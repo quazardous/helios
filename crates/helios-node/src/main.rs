@@ -506,11 +506,14 @@ fn main() -> ExitCode {
             }
         },
     };
-    println!("ready {address}");
+    // Whoever started the node may stop reading once it knows the node
+    // serves: a closed stdout must not kill the node (`println!` panics).
+    let mut out = std::io::stdout();
+    let _ = writeln!(out, "ready {address}");
     if let Some(control) = &control_address {
-        println!("control {control}");
+        let _ = writeln!(out, "control {control}");
     }
-    let _ = std::io::stdout().flush();
+    let _ = out.flush();
     let ready = bus.publish(
         SOURCE,
         None,

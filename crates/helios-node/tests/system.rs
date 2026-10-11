@@ -347,3 +347,53 @@ fn an_export_without_a_format_is_refused_at_load() {
     assert_eq!(out.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&out.stderr).contains("no format for"));
 }
+
+#[test]
+fn a_node_whose_stdout_is_closed_keeps_serving() {
+    let dir = std::env::temp_dir().join(format!("helios-system-closed-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("network.json"), NETWORK).unwrap();
+    // The reading end is gone before the node writes `ready`.
+    let (reader, writer) = std::io::pipe().unwrap();
+    drop(reader);
+    let mut node = Command::new(env!("CARGO_BIN_EXE_helios-node"))
+        .arg("--graph")
+        .arg(dir.join("network.json"))
+        .arg("--socket")
+        .arg(dir.join("node.sock"))
+        .stdout(writer)
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    // Nothing tells this test when the node serves (that is what stdout was
+    // for): wait for its socket, bounded, or for the node to die.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let served = loop {
+        if let Some(status) = node.try_wait().unwrap() {
+            break Err(format!("the node exited: {status}"));
+        }
+        let state = Command::new(env!("CARGO_BIN_EXE_helios"))
+            .args(["inspect", "--socket"])
+            .arg(dir.join("node.sock"))
+            .args(["wait-event", "node.idle", "--timeout", "10000"])
+            .output()
+            .unwrap();
+        if state.status.code() == Some(0) {
+            break Ok(());
+        }
+        if std::time::Instant::now() > deadline {
+            break Err("the node never served".into());
+        }
+        std::thread::yield_now();
+    };
+    let _ = node.kill();
+    let output = node.wait_with_output().unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(
+        served,
+        Ok(()),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
