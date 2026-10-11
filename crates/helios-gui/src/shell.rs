@@ -185,6 +185,9 @@ pub struct Shell {
     params: std::rc::Rc<std::cell::RefCell<crate::params::Params>>,
     /// Every value widgets and agents edit (`param.*` commands).
     pub values: std::sync::Arc<std::sync::Mutex<helios_values::Store>>,
+    /// Where path fields browse: the system's chooser or Helios's own
+    /// picker, and the recent workspaces.
+    places: crate::dialogs::Places,
 }
 
 impl Shell {
@@ -236,6 +239,10 @@ impl Shell {
             dialogs: VecDeque::new(),
             dialog_view: Arc::default(),
             assume_yes: false,
+            places: crate::dialogs::Places {
+                native: std::env::var_os("HELIOS_NO_NATIVE_DIALOGS").is_none(),
+                recent: recent_workspaces(),
+            },
             menu: None,
             menus: helios_shell::menus::Menus::new(),
             theme_name: helios_theme::BASE.into(),
@@ -1160,6 +1167,12 @@ impl Shell {
         self.open(crate::dialogs::Dialog::Confirm(c));
     }
 
+    /// Where path fields browse. `headless::harness` turns the system's
+    /// chooser off.
+    pub fn set_places(&mut self, places: crate::dialogs::Places) {
+        self.places = places;
+    }
+
     /// Asks for values, then runs the form's command with them.
     pub fn form(&mut self, f: crate::dialogs::Form) {
         self.open(crate::dialogs::Dialog::Form(f));
@@ -1430,7 +1443,7 @@ impl Shell {
         }
         let look = crate::dialogs::Look::of(&self.theme);
         if let Some(open) = self.dialogs.front_mut() {
-            let answer = crate::dialogs::dialog_ui(ctx, &look, open);
+            let answer = crate::dialogs::dialog_ui(ctx, &look, open, &self.places);
             self.refresh_dialog_view();
             if let Some(a) = answer {
                 self.answer(a, Origin::User);
@@ -1715,7 +1728,11 @@ impl Shell {
                 title: "Open a workspace".into(),
                 fields: vec![crate::dialogs::Field {
                     key: "path".into(),
-                    descriptor: helios_values::Descriptor::text("directory", ""),
+                    descriptor: helios_values::Descriptor::path(
+                        "directory",
+                        helios_values::PathKind::Dir,
+                        &[],
+                    ),
                     value: helios_core::Value::Text(String::new()),
                 }],
                 verb: "Open".into(),
@@ -2454,6 +2471,8 @@ pub mod headless {
             eframe::egui_wgpu::RendererOptions::PREDICTABLE,
         );
         shell.attach_gpu(&rs);
+        // Never a window of the system's from a headless run.
+        shell.places.native = false;
         Harness::builder()
             .with_size(size)
             .renderer(egui_kittest::wgpu::WgpuTestRenderer::from_render_state(rs))

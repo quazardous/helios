@@ -9,12 +9,20 @@
 //! `dialog.answer` answers it, so an agent sees and answers what a human
 //! would, its origin recorded like any write.
 //!
+//! A form's path field (a descriptor with a [`PathHint`]) has a Browse
+//! button: the system's chooser when there is one, else Helios's own
+//! picker of folders and files, drawn in the dialog (see [`Places`]).
+//!
 //! The rules each kind follows are in `docs/gui.md`, "Windows, dialogs and
 //! menus".
 
+use std::path::{Path, PathBuf};
+use std::sync::mpsc;
+use std::time::{Duration, Instant};
+
 use egui::{Align, Align2, Color32, Id, Key, Layout, Order, RichText, Ui};
 use helios_core::Value;
-use helios_values::{Descriptor, Type, value_from_json, value_to_json};
+use helios_values::{Descriptor, PathHint, PathKind, Type, value_from_json, value_to_json};
 use serde::Serialize;
 use serde_json::{Value as Json, json};
 
@@ -168,6 +176,234 @@ pub(crate) fn take_requests(ctx: &egui::Context) -> Vec<Request> {
     ctx.data_mut(|d| std::mem::take(d.get_temp_mut_or_default::<Vec<Request>>(requests_id())))
 }
 
+/// Where path fields browse.
+#[derive(Clone, Debug, Default)]
+pub struct Places {
+    /// Browse opens the system's chooser (through the XDG desktop portal
+    /// on Linux), on a thread of its own so the window keeps drawing. When
+    /// off, or when no chooser shows up, Helios's own picker opens instead.
+    /// Off in headless runs, and when `HELIOS_NO_NATIVE_DIALOGS` is set.
+    pub native: bool,
+    /// The recent workspaces: offered first when choosing a directory.
+    pub recent: Vec<PathBuf>,
+}
+
+/// A chooser that answers nothing this soon was never shown (no portal,
+/// no fallback): Helios's own picker takes over.
+const NO_CHOOSER: Duration = Duration::from_millis(250);
+
+/// The system's chooser, open on its own thread for a field.
+pub(crate) struct Native {
+    field: usize,
+    hint: PathHint,
+    answer: mpsc::Receiver<(Option<PathBuf>, Duration)>,
+}
+
+/// A row of Helios's own path picker.
+#[derive(Clone, Debug, PartialEq)]
+enum Place {
+    Recent(PathBuf),
+    Up(PathBuf),
+    Dir(PathBuf),
+    File(PathBuf),
+}
+
+/// Helios's own path picker, in the picker's look: the folder shown, its
+/// subfolders (and files, for a file), a path to type.
+pub(crate) struct Browse {
+    field: usize,
+    hint: PathHint,
+    dir: PathBuf,
+    rows: Vec<Place>,
+    typed: String,
+    selected: usize,
+    error: Option<String>,
+}
+
+impl Browse {
+    fn new(field: usize, hint: PathHint, start: &Path, recent: &[PathBuf]) -> Self {
+        let mut b = Browse {
+            field,
+            hint,
+            dir: PathBuf::new(),
+            rows: Vec::new(),
+            typed: String::new(),
+            selected: 0,
+            error: None,
+        };
+        if b.go(start, recent).is_err() {
+            let fallback = home();
+            if let Err(e) = b.go(&fallback, recent) {
+                b.dir = fallback;
+                b.typed = b.dir.display().to_string();
+                b.error = Some(e);
+            }
+        }
+        b
+    }
+
+    /// Shows a folder; the folder left is selected when going up.
+    fn go(&mut self, dir: &Path, recent: &[PathBuf]) -> Result<(), String> {
+        let read = std::fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        let (mut dirs, mut files) = (Vec::new(), Vec::new());
+        for e in read.flatten() {
+            if e.file_name().to_string_lossy().starts_with('.') {
+                continue;
+            }
+            let path = e.path();
+            if path.is_dir() {
+                dirs.push(path);
+            } else if self.hint.kind == PathKind::File && self.hint.accepts(&path) {
+                files.push(path);
+            }
+        }
+        let by_name = |p: &PathBuf| {
+            p.file_name()
+                .map(|n| n.to_string_lossy().to_lowercase())
+                .unwrap_or_default()
+        };
+        dirs.sort_by_key(by_name);
+        files.sort_by_key(by_name);
+        let mut rows = Vec::new();
+        if self.hint.kind == PathKind::Dir {
+            rows.extend(
+                recent
+                    .iter()
+                    .filter(|r| r.as_path() != dir && r.is_dir())
+                    .map(|r| Place::Recent(r.clone())),
+            );
+        }
+        if let Some(up) = dir.parent() {
+            rows.push(Place::Up(up.to_path_buf()));
+        }
+        rows.extend(dirs.into_iter().map(Place::Dir));
+        rows.extend(files.into_iter().map(Place::File));
+        let left = self.dir.clone();
+        self.selected = rows
+            .iter()
+            .position(|r| matches!(r, Place::Dir(d) if *d == left))
+            .unwrap_or(0);
+        self.rows = rows;
+        self.dir = dir.to_path_buf();
+        self.typed = dir.display().to_string();
+        self.error = None;
+        Ok(())
+    }
+
+    /// The path typed, when it is not the folder shown.
+    fn typed_path(&self) -> Option<PathBuf> {
+        let t = self.typed.trim();
+        (!t.is_empty() && t != self.dir.display().to_string()).then(|| expand(t))
+    }
+
+    /// What taking a path means: going into a folder, or the answer.
+    fn take(&mut self, path: PathBuf, recent: &[PathBuf]) -> Option<PathBuf> {
+        if path.is_dir() {
+            if let Err(e) = self.go(&path, recent) {
+                self.error = Some(e);
+            }
+            None
+        } else if self.hint.kind == PathKind::File && path.is_file() && self.hint.accepts(&path) {
+            Some(path)
+        } else {
+            self.error = Some(format!("Nothing to open at {}", path.display()));
+            None
+        }
+    }
+
+    /// The answer of the primary button: the folder shown (or typed), or
+    /// the file selected (or typed).
+    fn choose(&mut self, recent: &[PathBuf]) -> Option<PathBuf> {
+        match self.hint.kind {
+            PathKind::Dir => match self.typed_path() {
+                Some(p) if p.is_dir() => Some(p),
+                Some(p) => {
+                    self.error = Some(format!("No such folder: {}", p.display()));
+                    None
+                }
+                None => Some(self.dir.clone()),
+            },
+            PathKind::File => {
+                if let Some(p) = self.typed_path() {
+                    return self.take(p, recent);
+                }
+                match self.rows.get(self.selected) {
+                    Some(Place::File(p)) => Some(p.clone()),
+                    _ => {
+                        self.error = Some("Choose a file".into());
+                        None
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// `~` and `~/…` as the home directory.
+fn expand(typed: &str) -> PathBuf {
+    match typed.strip_prefix('~') {
+        Some(rest) if rest.is_empty() || rest.starts_with('/') => {
+            home().join(rest.trim_start_matches('/'))
+        }
+        _ => PathBuf::from(typed),
+    }
+}
+
+fn home() -> PathBuf {
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_else(|| PathBuf::from("/"))
+}
+
+/// Where browsing for a field starts: the folder its value names (or the
+/// file's folder), else home.
+fn start_of(value: &str) -> PathBuf {
+    let value = value.trim();
+    if value.is_empty() {
+        return home();
+    }
+    let p = expand(value);
+    if p.is_dir() {
+        p
+    } else {
+        p.parent()
+            .filter(|d| d.is_dir())
+            .map_or_else(home, Path::to_path_buf)
+    }
+}
+
+/// Opens the system's chooser on a thread; `None` when it cannot start.
+fn native(ctx: &egui::Context, field: usize, hint: &PathHint, start: PathBuf) -> Option<Native> {
+    let (tx, answer) = mpsc::channel();
+    let ctx = ctx.clone();
+    let h = hint.clone();
+    std::thread::Builder::new()
+        .name("helios-chooser".into())
+        .spawn(move || {
+            let began = Instant::now();
+            let d = rfd::FileDialog::new().set_directory(&start);
+            let picked = match h.kind {
+                PathKind::Dir => d.set_title("Choose a folder").pick_folder(),
+                PathKind::File if h.extensions.is_empty() => {
+                    d.set_title("Choose a file").pick_file()
+                }
+                PathKind::File => d
+                    .set_title("Choose a file")
+                    .add_filter("Accepted files", &h.extensions)
+                    .pick_file(),
+            };
+            let _ = tx.send((picked, began.elapsed()));
+            ctx.request_repaint();
+        })
+        .ok()?;
+    Some(Native {
+        field,
+        hint: hint.clone(),
+        answer,
+    })
+}
+
 /// How the user (or an agent) answered.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Answer {
@@ -185,6 +421,10 @@ pub(crate) struct Open {
     pub query: String,
     pub selected: usize,
     pub focused: bool,
+    /// Helios's own path picker, open for a field.
+    pub browse: Option<Browse>,
+    /// The system's chooser, open for a field.
+    pub native: Option<Native>,
 }
 
 impl Open {
@@ -199,6 +439,59 @@ impl Open {
             query: String::new(),
             selected: 0,
             focused: false,
+            browse: None,
+            native: None,
+        }
+    }
+
+    /// Browses for a form's path field: the system's chooser if asked
+    /// for and it starts, else Helios's own picker.
+    fn start_browse(&mut self, ctx: &egui::Context, field: usize, places: &Places) {
+        let Dialog::Form(f) = &self.dialog else {
+            return;
+        };
+        let Some(hint) = f.fields.get(field).and_then(|f| f.descriptor.path.clone()) else {
+            return;
+        };
+        let start = start_of(&self.text(field));
+        if places.native {
+            self.native = native(ctx, field, &hint, start.clone());
+            if self.native.is_some() {
+                return;
+            }
+        }
+        self.browse = Some(Browse::new(field, hint, &start, &places.recent));
+    }
+
+    /// A text field's value.
+    fn text(&self, field: usize) -> String {
+        match self.values.get(field) {
+            Some(Value::Text(t)) => t.clone(),
+            _ => String::new(),
+        }
+    }
+
+    /// Takes the system chooser's answer when it comes; opens Helios's own
+    /// picker when no chooser showed up.
+    fn poll_native(&mut self, places: &Places) {
+        let Some(n) = &self.native else {
+            return;
+        };
+        let fallback = match n.answer.try_recv() {
+            Err(mpsc::TryRecvError::Empty) => return,
+            Ok((Some(path), _)) => {
+                if let Some(v) = self.values.get_mut(n.field) {
+                    *v = Value::Text(path.display().to_string());
+                }
+                false
+            }
+            Ok((None, took)) => took < NO_CHOOSER,
+            Err(mpsc::TryRecvError::Disconnected) => true,
+        };
+        let n = self.native.take().expect("checked above");
+        if fallback {
+            let start = start_of(&self.text(n.field));
+            self.browse = Some(Browse::new(n.field, n.hint, &start, &places.recent));
         }
     }
 
@@ -213,6 +506,12 @@ impl Open {
                 .map(|(f, v)| (f.key.clone(), value_to_json(v)))
                 .collect::<serde_json::Map<_, _>>()
                 .into();
+            if let Some(b) = &self.browse {
+                j["browsing"] = json!({
+                    "field": f.fields[b.field].key,
+                    "dir": b.dir.display().to_string(),
+                });
+            }
         }
         j
     }
@@ -324,6 +623,18 @@ fn footer_button(ui: &mut Ui, look: &Look, label: &str, kind: Option<bool>) -> e
 /// The footer every dialog has: Cancel then the primary action, on the
 /// right. Returns the answer clicked.
 fn footer(ui: &mut Ui, look: &Look, verb: &str, danger: bool, name: &str) -> Option<Answer> {
+    footer_of(ui, look, verb, "Cancel", danger, name)
+}
+
+/// The footer with its secondary button named (Cancel, Back).
+fn footer_of(
+    ui: &mut Ui,
+    look: &Look,
+    verb: &str,
+    secondary: &str,
+    danger: bool,
+    name: &str,
+) -> Option<Answer> {
     let mut answer = None;
     ui.add_space(look.pad * 0.5);
     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -332,7 +643,7 @@ fn footer(ui: &mut Ui, look: &Look, verb: &str, danger: bool, name: &str) -> Opt
         if primary.clicked() {
             answer = Some(Answer::Primary);
         }
-        let cancel = footer_button(ui, look, "Cancel", None);
+        let cancel = footer_button(ui, look, secondary, None);
         crate::name_rect(ui.ctx(), &format!("{name}.cancel"), cancel.rect);
         if cancel.clicked() {
             answer = Some(Answer::Cancel);
@@ -345,11 +656,40 @@ fn footer(ui: &mut Ui, look: &Look, verb: &str, danger: bool, name: &str) -> Opt
     answer
 }
 
-/// A field's widget, from its descriptor.
-fn field_ui(ui: &mut Ui, field: &Field, value: &mut Value) {
+/// A field's widget, from its descriptor; true when its Browse button
+/// was clicked.
+fn field_ui(ui: &mut Ui, field: &Field, value: &mut Value, places: &Places, waiting: bool) -> bool {
     let d = &field.descriptor;
     ui.label(&d.label);
+    let mut browse = false;
     match (d.ty, &mut *value) {
+        (Type::Text, Value::Text(v)) if d.path.is_some() => {
+            ui.horizontal(|ui| {
+                let room = ui.available_width() - ui.spacing().item_spacing.x - 80.0;
+                ui.add(egui::TextEdit::singleline(v).desired_width(room.max(120.0)));
+                let b = ui.add_enabled(!waiting, egui::Button::new("Browse…"));
+                crate::name_rect(
+                    ui.ctx(),
+                    &format!("helios.dialog.browse.{}", field.key),
+                    b.rect,
+                );
+                browse = b.clicked();
+            });
+            // A directory: the recent workspaces, one click away.
+            if d.path.as_ref().is_some_and(|h| h.kind == PathKind::Dir) && !places.recent.is_empty()
+            {
+                ui.end_row();
+                ui.weak("recent");
+                ui.vertical(|ui| {
+                    for p in places.recent.iter().take(5) {
+                        let shown = p.display().to_string();
+                        if list_row(ui, *v == shown, &shown, None).clicked() {
+                            *v = shown;
+                        }
+                    }
+                });
+            }
+        }
         (Type::Float, Value::Float(v)) => {
             let (lo, hi) = d.soft.or(d.hard).unwrap_or((f64::MIN, f64::MAX));
             let mut shown = *v * d.display_scale;
@@ -388,10 +728,107 @@ fn field_ui(ui: &mut Ui, field: &Field, value: &mut Value) {
         }
     }
     ui.end_row();
+    browse
+}
+
+/// Helios's own path picker, drawn in the dialog: `Some(Some(path))` when
+/// one is chosen, `Some(None)` to go back to the form.
+#[allow(clippy::option_option)]
+fn browse_ui(
+    ui: &mut Ui,
+    look: &Look,
+    b: &mut Browse,
+    recent: &[PathBuf],
+    (enter, down, up): (bool, bool, bool),
+) -> Option<Option<PathBuf>> {
+    let edit = ui.add(
+        egui::TextEdit::singleline(&mut b.typed)
+            .hint_text("Type a path")
+            .desired_width(f32::INFINITY),
+    );
+    crate::name_rect(ui.ctx(), "helios.dialog.path", edit.rect);
+    // The path keeps the keys: arrows move in the list, Enter opens.
+    edit.request_focus();
+    if let Some(e) = &b.error {
+        ui.colored_label(look.warning, e);
+    }
+    let n = b.rows.len();
+    if n > 0 {
+        if down {
+            b.selected = (b.selected + 1) % n;
+        }
+        if up {
+            b.selected = (b.selected + n - 1) % n;
+        }
+    }
+    ui.separator();
+    let mut taken = None;
+    egui::ScrollArea::vertical()
+        .max_height(look.width * 0.75)
+        .auto_shrink([false, true])
+        .show(ui, |ui| {
+            for (i, row) in b.rows.iter().enumerate() {
+                let (label, detail, path) = match row {
+                    Place::Recent(p) => (p.display().to_string(), Some("recent"), p),
+                    Place::Up(p) => ("..".to_string(), Some("up"), p),
+                    Place::Dir(p) | Place::File(p) => (
+                        p.file_name()
+                            .map(|n| n.to_string_lossy().into_owned())
+                            .unwrap_or_default(),
+                        matches!(row, Place::Dir(_)).then_some("folder"),
+                        p,
+                    ),
+                };
+                let r = list_row(ui, i == b.selected, &label, detail);
+                if i == b.selected && (down || up) {
+                    r.scroll_to_me(None);
+                }
+                if r.clicked() {
+                    b.selected = i;
+                    taken = Some(path.clone());
+                }
+            }
+            if n == 0 {
+                ui.weak(match b.hint.kind {
+                    PathKind::Dir => "No folder here",
+                    PathKind::File => "Nothing to choose here",
+                });
+            }
+        });
+    if taken.is_none() && enter {
+        taken = b.typed_path().or_else(|| {
+            b.rows.get(b.selected).map(|r| match r {
+                Place::Recent(p) | Place::Up(p) | Place::Dir(p) | Place::File(p) => p.clone(),
+            })
+        });
+    }
+    let verb = match b.hint.kind {
+        PathKind::Dir => "Choose this folder",
+        PathKind::File => "Choose",
+    };
+    let clicked = footer_of(ui, look, verb, "Back", false, "helios.dialog");
+    if let Some(p) = taken
+        && let Some(chosen) = b.take(p, recent)
+    {
+        return Some(Some(chosen));
+    }
+    match clicked {
+        Some(Answer::Primary) => b.choose(recent).map(Some),
+        Some(_) => Some(None),
+        None => None,
+    }
 }
 
 /// Draws the open dialog, modal; returns the answer given this frame.
-pub(crate) fn dialog_ui(ctx: &egui::Context, look: &Look, open: &mut Open) -> Option<Answer> {
+pub(crate) fn dialog_ui(
+    ctx: &egui::Context,
+    look: &Look,
+    open: &mut Open,
+    places: &Places,
+) -> Option<Answer> {
+    open.poll_native(places);
+    // The keys of this frame belong to the path picker when it is open.
+    let browsing = open.browse.is_some();
     let (enter, escape, down, up) = ctx.input(|i| {
         (
             i.key_pressed(Key::Enter),
@@ -403,7 +840,11 @@ pub(crate) fn dialog_ui(ctx: &egui::Context, look: &Look, open: &mut Open) -> Op
     let mut answer = None;
     let title = match &open.dialog {
         Dialog::Confirm(c) => c.title.clone(),
-        Dialog::Form(f) => f.title.clone(),
+        Dialog::Form(f) => match &open.browse {
+            Some(b) if b.hint.kind == PathKind::Dir => "Choose a folder".into(),
+            Some(_) => "Choose a file".into(),
+            None => f.title.clone(),
+        },
         Dialog::Picker(p) => p.title.clone(),
         Dialog::Info(i) => i.title.clone(),
     };
@@ -419,15 +860,38 @@ pub(crate) fn dialog_ui(ctx: &egui::Context, look: &Look, open: &mut Open) -> Op
                 answer = footer(ui, look, &c.verb, c.danger, "helios.dialog");
             }
             Dialog::Form(f) => {
-                egui::Grid::new("helios.form")
-                    .num_columns(2)
-                    .spacing([look.pad, look.pad * 0.5])
-                    .show(ui, |ui| {
-                        for (field, value) in f.fields.iter().zip(open.values.iter_mut()) {
-                            field_ui(ui, field, value);
+                if let Some(b) = &mut open.browse {
+                    match browse_ui(ui, look, b, &places.recent, (enter, down, up)) {
+                        Some(Some(path)) => {
+                            open.values[b.field] = Value::Text(path.display().to_string());
+                            open.browse = None;
                         }
-                    });
-                answer = footer(ui, look, &f.verb, false, "helios.dialog");
+                        Some(None) => open.browse = None,
+                        None => {}
+                    }
+                } else {
+                    let waiting = open.native.is_some();
+                    let mut asked = None;
+                    egui::Grid::new("helios.form")
+                        .num_columns(2)
+                        .spacing([look.pad, look.pad * 0.5])
+                        .show(ui, |ui| {
+                            for (i, (field, value)) in
+                                f.fields.iter().zip(open.values.iter_mut()).enumerate()
+                            {
+                                if field_ui(ui, field, value, places, waiting) {
+                                    asked = Some(i);
+                                }
+                            }
+                        });
+                    if waiting {
+                        ui.weak("Waiting for the system's file chooser…");
+                    }
+                    answer = footer(ui, look, &f.verb, false, "helios.dialog");
+                    if let Some(i) = asked {
+                        open.start_browse(ui.ctx(), i, places);
+                    }
+                }
             }
             Dialog::Info(i) => {
                 for line in &i.lines {
@@ -492,6 +956,13 @@ pub(crate) fn dialog_ui(ctx: &egui::Context, look: &Look, open: &mut Open) -> Op
         }
     });
     crate::name_rect(ctx, "helios.dialog", modal.response.rect);
+    if browsing {
+        // Escape leaves the path picker, not the form.
+        if open.browse.is_some() && (escape || modal.should_close()) {
+            open.browse = None;
+        }
+        return answer;
+    }
     if answer.is_none() {
         if escape || modal.should_close() {
             answer = Some(Answer::Cancel);

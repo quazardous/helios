@@ -162,4 +162,9 @@ fn opening_a_workspace_without_a_path_asks_for_one() {
         .unwrap();
     assert_eq!(form["kind"], json!("form"));
     assert_eq!(form["command"], json!("workspace.open"));
+    // A directory field: Browse, and the recent workspaces.
+    let field = &form["fields"][0];
+    assert_eq!(field["key"], json!("path"));
+    assert_eq!(field["descriptor"]["path"], json!({ "kind": "dir" }));
+    assert!(h.state().target_rect("helios.dialog.browse.path").is_ok());
 }

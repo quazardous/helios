@@ -3,11 +3,11 @@
 
 use egui::{Key, vec2};
 use helios_gui::dialogs::{
-    Choice, Confirm, Field, Form, Level, MenuItem, Picker, Request, request,
+    Choice, Confirm, Field, Form, Level, MenuItem, Picker, Places, Request, request,
 };
 use helios_gui::{Shell, headless, helios_panels};
 use helios_shell::commands::{CommandSpec, Origin};
-use helios_values::Descriptor;
+use helios_values::{Descriptor, PathKind};
 use serde_json::json;
 
 fn harness(shell: Shell) -> egui_kittest::Harness<'static, Shell> {
@@ -334,4 +334,126 @@ fn pictures_of_each_kind() {
             }
         }
     }
+}
+
+/// A tree of folders of its own for a test.
+fn tree(name: &str, dirs: &[&str], files: &[&str]) -> std::path::PathBuf {
+    let root = std::env::temp_dir().join(format!("helios-browse-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    for d in dirs {
+        std::fs::create_dir_all(root.join(d)).unwrap();
+    }
+    std::fs::create_dir_all(&root).unwrap();
+    for f in files {
+        std::fs::write(root.join(f), "").unwrap();
+    }
+    root
+}
+
+fn click(h: &mut egui_kittest::Harness<'static, Shell>, target: &str) {
+    let at = h.state().target_rect(target).unwrap().center();
+    h.hover_at(at);
+    h.run();
+    for pressed in [true, false] {
+        h.event(egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+    }
+    h.run();
+}
+
+fn press(h: &mut egui_kittest::Harness<'static, Shell>, key: Key) {
+    h.key_press(key);
+    h.run();
+}
+
+fn current(h: &mut egui_kittest::Harness<'static, Shell>) -> serde_json::Value {
+    h.state_mut()
+        .run("dialog.current", json!(null), Origin::User)
+        .unwrap()
+}
+
+fn path_form(key: &str, descriptor: Descriptor, value: &std::path::Path) -> Form {
+    Form {
+        title: "Choose".into(),
+        fields: vec![Field {
+            key: key.into(),
+            descriptor,
+            value: helios_core::Value::Text(value.display().to_string()),
+        }],
+        verb: "Use".into(),
+        command: "workbench.fullscreen".into(),
+    }
+}
+
+/// The shell's own picker, as when no system chooser answers.
+fn own_picker(mut shell: Shell) -> Shell {
+    shell.set_places(Places {
+        native: false,
+        recent: Vec::new(),
+    });
+    shell
+}
+
+#[test]
+fn browse_walks_folders_in_the_own_picker_and_fills_the_field() {
+    let root = tree("dirs", &["a/inner", "b"], &["notes.txt"]);
+    let mut shell = own_picker(Shell::new(helios_panels(), None));
+    shell.form(path_form(
+        "dir",
+        Descriptor::path("folder", PathKind::Dir, &[]),
+        &root,
+    ));
+    let mut h = harness(shell);
+    click(&mut h, "helios.dialog.browse.dir");
+    let shown = |p: &std::path::Path| json!(p.display().to_string());
+    assert_eq!(current(&mut h)["browsing"]["dir"], shown(&root));
+    // "..", then a and b: no files when choosing a folder.
+    press(&mut h, Key::ArrowDown);
+    press(&mut h, Key::Enter);
+    assert_eq!(current(&mut h)["browsing"]["dir"], shown(&root.join("a")));
+    // ".." is first: back up, where the folder left is selected.
+    press(&mut h, Key::Enter);
+    assert_eq!(current(&mut h)["browsing"]["dir"], shown(&root));
+    press(&mut h, Key::ArrowDown);
+    press(&mut h, Key::Enter);
+    assert_eq!(current(&mut h)["browsing"]["dir"], shown(&root.join("b")));
+    click(&mut h, "helios.dialog.primary");
+    let form = current(&mut h);
+    assert!(form.get("browsing").is_none(), "{form}");
+    assert_eq!(form["kind"], json!("form"));
+    assert_eq!(form["values"]["dir"], shown(&root.join("b")));
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn a_file_field_lists_accepted_files_and_escape_goes_back_to_the_form() {
+    let root = tree("files", &[], &["photo.jpg", "photo.xmp"]);
+    let mut shell = own_picker(Shell::new(helios_panels(), None));
+    shell.form(path_form(
+        "sidecar",
+        Descriptor::path("sidecar", PathKind::File, &["xmp"]),
+        &root,
+    ));
+    let mut h = harness(shell);
+    click(&mut h, "helios.dialog.browse.sidecar");
+    assert!(current(&mut h).get("browsing").is_some());
+    press(&mut h, Key::Escape);
+    let form = current(&mut h);
+    assert_eq!(form["kind"], json!("form"), "the form stays");
+    assert!(form.get("browsing").is_none());
+    click(&mut h, "helios.dialog.browse.sidecar");
+    // "..", then the one file accepted.
+    press(&mut h, Key::ArrowDown);
+    press(&mut h, Key::Enter);
+    let form = current(&mut h);
+    assert!(form.get("browsing").is_none(), "{form}");
+    assert_eq!(
+        form["values"]["sidecar"],
+        json!(root.join("photo.xmp").display().to_string())
+    );
+    let _ = std::fs::remove_dir_all(&root);
 }

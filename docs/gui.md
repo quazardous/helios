@@ -231,6 +231,18 @@ so an agent sees and answers what a human would, its origin recorded.
 
   ![A form](gui/form-helios-light.png)
 
+  A **path field** (a descriptor made with `Descriptor::path`: a
+  directory, or a file with its accepted extensions) is a text field and
+  a Browse… button. Browse opens the system's chooser through the `rfd`
+  crate (on Linux the XDG desktop portal, no GTK), on its own thread so
+  the window keeps drawing; the path chosen fills the field. When no
+  chooser shows up, in headless runs, or with `HELIOS_NO_NATIVE_DIALOGS`
+  set, Helios's own picker opens in the dialog, in the picker's look:
+  the recent workspaces first (for a directory), `..`, the subfolders
+  (and the accepted files), a path to type; arrows and Enter go in and
+  up, Escape goes back to the form. A directory field also lists the
+  recent workspaces under it; "Open a workspace" is such a form.
+
 - **Picker**: a list to choose from with search, the palette's look;
   arrows and Enter, or a click.
 - **Menu and context menu**: entries are commands, nothing else. Titles
