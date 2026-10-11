@@ -152,6 +152,7 @@ fn panels() -> Panels {
             id: id.into(),
             title: id.trim_start_matches("helios.").into(),
             area,
+            areas: vec![],
             commands: vec![],
         })
         .unwrap();
@@ -197,6 +198,7 @@ fn a_layout_round_trips_and_is_repaired_against_panels_and_screens() {
         id: "helios.queue".into(),
         title: "queue".into(),
         area: Area::BottomPanel,
+        areas: vec![],
         commands: vec![],
     })
     .unwrap();
@@ -226,4 +228,66 @@ fn a_closed_panel_stays_closed_when_the_layout_is_repaired() {
         .repair(&panels(), &["primary"]);
     assert!(!repaired.placed().contains(&first.as_str()), "{notes:?}");
     assert_eq!(repaired.hidden, [first]);
+}
+
+#[test]
+fn a_panel_found_where_it_may_not_be_goes_back_to_its_default_area() {
+    let mut p = Panels::new();
+    p.declare(PanelSpec {
+        id: "helios.viewport".into(),
+        title: "Image".into(),
+        area: Area::Editors,
+        areas: vec![Area::Editors],
+        commands: vec![],
+    })
+    .unwrap();
+    p.declare(PanelSpec {
+        id: "helios.log".into(),
+        title: "Log".into(),
+        area: Area::BottomPanel,
+        areas: vec![],
+        commands: vec![],
+    })
+    .unwrap();
+    assert!(p.get("helios.log").unwrap().allows(Area::Editors));
+    assert!(
+        !p.get("helios.viewport")
+            .unwrap()
+            .allows(Area::PrimarySideBar)
+    );
+    let saved = Layout {
+        areas: vec![(
+            Area::PrimarySideBar,
+            Node::Tabs {
+                panels: vec!["helios.viewport".into(), "helios.log".into()],
+                active: 0,
+            },
+        )],
+        auxiliary: vec![],
+        hidden: vec![],
+    };
+    let (fixed, notes) = saved.repair(&p, &[]);
+    assert_eq!(
+        fixed.areas,
+        [
+            (
+                Area::Editors,
+                Node::Tabs {
+                    panels: vec!["helios.viewport".into()],
+                    active: 0
+                }
+            ),
+            (
+                Area::PrimarySideBar,
+                Node::Tabs {
+                    panels: vec!["helios.log".into()],
+                    active: 0
+                }
+            ),
+        ]
+    );
+    assert_eq!(
+        notes,
+        ["`helios.viewport` cannot be in the primary side bar: moved to its default area"]
+    );
 }

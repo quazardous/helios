@@ -117,8 +117,8 @@ impl Layout {
 
     /// Brings a saved layout in line with today's panels and screens:
     /// panels no longer declared are dropped, new ones go to their default
-    /// area, a window on a screen that is gone comes back docked. Says what
-    /// it changed.
+    /// area, so do panels in an area they may no longer be in, a window on
+    /// a screen that is gone comes back docked. Says what it changed.
     pub fn repair(self, panels: &Panels, screens: &[&str]) -> (Layout, Vec<String>) {
         let mut notes = Vec::new();
         let known = |id: &str| panels.get(id).is_some();
@@ -144,7 +144,19 @@ impl Layout {
                     notes.push(format!("panel `{p}` no longer exists"));
                 }
             }
-            if let Some(n) = node.retain(&known) {
+            for p in node.panels() {
+                if let Some(spec) = panels.get(p)
+                    && !spec.allows(area)
+                {
+                    notes.push(format!(
+                        "`{p}` cannot be in {}: moved to its default area",
+                        area.name()
+                    ));
+                    redock.push(p.to_string());
+                }
+            }
+            let allowed = |id: &str| panels.get(id).is_some_and(|s| s.allows(area));
+            if let Some(n) = node.retain(&allowed) {
                 areas.push((area, n));
             }
         }

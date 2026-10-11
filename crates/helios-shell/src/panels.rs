@@ -21,9 +21,30 @@ pub struct PanelSpec {
     pub id: String,
     pub title: String,
     pub area: Area,
+    /// The areas it may be moved to besides `area`; empty: any area.
+    pub areas: Vec<Area>,
     /// Command ids the panel contributes (its toggle and focus commands
     /// are added by the shell).
     pub commands: Vec<String>,
+}
+
+impl PanelSpec {
+    /// Whether the panel may live in an area.
+    pub fn allows(&self, area: Area) -> bool {
+        self.areas.is_empty() || area == self.area || self.areas.contains(&area)
+    }
+}
+
+impl Area {
+    /// As people call it.
+    pub fn name(self) -> &'static str {
+        match self {
+            Area::Editors => "the editors",
+            Area::PrimarySideBar => "the primary side bar",
+            Area::SecondarySideBar => "the secondary side bar",
+            Area::BottomPanel => "the bottom panel",
+        }
+    }
 }
 
 #[derive(Default)]

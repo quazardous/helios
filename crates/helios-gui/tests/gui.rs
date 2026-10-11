@@ -400,3 +400,111 @@ fn the_shell_runs_the_value_commands_with_their_origin() {
         Origin::Agent("a1".into())
     );
 }
+
+/// Drags a panel's tab (just above its body) to a point, over a few frames.
+fn drag_tab(h: &mut egui_kittest::Harness<'_, Shell>, panel: &str, to: egui::Pos2) {
+    let body = h.state().target_rect(panel).unwrap();
+    let from = egui::pos2(body.left() + 24.0, body.top() - 12.0);
+    h.hover_at(from);
+    h.run();
+    h.drag_at(from);
+    h.run();
+    for k in 1..=8 {
+        h.hover_at(from + (to - from) * (k as f32 / 8.0));
+        h.run();
+    }
+    h.drop_at(to);
+    h.run();
+    h.run();
+}
+
+fn area_of(shell: &Shell, panel: &str) -> Option<Area> {
+    shell
+        .layout()
+        .areas
+        .iter()
+        .find(|(_, n)| {
+            serde_json::to_string(n)
+                .unwrap()
+                .contains(&format!("\"{panel}\""))
+        })
+        .map(|(a, _)| *a)
+}
+
+#[test]
+fn a_tab_dragged_to_another_area_moves_there_and_stays_after_a_restart() {
+    let mut h = headless::harness(Shell::new(helios_panels(), None), vec2(1280.0, 800.0));
+    h.run();
+    assert_eq!(
+        area_of(h.state(), "helios.vault"),
+        Some(Area::PrimarySideBar)
+    );
+    let target = h.state().target_rect("helios.params").unwrap().center();
+    drag_tab(&mut h, "helios.vault", target);
+    assert_eq!(
+        area_of(h.state(), "helios.vault"),
+        Some(Area::SecondarySideBar),
+        "{:?}",
+        h.state().notes
+    );
+    let saved = h.state().layout();
+    let again = Shell::new(helios_panels(), Some(saved.clone()));
+    assert_eq!(again.layout(), saved);
+}
+
+#[test]
+fn a_tab_that_may_not_go_there_goes_back_and_says_why() {
+    let mut h = headless::harness(Shell::new(helios_panels(), None), vec2(1280.0, 800.0));
+    h.run();
+    let target = h.state().target_rect("helios.vault").unwrap().center();
+    // Shown while dragging, before the drop.
+    let body = h.state().target_rect("helios.viewport").unwrap();
+    let from = egui::pos2(body.left() + 24.0, body.top() - 12.0);
+    h.hover_at(from);
+    h.run();
+    h.drag_at(from);
+    h.run();
+    for k in 1..=8 {
+        h.hover_at(from + (target - from) * (k as f32 / 8.0));
+        h.run();
+    }
+    assert!(
+        h.state().target_rect("helios.drop").is_ok(),
+        "a drop hint is shown"
+    );
+    h.drop_at(target);
+    h.run();
+    h.run();
+    assert_eq!(area_of(h.state(), "helios.viewport"), Some(Area::Editors));
+    assert_eq!(
+        h.state().notes.last().map(String::as_str),
+        Some("Image stays out of the primary side bar")
+    );
+}
+
+#[test]
+fn move_to_does_what_a_drag_does_under_the_same_rules() {
+    let mut shell = Shell::new(helios_panels(), None);
+    shell
+        .run(
+            "helios.log.moveTo",
+            json!({ "area": "editors" }),
+            Origin::User,
+        )
+        .unwrap();
+    shell
+        .run(
+            "helios.graph.moveTo",
+            json!({ "area": "bottom_panel" }),
+            Origin::Agent("a1".into()),
+        )
+        .unwrap();
+    let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+    h.run();
+    assert_eq!(area_of(h.state(), "helios.log"), Some(Area::Editors));
+    assert_eq!(area_of(h.state(), "helios.graph"), Some(Area::Editors));
+    assert_eq!(
+        h.state().notes.last().map(String::as_str),
+        Some("Graph stays out of the bottom panel")
+    );
+}

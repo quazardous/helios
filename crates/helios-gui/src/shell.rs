@@ -50,6 +50,7 @@ enum Action {
     Focus(String),
     Toggle(String),
     Detach(String),
+    MoveTo(String, Area),
     Dock(String),
     Snapshot {
         target: String,
@@ -106,6 +107,13 @@ pub struct Shell {
     focused: Option<String>,
     cx: Context,
     rects: BTreeMap<String, Rect>,
+    /// Where each area was drawn last frame (the editors always are).
+    area_rects: BTreeMap<Area, Rect>,
+    /// The window's content, where hidden areas offer a drop zone.
+    content_rect: Rect,
+    /// The panel whose tab is being dragged, the area it comes from and
+    /// where the pointer was last seen.
+    dragging: Option<(String, Area, egui::Pos2)>,
     pixels_per_point: f32,
     contents: BTreeMap<String, Content>,
     shots: VecDeque<Shot>,
@@ -151,6 +159,9 @@ impl Shell {
             focused: None,
             cx: Context::new(),
             rects: BTreeMap::new(),
+            area_rects: BTreeMap::new(),
+            content_rect: Rect::NOTHING,
+            dragging: None,
             pixels_per_point: 1.0,
             contents: BTreeMap::new(),
             shots: VecDeque::new(),
@@ -472,6 +483,23 @@ impl Shell {
                 ),
                 Box::new(move |_| Ok(Action::Toggle(toggle.clone()))),
             );
+            let move_to = id.clone();
+            add(
+                CommandSpec::new(
+                    &format!("{id}.moveTo"),
+                    &format!("Move {} to an area (`area`)", p.title),
+                    "View",
+                ),
+                Box::new(move |a| {
+                    let area = a
+                        .get("area")
+                        .cloned()
+                        .ok_or("`area` is missing: editors, primary_side_bar, secondary_side_bar or bottom_panel")?;
+                    let area: Area =
+                        serde_json::from_value(area).map_err(|e| format!("`area`: {e}"))?;
+                    Ok(Action::MoveTo(move_to.clone(), area))
+                }),
+            );
             let detach = id.clone();
             add(
                 CommandSpec::new(
@@ -764,6 +792,174 @@ impl Shell {
         }
     }
 
+    /// Moves a panel to an area, into the tabs under `at` when given,
+    /// else the area's first tabs; refused when the panel may not be there.
+    fn move_to(&mut self, panel: &str, area: Area, at: Option<egui::Pos2>) -> Result<(), String> {
+        let spec = self
+            .panels
+            .get(panel)
+            .ok_or_else(|| format!("no panel `{panel}`"))?;
+        if !spec.allows(area) {
+            return Err(format!("{} stays out of {}", spec.title, area.name()));
+        }
+        self.undock(panel);
+        self.auxiliary.retain(|a| a.panel != panel);
+        self.hidden.retain(|h| h != panel);
+        let tab = panel.to_string();
+        match self.docks.iter_mut().find(|(a, _)| *a == area) {
+            Some((_, dock)) => {
+                let leaf = at.and_then(|at| {
+                    dock.main_surface()
+                        .iter()
+                        .position(|n| matches!(n, egui_dock::Node::Leaf(l) if l.rect.contains(at)))
+                });
+                match leaf {
+                    Some(i) => {
+                        let tree = dock.main_surface_mut();
+                        let node = egui_dock::NodeIndex(i);
+                        tree.set_focused_node(node);
+                        tree.push_to_focused_leaf(tab);
+                    }
+                    None => dock.push_to_first_leaf(tab),
+                }
+            }
+            None => {
+                self.docks.push((
+                    area,
+                    to_dock(&Node::Tabs {
+                        panels: vec![tab],
+                        active: 0,
+                    }),
+                ));
+                self.docks.sort_by_key(|(a, _)| *a);
+            }
+        }
+        self.focused = Some(panel.to_string());
+        Ok(())
+    }
+
+    /// The area a drop at `at` goes to: the one drawn there, else the
+    /// zone of a hidden side or bottom area along the window's edges.
+    fn area_at(&self, at: egui::Pos2) -> Option<Area> {
+        let shown = |a: Area| self.docks.iter().any(|(d, _)| *d == a);
+        let edge = 48.0;
+        let c = self.content_rect;
+        if c.is_positive() {
+            if !shown(Area::PrimarySideBar) && at.x < c.left() + edge {
+                return Some(Area::PrimarySideBar);
+            }
+            if !shown(Area::SecondarySideBar) && at.x > c.right() - edge {
+                return Some(Area::SecondarySideBar);
+            }
+            if !shown(Area::BottomPanel) && at.y > c.bottom() - edge {
+                return Some(Area::BottomPanel);
+            }
+        }
+        self.area_rects
+            .iter()
+            .filter(|(a, _)| **a != Area::Editors)
+            .find(|(_, r)| r.contains(at))
+            .map(|(a, _)| *a)
+            .or_else(|| {
+                self.area_rects
+                    .get(&Area::Editors)
+                    .filter(|r| r.contains(at))
+                    .map(|_| Area::Editors)
+            })
+    }
+
+    /// The tab egui is dragging, if it is one of the docks' tabs.
+    fn dragged_tab(&self, ctx: &Egui) -> Option<(String, Area)> {
+        let id = ctx.dragged_id()?;
+        self.docks.iter().find_map(|(area, dock)| {
+            let base = Id::new(format!("helios.area.{area:?}"));
+            dock.iter_all_tabs().find_map(|(path, tab)| {
+                // How egui_dock names a tab's drag (`show/leaf.rs`).
+                let tab_id = base
+                    .with((path.surface, "surface"))
+                    .with((path.node_path().node, "node"))
+                    .with((path.tab.0, "tab"));
+                (tab_id == id).then(|| (tab.clone(), *area))
+            })
+        })
+    }
+
+    /// Follows a tab drag; when it is dropped over another area, egui_dock
+    /// (which only sees its own area) leaves it where it was, and the shell
+    /// moves it, or says why it may not go there.
+    fn follow_drag(&mut self, ctx: &Egui) {
+        let pos = ctx.input(|i| i.pointer.latest_pos());
+        if let Some((panel, from)) = self.dragged_tab(ctx) {
+            let at = pos.or(self.dragging.as_ref().map(|d| d.2));
+            if let Some(at) = at {
+                self.dragging = Some((panel, from, at));
+            }
+            return;
+        }
+        let Some((panel, from, last)) = self.dragging.take() else {
+            return;
+        };
+        let at = pos.unwrap_or(last);
+        let Some(to) = self.area_at(at).filter(|a| *a != from) else {
+            return;
+        };
+        if let Err(e) = self.move_to(&panel, to, Some(at)) {
+            self.notes.push(e);
+        }
+    }
+
+    /// While a tab is dragged over another area, shows whether it may go
+    /// there.
+    fn drop_hint(&mut self, ctx: &Egui) {
+        let Some((panel, from, at)) = self.dragging.clone() else {
+            return;
+        };
+        let Some(to) = self.area_at(at).filter(|a| *a != from) else {
+            return;
+        };
+        let Some(spec) = self.panels.get(&panel) else {
+            return;
+        };
+        let c = self.content_rect;
+        let edge = 48.0;
+        let rect = self.area_rects.get(&to).copied().unwrap_or(match to {
+            Area::PrimarySideBar => {
+                Rect::from_min_max(c.min, egui::pos2(c.left() + edge, c.bottom()))
+            }
+            Area::SecondarySideBar => {
+                Rect::from_min_max(egui::pos2(c.right() - edge, c.top()), c.max)
+            }
+            Area::BottomPanel => Rect::from_min_max(egui::pos2(c.left(), c.bottom() - edge), c.max),
+            Area::Editors => c,
+        });
+        let visuals = ctx.global_style().visuals.clone();
+        let painter = ctx.layer_painter(egui::LayerId::new(
+            egui::Order::Foreground,
+            Id::new("helios.drop"),
+        ));
+        if spec.allows(to) {
+            let fill = visuals.selection.bg_fill.gamma_multiply(0.25);
+            painter.rect_filled(rect, 4.0, fill);
+            painter.rect_stroke(
+                rect,
+                4.0,
+                visuals.selection.stroke,
+                egui::StrokeKind::Inside,
+            );
+        } else {
+            let fill = visuals.error_fg_color.gamma_multiply(0.15);
+            painter.rect_filled(rect, 4.0, fill);
+            painter.text(
+                rect.center(),
+                Align2::CENTER_CENTER,
+                format!("{} stays out of {}", spec.title, to.name()),
+                egui::FontId::proportional(13.0),
+                visuals.error_fg_color,
+            );
+        }
+        name_rect(ctx, "helios.drop", rect);
+    }
+
     fn focus(&mut self, panel: &str) {
         if !self.shown(panel) {
             self.dock(panel);
@@ -893,6 +1089,11 @@ impl Shell {
                     self.hidden.push(p);
                 } else {
                     self.dock(&p);
+                }
+            }
+            Action::MoveTo(p, area) => {
+                if let Err(e) = self.move_to(&p, area, None) {
+                    self.notes.push(e);
                 }
             }
             Action::Detach(p) => {
@@ -1088,8 +1289,12 @@ impl Shell {
             contents,
             rects,
             focused,
+            area_rects,
+            content_rect,
             ..
         } = self;
+        *content_rect = ui.max_rect();
+        area_rects.clear();
         let mut viewer = Viewer {
             panels,
             contents,
@@ -1109,15 +1314,20 @@ impl Shell {
                 Area::SecondarySideBar => egui::Panel::right(id.clone()).default_size(260.0),
                 Area::BottomPanel => egui::Panel::bottom(id.clone()).default_size(200.0),
             };
-            panel.resizable(true).show(ui, |ui| {
+            let shown = panel.resizable(true).show(ui, |ui| {
                 show_dock(ui, &id, dock, &mut viewer);
             });
+            area_rects.insert(*area, shown.response.rect);
         }
-        egui::CentralPanel::default().show(ui, |ui| {
+        let shown = egui::CentralPanel::default().show(ui, |ui| {
             if let Some(dock) = editors {
                 show_dock(ui, "helios.area.Editors", dock, &mut viewer);
             }
         });
+        area_rects.insert(Area::Editors, shown.response.rect);
+        let ctx = ui.ctx().clone();
+        self.follow_drag(&ctx);
+        self.drop_hint(&ctx);
     }
 
     fn windows(&mut self, ctx: &Egui) {
@@ -1325,7 +1535,8 @@ impl TabViewer for Viewer<'_> {
     }
 
     fn allowed_in_windows(&self, _tab: &mut String) -> bool {
-        // Detached panels get real windows, through `<panel>.detach`.
+        // Detached panels get real windows, through `<panel>.detach`; a tab
+        // dropped over another area is moved there by the shell.
         false
     }
 }
