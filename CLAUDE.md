@@ -15,5 +15,7 @@
   and its local `AGENTS.local.md` (build, bench and checkout state).
 - License is GPLv3 (Helios links with darktable); ask before adding a
   dependency with an incompatible license.
-- Do not commit or push unless asked: stop at a staged change and a proposed
-  commit message.
+- Commit and push freely in this repository (2026-10-11): it is a new,
+  AI-assisted project. Keep one purpose per commit, every commit building
+  and passing its tests, with a changelog fragment for user-visible changes.
+  The darktable fork keeps its own rules (see its `AGENTS.md`).
