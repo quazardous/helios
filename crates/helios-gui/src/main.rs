@@ -82,16 +82,21 @@ fn main() -> Result<(), String> {
         .and_then(|p| p.canonicalize().ok())
         .ok_or("no workspace directory")?;
     let file = layout_file(&workspace);
-    let shell = Shell::new(helios_panels(), load(file.as_deref()));
+    let mut shell = Shell::new(helios_panels(), load(file.as_deref()));
     let name = workspace.file_name().map_or_else(
         || workspace.display().to_string(),
         |n| n.to_string_lossy().into(),
     );
+    shell.set_title(&name);
+    shell.draw_frame(true);
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title(format!("{name} — Helios"))
             .with_app_id("helios-gui")
-            .with_inner_size([1280.0, 800.0]),
+            .with_inner_size([1280.0, 800.0])
+            .with_min_inner_size([640.0, 400.0])
+            // Helios draws its own frame (see `frame.rs`).
+            .with_decorations(false),
         ..Default::default()
     };
     eframe::run_native(

@@ -133,3 +133,22 @@ fn records_frames_at_a_fixed_rate() {
     assert_eq!(std::fs::read_dir(&out).unwrap().count(), 3);
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+#[test]
+fn f11_toggles_full_screen_and_the_frame_has_its_buttons() {
+    let mut shell = Shell::new(helios_panels(), None);
+    shell.set_title("photos");
+    shell.draw_frame(true);
+    let mut h = headless::harness(shell, vec2(1024.0, 700.0));
+    h.run();
+    h.get_by_label("photos");
+    h.key_press(Key::F11);
+    h.run();
+    let last = h.state().registry.history().last().unwrap();
+    assert_eq!(last.id, "workbench.fullscreen");
+    assert!(last.result.is_ok());
+    let s = h.state_mut();
+    for id in ["window.minimize", "window.maximize", "window.close"] {
+        s.run(id, json!(null), Origin::User).unwrap();
+    }
+}

@@ -2,6 +2,7 @@
 //! framework's own pictures and recordings of it.
 
 pub mod dock;
+pub mod frame;
 pub mod keys;
 pub mod shell;
 pub mod snapshot;

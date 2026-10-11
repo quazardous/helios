@@ -31,6 +31,10 @@ const SCREEN: &str = "primary";
 /// next frame, where the shell's state is at hand.
 enum Action {
     Palette,
+    Fullscreen,
+    Minimize,
+    Maximize,
+    Close,
     Focus(String),
     Toggle(String),
     Detach(String),
@@ -94,6 +98,9 @@ pub struct Shell {
     recording: Option<(String, Recorder)>,
     /// What the shell has to say: command results, layout repairs.
     pub notes: Vec<String>,
+    title: String,
+    /// The window's frame is drawn by Helios (see `frame`).
+    framed: bool,
 }
 
 impl Shell {
@@ -121,6 +128,8 @@ impl Shell {
             recording: None,
             notes,
             panels,
+            title: String::new(),
+            framed: false,
         };
         shell.docks = layout
             .areas
@@ -146,6 +155,17 @@ impl Shell {
     /// Gives a panel its content; panels without one show a placeholder.
     pub fn set_content(&mut self, panel: &str, content: impl FnMut(&mut Ui) + 'static) {
         self.contents.insert(panel.into(), Box::new(content));
+    }
+
+    /// The window's title, shown in the frame Helios draws.
+    pub fn set_title(&mut self, title: &str) {
+        self.title = title.into();
+    }
+
+    /// Draws the window's frame (title bar, buttons, resize edges) instead
+    /// of the system's; the window is then opened without decorations.
+    pub fn draw_frame(&mut self, on: bool) {
+        self.framed = on;
     }
 
     /// The panel that has the focus.
@@ -266,9 +286,29 @@ impl Shell {
                 Box::new(move |_| Ok(Action::Dock(id.clone()))),
             );
         }
+        for (id, title, action) in [
+            (
+                "workbench.fullscreen",
+                "Toggle full screen",
+                (|| Action::Fullscreen) as fn() -> Action,
+            ),
+            ("window.minimize", "Minimize the window", || {
+                Action::Minimize
+            }),
+            ("window.maximize", "Maximize or restore the window", || {
+                Action::Maximize
+            }),
+            ("window.close", "Close the window", || Action::Close),
+        ] {
+            add(
+                CommandSpec::new(id, title, "View"),
+                Box::new(move |_| Ok(action())),
+            );
+        }
         for (keys, command) in [
             ("ctrl+shift+p", "workbench.palette"),
             ("f1", "workbench.palette"),
+            ("f11", "workbench.fullscreen"),
         ] {
             self.keymap
                 .bind(keys, command, "", Layer::Default, "shell")
@@ -353,6 +393,16 @@ impl Shell {
                     }),
                 }
             }
+            Action::Fullscreen => {
+                let on = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
+                ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!on));
+            }
+            Action::Minimize => ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true)),
+            Action::Maximize => {
+                let on = ctx.input(|i| i.viewport().maximized.unwrap_or(false));
+                ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!on));
+            }
+            Action::Close => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
             Action::Focus(p) => self.focus(&p),
             Action::Toggle(p) => {
                 if self.shown(&p) {
@@ -462,6 +512,9 @@ impl Shell {
         let ctx = ui.ctx().clone();
         self.pixels_per_point = ctx.pixels_per_point();
         self.cx = self.context(&ctx);
+        if self.framed {
+            crate::frame::resize_handles(&ctx);
+        }
 
         for event in ctx.input(|i| i.events.clone()) {
             match event {
@@ -487,6 +540,10 @@ impl Shell {
         ctx.data_mut(|d| d.remove::<BTreeMap<String, Rect>>(Id::new("helios.named")));
         self.rects.insert("window".into(), ctx.content_rect());
 
+        let fullscreen = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
+        if self.framed && !fullscreen {
+            self.title_bar(ui);
+        }
         self.status_bar(ui);
         self.areas(ui);
         self.windows(&ctx);
@@ -500,6 +557,21 @@ impl Shell {
             ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(Default::default()));
             ctx.request_repaint();
         }
+    }
+
+    fn title_bar(&mut self, ui: &mut Ui) {
+        let request = egui::Panel::top("helios.titlebar")
+            .exact_size(crate::frame::TITLE_HEIGHT)
+            .frame(egui::Frame::NONE.fill(ui.visuals().panel_fill))
+            .show(ui, |ui| crate::frame::title_bar(ui, &self.title))
+            .inner;
+        let command = match request {
+            Some(crate::frame::Request::Minimize) => "window.minimize",
+            Some(crate::frame::Request::ToggleMaximize) => "window.maximize",
+            Some(crate::frame::Request::Close) => "window.close",
+            None => return,
+        };
+        let _ = self.run(command, Value::Null, Origin::User);
     }
 
     fn status_bar(&mut self, ui: &mut Ui) {
