@@ -16,6 +16,7 @@
 
 pub mod import;
 pub mod layout;
+pub mod legacy;
 pub mod sidecar;
 
 pub use import::{Imported, Node, Report, import};

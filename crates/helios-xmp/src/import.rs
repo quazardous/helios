@@ -6,6 +6,7 @@ use serde::Serialize;
 use serde_json::{Map, Value};
 
 use crate::layout::{self, Layouts};
+use crate::legacy;
 use crate::sidecar::Sidecar;
 
 /// A Helios module instance an edit asks for.
@@ -27,6 +28,11 @@ pub struct Report {
     /// Items whose params version has no layout here: `(operation, version,
     /// versions known)`. Migrating them is a step of its own.
     pub unsupported_versions: Vec<(String, u32, Vec<u32>)>,
+    /// Older versions of modules taken for their presence only: their
+    /// params were not read. `(operation, version)`.
+    pub params_not_read: Vec<(String, u32)>,
+    /// Items migrated from an older version: `(operation, from, to)`.
+    pub migrated: Vec<(String, u32, u32)>,
     /// Items whose params could not be decoded.
     pub undecodable: Vec<(String, String)>,
     /// Values without a Helios counterpart: `(operation, field, value)`.
@@ -168,20 +174,54 @@ pub fn import(sidecar: &Sidecar, layouts: &Layouts) -> Imported {
             out.report.disabled.push(item.operation.clone());
             continue;
         }
-        let Some(layout) = layouts.get(&item.operation, item.modversion) else {
-            let known = layouts.versions(&item.operation);
-            if known.is_empty() {
-                out.report.unknown_modules.push(item.operation.clone());
-            } else {
-                out.report.unsupported_versions.push((
-                    item.operation.clone(),
-                    item.modversion,
-                    known,
-                ));
-            }
+        let known = layouts.versions(&item.operation);
+        let Some(&current) = known.iter().max() else {
+            out.report.unknown_modules.push(item.operation.clone());
             continue;
         };
-        let decoded = match layout::decode(layout, &item.params) {
+        let layout = layouts
+            .get(&item.operation, current)
+            .expect("a known version");
+        let params = if item.modversion == current {
+            item.params.clone()
+        } else if legacy::presence_only(&item.operation)
+            && map(&item.operation, &Map::new(), &mut Report::default()).is_some()
+        {
+            out.report
+                .params_not_read
+                .push((item.operation.clone(), item.modversion));
+            // An empty decode: the mapping reads nothing from these modules.
+            let mapped = map(&item.operation, &Map::new(), &mut out.report).expect("mapped");
+            out.nodes.push(Node {
+                operation: item.operation.clone(),
+                multi_name: item.multi_name.clone(),
+                module: mapped.module.into(),
+                params: mapped.params,
+            });
+            continue;
+        } else {
+            match legacy::upgrade(&item.operation, item.modversion, &item.params, current) {
+                Some(Ok(bytes)) => {
+                    out.report
+                        .migrated
+                        .push((item.operation.clone(), item.modversion, current));
+                    bytes
+                }
+                Some(Err(e)) => {
+                    out.report.undecodable.push((item.operation.clone(), e));
+                    continue;
+                }
+                None => {
+                    out.report.unsupported_versions.push((
+                        item.operation.clone(),
+                        item.modversion,
+                        known,
+                    ));
+                    continue;
+                }
+            }
+        };
+        let decoded = match layout::decode(layout, &params) {
             Ok(Value::Object(fields)) => fields,
             Ok(_) => continue,
             Err(e) => {

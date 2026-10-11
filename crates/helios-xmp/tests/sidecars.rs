@@ -119,23 +119,25 @@ fn a_current_sidecar_imports_with_its_values_and_reports_the_rest() {
 }
 
 #[test]
-fn an_old_sidecar_names_the_versions_to_migrate() {
+fn an_old_sidecar_names_the_versions_it_converted() {
     let Some(dir) = tests_dir() else { return };
     let sidecar = read(&dir, "0001-exposure/exposure.xmp");
-    let imported = import(&sidecar, &Layouts::built_in());
-    let old: Vec<_> = imported
-        .report
-        .unsupported_versions
+    let r = import(&sidecar, &Layouts::built_in()).report;
+    let migrated: Vec<_> = r
+        .migrated
         .iter()
         .map(|(op, v, _)| (op.as_str(), *v))
         .collect();
-    for expected in [
-        ("rawprepare", 1),
-        ("temperature", 3),
-        ("highlights", 2),
-        ("demosaic", 3),
-    ] {
-        assert!(old.contains(&expected), "{expected:?} in {old:?}");
+    let taken: Vec<_> = r
+        .params_not_read
+        .iter()
+        .map(|(op, v)| (op.as_str(), *v))
+        .collect();
+    for expected in [("temperature", 3), ("highlights", 2)] {
+        assert!(migrated.contains(&expected), "{expected:?} in {migrated:?}");
+    }
+    for expected in [("rawprepare", 1), ("demosaic", 3)] {
+        assert!(taken.contains(&expected), "{expected:?} in {taken:?}");
     }
 }
 
@@ -172,4 +174,63 @@ fn every_test_sidecar_reads_and_nothing_is_lost_silently() {
         }
     }
     assert!(sidecars > 150, "{sidecars} sidecars");
+}
+
+/// darktable's own migrations of every older params found in its public
+/// test sidecars, produced by `tools/dt_legacy_oracle.sh`: one line per
+/// case, "module version old-params current new-params".
+const ORACLE: &str = include_str!("legacy-oracle.txt");
+
+fn unhex(text: &str) -> Vec<u8> {
+    decode_params(text).unwrap()
+}
+
+#[test]
+fn migrations_give_darktables_bytes() {
+    let mut cases = 0;
+    for line in ORACLE.lines() {
+        let f: Vec<&str> = line.split(' ').collect();
+        let (module, version, old, current, expected) = (
+            f[0],
+            f[1].parse().unwrap(),
+            unhex(f[2]),
+            f[3].parse().unwrap(),
+            unhex(f[4]),
+        );
+        let got = helios_xmp::legacy::upgrade(module, version, &old, current)
+            .unwrap_or_else(|| panic!("{module} v{version}: no migration"))
+            .unwrap_or_else(|e| panic!("{module} v{version}: {e}"));
+        assert_eq!(got, expected, "{module} v{version} -> v{current}");
+        cases += 1;
+    }
+    assert!(cases >= 35, "{cases} cases");
+}
+
+#[test]
+fn old_sidecars_import_their_values_after_migration() {
+    let Some(dir) = tests_dir() else { return };
+    let sidecar = read(&dir, "0001-exposure/exposure.xmp");
+    let imported = import(&sidecar, &Layouts::built_in());
+    let r = &imported.report;
+    assert!(r.unsupported_versions.is_empty(), "{r:#?}");
+    for presence in ["rawprepare", "demosaic"] {
+        assert!(
+            r.params_not_read.iter().any(|(m, _)| m == presence),
+            "{r:#?}"
+        );
+    }
+    assert!(
+        r.migrated
+            .iter()
+            .any(|(m, from, to)| m == "temperature" && *from == 3 && *to == 4)
+    );
+    let wb = imported
+        .nodes
+        .iter()
+        .find(|n| n.module == "whitebalance")
+        .unwrap();
+    assert!(
+        matches!(wb.params.get("red"), Some(Param::Float(v)) if *v > 1.0),
+        "{wb:?}"
+    );
 }
