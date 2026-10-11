@@ -4,8 +4,10 @@
 //! On the balanced mosaic, a clipped photosite of a channel with a large
 //! coefficient (red, blue) ends above a clipped green one: left alone, blown
 //! highlights turn magenta. darktable's clip mode cuts every photosite at
-//! `clip` times the smallest white-balance coefficient, so that clipped
-//! areas stay neutral. The coefficients are the camera's (a declared context
+//! `clip` times the smallest white-balance coefficient (green, in
+//! practice), so that clipped areas stay neutral, and a little under it:
+//! darktable's clip mode scales `clip` by 0.987 (`highlights_clip_magics`),
+//! which Helios keeps for parity. The coefficients are the camera's (a declared context
 //! input), normalized to green as the white balance does.
 //!
 //! Not ported yet: the reconstruction modes (inpaint opposed, segmentation,
@@ -20,6 +22,9 @@ use helios_photo::camera::fields;
 
 pub struct Highlights;
 
+/// darktable's factor on `clip` in clip mode.
+const CLIP_MAGIC: f64 = 0.987;
+
 /// The level every photosite is cut at.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Plan {
@@ -32,7 +37,8 @@ impl Module for Highlights {
     fn manifest(&self) -> Manifest {
         Manifest {
             name: "highlights".into(),
-            version: 1,
+            // 2: darktable's clip-mode factor (0.987).
+            version: 2,
             description: "Keep blown highlights neutral (clip)".into(),
             params: vec![ParamSpec::float(
                 "clip",
@@ -66,7 +72,7 @@ impl Module for Highlights {
             .into_iter()
             .fold(f64::INFINITY, f64::min);
         Ok(Plan {
-            threshold: (params.float("clip") * smallest) as f32,
+            threshold: (params.float("clip") * CLIP_MAGIC * smallest) as f32,
         })
     }
 
@@ -107,7 +113,7 @@ mod tests {
         let out = Highlights
             .process(&plan, &[&img], Region::sized(3, 1))
             .unwrap();
-        assert_eq!(out[0].data(), &[0.4, 1.0, 1.0]);
+        assert_eq!(out[0].data(), &[0.4, 0.987, 0.987]);
     }
 
     #[test]

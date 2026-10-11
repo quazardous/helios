@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use helios_core::{Bus, Engine, Graph, Image, ModuleRef, Params};
-use helios_parity::{Darktable, Item, align, compare, reduce};
+use helios_parity::{DEMOSAIC_MARGIN, Darktable, Item, align, compare, inset, reduce};
 use serde_json::json;
 
 fn images() -> PathBuf {
@@ -73,12 +73,14 @@ fn darktable(dt: &Darktable, raw: &Path, method: &str) -> Image {
     out
 }
 
-/// Reports the difference at full size and at 1/8 (colour alone, detail
-/// averaged out). It asserts nothing yet: Helios's demosaic is bilinear,
-/// darktable's RCD and Markesteijn, and closing that gap is the work this
-/// report measures.
+/// darktable's default chain (RCD on Bayer, Markesteijn on X-Trans)
+/// against Helios's, judged with darktable's thresholds (max at the 99.9th
+/// percentile, see `Difference::passes_as_a_port`) away from the image's
+/// edges, where darktable fills pixels with another method. The
+/// difference with detail averaged out (1/8) is reported too: it is
+/// colour alone.
 #[test]
-fn raw_chain_against_darktable_is_reported() {
+fn raw_chain_matches_darktable() {
     let Ok(dt) = Darktable::find() else {
         eprintln!("skipped: no darktable-cli");
         return;
@@ -108,9 +110,14 @@ fn raw_chain_against_darktable_is_reported() {
             helios_parity::write_pfm(&ours, &dir.join(format!("{file}.helios.pfm"))).unwrap();
             helios_parity::write_pfm(&theirs, &dir.join(format!("{file}.darktable.pfm"))).unwrap();
         }
+        let (ours, theirs) = (
+            inset(&ours, DEMOSAIC_MARGIN),
+            inset(&theirs, DEMOSAIC_MARGIN),
+        );
         let full = compare(&ours, &theirs).unwrap();
         let coarse = compare(&reduce(&ours, 8), &reduce(&theirs, 8)).unwrap();
         eprintln!("{file} {method}: shift ({dx}, {dy}), full {full:?}, 1/8 {coarse:?}");
+        assert!(full.passes_as_a_port(), "{file}: {full:?}");
     }
 }
 

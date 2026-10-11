@@ -5,12 +5,16 @@
 //!
 //! - **RCD** (Ratio Corrected Demosaicing), darktable's default for Bayer
 //!   patterns, ported from darktable (see `rcd.rs`);
+//! - **Markesteijn** one pass, darktable's default for X-Trans, ported
+//!   from darktable (see `xtrans.rs`);
 //! - **bilinear**, for any filter pattern.
 //!
-//! `auto` is RCD on a Bayer pattern and bilinear on X-Trans, until
-//! Markesteijn (darktable's X-Trans default) is ported.
+//! `auto` is RCD on a Bayer pattern and Markesteijn on X-Trans, as in
+//! darktable. Near the image's edges darktable fills the pixels these
+//! methods do not compute with another method; Helios computes them from
+//! replicated edges, so the outer 12 pixels may differ from darktable's.
 //!
-//! Bilinear: Each missing color of
+//! Bilinear: each missing color of
 //! a photosite is the mean of the nearest photosites of that color: those of
 //! the 3 x 3 neighbourhood, else of the 5 x 5 one (some X-Trans positions
 //! lack a red or a blue nearby). On a Bayer pattern this is darktable's
@@ -23,6 +27,7 @@
 //! pattern gives there; those pixels are approximate.
 
 mod rcd;
+mod xtrans;
 
 use helios_core::{
     Context, Family, Image, Manifest, Module, ModuleKind, Needs, ParamKind, ParamSpec, Params,
@@ -37,6 +42,7 @@ pub struct Demosaic;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Method {
     Rcd,
+    Markesteijn,
     Bilinear,
 }
 
@@ -44,6 +50,9 @@ pub enum Method {
 pub struct Plan {
     cfa: Cfa,
     method: Method,
+    /// The largest value to expect: darktable's processed maximum, the
+    /// largest white-balance coefficient (at least 1). RCD normalizes by it.
+    maximum: f32,
 }
 
 fn index(c: Channel) -> usize {
@@ -65,15 +74,21 @@ impl Module for Demosaic {
             description: "Turn the sensor mosaic into camera RGB".into(),
             params: vec![ParamSpec {
                 name: "method".into(),
-                description: "auto: RCD on Bayer patterns, bilinear on X-Trans".into(),
+                description: "auto: RCD on Bayer patterns, Markesteijn on X-Trans".into(),
                 kind: ParamKind::Choice {
-                    options: vec!["auto".into(), "rcd".into(), "bilinear".into()],
+                    options: vec![
+                        "auto".into(),
+                        "rcd".into(),
+                        "markesteijn".into(),
+                        "bilinear".into(),
+                    ],
                     default: "auto".into(),
                 },
             }],
             inputs: vec![PortSpec::image("input", 1)],
             outputs: vec![PortSpec::image("output", 4)],
-            context: vec![fields::CFA.into()],
+            // The white balance gives RCD the largest value to expect.
+            context: vec![fields::CFA.into(), fields::WHITE_BALANCE.into()],
             needs: Needs { overlap: 2 },
             kind: ModuleKind::Process,
             family: Family::Detail,
@@ -95,16 +110,37 @@ impl Module for Demosaic {
                 }
                 Method::Rcd
             }
+            Some(Value::Choice(m)) if m == "markesteijn" => {
+                if bayer {
+                    return Err("Markesteijn needs an X-Trans pattern".into());
+                }
+                Method::Markesteijn
+            }
             Some(Value::Choice(m)) if m == "bilinear" => Method::Bilinear,
             _ if bayer => Method::Rcd,
-            _ => Method::Bilinear,
+            _ => Method::Markesteijn,
         };
-        Ok(Plan { cfa, method })
+        // Optional: without a white balance, values are expected up to 1.
+        let maximum = context
+            .get(fields::WHITE_BALANCE)
+            .and_then(|v| v.as_list())
+            .filter(|l| l.len() >= 3 && l[1] > 0.0)
+            .map_or(1.0, |wb| {
+                [wb[0] / wb[1], 1.0, wb[2] / wb[1]]
+                    .into_iter()
+                    .fold(1.0f64, f64::max)
+            }) as f32;
+        Ok(Plan {
+            cfa,
+            method,
+            maximum,
+        })
     }
 
     fn input_region(&self, plan: &Plan, output: Region, overlap: u32) -> Region {
         match plan.method {
             Method::Bilinear => output.grow(overlap),
+            Method::Markesteijn => output.grow(xtrans::BORDER),
             Method::Rcd => {
                 // The tile starts on an even photosite (see `rcd.rs`).
                 let g = output.grow(rcd::BORDER);
@@ -134,7 +170,7 @@ impl Module for Demosaic {
                 r.y,
                 r.width as usize,
                 r.height as usize,
-                1.0,
+                plan.maximum,
                 |col, row| input.pixel(r.x + col as i64, r.y + row as i64)[0],
             );
             return Ok(vec![Image::from_fn(output, 4, |x, y, c| {
@@ -142,6 +178,20 @@ impl Module for Demosaic {
                     return 1.0;
                 }
                 planes[c as usize][(y - r.y) as usize * stride + (x - r.x) as usize]
+            })]);
+        }
+        if plan.method == Method::Markesteijn {
+            let r = input.region();
+            let width = r.width as usize;
+            let pixels =
+                xtrans::demosaic(&plan.cfa, r.x, r.y, width, r.height as usize, |col, row| {
+                    input.pixel(r.x + col as i64, r.y + row as i64)[0]
+                });
+            return Ok(vec![Image::from_fn(output, 4, |x, y, c| {
+                if c == 3 {
+                    return 1.0;
+                }
+                pixels[(y - r.y) as usize * width + (x - r.x) as usize][c as usize]
             })]);
         }
         let cfa = &plan.cfa;
@@ -206,7 +256,12 @@ mod tests {
     fn a_grey_scene_stays_grey_on_both_patterns() {
         let out = Region::sized(12, 12);
         let input = Image::from_fn(out.grow(12), 1, |_, _, _| 0.4);
-        for (cfa, method) in [("RGGB", "rcd"), ("RGGB", "bilinear"), (XTRANS, "bilinear")] {
+        for (cfa, method) in [
+            ("RGGB", "rcd"),
+            ("RGGB", "bilinear"),
+            (XTRANS, "markesteijn"),
+            (XTRANS, "bilinear"),
+        ] {
             let rgb = run_with(cfa, method, &input, out);
             for p in rgb.data().as_chunks::<4>().0 {
                 assert!(close(p, &[0.4, 0.4, 0.4, 1.0]), "{cfa} {method}: {p:?}");
@@ -233,7 +288,7 @@ mod tests {
     }
 
     #[test]
-    fn auto_is_rcd_on_bayer_and_bilinear_on_x_trans() {
+    fn auto_is_rcd_on_bayer_and_markesteijn_on_x_trans() {
         let plan = |cfa| {
             Demosaic
                 .prepare(&Params::new(), &context(cfa))
@@ -241,9 +296,39 @@ mod tests {
                 .method
         };
         assert_eq!(plan("RGGB"), Method::Rcd);
-        assert_eq!(plan(XTRANS), Method::Bilinear);
+        assert_eq!(plan(XTRANS), Method::Markesteijn);
         let rcd = Params::new().with("method", Value::Choice("rcd".into()));
         assert!(Demosaic.prepare(&rcd, &context(XTRANS)).is_err());
+        let mk = Params::new().with("method", Value::Choice("markesteijn".into()));
+        assert!(Demosaic.prepare(&mk, &context("RGGB")).is_err());
+    }
+
+    #[test]
+    fn markesteijn_gives_the_same_pixels_whatever_the_region() {
+        let scene = Image::from_fn(Region::new(-20, -20, 90, 80), 1, |x, y, _| {
+            ((x * 37 + y * 11) % 23) as f32 / 23.0
+                + if (x / 5 + y / 7) % 2 == 0 { 0.3 } else { 0.0 }
+        });
+        let whole = run(XTRANS, &scene, Region::sized(50, 40));
+        for piece in [
+            Region::new(3, 5, 17, 11),
+            Region::new(20, 1, 9, 30),
+            Region::new(31, 27, 19, 13),
+        ] {
+            let part = run(XTRANS, &scene, piece);
+            assert_eq!(part.data(), whole.sample(piece).data(), "{piece}");
+        }
+    }
+
+    #[test]
+    fn markesteijn_brings_a_flat_colour_back_on_x_trans() {
+        let cfa = Cfa::parse(XTRANS).unwrap();
+        let color = [0.8f32, 0.5, 0.2];
+        let out = Region::sized(18, 18);
+        let input = Image::from_fn(out.grow(14), 1, |x, y, _| color[index(cfa.color_at(x, y))]);
+        for p in run(XTRANS, &input, out).data().as_chunks::<4>().0 {
+            assert!(close(&p[..3], &color), "{p:?}");
+        }
     }
 
     #[test]
