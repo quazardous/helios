@@ -15,6 +15,7 @@ helios-inspect = { path = "crates/helios-inspect" }
 helios-config = { path = "crates/helios-config" }
 helios-photo = { path = "crates/helios-photo" }
 helios-export = { path = "crates/helios-export" }
+helios-decision = { path = "crates/helios-decision" }
 blake3 = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

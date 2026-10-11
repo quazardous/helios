@@ -62,6 +62,9 @@ A Cargo workspace (Rust):
   rendered, converted from the working space to sRGB, encoded (JPEG, PNG 8
   or 16-bit, TIFF 16-bit) and written atomically, as jobs that hold their
   destination so two writes to one file never race.
+- `crates/helios-decision`: decision nodes: resolution modes (full AI,
+  AI-assisted, human), recorded and versioned answers (who decided, which
+  model, on which inputs), replayed offline into a network.
 - `crates/helios-journal`: the workflow level: a journal per item and node
   (claims, leases, joins, choices, retries), after grampy, with a contract
   every storage must pass.

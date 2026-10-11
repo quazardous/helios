@@ -151,8 +151,8 @@ fn an_agent_starts_its_own_sandbox_through_mcp() {
         json!({ "dir": place.s() }),
     );
     assert!(!failed, "{text}");
-    let (failed, _) = mcp_call(&mut stdin, &mut stdout, 3, "helios_wait_idle", json!({}));
-    assert!(!failed);
+    let (failed, text) = mcp_call(&mut stdin, &mut stdout, 3, "helios_wait_idle", json!({}));
+    assert!(!failed, "{text}");
     if cfg!(debug_assertions) {
         let region = json!({ "x": 0, "y": 0, "width": 8, "height": 8 });
         let (failed, text) = mcp_call(

@@ -28,6 +28,9 @@ pub(crate) enum Kind {
         module: ModuleRef,
         params: Params,
         context: Context,
+        /// False for a decision node until an answer is recorded: its
+        /// parameters are the answer, not something to edit.
+        answered: bool,
     },
 }
 
@@ -81,12 +84,14 @@ impl Graph {
     ) -> Result<NodeId, Error> {
         let params = module.manifest().resolve(params)?;
         let inputs = vec![None; module.manifest().inputs.len()];
+        let answered = module.manifest().kind != ModuleKind::Decision;
         Ok(self.push(Node {
             name: name.into(),
             kind: Kind::Module {
                 module,
                 params,
                 context: Context::new(),
+                answered,
             },
             inputs,
         }))
@@ -105,10 +110,19 @@ impl Graph {
         self.nodes.get_mut(id.0).ok_or(Error::Node(id.0))
     }
 
-    /// Changes one parameter of a module node.
+    /// Changes one parameter of a module node. A decision node is not
+    /// edited: it is answered ([`Graph::answer`]), so that every change to
+    /// it is a recorded decision.
     pub fn set_param(&mut self, id: NodeId, name: &str, value: Value) -> Result<(), Error> {
         let node = self.node_mut(id)?;
         match &mut node.kind {
+            Kind::Module { module, .. } if module.manifest().kind == ModuleKind::Decision => {
+                Err(Error::Param {
+                    module: node.name.clone(),
+                    param: name.into(),
+                    reason: "a decision node is answered, not edited".into(),
+                })
+            }
             Kind::Module { module, params, .. } => {
                 let mut changed = params.clone();
                 changed.set(name, value);
@@ -121,6 +135,74 @@ impl Graph {
                 reason: "a source has no parameters".into(),
             }),
         }
+    }
+
+    /// Records the answer of a decision node: its parameters, checked and
+    /// completed like any parameters. Renders use it from now on.
+    pub fn answer(&mut self, id: NodeId, values: &Params) -> Result<(), Error> {
+        let node = self.node_mut(id)?;
+        match &mut node.kind {
+            Kind::Module {
+                module,
+                params,
+                answered,
+                ..
+            } if module.manifest().kind == ModuleKind::Decision => {
+                *params = module.manifest().resolve(values)?;
+                *answered = true;
+                Ok(())
+            }
+            _ => Err(Error::Contract {
+                module: node.name.clone(),
+                reason: "only a decision node is answered".into(),
+            }),
+        }
+    }
+
+    /// Checks an answer for a decision node without recording it.
+    pub fn check_answer(&self, id: NodeId, values: &Params) -> Result<(), Error> {
+        let node = self.node(id)?;
+        match &node.kind {
+            Kind::Module { module, .. } if module.manifest().kind == ModuleKind::Decision => {
+                module.manifest().resolve(values).map(|_| ())
+            }
+            _ => Err(Error::Contract {
+                module: node.name.clone(),
+                reason: "only a decision node is answered".into(),
+            }),
+        }
+    }
+
+    /// Takes a decision node's answer back: it is pending again.
+    pub fn withdraw(&mut self, id: NodeId) -> Result<(), Error> {
+        let node = self.node_mut(id)?;
+        match &mut node.kind {
+            Kind::Module {
+                module, answered, ..
+            } if module.manifest().kind == ModuleKind::Decision => {
+                *answered = false;
+                Ok(())
+            }
+            _ => Err(Error::Contract {
+                module: node.name.clone(),
+                reason: "only a decision node is answered".into(),
+            }),
+        }
+    }
+
+    /// The node feeding each input of a node (`None` when unconnected).
+    pub fn input_nodes(&self, id: NodeId) -> Result<Vec<Option<NodeId>>, Error> {
+        Ok(self
+            .node(id)?
+            .inputs
+            .iter()
+            .map(|i| i.map(|(n, _)| n))
+            .collect())
+    }
+
+    /// A node by name.
+    pub fn find(&self, name: &str) -> Option<NodeId> {
+        self.nodes.iter().position(|n| n.name == name).map(NodeId)
     }
 
     /// Sets the context (image metadata) a module node is evaluated with.
@@ -294,11 +376,17 @@ impl Describe for Graph {
                         "id": i, "name": n.name, "kind": "source",
                         "region": image.region(), "channels": image.channels(), "hash": hash.short(),
                     }),
-                    Kind::Module { module, params, .. } => serde_json::json!({
-                        "id": i, "name": n.name, "kind": "module",
-                        "module": module.manifest().name, "version": module.manifest().version,
-                        "params": params, "inputs": inputs,
-                    }),
+                    Kind::Module { module, params, answered, .. } => {
+                        let mut node = serde_json::json!({
+                            "id": i, "name": n.name, "kind": "module",
+                            "module": module.manifest().name, "version": module.manifest().version,
+                            "params": params, "inputs": inputs,
+                        });
+                        if module.manifest().kind == ModuleKind::Decision {
+                            node["answered"] = (*answered).into();
+                        }
+                        node
+                    }
                 }
             })
             .collect();

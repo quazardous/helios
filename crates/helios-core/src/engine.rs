@@ -114,6 +114,11 @@ enum Work {
         plan: crate::module::Plan,
         inputs: Vec<(Step, usize)>,
     },
+    /// A decision node with no recorded answer: its inputs are planned (a
+    /// surface shows what it will look at), nothing is computed.
+    Pending {
+        inputs: Vec<(Step, usize)>,
+    },
 }
 
 /// Computed content, by key, within an optional memory budget.
@@ -253,7 +258,7 @@ impl Engine {
         step: &Step,
         out: &mut Vec<NodeStatus>,
     ) -> Result<(), Error> {
-        if let Work::Module { inputs, .. } = &step.work {
+        if let Work::Module { inputs, .. } | Work::Pending { inputs } = &step.work {
             for (input, _) in inputs {
                 self.collect_status(graph, input, out)?;
             }
@@ -283,6 +288,7 @@ impl Engine {
             )
         });
         let state = match cell.as_deref().map(OnceLock::get) {
+            _ if matches!(step.work, Work::Pending { .. }) => NodeState::Pending,
             Some(Some(Ok(_))) => NodeState::Done,
             Some(Some(Err(_))) => NodeState::Failed,
             Some(None) => NodeState::Running,
@@ -371,9 +377,22 @@ impl Engine {
                 Work::Source(image.clone())
             }
             Kind::Module {
+                answered: false, ..
+            } => {
+                h.update(b"helios.step.pending.v1");
+                let mut inputs = Vec::with_capacity(node.inputs.len());
+                for (src, port) in node.inputs.iter().flatten() {
+                    let step = self.plan(graph, *src, region)?;
+                    h.update(&step.key.0);
+                    inputs.push((step, *port));
+                }
+                Work::Pending { inputs }
+            }
+            Kind::Module {
                 module,
                 params,
                 context,
+                ..
             } => {
                 let manifest = module.manifest();
                 h.update(b"helios.step.module.v1");
@@ -412,6 +431,12 @@ impl Engine {
     }
 
     fn execute(&self, step: &Step, cause: u64) -> Outputs {
+        if let Work::Pending { .. } = step.work {
+            // Nothing to compute or cache: the answer is not there yet.
+            return Err(Error::Pending {
+                node: step.name.clone(),
+            });
+        }
         self.requests.fetch_add(1, Ordering::SeqCst);
         self.track(step, |t| {
             t.requests += 1;
@@ -516,6 +541,7 @@ impl Engine {
                     held.iter().map(|(outputs, port)| &outputs[*port]).collect();
                 Ok(Arc::new(module.process(plan, &images, step.region)?))
             }
+            Work::Pending { .. } => unreachable!("execute answers pending steps itself"),
         }
     }
 }

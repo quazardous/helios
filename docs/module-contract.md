@@ -174,6 +174,26 @@ and 6): the non-deterministic part is
 the resolution of the node, which is outside the render and lands in the
 edit like any user action.
 
+How it is built:
+
+- in the core, a decision node is a module of kind `decision` whose
+  parameters are its answer. Until one is recorded it is **pending**: a
+  render through it fails with a transient `Pending` error (nothing read,
+  computed or cached), and its status says `pending`. It is answered
+  through `Graph::answer`, never edited with `set_param`, so every change to
+  it goes through the book below;
+- `helios-decision` holds the **book** of an edit: each node's mode, every
+  answer with its version, who decided, the model and its version, and the
+  content keys of the inputs it saw. A model answer is the answer in full AI
+  mode, a proposal in AI-assisted mode, and refused in human mode; a human
+  may always decide, which in full AI mode is the review. Asking again
+  withdraws the answer in force and keeps the history. A stored book
+  replays into a fresh graph with no model, and an answer given on other
+  inputs is flagged for review, never recomputed;
+- the mode set on a node holds unless a project or a run (or a user, for
+  themselves) sets `project.decisions.mode`; a global preference only fills
+  in for nodes that set none.
+
 ## How a module is tested
 
 Every module is testable alone, with no darktable and no framework running:

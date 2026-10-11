@@ -216,6 +216,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "helios-decision"
+version = "0.0.1"
+dependencies = [
+ "helios-config",
+ "helios-core",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "helios-export"
 version = "0.0.1"
 dependencies = [

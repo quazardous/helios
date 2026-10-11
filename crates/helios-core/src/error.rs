@@ -26,12 +26,15 @@ pub enum Error {
     /// A failure injected on purpose (testing the error paths). Transient:
     /// never cached, so asking again computes again.
     Fault { node: String, what: String },
+    /// A decision node has no recorded answer yet. Transient: once it is
+    /// answered, asking again renders.
+    Pending { node: String },
 }
 
 impl Error {
     /// Whether asking again may give another answer: such errors are not cached.
     pub fn is_transient(&self) -> bool {
-        matches!(self, Error::Fault { .. })
+        matches!(self, Error::Fault { .. } | Error::Pending { .. })
     }
 }
 
@@ -56,6 +59,7 @@ impl fmt::Display for Error {
             }
             Error::Module { module, reason } => write!(f, "{module}: {reason}"),
             Error::Fault { node, what } => write!(f, "{node}: injected fault ({what})"),
+            Error::Pending { node } => write!(f, "{node}: decision pending (no recorded answer)"),
         }
     }
 }

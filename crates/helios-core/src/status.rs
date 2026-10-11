@@ -32,6 +32,8 @@ pub enum NodeState {
     Done,
     /// Its computation failed; asking again gives the same error.
     Failed,
+    /// A decision node waiting for its answer; what reads from it waits too.
+    Pending,
 }
 
 /// How much a node has been asked and has worked, for one render region.
