@@ -12,11 +12,15 @@ helios-theme.workspace = true
 helios-profile.workspace = true
 helios-scopes.workspace = true
 helios-values.workspace = true
+# MIT OR Apache-2.0.
+bytemuck = "1"
 helios-core.workspace = true
 helios-photo.workspace = true
 helios-load.workspace = true
 helios-vault.workspace = true
 helios-vault-sqlite.workspace = true
+# The demo image chain of `helios-gui --image`.
+helios-module-exposure = { path = "../../modules/exposure" }
 serde.workspace = true
 serde_json.workspace = true
 # MIT OR Apache-2.0 (egui, eframe, egui_kittest), MIT (egui_dock).

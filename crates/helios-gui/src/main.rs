@@ -1,6 +1,8 @@
-//! `helios-gui [workspace] [--vault FILE]`: opens a workspace (a directory,
-//! the current one by default) in a window; with a vault, its images fill
-//! the library, and what the user rates or labels there is written back.
+//! `helios-gui [workspace] [--vault FILE] [--image FILE]`: opens a
+//! workspace (a directory, the current one by default) in a window; with a
+//! vault, its images fill the library, and what the user rates or labels
+//! there is written back; with an image, the viewport shows it through an
+//! exposure node whose parameters are values (`node/exposure/*`).
 //! `--snapshot <target> <file.png>` draws it offscreen instead and saves a
 //! picture of the target.
 
@@ -102,6 +104,28 @@ fn fill_library(shell: &mut Shell, vault: &Vault) -> Result<(), String> {
     Ok(())
 }
 
+/// Shows a picture (or a raw file's embedded preview) in the viewport,
+/// through an exposure node.
+fn show_image(shell: &mut Shell, path: &Path) -> Result<(), String> {
+    let image = match helios_load::Kind::of(path) {
+        helios_load::Kind::Picture => helios_load::load(path)?.image,
+        helios_load::Kind::Raw => helios_load::preview(path)?
+            .ok_or_else(|| format!("{}: no preview to show", path.display()))?,
+    };
+    let mut g = helios_core::Graph::new();
+    let src = g.add_source("source", image);
+    let exp = g
+        .add_module(
+            "exposure",
+            helios_core::ModuleRef::new(helios_module_exposure::Exposure),
+            &helios_core::Params::new(),
+        )
+        .map_err(|e| e.to_string())?;
+    g.connect(src, "image", exp, "input")
+        .map_err(|e| e.to_string())?;
+    shell.set_view_source(g, exp, "output")
+}
+
 struct App {
     shell: Shell,
     file: Option<PathBuf>,
@@ -163,6 +187,15 @@ fn main() -> Result<(), String> {
         let image = headless::snapshot(&mut harness, target)?;
         return helios_gui::snapshot::save(&image, Path::new(out));
     }
+    let image_file = args
+        .iter()
+        .position(|a| a == "--image")
+        .map(|i| {
+            args.get(i + 1)
+                .map(PathBuf::from)
+                .ok_or("--image takes a FILE")
+        })
+        .transpose()?;
     let vault_file = args
         .iter()
         .position(|a| a == "--vault")
@@ -175,7 +208,10 @@ fn main() -> Result<(), String> {
     let workspace = args
         .iter()
         .enumerate()
-        .find(|(i, a)| !a.starts_with('-') && (*i == 0 || args[i - 1] != "--vault"))
+        .find(|(i, a)| {
+            !a.starts_with('-')
+                && (*i == 0 || !["--vault", "--image"].contains(&args[i - 1].as_str()))
+        })
         .map(|(_, a)| a)
         .map(PathBuf::from)
         .filter(|p| p.is_dir())
@@ -204,6 +240,9 @@ fn main() -> Result<(), String> {
     if let Some(saved) = load(file.as_deref()) {
         shell.set_layout(saved);
     }
+    if let Some(path) = image_file {
+        show_image(&mut shell, &path)?;
+    }
     let vault = match vault_file {
         Some(path) => {
             let vault = helios_vault::Vault::new(helios_vault_sqlite::SqliteStore::open(&path)?);
@@ -225,7 +264,12 @@ fn main() -> Result<(), String> {
     eframe::run_native(
         "helios-gui",
         options,
-        Box::new(|_| Ok(Box::new(App { shell, file, vault }))),
+        Box::new(|cc| {
+            if let Some(rs) = cc.wgpu_render_state.as_ref() {
+                shell.attach_gpu(rs);
+            }
+            Ok(Box::new(App { shell, file, vault }))
+        }),
     )
     .map_err(|e| e.to_string())
 }

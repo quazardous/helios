@@ -155,3 +155,21 @@ pub fn save(image: &RgbaImage, path: &Path) -> Result<(), String> {
         .save(path)
         .map_err(|e| format!("{}: {e}", path.display()))
 }
+
+/// Saves float image data before any display transform, as a 16-bit
+/// PNG: linear values in the working space, 0 to 1 over the 16 bits,
+/// clipped (a scene picture for comparisons, not for viewing).
+pub fn save_scene(scene: &helios_core::Image, path: &Path) -> Result<(), String> {
+    let r = scene.region();
+    let n = scene.channels() as usize;
+    let mut out = image::ImageBuffer::<image::Rgba<u16>, Vec<u16>>::new(r.width, r.height);
+    for (p, src) in out.pixels_mut().zip(scene.data().chunks_exact(n)) {
+        let c = |i: usize| (src[i.min(n - 1)].clamp(0.0, 1.0) * 65535.0).round() as u16;
+        *p = image::Rgba([c(0), c(1), c(2), if n >= 4 { c(3) } else { 65535 }]);
+    }
+    if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
+        std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    }
+    out.save(path)
+        .map_err(|e| format!("{}: {e}", path.display()))
+}

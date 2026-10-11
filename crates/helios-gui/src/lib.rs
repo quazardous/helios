@@ -10,6 +10,7 @@ pub mod scopes;
 pub mod shell;
 pub mod snapshot;
 pub mod theme;
+pub mod viewport;
 
 pub use shell::{Shell, headless, name_rect};
 

@@ -10,7 +10,7 @@ use serde::Serialize;
 
 use crate::describe::Describe;
 use crate::error::Error;
-use crate::image::{ContentHash, Image};
+use crate::image::{ContentHash, Image, Region};
 use crate::manifest::{Manifest, ModuleKind, ParamHint};
 use crate::module::{Context, ModuleRef};
 use crate::params::{Params, Value};
@@ -21,6 +21,7 @@ pub const SOURCE_PORT: &str = "image";
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
 pub struct NodeId(pub usize);
 
+#[derive(Clone)]
 pub(crate) enum Kind {
     /// Image data handed to the graph by the framework (its loaders own IO).
     Source { image: Image, hash: ContentHash },
@@ -34,6 +35,7 @@ pub(crate) enum Kind {
     },
 }
 
+#[derive(Clone)]
 pub(crate) struct Node {
     pub(crate) name: String,
     pub(crate) kind: Kind,
@@ -47,12 +49,25 @@ pub struct Graph {
     nodes: Vec<Node>,
 }
 
+static NEXT_GRAPH: AtomicU64 = AtomicU64::new(1);
+
 impl Default for Graph {
     fn default() -> Self {
-        static NEXT: AtomicU64 = AtomicU64::new(1);
         Self {
-            id: NEXT.fetch_add(1, Ordering::Relaxed),
+            id: NEXT_GRAPH.fetch_add(1, Ordering::Relaxed),
             nodes: Vec::new(),
+        }
+    }
+}
+
+/// A copy to render from elsewhere (another thread), cheap: images and
+/// modules are shared. It is another graph to the engine, which still
+/// finds the same content by its keys.
+impl Clone for Graph {
+    fn clone(&self) -> Self {
+        Self {
+            id: NEXT_GRAPH.fetch_add(1, Ordering::Relaxed),
+            nodes: self.nodes.clone(),
         }
     }
 }
@@ -187,6 +202,23 @@ impl Graph {
                 module: node.name.clone(),
                 reason: "only a decision node is answered".into(),
             }),
+        }
+    }
+
+    /// The extent of what a node outputs: its source's image region,
+    /// followed up the first inputs (modules keep the geometry they are
+    /// given). `None` when no source feeds it.
+    pub fn extent(&self, id: NodeId) -> Result<Option<Region>, Error> {
+        let mut at = id;
+        loop {
+            let node = self.node(at)?;
+            match &node.kind {
+                Kind::Source { image, .. } => return Ok(Some(image.region())),
+                Kind::Module { .. } => match node.inputs.first().copied().flatten() {
+                    Some((from, _)) => at = from,
+                    None => return Ok(None),
+                },
+            }
         }
     }
 

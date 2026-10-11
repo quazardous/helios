@@ -38,9 +38,9 @@ fn layout_nodes_round_trip_through_the_dock() {
 fn draws_every_area_and_pictures_a_panel() {
     let mut h = headless::harness(Shell::new(helios_panels(), None), vec2(1280.0, 800.0));
     h.run();
-    for title in ["Image", "Parameters"] {
-        h.get_by_label(title);
-    }
+    h.get_by_label("Parameters");
+    // The image viewport, empty.
+    h.get_by_label("No image");
     // The Vault panel and the filmstrip show the (empty) library.
     h.get_by_label("No images: import a folder into the vault");
     h.get_by_label("No images");

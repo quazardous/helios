@@ -51,6 +51,7 @@ enum Action {
     Toggle(String),
     Detach(String),
     MoveTo(String, Area),
+    Zoom(Zoom),
     Answer(crate::dialogs::Answer, Origin),
     AssumeYes(bool),
     Dock(String),
@@ -67,6 +68,14 @@ enum Action {
 }
 
 type Queue = Arc<Mutex<Vec<Action>>>;
+
+/// What the viewport's zoom commands ask for.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Zoom {
+    Fit,
+    Actual,
+    By(f64),
+}
 
 /// How a command turns its arguments into an action.
 type ActionOf = Box<dyn Fn(&Value) -> Result<Action, String> + Send + Sync>;
@@ -151,6 +160,7 @@ pub struct Shell {
     dismissed: Vec<usize>,
     /// The GUI's clock, in seconds, as of this frame.
     now: f64,
+    viewport: std::rc::Rc<std::cell::RefCell<crate::viewport::Viewport>>,
     /// Every value widgets and agents edit (`param.*` commands).
     pub values: std::sync::Arc<std::sync::Mutex<helios_values::Store>>,
 }
@@ -196,6 +206,7 @@ impl Shell {
             scopes: Default::default(),
             library: Default::default(),
             values: Default::default(),
+            viewport: Default::default(),
             dialogs: VecDeque::new(),
             dialog_view: Arc::default(),
             assume_yes: false,
@@ -212,6 +223,13 @@ impl Shell {
         shell.declare_commands();
         helios_values::register(&mut shell.registry, shell.values.clone())
             .expect("param commands are declared once");
+        crate::viewport::declare(&mut shell.values.lock().expect("value store lock"));
+        if shell.panels.get("helios.viewport").is_some() {
+            let (viewport, values) = (shell.viewport.clone(), shell.values.clone());
+            shell.set_content("helios.viewport", move |ui| {
+                viewport.borrow_mut().ui(ui, &values);
+            });
+        }
         if shell.panels.get("helios.scopes").is_some() {
             let scopes = shell.scopes.clone();
             shell.set_content("helios.scopes", move |ui| scopes.borrow_mut().ui(ui));
@@ -258,6 +276,41 @@ impl Shell {
     /// The library's state, to read.
     pub fn library(&self) -> std::cell::Ref<'_, crate::library::Library> {
         self.library.borrow()
+    }
+
+    /// Shows a node's output in the viewport; the parameters of the
+    /// graph's nodes become values (`node/<node>/<param>`), and a change to
+    /// them renders again.
+    pub fn set_view_source(
+        &mut self,
+        graph: helios_core::Graph,
+        node: helios_core::NodeId,
+        port: &str,
+    ) -> Result<(), String> {
+        {
+            let mut store = self.values.lock().expect("value store lock");
+            for id in graph.ids() {
+                helios_values::bind_node(&mut store, &graph, id)?;
+            }
+            store.take_dirty();
+        }
+        self.viewport.borrow_mut().set_source(graph, node, port)
+    }
+
+    /// Gives the viewport the GPU objects it draws with, on the render
+    /// state the window (or a test harness) draws with.
+    pub fn attach_gpu(&mut self, rs: &eframe::egui_wgpu::RenderState) {
+        crate::viewport::install(rs);
+    }
+
+    /// What the viewport's render thread did.
+    pub fn viewport_stats(&self) -> std::sync::Arc<crate::viewport::Stats> {
+        self.viewport.borrow().stats.clone()
+    }
+
+    /// The float data the viewport shows, before the display transform.
+    pub fn viewport_scene(&self) -> Option<helios_core::Image> {
+        self.viewport.borrow().scene().cloned()
     }
 
     /// The layout as it stands, to be saved with the workspace.
@@ -737,6 +790,21 @@ impl Shell {
             CommandSpec::new("vault.previous", "Select the previous image", "Vault"),
             Box::new(|_| Ok(Action::Step(-1))),
         );
+        for (id, title, zoom) in [
+            ("viewport.zoom.fit", "Image: fit to the view", Zoom::Fit),
+            (
+                "viewport.zoom.100",
+                "Image: actual pixels (100 %)",
+                Zoom::Actual,
+            ),
+            ("viewport.zoom.in", "Image: zoom in", Zoom::By(1.25)),
+            ("viewport.zoom.out", "Image: zoom out", Zoom::By(0.8)),
+        ] {
+            add(
+                CommandSpec::new(id, title, "View"),
+                Box::new(move |_| Ok(Action::Zoom(zoom))),
+            );
+        }
         add(
             CommandSpec::new("scopes.stops", "Scopes: in stops (log)", "View"),
             Box::new(|_| Ok(Action::ScopeStops(true))),
@@ -1324,6 +1392,43 @@ impl Shell {
                     self.dock(&p);
                 }
             }
+            Action::Zoom(z) => {
+                use crate::viewport::{CENTER_X, CENTER_Y, FIT, ZOOM};
+                use helios_core::Value as V;
+                let current = self.viewport.borrow().effective_zoom;
+                let mut store = self.values.lock().expect("value store lock");
+                let set = |store: &mut helios_values::Store, path: &str, v: V| {
+                    let _ = store.set(helios_values::Set::new(
+                        path,
+                        helios_values::Change::To(v),
+                        Origin::User,
+                    ));
+                };
+                let fitted = store
+                    .get(FIT)
+                    .and_then(|e| e.value.as_bool())
+                    .unwrap_or(true);
+                match z {
+                    Zoom::Fit => set(&mut store, FIT, V::Bool(true)),
+                    Zoom::Actual | Zoom::By(_) => {
+                        if fitted {
+                            // Leaving fit keeps the image where it was.
+                            let extent = self.viewport.borrow().graph_extent();
+                            if let Some((w, h)) = extent {
+                                set(&mut store, CENTER_X, V::Float(w / 2.0));
+                                set(&mut store, CENTER_Y, V::Float(h / 2.0));
+                            }
+                        }
+                        let zoom = match z {
+                            Zoom::Actual => 1.0 / f64::from(self.pixels_per_point),
+                            Zoom::By(f) => current * f,
+                            Zoom::Fit => unreachable!(),
+                        };
+                        set(&mut store, ZOOM, V::Float(zoom));
+                        set(&mut store, FIT, V::Bool(false));
+                    }
+                }
+            }
             Action::MoveTo(p, area) => {
                 if let Err(e) = self.move_to(&p, area, None) {
                     self.warn(e);
@@ -1355,6 +1460,17 @@ impl Shell {
             Action::Dock(p) => {
                 if self.auxiliary.iter().any(|a| a.panel == p) {
                     self.dock(&p);
+                }
+            }
+            Action::Snapshot { target, path } if target == "viewport.scene" => {
+                // The float data, before the display transform.
+                let saved = self
+                    .viewport_scene()
+                    .ok_or_else(|| "the viewport shows nothing yet".to_string())
+                    .and_then(|scene| snapshot::save_scene(&scene, &path));
+                match saved {
+                    Ok(()) => self.note(format!("viewport.scene saved to {}", path.display())),
+                    Err(e) => self.warn(format!("viewport.scene: {e}")),
                 }
             }
             Action::Snapshot { target, path } => {
@@ -1486,6 +1602,9 @@ impl Shell {
             self.title_bar(ui);
         }
         self.status_bar(ui);
+        self.viewport
+            .borrow_mut()
+            .sync(&mut self.values.lock().expect("value store lock"));
         self.areas(ui);
         self.windows(&ctx);
         self.palette_ui(&ctx);
@@ -1816,10 +1935,16 @@ pub mod headless {
     use egui_kittest::Harness;
 
     /// A shell drawn offscreen at a size, on the wgpu renderer.
-    pub fn harness<'a>(shell: Shell, size: egui::Vec2) -> Harness<'a, Shell> {
+    pub fn harness<'a>(mut shell: Shell, size: egui::Vec2) -> Harness<'a, Shell> {
+        // Our own render state, so the viewport's GPU objects live on it.
+        let rs = egui_kittest::wgpu::create_render_state(
+            egui_kittest::wgpu::default_wgpu_setup(),
+            eframe::egui_wgpu::RendererOptions::PREDICTABLE,
+        );
+        shell.attach_gpu(&rs);
         Harness::builder()
             .with_size(size)
-            .wgpu()
+            .renderer(egui_kittest::wgpu::WgpuTestRenderer::from_render_state(rs))
             .build_ui_state(|ui, shell: &mut Shell| shell.ui(ui), shell)
     }
 
