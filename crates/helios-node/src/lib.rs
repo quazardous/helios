@@ -12,6 +12,8 @@
 //! Sources are synthetic images for now: loading files is the framework's
 //! job and comes with the photo domain.
 
+pub mod mcp;
+
 use std::collections::BTreeMap;
 
 use helios_core::{Graph, ModuleRef, NodeId, Params, Region};

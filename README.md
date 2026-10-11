@@ -58,7 +58,8 @@ A Cargo workspace (Rust):
   from a JSON description, renders it and serves inspection; and `helios`,
   the command line (`helios inspect state`, `events`, `wait-event`,
   `wait-idle`; in debug builds `helios control render`, `set-param`,
-  `pause`, `fault`...).
+  `pause`, `fault`...); and `helios-mcp`, an MCP server giving an agent the
+  same verbs.
 - `modules/exposure`: darktable's exposure module (manual mode), ported.
 
 Build and test with `cargo test --workspace`.

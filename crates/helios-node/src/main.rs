@@ -67,6 +67,25 @@ impl Event for Idle {
     const KIND: &'static str = "node.idle";
 }
 
+/// The modules this node knows, with their manifests: what a surface or an
+/// agent needs to build and edit a network.
+struct Modules;
+
+impl Describe for Modules {
+    fn describe(&self) -> Value {
+        let modules: serde_json::Map<String, Value> = helios_node::registry()
+            .into_iter()
+            .map(|(name, module)| {
+                (
+                    name.to_string(),
+                    serde_json::to_value(module.manifest()).expect("manifests serialize"),
+                )
+            })
+            .collect();
+        json!({ "modules": modules })
+    }
+}
+
 /// The graph of the node, shared by renders, inspection and control.
 struct SharedGraph(RwLock<Graph>);
 
@@ -395,6 +414,7 @@ fn main() -> ExitCode {
         .with("node", Arc::new(Status(node.clone())))
         .with("config", config.clone())
         .with("scheduler", node.scheduler.clone())
+        .with("modules", Arc::new(Modules))
         .with_scheduler(node.scheduler.clone());
     if let Err(e) = serve(inspector, &args.socket) {
         eprintln!(
