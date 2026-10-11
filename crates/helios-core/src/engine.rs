@@ -22,7 +22,9 @@ use crate::describe::Describe;
 use crate::error::Error;
 use crate::graph::{Graph, Kind, NodeId};
 use crate::image::{ContentHash, Image, Region};
+use crate::manifest::{Family, ModuleKind, Role};
 use crate::module::ModuleRef;
+use crate::status::{Load, NodeState, NodeStatus, NodeType};
 
 /// The source name the engine publishes events under.
 const SOURCE: &str = "engine";
@@ -85,6 +87,7 @@ impl Counters {
 /// A step of an evaluation, planned but not run.
 struct Step {
     key: ContentHash,
+    graph: u64,
     node: NodeId,
     name: String,
     region: Region,
@@ -106,6 +109,19 @@ pub struct Engine {
     requests: AtomicU64,
     computed: AtomicU64,
     source_reads: AtomicU64,
+    /// What each node did, per graph and region.
+    tracks: Mutex<HashMap<TrackKey, Track>>,
+}
+
+type TrackKey = (u64, NodeId, Region);
+
+#[derive(Default)]
+struct Track {
+    /// The content key last asked of this node over this region.
+    last_key: Option<ContentHash>,
+    requests: u64,
+    computed: u64,
+    running: u64,
 }
 
 impl Engine {
@@ -116,7 +132,99 @@ impl Engine {
             requests: AtomicU64::new(0),
             computed: AtomicU64::new(0),
             source_reads: AtomicU64::new(0),
+            tracks: Mutex::new(HashMap::new()),
         }
+    }
+
+    fn track<R>(&self, step: &Step, f: impl FnOnce(&mut Track) -> R) -> R {
+        let mut tracks = self.tracks.lock().expect("engine tracks lock");
+        f(tracks
+            .entry((step.graph, step.node, step.region))
+            .or_default())
+    }
+
+    /// The normalized status of a node and of every node it reads from, for
+    /// a render of `region` (inputs first, the node itself last). Nothing is
+    /// computed: the network is only planned and compared with what the
+    /// engine holds.
+    pub fn status(
+        &self,
+        graph: &Graph,
+        node: NodeId,
+        region: Region,
+    ) -> Result<Vec<NodeStatus>, Error> {
+        let step = self.plan(graph, node, region)?;
+        let mut out = Vec::new();
+        self.collect_status(graph, &step, &mut out)?;
+        Ok(out)
+    }
+
+    fn collect_status(
+        &self,
+        graph: &Graph,
+        step: &Step,
+        out: &mut Vec<NodeStatus>,
+    ) -> Result<(), Error> {
+        if let Work::Module { inputs, .. } = &step.work {
+            for (input, _) in inputs {
+                self.collect_status(graph, input, out)?;
+            }
+        }
+        if out
+            .iter()
+            .any(|s| s.node == step.node && s.region == step.region)
+        {
+            return Ok(());
+        }
+        let cell = self
+            .cache
+            .lock()
+            .expect("engine cache lock")
+            .get(&step.key)
+            .cloned();
+        let (last_key, load) = self.track(step, |t| {
+            (
+                t.last_key,
+                Load {
+                    requests: t.requests,
+                    computed: t.computed,
+                    shared: t.requests - t.computed,
+                    running: t.running,
+                },
+            )
+        });
+        let state = match cell.as_deref().map(OnceLock::get) {
+            Some(Some(Ok(_))) => NodeState::Done,
+            Some(Some(Err(_))) => NodeState::Failed,
+            Some(None) => NodeState::Running,
+            None if last_key.is_some_and(|k| k != step.key) => NodeState::Stale,
+            None => NodeState::Idle,
+        };
+        let (node_type, family, role) = match &graph.node(step.node)?.kind {
+            Kind::Source { .. } => (NodeType::Source, Family::Io, Role::General),
+            Kind::Module { module, .. } => {
+                let m = module.manifest();
+                let t = match m.kind {
+                    ModuleKind::Process => NodeType::Process,
+                    ModuleKind::Decision => NodeType::Decision,
+                    ModuleKind::Sink => NodeType::Sink,
+                };
+                (t, m.family, m.role)
+            }
+        };
+        out.push(NodeStatus {
+            node: step.node,
+            name: step.name.clone(),
+            node_type,
+            family,
+            role,
+            state,
+            region: step.region,
+            key: step.key.short(),
+            load,
+            runs_on: "cpu",
+        });
+        Ok(())
     }
 
     pub fn bus(&self) -> &Arc<Bus> {
@@ -205,6 +313,7 @@ impl Engine {
         };
         Ok(Step {
             key: ContentHash(*h.finalize().as_bytes()),
+            graph: graph.id(),
             node: id,
             name: node.name.clone(),
             region,
@@ -214,6 +323,10 @@ impl Engine {
 
     fn execute(&self, step: &Step, cause: u64) -> Outputs {
         self.requests.fetch_add(1, Ordering::SeqCst);
+        self.track(step, |t| {
+            t.requests += 1;
+            t.last_key = Some(step.key);
+        });
         let cell = {
             let mut cache = self.cache.lock().expect("engine cache lock");
             cache.entry(step.key).or_default().clone()
@@ -221,7 +334,12 @@ impl Engine {
         // Only one thread runs the initializer; others asking for the same key wait for it.
         cell.get_or_init(|| {
             self.computed.fetch_add(1, Ordering::SeqCst);
+            self.track(step, |t| {
+                t.computed += 1;
+                t.running += 1;
+            });
             let result = self.compute(step, cause);
+            self.track(step, |t| t.running -= 1);
             let event = StepComputed {
                 node: step.node,
                 name: step.name.clone(),

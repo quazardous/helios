@@ -22,6 +22,7 @@ pub mod image;
 pub mod manifest;
 pub mod module;
 pub mod params;
+pub mod status;
 
 pub use bus::{Bus, Envelope, Event};
 pub use describe::Describe;
@@ -29,6 +30,9 @@ pub use engine::{Counters, Engine};
 pub use error::Error;
 pub use graph::{Graph, NodeId};
 pub use image::{ContentHash, Image, Region};
-pub use manifest::{Manifest, Needs, ParamKind, ParamSpec, PortKind, PortSpec};
+pub use manifest::{
+    Family, Manifest, ModuleKind, Needs, ParamKind, ParamSpec, PortKind, PortSpec, Role,
+};
 pub use module::{Context, Module, ModuleRef};
 pub use params::{Params, Value};
+pub use status::{Load, NodeState, NodeStatus, NodeType};

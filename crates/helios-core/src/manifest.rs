@@ -137,6 +137,46 @@ pub struct Needs {
     pub overlap: u32,
 }
 
+/// What kind of node a module makes in a network.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ModuleKind {
+    /// Turns inputs into outputs.
+    #[default]
+    Process,
+    /// Where the algorithm alone is not enough: resolved by an AI model or a
+    /// human, its answer recorded (see `docs/module-contract.md`).
+    Decision,
+    /// Writes outside the framework's store (an export, a sidecar, an upload).
+    Sink,
+}
+
+/// The family a module belongs to, shown in its node header and used to
+/// present modules by intent.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Family {
+    Tone,
+    Color,
+    Detail,
+    Geometry,
+    Merge,
+    Mask,
+    Ai,
+    Io,
+    #[default]
+    Other,
+}
+
+/// Whether a module is the general-purpose tool for its job or a specialised one.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Role {
+    #[default]
+    General,
+    Specialised,
+}
+
 /// Everything a module declares about itself.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Manifest {
@@ -149,6 +189,9 @@ pub struct Manifest {
     /// Context fields (metadata of the image being processed) the module reads.
     pub context: Vec<String>,
     pub needs: Needs,
+    pub kind: ModuleKind,
+    pub family: Family,
+    pub role: Role,
 }
 
 impl Manifest {
@@ -223,6 +266,9 @@ mod tests {
             outputs: vec![],
             context: vec![],
             needs: Needs::default(),
+            kind: ModuleKind::Process,
+            family: Family::Other,
+            role: Role::General,
         }
     }
 

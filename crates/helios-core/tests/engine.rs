@@ -22,6 +22,9 @@ impl Module for Gain {
             outputs: vec![PortSpec::image("output", 1)],
             context: vec![],
             needs: Needs::default(),
+            kind: ModuleKind::Process,
+            family: Family::Tone,
+            role: Role::General,
         }
     }
 
@@ -54,6 +57,9 @@ impl Module for Blur {
             outputs: vec![PortSpec::image("output", 1)],
             context: vec![],
             needs: Needs { overlap: 1 },
+            kind: ModuleKind::Process,
+            family: Family::Detail,
+            role: Role::General,
         }
     }
 

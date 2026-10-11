@@ -4,6 +4,8 @@
 //!
 //! [`Engine`]: crate::engine::Engine
 
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use serde::Serialize;
 
 use crate::describe::Describe;
@@ -35,14 +37,29 @@ pub(crate) struct Node {
     pub(crate) inputs: Vec<Option<(NodeId, usize)>>,
 }
 
-#[derive(Default)]
 pub struct Graph {
+    /// Unique in the process: what the engine remembers about a node is kept per graph.
+    id: u64,
     nodes: Vec<Node>,
+}
+
+impl Default for Graph {
+    fn default() -> Self {
+        static NEXT: AtomicU64 = AtomicU64::new(1);
+        Self {
+            id: NEXT.fetch_add(1, Ordering::Relaxed),
+            nodes: Vec::new(),
+        }
+    }
 }
 
 impl Graph {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn id(&self) -> u64 {
+        self.id
     }
 
     pub fn add_source(&mut self, name: &str, image: Image) -> NodeId {

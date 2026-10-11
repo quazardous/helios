@@ -198,7 +198,7 @@ mod tests {
 #[cfg(test)]
 mod contract_tests {
     use super::*;
-    use helios_core::{Context, Needs, ParamSpec, PortSpec};
+    use helios_core::{Context, Family, ModuleKind, Needs, ParamSpec, PortSpec, Role};
 
     /// Divides by `d`: fine by default, infinite at `d = 0`, its declared minimum.
     struct Divide;
@@ -216,6 +216,9 @@ mod contract_tests {
                 outputs: vec![PortSpec::image("output", 1)],
                 context: vec![],
                 needs: Needs::default(),
+                kind: ModuleKind::Process,
+                family: Family::Other,
+                role: Role::General,
             }
         }
 

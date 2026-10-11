@@ -12,7 +12,10 @@
 //! One difference: darktable also scales the fourth channel, which its
 //! pixelpipe carries but does not use; here it is passed through untouched.
 
-use helios_core::{Context, Image, Manifest, Module, Needs, ParamSpec, Params, PortSpec, Region};
+use helios_core::{
+    Context, Family, Image, Manifest, Module, ModuleKind, Needs, ParamSpec, Params, PortSpec,
+    Region, Role,
+};
 
 pub struct Exposure;
 
@@ -39,6 +42,9 @@ impl Module for Exposure {
             outputs: vec![PortSpec::image("output", 4)],
             context: vec![],
             needs: Needs::default(),
+            kind: ModuleKind::Process,
+            family: Family::Tone,
+            role: Role::General,
         }
     }
 

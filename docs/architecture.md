@@ -171,6 +171,41 @@ changing a rating is one field write and one event. A budget that breaks is
 a failing test with the list of operations that exceeded it, which tells an
 agent exactly what regressed.
 
+## Two levels of execution
+
+(2026-10-11) **Render level**: one network evaluated over a region. Pure,
+content-addressed, shared results, single flight: no queue is needed, and
+the engine reports each node's status (idle, stale, running, done, failed,
+with its load) by comparing the planned content keys with what it holds.
+
+**Workflow level**: one network applied to many items over time (412
+images of a wedding, 3,200 to cull, a roll of 36, a batch export). Items are
+often images but not always. This level needs work queues, and follows the
+model of [grampy](https://github.com/quazardous/grampy), a workflow graph
+over work queues kept in a storage:
+
+- a **node journal** per (item, node): running, done, skipped, failed,
+  omitted; workers claim with a lease and conclude;
+- **joins** as data: all parents, k of n, a step that runs on a failure;
+- **exclusive choices**: a decision node that picks a branch marks what only
+  the other branches lead to as omitted;
+- **retries** with a declared backoff, **leases** given back when a worker
+  dies, **waits** settled by a durable signal (a human answering an
+  AI-assisted decision node);
+- **concurrency and rate limits** per node (GPU memory, AI calls, an export
+  destination);
+- **groups**: items worked together (a burst, a roll);
+- **lanes**: an item that comes back while waiting merges with the waiting
+  version and runs once (a slider dragged over a batch);
+- items **pinned to the graph version** they started on, migrated all or
+  nothing (engine version drift, ROADMAP 2.3);
+- **monitoring** per node: claimable now, oldest waiting, longest running,
+  retries due; this feeds the queue panel of the GUI.
+
+The journal lives in the vault. It comes with the scheduler: an in-memory
+journal first, with a contract test suite every storage must pass (grampy's
+driver contract is the model), then a vault-backed one.
+
 ## What replaces each darktable channel
 
 | darktable | Helios |

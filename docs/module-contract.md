@@ -94,6 +94,10 @@ Each line is a reason why darktable modules cannot be tested alone today.
 ## What a module declares (manifest)
 
 - **Identity**: name, version, short description.
+- **Header**: what kind of node it makes (process, decision, sink), its
+  family (tone, color, detail, geometry, merge, mask, AI, IO) and its role
+  (general purpose or specialised). With the state and load the engine
+  adds, this is the node header every surface shows (see [gui.md](gui.md)).
 - **Parameters**: named and typed (float, int, bool, enum, curve, ...), with
   default, range and description, plus whether a value depends on the image
   scale (a radius in pixels) and how it scales.
