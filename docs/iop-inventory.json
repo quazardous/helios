@@ -1,0 +1,4642 @@
+{
+ "modules": [
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init",
+     "gui_update",
+     "gui_changed",
+     "gui_reset",
+     "color_picker_apply"
+    ],
+    "params": [
+     "legacy_params",
+     "reload_defaults",
+     "init_presets",
+     "init"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "ALLOW_TILING",
+    "INCLUDE_IN_STYLES",
+    "SUPPORTS_BLENDING"
+   ],
+   "gtk_calls": 49,
+   "introspection": true,
+   "lines": 2866,
+   "module": "agx",
+   "params": {
+    "annotated": {
+     "DEFAULT": 36,
+     "DESCRIPTION": 36,
+     "MAX": 32,
+     "MIN": 32
+    },
+    "fields": 36
+   },
+   "raster_mask": false,
+   "scale_aware": false,
+   "version": 7,
+   "widgets_by_hand": 1,
+   "widgets_from_params": 0
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [
+     "modify_roi_in",
+     "modify_roi_out",
+     "distort_transform",
+     "distort_backtransform",
+     "distort_mask"
+    ],
+    "gui": [
+     "gui_init",
+     "gui_update",
+     "gui_changed",
+     "gui_reset",
+     "gui_cleanup",
+     "gui_post_expose",
+     "gui_focus",
+     "mouse_moved",
+     "button_pressed",
+     "button_released",
+     "scrolled",
+     "mouse_actions"
+    ],
+    "params": [
+     "legacy_params",
+     "reload_defaults"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "ALLOW_FAST_PIPE",
+    "ALLOW_TILING",
+    "GUIDES_SPECIAL_DRAW",
+    "GUIDES_WIDGET",
+    "ONE_INSTANCE",
+    "TILING_FULL_ROI"
+   ],
+   "gtk_calls": 55,
+   "introspection": true,
+   "lines": 6264,
+   "module": "ashift",
+   "params": {
+    "annotated": {
+     "DEFAULT": 14,
+     "DESCRIPTION": 9,
+     "MAX": 12,
+     "MIN": 12
+    },
+    "fields": 17
+   },
+   "raster_mask": false,
+   "scale_aware": true,
+   "version": 5,
+   "widgets_by_hand": 10,
+   "widgets_from_params": 10
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "tiling_callback",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init",
+     "gui_update",
+     "gui_cleanup",
+     "gui_focus"
+    ],
+    "params": [
+     "legacy_params",
+     "init_presets",
+     "init"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "ALLOW_TILING",
+    "SUPPORTS_BLENDING"
+   ],
+   "gtk_calls": 24,
+   "introspection": true,
+   "lines": 1828,
+   "module": "atrous",
+   "params": {
+    "annotated": {
+     "DEFAULT": 3,
+     "MAX": 1,
+     "MIN": 1
+    },
+    "fields": 4
+   },
+   "raster_mask": false,
+   "scale_aware": true,
+   "version": 2,
+   "widgets_by_hand": 1,
+   "widgets_from_params": 1
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "tiling_callback",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init",
+     "gui_update",
+     "gui_changed",
+     "gui_cleanup"
+    ],
+    "params": [
+     "legacy_params",
+     "reload_defaults",
+     "init_presets",
+     "init"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "ALLOW_TILING",
+    "SUPPORTS_BLENDING"
+   ],
+   "gtk_calls": 32,
+   "introspection": true,
+   "lines": 2162,
+   "module": "basecurve",
+   "params": {
+    "annotated": {
+     "DEFAULT": 2,
+     "MAX": 2,
+     "MIN": 2
+    },
+    "fields": 7
+   },
+   "raster_mask": false,
+   "scale_aware": true,
+   "version": 6,
+   "widgets_by_hand": 2,
+   "widgets_from_params": 4
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "tiling_callback",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init",
+     "gui_update",
+     "gui_changed",
+     "gui_post_expose",
+     "gui_focus",
+     "color_picker_apply",
+     "mouse_moved",
+     "button_pressed",
+     "button_released"
+    ],
+    "params": [
+     "legacy_params",
+     "change_image"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "ALLOW_TILING",
+    "DEPRECATED",
+    "SUPPORTS_BLENDING"
+   ],
+   "gtk_calls": 16,
+   "introspection": true,
+   "lines": 1550,
+   "module": "basicadj",
+   "params": {
+    "annotated": {
+     "DEFAULT": 7,
+     "DESCRIPTION": 1,
+     "MAX": 7,
+     "MIN": 7
+    },
+    "fields": 11
+   },
+   "raster_mask": false,
+   "scale_aware": true,
+   "version": 2,
+   "widgets_by_hand": 1,
+   "widgets_from_params": 10
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "tiling_callback",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init",
+     "gui_update",
+     "gui_changed"
+    ],
+    "params": [
+     "legacy_params",
+     "init_presets"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "ALLOW_TILING",
+    "INCLUDE_IN_STYLES",
+    "SUPPORTS_BLENDING"
+   ],
+   "gtk_calls": 12,
+   "introspection": true,
+   "lines": 502,
+   "module": "bilat",
+   "params": {
+    "annotated": {
+     "DEFAULT": 5,
+     "DESCRIPTION": 1,
+     "MAX": 4,
+     "MIN": 4
+    },
+    "fields": 5
+   },
+   "raster_mask": false,
+   "scale_aware": true,
+   "version": 3,
+   "widgets_by_hand": 0,
+   "widgets_from_params": 7
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "tiling_callback",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init"
+    ],
+    "params": []
+   },
+   "details_mask": false,
+   "flags": [
+    "INCLUDE_IN_STYLES",
+    "SUPPORTS_BLENDING"
+   ],
+   "gtk_calls": 3,
+   "introspection": true,
+   "lines": 398,
+   "module": "bloom",
+   "params": {
+    "annotated": {
+     "DEFAULT": 3,
+     "MAX": 3,
+     "MIN": 3
+    },
+    "fields": 3
+   },
+   "raster_mask": false,
+   "scale_aware": true,
+   "version": 1,
+   "widgets_by_hand": 0,
+   "widgets_from_params": 3
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "tiling_callback",
+     "commit_params"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init",
+     "gui_update",
+     "gui_changed",
+     "gui_cleanup"
+    ],
+    "params": []
+   },
+   "details_mask": false,
+   "flags": [
+    "ALLOW_TILING",
+    "INCLUDE_IN_STYLES",
+    "SUPPORTS_BLENDING"
+   ],
+   "gtk_calls": 32,
+   "introspection": true,
+   "lines": 1032,
+   "module": "blurs",
+   "params": {
+    "annotated": {
+     "DEFAULT": 9,
+     "DESCRIPTION": 9,
+     "MAX": 8,
+     "MIN": 8
+    },
+    "fields": 9
+   },
+   "raster_mask": false,
+   "scale_aware": true,
+   "version": 1,
+   "widgets_by_hand": 1,
+   "widgets_from_params": 9
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [
+     "modify_roi_in",
+     "modify_roi_out",
+     "distort_transform",
+     "distort_backtransform",
+     "distort_mask"
+    ],
+    "gui": [
+     "gui_init",
+     "gui_update",
+     "gui_changed",
+     "color_picker_apply"
+    ],
+    "params": [
+     "legacy_params",
+     "init_presets"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "ALLOW_TILING",
+    "EXPAND_ROI_IN",
+    "GUIDES_WIDGET",
+    "TILING_FULL_ROI"
+   ],
+   "gtk_calls": 33,
+   "introspection": true,
+   "lines": 1081,
+   "module": "borders",
+   "params": {
+    "annotated": {
+     "DEFAULT": 2,
+     "DESCRIPTION": 2
+    },
+    "fields": 14
+   },
+   "raster_mask": false,
+   "scale_aware": true,
+   "version": 4,
+   "widgets_by_hand": 4,
+   "widgets_from_params": 8
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [
+     "modify_roi_in",
+     "modify_roi_out",
+     "distort_mask"
+    ],
+    "gui": [
+     "gui_init",
+     "gui_update"
+    ],
+    "params": [
+     "legacy_params",
+     "reload_defaults"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "ONE_INSTANCE"
+   ],
+   "gtk_calls": 9,
+   "introspection": true,
+   "lines": 1325,
+   "module": "cacorrect",
+   "params": {
+    "annotated": {
+     "DEFAULT": 2,
+     "DESCRIPTION": 2
+    },
+    "fields": 2
+   },
+   "raster_mask": false,
+   "scale_aware": true,
+   "version": 2,
+   "widgets_by_hand": 2,
+   "widgets_from_params": 3
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "commit_params"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init",
+     "gui_update"
+    ],
+    "params": [
+     "reload_defaults"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "INCLUDE_IN_STYLES",
+    "SUPPORTS_BLENDING"
+   ],
+   "gtk_calls": 5,
+   "introspection": true,
+   "lines": 755,
+   "module": "cacorrectrgb",
+   "params": {
+    "annotated": {
+     "DEFAULT": 5,
+     "DESCRIPTION": 5,
+     "MAX": 3,
+     "MIN": 3
+    },
+    "fields": 5
+   },
+   "raster_mask": false,
+   "scale_aware": true,
+   "version": 1,
+   "widgets_by_hand": 1,
+   "widgets_from_params": 6
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "tiling_callback"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init"
+    ],
+    "params": []
+   },
+   "details_mask": false,
+   "flags": [
+    "INCLUDE_IN_STYLES",
+    "SUPPORTS_BLENDING"
+   ],
+   "gtk_calls": 4,
+   "introspection": true,
+   "lines": 434,
+   "module": "censorize",
+   "params": {
+    "annotated": {
+     "DEFAULT": 4,
+     "DESCRIPTION": 4,
+     "MAX": 4,
+     "MIN": 4
+    },
+    "fields": 4
+   },
+   "raster_mask": false,
+   "scale_aware": true,
+   "version": 1,
+   "widgets_by_hand": 0,
+   "widgets_from_params": 4
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init",
+     "gui_update"
+    ],
+    "params": [
+     "legacy_params",
+     "init_presets",
+     "init"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "ALLOW_TILING",
+    "DEPRECATED",
+    "INCLUDE_IN_STYLES",
+    "SUPPORTS_BLENDING"
+   ],
+   "gtk_calls": 3,
+   "introspection": true,
+   "lines": 760,
+   "module": "channelmixer",
+   "params": {
+    "annotated": {
+     "MAX": 3,
+     "MIN": 3
+    },
+    "fields": 4
+   },
+   "raster_mask": false,
+   "scale_aware": false,
+   "version": 2,
+   "widgets_by_hand": 4,
+   "widgets_from_params": 0
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init",
+     "gui_update",
+     "gui_changed",
+     "gui_reset",
+     "gui_cleanup",
+     "gui_post_expose",
+     "gui_focus",
+     "color_picker_apply",
+     "mouse_moved",
+     "button_pressed",
+     "button_released"
+    ],
+    "params": [
+     "legacy_params",
+     "reload_defaults",
+     "init_presets",
+     "init"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "ALLOW_TILING",
+    "INCLUDE_IN_STYLES",
+    "SUPPORTS_BLENDING"
+   ],
+   "gtk_calls": 108,
+   "introspection": true,
+   "lines": 4769,
+   "module": "channelmixerrgb",
+   "params": {
+    "annotated": {
+     "DEFAULT": 9,
+     "DESCRIPTION": 6,
+     "MAX": 8,
+     "MIN": 8
+    },
+    "fields": 16
+   },
+   "raster_mask": false,
+   "scale_aware": false,
+   "version": 3,
+   "widgets_by_hand": 18,
+   "widgets_from_params": 12
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init",
+     "gui_update"
+    ],
+    "params": [
+     "init"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "DEPRECATED",
+    "INCLUDE_IN_STYLES"
+   ],
+   "gtk_calls": 2,
+   "introspection": false,
+   "lines": 340,
+   "module": "clahe",
+   "params": null,
+   "raster_mask": false,
+   "scale_aware": true,
+   "version": 1,
+   "widgets_by_hand": 2,
+   "widgets_from_params": 0
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [
+     "modify_roi_in",
+     "modify_roi_out",
+     "distort_transform",
+     "distort_backtransform",
+     "distort_mask"
+    ],
+    "gui": [
+     "gui_init",
+     "gui_update",
+     "gui_changed",
+     "gui_reset",
+     "gui_cleanup",
+     "gui_post_expose",
+     "gui_focus",
+     "mouse_moved",
+     "button_pressed",
+     "button_released",
+     "mouse_actions"
+    ],
+    "params": [
+     "legacy_params",
+     "reload_defaults"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "ALLOW_FAST_PIPE",
+    "ALLOW_TILING",
+    "DEPRECATED",
+    "GUIDES_SPECIAL_DRAW",
+    "GUIDES_WIDGET",
+    "ONE_INSTANCE",
+    "TILING_FULL_ROI"
+   ],
+   "gtk_calls": 13,
+   "introspection": true,
+   "lines": 3343,
+   "module": "clipping",
+   "params": {
+    "annotated": {
+     "DEFAULT": 12,
+     "DESCRIPTION": 5,
+     "MAX": 13,
+     "MIN": 13
+    },
+    "fields": 19
+   },
+   "raster_mask": false,
+   "scale_aware": true,
+   "version": 5,
+   "widgets_by_hand": 4,
+   "widgets_from_params": 6
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init"
+    ],
+    "params": []
+   },
+   "details_mask": false,
+   "flags": [
+    "ALLOW_TILING",
+    "DEPRECATED",
+    "INCLUDE_IN_STYLES",
+    "SUPPORTS_BLENDING"
+   ],
+   "gtk_calls": 3,
+   "introspection": true,
+   "lines": 284,
+   "module": "colisa",
+   "params": {
+    "annotated": {
+     "DEFAULT": 3,
+     "MAX": 3,
+     "MIN": 3
+    },
+    "fields": 3
+   },
+   "raster_mask": false,
+   "scale_aware": false,
+   "version": 1,
+   "widgets_by_hand": 0,
+   "widgets_from_params": 3
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init",
+     "gui_update",
+     "gui_changed",
+     "gui_reset",
+     "color_picker_apply"
+    ],
+    "params": [
+     "legacy_params",
+     "init_presets"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "INCLUDE_IN_STYLES",
+    "SUPPORTS_BLENDING"
+   ],
+   "gtk_calls": 61,
+   "introspection": true,
+   "lines": 2029,
+   "module": "colorbalance",
+   "params": {
+    "annotated": {
+     "DEFAULT": 6,
+     "DESCRIPTION": 3,
+     "MAX": 5,
+     "MIN": 5
+    },
+    "fields": 6
+   },
+   "raster_mask": false,
+   "scale_aware": false,
+   "version": 3,
+   "widgets_by_hand": 10,
+   "widgets_from_params": 7
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init",
+     "gui_update",
+     "gui_changed",
+     "gui_reset",
+     "gui_focus",
+     "color_picker_apply"
+    ],
+    "params": [
+     "legacy_params",
+     "init_presets"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "ALLOW_TILING",
+    "INCLUDE_IN_STYLES",
+    "SUPPORTS_BLENDING"
+   ],
+   "gtk_calls": 49,
+   "introspection": true,
+   "lines": 2130,
+   "module": "colorbalancergb",
+   "params": {
+    "annotated": {
+     "DEFAULT": 33,
+     "DESCRIPTION": 33,
+     "MAX": 32,
+     "MIN": 32
+    },
+    "fields": 33
+   },
+   "raster_mask": false,
+   "scale_aware": false,
+   "version": 5,
+   "widgets_by_hand": 16,
+   "widgets_from_params": 33
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init",
+     "gui_update",
+     "gui_reset",
+     "color_picker_apply"
+    ],
+    "params": [
+     "legacy_params",
+     "init_presets",
+     "init"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "ALLOW_TILING",
+    "SUPPORTS_BLENDING"
+   ],
+   "gtk_calls": 18,
+   "introspection": true,
+   "lines": 1645,
+   "module": "colorchecker",
+   "params": {
+    "annotated": {},
+    "fields": 7
+   },
+   "raster_mask": false,
+   "scale_aware": false,
+   "version": 2,
+   "widgets_by_hand": 7,
+   "widgets_from_params": 0
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init",
+     "gui_update"
+    ],
+    "params": [
+     "legacy_params"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "ALLOW_TILING",
+    "INCLUDE_IN_STYLES",
+    "SUPPORTS_BLENDING"
+   ],
+   "gtk_calls": 2,
+   "introspection": true,
+   "lines": 325,
+   "module": "colorcontrast",
+   "params": {
+    "annotated": {
+     "DEFAULT": 3,
+     "DESCRIPTION": 2,
+     "MAX": 2,
+     "MIN": 2
+    },
+    "fields": 5
+   },
+   "raster_mask": false,
+   "scale_aware": false,
+   "version": 2,
+   "widgets_by_hand": 0,
+   "widgets_from_params": 2
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init",
+     "gui_update",
+     "gui_cleanup"
+    ],
+    "params": [
+     "init_presets"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "ALLOW_TILING",
+    "INCLUDE_IN_STYLES",
+    "SUPPORTS_BLENDING"
+   ],
+   "gtk_calls": 13,
+   "introspection": true,
+   "lines": 517,
+   "module": "colorcorrection",
+   "params": {
+    "annotated": {
+     "DEFAULT": 1,
+     "MAX": 1,
+     "MIN": 1
+    },
+    "fields": 2
+   },
+   "raster_mask": false,
+   "scale_aware": false,
+   "version": 1,
+   "widgets_by_hand": 1,
+   "widgets_from_params": 1
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "tiling_callback",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init",
+     "gui_update",
+     "gui_changed",
+     "gui_cleanup",
+     "gui_post_expose",
+     "gui_focus",
+     "color_picker_apply",
+     "mouse_moved",
+     "scrolled",
+     "mouse_leave"
+    ],
+    "params": [
+     "legacy_params",
+     "reload_defaults",
+     "init_presets"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "ALLOW_TILING",
+    "INCLUDE_IN_STYLES",
+    "SUPPORTS_BLENDING"
+   ],
+   "gtk_calls": 50,
+   "introspection": true,
+   "lines": 3989,
+   "module": "colorequal",
+   "params": {
+    "annotated": {
+     "DEFAULT": 32,
+     "DESCRIPTION": 32,
+     "MAX": 31,
+     "MIN": 31
+    },
+    "fields": 32
+   },
+   "raster_mask": false,
+   "scale_aware": true,
+   "version": 4,
+   "widgets_by_hand": 2,
+   "widgets_from_params": 33
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init",
+     "gui_update",
+     "gui_changed",
+     "gui_cleanup",
+     "gui_focus",
+     "color_picker_apply"
+    ],
+    "params": [
+     "change_image",
+     "init"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "INCLUDE_IN_STYLES",
+    "SUPPORTS_BLENDING"
+   ],
+   "gtk_calls": 38,
+   "introspection": true,
+   "lines": 1766,
+   "module": "colorharmonizer",
+   "params": {
+    "annotated": {
+     "DEFAULT": 9,
+     "DESCRIPTION": 9,
+     "MAX": 8,
+     "MIN": 8
+    },
+    "fields": 9
+   },
+   "raster_mask": false,
+   "scale_aware": true,
+   "version": 1,
+   "widgets_by_hand": 5,
+   "widgets_from_params": 6
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace",
+     "input_colorspace",
+     "output_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init",
+     "gui_update",
+     "gui_cleanup"
+    ],
+    "params": [
+     "legacy_params",
+     "reload_defaults"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "ALLOW_TILING",
+    "ONE_INSTANCE"
+   ],
+   "gtk_calls": 4,
+   "introspection": true,
+   "lines": 2366,
+   "module": "colorin",
+   "params": {
+    "annotated": {
+     "DEFAULT": 4,
+     "DESCRIPTION": 1
+    },
+    "fields": 7
+   },
+   "raster_mask": false,
+   "scale_aware": false,
+   "version": 7,
+   "widgets_by_hand": 2,
+   "widgets_from_params": 1
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init",
+     "gui_update",
+     "gui_changed",
+     "gui_reset",
+     "color_picker_apply"
+    ],
+    "params": [
+     "legacy_params",
+     "init"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "ALLOW_TILING",
+    "INCLUDE_IN_STYLES",
+    "SUPPORTS_BLENDING"
+   ],
+   "gtk_calls": 5,
+   "introspection": true,
+   "lines": 376,
+   "module": "colorize",
+   "params": {
+    "annotated": {
+     "DEFAULT": 4,
+     "DESCRIPTION": 1,
+     "MAX": 4,
+     "MIN": 4
+    },
+    "fields": 5
+   },
+   "raster_mask": false,
+   "scale_aware": false,
+   "version": 2,
+   "widgets_by_hand": 0,
+   "widgets_from_params": 4
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "tiling_callback",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init",
+     "gui_changed",
+     "gui_cleanup"
+    ],
+    "params": [
+     "reload_defaults"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "ONE_INSTANCE",
+    "SUPPORTS_BLENDING"
+   ],
+   "gtk_calls": 11,
+   "introspection": true,
+   "lines": 1059,
+   "module": "colormapping",
+   "params": {
+    "annotated": {
+     "DEFAULT": 4,
+     "DESCRIPTION": 3,
+     "MAX": 3,
+     "MIN": 3
+    },
+    "fields": 12
+   },
+   "raster_mask": false,
+   "scale_aware": true,
+   "version": 1,
+   "widgets_by_hand": 5,
+   "widgets_from_params": 3
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace",
+     "input_colorspace",
+     "output_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init",
+     "gui_update"
+    ],
+    "params": [
+     "legacy_params",
+     "init"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "ALLOW_TILING",
+    "ONE_INSTANCE",
+    "WRITE_PIPECACHE_IN"
+   ],
+   "gtk_calls": 7,
+   "introspection": true,
+   "lines": 911,
+   "module": "colorout",
+   "params": {
+    "annotated": {
+     "DEFAULT": 2
+    },
+    "fields": 3
+   },
+   "raster_mask": false,
+   "scale_aware": false,
+   "version": 5,
+   "widgets_by_hand": 1,
+   "widgets_from_params": 0
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "tiling_callback",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init",
+     "gui_update",
+     "gui_changed",
+     "gui_cleanup"
+    ],
+    "params": [
+     "legacy_params"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "INCLUDE_IN_STYLES",
+    "SUPPORTS_BLENDING"
+   ],
+   "gtk_calls": 15,
+   "introspection": true,
+   "lines": 1265,
+   "module": "colorreconstruction",
+   "params": {
+    "annotated": {
+     "DEFAULT": 5,
+     "DESCRIPTION": 2,
+     "MAX": 4,
+     "MIN": 4
+    },
+    "fields": 5
+   },
+   "raster_mask": false,
+   "scale_aware": true,
+   "version": 3,
+   "widgets_by_hand": 2,
+   "widgets_from_params": 5
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init",
+     "gui_update"
+    ],
+    "params": []
+   },
+   "details_mask": false,
+   "flags": [
+    "DEPRECATED",
+    "ONE_INSTANCE",
+    "PREVIEW_NON_OPENCL"
+   ],
+   "gtk_calls": 0,
+   "introspection": true,
+   "lines": 415,
+   "module": "colortransfer",
+   "params": {
+    "annotated": {
+     "DEFAULT": 2
+    },
+    "fields": 5
+   },
+   "raster_mask": false,
+   "scale_aware": false,
+   "version": 1,
+   "widgets_by_hand": 1,
+   "widgets_from_params": 0
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init",
+     "gui_update",
+     "gui_changed",
+     "gui_reset",
+     "gui_cleanup",
+     "gui_focus",
+     "color_picker_apply"
+    ],
+    "params": [
+     "legacy_params",
+     "init_presets",
+     "init"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "ALLOW_TILING",
+    "INCLUDE_IN_STYLES",
+    "SUPPORTS_BLENDING"
+   ],
+   "gtk_calls": 61,
+   "introspection": true,
+   "lines": 3001,
+   "module": "colorzones",
+   "params": {
+    "annotated": {
+     "DEFAULT": 3,
+     "DESCRIPTION": 3,
+     "MAX": 2,
+     "MIN": 2
+    },
+    "fields": 7
+   },
+   "raster_mask": false,
+   "scale_aware": false,
+   "version": 5,
+   "widgets_by_hand": 5,
+   "widgets_from_params": 3
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [
+     "modify_roi_in"
+    ],
+    "gui": [
+     "gui_init",
+     "gui_focus"
+    ],
+    "params": [
+     "legacy_params"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "INCLUDE_IN_STYLES",
+    "SUPPORTS_BLENDING"
+   ],
+   "gtk_calls": 9,
+   "introspection": true,
+   "lines": 734,
+   "module": "contrastntexture",
+   "params": {
+    "annotated": {
+     "DEFAULT": 8,
+     "DESCRIPTION": 8,
+     "MAX": 8,
+     "MIN": 8
+    },
+    "fields": 8
+   },
+   "raster_mask": false,
+   "scale_aware": true,
+   "version": 2,
+   "widgets_by_hand": 2,
+   "widgets_from_params": 6
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [
+     "modify_roi_in",
+     "modify_roi_out",
+     "distort_transform",
+     "distort_backtransform",
+     "distort_mask"
+    ],
+    "gui": [
+     "gui_init",
+     "gui_update",
+     "gui_changed",
+     "gui_reset",
+     "gui_cleanup",
+     "gui_post_expose",
+     "gui_focus",
+     "mouse_moved",
+     "button_pressed",
+     "button_released",
+     "mouse_actions"
+    ],
+    "params": [
+     "legacy_params",
+     "reload_defaults"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "ALLOW_FAST_PIPE",
+    "ALLOW_TILING",
+    "CROP_EXPOSER",
+    "GUIDES_SPECIAL_DRAW",
+    "GUIDES_WIDGET",
+    "ONE_INSTANCE",
+    "TILING_FULL_ROI"
+   ],
+   "gtk_calls": 5,
+   "introspection": true,
+   "lines": 2025,
+   "module": "crop",
+   "params": {
+    "annotated": {
+     "DEFAULT": 2,
+     "DESCRIPTION": 4,
+     "MAX": 4,
+     "MIN": 4
+    },
+    "fields": 6
+   },
+   "raster_mask": false,
+   "scale_aware": true,
+   "version": 3,
+   "widgets_by_hand": 1,
+   "widgets_from_params": 4
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "tiling_callback"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init",
+     "gui_update"
+    ],
+    "params": []
+   },
+   "details_mask": false,
+   "flags": [
+    "SUPPORTS_BLENDING"
+   ],
+   "gtk_calls": 3,
+   "introspection": true,
+   "lines": 429,
+   "module": "defringe",
+   "params": {
+    "annotated": {
+     "DEFAULT": 3,
+     "DESCRIPTION": 3,
+     "MAX": 2,
+     "MIN": 2
+    },
+    "fields": 3
+   },
+   "raster_mask": false,
+   "scale_aware": true,
+   "version": 1,
+   "widgets_by_hand": 0,
+   "widgets_from_params": 3
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace",
+     "input_colorspace",
+     "output_colorspace"
+    ],
+    "geometry": [
+     "modify_roi_in",
+     "modify_roi_out",
+     "distort_mask"
+    ],
+    "gui": [
+     "gui_init",
+     "gui_update",
+     "gui_changed",
+     "gui_focus"
+    ],
+    "params": [
+     "legacy_params",
+     "reload_defaults"
+    ]
+   },
+   "details_mask": true,
+   "flags": [
+    "FENCE",
+    "ONE_INSTANCE",
+    "WRITE_DETAILS"
+   ],
+   "gtk_calls": 38,
+   "introspection": true,
+   "lines": 1989,
+   "module": "demosaic",
+   "params": {
+    "annotated": {
+     "DEFAULT": 14,
+     "DESCRIPTION": 14,
+     "MAX": 9,
+     "MIN": 9
+    },
+    "fields": 14
+   },
+   "raster_mask": false,
+   "scale_aware": true,
+   "version": 7,
+   "widgets_by_hand": 2,
+   "widgets_from_params": 16
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "tiling_callback",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [
+     "modify_roi_in",
+     "modify_roi_out",
+     "distort_mask"
+    ],
+    "gui": [],
+    "params": [
+     "init"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "ALLOW_TILING",
+    "FENCE",
+    "HIDDEN",
+    "NO_HISTORY_STACK",
+    "ONE_INSTANCE",
+    "WRITE_PIPECACHE_IN"
+   ],
+   "gtk_calls": 0,
+   "introspection": true,
+   "lines": 192,
+   "module": "demosaicscale",
+   "params": {
+    "annotated": {},
+    "fields": 1
+   },
+   "raster_mask": false,
+   "scale_aware": true,
+   "version": 1,
+   "widgets_by_hand": 0,
+   "widgets_from_params": 0
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "tiling_callback",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init",
+     "gui_update",
+     "gui_changed",
+     "gui_reset",
+     "gui_cleanup"
+    ],
+    "params": [
+     "legacy_params",
+     "reload_defaults",
+     "init_presets",
+     "init"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "ALLOW_TILING",
+    "SUPPORTS_BLENDING"
+   ],
+   "gtk_calls": 66,
+   "introspection": true,
+   "lines": 3813,
+   "module": "denoiseprofile",
+   "params": {
+    "annotated": {
+     "DEFAULT": 4,
+     "DESCRIPTION": 4
+    },
+    "fields": 17
+   },
+   "raster_mask": false,
+   "scale_aware": true,
+   "version": 12,
+   "widgets_by_hand": 10,
+   "widgets_from_params": 18
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "tiling_callback"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init"
+    ],
+    "params": [
+     "legacy_params",
+     "init_presets"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "ALLOW_TILING",
+    "INCLUDE_IN_STYLES",
+    "SUPPORTS_BLENDING"
+   ],
+   "gtk_calls": 15,
+   "introspection": true,
+   "lines": 1916,
+   "module": "diffuse",
+   "params": {
+    "annotated": {
+     "DEFAULT": 15,
+     "DESCRIPTION": 15,
+     "MAX": 15,
+     "MIN": 15
+    },
+    "fields": 15
+   },
+   "raster_mask": false,
+   "scale_aware": true,
+   "version": 2,
+   "widgets_by_hand": 5,
+   "widgets_from_params": 15
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init",
+     "gui_update",
+     "gui_changed"
+    ],
+    "params": [
+     "legacy_params",
+     "init_presets"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "SUPPORTS_BLENDING"
+   ],
+   "gtk_calls": 3,
+   "introspection": true,
+   "lines": 749,
+   "module": "dither",
+   "params": {
+    "annotated": {
+     "DEFAULT": 2,
+     "DESCRIPTION": 2,
+     "MAX": 1,
+     "MIN": 1
+    },
+    "fields": 6
+   },
+   "raster_mask": false,
+   "scale_aware": true,
+   "version": 2,
+   "widgets_by_hand": 0,
+   "widgets_from_params": 2
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "commit_params",
+     "init_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [
+     "modify_roi_in",
+     "modify_roi_out",
+     "distort_transform",
+     "distort_backtransform",
+     "distort_mask"
+    ],
+    "gui": [
+     "gui_init",
+     "gui_update"
+    ],
+    "params": []
+   },
+   "details_mask": false,
+   "flags": [],
+   "gtk_calls": 5,
+   "introspection": true,
+   "lines": 456,
+   "module": "enlargecanvas",
+   "params": {
+    "annotated": {
+     "DEFAULT": 4,
+     "DESCRIPTION": 5,
+     "MAX": 4,
+     "MIN": 4
+    },
+    "fields": 5
+   },
+   "raster_mask": false,
+   "scale_aware": true,
+   "version": 1,
+   "widgets_by_hand": 0,
+   "widgets_from_params": 5
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init",
+     "gui_update"
+    ],
+    "params": [
+     "init"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "DEPRECATED"
+   ],
+   "gtk_calls": 1,
+   "introspection": true,
+   "lines": 245,
+   "module": "equalizer",
+   "params": {
+    "annotated": {},
+    "fields": 1
+   },
+   "raster_mask": false,
+   "scale_aware": true,
+   "version": 1,
+   "widgets_by_hand": 1,
+   "widgets_from_params": 0
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init",
+     "gui_update",
+     "gui_changed",
+     "gui_reset",
+     "gui_cleanup",
+     "color_picker_apply"
+    ],
+    "params": [
+     "legacy_params",
+     "reload_defaults",
+     "init_presets"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "ALLOW_TILING",
+    "SUPPORTS_BLENDING"
+   ],
+   "gtk_calls": 38,
+   "introspection": true,
+   "lines": 1398,
+   "module": "exposure",
+   "params": {
+    "annotated": {
+     "DEFAULT": 7,
+     "DESCRIPTION": 5,
+     "MAX": 4,
+     "MIN": 4
+    },
+    "fields": 7
+   },
+   "raster_mask": false,
+   "scale_aware": false,
+   "version": 7,
+   "widgets_by_hand": 10,
+   "widgets_from_params": 9
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init",
+     "gui_update",
+     "gui_reset",
+     "color_picker_apply"
+    ],
+    "params": [
+     "legacy_params",
+     "init_presets",
+     "init"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "ALLOW_TILING",
+    "DEPRECATED",
+    "INCLUDE_IN_STYLES",
+    "SUPPORTS_BLENDING"
+   ],
+   "gtk_calls": 42,
+   "introspection": true,
+   "lines": 1671,
+   "module": "filmic",
+   "params": {
+    "annotated": {},
+    "fields": 15
+   },
+   "raster_mask": false,
+   "scale_aware": false,
+   "version": 3,
+   "widgets_by_hand": 22,
+   "widgets_from_params": 0
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "tiling_callback",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init",
+     "gui_update",
+     "gui_changed",
+     "gui_reset",
+     "gui_focus",
+     "color_picker_apply"
+    ],
+    "params": [
+     "legacy_params",
+     "reload_defaults",
+     "init_presets"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "ALLOW_TILING",
+    "INCLUDE_IN_STYLES",
+    "SUPPORTS_BLENDING"
+   ],
+   "gtk_calls": 68,
+   "introspection": true,
+   "lines": 4761,
+   "module": "filmicrgb",
+   "params": {
+    "annotated": {
+     "DEFAULT": 29,
+     "DESCRIPTION": 28,
+     "MAX": 19,
+     "MIN": 19
+    },
+    "fields": 29
+   },
+   "raster_mask": false,
+   "scale_aware": true,
+   "version": 6,
+   "widgets_by_hand": 5,
+   "widgets_from_params": 30
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "tiling_callback",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [
+     "modify_roi_in",
+     "distort_mask"
+    ],
+    "gui": [],
+    "params": [
+     "init"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "ALLOW_TILING",
+    "HIDDEN",
+    "NO_HISTORY_STACK",
+    "ONE_INSTANCE",
+    "TILING_FULL_ROI",
+    "WRITE_PIPECACHE_IN"
+   ],
+   "gtk_calls": 0,
+   "introspection": true,
+   "lines": 229,
+   "module": "finalscale",
+   "params": {
+    "annotated": {},
+    "fields": 1
+   },
+   "raster_mask": false,
+   "scale_aware": true,
+   "version": 1,
+   "widgets_by_hand": 0,
+   "widgets_from_params": 0
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [
+     "modify_roi_in",
+     "modify_roi_out",
+     "distort_transform",
+     "distort_backtransform",
+     "distort_mask"
+    ],
+    "gui": [
+     "gui_init",
+     "gui_cleanup"
+    ],
+    "params": [
+     "legacy_params",
+     "reload_defaults",
+     "init_presets"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "ALLOW_TILING",
+    "GUIDES_WIDGET",
+    "ONE_INSTANCE",
+    "TILING_FULL_ROI",
+    "UNSAFE_COPY"
+   ],
+   "gtk_calls": 0,
+   "introspection": true,
+   "lines": 631,
+   "module": "flip",
+   "params": {
+    "annotated": {},
+    "fields": 1
+   },
+   "raster_mask": false,
+   "scale_aware": true,
+   "version": 2,
+   "widgets_by_hand": 1,
+   "widgets_from_params": 0
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [],
+    "params": [
+     "init"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "FENCE",
+    "HIDDEN",
+    "ONE_INSTANCE",
+    "UNSAFE_COPY",
+    "WRITE_PIPECACHE"
+   ],
+   "gtk_calls": 0,
+   "introspection": true,
+   "lines": 356,
+   "module": "gamma",
+   "params": {
+    "annotated": {},
+    "fields": 1
+   },
+   "raster_mask": false,
+   "scale_aware": false,
+   "version": 1,
+   "widgets_by_hand": 0,
+   "widgets_from_params": 0
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "tiling_callback",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init",
+     "gui_update",
+     "gui_changed"
+    ],
+    "params": [
+     "legacy_params"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "ALLOW_TILING",
+    "DEPRECATED",
+    "INCLUDE_IN_STYLES",
+    "SUPPORTS_BLENDING"
+   ],
+   "gtk_calls": 5,
+   "introspection": true,
+   "lines": 658,
+   "module": "globaltonemap",
+   "params": {
+    "annotated": {
+     "DEFAULT": 4,
+     "DESCRIPTION": 2,
+     "MAX": 3,
+     "MIN": 3
+    },
+    "fields": 5
+   },
+   "raster_mask": false,
+   "scale_aware": true,
+   "version": 3,
+   "widgets_by_hand": 0,
+   "widgets_from_params": 4
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init",
+     "gui_update",
+     "gui_changed",
+     "gui_reset",
+     "gui_post_expose",
+     "color_picker_apply",
+     "mouse_moved",
+     "button_pressed",
+     "button_released",
+     "scrolled",
+     "mouse_actions"
+    ],
+    "params": [
+     "init_presets"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "ALLOW_TILING",
+    "INCLUDE_IN_STYLES",
+    "SUPPORTS_BLENDING",
+    "TILING_FULL_ROI"
+   ],
+   "gtk_calls": 6,
+   "introspection": true,
+   "lines": 1086,
+   "module": "graduatednd",
+   "params": {
+    "annotated": {
+     "DEFAULT": 6,
+     "DESCRIPTION": 6,
+     "MAX": 5,
+     "MIN": 5
+    },
+    "fields": 6
+   },
+   "raster_mask": false,
+   "scale_aware": true,
+   "version": 1,
+   "widgets_by_hand": 0,
+   "widgets_from_params": 5
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init"
+    ],
+    "params": [
+     "legacy_params"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "INCLUDE_IN_STYLES",
+    "SUPPORTS_BLENDING"
+   ],
+   "gtk_calls": 3,
+   "introspection": true,
+   "lines": 580,
+   "module": "grain",
+   "params": {
+    "annotated": {
+     "DEFAULT": 3,
+     "DESCRIPTION": 1,
+     "MAX": 2,
+     "MIN": 2
+    },
+    "fields": 4
+   },
+   "raster_mask": false,
+   "scale_aware": true,
+   "version": 2,
+   "widgets_by_hand": 0,
+   "widgets_from_params": 3
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "tiling_callback",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init",
+     "gui_update",
+     "gui_changed"
+    ],
+    "params": [
+     "legacy_params"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "INCLUDE_IN_STYLES",
+    "SUPPORTS_BLENDING"
+   ],
+   "gtk_calls": 2,
+   "introspection": true,
+   "lines": 983,
+   "module": "hazeremoval",
+   "params": {
+    "annotated": {
+     "DEFAULT": 4,
+     "MAX": 2,
+     "MIN": 2
+    },
+    "fields": 4
+   },
+   "raster_mask": false,
+   "scale_aware": true,
+   "version": 3,
+   "widgets_by_hand": 0,
+   "widgets_from_params": 2
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "tiling_callback",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [
+     "modify_roi_in",
+     "modify_roi_out",
+     "distort_mask"
+    ],
+    "gui": [
+     "gui_init",
+     "gui_update",
+     "gui_changed",
+     "gui_focus"
+    ],
+    "params": [
+     "legacy_params",
+     "reload_defaults"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "ALLOW_TILING",
+    "ONE_INSTANCE",
+    "SUPPORTS_BLENDING",
+    "WRITE_RASTER"
+   ],
+   "gtk_calls": 25,
+   "introspection": true,
+   "lines": 1441,
+   "module": "highlights",
+   "params": {
+    "annotated": {
+     "DEFAULT": 10,
+     "DESCRIPTION": 10,
+     "MAX": 7,
+     "MIN": 7
+    },
+    "fields": 10
+   },
+   "raster_mask": true,
+   "scale_aware": true,
+   "version": 5,
+   "widgets_by_hand": 2,
+   "widgets_from_params": 10
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "tiling_callback",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init"
+    ],
+    "params": []
+   },
+   "details_mask": false,
+   "flags": [
+    "ALLOW_TILING",
+    "INCLUDE_IN_STYLES",
+    "SUPPORTS_BLENDING"
+   ],
+   "gtk_calls": 2,
+   "introspection": true,
+   "lines": 366,
+   "module": "highpass",
+   "params": {
+    "annotated": {
+     "DEFAULT": 2,
+     "DESCRIPTION": 1,
+     "MAX": 2,
+     "MIN": 2
+    },
+    "fields": 2
+   },
+   "raster_mask": false,
+   "scale_aware": true,
+   "version": 1,
+   "widgets_by_hand": 0,
+   "widgets_from_params": 2
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init",
+     "gui_update"
+    ],
+    "params": [
+     "reload_defaults"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "ONE_INSTANCE",
+    "SUPPORTS_BLENDING"
+   ],
+   "gtk_calls": 10,
+   "introspection": true,
+   "lines": 484,
+   "module": "hotpixels",
+   "params": {
+    "annotated": {
+     "DEFAULT": 4,
+     "DESCRIPTION": 2,
+     "MAX": 2,
+     "MIN": 2
+    },
+    "fields": 4
+   },
+   "raster_mask": false,
+   "scale_aware": false,
+   "version": 1,
+   "widgets_by_hand": 3,
+   "widgets_from_params": 6
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init",
+     "gui_update",
+     "color_picker_apply"
+    ],
+    "params": [
+     "legacy_params",
+     "reload_defaults"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "DEPRECATED",
+    "ONE_INSTANCE"
+   ],
+   "gtk_calls": 5,
+   "introspection": true,
+   "lines": 507,
+   "module": "invert",
+   "params": {
+    "annotated": {
+     "DEFAULT": 1
+    },
+    "fields": 1
+   },
+   "raster_mask": false,
+   "scale_aware": false,
+   "version": 2,
+   "widgets_by_hand": 2,
+   "widgets_from_params": 0
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init",
+     "gui_update",
+     "gui_changed",
+     "gui_cleanup",
+     "color_picker_apply"
+    ],
+    "params": [
+     "legacy_params",
+     "init"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "DEPRECATED",
+    "SUPPORTS_BLENDING"
+   ],
+   "gtk_calls": 28,
+   "introspection": true,
+   "lines": 988,
+   "module": "levels",
+   "params": {
+    "annotated": {
+     "DEFAULT": 4,
+     "MAX": 3,
+     "MIN": 3
+    },
+    "fields": 5
+   },
+   "raster_mask": false,
+   "scale_aware": false,
+   "version": 2,
+   "widgets_by_hand": 2,
+   "widgets_from_params": 4
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [
+     "modify_roi_in",
+     "distort_transform",
+     "distort_backtransform",
+     "distort_mask"
+    ],
+    "gui": [
+     "gui_init",
+     "gui_update",
+     "gui_reset",
+     "gui_post_expose",
+     "gui_focus",
+     "mouse_moved",
+     "button_pressed",
+     "button_released",
+     "scrolled"
+    ],
+    "params": []
+   },
+   "details_mask": false,
+   "flags": [
+    "SUPPORTS_BLENDING"
+   ],
+   "gtk_calls": 32,
+   "introspection": true,
+   "lines": 3812,
+   "module": "liquify",
+   "params": null,
+   "raster_mask": false,
+   "scale_aware": true,
+   "version": 1,
+   "widgets_by_hand": 2,
+   "widgets_from_params": 0
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init",
+     "gui_update",
+     "gui_cleanup"
+    ],
+    "params": [
+     "init_presets",
+     "init"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "ALLOW_TILING",
+    "INCLUDE_IN_STYLES",
+    "SUPPORTS_BLENDING"
+   ],
+   "gtk_calls": 13,
+   "introspection": true,
+   "lines": 828,
+   "module": "lowlight",
+   "params": {
+    "annotated": {
+     "DEFAULT": 2,
+     "DESCRIPTION": 1,
+     "MAX": 1,
+     "MIN": 1
+    },
+    "fields": 3
+   },
+   "raster_mask": false,
+   "scale_aware": false,
+   "version": 1,
+   "widgets_by_hand": 0,
+   "widgets_from_params": 1
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "tiling_callback",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init"
+    ],
+    "params": [
+     "legacy_params",
+     "init_presets"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "ALLOW_TILING",
+    "INCLUDE_IN_STYLES",
+    "SUPPORTS_BLENDING"
+   ],
+   "gtk_calls": 5,
+   "introspection": true,
+   "lines": 589,
+   "module": "lowpass",
+   "params": {
+    "annotated": {
+     "DEFAULT": 7,
+     "DESCRIPTION": 1,
+     "MAX": 4,
+     "MIN": 4
+    },
+    "fields": 7
+   },
+   "raster_mask": false,
+   "scale_aware": true,
+   "version": 4,
+   "widgets_by_hand": 0,
+   "widgets_from_params": 5
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "tiling_callback",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init",
+     "gui_update"
+    ],
+    "params": [
+     "legacy_params"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "INCLUDE_IN_STYLES",
+    "SUPPORTS_BLENDING"
+   ],
+   "gtk_calls": 100,
+   "introspection": true,
+   "lines": 1866,
+   "module": "lut3d",
+   "params": {
+    "annotated": {
+     "DEFAULT": 3,
+     "DESCRIPTION": 1
+    },
+    "fields": 6
+   },
+   "raster_mask": false,
+   "scale_aware": false,
+   "version": 3,
+   "widgets_by_hand": 8,
+   "widgets_from_params": 2
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [],
+    "params": [
+     "legacy_params"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "HIDDEN",
+    "ONE_INSTANCE",
+    "UNSAFE_COPY"
+   ],
+   "gtk_calls": 0,
+   "introspection": true,
+   "lines": 130,
+   "module": "mask_manager",
+   "params": {
+    "annotated": {},
+    "fields": 1
+   },
+   "raster_mask": false,
+   "scale_aware": false,
+   "version": 2,
+   "widgets_by_hand": 0,
+   "widgets_from_params": 0
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "tiling_callback",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init",
+     "gui_update",
+     "gui_cleanup",
+     "color_picker_apply"
+    ],
+    "params": [
+     "legacy_params",
+     "init_presets"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "ALLOW_TILING",
+    "INCLUDE_IN_STYLES",
+    "SUPPORTS_BLENDING"
+   ],
+   "gtk_calls": 12,
+   "introspection": true,
+   "lines": 598,
+   "module": "monochrome",
+   "params": {
+    "annotated": {
+     "DEFAULT": 4,
+     "MAX": 1,
+     "MIN": 1
+    },
+    "fields": 4
+   },
+   "raster_mask": false,
+   "scale_aware": true,
+   "version": 2,
+   "widgets_by_hand": 1,
+   "widgets_from_params": 1
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init",
+     "gui_update",
+     "gui_changed",
+     "gui_reset",
+     "color_picker_apply"
+    ],
+    "params": [
+     "legacy_params",
+     "init_presets",
+     "init"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "ALLOW_TILING",
+    "INCLUDE_IN_STYLES",
+    "ONE_INSTANCE"
+   ],
+   "gtk_calls": 36,
+   "introspection": true,
+   "lines": 1078,
+   "module": "negadoctor",
+   "params": {
+    "annotated": {},
+    "fields": 10
+   },
+   "raster_mask": false,
+   "scale_aware": false,
+   "version": 2,
+   "widgets_by_hand": 11,
+   "widgets_from_params": 16
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "tiling_callback",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init"
+    ],
+    "params": [
+     "legacy_params"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "ALLOW_TILING",
+    "SUPPORTS_BLENDING"
+   ],
+   "gtk_calls": 4,
+   "introspection": true,
+   "lines": 452,
+   "module": "nlmeans",
+   "params": {
+    "annotated": {
+     "DEFAULT": 4,
+     "DESCRIPTION": 1,
+     "MAX": 4,
+     "MIN": 4
+    },
+    "fields": 4
+   },
+   "raster_mask": false,
+   "scale_aware": true,
+   "version": 2,
+   "widgets_by_hand": 0,
+   "widgets_from_params": 4
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "tiling_callback",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [],
+    "params": [
+     "init"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "ALLOW_TILING",
+    "HIDDEN",
+    "NO_HISTORY_STACK",
+    "ONE_INSTANCE"
+   ],
+   "gtk_calls": 0,
+   "introspection": false,
+   "lines": 423,
+   "module": "overexposed",
+   "params": null,
+   "raster_mask": false,
+   "scale_aware": false,
+   "version": 3,
+   "widgets_by_hand": 0,
+   "widgets_from_params": 0
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init",
+     "gui_update",
+     "gui_changed",
+     "gui_reset"
+    ],
+    "params": [
+     "legacy_params",
+     "reload_defaults"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "INCLUDE_IN_STYLES",
+    "SUPPORTS_BLENDING"
+   ],
+   "gtk_calls": 44,
+   "introspection": true,
+   "lines": 1575,
+   "module": "overlay",
+   "params": {
+    "annotated": {
+     "DEFAULT": 10,
+     "DESCRIPTION": 7,
+     "MAX": 5,
+     "MIN": 5
+    },
+    "fields": 14
+   },
+   "raster_mask": false,
+   "scale_aware": true,
+   "version": 2,
+   "widgets_by_hand": 6,
+   "widgets_from_params": 8
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init",
+     "gui_changed"
+    ],
+    "params": []
+   },
+   "details_mask": false,
+   "flags": [
+    "ALLOW_TILING",
+    "INCLUDE_IN_STYLES",
+    "SUPPORTS_BLENDING"
+   ],
+   "gtk_calls": 6,
+   "introspection": true,
+   "lines": 432,
+   "module": "primaries",
+   "params": {
+    "annotated": {
+     "DEFAULT": 8,
+     "DESCRIPTION": 8,
+     "MAX": 8,
+     "MIN": 8
+    },
+    "fields": 8
+   },
+   "raster_mask": false,
+   "scale_aware": false,
+   "version": 1,
+   "widgets_by_hand": 0,
+   "widgets_from_params": 2
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init",
+     "gui_update",
+     "gui_changed",
+     "gui_reset",
+     "color_picker_apply"
+    ],
+    "params": [
+     "legacy_params",
+     "init_presets"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "ALLOW_TILING",
+    "INCLUDE_IN_STYLES",
+    "ONE_INSTANCE",
+    "SUPPORTS_BLENDING"
+   ],
+   "gtk_calls": 14,
+   "introspection": true,
+   "lines": 659,
+   "module": "profile_gamma",
+   "params": {
+    "annotated": {
+     "DEFAULT": 7,
+     "DESCRIPTION": 4,
+     "MAX": 6,
+     "MIN": 6
+    },
+    "fields": 7
+   },
+   "raster_mask": false,
+   "scale_aware": false,
+   "version": 2,
+   "widgets_by_hand": 3,
+   "widgets_from_params": 7
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "tiling_callback",
+     "commit_params",
+     "init_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [
+     "modify_roi_in",
+     "distort_mask"
+    ],
+    "gui": [
+     "gui_init",
+     "gui_update",
+     "gui_changed",
+     "gui_focus"
+    ],
+    "params": [
+     "legacy_params",
+     "reload_defaults",
+     "init"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "WRITE_RASTER"
+   ],
+   "gtk_calls": 24,
+   "introspection": true,
+   "lines": 936,
+   "module": "rasterfile",
+   "params": {
+    "annotated": {
+     "DEFAULT": 1,
+     "DESCRIPTION": 1
+    },
+    "fields": 10
+   },
+   "raster_mask": true,
+   "scale_aware": true,
+   "version": 2,
+   "widgets_by_hand": 3,
+   "widgets_from_params": 1
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init",
+     "gui_update",
+     "gui_cleanup"
+    ],
+    "params": [
+     "legacy_params",
+     "reload_defaults",
+     "init"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "SUPPORTS_BLENDING"
+   ],
+   "gtk_calls": 21,
+   "introspection": true,
+   "lines": 914,
+   "module": "rawdenoise",
+   "params": {
+    "annotated": {
+     "DEFAULT": 2,
+     "DESCRIPTION": 1,
+     "MAX": 1,
+     "MIN": 1
+    },
+    "fields": 3
+   },
+   "raster_mask": false,
+   "scale_aware": false,
+   "version": 2,
+   "widgets_by_hand": 3,
+   "widgets_from_params": 1
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "tiling_callback",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [],
+    "params": [
+     "init"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "ALLOW_TILING",
+    "HIDDEN",
+    "NO_HISTORY_STACK",
+    "ONE_INSTANCE"
+   ],
+   "gtk_calls": 0,
+   "introspection": false,
+   "lines": 444,
+   "module": "rawoverexposed",
+   "params": null,
+   "raster_mask": false,
+   "scale_aware": true,
+   "version": 1,
+   "widgets_by_hand": 0,
+   "widgets_from_params": 0
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "output_format",
+     "default_colorspace"
+    ],
+    "geometry": [
+     "modify_roi_in",
+     "modify_roi_out",
+     "distort_transform",
+     "distort_backtransform"
+    ],
+    "gui": [
+     "gui_init",
+     "gui_update",
+     "gui_changed"
+    ],
+    "params": [
+     "legacy_params",
+     "reload_defaults",
+     "init_presets"
+    ]
+   },
+   "details_mask": true,
+   "flags": [
+    "ALLOW_TILING",
+    "ONE_INSTANCE",
+    "TILING_FULL_ROI",
+    "UNSAFE_COPY",
+    "WRITE_DETAILS"
+   ],
+   "gtk_calls": 15,
+   "introspection": true,
+   "lines": 945,
+   "module": "rawprepare",
+   "params": {
+    "annotated": {
+     "DEFAULT": 1,
+     "DESCRIPTION": 7,
+     "MAX": 6,
+     "MIN": 6
+    },
+    "fields": 7
+   },
+   "raster_mask": false,
+   "scale_aware": true,
+   "version": 2,
+   "widgets_by_hand": 3,
+   "widgets_from_params": 7
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init",
+     "gui_update",
+     "color_picker_apply"
+    ],
+    "params": [
+     "init_presets"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "ALLOW_TILING",
+    "DEPRECATED",
+    "INCLUDE_IN_STYLES",
+    "SUPPORTS_BLENDING"
+   ],
+   "gtk_calls": 4,
+   "introspection": true,
+   "lines": 271,
+   "module": "relight",
+   "params": {
+    "annotated": {
+     "DEFAULT": 3,
+     "DESCRIPTION": 1,
+     "MAX": 2,
+     "MIN": 2
+    },
+    "fields": 3
+   },
+   "raster_mask": false,
+   "scale_aware": false,
+   "version": 1,
+   "widgets_by_hand": 1,
+   "widgets_from_params": 2
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "tiling_callback",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [
+     "modify_roi_in",
+     "distort_mask"
+    ],
+    "gui": [
+     "gui_init",
+     "gui_update",
+     "gui_changed",
+     "gui_reset",
+     "gui_post_expose",
+     "gui_focus",
+     "color_picker_apply",
+     "masks_selection_changed"
+    ],
+    "params": [
+     "legacy_params",
+     "reload_defaults",
+     "change_image",
+     "init"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "NO_MASKS",
+    "SUPPORTS_BLENDING"
+   ],
+   "gtk_calls": 148,
+   "introspection": true,
+   "lines": 4882,
+   "module": "retouch",
+   "params": {
+    "annotated": {
+     "DEFAULT": 9,
+     "DESCRIPTION": 5,
+     "MAX": 2,
+     "MIN": 2
+    },
+    "fields": 12
+   },
+   "raster_mask": false,
+   "scale_aware": true,
+   "version": 3,
+   "widgets_by_hand": 21,
+   "widgets_from_params": 4
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init",
+     "gui_update",
+     "gui_changed",
+     "gui_reset",
+     "gui_cleanup",
+     "color_picker_apply"
+    ],
+    "params": [
+     "init_presets",
+     "change_image",
+     "init"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "ALLOW_TILING",
+    "SUPPORTS_BLENDING"
+   ],
+   "gtk_calls": 38,
+   "introspection": true,
+   "lines": 1955,
+   "module": "rgbcurve",
+   "params": {
+    "annotated": {
+     "DEFAULT": 5,
+     "DESCRIPTION": 3
+    },
+    "fields": 6
+   },
+   "raster_mask": false,
+   "scale_aware": false,
+   "version": 1,
+   "widgets_by_hand": 4,
+   "widgets_from_params": 4
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init",
+     "gui_update",
+     "gui_changed",
+     "gui_reset",
+     "gui_post_expose",
+     "gui_focus",
+     "color_picker_apply",
+     "mouse_moved",
+     "button_pressed",
+     "button_released"
+    ],
+    "params": [
+     "change_image",
+     "init"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "SUPPORTS_BLENDING"
+   ],
+   "gtk_calls": 30,
+   "introspection": true,
+   "lines": 1529,
+   "module": "rgblevels",
+   "params": {
+    "annotated": {
+     "DEFAULT": 2,
+     "DESCRIPTION": 2
+    },
+    "fields": 3
+   },
+   "raster_mask": false,
+   "scale_aware": true,
+   "version": 1,
+   "widgets_by_hand": 3,
+   "widgets_from_params": 2
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [
+     "modify_roi_in",
+     "modify_roi_out",
+     "distort_transform",
+     "distort_backtransform",
+     "distort_mask"
+    ],
+    "gui": [],
+    "params": [
+     "reload_defaults"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "ALLOW_TILING",
+    "HIDDEN",
+    "ONE_INSTANCE",
+    "TILING_FULL_ROI",
+    "UNSAFE_COPY"
+   ],
+   "gtk_calls": 0,
+   "introspection": true,
+   "lines": 358,
+   "module": "rotatepixels",
+   "params": {
+    "annotated": {},
+    "fields": 2
+   },
+   "raster_mask": false,
+   "scale_aware": true,
+   "version": 1,
+   "widgets_by_hand": 0,
+   "widgets_from_params": 0
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "tiling_callback",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init",
+     "gui_update",
+     "gui_changed",
+     "gui_cleanup",
+     "gui_focus",
+     "color_picker_apply"
+    ],
+    "params": [
+     "init_presets",
+     "init"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "ALLOW_TILING",
+    "INCLUDE_IN_STYLES",
+    "SUPPORTS_BLENDING"
+   ],
+   "gtk_calls": 47,
+   "introspection": true,
+   "lines": 2265,
+   "module": "satcurvergb",
+   "params": {
+    "annotated": {
+     "DEFAULT": 7,
+     "DESCRIPTION": 7,
+     "MAX": 5,
+     "MIN": 5
+    },
+    "fields": 8
+   },
+   "raster_mask": false,
+   "scale_aware": false,
+   "version": 1,
+   "widgets_by_hand": 4,
+   "widgets_from_params": 6
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [
+     "modify_roi_in",
+     "modify_roi_out",
+     "distort_transform",
+     "distort_backtransform",
+     "distort_mask"
+    ],
+    "gui": [
+     "gui_init"
+    ],
+    "params": []
+   },
+   "details_mask": false,
+   "flags": [
+    "ALLOW_TILING",
+    "ONE_INSTANCE",
+    "TILING_FULL_ROI",
+    "UNSAFE_COPY"
+   ],
+   "gtk_calls": 1,
+   "introspection": true,
+   "lines": 287,
+   "module": "scalepixels",
+   "params": {
+    "annotated": {
+     "DEFAULT": 1,
+     "DESCRIPTION": 1,
+     "MAX": 1,
+     "MIN": 1
+    },
+    "fields": 1
+   },
+   "raster_mask": false,
+   "scale_aware": true,
+   "version": 1,
+   "widgets_by_hand": 0,
+   "widgets_from_params": 1
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "tiling_callback",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init"
+    ],
+    "params": [
+     "legacy_params"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "ALLOW_TILING",
+    "INCLUDE_IN_STYLES",
+    "SUPPORTS_BLENDING"
+   ],
+   "gtk_calls": 8,
+   "introspection": true,
+   "lines": 705,
+   "module": "shadhi",
+   "params": {
+    "annotated": {
+     "DEFAULT": 11,
+     "DESCRIPTION": 4,
+     "MAX": 7,
+     "MIN": 7
+    },
+    "fields": 12
+   },
+   "raster_mask": false,
+   "scale_aware": true,
+   "version": 5,
+   "widgets_by_hand": 0,
+   "widgets_from_params": 8
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "tiling_callback",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init"
+    ],
+    "params": [
+     "init_presets"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "ALLOW_TILING",
+    "SUPPORTS_BLENDING"
+   ],
+   "gtk_calls": 3,
+   "introspection": true,
+   "lines": 437,
+   "module": "sharpen",
+   "params": {
+    "annotated": {
+     "DEFAULT": 3,
+     "MAX": 3,
+     "MIN": 3
+    },
+    "fields": 3
+   },
+   "raster_mask": false,
+   "scale_aware": true,
+   "version": 1,
+   "widgets_by_hand": 0,
+   "widgets_from_params": 3
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "commit_params",
+     "init_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init",
+     "gui_update",
+     "gui_changed"
+    ],
+    "params": [
+     "legacy_params",
+     "init_presets"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "ALLOW_TILING",
+    "INCLUDE_IN_STYLES",
+    "SUPPORTS_BLENDING"
+   ],
+   "gtk_calls": 13,
+   "introspection": true,
+   "lines": 982,
+   "module": "sigmoid",
+   "params": {
+    "annotated": {
+     "DEFAULT": 14,
+     "DESCRIPTION": 14,
+     "MAX": 12,
+     "MIN": 12
+    },
+    "fields": 14
+   },
+   "raster_mask": false,
+   "scale_aware": false,
+   "version": 3,
+   "widgets_by_hand": 0,
+   "widgets_from_params": 10
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "tiling_callback",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init"
+    ],
+    "params": []
+   },
+   "details_mask": false,
+   "flags": [
+    "ALLOW_TILING",
+    "INCLUDE_IN_STYLES",
+    "SUPPORTS_BLENDING"
+   ],
+   "gtk_calls": 4,
+   "introspection": true,
+   "lines": 392,
+   "module": "soften",
+   "params": {
+    "annotated": {
+     "DEFAULT": 4,
+     "DESCRIPTION": 1,
+     "MAX": 4,
+     "MIN": 4
+    },
+    "fields": 4
+   },
+   "raster_mask": false,
+   "scale_aware": true,
+   "version": 1,
+   "widgets_by_hand": 0,
+   "widgets_from_params": 4
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "tiling_callback",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [
+     "modify_roi_in"
+    ],
+    "gui": [
+     "gui_init",
+     "gui_update",
+     "gui_changed",
+     "gui_reset",
+     "gui_cleanup",
+     "color_picker_apply"
+    ],
+    "params": [
+     "legacy_params",
+     "init_presets"
+    ]
+   },
+   "details_mask": false,
+   "flags": [],
+   "gtk_calls": 180,
+   "introspection": true,
+   "lines": 6484,
+   "module": "spektrafilm",
+   "params": {
+    "annotated": {
+     "DEFAULT": 74,
+     "DESCRIPTION": 68,
+     "MAX": 56,
+     "MIN": 56
+    },
+    "fields": 87
+   },
+   "raster_mask": false,
+   "scale_aware": true,
+   "version": 3,
+   "widgets_by_hand": 16,
+   "widgets_from_params": 77
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init",
+     "gui_update",
+     "gui_changed",
+     "color_picker_apply"
+    ],
+    "params": [
+     "init_presets"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "ALLOW_TILING",
+    "INCLUDE_IN_STYLES",
+    "SUPPORTS_BLENDING"
+   ],
+   "gtk_calls": 14,
+   "introspection": true,
+   "lines": 537,
+   "module": "splittoning",
+   "params": {
+    "annotated": {
+     "DEFAULT": 6,
+     "DESCRIPTION": 4,
+     "MAX": 6,
+     "MIN": 6
+    },
+    "fields": 6
+   },
+   "raster_mask": false,
+   "scale_aware": false,
+   "version": 1,
+   "widgets_by_hand": 1,
+   "widgets_from_params": 6
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [
+     "modify_roi_in",
+     "distort_mask"
+    ],
+    "gui": [
+     "gui_init",
+     "gui_update",
+     "gui_reset",
+     "gui_focus"
+    ],
+    "params": [
+     "legacy_params",
+     "init"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "DEPRECATED",
+    "NO_MASKS",
+    "SUPPORTS_BLENDING"
+   ],
+   "gtk_calls": 30,
+   "introspection": true,
+   "lines": 905,
+   "module": "spots",
+   "params": {
+    "annotated": {},
+    "fields": 2
+   },
+   "raster_mask": false,
+   "scale_aware": true,
+   "version": 2,
+   "widgets_by_hand": 2,
+   "widgets_from_params": 0
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init",
+     "gui_update",
+     "gui_changed",
+     "gui_reset",
+     "gui_cleanup",
+     "color_picker_apply"
+    ],
+    "params": [
+     "legacy_params",
+     "reload_defaults"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "ALLOW_TILING",
+    "ONE_INSTANCE",
+    "UNSAFE_COPY"
+   ],
+   "gtk_calls": 73,
+   "introspection": true,
+   "lines": 2232,
+   "module": "temperature",
+   "params": {
+    "annotated": {
+     "MAX": 4,
+     "MIN": 4
+    },
+    "fields": 5
+   },
+   "raster_mask": false,
+   "scale_aware": false,
+   "version": 4,
+   "widgets_by_hand": 8,
+   "widgets_from_params": 4
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init",
+     "gui_update",
+     "gui_changed",
+     "gui_reset",
+     "gui_cleanup",
+     "color_picker_apply"
+    ],
+    "params": [
+     "legacy_params",
+     "init_presets",
+     "init"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "ALLOW_TILING",
+    "SUPPORTS_BLENDING"
+   ],
+   "gtk_calls": 36,
+   "introspection": true,
+   "lines": 1987,
+   "module": "tonecurve",
+   "params": {
+    "annotated": {
+     "DEFAULT": 5,
+     "DESCRIPTION": 2
+    },
+    "fields": 7
+   },
+   "raster_mask": false,
+   "scale_aware": false,
+   "version": 5,
+   "widgets_by_hand": 5,
+   "widgets_from_params": 2
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "tiling_callback",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [
+     "modify_roi_in"
+    ],
+    "gui": [
+     "gui_init",
+     "gui_update",
+     "gui_changed",
+     "gui_reset",
+     "gui_cleanup",
+     "gui_post_expose",
+     "gui_focus",
+     "mouse_moved",
+     "scrolled",
+     "mouse_leave",
+     "mouse_actions"
+    ],
+    "params": [
+     "legacy_params",
+     "init_presets"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "INCLUDE_IN_STYLES",
+    "SUPPORTS_BLENDING"
+   ],
+   "gtk_calls": 56,
+   "introspection": true,
+   "lines": 3992,
+   "module": "toneequal",
+   "params": {
+    "annotated": {
+     "DEFAULT": 18,
+     "DESCRIPTION": 17,
+     "MAX": 15,
+     "MIN": 15
+    },
+    "fields": 18
+   },
+   "raster_mask": false,
+   "scale_aware": true,
+   "version": 2,
+   "widgets_by_hand": 4,
+   "widgets_from_params": 17
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "tiling_callback",
+     "commit_params"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [
+     "distort_transform",
+     "distort_backtransform"
+    ],
+    "gui": [
+     "gui_init",
+     "gui_update",
+     "gui_changed",
+     "gui_cleanup",
+     "color_picker_apply",
+     "mouse_actions"
+    ],
+    "params": [
+     "legacy_params",
+     "reload_defaults",
+     "init"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "ALLOW_TILING",
+    "INCLUDE_IN_STYLES",
+    "SUPPORTS_BLENDING"
+   ],
+   "gtk_calls": 2,
+   "introspection": true,
+   "lines": 726,
+   "module": "useless",
+   "params": {
+    "annotated": {
+     "DEFAULT": 3,
+     "DESCRIPTION": 3,
+     "MAX": 2,
+     "MIN": 2
+    },
+    "fields": 4
+   },
+   "raster_mask": true,
+   "scale_aware": true,
+   "version": 3,
+   "widgets_by_hand": 1,
+   "widgets_from_params": 5
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init",
+     "gui_update"
+    ],
+    "params": [
+     "legacy_params"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "ALLOW_TILING",
+    "INCLUDE_IN_STYLES",
+    "SUPPORTS_BLENDING"
+   ],
+   "gtk_calls": 2,
+   "introspection": true,
+   "lines": 291,
+   "module": "velvia",
+   "params": {
+    "annotated": {
+     "DEFAULT": 2,
+     "DESCRIPTION": 1,
+     "MAX": 2,
+     "MIN": 2
+    },
+    "fields": 2
+   },
+   "raster_mask": false,
+   "scale_aware": false,
+   "version": 2,
+   "widgets_by_hand": 0,
+   "widgets_from_params": 2
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init",
+     "gui_update"
+    ],
+    "params": []
+   },
+   "details_mask": false,
+   "flags": [
+    "ALLOW_TILING",
+    "DEPRECATED",
+    "INCLUDE_IN_STYLES",
+    "SUPPORTS_BLENDING"
+   ],
+   "gtk_calls": 1,
+   "introspection": true,
+   "lines": 206,
+   "module": "vibrance",
+   "params": {
+    "annotated": {
+     "DEFAULT": 1,
+     "DESCRIPTION": 1,
+     "MAX": 1,
+     "MIN": 1
+    },
+    "fields": 1
+   },
+   "raster_mask": false,
+   "scale_aware": false,
+   "version": 2,
+   "widgets_by_hand": 0,
+   "widgets_from_params": 1
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init",
+     "gui_update",
+     "gui_changed",
+     "gui_post_expose",
+     "mouse_moved",
+     "button_pressed",
+     "button_released",
+     "mouse_actions"
+    ],
+    "params": [
+     "legacy_params",
+     "init_presets"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "ALLOW_TILING",
+    "INCLUDE_IN_STYLES",
+    "SUPPORTS_BLENDING",
+    "TILING_FULL_ROI"
+   ],
+   "gtk_calls": 12,
+   "introspection": true,
+   "lines": 1104,
+   "module": "vignette",
+   "params": {
+    "annotated": {
+     "DEFAULT": 9,
+     "DESCRIPTION": 5,
+     "MAX": 6,
+     "MIN": 6
+    },
+    "fields": 10
+   },
+   "raster_mask": false,
+   "scale_aware": true,
+   "version": 4,
+   "widgets_by_hand": 1,
+   "widgets_from_params": 11
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init",
+     "gui_update",
+     "gui_changed",
+     "gui_cleanup",
+     "color_picker_apply"
+    ],
+    "params": [
+     "legacy_params",
+     "init"
+    ]
+   },
+   "details_mask": false,
+   "flags": [
+    "INCLUDE_IN_STYLES",
+    "SUPPORTS_BLENDING"
+   ],
+   "gtk_calls": 61,
+   "introspection": true,
+   "lines": 1590,
+   "module": "watermark",
+   "params": {
+    "annotated": {
+     "DEFAULT": 10,
+     "DESCRIPTION": 6,
+     "MAX": 5,
+     "MIN": 5
+    },
+    "fields": 13
+   },
+   "raster_mask": false,
+   "scale_aware": true,
+   "version": 7,
+   "widgets_by_hand": 13,
+   "widgets_from_params": 8
+  },
+  {
+   "ai": false,
+   "api": {
+    "compute": [
+     "process",
+     "process_cl",
+     "commit_params",
+     "init_pipe",
+     "cleanup_pipe"
+    ],
+    "format": [
+     "default_colorspace"
+    ],
+    "geometry": [],
+    "gui": [
+     "gui_init",
+     "gui_update",
+     "gui_cleanup"
+    ],
+    "params": []
+   },
+   "details_mask": false,
+   "flags": [
+    "ALLOW_TILING",
+    "DEPRECATED",
+    "INCLUDE_IN_STYLES",
+    "PREVIEW_NON_OPENCL",
+    "SUPPORTS_BLENDING"
+   ],
+   "gtk_calls": 20,
+   "introspection": true,
+   "lines": 816,
+   "module": "zonesystem",
+   "params": {
+    "annotated": {
+     "DEFAULT": 2
+    },
+    "fields": 2
+   },
+   "raster_mask": false,
+   "scale_aware": true,
+   "version": 1,
+   "widgets_by_hand": 2,
+   "widgets_from_params": 0
+  }
+ ]
+}

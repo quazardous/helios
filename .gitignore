@@ -1,0 +1,4 @@
+# local agent / tooling config
+.mcp.json
+.aiball*
+CLAUDE.todo
