@@ -1,8 +1,8 @@
 # GUI design notes
 
-Status: **draft, not decided** (2026-10-11), from the review of the
-mockups. The toolkit is not chosen yet (ROADMAP section 2.1: portable, GPU
-accelerated on Linux, Windows and macOS, close to Vulkan). Research behind
+Status: **draft** (2026-10-11), from the review of the mockups. The toolkit
+is egui on wgpu (decided 2026-10-11, ROADMAP section 2.1; the comparison
+with iced is in [gui-prototype.md](gui-prototype.md)). Research behind
 these notes: [ux-research.md](ux-research.md).
 
 ## Panels
