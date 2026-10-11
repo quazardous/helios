@@ -23,6 +23,16 @@ pub enum Error {
     Contract { module: String, reason: String },
     /// A module failed while preparing or processing.
     Module { module: String, reason: String },
+    /// A failure injected on purpose (testing the error paths). Transient:
+    /// never cached, so asking again computes again.
+    Fault { node: String, what: String },
+}
+
+impl Error {
+    /// Whether asking again may give another answer: such errors are not cached.
+    pub fn is_transient(&self) -> bool {
+        matches!(self, Error::Fault { .. })
+    }
 }
 
 impl fmt::Display for Error {
@@ -45,6 +55,7 @@ impl fmt::Display for Error {
                 write!(f, "{module} broke its contract: {reason}")
             }
             Error::Module { module, reason } => write!(f, "{module}: {reason}"),
+            Error::Fault { node, what } => write!(f, "{node}: injected fault ({what})"),
         }
     }
 }

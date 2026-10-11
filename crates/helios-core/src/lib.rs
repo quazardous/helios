@@ -28,7 +28,7 @@ pub mod status;
 
 pub use bus::{Bus, Envelope, Event};
 pub use describe::Describe;
-pub use engine::{Counters, Engine};
+pub use engine::{Counters, Engine, FaultKind};
 pub use error::Error;
 pub use graph::{Graph, LayoutHint, NodeId};
 pub use image::{ContentHash, Image, Region};

@@ -27,6 +27,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use helios_core::{Bus, Describe, Envelope, Scheduler};
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -159,15 +160,28 @@ impl Inspector {
 /// background for the life of the process.
 #[cfg(unix)]
 pub fn serve(inspector: Inspector, path: &Path) -> io::Result<PathBuf> {
+    serve_lines(path, move |request: Request| inspector.answer(&request))
+}
+
+/// Serves JSON lines on a Unix socket at `path`: each line is parsed as an
+/// `R` and answered by `handler`; a line that does not parse is answered
+/// with the reason. Shared by the inspect and control endpoints.
+#[cfg(unix)]
+pub fn serve_lines<R, H>(path: &Path, handler: H) -> io::Result<PathBuf>
+where
+    R: DeserializeOwned,
+    H: Fn(R) -> Value + Send + Sync + 'static,
+{
     use std::os::unix::net::UnixListener;
 
     if path.exists() {
         std::fs::remove_file(path)?;
     }
     let listener = UnixListener::bind(path)?;
+    let handler = Arc::new(handler);
     thread::spawn(move || {
         for stream in listener.incoming().flatten() {
-            let inspector = inspector.clone();
+            let handler = handler.clone();
             thread::spawn(move || {
                 let reader = BufReader::new(match stream.try_clone() {
                     Ok(s) => s,
@@ -179,8 +193,8 @@ pub fn serve(inspector: Inspector, path: &Path) -> io::Result<PathBuf> {
                     if line.trim().is_empty() {
                         continue;
                     }
-                    let response = match serde_json::from_str::<Request>(&line) {
-                        Ok(request) => inspector.answer(&request),
+                    let response = match serde_json::from_str::<R>(&line) {
+                        Ok(request) => handler(request),
                         Err(e) => json!({ "ok": false, "error": format!("bad request: {e}") }),
                     };
                     if writeln!(writer, "{response}").is_err() {
@@ -195,7 +209,7 @@ pub fn serve(inspector: Inspector, path: &Path) -> io::Result<PathBuf> {
 
 /// Sends one request to the endpoint at `path` and reads the response.
 #[cfg(unix)]
-pub fn request(path: &Path, request: &Request) -> io::Result<Value> {
+pub fn request<R: Serialize>(path: &Path, request: &R) -> io::Result<Value> {
     use std::os::unix::net::UnixStream;
 
     let mut stream = UnixStream::connect(path)?;
@@ -207,4 +221,41 @@ pub fn request(path: &Path, request: &Request) -> io::Result<Value> {
     let mut line = String::new();
     BufReader::new(stream).read_line(&mut line)?;
     serde_json::from_str(&line).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+}
+
+/// The debug control endpoint's requests: actions on a running node. A node
+/// serves them only in debug builds and when asked to (see `helios-node`);
+/// the inspect endpoint stays read-only.
+pub mod control {
+    use helios_core::{FaultKind, Region, Value};
+    use serde::{Deserialize, Serialize};
+
+    #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+    #[serde(tag = "cmd", rename_all = "snake_case")]
+    pub enum ControlRequest {
+        /// Renders a node's output over a region, as a scheduler job.
+        Render {
+            node: String,
+            port: String,
+            region: Region,
+        },
+        /// Changes one parameter of a module node.
+        SetParam {
+            node: String,
+            param: String,
+            value: Value,
+        },
+        /// Cancels a job.
+        Cancel {
+            job: u64,
+        },
+        /// Stops starting jobs; running ones finish.
+        Pause,
+        Resume,
+        /// Makes the next computation or source read of a node fail once.
+        Fault {
+            node: String,
+            kind: FaultKind,
+        },
+    }
 }

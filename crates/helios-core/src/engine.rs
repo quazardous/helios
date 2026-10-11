@@ -57,6 +57,16 @@ impl Event for StepComputed {
     const KIND: &'static str = "engine.step_computed";
 }
 
+/// Where an injected fault strikes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FaultKind {
+    /// The next computation of a module node fails.
+    Compute,
+    /// The next read of a source node fails.
+    SourceRead,
+}
+
 /// What the engine did, since it was created.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct Counters {
@@ -178,6 +188,8 @@ pub struct Engine {
     source_reads: AtomicU64,
     /// What each node did, per graph and region.
     tracks: Mutex<HashMap<TrackKey, Track>>,
+    /// Faults injected and not yet hit: (graph, node, kind).
+    faults: Mutex<Vec<(u64, NodeId, FaultKind)>>,
 }
 
 type TrackKey = (u64, NodeId, Region);
@@ -208,6 +220,7 @@ impl Engine {
             computed: AtomicU64::new(0),
             source_reads: AtomicU64::new(0),
             tracks: Mutex::new(HashMap::new()),
+            faults: Mutex::new(Vec::new()),
         }
     }
 
@@ -434,13 +447,54 @@ impl Engine {
                 .expect("engine cache lock")
                 .settle(step.key, self.budget);
         }
+        if outputs.as_ref().is_err_and(Error::is_transient) {
+            // A transient failure is not an answer: forget it, so asking
+            // again computes again.
+            let mut cache = self.cache.lock().expect("engine cache lock");
+            if cache
+                .entries
+                .get(&step.key)
+                .is_some_and(|e| Arc::ptr_eq(&e.cell, &cell))
+            {
+                cache.entries.remove(&step.key);
+            }
+        }
         outputs
+    }
+
+    /// Makes the next computation (or source read) of a node fail once, to
+    /// exercise error paths on demand. Consumed by the first step it hits.
+    pub fn inject_fault(&self, graph: &Graph, node: NodeId, kind: FaultKind) {
+        self.faults
+            .lock()
+            .expect("engine faults lock")
+            .push((graph.id(), node, kind));
+    }
+
+    fn take_fault(&self, step: &Step, kind: FaultKind) -> bool {
+        let mut faults = self.faults.lock().expect("engine faults lock");
+        match faults
+            .iter()
+            .position(|f| *f == (step.graph, step.node, kind))
+        {
+            Some(i) => {
+                faults.remove(i);
+                true
+            }
+            None => false,
+        }
     }
 
     fn compute(&self, step: &Step, cause: u64) -> Outputs {
         match &step.work {
             Work::Source(image) => {
                 self.source_reads.fetch_add(1, Ordering::SeqCst);
+                if self.take_fault(step, FaultKind::SourceRead) {
+                    return Err(Error::Fault {
+                        node: step.name.clone(),
+                        what: "source read".into(),
+                    });
+                }
                 Ok(Arc::new(vec![image.sample(step.region)]))
             }
             Work::Module {
@@ -451,6 +505,12 @@ impl Engine {
                 let mut held = Vec::with_capacity(inputs.len());
                 for (input, port) in inputs {
                     held.push((self.execute(input, cause)?, *port));
+                }
+                if self.take_fault(step, FaultKind::Compute) {
+                    return Err(Error::Fault {
+                        node: step.name.clone(),
+                        what: "computation".into(),
+                    });
                 }
                 let images: Vec<&Image> =
                     held.iter().map(|(outputs, port)| &outputs[*port]).collect();

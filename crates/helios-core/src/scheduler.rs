@@ -146,6 +146,16 @@ pub struct Idle {
     pub cancelled: u64,
 }
 
+/// The scheduler was paused or resumed.
+#[derive(Serialize)]
+pub struct Paused {
+    pub paused: bool,
+}
+
+impl Event for Paused {
+    const KIND: &'static str = "scheduler.paused";
+}
+
 impl Event for Idle {
     const KIND: &'static str = "scheduler.idle";
 }
@@ -185,6 +195,8 @@ struct State {
     failed: u64,
     cancelled: u64,
     shutdown: bool,
+    /// No job starts while paused; running jobs finish.
+    paused: bool,
 }
 
 impl State {
@@ -203,6 +215,9 @@ impl State {
     /// The queued job to start now: the highest priority among those whose
     /// needs are all available, the oldest first.
     fn next_runnable(&self) -> Option<usize> {
+        if self.paused {
+            return None;
+        }
         let mut best: Option<usize> = None;
         for (i, p) in self.queue.iter().enumerate() {
             let better =
@@ -423,6 +438,28 @@ impl Scheduler {
         false
     }
 
+    /// Stops starting jobs (running ones finish); queued jobs wait for `resume`.
+    pub fn pause(&self) {
+        let mut state = self.shared.state.lock().expect("scheduler lock");
+        if !state.paused {
+            state.paused = true;
+            self.shared
+                .bus
+                .publish(SOURCE, None, &Paused { paused: true });
+        }
+    }
+
+    pub fn resume(&self) {
+        let mut state = self.shared.state.lock().expect("scheduler lock");
+        if state.paused {
+            state.paused = false;
+            self.shared
+                .bus
+                .publish(SOURCE, None, &Paused { paused: false });
+            self.shared.changed.notify_all();
+        }
+    }
+
     pub fn is_idle(&self) -> bool {
         self.shared.state.lock().expect("scheduler lock").idle()
     }
@@ -532,6 +569,7 @@ impl Describe for Scheduler {
             .collect();
         serde_json::json!({
             "idle": state.idle(),
+            "paused": state.paused,
             "workers": self.workers.len(),
             "queued": waiting,
             "running": state.running.values().map(|(info, _)| info).collect::<Vec<_>>(),

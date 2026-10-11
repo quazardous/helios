@@ -56,7 +56,9 @@ A Cargo workspace (Rust):
   origin.
 - `crates/helios-node`: `helios-node`, a headless node that loads a network
   from a JSON description, renders it and serves inspection; and `helios`,
-  the command line (`helios inspect state`, `events`, `wait-event`...).
+  the command line (`helios inspect state`, `events`, `wait-event`,
+  `wait-idle`; in debug builds `helios control render`, `set-param`,
+  `pause`, `fault`...).
 - `modules/exposure`: darktable's exposure module (manual mode), ported.
 
 Build and test with `cargo test --workspace`.
