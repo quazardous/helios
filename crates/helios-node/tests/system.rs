@@ -480,7 +480,7 @@ fn a_raw_goes_through_the_pipe_to_a_file() {
         eprintln!("skipped: no test images in {}", images.display());
         return;
     }
-    // rawprepare and demosaic read the camera's levels and pattern from the
+    // The modules read the camera's levels, balance and pattern from the
     // context the raw source gives them: nothing is passed by hand.
     let region = r#"{ "x": 0, "y": 0, "width": 256, "height": 128 }"#;
     let network = format!(
@@ -488,12 +488,16 @@ fn a_raw_goes_through_the_pipe_to_a_file() {
       "sources": [{{ "name": "raw", "file": {raw:?} }}],
       "modules": [
         {{ "name": "prep", "module": "rawprepare" }},
+        {{ "name": "wb", "module": "whitebalance" }},
+        {{ "name": "hl", "module": "highlights" }},
         {{ "name": "demosaic", "module": "demosaic" }},
         {{ "name": "exp", "module": "exposure", "params": {{ "exposure": {{ "float": 1.0 }} }} }}
       ],
       "connections": [
         {{ "from": "raw", "port": "image", "to": "prep", "input": "input" }},
-        {{ "from": "prep", "port": "output", "to": "demosaic", "input": "input" }},
+        {{ "from": "prep", "port": "output", "to": "wb", "input": "input" }},
+        {{ "from": "wb", "port": "output", "to": "hl", "input": "input" }},
+        {{ "from": "hl", "port": "output", "to": "demosaic", "input": "input" }},
         {{ "from": "demosaic", "port": "output", "to": "exp", "input": "input" }}
       ],
       "exports": [{{ "node": "exp", "region": {region}, "path": "out.png" }}]

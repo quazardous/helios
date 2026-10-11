@@ -86,6 +86,9 @@ A Cargo workspace (Rust):
 - `modules/exposure`: darktable's exposure module (manual mode), ported.
 - `modules/rawprepare`: darktable's rawprepare (black level and scale from
   the camera's description), ported.
+- `modules/whitebalance`: darktable's white balance (as shot or user
+  coefficients, on the mosaic), ported.
+- `modules/highlights`: darktable's highlights, clip mode, ported.
 - `modules/demosaic`: mosaic to camera RGB, bilinear for Bayer and X-Trans.
 
 Build and test with `cargo test --workspace`.

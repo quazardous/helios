@@ -16,6 +16,8 @@ helios-testkit.workspace = true
 helios-module-exposure = { path = "../../modules/exposure" }
 helios-module-rawprepare = { path = "../../modules/rawprepare" }
 helios-module-demosaic = { path = "../../modules/demosaic" }
+helios-module-whitebalance = { path = "../../modules/whitebalance" }
+helios-module-highlights = { path = "../../modules/highlights" }
 serde.workspace = true
 serde_json.workspace = true
 

@@ -485,7 +485,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "helios-module-highlights"
+version = "0.0.1"
+dependencies = [
+ "helios-core",
+ "helios-photo",
+ "helios-testkit",
+]
+
+[[package]]
 name = "helios-module-rawprepare"
+version = "0.0.1"
+dependencies = [
+ "helios-core",
+ "helios-photo",
+ "helios-testkit",
+]
+
+[[package]]
+name = "helios-module-whitebalance"
 version = "0.0.1"
 dependencies = [
  "helios-core",
@@ -504,7 +522,9 @@ dependencies = [
  "helios-load",
  "helios-module-demosaic",
  "helios-module-exposure",
+ "helios-module-highlights",
  "helios-module-rawprepare",
+ "helios-module-whitebalance",
  "helios-testkit",
  "image",
  "serde",

@@ -125,6 +125,14 @@ pub fn registry() -> BTreeMap<&'static str, ModuleRef> {
             "rawprepare",
             ModuleRef::new(helios_module_rawprepare::RawPrepare),
         ),
+        (
+            "whitebalance",
+            ModuleRef::new(helios_module_whitebalance::WhiteBalance),
+        ),
+        (
+            "highlights",
+            ModuleRef::new(helios_module_highlights::Highlights),
+        ),
         ("demosaic", ModuleRef::new(helios_module_demosaic::Demosaic)),
         ("exposure", ModuleRef::new(helios_module_exposure::Exposure)),
     ])
