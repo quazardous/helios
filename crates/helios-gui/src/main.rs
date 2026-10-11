@@ -218,6 +218,9 @@ fn main() -> Result<(), String> {
         .or_else(|| std::env::current_dir().ok())
         .and_then(|p| p.canonicalize().ok())
         .ok_or("no workspace directory")?;
+    if let Err(e) = helios_gui::shell::remember_workspace(&workspace) {
+        eprintln!("helios-gui: cannot remember the workspace: {e}");
+    }
     let file = layout_file(&workspace);
     let mut shell = Shell::new(helios_panels(), load(file.as_deref()));
     let name = workspace.file_name().map_or_else(

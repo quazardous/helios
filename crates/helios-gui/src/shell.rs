@@ -53,6 +53,11 @@ enum Action {
     MoveTo(String, Area),
     Zoom(Zoom),
     Copy(String),
+    SystemMenu,
+    RunCommand(String),
+    About,
+    Keybindings,
+    OpenWorkspace(Option<PathBuf>),
     Answer(crate::dialogs::Answer, Origin),
     AssumeYes(bool),
     Dock(String),
@@ -154,7 +159,11 @@ pub struct Shell {
     /// Confirmations are answered yes by policy (a script's `--yes`).
     assume_yes: bool,
     /// An open menu: where, its entries, the selected one.
-    menu: Option<(egui::Pos2, Vec<crate::dialogs::MenuItem>, usize)>,
+    menu: Option<(egui::Pos2, MenuSource, usize)>,
+    /// The menus contributed so far, by id (`system`).
+    pub menus: helios_shell::menus::Menus,
+    /// The theme in use, by name.
+    theme_name: String,
     /// Every notice so far; the status bar shows the last, toasts the
     /// recent warnings and errors.
     notices: Vec<crate::dialogs::Notice>,
@@ -214,6 +223,8 @@ impl Shell {
             dialog_view: Arc::default(),
             assume_yes: false,
             menu: None,
+            menus: helios_shell::menus::Menus::new(),
+            theme_name: helios_theme::BASE.into(),
             notices: Vec::new(),
             dismissed: Vec::new(),
             now: 0.0,
@@ -224,6 +235,7 @@ impl Shell {
             .map(|(area, node)| (*area, to_dock(node)))
             .collect();
         shell.declare_commands();
+        shell.declare_menus();
         helios_values::register(&mut shell.registry, shell.values.clone())
             .expect("param commands are declared once");
         {
@@ -360,6 +372,7 @@ impl Shell {
     /// Switches to a theme, with the user's overrides; problems (an
     /// unknown base, a wrong token) fall back and are noted, never fatal.
     pub fn set_theme(&mut self, name: &str, overrides: BTreeMap<String, serde_json::Value>) {
+        self.theme_name = name.into();
         self.theme_overrides = overrides;
         self.theme = self.themes.resolve(name, &self.theme_overrides);
         self.theme_pending = true;
@@ -582,6 +595,46 @@ impl Shell {
             Box::new(|a| {
                 Ok(Action::AssumeYes(
                     a.get("on").and_then(Value::as_bool).unwrap_or(true),
+                ))
+            }),
+        );
+        add(
+            CommandSpec::new("workbench.systemMenu", "Show the Helios menu", "Window"),
+            Box::new(|_| Ok(Action::SystemMenu)),
+        );
+        add(
+            CommandSpec::new("workbench.run", "Run a command by id (`command`)", "Window"),
+            Box::new(|a| {
+                a.get("command")
+                    .and_then(Value::as_str)
+                    .map(|c| Action::RunCommand(c.into()))
+                    .ok_or_else(|| "`command` is missing".to_string())
+            }),
+        );
+        add(
+            CommandSpec::new("workbench.about", "About Helios", "Help"),
+            Box::new(|_| Ok(Action::About)),
+        );
+        add(
+            CommandSpec::new("workbench.keybindings", "Keyboard shortcuts", "Preferences"),
+            Box::new(|_| Ok(Action::Keybindings)),
+        );
+        add(
+            CommandSpec::new("workbench.quit", "Quit Helios", "Window"),
+            Box::new(|_| Ok(Action::Close)),
+        );
+        add(
+            CommandSpec::new(
+                "workspace.open",
+                "Open a workspace in a new window (`path`)",
+                "Workspace",
+            ),
+            Box::new(|a| {
+                Ok(Action::OpenWorkspace(
+                    a.get("path")
+                        .and_then(Value::as_str)
+                        .filter(|p| !p.is_empty())
+                        .map(PathBuf::from),
                 ))
             }),
         );
@@ -912,6 +965,7 @@ impl Shell {
             }),
         );
         for (keys, command) in [
+            ("alt+space", "workbench.systemMenu"),
             ("ctrl+shift+p", "workbench.palette"),
             ("f1", "workbench.palette"),
             ("f11", "workbench.fullscreen"),
@@ -938,7 +992,11 @@ impl Shell {
     fn context(&self, ctx: &Egui) -> Context {
         let mut cx = Context::new()
             .flag("textInputFocus", ctx.egui_wants_keyboard_input())
-            .flag("paletteVisible", self.palette.is_some());
+            .flag("paletteVisible", self.palette.is_some())
+            .flag(
+                "fullScreen",
+                ctx.input(|i| i.viewport().fullscreen.unwrap_or(false)),
+            );
         if let Some(p) = &self.focused {
             cx.set("focusedPanel", p);
         }
@@ -1040,7 +1098,193 @@ impl Shell {
 
     /// Opens a menu of commands at a position.
     pub fn open_menu(&mut self, at: egui::Pos2, items: Vec<crate::dialogs::MenuItem>) {
-        self.menu = Some((at, items, 0));
+        self.menu = Some((at, MenuSource::Items(items), 0));
+    }
+
+    /// Opens a declared menu (see `helios_shell::menus`) at a position.
+    pub fn open_declared_menu(&mut self, at: egui::Pos2, menu: &str) {
+        self.menu = Some((at, MenuSource::Declared(menu.into()), 0));
+    }
+
+    /// A declared menu as data, as it would open now: each entry's
+    /// command, title, keys, whether it applies and whether it is ticked;
+    /// submenus nested.
+    pub fn menu_items(&self, menu: &str) -> Value {
+        fn rows(list: &[crate::dialogs::Row]) -> Value {
+            use crate::dialogs::Row;
+            Value::Array(
+                list.iter()
+                    .map(|r| match r {
+                        Row::Separator => json!({ "kind": "separator" }),
+                        Row::Submenu(label, sub) => {
+                            json!({ "kind": "submenu", "label": label, "items": rows(sub) })
+                        }
+                        Row::Entry(e) => json!({
+                            "kind": "command",
+                            "id": e.id,
+                            "args": e.args,
+                            "title": e.title,
+                            "keys": e.keys,
+                            "enabled": e.disabled.is_none(),
+                            "checked": e.checked,
+                        }),
+                    })
+                    .collect(),
+            )
+        }
+        rows(&self.declared_rows(menu))
+    }
+
+    /// A declared menu's rows in the current context.
+    fn declared_rows(&self, menu: &str) -> Vec<crate::dialogs::Row> {
+        use crate::dialogs::{Entry, Row};
+        use helios_shell::menus::{Item, Shown};
+        let mut rows = Vec::new();
+        for shown in self.menus.show(menu, &self.cx) {
+            match shown {
+                Shown::Separator => rows.push(Row::Separator),
+                Shown::Item {
+                    item: Item::Command { id, args },
+                    enabled,
+                    checked,
+                } => {
+                    let Some(spec) = self.registry.spec(&id) else {
+                        continue;
+                    };
+                    rows.push(Row::Entry(Entry {
+                        title: menu_title(&spec.title),
+                        keys: self.keymap.keys_for(&id).first().map(|k| k.to_string()),
+                        disabled: (!enabled).then(|| format!("Not available here ({})", spec.when)),
+                        checked,
+                        id,
+                        args,
+                    }));
+                }
+                Shown::Item {
+                    item: Item::Submenu { menu, label },
+                    ..
+                } => rows.push(Row::Submenu(label, self.declared_rows(&menu))),
+                Shown::Item {
+                    item: Item::List { name },
+                    ..
+                } => rows.extend(self.list_rows(&name)),
+            }
+        }
+        rows
+    }
+
+    /// The entries of a list the shell fills when a menu opens.
+    fn list_rows(&self, name: &str) -> Vec<crate::dialogs::Row> {
+        use crate::dialogs::{Entry, Row};
+        let entry = |id: &str, args: Value, title: String, checked: bool| {
+            Row::Entry(Entry {
+                id: id.into(),
+                args,
+                title,
+                keys: None,
+                disabled: None,
+                checked,
+            })
+        };
+        match name {
+            "themes" => self
+                .themes
+                .names()
+                .into_iter()
+                .map(|t| {
+                    entry(
+                        "theme.select",
+                        json!({ "name": t }),
+                        t.to_string(),
+                        t == self.theme_name,
+                    )
+                })
+                .collect(),
+            "profiles" => {
+                let mut names: Vec<String> = std::fs::read_dir(&self.profiles_dir)
+                    .into_iter()
+                    .flatten()
+                    .flatten()
+                    .filter_map(|e| {
+                        e.file_name()
+                            .to_str()?
+                            .strip_suffix(".helios-profile")
+                            .map(String::from)
+                    })
+                    .collect();
+                if !names.contains(&"default".to_string()) {
+                    names.push("default".into());
+                }
+                names.sort();
+                names
+                    .into_iter()
+                    .map(|n| {
+                        let checked = n == self.profile_name;
+                        entry("profile.use", json!({ "name": n }), n, checked)
+                    })
+                    .collect()
+            }
+            "recent" => {
+                let recent = recent_workspaces();
+                if recent.is_empty() {
+                    return vec![Row::Entry(Entry {
+                        id: "workspace.open".into(),
+                        args: Value::Null,
+                        title: "No recent workspace".into(),
+                        keys: None,
+                        disabled: Some("Nothing opened yet".into()),
+                        checked: false,
+                    })];
+                }
+                recent
+                    .into_iter()
+                    .map(|p| {
+                        entry(
+                            "workspace.open",
+                            json!({ "path": p }),
+                            p.display().to_string(),
+                            false,
+                        )
+                    })
+                    .collect()
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    /// The menus Helios itself contributes.
+    fn declare_menus(&mut self) {
+        use helios_shell::menus::MenuItem as M;
+        for item in [
+            M::command("system", "1_workspace", 0, "workspace.open"),
+            M::submenu(
+                "system",
+                "1_workspace",
+                1,
+                "system.recent",
+                "Recent workspaces",
+            ),
+            M::submenu("system", "2_preferences", 0, "system.profiles", "Profiles"),
+            M::submenu("system", "2_preferences", 1, "system.themes", "Themes"),
+            M::command("system", "2_preferences", 2, "workbench.keybindings"),
+            M::submenu("system", "3_window", 0, "system.window", "Window"),
+            M::command("system", "4_about", 0, "workbench.about"),
+            M::command("system", "9_quit", 0, "workbench.quit"),
+            M::list("system.recent", "1", 0, "recent"),
+            M::list("system.profiles", "1", 0, "profiles"),
+            M::command("system.profiles", "2", 0, "profile.export"),
+            M::command("system.profiles", "2", 1, "profile.import"),
+            M::list("system.themes", "1", 0, "themes"),
+            M::command("system.themes", "2", 0, "theme.export"),
+            M::command("system.window", "1", 0, "window.minimize"),
+            M::command("system.window", "1", 1, "window.maximize"),
+            M::command("system.window", "1", 2, "workbench.fullscreen").checked("fullScreen"),
+            M::command("system.window", "2", 0, "window.close"),
+        ] {
+            self.menus
+                .contribute(item)
+                .expect("the shell's menus parse");
+        }
     }
 
     /// The notices so far, oldest first.
@@ -1093,9 +1337,10 @@ impl Shell {
                     Some(Row::Entry(Entry {
                         id: id.clone(),
                         args: args.clone(),
-                        title: spec.title.clone(),
+                        title: menu_title(&spec.title),
                         keys: self.keymap.keys_for(id).first().map(|k| k.to_string()),
                         disabled: (!applies).then(|| format!("Not available here ({})", spec.when)),
+                        checked: false,
                     }))
                 }
             })
@@ -1121,14 +1366,17 @@ impl Shell {
             if let Some(a) = answer {
                 self.answer(a, Origin::User);
             }
-        } else if let Some((at, items, mut selected)) = self.menu.take() {
-            let rows = self.menu_rows(&items);
+        } else if let Some((at, source, mut selected)) = self.menu.take() {
+            let rows = match &source {
+                MenuSource::Items(items) => self.menu_rows(items),
+                MenuSource::Declared(id) => self.declared_rows(id),
+            };
             match crate::dialogs::menu_ui(ctx, at, &rows, &mut selected) {
                 Some(Some((id, args))) => {
                     let _ = self.run(&id, args, Origin::User);
                 }
                 Some(None) => {}
-                None => self.menu = Some((at, items, selected)),
+                None => self.menu = Some((at, source, selected)),
             }
         }
         if let Some(command) =
@@ -1341,6 +1589,84 @@ impl Shell {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!on));
             }
             Action::Close => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+            Action::SystemMenu => {
+                let at = self
+                    .rects
+                    .get("helios.logo")
+                    .map_or(egui::pos2(8.0, crate::frame::TITLE_HEIGHT), |r| {
+                        r.left_bottom()
+                    });
+                self.open_declared_menu(at, "system");
+            }
+            Action::RunCommand(id) => {
+                let _ = self.run(&id, Value::Null, Origin::User);
+            }
+            Action::About => self.open(crate::dialogs::Dialog::Info(crate::dialogs::Info {
+                title: format!("Helios {}", env!("CARGO_PKG_VERSION")),
+                lines: vec![
+                    "A node-based photo developer.".into(),
+                    "Free software under the GNU General Public License, version 3 or later."
+                        .into(),
+                    "Source: https://github.com/quazardous/helios".into(),
+                ],
+            })),
+            Action::Keybindings => {
+                let mut choices: Vec<crate::dialogs::Choice> = self
+                    .registry
+                    .available(&self.cx)
+                    .into_iter()
+                    .filter_map(|spec| {
+                        // Every key bound to it.
+                        let keys: Vec<String> = self
+                            .keymap
+                            .keys_for(&spec.id)
+                            .iter()
+                            .map(|k| k.to_string())
+                            .collect();
+                        if keys.is_empty() {
+                            return None;
+                        }
+                        let keys = keys.join(" · ");
+                        Some(crate::dialogs::Choice {
+                            value: spec.id.clone(),
+                            label: format!("{}: {}", spec.category, spec.title),
+                            detail: Some(keys),
+                        })
+                    })
+                    .collect();
+                choices.sort_by(|a, b| a.label.cmp(&b.label));
+                self.pick(crate::dialogs::Picker {
+                    title: "Keyboard shortcuts".into(),
+                    choices,
+                    command: "workbench.run".into(),
+                    arg: "command".into(),
+                });
+            }
+            Action::OpenWorkspace(None) => self.form(crate::dialogs::Form {
+                title: "Open a workspace".into(),
+                fields: vec![crate::dialogs::Field {
+                    key: "path".into(),
+                    descriptor: helios_values::Descriptor::text("directory", ""),
+                    value: helios_core::Value::Text(String::new()),
+                }],
+                verb: "Open".into(),
+                command: "workspace.open".into(),
+            }),
+            Action::OpenWorkspace(Some(path)) => {
+                // One window per workspace: another process opens it.
+                let opened = std::env::current_exe()
+                    .map_err(|e| e.to_string())
+                    .and_then(|exe| {
+                        std::process::Command::new(exe)
+                            .arg(&path)
+                            .spawn()
+                            .map_err(|e| e.to_string())
+                    });
+                match opened {
+                    Ok(_) => self.note(format!("opening {}", path.display())),
+                    Err(e) => self.warn(format!("cannot open {}: {e}", path.display())),
+                }
+            }
             Action::Theme(name) => {
                 let overrides = self.theme_overrides.clone();
                 self.set_theme(&name, overrides);
@@ -1682,6 +2008,10 @@ impl Shell {
             Some(crate::frame::Request::Minimize) => "window.minimize",
             Some(crate::frame::Request::ToggleMaximize) => "window.maximize",
             Some(crate::frame::Request::Close) => "window.close",
+            Some(crate::frame::Request::SystemMenu(at)) => {
+                self.open_declared_menu(at, "system");
+                return;
+            }
             None => return,
         };
         let _ = self.run(command, Value::Null, Origin::User);
@@ -1792,7 +2122,7 @@ impl Shell {
                             vctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!on));
                         }
                         Some(crate::frame::Request::Close) => back.push(panel.clone()),
-                        None => {}
+                        Some(crate::frame::Request::SystemMenu(_)) | None => {}
                     }
                 }
                 egui::CentralPanel::default().show(ui, |ui| {
@@ -1910,6 +2240,50 @@ fn default_path(target: &str, extension: &str) -> PathBuf {
         .collect();
     home.join("Pictures/Helios")
         .join(format!("{name}-{secs}.{extension}"))
+}
+
+/// A command's title as a menu shows it: without the hint of its
+/// arguments (`Open a workspace (`path`)`), which the palette keeps.
+fn menu_title(title: &str) -> String {
+    match title.rfind(" (`") {
+        Some(i) if title.ends_with(')') => title[..i].to_string(),
+        _ => title.to_string(),
+    }
+}
+
+/// What a menu shows: items given by the caller, or a declared menu.
+enum MenuSource {
+    Items(Vec<crate::dialogs::MenuItem>),
+    Declared(String),
+}
+
+fn recent_file() -> PathBuf {
+    config_dir().join("recent-workspaces.json")
+}
+
+/// The workspaces opened last, the most recent first.
+pub fn recent_workspaces() -> Vec<PathBuf> {
+    std::fs::read_to_string(recent_file())
+        .ok()
+        .and_then(|t| serde_json::from_str::<Vec<PathBuf>>(&t).ok())
+        .unwrap_or_default()
+}
+
+/// Puts a workspace first among the recent ones (ten are kept).
+pub fn remember_workspace(path: &std::path::Path) -> Result<(), String> {
+    let mut list = recent_workspaces();
+    list.retain(|p| p != path);
+    list.insert(0, path.to_path_buf());
+    list.truncate(10);
+    let file = recent_file();
+    if let Some(dir) = file.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    std::fs::write(
+        &file,
+        serde_json::to_string_pretty(&list).expect("paths serialize"),
+    )
+    .map_err(|e| format!("{}: {e}", file.display()))
 }
 
 /// The user's configuration directory for Helios.

@@ -235,6 +235,16 @@ so an agent sees and answers what a human would, its origin recorded.
 - **Window**: auxiliary windows share the frame Helios draws (title bar
   and buttons), titled "`<panel>` — Helios".
 
+**Menus are declared** (`helios_shell::menus`): a menu is an id to which
+the shell, a panel or a plugin contributes items, each a command (with
+arguments), a submenu, or a list the shell fills when the menu opens
+(themes, profiles, recent workspaces). Items sit in ordered groups,
+separated when shown; a `when` clause hides or greys an item, a `checked`
+clause ticks it. `Shell::menu_items(id)` gives a menu as data, as it would
+open now. The logo at the top left opens the `system` menu (Alt+Space
+too): open a workspace, recent workspaces, profiles, themes, keyboard
+shortcuts, the window, about, quit.
+
 The pictures are written by `HELIOS_DOC_PICTURES=docs/gui cargo test -p
 helios-gui --test dialogs pictures`.
 

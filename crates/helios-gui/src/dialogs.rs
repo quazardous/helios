@@ -93,6 +93,13 @@ pub struct Picker {
     pub arg: String,
 }
 
+/// Information to read, closed by its one button ("About Helios").
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct Info {
+    pub title: String,
+    pub lines: Vec<String>,
+}
+
 /// A dialog the shell shows, one at a time, modal.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "lowercase")]
@@ -100,6 +107,7 @@ pub enum Dialog {
     Confirm(Confirm),
     Form(Form),
     Picker(Picker),
+    Info(Info),
 }
 
 /// A menu entry: a command, never anything else.
@@ -213,7 +221,7 @@ impl Open {
     /// without running anything.
     pub fn resolve(&self, answer: &Answer) -> Result<Option<(String, Json)>, String> {
         match (&self.dialog, answer) {
-            (_, Answer::Cancel) => Ok(None),
+            (_, Answer::Cancel) | (Dialog::Info(_), _) => Ok(None),
             (Dialog::Confirm(c), Answer::Primary) => Ok(Some((c.command.clone(), c.args.clone()))),
             (Dialog::Confirm(_), Answer::Values(_)) => {
                 Err("a confirmation takes primary or cancel".into())
@@ -397,6 +405,7 @@ pub(crate) fn dialog_ui(ctx: &egui::Context, look: &Look, open: &mut Open) -> Op
         Dialog::Confirm(c) => c.title.clone(),
         Dialog::Form(f) => f.title.clone(),
         Dialog::Picker(p) => p.title.clone(),
+        Dialog::Info(i) => i.title.clone(),
     };
     let modal = egui::Modal::new(Id::new("helios.dialog")).show(ctx, |ui| {
         ui.set_width(look.width);
@@ -419,6 +428,19 @@ pub(crate) fn dialog_ui(ctx: &egui::Context, look: &Look, open: &mut Open) -> Op
                         }
                     });
                 answer = footer(ui, look, &f.verb, false, "helios.dialog");
+            }
+            Dialog::Info(i) => {
+                for line in &i.lines {
+                    ui.label(line);
+                }
+                ui.add_space(look.pad * 0.5);
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    let close = footer_button(ui, look, "Close", Some(false));
+                    crate::name_rect(ui.ctx(), "helios.dialog.primary", close.rect);
+                    if close.clicked() {
+                        answer = Some(Answer::Cancel);
+                    }
+                });
             }
             Dialog::Picker(p) => {
                 let edit = ui.add(
@@ -515,6 +537,8 @@ pub(crate) struct Entry {
     pub keys: Option<String>,
     /// Why it does not apply here, if it does not.
     pub disabled: Option<String>,
+    /// Shown ticked (the theme in use).
+    pub checked: bool,
 }
 
 /// A menu resolved against the registry, the keymap and the context.
@@ -601,7 +625,28 @@ fn draw_rows(
                 ui.separator();
             }
             Row::Submenu(label, sub) => {
-                ui.menu_button(label, |ui| draw_rows(ui, sub, usize::MAX, &mut 0, picked));
+                ui.horizontal(|ui| {
+                    // Aligned with the entries (their tick's room), no
+                    // frame, an arrow on the right.
+                    // The tick's room, plus the padding a selectable label
+                    // has and a frameless button lacks.
+                    let pad = ui.spacing().button_padding.x;
+                    ui.allocate_exact_size(egui::vec2(14.0 + pad, 14.0), egui::Sense::hover());
+                    ui.style_mut().visuals.button_frame = false;
+                    let r = ui
+                        .menu_button(label, |ui| draw_rows(ui, sub, usize::MAX, &mut 0, picked))
+                        .response;
+                    let arrow = egui::pos2(ui.max_rect().right() - 8.0, r.rect.center().y);
+                    let ink = ui.visuals().weak_text_color();
+                    ui.painter().line_segment(
+                        [arrow + egui::vec2(-3.0, -4.0), arrow],
+                        egui::Stroke::new(1.5, ink),
+                    );
+                    ui.painter().line_segment(
+                        [arrow, arrow + egui::vec2(-3.0, 4.0)],
+                        egui::Stroke::new(1.5, ink),
+                    );
+                });
             }
             Row::Entry(e) => {
                 let enabled = e.disabled.is_none();
@@ -612,6 +657,21 @@ fn draw_rows(
                 let r = ui
                     .add_enabled_ui(enabled, |ui| {
                         ui.horizontal(|ui| {
+                            // A tick, painted (not every font has one).
+                            let (tick, _) = ui
+                                .allocate_exact_size(egui::vec2(14.0, 14.0), egui::Sense::hover());
+                            if e.checked {
+                                let c = tick.center();
+                                let stroke = egui::Stroke::new(1.5, ui.visuals().text_color());
+                                ui.painter().line_segment(
+                                    [c + egui::vec2(-4.0, 0.0), c + egui::vec2(-1.0, 3.0)],
+                                    stroke,
+                                );
+                                ui.painter().line_segment(
+                                    [c + egui::vec2(-1.0, 3.0), c + egui::vec2(4.5, -3.5)],
+                                    stroke,
+                                );
+                            }
                             let r = ui.selectable_label(is_selected, &e.title);
                             if let Some(keys) = &e.keys {
                                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {

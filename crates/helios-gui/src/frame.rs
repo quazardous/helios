@@ -78,11 +78,30 @@ fn button(ui: &mut Ui, kind: Button, maximized: bool) -> bool {
 }
 
 /// What the user asked of the window through its frame.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq)]
 pub enum Request {
     Minimize,
     ToggleMaximize,
     Close,
+    /// The logo was clicked: the system menu, opened at this point.
+    SystemMenu(egui::Pos2),
+}
+
+/// The logo, decoded once.
+fn logo(ctx: &egui::Context) -> egui::TextureHandle {
+    let id = egui::Id::new("helios.logo");
+    if let Some(t) = ctx.data(|d| d.get_temp::<egui::TextureHandle>(id)) {
+        return t;
+    }
+    let png = include_bytes!("../../../packaging/linux/icons/io.github.quazardous.Helios-64.png");
+    let rgba = image::load_from_memory(png)
+        .expect("the bundled logo decodes")
+        .into_rgba8();
+    let size = [rgba.width() as usize, rgba.height() as usize];
+    let picture = egui::ColorImage::from_rgba_unmultiplied(size, rgba.as_raw());
+    let t = ctx.load_texture("helios.logo", picture, egui::TextureOptions::LINEAR);
+    ctx.data_mut(|d| d.insert_temp(id, t.clone()));
+    t
 }
 
 /// Draws the title bar in `ui` (the top panel's); returns what was asked.
@@ -129,8 +148,20 @@ pub fn title_bar(ui: &mut Ui, title: &str) -> Option<Request> {
         Rect::from_center_size(bar.center(), vec2(bar.width() / 2.0, TITLE_HEIGHT)),
         label(title, false),
     );
+    // The logo opens the system menu (Alt+Space too).
+    let side = TITLE_HEIGHT - 8.0;
+    let at = Rect::from_min_size(pos2(bar.left() + 8.0, bar.top() + 4.0), vec2(side, side));
+    let logo = logo(&ctx);
+    let button = ui.put(
+        at,
+        egui::Button::image(egui::Image::new((logo.id(), vec2(side, side)))).frame(false),
+    );
+    crate::name_rect(&ctx, "helios.logo", button.rect);
+    if button.on_hover_text("Helios menu (Alt+Space)").clicked() {
+        request = Some(Request::SystemMenu(at.left_bottom()));
+    }
     ui.put(
-        Rect::from_min_size(pos2(bar.left() + 12.0, bar.top()), vec2(80.0, TITLE_HEIGHT)),
+        Rect::from_min_size(pos2(at.right() + 8.0, bar.top()), vec2(80.0, TITLE_HEIGHT)),
         label("Helios", true),
     );
     request

@@ -291,3 +291,61 @@ fn a_panel_found_where_it_may_not_be_goes_back_to_its_default_area() {
         ["`helios.viewport` cannot be in the primary side bar: moved to its default area"]
     );
 }
+
+#[test]
+fn menus_are_declared_grouped_and_follow_the_context() {
+    use helios_shell::menus::{Item, MenuItem, Menus, Shown};
+    let mut m = Menus::new();
+    m.contribute(MenuItem::command("system", "9_quit", 0, "window.close"))
+        .unwrap();
+    m.contribute(MenuItem::command("system", "1_open", 2, "workspace.recent"))
+        .unwrap();
+    m.contribute(MenuItem::command("system", "1_open", 1, "workspace.open"))
+        .unwrap();
+    m.contribute(
+        MenuItem::command("system", "1_open", 3, "palette.only").when("paletteVisible", false),
+    )
+    .unwrap();
+    m.contribute(
+        MenuItem::command("system", "5_view", 0, "workbench.fullscreen")
+            .when("paletteVisible", true)
+            .checked("fullScreen"),
+    )
+    .unwrap();
+    assert!(
+        m.contribute(MenuItem::command("system", "x", 0, "y").when("a &&", true))
+            .is_err()
+    );
+    let id = |s: &Shown| match s {
+        Shown::Item {
+            item: Item::Command { id, .. },
+            ..
+        } => id.clone(),
+        Shown::Separator => "-".into(),
+        _ => "?".into(),
+    };
+    let cx = Context::new().flag("fullScreen", true);
+    let shown = m.show("system", &cx);
+    let ids: Vec<String> = shown.iter().map(id).collect();
+    // The palette-only item is hidden; full screen greyed but ticked.
+    assert_eq!(
+        ids,
+        [
+            "workspace.open",
+            "workspace.recent",
+            "-",
+            "workbench.fullscreen",
+            "-",
+            "window.close"
+        ]
+    );
+    assert!(matches!(
+        shown[3],
+        Shown::Item {
+            enabled: false,
+            checked: true,
+            ..
+        }
+    ));
+    assert_eq!(m.ids(), ["system"]);
+}
