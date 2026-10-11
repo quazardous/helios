@@ -8,6 +8,8 @@ src="$(cd "$1" && pwd)"
 build="$(cd "$2" && pwd)"
 here="$(cd "$(dirname "$0")" && pwd)"
 bin="$(mktemp -d)/dt_legacy_oracle"
+# pkg-config's flags are split into words on purpose.
+# shellcheck disable=SC2046
 cc -O1 -o "$bin" "$here/dt_legacy_oracle.c" -I"$src/src" -I"$build/src" \
   $(pkg-config --cflags glib-2.0) -ldl
 plugins="$(dirname "$(find "$build" -name libexposure.so -path '*plugins*' | head -1)")"

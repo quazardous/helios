@@ -13,6 +13,8 @@ src="$(cd "$1" && pwd)"
 build="$(cd "$2" && pwd)"
 here="$(cd "$(dirname "$0")" && pwd)"
 bin="$(mktemp -d)/dt_param_layouts"
+# pkg-config's flags are split into words on purpose.
+# shellcheck disable=SC2046
 cc -O1 -o "$bin" "$here/dt_param_layouts.c" -I"$src/src" -I"$build/src" \
   $(pkg-config --cflags glib-2.0) -ldl
 if [ -n "${3:-}" ]; then
