@@ -12,7 +12,9 @@
 //! - `events` (`since`): the journaled bus events after a sequence number;
 //! - `wait_event` (`kind`, `since`, `timeout_ms`): the first event of that
 //!   kind after `since`, waiting for it if needed; on timeout the error
-//!   carries the last events seen, so the caller learns what happened instead.
+//!   carries the last events seen, so the caller learns what happened instead;
+//! - `wait_idle` (`timeout_ms`): returns once the scheduler has nothing queued
+//!   or running; on timeout the error carries what is still queued or running.
 //!
 //! Responses: `{"ok": true, ...}` or `{"ok": false, "error": "...", ...}`.
 
@@ -24,7 +26,7 @@ use std::sync::mpsc::RecvTimeoutError;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use helios_core::{Bus, Describe, Envelope};
+use helios_core::{Bus, Describe, Envelope, Scheduler};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -44,6 +46,9 @@ pub enum Request {
         since: u64,
         timeout_ms: u64,
     },
+    WaitIdle {
+        timeout_ms: u64,
+    },
 }
 
 /// How many recent events a failed wait reports.
@@ -54,6 +59,7 @@ const RECENT: usize = 10;
 pub struct Inspector {
     bus: Arc<Bus>,
     entities: BTreeMap<String, Arc<dyn Describe + Send + Sync>>,
+    scheduler: Option<Arc<Scheduler>>,
 }
 
 impl Inspector {
@@ -61,7 +67,14 @@ impl Inspector {
         Self {
             bus,
             entities: BTreeMap::new(),
+            scheduler: None,
         }
+    }
+
+    /// The scheduler `wait_idle` waits on.
+    pub fn with_scheduler(mut self, scheduler: Arc<Scheduler>) -> Self {
+        self.scheduler = Some(scheduler);
+        self
     }
 
     /// Shows an entity under a name. The bus is always shown as `bus`.
@@ -99,6 +112,17 @@ impl Inspector {
                 since,
                 timeout_ms,
             } => self.wait_event(kind, *since, Duration::from_millis(*timeout_ms)),
+            Request::WaitIdle { timeout_ms } => match &self.scheduler {
+                None => json!({ "ok": false, "error": "this process has no scheduler" }),
+                Some(s) if s.wait_until_idle(Duration::from_millis(*timeout_ms)) => {
+                    json!({ "ok": true, "idle": true })
+                }
+                Some(s) => json!({
+                    "ok": false,
+                    "error": format!("still busy after {timeout_ms} ms"),
+                    "scheduler": s.describe(),
+                }),
+            },
         }
     }
 

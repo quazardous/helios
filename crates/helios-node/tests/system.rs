@@ -78,9 +78,15 @@ const NETWORK: &str = r#"{
 fn a_node_is_driven_and_observed_through_the_cli() {
     let sandbox = Sandbox::start("render", NETWORK);
 
+    // Renders are scheduler jobs: wait for the scheduler, not for a delay.
+    let (code, idle) = sandbox.inspect(&["wait-idle", "--timeout", "10000"]);
+    assert_eq!(code, 0, "{idle}");
     let (code, idle) = sandbox.inspect(&["wait-event", "node.idle", "--timeout", "10000"]);
     assert_eq!(code, 0, "{idle}");
     assert_eq!(idle["event"]["payload"]["failed"], 0);
+    let (_, scheduler) = sandbox.inspect(&["describe", "scheduler"]);
+    assert_eq!(scheduler["describe"]["totals"]["done"], 2);
+    assert_eq!(scheduler["describe"]["recent"][0]["name"], "render exp");
 
     let (code, state) = sandbox.inspect(&["state"]);
     assert_eq!(code, 0);

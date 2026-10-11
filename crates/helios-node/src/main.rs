@@ -18,7 +18,7 @@ use std::process::ExitCode;
 use std::sync::{Arc, Mutex};
 
 use helios_config::{Config, Layer, Schema};
-use helios_core::{Bus, Describe, Engine, Event, Graph, NodeId, Region};
+use helios_core::{Bus, Describe, Engine, Event, Graph, NodeId, Region, Scheduler};
 use helios_inspect::{Inspector, serve};
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -191,6 +191,10 @@ fn main() -> ExitCode {
         config.number("system.events.journal") as usize
     ));
     let engine = Arc::new(Engine::new(bus.clone()));
+    let scheduler = Arc::new(Scheduler::new(
+        bus.clone(),
+        config.number("system.scheduler.workers") as usize,
+    ));
     let graph = Arc::new(loaded.graph);
     let status = Arc::new(Status {
         graph: graph.clone(),
@@ -207,7 +211,9 @@ fn main() -> ExitCode {
         .with("graph", graph.clone())
         .with("engine", engine.clone())
         .with("node", status.clone())
-        .with("config", config.clone());
+        .with("config", config.clone())
+        .with("scheduler", scheduler.clone())
+        .with_scheduler(scheduler.clone());
     if let Err(e) = serve(inspector, &args.socket) {
         eprintln!(
             "helios-node: cannot serve on {}: {e}",
@@ -226,31 +232,41 @@ fn main() -> ExitCode {
         },
     );
 
-    let mut failed = 0;
-    for r in &loaded.renders {
+    // Every render is a job of the scheduler; the node is idle when it is.
+    for r in loaded.renders.iter().cloned() {
         let id = loaded.nodes[&r.node];
-        let result = engine.render(&graph, id, &r.port, r.region);
-        let (hash, error) = match &result {
-            Ok(image) => (Some(image.content_hash().to_string()), None),
-            Err(e) => {
-                failed += 1;
-                (None, Some(e.to_string()))
-            }
-        };
-        let done = RenderDone {
-            node: r.node.clone(),
-            port: r.port.clone(),
-            region: r.region,
-            hash,
-            error,
-        };
-        status
-            .renders
-            .lock()
-            .expect("status lock")
-            .push(serde_json::to_value(&done).expect("events serialize"));
-        bus.publish(SOURCE, Some(ready), &done);
+        let (engine, graph, status, bus) =
+            (engine.clone(), graph.clone(), status.clone(), bus.clone());
+        scheduler.submit(&format!("render {}", r.node), move |_| {
+            let result = engine.render(&graph, id, &r.port, r.region);
+            let (hash, error) = match &result {
+                Ok(image) => (Some(image.content_hash().to_string()), None),
+                Err(e) => (None, Some(e.to_string())),
+            };
+            let done = RenderDone {
+                node: r.node.clone(),
+                port: r.port.clone(),
+                region: r.region,
+                hash,
+                error: error.clone(),
+            };
+            status
+                .renders
+                .lock()
+                .expect("status lock")
+                .push(serde_json::to_value(&done).expect("events serialize"));
+            bus.publish(SOURCE, Some(ready), &done);
+            error.map_or(Ok(()), Err)
+        });
     }
+    scheduler.wait_until_idle(std::time::Duration::MAX);
+    let failed = status
+        .renders
+        .lock()
+        .expect("status lock")
+        .iter()
+        .filter(|r| !r["error"].is_null())
+        .count();
     *status.idle.lock().expect("status lock") = true;
     bus.publish(
         SOURCE,

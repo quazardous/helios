@@ -11,6 +11,7 @@
 //! - [`graph`]: a network of nodes.
 //! - [`engine`]: evaluates a network, never computing the same content twice.
 //! - [`bus`]: typed events for orchestration, with a journal.
+//! - [`scheduler`]: named, cancellable background jobs; waiting until idle.
 //! - [`describe`]: every entity reports its state as structured data.
 
 pub mod bus;
@@ -22,6 +23,7 @@ pub mod image;
 pub mod manifest;
 pub mod module;
 pub mod params;
+pub mod scheduler;
 pub mod status;
 
 pub use bus::{Bus, Envelope, Event};
@@ -35,4 +37,5 @@ pub use manifest::{
 };
 pub use module::{Context, Module, ModuleRef};
 pub use params::{Params, Value};
+pub use scheduler::{CancelToken, JobId, JobState, Scheduler};
 pub use status::{Load, NodeState, NodeStatus, NodeType};

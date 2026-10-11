@@ -4,6 +4,7 @@
 //!     helios inspect [--socket PATH] describe ENTITY
 //!     helios inspect [--socket PATH] events [--since SEQ]
 //!     helios inspect [--socket PATH] wait-event KIND [--since SEQ] [--timeout MS]
+//!     helios inspect [--socket PATH] wait-idle [--timeout MS]
 //!
 //! The socket defaults to `$HELIOS_SOCKET`. Output is JSON. Exit codes:
 //! 0 answered, 1 the node answered with an error (a wait that timed out
@@ -18,7 +19,8 @@ const USAGE: &str = "usage:
   helios inspect [--socket PATH] state
   helios inspect [--socket PATH] describe ENTITY
   helios inspect [--socket PATH] events [--since SEQ]
-  helios inspect [--socket PATH] wait-event KIND [--since SEQ] [--timeout MS]";
+  helios inspect [--socket PATH] wait-event KIND [--since SEQ] [--timeout MS]
+  helios inspect [--socket PATH] wait-idle [--timeout MS]";
 
 fn usage(error: &str) -> ExitCode {
     eprintln!("helios: {error}\n{USAGE}");
@@ -61,6 +63,9 @@ fn parse(args: Vec<String>) -> Result<(PathBuf, Request), String> {
         ["wait-event", kind] => Request::WaitEvent {
             kind: kind.to_string(),
             since,
+            timeout_ms: timeout,
+        },
+        ["wait-idle"] => Request::WaitIdle {
             timeout_ms: timeout,
         },
         [] => return Err("inspect needs a request".into()),

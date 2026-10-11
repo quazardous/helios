@@ -202,6 +202,19 @@ impl Setting {
 /// same way and add them to a [`Schema`].
 pub const SETTINGS: &[Setting] = &[
     Setting {
+        key: "system.scheduler.workers",
+        concern: Concern::Machine,
+        label: "Worker threads",
+        about: "How many jobs run at once on this machine; 0 means one per CPU.",
+        kind: Kind::Number {
+            min: 0.0,
+            max: 1024.0,
+            default: 0.0,
+            unit: "threads",
+            integer: true,
+        },
+    },
+    Setting {
         key: "system.events.journal",
         concern: Concern::Machine,
         label: "Event journal",
