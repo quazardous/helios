@@ -1,0 +1,16 @@
+[package]
+name = "helios-parity"
+description = "Helios parity with darktable: renders the same input with darktable-cli and compares in Delta E 2000"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+helios-core.workspace = true
+helios-photo.workspace = true
+helios-xmp.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+helios-module-exposure = { path = "../../modules/exposure" }

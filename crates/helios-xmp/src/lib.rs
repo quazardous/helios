@@ -20,5 +20,5 @@ pub mod legacy;
 pub mod sidecar;
 
 pub use import::{Imported, Node, Report, import};
-pub use layout::{Layouts, decode};
+pub use layout::{Layouts, decode, encode};
 pub use sidecar::{HistoryItem, Sidecar};

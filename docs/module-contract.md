@@ -240,6 +240,12 @@ Every module is testable alone, with no darktable and no framework running:
 3. **Parity with darktable**: for a module ported from darktable, the same
    image and parameters rendered by `darktable-cli` with only that module
    active, compared within a Delta E threshold. darktable is the oracle.
+   `helios-parity` does it: the same linear Rec.2020 float image goes to
+   both, darktable's history holds only the module between colorin and
+   colorout set to linear Rec.2020, and the renders are compared with
+   Delta E 2000 against darktable's integration thresholds (max 2.3, mean
+   0.77). It runs nightly against darktable's own packages, and is
+   skipped where `darktable-cli` is missing.
 
 ## Language
 

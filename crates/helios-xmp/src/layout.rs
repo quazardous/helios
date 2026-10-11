@@ -96,6 +96,14 @@ impl Layouts {
             .unwrap_or_default()
     }
 
+    /// Every module and version known.
+    pub fn all(&self) -> Vec<(&str, u32)> {
+        self.modules
+            .iter()
+            .flat_map(|(name, v)| v.iter().map(move |m| (name.as_str(), m.version)))
+            .collect()
+    }
+
     pub fn len(&self) -> usize {
         self.modules.len()
     }
@@ -185,4 +193,95 @@ pub fn decode(layout: &ModuleLayout, data: &[u8]) -> Result<Value, String> {
         ));
     }
     field(&layout.params, data, 0)
+}
+
+fn slot<'a>(out: &'a mut [u8], f: &Field, at: usize, n: usize) -> Result<&'a mut [u8], String> {
+    let len = out.len();
+    out.get_mut(at..at + n)
+        .ok_or_else(|| format!("`{}` ends past the params' {len} bytes", f.name))
+}
+
+fn put(f: &Field, given: Option<&Value>, out: &mut [u8], base: usize) -> Result<(), String> {
+    let at = base + f.offset;
+    let value = given.or(f.default.as_ref());
+    let number = |v: Option<&Value>| -> Result<f64, String> {
+        match v {
+            None => Ok(0.0),
+            Some(Value::Bool(b)) => Ok(f64::from(u8::from(*b))),
+            Some(Value::String(name)) => f
+                .values
+                .iter()
+                .find(|e| e.name == *name)
+                .map(|e| e.value as f64)
+                .ok_or_else(|| format!("`{}`: no value named `{name}`", f.name)),
+            Some(v) => v
+                .as_f64()
+                .ok_or_else(|| format!("`{}`: `{v}` is not a number", f.name)),
+        }
+    };
+    match (f.kind.as_str(), f.size) {
+        ("float", 4) => {
+            slot(out, f, at, 4)?.copy_from_slice(&(number(value)? as f32).to_le_bytes())
+        }
+        ("double", 8) => slot(out, f, at, 8)?.copy_from_slice(&number(value)?.to_le_bytes()),
+        ("int" | "long" | "enum", 4) => {
+            slot(out, f, at, 4)?.copy_from_slice(&(number(value)? as i32).to_le_bytes())
+        }
+        ("uint" | "ulong" | "bool", 4) => {
+            slot(out, f, at, 4)?.copy_from_slice(&(number(value)? as u32).to_le_bytes())
+        }
+        ("long", 8) => slot(out, f, at, 8)?.copy_from_slice(&(number(value)? as i64).to_le_bytes()),
+        ("ulong", 8) => {
+            slot(out, f, at, 8)?.copy_from_slice(&(number(value)? as u64).to_le_bytes())
+        }
+        ("short", 2) => {
+            slot(out, f, at, 2)?.copy_from_slice(&(number(value)? as i16).to_le_bytes())
+        }
+        ("ushort", 2) => {
+            slot(out, f, at, 2)?.copy_from_slice(&(number(value)? as u16).to_le_bytes())
+        }
+        ("int8" | "char", 1) => slot(out, f, at, 1)?[0] = (number(value)? as i8) as u8,
+        ("uint8" | "bool", 1) => slot(out, f, at, 1)?[0] = number(value)? as u8,
+        ("array", _) => {
+            let element = f
+                .element
+                .as_deref()
+                .ok_or("an array without element type")?;
+            let count = f.count.unwrap_or(0);
+            if element.kind == "char" {
+                let text = value.and_then(Value::as_str).unwrap_or("");
+                if text.len() >= count {
+                    return Err(format!("`{}`: text longer than {count} bytes", f.name));
+                }
+                slot(out, f, at, count)?[..text.len()].copy_from_slice(text.as_bytes());
+            } else {
+                let items = value.and_then(Value::as_array);
+                for i in 0..count {
+                    let item = items.and_then(|a| a.get(i));
+                    put(element, item, out, base + i * element.size)?;
+                }
+            }
+        }
+        ("struct", _) => {
+            for member in &f.fields {
+                put(member, value.and_then(|v| v.get(&member.name)), out, base)?;
+            }
+        }
+        (kind, size) => {
+            return Err(format!(
+                "`{}`: cannot encode {kind} of {size} bytes",
+                f.name
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Encodes named values into raw params with a module's layout: the
+/// inverse of [`decode`]. Fields left out take their default (zero when
+/// darktable declares none); enums take their name or their number.
+pub fn encode(layout: &ModuleLayout, values: &Value) -> Result<Vec<u8>, String> {
+    let mut out = vec![0u8; layout.size];
+    put(&layout.params, Some(values), &mut out, 0)?;
+    Ok(out)
 }

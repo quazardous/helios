@@ -1758,6 +1758,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "helios-parity"
+version = "0.0.1"
+dependencies = [
+ "helios-core",
+ "helios-module-exposure",
+ "helios-photo",
+ "helios-xmp",
+ "serde_json",
+]
+
+[[package]]
 name = "helios-photo"
 version = "0.0.1"
 dependencies = [

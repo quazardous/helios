@@ -1,0 +1,25 @@
+name: parity
+
+# Helios's modules against darktable's own renders (helios-parity). Nightly,
+# since it installs darktable; also runnable by hand.
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+jobs:
+  darktable:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      # darktable's own packages (openSUSE Build Service), as recent as the
+      # release Helios's params layouts come from.
+      - name: darktable
+        run: |
+          repo=https://download.opensuse.org/repositories/graphics:/darktable/xUbuntu_24.04
+          curl -fsSL "$repo/Release.key" | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/darktable.gpg > /dev/null
+          echo "deb $repo/ /" | sudo tee /etc/apt/sources.list.d/darktable.list
+          sudo apt-get update -q && sudo apt-get install -yq darktable
+          darktable-cli --version | head -1
+      - run: cargo test -p helios-parity -- --nocapture
