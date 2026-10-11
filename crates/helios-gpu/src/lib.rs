@@ -4,13 +4,18 @@
 //! A [`Gpu`] holds a device: its own ([`Gpu::new`]), or one handed over by
 //! the GUI ([`Gpu::from_device`]) so the viewport and the engine share it
 //! and computed buffers need no copy to be shown. [`Gpu::run`] uploads the
-//! input, runs the module's kernel and reads the result back; keeping
-//! buffers on the GPU along a network is the engine's next step.
+//! input, runs the module's kernel and reads the result back. A [`Gpu`] is
+//! also the engine's [`Accelerator`]: an engine given one
+//! (`Engine::with_accelerator`) computes every step that has a GPU variant
+//! on it. Keeping buffers on the GPU between steps is the next step.
 //!
 //! [`check`] runs a module on both backends and compares: a GPU variant is
 //! only trusted within its tolerance of the CPU reference.
 
-use helios_core::{Context, Error, Image, ModuleRef, Params, Region};
+use std::collections::HashMap;
+use std::sync::Mutex;
+
+use helios_core::{Accelerator, Context, Error, GpuJob, Image, ModuleRef, Params, Region};
 use wgpu::util::DeviceExt;
 
 pub struct Gpu {
@@ -18,6 +23,9 @@ pub struct Gpu {
     queue: wgpu::Queue,
     /// The adapter's description, for reports.
     pub adapter: String,
+    id: String,
+    /// Compiled kernels, by source and entry point.
+    pipelines: Mutex<HashMap<(&'static str, &'static str), wgpu::ComputePipeline>>,
 }
 
 impl Gpu {
@@ -37,11 +45,11 @@ impl Gpu {
             ..Default::default()
         }))
         .map_err(|e| format!("no GPU device: {e}"))?;
-        Ok(Gpu {
+        Ok(Gpu::from_device(
             device,
             queue,
-            adapter: format!("{} ({:?}, {:?})", info.name, info.device_type, info.backend),
-        })
+            &format!("{} ({:?}, {:?})", info.name, info.device_type, info.backend),
+        ))
     }
 
     /// A device someone else opened (the GUI's).
@@ -50,6 +58,8 @@ impl Gpu {
             device,
             queue,
             adapter: adapter.into(),
+            id: format!("wgpu {adapter}"),
+            pipelines: Mutex::default(),
         }
     }
 
@@ -67,29 +77,72 @@ impl Gpu {
         let Some(job) = module.gpu_job(params, context, 1.0, output)? else {
             return Ok(None);
         };
-        let (kernel, uniforms) = (job.kernel, job.uniforms);
-        let input = &source.sample(job.input);
+        let input = source.sample(job.input);
         let m = module.manifest();
-        let out_channels = m
+        let channels = m
             .outputs
             .first()
             .and_then(|p| p.channels())
             .unwrap_or(input.channels());
-        let region = output;
-        let pixels = region.area() as u32;
+        self.dispatch(&m.name, &job, &input, output, channels)
+            .map(Some)
+            .map_err(|reason| Error::Module {
+                module: m.name.clone(),
+                reason: format!("GPU: {reason}"),
+            })
+    }
+
+    /// The kernel's pipeline, compiled once. A kernel that does not
+    /// compile is an error, never a panic.
+    fn pipeline(&self, name: &str, job: &GpuJob) -> Result<wgpu::ComputePipeline, String> {
+        let key = (job.kernel.wgsl, job.kernel.entry);
+        if let Some(p) = self.pipelines.lock().expect("pipelines lock").get(&key) {
+            return Ok(p.clone());
+        }
         let d = &self.device;
+        let scope = d.push_error_scope(wgpu::ErrorFilter::Validation);
         let shader = d.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some(&m.name),
-            source: wgpu::ShaderSource::Wgsl(kernel.wgsl.into()),
+            label: Some(name),
+            source: wgpu::ShaderSource::Wgsl(job.kernel.wgsl.into()),
         });
         let pipeline = d.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some(&m.name),
+            label: Some(name),
             layout: None,
             module: &shader,
-            entry_point: Some(kernel.entry),
+            entry_point: Some(job.kernel.entry),
             compilation_options: Default::default(),
             cache: None,
         });
+        if let Some(e) = pollster::block_on(scope.pop()) {
+            return Err(format!("kernel `{}`: {e}", job.kernel.entry));
+        }
+        self.pipelines
+            .lock()
+            .expect("pipelines lock")
+            .insert(key, pipeline.clone());
+        Ok(pipeline)
+    }
+
+    /// Uploads `input`, runs the kernel over `output` and reads it back.
+    fn dispatch(
+        &self,
+        name: &str,
+        job: &GpuJob,
+        input: &Image,
+        output: Region,
+        channels: u32,
+    ) -> Result<Image, String> {
+        if input.region() != job.input {
+            return Err(format!(
+                "input covers {}, the kernel reads {}",
+                input.region(),
+                job.input
+            ));
+        }
+        let pipeline = self.pipeline(name, job)?;
+        let pixels = output.area() as u32;
+        let d = &self.device;
+        let scope = d.push_error_scope(wgpu::ErrorFilter::Validation);
         let storage = |data: &[u8], label: &str, usage| {
             d.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some(label),
@@ -102,7 +155,7 @@ impl Gpu {
             "input",
             wgpu::BufferUsages::STORAGE,
         );
-        let out_size = (pixels as u64) * u64::from(out_channels) * 4;
+        let out_size = (pixels as u64) * u64::from(channels) * 4;
         let output_buf = d.create_buffer(&wgpu::BufferDescriptor {
             label: Some("output"),
             size: out_size.max(4),
@@ -110,14 +163,14 @@ impl Gpu {
             mapped_at_creation: false,
         });
         let plan_buf = storage(
-            bytemuck::cast_slice(&uniforms),
+            bytemuck::cast_slice(&job.uniforms),
             "plan",
             wgpu::BufferUsages::UNIFORM,
         );
         let shape = [
             pixels,
             input.channels(),
-            out_channels,
+            channels,
             0u32,
             job.input.width,
             job.input.height,
@@ -166,21 +219,35 @@ impl Gpu {
         }
         encoder.copy_buffer_to_buffer(&output_buf, 0, &readback, 0, out_size.max(4));
         self.queue.submit([encoder.finish()]);
+        if let Some(e) = pollster::block_on(scope.pop()) {
+            return Err(e.to_string());
+        }
         let slice = readback.slice(..);
         slice.map_async(wgpu::MapMode::Read, |_| {});
         d.poll(wgpu::PollType::wait_indefinitely())
-            .map_err(|e| Error::Module {
-                module: m.name.clone(),
-                reason: format!("GPU: {e}"),
-            })?;
-        let view = slice.get_mapped_range().map_err(|e| Error::Module {
-            module: m.name.clone(),
-            reason: format!("GPU: {e}"),
-        })?;
+            .map_err(|e| e.to_string())?;
+        let view = slice.get_mapped_range().map_err(|e| e.to_string())?;
         let data: Vec<f32> = bytemuck::cast_slice(&view[..out_size as usize]).to_vec();
         drop(view);
         readback.unmap();
-        Ok(Some(Image::new(region, out_channels, data)))
+        Ok(Image::new(output, channels, data))
+    }
+}
+
+impl Accelerator for Gpu {
+    fn id(&self) -> &str {
+        &self.id
+    }
+
+    fn run(
+        &self,
+        module: &str,
+        job: &GpuJob,
+        input: &Image,
+        output: Region,
+        channels: u32,
+    ) -> Result<Image, String> {
+        self.dispatch(module, job, input, output, channels)
     }
 }
 

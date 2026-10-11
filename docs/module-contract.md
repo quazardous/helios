@@ -213,9 +213,18 @@ A module may carry a GPU variant next to its CPU code: a WGSL compute
 kernel and the plan packed as its uniforms (`gpu_kernel`, `gpu_uniforms`).
 The core only carries it; the GPU backend (`helios-gpu`, on wgpu) runs it,
 on the same plan, and a variant is trusted only within its tolerance of the
-CPU reference, which stays the definition of the module. The first kernels
-work pixel by pixel; neighbourhood kernels and buffers kept on the GPU
-along a network come next.
+CPU reference, which stays the definition of the module. Kernels read a
+neighbourhood the same way the CPU code does, through the plan's input
+region.
+
+An engine given an accelerator (`Engine::with_accelerator`, a `Gpu` from
+`helios-gpu`) computes every step whose module has a GPU variant, one
+input and one output on it, and the other steps on the CPU, in the same
+network. GPU content is keyed apart from CPU content, since the two agree
+within a tolerance and not bit for bit. A kernel that fails to compile or
+to run makes the step fail with the module's error; it never panics.
+Buffers are still read back after each step; keeping them on the GPU
+along a chain comes next.
 
 ## How a module is tested
 

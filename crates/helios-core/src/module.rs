@@ -70,6 +70,26 @@ pub struct GpuJob {
     pub input: Region,
 }
 
+/// Runs modules' GPU variants for the engine (`helios-gpu` on wgpu). The
+/// engine hands it a step whose module has a kernel, one input and one
+/// output; it answers the output image, or why it could not.
+pub trait Accelerator: Send + Sync {
+    /// Names the backend in content keys: its results agree with the CPU
+    /// within a tolerance, not bit for bit, so they are cached apart.
+    fn id(&self) -> &str;
+
+    /// Runs `job` over `output`, reading `input` (which covers
+    /// `job.input`), into `channels` channels.
+    fn run(
+        &self,
+        module: &str,
+        job: &GpuJob,
+        input: &Image,
+        output: Region,
+        channels: u32,
+    ) -> Result<Image, String>;
+}
+
 /// An image processing module: a pure computation with a declared surface.
 ///
 /// No IO, no global state, no logging, no threads of its own: everything it
@@ -177,6 +197,37 @@ impl ModuleRef {
         }))
     }
 
+    /// Whether an accelerator can run this module: a GPU variant, one
+    /// input and one output.
+    pub(crate) fn acceleratable(&self) -> bool {
+        let m = self.manifest();
+        self.0.gpu_kernel().is_some() && m.inputs.len() == 1 && m.outputs.len() == 1
+    }
+
+    /// Runs the GPU variant on an accelerator and checks the result as
+    /// `process` does. A failure (a shader that does not compile, a lost
+    /// device) is the module's error, never a panic.
+    pub(crate) fn accelerate(
+        &self,
+        accelerator: &dyn Accelerator,
+        plan: &Plan,
+        input: &Image,
+        output: Region,
+    ) -> Result<Vec<Image>, Error> {
+        let kernel = self.0.gpu_kernel().expect("checked by acceleratable");
+        let job = GpuJob {
+            kernel,
+            uniforms: self.0.gpu_uniforms(plan),
+            input: self.input_region(plan, output),
+        };
+        let m = self.manifest();
+        let channels = m.outputs[0].channels().unwrap_or(input.channels());
+        let image = accelerator
+            .run(&m.name, &job, input, output, channels)
+            .map_err(|reason| self.module_error(format!("GPU: {reason}")))?;
+        self.check(vec![image], output)
+    }
+
     /// Runs `process` and checks the result against the manifest.
     pub(crate) fn process(
         &self,
@@ -188,6 +239,11 @@ impl ModuleRef {
             .0
             .process(plan, inputs, output)
             .map_err(|reason| self.module_error(reason))?;
+        self.check(outputs, output)
+    }
+
+    /// Outputs as the manifest declares them: count, region, channels.
+    fn check(&self, outputs: Vec<Image>, output: Region) -> Result<Vec<Image>, Error> {
         let m = self.manifest();
         let broken = |reason: String| Error::Contract {
             module: m.name.clone(),

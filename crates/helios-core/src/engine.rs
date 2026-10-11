@@ -23,6 +23,7 @@ use crate::error::Error;
 use crate::graph::{Graph, Kind, NodeId};
 use crate::image::{ContentHash, Image, Region};
 use crate::manifest::{Family, ModuleKind, Role};
+use crate::module::Accelerator;
 use crate::module::ModuleRef;
 use crate::status::{Load, NodeState, NodeStatus, NodeType};
 
@@ -78,6 +79,8 @@ pub struct Counters {
     pub source_reads: u64,
     /// Cache entries evicted to stay within the memory budget.
     pub evictions: u64,
+    /// Steps computed by the accelerator (the GPU).
+    pub accelerated: u64,
 }
 
 impl Counters {
@@ -93,6 +96,7 @@ impl Counters {
             computed: self.computed - earlier.computed,
             source_reads: self.source_reads - earlier.source_reads,
             evictions: self.evictions - earlier.evictions,
+            accelerated: self.accelerated - earlier.accelerated,
         }
     }
 }
@@ -114,6 +118,8 @@ enum Work {
         module: ModuleRef,
         plan: crate::module::Plan,
         inputs: Vec<(Step, usize)>,
+        /// Computed by the engine's accelerator.
+        accelerated: bool,
     },
     /// A decision node with no recorded answer: its inputs are planned (a
     /// surface shows what it will look at), nothing is computed.
@@ -194,6 +200,9 @@ pub struct Engine {
     tracks: Mutex<HashMap<TrackKey, Track>>,
     /// Faults injected and not yet hit: (graph, node, kind).
     faults: Mutex<Vec<(u64, NodeId, FaultKind)>>,
+    /// Runs GPU variants; `None`: everything on the CPU.
+    accelerator: Option<Arc<dyn Accelerator>>,
+    accelerated: AtomicU64,
 }
 
 type TrackKey = (u64, NodeId, Region);
@@ -225,7 +234,17 @@ impl Engine {
             source_reads: AtomicU64::new(0),
             tracks: Mutex::new(HashMap::new()),
             faults: Mutex::new(Vec::new()),
+            accelerator: None,
+            accelerated: AtomicU64::new(0),
         }
+    }
+
+    /// Computes the steps whose module has a GPU variant on `accelerator`;
+    /// the others stay on the CPU. Their content is keyed apart from CPU
+    /// content, as the two agree within a tolerance only.
+    pub fn with_accelerator(mut self, accelerator: Arc<dyn Accelerator>) -> Self {
+        self.accelerator = Some(accelerator);
+        self
     }
 
     fn track<R>(&self, step: &Step, f: impl FnOnce(&mut Track) -> R) -> R {
@@ -331,6 +350,7 @@ impl Engine {
             computed: self.computed.load(Ordering::SeqCst),
             source_reads: self.source_reads.load(Ordering::SeqCst),
             evictions: self.cache.lock().expect("engine cache lock").evictions,
+            accelerated: self.accelerated.load(Ordering::SeqCst),
         }
     }
 
@@ -431,6 +451,14 @@ impl Engine {
                 h.update(&params.canonical_bytes());
                 let plan = module.prepare(params, context, scale)?;
                 h.update(&context.restricted_to(&manifest.context).canonical_bytes());
+                let accelerated = match &self.accelerator {
+                    Some(a) if module.acceleratable() => {
+                        h.update(b"helios.step.accelerated.v1");
+                        h.update(a.id().as_bytes());
+                        true
+                    }
+                    _ => false,
+                };
                 let input_region = module.input_region(&plan, region);
                 let mut inputs = Vec::with_capacity(node.inputs.len());
                 for (i, connection) in node.inputs.iter().enumerate() {
@@ -447,6 +475,7 @@ impl Engine {
                     module: module.clone(),
                     plan,
                     inputs,
+                    accelerated,
                 }
             }
         };
@@ -556,6 +585,7 @@ impl Engine {
                 module,
                 plan,
                 inputs,
+                accelerated,
             } => {
                 let mut held = Vec::with_capacity(inputs.len());
                 for (input, port) in inputs {
@@ -569,7 +599,18 @@ impl Engine {
                 }
                 let images: Vec<&Image> =
                     held.iter().map(|(outputs, port)| &outputs[*port]).collect();
-                Ok(Arc::new(module.process(plan, &images, step.region)?))
+                match (&self.accelerator, accelerated) {
+                    (Some(a), true) => {
+                        self.accelerated.fetch_add(1, Ordering::SeqCst);
+                        Ok(Arc::new(module.accelerate(
+                            a.as_ref(),
+                            plan,
+                            images[0],
+                            step.region,
+                        )?))
+                    }
+                    _ => Ok(Arc::new(module.process(plan, &images, step.region)?)),
+                }
             }
             Work::Pending { .. } => unreachable!("execute answers pending steps itself"),
         }

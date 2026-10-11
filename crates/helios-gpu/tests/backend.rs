@@ -143,3 +143,117 @@ fn sigmoid_on_the_gpu_matches_the_cpu() {
         );
     }
 }
+
+/// exposure → blur → sigmoid over a region, on an engine with or without
+/// the GPU.
+fn chain(engine: &helios_core::Engine, input: &helios_core::Image) -> helios_core::Image {
+    use helios_core::graph::SOURCE_PORT;
+    let mut g = helios_core::Graph::new();
+    let src = g.add_source("src", input.clone());
+    let mut prev = src;
+    let mut port = SOURCE_PORT.to_string();
+    let steps: [(&str, ModuleRef, Params); 3] = [
+        (
+            "exposure",
+            ModuleRef::new(Exposure),
+            Params::new().with("exposure", Value::Float(1.0)),
+        ),
+        (
+            "blur",
+            ModuleRef::new(helios_module_blur::Blur),
+            Params::new().with("radius", Value::Float(3.0)),
+        ),
+        (
+            "sigmoid",
+            ModuleRef::new(helios_module_sigmoid::Sigmoid),
+            Params::new().with("contrast", Value::Float(1.8)),
+        ),
+    ];
+    for (name, module, params) in steps {
+        let n = g.add_module(name, module.clone(), &params).unwrap();
+        g.connect(prev, &port, n, &module.manifest().inputs[0].name)
+            .unwrap();
+        prev = n;
+        port = module.manifest().outputs[0].name.clone();
+    }
+    engine
+        .render(&g, prev, &port, Region::new(8, 6, 48, 36))
+        .unwrap()
+}
+
+#[test]
+fn an_engine_with_the_gpu_renders_a_chain_as_the_cpu_does() {
+    use std::sync::Arc;
+    let Some(gpu) = gpu() else { return };
+    let input = helios_testkit::noise(Region::sized(64, 48), 4, 11);
+    let bus = Arc::new(helios_core::Bus::new());
+    let cpu = chain(&helios_core::Engine::new(bus.clone()), &input);
+    let engine = helios_core::Engine::new(bus).with_accelerator(Arc::new(gpu));
+    let out = chain(&engine, &input);
+    let c = helios_gpu::compare(&out, &cpu).unwrap();
+    assert!(c.max_abs < 1e-4, "{c:?}");
+    assert_eq!(engine.counters().accelerated, 3);
+    // Asked again, everything comes from the cache.
+    chain(&engine, &input);
+    assert_eq!(engine.counters().accelerated, 3);
+}
+
+mod broken {
+    use helios_core::*;
+
+    /// A module whose GPU variant does not compile.
+    pub struct Broken;
+
+    impl Module for Broken {
+        type Plan = ();
+        fn manifest(&self) -> Manifest {
+            Manifest {
+                name: "broken".into(),
+                version: 1,
+                description: String::new(),
+                params: vec![],
+                inputs: vec![PortSpec::image("input", 1)],
+                outputs: vec![PortSpec::image("output", 1)],
+                context: vec![],
+                needs: Needs::default(),
+                kind: ModuleKind::Process,
+                family: Family::Other,
+                role: Role::General,
+            }
+        }
+        fn prepare(&self, _: &Params, _: &Context) -> Result<(), String> {
+            Ok(())
+        }
+        fn process(&self, _: &(), inputs: &[&Image], _: Region) -> Result<Vec<Image>, String> {
+            Ok(vec![inputs[0].clone()])
+        }
+        fn gpu_kernel(&self) -> Option<GpuKernel> {
+            Some(GpuKernel {
+                wgsl: "@compute @workgroup_size(64) fn main() { let x: f32 = nope; }",
+                entry: "main",
+            })
+        }
+    }
+}
+
+#[test]
+fn a_kernel_that_does_not_compile_is_an_error_not_a_panic() {
+    use std::sync::Arc;
+    let Some(gpu) = gpu() else { return };
+    let mut g = helios_core::Graph::new();
+    let src = g.add_source("src", helios_testkit::noise(Region::sized(8, 8), 1, 2));
+    let n = g
+        .add_module("b", ModuleRef::new(broken::Broken), &Params::new())
+        .unwrap();
+    g.connect(src, helios_core::graph::SOURCE_PORT, n, "input")
+        .unwrap();
+    let engine =
+        helios_core::Engine::new(Arc::new(helios_core::Bus::new())).with_accelerator(Arc::new(gpu));
+    let err = engine
+        .render(&g, n, "output", Region::sized(8, 8))
+        .unwrap_err();
+    assert!(
+        matches!(&err, helios_core::Error::Module { module, reason } if module == "broken" && reason.starts_with("GPU: kernel `main`")),
+        "{err}"
+    );
+}
