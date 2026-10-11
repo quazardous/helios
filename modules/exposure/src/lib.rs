@@ -67,7 +67,7 @@ impl Module for Exposure {
         output: Region,
     ) -> Result<Vec<Image>, String> {
         let mut data = inputs[0].data().to_vec();
-        for pixel in data.chunks_exact_mut(4) {
+        for pixel in data.as_chunks_mut::<4>().0 {
             for v in &mut pixel[..3] {
                 *v = (*v - plan.black) * plan.scale;
             }

@@ -111,8 +111,8 @@ mod tests {
         let input = Image::from_fn(out.grow(2), 1, |_, _, _| 0.4);
         for cfa in ["RGGB", XTRANS] {
             let rgb = run(cfa, &input, out);
-            for p in rgb.data().chunks_exact(4) {
-                assert_eq!(p, [0.4, 0.4, 0.4, 1.0], "{cfa}");
+            for p in rgb.data().as_chunks::<4>().0 {
+                assert_eq!(*p, [0.4, 0.4, 0.4, 1.0], "{cfa}");
             }
         }
     }
@@ -124,7 +124,7 @@ mod tests {
         let color = [0.8f32, 0.5, 0.2];
         let out = Region::sized(8, 8);
         let input = Image::from_fn(out.grow(2), 1, |x, y, _| color[index(cfa.color_at(x, y))]);
-        for p in run("RGGB", &input, out).data().chunks_exact(4) {
+        for p in run("RGGB", &input, out).data().as_chunks::<4>().0 {
             assert_eq!(&p[..3], &color);
         }
     }
