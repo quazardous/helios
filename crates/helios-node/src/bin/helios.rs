@@ -1,16 +1,16 @@
 //! `helios`: the command line of Helios.
 //!
-//!     helios inspect [--socket PATH] state
-//!     helios inspect [--socket PATH] describe ENTITY
-//!     helios inspect [--socket PATH] events [--since SEQ]
-//!     helios inspect [--socket PATH] wait-event KIND [--since SEQ] [--timeout MS]
-//!     helios inspect [--socket PATH] wait-idle [--timeout MS]
+//!     helios inspect [--socket PATH|tcp://HOST:PORT --token-file FILE] state
+//!     helios inspect [--socket PATH|tcp://HOST:PORT --token-file FILE] describe ENTITY
+//!     helios inspect [--socket PATH|tcp://HOST:PORT --token-file FILE] events [--since SEQ]
+//!     helios inspect [--socket PATH|tcp://HOST:PORT --token-file FILE] wait-event KIND [--since SEQ] [--timeout MS]
+//!     helios inspect [--socket PATH|tcp://HOST:PORT --token-file FILE] wait-idle [--timeout MS]
 //!
-//!     helios control [--socket PATH] render NODE [--port PORT] --region X,Y,W,H
-//!     helios control [--socket PATH] set-param NODE PARAM VALUE
-//!     helios control [--socket PATH] cancel JOB
-//!     helios control [--socket PATH] pause | resume
-//!     helios control [--socket PATH] fault NODE compute|source-read
+//!     helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] render NODE [--port PORT] --region X,Y,W,H
+//!     helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] set-param NODE PARAM VALUE
+//!     helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] cancel JOB
+//!     helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] pause | resume
+//!     helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] fault NODE compute|source-read
 //!
 //!     helios sandbox new DIR [--network FILE] | start DIR | stop DIR | clean DIR
 //!
@@ -24,19 +24,19 @@ use std::process::ExitCode;
 
 use helios_core::{FaultKind, Region, Value};
 use helios_inspect::control::ControlRequest;
-use helios_inspect::{Request, request};
+use helios_inspect::{Address, Request, request_at};
 
 const USAGE: &str = "usage:
-  helios inspect [--socket PATH] state
-  helios inspect [--socket PATH] describe ENTITY
-  helios inspect [--socket PATH] events [--since SEQ]
-  helios inspect [--socket PATH] wait-event KIND [--since SEQ] [--timeout MS]
-  helios inspect [--socket PATH] wait-idle [--timeout MS]
-  helios control [--socket PATH] render NODE [--port PORT] --region X,Y,W,H
-  helios control [--socket PATH] set-param NODE PARAM VALUE
-  helios control [--socket PATH] cancel JOB
-  helios control [--socket PATH] pause | resume
-  helios control [--socket PATH] fault NODE compute|source-read
+  helios inspect [--socket PATH|tcp://HOST:PORT --token-file FILE] state
+  helios inspect [--socket PATH|tcp://HOST:PORT --token-file FILE] describe ENTITY
+  helios inspect [--socket PATH|tcp://HOST:PORT --token-file FILE] events [--since SEQ]
+  helios inspect [--socket PATH|tcp://HOST:PORT --token-file FILE] wait-event KIND [--since SEQ] [--timeout MS]
+  helios inspect [--socket PATH|tcp://HOST:PORT --token-file FILE] wait-idle [--timeout MS]
+  helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] render NODE [--port PORT] --region X,Y,W,H
+  helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] set-param NODE PARAM VALUE
+  helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] cancel JOB
+  helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] pause | resume
+  helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] fault NODE compute|source-read
   helios sandbox new DIR [--network FILE] | start DIR | stop DIR | clean DIR";
 
 fn usage(error: &str) -> ExitCode {
@@ -80,7 +80,7 @@ fn value(text: &str) -> Value {
 
 /// A request, serialized for its endpoint.
 struct Call {
-    socket: PathBuf,
+    socket: Address,
     body: serde_json::Value,
 }
 
@@ -92,13 +92,28 @@ fn parse(args: Vec<String>) -> Result<Call, String> {
         "control" => ("HELIOS_CONTROL_SOCKET", "control"),
         other => return Err(format!("unknown command `{other}`")),
     };
-    let mut socket = std::env::var_os(env).map(PathBuf::from);
+    let mut socket = std::env::var(env).ok();
+    let mut token = std::env::var("HELIOS_TOKEN").ok();
     let mut words = Vec::new();
     let (mut since, mut timeout) = (0, 10_000);
     let (mut port, mut area) = ("output".to_string(), None);
     while let Some(arg) = args.next() {
         match arg.as_str() {
-            "--socket" => socket = Some(PathBuf::from(args.next().ok_or("--socket needs a path")?)),
+            "--socket" => {
+                socket = Some(
+                    args.next()
+                        .ok_or("--socket needs a path or tcp:// address")?,
+                )
+            }
+            "--token-file" => {
+                let file = args.next().ok_or("--token-file needs a path")?;
+                token = Some(
+                    std::fs::read_to_string(&file)
+                        .map_err(|e| format!("cannot read {file}: {e}"))?
+                        .trim()
+                        .to_string(),
+                );
+            }
             "--since" => since = number(args.next(), "--since")?,
             "--timeout" => timeout = number(args.next(), "--timeout")?,
             "--port" => port = args.next().ok_or("--port needs a name")?,
@@ -107,6 +122,7 @@ fn parse(args: Vec<String>) -> Result<Call, String> {
         }
     }
     let socket = socket.ok_or(format!("no socket: pass --socket PATH or set {env}"))?;
+    let socket = Address::parse(&socket, token)?;
     let words: Vec<&str> = words.iter().map(String::as_str).collect();
     let body = if what == "inspect" {
         let request = match words.as_slice() {
@@ -224,7 +240,7 @@ fn main() -> ExitCode {
         Ok(c) => c,
         Err(e) => return usage(&e),
     };
-    match request(&call.socket, &call.body) {
+    match request_at(&call.socket, &call.body) {
         Ok(answer) => {
             println!(
                 "{}",
@@ -237,10 +253,7 @@ fn main() -> ExitCode {
             }
         }
         Err(e) => {
-            eprintln!(
-                "helios: cannot reach the node at {}: {e}",
-                call.socket.display()
-            );
+            eprintln!("helios: cannot reach the node at {}: {e}", call.socket);
             ExitCode::from(3)
         }
     }

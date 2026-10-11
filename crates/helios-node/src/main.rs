@@ -7,7 +7,12 @@
 //!
 //!     helios-node --graph network.json --socket /path/to/node.sock
 //!                 [--global FILE] [--project DIR] [--user FILE] [--set KEY=VALUE]...
-//!                 [--control /path/to/control.sock]
+//!                 [--control /path/to/control.sock] [--token-file FILE]
+//!
+//! An endpoint is a Unix socket path or `tcp://127.0.0.1:PORT` (port 0 picks
+//! one); with TCP the node writes a session token to `--token-file` (readable
+//! by its user only) and prints the addresses it bound: `ready ADDRESS`, then
+//! `control ADDRESS`.
 //!
 //! Settings come from the files given (global layer, `DIR/helios.toml` for
 //! the project layer, user layer) and from `--set` (run layer); nothing is
@@ -25,7 +30,7 @@ use std::sync::{Arc, Mutex, RwLock};
 
 use helios_config::{Config, Layer, Schema};
 use helios_core::{Bus, Describe, Engine, Event, Graph, JobId, NodeId, Region, Scheduler};
-use helios_inspect::{Inspector, serve};
+use helios_inspect::{Inspector, Listen, new_token, serve_inspector, write_token};
 use serde::Serialize;
 use serde_json::{Value, json};
 
@@ -268,7 +273,7 @@ mod control {
 }
 
 /// Serves the control endpoint, if this build and environment allow it.
-fn serve_control(node: &Arc<Node>, path: &std::path::Path) -> Result<(), String> {
+fn serve_control(node: &Arc<Node>, listen: &Listen, token: Option<&str>) -> Result<String, String> {
     #[cfg(debug_assertions)]
     {
         if std::env::var_os("HELIOS_DEBUG_CONTROL").is_none() {
@@ -277,21 +282,24 @@ fn serve_control(node: &Arc<Node>, path: &std::path::Path) -> Result<(), String>
             );
         }
         let node = node.clone();
-        helios_inspect::serve_lines(path, move |request| control::answer(&node, request))
-            .map(|_| ())
-            .map_err(|e| format!("cannot serve control on {}: {e}", path.display()))
+        helios_inspect::serve_at(listen, token, move |request| {
+            control::answer(&node, request)
+        })
+        .map(|bound| bound.address)
+        .map_err(|e| format!("cannot serve control on {listen:?}: {e}"))
     }
     #[cfg(not(debug_assertions))]
     {
-        let _ = (node, path);
+        let _ = (node, listen, token);
         Err("the control endpoint exists only in debug builds".into())
     }
 }
 
 struct Args {
     graph: PathBuf,
-    socket: PathBuf,
-    control: Option<PathBuf>,
+    socket: Listen,
+    control: Option<Listen>,
+    token_file: Option<PathBuf>,
     layers: Vec<(Layer, PathBuf)>,
     sets: Vec<(String, String)>,
 }
@@ -300,6 +308,7 @@ fn parse_args() -> Result<Args, String> {
     let mut graph = None;
     let mut socket = None;
     let mut control = None;
+    let mut token_file = None;
     let mut layers = Vec::new();
     let mut sets = Vec::new();
     let mut args = std::env::args().skip(1);
@@ -307,8 +316,9 @@ fn parse_args() -> Result<Args, String> {
         let mut value = || args.next().ok_or(format!("{arg} needs a value"));
         match arg.as_str() {
             "--graph" => graph = Some(PathBuf::from(value()?)),
-            "--socket" => socket = Some(PathBuf::from(value()?)),
-            "--control" => control = Some(PathBuf::from(value()?)),
+            "--socket" => socket = Some(Listen::parse(&value()?)?),
+            "--control" => control = Some(Listen::parse(&value()?)?),
+            "--token-file" => token_file = Some(PathBuf::from(value()?)),
             "--global" => layers.push((Layer::Global, PathBuf::from(value()?))),
             "--project" => {
                 layers.push((Layer::Project, PathBuf::from(value()?).join("helios.toml")))
@@ -328,6 +338,7 @@ fn parse_args() -> Result<Args, String> {
         graph: graph.ok_or("missing --graph FILE")?,
         socket: socket.ok_or("missing --socket PATH")?,
         control,
+        token_file,
         layers,
         sets,
     })
@@ -362,7 +373,7 @@ fn main() -> ExitCode {
         Ok(a) => a,
         Err(e) => {
             eprintln!(
-                "helios-node: {e}\nusage: helios-node --graph FILE --socket PATH [--global FILE] [--project DIR] [--user FILE] [--set KEY=VALUE]... [--control PATH]"
+                "helios-node: {e}\nusage: helios-node --graph FILE --socket PATH [--global FILE] [--project DIR] [--user FILE] [--set KEY=VALUE]... [--control PATH] [--token-file FILE]"
             );
             return ExitCode::from(2);
         }
@@ -416,26 +427,49 @@ fn main() -> ExitCode {
         .with("scheduler", node.scheduler.clone())
         .with("modules", Arc::new(Modules))
         .with_scheduler(node.scheduler.clone());
-    if let Err(e) = serve(inspector, &args.socket) {
-        eprintln!(
-            "helios-node: cannot serve on {}: {e}",
-            args.socket.display()
-        );
-        return ExitCode::from(1);
+    // A TCP endpoint needs a session token, written where only this user reads it.
+    let tcp = [Some(&args.socket), args.control.as_ref()]
+        .into_iter()
+        .flatten()
+        .any(|l| matches!(l, Listen::Tcp(_)));
+    let token = tcp.then(new_token);
+    if let Some(token) = &token {
+        let Some(file) = &args.token_file else {
+            eprintln!("helios-node: a tcp:// endpoint needs --token-file FILE");
+            return ExitCode::from(2);
+        };
+        if let Err(e) = write_token(file, token) {
+            eprintln!("helios-node: cannot write {}: {e}", file.display());
+            return ExitCode::from(1);
+        }
     }
-    if let Some(path) = &args.control
-        && let Err(e) = serve_control(&node, path)
-    {
-        eprintln!("helios-node: {e}");
-        return ExitCode::from(1);
+    let address = match serve_inspector(inspector, &args.socket, token.as_deref()) {
+        Ok(bound) => bound.address,
+        Err(e) => {
+            eprintln!("helios-node: cannot serve on {:?}: {e}", args.socket);
+            return ExitCode::from(1);
+        }
+    };
+    let control_address = match &args.control {
+        None => None,
+        Some(listen) => match serve_control(&node, listen, token.as_deref()) {
+            Ok(address) => Some(address),
+            Err(e) => {
+                eprintln!("helios-node: {e}");
+                return ExitCode::from(1);
+            }
+        },
+    };
+    println!("ready {address}");
+    if let Some(control) = &control_address {
+        println!("control {control}");
     }
-    println!("ready {}", args.socket.display());
     let _ = std::io::stdout().flush();
     let ready = bus.publish(
         SOURCE,
         None,
         &Ready {
-            socket: args.socket.display().to_string(),
+            socket: address.clone(),
             renders: loaded.renders.len(),
         },
     );

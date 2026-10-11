@@ -19,17 +19,20 @@
 //! Responses: `{"ok": true, ...}` or `{"ok": false, "error": "...", ...}`.
 
 use std::collections::BTreeMap;
-use std::io::{self, BufRead, BufReader, Write};
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::mpsc::RecvTimeoutError;
-use std::thread;
 use std::time::{Duration, Instant};
 
 use helios_core::{Bus, Describe, Envelope, Scheduler};
+
+pub mod transport;
+
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+pub use transport::{Address, Bound, Listen, new_token, request_at, serve_at, write_token};
 
 /// A request, as sent on the wire.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -163,64 +166,33 @@ pub fn serve(inspector: Inspector, path: &Path) -> io::Result<PathBuf> {
     serve_lines(path, move |request: Request| inspector.answer(&request))
 }
 
+/// Serves the inspector on any transport (see [`transport`]).
+pub fn serve_inspector(
+    inspector: Inspector,
+    listen: &Listen,
+    token: Option<&str>,
+) -> io::Result<Bound> {
+    serve_at(listen, token, move |request: Request| {
+        inspector.answer(&request)
+    })
+}
+
 /// Serves JSON lines on a Unix socket at `path`: each line is parsed as an
 /// `R` and answered by `handler`; a line that does not parse is answered
-/// with the reason. Shared by the inspect and control endpoints.
+/// with the reason.
 #[cfg(unix)]
 pub fn serve_lines<R, H>(path: &Path, handler: H) -> io::Result<PathBuf>
 where
     R: DeserializeOwned,
     H: Fn(R) -> Value + Send + Sync + 'static,
 {
-    use std::os::unix::net::UnixListener;
-
-    if path.exists() {
-        std::fs::remove_file(path)?;
-    }
-    let listener = UnixListener::bind(path)?;
-    let handler = Arc::new(handler);
-    thread::spawn(move || {
-        for stream in listener.incoming().flatten() {
-            let handler = handler.clone();
-            thread::spawn(move || {
-                let reader = BufReader::new(match stream.try_clone() {
-                    Ok(s) => s,
-                    Err(_) => return,
-                });
-                let mut writer = stream;
-                for line in reader.lines() {
-                    let Ok(line) = line else { return };
-                    if line.trim().is_empty() {
-                        continue;
-                    }
-                    let response = match serde_json::from_str::<R>(&line) {
-                        Ok(request) => handler(request),
-                        Err(e) => json!({ "ok": false, "error": format!("bad request: {e}") }),
-                    };
-                    if writeln!(writer, "{response}").is_err() {
-                        return;
-                    }
-                }
-            });
-        }
-    });
-    Ok(path.to_path_buf())
+    serve_at(&Listen::Unix(path.to_path_buf()), None, handler).map(|_| path.to_path_buf())
 }
 
-/// Sends one request to the endpoint at `path` and reads the response.
+/// Sends one request to the Unix socket at `path` and reads the response.
 #[cfg(unix)]
 pub fn request<R: Serialize>(path: &Path, request: &R) -> io::Result<Value> {
-    use std::os::unix::net::UnixStream;
-
-    let mut stream = UnixStream::connect(path)?;
-    writeln!(
-        stream,
-        "{}",
-        serde_json::to_string(request).expect("requests always serialize")
-    )?;
-    let mut line = String::new();
-    BufReader::new(stream).read_line(&mut line)?;
-    serde_json::from_str(&line).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+    request_at(&Address::Unix(path.to_path_buf()), request)
 }
 
 /// The debug control endpoint's requests: actions on a running node. A node

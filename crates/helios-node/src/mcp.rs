@@ -8,7 +8,9 @@
 //!
 //! Transport: JSON-RPC 2.0, one message per line on stdin and stdout.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+
+use helios_inspect::{Address, request_at};
 
 use serde_json::{Map, Value, json};
 
@@ -316,8 +318,8 @@ impl Tool {
 
 /// The sockets the server talks to, and how it starts sandboxes.
 pub struct Sockets {
-    pub inspect: Option<PathBuf>,
-    pub control: Option<PathBuf>,
+    pub inspect: Option<Address>,
+    pub control: Option<Address>,
     /// The `helios-node` executable.
     pub node_bin: PathBuf,
 }
@@ -334,8 +336,9 @@ fn sandbox(sockets: &mut Sockets, tool: &Tool, request: &Value) -> Value {
             created
                 .and_then(|()| crate::sandbox::start(&dir, &sockets.node_bin))
                 .map(|state| {
-                    sockets.inspect = Some(state.inspect.clone());
-                    sockets.control = cfg!(debug_assertions).then(|| state.control.clone());
+                    sockets.inspect = Some(Address::Unix(state.inspect.clone()));
+                    sockets.control =
+                        cfg!(debug_assertions).then(|| Address::Unix(state.control.clone()));
                     serde_json::to_value(state).expect("state serializes")
                 })
         }
@@ -350,9 +353,8 @@ fn sandbox(sockets: &mut Sockets, tool: &Tool, request: &Value) -> Value {
     }
 }
 
-fn send(path: &Path, request: &Value) -> Result<Value, String> {
-    helios_inspect::request(path, request)
-        .map_err(|e| format!("cannot reach the node at {}: {e}", path.display()))
+fn send(address: &Address, request: &Value) -> Result<Value, String> {
+    request_at(address, request).map_err(|e| format!("cannot reach the node at {address}: {e}"))
 }
 
 fn tool_result(text: String, is_error: bool) -> Value {
@@ -507,7 +509,7 @@ mod tests {
     #[test]
     fn notifications_get_no_answer_and_unknown_methods_an_error() {
         let mut sockets = Sockets {
-            inspect: Some(PathBuf::from("/nonexistent")),
+            inspect: Some(Address::Unix(PathBuf::from("/nonexistent"))),
             control: None,
             node_bin: PathBuf::from("helios-node"),
         };
