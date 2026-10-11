@@ -27,6 +27,35 @@ pub fn check<S: Store>(make: impl Fn() -> S) {
     commands_skip_unchanged_values_coalesce_and_audit(make());
     cursors_cost_one_query_and_report_deltas(make());
     versions_are_content_addressed_and_heads_follow_forks_and_merges(make());
+    documents_round_trip_by_namespace(make());
+}
+
+fn documents_round_trip_by_namespace<S: Store>(mut store: S) {
+    assert_eq!(store.document("config", "user").unwrap(), None);
+    store
+        .set_document("config", "user", Some(&json!({ "toml": "a = 1" })))
+        .unwrap();
+    store
+        .set_document("config", "user", Some(&json!({ "toml": "a = 2" })))
+        .unwrap();
+    store
+        .set_document(
+            "journal/w",
+            "img\u{1f}fetch",
+            Some(&json!({ "status": "done" })),
+        )
+        .unwrap();
+    assert_eq!(
+        store.document("config", "user").unwrap(),
+        Some(json!({ "toml": "a = 2" }))
+    );
+    assert_eq!(store.documents("config").unwrap().len(), 1);
+    assert_eq!(
+        store.documents("journal/w").unwrap(),
+        [("img\u{1f}fetch".to_string(), json!({ "status": "done" }))]
+    );
+    store.set_document("config", "user", None).unwrap();
+    assert!(store.documents("config").unwrap().is_empty());
 }
 
 fn versions_are_content_addressed_and_heads_follow_forks_and_merges<S: Store>(store: S) {

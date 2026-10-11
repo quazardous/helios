@@ -20,8 +20,9 @@
 //! Time is always passed in (milliseconds), never read from a clock, so the
 //! journal is deterministic and every worker agrees on what is due.
 //!
-//! Storage is a [`Store`]: [`MemoryStore`] here, the vault later. Every store
-//! must pass the same [`contract`].
+//! Storage is a [`Store`]: [`MemoryStore`] here, the vault's
+//! (`helios_vault::journal::VaultJournal`) for a journal that lasts. Every
+//! store must pass the same [`contract`].
 //!
 //! Not yet: groups, lanes, waits and signals, rate limits, graph versions,
 //! history of what forget and retries take away.
@@ -31,13 +32,13 @@ use std::fmt;
 use std::sync::Mutex;
 
 use helios_core::Describe;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 pub mod contract;
 
 /// Where an item stands at a node.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Status {
     Running,
@@ -58,7 +59,7 @@ impl Status {
 }
 
 /// The journal row of an item at a node.
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Row {
     pub status: Status,
     /// Attempts started so far.

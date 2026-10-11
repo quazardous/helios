@@ -23,6 +23,7 @@ helios-load = { path = "crates/helios-load" }
 helios-xmp = { path = "crates/helios-xmp" }
 helios-parity = { path = "crates/helios-parity" }
 helios-resolve = { path = "crates/helios-resolve" }
+helios-journal = { path = "crates/helios-journal" }
 helios-vkdt = { path = "crates/helios-vkdt" }
 helios-gpu = { path = "crates/helios-gpu" }
 helios-shell = { path = "crates/helios-shell" }

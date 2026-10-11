@@ -41,3 +41,14 @@ fn a_sqlite_vault_survives_reopening() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_journal_in_a_sqlite_vault_passes_the_journal_contract() {
+    use helios_vault::journal::VaultJournal;
+    helios_journal::contract::check(|| {
+        VaultJournal::new(
+            std::sync::Arc::new(Vault::new(SqliteStore::in_memory().unwrap())),
+            "test",
+        )
+    });
+}

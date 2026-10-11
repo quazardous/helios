@@ -13,4 +13,5 @@ serde_json.workspace = true
 rusqlite = { version = "0.40", features = ["bundled"] }
 
 [dev-dependencies]
+helios-journal.workspace = true
 helios-core.workspace = true

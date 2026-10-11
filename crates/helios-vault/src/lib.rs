@@ -29,6 +29,7 @@ use serde_json::json;
 pub mod catalog;
 pub mod contract;
 pub mod fields;
+pub mod journal;
 pub mod versions;
 
 pub use catalog::{ApplyReport, CursorId, CursorInfo, Delta, Row};
@@ -121,11 +122,25 @@ pub trait Store: Send {
     fn version(&self, id: &VersionId) -> Result<Option<Version>, String>;
     /// An image's versions, in no particular order.
     fn versions(&self, image: &ImageId) -> Result<Vec<Version>, String>;
+
+    /// A JSON document by namespace and key: what the vault keeps besides
+    /// images (a workflow journal's rows, configuration layers).
+    fn document(&self, ns: &str, key: &str) -> Result<Option<serde_json::Value>, String>;
+    /// Sets (or with `None` removes) a document.
+    fn set_document(
+        &mut self,
+        ns: &str,
+        key: &str,
+        value: Option<&serde_json::Value>,
+    ) -> Result<(), String>;
+    /// Every document of a namespace, by key.
+    fn documents(&self, ns: &str) -> Result<Vec<(String, serde_json::Value)>, String>;
 }
 
 /// Rows in memory: the reference other stores are checked against.
 #[derive(Default)]
 pub struct MemoryStore {
+    documents: BTreeMap<(String, String), serde_json::Value>,
     versions: BTreeMap<VersionId, Version>,
     images: BTreeMap<ImageId, Image>,
     locations: BTreeMap<PathBuf, (ImageId, Location)>,
@@ -278,6 +293,33 @@ impl Store for MemoryStore {
             .values()
             .filter(|v| v.image == *image)
             .cloned()
+            .collect())
+    }
+
+    fn document(&self, ns: &str, key: &str) -> Result<Option<serde_json::Value>, String> {
+        Ok(self.documents.get(&(ns.into(), key.into())).cloned())
+    }
+
+    fn set_document(
+        &mut self,
+        ns: &str,
+        key: &str,
+        value: Option<&serde_json::Value>,
+    ) -> Result<(), String> {
+        let k = (ns.to_string(), key.to_string());
+        match value {
+            Some(v) => self.documents.insert(k, v.clone()),
+            None => self.documents.remove(&k),
+        };
+        Ok(())
+    }
+
+    fn documents(&self, ns: &str) -> Result<Vec<(String, serde_json::Value)>, String> {
+        Ok(self
+            .documents
+            .iter()
+            .filter(|((n, _), _)| n == ns)
+            .map(|((_, k), v)| (k.clone(), v.clone()))
             .collect())
     }
 }

@@ -58,6 +58,12 @@ CREATE TABLE IF NOT EXISTS versions (
     label   TEXT
 );
 CREATE INDEX IF NOT EXISTS versions_image ON versions (image);
+CREATE TABLE IF NOT EXISTS documents (
+    ns    TEXT NOT NULL,
+    key   TEXT NOT NULL,
+    value TEXT NOT NULL,  -- JSON
+    PRIMARY KEY (ns, key)
+);
 ";
 
 pub struct SqliteStore {
@@ -465,5 +471,54 @@ impl Store for SqliteStore {
 
     fn versions(&self, image: &ImageId) -> Result<Vec<Version>, String> {
         self.versions_where("image = ?1", &image.hex())
+    }
+
+    fn document(&self, ns: &str, key: &str) -> Result<Option<Value>, String> {
+        let text: Option<String> = self
+            .db
+            .query_row(
+                "SELECT value FROM documents WHERE ns = ?1 AND key = ?2",
+                params![ns, key],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(err)?;
+        text.map(|t| serde_json::from_str(&t).map_err(|e| format!("document {ns}/{key}: {e}")))
+            .transpose()
+    }
+
+    fn set_document(&mut self, ns: &str, key: &str, value: Option<&Value>) -> Result<(), String> {
+        match value {
+            Some(v) => self.db.execute(
+                "INSERT INTO documents (ns, key, value) VALUES (?1, ?2, ?3)
+                 ON CONFLICT (ns, key) DO UPDATE SET value = excluded.value",
+                params![ns, key, v.to_string()],
+            ),
+            None => self.db.execute(
+                "DELETE FROM documents WHERE ns = ?1 AND key = ?2",
+                params![ns, key],
+            ),
+        }
+        .map(|_| ())
+        .map_err(err)
+    }
+
+    fn documents(&self, ns: &str) -> Result<Vec<(String, Value)>, String> {
+        let mut statement = self
+            .db
+            .prepare("SELECT key, value FROM documents WHERE ns = ?1 ORDER BY key")
+            .map_err(err)?;
+        let rows: Vec<(String, String)> = statement
+            .query_map(params![ns], |r| Ok((r.get(0)?, r.get(1)?)))
+            .map_err(err)?
+            .collect::<Result<_, _>>()
+            .map_err(err)?;
+        rows.into_iter()
+            .map(|(k, t)| {
+                serde_json::from_str(&t)
+                    .map(|v| (k.clone(), v))
+                    .map_err(|e| format!("document {ns}/{k}: {e}"))
+            })
+            .collect()
     }
 }
