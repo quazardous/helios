@@ -64,11 +64,19 @@ pub fn camera_to_working(xyz_to_camera: &[f64; 9]) -> Option<Mat3> {
         [xyz_to_camera[6], xyz_to_camera[7], xyz_to_camera[8]],
     ];
     let cam_rgb = mul(&cam_xyz, &REC2020_TO_XYZ);
+    // A row summing to zero (an unknown camera's all-zero matrix) cannot be
+    // normalized: no matrix, rather than one full of NaN.
+    if cam_rgb
+        .iter()
+        .any(|row| !row.iter().sum::<f64>().is_normal())
+    {
+        return None;
+    }
     let normalized = cam_rgb.map(|row| {
         let sum: f64 = row.iter().sum();
         row.map(|v| v / sum)
     });
-    inverse(&normalized)
+    inverse(&normalized).filter(|m| m.iter().flatten().all(|v| v.is_finite()))
 }
 
 /// sRGB transfer function: linear to encoded, both in [0, 1].
@@ -131,6 +139,11 @@ mod tests {
         let m = camera_to_working(&[0.9, -0.3, -0.1, -0.4, 1.2, 0.2, -0.05, 0.15, 0.6]).unwrap();
         let white = apply(&m, [1.0, 1.0, 1.0]);
         assert!(white.iter().all(|v| (v - 1.0).abs() < 1e-9), "{white:?}");
+    }
+
+    #[test]
+    fn an_unknown_cameras_zero_matrix_gives_none_not_nan() {
+        assert_eq!(camera_to_working(&[0.0; 9]), None);
     }
 
     #[test]
