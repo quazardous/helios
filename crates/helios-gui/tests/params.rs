@@ -26,8 +26,9 @@ fn harness() -> egui_kittest::Harness<'static, Shell> {
         )
         .unwrap();
     g.connect(src, "image", exp, "input").unwrap();
-    let mut shell = Shell::new(helios_panels(), None);
-    shell.set_view_source(g, exp, "output").unwrap();
+    let shell = Shell::new(helios_panels(), None);
+    // The node's values only: no viewport rendering in the background.
+    helios_values::bind_node(&mut shell.values.lock().unwrap(), &g, exp).unwrap();
     let mut h = headless::harness(shell, vec2(1280.0, 800.0));
     h.state_mut()
         .run("helios.params.focus", json!(null), Origin::User)
