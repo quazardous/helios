@@ -1687,6 +1687,7 @@ dependencies = [
  "helios-module-blur",
  "helios-module-exposure",
  "helios-module-sigmoid",
+ "helios-module-vkdt",
  "helios-testkit",
  "pollster 0.4.0",
  "wgpu",
@@ -1798,6 +1799,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "helios-module-vkdt"
+version = "0.0.1"
+dependencies = [
+ "helios-core",
+ "helios-testkit",
+]
+
+[[package]]
 name = "helios-module-whitebalance"
 version = "0.0.1"
 dependencies = [
@@ -1823,6 +1832,7 @@ dependencies = [
  "helios-module-highlights",
  "helios-module-rawprepare",
  "helios-module-sigmoid",
+ "helios-module-vkdt",
  "helios-module-whitebalance",
  "helios-resolve",
  "helios-testkit",
@@ -1844,6 +1854,7 @@ dependencies = [
  "helios-module-exposure",
  "helios-module-highlights",
  "helios-module-rawprepare",
+ "helios-module-vkdt",
  "helios-module-whitebalance",
  "helios-photo",
  "helios-xmp",

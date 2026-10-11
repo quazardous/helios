@@ -13,6 +13,8 @@
 //! the PATH; [`Darktable::find`] says when there is none, so tests can
 //! skip and say why.
 
+pub mod vkdt;
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 

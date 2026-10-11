@@ -257,3 +257,34 @@ fn a_kernel_that_does_not_compile_is_an_error_not_a_panic() {
         "{err}"
     );
 }
+
+#[test]
+fn vkdt_modules_on_the_gpu_match_their_cpu_reference() {
+    let Some(gpu) = gpu() else { return };
+    let input = helios_testkit::noise(Region::sized(70, 50), 4, 9);
+    let exposure = ModuleRef::new(helios_module_vkdt::VkdtExposure);
+    for ev in [-2.0, 0.0, 1.5] {
+        let params = Params::new().with("exposure", Value::Float(ev));
+        let c = check(
+            &gpu,
+            &exposure,
+            &params,
+            &Context::new(),
+            &input,
+            input.region(),
+        )
+        .unwrap();
+        assert!(c.max_rel < 1e-6, "exposure {ev}: {c:?}");
+    }
+    let usm = ModuleRef::new(helios_module_vkdt::VkdtUsm);
+    for (amount, thrs, region) in [
+        (2.0, 0.2, Region::new(6, 5, 40, 30)),
+        (0.5, 0.05, Region::new(0, 0, 30, 20)),
+    ] {
+        let params = Params::new()
+            .with("amount", Value::Float(amount))
+            .with("thrs", Value::Float(thrs));
+        let c = check(&gpu, &usm, &params, &Context::new(), &input, region).unwrap();
+        assert!(c.max_abs < 1e-4, "usm {amount}, {thrs}: {c:?}");
+    }
+}

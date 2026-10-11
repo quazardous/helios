@@ -225,6 +225,11 @@ pub fn registry() -> BTreeMap<&'static str, ModuleRef> {
         ),
         ("sigmoid", ModuleRef::new(helios_module_sigmoid::Sigmoid)),
         ("blur", ModuleRef::new(helios_module_blur::Blur)),
+        (
+            "vkdt_exposure",
+            ModuleRef::new(helios_module_vkdt::VkdtExposure),
+        ),
+        ("vkdt_usm", ModuleRef::new(helios_module_vkdt::VkdtUsm)),
     ])
 }
 

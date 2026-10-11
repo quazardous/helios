@@ -1,7 +1,8 @@
 name: parity
 
-# Helios's modules against darktable's own renders (helios-parity). Nightly,
-# since it installs darktable; also runnable by hand.
+# Helios's modules against darktable's and vkdt's own renders
+# (helios-parity). Nightly, since it installs darktable and builds vkdt;
+# also runnable by hand.
 on:
   schedule:
     - cron: "17 3 * * *"
@@ -23,3 +24,32 @@ jobs:
           sudo apt-get update -q && sudo apt-get install -yq darktable
           darktable-cli --version | head -1
       - run: cargo test -p helios-parity -- --nocapture
+
+  vkdt:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      # vkdt's command line, built at the commit the manifest round trip was
+      # checked on, without its optional inputs (raw, video, JXL). It runs on
+      # lavapipe, Mesa's software Vulkan.
+      - name: vkdt
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -yq clang glslang-tools libvulkan-dev mesa-vulkan-drivers libjpeg-dev zlib1g-dev pkg-config
+          git init -q vkdt && cd vkdt
+          git fetch -q --depth 1 https://github.com/hanatos/vkdt.git afc34256fb22bcaf6dcf6503d19d5f9a6f477af5
+          git checkout -q FETCH_HEAD
+          cat > bin/config.mk <<'EOF'
+          VKDT_USE_RAWINPUT=0
+          VKDT_USE_JXL=0
+          VKDT_USE_V4L2=0
+          VKDT_USE_MLV=0
+          VKDT_USE_PIPEWIRE=0
+          VKDT_USE_MCRAW=0
+          VKDT_USE_FFMPEG=0
+          OPT_CFLAGS=-Wall -pipe -O2 -DNDEBUG
+          EOF
+          make cli -j"$(nproc)"
+          echo "VKDT_CLI=$PWD/bin/vkdt-cli" >> "$GITHUB_ENV"
+      - run: cargo test -p helios-parity --test vkdt -- --nocapture
