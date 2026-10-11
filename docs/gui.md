@@ -12,6 +12,29 @@ as in VS Code: each user builds the view they want. Layouts are saved per
 project workspace and follow the user (configuration, user scope). A
 minimal image-first layout stays available for small screens.
 
+**One window is one workspace (decided 2026-10-11).** A window holds one
+project; another project opens another window. A detached panel opens an
+auxiliary window of the same workspace: closing it docks the panel back,
+closing the workspace closes them all. Tabs live inside editor groups
+(several graphs or images side by side), never at the project level.
+
+The shell is a framework from the start:
+
+- **areas**: editor groups (tabbed, splittable) in the centre, side and
+  bottom panels, an activity bar, a status bar;
+- **panels are declared** (id, title, default area, commands), so the shell
+  places, saves and restores them and exposes them to shortcuts and the
+  palette;
+- **every action is a named command** (`view.graph.focus`,
+  `panel.queue.toggle`), the same for menus, shortcuts, the command
+  palette, agents (control API) and tests;
+- **navigation by keyboard**: editor groups, tabs, the palette, quick open
+  (an image, a node), a key per panel, cycling between areas; the map
+  follows darktable's keys where they fit a clear credo, and is being
+  researched;
+- the layout, auxiliary windows and their screens included, is saved per
+  workspace in the user scope.
+
 ## Settings pages
 
 Settings pages are generated, never laid out by hand: a setting named

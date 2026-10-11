@@ -112,6 +112,15 @@ the engine computed on the GPU without copying them back. wgpu is
 the shared GPU layer for the GUI and the engine's GPU modules (2026-10-11,
 decided with egui: Vulkan on Linux and Windows, Metal on macOS, raw Vulkan
 access for vkdt interop), at the version egui uses (wgpu 30 with egui 0.36).
+**One window is one workspace** (2026-10-11, decided), as in VS Code:
+opening another project opens another window, never a project tab.
+Auxiliary windows (panels detached to another screen) belong to their
+workspace's window; tabs live inside editor groups. The shell is a panel
+framework from the start: fixed areas (editor groups, side and bottom
+panels, activity and status bars), panels declared rather than hard-coded,
+every action a named command reachable from menus, shortcuts, the palette,
+agents and tests. Shortcuts follow darktable's where they fit a clear
+credo (being researched, see docs/gui.md).
 
 **Helios makes darktable and vkdt meet** (2026-10-11, decided as the
 long-term goal). darktable brings compatibility (edits, workflow, users) and
