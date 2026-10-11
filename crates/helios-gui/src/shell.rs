@@ -27,13 +27,17 @@ use crate::snapshot::{self, Recorder};
 /// monitors.
 const SCREEN: &str = "primary";
 
+/// Pixels per point from which a screen is `hidpi` for profile variants.
+const HIDPI: f32 = 1.5;
+
 /// What commands ask the shell to do; they are queued and applied at the
 /// next frame, where the shell's state is at hand.
 enum Action {
     Palette,
     Theme(String),
     ThemeExport(PathBuf),
-    ProfileExport(PathBuf, Vec<helios_profile::Part>),
+    /// Where, which parts, only this machine's view.
+    ProfileExport(PathBuf, Vec<helios_profile::Part>, bool),
     ProfileImport(PathBuf),
     ProfileApply,
     ProfileUse(String),
@@ -150,6 +154,13 @@ pub struct Shell {
     profile_name: String,
     /// A profile read and shown as a diff, waiting for `profile.import.apply`.
     pending_import: Option<helios_profile::Profile>,
+    /// This machine, as profile variants select it.
+    machine: helios_profile::Machine,
+    /// The profile in use as read, with its variants, and as resolved for
+    /// this machine.
+    loaded: Option<(helios_profile::Profile, helios_profile::Resolved)>,
+    /// What `profile.resolved` answers.
+    resolved_view: Arc<Mutex<Value>>,
     scopes: std::rc::Rc<std::cell::RefCell<crate::scopes::Scopes>>,
     library: std::rc::Rc<std::cell::RefCell<crate::library::Library>>,
     /// Dialogs waiting to be answered, the first one shown.
@@ -214,6 +225,9 @@ impl Shell {
             profiles_dir: config_dir().join("profiles"),
             profile_name: "default".into(),
             pending_import: None,
+            machine: helios_profile::Machine::here(&config_dir().join("machine.toml")),
+            loaded: None,
+            resolved_view: Arc::new(Mutex::new(Value::Null)),
             scopes: Default::default(),
             library: Default::default(),
             values: Default::default(),
@@ -411,8 +425,53 @@ impl Shell {
         }
     }
 
-    /// Applies a profile's parts the shell holds; the others stay.
+    /// Applies a profile's parts the shell holds, resolved for this
+    /// machine (its variants for this system, screen and machine applied);
+    /// the others stay. `profile.resolved` says which values a variant set.
     pub fn apply_profile(&mut self, p: &helios_profile::Profile) {
+        let machine = self.machine_now();
+        let resolved = p.resolve(&machine);
+        if !resolved.from.is_empty() {
+            let from: Vec<String> = resolved
+                .from
+                .iter()
+                .map(|f| {
+                    let removed = if f.removed { " (removed)" } else { "" };
+                    format!("{:?} {}{removed} from {}", f.part, f.key, f.selector)
+                })
+                .collect();
+            self.note(format!(
+                "profile {}: {} values from variants: {}",
+                p.name,
+                from.len(),
+                from.join(", ")
+            ));
+        }
+        *self.resolved_view.lock().expect("resolved view") = json!({
+            "profile": p.name,
+            "machine": machine,
+            "from": resolved.from,
+        });
+        self.apply_resolved(&resolved.profile);
+        self.loaded = Some((p.clone(), resolved));
+    }
+
+    /// This machine, its screen as of the last frame.
+    fn machine_now(&self) -> helios_profile::Machine {
+        let mut m = self.machine.clone();
+        m.hidpi |= self.pixels_per_point >= HIDPI;
+        m
+    }
+
+    /// Sets this machine as profile variants see it (the host reads it
+    /// from `machine.toml` in the config directory); applies at the next
+    /// profile.
+    pub fn set_machine(&mut self, machine: helios_profile::Machine) {
+        self.machine = machine;
+    }
+
+    /// Applies a resolved profile's parts the shell holds.
+    fn apply_resolved(&mut self, p: &helios_profile::Profile) {
         use helios_profile::{System, local_keys};
         self.profile_name = p.name.clone();
         if let Some(t) = &p.theme {
@@ -545,6 +604,17 @@ impl Shell {
                         .clone()
                         .unwrap_or(Value::Null))
                 },
+            )
+            .expect("shell commands are declared once");
+        let view = self.resolved_view.clone();
+        self.registry
+            .register(
+                CommandSpec::new(
+                    "profile.resolved",
+                    "Describe the profile in use as resolved for this machine: which values came from which variant",
+                    "Preferences",
+                ),
+                move |_, _| Ok(view.lock().expect("resolved view").clone()),
             )
             .expect("shell commands are declared once");
         let q = self.queue.clone();
@@ -917,10 +987,14 @@ impl Shell {
         add(
             CommandSpec::new(
                 "profile.export",
-                "Export the profile (all parts, or `parts`)",
+                "Export the profile (all parts, or `parts`; `this_machine` flattens its variants)",
                 "Preferences",
             ),
             Box::new(move |a| {
+                let this_machine = a
+                    .get("this_machine")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
                 let parts = match a.get("parts") {
                     None | Some(Value::Null) => Vec::new(),
                     Some(v) => {
@@ -931,7 +1005,7 @@ impl Shell {
                     || config_dir().join("profiles/exported.helios-profile"),
                     PathBuf::from,
                 );
-                Ok(Action::ProfileExport(path, parts))
+                Ok(Action::ProfileExport(path, parts, this_machine))
             }),
         );
         add(
@@ -1683,13 +1757,20 @@ impl Shell {
                     Err(e) => format!("cannot export the theme to {}: {e}", path.display()),
                 });
             }
-            Action::ProfileExport(path, parts) => {
+            Action::ProfileExport(path, parts, this_machine) => {
                 let parts = if parts.is_empty() {
                     helios_profile::Part::ALL.to_vec()
                 } else {
                     parts
                 };
-                let profile = self.profile();
+                // What the shell holds is this machine's view; the
+                // profile's variants travel unless asked otherwise.
+                let profile = match &self.loaded {
+                    Some((source, resolved)) if !this_machine => {
+                        self.profile().rebase(source, &resolved.profile)
+                    }
+                    _ => self.profile(),
+                };
                 let present: Vec<_> = parts.into_iter().filter(|p| profile.has(*p)).collect();
                 // No plugin settings yet to keep home.
                 let written = profile.export(&present, &|_, _| false).and_then(|text| {
@@ -1930,7 +2011,17 @@ impl Shell {
     /// Draws the shell for one frame.
     pub fn ui(&mut self, ui: &mut Ui) {
         let ctx = ui.ctx().clone();
+        let was_hidpi = self.pixels_per_point >= HIDPI;
         self.pixels_per_point = ctx.pixels_per_point();
+        // The screen is known from the first frame on: a profile applied
+        // before, with a `hidpi` variant, is applied again.
+        if was_hidpi != (self.pixels_per_point >= HIDPI)
+            && let Some((source, _)) = &self.loaded
+            && source.on.contains_key(&helios_profile::Selector::Hidpi)
+        {
+            let source = source.clone();
+            self.apply_profile(&source);
+        }
         self.now = ctx.input(|i| i.time);
         self.cx = self.context(&ctx);
         if self.framed {

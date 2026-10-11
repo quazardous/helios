@@ -187,6 +187,20 @@ sync through the vault.
   Windows, Cmd on macOS); a binding may still name a system. MIDI and
   controller bindings are a separate part, since devices differ between
   machines.
+- **Variants per system or machine.** Any part may hold variants under
+  `[on.<selector>]` (`[on.macos.theme]`, `[[on.machine.laptop.keymap]]`),
+  overriding its common values. A selector is a system (`macos`, `linux`,
+  `windows`), a screen class (`hidpi`) or a named machine
+  (`machine.<name>`); a machine is named once, in `machine.toml` in the
+  config directory (`name = "laptop"`), never in a profile, never synced.
+  A profile is resolved for this machine when applied: common values,
+  then the system's, the screen class's, the machine's, the most specific
+  winning. `profile.resolved` says which values came from which variant.
+  Variants for other machines, or selectors Helios does not know, stay in
+  the file unapplied. They travel with an export and show per selector in
+  an import's diff; `profile.export` with `this_machine` writes only this
+  machine's view, flattened. Machine settings never enter a profile,
+  variants included.
 - **Sync.** Later, through the vault (the user's own server), never a
   third-party service. Conflicts show as a diff per part, and the last 20
   versions are kept.

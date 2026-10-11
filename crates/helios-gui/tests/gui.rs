@@ -270,6 +270,72 @@ fn a_profile_exports_imports_with_a_diff_and_is_used_by_name() {
 }
 
 #[test]
+fn the_shell_applies_a_profile_resolved_for_this_machine() {
+    use helios_profile::{Machine, System};
+    let dir = std::env::temp_dir().join(format!("helios-variants-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("work.helios-profile"),
+        "helios_profile = 1\nname = \"work\"\n\
+         [theme]\nname = \"helios-dark\"\n\
+         [on.machine.laptop.theme]\nname = \"helios-light\"\n\
+         [on.machine.studio.theme]\nname = \"helios-high-contrast\"\n",
+    )
+    .unwrap();
+    let mut shell = Shell::new(helios_panels(), None);
+    shell.set_profiles_dir(dir.clone());
+    shell.set_machine(Machine {
+        system: System::current(),
+        name: Some("laptop".into()),
+        hidpi: false,
+    });
+    let mut h = headless::harness(shell, vec2(800.0, 500.0));
+    h.run();
+    let dark_fill = h.ctx.global_style().visuals.panel_fill;
+    let s = h.state_mut();
+    s.run("profile.use", json!({ "name": "work" }), Origin::User)
+        .unwrap();
+    h.run();
+    assert_eq!(h.state().theme().name, "helios-light");
+    assert_ne!(h.ctx.global_style().visuals.panel_fill, dark_fill);
+    let resolved = h
+        .state_mut()
+        .run("profile.resolved", json!(null), Origin::User)
+        .unwrap();
+    assert_eq!(resolved["machine"]["name"], "laptop");
+    assert_eq!(
+        resolved["from"],
+        json!([{ "part": "theme", "key": "theme", "selector": "machine.laptop" }])
+    );
+    let notes = h.state().notes.join("\n");
+    assert!(notes.contains("Theme theme from machine.laptop"), "{notes}");
+
+    // Exported, the variants travel; this machine's view flattens them.
+    let (all, mine) = (
+        dir.join("all.helios-profile"),
+        dir.join("mine.helios-profile"),
+    );
+    let s = h.state_mut();
+    s.run("profile.export", json!({ "path": all }), Origin::User)
+        .unwrap();
+    s.run(
+        "profile.export",
+        json!({ "path": mine, "this_machine": true }),
+        Origin::User,
+    )
+    .unwrap();
+    h.run();
+    let all = std::fs::read_to_string(&all).unwrap();
+    assert!(all.contains("name = \"helios-dark\""), "{all}");
+    assert!(all.contains("[on.machine.studio.theme]"), "{all}");
+    let mine = std::fs::read_to_string(&mine).unwrap();
+    assert!(mine.contains("name = \"helios-light\""), "{mine}");
+    assert!(!mine.contains("[on."), "{mine}");
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
 fn scopes_draw_the_image_they_are_given_in_each_mode() {
     use helios_gui::scopes::{Mode, picture};
     // A dark left half and a bright right half.
