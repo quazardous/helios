@@ -34,7 +34,7 @@ fn a_sqlite_vault_survives_reopening() {
     );
     assert_eq!(v.describe()["images"], 1);
     // The edit history came back with the images, unchanged.
-    assert_eq!(v.heads(&first.image).unwrap(), [first.clone()]);
+    assert_eq!(v.heads(&first.image).unwrap(), std::slice::from_ref(&first));
     assert!(
         !v.add_version(&Version::new(first.image, vec![], edit, "agent", 9))
             .unwrap()

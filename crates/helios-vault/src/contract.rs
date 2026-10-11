@@ -64,7 +64,7 @@ fn versions_are_content_addressed_and_heads_follow_forks_and_merges<S: Store>(st
         Version::new(img.id, vec![user.id, agent.id], edit(0.9), "user", 30).id
     );
     vault.add_version(&merge).unwrap();
-    assert_eq!(vault.heads(&img.id).unwrap(), [merge.clone()]);
+    assert_eq!(vault.heads(&img.id).unwrap(), std::slice::from_ref(&merge));
 
     let all = vault.versions(&img.id).unwrap();
     assert_eq!(all.len(), 4);
