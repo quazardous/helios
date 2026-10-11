@@ -12,8 +12,8 @@ use helios_compute::{
     RemoteState, Role, Settings, WgpuAdapters, commands,
 };
 use helios_core::{
-    Accelerator, Bus, Describe, GpuJob, Graph, Image, ModuleRef, Params, Region, Value,
-    graph::SOURCE_PORT,
+    Accelerator, Bus, Describe, DeviceImage, GpuJob, Graph, Image, ModuleRef, Params, Region,
+    Value, graph::SOURCE_PORT,
 };
 use helios_shell::commands::{Origin, Registry};
 use helios_shell::when::Context;
@@ -63,23 +63,36 @@ impl Accelerator for FakeGpu {
         &self.id
     }
 
+    fn upload(&self, image: &Image) -> Result<DeviceImage, String> {
+        Ok(DeviceImage::new(
+            image.region(),
+            image.channels(),
+            image.clone(),
+        ))
+    }
+
+    fn download(&self, image: &DeviceImage) -> Result<Image, String> {
+        Ok(image.handle::<Image>().ok_or("not mine")?.clone())
+    }
+
     fn run(
         &self,
         _: &str,
         _: &GpuJob,
-        _: &Image,
+        _: &DeviceImage,
         output: Region,
         channels: u32,
-    ) -> Result<Image, String> {
+    ) -> Result<DeviceImage, String> {
         if self.fails {
             return Err("device lost".into());
         }
         self.runs.fetch_add(1, Ordering::SeqCst);
-        Ok(Image::new(
+        let zeros = Image::new(
             output,
             channels,
             vec![0.0; output.area() * channels as usize],
-        ))
+        );
+        Ok(DeviceImage::new(output, channels, zeros))
     }
 }
 
