@@ -112,8 +112,9 @@ pub fn demosaic(
             rgb[0][idx(row, col)] = pix;
         }
     }
-    for d in 1..NDIR {
-        rgb[d] = rgb[0].clone();
+    let (first, rest) = rgb.split_at_mut(1);
+    for dir in rest {
+        dir.copy_from_slice(&first[0]);
     }
 
     // Green 1 and 3: the min and max of the greens around each red/blue pair.
@@ -344,7 +345,7 @@ pub fn demosaic(
         for col in pad_homo..cols - pad_homo {
             let p = tidx(row, col);
             let mut tr = f32::MAX;
-            for d in drv.iter() {
+            for d in &drv {
                 if tr > d[p] {
                     tr = d[p];
                 }
@@ -363,7 +364,7 @@ pub fn demosaic(
     }
 
     // 5 x 5 sums of homogeneity, by rolling column sums.
-    let pad = BORDER as i64;
+    let pad = i64::from(BORDER);
     let mut homosum = vec![vec![0u8; n]; NDIR];
     for d in 0..NDIR {
         for row in pad..rows - pad {

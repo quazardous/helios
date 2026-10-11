@@ -56,7 +56,7 @@ impl Module for RawPrepare {
             })?;
         let white = context
             .get(fields::WHITE)
-            .and_then(|v| v.as_f64())
+            .and_then(helios_core::Value::as_f64)
             .ok_or_else(|| format!("context field `{}`: a white level needed", fields::WHITE))?;
         if black.iter().any(|b| *b >= white) {
             return Err(format!(

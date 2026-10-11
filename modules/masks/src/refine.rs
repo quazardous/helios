@@ -237,7 +237,7 @@ fn box_mean(v: &[f64], from: Region, to: Region, w: u32) -> Vec<f64> {
     let tw = to.width as usize;
     let n = ((2 * w + 1) * (2 * w + 1)) as f64;
     let mut out = Vec::with_capacity(to.area());
-    for y in 0..to.height as i64 {
+    for y in 0..i64::from(to.height) {
         for x in 0..tw {
             let s: f64 = (0..=2 * w).map(|d| across[(y + d) as usize * tw + x]).sum();
             out.push(s / n);

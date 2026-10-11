@@ -77,7 +77,7 @@ impl Module for Exposure {
         if params.get("compensate_bias") == Some(&Value::Bool(true)) {
             let bias = context
                 .get(EXPOSURE_BIAS)
-                .and_then(|v| v.as_f64())
+                .and_then(helios_core::Value::as_f64)
                 .ok_or_else(|| {
                     format!("context field `{EXPOSURE_BIAS}`: the camera's bias needed")
                 })?;
@@ -187,10 +187,10 @@ mod tests {
             .unwrap()
     }
 
-    fn apply(plan: &Plan, rgba: [f32; 4]) -> Vec<f32> {
+    fn apply(plan: Plan, rgba: [f32; 4]) -> Vec<f32> {
         let input = Image::new(Region::sized(1, 1), 4, rgba.to_vec());
         Exposure
-            .process(plan, &[&input], Region::sized(1, 1))
+            .process(&plan, &[&input], Region::sized(1, 1))
             .unwrap()[0]
             .data()
             .to_vec()
@@ -199,7 +199,7 @@ mod tests {
     #[test]
     fn defaults_are_the_identity() {
         assert_eq!(
-            apply(&plan(0.0, 0.0), [0.1, 0.5, 2.0, 0.7]),
+            apply(plan(0.0, 0.0), [0.1, 0.5, 2.0, 0.7]),
             [0.1, 0.5, 2.0, 0.7]
         );
     }
@@ -224,11 +224,11 @@ mod tests {
     #[test]
     fn one_stop_doubles_the_light_and_keeps_the_fourth_channel() {
         assert_eq!(
-            apply(&plan(1.0, 0.0), [0.1, 0.5, 2.0, 0.7]),
+            apply(plan(1.0, 0.0), [0.1, 0.5, 2.0, 0.7]),
             [0.2, 1.0, 4.0, 0.7]
         );
         assert_eq!(
-            apply(&plan(-2.0, 0.0), [0.4, 1.0, 2.0, 0.7]),
+            apply(plan(-2.0, 0.0), [0.4, 1.0, 2.0, 0.7]),
             [0.1, 0.25, 0.5, 0.7]
         );
     }
@@ -236,7 +236,7 @@ mod tests {
     #[test]
     fn black_maps_to_zero_and_white_to_one() {
         let p = plan(0.0, 0.1);
-        let out = apply(&p, [0.1, 1.0, 0.55, 0.0]);
+        let out = apply(p, [0.1, 1.0, 0.55, 0.0]);
         assert_eq!(out[0], 0.0);
         assert!((out[1] - 1.0).abs() < 1e-6);
         assert!((out[2] - 0.5).abs() < 1e-6);
@@ -250,7 +250,7 @@ mod tests {
             .unwrap();
         let shot_over = Context::new().with(EXPOSURE_BIAS, Value::Float(1.0));
         let p = Exposure.prepare(&params, &shot_over).unwrap();
-        assert_eq!(apply(&p, [0.4, 0.4, 0.4, 1.0]), [0.2, 0.2, 0.2, 1.0]);
+        assert_eq!(apply(p, [0.4, 0.4, 0.4, 1.0]), [0.2, 0.2, 0.2, 1.0]);
         let err = Exposure.prepare(&params, &Context::new()).unwrap_err();
         assert!(err.contains(EXPOSURE_BIAS), "{err}");
         // Off by default: the bias changes nothing.

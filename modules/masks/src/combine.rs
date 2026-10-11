@@ -67,6 +67,10 @@ impl Operator {
     /// Folds one member `m` (opacity and inversion applied) into `d`.
     /// `first` says whether `m` is the first visible member: difference has
     /// no seed that copies, so its first member is copied.
+    #[allow(
+        clippy::match_same_arms,
+        reason = "merging Maximum with Difference's guarded arm would apply the guard to both"
+    )]
     fn step(self, d: f32, m: f32, first: bool) -> f32 {
         let both = d > 0.0 && m > 0.0;
         match self {
@@ -124,7 +128,7 @@ impl Module for MaskCombine {
                     name: "operator".into(),
                     description: "how the members fold together, in port order".into(),
                     kind: ParamKind::Choice {
-                        options: Operator::NAMES.iter().map(|s| s.to_string()).collect(),
+                        options: Operator::NAMES.iter().map(std::string::ToString::to_string).collect(),
                         default: "maximum".into(),
                     },
                 },

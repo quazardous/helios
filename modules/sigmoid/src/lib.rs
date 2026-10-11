@@ -125,20 +125,20 @@ fn order(p: [f32; 3]) -> (usize, usize, usize) {
 fn preserve_hue(input: [f32; 3], curved: [f32; 3], hue: f32) -> [f32; 3] {
     let (max, mid, min) = order(input);
     let chroma = input[max] - input[min];
-    let midscale = if chroma != 0.0 {
-        (input[mid] - input[min]) / chroma
-    } else {
+    let midscale = if chroma == 0.0 {
         0.0
+    } else {
+        (input[mid] - input[min]) / chroma
     };
     let full = curved[min] + (curved[max] - curved[min]) * midscale;
     let naive_mid = (1.0 - hue) * curved[mid] + hue * full;
     let energy = curved[0] + curved[1] + curved[2];
     let naive_energy = curved[min] + naive_mid + curved[max];
     let min_plus_mid = input[min] + input[mid];
-    let blend = if min_plus_mid != 0.0 {
-        2.0 * input[min] / min_plus_mid
-    } else {
+    let blend = if min_plus_mid == 0.0 {
         0.0
+    } else {
+        2.0 * input[min] / min_plus_mid
     };
     let target = blend * energy + (1.0 - blend) * naive_energy;
     let mut out = [0.0; 3];
