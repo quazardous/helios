@@ -20,6 +20,34 @@ with the GPLv3.
 Tests never sleep and never touch a real photo library: they wait on
 events and run in their own directories (see docs/testing-strategy.md).
 
+## Test times
+
+CI runs the tests with [cargo-nextest](https://nexte.st/) (one process per
+test, `cargo install --locked cargo-nextest`), and the doctests with
+`cargo test --doc`, which nextest does not run:
+
+```bash
+cargo nextest run --workspace     # what CI runs, with --profile ci
+cargo xtask test-times            # the same, timed and recorded
+cargo xtask test-times --top 30 --profile ci
+```
+
+`cargo xtask test-times` keeps one line per run in
+`target/test-times/history.jsonl` and prints the slowest tests, the time
+per crate, and the tests that took more than 50 % and more than 0.5 s
+longer than the median of their last five runs. CI writes the 15 slowest
+tests to the job summary and keeps the JUnit report as an artifact.
+
+nextest warns about a test still running after 10 s and stops it after
+120 s (`.config/nextest.toml`). When the suite takes more than 3 minutes
+locally, or one test more than 5 s, open an optimisation pass: find what
+the slow tests wait for rather than raising a limit.
+
+No `sleep` in a test, not even in a polling loop: wait on the event that
+says the work is done (a channel, a condition variable, a bus event), with
+a generous deadline that only a hang reaches. A sleep makes the test slow
+when the machine is idle and flaky when it is loaded.
+
 ## Linters and formatters
 
 ```bash

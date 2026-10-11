@@ -1,0 +1,18 @@
+# cargo-nextest: one process per test, timings, slow-test warnings.
+# `cargo nextest run` locally, `cargo nextest run --profile ci` in CI,
+# `cargo xtask test-times` for the slowest tests and their history.
+# Doctests do not run under nextest: `cargo test --doc` runs them.
+
+[profile.default]
+# Warn about a test still running after 10 s, stop it after 12 periods
+# (120 s): a hung test fails instead of blocking the suite.
+slow-timeout = { period = "10s", terminate-after = 12 }
+
+# Every profile writes a JUnit report to target/nextest/<profile>/junit.xml,
+# read by `cargo xtask test-times`.
+[profile.default.junit]
+path = "junit.xml"
+
+[profile.ci]
+retries = 0
+fail-fast = false
