@@ -61,7 +61,7 @@ fn step(module: &str, version: u32, b: &[u8]) -> Option<Result<(u32, Vec<u8>), S
             // highlights v1..v3 go to v4 by copying the old struct over the
             // v4 layout {mode, blendL, blendC, strength, clip, noise_level,
             // iterations, scales, candidating, combine, recovery, solid_color}.
-            ("highlights", 1 | 2 | 3) => {
+            ("highlights", 1..=3) => {
                 let size = match version {
                     1 => 16,
                     2 => 20,
