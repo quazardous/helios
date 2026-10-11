@@ -264,7 +264,19 @@ impl Engine {
         node: NodeId,
         region: Region,
     ) -> Result<Vec<NodeStatus>, Error> {
-        let step = self.plan(graph, node, region, 1.0)?;
+        self.status_at(graph, node, region, 1.0)
+    }
+
+    /// [`Engine::status`] for a render at a scale (`region` in pixels at
+    /// that scale): what a viewport showing a proxy asks.
+    pub fn status_at(
+        &self,
+        graph: &Graph,
+        node: NodeId,
+        region: Region,
+        scale: f64,
+    ) -> Result<Vec<NodeStatus>, Error> {
+        let step = self.plan(graph, node, region, scale)?;
         let mut out = Vec::new();
         self.collect_status(graph, &step, &mut out)?;
         Ok(out)

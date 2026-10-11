@@ -60,6 +60,9 @@ pub struct Stats {
     pub tiles_reused: AtomicU64,
     /// Exact renders given up for a newer view.
     pub cancelled: AtomicU64,
+    /// The shown node's chain as the last exact render left it: state,
+    /// load, where each step ran.
+    pub statuses: Mutex<Vec<helios_core::status::NodeStatus>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -188,6 +191,9 @@ fn render_thread(
             stats.cancelled.fetch_add(1, Ordering::Relaxed);
             continue;
         }
+        if let Ok(s) = engine.status_at(&r.graph, r.node, r.port_region(), r.scale) {
+            *stats.statuses.lock().expect("statuses lock") = s;
+        }
         generation += 1;
         let _ = results.send(Layer {
             version: r.version,
@@ -202,6 +208,11 @@ fn render_thread(
 }
 
 impl Request {
+    /// The region the statuses are asked for: the request's.
+    fn port_region(&self) -> Region {
+        self.region
+    }
+
     /// The node's extent at the request's scale.
     fn extent_at(&self) -> Region {
         let e = self
@@ -351,6 +362,31 @@ impl Viewport {
         self.source
             .as_ref()
             .map(|s| (f64::from(s.extent.width), f64::from(s.extent.height)))
+    }
+
+    /// Changes the shown graph (a node added, removed, wired), then renders
+    /// again; the shown node follows `output` when it returns one.
+    pub fn edit(
+        &mut self,
+        f: impl FnOnce(&mut Graph, NodeId) -> Result<Option<NodeId>, String>,
+    ) -> Result<(), String> {
+        let src = self.source.as_mut().ok_or("no graph is shown")?;
+        if let Some(node) = f(&mut src.graph, src.node)? {
+            src.node = node;
+        }
+        src.extent = src
+            .graph
+            .extent(src.node)
+            .map_err(|e| e.to_string())?
+            .ok_or("the shown node has no source feeding it")?;
+        src.shared = Arc::new(src.graph.clone());
+        self.version += 1;
+        Ok(())
+    }
+
+    /// The node shown.
+    pub fn output(&self) -> Option<NodeId> {
+        self.source.as_ref().map(|s| s.node)
     }
 
     /// The graph shown, to bind its nodes to a store.

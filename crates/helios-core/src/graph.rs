@@ -362,6 +362,93 @@ impl Graph {
         Ok(())
     }
 
+    /// Unplugs an input port.
+    pub fn disconnect(&mut self, to: NodeId, in_port: &str) -> Result<(), Error> {
+        let target = self.node(to)?;
+        let Kind::Module { module, .. } = &target.kind else {
+            return Err(Error::Port {
+                module: target.name.clone(),
+                port: in_port.into(),
+            });
+        };
+        let i = module.manifest().input_index(in_port)?;
+        self.node_mut(to)?.inputs[i] = None;
+        Ok(())
+    }
+
+    /// The names of a node's output ports.
+    pub fn output_names(&self, id: NodeId) -> Result<Vec<String>, Error> {
+        Ok(match &self.node(id)?.kind {
+            Kind::Source { .. } => vec![SOURCE_PORT.to_string()],
+            Kind::Module { module, .. } => module
+                .manifest()
+                .outputs
+                .iter()
+                .map(|p| p.name.clone())
+                .collect(),
+        })
+    }
+
+    /// Removes a node. What it fed is fed by what fed its first input,
+    /// where the channels allow, so a chain stays a chain; ids after it
+    /// move down by one.
+    pub fn remove(&mut self, id: NodeId) -> Result<(), Error> {
+        let feeding = self.node(id)?.inputs.first().copied().flatten();
+        let mut splice = Vec::new();
+        for node in &mut self.nodes {
+            for input in &mut node.inputs {
+                if input.is_some_and(|(src, _)| src == id) {
+                    splice.push(input.take().map(|(_, port)| port));
+                } else {
+                    splice.push(None);
+                }
+            }
+        }
+        // Where each consumer's input was, by node and port index.
+        let mut cut = Vec::new();
+        let mut k = 0;
+        for (n, node) in self.nodes.iter().enumerate() {
+            for p in 0..node.inputs.len() {
+                if splice[k].is_some() {
+                    cut.push((n, p));
+                }
+                k += 1;
+            }
+        }
+        self.nodes.remove(id.0);
+        let shift = |n: NodeId| if n.0 > id.0 { NodeId(n.0 - 1) } else { n };
+        for node in &mut self.nodes {
+            for (src, _) in node.inputs.iter_mut().flatten() {
+                *src = shift(*src);
+            }
+        }
+        if let Some((src, out)) = feeding {
+            let src = shift(src);
+            for (n, p) in cut {
+                if n == id.0 {
+                    continue;
+                }
+                let consumer = if n > id.0 { n - 1 } else { n };
+                let channels = self.output_channels(src, out);
+                let wants = match &self.nodes[consumer].kind {
+                    Kind::Module { module, .. } => module.manifest().inputs[p].channels(),
+                    Kind::Source { .. } => None,
+                };
+                if channels.is_some() && channels == wants {
+                    self.nodes[consumer].inputs[p] = Some((src, out));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn output_channels(&self, id: NodeId, out: usize) -> Option<u32> {
+        match &self.nodes.get(id.0)?.kind {
+            Kind::Source { image, .. } => Some(image.channels()),
+            Kind::Module { module, .. } => module.manifest().outputs.get(out)?.channels(),
+        }
+    }
+
     /// Whether `upstream` feeds `node`, directly or not.
     fn feeds(&self, upstream: NodeId, node: NodeId) -> Result<bool, Error> {
         for (src, _) in self.node(node)?.inputs.iter().flatten() {

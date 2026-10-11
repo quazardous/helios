@@ -452,6 +452,12 @@ impl Store {
             .collect()
     }
 
+    /// Removes every path under a prefix (a node gone from the graph).
+    pub fn forget(&mut self, prefix: &str) {
+        self.entries.retain(|p, _| !p.starts_with(prefix));
+        self.dirty.retain(|p| !p.starts_with(prefix));
+    }
+
     /// The store's sequence number: the last change's.
     pub fn seq(&self) -> u64 {
         self.seq
