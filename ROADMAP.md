@@ -110,8 +110,10 @@ workspaces) come next.
 extracted into an egui component library published on its own,
 `egui-pop` (tokens and themes, icons, the normalized dialogs and menus,
 sliders and parameter widgets, the graph view), themable, accessible,
-driven by agents and tested headless; Helios consumes it. Its licence and
-crate layout follow the research in progress (not decided).
+driven by agents and tested headless; Helios consumes it. MIT licence,
+its own repository (github.com/quazardous/egui-pop), the name reserved on
+crates.io; crate layout and phases in docs/ui-library-research.md
+(2026-10-11, decided).
 Hard requirement (2026-10-11, decided): GPU acceleration on Linux, Windows
 and macOS, as close to Vulkan as possible, so the viewport can show buffers
 the engine computed on the GPU without copying them back. wgpu is
