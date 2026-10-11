@@ -18,7 +18,7 @@ fn mine() -> Profile {
         }]),
         theme: Some(ThemeChoice {
             name: "helios-light".into(),
-            overrides: BTreeMap::from([("accent.base".into(), json!("#3080ff"))]),
+            overrides: BTreeMap::from([("accent.default".into(), json!("#3080ff"))]),
         }),
         layout: None,
         plugins: Some(vec![PluginRef {
@@ -168,7 +168,7 @@ grid = true
 
 [theme]
 name = "helios-dark"
-overrides = { "accent.base" = "#3080ff" }
+overrides = { "accent.default" = "#3080ff" }
 
 [[keymap]]
 keys = "Mod+e"
@@ -189,7 +189,7 @@ keys = "meta+alt+e"
 command = "export.run"
 
 [on.machine.laptop.theme]
-overrides = { "font.size" = "15px" }
+overrides = { "font.size.body" = "15px" }
 
 [[on.machine.laptop.keymap]]
 keys = ""
@@ -268,8 +268,8 @@ fn a_profile_resolves_for_each_system_and_machine() {
     let laptop = p.resolve(&machine(System::MacOs, Some("laptop")));
     let theme = laptop.profile.theme.clone().unwrap();
     assert_eq!(theme.name, "helios-dark");
-    assert_eq!(theme.overrides["font.size"], json!("15px"));
-    assert_eq!(theme.overrides["accent.base"], json!("#3080ff"));
+    assert_eq!(theme.overrides["font.size.body"], json!("15px"));
+    assert_eq!(theme.overrides["accent.default"], json!("#3080ff"));
     assert_eq!(
         keys(&laptop.profile),
         [("export.run".into(), "meta+alt+e".into())]

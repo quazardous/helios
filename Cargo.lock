@@ -1022,6 +1022,62 @@ dependencies = [
 ]
 
 [[package]]
+name = "egui-pop"
+version = "0.0.1"
+source = "git+https://github.com/quazardous/egui-pop?rev=35f9ffb#35f9ffb223629ebade94944b38e5ee01ac285f4b"
+dependencies = [
+ "egui",
+ "egui-pop-api",
+ "egui-pop-core",
+ "egui-pop-model",
+ "egui-pop-tokens",
+]
+
+[[package]]
+name = "egui-pop-api"
+version = "0.0.1"
+source = "git+https://github.com/quazardous/egui-pop?rev=35f9ffb#35f9ffb223629ebade94944b38e5ee01ac285f4b"
+dependencies = [
+ "egui",
+ "egui-pop-core",
+ "egui-pop-model",
+ "log",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "egui-pop-core"
+version = "0.0.1"
+source = "git+https://github.com/quazardous/egui-pop?rev=35f9ffb#35f9ffb223629ebade94944b38e5ee01ac285f4b"
+dependencies = [
+ "egui",
+ "egui-pop-model",
+ "egui-pop-tokens",
+ "log",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "egui-pop-model"
+version = "0.0.1"
+source = "git+https://github.com/quazardous/egui-pop?rev=35f9ffb#35f9ffb223629ebade94944b38e5ee01ac285f4b"
+dependencies = [
+ "log",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "egui-pop-tokens"
+version = "0.0.1"
+source = "git+https://github.com/quazardous/egui-pop?rev=35f9ffb#35f9ffb223629ebade94944b38e5ee01ac285f4b"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
 name = "egui-wgpu"
 version = "0.36.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1784,6 +1840,7 @@ dependencies = [
  "bytemuck",
  "eframe",
  "egui",
+ "egui-pop",
  "egui_dock",
  "egui_kittest",
  "helios-core",
@@ -1793,7 +1850,6 @@ dependencies = [
  "helios-profile",
  "helios-scopes",
  "helios-shell",
- "helios-theme",
  "helios-values",
  "helios-vault",
  "helios-vault-sqlite",

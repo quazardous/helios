@@ -169,7 +169,7 @@ fn themes_switch_from_the_palette_and_export_to_a_token_file() {
     let light_fill = h.ctx.global_style().visuals.panel_fill;
     assert_ne!(dark_fill, light_fill);
     assert!(!h.ctx.global_style().visuals.dark_mode);
-    assert_eq!(h.state().theme().name, "helios-light");
+    assert_eq!(h.state().theme_name(), "helios-light");
 
     let path =
         std::env::temp_dir().join(format!("helios-theme-{}.tokens.json", std::process::id()));
@@ -180,7 +180,7 @@ fn themes_switch_from_the_palette_and_export_to_a_token_file() {
     let file: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
     assert_eq!(file["$name"], "helios-light");
-    assert_eq!(file["bg"]["panel"]["$type"], "color");
+    assert_eq!(file["surface"]["panel"]["$type"], "color");
     std::fs::remove_file(&path).unwrap();
 
     // An unknown theme falls back to the dark one and says so.
@@ -246,7 +246,7 @@ fn a_profile_exports_imports_with_a_diff_and_is_used_by_name() {
         "{notes}"
     );
     assert_eq!(
-        h2.state().theme().name,
+        h2.state().theme_name(),
         "helios-dark",
         "nothing applied yet"
     );
@@ -254,7 +254,7 @@ fn a_profile_exports_imports_with_a_diff_and_is_used_by_name() {
     s.run("profile.import.apply", json!(null), Origin::User)
         .unwrap();
     h2.run();
-    assert_eq!(h2.state().theme().name, "helios-high-contrast");
+    assert_eq!(h2.state().theme_name(), "helios-high-contrast");
     assert!(!h2.state().layout().placed().contains(&"helios.log"));
 
     // By name, as a workspace does.
@@ -264,7 +264,7 @@ fn a_profile_exports_imports_with_a_diff_and_is_used_by_name() {
     s.run("profile.use", json!({ "name": "work" }), Origin::User)
         .unwrap();
     h2.run();
-    assert_eq!(h2.state().theme().name, "helios-high-contrast");
+    assert_eq!(h2.state().theme_name(), "helios-high-contrast");
     assert_eq!(h2.state().profile_name(), "work");
     std::fs::remove_dir_all(&dir).unwrap();
 }
@@ -297,7 +297,7 @@ fn the_shell_applies_a_profile_resolved_for_this_machine() {
     s.run("profile.use", json!({ "name": "work" }), Origin::User)
         .unwrap();
     h.run();
-    assert_eq!(h.state().theme().name, "helios-light");
+    assert_eq!(h.state().theme_name(), "helios-light");
     assert_ne!(h.ctx.global_style().visuals.panel_fill, dark_fill);
     let resolved = h
         .state_mut()

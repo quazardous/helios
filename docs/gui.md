@@ -114,7 +114,8 @@ because the network turns around them; the others are stacked under them.
 
 Status: **decided** (2026-10-11). Research:
 [profiles-research.md](profiles-research.md). Built: themes
-(`helios-theme`, the GUI's mapping and commands) and profiles
+(Helios's overlays of egui-pop's themes, in `helios-gui`, and their
+commands) and profiles
 (`helios-profile`, export, import with a diff, a workspace's profile).
 Not yet: applying a theme's font families, the keyring API for plugins,
 sync through the vault.
@@ -122,25 +123,34 @@ sync through the vault.
 ### Themes
 
 - **The format.** A theme is a token file in the Design Tokens format
-  (DTCG JSON), `*.helios-theme.json`. Its tokens are semantic:
-  - surfaces: `bg.panel`, `bg.canvas`;
-  - text: `fg.text`, `fg.weak`;
-  - `accent`;
-  - node states: `state.running`, `state.failed`, `state.pending`;
-  - module families: `family.tone`;
-  - graph wires;
-  - sizes: `radius.widget`, `space.item`;
-  - type: `font.ui`, `font.mono`, `font.size`.
-- **Tokens only.** Code maps tokens onto `egui::Visuals` and `Style`. A
-  widget reads tokens, never a literal colour. egui's own fields are never
-  saved, so an egui upgrade cannot break a theme. Settings without a
-  semantic token (`striped`, handle shape) go under `$extensions` with the
-  key `io.github.quazardous.helios`.
-- **Inheritance.** A theme `$extends` a base: Helios Dark, Helios Light,
-  high contrast. A plugin's theme may extend any installed theme. When a
-  base is missing, the theme falls back to Helios Dark and says so.
-  Aliases (`{accent}`) let a theme change one colour and keep the rest
-  consistent.
+  (DTCG JSON), `*.helios-theme.json`, resolved by egui-pop (`egui_pop::theme`), the UI library
+  Helios is built on; its token guide is the reference for the format,
+  the tiers and the contract. The tokens are semantic:
+  - surfaces: `surface.panel`, `surface.canvas`, `surface.overlay`;
+  - text: `text.default`, `text.muted`;
+  - `accent.default`, `danger`, `warning`, `success`, `info`;
+  - sizes: `radius.widget`, `space.m`, `size.dialog.width`;
+  - type: `font.size.body`, `font.family.ui`, `font.family.mono`;
+  - component tokens: `button.*`, `dialog.*`, `toast.*`.
+- **Helios's own tokens.** What egui-pop's contract does not have is a
+  Helios component token, in each Helios theme: node states
+  (`state.done`, `state.running`, `state.stale`, `state.failed`,
+  `state.pending`), the destructive button (`button.danger.background`,
+  `button.danger.text`) and the neutral surround behind a photo
+  (`viewport.surround`). A theme without them falls back to the nearest
+  egui-pop token. Still to come: module families (`family.tone`), graph
+  wires.
+- **Tokens only.** egui-pop maps tokens onto `egui::Visuals` and `Style`.
+  A widget reads tokens (`Tokens::of(ctx)`), never a literal colour.
+  egui's own fields are never saved, so an egui upgrade cannot break a
+  theme. Unknown data goes under `$extensions` with the key
+  `io.github.quazardous.helios`.
+- **Inheritance.** A theme `$extends` a base. Helios Dark, Helios Light
+  and Helios High Contrast are thin overlays of egui-pop's `pop-dark`,
+  `pop-light` and `pop-high-contrast`. A plugin's theme may extend any
+  installed theme. When a theme is missing, Helios falls back to Helios
+  Dark and says so. Aliases (`{accent.default}`) let a theme change one
+  colour and keep the rest consistent.
 - **Overrides.** User overrides are a token file per theme, or for every
   theme, in the user's settings: the counterpart of VS Code's `[Theme]`
   keys and darktable's `user.css`. They are applied last and validated;

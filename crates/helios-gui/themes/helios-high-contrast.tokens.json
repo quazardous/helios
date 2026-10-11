@@ -1,0 +1,24 @@
+{
+  "$extends": "pop-high-contrast",
+  "$description": "Helios's high contrast theme: egui-pop's (black surfaces, white text, strong outlines, larger text) and Helios's own tokens.",
+  "viewport": {
+    "surround": {"$type": "color", "$value": "#000000", "$description": "Helios component token: behind the photo being edited. Black, as the surfaces around it."}
+  },
+  "state": {
+    "$type": "color",
+    "$description": "Helios component tokens: the state of a node in the graph.",
+    "done": {"$value": "{success}", "$description": "A node computed and current."},
+    "running": {"$value": "{info}", "$description": "A node being computed."},
+    "stale": {"$value": "{text.muted}", "$description": "A node whose content is out of date."},
+    "failed": {"$value": "{danger}", "$description": "A node whose computation failed."},
+    "pending": {"$value": "{accent.default}", "$description": "A decision waiting for an answer."}
+  },
+  "button": {
+    "danger": {
+      "$type": "color",
+      "$description": "Helios component tokens: the primary button of a destructive dialog.",
+      "background": {"$value": "{red.9}"},
+      "text": {"$value": "{red.contrast}"}
+    }
+  }
+}

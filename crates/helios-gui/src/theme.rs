@@ -1,91 +1,113 @@
-//! A resolved theme (`helios-theme`) as egui's visuals and style: the one
-//! place tokens become egui values. Widgets read the egui style or the
-//! theme's tokens, never literal colors.
+//! Helios's themes: thin overlays of egui-pop's themes (`egui_pop::theme`),
+//! in the Design Tokens format (DTCG). egui-pop resolves them, maps them
+//! onto egui's visuals and style, and keeps the typed tokens in the
+//! context ([`Tokens::of`]). Widgets read the egui style or the tokens,
+//! never literal colors.
 //!
-//! Font families are not applied yet: egui's bundled fonts stay until the
-//! font files a theme names can be loaded.
+//! Each Helios theme `$extends` an egui-pop base (`pop-dark`, `pop-light`,
+//! `pop-high-contrast`) and keeps only what is Helios's own: its component
+//! tokens ([`HELIOS_TOKENS`]), which egui-pop's contract does not have,
+//! among them a neutral surround behind photos. A theme without them (a user's
+//! theme extending an egui-pop base directly) still works: [`Extra`] falls
+//! back to the nearest egui-pop token.
 
-use egui::{Color32, CornerRadius, Stroke, TextStyle};
-use helios_theme::Resolved;
+use std::collections::BTreeMap;
 
-pub fn color(r: &Resolved, token: &str) -> Color32 {
-    let [cr, cg, cb, ca] = r.color(token);
-    let b = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
-    Color32::from_rgba_unmultiplied(b(cr), b(cg), b(cb), b(ca))
-}
+use egui::Color32;
+pub use egui_pop::theme::{ThemeSpec, Themes, Tokens};
+use serde_json::Value as Json;
 
-fn radius(r: &Resolved, token: &str) -> CornerRadius {
-    CornerRadius::same(r.size(token).round().clamp(0.0, 255.0) as u8)
-}
+/// The theme Helios starts with, and falls back to.
+pub const DEFAULT: &str = "helios-dark";
 
-/// Whether a color is a dark one (for egui's dark mode switches).
-fn dark(c: Color32) -> bool {
-    let l = 0.2126 * f32::from(c.r()) + 0.7152 * f32::from(c.g()) + 0.0722 * f32::from(c.b());
-    l < 128.0
-}
+/// Helios's built-in themes, in the order they are offered.
+const BUILT_IN: &[(&str, &str)] = &[
+    (
+        "helios-dark",
+        include_str!("../themes/helios-dark.tokens.json"),
+    ),
+    (
+        "helios-light",
+        include_str!("../themes/helios-light.tokens.json"),
+    ),
+    (
+        "helios-high-contrast",
+        include_str!("../themes/helios-high-contrast.tokens.json"),
+    ),
+];
 
-/// Applies a theme to egui.
-pub fn apply(ctx: &egui::Context, r: &Resolved) {
-    let panel = color(r, "bg.panel");
-    let text = color(r, "fg.text");
-    let border = color(r, "border");
-    let accent = color(r, "accent.base");
-    let widget_radius = radius(r, "radius.widget");
-    let mut visuals = if dark(panel) {
-        egui::Visuals::dark()
-    } else {
-        egui::Visuals::light()
-    };
-    visuals.panel_fill = panel;
-    visuals.window_fill = color(r, "bg.window");
-    visuals.extreme_bg_color = color(r, "bg.extreme");
-    visuals.text_edit_bg_color = Some(color(r, "bg.extreme"));
-    visuals.faint_bg_color = color(r, "bg.widget");
-    visuals.code_bg_color = color(r, "bg.widget");
-    visuals.window_stroke = Stroke::new(1.0, border);
-    visuals.window_corner_radius = radius(r, "radius.window");
-    visuals.menu_corner_radius = radius(r, "radius.window");
-    visuals.hyperlink_color = accent;
-    visuals.warn_fg_color = color(r, "warning");
-    visuals.error_fg_color = color(r, "danger");
-    visuals.weak_text_color = Some(color(r, "fg.weak"));
-    visuals.selection.bg_fill = color(r, "selection");
-    visuals.selection.stroke = Stroke::new(1.0, accent);
-    let w = &mut visuals.widgets;
-    for (state, fill) in [
-        (&mut w.noninteractive, panel),
-        (&mut w.inactive, color(r, "bg.widget")),
-        (&mut w.hovered, color(r, "bg.widget_hover")),
-        (&mut w.active, color(r, "bg.widget_active")),
-        (&mut w.open, color(r, "bg.widget_hover")),
-    ] {
-        state.bg_fill = fill;
-        state.weak_bg_fill = fill;
-        state.fg_stroke = Stroke::new(1.0, text);
-        state.corner_radius = widget_radius;
+/// The tokens Helios reads beyond egui-pop's contract: color tokens, with
+/// their meaning.
+pub const HELIOS_TOKENS: &[(&str, &str)] = &[
+    (
+        "viewport.surround",
+        "behind the photo being edited, neutral",
+    ),
+    ("state.done", "a node computed and current"),
+    ("state.running", "a node being computed"),
+    ("state.stale", "a node whose content is out of date"),
+    ("state.failed", "a node whose computation failed"),
+    ("state.pending", "a decision waiting for an answer"),
+    (
+        "button.danger.background",
+        "the primary button of a destructive dialog",
+    ),
+    ("button.danger.text", "the label on that button"),
+];
+
+/// egui-pop's built-in themes and Helios's.
+pub fn themes() -> Themes {
+    let mut themes = Themes::default();
+    for (name, text) in BUILT_IN {
+        themes.add_json(name, text).expect("built-in themes parse");
     }
-    w.noninteractive.bg_stroke = Stroke::new(1.0, border);
-    w.hovered.bg_stroke = Stroke::new(1.0, border);
-    w.active.bg_stroke = Stroke::new(1.0, accent);
-    w.hovered.fg_stroke = Stroke::new(1.0, color(r, "fg.strong"));
-    w.active.fg_stroke = Stroke::new(1.0, color(r, "fg.strong"));
+    themes
+}
 
-    let size = r.size("font.size").max(6.0);
-    let space = r.size("space.item");
-    ctx.all_styles_mut(|style| {
-        style.visuals = visuals.clone();
-        let fonts = &mut style.text_styles;
-        for (text_style, scale) in [
-            (TextStyle::Body, 1.0),
-            (TextStyle::Button, 1.0),
-            (TextStyle::Monospace, 1.0),
-            (TextStyle::Small, 0.85),
-            (TextStyle::Heading, 1.4),
-        ] {
-            if let Some(font) = fonts.get_mut(&text_style) {
-                font.size = size * scale;
-            }
+/// The themes a user picks from: every theme known but egui-pop's bases,
+/// which Helios's own extend.
+pub fn choosable(themes: &Themes) -> Vec<String> {
+    themes
+        .names()
+        .filter(|n| !egui_pop::theme::BUILT_IN_THEMES.contains(n))
+        .map(String::from)
+        .collect()
+}
+
+/// A theme resolved with the user's overrides (raw values by token path),
+/// ready to install. An unknown theme name is reported by egui-pop in the
+/// problems; the caller decides what to fall back to.
+pub fn resolve(themes: &Themes, name: &str, overrides: &BTreeMap<String, Json>) -> Tokens {
+    let mut spec = ThemeSpec::new(name);
+    spec.overrides.clone_from(overrides);
+    Tokens::new(themes.resolve(&spec))
+}
+
+/// Helios's own tokens, typed, each with an egui-pop fallback.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Extra {
+    pub viewport_surround: Color32,
+    pub state_done: Color32,
+    pub state_running: Color32,
+    pub state_stale: Color32,
+    pub state_failed: Color32,
+    pub state_pending: Color32,
+    pub danger_background: Color32,
+    pub danger_text: Color32,
+}
+
+impl Extra {
+    pub fn of(t: &Tokens) -> Extra {
+        let c = |path: &str, or: Color32| t.color(path).unwrap_or(or);
+        Extra {
+            viewport_surround: c("viewport.surround", t.surface.canvas),
+            state_done: c("state.done", t.status.success),
+            state_running: c("state.running", t.status.info),
+            state_stale: c("state.stale", t.text.muted),
+            state_failed: c("state.failed", t.status.danger),
+            state_pending: c("state.pending", t.accent.default),
+            danger_background: c("button.danger.background", t.status.danger),
+            danger_text: c("button.danger.text", t.surface.panel),
         }
-        style.spacing.item_spacing = egui::vec2(space, space * 0.66);
-    });
+    }
 }

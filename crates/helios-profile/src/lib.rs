@@ -36,7 +36,7 @@
 //! command = "export.run"
 //!
 //! [on.machine.laptop.theme]
-//! overrides = { "font.size" = "15px" }
+//! overrides = { "font.size.body" = "15px" }
 //!
 //! [[on.macos.keymap]]
 //! keys = "meta+alt+e"

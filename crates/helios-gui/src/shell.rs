@@ -114,6 +114,10 @@ pub fn name_rect(ctx: &Egui, name: &str, rect: Rect) {
     });
 }
 
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "independent switches (framed, pending theme, auto-answer, still), not states of one machine"
+)]
 pub struct Shell {
     pub registry: Registry,
     pub keymap: Keymap,
@@ -144,8 +148,8 @@ pub struct Shell {
     title: String,
     /// The window's frame is drawn by Helios (see `frame`).
     framed: bool,
-    themes: helios_theme::Themes,
-    theme: helios_theme::Resolved,
+    themes: crate::theme::Themes,
+    theme: crate::theme::Tokens,
     theme_overrides: BTreeMap<String, serde_json::Value>,
     /// The theme changed and egui has not been told yet.
     theme_pending: bool,
@@ -188,6 +192,9 @@ pub struct Shell {
     /// Where path fields browse: the system's chooser or Helios's own
     /// picker, and the recent workspaces.
     places: crate::dialogs::Places,
+    /// Headless runs: no cursor blink and no animation, so a frame settles
+    /// and a test's `run` ends.
+    still: bool,
 }
 
 impl Shell {
@@ -221,8 +228,12 @@ impl Shell {
             panels,
             title: String::new(),
             framed: false,
-            themes: helios_theme::Themes::default(),
-            theme: helios_theme::Themes::default().resolve(helios_theme::BASE, &BTreeMap::new()),
+            themes: crate::theme::themes(),
+            theme: crate::theme::resolve(
+                &crate::theme::themes(),
+                crate::theme::DEFAULT,
+                &BTreeMap::new(),
+            ),
             theme_overrides: BTreeMap::new(),
             theme_pending: true,
             profiles_dir: config_dir().join("profiles"),
@@ -239,13 +250,14 @@ impl Shell {
             dialogs: VecDeque::new(),
             dialog_view: Arc::default(),
             assume_yes: false,
+            still: false,
             places: crate::dialogs::Places {
                 native: std::env::var_os("HELIOS_NO_NATIVE_DIALOGS").is_none(),
                 recent: recent_workspaces(),
             },
             menu: None,
             menus: helios_shell::menus::Menus::new(),
-            theme_name: helios_theme::BASE.into(),
+            theme_name: crate::theme::DEFAULT.into(),
             notices: Vec::new(),
             dismissed: Vec::new(),
             now: 0.0,
@@ -395,15 +407,37 @@ impl Shell {
     pub fn set_theme(&mut self, name: &str, overrides: BTreeMap<String, serde_json::Value>) {
         self.theme_name = name.into();
         self.theme_overrides = overrides;
-        self.theme = self.themes.resolve(name, &self.theme_overrides);
+        // An unknown theme falls back to Helios's default, not to the
+        // egui-pop base egui-pop itself would pick.
+        let known = self.themes.get(name).is_some();
+        if !known {
+            self.warn(format!(
+                "theme {name}: no theme `{name}`: {} is used instead",
+                crate::theme::DEFAULT
+            ));
+        }
+        let resolved = if known { name } else { crate::theme::DEFAULT };
+        self.theme = crate::theme::resolve(&self.themes, resolved, &self.theme_overrides);
         self.theme_pending = true;
-        for p in self.theme.problems.clone() {
+        let problems: Vec<String> = self
+            .theme
+            .resolved()
+            .problems()
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        for p in problems {
             self.warn(format!("theme {name}: {p}"));
         }
     }
 
+    /// The name of the theme in use, as chosen.
+    pub fn theme_name(&self) -> &str {
+        &self.theme_name
+    }
+
     /// The theme in use.
-    pub fn theme(&self) -> &helios_theme::Resolved {
+    pub fn theme(&self) -> &crate::theme::Tokens {
         &self.theme
     }
 
@@ -424,7 +458,7 @@ impl Shell {
             name: self.profile_name.clone(),
             keymap: Some(keymap),
             theme: Some(ThemeChoice {
-                name: self.theme.name.clone(),
+                name: self.theme_name.clone(),
                 overrides: self.theme_overrides.clone(),
             }),
             layout: serde_json::from_str(&self.layout().to_json()).ok(),
@@ -547,7 +581,7 @@ impl Shell {
     }
 
     /// Adds a theme (a user's file, a plugin's) to those that can be chosen.
-    pub fn add_theme(&mut self, theme: helios_theme::Theme) {
+    pub fn add_theme(&mut self, theme: egui_pop::tokens::TokenFile) {
         self.themes.add(theme);
     }
 
@@ -824,12 +858,7 @@ impl Shell {
                 Box::new(move |_| Ok(action())),
             );
         }
-        let names: Vec<String> = self
-            .themes
-            .names()
-            .iter()
-            .map(std::string::ToString::to_string)
-            .collect();
+        let names = crate::theme::choosable(&self.themes);
         for name in names {
             let title = name
                 .trim_start_matches("helios-")
@@ -1280,17 +1309,11 @@ impl Shell {
             })
         };
         match name {
-            "themes" => self
-                .themes
-                .names()
+            "themes" => crate::theme::choosable(&self.themes)
                 .into_iter()
                 .map(|t| {
-                    entry(
-                        "theme.select",
-                        json!({ "name": t }),
-                        t.to_string(),
-                        t == self.theme_name,
-                    )
+                    let checked = t == self.theme_name;
+                    entry("theme.select", json!({ "name": t }), t, checked)
                 })
                 .collect(),
             "profiles" => {
@@ -1765,8 +1788,10 @@ impl Shell {
                 self.set_theme(&name, overrides);
             }
             Action::ThemeExport(path) => {
-                let text = serde_json::to_string_pretty(&self.theme.to_tokens())
-                    .expect("tokens serialize");
+                // The resolved theme as one file, under its name.
+                let mut tokens = self.theme.resolved().to_dtcg();
+                tokens["$name"] = json!(self.theme_name);
+                let text = serde_json::to_string_pretty(&tokens).expect("tokens serialize");
                 let saved = path
                     .parent()
                     .map_or(Ok(()), std::fs::create_dir_all)
@@ -2079,7 +2104,13 @@ impl Shell {
             }
         }
         if self.theme_pending {
-            crate::theme::apply(&ctx, &self.theme);
+            egui_pop::theme::install_tokens(&ctx, self.theme.clone());
+            if self.still {
+                ctx.all_styles_mut(|style| {
+                    style.visuals.text_cursor.blink = false;
+                    style.animation_time = 0.0;
+                });
+            }
             self.theme_pending = false;
         }
 
@@ -2483,6 +2514,7 @@ pub mod headless {
         shell.attach_gpu(&rs);
         // Never a window of the system's from a headless run.
         shell.places.native = false;
+        shell.still = true;
         Harness::builder()
             .with_size(size)
             .renderer(egui_kittest::wgpu::WgpuTestRenderer::from_render_state(rs))

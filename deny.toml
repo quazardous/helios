@@ -62,8 +62,9 @@ multiple-versions = "warn"
 wildcards = "allow"
 
 [sources]
-# crates.io only: no dependency comes from git or another registry.
+# crates.io, and egui-pop from its repository: Helios pins a commit of it
+# until egui-pop 0.1 is published on crates.io.
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
-allow-git = []
+allow-git = ["https://github.com/quazardous/egui-pop"]

@@ -589,20 +589,24 @@ pub(crate) struct Look {
     pub accent: Color32,
     pub accent_text: Color32,
     pub danger: Color32,
+    pub danger_fill: Color32,
+    pub danger_text: Color32,
     pub warning: Color32,
 }
 
 impl Look {
-    pub fn of(r: &helios_theme::Resolved) -> Self {
-        let c = |t: &str| crate::theme::color(r, t);
+    pub fn of(t: &crate::theme::Tokens) -> Self {
+        let extra = crate::theme::Extra::of(t);
         Look {
-            width: r.size("size.dialog"),
-            pad: r.size("space.dialog"),
-            toast: r.size("size.toast"),
-            accent: c("accent.base"),
-            accent_text: c("accent.text"),
-            danger: c("danger"),
-            warning: c("warning"),
+            width: t.dialog.width,
+            pad: t.dialog.padding,
+            toast: t.toast.width,
+            accent: t.accent.default,
+            accent_text: t.text.on_accent,
+            danger: t.status.danger,
+            danger_fill: extra.danger_background,
+            danger_text: extra.danger_text,
+            warning: t.status.warning,
         }
     }
 }
@@ -612,7 +616,7 @@ fn footer_button(ui: &mut Ui, look: &Look, label: &str, kind: Option<bool>) -> e
     // `Some(danger)`: the primary button; `None`: the secondary one.
     let text = RichText::new(label);
     let button = match kind {
-        Some(true) => egui::Button::new(text.color(Color32::WHITE)).fill(look.danger),
+        Some(true) => egui::Button::new(text.color(look.danger_text)).fill(look.danger_fill),
         Some(false) => egui::Button::new(text.color(look.accent_text)).fill(look.accent),
         None => egui::Button::new(text),
     };

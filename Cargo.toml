@@ -37,6 +37,10 @@ helios-gui = { path = "crates/helios-gui" }
 helios-vault = { path = "crates/helios-vault" }
 helios-vault-sqlite = { path = "crates/helios-vault-sqlite" }
 helios-i18n = { path = "crates/helios-i18n" }
+# MIT: the UI library Helios is built on (themes today). Pinned to a
+# commit until egui-pop 0.1 is on crates.io, then to that version.
+# eframe stays off: Helios brings its own, with its own features.
+egui-pop = { git = "https://github.com/quazardous/egui-pop", rev = "35f9ffb", default-features = false }
 blake3 = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
