@@ -16,8 +16,8 @@
 //! pixelpipe carries but does not use; here it is passed through untouched.
 
 use helios_core::{
-    Context, Family, GpuKernel, Image, Manifest, Module, ModuleKind, Needs, ParamKind, ParamSpec,
-    Params, PortSpec, Region, Role, Value,
+    Context, Family, GpuKernel, Image, Manifest, Module, ModuleKind, Needs, ParamHint, ParamKind,
+    ParamSpec, Params, PortSpec, Region, Role, Value,
 };
 use helios_photo::camera::fields::EXPOSURE_BIAS;
 
@@ -55,6 +55,21 @@ impl Module for Exposure {
             family: Family::Tone,
             role: Role::General,
         }
+    }
+
+    fn param_hints(&self) -> Vec<ParamHint> {
+        vec![
+            ParamHint::new("exposure")
+                .soft(-3.0, 4.0)
+                .steps(0.02, 0.25)
+                .unit("EV")
+                .display(1.0, 2),
+            ParamHint::new("black")
+                .soft(-0.1, 0.1)
+                .steps(0.0005, 0.005)
+                .unit("%")
+                .display(100.0, 2),
+        ]
     }
 
     fn prepare(&self, params: &Params, context: &Context) -> Result<Plan, String> {

@@ -141,6 +141,72 @@ impl ParamKind {
     }
 }
 
+/// How a parameter is best shown and moved, beyond what its kind fixes:
+/// what an editor needs and the engine does not. Every field is optional;
+/// a module gives hints only for the parameters that need them.
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+pub struct ParamHint {
+    pub name: String,
+    /// The range a slider spans by default, within the hard one (the
+    /// kind's); going past it up to the hard range is asked explicitly.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub soft: Option<(f64, f64)>,
+    /// One fine step, in the parameter's own unit.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub step: Option<f64>,
+    /// One coarse step.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub coarse: Option<f64>,
+    /// The unit shown (`EV`, `%`, `px`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unit: Option<String>,
+    /// Shown value = value × scale (100 for a fraction shown in %).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_scale: Option<f64>,
+    /// Decimals shown.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub precision: Option<u32>,
+    /// A short label; the parameter's name otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+}
+
+impl ParamHint {
+    pub fn new(name: &str) -> Self {
+        Self {
+            name: name.into(),
+            ..Self::default()
+        }
+    }
+
+    pub fn soft(mut self, min: f64, max: f64) -> Self {
+        self.soft = Some((min, max));
+        self
+    }
+
+    pub fn steps(mut self, fine: f64, coarse: f64) -> Self {
+        self.step = Some(fine);
+        self.coarse = Some(coarse);
+        self
+    }
+
+    pub fn unit(mut self, unit: &str) -> Self {
+        self.unit = Some(unit.into());
+        self
+    }
+
+    pub fn display(mut self, scale: f64, precision: u32) -> Self {
+        self.display_scale = Some(scale);
+        self.precision = Some(precision);
+        self
+    }
+
+    pub fn label(mut self, label: &str) -> Self {
+        self.label = Some(label.into());
+        self
+    }
+}
+
 /// A named parameter.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct ParamSpec {

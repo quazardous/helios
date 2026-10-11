@@ -377,3 +377,26 @@ fn the_library_rates_and_labels_what_is_selected_and_hands_the_changes_over() {
     let shot = headless::snapshot(&mut h, "helios.library.strip.1").unwrap();
     assert!(shot.width() > 30, "{}", shot.width());
 }
+
+#[test]
+fn the_shell_runs_the_value_commands_with_their_origin() {
+    use helios_values::Descriptor;
+    let mut shell = Shell::new(helios_panels(), None);
+    shell
+        .values
+        .lock()
+        .unwrap()
+        .declare("view/zoom", Descriptor::float("zoom", 0.1, 8.0, 1.0));
+    let a = shell
+        .run(
+            "param.set",
+            json!({ "path": "view/zoom", "step": 10 }),
+            Origin::Agent("a1".into()),
+        )
+        .unwrap();
+    assert!((a["value"].as_f64().unwrap() - 1.79).abs() < 1e-9, "{a}");
+    assert_eq!(
+        shell.registry.history().last().unwrap().origin,
+        Origin::Agent("a1".into())
+    );
+}

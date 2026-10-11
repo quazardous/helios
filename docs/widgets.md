@@ -1,9 +1,11 @@
 # Widgets: bound to values, driven by humans and agents alike
 
-Status: **proposal, for review** (2026-10-11). The user's requirements:
-every widget can be driven remotely by an agent (MCP) as easily as by a
-human, and a widget is bound to the value it controls, so that a change
-made elsewhere reaches it. darktable paths are relative to its source tree.
+Status: **accepted** (2026-10-11); the value store is built
+(`crates/helios-values`), the widgets bound to it come next. The user's
+requirements: every widget can be driven remotely by an agent (MCP) as
+easily as by a human, and a widget is bound to the value it controls, so
+that a change made elsewhere reaches it. darktable paths are relative to
+its source tree.
 
 ## What others do
 

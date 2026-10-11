@@ -7,8 +7,8 @@
 //! scale), and the base of darktable's blurs and local contrast.
 
 use helios_core::{
-    Context, Family, GpuKernel, Image, Manifest, Module, ModuleKind, Needs, ParamSpec, Params,
-    PortSpec, Region, Role,
+    Context, Family, GpuKernel, Image, Manifest, Module, ModuleKind, Needs, ParamHint, ParamSpec,
+    Params, PortSpec, Region, Role,
 };
 
 pub struct Blur;
@@ -65,6 +65,16 @@ impl Module for Blur {
             family: Family::Detail,
             role: Role::General,
         }
+    }
+
+    fn param_hints(&self) -> Vec<ParamHint> {
+        vec![
+            ParamHint::new("radius")
+                .soft(0.0, 16.0)
+                .steps(0.1, 1.0)
+                .unit("px")
+                .display(1.0, 1),
+        ]
     }
 
     fn prepare(&self, params: &Params, context: &Context) -> Result<Plan, String> {

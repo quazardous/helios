@@ -33,8 +33,8 @@ pub use error::Error;
 pub use graph::{Graph, LayoutHint, NodeId};
 pub use image::{ContentHash, Image, Region};
 pub use manifest::{
-    Family, Manifest, ModuleKind, Needs, ParamKind, ParamSpec, PixelFormat, PortKind, PortSpec,
-    Role,
+    Family, Manifest, ModuleKind, Needs, ParamHint, ParamKind, ParamSpec, PixelFormat, PortKind,
+    PortSpec, Role,
 };
 pub use module::{Accelerator, Context, GpuJob, GpuKernel, Module, ModuleRef};
 pub use params::{Params, Value};

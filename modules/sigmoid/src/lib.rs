@@ -16,8 +16,8 @@
 //! the working space's own primaries.
 
 use helios_core::{
-    Context, Family, GpuKernel, Image, Manifest, Module, ModuleKind, Needs, ParamSpec, Params,
-    PortSpec, Region, Role,
+    Context, Family, GpuKernel, Image, Manifest, Module, ModuleKind, Needs, ParamHint, ParamSpec,
+    Params, PortSpec, Region, Role,
 };
 
 pub struct Sigmoid;
@@ -195,6 +195,25 @@ impl Module for Sigmoid {
             family: Family::Tone,
             role: Role::General,
         }
+    }
+
+    fn param_hints(&self) -> Vec<ParamHint> {
+        vec![
+            ParamHint::new("contrast")
+                .soft(0.5, 3.0)
+                .steps(0.01, 0.1)
+                .display(1.0, 2),
+            ParamHint::new("skew").steps(0.01, 0.1).display(1.0, 2),
+            ParamHint::new("white_target")
+                .soft(50.0, 400.0)
+                .steps(1.0, 10.0)
+                .unit("%")
+                .display(1.0, 1),
+            ParamHint::new("preserve_hue")
+                .steps(1.0, 10.0)
+                .unit("%")
+                .display(1.0, 0),
+        ]
     }
 
     fn prepare(&self, params: &Params, _: &Context) -> Result<Plan, String> {

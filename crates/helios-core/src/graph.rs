@@ -11,7 +11,7 @@ use serde::Serialize;
 use crate::describe::Describe;
 use crate::error::Error;
 use crate::image::{ContentHash, Image};
-use crate::manifest::{Manifest, ModuleKind};
+use crate::manifest::{Manifest, ModuleKind, ParamHint};
 use crate::module::{Context, ModuleRef};
 use crate::params::{Params, Value};
 
@@ -225,6 +225,35 @@ impl Graph {
             Kind::Source { .. } => None,
             Kind::Module { module, .. } => Some(module.manifest().clone()),
         })
+    }
+
+    /// The parameters of a module node, completed with defaults; `None`
+    /// for a source.
+    pub fn params(&self, id: NodeId) -> Result<Option<Params>, Error> {
+        Ok(match &self.node(id)?.kind {
+            Kind::Source { .. } => None,
+            Kind::Module { params, .. } => Some(params.clone()),
+        })
+    }
+
+    /// The parameter hints of a module node (see [`Module::param_hints`]).
+    ///
+    /// [`Module::param_hints`]: crate::Module::param_hints
+    pub fn param_hints(&self, id: NodeId) -> Result<Vec<ParamHint>, Error> {
+        Ok(match &self.node(id)?.kind {
+            Kind::Source { .. } => Vec::new(),
+            Kind::Module { module, .. } => module.param_hints(),
+        })
+    }
+
+    /// The name of a node.
+    pub fn name(&self, id: NodeId) -> Result<&str, Error> {
+        Ok(&self.node(id)?.name)
+    }
+
+    /// Every node, in the order they were added.
+    pub fn ids(&self) -> impl Iterator<Item = NodeId> + '_ {
+        (0..self.nodes.len()).map(NodeId)
     }
 
     /// A node by name.

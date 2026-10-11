@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use crate::error::Error;
 use crate::image::{Image, Region};
-use crate::manifest::Manifest;
+use crate::manifest::{Manifest, ParamHint};
 use crate::params::{Params, Value};
 
 /// Context inputs: metadata of the image being processed (for the photo
@@ -101,6 +101,13 @@ pub trait Module: Send + Sync + 'static {
 
     fn manifest(&self) -> Manifest;
 
+    /// How its parameters are best shown and moved (soft range, steps,
+    /// unit): read by editors and agents, never by the engine. None by
+    /// default.
+    fn param_hints(&self) -> Vec<ParamHint> {
+        Vec::new()
+    }
+
     /// Turns parameters (already checked against the manifest and completed
     /// with defaults) and declared context fields into a plan. Cheap, no pixels.
     fn prepare(&self, params: &Params, context: &Context) -> Result<Self::Plan, String>;
@@ -158,6 +165,10 @@ impl ModuleRef {
 
     pub fn manifest(&self) -> &Manifest {
         self.0.manifest()
+    }
+
+    pub fn param_hints(&self) -> Vec<ParamHint> {
+        self.0.param_hints()
     }
 
     pub(crate) fn prepare(
@@ -289,6 +300,7 @@ pub(crate) type Plan = Arc<dyn Any + Send + Sync>;
 
 trait Erased: Send + Sync {
     fn manifest(&self) -> &Manifest;
+    fn param_hints(&self) -> Vec<ParamHint>;
     fn prepare(&self, params: &Params, context: &Context, scale: f64) -> Result<Plan, String>;
     fn input_region(&self, plan: &Plan, output: Region) -> Region;
     fn gpu_kernel(&self) -> Option<GpuKernel>;
@@ -312,6 +324,10 @@ impl<M: Module> Adapter<M> {
 impl<M: Module> Erased for Adapter<M> {
     fn manifest(&self) -> &Manifest {
         &self.manifest
+    }
+
+    fn param_hints(&self) -> Vec<ParamHint> {
+        self.module.param_hints()
     }
 
     fn prepare(&self, params: &Params, context: &Context, scale: f64) -> Result<Plan, String> {

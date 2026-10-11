@@ -11,6 +11,7 @@ helios-shell.workspace = true
 helios-theme.workspace = true
 helios-profile.workspace = true
 helios-scopes.workspace = true
+helios-values.workspace = true
 helios-core.workspace = true
 helios-photo.workspace = true
 helios-load.workspace = true

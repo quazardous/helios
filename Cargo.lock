@@ -1708,6 +1708,7 @@ dependencies = [
  "helios-scopes",
  "helios-shell",
  "helios-theme",
+ "helios-values",
  "helios-vault",
  "helios-vault-sqlite",
  "image",
@@ -1925,6 +1926,17 @@ dependencies = [
 name = "helios-theme"
 version = "0.0.1"
 dependencies = [
+ "serde_json",
+]
+
+[[package]]
+name = "helios-values"
+version = "0.0.1"
+dependencies = [
+ "helios-core",
+ "helios-module-exposure",
+ "helios-shell",
+ "serde",
  "serde_json",
 ]
 

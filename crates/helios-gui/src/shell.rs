@@ -127,6 +127,8 @@ pub struct Shell {
     pending_import: Option<helios_profile::Profile>,
     scopes: std::rc::Rc<std::cell::RefCell<crate::scopes::Scopes>>,
     library: std::rc::Rc<std::cell::RefCell<crate::library::Library>>,
+    /// Every value widgets and agents edit (`param.*` commands).
+    pub values: std::sync::Arc<std::sync::Mutex<helios_values::Store>>,
 }
 
 impl Shell {
@@ -166,6 +168,7 @@ impl Shell {
             pending_import: None,
             scopes: Default::default(),
             library: Default::default(),
+            values: Default::default(),
         };
         shell.docks = layout
             .areas
@@ -173,6 +176,8 @@ impl Shell {
             .map(|(area, node)| (*area, to_dock(node)))
             .collect();
         shell.declare_commands();
+        helios_values::register(&mut shell.registry, shell.values.clone())
+            .expect("param commands are declared once");
         if shell.panels.get("helios.scopes").is_some() {
             let scopes = shell.scopes.clone();
             shell.set_content("helios.scopes", move |ui| scopes.borrow_mut().ui(ui));

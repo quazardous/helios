@@ -1,0 +1,352 @@
+//! The value store: ranges, steps, gestures, guards, undo, events, the
+//! graph it mirrors and the commands over it.
+
+use std::sync::{Arc, Mutex};
+
+use helios_core::{Bus, Engine, Graph, Image, ModuleRef, Params, Region, Value};
+use helios_shell::commands::{Origin, Registry};
+use helios_shell::when::Context;
+use helios_values::*;
+use serde_json::json;
+
+fn agent() -> Origin {
+    Origin::Agent("a1".into())
+}
+
+/// An exposure node over a grey source, its parameters in a store.
+fn exposure() -> (Graph, helios_core::NodeId, Store, Arc<Bus>) {
+    let mut g = Graph::new();
+    let src = g.add_source(
+        "source",
+        Image::from_fn(
+            Region::sized(4, 4),
+            4,
+            |_, _, c| if c == 3 { 1.0 } else { 0.25 },
+        ),
+    );
+    let exp = g
+        .add_module(
+            "exposure",
+            ModuleRef::new(helios_module_exposure::Exposure),
+            &Params::new(),
+        )
+        .unwrap();
+    g.connect(src, "image", exp, "input").unwrap();
+    let bus = Arc::new(Bus::new());
+    let mut store = Store::new().with_bus(bus.clone());
+    assert_eq!(bind_node(&mut store, &g, exp).unwrap(), 3);
+    (g, exp, store, bus)
+}
+
+fn ev(store: &Store) -> f64 {
+    store
+        .get("node/exposure/exposure")
+        .unwrap()
+        .value
+        .as_f64()
+        .unwrap()
+}
+
+#[test]
+fn descriptors_come_from_the_manifest_and_its_hints() {
+    let (_, _, store, _) = exposure();
+    let d = &store.get("node/exposure/exposure").unwrap().descriptor;
+    assert_eq!(d.ty, Type::Float);
+    assert_eq!(d.hard, Some((-18.0, 18.0)));
+    assert_eq!(d.soft, Some((-3.0, 4.0)));
+    assert_eq!((d.step, d.coarse), (0.02, 0.25));
+    assert_eq!(d.unit.as_deref(), Some("EV"));
+    assert_eq!(d.default, Value::Float(0.0));
+    let paths: Vec<&str> = store
+        .list("node/exposure/")
+        .iter()
+        .map(|(p, _)| *p)
+        .collect();
+    assert_eq!(
+        paths,
+        [
+            "node/exposure/black",
+            "node/exposure/compensate_bias",
+            "node/exposure/exposure"
+        ]
+    );
+}
+
+#[test]
+fn writes_are_held_to_the_soft_range_unless_forced_and_say_so() {
+    let (_, _, mut store, _) = exposure();
+    let path = "node/exposure/exposure";
+    let a = store
+        .set(Set::new(path, Change::To(Value::Float(6.0)), Origin::User))
+        .unwrap();
+    assert_eq!(
+        (a.value.clone(), a.clamped),
+        (Value::Float(4.0), Clamped::Soft)
+    );
+    let a = store
+        .set(Set::new(path, Change::To(Value::Float(6.0)), Origin::User).force())
+        .unwrap();
+    assert_eq!((a.value, a.clamped), (Value::Float(6.0), Clamped::None));
+    let a = store
+        .set(Set::new(path, Change::To(Value::Float(40.0)), Origin::User).force())
+        .unwrap();
+    assert_eq!((a.value, a.clamped), (Value::Float(18.0), Clamped::Hard));
+    // Top and bottom go to the soft ends, or the hard ones when forced.
+    store
+        .set(Set::new(path, Change::Bottom, Origin::User))
+        .unwrap();
+    assert_eq!(ev(&store), -3.0);
+    store
+        .set(Set::new(path, Change::Top, Origin::User).force())
+        .unwrap();
+    assert_eq!(ev(&store), 18.0);
+    // A wrong type is refused, with the value it stays at.
+    let r = store
+        .set(Set::new(path, Change::To(Value::Bool(true)), Origin::User))
+        .unwrap_err();
+    assert!(
+        matches!(r, Refused::Invalid { current: Value::Float(v), .. } if v == 18.0),
+        "{r:?}"
+    );
+}
+
+#[test]
+fn steps_move_by_fine_or_coarse_amounts() {
+    let (_, _, mut store, _) = exposure();
+    let path = "node/exposure/exposure";
+    store
+        .set(Set::new(path, Change::Step(5), Origin::Midi))
+        .unwrap();
+    assert!((ev(&store) - 0.1).abs() < 1e-12, "{}", ev(&store));
+    store
+        .set(Set::new(path, Change::Coarse(-2), Origin::Midi))
+        .unwrap();
+    assert!((ev(&store) + 0.4).abs() < 1e-12, "{}", ev(&store));
+    store
+        .set(Set::new(path, Change::Reset, Origin::Midi))
+        .unwrap();
+    assert_eq!(ev(&store), 0.0);
+    // A bool steps by toggling.
+    let flag = "node/exposure/compensate_bias";
+    store
+        .set(Set::new(flag, Change::Step(1), Origin::User))
+        .unwrap();
+    assert_eq!(store.get(flag).unwrap().value, Value::Bool(true));
+}
+
+#[test]
+fn an_agent_cannot_move_what_a_hand_is_dragging() {
+    let (_, _, mut store, _) = exposure();
+    let path = "node/exposure/exposure";
+    let drag = store.begin_gesture(Origin::User, "drag exposure");
+    for v in [0.5, 0.8, 1.0] {
+        store
+            .set(Set::new(path, Change::To(Value::Float(v)), Origin::User).gesture(drag))
+            .unwrap();
+    }
+    let r = store
+        .set(Set::new(path, Change::To(Value::Float(-1.0)), agent()))
+        .unwrap_err();
+    assert_eq!(
+        r,
+        Refused::Held {
+            current: Value::Float(1.0),
+            by: Origin::User
+        }
+    );
+    // Other values stay free.
+    store
+        .set(Set::new(
+            "node/exposure/black",
+            Change::To(Value::Float(0.01)),
+            agent(),
+        ))
+        .unwrap();
+    store.end(drag);
+    store
+        .set(Set::new(path, Change::To(Value::Float(-1.0)), agent()))
+        .unwrap();
+    assert_eq!(ev(&store), -1.0);
+}
+
+#[test]
+fn a_writer_can_ask_that_nothing_changed_since_it_read() {
+    let (_, _, mut store, _) = exposure();
+    let path = "node/exposure/exposure";
+    let read = store.get(path).unwrap().seq;
+    store
+        .set(Set::new(path, Change::To(Value::Float(1.0)), Origin::User))
+        .unwrap();
+    let r = store
+        .set(Set::new(path, Change::To(Value::Float(2.0)), agent()).if_seq(read))
+        .unwrap_err();
+    assert!(
+        matches!(r, Refused::Stale { current: Value::Float(v), .. } if v == 1.0),
+        "{r:?}"
+    );
+    let now = store.get(path).unwrap().seq;
+    let a = store
+        .set(Set::new(path, Change::To(Value::Float(2.0)), agent()).if_seq(now))
+        .unwrap();
+    assert!(a.changed && a.seq > now);
+}
+
+#[test]
+fn a_gesture_or_a_group_is_one_undo_step_and_a_write_another() {
+    let (_, _, mut store, _) = exposure();
+    let path = "node/exposure/exposure";
+    let drag = store.begin_gesture(Origin::User, "drag exposure");
+    for v in [0.5, 0.8, 1.0] {
+        store
+            .set(Set::new(path, Change::To(Value::Float(v)), Origin::User).gesture(drag))
+            .unwrap();
+    }
+    store.end(drag);
+    let group = store.begin_group(agent(), "brighten and lift");
+    store
+        .set(Set::new(path, Change::Step(10), agent()).gesture(group))
+        .unwrap();
+    store
+        .set(
+            Set::new(
+                "node/exposure/black",
+                Change::To(Value::Float(-0.02)),
+                agent(),
+            )
+            .gesture(group),
+        )
+        .unwrap();
+    store.end(group);
+    store
+        .set(Set::new(path, Change::To(Value::Float(3.0)), Origin::User))
+        .unwrap();
+    let labels: Vec<&str> = store
+        .undo_steps()
+        .iter()
+        .map(|s| s.label.as_str())
+        .collect();
+    assert_eq!(
+        labels,
+        [
+            "drag exposure",
+            "brighten and lift",
+            "set node/exposure/exposure"
+        ]
+    );
+    store.undo(&Origin::User).unwrap();
+    store.undo(&Origin::User).unwrap();
+    assert_eq!(ev(&store), 1.0);
+    assert_eq!(
+        store.get("node/exposure/black").unwrap().value,
+        Value::Float(0.0)
+    );
+    // Undo is a write: it carries who asked for it.
+    assert_eq!(store.get(path).unwrap().origin, Some(Origin::User));
+    assert_eq!(
+        store.undo(&Origin::User).unwrap().as_deref(),
+        Some("drag exposure")
+    );
+    assert_eq!(ev(&store), 0.0);
+    store.redo(&Origin::User).unwrap();
+    assert_eq!(ev(&store), 1.0);
+}
+
+#[test]
+fn every_change_is_announced_once_and_no_change_is_not() {
+    let (_, _, mut store, bus) = exposure();
+    let path = "node/exposure/exposure";
+    let start = bus.last_seq();
+    store
+        .set(Set::new(path, Change::To(Value::Float(1.0)), agent()))
+        .unwrap();
+    let a = store
+        .set(Set::new(path, Change::To(Value::Float(1.0)), Origin::User))
+        .unwrap();
+    assert!(!a.changed);
+    let events = bus.since(start);
+    assert_eq!(events.len(), 1, "{events:?}");
+    assert_eq!(events[0].kind, "param.changed");
+    assert_eq!(
+        events[0].payload,
+        json!({
+            "path": path,
+            "old": { "float": 0.0 },
+            "new": { "float": 1.0 },
+            "origin": { "kind": "agent", "id": "a1" },
+            "seq": a.seq,
+        })
+    );
+}
+
+#[test]
+fn the_graph_renders_what_the_store_holds() {
+    let (mut g, exp, mut store, _) = exposure();
+    store
+        .set(Set::new(
+            "node/exposure/exposure",
+            Change::To(Value::Float(1.0)),
+            agent(),
+        ))
+        .unwrap();
+    assert_eq!(sync(&mut store, &mut g).unwrap(), 1);
+    assert_eq!(sync(&mut store, &mut g).unwrap(), 0, "nothing more to send");
+    let engine = Engine::new(Arc::new(Bus::new()));
+    let out = engine
+        .render(&g, exp, "output", Region::sized(4, 4))
+        .unwrap();
+    assert!(
+        (out.pixel(1, 1)[0] - 0.5).abs() < 1e-6,
+        "{:?}",
+        out.pixel(1, 1)
+    );
+}
+
+#[test]
+fn the_commands_drive_the_store_with_their_origin() {
+    let (_, _, store, _) = exposure();
+    let store = Arc::new(Mutex::new(store));
+    let mut r = Registry::new();
+    register(&mut r, store.clone()).unwrap();
+    let cx = Context::new();
+    let path = "node/exposure/exposure";
+    let a = r
+        .run(
+            "param.set",
+            json!({ "path": path, "value": 9 }),
+            agent(),
+            &cx,
+        )
+        .unwrap();
+    assert_eq!(a["value"], json!(4.0));
+    assert_eq!(a["clamped"], json!("soft"));
+    let got = r
+        .run("param.get", json!({ "path": path }), agent(), &cx)
+        .unwrap();
+    assert_eq!(got["origin"], json!({ "kind": "agent", "id": "a1" }));
+    assert_eq!(got["changed"], json!(true));
+    assert_eq!(got["descriptor"]["unit"], json!("EV"));
+    let stale = r
+        .run(
+            "param.set",
+            json!({ "path": path, "step": 1, "if_seq": 0 }),
+            agent(),
+            &cx,
+        )
+        .unwrap_err();
+    assert!(stale.contains("\"refused\":\"stale\""), "{stale}");
+    r.run("param.reset", json!({ "path": path }), Origin::User, &cx)
+        .unwrap();
+    assert_eq!(ev(&store.lock().unwrap()), 0.0);
+    let list = r
+        .run(
+            "param.list",
+            json!({ "prefix": "node/exposure/" }),
+            agent(),
+            &cx,
+        )
+        .unwrap();
+    assert_eq!(list.as_array().unwrap().len(), 3);
+    let undone = r.run("param.undo", json!(null), Origin::User, &cx).unwrap();
+    assert_eq!(undone["undone"], json!("set node/exposure/exposure"));
+    assert_eq!(ev(&store.lock().unwrap()), 4.0);
+}

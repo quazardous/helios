@@ -30,6 +30,7 @@ helios-scopes = { path = "crates/helios-scopes" }
 helios-vkdt = { path = "crates/helios-vkdt" }
 helios-gpu = { path = "crates/helios-gpu" }
 helios-shell = { path = "crates/helios-shell" }
+helios-values = { path = "crates/helios-values" }
 helios-gui = { path = "crates/helios-gui" }
 helios-vault = { path = "crates/helios-vault" }
 helios-vault-sqlite = { path = "crates/helios-vault-sqlite" }

@@ -1,0 +1,16 @@
+[package]
+name = "helios-values"
+description = "Helios value store: every editable value at a stable path, with its descriptor, written by humans and agents alike"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+helios-core.workspace = true
+helios-shell.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+helios-module-exposure = { path = "../../modules/exposure" }
