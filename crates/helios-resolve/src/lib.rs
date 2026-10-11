@@ -17,9 +17,12 @@
 //! Resolvers here: [`Scripted`] (fixed answers, for tests and replays),
 //! [`Cached`] (never asks twice about the same pixels), and
 //! [`command::Command`] (an external program speaking JSON, which covers
-//! local models and any API through the user's own script).
+//! local models and any API through the user's own script), and
+//! [`http::Http`] (an OpenAI-compatible or Anthropic vision endpoint, its
+//! key read from the environment).
 
 pub mod command;
+pub mod http;
 
 use std::collections::HashMap;
 use std::sync::mpsc;

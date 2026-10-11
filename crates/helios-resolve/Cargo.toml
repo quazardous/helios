@@ -12,3 +12,6 @@ helios-decision.workspace = true
 helios-export.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+# MIT OR Apache-2.0: an HTTP client (rustls), and base64 for images.
+ureq = { version = "3", features = ["json"] }
+base64 = "0.22"
