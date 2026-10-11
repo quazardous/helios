@@ -48,6 +48,9 @@ A Cargo workspace (Rust):
 - `crates/helios-inspect`: the read-only inspection endpoint of a Helios
   process (state snapshots, bus events, waiting on an event) as JSON lines
   over a local socket.
+- `crates/helios-config`: settings declared once, resolved through layers
+  (defaults, global, project, user, run), each value reported with its
+  origin.
 - `crates/helios-node`: `helios-node`, a headless node that loads a network
   from a JSON description, renders it and serves inspection; and `helios`,
   the command line (`helios inspect state`, `events`, `wait-event`...).

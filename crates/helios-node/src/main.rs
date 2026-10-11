@@ -6,12 +6,18 @@
 //! a signal.
 //!
 //!     helios-node --graph network.json --socket /path/to/node.sock
+//!                 [--global FILE] [--project DIR] [--user FILE] [--set KEY=VALUE]...
+//!
+//! Settings come from the files given (global layer, `DIR/helios.toml` for
+//! the project layer, user layer) and from `--set` (run layer); nothing is
+//! read from a default location behind the caller's back.
 
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::{Arc, Mutex};
 
+use helios_config::{Config, Layer, Schema};
 use helios_core::{Bus, Describe, Engine, Event, Graph, NodeId, Region};
 use helios_inspect::{Inspector, serve};
 use serde::Serialize;
@@ -88,30 +94,75 @@ impl Describe for Status {
 struct Args {
     graph: PathBuf,
     socket: PathBuf,
+    layers: Vec<(Layer, PathBuf)>,
+    sets: Vec<(String, String)>,
 }
 
 fn parse_args() -> Result<Args, String> {
     let mut graph = None;
     let mut socket = None;
+    let mut layers = Vec::new();
+    let mut sets = Vec::new();
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
+        let mut value = || args.next().ok_or(format!("{arg} needs a value"));
         match arg.as_str() {
-            "--graph" => graph = args.next().map(PathBuf::from),
-            "--socket" => socket = args.next().map(PathBuf::from),
+            "--graph" => graph = Some(PathBuf::from(value()?)),
+            "--socket" => socket = Some(PathBuf::from(value()?)),
+            "--global" => layers.push((Layer::Global, PathBuf::from(value()?))),
+            "--project" => {
+                layers.push((Layer::Project, PathBuf::from(value()?).join("helios.toml")))
+            }
+            "--user" => layers.push((Layer::User, PathBuf::from(value()?))),
+            "--set" => {
+                let v = value()?;
+                let (k, val) = v
+                    .split_once('=')
+                    .ok_or(format!("--set takes KEY=VALUE, got `{v}`"))?;
+                sets.push((k.to_string(), val.to_string()));
+            }
             other => return Err(format!("unknown argument `{other}`")),
         }
     }
     Ok(Args {
         graph: graph.ok_or("missing --graph FILE")?,
         socket: socket.ok_or("missing --socket PATH")?,
+        layers,
+        sets,
     })
+}
+
+/// The node's settings, from the layers it was given.
+fn config(args: &Args) -> Result<Config, String> {
+    let mut config = Config::new(Schema::core());
+    // Lowest layer first: a value equal to what it inherits leaves its layer,
+    // so what it inherits must be known when it is set.
+    let mut layers: Vec<_> = args.layers.iter().collect();
+    layers.sort_by_key(|(layer, _)| *layer);
+    for (layer, path) in layers {
+        config.load_file(*layer, path).map_err(|problems| {
+            let lines: Vec<String> = problems
+                .iter()
+                .map(|p| format!("{}: {p}", path.display()))
+                .collect();
+            lines.join("\n")
+        })?;
+    }
+    for (key, value) in &args.sets {
+        config
+            .set_str(Layer::Run, key, value)
+            .map_err(|p| p.to_string())?;
+    }
+    Ok(config)
 }
 
 fn main() -> ExitCode {
     let args = match parse_args() {
         Ok(a) => a,
         Err(e) => {
-            eprintln!("helios-node: {e}\nusage: helios-node --graph FILE --socket PATH");
+            eprintln!(
+                "helios-node: {e}\nusage: helios-node --graph FILE --socket PATH [--global FILE] [--project DIR] [--user FILE] [--set KEY=VALUE]..."
+            );
             return ExitCode::from(2);
         }
     };
@@ -129,7 +180,16 @@ fn main() -> ExitCode {
         }
     };
 
-    let bus = Arc::new(Bus::new());
+    let config = match config(&args) {
+        Ok(c) => Arc::new(c),
+        Err(e) => {
+            eprintln!("helios-node: {e}");
+            return ExitCode::from(1);
+        }
+    };
+    let bus = Arc::new(Bus::with_journal(
+        config.number("system.events.journal") as usize
+    ));
     let engine = Arc::new(Engine::new(bus.clone()));
     let graph = Arc::new(loaded.graph);
     let status = Arc::new(Status {
@@ -146,7 +206,8 @@ fn main() -> ExitCode {
     let inspector = Inspector::new(bus.clone())
         .with("graph", graph.clone())
         .with("engine", engine.clone())
-        .with("node", status.clone());
+        .with("node", status.clone())
+        .with("config", config.clone());
     if let Err(e) = serve(inspector, &args.socket) {
         eprintln!(
             "helios-node: cannot serve on {}: {e}",

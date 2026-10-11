@@ -9,6 +9,7 @@ repository.workspace = true
 [dependencies]
 helios-core.workspace = true
 helios-inspect.workspace = true
+helios-config.workspace = true
 helios-testkit.workspace = true
 helios-module-exposure = { path = "../../modules/exposure" }
 serde.workspace = true

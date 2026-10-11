@@ -206,6 +206,43 @@ The journal lives in the vault. It comes with the scheduler: an in-memory
 journal first, with a contract test suite every storage must pass (grampy's
 driver contract is the model), then a vault-backed one.
 
+## Configuration
+
+(2026-10-11) One settings system for the whole framework, in the
+`helios-config` crate.
+
+- **Declared once**, after tvty's settings schema: each setting has a name,
+  a label, a description, a kind (number with bounds and unit, toggle with
+  its two words, choice) with its default, and a **concern**. Options pages,
+  get and set by key, and the check of a hand-edited file come from the
+  declarations.
+- **Pages come from the naming structure**: a setting is named
+  `page.group.name` (`interface.graph.zoom`), and that name alone places it
+  on the options page `interface`, in the group `graph`; in a file it is
+  `[interface.graph]` then `zoom = ...`. Nobody lays out a settings page by
+  hand.
+- **Normalized inputs**: a setting describes its input in the same shape as
+  a module parameter (`type` float, int, bool or choice, bounds, default,
+  choices), so the GUI draws settings and module parameters with the same
+  widgets.
+- **Layered**, after aiball's "russian doll": shipped defaults, then
+  `global` (this user on this machine), `project` (shared by everyone on the
+  project), `user` (follows the user on every machine), `run` (one
+  invocation: command line, environment). The concern decides which layers
+  may set a value: machine settings only in global and run, project settings
+  up to project, user taste up to user. A value set in a layer its concern
+  does not allow is refused.
+- **Origin**: every effective value is reported with the layer it comes
+  from (`helios inspect describe config`). A value equal to what the layers
+  below give leaves its layer, so it keeps following them and defaults can
+  evolve.
+- **Files are TOML**, loaded all or nothing: a file with a problem changes
+  nothing and every problem is reported at once.
+- **Settings are inputs**: the program's edge says which files form which
+  layer; components receive resolved values and never read a configuration
+  file behind the caller's back. The user and project layers move into the
+  vault later, so every node of a user sees the same ones.
+
 ## What replaces each darktable channel
 
 | darktable | Helios |

@@ -157,6 +157,103 @@ fn failures_say_what_happened_instead() {
 }
 
 #[test]
+fn settings_come_from_the_layers_given_with_their_origin() {
+    let dir = std::env::temp_dir().join(format!("helios-system-config-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("project")).unwrap();
+    std::fs::write(
+        dir.join("global.toml"),
+        "[system.events]\njournal = 64\n[project.decisions]\nmode = \"human\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("project/helios.toml"),
+        "[project.decisions]\nmode = \"full_ai\"\n",
+    )
+    .unwrap();
+    std::fs::write(dir.join("network.json"), NETWORK).unwrap();
+    let mut node = Command::new(env!("CARGO_BIN_EXE_helios-node"))
+        .arg("--graph")
+        .arg(dir.join("network.json"))
+        .arg("--socket")
+        .arg(dir.join("node.sock"))
+        .arg("--global")
+        .arg(dir.join("global.toml"))
+        .arg("--project")
+        .arg(dir.join("project"))
+        .args(["--set", "interface.graph.zoom=overview"])
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut line = String::new();
+    BufReader::new(node.stdout.take().unwrap())
+        .read_line(&mut line)
+        .unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_helios"))
+        .arg("inspect")
+        .arg("--socket")
+        .arg(dir.join("node.sock"))
+        .args(["describe", "config"])
+        .output()
+        .unwrap();
+    let _ = node.kill();
+    let _ = node.wait();
+    let _ = std::fs::remove_dir_all(&dir);
+    let answer: Value = serde_json::from_slice(&out.stdout).unwrap();
+    let origin = |key: &str| {
+        let s = answer["describe"]["settings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["key"] == key)
+            .unwrap();
+        (
+            s["value"].clone(),
+            s["origin"].as_str().unwrap().to_string(),
+        )
+    };
+    assert_eq!(
+        origin("system.events.journal"),
+        (serde_json::json!(64.0), "global".into())
+    );
+    assert_eq!(
+        origin("project.decisions.mode"),
+        (serde_json::json!("full_ai"), "project".into())
+    );
+    assert_eq!(
+        origin("interface.graph.zoom"),
+        (serde_json::json!("overview"), "run".into())
+    );
+    assert_eq!(origin("interface.panels.queue_when_empty").1, "default");
+}
+
+#[test]
+fn a_setting_in_the_wrong_layer_is_refused() {
+    let dir = std::env::temp_dir().join(format!("helios-system-badconf-{}", std::process::id()));
+    std::fs::create_dir_all(dir.join("project")).unwrap();
+    std::fs::write(
+        dir.join("project/helios.toml"),
+        "[system.events]\njournal = 64\n",
+    )
+    .unwrap();
+    std::fs::write(dir.join("network.json"), NETWORK).unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_helios-node"))
+        .arg("--graph")
+        .arg(dir.join("network.json"))
+        .arg("--socket")
+        .arg(dir.join("n.sock"))
+        .arg("--project")
+        .arg(dir.join("project"))
+        .output()
+        .unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("a machine setting is set in: global, run")
+    );
+}
+
+#[test]
 fn a_bad_network_is_refused_with_a_reason() {
     let dir = std::env::temp_dir().join(format!("helios-system-bad-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
