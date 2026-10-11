@@ -12,3 +12,6 @@ helios-gui.workspace = true
 helios-i18n.workspace = true
 helios-node = { path = "../helios-node" }
 serde_json.workspace = true
+
+[lints]
+workspace = true

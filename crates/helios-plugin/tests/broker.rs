@@ -263,7 +263,7 @@ fn restarts_back_off_after_a_crash() {
         return;
     }
     let b = testee(Policy {
-        backoff: Duration::from_secs(60),
+        backoff: Duration::from_mins(1),
         ..quick()
     });
     b.call(TESTEE, READ, "echo", json!({})).unwrap();

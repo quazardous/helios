@@ -11,3 +11,6 @@ helios-shell.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 toml = "1"
+
+[lints]
+workspace = true

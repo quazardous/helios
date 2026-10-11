@@ -159,9 +159,9 @@ fn param(line: &str, ranges: &[(String, f64, f64)]) -> Result<ParamSpec, String>
                         .map_err(|_| format!("params: `{line}`: `{d}` is not an int"))
                 })
                 .collect::<Result<_, _>>()?;
-            let (min, max) = range
-                .map(|(a, b)| (a.floor() as i64, b.ceil() as i64))
-                .unwrap_or((i64::MIN, i64::MAX));
+            let (min, max) = range.map_or((i64::MIN, i64::MAX), |(a, b)| {
+                (a.floor() as i64, b.ceil() as i64)
+            });
             if count == 1 && d.len() == 1 {
                 ParamKind::Int {
                     min: min.min(d[0]),
@@ -326,7 +326,10 @@ fn param_line(p: &ParamSpec) -> String {
         ParamKind::Ints { count, default, .. } => (
             "int",
             *count,
-            default.iter().map(|v| v.to_string()).collect(),
+            default
+                .iter()
+                .map(std::string::ToString::to_string)
+                .collect(),
         ),
         ParamKind::Text { capacity, default } => ("string", *capacity, vec![default.clone()]),
         ParamKind::Bool { default } => ("int", 1, vec![i64::from(*default).to_string()]),

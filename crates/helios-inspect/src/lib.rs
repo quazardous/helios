@@ -143,8 +143,8 @@ impl Inspector {
             let left = deadline.saturating_duration_since(Instant::now());
             match rx.recv_timeout(left) {
                 Ok(e) if found(&e) => return json!({ "ok": true, "event": e }),
-                Ok(_) => continue,
-                Err(RecvTimeoutError::Timeout) | Err(RecvTimeoutError::Disconnected) => break,
+                Ok(_) => {}
+                Err(RecvTimeoutError::Timeout | RecvTimeoutError::Disconnected) => break,
             }
         }
         let journal = self.bus.since(since);

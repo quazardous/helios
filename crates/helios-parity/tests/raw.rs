@@ -10,12 +10,13 @@ use helios_parity::{DEMOSAIC_MARGIN, Darktable, Item, align, compare, inset, red
 use serde_json::json;
 
 fn images() -> PathBuf {
-    std::env::var_os("HELIOS_TEST_IMAGES")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
+    std::env::var_os("HELIOS_TEST_IMAGES").map_or_else(
+        || {
             Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("../../../darktable/src/tests/integration/images")
-        })
+        },
+        PathBuf::from,
+    )
 }
 
 /// rawprepare → white balance as shot → highlights clip → demosaic →
@@ -48,7 +49,7 @@ fn helios(raw: &Path) -> Image {
         g.connect(prev, &port, n, &module.manifest().inputs[0].name)
             .unwrap();
         prev = n;
-        port = module.manifest().outputs[0].name.clone();
+        port.clone_from(&module.manifest().outputs[0].name);
     }
     Engine::new(Arc::new(Bus::new()))
         .render(&g, prev, &port, loaded.image.region())

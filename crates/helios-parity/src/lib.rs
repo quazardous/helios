@@ -15,6 +15,7 @@
 
 pub mod vkdt;
 
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -86,10 +87,12 @@ pub fn sidecar(items: &[Item], input: Input, layouts: &Layouts) -> Result<String
             .max()
             .ok_or_else(|| format!("no layout for `{}`", item.module))?;
         let layout = layouts.get(&item.module, version).expect("listed");
-        let params: String = encode(layout, &item.values)?
+        let params = encode(layout, &item.values)?
             .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect();
+            .fold(String::new(), |mut hex, b| {
+                let _ = write!(hex, "{b:02x}");
+                hex
+            });
         lines.push(format!(
             r#"<rdf:li darktable:num="{i}" darktable:operation="{}" darktable:enabled="1" darktable:modversion="{version}" darktable:params="{params}" darktable:multi_name="" darktable:multi_priority="0"/>"#,
             item.module
@@ -120,8 +123,8 @@ pub fn sidecar(items: &[Item], input: Input, layouts: &Layouts) -> Result<String
 pub fn write_pfm(image: &Image, path: &Path) -> Result<(), String> {
     let r = image.region();
     let mut out = format!("PF\n{} {}\n-1.0\n", r.width, r.height).into_bytes();
-    for y in (0..r.height as i64).rev() {
-        for x in 0..r.width as i64 {
+    for y in (0..i64::from(r.height)).rev() {
+        for x in 0..i64::from(r.width) {
             let p = image.pixel(r.x + x, r.y + y);
             for c in 0..3 {
                 out.extend_from_slice(&p[c.min(p.len() - 1)].to_le_bytes());
@@ -181,8 +184,7 @@ impl Darktable {
     /// darktable-cli, or why there is none.
     pub fn find() -> Result<Darktable, String> {
         let cli = std::env::var_os("HELIOS_DARKTABLE_CLI")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from("darktable-cli"));
+            .map_or_else(|| PathBuf::from("darktable-cli"), PathBuf::from);
         let out = Command::new(&cli)
             .arg("--version")
             .output()
@@ -301,7 +303,7 @@ pub fn delta_e_2000(a: [f64; 3], b: [f64; 3]) -> f64 {
     let [l2, a2, b2] = b;
     let c1 = a1.hypot(b1);
     let c2 = a2.hypot(b2);
-    let cm = (c1 + c2) / 2.0;
+    let cm = f64::midpoint(c1, c2);
     let g = 0.5 * (1.0 - (cm.powi(7) / (cm.powi(7) + 25f64.powi(7))).sqrt());
     let (a1p, a2p) = ((1.0 + g) * a1, (1.0 + g) * a2);
     let (c1p, c2p) = (a1p.hypot(b1), a2p.hypot(b2));
@@ -328,12 +330,12 @@ pub fn delta_e_2000(a: [f64; 3], b: [f64; 3]) -> f64 {
         }
     };
     let dhh = 2.0 * (c1p * c2p).sqrt() * (dh / 2.0).sin();
-    let lm = (l1 + l2) / 2.0;
-    let cmp = (c1p + c2p) / 2.0;
+    let lm = f64::midpoint(l1, l2);
+    let cmp = f64::midpoint(c1p, c2p);
     let hm = if c1p * c2p == 0.0 {
         h1p + h2p
     } else if (h1p - h2p).abs() <= PI {
-        (h1p + h2p) / 2.0
+        f64::midpoint(h1p, h2p)
     } else if h1p + h2p < 2.0 * PI {
         (h1p + h2p + 2.0 * PI) / 2.0
     } else {
@@ -389,13 +391,13 @@ pub fn compare(ours: &Image, theirs: &Image) -> Result<Difference, String> {
     }
     let (mut max, mut sum, mut max_abs) = (0.0f64, 0.0f64, 0.0f64);
     let mut all = Vec::with_capacity(a.area());
-    for y in 0..a.height as i64 {
-        for x in 0..a.width as i64 {
+    for y in 0..i64::from(a.height) {
+        for x in 0..i64::from(a.width) {
             let p = ours.pixel(a.x + x, a.y + y);
             let q = theirs.pixel(b.x + x, b.y + y);
-            let rgb = |p: &[f32]| [p[0] as f64, p[1] as f64, p[2] as f64];
+            let rgb = |p: &[f32]| [f64::from(p[0]), f64::from(p[1]), f64::from(p[2])];
             for c in 0..3 {
-                max_abs = max_abs.max((p[c] - q[c]).abs() as f64);
+                max_abs = max_abs.max(f64::from((p[c] - q[c]).abs()));
             }
             let d = delta_e_2000(lab(rgb(p)), lab(rgb(q)));
             max = max.max(d);
@@ -425,10 +427,12 @@ pub fn reduce(image: &Image, factor: u32) -> Image {
     let n = (factor * factor) as f32;
     Image::from_fn(Region::sized(w, h), 3, |x, y, c| {
         let mut sum = 0.0;
-        for dy in 0..factor as i64 {
-            for dx in 0..factor as i64 {
-                sum += image.pixel(r.x + x * factor as i64 + dx, r.y + y * factor as i64 + dy)
-                    [c as usize];
+        for dy in 0..i64::from(factor) {
+            for dx in 0..i64::from(factor) {
+                sum += image.pixel(
+                    r.x + x * i64::from(factor) + dx,
+                    r.y + y * i64::from(factor) + dy,
+                )[c as usize];
             }
         }
         sum / n
@@ -446,8 +450,8 @@ pub fn align(ours: &Image, theirs: &Image, reach: i64) -> (i64, i64, Image, Imag
         // theirs(x, y) is ours(x + dx, y + dy).
         let x0 = 0.max(-dx);
         let y0 = 0.max(-dy);
-        let x1 = (b.width as i64).min(a.width as i64 - dx);
-        let y1 = (b.height as i64).min(a.height as i64 - dy);
+        let x1 = i64::from(b.width).min(i64::from(a.width) - dx);
+        let y1 = i64::from(b.height).min(i64::from(a.height) - dy);
         (x0, y0, x1, y1)
     };
     let mut best = (f64::INFINITY, 0, 0);

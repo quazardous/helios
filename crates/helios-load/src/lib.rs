@@ -255,8 +255,9 @@ fn raw(bytes: Arc<Vec<u8>>) -> Result<(Image, CameraInfo), String> {
     let area = raw
         .crop_area
         .or(raw.active_area)
-        .map(|r| (r.p.x, r.p.y, r.d.w, r.d.h))
-        .unwrap_or((0, 0, raw.width, raw.height));
+        .map_or((0, 0, raw.width, raw.height), |r| {
+            (r.p.x, r.p.y, r.d.w, r.d.h)
+        });
     let (x0, y0, w, h) = area;
     if x0 + w > raw.width || y0 + h > raw.height || w == 0 || h == 0 {
         return Err(format!(

@@ -350,12 +350,13 @@ fn an_export_without_a_format_is_refused_at_load() {
 
 #[test]
 fn files_are_sources_read_next_to_the_network() {
-    let images = std::env::var_os("HELIOS_TEST_IMAGES")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
+    let images = std::env::var_os("HELIOS_TEST_IMAGES").map_or_else(
+        || {
             Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("../../../darktable/src/tests/integration/images")
-        });
+        },
+        PathBuf::from,
+    );
     let raw = images.join("mire1.cr2");
     if !raw.is_file() {
         eprintln!("skipped: no test images in {}", images.display());
@@ -469,12 +470,13 @@ fn a_node_whose_stdout_is_closed_keeps_serving() {
 
 #[test]
 fn a_raw_goes_through_the_pipe_to_a_file() {
-    let images = std::env::var_os("HELIOS_TEST_IMAGES")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
+    let images = std::env::var_os("HELIOS_TEST_IMAGES").map_or_else(
+        || {
             Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("../../../darktable/src/tests/integration/images")
-        });
+        },
+        PathBuf::from,
+    );
     let raw = images.join("mire1.cr2");
     if !raw.is_file() {
         eprintln!("skipped: no test images in {}", images.display());
@@ -516,7 +518,7 @@ fn a_raw_goes_through_the_pipe_to_a_file() {
     // Not black, not white: real light came through.
     let mean = png
         .pixels()
-        .map(|p| p.0.iter().map(|v| *v as f64).sum::<f64>() / 3.0)
+        .map(|p| p.0.iter().map(|v| f64::from(*v)).sum::<f64>() / 3.0)
         .sum::<f64>()
         / (256.0 * 128.0);
     assert!(mean > 5.0 && mean < 250.0, "mean {mean}");

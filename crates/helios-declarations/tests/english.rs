@@ -19,7 +19,12 @@ fn the_english_catalog_matches_the_declarations() {
     let extra: Vec<_> = std::fs::read_dir(&dir)
         .expect("i18n/en exists")
         .filter_map(|e| e.ok()?.file_name().into_string().ok())
-        .filter(|n| n.ends_with(".ftl") && !files.contains_key(n.as_str()))
+        .filter(|n| {
+            std::path::Path::new(n)
+                .extension()
+                .is_some_and(|e| e == "ftl")
+                && !files.contains_key(n.as_str())
+        })
         .collect();
     assert!(
         extra.is_empty(),

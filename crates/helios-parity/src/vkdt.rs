@@ -10,6 +10,7 @@
 //! vkdt-cli is found as `VKDT_CLI`, else `vkdt-cli` on the PATH; it finds
 //! its modules next to itself (a vkdt checkout's `bin/`).
 
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -23,8 +24,8 @@ pub struct Vkdt {
 pub fn write_pfm_top_first(image: &Image, path: &Path) -> Result<(), String> {
     let r = image.region();
     let mut out = format!("PF\n{} {}\n-1.0\n", r.width, r.height).into_bytes();
-    for y in 0..r.height as i64 {
-        for x in 0..r.width as i64 {
+    for y in 0..i64::from(r.height) {
+        for x in 0..i64::from(r.width) {
             let p = image.pixel(r.x + x, r.y + y);
             for c in 0..3 {
                 out.extend_from_slice(&p[c.min(p.len() - 1)].to_le_bytes());
@@ -42,16 +43,15 @@ pub fn read_pfm_top_first(path: &Path) -> Result<Image, String> {
     Ok(Image::from_fn(
         Region::sized(r.width, r.height),
         3,
-        |x, y, c| flipped.pixel(x, r.height as i64 - 1 - y)[c as usize],
+        |x, y, c| flipped.pixel(x, i64::from(r.height) - 1 - y)[c as usize],
     ))
 }
 
 impl Vkdt {
     /// vkdt-cli, or why there is none.
     pub fn find() -> Result<Vkdt, String> {
-        let cli = std::env::var_os("VKDT_CLI")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from("vkdt-cli"));
+        let cli =
+            std::env::var_os("VKDT_CLI").map_or_else(|| PathBuf::from("vkdt-cli"), PathBuf::from);
         // vkdt-cli without arguments prints its usage and fails: it exists.
         Command::new(&cli)
             .output()
@@ -80,7 +80,7 @@ impl Vkdt {
             src.display()
         );
         for (name, value) in params {
-            cfg.push_str(&format!("param:{module}:01:{name}:{value}\n"));
+            let _ = writeln!(cfg, "param:{module}:01:{name}:{value}");
         }
         let graph = dir.join("graph.cfg");
         std::fs::write(&graph, cfg).map_err(|e| format!("{}: {e}", graph.display()))?;

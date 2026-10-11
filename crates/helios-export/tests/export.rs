@@ -42,7 +42,7 @@ fn png16_holds_srgb_encoded_values() {
         white.iter().all(|&v| v >= 65520),
         "white stays white: {white:?}"
     );
-    let grey = decoded.get_pixel(2, 0).0[0] as f64 / 65535.0;
+    let grey = f64::from(decoded.get_pixel(2, 0).0[0]) / 65535.0;
     assert!(
         (grey - 0.461).abs() < 0.002,
         "middle grey encodes near 46 %, got {grey}"

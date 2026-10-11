@@ -24,6 +24,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
+use std::fmt::Write as _;
 use std::io;
 use std::path::Path;
 
@@ -253,7 +254,7 @@ pub fn write_hashes(hashes: &BTreeMap<String, String>) -> String {
          # reported by `cargo xtask i18n check`.\n",
     );
     for (k, h) in hashes {
-        out.push_str(&format!("{k} {h}\n"));
+        let _ = writeln!(out, "{k} {h}");
     }
     out
 }

@@ -9,11 +9,10 @@ use helios_xmp::sidecar::decode_params;
 use helios_xmp::{Layouts, Sidecar, decode, import};
 
 fn tests_dir() -> Option<PathBuf> {
-    let dir = std::env::var_os("HELIOS_DT_TESTS")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../darktable/src/tests/integration")
-        });
+    let dir = std::env::var_os("HELIOS_DT_TESTS").map_or_else(
+        || Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../darktable/src/tests/integration"),
+        PathBuf::from,
+    );
     if dir.join("0001-exposure/exposure.xmp").is_file() {
         Some(dir)
     } else {

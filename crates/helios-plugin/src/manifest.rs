@@ -293,7 +293,7 @@ impl Manifest {
                 p.push(format!(
                     "command `{}`: give a program in the plugin's directory or on PATH",
                     c.display()
-                ))
+                ));
             }
             Some(_) => {}
         }

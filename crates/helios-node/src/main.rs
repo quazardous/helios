@@ -215,7 +215,7 @@ impl Node {
             region,
             scale: proxy_scale(region),
             brief: self.brief.clone(),
-            timeout: std::time::Duration::from_secs(600),
+            timeout: std::time::Duration::from_mins(10),
             now: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_or(0, |d| d.as_secs()),
@@ -457,7 +457,7 @@ fn parse_args() -> Result<Args, String> {
             "--token-file" => token_file = Some(PathBuf::from(value()?)),
             "--global" => layers.push((Layer::Global, PathBuf::from(value()?))),
             "--project" => {
-                layers.push((Layer::Project, PathBuf::from(value()?).join("helios.toml")))
+                layers.push((Layer::Project, PathBuf::from(value()?).join("helios.toml")));
             }
             "--user" => layers.push((Layer::User, PathBuf::from(value()?))),
             "--vault" => vault = Some(PathBuf::from(value()?)),
@@ -598,7 +598,12 @@ fn main() -> ExitCode {
     for (name, mode) in &loaded.decisions {
         book.declare(name, *mode);
     }
-    let resolver = match loaded.resolver.as_ref().map(|r| r.build()).transpose() {
+    let resolver = match loaded
+        .resolver
+        .as_ref()
+        .map(helios_node::ResolverDesc::build)
+        .transpose()
+    {
         Ok(r) => r,
         Err(e) => {
             eprintln!("helios-node: resolver: {e}");

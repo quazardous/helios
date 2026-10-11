@@ -3,6 +3,7 @@
 //! built at run time: the declarations are that list.
 
 use std::collections::BTreeMap;
+use std::fmt::Write as _;
 
 use helios_core::{Manifest, ParamHint, ParamKind};
 use helios_shell::commands::CommandSpec;
@@ -106,7 +107,7 @@ impl Declarations {
     pub fn english(&self) -> BTreeMap<MessageId, String> {
         self.areas()
             .into_values()
-            .flat_map(|units| units.into_iter())
+            .flat_map(std::iter::IntoIterator::into_iter)
             .collect()
     }
 
@@ -176,7 +177,7 @@ impl Declarations {
                 }
                 out.push('\n');
                 for (a, v) in attrs {
-                    out.push_str(&format!("    .{a} = {}\n", escape(&v)));
+                    let _ = writeln!(out, "    .{a} = {}", escape(&v));
                 }
             }
             files.insert(file, out);
@@ -203,7 +204,7 @@ pub fn escape(text: &str) -> String {
         let mut chars = line.trim_start().chars().peekable();
         if n > 0 && matches!(chars.peek(), Some('[' | '*' | '.')) {
             let c = chars.next().expect("peeked");
-            out.push_str(&format!("{{\"{c}\"}}"));
+            let _ = write!(out, "{{\"{c}\"}}");
         }
         for c in chars {
             match c {
@@ -241,7 +242,7 @@ mod tests {
             inputs: vec![PortSpec::image("input", 4)],
             outputs: vec![PortSpec::image("output", 4)],
             context: vec![],
-            needs: Default::default(),
+            needs: helios_core::Needs::default(),
             kind: helios_core::ModuleKind::Process,
             family: helios_core::Family::Tone,
             role: helios_core::Role::General,

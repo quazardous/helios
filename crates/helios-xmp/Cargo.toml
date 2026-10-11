@@ -14,3 +14,6 @@ serde_json.workspace = true
 quick-xml = "0.42"
 flate2 = "1"
 base64 = "0.22"
+
+[lints]
+workspace = true

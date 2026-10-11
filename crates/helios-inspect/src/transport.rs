@@ -90,14 +90,14 @@ pub struct Bound {
 /// keyed hashers (seeded by the operating system), as hex.
 pub fn new_token() -> String {
     use std::collections::hash_map::RandomState;
+    use std::fmt::Write as _;
     use std::hash::{BuildHasher, Hasher};
-    (0..4u8)
-        .map(|i| {
-            let mut h = RandomState::new().build_hasher();
-            h.write_u8(i);
-            format!("{:016x}", h.finish())
-        })
-        .collect()
+    (0..4u8).fold(String::new(), |mut token, i| {
+        let mut h = RandomState::new().build_hasher();
+        h.write_u8(i);
+        let _ = write!(token, "{:016x}", h.finish());
+        token
+    })
 }
 
 /// Writes a token where only the current user can read it.

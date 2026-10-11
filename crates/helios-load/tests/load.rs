@@ -10,12 +10,13 @@ use helios_load::{Kind, load, preview};
 use helios_photo::Cfa;
 
 fn images() -> Option<PathBuf> {
-    let dir = std::env::var_os("HELIOS_TEST_IMAGES")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
+    let dir = std::env::var_os("HELIOS_TEST_IMAGES").map_or_else(
+        || {
             Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("../../../darktable/src/tests/integration/images")
-        });
+        },
+        PathBuf::from,
+    );
     if dir.join("mire1.cr2").is_file() {
         Some(dir)
     } else {

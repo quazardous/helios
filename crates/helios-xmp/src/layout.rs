@@ -143,7 +143,7 @@ fn field(f: &Field, data: &[u8], base: usize) -> Result<Value, String> {
         ("ulong", 8) => json!(u64::from_le_bytes(bytes(data, at)?)),
         ("short", 2) => json!(i16::from_le_bytes(bytes(data, at)?)),
         ("ushort", 2) => json!(u16::from_le_bytes(bytes(data, at)?)),
-        ("int8", 1) | ("char", 1) => json!(i8::from_le_bytes(bytes(data, at)?)),
+        ("int8" | "char", 1) => json!(i8::from_le_bytes(bytes(data, at)?)),
         ("uint8", 1) => json!(bytes::<1>(data, at)?[0]),
         ("bool", 4) => json!(u32::from_le_bytes(bytes(data, at)?) != 0),
         ("bool", 1) => json!(bytes::<1>(data, at)?[0] != 0),
@@ -221,24 +221,24 @@ fn put(f: &Field, given: Option<&Value>, out: &mut [u8], base: usize) -> Result<
     };
     match (f.kind.as_str(), f.size) {
         ("float", 4) => {
-            slot(out, f, at, 4)?.copy_from_slice(&(number(value)? as f32).to_le_bytes())
+            slot(out, f, at, 4)?.copy_from_slice(&(number(value)? as f32).to_le_bytes());
         }
         ("double", 8) => slot(out, f, at, 8)?.copy_from_slice(&number(value)?.to_le_bytes()),
         ("int" | "long" | "enum", 4) => {
-            slot(out, f, at, 4)?.copy_from_slice(&(number(value)? as i32).to_le_bytes())
+            slot(out, f, at, 4)?.copy_from_slice(&(number(value)? as i32).to_le_bytes());
         }
         ("uint" | "ulong" | "bool", 4) => {
-            slot(out, f, at, 4)?.copy_from_slice(&(number(value)? as u32).to_le_bytes())
+            slot(out, f, at, 4)?.copy_from_slice(&(number(value)? as u32).to_le_bytes());
         }
         ("long", 8) => slot(out, f, at, 8)?.copy_from_slice(&(number(value)? as i64).to_le_bytes()),
         ("ulong", 8) => {
-            slot(out, f, at, 8)?.copy_from_slice(&(number(value)? as u64).to_le_bytes())
+            slot(out, f, at, 8)?.copy_from_slice(&(number(value)? as u64).to_le_bytes());
         }
         ("short", 2) => {
-            slot(out, f, at, 2)?.copy_from_slice(&(number(value)? as i16).to_le_bytes())
+            slot(out, f, at, 2)?.copy_from_slice(&(number(value)? as i16).to_le_bytes());
         }
         ("ushort", 2) => {
-            slot(out, f, at, 2)?.copy_from_slice(&(number(value)? as u16).to_le_bytes())
+            slot(out, f, at, 2)?.copy_from_slice(&(number(value)? as u16).to_le_bytes());
         }
         ("int8" | "char", 1) => slot(out, f, at, 1)?[0] = (number(value)? as i8) as u8,
         ("uint8" | "bool", 1) => slot(out, f, at, 1)?[0] = number(value)? as u8,

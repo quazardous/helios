@@ -93,7 +93,10 @@ fn exports_to_one_file_take_turns_and_announce_the_file() {
         }
     }
     assert_eq!(written.len(), 4);
-    assert!(written[0].ends_with(".png") || written[0].ends_with(".jpg"));
+    let ext = std::path::Path::new(&written[0])
+        .extension()
+        .and_then(|e| e.to_str());
+    assert!(matches!(ext, Some("png" | "jpg")));
     let decoded = image::open(d.join("a.png")).unwrap();
     assert_eq!((decoded.width(), decoded.height()), (8, 4));
     assert!(image::open(d.join("b.jpg")).is_ok());

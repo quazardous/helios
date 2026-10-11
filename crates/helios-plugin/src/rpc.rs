@@ -233,7 +233,7 @@ impl Process {
         line.push('\n');
         stdin
             .write_all(line.as_bytes())
-            .and_then(|_| stdin.flush())
+            .and_then(|()| stdin.flush())
             .map_err(|e| e.to_string())
     }
 

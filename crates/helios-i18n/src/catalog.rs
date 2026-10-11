@@ -105,7 +105,10 @@ impl I18n {
             .filter(|t| t != PSEUDO)
             .ok_or_else(|| format!("`{tag}` names no language"))?;
         let resource = FluentResource::try_new(source.to_string()).map_err(|(_, errors)| {
-            let errors: Vec<String> = errors.iter().map(|e| e.to_string()).collect();
+            let errors: Vec<String> = errors
+                .iter()
+                .map(std::string::ToString::to_string)
+                .collect();
             format!("does not parse: {}", errors.join("; "))
         })?;
         let bundle = self.bundles.entry(tag.clone()).or_insert_with(|| {
@@ -126,7 +129,10 @@ impl I18n {
             }
         }
         bundle.add_resource(resource).map_err(|errors| {
-            let errors: Vec<String> = errors.iter().map(|e| e.to_string()).collect();
+            let errors: Vec<String> = errors
+                .iter()
+                .map(std::string::ToString::to_string)
+                .collect();
             errors.join("; ")
         })
     }
@@ -197,7 +203,7 @@ mod tests {
     use super::*;
     use crate::ids::{command_title, panel_title};
 
-    const FR: &str = r#"
+    const FR: &str = r"
 panel-helios-graph =
     .title = Graphe
 images-selected =
@@ -205,7 +211,7 @@ images-selected =
         [one] { $count } image sélectionnée
        *[other] { $count } images sélectionnées
     }
-"#;
+";
 
     const FR_CA: &str = "panel-helios-graph =\n    .title = Graphe (CA)\n";
 

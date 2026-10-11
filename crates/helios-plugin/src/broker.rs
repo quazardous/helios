@@ -40,9 +40,9 @@ impl Default for Policy {
         Policy {
             timeout: Duration::from_secs(30),
             start_timeout: Duration::from_secs(10),
-            idle: Duration::from_secs(300),
+            idle: Duration::from_mins(5),
             backoff: Duration::from_secs(1),
-            backoff_max: Duration::from_secs(60),
+            backoff_max: Duration::from_mins(1),
             grace: Duration::from_secs(1),
             env: Vec::new(),
         }
@@ -639,7 +639,7 @@ impl Broker {
         let mut fields = Vec::new();
         let mut errors = Vec::new();
         for id in providers {
-            let answer = self.require(id, "images.read").and_then(|_| {
+            let answer = self.require(id, "images.read").and_then(|()| {
                 self.call(
                     id,
                     "onService:metadata.read",
@@ -825,6 +825,10 @@ fn collect(answer: &Json, staging: &Path, folder: &Path) -> Result<(Vec<Json>, V
 }
 
 /// `name` in `folder`, numbered if taken: `IMG_1.JPG`, `IMG_1-1.JPG`.
+#[allow(
+    clippy::maybe_infinite_iter,
+    reason = "a folder holds finitely many files, so a free name is found"
+)]
 fn free_name(folder: &Path, name: &str) -> PathBuf {
     let first = folder.join(name);
     if !first.exists() {

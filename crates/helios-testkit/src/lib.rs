@@ -21,7 +21,7 @@ pub fn ramp(region: Region, channels: u32) -> Image {
     Image::from_fn(region, channels, |x, y, c| {
         let fx = (x - region.x) as f32 / w;
         let fy = (y - region.y) as f32 / h;
-        (fx + fy * (c + 1) as f32 / channels as f32) / 2.0
+        f32::midpoint(fx, fy * (c + 1) as f32 / channels as f32)
     })
 }
 

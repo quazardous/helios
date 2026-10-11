@@ -28,7 +28,7 @@ fn chart() -> Image {
             return 1.0;
         }
         let edge = if (x / 9 + y / 7) % 2 == 0 { 0.6 } else { 0.15 };
-        edge + ((x * 7 + y * 3 + c as i64 * 11) % 13) as f32 / 100.0
+        edge + ((x * 7 + y * 3 + i64::from(c) * 11) % 13) as f32 / 100.0
     })
 }
 

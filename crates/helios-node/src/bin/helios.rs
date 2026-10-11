@@ -73,8 +73,7 @@ fn value(text: &str) -> Value {
         "false" => Value::Bool(false),
         _ => text
             .parse()
-            .map(Value::Float)
-            .unwrap_or_else(|_| Value::Choice(text.into())),
+            .map_or_else(|_| Value::Choice(text.into()), Value::Float),
     }
 }
 
@@ -103,7 +102,7 @@ fn parse(args: Vec<String>) -> Result<Call, String> {
                 socket = Some(
                     args.next()
                         .ok_or("--socket needs a path or tcp:// address")?,
-                )
+                );
             }
             "--token-file" => {
                 let file = args.next().ok_or("--token-file needs a path")?;

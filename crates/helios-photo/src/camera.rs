@@ -91,6 +91,11 @@ impl CameraInfo {
 
     /// Reads the description back; names the first field missing or malformed.
     pub fn from_context(context: &Context) -> Result<Self, String> {
+        fn fixed<const N: usize>(name: &str, value: Option<&[f64]>) -> Result<[f64; N], String> {
+            value
+                .and_then(|v| <[f64; N]>::try_from(v).ok())
+                .ok_or_else(|| format!("context field `{name}` is not a list of {N} numbers"))
+        }
         let get = |name: &str| {
             context
                 .get(name)
@@ -107,11 +112,6 @@ impl CameraInfo {
                 .map(str::to_string)
                 .ok_or_else(|| format!("context field `{name}` is not text"))
         };
-        fn fixed<const N: usize>(name: &str, value: Option<&[f64]>) -> Result<[f64; N], String> {
-            value
-                .and_then(|v| <[f64; N]>::try_from(v).ok())
-                .ok_or_else(|| format!("context field `{name}` is not a list of {N} numbers"))
-        }
         Ok(Self {
             maker: text(fields::MAKER)?,
             model: text(fields::MODEL)?,
