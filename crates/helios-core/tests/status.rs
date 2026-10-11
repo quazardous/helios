@@ -61,7 +61,7 @@ impl Module for Broken {
         Ok(())
     }
 
-    fn process(&self, _: &(), _: &[&Image], _: Region) -> Result<Vec<Image>, String> {
+    fn process(&self, (): &(), _: &[&Image], _: Region) -> Result<Vec<Image>, String> {
         Err("disk full".into())
     }
 }
@@ -87,7 +87,7 @@ impl Module for Gate {
         Ok(())
     }
 
-    fn process(&self, _: &(), inputs: &[&Image], output: Region) -> Result<Vec<Image>, String> {
+    fn process(&self, (): &(), inputs: &[&Image], output: Region) -> Result<Vec<Image>, String> {
         self.started.lock().unwrap().send(()).unwrap();
         self.release.lock().unwrap().recv().unwrap();
         Ok(vec![inputs[0].sample(output)])

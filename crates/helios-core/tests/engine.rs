@@ -67,7 +67,7 @@ impl Module for Blur {
         Ok(())
     }
 
-    fn process(&self, _: &(), inputs: &[&Image], output: Region) -> Result<Vec<Image>, String> {
+    fn process(&self, (): &(), inputs: &[&Image], output: Region) -> Result<Vec<Image>, String> {
         let input = inputs[0];
         Ok(vec![Image::from_fn(output, 1, |x, y, _| {
             (input.pixel(x - 1, y)[0] + input.pixel(x, y)[0] + input.pixel(x + 1, y)[0]) / 3.0
@@ -92,7 +92,7 @@ impl Module for Liar {
         Ok(())
     }
 
-    fn process(&self, _: &(), _: &[&Image], output: Region) -> Result<Vec<Image>, String> {
+    fn process(&self, (): &(), _: &[&Image], output: Region) -> Result<Vec<Image>, String> {
         Ok(vec![Image::from_fn(output, 2, |_, _, _| 0.0)])
     }
 }
@@ -324,7 +324,7 @@ impl Module for Sum {
         Ok(())
     }
 
-    fn process(&self, _: &(), inputs: &[&Image], output: Region) -> Result<Vec<Image>, String> {
+    fn process(&self, (): &(), inputs: &[&Image], output: Region) -> Result<Vec<Image>, String> {
         assert_eq!(inputs.len(), 2, "one image per declared input");
         Ok(vec![Image::from_fn(output, 1, |x, y, _| {
             inputs

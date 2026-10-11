@@ -324,7 +324,7 @@ impl Scheduler {
     /// A scheduler with `workers` threads and named resources of fixed capacity.
     pub fn with_resources(bus: Arc<Bus>, workers: usize, resources: &[(&str, u64)]) -> Self {
         let workers = if workers == 0 {
-            thread::available_parallelism().map_or(1, |n| n.get())
+            thread::available_parallelism().map_or(1, std::num::NonZero::get)
         } else {
             workers
         };

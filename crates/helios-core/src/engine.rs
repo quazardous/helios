@@ -746,36 +746,33 @@ impl Engine {
                         what: "computation".into(),
                     });
                 }
-                match (&self.accelerator, accelerated) {
-                    (Some(a), true) => {
-                        let (content, port) = &held[0];
-                        let input = self.device(a.as_ref(), step, content, *port)?;
-                        self.accelerated.fetch_add(1, Ordering::SeqCst);
-                        let image = module.accelerate(a.as_ref(), plan, &input, step.region)?;
-                        Ok(Arc::new(Content::Device {
-                            image,
-                            host: OnceLock::new(),
-                        }))
+                if let (Some(a), true) = (&self.accelerator, accelerated) {
+                    let (content, port) = &held[0];
+                    let input = self.device(a.as_ref(), step, content, *port)?;
+                    self.accelerated.fetch_add(1, Ordering::SeqCst);
+                    let image = module.accelerate(a.as_ref(), plan, &input, step.region)?;
+                    Ok(Arc::new(Content::Device {
+                        image,
+                        host: OnceLock::new(),
+                    }))
+                } else {
+                    let images = held
+                        .iter()
+                        .zip(inputs)
+                        .map(|((content, port), (input, _))| self.host(input, content, *port))
+                        .collect::<Result<Vec<&Image>, Error>>()?;
+                    let placeholders: Vec<(usize, Image)> =
+                        absent.iter().map(|&(i, c)| (i, Image::absent(c))).collect();
+                    let mut images = images;
+                    // In index order, so each lands at its port's place.
+                    for (i, image) in &placeholders {
+                        images.insert(*i, image);
                     }
-                    _ => {
-                        let images = held
-                            .iter()
-                            .zip(inputs)
-                            .map(|((content, port), (input, _))| self.host(input, content, *port))
-                            .collect::<Result<Vec<&Image>, Error>>()?;
-                        let placeholders: Vec<(usize, Image)> =
-                            absent.iter().map(|&(i, c)| (i, Image::absent(c))).collect();
-                        let mut images = images;
-                        // In index order, so each lands at its port's place.
-                        for (i, image) in &placeholders {
-                            images.insert(*i, image);
-                        }
-                        Ok(Arc::new(Content::Host(module.process(
-                            plan,
-                            &images,
-                            step.region,
-                        )?)))
-                    }
+                    Ok(Arc::new(Content::Host(module.process(
+                        plan,
+                        &images,
+                        step.region,
+                    )?)))
                 }
             }
             Work::Pending { .. } => unreachable!("execute answers pending steps itself"),

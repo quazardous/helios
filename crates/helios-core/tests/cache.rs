@@ -39,7 +39,7 @@ impl Module for Copy {
         Ok(())
     }
 
-    fn process(&self, _: &(), inputs: &[&Image], output: Region) -> Result<Vec<Image>, String> {
+    fn process(&self, (): &(), inputs: &[&Image], output: Region) -> Result<Vec<Image>, String> {
         if let Some((started, release)) = &self.gate {
             started.lock().unwrap().send(()).unwrap();
             release.lock().unwrap().recv().unwrap();

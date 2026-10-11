@@ -80,7 +80,7 @@ impl Module for Offset {
         Ok(())
     }
 
-    fn process(&self, _: &(), inputs: &[&Image], output: Region) -> Result<Vec<Image>, String> {
+    fn process(&self, (): &(), inputs: &[&Image], output: Region) -> Result<Vec<Image>, String> {
         let input = inputs[0].sample(output);
         Ok(vec![Image::new(
             output,
@@ -99,7 +99,7 @@ struct Fake {
 }
 
 impl Accelerator for Fake {
-    fn id(&self) -> &str {
+    fn id(&self) -> &'static str {
         "fake"
     }
 

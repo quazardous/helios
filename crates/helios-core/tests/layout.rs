@@ -34,7 +34,7 @@ impl Module for Fake {
         Ok(())
     }
 
-    fn process(&self, _: &(), inputs: &[&Image], output: Region) -> Result<Vec<Image>, String> {
+    fn process(&self, (): &(), inputs: &[&Image], output: Region) -> Result<Vec<Image>, String> {
         Ok(vec![inputs[0].sample(output)])
     }
 }

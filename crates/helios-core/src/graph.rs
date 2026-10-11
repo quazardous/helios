@@ -394,14 +394,6 @@ impl Graph {
     /// node as principal, folding one into a stack) belong to the user's
     /// workspace and are applied on top by the surfaces.
     pub fn layout(&self) -> Vec<LayoutHint> {
-        let n = self.nodes.len();
-        let mut consumers: Vec<Vec<NodeId>> = vec![Vec::new(); n];
-        for (i, node) in self.nodes.iter().enumerate() {
-            for (src, _) in node.inputs.iter().flatten() {
-                consumers[src.0].push(NodeId(i));
-            }
-        }
-        let mut rank = vec![None; n];
         fn rank_of(g: &Graph, i: usize, memo: &mut [Option<usize>]) -> usize {
             if let Some(r) = memo[i] {
                 return r;
@@ -416,17 +408,6 @@ impl Graph {
             memo[i] = Some(r);
             r
         }
-        let principal: Vec<bool> = (0..n)
-            .map(|i| {
-                let node = &self.nodes[i];
-                let declared = match &node.kind {
-                    Kind::Source { .. } => true,
-                    Kind::Module { module, .. } => module.manifest().kind != ModuleKind::Process,
-                };
-                declared || node.inputs.iter().flatten().count() >= 2 || consumers[i].is_empty()
-            })
-            .collect();
-        let mut group = vec![None; n];
         fn group_of(
             i: usize,
             principal: &[bool],
@@ -449,6 +430,25 @@ impl Graph {
             memo[i] = Some(g);
             g
         }
+        let n = self.nodes.len();
+        let mut consumers: Vec<Vec<NodeId>> = vec![Vec::new(); n];
+        for (i, node) in self.nodes.iter().enumerate() {
+            for (src, _) in node.inputs.iter().flatten() {
+                consumers[src.0].push(NodeId(i));
+            }
+        }
+        let mut rank = vec![None; n];
+        let principal: Vec<bool> = (0..n)
+            .map(|i| {
+                let node = &self.nodes[i];
+                let declared = match &node.kind {
+                    Kind::Source { .. } => true,
+                    Kind::Module { module, .. } => module.manifest().kind != ModuleKind::Process,
+                };
+                declared || node.inputs.iter().flatten().count() >= 2 || consumers[i].is_empty()
+            })
+            .collect();
+        let mut group = vec![None; n];
         (0..n)
             .map(|i| LayoutHint {
                 node: NodeId(i),

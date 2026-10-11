@@ -395,7 +395,7 @@ struct Adapter<M: Module> {
 }
 
 impl<M: Module> Adapter<M> {
-    fn plan<'a>(&self, plan: &'a Plan) -> &'a M::Plan {
+    fn plan(plan: &Plan) -> &M::Plan {
         plan.downcast_ref()
             .expect("a plan is only ever given back to the module that made it")
     }
@@ -416,7 +416,7 @@ impl<M: Module> Erased for Adapter<M> {
 
     fn input_region(&self, plan: &Plan, output: Region) -> Region {
         self.module
-            .input_region(self.plan(plan), output, self.manifest.needs.overlap)
+            .input_region(Self::plan(plan), output, self.manifest.needs.overlap)
     }
 
     fn gpu_kernel(&self) -> Option<GpuKernel> {
@@ -424,7 +424,7 @@ impl<M: Module> Erased for Adapter<M> {
     }
 
     fn gpu_uniforms(&self, plan: &Plan) -> Vec<f32> {
-        let mut u = self.module.gpu_uniforms(self.plan(plan));
+        let mut u = self.module.gpu_uniforms(Self::plan(plan));
         u.resize(u.len().div_ceil(4).max(1) * 4, 0.0);
         u
     }
@@ -435,6 +435,6 @@ impl<M: Module> Erased for Adapter<M> {
         inputs: &[&Image],
         output: Region,
     ) -> Result<Vec<Image>, String> {
-        self.module.process(self.plan(plan), inputs, output)
+        self.module.process(Self::plan(plan), inputs, output)
     }
 }

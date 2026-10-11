@@ -236,7 +236,7 @@ impl Image {
             let (y0, y1) = span(y);
             for x in region.x..region.right() {
                 let (x0, x1) = span(x);
-                sum.iter_mut().for_each(|s| *s = 0.0);
+                sum.fill(0.0);
                 for fy in y0..y1 {
                     let cy = fy.clamp(r.y, r.bottom() - 1);
                     for fx in x0..x1 {
