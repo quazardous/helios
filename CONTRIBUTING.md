@@ -20,6 +20,33 @@ with the GPLv3.
 Tests never sleep and never touch a real photo library: they wait on
 events and run in their own directories (see docs/testing-strategy.md).
 
+## Linters and formatters
+
+```bash
+cargo xtask lint          # every check below
+cargo xtask lint --fix    # apply the formatters first, then check
+```
+
+`cargo xtask lint` runs rustfmt and clippy, then each of these tools that
+is installed, and names the missing ones (CI installs them all and runs
+`cargo xtask lint --require-all`):
+
+| Tool | Checks | Config | Install |
+|------|--------|--------|---------|
+| cargo-deny | licenses, RustSec advisories, sources | `deny.toml` | `cargo install --locked cargo-deny` |
+| cargo-machete | unused dependencies | | `cargo install --locked cargo-machete` |
+| taplo | TOML formatting | `taplo.toml` | `cargo install --locked taplo-cli` |
+| typos | spelling | `_typos.toml` | `cargo install --locked typos-cli` |
+| shellcheck | shell scripts | | your distribution's package |
+| ruff | Python lint and format | `ruff.toml` | `pip install ruff` |
+
+Clippy runs with the `pedantic` group on every crate (`[workspace.lints]`
+in Cargo.toml, with the lints allowed workspace-wide and why); a lint
+allowed in one place says why in a `reason`. Unsafe code is denied. A word
+typos flags that is right (darktable or vkdt jargon) goes in `_typos.toml`.
+A license cargo-deny rejects needs a decision before it goes in
+`deny.toml`.
+
 ## Commits
 
 One purpose per commit, and every commit builds and passes its tests. The

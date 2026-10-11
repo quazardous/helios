@@ -8,6 +8,8 @@
 //!   outsider; with `--base`, code changed since REF comes with a fragment.
 //! - `i18n extract | check | stamp LOCALE [--all]`: the translation
 //!   catalogs of `i18n/` (see `i18n.rs`).
+//! - `lint [--fix] [--require-all]`: rustfmt, clippy and the optional
+//!   linters that are installed (see `lint.rs`).
 //!
 //! A fragment is a file in `changelog.d/`, written in the same commit as the
 //! change it describes: a first line `kind: <kind>`, then one to three
@@ -15,6 +17,7 @@
 //! CONTRIBUTING.md.
 
 mod i18n;
+mod lint;
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -369,7 +372,7 @@ fn fail(problems: &[String]) -> ExitCode {
     ExitCode::from(1)
 }
 
-const USAGE: &str = "usage: cargo xtask changelog | release [--date YYYY-MM-DD] | check [--base REF] | i18n extract | i18n check | i18n stamp LOCALE [--all]";
+const USAGE: &str = "usage: cargo xtask changelog | release [--date YYYY-MM-DD] | check [--base REF] | lint [--fix] [--require-all] | i18n extract | i18n check | i18n stamp LOCALE [--all]";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -449,6 +452,10 @@ fn main() -> ExitCode {
                 fail(&problems)
             }
         }
+        ["lint", rest @ ..] => lint::run(&root, rest).unwrap_or_else(|| {
+            eprintln!("usage: cargo xtask {}", lint::USAGE);
+            ExitCode::from(2)
+        }),
         ["i18n", rest @ ..] => i18n::run(&root, rest).unwrap_or_else(|| {
             eprintln!("usage: cargo xtask {}", i18n::USAGE);
             ExitCode::from(2)
