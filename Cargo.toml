@@ -26,6 +26,7 @@ helios-resolve = { path = "crates/helios-resolve" }
 helios-journal = { path = "crates/helios-journal" }
 helios-theme = { path = "crates/helios-theme" }
 helios-profile = { path = "crates/helios-profile" }
+helios-scopes = { path = "crates/helios-scopes" }
 helios-vkdt = { path = "crates/helios-vkdt" }
 helios-gpu = { path = "crates/helios-gpu" }
 helios-shell = { path = "crates/helios-shell" }

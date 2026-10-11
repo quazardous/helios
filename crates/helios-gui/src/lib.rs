@@ -4,6 +4,7 @@
 pub mod dock;
 pub mod frame;
 pub mod keys;
+pub mod scopes;
 pub mod shell;
 pub mod snapshot;
 pub mod theme;

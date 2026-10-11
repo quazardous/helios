@@ -1,0 +1,10 @@
+[package]
+name = "helios-scopes"
+description = "Helios scopes: histogram, waveform and RGB parade counted on the working data"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+helios-core.workspace = true

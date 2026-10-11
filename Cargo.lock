@@ -1701,7 +1701,9 @@ dependencies = [
  "egui",
  "egui_dock",
  "egui_kittest",
+ "helios-core",
  "helios-profile",
+ "helios-scopes",
  "helios-shell",
  "helios-theme",
  "image",
@@ -1891,6 +1893,13 @@ dependencies = [
  "serde",
  "serde_json",
  "ureq",
+]
+
+[[package]]
+name = "helios-scopes"
+version = "0.0.1"
+dependencies = [
+ "helios-core",
 ]
 
 [[package]]

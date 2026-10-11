@@ -264,3 +264,41 @@ fn a_profile_exports_imports_with_a_diff_and_is_used_by_name() {
     assert_eq!(h2.state().profile_name(), "work");
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+#[test]
+fn scopes_draw_the_image_they_are_given_in_each_mode() {
+    use helios_gui::scopes::{Mode, picture};
+    // A dark left half and a bright right half.
+    let image = helios_core::Image::from_fn(helios_core::Region::sized(64, 32), 4, |x, _, c| {
+        if c == 3 {
+            1.0
+        } else if x < 32 {
+            0.05
+        } else {
+            0.8
+        }
+    });
+    let hist = picture(&image, Mode::Histogram, false);
+    let wave = picture(&image, Mode::Waveform, false);
+    assert_ne!(hist.pixels, wave.pixels);
+    // In the waveform, the left columns light low and the right ones high.
+    let lit_rows = |x: usize| -> Vec<usize> {
+        (0..wave.size[1])
+            .filter(|y| wave.pixels[y * wave.size[0] + x].r() > 40)
+            .collect()
+    };
+    let (left, right) = (lit_rows(10), lit_rows(200));
+    assert!(left.iter().min() > right.iter().max(), "{left:?} {right:?}");
+
+    let mut shell = Shell::new(helios_panels(), None);
+    shell.set_scope_image(image);
+    let mut h = headless::harness(shell, vec2(1024.0, 700.0));
+    h.run();
+    let s = h.state_mut();
+    s.run("helios.scopes.focus", json!(null), Origin::User)
+        .unwrap();
+    s.run("scopes.parade", json!(null), Origin::User).unwrap();
+    h.run();
+    let shot = headless::snapshot(&mut h, "helios.scopes.picture").unwrap();
+    assert!(shot.width() > 100, "{}", shot.width());
+}

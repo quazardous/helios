@@ -37,6 +37,8 @@ enum Action {
     ProfileImport(PathBuf),
     ProfileApply,
     ProfileUse(String),
+    ScopeMode(crate::scopes::Mode),
+    ScopeStops(bool),
     Fullscreen,
     Minimize,
     Maximize,
@@ -119,6 +121,7 @@ pub struct Shell {
     profile_name: String,
     /// A profile read and shown as a diff, waiting for `profile.import.apply`.
     pending_import: Option<helios_profile::Profile>,
+    scopes: std::rc::Rc<std::cell::RefCell<crate::scopes::Scopes>>,
 }
 
 impl Shell {
@@ -156,6 +159,7 @@ impl Shell {
             profiles_dir: config_dir().join("profiles"),
             profile_name: "default".into(),
             pending_import: None,
+            scopes: Default::default(),
         };
         shell.docks = layout
             .areas
@@ -163,7 +167,17 @@ impl Shell {
             .map(|(area, node)| (*area, to_dock(node)))
             .collect();
         shell.declare_commands();
+        if shell.panels.get("helios.scopes").is_some() {
+            let scopes = shell.scopes.clone();
+            shell.set_content("helios.scopes", move |ui| scopes.borrow_mut().ui(ui));
+        }
         shell
+    }
+
+    /// The image the scopes measure (working data, before the display
+    /// transform): set by the viewport once it exists.
+    pub fn set_scope_image(&mut self, image: helios_core::Image) {
+        self.scopes.borrow_mut().set_image(image);
     }
 
     /// The layout as it stands, to be saved with the workspace.
@@ -504,6 +518,36 @@ impl Shell {
                 Ok(Action::ThemeExport(path))
             }),
         );
+        for (id, title, mode) in [
+            (
+                "scopes.histogram",
+                "Scopes: histogram",
+                crate::scopes::Mode::Histogram,
+            ),
+            (
+                "scopes.waveform",
+                "Scopes: waveform",
+                crate::scopes::Mode::Waveform,
+            ),
+            (
+                "scopes.parade",
+                "Scopes: RGB parade",
+                crate::scopes::Mode::Parade,
+            ),
+        ] {
+            add(
+                CommandSpec::new(id, title, "View"),
+                Box::new(move |_| Ok(Action::ScopeMode(mode))),
+            );
+        }
+        add(
+            CommandSpec::new("scopes.stops", "Scopes: in stops (log)", "View"),
+            Box::new(|_| Ok(Action::ScopeStops(true))),
+        );
+        add(
+            CommandSpec::new("scopes.linear", "Scopes: linear", "View"),
+            Box::new(|_| Ok(Action::ScopeStops(false))),
+        );
         add(
             CommandSpec::new(
                 "profile.export",
@@ -721,6 +765,8 @@ impl Shell {
                     self.notes.push(format!("profile {name}: {e}"));
                 }
             }
+            Action::ScopeMode(mode) => self.scopes.borrow_mut().set_mode(mode),
+            Action::ScopeStops(on) => self.scopes.borrow_mut().set_stops(on),
             Action::Focus(p) => self.focus(&p),
             Action::Toggle(p) => {
                 if self.shown(&p) {

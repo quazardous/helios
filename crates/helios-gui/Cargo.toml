@@ -10,6 +10,8 @@ repository.workspace = true
 helios-shell.workspace = true
 helios-theme.workspace = true
 helios-profile.workspace = true
+helios-scopes.workspace = true
+helios-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 # MIT OR Apache-2.0 (egui, eframe, egui_kittest), MIT (egui_dock).
