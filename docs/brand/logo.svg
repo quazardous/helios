@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-labelledby="t">
+  <title id="t">Helios</title>
+  <!-- A stylized iris diaphragm that reads as a sun: the opening is the
+       sun's disc, the blades' edges in yellow are its rays. -->
+  <defs>
+    <radialGradient id="sun" cx="50%" cy="50%" r="60%">
+      <stop offset="0" stop-color="#fff3b0"/>
+      <stop offset="0.55" stop-color="#ffc21a"/>
+      <stop offset="1" stop-color="#f59a00"/>
+    </radialGradient>
+    <clipPath id="disc"><circle cx="128" cy="128" r="112"/></clipPath>
+  </defs>
+  <circle cx="128" cy="128" r="118" fill="#17181c"/>
+  <g clip-path="url(#disc)" stroke="#f5b400" stroke-width="7" stroke-linecap="round">
+    <line x1="148.00" y1="93.36" x2="211.25" y2="202.92"/>
+    <line x1="168.00" y1="128.00" x2="104.75" y2="237.56"/>
+    <line x1="148.00" y1="162.64" x2="21.49" y2="162.64"/>
+    <line x1="108.00" y1="162.64" x2="44.75" y2="53.08"/>
+    <line x1="88.00" y1="128.00" x2="151.25" y2="18.44"/>
+    <line x1="108.00" y1="93.36" x2="234.51" y2="93.36"/>
+  </g>
+  <path d="M148.00 93.36 L168.00 128.00 L148.00 162.64 L108.00 162.64 L88.00 128.00 L108.00 93.36 Z" fill="url(#sun)" stroke="#f5b400" stroke-width="7" stroke-linejoin="round"/>
+  <circle cx="128" cy="128" r="112" fill="none" stroke="#f5b400" stroke-width="7"/>
+</svg>

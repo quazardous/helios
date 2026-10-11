@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/brand/logo.svg" alt="Helios logo: an iris diaphragm whose opening is a sun" width="128"></p>
+
 # Helios
 
 > A client/server, AI-first image processing framework. Its first
