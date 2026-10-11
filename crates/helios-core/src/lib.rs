@@ -37,5 +37,5 @@ pub use manifest::{
 };
 pub use module::{Context, Module, ModuleRef};
 pub use params::{Params, Value};
-pub use scheduler::{CancelToken, JobId, JobState, Scheduler};
+pub use scheduler::{CancelToken, JobId, JobSpec, JobState, Priority, Scheduler};
 pub use status::{Load, NodeState, NodeStatus, NodeType};

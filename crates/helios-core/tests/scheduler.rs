@@ -108,6 +108,99 @@ fn a_running_job_sees_its_cancellation() {
     assert!(!s.cancel(id), "an ended job cannot be cancelled");
 }
 
+fn started_names(bus: &Bus) -> Vec<String> {
+    bus.since(0)
+        .iter()
+        .filter(|e| e.kind == "scheduler.job_started")
+        .map(|e| e.payload["name"].as_str().unwrap().to_string())
+        .collect()
+}
+
+#[test]
+fn the_highest_priority_goes_first_then_the_oldest() {
+    let bus = Arc::new(Bus::new());
+    let s = Scheduler::new(bus.clone(), 1);
+    let (started, release, job) = gated();
+    s.submit("held", job);
+    started.recv().unwrap();
+    s.submit_spec(
+        JobSpec::new("batch 1").priority(Priority::Batch),
+        |_| Ok(()),
+    );
+    s.submit_spec(
+        JobSpec::new("prefetch").priority(Priority::Prefetch),
+        |_| Ok(()),
+    );
+    s.submit_spec(
+        JobSpec::new("batch 2").priority(Priority::Batch),
+        |_| Ok(()),
+    );
+    s.submit("on screen", |_| Ok(()));
+    release.send(()).unwrap();
+    assert!(s.wait_until_idle(LONG));
+    assert_eq!(
+        started_names(&bus),
+        ["held", "on screen", "prefetch", "batch 1", "batch 2"]
+    );
+}
+
+#[test]
+fn a_limited_resource_holds_jobs_back_until_it_is_released() {
+    let bus = Arc::new(Bus::new());
+    let s = Scheduler::with_resources(bus.clone(), 2, &[("gpu", 1)]);
+    let (started, release, job) = gated();
+    s.submit_spec(JobSpec::new("first").needs("gpu", 1), job);
+    started.recv().unwrap();
+    let second = s.submit_spec(JobSpec::new("second").needs("gpu", 1), |_| Ok(()));
+    let events = bus.subscribe();
+    let free = s.submit("no gpu", |_| Ok(()));
+    // The free worker runs what needs no GPU, and leaves `second` queued.
+    events
+        .iter()
+        .find(|e| e.kind == "scheduler.job_ended" && e.payload["name"] == "no gpu")
+        .unwrap();
+    assert_eq!(s.job(free), Some(JobState::Done));
+    assert_eq!(s.job(second), Some(JobState::Queued));
+    let d = s.describe();
+    assert_eq!(d["resources"]["gpu"]["used"], 1);
+    assert_eq!(d["queued"][0]["can_start"], false);
+    release.send(()).unwrap();
+    assert!(s.wait_until_idle(LONG));
+    assert_eq!(s.job(second), Some(JobState::Done));
+    assert_eq!(s.describe()["resources"]["gpu"]["used"], 0);
+}
+
+#[test]
+fn needs_that_can_never_be_met_fail_at_once_with_the_reason() {
+    let s = Scheduler::with_resources(Arc::new(Bus::new()), 1, &[("gpu", 1)]);
+    let too_big = s.submit_spec(JobSpec::new("big").needs("gpu", 2), |_| Ok(()));
+    let unknown = s.submit_spec(JobSpec::new("ai").needs("ai_calls", 1), |_| Ok(()));
+    assert_eq!(s.job(too_big), Some(JobState::Failed));
+    assert_eq!(s.job(unknown), Some(JobState::Failed));
+    let recent = s.describe()["recent"].clone();
+    assert_eq!(recent[0]["error"], "needs 2 of `gpu`, whose capacity is 1");
+    assert_eq!(
+        recent[1]["error"],
+        "needs `ai_calls`, which this scheduler does not have"
+    );
+    assert!(s.is_idle());
+}
+
+#[test]
+fn needs_are_acquired_together_so_crossed_needs_never_deadlock() {
+    let s = Scheduler::with_resources(Arc::new(Bus::new()), 4, &[("a", 1), ("b", 1)]);
+    for i in 0..20 {
+        let spec = if i % 2 == 0 {
+            JobSpec::new("ab").needs("a", 1).needs("b", 1)
+        } else {
+            JobSpec::new("ba").needs("b", 1).needs("a", 1)
+        };
+        s.submit_spec(spec, |_| Ok(()));
+    }
+    assert!(s.wait_until_idle(LONG));
+    assert_eq!(s.describe()["totals"]["done"], 20);
+}
+
 #[test]
 fn events_of_a_job_follow_its_queuing() {
     let bus = Arc::new(Bus::new());

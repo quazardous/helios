@@ -5,9 +5,16 @@
 //! whether anything is queued or running, and anyone can wait until it is
 //! idle instead of sleeping (ROADMAP section 2.8, rule 3).
 //!
-//! This first version runs jobs on a fixed pool of threads, in submission
-//! order. Declared needs (GPU memory, AI calls, destinations), priorities and
-//! remote nodes come later.
+//! A job declares up front what it needs: a priority, and amounts of named
+//! resources (GPU memory, concurrent raw decodes, AI calls, an export
+//! destination) whose capacity the scheduler limits. A job starts only when
+//! all its needs are available, acquired together under one lock, so two
+//! jobs can never hold part of what the other waits for (no deadlock), and
+//! everything is released when the job ends. Among the jobs that can start,
+//! the highest priority goes first, then the oldest.
+//!
+//! Jobs run on a fixed pool of threads. Remote nodes, leases that expire
+//! when a node dies, and the measured-speed auto mode come later.
 
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -38,6 +45,47 @@ pub enum JobState {
     Cancelled,
 }
 
+/// Which work goes first when several can start.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Priority {
+    /// Work nobody is waiting for: exports, batches.
+    Batch,
+    /// Work someone will probably need soon: the next images of a cull.
+    Prefetch,
+    /// Work someone is waiting for right now: the image on screen.
+    #[default]
+    Interactive,
+}
+
+/// What a job declares before it runs.
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+pub struct JobSpec {
+    pub name: String,
+    pub priority: Priority,
+    /// Amounts of named resources, held for the whole job.
+    pub needs: BTreeMap<String, u64>,
+}
+
+impl JobSpec {
+    pub fn new(name: &str) -> Self {
+        Self {
+            name: name.into(),
+            ..Self::default()
+        }
+    }
+
+    pub fn priority(mut self, priority: Priority) -> Self {
+        self.priority = priority;
+        self
+    }
+
+    pub fn needs(mut self, resource: &str, amount: u64) -> Self {
+        *self.needs.entry(resource.into()).or_default() += amount;
+        self
+    }
+}
+
 /// Lets a running job notice it was cancelled. Jobs check it between steps;
 /// nothing is interrupted behind their back.
 #[derive(Clone, Debug, Default)]
@@ -60,6 +108,8 @@ pub type Work = Box<dyn FnOnce(&CancelToken) -> Result<(), String> + Send>;
 pub struct JobQueued {
     pub job: JobId,
     pub name: String,
+    pub priority: Priority,
+    pub needs: BTreeMap<String, u64>,
 }
 
 impl Event for JobQueued {
@@ -103,7 +153,8 @@ impl Event for Idle {
 #[derive(Clone, Debug, Serialize)]
 struct JobInfo {
     id: JobId,
-    name: String,
+    #[serde(flatten)]
+    spec: JobSpec,
     state: JobState,
     error: Option<String>,
 }
@@ -116,11 +167,19 @@ struct Pending {
     cause: u64,
 }
 
+/// A limited resource: how much exists, how much running jobs hold.
+#[derive(Clone, Copy, Debug, Default, Serialize)]
+struct Resource {
+    capacity: u64,
+    used: u64,
+}
+
 #[derive(Default)]
 struct State {
     next: u64,
     queue: VecDeque<Pending>,
     running: BTreeMap<JobId, (JobInfo, CancelToken)>,
+    resources: BTreeMap<String, Resource>,
     recent: VecDeque<JobInfo>,
     done: u64,
     failed: u64,
@@ -131,6 +190,58 @@ struct State {
 impl State {
     fn idle(&self) -> bool {
         self.queue.is_empty() && self.running.is_empty()
+    }
+
+    fn fits(&self, spec: &JobSpec) -> bool {
+        spec.needs.iter().all(|(name, amount)| {
+            self.resources
+                .get(name)
+                .is_some_and(|r| r.used + amount <= r.capacity)
+        })
+    }
+
+    /// The queued job to start now: the highest priority among those whose
+    /// needs are all available, the oldest first.
+    fn next_runnable(&self) -> Option<usize> {
+        let mut best: Option<usize> = None;
+        for (i, p) in self.queue.iter().enumerate() {
+            let better =
+                best.is_none_or(|b| p.info.spec.priority > self.queue[b].info.spec.priority);
+            if better && self.fits(&p.info.spec) {
+                best = Some(i);
+            }
+        }
+        best
+    }
+
+    fn acquire(&mut self, spec: &JobSpec) {
+        for (name, amount) in &spec.needs {
+            self.resources.get_mut(name).expect("checked by fits").used += amount;
+        }
+    }
+
+    fn release(&mut self, spec: &JobSpec) {
+        for (name, amount) in &spec.needs {
+            if let Some(r) = self.resources.get_mut(name) {
+                r.used -= amount;
+            }
+        }
+    }
+
+    /// Why a job can never start, if so.
+    fn impossible(&self, spec: &JobSpec) -> Option<String> {
+        spec.needs
+            .iter()
+            .find_map(|(name, amount)| match self.resources.get(name) {
+                None => Some(format!(
+                    "needs `{name}`, which this scheduler does not have"
+                )),
+                Some(r) if *amount > r.capacity => Some(format!(
+                    "needs {amount} of `{name}`, whose capacity is {}",
+                    r.capacity
+                )),
+                Some(_) => None,
+            })
     }
 
     fn finish(&mut self, info: JobInfo) {
@@ -150,9 +261,37 @@ impl State {
 struct Shared {
     bus: Arc<Bus>,
     state: Mutex<State>,
-    /// Signalled when a job is queued (workers) and when the scheduler
-    /// becomes idle (waiters).
+    /// Signalled when a job is queued, when resources are released (workers)
+    /// and when the scheduler becomes idle (waiters).
     changed: Condvar,
+}
+
+impl Shared {
+    fn ended(&self, state: &mut State, info: JobInfo, cause: u64) {
+        self.bus.publish(
+            SOURCE,
+            Some(cause),
+            &JobEnded {
+                job: info.id,
+                name: info.spec.name.clone(),
+                state: info.state,
+                error: info.error.clone(),
+            },
+        );
+        state.finish(info);
+        if state.idle() {
+            self.bus.publish(
+                SOURCE,
+                None,
+                &Idle {
+                    done: state.done,
+                    failed: state.failed,
+                    cancelled: state.cancelled,
+                },
+            );
+        }
+        self.changed.notify_all();
+    }
 }
 
 pub struct Scheduler {
@@ -161,16 +300,37 @@ pub struct Scheduler {
 }
 
 impl Scheduler {
-    /// A scheduler with `workers` threads (0: one per available CPU).
+    /// A scheduler with `workers` threads (0: one per available CPU) and no
+    /// limited resource.
     pub fn new(bus: Arc<Bus>, workers: usize) -> Self {
+        Self::with_resources(bus, workers, &[])
+    }
+
+    /// A scheduler with `workers` threads and named resources of fixed capacity.
+    pub fn with_resources(bus: Arc<Bus>, workers: usize, resources: &[(&str, u64)]) -> Self {
         let workers = if workers == 0 {
             thread::available_parallelism().map_or(1, |n| n.get())
         } else {
             workers
         };
+        let state = State {
+            resources: resources
+                .iter()
+                .map(|(name, capacity)| {
+                    (
+                        name.to_string(),
+                        Resource {
+                            capacity: *capacity,
+                            used: 0,
+                        },
+                    )
+                })
+                .collect(),
+            ..State::default()
+        };
         let shared = Arc::new(Shared {
             bus,
-            state: Mutex::new(State::default()),
+            state: Mutex::new(state),
             changed: Condvar::new(),
         });
         let handles = (0..workers)
@@ -188,10 +348,20 @@ impl Scheduler {
         }
     }
 
-    /// Queues a named job; returns its id.
+    /// Queues an interactive job with no declared need; returns its id.
     pub fn submit(
         &self,
         name: &str,
+        work: impl FnOnce(&CancelToken) -> Result<(), String> + Send + 'static,
+    ) -> JobId {
+        self.submit_spec(JobSpec::new(name), work)
+    }
+
+    /// Queues a job with its declared priority and needs. A job whose needs
+    /// can never be met ends at once as failed, saying why.
+    pub fn submit_spec(
+        &self,
+        spec: JobSpec,
         work: impl FnOnce(&CancelToken) -> Result<(), String> + Send + 'static,
     ) -> JobId {
         let mut state = self.shared.state.lock().expect("scheduler lock");
@@ -202,12 +372,24 @@ impl Scheduler {
             None,
             &JobQueued {
                 job: id,
-                name: name.into(),
+                name: spec.name.clone(),
+                priority: spec.priority,
+                needs: spec.needs.clone(),
             },
         );
+        if let Some(reason) = state.impossible(&spec) {
+            let info = JobInfo {
+                id,
+                spec,
+                state: JobState::Failed,
+                error: Some(reason),
+            };
+            self.shared.ended(&mut state, info, cause);
+            return id;
+        }
         let info = JobInfo {
             id,
-            name: name.into(),
+            spec,
             state: JobState::Queued,
             error: None,
         };
@@ -231,18 +413,7 @@ impl Scheduler {
                 state: JobState::Cancelled,
                 ..pending.info
             };
-            self.shared.bus.publish(
-                SOURCE,
-                Some(pending.cause),
-                &JobEnded {
-                    job: id,
-                    name: info.name.clone(),
-                    state: JobState::Cancelled,
-                    error: None,
-                },
-            );
-            state.finish(info);
-            announce_idle(&self.shared, &state);
+            self.shared.ended(&mut state, info, pending.cause);
             return true;
         }
         if let Some((_, token)) = state.running.get(&id) {
@@ -304,85 +475,67 @@ impl Drop for Scheduler {
     }
 }
 
-fn announce_idle(shared: &Shared, state: &State) {
-    if state.idle() {
-        shared.bus.publish(
-            SOURCE,
-            None,
-            &Idle {
-                done: state.done,
-                failed: state.failed,
-                cancelled: state.cancelled,
-            },
-        );
-        shared.changed.notify_all();
-    }
-}
-
 fn worker(shared: &Shared) {
     loop {
-        let pending = {
+        // Pick a job, acquire its needs and mark it running under one lock:
+        // the scheduler is never seen idle while a job is about to run.
+        let (info, work, token, cause) = {
             let mut state = shared.state.lock().expect("scheduler lock");
             loop {
-                if let Some(p) = state.queue.pop_front() {
-                    break p;
+                if let Some(i) = state.next_runnable() {
+                    let Pending {
+                        mut info,
+                        work,
+                        token,
+                        cause,
+                    } = state.queue.remove(i).expect("index from the queue");
+                    state.acquire(&info.spec);
+                    info.state = JobState::Running;
+                    state.running.insert(info.id, (info.clone(), token.clone()));
+                    shared.bus.publish(
+                        SOURCE,
+                        Some(cause),
+                        &JobStarted {
+                            job: info.id,
+                            name: info.spec.name.clone(),
+                        },
+                    );
+                    break (info, work, token, cause);
                 }
-                if state.shutdown {
+                if state.shutdown && state.queue.is_empty() {
                     return;
                 }
                 state = shared.changed.wait(state).expect("scheduler lock");
             }
         };
-        let Pending {
-            mut info,
-            work,
-            token,
-            cause,
-        } = pending;
-        info.state = JobState::Running;
-        {
-            let mut state = shared.state.lock().expect("scheduler lock");
-            state.running.insert(info.id, (info.clone(), token.clone()));
-            shared.bus.publish(
-                SOURCE,
-                Some(cause),
-                &JobStarted {
-                    job: info.id,
-                    name: info.name.clone(),
-                },
-            );
-        }
         let result = work(&token);
         let mut state = shared.state.lock().expect("scheduler lock");
         state.running.remove(&info.id);
+        state.release(&info.spec);
+        let mut info = info;
         (info.state, info.error) = match result {
             _ if token.is_cancelled() => (JobState::Cancelled, None),
             Ok(()) => (JobState::Done, None),
             Err(e) => (JobState::Failed, Some(e)),
         };
-        shared.bus.publish(
-            SOURCE,
-            Some(cause),
-            &JobEnded {
-                job: info.id,
-                name: info.name.clone(),
-                state: info.state,
-                error: info.error.clone(),
-            },
-        );
-        state.finish(info);
-        announce_idle(shared, &state);
+        shared.ended(&mut state, info, cause);
     }
 }
 
 impl Describe for Scheduler {
     fn describe(&self) -> serde_json::Value {
         let state = self.shared.state.lock().expect("scheduler lock");
+        let waiting: Vec<_> = state
+            .queue
+            .iter()
+            .map(|p| serde_json::json!({ "job": &p.info, "can_start": state.fits(&p.info.spec) }))
+            .collect();
         serde_json::json!({
             "idle": state.idle(),
             "workers": self.workers.len(),
-            "queued": state.queue.iter().map(|p| &p.info).collect::<Vec<_>>(),
+            "queued": waiting,
             "running": state.running.values().map(|(info, _)| info).collect::<Vec<_>>(),
+            "resources": state.resources,
             "recent": state.recent,
             "totals": { "done": state.done, "failed": state.failed, "cancelled": state.cancelled },
         })
