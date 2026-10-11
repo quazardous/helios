@@ -8,8 +8,8 @@
 use std::sync::Arc;
 
 use helios_core::{
-    Bus, Engine, Graph, Image, Manifest, Module, ModuleRef, NodeId, ParamKind, Params, Region,
-    Value,
+    Bus, Context, Engine, Graph, Image, Manifest, Module, ModuleRef, NodeId, ParamKind, Params,
+    Region, Value,
 };
 
 /// A smooth image: each channel grows along x and y, values in `[0, 1]`.
@@ -52,11 +52,17 @@ pub const CONTRACT_REGION: Region = Region::new(0, 0, 37, 23);
 /// - rendering tile by tile gives the same bits as one render (the declared
 ///   overlap is enough).
 pub fn check_contract<M: Module>(module: M) -> Result<(), Vec<String>> {
+    check_contract_in(module, &Context::new())
+}
+
+/// [`check_contract`] for a module that reads context fields (a camera's
+/// description): every render is made with `context`.
+pub fn check_contract_in<M: Module>(module: M, context: &Context) -> Result<(), Vec<String>> {
     let module = ModuleRef::new(module);
     let manifest = module.manifest().clone();
     let mut failures = check_manifest(&manifest);
     for (label, params) in parameter_sets(&manifest) {
-        if let Err(e) = check_params(&module, &manifest, &params) {
+        if let Err(e) = check_params(&module, &manifest, &params, context) {
             failures.push(format!("{label}: {e}"));
         }
     }
@@ -69,8 +75,13 @@ pub fn check_contract<M: Module>(module: M) -> Result<(), Vec<String>> {
 
 /// [`check_contract`], panicking with the list of failures.
 pub fn assert_contract<M: Module>(module: M) {
+    assert_contract_in(module, &Context::new());
+}
+
+/// [`check_contract_in`], panicking with the list of failures.
+pub fn assert_contract_in<M: Module>(module: M, context: &Context) {
     let name = module.manifest().name;
-    if let Err(failures) = check_contract(module) {
+    if let Err(failures) = check_contract_in(module, context) {
         panic!(
             "module `{name}` fails its contract:\n- {}",
             failures.join("\n- ")
@@ -115,10 +126,13 @@ fn network(
     module: &ModuleRef,
     manifest: &Manifest,
     params: &Params,
+    context: &Context,
 ) -> Result<(Graph, NodeId), String> {
     let mut g = Graph::new();
     let node = g
         .add_module(&manifest.name, module.clone(), params)
+        .map_err(|e| e.to_string())?;
+    g.set_context(node, context.clone())
         .map_err(|e| e.to_string())?;
     for (i, port) in manifest.inputs.iter().enumerate() {
         let src = g.add_source(
@@ -135,8 +149,13 @@ fn engine() -> Engine {
     Engine::new(Arc::new(Bus::new()))
 }
 
-fn check_params(module: &ModuleRef, manifest: &Manifest, params: &Params) -> Result<(), String> {
-    let (g, node) = network(module, manifest, params)?;
+fn check_params(
+    module: &ModuleRef,
+    manifest: &Manifest,
+    params: &Params,
+    context: &Context,
+) -> Result<(), String> {
+    let (g, node) = network(module, manifest, params, context)?;
     for port in &manifest.outputs {
         let whole = engine()
             .render(&g, node, &port.name, CONTRACT_REGION)

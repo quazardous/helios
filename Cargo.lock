@@ -468,10 +468,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "helios-module-demosaic"
+version = "0.0.1"
+dependencies = [
+ "helios-core",
+ "helios-photo",
+ "helios-testkit",
+]
+
+[[package]]
 name = "helios-module-exposure"
 version = "0.0.1"
 dependencies = [
  "helios-core",
+ "helios-testkit",
+]
+
+[[package]]
+name = "helios-module-rawprepare"
+version = "0.0.1"
+dependencies = [
+ "helios-core",
+ "helios-photo",
  "helios-testkit",
 ]
 
@@ -484,8 +502,11 @@ dependencies = [
  "helios-export",
  "helios-inspect",
  "helios-load",
+ "helios-module-demosaic",
  "helios-module-exposure",
+ "helios-module-rawprepare",
  "helios-testkit",
+ "image",
  "serde",
  "serde_json",
 ]

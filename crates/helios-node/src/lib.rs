@@ -120,7 +120,14 @@ impl ExportDesc {
 
 /// The modules this node can instantiate, by name.
 pub fn registry() -> BTreeMap<&'static str, ModuleRef> {
-    BTreeMap::from([("exposure", ModuleRef::new(helios_module_exposure::Exposure))])
+    BTreeMap::from([
+        (
+            "rawprepare",
+            ModuleRef::new(helios_module_rawprepare::RawPrepare),
+        ),
+        ("demosaic", ModuleRef::new(helios_module_demosaic::Demosaic)),
+        ("exposure", ModuleRef::new(helios_module_exposure::Exposure)),
+    ])
 }
 
 /// A network ready to evaluate.
@@ -287,7 +294,11 @@ mod tests {
         ))
         .err()
         .unwrap();
-        assert_eq!(unknown, "module `blur` unknown; known: exposure");
+        let known: Vec<_> = registry().keys().copied().collect();
+        assert_eq!(
+            unknown,
+            format!("module `blur` unknown; known: {}", known.join(", "))
+        );
         let twice = load(parse(r#"{ "modules": [{ "name": "a", "module": "exposure" }, { "name": "a", "module": "exposure" }] }"#)).err().unwrap();
         assert_eq!(twice, "two nodes named `a`");
         let missing = load(parse(r#"{ "renders": [{ "node": "x", "port": "output", "region": { "x": 0, "y": 0, "width": 1, "height": 1 } }] }"#)).err().unwrap();

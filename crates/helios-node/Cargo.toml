@@ -14,5 +14,10 @@ helios-export.workspace = true
 helios-load.workspace = true
 helios-testkit.workspace = true
 helios-module-exposure = { path = "../../modules/exposure" }
+helios-module-rawprepare = { path = "../../modules/rawprepare" }
+helios-module-demosaic = { path = "../../modules/demosaic" }
 serde.workspace = true
 serde_json.workspace = true
+
+[dev-dependencies]
+image = { version = "0.25", default-features = false, features = ["png"] }

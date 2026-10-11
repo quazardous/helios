@@ -84,6 +84,9 @@ A Cargo workspace (Rust):
   nodes); and `helios-mcp`, an MCP server giving an agent the same verbs,
   sandboxes included.
 - `modules/exposure`: darktable's exposure module (manual mode), ported.
+- `modules/rawprepare`: darktable's rawprepare (black level and scale from
+  the camera's description), ported.
+- `modules/demosaic`: mosaic to camera RGB, bilinear for Bayer and X-Trans.
 
 Build and test with `cargo test --workspace`.
 

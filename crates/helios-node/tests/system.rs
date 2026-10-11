@@ -466,3 +466,50 @@ fn a_node_whose_stdout_is_closed_keeps_serving() {
         String::from_utf8_lossy(&output.stderr)
     );
 }
+
+#[test]
+fn a_raw_goes_through_the_pipe_to_a_file() {
+    let images = std::env::var_os("HELIOS_TEST_IMAGES")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../../darktable/src/tests/integration/images")
+        });
+    let raw = images.join("mire1.cr2");
+    if !raw.is_file() {
+        eprintln!("skipped: no test images in {}", images.display());
+        return;
+    }
+    // rawprepare and demosaic read the camera's levels and pattern from the
+    // context the raw source gives them: nothing is passed by hand.
+    let region = r#"{ "x": 0, "y": 0, "width": 256, "height": 128 }"#;
+    let network = format!(
+        r#"{{
+      "sources": [{{ "name": "raw", "file": {raw:?} }}],
+      "modules": [
+        {{ "name": "prep", "module": "rawprepare" }},
+        {{ "name": "demosaic", "module": "demosaic" }},
+        {{ "name": "exp", "module": "exposure", "params": {{ "exposure": {{ "float": 1.0 }} }} }}
+      ],
+      "connections": [
+        {{ "from": "raw", "port": "image", "to": "prep", "input": "input" }},
+        {{ "from": "prep", "port": "output", "to": "demosaic", "input": "input" }},
+        {{ "from": "demosaic", "port": "output", "to": "exp", "input": "input" }}
+      ],
+      "exports": [{{ "node": "exp", "region": {region}, "path": "out.png" }}]
+    }}"#
+    );
+    let sandbox = Sandbox::start("raw-pipe", &network);
+    let (code, idle) = sandbox.inspect(&["wait-event", "node.idle", "--timeout", "60000"]);
+    assert_eq!(code, 0, "{idle}");
+    assert_eq!(idle["event"]["payload"]["failed"], 0, "{idle}");
+    let png = image::open(sandbox.dir.join("out.png")).unwrap().to_rgb8();
+    assert_eq!(png.dimensions(), (256, 128));
+    // Not black, not white: real light came through.
+    let mean = png
+        .pixels()
+        .map(|p| p.0.iter().map(|v| *v as f64).sum::<f64>() / 3.0)
+        .sum::<f64>()
+        / (256.0 * 128.0);
+    assert!(mean > 5.0 && mean < 250.0, "mean {mean}");
+}
