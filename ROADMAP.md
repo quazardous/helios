@@ -114,6 +114,10 @@ driven by agents and tested headless; Helios consumes it. MIT licence,
 its own repository (github.com/quazardous/egui-pop), the name reserved on
 crates.io; crate layout and phases in docs/ui-library-research.md
 (2026-10-11, decided).
+Until it provides their components, the GUI waits and the core goes on
+(2026-10-11, decided): new surfaces (graph editor, layouts, settings,
+tips) are built on egui-pop, not twice; the engine, the vault, modules,
+GPU and parity work continue in parallel.
 Hard requirement (2026-10-11, decided): GPU acceleration on Linux, Windows
 and macOS, as close to Vulkan as possible, so the viewport can show buffers
 the engine computed on the GPU without copying them back. wgpu is
