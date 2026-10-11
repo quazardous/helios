@@ -588,7 +588,9 @@ version = "0.0.1"
 dependencies = [
  "bytemuck",
  "helios-core",
+ "helios-module-blur",
  "helios-module-exposure",
+ "helios-module-sigmoid",
  "helios-testkit",
  "pollster",
  "wgpu",

@@ -53,25 +53,29 @@ impl Gpu {
         }
     }
 
-    /// Runs a module's GPU variant on one input, over the input's region.
+    /// Runs a module's GPU variant over `output`, reading `source` (edges
+    /// replicated where the module reads past it, as the engine does).
     /// `Ok(None)` when the module has none.
     pub fn run(
         &self,
         module: &ModuleRef,
         params: &Params,
         context: &Context,
-        input: &Image,
+        source: &Image,
+        output: Region,
     ) -> Result<Option<Image>, Error> {
-        let Some((kernel, uniforms)) = module.gpu_job(params, context, 1.0)? else {
+        let Some(job) = module.gpu_job(params, context, 1.0, output)? else {
             return Ok(None);
         };
+        let (kernel, uniforms) = (job.kernel, job.uniforms);
+        let input = &source.sample(job.input);
         let m = module.manifest();
         let out_channels = m
             .outputs
             .first()
             .and_then(|p| p.channels())
             .unwrap_or(input.channels());
-        let region = input.region();
+        let region = output;
         let pixels = region.area() as u32;
         let d = &self.device;
         let shader = d.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -110,7 +114,16 @@ impl Gpu {
             "plan",
             wgpu::BufferUsages::UNIFORM,
         );
-        let shape = [pixels, input.channels(), out_channels, 0u32];
+        let shape = [
+            pixels,
+            input.channels(),
+            out_channels,
+            0u32,
+            job.input.width,
+            job.input.height,
+            output.width,
+            output.height,
+        ];
         let shape_buf = storage(
             bytemuck::cast_slice(&shape),
             "shape",
@@ -211,7 +224,7 @@ pub fn check(
     region: Region,
 ) -> Result<Comparison, String> {
     let mut g = helios_core::Graph::new();
-    let src = g.add_source("src", input.sample(region));
+    let src = g.add_source("src", input.clone());
     let node = g
         .add_module("m", module.clone(), params)
         .map_err(|e| e.to_string())?;
@@ -230,7 +243,7 @@ pub fn check(
         .render(&g, node, port, region)
         .map_err(|e| e.to_string())?;
     let out = gpu
-        .run(module, params, context, &input.sample(region))
+        .run(module, params, context, input, region)
         .map_err(|e| e.to_string())?
         .ok_or("no GPU variant")?;
     compare(&out, &cpu)

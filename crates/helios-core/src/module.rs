@@ -48,15 +48,26 @@ impl Context {
 /// (`helios-gpu`) over the same plan as the CPU code, and checked against
 /// it. The core only carries it: it never runs it.
 ///
-/// The kernel works pixel by pixel. Its bindings, group 0: `0` the input
-/// (`array<f32>`, read), `1` the output (`array<f32>`, read and write), `2`
-/// the plan's uniforms (`array<vec4<f32>>`), `3` the shape (`vec4<u32>`:
-/// pixel count, input channels, output channels). One invocation per pixel,
-/// workgroups of 64.
+/// One invocation per output pixel, workgroups of 64. Bindings, group 0:
+/// `0` the input (`array<f32>`, read; it covers the region `input_region`
+/// asks for), `1` the output (`array<f32>`, read and write), `2` the plan's
+/// uniforms (`array<vec4<f32>>`), `3` the shape (`array<vec4<u32>, 2>`:
+/// output pixel count, input channels, output channels; then input width,
+/// input height, output width, output height). The output region sits in
+/// the input at `(input width - output width) / 2` on each side.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct GpuKernel {
     pub wgsl: &'static str,
     pub entry: &'static str,
+}
+
+/// What a GPU backend needs to run a module over a region.
+#[derive(Clone, Debug, PartialEq)]
+pub struct GpuJob {
+    pub kernel: GpuKernel,
+    pub uniforms: Vec<f32>,
+    /// The input region the kernel reads.
+    pub input: Region,
 }
 
 /// An image processing module: a pure computation with a declared surface.
@@ -152,13 +163,18 @@ impl ModuleRef {
         params: &Params,
         context: &Context,
         scale: f64,
-    ) -> Result<Option<(GpuKernel, Vec<f32>)>, Error> {
+        output: Region,
+    ) -> Result<Option<GpuJob>, Error> {
         let Some(kernel) = self.0.gpu_kernel() else {
             return Ok(None);
         };
         let params = self.manifest().resolve(params)?;
         let plan = self.prepare(&params, context, scale)?;
-        Ok(Some((kernel, self.0.gpu_uniforms(&plan))))
+        Ok(Some(GpuJob {
+            kernel,
+            uniforms: self.0.gpu_uniforms(&plan),
+            input: self.input_region(&plan, output),
+        }))
     }
 
     /// Runs `process` and checks the result against the manifest.

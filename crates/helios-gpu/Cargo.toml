@@ -15,4 +15,6 @@ pollster = "0.4"
 
 [dev-dependencies]
 helios-module-exposure = { path = "../../modules/exposure" }
+helios-module-blur = { path = "../../modules/blur" }
+helios-module-sigmoid = { path = "../../modules/sigmoid" }
 helios-testkit.workspace = true

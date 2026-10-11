@@ -7,8 +7,8 @@
 //! scale), and the base of darktable's blurs and local contrast.
 
 use helios_core::{
-    Context, Family, Image, Manifest, Module, ModuleKind, Needs, ParamSpec, Params, PortSpec,
-    Region, Role,
+    Context, Family, GpuKernel, Image, Manifest, Module, ModuleKind, Needs, ParamSpec, Params,
+    PortSpec, Region, Role,
 };
 
 pub struct Blur;
@@ -77,6 +77,21 @@ impl Module for Blur {
 
     fn input_region(&self, plan: &Plan, output: Region, _: u32) -> Region {
         output.grow(plan.reach() as u32)
+    }
+
+    fn gpu_kernel(&self) -> Option<GpuKernel> {
+        Some(GpuKernel {
+            wgsl: include_str!("blur.wgsl"),
+            entry: "main",
+        })
+    }
+
+    fn gpu_uniforms(&self, plan: &Plan) -> Vec<f32> {
+        // The kernel's uniforms hold 64 vec4: the reach, then the weights.
+        let mut u = vec![plan.reach() as f32, 0.0, 0.0, 0.0];
+        u.extend(&plan.weights);
+        u.resize(256, 0.0);
+        u
     }
 
     fn process(

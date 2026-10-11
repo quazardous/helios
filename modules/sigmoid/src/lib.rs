@@ -16,8 +16,8 @@
 //! the working space's own primaries.
 
 use helios_core::{
-    Context, Family, Image, Manifest, Module, ModuleKind, Needs, ParamSpec, Params, PortSpec,
-    Region, Role,
+    Context, Family, GpuKernel, Image, Manifest, Module, ModuleKind, Needs, ParamSpec, Params,
+    PortSpec, Region, Role,
 };
 
 pub struct Sigmoid;
@@ -217,6 +217,24 @@ impl Module for Sigmoid {
         } else {
             Err(format!("no curve fits these targets: {plan:?}"))
         }
+    }
+
+    fn gpu_kernel(&self) -> Option<GpuKernel> {
+        Some(GpuKernel {
+            wgsl: include_str!("sigmoid.wgsl"),
+            entry: "main",
+        })
+    }
+
+    fn gpu_uniforms(&self, p: &Plan) -> Vec<f32> {
+        vec![
+            p.white,
+            p.paper_exposure,
+            p.film_fog,
+            p.film_power,
+            p.paper_power,
+            p.hue_preservation,
+        ]
     }
 
     fn process(

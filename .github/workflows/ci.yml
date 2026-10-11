@@ -30,6 +30,9 @@ jobs:
       - name: software Vulkan
         run: sudo apt-get update -q && sudo apt-get install -yq mesa-vulkan-drivers
       - run: cargo test --workspace
+      # Say which GPU adapter the backend tests ran on (or that they skipped).
+      - name: GPU adapter
+        run: cargo test -q -p helios-gpu --test backend -- --nocapture 2>&1 | grep -E "^(GPU|skipped):" | sort -u
       - name: changelog fragments
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
