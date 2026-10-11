@@ -38,6 +38,7 @@ Values are not clamped on every port: operators clamp where darktable does
 | `mask_levels` | `mask` → `mask` | contrast and brightness (darktable's tone curve), then inversion, then opacity |
 | `mask_blend` | `input`, `processed` (RGBA), `mask` → `output` | `input + (processed - input) * mask * opacity` |
 | `mask_from_luma` | `input` → `output`, `mask` | a member from a luminance range; passes the image through |
+| `mask_parametric` | `input` → `output`, `mask` | a member from channel ranges (darktable's parametric mask); passes the image through |
 
 ## From darktable's tree to a sub-network
 

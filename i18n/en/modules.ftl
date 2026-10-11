@@ -107,6 +107,66 @@ param-mask-levels-opacity =
     .description = multiplies the mask, last
     .label = opacity
 
+param-mask-parametric-blue =
+    .description = blue range: low, high, feather below, feather above
+    .label = blue
+
+param-mask-parametric-blue-invert =
+    .description = invert this channel's selection
+    .label = blue_invert
+
+param-mask-parametric-chroma =
+    .description = chroma range (Cz x 100): low, high, feather below, feather above
+    .label = chroma
+
+param-mask-parametric-chroma-invert =
+    .description = invert this channel's selection
+    .label = chroma_invert
+
+param-mask-parametric-green =
+    .description = green range: low, high, feather below, feather above
+    .label = green
+
+param-mask-parametric-green-invert =
+    .description = invert this channel's selection
+    .label = green_invert
+
+param-mask-parametric-hue =
+    .description = hue range, in turns: low, high, feather below, feather above
+    .label = hue
+
+param-mask-parametric-hue-invert =
+    .description = invert this channel's selection
+    .label = hue_invert
+
+param-mask-parametric-invert =
+    .description = invert the combined mask
+    .label = invert
+
+param-mask-parametric-lightness =
+    .description = lightness range (Jz x 100): low, high, feather below, feather above
+    .label = lightness
+
+param-mask-parametric-lightness-invert =
+    .description = invert this channel's selection
+    .label = lightness_invert
+
+param-mask-parametric-luminance =
+    .description = luminance range: low, high, feather below, feather above
+    .label = luminance
+
+param-mask-parametric-luminance-invert =
+    .description = invert this channel's selection
+    .label = luminance_invert
+
+param-mask-parametric-red =
+    .description = red range: low, high, feather below, feather above
+    .label = red
+
+param-mask-parametric-red-invert =
+    .description = invert this channel's selection
+    .label = red_invert
+
 param-sigmoid-black-target =
     .description = display black, in %
     .label = black_target

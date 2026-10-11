@@ -18,15 +18,20 @@
 //! - [`MaskBlend`]: mixes a module's input and output through a mask.
 //! - [`MaskFromLuma`]: a member made from the image's luminance; it also
 //!   passes its input through, a module with a second (mask) output.
+//! - [`MaskParametric`]: a member from ranges of the image's channels
+//!   (luminance, RGB, perceptual lightness, chroma and hue), darktable's
+//!   parametric mask; it passes its input through too.
 
 mod blend;
 mod combine;
 mod luma;
+mod parametric;
 mod refine;
 
 pub use blend::MaskBlend;
 pub use combine::{MAX_MEMBERS, MaskCombine, Operator, fold};
 pub use luma::{MaskFromLuma, luminance};
+pub use parametric::{Channel, MaskParametric, ParametricPlan, Range, jzczhz};
 pub use refine::{MaskBlur, MaskFeather, MaskLevels, tone_curve};
 
 use helios_core::{Params, PortSpec, Value};
