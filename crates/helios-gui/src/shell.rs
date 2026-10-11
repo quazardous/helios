@@ -51,6 +51,8 @@ enum Action {
     Toggle(String),
     Detach(String),
     MoveTo(String, Area),
+    Answer(crate::dialogs::Answer, Origin),
+    AssumeYes(bool),
     Dock(String),
     Snapshot {
         target: String,
@@ -135,6 +137,20 @@ pub struct Shell {
     pending_import: Option<helios_profile::Profile>,
     scopes: std::rc::Rc<std::cell::RefCell<crate::scopes::Scopes>>,
     library: std::rc::Rc<std::cell::RefCell<crate::library::Library>>,
+    /// Dialogs waiting to be answered, the first one shown.
+    dialogs: VecDeque<crate::dialogs::Open>,
+    /// What `dialog.current` answers: the shown dialog, described.
+    dialog_view: Arc<Mutex<Option<Value>>>,
+    /// Confirmations are answered yes by policy (a script's `--yes`).
+    assume_yes: bool,
+    /// An open menu: where, its entries, the selected one.
+    menu: Option<(egui::Pos2, Vec<crate::dialogs::MenuItem>, usize)>,
+    /// Every notice so far; the status bar shows the last, toasts the
+    /// recent warnings and errors.
+    notices: Vec<crate::dialogs::Notice>,
+    dismissed: Vec<usize>,
+    /// The GUI's clock, in seconds, as of this frame.
+    now: f64,
     /// Every value widgets and agents edit (`param.*` commands).
     pub values: std::sync::Arc<std::sync::Mutex<helios_values::Store>>,
 }
@@ -180,6 +196,13 @@ impl Shell {
             scopes: Default::default(),
             library: Default::default(),
             values: Default::default(),
+            dialogs: VecDeque::new(),
+            dialog_view: Arc::default(),
+            assume_yes: false,
+            menu: None,
+            notices: Vec::new(),
+            dismissed: Vec::new(),
+            now: 0.0,
         };
         shell.docks = layout
             .areas
@@ -261,8 +284,8 @@ impl Shell {
         self.theme_overrides = overrides;
         self.theme = self.themes.resolve(name, &self.theme_overrides);
         self.theme_pending = true;
-        for p in &self.theme.problems {
-            self.notes.push(format!("theme {name}: {p}"));
+        for p in self.theme.problems.clone() {
+            self.warn(format!("theme {name}: {p}"));
         }
     }
 
@@ -311,14 +334,14 @@ impl Shell {
                     self.keymap
                         .bind(&local, &b.command, &b.when, Layer::User, "profile")
                 {
-                    self.notes.push(format!("profile {}: {e}", p.name));
+                    self.warn(format!("profile {}: {e}", p.name));
                 }
             }
         }
         if let Some(layout) = &p.layout {
             match Layout::from_json(&layout.to_string()) {
                 Ok(l) => self.set_layout(l),
-                Err(e) => self.notes.push(format!("profile {}: layout: {e}", p.name)),
+                Err(e) => self.warn(format!("profile {}: layout: {e}", p.name)),
             }
         }
     }
@@ -409,12 +432,57 @@ impl Shell {
     pub fn run(&mut self, id: &str, args: Value, origin: Origin) -> Result<Value, String> {
         let result = self.registry.run(id, args, origin, &self.cx);
         if let Err(e) = &result {
-            self.notes.push(e.clone());
+            self.warn(e.clone());
         }
         result
     }
 
     fn declare_commands(&mut self) {
+        let view = self.dialog_view.clone();
+        self.registry
+            .register(
+                CommandSpec::new(
+                    "dialog.current",
+                    "Describe the dialog waiting for an answer",
+                    "Window",
+                ),
+                move |_, _| {
+                    Ok(view
+                        .lock()
+                        .expect("dialog view")
+                        .clone()
+                        .unwrap_or(Value::Null))
+                },
+            )
+            .expect("shell commands are declared once");
+        let q = self.queue.clone();
+        self.registry
+            .register(
+                CommandSpec::new(
+                    "dialog.answer",
+                    "Answer the dialog (`answer`: primary or cancel; `values` for a form; `choice` for a picker)",
+                    "Window",
+                ),
+                move |args, origin| {
+                    use crate::dialogs::Answer;
+                    let answer = if let Some(c) = args.get("choice") {
+                        Answer::Values(c.clone())
+                    } else if let Some(v) = args.get("values") {
+                        Answer::Values(v.clone())
+                    } else {
+                        match args.get("answer").and_then(Value::as_str) {
+                            Some("primary") => Answer::Primary,
+                            Some("cancel") => Answer::Cancel,
+                            _ => return Err("`answer` is primary or cancel".into()),
+                        }
+                    };
+                    q.lock()
+                        .expect("queue")
+                        .push(Action::Answer(answer, origin.clone()));
+                    Ok(json!({"queued": true}))
+                },
+            )
+            .expect("shell commands are declared once");
         let q = self.queue.clone();
         let push = move |a: Action| q.lock().expect("queue").push(a);
         let mut add = |spec: CommandSpec, action: ActionOf| {
@@ -426,6 +494,18 @@ impl Shell {
                 })
                 .expect("shell commands are declared once");
         };
+        add(
+            CommandSpec::new(
+                "dialog.assumeYes",
+                "Answer confirmations yes by policy (`on`)",
+                "Window",
+            ),
+            Box::new(|a| {
+                Ok(Action::AssumeYes(
+                    a.get("on").and_then(Value::as_bool).unwrap_or(true),
+                ))
+            }),
+        );
         add(
             CommandSpec::new("workbench.palette", "Show all commands", "View"),
             Box::new(|_| Ok(Action::Palette)),
@@ -792,6 +872,156 @@ impl Shell {
         }
     }
 
+    // --- Dialogs, menus and notices (see `dialogs`) ---
+
+    /// Shows a notice: the status bar always, a toast unless it is plain
+    /// information. Kept in `notes` too.
+    pub fn notify(&mut self, level: crate::dialogs::Level, text: impl Into<String>) {
+        let text = text.into();
+        self.notes.push(text.clone());
+        self.notices.push(crate::dialogs::Notice {
+            level,
+            text,
+            action: None,
+            at: self.now,
+        });
+    }
+
+    fn note(&mut self, text: impl Into<String>) {
+        self.notify(crate::dialogs::Level::Info, text);
+    }
+
+    fn warn(&mut self, text: impl Into<String>) {
+        self.notify(crate::dialogs::Level::Warning, text);
+    }
+
+    fn open(&mut self, dialog: crate::dialogs::Dialog) {
+        self.dialogs.push_back(crate::dialogs::Open::new(dialog));
+        self.refresh_dialog_view();
+    }
+
+    /// Asks before running a command. Under the yes policy it runs at once,
+    /// and says so.
+    pub fn confirm(&mut self, c: crate::dialogs::Confirm) {
+        if self.assume_yes {
+            let text = format!("{}: confirmed by policy", c.verb);
+            self.notify(crate::dialogs::Level::Warning, text);
+            let _ = self.run(&c.command, c.args, Origin::Script("policy".into()));
+            return;
+        }
+        self.open(crate::dialogs::Dialog::Confirm(c));
+    }
+
+    /// Asks for values, then runs the form's command with them.
+    pub fn form(&mut self, f: crate::dialogs::Form) {
+        self.open(crate::dialogs::Dialog::Form(f));
+    }
+
+    /// Asks for a choice, then runs the picker's command with it.
+    pub fn pick(&mut self, p: crate::dialogs::Picker) {
+        self.open(crate::dialogs::Dialog::Picker(p));
+    }
+
+    /// Opens a menu of commands at a position.
+    pub fn open_menu(&mut self, at: egui::Pos2, items: Vec<crate::dialogs::MenuItem>) {
+        self.menu = Some((at, items, 0));
+    }
+
+    /// The notices so far, oldest first.
+    pub fn notices(&self) -> &[crate::dialogs::Notice] {
+        &self.notices
+    }
+
+    fn refresh_dialog_view(&mut self) {
+        *self.dialog_view.lock().expect("dialog view") =
+            self.dialogs.front().map(crate::dialogs::Open::describe);
+    }
+
+    fn answer(&mut self, answer: crate::dialogs::Answer, origin: Origin) {
+        let Some(open) = self.dialogs.front() else {
+            self.warn("no dialog to answer");
+            return;
+        };
+        match open.resolve(&answer) {
+            Ok(run) => {
+                self.dialogs.pop_front();
+                self.refresh_dialog_view();
+                if let Some((command, args)) = run
+                    && let Err(e) = self.run(&command, args, origin)
+                {
+                    self.warn(format!("{command}: {e}"));
+                }
+            }
+            Err(e) => self.warn(e),
+        }
+    }
+
+    /// A menu's items resolved against the registry, the keymap and the
+    /// context.
+    fn menu_rows(&self, items: &[crate::dialogs::MenuItem]) -> Vec<crate::dialogs::Row> {
+        use crate::dialogs::{Entry, MenuItem, Row};
+        items
+            .iter()
+            .filter_map(|item| match item {
+                MenuItem::Separator => Some(Row::Separator),
+                MenuItem::Submenu { label, items } => {
+                    Some(Row::Submenu(label.clone(), self.menu_rows(items)))
+                }
+                MenuItem::Command { id, args } => {
+                    let spec = self.registry.spec(id)?;
+                    let applies = self
+                        .registry
+                        .available(&self.cx)
+                        .iter()
+                        .any(|s| s.id == *id);
+                    Some(Row::Entry(Entry {
+                        id: id.clone(),
+                        args: args.clone(),
+                        title: spec.title.clone(),
+                        keys: self.keymap.keys_for(id).first().map(|k| k.to_string()),
+                        disabled: (!applies).then(|| format!("Not available here ({})", spec.when)),
+                    }))
+                }
+            })
+            .collect()
+    }
+
+    /// Dialogs, menus and toasts, over everything else.
+    fn overlays(&mut self, ctx: &Egui) {
+        use crate::dialogs::{Request, take_requests};
+        for r in take_requests(ctx) {
+            match r {
+                Request::Confirm(c) => self.confirm(c),
+                Request::Form(f) => self.form(f),
+                Request::Picker(p) => self.pick(p),
+                Request::Menu { at, items } => self.open_menu(at, items),
+                Request::Notify(level, text) => self.notify(level, text),
+            }
+        }
+        let look = crate::dialogs::Look::of(&self.theme);
+        if let Some(open) = self.dialogs.front_mut() {
+            let answer = crate::dialogs::dialog_ui(ctx, &look, open);
+            self.refresh_dialog_view();
+            if let Some(a) = answer {
+                self.answer(a, Origin::User);
+            }
+        } else if let Some((at, items, mut selected)) = self.menu.take() {
+            let rows = self.menu_rows(&items);
+            match crate::dialogs::menu_ui(ctx, at, &rows, &mut selected) {
+                Some(Some((id, args))) => {
+                    let _ = self.run(&id, args, Origin::User);
+                }
+                Some(None) => {}
+                None => self.menu = Some((at, items, selected)),
+            }
+        }
+        if let Some(command) =
+            crate::dialogs::toasts_ui(ctx, &look, &self.notices, &mut self.dismissed)
+        {
+            let _ = self.run(&command, Value::Null, Origin::User);
+        }
+    }
+
     /// Moves a panel to an area, into the tabs under `at` when given,
     /// else the area's first tabs; refused when the panel may not be there.
     fn move_to(&mut self, panel: &str, area: Area, at: Option<egui::Pos2>) -> Result<(), String> {
@@ -904,7 +1134,7 @@ impl Shell {
             return;
         };
         if let Err(e) = self.move_to(&panel, to, Some(at)) {
-            self.notes.push(e);
+            self.warn(e);
         }
     }
 
@@ -1006,7 +1236,7 @@ impl Shell {
                     .parent()
                     .map_or(Ok(()), std::fs::create_dir_all)
                     .and_then(|_| std::fs::write(&path, text));
-                self.notes.push(match saved {
+                self.note(match saved {
                     Ok(()) => format!("theme exported to {}", path.display()),
                     Err(e) => format!("cannot export the theme to {}: {e}", path.display()),
                 });
@@ -1026,7 +1256,7 @@ impl Shell {
                         .and_then(|_| std::fs::write(&path, text))
                         .map_err(|e| format!("{}: {e}", path.display()))
                 });
-                self.notes.push(match written {
+                self.note(match written {
                     Ok(()) => format!("profile exported to {}", path.display()),
                     Err(e) => format!("profile not exported: {e}"),
                 });
@@ -1035,24 +1265,24 @@ impl Shell {
                 Ok(incoming) => {
                     let changes = helios_profile::diff(&self.profile(), &incoming);
                     let count: usize = changes.iter().map(|d| d.changes.len()).sum();
-                    self.notes.push(format!(
+                    self.note(format!(
                         "profile {}: {count} changes; profile.import.apply to apply them",
                         incoming.name
                     ));
                     for d in &changes {
                         for c in &d.changes {
-                            self.notes.push(format!("{:?} {c}", d.part));
+                            self.note(format!("{:?} {c}", d.part));
                         }
                     }
                     self.pending_import = Some(incoming);
                 }
-                Err(e) => self.notes.push(format!("profile not imported: {e}")),
+                Err(e) => self.warn(format!("profile not imported: {e}")),
             },
             Action::ProfileApply => match self.pending_import.take() {
                 Some(p) => {
                     let name = p.name.clone();
                     self.apply_profile(&p);
-                    self.notes.push(format!("profile {name} applied"));
+                    self.note(format!("profile {name} applied"));
                 }
                 None => self
                     .notes
@@ -1060,24 +1290,27 @@ impl Shell {
             },
             Action::ProfileUse(name) => {
                 if let Err(e) = self.use_profile(&name) {
-                    self.notes.push(format!("profile {name}: {e}"));
+                    self.warn(format!("profile {name}: {e}"));
                 }
             }
             Action::ScopeMode(mode) => self.scopes.borrow_mut().set_mode(mode),
             Action::ScopeStops(on) => self.scopes.borrow_mut().set_stops(on),
             Action::Rate(n) => {
-                if let Err(e) = self.library.borrow_mut().rate(n) {
-                    self.notes.push(format!("vault.rate: {e}"));
+                let result = self.library.borrow_mut().rate(n);
+                if let Err(e) = result {
+                    self.warn(format!("vault.rate: {e}"));
                 }
             }
             Action::Reject => {
-                if let Err(e) = self.library.borrow_mut().toggle_reject() {
-                    self.notes.push(format!("vault.reject: {e}"));
+                let result = self.library.borrow_mut().toggle_reject();
+                if let Err(e) = result {
+                    self.warn(format!("vault.reject: {e}"));
                 }
             }
             Action::Label(l) => {
-                if let Err(e) = self.library.borrow_mut().toggle_label(&l) {
-                    self.notes.push(format!("vault.label: {e}"));
+                let result = self.library.borrow_mut().toggle_label(&l);
+                if let Err(e) = result {
+                    self.warn(format!("vault.label: {e}"));
                 }
             }
             Action::Step(n) => self.library.borrow_mut().step(n),
@@ -1093,8 +1326,17 @@ impl Shell {
             }
             Action::MoveTo(p, area) => {
                 if let Err(e) = self.move_to(&p, area, None) {
-                    self.notes.push(e);
+                    self.warn(e);
                 }
+            }
+            Action::Answer(answer, origin) => self.answer(answer, origin),
+            Action::AssumeYes(on) => {
+                self.assume_yes = on;
+                self.note(if on {
+                    "confirmations are answered yes by policy"
+                } else {
+                    "confirmations are asked again"
+                });
             }
             Action::Detach(p) => {
                 if !self.auxiliary.iter().any(|a| a.panel == p) {
@@ -1128,7 +1370,7 @@ impl Shell {
                         Ok(p) => format!("recording saved to {}", p.display()),
                         Err(e) => format!("recording failed: {e}"),
                     };
-                    self.notes.push(note);
+                    self.note(note);
                 }
             }
         }
@@ -1170,7 +1412,7 @@ impl Shell {
                     .and_then(|img| snapshot::save(&img, &path))
                     .map(|_| format!("{target} pictured to {}", path.display()))
                     .unwrap_or_else(|e| format!("snapshot failed: {e}"));
-                self.notes.push(note);
+                self.note(note);
             }
             Shot::Frame => {
                 if let Some((target, rec)) = &mut self.recording {
@@ -1181,7 +1423,7 @@ impl Shell {
                         .map(|r| snapshot::crop(&full, *r, self.pixels_per_point))
                         .and_then(|img| rec.push(&img));
                     if let Err(e) = pushed {
-                        self.notes.push(format!("recording stopped: {e}"));
+                        self.warn(format!("recording stopped: {e}"));
                         self.recording = None;
                     }
                 }
@@ -1195,6 +1437,7 @@ impl Shell {
     pub fn ui(&mut self, ui: &mut Ui) {
         let ctx = ui.ctx().clone();
         self.pixels_per_point = ctx.pixels_per_point();
+        self.now = ctx.input(|i| i.time);
         self.cx = self.context(&ctx);
         if self.framed {
             crate::frame::resize_handles(&ctx);
@@ -1208,16 +1451,26 @@ impl Shell {
                     repeat: false,
                     modifiers,
                     ..
-                } if self.palette.is_none() || key == Key::F1 || modifiers.ctrl => {
+                } if self.dialogs.is_empty()
+                    && self.menu.is_none()
+                    && (self.palette.is_none() || key == Key::F1 || modifiers.ctrl) =>
+                {
                     self.on_key(key, modifiers)
                 }
                 Event::Screenshot { image, .. } => self.on_screenshot(&image),
                 _ => {}
             }
         }
-        let actions: Vec<Action> = std::mem::take(&mut *self.queue.lock().expect("queue"));
-        for a in actions {
-            self.apply(&ctx, a);
+        // An action may run commands that queue more (a dialog's answer):
+        // they apply in the same frame, a bounded number of rounds.
+        for _ in 0..8 {
+            let actions: Vec<Action> = std::mem::take(&mut *self.queue.lock().expect("queue"));
+            if actions.is_empty() {
+                break;
+            }
+            for a in actions {
+                self.apply(&ctx, a);
+            }
         }
         if self.theme_pending {
             crate::theme::apply(&ctx, &self.theme);
@@ -1236,6 +1489,7 @@ impl Shell {
         self.areas(ui);
         self.windows(&ctx);
         self.palette_ui(&ctx);
+        self.overlays(&ctx);
 
         let named = ctx.data(|d| d.get_temp::<BTreeMap<String, Rect>>(Id::new("helios.named")));
         self.rects.extend(named.unwrap_or_default());
@@ -1338,13 +1592,38 @@ impl Shell {
                 .get(&aux.panel)
                 .map(|p| p.title.clone())
                 .unwrap_or_else(|| aux.panel.clone());
+            // The same title and, when Helios draws the main window's
+            // frame, the same frame.
+            let window_title = format!("{title} — Helios");
+            let framed = self.framed;
             let builder = ViewportBuilder::default()
-                .with_title(format!("{title} — Helios"))
+                .with_title(window_title.clone())
+                .with_decorations(!framed)
                 .with_inner_size([aux.rect[2], aux.rect[3]]);
             let mut content = self.contents.get_mut(&aux.panel);
             let rects = &mut self.rects;
             let panel = aux.panel.clone();
             ctx.show_viewport_immediate(ViewportId::from_hash_of(&panel), builder, |ui, _| {
+                if framed {
+                    let vctx = ui.ctx().clone();
+                    crate::frame::resize_handles(&vctx);
+                    let request = egui::Panel::top("helios.titlebar")
+                        .exact_size(crate::frame::TITLE_HEIGHT)
+                        .frame(egui::Frame::NONE.fill(ui.visuals().panel_fill))
+                        .show(ui, |ui| crate::frame::title_bar(ui, &window_title))
+                        .inner;
+                    match request {
+                        Some(crate::frame::Request::Minimize) => {
+                            vctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+                        }
+                        Some(crate::frame::Request::ToggleMaximize) => {
+                            let on = vctx.input(|i| i.viewport().maximized.unwrap_or(false));
+                            vctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!on));
+                        }
+                        Some(crate::frame::Request::Close) => back.push(panel.clone()),
+                        None => {}
+                    }
+                }
                 egui::CentralPanel::default().show(ui, |ui| {
                     rects.insert(panel.clone(), ui.max_rect());
                     match content.as_deref_mut() {
@@ -1417,19 +1696,9 @@ impl Shell {
                 }
                 ui.separator();
                 for (i, (id, title, keys)) in matches.iter().enumerate() {
-                    let row = ui.horizontal(|ui| {
-                        let r = ui.selectable_label(i == palette.selected, title);
-                        if let Some(k) = keys {
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
-                                    ui.weak(k);
-                                },
-                            );
-                        }
-                        r
-                    });
-                    if row.inner.clicked() {
+                    let row =
+                        crate::dialogs::list_row(ui, i == palette.selected, title, keys.as_deref());
+                    if row.clicked() {
                         run = Some(id.clone());
                     }
                 }

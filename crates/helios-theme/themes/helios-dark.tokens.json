@@ -57,7 +57,16 @@
     "widget": { "$value": "4px" },
     "window": { "$value": "8px" }
   },
-  "space": { "item": { "$type": "dimension", "$value": "6px" } },
+  "space": {
+    "$type": "dimension",
+    "item": { "$value": "6px" },
+    "dialog": { "$value": "16px" }
+  },
+  "size": {
+    "$type": "dimension",
+    "dialog": { "$value": "440px" },
+    "toast": { "$value": "340px" }
+  },
   "font": {
     "size": { "$type": "dimension", "$value": "13px" },
     "ui": { "$type": "fontFamily", "$value": ["Ubuntu", "sans-serif"] },

@@ -1,6 +1,7 @@
 //! Helios's desktop: the shell of `helios-shell` drawn with egui, and the
 //! framework's own pictures and recordings of it.
 
+pub mod dialogs;
 pub mod dock;
 pub mod frame;
 pub mod keys;

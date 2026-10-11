@@ -190,3 +190,50 @@ sync through the vault.
 - **Sync.** Later, through the vault (the user's own server), never a
   third-party service. Conflicts show as a diff per part, and the last 20
   versions are kept.
+
+## Windows, dialogs and menus
+
+**Normalized (decided 2026-10-11).** Panels, widgets, modules and plugins
+never draw a window, a popup, a menu or a dialog: they ask the shell
+(`helios_gui::dialogs`), which draws a small closed set of kinds, the same
+everywhere, from the theme's tokens (`size.dialog`, `space.dialog`,
+`size.toast`, `accent.base`, `danger`). A test fails if anything else
+creates one (`crates/helios-gui/tests/normalized.rs`). Every open dialog is
+also data: `dialog.current` describes it and `dialog.answer` answers it,
+so an agent sees and answers what a human would, its origin recorded.
+
+- **Confirm**: a question, its consequences in one line, Cancel then the
+  action on the right. The action is named by its verb ("Delete 3
+  images", never "OK"). A destructive one uses the danger style and the
+  focus starts on Cancel, so Enter does nothing harmful; otherwise Enter
+  is the action and Escape cancels. `dialog.assumeYes` answers yes by
+  policy, for scripts, and says so each time.
+
+  ![A destructive confirmation](gui/confirm-helios-dark.png)
+
+- **Form**: fields built from value descriptors (the value store's: type,
+  range, steps, unit, choices), the same footer; never a free layout.
+  Answered, it runs its command with the values.
+
+  ![A form](gui/form-helios-light.png)
+
+- **Picker**: a list to choose from with search, the palette's look;
+  arrows and Enter, or a click.
+- **Menu and context menu**: entries are commands, nothing else. Titles
+  come from the commands, keys from the keymap, so a menu never shows a
+  key that does not work; an entry whose `when` does not hold is greyed
+  with the reason. Arrows, Enter and Escape work.
+
+  ![A menu](gui/menu-helios-dark.png)
+
+- **Notice**: shown in the status bar; warnings and errors also as a toast
+  at the bottom right, with an optional action (a command). A notice
+  never takes the focus; errors stay until dismissed.
+
+  ![A toast](gui/toast-helios-dark.png)
+
+- **Window**: auxiliary windows share the frame Helios draws (title bar
+  and buttons), titled "`<panel>` — Helios".
+
+The pictures are written by `HELIOS_DOC_PICTURES=docs/gui cargo test -p
+helios-gui --test dialogs pictures`.
