@@ -11,7 +11,7 @@ use serde::Serialize;
 use crate::describe::Describe;
 use crate::error::Error;
 use crate::image::{ContentHash, Image};
-use crate::manifest::ModuleKind;
+use crate::manifest::{Manifest, ModuleKind};
 use crate::module::{Context, ModuleRef};
 use crate::params::{Params, Value};
 
@@ -198,6 +198,33 @@ impl Graph {
             .iter()
             .map(|i| i.map(|(n, _)| n))
             .collect())
+    }
+
+    /// The node and output port feeding each input of a node, the port by
+    /// name, as `Engine::render` takes it (`None` when unconnected).
+    pub fn input_ports(&self, id: NodeId) -> Result<Vec<Option<(NodeId, String)>>, Error> {
+        let node = self.node(id)?;
+        node.inputs
+            .iter()
+            .map(|i| {
+                i.map(|(src, port)| {
+                    let name = match &self.node(src)?.kind {
+                        Kind::Source { .. } => SOURCE_PORT.to_string(),
+                        Kind::Module { module, .. } => module.manifest().outputs[port].name.clone(),
+                    };
+                    Ok((src, name))
+                })
+                .transpose()
+            })
+            .collect()
+    }
+
+    /// The manifest of a module node; `None` for a source.
+    pub fn manifest(&self, id: NodeId) -> Result<Option<Manifest>, Error> {
+        Ok(match &self.node(id)?.kind {
+            Kind::Source { .. } => None,
+            Kind::Module { module, .. } => Some(module.manifest().clone()),
+        })
     }
 
     /// A node by name.

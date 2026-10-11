@@ -1783,6 +1783,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "helios-resolve"
+version = "0.0.1"
+dependencies = [
+ "helios-core",
+ "helios-decision",
+ "helios-export",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "helios-shell"
 version = "0.0.1"
 dependencies = [
