@@ -15,6 +15,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       # vkdt's module files, read by the manifest round-trip test (never
@@ -29,7 +32,18 @@ jobs:
       # backend's tests against the CPU reference.
       - name: software Vulkan
         run: sudo apt-get update -q && sudo apt-get install -yq mesa-vulkan-drivers
-      - run: cargo test --workspace
+      # One process per test, a JUnit report, slow tests named
+      # (.config/nextest.toml); nextest does not run doctests.
+      - run: cargo nextest run --workspace --profile ci
+      - run: cargo test --workspace --doc
+      - name: slowest tests
+        if: ${{ !cancelled() }}
+        run: cargo xtask test-times --from-junit target/nextest/ci/junit.xml --summary >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: junit
+          path: target/nextest/ci/junit.xml
       # Say which GPU adapter the backend tests ran on (or that they skipped).
       - name: GPU adapter
         run: cargo test -q -p helios-gpu --test backend -- --nocapture 2>&1 | grep -E "^(GPU|skipped):" | sort -u
