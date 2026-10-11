@@ -491,6 +491,7 @@ fn a_raw_goes_through_the_pipe_to_a_file() {
         {{ "name": "wb", "module": "whitebalance" }},
         {{ "name": "hl", "module": "highlights" }},
         {{ "name": "demosaic", "module": "demosaic" }},
+        {{ "name": "colorin", "module": "colorin" }},
         {{ "name": "exp", "module": "exposure", "params": {{ "exposure": {{ "float": 1.0 }} }} }}
       ],
       "connections": [
@@ -498,7 +499,8 @@ fn a_raw_goes_through_the_pipe_to_a_file() {
         {{ "from": "prep", "port": "output", "to": "wb", "input": "input" }},
         {{ "from": "wb", "port": "output", "to": "hl", "input": "input" }},
         {{ "from": "hl", "port": "output", "to": "demosaic", "input": "input" }},
-        {{ "from": "demosaic", "port": "output", "to": "exp", "input": "input" }}
+        {{ "from": "demosaic", "port": "output", "to": "colorin", "input": "input" }},
+        {{ "from": "colorin", "port": "output", "to": "exp", "input": "input" }}
       ],
       "exports": [{{ "node": "exp", "region": {region}, "path": "out.png" }}]
     }}"#

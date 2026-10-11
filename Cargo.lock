@@ -468,6 +468,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "helios-module-colorin"
+version = "0.0.1"
+dependencies = [
+ "helios-core",
+ "helios-photo",
+ "helios-testkit",
+]
+
+[[package]]
 name = "helios-module-demosaic"
 version = "0.0.1"
 dependencies = [
@@ -481,6 +490,7 @@ name = "helios-module-exposure"
 version = "0.0.1"
 dependencies = [
  "helios-core",
+ "helios-photo",
  "helios-testkit",
 ]
 
@@ -520,6 +530,7 @@ dependencies = [
  "helios-export",
  "helios-inspect",
  "helios-load",
+ "helios-module-colorin",
  "helios-module-demosaic",
  "helios-module-exposure",
  "helios-module-highlights",

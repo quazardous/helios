@@ -134,6 +134,7 @@ pub fn registry() -> BTreeMap<&'static str, ModuleRef> {
             ModuleRef::new(helios_module_highlights::Highlights),
         ),
         ("demosaic", ModuleRef::new(helios_module_demosaic::Demosaic)),
+        ("colorin", ModuleRef::new(helios_module_colorin::ColorIn)),
         ("exposure", ModuleRef::new(helios_module_exposure::Exposure)),
     ])
 }

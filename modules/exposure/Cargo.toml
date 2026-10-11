@@ -8,6 +8,7 @@ repository.workspace = true
 
 [dependencies]
 helios-core.workspace = true
+helios-photo.workspace = true
 
 [dev-dependencies]
 helios-testkit.workspace = true

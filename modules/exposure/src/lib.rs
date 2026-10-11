@@ -1,21 +1,25 @@
 //! Exposure, ported from darktable's `exposure` module (`src/iop/exposure.c`),
-//! manual mode only for now.
+//! manual mode.
 //!
 //! darktable computes `out = (in - black) * scale` with
 //! `white = 2^-exposure` and `scale = 1 / (white - black)`, pulling `black`
 //! just below `white` when it would reach it. The same is done here.
 //!
-//! Not ported yet: the deflicker mode (an analysis input: the raw histogram)
-//! and the compensation of the camera's exposure bias and highlight
-//! preservation (context inputs read from EXIF).
+//! With `compensate_bias`, the camera's exposure bias (from its description,
+//! a declared context input) is taken back, as darktable's "compensate
+//! camera exposure": a shot at +1 EV gets -1 EV.
+//!
+//! Not ported yet: the deflicker mode (an analysis input: the raw
+//! histogram) and highlight preservation.
 //!
 //! One difference: darktable also scales the fourth channel, which its
 //! pixelpipe carries but does not use; here it is passed through untouched.
 
 use helios_core::{
-    Context, Family, Image, Manifest, Module, ModuleKind, Needs, ParamSpec, Params, PortSpec,
-    Region, Role,
+    Context, Family, Image, Manifest, Module, ModuleKind, Needs, ParamKind, ParamSpec, Params,
+    PortSpec, Region, Role, Value,
 };
+use helios_photo::camera::fields::EXPOSURE_BIAS;
 
 pub struct Exposure;
 
@@ -37,10 +41,15 @@ impl Module for Exposure {
             params: vec![
                 ParamSpec::float("exposure", "exposure adjustment, in EV", -18.0, 18.0, 0.0),
                 ParamSpec::float("black", "black level correction", -1.0, 1.0, 0.0),
+                ParamSpec {
+                    name: "compensate_bias".into(),
+                    description: "take back the camera's exposure bias".into(),
+                    kind: ParamKind::Bool { default: false },
+                },
             ],
             inputs: vec![PortSpec::image("input", 4)],
             outputs: vec![PortSpec::image("output", 4)],
-            context: vec![],
+            context: vec![EXPOSURE_BIAS.into()],
             needs: Needs::default(),
             kind: ModuleKind::Process,
             family: Family::Tone,
@@ -48,8 +57,18 @@ impl Module for Exposure {
         }
     }
 
-    fn prepare(&self, params: &Params, _: &Context) -> Result<Plan, String> {
-        let white = (-params.float("exposure") as f32).exp2();
+    fn prepare(&self, params: &Params, context: &Context) -> Result<Plan, String> {
+        let mut exposure = params.float("exposure");
+        if params.get("compensate_bias") == Some(&Value::Bool(true)) {
+            let bias = context
+                .get(EXPOSURE_BIAS)
+                .and_then(|v| v.as_f64())
+                .ok_or_else(|| {
+                    format!("context field `{EXPOSURE_BIAS}`: the camera's bias needed")
+                })?;
+            exposure -= bias;
+        }
+        let white = (-exposure as f32).exp2();
         let mut black = params.float("black") as f32;
         if black >= white {
             black = white - 0.01;
@@ -129,6 +148,22 @@ mod tests {
         assert_eq!(out[0], 0.0);
         assert!((out[1] - 1.0).abs() < 1e-6);
         assert!((out[2] - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn the_cameras_bias_is_taken_back_when_asked() {
+        let params = Exposure
+            .manifest()
+            .resolve(&Params::new().with("compensate_bias", Value::Bool(true)))
+            .unwrap();
+        let shot_over = Context::new().with(EXPOSURE_BIAS, Value::Float(1.0));
+        let p = Exposure.prepare(&params, &shot_over).unwrap();
+        assert_eq!(apply(&p, [0.4, 0.4, 0.4, 1.0]), [0.2, 0.2, 0.2, 1.0]);
+        let err = Exposure.prepare(&params, &Context::new()).unwrap_err();
+        assert!(err.contains(EXPOSURE_BIAS), "{err}");
+        // Off by default: the bias changes nothing.
+        let off = Exposure.manifest().resolve(&Params::new()).unwrap();
+        assert_eq!(Exposure.prepare(&off, &shot_over).unwrap(), plan(0.0, 0.0));
     }
 
     #[test]
