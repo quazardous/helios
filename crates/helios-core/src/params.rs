@@ -13,8 +13,12 @@ pub enum Value {
     Bool(bool),
     Choice(String),
     /// Numbers that belong together (a color matrix, white balance
-    /// coefficients); used by context fields, not by parameters yet.
+    /// coefficients, an array parameter).
     List(Vec<f64>),
+    /// Whole numbers that belong together (an array parameter).
+    Ints(Vec<i64>),
+    /// Free text (a file name, a label).
+    Text(String),
 }
 
 impl Value {

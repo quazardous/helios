@@ -224,7 +224,12 @@ impl Graph {
             }),
             Kind::Module { module, .. } => {
                 let i = module.manifest().output_index(port)?;
-                Ok((i, module.manifest().outputs[i].channels()))
+                let spec = &module.manifest().outputs[i];
+                let channels = spec.channels().ok_or_else(|| Error::Contract {
+                    module: module.manifest().name.clone(),
+                    reason: format!("port `{}` is not an image the engine runs yet", spec.name),
+                })?;
+                Ok((i, channels))
             }
         }
     }
@@ -246,7 +251,11 @@ impl Graph {
             });
         };
         let in_index = module.manifest().input_index(in_port)?;
-        let expected = module.manifest().inputs[in_index].channels();
+        let spec = &module.manifest().inputs[in_index];
+        let expected = spec.channels().ok_or_else(|| Error::Contract {
+            module: module.manifest().name.clone(),
+            reason: format!("port `{}` is not an image the engine runs yet", spec.name),
+        })?;
         if channels != expected {
             return Err(Error::Contract {
                 module: module.manifest().name.clone(),

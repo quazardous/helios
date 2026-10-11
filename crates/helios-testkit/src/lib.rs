@@ -135,9 +135,12 @@ fn network(
     g.set_context(node, context.clone())
         .map_err(|e| e.to_string())?;
     for (i, port) in manifest.inputs.iter().enumerate() {
+        let channels = port
+            .channels()
+            .ok_or_else(|| format!("input `{}` is not an image the engine runs yet", port.name))?;
         let src = g.add_source(
             &port.name,
-            noise(CONTRACT_REGION.grow(16), port.channels(), i as u64 + 1),
+            noise(CONTRACT_REGION.grow(16), channels, i as u64 + 1),
         );
         g.connect(src, "image", node, &port.name)
             .map_err(|e| e.to_string())?;

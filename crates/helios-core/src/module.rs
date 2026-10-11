@@ -151,9 +151,9 @@ impl ModuleRef {
                     image.region()
                 )));
             }
-            if image.channels() != port.channels() {
+            if Some(image.channels()) != port.channels() {
                 return Err(broken(format!(
-                    "output `{}` has {} channels, {} declared",
+                    "output `{}` has {} channels, {:?} declared",
                     port.name,
                     image.channels(),
                     port.channels()

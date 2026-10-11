@@ -27,6 +27,26 @@ pub enum ParamKind {
         options: Vec<String>,
         default: String,
     },
+    /// A fixed number of floats; `default` may hold fewer values than
+    /// `count`, as vkdt's params files do.
+    Floats {
+        count: u32,
+        min: f64,
+        max: f64,
+        default: Vec<f64>,
+    },
+    /// A fixed number of whole numbers.
+    Ints {
+        count: u32,
+        min: i64,
+        max: i64,
+        default: Vec<i64>,
+    },
+    /// Text of at most `capacity` bytes.
+    Text {
+        capacity: u32,
+        default: String,
+    },
 }
 
 impl ParamKind {
@@ -36,6 +56,9 @@ impl ParamKind {
             ParamKind::Int { default, .. } => Value::Int(*default),
             ParamKind::Bool { default } => Value::Bool(*default),
             ParamKind::Choice { default, .. } => Value::Choice(default.clone()),
+            ParamKind::Floats { default, .. } => Value::List(default.clone()),
+            ParamKind::Ints { default, .. } => Value::Ints(default.clone()),
+            ParamKind::Text { default, .. } => Value::Text(default.clone()),
         }
     }
 
@@ -59,6 +82,41 @@ impl ParamKind {
                 }
             }
             (ParamKind::Bool { .. }, Value::Bool(_)) => Ok(()),
+            (
+                ParamKind::Floats {
+                    count, min, max, ..
+                },
+                Value::List(v),
+            ) => {
+                if v.len() > *count as usize {
+                    Err(format!("{} values, at most {count}", v.len()))
+                } else if let Some(x) = v.iter().find(|x| !x.is_finite() || *x < min || *x > max) {
+                    Err(format!("{x} outside [{min}, {max}]"))
+                } else {
+                    Ok(())
+                }
+            }
+            (
+                ParamKind::Ints {
+                    count, min, max, ..
+                },
+                Value::Ints(v),
+            ) => {
+                if v.len() > *count as usize {
+                    Err(format!("{} values, at most {count}", v.len()))
+                } else if let Some(x) = v.iter().find(|x| *x < min || *x > max) {
+                    Err(format!("{x} outside [{min}, {max}]"))
+                } else {
+                    Ok(())
+                }
+            }
+            (ParamKind::Text { capacity, .. }, Value::Text(t)) => {
+                if t.len() > *capacity as usize {
+                    Err(format!("{} bytes, at most {capacity}", t.len()))
+                } else {
+                    Ok(())
+                }
+            }
             (ParamKind::Choice { options, .. }, Value::Choice(v)) => {
                 if options.contains(v) {
                     Ok(())
@@ -76,6 +134,9 @@ impl ParamKind {
             ParamKind::Int { .. } => "an int",
             ParamKind::Bool { .. } => "a bool",
             ParamKind::Choice { .. } => "a choice",
+            ParamKind::Floats { .. } => "a list of floats",
+            ParamKind::Ints { .. } => "a list of ints",
+            ParamKind::Text { .. } => "text",
         }
     }
 }
@@ -105,6 +166,35 @@ impl ParamSpec {
 pub enum PortKind {
     /// An image with a fixed number of interleaved channels.
     Image { channels: u32 },
+    /// An image with any number of channels, decided when connected.
+    AnyImage,
+    /// An image shaped like another port of the same module (its channels
+    /// and format), as vkdt's `&input`.
+    SameAs { port: String },
+    /// A storage buffer rather than an image (vkdt's `ssbo`).
+    Buffer,
+}
+
+/// How the values of a port are stored.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PixelFormat {
+    /// 32-bit float, the engine's format.
+    #[default]
+    F32,
+    F16,
+    Ui8,
+    Ui16,
+    Ui32,
+    /// Decided when connected.
+    Any,
+    /// A format the engine does not process (vkdt's `atom`, `bc1`, `tri`),
+    /// kept by name.
+    Other(String),
+}
+
+fn is_default<T: Default + PartialEq>(v: &T) -> bool {
+    *v == T::default()
 }
 
 /// A named input or output.
@@ -113,6 +203,16 @@ pub struct PortSpec {
     pub name: String,
     #[serde(flatten)]
     pub kind: PortKind,
+    #[serde(skip_serializing_if = "is_default")]
+    pub format: PixelFormat,
+    /// What the channels mean, when named (`rgba`, `rggb` for a raw mosaic,
+    /// `y`), beyond their count.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub layout: Option<String>,
+    /// The port reads or writes outside the network (a file, a device):
+    /// the input of a sink, the output of a source.
+    #[serde(skip_serializing_if = "is_default")]
+    pub io: bool,
 }
 
 impl PortSpec {
@@ -120,12 +220,18 @@ impl PortSpec {
         Self {
             name: name.into(),
             kind: PortKind::Image { channels },
+            format: PixelFormat::F32,
+            layout: None,
+            io: false,
         }
     }
 
-    pub fn channels(&self) -> u32 {
+    /// The channel count, when the port fixes it. Ports of other kinds
+    /// describe foreign modules and are not connected by the engine yet.
+    pub fn channels(&self) -> Option<u32> {
         match self.kind {
-            PortKind::Image { channels } => channels,
+            PortKind::Image { channels } => Some(channels),
+            _ => None,
         }
     }
 }
