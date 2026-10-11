@@ -16,6 +16,7 @@
 
 mod i18n;
 
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
@@ -161,8 +162,8 @@ fn hygiene(text: &str) -> Vec<String> {
         }
     }
     if text.split_whitespace().any(|w| {
-        w.trim_matches(|c: char| !c.is_alphanumeric() && c != '.')
-            .ends_with(".rs")
+        let w = w.trim_matches(|c: char| !c.is_alphanumeric() && c != '.');
+        Path::new(w).extension().is_some_and(|e| e == "rs")
     }) {
         problems.push("a source file name: say what changes for a user, not where".into());
     }
@@ -247,7 +248,7 @@ fn render_section(version: Version, date: &str, fragments: &[Fragment]) -> Strin
         if entries.is_empty() {
             continue;
         }
-        out.push_str(&format!("\n### {}\n\n", kind.heading()));
+        let _ = write!(out, "\n### {}\n\n", kind.heading());
         for f in entries {
             let text = f
                 .text
@@ -255,7 +256,7 @@ fn render_section(version: Version, date: &str, fragments: &[Fragment]) -> Strin
                 .map(str::trim)
                 .collect::<Vec<_>>()
                 .join("\n  ");
-            out.push_str(&format!("- {text}\n"));
+            let _ = writeln!(out, "- {text}");
         }
     }
     out
@@ -355,9 +356,9 @@ fn missing_fragment(paths: &[String]) -> bool {
     let code = paths
         .iter()
         .any(|p| p.starts_with("crates/") || p.starts_with("modules/"));
-    let fragment = paths
-        .iter()
-        .any(|p| p.starts_with("changelog.d/") && p.ends_with(".md"));
+    let fragment = paths.iter().any(|p| {
+        p.starts_with("changelog.d/") && Path::new(p).extension().is_some_and(|e| e == "md")
+    });
     code && !fragment
 }
 
@@ -392,7 +393,9 @@ fn main() -> ExitCode {
             Err(p) => fail(&p),
         },
         ["release"] | ["release", "--date", _] => {
-            let date = words.get(2).map_or_else(today, |d| d.to_string());
+            let date = words
+                .get(2)
+                .map_or_else(today, std::string::ToString::to_string);
             match plan(&root, &date) {
                 Ok(None) => {
                     fail(&["nothing to release: no user-facing fragment in changelog.d/".into()])
@@ -571,7 +574,11 @@ mod tests {
 
     #[test]
     fn code_without_a_fragment_is_flagged() {
-        let p = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let p = |v: &[&str]| {
+            v.iter()
+                .map(std::string::ToString::to_string)
+                .collect::<Vec<_>>()
+        };
         assert!(missing_fragment(&p(&["crates/helios-core/src/engine.rs"])));
         assert!(!missing_fragment(&p(&[
             "crates/helios-core/src/engine.rs",
