@@ -4,21 +4,22 @@
        sun's disc, the blades' edges in yellow are its rays, running to the
        edges of the picture. -->
   <defs>
-    <radialGradient id="sun" cx="50%" cy="50%" r="60%">
-      <stop offset="0" stop-color="#fff3b0"/>
-      <stop offset="0.55" stop-color="#ffc21a"/>
+    <radialGradient id="sun" gradientUnits="userSpaceOnUse" cx="128" cy="128" r="40.70">
+      <stop offset="0" stop-color="#fffbe6"/>
+      <stop offset="0.35" stop-color="#ffe066"/>
+      <stop offset="0.75" stop-color="#ffbe1a"/>
       <stop offset="1" stop-color="#f59a00"/>
     </radialGradient>
     <clipPath id="frame"><rect width="256" height="256"/></clipPath>
   </defs>
   <rect width="256" height="256" fill="#17181c"/>
   <g clip-path="url(#frame)" stroke="#f5b400" stroke-width="11" stroke-linecap="butt">
-    <line x1="149.0" y1="91.63" x2="300.84" y2="354.62"/>
-    <line x1="170.0" y1="128.0" x2="51.76" y2="332.80"/>
-    <line x1="149.0" y1="164.37" x2="-89.40" y2="164.37"/>
-    <line x1="107.0" y1="164.37" x2="-44.84" y2="-98.62"/>
-    <line x1="86.0" y1="128.0" x2="204.24" y2="-76.80"/>
-    <line x1="107.0" y1="91.63" x2="345.40" y2="91.63"/>
+    <line x1="151.10" y1="87.99" x2="306.30" y2="356.81"/>
+    <line x1="174.20" y1="128.00" x2="55.96" y2="332.80"/>
+    <line x1="151.10" y1="168.01" x2="-90.66" y2="168.01"/>
+    <line x1="104.90" y1="168.01" x2="-50.30" y2="-100.81"/>
+    <line x1="81.80" y1="128.00" x2="200.04" y2="-76.80"/>
+    <line x1="104.90" y1="87.99" x2="346.66" y2="87.99"/>
   </g>
-  <path d="M149.00 91.63 L170.00 128.00 L149.00 164.37 L107.00 164.37 L86.00 128.00 L107.00 91.63 Z" fill="url(#sun)" stroke="#f5b400" stroke-width="11" stroke-linejoin="round"/>
+  <path d="M151.10 87.99 L174.20 128.00 L151.10 168.01 L104.90 168.01 L81.80 128.00 L104.90 87.99 Z" fill="url(#sun)" stroke="#f5b400" stroke-width="11" stroke-linejoin="round"/>
 </svg>
