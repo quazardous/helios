@@ -38,9 +38,12 @@ fn layout_nodes_round_trip_through_the_dock() {
 fn draws_every_area_and_pictures_a_panel() {
     let mut h = headless::harness(Shell::new(helios_panels(), None), vec2(1280.0, 800.0));
     h.run();
-    for title in ["Image", "Vault", "Parameters", "Queue"] {
+    for title in ["Image", "Parameters"] {
         h.get_by_label(title);
     }
+    // The Vault panel and the filmstrip show the (empty) library.
+    h.get_by_label("No images: import a folder into the vault");
+    h.get_by_label("No images");
     let window = headless::snapshot(&mut h, "window").unwrap();
     assert_eq!(window.dimensions(), (1280, 800));
     let vault = headless::snapshot(&mut h, "helios.vault").unwrap();
@@ -301,4 +304,76 @@ fn scopes_draw_the_image_they_are_given_in_each_mode() {
     h.run();
     let shot = headless::snapshot(&mut h, "helios.scopes.picture").unwrap();
     assert!(shot.width() > 100, "{}", shot.width());
+}
+
+#[test]
+fn the_library_rates_and_labels_what_is_selected_and_hands_the_changes_over() {
+    use helios_gui::library::{Change, Entry, REJECTED};
+    let entries: Vec<Entry> = ["a", "b", "c"]
+        .iter()
+        .map(|id| Entry {
+            id: id.to_string(),
+            name: format!("{id}.raf"),
+            rating: 0,
+            labels: Vec::new(),
+        })
+        .collect();
+    let mut shell = Shell::new(helios_panels(), None);
+    shell.set_library(entries.clone());
+    // A thumbnail arrives from another thread.
+    let sink = shell.library_thumbnails();
+    std::thread::spawn(move || {
+        let image =
+            helios_core::Image::from_fn(helios_core::Region::sized(600, 400), 4, |_, _, _| 0.2);
+        sink.send(("b".into(), image)).unwrap();
+    })
+    .join()
+    .unwrap();
+    let mut h = headless::harness(shell, vec2(1024.0, 700.0));
+    h.run();
+    let s = h.state_mut();
+    s.run("helios.filmstrip.focus", json!(null), Origin::User)
+        .unwrap();
+    s.run("vault.next", json!(null), Origin::User).unwrap();
+    s.run("vault.next", json!(null), Origin::User).unwrap();
+    h.run();
+    // Keys as in darktable's lighttable, while the library has the focus.
+    h.key_press(Key::Num3);
+    h.key_press(Key::R);
+    h.run();
+    let s = h.state_mut();
+    s.run("vault.label.blue", json!(null), Origin::User)
+        .unwrap();
+    s.run("vault.previous", json!(null), Origin::User).unwrap();
+    s.run("vault.rate", json!({ "stars": 5 }), Origin::User)
+        .unwrap();
+    h.run();
+    let s = h.state_mut();
+    assert_eq!(s.library().selected, Some(0));
+    assert_eq!(s.library().entries[1].rating, REJECTED);
+    assert_eq!(s.library().entries[1].labels, ["blue"]);
+    // The last change of each field is what the vault gets.
+    let changes = s.take_library_changes();
+    let change = |image: &str, field: &str, value| Change {
+        image: image.into(),
+        field: field.into(),
+        value: Some(value),
+    };
+    assert_eq!(
+        changes,
+        [
+            change("b", "rating", json!(REJECTED)),
+            change("b", "labels", json!(["blue"])),
+            change("a", "rating", json!(5)),
+        ]
+    );
+    assert!(s.take_library_changes().is_empty());
+    // A new list keeps the selection on its image.
+    let mut reordered = entries;
+    reordered.reverse();
+    s.set_library(reordered);
+    assert_eq!(s.library().selected, Some(2));
+    h.run();
+    let shot = headless::snapshot(&mut h, "helios.library.strip.1").unwrap();
+    assert!(shot.width() > 30, "{}", shot.width());
 }

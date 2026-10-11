@@ -4,6 +4,7 @@
 pub mod dock;
 pub mod frame;
 pub mod keys;
+pub mod library;
 pub mod scopes;
 pub mod shell;
 pub mod snapshot;
@@ -24,6 +25,7 @@ pub fn helios_panels() -> Panels {
         ("helios.modules", "Modules", Area::PrimarySideBar),
         ("helios.params", "Parameters", Area::SecondarySideBar),
         ("helios.scopes", "Scopes", Area::SecondarySideBar),
+        ("helios.filmstrip", "Filmstrip", Area::BottomPanel),
         ("helios.queue", "Queue", Area::BottomPanel),
         ("helios.log", "Log", Area::BottomPanel),
     ] {

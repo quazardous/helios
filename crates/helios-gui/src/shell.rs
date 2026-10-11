@@ -39,6 +39,10 @@ enum Action {
     ProfileUse(String),
     ScopeMode(crate::scopes::Mode),
     ScopeStops(bool),
+    Rate(i64),
+    Reject,
+    Label(String),
+    Step(i64),
     Fullscreen,
     Minimize,
     Maximize,
@@ -122,6 +126,7 @@ pub struct Shell {
     /// A profile read and shown as a diff, waiting for `profile.import.apply`.
     pending_import: Option<helios_profile::Profile>,
     scopes: std::rc::Rc<std::cell::RefCell<crate::scopes::Scopes>>,
+    library: std::rc::Rc<std::cell::RefCell<crate::library::Library>>,
 }
 
 impl Shell {
@@ -160,6 +165,7 @@ impl Shell {
             profile_name: "default".into(),
             pending_import: None,
             scopes: Default::default(),
+            library: Default::default(),
         };
         shell.docks = layout
             .areas
@@ -171,6 +177,19 @@ impl Shell {
             let scopes = shell.scopes.clone();
             shell.set_content("helios.scopes", move |ui| scopes.borrow_mut().ui(ui));
         }
+        for (panel, strip) in [("helios.vault", false), ("helios.filmstrip", true)] {
+            if shell.panels.get(panel).is_some() {
+                let library = shell.library.clone();
+                shell.set_content(panel, move |ui| {
+                    let mut library = library.borrow_mut();
+                    if strip {
+                        library.filmstrip(ui);
+                    } else {
+                        library.grid(ui);
+                    }
+                });
+            }
+        }
         shell
     }
 
@@ -178,6 +197,28 @@ impl Shell {
     /// transform): set by the viewport once it exists.
     pub fn set_scope_image(&mut self, image: helios_core::Image) {
         self.scopes.borrow_mut().set_image(image);
+    }
+
+    /// The images the library shows (the vault's, in its order); the
+    /// selection follows its image when it is still there.
+    pub fn set_library(&mut self, entries: Vec<crate::library::Entry>) {
+        self.library.borrow_mut().set_entries(entries);
+    }
+
+    /// Where thumbnails are sent, by image id, from any thread.
+    pub fn library_thumbnails(&self) -> std::sync::mpsc::Sender<(String, helios_core::Image)> {
+        self.library.borrow().thumbnails()
+    }
+
+    /// What the user changed in the library since the last call, for the
+    /// host to apply to the vault.
+    pub fn take_library_changes(&mut self) -> Vec<crate::library::Change> {
+        self.library.borrow_mut().take_changes()
+    }
+
+    /// The library's state, to read.
+    pub fn library(&self) -> std::cell::Ref<'_, crate::library::Library> {
+        self.library.borrow()
     }
 
     /// The layout as it stands, to be saved with the workspace.
@@ -541,6 +582,49 @@ impl Shell {
             );
         }
         add(
+            CommandSpec::new(
+                "vault.rate",
+                "Rate the selected image (`stars`, 0 to 5)",
+                "Vault",
+            ),
+            Box::new(|a| {
+                a.get("stars")
+                    .and_then(Value::as_i64)
+                    .map(Action::Rate)
+                    .ok_or_else(|| "`stars` is missing".to_string())
+            }),
+        );
+        for n in 0..=5 {
+            let title = format!("Rate the selected image {n} stars");
+            add(
+                CommandSpec::new(&format!("vault.rate.{n}"), &title, "Vault"),
+                Box::new(move |_| Ok(Action::Rate(n))),
+            );
+        }
+        add(
+            CommandSpec::new(
+                "vault.reject",
+                "Reject the selected image, or take it back",
+                "Vault",
+            ),
+            Box::new(|_| Ok(Action::Reject)),
+        );
+        for label in crate::library::LABELS {
+            let title = format!("Toggle the {label} label on the selected image");
+            add(
+                CommandSpec::new(&format!("vault.label.{label}"), &title, "Vault"),
+                Box::new(move |_| Ok(Action::Label(label.into()))),
+            );
+        }
+        add(
+            CommandSpec::new("vault.next", "Select the next image", "Vault"),
+            Box::new(|_| Ok(Action::Step(1))),
+        );
+        add(
+            CommandSpec::new("vault.previous", "Select the previous image", "Vault"),
+            Box::new(|_| Ok(Action::Step(-1))),
+        );
+        add(
             CommandSpec::new("scopes.stops", "Scopes: in stops (log)", "View"),
             Box::new(|_| Ok(Action::ScopeStops(true))),
         );
@@ -606,6 +690,19 @@ impl Shell {
             self.keymap
                 .bind(keys, command, "", Layer::Default, "shell")
                 .expect("shell keys parse");
+        }
+        // As in darktable's lighttable, while the library has the focus.
+        let library = "(focusedPanel == 'helios.vault' || focusedPanel == 'helios.filmstrip') && !textInputFocus";
+        let mut keys: Vec<(String, String)> = (0..=5)
+            .map(|n| (n.to_string(), format!("vault.rate.{n}")))
+            .collect();
+        keys.push(("r".into(), "vault.reject".into()));
+        keys.push(("right".into(), "vault.next".into()));
+        keys.push(("left".into(), "vault.previous".into()));
+        for (k, command) in keys {
+            self.keymap
+                .bind(&k, &command, library, Layer::Default, "shell")
+                .expect("library keys parse");
         }
     }
 
@@ -767,6 +864,22 @@ impl Shell {
             }
             Action::ScopeMode(mode) => self.scopes.borrow_mut().set_mode(mode),
             Action::ScopeStops(on) => self.scopes.borrow_mut().set_stops(on),
+            Action::Rate(n) => {
+                if let Err(e) = self.library.borrow_mut().rate(n) {
+                    self.notes.push(format!("vault.rate: {e}"));
+                }
+            }
+            Action::Reject => {
+                if let Err(e) = self.library.borrow_mut().toggle_reject() {
+                    self.notes.push(format!("vault.reject: {e}"));
+                }
+            }
+            Action::Label(l) => {
+                if let Err(e) = self.library.borrow_mut().toggle_label(&l) {
+                    self.notes.push(format!("vault.label: {e}"));
+                }
+            }
+            Action::Step(n) => self.library.borrow_mut().step(n),
             Action::Focus(p) => self.focus(&p),
             Action::Toggle(p) => {
                 if self.shown(&p) {

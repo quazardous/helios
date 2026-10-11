@@ -1,6 +1,8 @@
-//! `helios-gui [workspace]`: opens a workspace (a directory, the current
-//! one by default) in a window. `--snapshot <target> <file.png>` draws it
-//! offscreen instead and saves a picture of the target.
+//! `helios-gui [workspace] [--vault FILE]`: opens a workspace (a directory,
+//! the current one by default) in a window; with a vault, its images fill
+//! the library, and what the user rates or labels there is written back.
+//! `--snapshot <target> <file.png>` draws it offscreen instead and saves a
+//! picture of the target.
 
 use std::path::{Path, PathBuf};
 
@@ -37,14 +39,97 @@ fn load(file: Option<&Path>) -> Option<Layout> {
     Layout::from_json(&text).ok()
 }
 
+type Vault = helios_vault::Vault<helios_vault_sqlite::SqliteStore>;
+
+/// Fills the library from the vault, and reads the thumbnails behind it,
+/// one image at a time, from the first copy still present.
+fn fill_library(shell: &mut Shell, vault: &Vault) -> Result<(), String> {
+    use helios_gui::library::Entry;
+    use helios_vault::fields::{LABELS, Query, RATING};
+    let cursor = vault.open_cursor(Query::default())?;
+    let rows = vault.fetch(cursor.id, 0, cursor.count, &[RATING, LABELS])?;
+    vault.close_cursor(cursor.id);
+    let mut entries = Vec::new();
+    let mut files = Vec::new();
+    for row in rows {
+        let path = vault
+            .locations(&row.id)?
+            .into_iter()
+            .find(|l| l.present)
+            .map(|l| l.path);
+        let id = row.id.hex();
+        entries.push(Entry {
+            id: id.clone(),
+            name: path
+                .as_ref()
+                .and_then(|p| p.file_name())
+                .map_or_else(|| id[..12].to_string(), |n| n.to_string_lossy().into()),
+            rating: row.fields.get(RATING).and_then(|v| v.as_i64()).unwrap_or(0),
+            labels: row
+                .fields
+                .get(LABELS)
+                .and_then(|v| v.as_array())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|l| l.as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default(),
+        });
+        if let Some(path) = path {
+            files.push((id, path));
+        }
+    }
+    shell.set_library(entries);
+    let sink = shell.library_thumbnails();
+    std::thread::spawn(move || {
+        for (id, path) in files {
+            let image = match helios_load::Kind::of(&path) {
+                helios_load::Kind::Picture => helios_load::load(&path).map(|l| Some(l.image)),
+                helios_load::Kind::Raw => helios_load::preview(&path),
+            };
+            match image {
+                Ok(Some(image)) => {
+                    if sink.send((id, image)).is_err() {
+                        return;
+                    }
+                }
+                Ok(None) => {}
+                Err(e) => eprintln!("helios-gui: no thumbnail for {}: {e}", path.display()),
+            }
+        }
+    });
+    Ok(())
+}
+
 struct App {
     shell: Shell,
     file: Option<PathBuf>,
+    vault: Option<Vault>,
 }
 
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.shell.ui(ui);
+        let changes = self.shell.take_library_changes();
+        if let (Some(vault), false) = (&self.vault, changes.is_empty()) {
+            let commands: Result<Vec<_>, String> = changes
+                .into_iter()
+                .map(|c| {
+                    Ok(helios_vault::fields::Command {
+                        image: helios_vault::ImageId::from_hex(&c.image)?,
+                        field: c.field,
+                        value: c.value,
+                    })
+                })
+                .collect();
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_secs());
+            if let Err(e) = commands.and_then(|c| vault.apply(&c, "user", None, now)) {
+                self.shell.notes.push(format!("vault: {e}"));
+            }
+        }
     }
 
     fn on_exit(&mut self) {
@@ -78,9 +163,20 @@ fn main() -> Result<(), String> {
         let image = headless::snapshot(&mut harness, target)?;
         return helios_gui::snapshot::save(&image, Path::new(out));
     }
+    let vault_file = args
+        .iter()
+        .position(|a| a == "--vault")
+        .map(|i| {
+            args.get(i + 1)
+                .map(PathBuf::from)
+                .ok_or("--vault takes a FILE")
+        })
+        .transpose()?;
     let workspace = args
         .iter()
-        .find(|a| !a.starts_with('-'))
+        .enumerate()
+        .find(|(i, a)| !a.starts_with('-') && (*i == 0 || args[i - 1] != "--vault"))
+        .map(|(_, a)| a)
         .map(PathBuf::from)
         .filter(|p| p.is_dir())
         .or_else(|| std::env::current_dir().ok())
@@ -108,6 +204,14 @@ fn main() -> Result<(), String> {
     if let Some(saved) = load(file.as_deref()) {
         shell.set_layout(saved);
     }
+    let vault = match vault_file {
+        Some(path) => {
+            let vault = helios_vault::Vault::new(helios_vault_sqlite::SqliteStore::open(&path)?);
+            fill_library(&mut shell, &vault)?;
+            Some(vault)
+        }
+        None => None,
+    };
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title(format!("{name} — Helios"))
@@ -121,7 +225,7 @@ fn main() -> Result<(), String> {
     eframe::run_native(
         "helios-gui",
         options,
-        Box::new(|_| Ok(Box::new(App { shell, file }))),
+        Box::new(|_| Ok(Box::new(App { shell, file, vault }))),
     )
     .map_err(|e| e.to_string())
 }
