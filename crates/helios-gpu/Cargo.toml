@@ -1,0 +1,18 @@
+[package]
+name = "helios-gpu"
+description = "Helios GPU backend on wgpu: runs modules' WGSL variants and checks them against their CPU reference"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+helios-core.workspace = true
+# MIT OR Apache-2.0; the version egui 0.36 uses, so the GUI can share the device.
+wgpu = "30"
+bytemuck = "1"
+pollster = "0.4"
+
+[dev-dependencies]
+helios-module-exposure = { path = "../../modules/exposure" }
+helios-testkit.workspace = true

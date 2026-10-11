@@ -25,6 +25,10 @@ jobs:
           git fetch -q --depth 1 https://github.com/hanatos/vkdt.git afc34256fb22bcaf6dcf6503d19d5f9a6f477af5
           git checkout -q FETCH_HEAD
           echo "VKDT_SRC=$PWD" >> "$GITHUB_ENV"
+      # No GPU in CI: lavapipe, Mesa's software Vulkan, runs the GPU
+      # backend's tests against the CPU reference.
+      - name: software Vulkan
+        run: sudo apt-get update -q && sudo apt-get install -yq mesa-vulkan-drivers
       - run: cargo test --workspace
       - name: changelog fragments
         run: |
