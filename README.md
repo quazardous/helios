@@ -32,6 +32,9 @@ module. Meanwhile, a catalog SDK inside darktable itself is built in the
   header, the queue panel, the graph view.
 - [docs/ux-research.md](./docs/ux-research.md): what users ask of darktable's
   interface and its equivalents, real workflows, and scenarios for the GUI.
+- [docs/vkdt-study.md](./docs/vkdt-study.md): how vkdt modules describe
+  themselves and run, mapped onto the Helios module contract, with its
+  generated [inventory](./docs/vkdt-inventory.md).
 - [docs/iop-inventory.md](./docs/iop-inventory.md): what darktable's image
   operation modules already describe about themselves (introspection, widgets,
   tiling, OpenCL, scale awareness), as a baseline for module normalization.
@@ -72,6 +75,8 @@ Build and test with `cargo test --workspace`.
 
 - `tools/iop_inventory.py`: regenerates the module inventory from a darktable
   checkout (`../darktable` by default, or `$DARKTABLE_SRC`).
+- `tools/vkdt_inventory.py`: regenerates the vkdt module inventory from a vkdt
+  checkout (`../vkdt` by default, or `$VKDT_SRC`).
 
 Tooling that serves darktable itself (phase 0 SQL inventory, equivalence
 bench) lives in the darktable fork under `tools/helios/`.

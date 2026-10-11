@@ -1,0 +1,7974 @@
+{
+ "revision": "afc34256f",
+ "modules": [
+  {
+   "name": "OpenDRT",
+   "category": "output display transform/tonemapping",
+   "params": [
+    {
+     "name": "i gamut",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "4"
+     ]
+    },
+    {
+     "name": "i oetf",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "tn_Lp",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "100"
+     ]
+    },
+    {
+     "name": "tn_gb",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.13"
+     ]
+    },
+    {
+     "name": "pt_hdr",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.5"
+     ]
+    },
+    {
+     "name": "tn_Lg",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "10.0"
+     ]
+    },
+    {
+     "name": "crv en",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "tn_con",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "1.66"
+     ]
+    },
+    {
+     "name": "tn_sh",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.5"
+     ]
+    },
+    {
+     "name": "tn_toe",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.003"
+     ]
+    },
+    {
+     "name": "tn_off",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.005"
+     ]
+    },
+    {
+     "name": "tn_hc_en",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "tn_hc",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.0"
+     ]
+    },
+    {
+     "name": "tn_hc_pv",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "1.0"
+     ]
+    },
+    {
+     "name": "tn_hc_st",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "4.0"
+     ]
+    },
+    {
+     "name": "tn_lc_en",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "tn_lc",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.0"
+     ]
+    },
+    {
+     "name": "tn_lc_w",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.5"
+     ]
+    },
+    {
+     "name": "cwp",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "2"
+     ]
+    },
+    {
+     "name": "cwp_lm",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.25"
+     ]
+    },
+    {
+     "name": "rs_sa",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.35"
+     ]
+    },
+    {
+     "name": "rs_rw",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.25"
+     ]
+    },
+    {
+     "name": "rs_bw",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.55"
+     ]
+    },
+    {
+     "name": "pt_en",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "pt_lml",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.25"
+     ]
+    },
+    {
+     "name": "pt_lml_r",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.5"
+     ]
+    },
+    {
+     "name": "pt_lml_g",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.0"
+     ]
+    },
+    {
+     "name": "pt_lml_b",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.1"
+     ]
+    },
+    {
+     "name": "pt_lmh",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.25"
+     ]
+    },
+    {
+     "name": "pt_lmh_r",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.5"
+     ]
+    },
+    {
+     "name": "pt_lmh_b",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.0"
+     ]
+    },
+    {
+     "name": "ptl_en",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "ptl_c",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.06"
+     ]
+    },
+    {
+     "name": "ptl_m",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.08"
+     ]
+    },
+    {
+     "name": "ptl_y",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.06"
+     ]
+    },
+    {
+     "name": "ptm_en",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "ptm_lo",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.4"
+     ]
+    },
+    {
+     "name": "ptm_lo_r",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.25"
+     ]
+    },
+    {
+     "name": "ptm_lo_s",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.5"
+     ]
+    },
+    {
+     "name": "ptm_hi",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "-0.8"
+     ]
+    },
+    {
+     "name": "ptm_hi_r",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.35"
+     ]
+    },
+    {
+     "name": "ptm_hi_s",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.4"
+     ]
+    },
+    {
+     "name": "brl_en",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "brl",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.0"
+     ]
+    },
+    {
+     "name": "brl_r",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "-2.5"
+     ]
+    },
+    {
+     "name": "brl_g",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "-1.5"
+     ]
+    },
+    {
+     "name": "brl_b",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "-1.5"
+     ]
+    },
+    {
+     "name": "brl_rng",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.5"
+     ]
+    },
+    {
+     "name": "brl_st",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.35"
+     ]
+    },
+    {
+     "name": "brlp_en",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "brlp",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "-0.5"
+     ]
+    },
+    {
+     "name": "brlp_r",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "-1.25"
+     ]
+    },
+    {
+     "name": "brlp_g",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "-1.25"
+     ]
+    },
+    {
+     "name": "brlp_b",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "-0.25"
+     ]
+    },
+    {
+     "name": "hc_en",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "hc_r",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "1.0"
+     ]
+    },
+    {
+     "name": "hc_r_r",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.3"
+     ]
+    },
+    {
+     "name": "hsrgb_en",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "hs_r",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.6"
+     ]
+    },
+    {
+     "name": "hs_r_r",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.6"
+     ]
+    },
+    {
+     "name": "hs_g",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.35"
+     ]
+    },
+    {
+     "name": "hs_g_r",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "1.0"
+     ]
+    },
+    {
+     "name": "hs_b",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.66"
+     ]
+    },
+    {
+     "name": "hs_b_r",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "1.0"
+     ]
+    },
+    {
+     "name": "hscmy_en",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "hs_c",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.25"
+     ]
+    },
+    {
+     "name": "hs_c_r",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "1.0"
+     ]
+    },
+    {
+     "name": "hs_m",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.0"
+     ]
+    },
+    {
+     "name": "hs_m_r",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "1.0"
+     ]
+    },
+    {
+     "name": "hs_y",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.0"
+     ]
+    },
+    {
+     "name": "hs_y_r",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "1.0"
+     ]
+    },
+    {
+     "name": "clamp",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "tn_su",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "1"
+     ]
+    },
+    {
+     "name": "o gamut",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "2"
+     ]
+    },
+    {
+     "name": "eotf",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "read",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "output",
+     "type": "write",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "dspy",
+     "type": "write",
+     "channels": "rgba",
+     "format": "f16",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "i gamut": "hidden",
+    "i oetf": "hidden",
+    "tn_Lp": "slider",
+    "tn_gb": "slider",
+    "pt_hdr": "slider",
+    "tn_Lg": "slider",
+    "crv en": "hidden",
+    "tn_con": "slider",
+    "tn_sh": "slider",
+    "tn_toe": "slider",
+    "tn_off": "slider",
+    "tn_hc_en": "combo",
+    "tn_hc": "slider",
+    "tn_hc_pv": "slider",
+    "tn_hc_st": "slider",
+    "tn_lc_en": "combo",
+    "tn_lc": "slider",
+    "tn_lc_w": "slider",
+    "cwp": "combo",
+    "cwp_lm": "slider",
+    "rs_sa": "slider",
+    "rs_rw": "slider",
+    "rs_bw": "slider",
+    "pt_en": "combo",
+    "pt_lml": "slider",
+    "pt_lml_r": "slider",
+    "pt_lml_g": "slider",
+    "pt_lml_b": "slider",
+    "pt_lmh": "slider",
+    "pt_lmh_r": "slider",
+    "pt_lmh_b": "slider",
+    "ptl_en": "combo",
+    "ptl_c": "slider",
+    "ptl_m": "slider",
+    "ptl_y": "slider",
+    "ptm_en": "combo",
+    "ptm_lo": "slider",
+    "ptm_lo_r": "slider",
+    "ptm_lo_s": "slider",
+    "ptm_hi": "slider",
+    "ptm_hi_r": "slider",
+    "ptm_hi_s": "slider",
+    "brl_en": "combo",
+    "brl": "slider",
+    "brl_r": "slider",
+    "brl_g": "slider",
+    "brl_b": "slider",
+    "brl_rng": "slider",
+    "brl_st": "slider",
+    "brlp_en": "combo",
+    "brlp": "slider",
+    "brlp_r": "slider",
+    "brlp_g": "slider",
+    "brlp_b": "slider",
+    "hc_en": "combo",
+    "hc_r": "slider",
+    "hc_r_r": "slider",
+    "hsrgb_en": "combo",
+    "hs_r": "slider",
+    "hs_r_r": "slider",
+    "hs_g": "slider",
+    "hs_g_r": "slider",
+    "hs_b": "slider",
+    "hs_b_r": "slider",
+    "hscmy_en": "combo",
+    "hs_c": "slider",
+    "hs_c_r": "slider",
+    "hs_m": "slider",
+    "hs_m_r": "slider",
+    "hs_y": "slider",
+    "hs_y_r": "slider",
+    "clamp": "hidden",
+    "tn_su": "combo",
+    "o gamut": "hidden",
+    "eotf": "hidden"
+   },
+   "callbacks": [
+    "create_nodes",
+    "modify_roi_out"
+   ],
+   "shaders": 3,
+   "inputs": 1,
+   "outputs": 2,
+   "feedback": false
+  },
+  {
+   "name": "ab",
+   "category": "visualisation and inspection",
+   "params": [
+    {
+     "name": "split",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.5"
+     ]
+    },
+    {
+     "name": "line",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "read",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "inputb",
+     "type": "read",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "output",
+     "type": "write",
+     "channels": "&input",
+     "format": "*",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "split": "ab",
+    "line": "slider"
+   },
+   "callbacks": [],
+   "shaders": 1,
+   "inputs": 2,
+   "outputs": 1,
+   "feedback": false
+  },
+  {
+   "name": "accum",
+   "category": "3d/rendering",
+   "params": [
+    {
+     "name": "start",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "read",
+     "channels": "rgba",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "output",
+     "type": "write",
+     "channels": "rgba",
+     "format": "f32",
+     "flags": []
+    },
+    {
+     "name": "back",
+     "type": "read",
+     "channels": "rgba",
+     "format": "f32",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "start": "slider"
+   },
+   "callbacks": [
+    "create_nodes"
+   ],
+   "shaders": 1,
+   "inputs": 2,
+   "outputs": 1,
+   "feedback": false
+  },
+  {
+   "name": "align",
+   "category": "technical",
+   "params": [
+    {
+     "name": "merge_k",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "10"
+     ]
+    },
+    {
+     "name": "merge_n",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.0"
+     ]
+    },
+    {
+     "name": "blur0",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "32"
+     ]
+    },
+    {
+     "name": "blur1",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "16"
+     ]
+    },
+    {
+     "name": "blur2",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "8"
+     ]
+    },
+    {
+     "name": "blur3",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "8"
+     ]
+    },
+    {
+     "name": "sub",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "4"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "read",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "output",
+     "type": "write",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "alignsrc",
+     "type": "read",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "aligndst",
+     "type": "read",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "mask",
+     "type": "write",
+     "channels": "y",
+     "format": "f16",
+     "flags": []
+    },
+    {
+     "name": "visn",
+     "type": "write",
+     "channels": "rgba",
+     "format": "ui8",
+     "flags": []
+    },
+    {
+     "name": "mv",
+     "type": "write",
+     "channels": "rg",
+     "format": "f16",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "merge_k": "slider",
+    "merge_n": "slider",
+    "blur0": "slider",
+    "blur1": "slider",
+    "blur2": "slider",
+    "blur3": "slider",
+    "sub": "slider"
+   },
+   "callbacks": [
+    "create_nodes",
+    "modify_roi_in",
+    "modify_roi_out",
+    "check_params"
+   ],
+   "shaders": 7,
+   "inputs": 3,
+   "outputs": 4,
+   "feedback": false
+  },
+  {
+   "name": "autoexp",
+   "category": "corrective",
+   "params": [
+    {
+     "name": "vup",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "3.0"
+     ]
+    },
+    {
+     "name": "vdown",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "5.0"
+     ]
+    },
+    {
+     "name": "timediff",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.016"
+     ]
+    },
+    {
+     "name": "reset",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "read",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "output",
+     "type": "write",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "vup": "slider",
+    "vdown": "slider",
+    "timediff": "slider",
+    "reset": "combo"
+   },
+   "callbacks": [
+    "create_nodes"
+   ],
+   "shaders": 3,
+   "inputs": 1,
+   "outputs": 1,
+   "feedback": false
+  },
+  {
+   "name": "blend",
+   "category": "technical",
+   "params": [
+    {
+     "name": "opacity",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "1.0"
+     ]
+    },
+    {
+     "name": "taathrs",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.0"
+     ]
+    },
+    {
+     "name": "mode",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "mask",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "back",
+     "type": "read",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "input",
+     "type": "read",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "mask",
+     "type": "read",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "output",
+     "type": "write",
+     "channels": "&input",
+     "format": "f16",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "mode": "combo",
+    "mask": "combo",
+    "opacity": "slider",
+    "taathrs": "slider"
+   },
+   "callbacks": [
+    "create_nodes",
+    "modify_roi_out",
+    "check_params"
+   ],
+   "shaders": 3,
+   "inputs": 3,
+   "outputs": 1,
+   "feedback": false
+  },
+  {
+   "name": "bvh",
+   "category": "3d geometry",
+   "params": [
+    {
+     "name": "animate",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "sink",
+     "channels": "ssbo",
+     "format": "tri",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "animate": "combo"
+   },
+   "callbacks": [
+    "commit_params"
+   ],
+   "shaders": 0,
+   "inputs": 1,
+   "outputs": 0,
+   "feedback": false
+  },
+  {
+   "name": "ca",
+   "category": "raw processing",
+   "params": [
+    {
+     "name": "thrs",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.02"
+     ]
+    },
+    {
+     "name": "amount",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.8"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "read",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "output",
+     "type": "write",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "thrs": "slider",
+    "amount": "slider"
+   },
+   "callbacks": [
+    "create_nodes"
+   ],
+   "shaders": 2,
+   "inputs": 1,
+   "outputs": 1,
+   "feedback": false
+  },
+  {
+   "name": "check",
+   "category": "visualisation and inspection",
+   "params": [
+    {
+     "name": "thrs",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.0"
+     ]
+    },
+    {
+     "name": "mode",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "gamut",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "channels",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "7"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "read",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "output",
+     "type": "write",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "thrs": "slider",
+    "mode": "combo",
+    "gamut": "combo",
+    "channels": "bitmask"
+   },
+   "callbacks": [],
+   "shaders": 1,
+   "inputs": 1,
+   "outputs": 1,
+   "feedback": false
+  },
+  {
+   "name": "ciediag",
+   "category": "visualisation and inspection",
+   "params": [
+    {
+     "name": "nspots",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "pad",
+     "type": "int",
+     "count": "3",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "ref",
+     "type": "float",
+     "count": "72",
+     "default": [
+      "0"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "read",
+     "channels": "rgba",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "output",
+     "type": "write",
+     "channels": "rgba",
+     "format": "*",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "nspots": "slider",
+    "pad": "hidden",
+    "ref": "colour"
+   },
+   "callbacks": [
+    "create_nodes",
+    "modify_roi_in",
+    "modify_roi_out"
+   ],
+   "shaders": 2,
+   "inputs": 1,
+   "outputs": 1,
+   "feedback": false
+  },
+  {
+   "name": "cnngenin",
+   "category": "technical",
+   "params": [
+    {
+     "name": "generate",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "tiles",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "1"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "imgi",
+     "type": "read",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "refi",
+     "type": "read",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "imgo",
+     "type": "write",
+     "channels": "rgba",
+     "format": "f16",
+     "flags": []
+    },
+    {
+     "name": "refo",
+     "type": "write",
+     "channels": "rgba",
+     "format": "f16",
+     "flags": []
+    },
+    {
+     "name": "noiseab",
+     "type": "write",
+     "channels": "ssbo",
+     "format": "f32",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "generate": "combo",
+    "tiles": "combo"
+   },
+   "callbacks": [
+    "create_nodes",
+    "modify_roi_in",
+    "modify_roi_out",
+    "check_params"
+   ],
+   "shaders": 1,
+   "inputs": 2,
+   "outputs": 3,
+   "feedback": false
+  },
+  {
+   "name": "colenc",
+   "category": "colour processing/encoding",
+   "params": [
+    {
+     "name": "prim",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "1"
+     ]
+    },
+    {
+     "name": "trc",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "read",
+     "channels": "rgba",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "output",
+     "type": "write",
+     "channels": "rgba",
+     "format": "*",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "prim": "combo",
+    "trc": "combo"
+   },
+   "callbacks": [
+    "modify_roi_out"
+   ],
+   "shaders": 1,
+   "inputs": 1,
+   "outputs": 1,
+   "feedback": false
+  },
+  {
+   "name": "colour",
+   "category": "colour processing/encoding",
+   "params": [
+    {
+     "name": "exposure",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.0"
+     ]
+    },
+    {
+     "name": "sat",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "1.0"
+     ]
+    },
+    {
+     "name": "picked",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "matrix",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "1"
+     ]
+    },
+    {
+     "name": "gamut",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "clip",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "clipmax",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "1"
+     ]
+    },
+    {
+     "name": "temp",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "6504"
+     ]
+    },
+    {
+     "name": "white",
+     "type": "float",
+     "count": "4",
+     "default": [
+      "0.0",
+      "0.0",
+      "0.0",
+      "0.0"
+     ]
+    },
+    {
+     "name": "mat",
+     "type": "float",
+     "count": "9",
+     "default": [
+      "-1.0"
+     ]
+    },
+    {
+     "name": "mode",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "cnt",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "4"
+     ]
+    },
+    {
+     "name": "rbmap",
+     "type": "float",
+     "count": "144",
+     "default": [
+      "0.3333",
+      "0.3333",
+      "0.3333",
+      "0.3333",
+      "0.3333",
+      "0.3333",
+      "0.5",
+      "0.25",
+      "0.25",
+      "0.5",
+      "0.25",
+      "0.25",
+      "0.25",
+      "0.5",
+      "0.25",
+      "0.25",
+      "0.5",
+      "0.25",
+      "0.25",
+      "0.25",
+      "0.5",
+      "0.25",
+      "0.25",
+      "0.5"
+     ]
+    },
+    {
+     "name": "import",
+     "type": "string",
+     "count": "8",
+     "default": [
+      "01"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "read",
+     "channels": "rgba",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "output",
+     "type": "write",
+     "channels": "rgba",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "clut",
+     "type": "read",
+     "channels": "rg",
+     "format": "f16",
+     "flags": []
+    },
+    {
+     "name": "picked",
+     "type": "read",
+     "channels": "r",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "abney",
+     "type": "read",
+     "channels": "rg",
+     "format": "f16",
+     "flags": []
+    },
+    {
+     "name": "spectra",
+     "type": "read",
+     "channels": "rgba",
+     "format": "*",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "exposure": "slider",
+    "sat": "slider",
+    "picked": "combo",
+    "matrix": "combo",
+    "gamut": "combo",
+    "white": "rgb",
+    "temp": "slider",
+    "clip": "combo",
+    "clipmax": "slider",
+    "mat": "hidden",
+    "mode": "combo",
+    "cnt": "slider",
+    "rbmap": "rbmap",
+    "import": "callback"
+   },
+   "callbacks": [
+    "create_nodes",
+    "modify_roi_in",
+    "modify_roi_out",
+    "commit_params",
+    "check_params",
+    "write_sink",
+    "animate",
+    "init",
+    "ui_callback"
+   ],
+   "shaders": 4,
+   "inputs": 5,
+   "outputs": 1,
+   "feedback": false
+  },
+  {
+   "name": "coltgt",
+   "category": "visualisation and inspection",
+   "params": [],
+   "connectors": [
+    {
+     "name": "output",
+     "type": "write",
+     "channels": "rgba",
+     "format": "f16",
+     "flags": []
+    }
+   ],
+   "widgets": {},
+   "callbacks": [],
+   "shaders": 1,
+   "inputs": 0,
+   "outputs": 1,
+   "feedback": false
+  },
+  {
+   "name": "const",
+   "category": "unlisted",
+   "params": [
+    {
+     "name": "nspots",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "1"
+     ]
+    },
+    {
+     "name": "pad",
+     "type": "int",
+     "count": "3",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "colour",
+     "type": "float",
+     "count": "96",
+     "default": [
+      "1"
+     ]
+    },
+    {
+     "name": "mode",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "wd",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "1024"
+     ]
+    },
+    {
+     "name": "ht",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "1024"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "output",
+     "type": "write",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "nspots": "slider",
+    "pad": "hidden",
+    "colour": "rgb",
+    "mode": "combo",
+    "wd": "slider",
+    "ht": "slider"
+   },
+   "callbacks": [
+    "modify_roi_out",
+    "check_params"
+   ],
+   "shaders": 1,
+   "inputs": 0,
+   "outputs": 1,
+   "feedback": false
+  },
+  {
+   "name": "contrast",
+   "category": "tone",
+   "params": [
+    {
+     "name": "radius",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.01"
+     ]
+    },
+    {
+     "name": "edges",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.03"
+     ]
+    },
+    {
+     "name": "detail",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "1.0"
+     ]
+    },
+    {
+     "name": "thrs",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.0"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "read",
+     "channels": "rgba",
+     "format": "f16",
+     "flags": []
+    },
+    {
+     "name": "output",
+     "type": "write",
+     "channels": "rgba",
+     "format": "f16",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "radius": "slider",
+    "edges": "slider",
+    "detail": "slider",
+    "thrs": "slider"
+   },
+   "callbacks": [
+    "create_nodes",
+    "commit_params",
+    "check_params",
+    "init",
+    "cleanup"
+   ],
+   "shaders": 1,
+   "inputs": 1,
+   "outputs": 1,
+   "feedback": false
+  },
+  {
+   "name": "crop",
+   "category": "corrective",
+   "params": [
+    {
+     "name": "perspect",
+     "type": "float",
+     "count": "8",
+     "default": [
+      "0.25",
+      "0.25",
+      "0.75",
+      "0.25",
+      "0.75",
+      "0.75",
+      "0.25",
+      "0.75"
+     ]
+    },
+    {
+     "name": "crop",
+     "type": "float",
+     "count": "4",
+     "default": [
+      "1.0",
+      "3.0",
+      "3.0",
+      "7.0"
+     ]
+    },
+    {
+     "name": "rotate",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "1337"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "read",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "output",
+     "type": "write",
+     "channels": "&input",
+     "format": "f16",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "perspect": "pers",
+    "crop": "crop",
+    "rotate": "straight"
+   },
+   "callbacks": [
+    "modify_roi_in",
+    "modify_roi_out",
+    "commit_params",
+    "init",
+    "ui_callback"
+   ],
+   "shaders": 1,
+   "inputs": 1,
+   "outputs": 1,
+   "feedback": false
+  },
+  {
+   "name": "curves",
+   "category": "colour processing/encoding",
+   "params": [
+    {
+     "name": "abcdr",
+     "type": "float",
+     "count": "32",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "abcdg",
+     "type": "float",
+     "count": "32",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "abcdb",
+     "type": "float",
+     "count": "32",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "xr",
+     "type": "float",
+     "count": "8",
+     "default": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "name": "xg",
+     "type": "float",
+     "count": "8",
+     "default": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "name": "xb",
+     "type": "float",
+     "count": "8",
+     "default": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "name": "yr",
+     "type": "float",
+     "count": "8",
+     "default": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "name": "yg",
+     "type": "float",
+     "count": "8",
+     "default": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "name": "yb",
+     "type": "float",
+     "count": "8",
+     "default": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "name": "cntr",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "2"
+     ]
+    },
+    {
+     "name": "cntg",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "2"
+     ]
+    },
+    {
+     "name": "cntb",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "2"
+     ]
+    },
+    {
+     "name": "sel",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "-1"
+     ]
+    },
+    {
+     "name": "mode",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "channel",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "ych 3x3",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "edit",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "pad",
+     "type": "int",
+     "count": "2",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "ddr0",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "1"
+     ]
+    },
+    {
+     "name": "ddrn",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "1"
+     ]
+    },
+    {
+     "name": "ddg0",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "1"
+     ]
+    },
+    {
+     "name": "ddgn",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "1"
+     ]
+    },
+    {
+     "name": "ddb0",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "1"
+     ]
+    },
+    {
+     "name": "ddbn",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "1"
+     ]
+    },
+    {
+     "name": "vtx1",
+     "type": "float",
+     "count": "12",
+     "default": [
+      "0",
+      "0.2",
+      "0.4",
+      "0.6",
+      "0.8",
+      "1.0",
+      ""
+     ]
+    },
+    {
+     "name": "vtx2",
+     "type": "float",
+     "count": "12",
+     "default": [
+      "0.083333",
+      "0.25",
+      "0.41666",
+      "0.5833333",
+      "0.75",
+      "0.91666",
+      ""
+     ]
+    },
+    {
+     "name": "vtx3",
+     "type": "float",
+     "count": "12",
+     "default": [
+      "0",
+      "0.2",
+      "0.4",
+      "0.6",
+      "0.8",
+      "1.0",
+      ""
+     ]
+    },
+    {
+     "name": "vtx4",
+     "type": "float",
+     "count": "12",
+     "default": [
+      "0",
+      "0.2",
+      "0.4",
+      "0.6",
+      "0.8",
+      "1.0",
+      ""
+     ]
+    },
+    {
+     "name": "vtx5",
+     "type": "float",
+     "count": "12",
+     "default": [
+      "0",
+      "0.2",
+      "0.4",
+      "0.6",
+      "0.8",
+      "1.0",
+      ""
+     ]
+    },
+    {
+     "name": "vtx6",
+     "type": "float",
+     "count": "12",
+     "default": [
+      "0.083333",
+      "0.25",
+      "0.41666",
+      "0.5833333",
+      ".75",
+      "0.91666",
+      ""
+     ]
+    },
+    {
+     "name": "vtx7",
+     "type": "float",
+     "count": "12",
+     "default": [
+      "0.083333",
+      "0.25",
+      "0.41666",
+      "0.5833333",
+      ".75",
+      "0.91666",
+      ""
+     ]
+    },
+    {
+     "name": "vtx8",
+     "type": "float",
+     "count": "12",
+     "default": [
+      "0",
+      "0.2",
+      "0.4",
+      "0.6",
+      "0.8",
+      "1.0",
+      ""
+     ]
+    },
+    {
+     "name": "abcd1",
+     "type": "float",
+     "count": "24",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "abcd2",
+     "type": "float",
+     "count": "24",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "abcd3",
+     "type": "float",
+     "count": "24",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "abcd4",
+     "type": "float",
+     "count": "24",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "abcd5",
+     "type": "float",
+     "count": "24",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "abcd6",
+     "type": "float",
+     "count": "24",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "abcd7",
+     "type": "float",
+     "count": "24",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "abcd8",
+     "type": "float",
+     "count": "24",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "radius",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.002"
+     ]
+    },
+    {
+     "name": "edges",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.01"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "read",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "output",
+     "type": "write",
+     "channels": "rgba",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "dspy",
+     "type": "write",
+     "channels": "rgba",
+     "format": "*",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "xr": "hidden",
+    "xg": "hidden",
+    "xb": "hidden",
+    "yr": "hidden",
+    "yg": "hidden",
+    "yb": "hidden",
+    "cntr": "hidden",
+    "cntg": "hidden",
+    "cntb": "hidden",
+    "vtx1": "hidden",
+    "vtx2": "hidden",
+    "vtx3": "hidden",
+    "vtx4": "hidden",
+    "vtx5": "hidden",
+    "vtx6": "hidden",
+    "vtx7": "hidden",
+    "vtx8": "hidden",
+    "sel": "hidden",
+    "abcdr": "hidden",
+    "abcdg": "hidden",
+    "abcdb": "hidden",
+    "abcd1": "hidden",
+    "abcd2": "hidden",
+    "abcd3": "hidden",
+    "abcd4": "hidden",
+    "abcd5": "hidden",
+    "abcd6": "hidden",
+    "abcd7": "hidden",
+    "abcd8": "hidden",
+    "pad": "hidden",
+    "mode": "combo",
+    "channel": "combo",
+    "ddr0": "hidden",
+    "ddrn": "hidden",
+    "ddg0": "hidden",
+    "ddgn": "hidden",
+    "ddb0": "hidden",
+    "ddbn": "hidden",
+    "ych 3x3": "btngrid",
+    "edit": "combo"
+   },
+   "callbacks": [
+    "create_nodes",
+    "modify_roi_out",
+    "commit_params",
+    "check_params",
+    "init",
+    "cleanup",
+    "input"
+   ],
+   "shaders": 4,
+   "inputs": 1,
+   "outputs": 2,
+   "feedback": false
+  },
+  {
+   "name": "deconv",
+   "category": "corrective",
+   "params": [
+    {
+     "name": "sigma",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.6"
+     ]
+    },
+    {
+     "name": "iter",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "10"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "read",
+     "channels": "rgba",
+     "format": "f16",
+     "flags": []
+    },
+    {
+     "name": "output",
+     "type": "write",
+     "channels": "rgba",
+     "format": "f16",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "sigma": "slider",
+    "iter": "slider"
+   },
+   "callbacks": [
+    "create_nodes"
+   ],
+   "shaders": 1,
+   "inputs": 1,
+   "outputs": 1,
+   "feedback": false
+  },
+  {
+   "name": "dehaze",
+   "category": "corrective",
+   "params": [
+    {
+     "name": "radius",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.01"
+     ]
+    },
+    {
+     "name": "epsilon",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.01"
+     ]
+    },
+    {
+     "name": "strength",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.8"
+     ]
+    },
+    {
+     "name": "t0",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.1"
+     ]
+    },
+    {
+     "name": "haze",
+     "type": "float",
+     "count": "4",
+     "default": [
+      "1.0",
+      "1.0",
+      "1.0",
+      "1.0"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "read",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "output",
+     "type": "write",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "depth",
+     "type": "write",
+     "channels": "*",
+     "format": "f16",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "haze": "rgbknobs",
+    "strength": "slider",
+    "t0": "slider"
+   },
+   "callbacks": [
+    "create_nodes",
+    "commit_params",
+    "check_params",
+    "init",
+    "cleanup"
+   ],
+   "shaders": 2,
+   "inputs": 1,
+   "outputs": 2,
+   "feedback": false
+  },
+  {
+   "name": "demosaic",
+   "category": "raw processing",
+   "params": [
+    {
+     "name": "colour",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "method",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "read",
+     "channels": "rggb",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "output",
+     "type": "write",
+     "channels": "rgba",
+     "format": "f16",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "colour": "combo",
+    "method": "combo"
+   },
+   "callbacks": [
+    "create_nodes",
+    "modify_roi_in",
+    "modify_roi_out",
+    "check_params"
+   ],
+   "shaders": 7,
+   "inputs": 1,
+   "outputs": 1,
+   "feedback": false
+  },
+  {
+   "name": "denoise",
+   "category": "corrective",
+   "params": [
+    {
+     "name": "strength",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.0"
+     ]
+    },
+    {
+     "name": "luma",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.6"
+     ]
+    },
+    {
+     "name": "detail",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "1.0"
+     ]
+    },
+    {
+     "name": "pad",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "edges",
+     "type": "float",
+     "count": "4",
+     "default": [
+      "0",
+      "0",
+      "0",
+      "0"
+     ]
+    },
+    {
+     "name": "gainmap",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "1"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "read",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "output",
+     "type": "write",
+     "channels": "&input",
+     "format": "*",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "strength": "slider",
+    "luma": "slider",
+    "detail": "slider",
+    "pad": "hidden",
+    "edges": "colwheel",
+    "gainmap": "combo"
+   },
+   "callbacks": [
+    "create_nodes",
+    "modify_roi_in",
+    "modify_roi_out",
+    "check_params",
+    "read_source",
+    "init",
+    "cleanup"
+   ],
+   "shaders": 6,
+   "inputs": 1,
+   "outputs": 1,
+   "feedback": false
+  },
+  {
+   "name": "display",
+   "category": "visualisation and inspection",
+   "params": [],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "sink",
+     "channels": "rgba",
+     "format": "*",
+     "flags": []
+    }
+   ],
+   "widgets": {},
+   "callbacks": [],
+   "shaders": 0,
+   "inputs": 1,
+   "outputs": 0,
+   "feedback": false
+  },
+  {
+   "name": "dmlp-t",
+   "category": "unlisted",
+   "params": [
+    {
+     "name": "alpha",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.01"
+     ]
+    },
+    {
+     "name": "beta1",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.99"
+     ]
+    },
+    {
+     "name": "beta2",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.999"
+     ]
+    },
+    {
+     "name": "eps",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.0001"
+     ]
+    },
+    {
+     "name": "init",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "L2",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.001"
+     ]
+    },
+    {
+     "name": "gradclip",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "1000.0"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "read",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "ref",
+     "type": "read",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "output",
+     "type": "write",
+     "channels": "rgba",
+     "format": "f16",
+     "flags": []
+    },
+    {
+     "name": "w",
+     "type": "write",
+     "channels": "ssbo",
+     "format": "f16",
+     "flags": []
+    },
+    {
+     "name": "graph",
+     "type": "write",
+     "channels": "rgba",
+     "format": "f16",
+     "flags": []
+    },
+    {
+     "name": "vis",
+     "type": "write",
+     "channels": "rgba",
+     "format": "f16",
+     "flags": []
+    },
+    {
+     "name": "debug",
+     "type": "write",
+     "channels": "rgba",
+     "format": "f16",
+     "flags": []
+    },
+    {
+     "name": "wcp",
+     "type": "read",
+     "channels": "ssbo",
+     "format": "f16",
+     "flags": []
+    },
+    {
+     "name": "noiseab",
+     "type": "read",
+     "channels": "ssbo",
+     "format": "f32",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "alpha": "slider",
+    "beta1": "slider",
+    "beta2": "slider",
+    "eps": "slider",
+    "init": "combo",
+    "L2": "slider"
+   },
+   "callbacks": [
+    "create_nodes",
+    "modify_roi_in",
+    "modify_roi_out",
+    "init",
+    "cleanup"
+   ],
+   "shaders": 9,
+   "inputs": 4,
+   "outputs": 5,
+   "feedback": true
+  },
+  {
+   "name": "draw",
+   "category": "retouching",
+   "params": [
+    {
+     "name": "opacity",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "1.0"
+     ]
+    },
+    {
+     "name": "radius",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.01"
+     ]
+    },
+    {
+     "name": "hardness",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.9"
+     ]
+    },
+    {
+     "name": "draw",
+     "type": "int",
+     "count": "20000",
+     "default": [
+      "1",
+      "0"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "output",
+     "type": "write",
+     "channels": "y",
+     "format": "f16",
+     "flags": []
+    },
+    {
+     "name": "curve",
+     "type": "write",
+     "channels": "ssbo",
+     "format": "ui32",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "opacity": "slider",
+    "radius": "slider",
+    "hardness": "slider",
+    "draw": "draw"
+   },
+   "callbacks": [
+    "create_nodes",
+    "modify_roi_in",
+    "modify_roi_out",
+    "commit_params",
+    "check_params",
+    "read_source",
+    "init"
+   ],
+   "shaders": 0,
+   "inputs": 0,
+   "outputs": 2,
+   "feedback": false
+  },
+  {
+   "name": "eq",
+   "category": "tone",
+   "params": [
+    {
+     "name": "detail",
+     "type": "float",
+     "count": "6",
+     "default": [
+      "1",
+      "1",
+      "1",
+      "1",
+      "1",
+      "1"
+     ]
+    },
+    {
+     "name": "edges",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "1"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "read",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "output",
+     "type": "write",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "detail": "slider",
+    "edges": "slider"
+   },
+   "callbacks": [
+    "create_nodes"
+   ],
+   "shaders": 2,
+   "inputs": 1,
+   "outputs": 1,
+   "feedback": false
+  },
+  {
+   "name": "exposure",
+   "category": "tone",
+   "params": [
+    {
+     "name": "exposure",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.0"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "read",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "output",
+     "type": "write",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "exposure": "slider"
+   },
+   "callbacks": [],
+   "shaders": 1,
+   "inputs": 1,
+   "outputs": 1,
+   "feedback": false
+  },
+  {
+   "name": "filmcurv",
+   "category": "output display transform/tonemapping",
+   "params": [
+    {
+     "name": "light",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "3"
+     ]
+    },
+    {
+     "name": "contrast",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "1.2"
+     ]
+    },
+    {
+     "name": "bias",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.0"
+     ]
+    },
+    {
+     "name": "colour",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "3"
+     ]
+    },
+    {
+     "name": "chroma",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "1.0"
+     ]
+    },
+    {
+     "name": "rolloff",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.0"
+     ]
+    },
+    {
+     "name": "red",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.0"
+     ]
+    },
+    {
+     "name": "yellow",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.0"
+     ]
+    },
+    {
+     "name": "blue",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.0"
+     ]
+    },
+    {
+     "name": "shadows",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.0"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "read",
+     "channels": "rgba",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "output",
+     "type": "write",
+     "channels": "rgba",
+     "format": "f16",
+     "flags": []
+    },
+    {
+     "name": "dspy",
+     "type": "write",
+     "channels": "rgba",
+     "format": "f16",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "light": "slider",
+    "contrast": "slider",
+    "bias": "slider",
+    "colour": "combo",
+    "chroma": "slider",
+    "rolloff": "slider",
+    "shadows": "slider",
+    "red": "slider",
+    "yellow": "slider",
+    "blue": "slider"
+   },
+   "callbacks": [
+    "create_nodes",
+    "modify_roi_out"
+   ],
+   "shaders": 2,
+   "inputs": 1,
+   "outputs": 2,
+   "feedback": false
+  },
+  {
+   "name": "filmsim",
+   "category": "output display transform/tonemapping",
+   "params": [
+    {
+     "name": "process",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "film",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "4"
+     ]
+    },
+    {
+     "name": "ev film",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "f base",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "1.0"
+     ]
+    },
+    {
+     "name": "g film",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "1.0"
+     ]
+    },
+    {
+     "name": "g fast",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "1.0"
+     ]
+    },
+    {
+     "name": "g slow",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "1.0"
+     ]
+    },
+    {
+     "name": "exhaust",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.0"
+     ]
+    },
+    {
+     "name": "hl boost",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.0"
+     ]
+    },
+    {
+     "name": "paper",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "3"
+     ]
+    },
+    {
+     "name": "ev paper",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "p base",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "1.0"
+     ]
+    },
+    {
+     "name": "g paper",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "1.0"
+     ]
+    },
+    {
+     "name": "g fast p",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "1.0"
+     ]
+    },
+    {
+     "name": "g slow p",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "1.0"
+     ]
+    },
+    {
+     "name": "p exh",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.0"
+     ]
+    },
+    {
+     "name": "glare",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.0"
+     ]
+    },
+    {
+     "name": "filter c",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "-1"
+     ]
+    },
+    {
+     "name": "filter m",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "filter y",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "tune m",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.0"
+     ]
+    },
+    {
+     "name": "tune y",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.0"
+     ]
+    },
+    {
+     "name": "preflash",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "pf ev",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "-10.0"
+     ]
+    },
+    {
+     "name": "pf m",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.0"
+     ]
+    },
+    {
+     "name": "pf y",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.0"
+     ]
+    },
+    {
+     "name": "couplers",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "1"
+     ]
+    },
+    {
+     "name": "cp amt",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.5"
+     ]
+    },
+    {
+     "name": "lang r",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "1.0"
+     ]
+    },
+    {
+     "name": "lang g",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "1.0"
+     ]
+    },
+    {
+     "name": "lang b",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "1.0"
+     ]
+    },
+    {
+     "name": "cp rad",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "20.0"
+     ]
+    },
+    {
+     "name": "halation",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "1"
+     ]
+    },
+    {
+     "name": "radius",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "65.0"
+     ]
+    },
+    {
+     "name": "hal amt",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "1.0"
+     ]
+    },
+    {
+     "name": "hal mids",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.0"
+     ]
+    },
+    {
+     "name": "hal bnc",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "3"
+     ]
+    },
+    {
+     "name": "hal dec",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.5"
+     ]
+    },
+    {
+     "name": "scat amt",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.2"
+     ]
+    },
+    {
+     "name": "pad_cp",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "strength",
+     "type": "float",
+     "count": "4",
+     "default": [
+      "1.0",
+      "1.0",
+      "1.0",
+      "0"
+     ]
+    },
+    {
+     "name": "grain",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "1"
+     ]
+    },
+    {
+     "name": "size",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "1.0"
+     ]
+    },
+    {
+     "name": "uniform",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "1.0"
+     ]
+    },
+    {
+     "name": "enlarge",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "scan ill",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "5000"
+     ]
+    },
+    {
+     "name": "scne ill",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "film ill",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "pad",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "input",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "read",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "output",
+     "type": "write",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "filmsim",
+     "type": "read",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "spectra",
+     "type": "read",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "process": "combo",
+    "film": "combo",
+    "ev film": "slider",
+    "f base": "slider",
+    "g film": "slider",
+    "g fast": "slider",
+    "g slow": "slider",
+    "exhaust": "slider",
+    "hl boost": "slider",
+    "scne ill": "slider",
+    "film ill": "slider",
+    "paper": "combo",
+    "ev paper": "slider",
+    "p base": "slider",
+    "g paper": "slider",
+    "g fast p": "slider",
+    "g slow p": "slider",
+    "p exh": "slider",
+    "glare": "slider",
+    "filter c": "slider",
+    "filter m": "slider",
+    "filter y": "slider",
+    "tune m": "slider",
+    "tune y": "slider",
+    "preflash": "combo",
+    "pf ev": "slider",
+    "pf m": "slider",
+    "pf y": "slider",
+    "couplers": "combo",
+    "cp amt": "slider",
+    "lang r": "slider",
+    "lang g": "slider",
+    "lang b": "slider",
+    "cp rad": "slider",
+    "halation": "combo",
+    "radius": "slider",
+    "hal amt": "slider",
+    "hal mids": "slider",
+    "hal bnc": "slider",
+    "hal dec": "slider",
+    "scat amt": "slider",
+    "strength": "rgbknobs",
+    "grain": "combo",
+    "size": "slider",
+    "uniform": "slider",
+    "enlarge": "combo",
+    "scan ill": "slider",
+    "pad_cp": "hidden",
+    "pad": "hidden",
+    "input": "combo"
+   },
+   "callbacks": [
+    "create_nodes",
+    "modify_roi_in",
+    "modify_roi_out",
+    "commit_params",
+    "check_params"
+   ],
+   "shaders": 9,
+   "inputs": 3,
+   "outputs": 1,
+   "feedback": false
+  },
+  {
+   "name": "format",
+   "category": "technical",
+   "params": [
+    {
+     "name": "channels",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "format",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "read",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "output",
+     "type": "write",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "channels": "combo",
+    "format": "combo"
+   },
+   "callbacks": [
+    "modify_roi_out",
+    "check_params"
+   ],
+   "shaders": 1,
+   "inputs": 1,
+   "outputs": 1,
+   "feedback": false
+  },
+  {
+   "name": "frame",
+   "category": "effects/decoration",
+   "params": [
+    {
+     "name": "border",
+     "type": "float",
+     "count": "4",
+     "default": [
+      "1.0",
+      "1.0",
+      "1.0",
+      "1.0"
+     ]
+    },
+    {
+     "name": "line",
+     "type": "float",
+     "count": "4",
+     "default": [
+      "0.0",
+      "0.0",
+      "0.0",
+      "1.0"
+     ]
+    },
+    {
+     "name": "size",
+     "type": "float",
+     "count": "2",
+     "default": [
+      "0.2",
+      "0.2"
+     ]
+    },
+    {
+     "name": "align",
+     "type": "float",
+     "count": "2",
+     "default": [
+      "0.5",
+      "0.5"
+     ]
+    },
+    {
+     "name": "linewd",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.01"
+     ]
+    },
+    {
+     "name": "linepos",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.0"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "read",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "output",
+     "type": "write",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "border": "rgbknobs",
+    "line": "rgbknobs"
+   },
+   "callbacks": [
+    "modify_roi_in",
+    "modify_roi_out",
+    "check_params"
+   ],
+   "shaders": 1,
+   "inputs": 1,
+   "outputs": 1,
+   "feedback": false
+  },
+  {
+   "name": "g-csolid",
+   "category": "unlisted",
+   "params": [],
+   "connectors": [
+    {
+     "name": "curve",
+     "type": "read",
+     "channels": "ssbo",
+     "format": "ui32",
+     "flags": []
+    },
+    {
+     "name": "geo",
+     "type": "write",
+     "channels": "ssbo",
+     "format": "tri",
+     "flags": []
+    }
+   ],
+   "widgets": {},
+   "callbacks": [
+    "create_nodes",
+    "modify_roi_in",
+    "modify_roi_out",
+    "commit_params"
+   ],
+   "shaders": 1,
+   "inputs": 1,
+   "outputs": 1,
+   "feedback": false
+  },
+  {
+   "name": "g-ocean",
+   "category": "3d geometry",
+   "params": [
+    {
+     "name": "speed",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "1"
+     ]
+    },
+    {
+     "name": "depth",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "1"
+     ]
+    },
+    {
+     "name": "drag",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "1"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "read",
+     "channels": "ssbo",
+     "format": "tri",
+     "flags": []
+    },
+    {
+     "name": "output",
+     "type": "write",
+     "channels": "ssbo",
+     "format": "tri",
+     "flags": []
+    }
+   ],
+   "widgets": {},
+   "callbacks": [
+    "create_nodes",
+    "commit_params"
+   ],
+   "shaders": 1,
+   "inputs": 1,
+   "outputs": 1,
+   "feedback": false
+  },
+  {
+   "name": "g-wobble",
+   "category": "3d geometry",
+   "params": [
+    {
+     "name": "strength",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.4"
+     ]
+    },
+    {
+     "name": "radius",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "3"
+     ]
+    },
+    {
+     "name": "speed",
+     "type": "float",
+     "count": "1",
+     "default": [
+      ".1"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "read",
+     "channels": "ssbo",
+     "format": "tri",
+     "flags": []
+    },
+    {
+     "name": "output",
+     "type": "write",
+     "channels": "ssbo",
+     "format": "tri",
+     "flags": []
+    }
+   ],
+   "widgets": {},
+   "callbacks": [
+    "create_nodes",
+    "commit_params"
+   ],
+   "shaders": 1,
+   "inputs": 1,
+   "outputs": 1,
+   "feedback": false
+  },
+  {
+   "name": "grad",
+   "category": "tone",
+   "params": [
+    {
+     "name": "rgb",
+     "type": "float",
+     "count": "4",
+     "default": [
+      "0.0",
+      "0.0",
+      "0.0",
+      "1.0"
+     ]
+    },
+    {
+     "name": "stops",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "1"
+     ]
+    },
+    {
+     "name": "dist",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.0"
+     ]
+    },
+    {
+     "name": "width",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "1.0"
+     ]
+    },
+    {
+     "name": "rotate",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.0"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "read",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "output",
+     "type": "write",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "rgb": "rgbknobs",
+    "stops": "slider",
+    "dist": "slider",
+    "width": "slider",
+    "rotate": "slider"
+   },
+   "callbacks": [],
+   "shaders": 1,
+   "inputs": 1,
+   "outputs": 1,
+   "feedback": false
+  },
+  {
+   "name": "grade",
+   "category": "colour processing/encoding",
+   "params": [
+    {
+     "name": "lift",
+     "type": "float",
+     "count": "4",
+     "default": [
+      "0.0",
+      "0.0",
+      "0.0",
+      "0"
+     ]
+    },
+    {
+     "name": "gamma",
+     "type": "float",
+     "count": "4",
+     "default": [
+      "1.0",
+      "1.0",
+      "1.0",
+      "0"
+     ]
+    },
+    {
+     "name": "gain",
+     "type": "float",
+     "count": "4",
+     "default": [
+      "1.0",
+      "1.0",
+      "1.0",
+      "0"
+     ]
+    },
+    {
+     "name": "offset",
+     "type": "float",
+     "count": "4",
+     "default": [
+      "0.0",
+      "0.0",
+      "0.0",
+      "0"
+     ]
+    },
+    {
+     "name": "mode",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "sh_pivot",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.3"
+     ]
+    },
+    {
+     "name": "hi_pivot",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.4"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "read",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "output",
+     "type": "write",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "lift": "colwheel",
+    "gamma": "colwheel",
+    "gain": "colwheel",
+    "offset": "colwheel",
+    "mode": "combo",
+    "sh_pivot": "slider",
+    "hi_pivot": "slider"
+   },
+   "callbacks": [],
+   "shaders": 1,
+   "inputs": 1,
+   "outputs": 1,
+   "feedback": false
+  },
+  {
+   "name": "grain",
+   "category": "effects/decoration",
+   "params": [
+    {
+     "name": "size",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "1.4"
+     ]
+    },
+    {
+     "name": "strength",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.2"
+     ]
+    },
+    {
+     "name": "decay",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.5"
+     ]
+    },
+    {
+     "name": "octaves",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "1"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "read",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "output",
+     "type": "write",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "size": "slider",
+    "strength": "slider",
+    "decay": "slider",
+    "octaves": "slider"
+   },
+   "callbacks": [],
+   "shaders": 1,
+   "inputs": 1,
+   "outputs": 1,
+   "feedback": false
+  },
+  {
+   "name": "guided",
+   "category": "retouching",
+   "params": [
+    {
+     "name": "radius",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.01"
+     ]
+    },
+    {
+     "name": "epsilon",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.01"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "read",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "guide",
+     "type": "read",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "output",
+     "type": "write",
+     "channels": "r",
+     "format": "*",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "radius": "slider",
+    "epsilon": "slider"
+   },
+   "callbacks": [
+    "create_nodes",
+    "commit_params",
+    "check_params",
+    "init",
+    "cleanup"
+   ],
+   "shaders": 0,
+   "inputs": 2,
+   "outputs": 1,
+   "feedback": false
+  },
+  {
+   "name": "hdrmerge",
+   "category": "technical",
+   "params": [
+    {
+     "name": "pltscale",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "12.0"
+     ]
+    },
+    {
+     "name": "output",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "2"
+     ]
+    },
+    {
+     "name": "ev_push",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.0"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "read",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "input2",
+     "type": "read",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "input3",
+     "type": "read",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "input4",
+     "type": "read",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "input5",
+     "type": "read",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "input6",
+     "type": "read",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "output",
+     "type": "write",
+     "channels": "&input",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "dspy",
+     "type": "write",
+     "channels": "rgba",
+     "format": "f16",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "pltscale": "slider",
+    "output": "combo",
+    "ev_push": "slider"
+   },
+   "callbacks": [
+    "create_nodes",
+    "modify_roi_out",
+    "commit_params",
+    "init"
+   ],
+   "shaders": 2,
+   "inputs": 6,
+   "outputs": 2,
+   "feedback": false
+  },
+  {
+   "name": "hilite",
+   "category": "raw processing",
+   "params": [
+    {
+     "name": "white",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.985"
+     ]
+    },
+    {
+     "name": "desat",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.3"
+     ]
+    },
+    {
+     "name": "soft",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.6"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "read",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "output",
+     "type": "write",
+     "channels": "&input",
+     "format": "*",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "white": "slider",
+    "desat": "slider",
+    "soft": "slider"
+   },
+   "callbacks": [
+    "create_nodes"
+   ],
+   "shaders": 4,
+   "inputs": 1,
+   "outputs": 1,
+   "feedback": false
+  },
+  {
+   "name": "hist",
+   "category": "visualisation and inspection",
+   "params": [],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "read",
+     "channels": "rgba",
+     "format": "f16",
+     "flags": []
+    },
+    {
+     "name": "output",
+     "type": "write",
+     "channels": "rgba",
+     "format": "*",
+     "flags": []
+    }
+   ],
+   "widgets": {},
+   "callbacks": [
+    "create_nodes",
+    "modify_roi_in",
+    "modify_roi_out"
+   ],
+   "shaders": 2,
+   "inputs": 1,
+   "outputs": 1,
+   "feedback": false
+  },
+  {
+   "name": "hotpx",
+   "category": "corrective",
+   "params": [
+    {
+     "name": "thrs",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.2"
+     ]
+    },
+    {
+     "name": "channels",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "7"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "read",
+     "channels": "rggb",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "output",
+     "type": "write",
+     "channels": "rggb",
+     "format": "*",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "thrs": "slider",
+    "channels": "bitmask"
+   },
+   "callbacks": [
+    "create_nodes"
+   ],
+   "shaders": 1,
+   "inputs": 1,
+   "outputs": 1,
+   "feedback": false
+  },
+  {
+   "name": "i-bc1",
+   "category": "input",
+   "params": [
+    {
+     "name": "filename",
+     "type": "string",
+     "count": "256",
+     "default": [
+      "test.bc1"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "output",
+     "type": "source",
+     "channels": "rgb",
+     "format": "bc1",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "filename": "filename"
+   },
+   "callbacks": [
+    "modify_roi_out",
+    "read_source"
+   ],
+   "shaders": 0,
+   "inputs": 0,
+   "outputs": 1,
+   "feedback": false
+  },
+  {
+   "name": "i-exr",
+   "category": "input",
+   "params": [
+    {
+     "name": "filename",
+     "type": "string",
+     "count": "256",
+     "default": [
+      "test.exr"
+     ]
+    },
+    {
+     "name": "startid",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "noise a",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.0"
+     ]
+    },
+    {
+     "name": "noise b",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.0"
+     ]
+    },
+    {
+     "name": "prim",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "65535"
+     ]
+    },
+    {
+     "name": "trc",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "65535"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "output",
+     "type": "source",
+     "channels": "rgba",
+     "format": "f16",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "filename": "filename",
+    "noise a": "slider",
+    "noise b": "slider",
+    "prim": "combo",
+    "trc": "combo"
+   },
+   "callbacks": [],
+   "shaders": 0,
+   "inputs": 0,
+   "outputs": 1,
+   "feedback": false
+  },
+  {
+   "name": "i-hdr",
+   "category": "input",
+   "params": [
+    {
+     "name": "filename",
+     "type": "string",
+     "count": "256",
+     "default": [
+      "test.hdr"
+     ]
+    },
+    {
+     "name": "startid",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "noise a",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.0"
+     ]
+    },
+    {
+     "name": "noise b",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.0"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "output",
+     "type": "source",
+     "channels": "rgba",
+     "format": "f32",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "filename": "filename",
+    "noise a": "slider",
+    "noise b": "slider"
+   },
+   "callbacks": [
+    "modify_roi_out",
+    "check_params",
+    "read_source",
+    "init",
+    "cleanup"
+   ],
+   "shaders": 0,
+   "inputs": 0,
+   "outputs": 1,
+   "feedback": false
+  },
+  {
+   "name": "i-jpg",
+   "category": "input",
+   "params": [
+    {
+     "name": "filename",
+     "type": "string",
+     "count": "256",
+     "default": [
+      "test.jpg"
+     ]
+    },
+    {
+     "name": "startid",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "prim",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "65535"
+     ]
+    },
+    {
+     "name": "trc",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "65535"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "output",
+     "type": "source",
+     "channels": "rgba",
+     "format": "ui8",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "filename": "filename",
+    "prim": "combo",
+    "trc": "combo"
+   },
+   "callbacks": [
+    "modify_roi_out",
+    "check_params",
+    "read_source",
+    "init",
+    "cleanup"
+   ],
+   "shaders": 0,
+   "inputs": 0,
+   "outputs": 1,
+   "feedback": false
+  },
+  {
+   "name": "i-lut",
+   "category": "input",
+   "params": [
+    {
+     "name": "filename",
+     "type": "string",
+     "count": "256",
+     "default": [
+      "test.lut"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "output",
+     "type": "source",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "filename": "filename"
+   },
+   "callbacks": [
+    "modify_roi_out",
+    "read_source",
+    "init",
+    "cleanup"
+   ],
+   "shaders": 0,
+   "inputs": 0,
+   "outputs": 1,
+   "feedback": false
+  },
+  {
+   "name": "i-mcraw",
+   "category": "input",
+   "params": [
+    {
+     "name": "filename",
+     "type": "string",
+     "count": "256",
+     "default": [
+      "test.mcraw"
+     ]
+    },
+    {
+     "name": "noise a",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.0"
+     ]
+    },
+    {
+     "name": "noise b",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.0"
+     ]
+    },
+    {
+     "name": "start",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "black",
+     "type": "int",
+     "count": "4",
+     "default": [
+      "0",
+      "0",
+      "0",
+      "0"
+     ]
+    },
+    {
+     "name": "white",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "output",
+     "type": "source",
+     "channels": "rggb",
+     "format": "ui16",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "filename": "filename",
+    "noise a": "slider",
+    "noise b": "slider",
+    "start": "slider",
+    "black": "slider",
+    "white": "slider"
+   },
+   "callbacks": [],
+   "shaders": 2,
+   "inputs": 0,
+   "outputs": 1,
+   "feedback": false
+  },
+  {
+   "name": "i-mlv",
+   "category": "input",
+   "params": [
+    {
+     "name": "filename",
+     "type": "string",
+     "count": "256",
+     "default": [
+      "test.mlv"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "output",
+     "type": "source",
+     "channels": "rggb",
+     "format": "ui16",
+     "flags": []
+    }
+   ],
+   "widgets": {},
+   "callbacks": [
+    "modify_roi_out",
+    "read_source",
+    "init",
+    "cleanup",
+    "audio"
+   ],
+   "shaders": 0,
+   "inputs": 0,
+   "outputs": 1,
+   "feedback": false
+  },
+  {
+   "name": "i-obj",
+   "category": "3d geometry",
+   "params": [
+    {
+     "name": "filename",
+     "type": "string",
+     "count": "256",
+     "default": [
+      "test.obj"
+     ]
+    },
+    {
+     "name": "startid",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "texids",
+     "type": "string",
+     "count": "256",
+     "default": [
+      "texids.txt"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "output",
+     "type": "source",
+     "channels": "ssbo",
+     "format": "tri",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "filename": "filename",
+    "texids": "filename"
+   },
+   "callbacks": [
+    "modify_roi_out",
+    "read_source",
+    "init",
+    "cleanup"
+   ],
+   "shaders": 0,
+   "inputs": 0,
+   "outputs": 1,
+   "feedback": false
+  },
+  {
+   "name": "i-pfm",
+   "category": "input",
+   "params": [
+    {
+     "name": "filename",
+     "type": "string",
+     "count": "256",
+     "default": [
+      "test.pfm"
+     ]
+    },
+    {
+     "name": "startid",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "noise a",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.0"
+     ]
+    },
+    {
+     "name": "noise b",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.0"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "output",
+     "type": "source",
+     "channels": "rgba",
+     "format": "f32",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "filename": "filename",
+    "noise a": "slider",
+    "noise b": "slider"
+   },
+   "callbacks": [
+    "modify_roi_out",
+    "check_params",
+    "read_source",
+    "init",
+    "cleanup"
+   ],
+   "shaders": 0,
+   "inputs": 0,
+   "outputs": 1,
+   "feedback": false
+  },
+  {
+   "name": "i-raw",
+   "category": "input",
+   "params": [
+    {
+     "name": "filename",
+     "type": "string",
+     "count": "256",
+     "default": [
+      "test.cr2"
+     ]
+    },
+    {
+     "name": "noise a",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.0"
+     ]
+    },
+    {
+     "name": "noise b",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.0"
+     ]
+    },
+    {
+     "name": "startid",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "output",
+     "type": "source",
+     "channels": "*",
+     "format": "ui16",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "filename": "filename",
+    "noise a": "slider",
+    "noise b": "slider"
+   },
+   "callbacks": [
+    "modify_roi_out",
+    "check_params",
+    "read_source",
+    "init",
+    "cleanup"
+   ],
+   "shaders": 0,
+   "inputs": 0,
+   "outputs": 1,
+   "feedback": false
+  },
+  {
+   "name": "i-v4l2",
+   "category": "input",
+   "params": [
+    {
+     "name": "device",
+     "type": "string",
+     "count": "256",
+     "default": [
+      "/dev/video0"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "output",
+     "type": "source",
+     "channels": "rgba",
+     "format": "f16",
+     "flags": []
+    }
+   ],
+   "widgets": {},
+   "callbacks": [
+    "create_nodes",
+    "modify_roi_out",
+    "read_source",
+    "init",
+    "cleanup"
+   ],
+   "shaders": 1,
+   "inputs": 0,
+   "outputs": 1,
+   "feedback": false
+  },
+  {
+   "name": "i-vid",
+   "category": "input",
+   "params": [
+    {
+     "name": "colour",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "-1"
+     ]
+    },
+    {
+     "name": "trc",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "-1"
+     ]
+    },
+    {
+     "name": "bitdepth",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "4"
+     ]
+    },
+    {
+     "name": "chroma",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "3"
+     ]
+    },
+    {
+     "name": "colrange",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "2"
+     ]
+    },
+    {
+     "name": "filename",
+     "type": "string",
+     "count": "256",
+     "default": [
+      "video.mp4"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "output",
+     "type": "write",
+     "channels": "rgba",
+     "format": "f16",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "colour": "combo",
+    "trc": "combo",
+    "bitdepth": "hidden",
+    "chroma": "hidden",
+    "colrange": "combo",
+    "filename": "filename"
+   },
+   "callbacks": [
+    "create_nodes",
+    "modify_roi_out",
+    "commit_params",
+    "check_params",
+    "init",
+    "cleanup",
+    "audio"
+   ],
+   "shaders": 1,
+   "inputs": 0,
+   "outputs": 1,
+   "feedback": false
+  },
+  {
+   "name": "inpaint",
+   "category": "retouching",
+   "params": [
+    {
+     "name": "mode",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "read",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "mask",
+     "type": "read",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "output",
+     "type": "write",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "mode": "combo"
+   },
+   "callbacks": [
+    "create_nodes"
+   ],
+   "shaders": 2,
+   "inputs": 2,
+   "outputs": 1,
+   "feedback": false
+  },
+  {
+   "name": "jddcnn",
+   "category": "raw processing",
+   "params": [
+    {
+     "name": "arch",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "variant",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "1"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "read",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "output",
+     "type": "write",
+     "channels": "rgba",
+     "format": "f16",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "arch": "combo",
+    "variant": "combo"
+   },
+   "callbacks": [
+    "create_nodes",
+    "modify_roi_in",
+    "modify_roi_out",
+    "check_params",
+    "read_source"
+   ],
+   "shaders": 2,
+   "inputs": 1,
+   "outputs": 1,
+   "feedback": false
+  },
+  {
+   "name": "kpn",
+   "category": "corrective",
+   "params": [
+    {
+     "name": "noise a",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.0"
+     ]
+    },
+    {
+     "name": "noise b",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.0"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "read",
+     "channels": "rgba",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "output",
+     "type": "write",
+     "channels": "rgba",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "w",
+     "type": "read",
+     "channels": "ssbo",
+     "format": "f16",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "noise a": "slider",
+    "noise b": "slider"
+   },
+   "callbacks": [
+    "create_nodes"
+   ],
+   "shaders": 0,
+   "inputs": 2,
+   "outputs": 1,
+   "feedback": false
+  },
+  {
+   "name": "kpn-t",
+   "category": "technical",
+   "params": [
+    {
+     "name": "alpha",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.01"
+     ]
+    },
+    {
+     "name": "beta1",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.99"
+     ]
+    },
+    {
+     "name": "beta2",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.999"
+     ]
+    },
+    {
+     "name": "eps",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.0001"
+     ]
+    },
+    {
+     "name": "init",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "L2",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.001"
+     ]
+    },
+    {
+     "name": "gradclip",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "1000.0"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "read",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "ref",
+     "type": "read",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "output",
+     "type": "write",
+     "channels": "rgba",
+     "format": "f16",
+     "flags": []
+    },
+    {
+     "name": "w",
+     "type": "write",
+     "channels": "ssbo",
+     "format": "f16",
+     "flags": []
+    },
+    {
+     "name": "graph",
+     "type": "write",
+     "channels": "rgba",
+     "format": "f16",
+     "flags": []
+    },
+    {
+     "name": "vis",
+     "type": "write",
+     "channels": "rgba",
+     "format": "f16",
+     "flags": []
+    },
+    {
+     "name": "debug",
+     "type": "write",
+     "channels": "rgba",
+     "format": "f16",
+     "flags": []
+    },
+    {
+     "name": "wcp",
+     "type": "read",
+     "channels": "ssbo",
+     "format": "f16",
+     "flags": []
+    },
+    {
+     "name": "noiseab",
+     "type": "read",
+     "channels": "ssbo",
+     "format": "f32",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "alpha": "slider",
+    "beta1": "slider",
+    "beta2": "slider",
+    "eps": "slider",
+    "init": "combo",
+    "L2": "slider"
+   },
+   "callbacks": [
+    "create_nodes",
+    "modify_roi_in",
+    "modify_roi_out",
+    "init",
+    "cleanup"
+   ],
+   "shaders": 23,
+   "inputs": 4,
+   "outputs": 5,
+   "feedback": true
+  },
+  {
+   "name": "lens",
+   "category": "corrective",
+   "params": [
+    {
+     "name": "center",
+     "type": "float",
+     "count": "2",
+     "default": [
+      "0.0",
+      "0.0"
+     ]
+    },
+    {
+     "name": "scale",
+     "type": "float",
+     "count": "2",
+     "default": [
+      "1.0",
+      "1.0"
+     ]
+    },
+    {
+     "name": "squish0",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.0"
+     ]
+    },
+    {
+     "name": "squish1",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.0"
+     ]
+    },
+    {
+     "name": "ca red",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "1.0"
+     ]
+    },
+    {
+     "name": "ca blue",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "1.0"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "read",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "output",
+     "type": "write",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "center": "slider",
+    "scale": "slider",
+    "squish0": "slider",
+    "squish1": "slider",
+    "ca red": "slider",
+    "ca blue": "slider"
+   },
+   "callbacks": [],
+   "shaders": 1,
+   "inputs": 1,
+   "outputs": 1,
+   "feedback": false
+  },
+  {
+   "name": "llap",
+   "category": "tone",
+   "params": [
+    {
+     "name": "sigma",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.12"
+     ]
+    },
+    {
+     "name": "shadows",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "1.0"
+     ]
+    },
+    {
+     "name": "hilights",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "1.0"
+     ]
+    },
+    {
+     "name": "clarity",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.0"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "read",
+     "channels": "rgba",
+     "format": "f16",
+     "flags": []
+    },
+    {
+     "name": "output",
+     "type": "write",
+     "channels": "rgba",
+     "format": "f16",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "shadows": "slider",
+    "hilights": "slider",
+    "clarity": "slider"
+   },
+   "callbacks": [
+    "create_nodes"
+   ],
+   "shaders": 4,
+   "inputs": 1,
+   "outputs": 1,
+   "feedback": false
+  },
+  {
+   "name": "logo",
+   "category": "3d/rendering",
+   "params": [],
+   "connectors": [
+    {
+     "name": "output",
+     "type": "write",
+     "channels": "rgba",
+     "format": "f16",
+     "flags": []
+    }
+   ],
+   "widgets": {},
+   "callbacks": [],
+   "shaders": 1,
+   "inputs": 0,
+   "outputs": 1,
+   "feedback": false
+  },
+  {
+   "name": "loss",
+   "category": "output",
+   "params": [
+    {
+     "name": "loss",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "metric",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "x-axis",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "y-axis",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "read",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "orig",
+     "type": "read",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "dspy",
+     "type": "write",
+     "channels": "rgba",
+     "format": "f16",
+     "flags": []
+    },
+    {
+     "name": "loss",
+     "type": "write",
+     "channels": "y",
+     "format": "f32",
+     "flags": []
+    },
+    {
+     "name": "vis",
+     "type": "write",
+     "channels": "rgba",
+     "format": "f16",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "loss": "slider",
+    "metric": "combo",
+    "x-axis": "combo",
+    "y-axis": "combo"
+   },
+   "callbacks": [
+    "create_nodes",
+    "modify_roi_in",
+    "modify_roi_out",
+    "check_params",
+    "write_sink"
+   ],
+   "shaders": 3,
+   "inputs": 2,
+   "outputs": 3,
+   "feedback": false
+  },
+  {
+   "name": "mask",
+   "category": "retouching",
+   "params": [
+    {
+     "name": "mode",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "vmin",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.0"
+     ]
+    },
+    {
+     "name": "vmax",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "1.0"
+     ]
+    },
+    {
+     "name": "envelope",
+     "type": "float",
+     "count": "4",
+     "default": [
+      "0.0",
+      "0.25",
+      "0.75",
+      "1.0"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "read",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "output",
+     "type": "write",
+     "channels": "y",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "dspy",
+     "type": "write",
+     "channels": "rgba",
+     "format": "f16",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "mode": "combo",
+    "vmin": "slider",
+    "vmax": "slider",
+    "envelope": "slider"
+   },
+   "callbacks": [
+    "create_nodes",
+    "check_params"
+   ],
+   "shaders": 3,
+   "inputs": 1,
+   "outputs": 2,
+   "feedback": false
+  },
+  {
+   "name": "mv2rot",
+   "category": "technical",
+   "params": [],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "read",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "mv",
+     "type": "read",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "mask",
+     "type": "read",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "output",
+     "type": "write",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    }
+   ],
+   "widgets": {},
+   "callbacks": [
+    "create_nodes"
+   ],
+   "shaders": 3,
+   "inputs": 3,
+   "outputs": 1,
+   "feedback": false
+  },
+  {
+   "name": "negative",
+   "category": "corrective",
+   "params": [
+    {
+     "name": "Dmin",
+     "type": "float",
+     "count": "4",
+     "default": [
+      "1.0",
+      "1.0",
+      "1.0"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "read",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "output",
+     "type": "write",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "dmin",
+     "type": "read",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "Dmin": "rgb"
+   },
+   "callbacks": [
+    "create_nodes"
+   ],
+   "shaders": 1,
+   "inputs": 2,
+   "outputs": 1,
+   "feedback": false
+  },
+  {
+   "name": "nlr",
+   "category": "unlisted",
+   "params": [
+    {
+     "name": "alpha",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.9"
+     ]
+    },
+    {
+     "name": "taa",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "1.0"
+     ]
+    },
+    {
+     "name": "prealpha",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.9"
+     ]
+    },
+    {
+     "name": "sig_v",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.0"
+     ]
+    },
+    {
+     "name": "power",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "16"
+     ]
+    },
+    {
+     "name": "sig_n",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "128"
+     ]
+    },
+    {
+     "name": "sig_n_m",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.0"
+     ]
+    },
+    {
+     "name": "sig_d",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "1"
+     ]
+    },
+    {
+     "name": "steps",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "8"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "mv",
+     "type": "read",
+     "channels": "rg",
+     "format": "f16",
+     "flags": []
+    },
+    {
+     "name": "input",
+     "type": "read",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "albedo",
+     "type": "read",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "output",
+     "type": "write",
+     "channels": "rgba",
+     "format": "f16",
+     "flags": []
+    },
+    {
+     "name": "gbufp",
+     "type": "read",
+     "channels": "rgba",
+     "format": "f32",
+     "flags": []
+    },
+    {
+     "name": "gbufc",
+     "type": "read",
+     "channels": "rgba",
+     "format": "f32",
+     "flags": []
+    }
+   ],
+   "widgets": {},
+   "callbacks": [
+    "create_nodes"
+   ],
+   "shaders": 6,
+   "inputs": 5,
+   "outputs": 1,
+   "feedback": true
+  },
+  {
+   "name": "nprof",
+   "category": "internal use",
+   "params": [
+    {
+     "name": "test",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "install",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "remove",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "sink",
+     "channels": "r",
+     "format": "atom",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "test": "callback",
+    "install": "callback",
+    "remove": "callback"
+   },
+   "callbacks": [
+    "modify_roi_in",
+    "write_sink",
+    "ui_callback"
+   ],
+   "shaders": 0,
+   "inputs": 1,
+   "outputs": 0,
+   "feedback": false
+  },
+  {
+   "name": "o-bc1",
+   "category": "output",
+   "params": [
+    {
+     "name": "filename",
+     "type": "string",
+     "count": "256",
+     "default": [
+      "output"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "sink",
+     "channels": "rgba",
+     "format": "ui8",
+     "flags": []
+    }
+   ],
+   "widgets": {},
+   "callbacks": [
+    "write_sink"
+   ],
+   "shaders": 0,
+   "inputs": 1,
+   "outputs": 0,
+   "feedback": false
+  },
+  {
+   "name": "o-copy",
+   "category": "output",
+   "params": [
+    {
+     "name": "filename",
+     "type": "string",
+     "count": "256",
+     "default": [
+      "output"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "sink",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "filename": "filename"
+   },
+   "callbacks": [
+    "write_sink"
+   ],
+   "shaders": 0,
+   "inputs": 1,
+   "outputs": 0,
+   "feedback": false
+  },
+  {
+   "name": "o-csv",
+   "category": "unlisted",
+   "params": [
+    {
+     "name": "filename",
+     "type": "string",
+     "count": "256",
+     "default": [
+      "output"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "sink",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "filename": "filename"
+   },
+   "callbacks": [
+    "modify_roi_out",
+    "write_sink",
+    "init",
+    "cleanup"
+   ],
+   "shaders": 0,
+   "inputs": 1,
+   "outputs": 0,
+   "feedback": false
+  },
+  {
+   "name": "o-exr",
+   "category": "output",
+   "params": [
+    {
+     "name": "filename",
+     "type": "string",
+     "count": "256",
+     "default": [
+      "test"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "sink",
+     "channels": "rgba",
+     "format": "f16",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "filename": "filename"
+   },
+   "callbacks": [],
+   "shaders": 0,
+   "inputs": 1,
+   "outputs": 0,
+   "feedback": false
+  },
+  {
+   "name": "o-jpg",
+   "category": "output",
+   "params": [
+    {
+     "name": "filename",
+     "type": "string",
+     "count": "256",
+     "default": [
+      "output"
+     ]
+    },
+    {
+     "name": "quality",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "95"
+     ]
+    },
+    {
+     "name": "exif",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "1"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "sink",
+     "channels": "rgba",
+     "format": "ui8",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "filename": "filename",
+    "exif": "combo"
+   },
+   "callbacks": [
+    "write_sink"
+   ],
+   "shaders": 0,
+   "inputs": 1,
+   "outputs": 0,
+   "feedback": false
+  },
+  {
+   "name": "o-jxl",
+   "category": "output",
+   "params": [
+    {
+     "name": "filename",
+     "type": "string",
+     "count": "256",
+     "default": [
+      "output"
+     ]
+    },
+    {
+     "name": "quality",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "100"
+     ]
+    },
+    {
+     "name": "effort",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "10"
+     ]
+    },
+    {
+     "name": "exif",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "1"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "sink",
+     "channels": "rgba",
+     "format": "f16",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "filename": "filename",
+    "effort": "slider",
+    "exif": "combo"
+   },
+   "callbacks": [
+    "write_sink"
+   ],
+   "shaders": 0,
+   "inputs": 1,
+   "outputs": 0,
+   "feedback": false
+  },
+  {
+   "name": "o-lut",
+   "category": "output",
+   "params": [
+    {
+     "name": "filename",
+     "type": "string",
+     "count": "256",
+     "default": [
+      "output"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "sink",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "filename": "filename"
+   },
+   "callbacks": [
+    "write_sink"
+   ],
+   "shaders": 0,
+   "inputs": 1,
+   "outputs": 0,
+   "feedback": false
+  },
+  {
+   "name": "o-null",
+   "category": "output",
+   "params": [],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "sink",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    }
+   ],
+   "widgets": {},
+   "callbacks": [
+    "write_sink"
+   ],
+   "shaders": 0,
+   "inputs": 1,
+   "outputs": 0,
+   "feedback": false
+  },
+  {
+   "name": "o-pfm",
+   "category": "output",
+   "params": [
+    {
+     "name": "filename",
+     "type": "string",
+     "count": "256",
+     "default": [
+      "output"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "sink",
+     "channels": "rgba",
+     "format": "f32",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "filename": "filename"
+   },
+   "callbacks": [
+    "write_sink"
+   ],
+   "shaders": 0,
+   "inputs": 1,
+   "outputs": 0,
+   "feedback": false
+  },
+  {
+   "name": "o-vid",
+   "category": "output",
+   "params": [
+    {
+     "name": "filename",
+     "type": "string",
+     "count": "256",
+     "default": [
+      "output"
+     ]
+    },
+    {
+     "name": "quality",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "100"
+     ]
+    },
+    {
+     "name": "codec",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "1"
+     ]
+    },
+    {
+     "name": "profile",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "3"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "sink",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "filename": "filename",
+    "quality": "slider",
+    "codec": "combo",
+    "profile": "combo"
+   },
+   "callbacks": [
+    "create_nodes",
+    "write_sink",
+    "init",
+    "cleanup"
+   ],
+   "shaders": 1,
+   "inputs": 1,
+   "outputs": 0,
+   "feedback": false
+  },
+  {
+   "name": "o-web",
+   "category": "output",
+   "params": [],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "sink",
+     "channels": "rgba",
+     "format": "ui8",
+     "flags": []
+    }
+   ],
+   "widgets": {},
+   "callbacks": [],
+   "shaders": 0,
+   "inputs": 1,
+   "outputs": 0,
+   "feedback": false
+  },
+  {
+   "name": "ocean",
+   "category": "unlisted",
+   "params": [
+    {
+     "name": "time",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.0"
+     ]
+    },
+    {
+     "name": "seatime",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.0"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "output",
+     "type": "write",
+     "channels": "rgba",
+     "format": "f16",
+     "flags": []
+    }
+   ],
+   "widgets": {},
+   "callbacks": [],
+   "shaders": 1,
+   "inputs": 0,
+   "outputs": 1,
+   "feedback": false
+  },
+  {
+   "name": "oidn",
+   "category": "corrective",
+   "params": [
+    {
+     "name": "arch",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "model",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "read",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "output",
+     "type": "write",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "arch": "combo",
+    "model": "combo"
+   },
+   "callbacks": [
+    "create_nodes",
+    "check_params",
+    "read_source"
+   ],
+   "shaders": 2,
+   "inputs": 1,
+   "outputs": 1,
+   "feedback": false
+  },
+  {
+   "name": "okgmtclp",
+   "category": "colour processing/encoding",
+   "params": [
+    {
+     "name": "mode",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "L0",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "project",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "alpha",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.02"
+     ]
+    },
+    {
+     "name": "dspyl",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.02"
+     ]
+    },
+    {
+     "name": "dspyc",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.02"
+     ]
+    },
+    {
+     "name": "dspyh",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.02"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "read",
+     "channels": "rgba",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "output",
+     "type": "write",
+     "channels": "rgba",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "picked",
+     "type": "read",
+     "channels": "r",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "dspy",
+     "type": "write",
+     "channels": "rgba",
+     "format": "*",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "mode": "combo",
+    "project": "combo",
+    "L0": "combo",
+    "alpha": "slider",
+    "dspyl": "slider",
+    "dspyc": "slider",
+    "dspyh": "slider"
+   },
+   "callbacks": [
+    "create_nodes",
+    "modify_roi_out",
+    "input"
+   ],
+   "shaders": 2,
+   "inputs": 2,
+   "outputs": 2,
+   "feedback": false
+  },
+  {
+   "name": "overlay",
+   "category": "effects/decoration",
+   "params": [
+    {
+     "name": "font",
+     "type": "string",
+     "count": "256",
+     "default": [
+      "data/font"
+     ]
+    },
+    {
+     "name": "text l",
+     "type": "string",
+     "count": "256",
+     "default": [
+      "hello"
+     ]
+    },
+    {
+     "name": "text r",
+     "type": "string",
+     "count": "256",
+     "default": [
+      "world"
+     ]
+    },
+    {
+     "name": "perf l",
+     "type": "string",
+     "count": "8",
+     "default": [
+      ""
+     ]
+    },
+    {
+     "name": "perf r",
+     "type": "string",
+     "count": "8",
+     "default": [
+      ""
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "output",
+     "type": "write",
+     "channels": "rgba",
+     "format": "f16",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "font": "filename",
+    "text l": "text",
+    "text r": "text",
+    "perf l": "text",
+    "perf r": "text"
+   },
+   "callbacks": [
+    "create_nodes",
+    "modify_roi_out",
+    "commit_params",
+    "read_source",
+    "init",
+    "cleanup"
+   ],
+   "shaders": 0,
+   "inputs": 0,
+   "outputs": 1,
+   "feedback": false
+  },
+  {
+   "name": "physarum",
+   "category": "3d/rendering",
+   "params": [
+    {
+     "name": "back",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "21"
+     ]
+    },
+    {
+     "name": "cursor",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "21"
+     ]
+    },
+    {
+     "name": "colour",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "wave",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "output",
+     "type": "write",
+     "channels": "rgba",
+     "format": "f16",
+     "flags": []
+    },
+    {
+     "name": "mask",
+     "type": "read",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "back": "slider",
+    "cursor": "slider",
+    "colour": "slider",
+    "wave": "grab"
+   },
+   "callbacks": [
+    "create_nodes",
+    "modify_roi_in",
+    "commit_params",
+    "init",
+    "input"
+   ],
+   "shaders": 3,
+   "inputs": 1,
+   "outputs": 1,
+   "feedback": true
+  },
+  {
+   "name": "pick",
+   "category": "visualisation and inspection",
+   "params": [
+    {
+     "name": "nspots",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "pad",
+     "type": "int",
+     "count": "3",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "spots",
+     "type": "float",
+     "count": "96",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "picked",
+     "type": "float",
+     "count": "72",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "ref",
+     "type": "float",
+     "count": "72",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "show",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "grab",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "de76",
+     "type": "float",
+     "count": "3",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "freeze",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "sink",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "spectra",
+     "type": "read",
+     "channels": "rgba",
+     "format": "f32",
+     "flags": []
+    },
+    {
+     "name": "dsp_",
+     "type": "write",
+     "channels": "rgba",
+     "format": "f16",
+     "flags": []
+    },
+    {
+     "name": "picked",
+     "type": "write",
+     "channels": "r",
+     "format": "atom",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "nspots": "slider",
+    "pad": "hidden",
+    "spots": "pick",
+    "picked": "colour",
+    "ref": "hidden",
+    "show": "combo",
+    "grab": "combo",
+    "de76": "print",
+    "freeze": "callback"
+   },
+   "callbacks": [
+    "create_nodes",
+    "modify_roi_in",
+    "modify_roi_out",
+    "check_params",
+    "write_sink",
+    "ui_callback"
+   ],
+   "shaders": 3,
+   "inputs": 2,
+   "outputs": 2,
+   "feedback": false
+  },
+  {
+   "name": "quake",
+   "category": "3d/rendering",
+   "params": [
+    {
+     "name": "cam",
+     "type": "float",
+     "count": "12",
+     "default": [
+      "0",
+      "0",
+      "0",
+      "0",
+      "1",
+      "0",
+      "0",
+      "0",
+      "0",
+      "0",
+      "1",
+      "0"
+     ]
+    },
+    {
+     "name": "fog",
+     "type": "float",
+     "count": "4",
+     "default": [
+      "0",
+      "0",
+      "0",
+      "0"
+     ]
+    },
+    {
+     "name": "spp",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "1"
+     ]
+    },
+    {
+     "name": "water",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "skybox",
+     "type": "int",
+     "count": "6",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "cltime",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "health",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "100"
+     ]
+    },
+    {
+     "name": "armor",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "100"
+     ]
+    },
+    {
+     "name": "exec",
+     "type": "string",
+     "count": "100",
+     "default": [
+      "map e1m1"
+     ]
+    },
+    {
+     "name": "pause",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "ui",
+     "type": "write",
+     "channels": "rgba",
+     "format": "f16",
+     "flags": []
+    },
+    {
+     "name": "dyngeo",
+     "type": "source",
+     "channels": "ssbo",
+     "format": "tri",
+     "flags": []
+    },
+    {
+     "name": "stcgeo",
+     "type": "source",
+     "channels": "ssbo",
+     "format": "tri",
+     "flags": []
+    },
+    {
+     "name": "tex",
+     "type": "source",
+     "channels": "rgba",
+     "format": "ui8",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "cam": "grab",
+    "fog": "hidden",
+    "spp": "hidden",
+    "water": "hidden",
+    "skybox": "hidden",
+    "exec": "hidden",
+    "pause": "slider",
+    "cltime": "hidden",
+    "health": "hidden",
+    "armor": "hidden"
+   },
+   "callbacks": [
+    "create_nodes",
+    "modify_roi_in",
+    "modify_roi_out",
+    "commit_params",
+    "read_source",
+    "animate",
+    "init",
+    "cleanup",
+    "audio",
+    "input"
+   ],
+   "shaders": 1,
+   "inputs": 0,
+   "outputs": 4,
+   "feedback": false
+  },
+  {
+   "name": "rawhist",
+   "category": "visualisation and inspection",
+   "params": [],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "read",
+     "channels": "rggb",
+     "format": "ui16",
+     "flags": []
+    },
+    {
+     "name": "output",
+     "type": "write",
+     "channels": "rgba",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "data",
+     "type": "write",
+     "channels": "r",
+     "format": "atom",
+     "flags": []
+    }
+   ],
+   "widgets": {},
+   "callbacks": [
+    "create_nodes",
+    "modify_roi_out",
+    "commit_params",
+    "init"
+   ],
+   "shaders": 3,
+   "inputs": 1,
+   "outputs": 2,
+   "feedback": false
+  },
+  {
+   "name": "reinhard",
+   "category": "output display transform/tonemapping",
+   "params": [
+    {
+     "name": "max_w",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.0"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "read",
+     "channels": "rgba",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "output",
+     "type": "write",
+     "channels": "rgba",
+     "format": "*",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "max_w": "slider"
+   },
+   "callbacks": [],
+   "shaders": 1,
+   "inputs": 1,
+   "outputs": 1,
+   "feedback": false
+  },
+  {
+   "name": "resize",
+   "category": "technical",
+   "params": [
+    {
+     "name": "width",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "height",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "read",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "output",
+     "type": "write",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "width": "slider",
+    "height": "slider"
+   },
+   "callbacks": [
+    "create_nodes",
+    "modify_roi_in",
+    "modify_roi_out",
+    "check_params"
+   ],
+   "shaders": 1,
+   "inputs": 1,
+   "outputs": 1,
+   "feedback": false
+  },
+  {
+   "name": "rt",
+   "category": "3d/rendering",
+   "params": [
+    {
+     "name": "cam",
+     "type": "float",
+     "count": "12",
+     "default": [
+      "0",
+      "0",
+      "0",
+      "0",
+      "1",
+      "0",
+      "0",
+      "0",
+      "0",
+      "0",
+      "1",
+      "0"
+     ]
+    },
+    {
+     "name": "fog",
+     "type": "float",
+     "count": "4",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "cltime",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "spp",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "1"
+     ]
+    },
+    {
+     "name": "wd",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "1920"
+     ]
+    },
+    {
+     "name": "ht",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "1080"
+     ]
+    },
+    {
+     "name": "vis emit",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.0"
+     ]
+    },
+    {
+     "name": "cam mode",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "cam_mod",
+     "type": "string",
+     "count": "8",
+     "default": [
+      ""
+     ]
+    },
+    {
+     "name": "cam_inst",
+     "type": "string",
+     "count": "8",
+     "default": [
+      ""
+     ]
+    },
+    {
+     "name": "envmap",
+     "type": "string",
+     "count": "256",
+     "default": [
+      "env.hdr"
+     ]
+    },
+    {
+     "name": "startid",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "sampler",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "speedmod",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "output",
+     "type": "write",
+     "channels": "rgba",
+     "format": "f16",
+     "flags": []
+    },
+    {
+     "name": "tex",
+     "type": "read",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "blue",
+     "type": "read",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "irr",
+     "type": "write",
+     "channels": "ssbo",
+     "format": "f32",
+     "flags": []
+    },
+    {
+     "name": "albedo",
+     "type": "write",
+     "channels": "rgba",
+     "format": "f16",
+     "flags": []
+    },
+    {
+     "name": "gbuf",
+     "type": "write",
+     "channels": "rg",
+     "format": "f32",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "spp": "slider",
+    "envmap": "filename",
+    "startid": "hidden",
+    "wd": "slider",
+    "ht": "slider",
+    "cam mode": "combo",
+    "cam": "grab",
+    "fog": "rgbknobs",
+    "vis emit": "slider",
+    "cltime": "slider",
+    "cam_mod": "filename",
+    "cam_inst": "filename",
+    "sampler": "combo",
+    "speedmod": "slider"
+   },
+   "callbacks": [
+    "create_nodes",
+    "modify_roi_out",
+    "commit_params",
+    "check_params",
+    "read_source",
+    "init",
+    "cleanup",
+    "input"
+   ],
+   "shaders": 4,
+   "inputs": 2,
+   "outputs": 4,
+   "feedback": false
+  },
+  {
+   "name": "spheres",
+   "category": "3d/rendering",
+   "params": [],
+   "connectors": [
+    {
+     "name": "output",
+     "type": "write",
+     "channels": "rgba",
+     "format": "f16",
+     "flags": []
+    }
+   ],
+   "widgets": {},
+   "callbacks": [],
+   "shaders": 1,
+   "inputs": 0,
+   "outputs": 1,
+   "feedback": false
+  },
+  {
+   "name": "svgf",
+   "category": "3d/rendering",
+   "params": [
+    {
+     "name": "alpha",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.9"
+     ]
+    },
+    {
+     "name": "taa",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "1.0"
+     ]
+    },
+    {
+     "name": "prealpha",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.9"
+     ]
+    },
+    {
+     "name": "iter",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "4"
+     ]
+    },
+    {
+     "name": "vis emit",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    },
+    {
+     "name": "firefly",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "0"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "mv",
+     "type": "read",
+     "channels": "rg",
+     "format": "f16",
+     "flags": []
+    },
+    {
+     "name": "irr",
+     "type": "read",
+     "channels": "ssbo",
+     "format": "f32",
+     "flags": []
+    },
+    {
+     "name": "albedo",
+     "type": "read",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "output",
+     "type": "write",
+     "channels": "rgba",
+     "format": "f32",
+     "flags": []
+    },
+    {
+     "name": "gbufp",
+     "type": "read",
+     "channels": "*",
+     "format": "f32",
+     "flags": []
+    },
+    {
+     "name": "gbufc",
+     "type": "read",
+     "channels": "*",
+     "format": "f32",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "iter": "combo",
+    "vis emit": "slider",
+    "firefly": "combo"
+   },
+   "callbacks": [
+    "create_nodes",
+    "modify_roi_in",
+    "modify_roi_out",
+    "check_params"
+   ],
+   "shaders": 3,
+   "inputs": 5,
+   "outputs": 1,
+   "feedback": true
+  },
+  {
+   "name": "svgf2",
+   "category": "unlisted",
+   "params": [
+    {
+     "name": "alpha",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.9"
+     ]
+    },
+    {
+     "name": "taa",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "1.0"
+     ]
+    },
+    {
+     "name": "prealpha",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.9"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "read",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "gbuf",
+     "type": "read",
+     "channels": "rgba",
+     "format": "f32",
+     "flags": []
+    },
+    {
+     "name": "output",
+     "type": "write",
+     "channels": "rgba",
+     "format": "f16",
+     "flags": []
+    },
+    {
+     "name": "out4",
+     "type": "write",
+     "channels": "rgba",
+     "format": "f16",
+     "flags": []
+    },
+    {
+     "name": "out8",
+     "type": "write",
+     "channels": "rgba",
+     "format": "f16",
+     "flags": []
+    }
+   ],
+   "widgets": {},
+   "callbacks": [
+    "create_nodes",
+    "modify_roi_in",
+    "modify_roi_out"
+   ],
+   "shaders": 2,
+   "inputs": 2,
+   "outputs": 3,
+   "feedback": true
+  },
+  {
+   "name": "test10b",
+   "category": "visualisation and inspection",
+   "params": [],
+   "connectors": [
+    {
+     "name": "output",
+     "type": "write",
+     "channels": "rgba",
+     "format": "f16",
+     "flags": []
+    }
+   ],
+   "widgets": {},
+   "callbacks": [],
+   "shaders": 1,
+   "inputs": 0,
+   "outputs": 1,
+   "feedback": false
+  },
+  {
+   "name": "thumb",
+   "category": "internal use",
+   "params": [],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "sink",
+     "channels": "rgb",
+     "format": "bc1",
+     "flags": []
+    }
+   ],
+   "widgets": {},
+   "callbacks": [],
+   "shaders": 0,
+   "inputs": 1,
+   "outputs": 0,
+   "feedback": false
+  },
+  {
+   "name": "usm",
+   "category": "corrective",
+   "params": [
+    {
+     "name": "amount",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "2.0"
+     ]
+    },
+    {
+     "name": "thrs",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.2"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "read",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "output",
+     "type": "write",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "amount": "slider",
+    "thrs": "slider"
+   },
+   "callbacks": [],
+   "shaders": 1,
+   "inputs": 1,
+   "outputs": 1,
+   "feedback": false
+  },
+  {
+   "name": "vignette",
+   "category": "effects/decoration",
+   "params": [
+    {
+     "name": "center",
+     "type": "float",
+     "count": "2",
+     "default": [
+      "0",
+      "0"
+     ]
+    },
+    {
+     "name": "coef0",
+     "type": "float",
+     "count": "2",
+     "default": [
+      "1.0",
+      "0.0"
+     ]
+    },
+    {
+     "name": "coef1",
+     "type": "float",
+     "count": "2",
+     "default": [
+      "1.0",
+      "0.0"
+     ]
+    },
+    {
+     "name": "angle",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.0"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "read",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "output",
+     "type": "write",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "center": "slider",
+    "coef0": "slider",
+    "coef1": "slider",
+    "angle": "slider"
+   },
+   "callbacks": [],
+   "shaders": 1,
+   "inputs": 1,
+   "outputs": 1,
+   "feedback": false
+  },
+  {
+   "name": "vis",
+   "category": "visualisation and inspection",
+   "params": [
+    {
+     "name": "exposure",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.0"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "read",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "output",
+     "type": "write",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "exposure": "slider"
+   },
+   "callbacks": [
+    "modify_roi_out"
+   ],
+   "shaders": 1,
+   "inputs": 1,
+   "outputs": 1,
+   "feedback": false
+  },
+  {
+   "name": "wavelet",
+   "category": "retouching",
+   "params": [
+    {
+     "name": "scale",
+     "type": "float",
+     "count": "4",
+     "default": [
+      "0.0"
+     ]
+    },
+    {
+     "name": "exposure",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.0"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "read",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "mask",
+     "type": "read",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    },
+    {
+     "name": "output",
+     "type": "write",
+     "channels": "*",
+     "format": "*",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "scale": "slider",
+    "exposure": "slider"
+   },
+   "callbacks": [
+    "create_nodes"
+   ],
+   "shaders": 2,
+   "inputs": 2,
+   "outputs": 1,
+   "feedback": false
+  },
+  {
+   "name": "zones",
+   "category": "tone",
+   "params": [
+    {
+     "name": "radius",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.01"
+     ]
+    },
+    {
+     "name": "epsilon",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "0.06"
+     ]
+    },
+    {
+     "name": "gamma",
+     "type": "float",
+     "count": "1",
+     "default": [
+      "1.0"
+     ]
+    },
+    {
+     "name": "nzones",
+     "type": "int",
+     "count": "1",
+     "default": [
+      "3"
+     ]
+    },
+    {
+     "name": "zone",
+     "type": "float",
+     "count": "7",
+     "default": [
+      "0",
+      "0",
+      "0",
+      "0",
+      "0",
+      "0",
+      "0"
+     ]
+    }
+   ],
+   "connectors": [
+    {
+     "name": "input",
+     "type": "read",
+     "channels": "rgba",
+     "format": "f16",
+     "flags": []
+    },
+    {
+     "name": "output",
+     "type": "write",
+     "channels": "rgba",
+     "format": "f16",
+     "flags": []
+    },
+    {
+     "name": "dspy",
+     "type": "write",
+     "channels": "rgba",
+     "format": "f16",
+     "flags": []
+    }
+   ],
+   "widgets": {
+    "radius": "slider",
+    "epsilon": "slider",
+    "gamma": "slider",
+    "nzones": "slider",
+    "zone": "slider"
+   },
+   "callbacks": [
+    "create_nodes",
+    "modify_roi_in",
+    "modify_roi_out",
+    "commit_params",
+    "check_params",
+    "init",
+    "cleanup"
+   ],
+   "shaders": 2,
+   "inputs": 1,
+   "outputs": 2,
+   "feedback": false
+  }
+ ]
+}
