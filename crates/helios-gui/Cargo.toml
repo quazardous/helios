@@ -1,0 +1,18 @@
+[package]
+name = "helios-gui"
+description = "The Helios desktop: an egui shell (docking, auxiliary windows, palette, keys) over helios-shell, with headless snapshots"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+helios-shell.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+# MIT OR Apache-2.0 (egui, eframe, egui_kittest), MIT (egui_dock).
+egui = "0.36"
+eframe = { version = "0.36", default-features = false, features = ["default_fonts", "wgpu", "wayland", "x11", "accesskit"] }
+egui_dock = { version = "0.21", features = ["serde"] }
+egui_kittest = { version = "0.36", features = ["eframe", "wgpu"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
