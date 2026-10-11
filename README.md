@@ -65,6 +65,10 @@ A Cargo workspace (Rust):
 - `crates/helios-load`: loaders, the framework reading files into sources:
   camera raws through rawler (sensor data and camera description), JPEG,
   PNG and TIFF pictures in the working space, embedded previews.
+- `crates/helios-xmp`: darktable XMP sidecars read into Helios: history,
+  params decoded with darktable's own layouts (`layouts.json`, from
+  `tools/dt_param_layouts.sh`), mapped to Helios modules with a report of
+  what is not carried over.
 - `crates/helios-export`: exports, the leaves that write files: a node
   rendered, converted from the working space to sRGB, encoded (JPEG, PNG 8
   or 16-bit, TIFF 16-bit) and written atomically, as jobs that hold their

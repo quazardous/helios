@@ -20,6 +20,7 @@ helios-photo = { path = "crates/helios-photo" }
 helios-export = { path = "crates/helios-export" }
 helios-decision = { path = "crates/helios-decision" }
 helios-load = { path = "crates/helios-load" }
+helios-xmp = { path = "crates/helios-xmp" }
 helios-vault = { path = "crates/helios-vault" }
 blake3 = "1"
 serde = { version = "1", features = ["derive"] }
