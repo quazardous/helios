@@ -36,7 +36,7 @@ pub use manifest::{
     Family, Manifest, ModuleKind, Needs, ParamHint, ParamKind, ParamSpec, PixelFormat, PortKind,
     PortSpec, Role,
 };
-pub use module::{Accelerator, Context, GpuJob, GpuKernel, Module, ModuleRef};
+pub use module::{Accelerator, Context, DeviceImage, GpuJob, GpuKernel, Module, ModuleRef};
 pub use params::{Params, Value};
 pub use scheduler::{CancelToken, JobId, JobSpec, JobState, Priority, Scheduler};
 pub use status::{Load, NodeState, NodeStatus, NodeType};

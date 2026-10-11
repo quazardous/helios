@@ -31,6 +31,9 @@ pub enum Error {
     Pending { node: String },
     /// A render scale outside (0, 1], as written.
     Scale(String),
+    /// A result was asked in an accelerator's memory of an engine that has
+    /// none.
+    NoAccelerator,
 }
 
 impl Error {
@@ -62,6 +65,7 @@ impl fmt::Display for Error {
             Error::Module { module, reason } => write!(f, "{module}: {reason}"),
             Error::Fault { node, what } => write!(f, "{node}: injected fault ({what})"),
             Error::Scale(scale) => write!(f, "render scale {scale} is not in (0, 1]"),
+            Error::NoAccelerator => write!(f, "the engine has no accelerator"),
             Error::Pending { node } => write!(f, "{node}: decision pending (no recorded answer)"),
         }
     }

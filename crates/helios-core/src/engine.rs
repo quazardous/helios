@@ -10,6 +10,15 @@
 //!
 //! The engine counts every request and every computation, so tests can
 //! assert budgets ("rendering twice computes nothing the second time").
+//!
+//! With an [`Accelerator`], a step it runs keeps its result in the
+//! accelerator's memory ([`DeviceImage`]): the next accelerated step reads
+//! it there. Content moves only where the other side needs it: a host image
+//! is uploaded when an accelerated step reads it, a device image is read
+//! back (once, the copy kept with it) when a CPU step or the render's caller
+//! reads it. A chain of accelerated steps thus uploads its source once and
+//! reads back its result once. Device content is cached like host content,
+//! under the same key and within the same budget (its bytes count).
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -23,14 +32,38 @@ use crate::error::Error;
 use crate::graph::{Graph, Kind, NodeId};
 use crate::image::{ContentHash, Image, Region};
 use crate::manifest::{Family, ModuleKind, Role};
-use crate::module::Accelerator;
 use crate::module::ModuleRef;
+use crate::module::{Accelerator, DeviceImage};
 use crate::status::{Load, NodeState, NodeStatus, NodeType};
 
 /// The source name the engine publishes events under.
 const SOURCE: &str = "engine";
 
-type Outputs = Result<Arc<Vec<Image>>, Error>;
+type Outputs = Result<Arc<Content>, Error>;
+
+/// A step's outputs, where they live.
+enum Content {
+    /// In host memory, one image per output port.
+    Host(Vec<Image>),
+    /// An accelerated step's only output, in the accelerator's memory, and
+    /// its copy in host memory once something on the CPU read it.
+    Device {
+        image: DeviceImage,
+        host: OnceLock<Image>,
+    },
+}
+
+impl Content {
+    /// Bytes held, in host and device memory.
+    fn bytes(&self) -> usize {
+        match self {
+            Content::Host(images) => images.iter().map(|i| std::mem::size_of_val(i.data())).sum(),
+            Content::Device { image, host } => {
+                image.bytes() + host.get().map_or(0, |i| std::mem::size_of_val(i.data()))
+            }
+        }
+    }
+}
 
 /// A render was asked for. Events of that render carry its sequence number as cause.
 #[derive(Serialize)]
@@ -81,6 +114,10 @@ pub struct Counters {
     pub evictions: u64,
     /// Steps computed by the accelerator (the GPU).
     pub accelerated: u64,
+    /// Host images copied into the accelerator's memory.
+    pub uploads: u64,
+    /// Accelerator images read back into host memory.
+    pub readbacks: u64,
 }
 
 impl Counters {
@@ -97,6 +134,8 @@ impl Counters {
             source_reads: self.source_reads - earlier.source_reads,
             evictions: self.evictions - earlier.evictions,
             accelerated: self.accelerated - earlier.accelerated,
+            uploads: self.uploads - earlier.uploads,
+            readbacks: self.readbacks - earlier.readbacks,
         }
     }
 }
@@ -158,19 +197,17 @@ impl Cache {
         entry.cell.clone()
     }
 
-    /// Counts a newly ready entry, then evicts the least recently used
-    /// ready entries (never `keep`, never content still being computed)
-    /// until the cache fits its budget.
+    /// Counts what a ready entry holds (again: a device entry grows when it
+    /// is read back), then evicts the least recently used ready entries
+    /// (never `keep`, never content still being computed) until the cache
+    /// fits its budget.
     fn settle(&mut self, keep: ContentHash, budget: Option<usize>) {
         if let Some(entry) = self.entries.get_mut(&keep)
-            && entry.size == 0
-            && let Some(Ok(outputs)) = entry.cell.get()
+            && let Some(Ok(content)) = entry.cell.get()
         {
-            entry.size = outputs
-                .iter()
-                .map(|i| std::mem::size_of_val(i.data()))
-                .sum();
-            self.bytes += entry.size;
+            let size = content.bytes();
+            self.bytes = self.bytes - entry.size + size;
+            entry.size = size;
         }
         let Some(budget) = budget else { return };
         while self.bytes > budget {
@@ -203,6 +240,8 @@ pub struct Engine {
     /// Runs GPU variants; `None`: everything on the CPU.
     accelerator: Option<Arc<dyn Accelerator>>,
     accelerated: AtomicU64,
+    uploads: AtomicU64,
+    readbacks: AtomicU64,
 }
 
 type TrackKey = (u64, NodeId, Region);
@@ -236,6 +275,8 @@ impl Engine {
             faults: Mutex::new(Vec::new()),
             accelerator: None,
             accelerated: AtomicU64::new(0),
+            uploads: AtomicU64::new(0),
+            readbacks: AtomicU64::new(0),
         }
     }
 
@@ -351,6 +392,8 @@ impl Engine {
             source_reads: self.source_reads.load(Ordering::SeqCst),
             evictions: self.cache.lock().expect("engine cache lock").evictions,
             accelerated: self.accelerated.load(Ordering::SeqCst),
+            uploads: self.uploads.load(Ordering::SeqCst),
+            readbacks: self.readbacks.load(Ordering::SeqCst),
         }
     }
 
@@ -378,6 +421,49 @@ impl Engine {
         region: Region,
         scale: f64,
     ) -> Result<Image, Error> {
+        let (step, content, index) = self.render_content(graph, node, port, region, scale)?;
+        Ok(self.host(&step, &content, index)?.clone())
+    }
+
+    /// Renders at full resolution into the accelerator's memory, for a
+    /// consumer on the same device (a viewport sharing the GUI's device):
+    /// the result is not read back. An accelerated result is handed as is
+    /// (shared with the cache: do not write to it); a result computed on
+    /// the CPU is uploaded. [`Error::NoAccelerator`] without an accelerator.
+    pub fn render_device(
+        &self,
+        graph: &Graph,
+        node: NodeId,
+        port: &str,
+        region: Region,
+    ) -> Result<DeviceImage, Error> {
+        self.render_device_at(graph, node, port, region, 1.0)
+    }
+
+    /// [`Engine::render_device`] at a scale, as [`Engine::render_at`].
+    pub fn render_device_at(
+        &self,
+        graph: &Graph,
+        node: NodeId,
+        port: &str,
+        region: Region,
+        scale: f64,
+    ) -> Result<DeviceImage, Error> {
+        let accelerator = self.accelerator.clone().ok_or(Error::NoAccelerator)?;
+        let (step, content, index) = self.render_content(graph, node, port, region, scale)?;
+        self.device(accelerator.as_ref(), &step, &content, index)
+    }
+
+    /// Plans and executes a render: the requested step, its content and
+    /// the index of the port asked for.
+    fn render_content(
+        &self,
+        graph: &Graph,
+        node: NodeId,
+        port: &str,
+        region: Region,
+        scale: f64,
+    ) -> Result<(Step, Arc<Content>, usize), Error> {
         if !(scale > 0.0 && scale <= 1.0) {
             return Err(Error::Scale(scale.to_string()));
         }
@@ -392,8 +478,54 @@ impl Engine {
             },
         );
         let step = self.plan(graph, node, region, scale)?;
-        let outputs = self.execute(&step, cause)?;
-        Ok(outputs[index].clone())
+        let content = self.execute(&step, cause)?;
+        Ok((step, content, index))
+    }
+
+    /// Output `port` of `step`'s content in host memory. Device content is
+    /// read back once; the copy stays with it, counted in the cache.
+    fn host<'a>(&self, step: &Step, content: &'a Content, port: usize) -> Result<&'a Image, Error> {
+        let (image, host) = match content {
+            Content::Host(images) => return Ok(&images[port]),
+            Content::Device { image, host } => (image, host),
+        };
+        if let Some(copy) = host.get() {
+            return Ok(copy);
+        }
+        let accelerator = self
+            .accelerator
+            .as_ref()
+            .expect("device content comes from the accelerator");
+        self.readbacks.fetch_add(1, Ordering::SeqCst);
+        let copy = accelerator
+            .download(image)
+            .map_err(|reason| transfer_error(step, reason))?;
+        let copy = host.get_or_init(|| copy);
+        self.cache
+            .lock()
+            .expect("engine cache lock")
+            .settle(step.key, self.budget);
+        Ok(copy)
+    }
+
+    /// Output `port` of `step`'s content in the accelerator's memory,
+    /// uploaded if it is in host memory (for `consumer`, which reads it).
+    fn device(
+        &self,
+        accelerator: &dyn Accelerator,
+        consumer: &Step,
+        content: &Content,
+        port: usize,
+    ) -> Result<DeviceImage, Error> {
+        match content {
+            Content::Device { image, .. } => Ok(image.clone()),
+            Content::Host(images) => {
+                self.uploads.fetch_add(1, Ordering::SeqCst);
+                accelerator
+                    .upload(&images[port])
+                    .map_err(|reason| transfer_error(consumer, reason))
+            }
+        }
     }
 
     /// The content key of a node's outputs over a region, without computing them.
@@ -579,7 +711,9 @@ impl Engine {
                         what: "source read".into(),
                     });
                 }
-                Ok(Arc::new(vec![image.sample_at(step.region, *scale)]))
+                Ok(Arc::new(Content::Host(vec![
+                    image.sample_at(step.region, *scale),
+                ])))
             }
             Work::Module {
                 module,
@@ -597,23 +731,45 @@ impl Engine {
                         what: "computation".into(),
                     });
                 }
-                let images: Vec<&Image> =
-                    held.iter().map(|(outputs, port)| &outputs[*port]).collect();
                 match (&self.accelerator, accelerated) {
                     (Some(a), true) => {
+                        let (content, port) = &held[0];
+                        let input = self.device(a.as_ref(), step, content, *port)?;
                         self.accelerated.fetch_add(1, Ordering::SeqCst);
-                        Ok(Arc::new(module.accelerate(
-                            a.as_ref(),
-                            plan,
-                            images[0],
-                            step.region,
-                        )?))
+                        let image = module.accelerate(a.as_ref(), plan, &input, step.region)?;
+                        Ok(Arc::new(Content::Device {
+                            image,
+                            host: OnceLock::new(),
+                        }))
                     }
-                    _ => Ok(Arc::new(module.process(plan, &images, step.region)?)),
+                    _ => {
+                        let images = held
+                            .iter()
+                            .zip(inputs)
+                            .map(|((content, port), (input, _))| self.host(input, content, *port))
+                            .collect::<Result<Vec<&Image>, Error>>()?;
+                        Ok(Arc::new(Content::Host(module.process(
+                            plan,
+                            &images,
+                            step.region,
+                        )?)))
+                    }
                 }
             }
             Work::Pending { .. } => unreachable!("execute answers pending steps itself"),
         }
+    }
+}
+
+/// A copy to or from the accelerator failed, for `step`: its module's error.
+fn transfer_error(step: &Step, reason: String) -> Error {
+    let module = match &step.work {
+        Work::Module { module, .. } => module.manifest().name.clone(),
+        _ => step.name.clone(),
+    };
+    Error::Module {
+        module,
+        reason: format!("GPU: {reason}"),
     }
 }
 

@@ -41,6 +41,30 @@ device memory, shared memory, tiles, network transfer verified by content
 hash. The bus never carries a payload; at most a reference (buffer handle,
 content hash) to it.
 
+### GPU residency
+
+(2026-10-11) An engine with an accelerator (a `Gpu` from `helios-gpu`)
+keeps the result of each step it runs on the GPU in a GPU buffer (a
+`DeviceImage`: region, channels, and a handle only its device reads). The
+next GPU step reads that buffer directly. Images cross only where the other
+side needs them: a host image (a source, a CPU step's result) is uploaded
+when a GPU step reads it, and a GPU image is read back when a CPU step or
+the caller of `Engine::render` reads it. A chain of GPU steps therefore
+uploads its source once and reads back its result once; a CPU-only module
+in the middle costs one readback and one upload more. The engine counts
+both (`Counters::uploads`, `Counters::readbacks`), so tests assert them.
+
+GPU results are cached like CPU ones, under the same content key (which
+already names the accelerator) and within the same memory budget: their
+bytes count, and the least recently used are evicted first, which frees
+the GPU buffer once nothing else holds it. A read back copy is kept with
+the GPU entry and counted too, so asking the same render again reads back
+nothing. `Engine::render_device` answers the result in GPU memory without
+reading it back (uploading it if the last step ran on the CPU), for a
+viewport sharing the engine's device; `Gpu::buffer` gives the `wgpu`
+buffer behind it (tightly packed `f32` pixels). It is shared with the
+cache: read it, never write it.
+
 ### Commands: to the owner
 
 Every piece of state has one owner (the vault for catalog data, the edit for

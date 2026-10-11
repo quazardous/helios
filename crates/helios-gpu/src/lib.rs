@@ -7,7 +7,9 @@
 //! input, runs the module's kernel and reads the result back. A [`Gpu`] is
 //! also the engine's [`Accelerator`]: an engine given one
 //! (`Engine::with_accelerator`) computes every step that has a GPU variant
-//! on it. Keeping buffers on the GPU between steps is the next step.
+//! on it, and images stay in GPU buffers from one such step to the next.
+//! `Engine::render_device` hands a render's result as a buffer on the
+//! device ([`Gpu::buffer`]), for a viewport that shares it.
 //!
 //! [`check`] runs a module on both backends and compares: a GPU variant is
 //! only trusted within its tolerance of the CPU reference.
@@ -15,7 +17,9 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-use helios_core::{Accelerator, Context, Error, GpuJob, Image, ModuleRef, Params, Region};
+use helios_core::{
+    Accelerator, Context, DeviceImage, Error, GpuJob, Image, ModuleRef, Params, Region,
+};
 use wgpu::util::DeviceExt;
 
 pub struct Gpu {
@@ -128,6 +132,19 @@ impl Gpu {
         Ok(pipeline)
     }
 
+    /// The buffer behind an image this GPU holds (what
+    /// `Engine::render_device` answers on an engine it accelerates); `None`
+    /// for an image of another device. Pixels are `f32`, channels
+    /// interleaved, rows top to bottom over `image.region()`, tightly packed
+    /// (`width * channels` floats a row); usages `STORAGE | COPY_SRC`. Read
+    /// it, never write it: the engine's cache shares it.
+    pub fn buffer<'a>(&self, image: &'a DeviceImage) -> Option<&'a wgpu::Buffer> {
+        image
+            .handle::<Resident>()
+            .filter(|r| r.device == self.device)
+            .map(|r| &r.buffer)
+    }
+
     /// Uploads `input`, runs the kernel over `output` and reads it back.
     fn dispatch(
         &self,
@@ -137,6 +154,49 @@ impl Gpu {
         output: Region,
         channels: u32,
     ) -> Result<Image, String> {
+        let input = self.upload_image(input);
+        let out = self.kernel(name, job, &input, output, channels)?;
+        self.download_image(&out)
+    }
+
+    /// Copies a host image into a buffer on the device.
+    fn upload_image(&self, image: &Image) -> DeviceImage {
+        let data: &[u8] = bytemuck::cast_slice(image.data());
+        let buffer = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("image"),
+                // A binding is never empty.
+                contents: if data.is_empty() { &[0; 4] } else { data },
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            });
+        self.resident(image.region(), image.channels(), buffer)
+    }
+
+    fn resident(&self, region: Region, channels: u32, buffer: wgpu::Buffer) -> DeviceImage {
+        DeviceImage::new(
+            region,
+            channels,
+            Resident {
+                device: self.device.clone(),
+                buffer,
+            },
+        )
+    }
+
+    /// Runs the kernel over `output`, reading `input` on the device, into a
+    /// new buffer on the device. Nothing is read back.
+    fn kernel(
+        &self,
+        name: &str,
+        job: &GpuJob,
+        input: &DeviceImage,
+        output: Region,
+        channels: u32,
+    ) -> Result<DeviceImage, String> {
+        let input_buf = self
+            .buffer(input)
+            .ok_or("the input is not in this device's memory")?;
         if input.region() != job.input {
             return Err(format!(
                 "input covers {}, the kernel reads {}",
@@ -148,18 +208,13 @@ impl Gpu {
         let pixels = output.area() as u32;
         let d = &self.device;
         let scope = d.push_error_scope(wgpu::ErrorFilter::Validation);
-        let storage = |data: &[u8], label: &str, usage| {
+        let uniform = |data: &[u8], label: &str| {
             d.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some(label),
                 contents: data,
-                usage,
+                usage: wgpu::BufferUsages::UNIFORM,
             })
         };
-        let input_buf = storage(
-            bytemuck::cast_slice(input.data()),
-            "input",
-            wgpu::BufferUsages::STORAGE,
-        );
         let out_size = (pixels as u64) * u64::from(channels) * 4;
         let output_buf = d.create_buffer(&wgpu::BufferDescriptor {
             label: Some("output"),
@@ -167,11 +222,7 @@ impl Gpu {
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
             mapped_at_creation: false,
         });
-        let plan_buf = storage(
-            bytemuck::cast_slice(&job.uniforms),
-            "plan",
-            wgpu::BufferUsages::UNIFORM,
-        );
+        let plan_buf = uniform(bytemuck::cast_slice(&job.uniforms), "plan");
         let shape = [
             pixels,
             input.channels(),
@@ -182,17 +233,7 @@ impl Gpu {
             output.width,
             output.height,
         ];
-        let shape_buf = storage(
-            bytemuck::cast_slice(&shape),
-            "shape",
-            wgpu::BufferUsages::UNIFORM,
-        );
-        let readback = d.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("readback"),
-            size: out_size.max(4),
-            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let shape_buf = uniform(bytemuck::cast_slice(&shape), "shape");
         let group = d.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("bindings"),
             layout: &pipeline.get_bind_group_layout(0),
@@ -222,7 +263,32 @@ impl Gpu {
             pass.set_bind_group(0, &group, &[]);
             pass.dispatch_workgroups(pixels.div_ceil(64), 1, 1);
         }
-        encoder.copy_buffer_to_buffer(&output_buf, 0, &readback, 0, out_size.max(4));
+        // Submitted, not waited for: the queue runs submissions in order,
+        // so the next kernel or a readback sees this one's result.
+        self.queue.submit([encoder.finish()]);
+        if let Some(e) = pollster::block_on(scope.pop()) {
+            return Err(e.to_string());
+        }
+        Ok(self.resident(output, channels, output_buf))
+    }
+
+    /// Reads an image on the device back into host memory, waiting for the
+    /// kernels that write it.
+    fn download_image(&self, image: &DeviceImage) -> Result<Image, String> {
+        let buffer = self
+            .buffer(image)
+            .ok_or("the image is not in this device's memory")?;
+        let size = image.bytes() as u64;
+        let d = &self.device;
+        let scope = d.push_error_scope(wgpu::ErrorFilter::Validation);
+        let readback = d.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("readback"),
+            size: size.max(4),
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let mut encoder = d.create_command_encoder(&Default::default());
+        encoder.copy_buffer_to_buffer(buffer, 0, &readback, 0, size.max(4));
         self.queue.submit([encoder.finish()]);
         if let Some(e) = pollster::block_on(scope.pop()) {
             return Err(e.to_string());
@@ -232,11 +298,18 @@ impl Gpu {
         d.poll(wgpu::PollType::wait_indefinitely())
             .map_err(|e| e.to_string())?;
         let view = slice.get_mapped_range().map_err(|e| e.to_string())?;
-        let data: Vec<f32> = bytemuck::cast_slice(&view[..out_size as usize]).to_vec();
+        let data: Vec<f32> = bytemuck::cast_slice(&view[..size as usize]).to_vec();
         drop(view);
         readback.unmap();
-        Ok(Image::new(output, channels, data))
+        Ok(Image::new(image.region(), image.channels(), data))
     }
+}
+
+/// What a [`DeviceImage`] made by a [`Gpu`] holds: a storage buffer, and
+/// the device it lives on (an image is only used on its own device).
+struct Resident {
+    device: wgpu::Device,
+    buffer: wgpu::Buffer,
 }
 
 impl Accelerator for Gpu {
@@ -244,15 +317,23 @@ impl Accelerator for Gpu {
         &self.id
     }
 
+    fn upload(&self, image: &Image) -> Result<DeviceImage, String> {
+        Ok(self.upload_image(image))
+    }
+
+    fn download(&self, image: &DeviceImage) -> Result<Image, String> {
+        self.download_image(image)
+    }
+
     fn run(
         &self,
         module: &str,
         job: &GpuJob,
-        input: &Image,
+        input: &DeviceImage,
         output: Region,
         channels: u32,
-    ) -> Result<Image, String> {
-        self.dispatch(module, job, input, output, channels)
+    ) -> Result<DeviceImage, String> {
+        self.kernel(module, job, input, output, channels)
     }
 }
 

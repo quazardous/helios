@@ -70,24 +70,82 @@ pub struct GpuJob {
     pub input: Region,
 }
 
+/// An image held in an accelerator's memory (a buffer on a GPU): the
+/// region and channels it covers, and a handle only the accelerator that
+/// made it understands. Cloning shares the handle; the memory is freed when
+/// the last clone goes.
+#[derive(Clone)]
+pub struct DeviceImage {
+    region: Region,
+    channels: u32,
+    handle: Arc<dyn Any + Send + Sync>,
+}
+
+impl DeviceImage {
+    pub fn new(region: Region, channels: u32, handle: impl Any + Send + Sync) -> Self {
+        Self {
+            region,
+            channels,
+            handle: Arc::new(handle),
+        }
+    }
+
+    pub fn region(&self) -> Region {
+        self.region
+    }
+
+    pub fn channels(&self) -> u32 {
+        self.channels
+    }
+
+    /// The accelerator's handle, if it is of type `T`.
+    pub fn handle<T: Any>(&self) -> Option<&T> {
+        self.handle.downcast_ref()
+    }
+
+    /// The bytes of its pixels (f32 per channel).
+    pub fn bytes(&self) -> usize {
+        self.region.area() * self.channels as usize * 4
+    }
+}
+
+impl std::fmt::Debug for DeviceImage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DeviceImage")
+            .field("region", &self.region)
+            .field("channels", &self.channels)
+            .finish_non_exhaustive()
+    }
+}
+
 /// Runs modules' GPU variants for the engine (`helios-gpu` on wgpu). The
 /// engine hands it a step whose module has a kernel, one input and one
-/// output; it answers the output image, or why it could not.
+/// output. Images stay in its memory from one step to the next: the engine
+/// uploads a host image only when a step it runs reads one, and reads a
+/// result back only when the CPU (a CPU step, or the render's caller) needs
+/// it.
 pub trait Accelerator: Send + Sync {
     /// Names the backend in content keys: its results agree with the CPU
     /// within a tolerance, not bit for bit, so they are cached apart.
     fn id(&self) -> &str;
 
+    /// Copies a host image into its memory.
+    fn upload(&self, image: &Image) -> Result<DeviceImage, String>;
+
+    /// Reads one of its images back into host memory.
+    fn download(&self, image: &DeviceImage) -> Result<Image, String>;
+
     /// Runs `job` over `output`, reading `input` (which covers
-    /// `job.input`), into `channels` channels.
+    /// `job.input`), into `channels` channels. Input and result stay in its
+    /// memory.
     fn run(
         &self,
         module: &str,
         job: &GpuJob,
-        input: &Image,
+        input: &DeviceImage,
         output: Region,
         channels: u32,
-    ) -> Result<Image, String>;
+    ) -> Result<DeviceImage, String>;
 }
 
 /// An image processing module: a pure computation with a declared surface.
@@ -216,15 +274,16 @@ impl ModuleRef {
     }
 
     /// Runs the GPU variant on an accelerator and checks the result as
-    /// `process` does. A failure (a shader that does not compile, a lost
-    /// device) is the module's error, never a panic.
+    /// `process` does; input and result stay in the accelerator's memory. A
+    /// failure (a shader that does not compile, a lost device) is the
+    /// module's error, never a panic.
     pub(crate) fn accelerate(
         &self,
         accelerator: &dyn Accelerator,
         plan: &Plan,
-        input: &Image,
+        input: &DeviceImage,
         output: Region,
-    ) -> Result<Vec<Image>, Error> {
+    ) -> Result<DeviceImage, Error> {
         let kernel = self.0.gpu_kernel().expect("checked by acceleratable");
         let job = GpuJob {
             kernel,
@@ -236,7 +295,8 @@ impl ModuleRef {
         let image = accelerator
             .run(&m.name, &job, input, output, channels)
             .map_err(|reason| self.module_error(format!("GPU: {reason}")))?;
-        self.check(vec![image], output)
+        self.check_shape(0, image.region(), image.channels(), output)?;
+        Ok(image)
     }
 
     /// Runs `process` and checks the result against the manifest.
@@ -267,24 +327,40 @@ impl ModuleRef {
                 m.outputs.len()
             )));
         }
-        for (image, port) in outputs.iter().zip(&m.outputs) {
-            if image.region() != output {
-                return Err(broken(format!(
-                    "output `{}` covers {}, asked {output}",
-                    port.name,
-                    image.region()
-                )));
-            }
-            if Some(image.channels()) != port.channels() {
-                return Err(broken(format!(
-                    "output `{}` has {} channels, {:?} declared",
-                    port.name,
-                    image.channels(),
-                    port.channels()
-                )));
-            }
+        for (i, image) in outputs.iter().enumerate() {
+            self.check_shape(i, image.region(), image.channels(), output)?;
         }
         Ok(outputs)
+    }
+
+    /// Output `index` covers `output` with its declared channels.
+    fn check_shape(
+        &self,
+        index: usize,
+        region: Region,
+        channels: u32,
+        output: Region,
+    ) -> Result<(), Error> {
+        let m = self.manifest();
+        let port = &m.outputs[index];
+        let broken = |reason: String| Error::Contract {
+            module: m.name.clone(),
+            reason,
+        };
+        if region != output {
+            return Err(broken(format!(
+                "output `{}` covers {region}, asked {output}",
+                port.name
+            )));
+        }
+        if Some(channels) != port.channels() {
+            return Err(broken(format!(
+                "output `{}` has {channels} channels, {:?} declared",
+                port.name,
+                port.channels()
+            )));
+        }
+        Ok(())
     }
 
     fn module_error(&self, reason: String) -> Error {

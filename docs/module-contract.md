@@ -223,8 +223,9 @@ input and one output on it, and the other steps on the CPU, in the same
 network. GPU content is keyed apart from CPU content, since the two agree
 within a tolerance and not bit for bit. A kernel that fails to compile or
 to run makes the step fail with the module's error; it never panics.
-Buffers are still read back after each step; keeping them on the GPU
-along a chain comes next.
+Images stay in GPU memory from one GPU step to the next and are only read
+back where the CPU needs them (see "GPU residency" in
+`docs/architecture.md`).
 
 ## How a module is tested
 
