@@ -101,6 +101,12 @@ impl Registry {
         self.commands.get(id).map(|e| &e.spec)
     }
 
+    /// Every declared command, wherever it applies, by id: what tools such
+    /// as the English catalog's generation read.
+    pub fn specs(&self) -> impl Iterator<Item = &CommandSpec> {
+        self.commands.values().map(|e| &e.spec)
+    }
+
     /// The commands that apply in a context, for the palette.
     pub fn available(&self, cx: &Context) -> Vec<&CommandSpec> {
         self.commands
