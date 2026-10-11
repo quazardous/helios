@@ -25,8 +25,13 @@ use helios_core::{ContentHash, Describe};
 use serde::Serialize;
 use serde_json::json;
 
+pub mod catalog;
 pub mod contract;
+pub mod fields;
 pub mod sqlite;
+
+pub use catalog::{ApplyReport, CursorId, CursorInfo, Delta, Row};
+pub use fields::{AuditEntry, Command, Order, Query};
 
 /// An image, identified by the hash of its file.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
@@ -86,6 +91,27 @@ pub trait Store: Send {
     fn locations(&self, id: &ImageId) -> Result<Vec<Location>, String>;
     fn at_path(&self, path: &Path) -> Result<Option<(ImageId, Location)>, String>;
     fn all_locations(&self) -> Result<Vec<(ImageId, Location)>, String>;
+
+    /// One field of an image.
+    fn field(&self, id: &ImageId, name: &str) -> Result<Option<serde_json::Value>, String>;
+    /// Sets (or with `None` clears) a field; the image must exist.
+    fn set_field(
+        &mut self,
+        id: &ImageId,
+        name: &str,
+        value: Option<&serde_json::Value>,
+    ) -> Result<(), String>;
+    /// The asked fields of many images in one call, in the order of `ids`.
+    fn fields_of(
+        &self,
+        ids: &[ImageId],
+        names: &[&str],
+    ) -> Result<Vec<BTreeMap<String, serde_json::Value>>, String>;
+    /// The images a query selects, in its order.
+    fn select(&self, query: &Query) -> Result<Vec<ImageId>, String>;
+    /// Records a change; returns its sequence number.
+    fn add_audit(&mut self, entry: &AuditEntry) -> Result<u64, String>;
+    fn audit(&self, id: &ImageId) -> Result<Vec<AuditEntry>, String>;
 }
 
 /// Rows in memory: the reference other stores are checked against.
@@ -93,6 +119,8 @@ pub trait Store: Send {
 pub struct MemoryStore {
     images: BTreeMap<ImageId, Image>,
     locations: BTreeMap<PathBuf, (ImageId, Location)>,
+    fields: BTreeMap<(ImageId, String), serde_json::Value>,
+    audit: Vec<AuditEntry>,
 }
 
 impl Store for MemoryStore {
@@ -133,6 +161,94 @@ impl Store for MemoryStore {
     fn all_locations(&self) -> Result<Vec<(ImageId, Location)>, String> {
         Ok(self.locations.values().cloned().collect())
     }
+
+    fn field(&self, id: &ImageId, name: &str) -> Result<Option<serde_json::Value>, String> {
+        Ok(self.fields.get(&(*id, name.to_string())).cloned())
+    }
+
+    fn set_field(
+        &mut self,
+        id: &ImageId,
+        name: &str,
+        value: Option<&serde_json::Value>,
+    ) -> Result<(), String> {
+        if !self.images.contains_key(id) {
+            return Err(format!("no image {}", id.hex()));
+        }
+        let key = (*id, name.to_string());
+        match value {
+            Some(v) => self.fields.insert(key, v.clone()),
+            None => self.fields.remove(&key),
+        };
+        Ok(())
+    }
+
+    fn fields_of(
+        &self,
+        ids: &[ImageId],
+        names: &[&str],
+    ) -> Result<Vec<BTreeMap<String, serde_json::Value>>, String> {
+        Ok(ids
+            .iter()
+            .map(|id| {
+                names
+                    .iter()
+                    .filter_map(|n| {
+                        self.fields
+                            .get(&(*id, n.to_string()))
+                            .map(|v| (n.to_string(), v.clone()))
+                    })
+                    .collect()
+            })
+            .collect())
+    }
+
+    fn select(&self, query: &Query) -> Result<Vec<ImageId>, String> {
+        let rating = |id: &ImageId| {
+            self.fields
+                .get(&(*id, fields::RATING.to_string()))
+                .and_then(|v| v.as_i64())
+                .unwrap_or(0)
+        };
+        let mut ids: Vec<ImageId> = self
+            .images
+            .keys()
+            .filter(|id| query.min_rating.is_none_or(|min| rating(id) >= min))
+            .filter(|id| {
+                query.label.as_ref().is_none_or(|label| {
+                    self.fields
+                        .get(&(**id, fields::LABELS.to_string()))
+                        .and_then(|v| v.as_array())
+                        .is_some_and(|labels| {
+                            labels.iter().any(|l| l.as_str() == Some(label.as_str()))
+                        })
+                })
+            })
+            .copied()
+            .collect();
+        if query.order == Order::RatingDesc {
+            ids.sort_by_key(|id| (std::cmp::Reverse(rating(id)), *id));
+        }
+        Ok(ids)
+    }
+
+    fn add_audit(&mut self, entry: &AuditEntry) -> Result<u64, String> {
+        let seq = self.audit.len() as u64 + 1;
+        self.audit.push(AuditEntry {
+            seq,
+            ..entry.clone()
+        });
+        Ok(seq)
+    }
+
+    fn audit(&self, id: &ImageId) -> Result<Vec<AuditEntry>, String> {
+        Ok(self
+            .audit
+            .iter()
+            .filter(|e| e.image == *id)
+            .cloned()
+            .collect())
+    }
 }
 
 /// Files the vault treats as images, by extension (raw formats and common
@@ -151,6 +267,8 @@ pub struct Reads {
     /// Files partially hashed (beginning and end).
     pub partial_hashes: u64,
     pub bytes: u64,
+    /// Store queries for catalog reads (selections, field fetches).
+    pub queries: u64,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
@@ -178,6 +296,8 @@ const PARTIAL: u64 = 64 * 1024;
 pub struct Vault<S: Store> {
     store: Mutex<S>,
     reads: Mutex<Reads>,
+    catalog: Mutex<catalog::State>,
+    bus: Option<std::sync::Arc<helios_core::Bus>>,
 }
 
 impl<S: Store> Vault<S> {
@@ -185,7 +305,15 @@ impl<S: Store> Vault<S> {
         Self {
             store: Mutex::new(store),
             reads: Mutex::new(Reads::default()),
+            catalog: Mutex::new(catalog::State::default()),
+            bus: None,
         }
+    }
+
+    /// Announces every change on `bus`.
+    pub fn with_bus(mut self, bus: std::sync::Arc<helios_core::Bus>) -> Self {
+        self.bus = Some(bus);
+        self
     }
 
     pub fn reads(&self) -> Reads {
@@ -276,6 +404,7 @@ impl<S: Store> Vault<S> {
             )?;
             if new {
                 report.added += 1;
+                self.catalog.lock().expect("catalog lock").version += 1;
             } else {
                 report.located += 1;
             }
@@ -367,6 +496,7 @@ impl<S: Store> Describe for Vault<S> {
             "images": images,
             "locations": { "all": locations.len(), "present": present },
             "reads": self.reads(),
+            "catalog": self.catalog.lock().expect("catalog lock").describe(),
         })
     }
 }
