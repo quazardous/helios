@@ -6,6 +6,7 @@ pub mod dock;
 pub mod frame;
 pub mod keys;
 pub mod library;
+pub mod params;
 pub mod scopes;
 pub mod shell;
 pub mod snapshot;

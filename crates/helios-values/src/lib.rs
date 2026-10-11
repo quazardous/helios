@@ -136,6 +136,10 @@ impl Descriptor {
         }
     }
 
+    pub fn text(label: &str, default: &str) -> Self {
+        Self::base(Type::Text, label, Value::Text(default.into()))
+    }
+
     /// From a module's parameter and its hint, if any.
     pub fn from_spec(spec: &ParamSpec, hint: Option<&ParamHint>) -> Self {
         let mut d = match &spec.kind {
@@ -221,6 +225,8 @@ pub struct Entry {
     pub seq: u64,
     /// Who changed it last; `None` until someone does.
     pub origin: Option<Origin>,
+    /// The order it was declared in (a manifest's order).
+    pub order: u64,
 }
 
 /// What a write asks for.
@@ -417,6 +423,10 @@ impl Store {
 
     /// Declares a path at a value (a node's current parameter).
     pub fn declare_with(&mut self, path: &str, descriptor: Descriptor, value: Value) {
+        let order = self
+            .entries
+            .get(path)
+            .map_or(self.entries.len() as u64, |e| e.order);
         self.entries.insert(
             path.into(),
             Entry {
@@ -424,6 +434,7 @@ impl Store {
                 value,
                 seq: 0,
                 origin: None,
+                order,
             },
         );
     }
@@ -565,6 +576,15 @@ impl Store {
             }
             (_, ty) => Err(format!("a {ty:?} cannot be stepped")),
         }
+    }
+
+    /// The origin of the gesture holding a path, if one does: a widget
+    /// shows it, an agent knows to wait.
+    pub fn held_by(&self, path: &str) -> Option<&Origin> {
+        self.gestures
+            .values()
+            .find(|g| g.holds && g.paths.contains(path))
+            .map(|g| &g.origin)
     }
 
     /// Who holds a path against `origin`, if anyone.

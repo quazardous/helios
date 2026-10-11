@@ -237,3 +237,20 @@ so an agent sees and answers what a human would, its origin recorded.
 
 The pictures are written by `HELIOS_DOC_PICTURES=docs/gui cargo test -p
 helios-gui --test dialogs pictures`.
+
+## Parameters
+
+Parameter widgets are generated from value descriptors and bound to the
+value store (see [widgets.md](widgets.md)); a widget never holds its
+value. A number is a slider over its soft range: a drag is one gesture
+(one undo step; an agent's write meanwhile is refused), the wheel and the
+arrows step (Shift coarse), a double click resets, Enter types a value
+(units and either decimal mark accepted; past the soft range it is forced
+up to the hard one, and says so). A dot on the left marks a value changed
+from its default (click: reset); a diamond on the right, a value just
+moved by someone else (the tooltip says who); an amber dot, a value held
+by another origin's gesture. Each widget is found by its path
+(`param:<path>`), is a slider to assistive technology, and its context
+menu resets, copies the path or copies the value.
+
+![The Parameters panel, the exposure moved by an agent](gui/params-helios-dark.png)

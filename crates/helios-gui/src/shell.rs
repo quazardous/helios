@@ -52,6 +52,7 @@ enum Action {
     Detach(String),
     MoveTo(String, Area),
     Zoom(Zoom),
+    Copy(String),
     Answer(crate::dialogs::Answer, Origin),
     AssumeYes(bool),
     Dock(String),
@@ -161,6 +162,7 @@ pub struct Shell {
     /// The GUI's clock, in seconds, as of this frame.
     now: f64,
     viewport: std::rc::Rc<std::cell::RefCell<crate::viewport::Viewport>>,
+    params: std::rc::Rc<std::cell::RefCell<crate::params::Params>>,
     /// Every value widgets and agents edit (`param.*` commands).
     pub values: std::sync::Arc<std::sync::Mutex<helios_values::Store>>,
 }
@@ -207,6 +209,7 @@ impl Shell {
             library: Default::default(),
             values: Default::default(),
             viewport: Default::default(),
+            params: Default::default(),
             dialogs: VecDeque::new(),
             dialog_view: Arc::default(),
             assume_yes: false,
@@ -223,7 +226,30 @@ impl Shell {
         shell.declare_commands();
         helios_values::register(&mut shell.registry, shell.values.clone())
             .expect("param commands are declared once");
-        crate::viewport::declare(&mut shell.values.lock().expect("value store lock"));
+        {
+            let mut store = shell.values.lock().expect("value store lock");
+            crate::viewport::declare(&mut store);
+            store.declare(
+                crate::params::SELECTION,
+                helios_values::Descriptor::text("selected node", ""),
+            );
+        }
+        if shell.panels.get("helios.params").is_some() {
+            let (params, values) = (shell.params.clone(), shell.values.clone());
+            shell.set_content("helios.params", move |ui| {
+                let selection = values
+                    .lock()
+                    .expect("value store lock")
+                    .get(crate::params::SELECTION)
+                    .and_then(|e| match &e.value {
+                        helios_core::Value::Text(t) if !t.is_empty() => Some(t.clone()),
+                        _ => None,
+                    });
+                params
+                    .borrow_mut()
+                    .panel_ui(ui, &values, selection.as_deref());
+            });
+        }
         if shell.panels.get("helios.viewport").is_some() {
             let (viewport, values) = (shell.viewport.clone(), shell.values.clone());
             shell.set_content("helios.viewport", move |ui| {
@@ -790,6 +816,28 @@ impl Shell {
             CommandSpec::new("vault.previous", "Select the previous image", "Vault"),
             Box::new(|_| Ok(Action::Step(-1))),
         );
+        for (id, title, value) in [
+            ("param.copyPath", "Copy a value's path (`path`)", false),
+            ("param.copyValue", "Copy a value (`path`)", true),
+        ] {
+            let values = self.values.clone();
+            add(
+                CommandSpec::new(id, title, "Values"),
+                Box::new(move |a| {
+                    let path = string(a, "path")?;
+                    if !value {
+                        return Ok(Action::Copy(path));
+                    }
+                    let store = values.lock().expect("value store lock");
+                    let e = store
+                        .get(&path)
+                        .ok_or_else(|| format!("no value at `{path}`"))?;
+                    Ok(Action::Copy(
+                        helios_values::value_to_json(&e.value).to_string(),
+                    ))
+                }),
+            );
+        }
         for (id, title, zoom) in [
             ("viewport.zoom.fit", "Image: fit to the view", Zoom::Fit),
             (
@@ -1428,6 +1476,10 @@ impl Shell {
                         set(&mut store, FIT, V::Bool(false));
                     }
                 }
+            }
+            Action::Copy(text) => {
+                ctx.copy_text(text.clone());
+                self.note(format!("copied {text}"));
             }
             Action::MoveTo(p, area) => {
                 if let Err(e) = self.move_to(&p, area, None) {
