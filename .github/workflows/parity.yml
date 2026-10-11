@@ -27,17 +27,21 @@ jobs:
 
   vkdt:
     runs-on: ubuntu-24.04
+    # vkdt needs Vulkan 1.4 headers and a recent Mesa: Fedora has both.
+    container: fedora:44
     steps:
+      - name: tools
+        run: |
+          dnf install -yq git make clang glslang vulkan-headers vulkan-loader-devel \
+            mesa-vulkan-drivers libjpeg-turbo-devel zlib-devel pkgconf-pkg-config \
+            rust cargo gcc
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
       # vkdt's command line, built at the commit the manifest round trip was
       # checked on, without its optional inputs (raw, video, JXL). It runs on
       # lavapipe, Mesa's software Vulkan.
       - name: vkdt
         run: |
-          sudo apt-get update -q
-          sudo apt-get install -yq clang glslang-tools libvulkan-dev mesa-vulkan-drivers libjpeg-dev zlib1g-dev pkg-config
-          git init -q vkdt && cd vkdt
+          git init -q /tmp/vkdt && cd /tmp/vkdt
           git fetch -q --depth 1 https://github.com/hanatos/vkdt.git afc34256fb22bcaf6dcf6503d19d5f9a6f477af5
           git checkout -q FETCH_HEAD
           cat > bin/config.mk <<'EOF'
@@ -51,5 +55,5 @@ jobs:
           OPT_CFLAGS=-Wall -pipe -O2 -DNDEBUG
           EOF
           make cli -j"$(nproc)"
-          echo "VKDT_CLI=$PWD/bin/vkdt-cli" >> "$GITHUB_ENV"
+          echo "VKDT_CLI=/tmp/vkdt/bin/vkdt-cli" >> "$GITHUB_ENV"
       - run: cargo test -p helios-parity --test vkdt -- --nocapture
