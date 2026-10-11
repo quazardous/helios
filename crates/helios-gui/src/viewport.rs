@@ -10,7 +10,7 @@
 //! - **The view** (zoom, centre, fit) lives in the value store at
 //!   `view/viewport/*`, so keys, the palette and agents move it like any
 //!   value; a drag is one gesture.
-//! - **Drawing** goes through egui_wgpu's paint callback on the device
+//! - **Drawing** goes through `egui_wgpu`'s paint callback on the device
 //!   eframe opened: an `rgba32float` texture per layer, the display
 //!   transform (to sRGB primaries, clipped, encoded) in the shader.
 //! - **Pictures**: `viewport.display` is what is on screen; `viewport.scene`
@@ -144,10 +144,13 @@ fn render_thread(
         let reg = r.region;
         let mut data = vec![0.0f32; reg.area() * 4];
         let mut cancelled = false;
-        let (tx0, ty0) = (reg.x.div_euclid(TILE as i64), reg.y.div_euclid(TILE as i64));
+        let (tx0, ty0) = (
+            reg.x.div_euclid(i64::from(TILE)),
+            reg.y.div_euclid(i64::from(TILE)),
+        );
         let (tx1, ty1) = (
-            (reg.right() - 1).div_euclid(TILE as i64),
-            (reg.bottom() - 1).div_euclid(TILE as i64),
+            (reg.right() - 1).div_euclid(i64::from(TILE)),
+            (reg.bottom() - 1).div_euclid(i64::from(TILE)),
         );
         'tiles: for ty in ty0..=ty1 {
             for tx in tx0..=tx1 {
@@ -162,24 +165,20 @@ fn render_thread(
                     Err(TryRecvError::Empty) => {}
                 }
                 let key = (r.version, scale_key, tx, ty);
-                let tile = match tiles.get(&key) {
-                    Some(t) => {
-                        stats.tiles_reused.fetch_add(1, Ordering::Relaxed);
-                        t.clone()
-                    }
-                    None => {
-                        let full = Region::new(tx * TILE as i64, ty * TILE as i64, TILE, TILE);
-                        let Some(within) = clip(full, r.extent_at()) else {
-                            continue;
-                        };
-                        let Ok(t) = engine.render_at(&r.graph, r.node, &r.port, within, r.scale)
-                        else {
-                            continue;
-                        };
-                        stats.tiles_rendered.fetch_add(1, Ordering::Relaxed);
-                        tiles.insert(key, t.clone());
-                        t
-                    }
+                let tile = if let Some(t) = tiles.get(&key) {
+                    stats.tiles_reused.fetch_add(1, Ordering::Relaxed);
+                    t.clone()
+                } else {
+                    let full = Region::new(tx * i64::from(TILE), ty * i64::from(TILE), TILE, TILE);
+                    let Some(within) = clip(full, r.extent_at()) else {
+                        continue;
+                    };
+                    let Ok(t) = engine.render_at(&r.graph, r.node, &r.port, within, r.scale) else {
+                        continue;
+                    };
+                    stats.tiles_rendered.fetch_add(1, Ordering::Relaxed);
+                    tiles.insert(key, t.clone());
+                    t
                 };
                 copy_into(&mut data, reg, &tile);
             }
@@ -602,7 +601,7 @@ struct Slot {
     group: Option<(wgpu::BindGroup, u64)>,
 }
 
-/// The viewport's GPU objects, kept in egui_wgpu's callback resources.
+/// The viewport's GPU objects, kept in `egui_wgpu`'s callback resources.
 pub struct Gpu {
     pipeline: wgpu::RenderPipeline,
     layout: wgpu::BindGroupLayout,
@@ -655,22 +654,22 @@ pub fn install(rs: &egui_wgpu::RenderState) {
         vertex: wgpu::VertexState {
             module: &shader,
             entry_point: Some("vs"),
-            compilation_options: Default::default(),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
             buffers: &[],
         },
         fragment: Some(wgpu::FragmentState {
             module: &shader,
             entry_point: Some("fs"),
-            compilation_options: Default::default(),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
             targets: &[Some(wgpu::ColorTargetState {
                 format: rs.target_format,
                 blend: None,
                 write_mask: wgpu::ColorWrites::ALL,
             })],
         }),
-        primitive: Default::default(),
+        primitive: wgpu::PrimitiveState::default(),
         depth_stencil: None,
-        multisample: Default::default(),
+        multisample: wgpu::MultisampleState::default(),
         multiview_mask: None,
         cache: None,
     });
@@ -780,7 +779,7 @@ impl egui_wgpu::CallbackTrait for Paint {
                     },
                     size,
                 );
-                let view = texture.create_view(&Default::default());
+                let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
                 let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
                     label: Some("helios.viewport.layer"),
                     layout: &gpu.layout,

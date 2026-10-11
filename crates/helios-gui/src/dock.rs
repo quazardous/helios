@@ -1,4 +1,4 @@
-//! The shell's layout nodes as egui_dock trees, and back. One dock per
+//! The shell's layout nodes as `egui_dock` trees, and back. One dock per
 //! area; the shell's layout stays the saved form, the dock is how it is
 //! shown and moved.
 
@@ -18,7 +18,7 @@ fn place(dock: &mut DockState<String>, at: NodeIndex, node: &Node) {
     match node {
         Node::Tabs { panels, active } => {
             if let Ok(leaf) = tree.leaf_mut(at) {
-                leaf.tabs = panels.clone();
+                leaf.tabs.clone_from(panels);
                 leaf.active = (*active).min(panels.len().saturating_sub(1)).into();
             }
         }

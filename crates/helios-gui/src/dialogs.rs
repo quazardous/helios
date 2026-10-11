@@ -158,7 +158,7 @@ fn requests_id() -> Id {
 pub fn request(ctx: &egui::Context, r: Request) {
     ctx.data_mut(|d| {
         d.get_temp_mut_or_default::<Vec<Request>>(requests_id())
-            .push(r)
+            .push(r);
     });
 }
 
@@ -327,12 +327,11 @@ impl Browse {
                 if let Some(p) = self.typed_path() {
                     return self.take(p, recent);
                 }
-                match self.rows.get(self.selected) {
-                    Some(Place::File(p)) => Some(p.clone()),
-                    _ => {
-                        self.error = Some("Choose a file".into());
-                        None
-                    }
+                if let Some(Place::File(p)) = self.rows.get(self.selected) {
+                    Some(p.clone())
+                } else {
+                    self.error = Some("Choose a file".into());
+                    None
                 }
             }
         }

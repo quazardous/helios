@@ -180,7 +180,8 @@ fn pictures_of_the_parameters_panel() {
     let out = std::env::var_os("HELIOS_DOC_PICTURES").map(std::path::PathBuf::from);
     for theme in ["helios-dark", "helios-light"] {
         let mut h = harness();
-        h.state_mut().set_theme(theme, Default::default());
+        h.state_mut()
+            .set_theme(theme, std::collections::BTreeMap::default());
         h.state_mut()
             .run(
                 "param.set",

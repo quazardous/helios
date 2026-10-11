@@ -20,8 +20,8 @@ use helios_shell::panels::{Area, PanelSpec, Panels};
 /// The panels Helios declares today, with the areas each may be moved to;
 /// each shows a placeholder until its widget lands.
 pub fn helios_panels() -> Panels {
+    use Area::{BottomPanel, Editors, PrimarySideBar, SecondarySideBar};
     let mut panels = Panels::new();
-    use Area::*;
     let sides = vec![PrimarySideBar, SecondarySideBar, BottomPanel];
     for (id, title, area, areas) in [
         ("helios.viewport", "Image", Editors, vec![Editors]),

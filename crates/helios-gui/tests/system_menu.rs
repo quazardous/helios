@@ -59,7 +59,7 @@ fn the_logo_opens_the_system_menu_and_alt_space_too() {
 #[test]
 fn the_system_menu_is_declared_with_keys_ticks_and_lists() {
     let mut shell = framed();
-    shell.set_theme("helios-light", Default::default());
+    shell.set_theme("helios-light", std::collections::BTreeMap::default());
     let items = shell.menu_items("system");
     assert_eq!(
         titles(&items),

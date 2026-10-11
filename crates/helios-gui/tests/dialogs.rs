@@ -258,7 +258,7 @@ fn pictures_of_each_kind() {
     for theme in ["helios-dark", "helios-light"] {
         for kind in ["confirm", "form", "menu", "toast"] {
             let mut shell = Shell::new(helios_panels(), None);
-            shell.set_theme(theme, Default::default());
+            shell.set_theme(theme, std::collections::BTreeMap::default());
             let target = match kind {
                 "confirm" => {
                     shell.confirm(Confirm {

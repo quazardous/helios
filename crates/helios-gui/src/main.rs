@@ -66,7 +66,11 @@ fn fill_library(shell: &mut Shell, vault: &Vault) -> Result<(), String> {
                 .as_ref()
                 .and_then(|p| p.file_name())
                 .map_or_else(|| id[..12].to_string(), |n| n.to_string_lossy().into()),
-            rating: row.fields.get(RATING).and_then(|v| v.as_i64()).unwrap_or(0),
+            rating: row
+                .fields
+                .get(RATING)
+                .and_then(serde_json::Value::as_i64)
+                .unwrap_or(0),
             labels: row
                 .fields
                 .get(LABELS)
@@ -163,10 +167,10 @@ impl eframe::App for App {
             let saved = file
                 .parent()
                 .map_or(Ok(()), std::fs::create_dir_all)
-                .and_then(|_| {
+                .and_then(|()| {
                     std::fs::write(file.with_file_name("workspace.json"), pointer.to_string())
                 })
-                .and_then(|_| std::fs::write(file, self.shell.layout().to_json()));
+                .and_then(|()| std::fs::write(file, self.shell.layout().to_json()));
             if let Err(e) = saved {
                 eprintln!(
                     "helios-gui: cannot save the layout to {}: {e}",

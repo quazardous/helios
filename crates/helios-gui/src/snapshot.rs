@@ -1,6 +1,6 @@
 //! Pictures of the interface taken by the framework itself, without a
 //! window manager in the way: a named widget, a panel, the window. Headless
-//! through egui_kittest's wgpu renderer, or from a real window through
+//! through `egui_kittest`'s wgpu renderer, or from a real window through
 //! egui's screenshot command. Recordings are sequences of such pictures,
 //! encoded to MP4 by `ffmpeg` when it is on the PATH, kept as numbered PNG
 //! files otherwise.
@@ -15,7 +15,11 @@ use image::RgbaImage;
 /// An egui screenshot as an image.
 pub fn from_color_image(image: &ColorImage) -> RgbaImage {
     let [w, h] = image.size;
-    let bytes = image.pixels.iter().flat_map(|c| c.to_array()).collect();
+    let bytes = image
+        .pixels
+        .iter()
+        .flat_map(egui::Color32::to_array)
+        .collect();
     RgbaImage::from_raw(w as u32, h as u32, bytes).expect("egui image size")
 }
 

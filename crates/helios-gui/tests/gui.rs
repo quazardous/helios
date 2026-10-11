@@ -13,7 +13,7 @@ use serde_json::json;
 
 fn tabs(p: &[&str], active: usize) -> Node {
     Node::Tabs {
-        panels: p.iter().map(|s| s.to_string()).collect(),
+        panels: p.iter().map(std::string::ToString::to_string).collect(),
         active,
     }
 }

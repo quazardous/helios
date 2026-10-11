@@ -231,11 +231,11 @@ impl Shell {
             machine: helios_profile::Machine::here(&config_dir().join("machine.toml")),
             loaded: None,
             resolved_view: Arc::new(Mutex::new(Value::Null)),
-            scopes: Default::default(),
-            library: Default::default(),
-            values: Default::default(),
-            viewport: Default::default(),
-            params: Default::default(),
+            scopes: std::rc::Rc::default(),
+            library: std::rc::Rc::default(),
+            values: Arc::default(),
+            viewport: std::rc::Rc::default(),
+            params: std::rc::Rc::default(),
             dialogs: VecDeque::new(),
             dialog_view: Arc::default(),
             assume_yes: false,
@@ -480,7 +480,7 @@ impl Shell {
     /// Applies a resolved profile's parts the shell holds.
     fn apply_resolved(&mut self, p: &helios_profile::Profile) {
         use helios_profile::{System, local_keys};
-        self.profile_name = p.name.clone();
+        self.profile_name.clone_from(&p.name);
         if let Some(t) = &p.theme {
             self.set_theme(&t.name, t.overrides.clone());
         }
@@ -526,7 +526,7 @@ impl Shell {
         self.profiles_dir.join(format!("{name}.helios-profile"))
     }
 
-    fn read_profile(&self, path: &std::path::Path) -> Result<helios_profile::Profile, String> {
+    fn read_profile(path: &std::path::Path) -> Result<helios_profile::Profile, String> {
         let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
         helios_profile::Profile::import(&text)
     }
@@ -534,13 +534,11 @@ impl Shell {
     /// Uses a named profile, the parts it leaves out from the Default
     /// profile (`default.helios-profile`, when there is one).
     pub fn use_profile(&mut self, name: &str) -> Result<(), String> {
-        let default = self
-            .read_profile(&self.profile_file("default"))
-            .unwrap_or_default();
+        let default = Self::read_profile(&self.profile_file("default")).unwrap_or_default();
         let p = if name == "default" {
             default.clone()
         } else {
-            self.read_profile(&self.profile_file(name))?
+            Self::read_profile(&self.profile_file(name))?
         };
         let mut p = p.over(&default);
         p.name = name.to_string();
@@ -826,7 +824,12 @@ impl Shell {
                 Box::new(move |_| Ok(action())),
             );
         }
-        let names: Vec<String> = self.themes.names().iter().map(|n| n.to_string()).collect();
+        let names: Vec<String> = self
+            .themes
+            .names()
+            .iter()
+            .map(std::string::ToString::to_string)
+            .collect();
         for name in names {
             let title = name
                 .trim_start_matches("helios-")
@@ -1112,18 +1115,17 @@ impl Shell {
         };
         self.auxiliary.retain(|a| a.panel != panel);
         self.hidden.retain(|h| h != panel);
-        match self.docks.iter_mut().find(|(a, _)| *a == area) {
-            Some((_, dock)) => dock.push_to_first_leaf(panel.to_string()),
-            None => {
-                self.docks.push((
-                    area,
-                    to_dock(&Node::Tabs {
-                        panels: vec![panel.to_string()],
-                        active: 0,
-                    }),
-                ));
-                self.docks.sort_by_key(|(a, _)| *a);
-            }
+        if let Some((_, dock)) = self.docks.iter_mut().find(|(a, _)| *a == area) {
+            dock.push_to_first_leaf(panel.to_string());
+        } else {
+            self.docks.push((
+                area,
+                to_dock(&Node::Tabs {
+                    panels: vec![panel.to_string()],
+                    active: 0,
+                }),
+            ));
+            self.docks.sort_by_key(|(a, _)| *a);
         }
     }
 
@@ -1240,7 +1242,11 @@ impl Shell {
                     };
                     rows.push(Row::Entry(Entry {
                         title: menu_title(&spec.title),
-                        keys: self.keymap.keys_for(&id).first().map(|k| k.to_string()),
+                        keys: self
+                            .keymap
+                            .keys_for(&id)
+                            .first()
+                            .map(std::string::ToString::to_string),
                         disabled: (!enabled).then(|| format!("Not available here ({})", spec.when)),
                         checked,
                         id,
@@ -1420,7 +1426,11 @@ impl Shell {
                         id: id.clone(),
                         args: args.clone(),
                         title: menu_title(&spec.title),
-                        keys: self.keymap.keys_for(id).first().map(|k| k.to_string()),
+                        keys: self
+                            .keymap
+                            .keys_for(id)
+                            .first()
+                            .map(std::string::ToString::to_string),
                         disabled: (!applies).then(|| format!("Not available here ({})", spec.when)),
                         checked: false,
                     }))
@@ -1482,33 +1492,30 @@ impl Shell {
         self.auxiliary.retain(|a| a.panel != panel);
         self.hidden.retain(|h| h != panel);
         let tab = panel.to_string();
-        match self.docks.iter_mut().find(|(a, _)| *a == area) {
-            Some((_, dock)) => {
-                let leaf = at.and_then(|at| {
-                    dock.main_surface()
-                        .iter()
-                        .position(|n| matches!(n, egui_dock::Node::Leaf(l) if l.rect.contains(at)))
-                });
-                match leaf {
-                    Some(i) => {
-                        let tree = dock.main_surface_mut();
-                        let node = egui_dock::NodeIndex(i);
-                        tree.set_focused_node(node);
-                        tree.push_to_focused_leaf(tab);
-                    }
-                    None => dock.push_to_first_leaf(tab),
+        if let Some((_, dock)) = self.docks.iter_mut().find(|(a, _)| *a == area) {
+            let leaf = at.and_then(|at| {
+                dock.main_surface()
+                    .iter()
+                    .position(|n| matches!(n, egui_dock::Node::Leaf(l) if l.rect.contains(at)))
+            });
+            match leaf {
+                Some(i) => {
+                    let tree = dock.main_surface_mut();
+                    let node = egui_dock::NodeIndex(i);
+                    tree.set_focused_node(node);
+                    tree.push_to_focused_leaf(tab);
                 }
+                None => dock.push_to_first_leaf(tab),
             }
-            None => {
-                self.docks.push((
-                    area,
-                    to_dock(&Node::Tabs {
-                        panels: vec![tab],
-                        active: 0,
-                    }),
-                ));
-                self.docks.sort_by_key(|(a, _)| *a);
-            }
+        } else {
+            self.docks.push((
+                area,
+                to_dock(&Node::Tabs {
+                    panels: vec![tab],
+                    active: 0,
+                }),
+            ));
+            self.docks.sort_by_key(|(a, _)| *a);
         }
         self.focused = Some(panel.to_string());
         Ok(())
@@ -1560,7 +1567,7 @@ impl Shell {
         })
     }
 
-    /// Follows a tab drag; when it is dropped over another area, egui_dock
+    /// Follows a tab drag; when it is dropped over another area, `egui_dock`
     /// (which only sees its own area) leaves it where it was, and the shell
     /// moves it, or says why it may not go there.
     fn follow_drag(&mut self, ctx: &Egui) {
@@ -1703,7 +1710,7 @@ impl Shell {
                             .keymap
                             .keys_for(&spec.id)
                             .iter()
-                            .map(|k| k.to_string())
+                            .map(std::string::ToString::to_string)
                             .collect();
                         if keys.is_empty() {
                             return None;
@@ -1763,7 +1770,7 @@ impl Shell {
                 let saved = path
                     .parent()
                     .map_or(Ok(()), std::fs::create_dir_all)
-                    .and_then(|_| std::fs::write(&path, text));
+                    .and_then(|()| std::fs::write(&path, text));
                 self.note(match saved {
                     Ok(()) => format!("theme exported to {}", path.display()),
                     Err(e) => format!("cannot export the theme to {}: {e}", path.display()),
@@ -1788,7 +1795,7 @@ impl Shell {
                 let written = profile.export(&present, &|_, _| false).and_then(|text| {
                     path.parent()
                         .map_or(Ok(()), std::fs::create_dir_all)
-                        .and_then(|_| std::fs::write(&path, text))
+                        .and_then(|()| std::fs::write(&path, text))
                         .map_err(|e| format!("{}: {e}", path.display()))
                 });
                 self.note(match written {
@@ -1796,7 +1803,7 @@ impl Shell {
                     Err(e) => format!("profile not exported: {e}"),
                 });
             }
-            Action::ProfileImport(path) => match self.read_profile(&path) {
+            Action::ProfileImport(path) => match Self::read_profile(&path) {
                 Ok(incoming) => {
                     let changes = helios_profile::diff(&self.profile(), &incoming);
                     let count: usize = changes.iter().map(|d| d.changes.len()).sum();
@@ -1946,7 +1953,7 @@ impl Shell {
             }
             Action::Snapshot { target, path } => {
                 self.shots.push_back(Shot::Save { target, path });
-                ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(Default::default()));
+                ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::default()));
             }
             Action::RecordStart { target, path, fps } => {
                 self.recording = Some((target, Recorder::new(path, fps)));
@@ -1997,8 +2004,10 @@ impl Shell {
                     .target_rect(&target)
                     .map(|r| snapshot::crop(&full, r, self.pixels_per_point))
                     .and_then(|img| snapshot::save(&img, &path))
-                    .map(|_| format!("{target} pictured to {}", path.display()))
-                    .unwrap_or_else(|e| format!("snapshot failed: {e}"));
+                    .map_or_else(
+                        |e| format!("snapshot failed: {e}"),
+                        |()| format!("{target} pictured to {}", path.display()),
+                    );
                 self.note(note);
             }
             Shot::Frame => {
@@ -2052,7 +2061,7 @@ impl Shell {
                     && self.menu.is_none()
                     && (self.palette.is_none() || key == Key::F1 || modifiers.ctrl) =>
                 {
-                    self.on_key(key, modifiers)
+                    self.on_key(key, modifiers);
                 }
                 Event::Screenshot { image, .. } => self.on_screenshot(&image),
                 _ => {}
@@ -2096,7 +2105,7 @@ impl Shell {
 
         if self.recording.is_some() {
             self.shots.push_back(Shot::Frame);
-            ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(Default::default()));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::default()));
             ctx.request_repaint();
         }
     }
@@ -2194,8 +2203,7 @@ impl Shell {
             let title = self
                 .panels
                 .get(&aux.panel)
-                .map(|p| p.title.clone())
-                .unwrap_or_else(|| aux.panel.clone());
+                .map_or_else(|| aux.panel.clone(), |p| p.title.clone());
             // The same title and, when Helios draws the main window's
             // frame, the same frame.
             let window_title = format!("{title} — Helios");
@@ -2258,7 +2266,11 @@ impl Shell {
             .filter(|s| s.id != "workbench.palette")
             .take(12)
             .map(|s| {
-                let keys = self.keymap.keys_for(&s.id).first().map(|k| k.to_string());
+                let keys = self
+                    .keymap
+                    .keys_for(&s.id)
+                    .first()
+                    .map(std::string::ToString::to_string);
                 (s.id.clone(), format!("{}: {}", s.category, s.title), keys)
             })
             .collect();
@@ -2431,8 +2443,7 @@ impl TabViewer for Viewer<'_> {
     fn title(&mut self, tab: &mut String) -> egui::WidgetText {
         self.panels
             .get(tab)
-            .map(|p| p.title.clone())
-            .unwrap_or_else(|| tab.clone())
+            .map_or_else(|| tab.clone(), |p| p.title.clone())
             .into()
     }
 
@@ -2442,12 +2453,11 @@ impl TabViewer for Viewer<'_> {
         if ui.input(|i| i.pointer.any_pressed()) && ui.rect_contains_pointer(rect) {
             *self.focused = Some(tab.clone());
         }
-        match self.contents.get_mut(tab) {
-            Some(c) => c(ui),
-            None => {
-                let title = self.panels.get(tab).map_or(tab.as_str(), |p| &p.title);
-                placeholder(ui, title)
-            }
+        if let Some(c) = self.contents.get_mut(tab) {
+            c(ui);
+        } else {
+            let title = self.panels.get(tab).map_or(tab.as_str(), |p| &p.title);
+            placeholder(ui, title);
         }
     }
 
@@ -2460,7 +2470,7 @@ impl TabViewer for Viewer<'_> {
 
 /// Headless rendering, for tests, agents and machines without a display.
 pub mod headless {
-    use super::*;
+    use super::{Recorder, RgbaImage, Shell, snapshot};
     use egui_kittest::Harness;
 
     /// A shell drawn offscreen at a size, on the wgpu renderer.
