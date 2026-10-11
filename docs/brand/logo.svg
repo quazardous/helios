@@ -1,25 +1,26 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-labelledby="t">
   <title id="t">Helios</title>
   <!-- A stylized iris diaphragm that reads as a sun: the opening is the
-       sun's disc, the blades' edges in yellow are its rays, running to the
-       edges of the picture. -->
+       sun's disc and the blades' edges its rays, all lit by one light that
+       starts at the centre and spreads to the edges of the picture. -->
   <defs>
-    <radialGradient id="sun" gradientUnits="userSpaceOnUse" cx="128" cy="128" r="40.70">
+    <radialGradient id="sun" gradientUnits="userSpaceOnUse" cx="128" cy="128" r="181.02">
       <stop offset="0" stop-color="#fffbe6"/>
-      <stop offset="0.35" stop-color="#ffe066"/>
-      <stop offset="0.75" stop-color="#ffbe1a"/>
-      <stop offset="1" stop-color="#f59a00"/>
+      <stop offset="0.140" stop-color="#ffe066"/>
+      <stop offset="0.311" stop-color="#ffc21a"/>
+      <stop offset="0.656" stop-color="#f7a600"/>
+      <stop offset="1" stop-color="#ea8a00"/>
     </radialGradient>
     <clipPath id="frame"><rect width="256" height="256"/></clipPath>
   </defs>
   <rect width="256" height="256" fill="#17181c"/>
-  <g clip-path="url(#frame)" stroke="#f5b400" stroke-width="11" stroke-linecap="butt">
-    <line x1="151.10" y1="87.99" x2="306.30" y2="356.81"/>
-    <line x1="174.20" y1="128.00" x2="55.96" y2="332.80"/>
-    <line x1="151.10" y1="168.01" x2="-90.66" y2="168.01"/>
-    <line x1="104.90" y1="168.01" x2="-50.30" y2="-100.81"/>
-    <line x1="81.80" y1="128.00" x2="200.04" y2="-76.80"/>
-    <line x1="104.90" y1="87.99" x2="346.66" y2="87.99"/>
+  <g clip-path="url(#frame)" stroke="url(#sun)" stroke-width="11" stroke-linecap="butt">
+    <line x1="153.41" y1="83.99" x2="312.31" y2="359.21"/>
+    <line x1="178.82" y1="128.00" x2="60.58" y2="332.80"/>
+    <line x1="153.41" y1="172.01" x2="-92.05" y2="172.01"/>
+    <line x1="102.59" y1="172.01" x2="-56.31" y2="-103.21"/>
+    <line x1="77.18" y1="128.00" x2="195.42" y2="-76.80"/>
+    <line x1="102.59" y1="83.99" x2="348.05" y2="83.99"/>
   </g>
-  <path d="M151.10 87.99 L174.20 128.00 L151.10 168.01 L104.90 168.01 L81.80 128.00 L104.90 87.99 Z" fill="url(#sun)" stroke="#f5b400" stroke-width="11" stroke-linejoin="round"/>
+  <path d="M153.41 83.99 L178.82 128.00 L153.41 172.01 L102.59 172.01 L77.18 128.00 L102.59 83.99 Z" fill="url(#sun)" stroke="url(#sun)" stroke-width="11" stroke-linejoin="round"/>
 </svg>
