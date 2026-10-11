@@ -40,3 +40,21 @@ jobs:
           else
             cargo xtask check
           fi
+
+  # Every linter of `cargo xtask lint`, installed so none is skipped:
+  # rustfmt, clippy, cargo-deny, cargo-machete, taplo, typos, shellcheck, ruff.
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny,cargo-machete,taplo,typos
+      - name: shellcheck and ruff
+        run: |
+          sudo apt-get update -q && sudo apt-get install -yq shellcheck
+          pipx install ruff
+      - run: cargo xtask lint --require-all
