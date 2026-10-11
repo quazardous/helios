@@ -126,9 +126,14 @@ credo (being researched, see docs/gui.md).
 long-term goal). darktable brings compatibility (edits, workflow, users) and
 CPU computation; vkdt brings the graph and GPU speed. The meeting point is
 the module contract: one description able to host a module coming from
-either side, so both lineages run in the same graph. How (porting, bridging,
-contributing upstream to one or both) is not decided. No vkdt fork until a
-change to vkdt itself is needed (proposed 2026-10-11, not decided).
+either side, so both lineages run in the same graph. vkdt modules are
+**ported**, not bridged (2026-10-11, decided): a Rust CPU reference and a
+WGSL variant hand-translated from their GLSL, checked against `vkdt-cli` as
+darktable's modules are against `darktable-cli`. Embedding libvkdt would
+bring a second Vulkan device, which vkdt creates itself; a port keeps one
+device, the engine's cache and tiling, and the CPU reference. **No vkdt
+fork** (2026-10-11, decided): small fixes go upstream as pull requests,
+and the question comes back only if a needed change is refused.
 
 What darktable already offers to build on:
 
