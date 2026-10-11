@@ -29,9 +29,11 @@ use serde_json::json;
 pub mod catalog;
 pub mod contract;
 pub mod fields;
+pub mod versions;
 
 pub use catalog::{ApplyReport, CursorId, CursorInfo, Delta, Row};
 pub use fields::{AuditEntry, Command, Order, Query};
+pub use versions::{Version, VersionId};
 
 /// An image, identified by the hash of its file.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
@@ -113,11 +115,18 @@ pub trait Store: Send {
     /// Records a change; returns its sequence number.
     fn add_audit(&mut self, entry: &AuditEntry) -> Result<u64, String>;
     fn audit(&self, id: &ImageId) -> Result<Vec<AuditEntry>, String>;
+
+    /// Keeps a version; false if it was already kept (same id).
+    fn put_version(&mut self, version: &Version) -> Result<bool, String>;
+    fn version(&self, id: &VersionId) -> Result<Option<Version>, String>;
+    /// An image's versions, in no particular order.
+    fn versions(&self, image: &ImageId) -> Result<Vec<Version>, String>;
 }
 
 /// Rows in memory: the reference other stores are checked against.
 #[derive(Default)]
 pub struct MemoryStore {
+    versions: BTreeMap<VersionId, Version>,
     images: BTreeMap<ImageId, Image>,
     locations: BTreeMap<PathBuf, (ImageId, Location)>,
     fields: BTreeMap<(ImageId, String), serde_json::Value>,
@@ -247,6 +256,27 @@ impl Store for MemoryStore {
             .audit
             .iter()
             .filter(|e| e.image == *id)
+            .cloned()
+            .collect())
+    }
+
+    fn put_version(&mut self, version: &Version) -> Result<bool, String> {
+        if self.versions.contains_key(&version.id) {
+            return Ok(false);
+        }
+        self.versions.insert(version.id, version.clone());
+        Ok(true)
+    }
+
+    fn version(&self, id: &VersionId) -> Result<Option<Version>, String> {
+        Ok(self.versions.get(id).cloned())
+    }
+
+    fn versions(&self, image: &ImageId) -> Result<Vec<Version>, String> {
+        Ok(self
+            .versions
+            .values()
+            .filter(|v| v.image == *image)
             .cloned()
             .collect())
     }

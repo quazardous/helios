@@ -26,6 +26,71 @@ pub fn check<S: Store>(make: impl Fn() -> S) {
     queries_filter_and_order(make());
     commands_skip_unchanged_values_coalesce_and_audit(make());
     cursors_cost_one_query_and_report_deltas(make());
+    versions_are_content_addressed_and_heads_follow_forks_and_merges(make());
+}
+
+fn versions_are_content_addressed_and_heads_follow_forks_and_merges<S: Store>(store: S) {
+    use crate::versions::Version;
+
+    let bus = Arc::new(Bus::new());
+    let vault = Vault::new(store).with_bus(bus.clone());
+    let img = image(1);
+    let edit = |ev: f64| json!({ "modules": [{ "name": "exp", "module": "exposure", "params": { "exposure": { "float": ev } } }] });
+    let first = Version::new(img.id, vec![], edit(0.5), "import:xmp", 10);
+    assert!(
+        vault.add_version(&first).is_err(),
+        "an unknown image has no versions"
+    );
+    {
+        vault.store.lock().unwrap().add_image(&img).unwrap();
+    }
+    assert!(vault.add_version(&first).unwrap());
+    // The same edit on the same parents is the same version, whoever and whenever.
+    let again = Version::new(img.id, vec![], edit(0.5), "user", 99);
+    assert_eq!(again.id, first.id);
+    assert!(!vault.add_version(&again).unwrap());
+
+    // Two edits from the same parent: both kept, two heads.
+    let user = Version::new(img.id, vec![first.id], edit(1.0), "user", 20).labelled("brighter");
+    let agent = Version::new(img.id, vec![first.id], edit(0.8), "agent:a1", 21);
+    vault.add_version(&user).unwrap();
+    vault.add_version(&agent).unwrap();
+    let heads: Vec<_> = vault.heads(&img.id).unwrap().iter().map(|v| v.id).collect();
+    assert_eq!(heads, [user.id, agent.id]);
+    // A merge has both as parents, in either order the same version.
+    let merge = Version::new(img.id, vec![agent.id, user.id], edit(0.9), "user", 30);
+    assert_eq!(
+        merge.id,
+        Version::new(img.id, vec![user.id, agent.id], edit(0.9), "user", 30).id
+    );
+    vault.add_version(&merge).unwrap();
+    assert_eq!(vault.heads(&img.id).unwrap(), [merge.clone()]);
+
+    let all = vault.versions(&img.id).unwrap();
+    assert_eq!(all.len(), 4);
+    assert_eq!(all[0], first);
+    assert_eq!(
+        vault.version(&user.id).unwrap().unwrap().label.as_deref(),
+        Some("brighter")
+    );
+
+    // A parent must be a version of the same image.
+    let other = image(2);
+    vault.store.lock().unwrap().add_image(&other).unwrap();
+    let stray = Version::new(other.id, vec![first.id], edit(0.1), "user", 40);
+    assert!(
+        vault
+            .add_version(&stray)
+            .unwrap_err()
+            .contains("another image")
+    );
+
+    let announced = bus
+        .since(0)
+        .iter()
+        .filter(|e| e.kind == "vault.version_added")
+        .count();
+    assert_eq!(announced, 4);
 }
 
 fn scratch(name: &str) -> PathBuf {

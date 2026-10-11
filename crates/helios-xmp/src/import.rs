@@ -166,6 +166,41 @@ fn map(operation: &str, f: &Map<String, Value>, report: &mut Report) -> Option<M
     })
 }
 
+/// Where an imported edit comes from, as a version records it.
+pub const ORIGIN: &str = "import:xmp";
+
+impl Imported {
+    /// The edit as a network after a source named `src`, the modules
+    /// chained in history order (output to input), in the shape of a
+    /// `helios-node` network description: what the vault keeps as a
+    /// version (`Version::new(image, parents, imported.edit(), ORIGIN, now)`).
+    pub fn edit(&self) -> Value {
+        let mut modules = Vec::new();
+        let mut connections = Vec::new();
+        let mut previous = ("src".to_string(), "image");
+        for n in &self.nodes {
+            let name = if n.multi_name.is_empty() {
+                n.operation.clone()
+            } else {
+                format!("{} {}", n.operation, n.multi_name)
+            };
+            modules.push(serde_json::json!({
+                "name": name,
+                "module": n.module,
+                "params": n.params,
+            }));
+            connections.push(serde_json::json!({
+                "from": previous.0,
+                "port": previous.1,
+                "to": name,
+                "input": "input",
+            }));
+            previous = (name, "output");
+        }
+        serde_json::json!({ "modules": modules, "connections": connections })
+    }
+}
+
 /// Reads a sidecar's effective history into Helios modules.
 pub fn import(sidecar: &Sidecar, layouts: &Layouts) -> Imported {
     let mut out = Imported::default();

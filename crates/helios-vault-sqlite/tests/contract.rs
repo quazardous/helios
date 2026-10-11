@@ -2,7 +2,7 @@
 //! what it knows across reopening.
 
 use helios_core::Describe;
-use helios_vault::{Vault, contract};
+use helios_vault::{Vault, Version, contract};
 use helios_vault_sqlite::SqliteStore;
 
 #[test]
@@ -16,10 +16,15 @@ fn a_sqlite_vault_survives_reopening() {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(dir.join("photos")).unwrap();
     std::fs::write(dir.join("photos/a.cr3"), b"raw bytes").unwrap();
-    {
+    let edit = serde_json::json!({ "modules": [{ "name": "exp", "module": "exposure" }] });
+    let first = {
         let v = Vault::new(SqliteStore::open(&dir.join("vault.db")).unwrap());
         assert_eq!(v.import(&dir.join("photos"), 1).unwrap().added, 1);
-    }
+        let image = v.images().unwrap()[0].id;
+        let first = Version::new(image, vec![], edit.clone(), "user", 1).labelled("first");
+        v.add_version(&first).unwrap();
+        first
+    };
     let v = Vault::new(SqliteStore::open(&dir.join("vault.db")).unwrap());
     assert_eq!(v.import(&dir.join("photos"), 2).unwrap().unchanged, 1);
     assert_eq!(
@@ -28,5 +33,11 @@ fn a_sqlite_vault_survives_reopening() {
         "known from the database: nothing read"
     );
     assert_eq!(v.describe()["images"], 1);
+    // The edit history came back with the images, unchanged.
+    assert_eq!(v.heads(&first.image).unwrap(), [first.clone()]);
+    assert!(
+        !v.add_version(&Version::new(first.image, vec![], edit, "agent", 9))
+            .unwrap()
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }

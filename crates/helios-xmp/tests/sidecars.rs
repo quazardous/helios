@@ -234,3 +234,29 @@ fn old_sidecars_import_their_values_after_migration() {
         "{wb:?}"
     );
 }
+
+#[test]
+fn an_imported_edit_is_a_chained_network() {
+    use helios_core::Params;
+    use helios_xmp::{Imported, Node};
+    let node = |op: &str, multi: &str, module: &str| Node {
+        operation: op.into(),
+        multi_name: multi.into(),
+        module: module.into(),
+        params: Params::new().with("exposure", Param::Float(1.0)),
+    };
+    let imported = Imported {
+        nodes: vec![
+            node("exposure", "", "exposure"),
+            node("exposure", "1", "exposure"),
+        ],
+        ..Default::default()
+    };
+    let edit = imported.edit();
+    assert_eq!(edit["modules"][1]["name"], "exposure 1");
+    assert_eq!(edit["modules"][0]["params"]["exposure"]["float"], 1.0);
+    assert_eq!(edit["connections"][0]["from"], "src");
+    assert_eq!(edit["connections"][1]["from"], "exposure");
+    assert_eq!(edit["connections"][1]["port"], "output");
+    assert_eq!(edit["connections"][1]["to"], "exposure 1");
+}

@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 use serde_json::Value;
 
 use helios_vault::fields::{AuditEntry, LABELS, Order, Query, RATING};
-use helios_vault::{Image, ImageId, Location, Store, parse_hash};
+use helios_vault::{Image, ImageId, Location, Store, Version, VersionId, parse_hash};
 
 const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS images (
@@ -48,10 +48,65 @@ CREATE TABLE IF NOT EXISTS audit (
     new   TEXT
 );
 CREATE INDEX IF NOT EXISTS audit_image ON audit (image);
+CREATE TABLE IF NOT EXISTS versions (
+    id      TEXT PRIMARY KEY,
+    image   TEXT NOT NULL REFERENCES images (id),
+    parents TEXT NOT NULL,  -- JSON array of version ids
+    edit    TEXT NOT NULL,  -- JSON
+    origin  TEXT NOT NULL,
+    at      INTEGER NOT NULL,
+    label   TEXT
+);
+CREATE INDEX IF NOT EXISTS versions_image ON versions (image);
 ";
 
 pub struct SqliteStore {
     db: Connection,
+}
+
+impl SqliteStore {
+    fn versions_where(&self, condition: &str, key: &str) -> Result<Vec<Version>, String> {
+        let mut statement = self
+            .db
+            .prepare(&format!(
+                "SELECT id, image, parents, edit, origin, at, label FROM versions WHERE {condition}"
+            ))
+            .map_err(err)?;
+        type Raw = (String, String, String, String, String, i64, Option<String>);
+        let rows: Vec<Raw> = statement
+            .query_map(params![key], |r| {
+                Ok((
+                    r.get(0)?,
+                    r.get(1)?,
+                    r.get(2)?,
+                    r.get(3)?,
+                    r.get(4)?,
+                    r.get(5)?,
+                    r.get(6)?,
+                ))
+            })
+            .map_err(err)?
+            .collect::<Result<_, _>>()
+            .map_err(err)?;
+        rows.into_iter()
+            .map(|(id, image, parents, edit, origin, at, label)| {
+                let parents: Vec<String> =
+                    serde_json::from_str(&parents).map_err(|e| format!("version {id}: {e}"))?;
+                Ok(Version {
+                    id: VersionId::from_hex(&id)?,
+                    image: ImageId::from_hex(&image)?,
+                    parents: parents
+                        .iter()
+                        .map(|p| VersionId::from_hex(p))
+                        .collect::<Result<_, _>>()?,
+                    edit: serde_json::from_str(&edit).map_err(|e| format!("version {id}: {e}"))?,
+                    origin,
+                    at: at as u64,
+                    label,
+                })
+            })
+            .collect()
+    }
 }
 
 fn err(e: rusqlite::Error) -> String {
@@ -381,5 +436,34 @@ impl Store for SqliteStore {
                 })
             })
             .collect()
+    }
+
+    fn put_version(&mut self, v: &Version) -> Result<bool, String> {
+        let parents: Vec<String> = v.parents.iter().map(VersionId::hex).collect();
+        let added = self
+            .db
+            .execute(
+                "INSERT OR IGNORE INTO versions (id, image, parents, edit, origin, at, label) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![
+                    v.id.hex(),
+                    v.image.hex(),
+                    serde_json::to_string(&parents).expect("ids serialize"),
+                    v.edit.to_string(),
+                    v.origin,
+                    v.at as i64,
+                    v.label
+                ],
+            )
+            .map_err(err)?;
+        Ok(added == 1)
+    }
+
+    fn version(&self, id: &VersionId) -> Result<Option<Version>, String> {
+        self.versions_where("id = ?1", &id.hex())
+            .map(|mut v| v.pop())
+    }
+
+    fn versions(&self, image: &ImageId) -> Result<Vec<Version>, String> {
+        self.versions_where("image = ?1", &image.hex())
     }
 }
