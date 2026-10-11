@@ -271,41 +271,56 @@ fn request(
     })
 }
 
-/// Asks `resolver` about every decision waiting on a model (full-AI and
-/// AI-assisted nodes that are pending), as scheduler jobs needing one
-/// `ai_calls` each, waits for them, and records what came back.
-pub fn resolve_waiting(
-    book: &mut Book,
-    graph: &mut Graph,
+/// Phase one: the requests for every decision waiting on a model
+/// (full-AI and AI-assisted nodes that are pending), their inputs
+/// rendered. Needs the graph only to read; the requests that could not be
+/// built are reported, with why.
+pub fn ask(
+    book: &Book,
+    graph: &Graph,
     engine: &Engine,
-    scheduler: &Scheduler,
-    resolver: Arc<dyn Resolver>,
     settings: &Settings,
-) -> Result<Report, String> {
-    let mut report = Report::default();
-    let waiting: Vec<String> = book
-        .waiting()
-        .into_iter()
-        .filter(|(_, s)| *s == Status::Pending)
-        .map(|(n, _)| n.to_string())
-        .collect();
-    let (tx, rx) = mpsc::channel();
-    let mut asked = 0;
-    for node in waiting {
-        let mode = book.mode(&node)?;
-        if mode == Mode::Human {
+) -> (Vec<Request>, Vec<(String, String)>) {
+    let mut requests = Vec::new();
+    let mut failed = Vec::new();
+    for (node, status) in book.waiting() {
+        if status != Status::Pending {
             continue;
         }
-        let req = match request(engine, graph, &node, mode, settings) {
-            Ok(r) => r,
+        let mode = match book.mode(node) {
+            Ok(Mode::Human) => continue,
+            Ok(m) => m,
             Err(e) => {
-                report.failed.push((node, e));
+                failed.push((node.to_string(), e));
                 continue;
             }
         };
+        match request(engine, graph, node, mode, settings) {
+            Ok(r) => requests.push(r),
+            Err(e) => failed.push((node.to_string(), e)),
+        }
+    }
+    (requests, failed)
+}
+
+/// What a model call gave, with the request it answers.
+pub type Called = (Request, Result<Resolution, String>);
+
+/// Phase two: calls the resolver for each request, as scheduler jobs
+/// needing one `ai_calls` each, and waits for them. Needs neither the
+/// graph nor the book, so a node keeps serving while models think.
+pub fn call(
+    scheduler: &Scheduler,
+    resolver: Arc<dyn Resolver>,
+    requests: Vec<Request>,
+    timeout: Duration,
+) -> Result<Vec<Called>, String> {
+    let (tx, rx) = mpsc::channel();
+    let asked = requests.len();
+    for req in requests {
         let (tx, resolver) = (tx.clone(), resolver.clone());
         scheduler.submit_spec(
-            JobSpec::new(&format!("decide {node}")).needs(AI_CALLS, 1),
+            JobSpec::new(&format!("decide {}", req.node)).needs(AI_CALLS, 1),
             move |token| {
                 let result = if token.is_cancelled() {
                     Err("cancelled".to_string())
@@ -316,17 +331,33 @@ pub fn resolve_waiting(
                 Ok(())
             },
         );
-        asked += 1;
     }
     drop(tx);
+    let mut called = Vec::with_capacity(asked);
     for _ in 0..asked {
-        let Ok((req, result)) = rx.recv_timeout(settings.timeout) else {
-            return Err(format!(
-                "{} of {asked} model calls did not finish in {:?}",
-                asked - report.answered.len() - report.proposed.len() - report.failed.len(),
-                settings.timeout
-            ));
-        };
+        match rx.recv_timeout(timeout) {
+            Ok(c) => called.push(c),
+            Err(_) => {
+                return Err(format!(
+                    "{} of {asked} model calls did not finish in {timeout:?}",
+                    asked - called.len()
+                ));
+            }
+        }
+    }
+    Ok(called)
+}
+
+/// Phase three: records what came back: full-AI answers in force,
+/// AI-assisted ones as proposals; a failed call leaves its decision waiting.
+pub fn record(
+    book: &mut Book,
+    graph: &mut Graph,
+    called: Vec<Called>,
+    now: u64,
+    report: &mut Report,
+) {
+    for (req, result) in called {
         let keys: Vec<String> = req.inputs.iter().map(|i| i.key.clone()).collect();
         let recorded = result.and_then(|r| match req.mode {
             Mode::FullAi => {
@@ -335,11 +366,11 @@ pub fn resolve_waiting(
                     .first()
                     .cloned()
                     .ok_or("the model gave no option")?;
-                book.model_answer(graph, &req.node, best, r.model, keys, settings.now)
+                book.model_answer(graph, &req.node, best, r.model, keys, now)
                     .map(|_| true)
             }
             _ => book
-                .propose(graph, &req.node, r.options, r.model, keys, settings.now)
+                .propose(graph, &req.node, r.options, r.model, keys, now)
                 .map(|_| false),
         });
         match recorded {
@@ -348,5 +379,24 @@ pub fn resolve_waiting(
             Err(e) => report.failed.push((req.node, e)),
         }
     }
+}
+
+/// Asks `resolver` about every decision waiting on a model and records
+/// the answers: [`ask`], [`call`] and [`record`] in a row.
+pub fn resolve_waiting(
+    book: &mut Book,
+    graph: &mut Graph,
+    engine: &Engine,
+    scheduler: &Scheduler,
+    resolver: Arc<dyn Resolver>,
+    settings: &Settings,
+) -> Result<Report, String> {
+    let (requests, failed) = ask(book, graph, engine, settings);
+    let mut report = Report {
+        failed,
+        ..Report::default()
+    };
+    let called = call(scheduler, resolver, requests, settings.timeout)?;
+    record(book, graph, called, settings.now, &mut report);
     Ok(report)
 }

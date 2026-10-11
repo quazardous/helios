@@ -30,8 +30,10 @@ use std::sync::{Arc, Mutex, RwLock};
 
 use helios_config::{Config, Layer, Schema};
 use helios_core::{Bus, Describe, Engine, Event, Graph, JobId, NodeId, Region, Scheduler};
+use helios_decision::Book;
 use helios_inspect::{Inspector, Listen, new_token, serve_inspector, write_token};
 use helios_node::ExportDesc;
+use helios_resolve::{Report, Resolver, Settings};
 use serde::Serialize;
 use serde_json::{Value, json};
 
@@ -116,6 +118,11 @@ struct Node {
     /// Export jobs, by destination.
     exports: Mutex<Vec<(PathBuf, JobId)>>,
     idle: Mutex<bool>,
+    /// The decisions of the network, and the model that answers them.
+    book: Mutex<Book>,
+    resolver: Option<Arc<dyn Resolver>>,
+    brief: Option<String>,
+    frame: Option<Region>,
 }
 
 impl Node {
@@ -192,6 +199,40 @@ impl Node {
         Ok(job)
     }
 
+    /// Asks the resolver about every decision waiting on a model: inputs
+    /// read under the graph's read lock, models called with no lock held,
+    /// answers recorded under the write lock.
+    fn resolve_decisions(&self) -> Result<Report, String> {
+        let resolver = self
+            .resolver
+            .clone()
+            .ok_or("the network names no `resolver`")?;
+        let region = self.frame.ok_or("the network has no source to decide on")?;
+        let settings = Settings {
+            region,
+            scale: proxy_scale(region),
+            brief: self.brief.clone(),
+            timeout: std::time::Duration::from_secs(600),
+            now: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_secs()),
+        };
+        let (requests, failed) = {
+            let book = self.book.lock().expect("book lock");
+            let graph = self.graph.0.read().expect("graph lock");
+            helios_resolve::ask(&book, &graph, &self.engine, &settings)
+        };
+        let called = helios_resolve::call(&self.scheduler, resolver, requests, settings.timeout)?;
+        let mut report = Report {
+            failed,
+            ..Report::default()
+        };
+        let mut book = self.book.lock().expect("book lock");
+        let mut graph = self.graph.0.write().expect("graph lock");
+        helios_resolve::record(&mut book, &mut graph, called, settings.now, &mut report);
+        Ok(report)
+    }
+
     fn export_states(&self) -> Vec<Value> {
         self.exports
             .lock()
@@ -200,6 +241,12 @@ impl Node {
             .map(|(path, job)| json!({ "path": path, "job": job, "state": self.scheduler.job(*job) }))
             .collect()
     }
+}
+
+/// The scale a model sees an image at: its long side near 1024 pixels.
+fn proxy_scale(region: Region) -> f64 {
+    let long = f64::from(region.width.max(region.height)).max(1.0);
+    (1024.0 / long).min(1.0)
 }
 
 /// What the node reports about itself, with the header of every node
@@ -254,6 +301,12 @@ mod control {
         const KIND: &'static str = "control.action";
     }
 
+    fn now() -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs())
+    }
+
     pub fn answer(node: &Arc<Node>, request: ControlRequest) -> Value {
         let seq = node
             .bus
@@ -304,6 +357,44 @@ mod control {
                 node.engine.inject_fault(&graph, id, *kind);
                 json!({})
             }),
+            ControlRequest::Decisions => {
+                let book = node.book.lock().expect("book lock");
+                Ok(json!({ "decisions": helios_core::Describe::describe(&*book)["nodes"] }))
+            }
+            ControlRequest::DecisionResolve => node
+                .resolve_decisions()
+                .map(|report| json!({ "report": report })),
+            ControlRequest::DecisionAccept {
+                node: name,
+                option,
+                who,
+            } => {
+                let mut book = node.book.lock().expect("book lock");
+                let mut graph = node.graph.0.write().expect("graph lock");
+                book.accept(&mut graph, name, who, *option, now())
+                    .map(|version| json!({ "version": version }))
+            }
+            ControlRequest::DecisionDecide {
+                node: name,
+                values,
+                who,
+            } => {
+                let mut book = node.book.lock().expect("book lock");
+                let mut graph = node.graph.0.write().expect("graph lock");
+                let inputs = match node.frame {
+                    Some(region) => helios_decision::input_keys(&node.engine, &graph, name, region),
+                    None => Ok(Vec::new()),
+                };
+                inputs.and_then(|inputs| {
+                    book.decide(&mut graph, name, who, values.clone(), inputs, now())
+                        .map(|version| json!({ "version": version }))
+                })
+            }
+            ControlRequest::DecisionReask { node: name } => {
+                let mut book = node.book.lock().expect("book lock");
+                let mut graph = node.graph.0.write().expect("graph lock");
+                book.reask(&mut graph, name).map(|()| json!({}))
+            }
         };
         match result {
             Ok(extra) => done(extra),
@@ -443,6 +534,17 @@ fn main() -> ExitCode {
     let bus = Arc::new(Bus::with_journal(
         config.number("system.events.journal") as usize
     ));
+    let mut book = Book::new().with_bus(bus.clone());
+    for (name, mode) in &loaded.decisions {
+        book.declare(name, *mode);
+    }
+    let resolver = match loaded.resolver.as_ref().map(|r| r.build()).transpose() {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("helios-node: resolver: {e}");
+            return ExitCode::from(1);
+        }
+    };
     let budget = match config.number("system.cache.budget") as usize {
         0 => None,
         mib => Some(mib * 1024 * 1024),
@@ -450,9 +552,13 @@ fn main() -> ExitCode {
     let node = Arc::new(Node {
         bus: bus.clone(),
         engine: Arc::new(Engine::with_budget(bus.clone(), budget)),
-        scheduler: Arc::new(Scheduler::new(
+        scheduler: Arc::new(Scheduler::with_resources(
             bus.clone(),
             config.number("system.scheduler.workers") as usize,
+            &[(
+                helios_resolve::AI_CALLS,
+                config.number("system.ai.calls") as u64,
+            )],
         )),
         graph: Arc::new(SharedGraph(RwLock::new(loaded.graph))),
         names: loaded.nodes,
@@ -460,6 +566,10 @@ fn main() -> ExitCode {
         renders: Mutex::new(Vec::new()),
         exports: Mutex::new(Vec::new()),
         idle: Mutex::new(false),
+        book: Mutex::new(book),
+        resolver,
+        brief: loaded.brief.clone(),
+        frame: loaded.frame,
     });
     let inspector = Inspector::new(bus.clone())
         .with("graph", node.graph.clone())

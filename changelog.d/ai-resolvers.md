@@ -12,3 +12,11 @@ script around an online service works without Helios holding any key.
 Helios can also call a vision model directly: any OpenAI-compatible
 endpoint (OpenAI, or a local server speaking its protocol) or Anthropic's,
 with the key read from an environment variable, never from a file.
+
+A network can say which model answers its decisions (`resolver`), each
+decision's mode, and a brief; `helios control decisions`,
+`decision-resolve`, `decision-accept`, `decision-decide` and
+`decision-reask`, and the matching MCP tools, let you or an agent ask the
+model, review its proposals and answer. The new `decide_exposure` module
+is a first decision: how bright the image should be. The setting
+`system.ai.calls` caps how many model calls run at once (2 by default).

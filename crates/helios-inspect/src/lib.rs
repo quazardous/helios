@@ -199,7 +199,7 @@ pub fn request<R: Serialize>(path: &Path, request: &R) -> io::Result<Value> {
 /// serves them only in debug builds and when asked to (see `helios-node`);
 /// the inspect endpoint stays read-only.
 pub mod control {
-    use helios_core::{FaultKind, Region, Value};
+    use helios_core::{FaultKind, Params, Region, Value};
     use serde::{Deserialize, Serialize};
 
     #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -229,5 +229,33 @@ pub mod control {
             node: String,
             kind: FaultKind,
         },
+        /// The decisions of the network: mode, status, answer, proposal.
+        Decisions,
+        /// Asks the network's resolver about every decision waiting on a
+        /// model, and records what comes back.
+        DecisionResolve,
+        /// A human takes one of a proposal's options (0 is the best).
+        DecisionAccept {
+            node: String,
+            #[serde(default)]
+            option: usize,
+            #[serde(default = "someone")]
+            who: String,
+        },
+        /// A human gives the answer.
+        DecisionDecide {
+            node: String,
+            values: Params,
+            #[serde(default = "someone")]
+            who: String,
+        },
+        /// Withdraws a decision's answer: it waits again.
+        DecisionReask {
+            node: String,
+        },
+    }
+
+    fn someone() -> String {
+        "user".into()
     }
 }

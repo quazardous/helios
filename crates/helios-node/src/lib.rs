@@ -18,6 +18,20 @@
 //! port (or the `port` given) to a file whose format follows its extension,
 //! unless `format` says otherwise (`{ "format": "jpeg", "quality": 90 }`,
 //! `{ "format": "png", "bits": 16 }`, `{ "format": "tiff" }`).
+//!
+//! Decision nodes (modules of the decision kind, such as
+//! `decide_exposure`) take a mode in `decisions` (`full_ai`, `ai_assisted`
+//! or `human`), and the network may name the model that answers them:
+//!
+//! ```json
+//! "decisions": { "bright": "ai_assisted" },
+//! "brief": "bright and airy",
+//! "resolver": { "command": ["my-model", "--json"] }
+//! ```
+//!
+//! or `"resolver": { "http": { "api": "openai", "url": "https://…/chat/completions",
+//! "model": "…", "key_env": "OPENAI_API_KEY" } }` (`api` may be `anthropic`).
+//! The key is read from that environment variable when a model is called.
 
 pub mod mcp;
 pub mod sandbox;
@@ -25,8 +39,14 @@ pub mod sandbox;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use helios_core::{Graph, ModuleRef, NodeId, Params, Region};
+use std::sync::Arc;
+
+use helios_core::{Graph, ModuleKind, ModuleRef, NodeId, Params, Region};
+use helios_decision::Mode;
 use helios_export::Format;
+use helios_resolve::command::Command;
+use helios_resolve::http::{Api, Http};
+use helios_resolve::{Cached, Resolver};
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -41,6 +61,69 @@ pub struct Description {
     pub renders: Vec<RenderDesc>,
     #[serde(default)]
     pub exports: Vec<ExportDesc>,
+    /// Each decision node's mode, by node name.
+    #[serde(default)]
+    pub decisions: BTreeMap<String, Mode>,
+    /// What the network is for, in words: given to the models.
+    #[serde(default)]
+    pub brief: Option<String>,
+    #[serde(default)]
+    pub resolver: Option<ResolverDesc>,
+}
+
+/// The model that answers decisions.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ResolverDesc {
+    /// A program and its arguments, speaking JSON (see `helios-resolve`).
+    Command(Vec<String>),
+    Http(HttpDesc),
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct HttpDesc {
+    pub api: HttpApi,
+    pub url: String,
+    pub model: String,
+    #[serde(default)]
+    pub key_env: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum HttpApi {
+    OpenAi,
+    Anthropic,
+}
+
+impl ResolverDesc {
+    /// The resolver this describes, behind a cache: the same pixels are
+    /// never asked about twice.
+    pub fn build(&self) -> Result<Arc<dyn Resolver>, String> {
+        Ok(match self {
+            ResolverDesc::Command(argv) => {
+                let (program, args) = argv
+                    .split_first()
+                    .ok_or("`resolver.command` names no program")?;
+                let mut c = Command::new(program);
+                for a in args {
+                    c = c.arg(a);
+                }
+                Arc::new(Cached::new(c))
+            }
+            ResolverDesc::Http(h) => {
+                let api = match h.api {
+                    HttpApi::OpenAi => Api::OpenAi,
+                    HttpApi::Anthropic => Api::Anthropic,
+                };
+                let mut http = Http::new(api, &h.url, &h.model);
+                if let Some(var) = &h.key_env {
+                    http = http.key_from(var);
+                }
+                Arc::new(Cached::new(http))
+            }
+        })
+    }
 }
 
 /// A source: a synthetic image, or a file read by the framework.
@@ -136,6 +219,10 @@ pub fn registry() -> BTreeMap<&'static str, ModuleRef> {
         ("demosaic", ModuleRef::new(helios_module_demosaic::Demosaic)),
         ("colorin", ModuleRef::new(helios_module_colorin::ColorIn)),
         ("exposure", ModuleRef::new(helios_module_exposure::Exposure)),
+        (
+            "decide_exposure",
+            ModuleRef::new(helios_module_exposure::DecideExposure),
+        ),
         ("sigmoid", ModuleRef::new(helios_module_sigmoid::Sigmoid)),
         ("blur", ModuleRef::new(helios_module_blur::Blur)),
     ])
@@ -147,6 +234,12 @@ pub struct Loaded {
     pub nodes: BTreeMap<String, NodeId>,
     pub renders: Vec<RenderDesc>,
     pub exports: Vec<ExportDesc>,
+    /// Every decision node with its mode (`human` unless the description says).
+    pub decisions: BTreeMap<String, Mode>,
+    pub brief: Option<String>,
+    pub resolver: Option<ResolverDesc>,
+    /// The first source's region: what decisions look at.
+    pub frame: Option<Region>,
 }
 
 impl Loaded {
@@ -194,11 +287,13 @@ pub fn load_in(mut desc: Description, base: &Path) -> Result<Loaded, String> {
         }
     };
     let mut cameras = BTreeMap::new();
+    let mut frame = None;
     for s in &desc.sources {
         let synthetic = match (&s.synthetic, &s.file) {
             (Some(synthetic), None) => synthetic,
             (None, Some(file)) => {
                 let loaded = helios_load::load(&base.join(file))?;
+                frame.get_or_insert(loaded.image.region());
                 let id = graph.add_source(&s.name, loaded.image);
                 if let Some(camera) = loaded.camera {
                     cameras.insert(id, camera);
@@ -226,6 +321,7 @@ pub fn load_in(mut desc: Description, base: &Path) -> Result<Loaded, String> {
                 channels,
             } => helios_testkit::ramp(Region::sized(width, height), channels),
         };
+        frame.get_or_insert(image.region());
         add(&s.name, graph.add_source(&s.name, image))?;
     }
     for m in &desc.modules {
@@ -241,11 +337,27 @@ pub fn load_in(mut desc: Description, base: &Path) -> Result<Loaded, String> {
             .map_err(|e| e.to_string())?;
         add(&m.name, id)?;
     }
+    let mut decisions = BTreeMap::new();
+    for m in &desc.modules {
+        if registry[m.module.as_str()].manifest().kind == ModuleKind::Decision {
+            let mode = desc.decisions.get(&m.name).copied().unwrap_or(Mode::Human);
+            decisions.insert(m.name.clone(), mode);
+        }
+    }
+    if let Some(name) = desc.decisions.keys().find(|n| !decisions.contains_key(*n)) {
+        return Err(format!(
+            "`decisions` names `{name}`, which is not a decision node"
+        ));
+    }
     let mut loaded = Loaded {
         graph,
         nodes,
         renders: desc.renders,
         exports: desc.exports,
+        decisions,
+        brief: desc.brief,
+        resolver: desc.resolver,
+        frame,
     };
     for c in &desc.connections {
         let (from, to) = (loaded.node(&c.from)?, loaded.node(&c.to)?);

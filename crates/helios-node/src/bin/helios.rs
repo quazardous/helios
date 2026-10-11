@@ -172,6 +172,28 @@ fn parse(args: Vec<String>) -> Result<Call, String> {
                     }
                 },
             },
+            ["decisions"] => ControlRequest::Decisions,
+            ["decision-resolve"] => ControlRequest::DecisionResolve,
+            ["decision-accept", node] => ControlRequest::DecisionAccept {
+                node: node.to_string(),
+                option: 0,
+                who: "user".into(),
+            },
+            ["decision-accept", node, option] => ControlRequest::DecisionAccept {
+                node: node.to_string(),
+                option: option
+                    .parse()
+                    .map_err(|_| format!("`{option}` is not an option number"))?,
+                who: "user".into(),
+            },
+            ["decision-decide", node, param, v] => ControlRequest::DecisionDecide {
+                node: node.to_string(),
+                values: helios_core::Params::new().with(param, value(v)),
+                who: "user".into(),
+            },
+            ["decision-reask", node] => ControlRequest::DecisionReask {
+                node: node.to_string(),
+            },
             [] => return Err("control needs an action".into()),
             other => return Err(format!("unknown action `{}`", other.join(" "))),
         };

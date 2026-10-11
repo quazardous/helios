@@ -13,6 +13,8 @@ helios-config.workspace = true
 helios-export.workspace = true
 helios-load.workspace = true
 helios-testkit.workspace = true
+helios-decision.workspace = true
+helios-resolve.workspace = true
 helios-module-exposure = { path = "../../modules/exposure" }
 helios-module-rawprepare = { path = "../../modules/rawprepare" }
 helios-module-demosaic = { path = "../../modules/demosaic" }

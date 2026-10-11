@@ -106,6 +106,55 @@ impl Module for Exposure {
     }
 }
 
+/// A decided exposure: a decision node whose answer is the exposure, in
+/// EV. A model (or a human) looks at the image and says how bright it
+/// should be; the render then applies it as `exposure` does.
+pub struct DecideExposure;
+
+impl Module for DecideExposure {
+    type Plan = Plan;
+
+    fn manifest(&self) -> Manifest {
+        Manifest {
+            name: "decide_exposure".into(),
+            version: 1,
+            description: "How much brighter or darker the image should be, in EV".into(),
+            params: vec![ParamSpec::float(
+                "exposure",
+                "exposure adjustment, in EV: positive brightens, negative darkens",
+                -6.0,
+                6.0,
+                0.0,
+            )],
+            inputs: vec![PortSpec::image("input", 4)],
+            outputs: vec![PortSpec::image("output", 4)],
+            context: vec![],
+            needs: Needs::default(),
+            kind: ModuleKind::Decision,
+            family: Family::Ai,
+            role: Role::General,
+        }
+    }
+
+    fn prepare(&self, params: &Params, _: &Context) -> Result<Plan, String> {
+        let decided = Params::new().with("exposure", Value::Float(params.float("exposure")));
+        let resolved = Exposure
+            .manifest()
+            .resolve(&decided)
+            .map_err(|e| e.to_string())?;
+        Exposure.prepare(&resolved, &Context::new())
+    }
+
+    fn process(
+        &self,
+        plan: &Plan,
+        inputs: &[&Image],
+        output: Region,
+    ) -> Result<Vec<Image>, String> {
+        Exposure.process(plan, inputs, output)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -138,6 +187,23 @@ mod tests {
             apply(&plan(0.0, 0.0), [0.1, 0.5, 2.0, 0.7]),
             [0.1, 0.5, 2.0, 0.7]
         );
+    }
+
+    #[test]
+    fn a_decided_exposure_brightens_as_exposure_does() {
+        let params = Params::new().with("exposure", Value::Float(1.0));
+        let plan = DecideExposure
+            .prepare(
+                &DecideExposure.manifest().resolve(&params).unwrap(),
+                &Context::new(),
+            )
+            .unwrap();
+        let input = Image::new(Region::sized(1, 1), 4, vec![0.1, 0.25, 0.5, 1.0]);
+        let out = DecideExposure
+            .process(&plan, &[&input], Region::sized(1, 1))
+            .unwrap();
+        assert_eq!(out[0].data(), &[0.2, 0.5, 1.0, 1.0]);
+        assert_eq!(DecideExposure.manifest().kind, ModuleKind::Decision);
     }
 
     #[test]

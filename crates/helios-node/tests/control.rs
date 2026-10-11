@@ -23,11 +23,15 @@ struct Sandbox {
 
 impl Sandbox {
     fn start(name: &str, control: bool) -> Self {
+        Self::start_with(name, control, NETWORK)
+    }
+
+    fn start_with(name: &str, control: bool, network: &str) -> Self {
         let dir =
             std::env::temp_dir().join(format!("helios-control-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("network.json"), NETWORK).unwrap();
+        std::fs::write(dir.join("network.json"), network).unwrap();
         let mut command = Command::new(env!("CARGO_BIN_EXE_helios-node"));
         command
             .arg("--graph")
@@ -190,4 +194,53 @@ fn control_is_refused_without_the_environment_flag() {
     let _ = std::fs::remove_dir_all(&dir);
     assert_eq!(out.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&out.stderr).contains("only when HELIOS_DEBUG_CONTROL is set"));
+}
+
+/// A decision answered by a model (a shell script here), then by a human.
+const DECIDED: &str = r#"{
+  "sources": [{ "name": "src", "synthetic": { "kind": "ramp", "width": 32, "height": 16, "channels": 4 } }],
+  "modules": [{ "name": "bright", "module": "decide_exposure" }],
+  "connections": [{ "from": "src", "port": "image", "to": "bright", "input": "input" }],
+  "decisions": { "bright": "ai_assisted" },
+  "brief": "bright and airy",
+  "resolver": { "command": ["sh", "-c", "cat > /dev/null; echo '{\"options\":[{\"exposure\":1.5},{\"exposure\":0.5}],\"confidence\":0.8,\"rationale\":\"dark\",\"model\":{\"name\":\"script\",\"version\":\"1\"}}'"] }
+}"#;
+
+#[test]
+fn a_model_proposes_and_a_human_accepts_through_control() {
+    let s = Sandbox::start_with("decide", true, DECIDED);
+    let (_, list) = s.control(&["decisions"]);
+    assert_eq!(list["decisions"]["bright"]["mode"], "ai_assisted", "{list}");
+
+    // Before any answer the decision blocks its render.
+    s.control(&["render", "bright", "--region", REGION]);
+    s.inspect(&["wait-idle"]);
+    assert!(
+        s.last_render()["error"]
+            .as_str()
+            .unwrap()
+            .contains("pending")
+    );
+
+    let (code, resolved) = s.control(&["decision-resolve"]);
+    assert_eq!(code, 0, "{resolved}");
+    assert_eq!(resolved["report"]["proposed"][0], "bright", "{resolved}");
+    let (_, list) = s.control(&["decisions"]);
+    let proposal = &list["decisions"]["bright"]["proposal"];
+    assert_eq!(proposal["options"].as_array().unwrap().len(), 2, "{list}");
+
+    // The human takes the second option; the render goes through.
+    let (code, accepted) = s.control(&["decision-accept", "bright", "1"]);
+    assert_eq!(code, 0, "{accepted}");
+    s.control(&["render", "bright", "--region", REGION]);
+    s.inspect(&["wait-idle"]);
+    assert!(s.last_render()["hash"].is_string(), "{}", s.last_render());
+    let (_, list) = s.control(&["decisions"]);
+    assert_eq!(list["decisions"]["bright"]["status"], "answered", "{list}");
+
+    // Asked again, it waits again; a human answers directly.
+    assert_eq!(s.control(&["decision-reask", "bright"]).0, 0);
+    let (code, decided) = s.control(&["decision-decide", "bright", "exposure", "2"]);
+    assert_eq!(code, 0, "{decided}");
+    assert_eq!(decided["version"], 2, "{decided}");
 }

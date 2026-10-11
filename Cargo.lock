@@ -1812,6 +1812,7 @@ version = "0.0.1"
 dependencies = [
  "helios-config",
  "helios-core",
+ "helios-decision",
  "helios-export",
  "helios-inspect",
  "helios-load",
@@ -1823,6 +1824,7 @@ dependencies = [
  "helios-module-rawprepare",
  "helios-module-sigmoid",
  "helios-module-whitebalance",
+ "helios-resolve",
  "helios-testkit",
  "image",
  "serde",

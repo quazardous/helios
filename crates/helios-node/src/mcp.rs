@@ -82,6 +82,25 @@ fn zero() -> Value {
     json!(0)
 }
 
+fn agent() -> Value {
+    json!("agent")
+}
+
+fn param_values() -> Value {
+    json!({
+        "description": "Parameter name to value, each value one of {\"float\": n}, {\"int\": n}, {\"bool\": b}, {\"choice\": \"s\"}",
+        "type": "object",
+        "additionalProperties": param_value()
+    })
+}
+
+const WHO: Param = Param {
+    name: "who",
+    schema: string,
+    description: "Who decides, as the decision's history records it",
+    default: Some(agent),
+};
+
 fn ten_seconds() -> Value {
     json!(10_000)
 }
@@ -266,6 +285,59 @@ pub const TOOLS: &[Tool] = &[
             },
         ],
     },
+    Tool {
+        name: "helios_decisions",
+        endpoint: Endpoint::Control,
+        cmd: "decisions",
+        description: "Lists the network's decisions: mode, status, the answer in force and its history, a pending proposal (debug control)",
+        params: &[],
+    },
+    Tool {
+        name: "helios_decision_resolve",
+        endpoint: Endpoint::Control,
+        cmd: "decision_resolve",
+        description: "Asks the network's model about every decision waiting on one; full-AI answers are applied, AI-assisted ones become proposals (debug control)",
+        params: &[],
+    },
+    Tool {
+        name: "helios_decision_accept",
+        endpoint: Endpoint::Control,
+        cmd: "decision_accept",
+        description: "Takes one option of a decision's proposal, 0 being the model's best (debug control)",
+        params: &[
+            NODE,
+            Param {
+                name: "option",
+                schema: integer,
+                description: "Option number, 0 for the best",
+                default: Some(zero),
+            },
+            WHO,
+        ],
+    },
+    Tool {
+        name: "helios_decision_decide",
+        endpoint: Endpoint::Control,
+        cmd: "decision_decide",
+        description: "Gives a decision's answer directly, checked against the decision module's parameters (debug control)",
+        params: &[
+            NODE,
+            Param {
+                name: "values",
+                schema: param_values,
+                description: "The answer's parameters",
+                default: None,
+            },
+            WHO,
+        ],
+    },
+    Tool {
+        name: "helios_decision_reask",
+        endpoint: Endpoint::Control,
+        cmd: "decision_reask",
+        description: "Withdraws a decision's answer so it is asked again; earlier answers stay in its history (debug control)",
+        params: &[NODE],
+    },
 ];
 
 impl Tool {
@@ -440,6 +512,7 @@ mod tests {
                     "entity" | "kind" if tool.cmd == "fault" => json!("compute"),
                     "region" => json!({ "x": 0, "y": 0, "width": 4, "height": 4 }),
                     "value" => json!({ "float": 1.0 }),
+                    "values" => json!({ "exposure": { "float": 1.0 } }),
                     "job" => json!(3),
                     _ => json!("exp"),
                 };
@@ -471,7 +544,19 @@ mod tests {
     #[test]
     fn every_request_has_a_tool() {
         let inspect = ["state", "describe", "events", "wait_event", "wait_idle"];
-        let control = ["render", "set_param", "cancel", "pause", "resume", "fault"];
+        let control = [
+            "render",
+            "set_param",
+            "cancel",
+            "pause",
+            "resume",
+            "fault",
+            "decisions",
+            "decision_resolve",
+            "decision_accept",
+            "decision_decide",
+            "decision_reask",
+        ];
         for cmd in inspect.iter().chain(&control) {
             assert!(TOOLS.iter().any(|t| t.cmd == *cmd), "no tool for `{cmd}`");
         }
