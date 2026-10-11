@@ -24,6 +24,16 @@ layer is normalized, workflows become simple, and a better-written framework
 lets the project move faster on all fronts: normalization is a multiplier,
 not a feature.
 
+**Photo editing is one application of image processing** (2026-10-11,
+decided). The framework is a general image processing framework, AVS style;
+photo editing (darktable's job) is the first application built on it, not
+its definition. The core (data types, ports, graph, scheduler, vault) knows
+nothing about raws, EXIF or film rolls: those belong to a photo domain layer
+on top. Other applications (video, as vkdt already does, timelapse,
+astrophotography, scientific imaging) stay possible without being built:
+photo editing remains the only application that drives the work, per the
+second-system safeguard below.
+
 ### Two repositories
 
 1. **The darktable fork**
@@ -41,9 +51,13 @@ changes it can accept on their own merits.
 ### Constraints
 
 - License: **GPLv3**, mandatory since Helios links with darktable.
-- Language considered for the kernel: **Rust**. A normalized interface becomes
-  a stable boundary (C ABI) behind which one component at a time can be
-  replaced, under an equivalence bench, without rewriting everything.
+- Language: **Rust first, best effort for the rest** (2026-10-11, decided).
+  Everything new is written in Rust by default; another language is used
+  only where Rust is not practical (the C bridge to darktable, GPU shaders,
+  the web front), and that code is held to a lighter bar. A normalized
+  interface becomes a stable boundary (C ABI) behind which one component at
+  a time can be replaced, under an equivalence bench, without rewriting
+  everything.
 - Known friction: darktable module parameters are stored as raw bytes
   (database, XMP, pipe cache), so their memory layout is part of the
   interface; introspection is generated from the C structures; computation
@@ -72,9 +86,13 @@ modules) with **different surfaces** on top, not two engines side by side:
 - an AI / workshops surface;
 - a cloud surface (the technology must be easy to reuse in a 100% cloud tool).
 
-Helios as a **bridge between darktable and vkdt**: a module description
-inspired by the vkdt format; darktable brings compatibility and CPU
-computation, vkdt brings the graph and GPU speed. Not decided.
+**Helios makes darktable and vkdt meet** (2026-10-11, decided as the
+long-term goal). darktable brings compatibility (edits, workflow, users) and
+CPU computation; vkdt brings the graph and GPU speed. The meeting point is
+the module contract: one description able to host a module coming from
+either side, so both lineages run in the same graph. How (porting, bridging,
+contributing upstream to one or both) is not decided. No vkdt fork until a
+change to vkdt itself is needed (proposed 2026-10-11, not decided).
 
 What darktable already offers to build on:
 
@@ -87,6 +105,18 @@ What darktable already offers to build on:
 
 Computation and the GTK GUI live in the same file and the same library: they
 must be separated for use without GTK.
+
+**Isolated modules, layered framework** (2026-10-11, decided). The fork
+untangles darktable's legacy; this repository starts writing the future
+engine. Every piece of image processing is completely isolated and testable
+on its own: no IO, no global state, no GUI, only declared inputs, parameters
+and outputs. The code is therefore **horizontal for features** (many
+independent modules side by side, adding one touches nothing else) and
+**vertical for the framework** (a deep stack of layers: module contract,
+graph, scheduler, vault, surfaces). Modules are written in Rust (section 1,
+constraints); the module contract and the test oracle (darktable's own
+render) are not decided yet; draft in
+[docs/module-contract.md](docs/module-contract.md).
 
 **Retouch on proxy, deferred exact render** (2026-10-10). From daily
 newspaper press: retouching on thumbnails, then the same retouch replayed on
@@ -214,8 +244,18 @@ hash) is part of Helios; deploying a NAS is not.
 
 ### 2.5 Workshops and AI
 
+- (2026-10-11, decided) **AI junctions in the network**: any processing
+  network can contain a decision node, a point where the algorithm alone is
+  not enough and a judgment sets parameters, picks a mask or a branch, or
+  validates a render. Three resolution modes: full AI, AI-assisted (the AI
+  proposes, a human confirms) and human. Its answer is recorded in the edit,
+  so renders stay deterministic and asking again creates a new version.
+  Design in [docs/module-contract.md](docs/module-contract.md).
 - **Recipes** (diagnosis -> tool), **workshops** (a customized recipe),
   **retouches** (an applied workshop).
+- In AVS terms, a workshop is a **macro**: a network of modules packaged as
+  one, exposing only chosen parameters (see
+  [docs/module-contract.md](docs/module-contract.md)).
 - A workshop: the AI translates an artistic intention ("too contrasty with the
   blue sky") into a mini workspace: the real darktable modules, pre-calibrated
   for the photo, with only the useful sliders (restricted ranges, tested at
@@ -262,7 +302,7 @@ at step C); selection stays in the database during phase 0.
 - [ ] **Step A: no SQL outside `common/`**, one domain = one potential
       upstream PR, checked by an equivalence bench (SQL dump + XMP, plus GUI
       captures) and a SQL inventory whose counter must go down.
-  - [x] 1. ratings and color labels (2026-10-10, ready for review)
+  - [x] 1. ratings and color labels (committed c442a88a8, 2026-10-11)
   - [ ] 2. metadata
   - [ ] 3. tags
   - [ ] 4. film rolls and images
@@ -300,6 +340,9 @@ in the GUI), never as a step toward client/server.
 - Delta E parity matrix against `darktable-cli`.
 
 ### Phase 2: this repository
+
+(2026-10-11) Starts now, in parallel with phase 0, with the isolated module
+contract (section 2.1).
 
 - Layout: `protocol/`, `kernel/` (Rust), `engine/`, `vault/`, `mcp/`,
   `plugins/`, `front/`, `parity/`, `docs/`.

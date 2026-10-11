@@ -20,6 +20,8 @@ catalog SDK inside darktable itself, happens in the
 - [ROADMAP.md](./ROADMAP.md): vision, concepts, phases and open questions.
 - [docs/NEEDS.md](./docs/NEEDS.md): the roadmap checked against real user needs,
   competitors and measurements.
+- [docs/module-contract.md](./docs/module-contract.md): draft of what an
+  image processing module is in Helios: isolated, pure, testable alone.
 - [docs/iop-inventory.md](./docs/iop-inventory.md): what darktable's image
   operation modules already describe about themselves (introspection, widgets,
   tiling, OpenCL, scale awareness), as a baseline for module normalization.
