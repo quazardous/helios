@@ -1,0 +1,20 @@
+{
+  "$name": "helios-high-contrast",
+  "$extends": "helios-dark",
+  "$description": "The dark theme with black panels, white text and strong outlines.",
+  "bg": {
+    "$type": "color",
+    "panel": { "$value": "#000000" },
+    "window": { "$value": "#000000" },
+    "widget": { "$value": "#1a1a1a" },
+    "widget_hover": { "$value": "#333333" }
+  },
+  "fg": {
+    "$type": "color",
+    "text": { "$value": "#ffffff" },
+    "weak": { "$value": "#d0d0d0" }
+  },
+  "border": { "$type": "color", "$value": "#ffffff" },
+  "accent": { "$type": "color", "base": { "$value": "#ffd24d" } },
+  "font": { "size": { "$type": "dimension", "$value": "15px" } }
+}

@@ -152,3 +152,43 @@ fn f11_toggles_full_screen_and_the_frame_has_its_buttons() {
         s.run(id, json!(null), Origin::User).unwrap();
     }
 }
+
+#[test]
+fn themes_switch_from_the_palette_and_export_to_a_token_file() {
+    let mut h = headless::harness(Shell::new(helios_panels(), None), vec2(800.0, 500.0));
+    h.run();
+    let dark_fill = h.ctx.global_style().visuals.panel_fill;
+    let s = h.state_mut();
+    s.run("theme.helios-light", json!(null), Origin::User)
+        .unwrap();
+    h.run();
+    let light_fill = h.ctx.global_style().visuals.panel_fill;
+    assert_ne!(dark_fill, light_fill);
+    assert!(!h.ctx.global_style().visuals.dark_mode);
+    assert_eq!(h.state().theme().name, "helios-light");
+
+    let path =
+        std::env::temp_dir().join(format!("helios-theme-{}.tokens.json", std::process::id()));
+    let s = h.state_mut();
+    s.run("theme.export", json!({ "path": path }), Origin::User)
+        .unwrap();
+    h.run();
+    let file: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(file["$name"], "helios-light");
+    assert_eq!(file["bg"]["panel"]["$type"], "color");
+    std::fs::remove_file(&path).unwrap();
+
+    // An unknown theme falls back to the dark one and says so.
+    let s = h.state_mut();
+    s.run("theme.select", json!({ "name": "nope" }), Origin::User)
+        .unwrap();
+    h.run();
+    assert!(
+        h.state()
+            .notes
+            .iter()
+            .any(|n| n.contains("no theme `nope`"))
+    );
+    assert_eq!(h.ctx.global_style().visuals.panel_fill, dark_fill);
+}

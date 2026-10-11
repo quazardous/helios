@@ -6,6 +6,7 @@ pub mod frame;
 pub mod keys;
 pub mod shell;
 pub mod snapshot;
+pub mod theme;
 
 pub use shell::{Shell, headless, name_rect};
 

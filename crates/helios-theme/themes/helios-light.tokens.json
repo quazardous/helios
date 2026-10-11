@@ -1,0 +1,38 @@
+{
+  "$name": "helios-light",
+  "$extends": "helios-dark",
+  "$description": "Light greys for daylight rooms; the gold darkened to read on white.",
+  "palette": {
+    "$type": "color",
+    "paper-97": { "$value": "#f4f2ee" },
+    "paper-93": { "$value": "#eae7e1" },
+    "paper-88": { "$value": "#dcd8d0" },
+    "paper-80": { "$value": "#c8c3b9" },
+    "ink-15": { "$value": "#26231e" },
+    "ink-40": { "$value": "#6b665e" },
+    "gold-dark": { "$value": "#9a6a10" }
+  },
+  "bg": {
+    "$type": "color",
+    "canvas": { "$value": "#808080" },
+    "panel": { "$value": "{palette.paper-93}" },
+    "window": { "$value": "{palette.paper-97}" },
+    "extreme": { "$value": "#ffffff" },
+    "widget": { "$value": "{palette.paper-88}" },
+    "widget_hover": { "$value": "{palette.paper-80}" },
+    "widget_active": { "$value": "#b8b2a6" }
+  },
+  "fg": {
+    "$type": "color",
+    "text": { "$value": "{palette.ink-15}" },
+    "weak": { "$value": "{palette.ink-40}" },
+    "strong": { "$value": "#000000" }
+  },
+  "border": { "$type": "color", "$value": "{palette.paper-80}" },
+  "accent": {
+    "$type": "color",
+    "base": { "$value": "{palette.gold-dark}" },
+    "text": { "$value": "#ffffff" }
+  },
+  "selection": { "$type": "color", "$value": "#9a6a1040" }
+}

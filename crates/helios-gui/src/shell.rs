@@ -31,6 +31,8 @@ const SCREEN: &str = "primary";
 /// next frame, where the shell's state is at hand.
 enum Action {
     Palette,
+    Theme(String),
+    ThemeExport(PathBuf),
     Fullscreen,
     Minimize,
     Maximize,
@@ -101,6 +103,11 @@ pub struct Shell {
     title: String,
     /// The window's frame is drawn by Helios (see `frame`).
     framed: bool,
+    themes: helios_theme::Themes,
+    theme: helios_theme::Resolved,
+    theme_overrides: BTreeMap<String, serde_json::Value>,
+    /// The theme changed and egui has not been told yet.
+    theme_pending: bool,
 }
 
 impl Shell {
@@ -130,6 +137,10 @@ impl Shell {
             panels,
             title: String::new(),
             framed: false,
+            themes: helios_theme::Themes::default(),
+            theme: helios_theme::Themes::default().resolve(helios_theme::BASE, &BTreeMap::new()),
+            theme_overrides: BTreeMap::new(),
+            theme_pending: true,
         };
         shell.docks = layout
             .areas
@@ -155,6 +166,27 @@ impl Shell {
     /// Gives a panel its content; panels without one show a placeholder.
     pub fn set_content(&mut self, panel: &str, content: impl FnMut(&mut Ui) + 'static) {
         self.contents.insert(panel.into(), Box::new(content));
+    }
+
+    /// Switches to a theme, with the user's overrides; problems (an
+    /// unknown base, a wrong token) fall back and are noted, never fatal.
+    pub fn set_theme(&mut self, name: &str, overrides: BTreeMap<String, serde_json::Value>) {
+        self.theme_overrides = overrides;
+        self.theme = self.themes.resolve(name, &self.theme_overrides);
+        self.theme_pending = true;
+        for p in &self.theme.problems {
+            self.notes.push(format!("theme {name}: {p}"));
+        }
+    }
+
+    /// The theme in use.
+    pub fn theme(&self) -> &helios_theme::Resolved {
+        &self.theme
+    }
+
+    /// Adds a theme (a user's file, a plugin's) to those that can be chosen.
+    pub fn add_theme(&mut self, theme: helios_theme::Theme) {
+        self.themes.add(theme);
     }
 
     /// The window's title, shown in the frame Helios draws.
@@ -305,6 +337,61 @@ impl Shell {
                 Box::new(move |_| Ok(action())),
             );
         }
+        let names: Vec<String> = self.themes.names().iter().map(|n| n.to_string()).collect();
+        for name in names {
+            let title = name
+                .trim_start_matches("helios-")
+                .split('-')
+                .map(|w| {
+                    let mut c = w.chars();
+                    c.next().map_or_else(String::new, |f| {
+                        f.to_uppercase().collect::<String>() + c.as_str()
+                    })
+                })
+                .collect::<Vec<_>>()
+                .join(" ");
+            let picked = name.clone();
+            add(
+                CommandSpec::new(
+                    &format!("theme.{name}"),
+                    &format!("Theme: {title}"),
+                    "Preferences",
+                ),
+                Box::new(move |_| Ok(Action::Theme(picked.clone()))),
+            );
+        }
+        add(
+            CommandSpec::new("theme.select", "Use a theme by name", "Preferences"),
+            Box::new(move |a| {
+                a.get("name")
+                    .and_then(Value::as_str)
+                    .map(|n| Action::Theme(n.to_string()))
+                    .ok_or_else(|| "`name` is missing".to_string())
+            }),
+        );
+        add(
+            CommandSpec::new(
+                "theme.export",
+                "Export the theme in use, overrides merged",
+                "Preferences",
+            ),
+            Box::new(move |a| {
+                // By default next to the user's settings, where themes are read.
+                let path = a.get("path").and_then(Value::as_str).map_or_else(
+                    || {
+                        let config = std::env::var_os("XDG_CONFIG_HOME")
+                            .map(PathBuf::from)
+                            .or_else(|| {
+                                std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config"))
+                            })
+                            .unwrap_or_else(|| PathBuf::from("."));
+                        config.join("helios/themes/exported.tokens.json")
+                    },
+                    PathBuf::from,
+                );
+                Ok(Action::ThemeExport(path))
+            }),
+        );
         for (keys, command) in [
             ("ctrl+shift+p", "workbench.palette"),
             ("f1", "workbench.palette"),
@@ -403,6 +490,22 @@ impl Shell {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!on));
             }
             Action::Close => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+            Action::Theme(name) => {
+                let overrides = self.theme_overrides.clone();
+                self.set_theme(&name, overrides);
+            }
+            Action::ThemeExport(path) => {
+                let text = serde_json::to_string_pretty(&self.theme.to_tokens())
+                    .expect("tokens serialize");
+                let saved = path
+                    .parent()
+                    .map_or(Ok(()), std::fs::create_dir_all)
+                    .and_then(|_| std::fs::write(&path, text));
+                self.notes.push(match saved {
+                    Ok(()) => format!("theme exported to {}", path.display()),
+                    Err(e) => format!("cannot export the theme to {}: {e}", path.display()),
+                });
+            }
             Action::Focus(p) => self.focus(&p),
             Action::Toggle(p) => {
                 if self.shown(&p) {
@@ -535,6 +638,10 @@ impl Shell {
         for a in actions {
             self.apply(&ctx, a);
         }
+        if self.theme_pending {
+            crate::theme::apply(&ctx, &self.theme);
+            self.theme_pending = false;
+        }
 
         self.rects.clear();
         ctx.data_mut(|d| d.remove::<BTreeMap<String, Rect>>(Id::new("helios.named")));
@@ -584,7 +691,7 @@ impl Shell {
                         ui.separator();
                     }
                     if self.recording.is_some() {
-                        ui.colored_label(egui::Color32::RED, "● REC");
+                        ui.colored_label(ui.visuals().error_fg_color, "● REC");
                         ui.separator();
                     }
                     if let Some(note) = self.notes.last() {

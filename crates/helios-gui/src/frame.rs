@@ -29,7 +29,7 @@ fn button(ui: &mut Ui, kind: Button, maximized: bool) -> bool {
     let hovered = response.hovered();
     let pressed = response.is_pointer_button_down_on();
     let (fill, ink) = match (kind, hovered || pressed) {
-        (Button::Close, true) => (Color32::from_rgb(196, 43, 28), Color32::WHITE),
+        (Button::Close, true) => (visuals.error_fg_color, Color32::WHITE),
         (_, true) => (
             visuals.widgets.hovered.weak_bg_fill,
             visuals.widgets.hovered.fg_stroke.color,

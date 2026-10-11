@@ -1,0 +1,10 @@
+[package]
+name = "helios-theme"
+description = "Helios themes: Design Tokens (DTCG) files with inheritance, aliases and validated overrides"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde_json.workspace = true
