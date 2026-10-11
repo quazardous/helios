@@ -39,6 +39,11 @@ impl Gpu {
             ..Default::default()
         }))
         .map_err(|e| format!("no GPU adapter: {e}"))?;
+        Gpu::open(&adapter)
+    }
+
+    /// Opens a device on a given adapter (one the compute manager chose).
+    pub fn open(adapter: &wgpu::Adapter) -> Result<Gpu, String> {
         let info = adapter.get_info();
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             label: Some("helios"),

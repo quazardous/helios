@@ -1,0 +1,22 @@
+[package]
+name = "helios-compute"
+description = "Helios compute units: the machines and devices that run renders, their settings, calibration and routing"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+helios-core.workspace = true
+helios-gpu.workspace = true
+helios-shell.workspace = true
+helios-inspect.workspace = true
+# The calibration's reference modules.
+helios-module-exposure = { path = "../../modules/exposure" }
+helios-module-blur = { path = "../../modules/blur" }
+# MIT OR Apache-2.0; the version helios-gpu uses.
+wgpu = "30"
+pollster = "0.4"
+serde.workspace = true
+serde_json.workspace = true
+toml = "1"

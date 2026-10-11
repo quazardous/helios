@@ -29,6 +29,7 @@ helios-profile = { path = "crates/helios-profile" }
 helios-scopes = { path = "crates/helios-scopes" }
 helios-vkdt = { path = "crates/helios-vkdt" }
 helios-gpu = { path = "crates/helios-gpu" }
+helios-compute = { path = "crates/helios-compute" }
 helios-shell = { path = "crates/helios-shell" }
 helios-values = { path = "crates/helios-values" }
 helios-gui = { path = "crates/helios-gui" }

@@ -1640,6 +1640,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
+name = "helios-compute"
+version = "0.0.1"
+dependencies = [
+ "helios-core",
+ "helios-gpu",
+ "helios-inspect",
+ "helios-module-blur",
+ "helios-module-exposure",
+ "helios-shell",
+ "pollster 0.4.0",
+ "serde",
+ "serde_json",
+ "toml 1.1.8+spec-1.1.0",
+ "wgpu",
+]
+
+[[package]]
 name = "helios-config"
 version = "0.0.1"
 dependencies = [

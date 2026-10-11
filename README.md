@@ -73,6 +73,10 @@ A Cargo workspace (Rust):
   `params.ui`) read into Helios manifests and written back unchanged.
 - `crates/helios-gpu`: the GPU backend on wgpu: modules' WGSL variants run
   on the same plans as their CPU code and are checked against it.
+- `crates/helios-compute`: compute units: the local machine's CPU and GPUs
+  (and declared remote nodes), their machine-scope settings (enabled,
+  role, priority, budgets), a calibration benchmark, and routing a job to
+  a device with a CPU fallback; the `compute.*` commands.
 - `packaging/linux`: the launcher and icons for GNOME and other freedesktop
   desktops (`install.sh` installs them for the current user).
 - `crates/helios-shell`: the desktop shell's logic without a GUI toolkit:
