@@ -57,9 +57,9 @@ def exiftool(*args):
             text=True,
         )
     except FileNotFoundError:
-        raise Failure(-32001, "exiftool is not installed (%s)" % state["exiftool"])
+        raise Failure(-32001, "exiftool is not installed ({})".format(state["exiftool"])) from None
     if out.returncode != 0 and not out.stdout:
-        raise Failure(-32002, "exiftool failed: %s" % out.stderr.strip())
+        raise Failure(-32002, f"exiftool failed: {out.stderr.strip()}")
     return out.stdout
 
 
@@ -85,7 +85,7 @@ def read_metadata(params):
 def execute(params):
     if params.get("command") == "exiftool.version":
         return {"version": exiftool("-ver").strip()}
-    raise Failure(-32601, "no command %s" % params.get("command"))
+    raise Failure(-32601, "no command {}".format(params.get("command")))
 
 
 def initialize(params):
@@ -116,12 +116,17 @@ def main():
         handler = METHODS.get(method)
         try:
             if handler is None:
-                raise Failure(-32601, "no method %s" % method)
+                raise Failure(-32601, f"no method {method}")
             result = handler(message.get("params") or {})
             send({"jsonrpc": "2.0", "id": message["id"], "result": result})
         except Failure as f:
-            send({"jsonrpc": "2.0", "id": message["id"],
-                  "error": {"code": f.code, "message": f.message}})
+            send(
+                {
+                    "jsonrpc": "2.0",
+                    "id": message["id"],
+                    "error": {"code": f.code, "message": f.message},
+                }
+            )
 
 
 if __name__ == "__main__":

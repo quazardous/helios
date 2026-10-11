@@ -41,7 +41,11 @@ CALLBACKS = [
 def read_lines(path):
     if not path.exists():
         return []
-    return [l.strip() for l in path.read_text(errors="replace").splitlines() if l.strip() and not l.startswith("#")]
+    return [
+        line.strip()
+        for line in path.read_text(errors="replace").splitlines()
+        if line.strip() and not line.startswith("#")
+    ]
 
 
 def parse_params(path):
@@ -61,13 +65,15 @@ def parse_connectors(path):
         parts = line.split(":")
         if len(parts) < 4:
             continue
-        connectors.append({
-            "name": parts[0],
-            "type": parts[1],
-            "channels": parts[2],
-            "format": parts[3],
-            "flags": parts[4:],
-        })
+        connectors.append(
+            {
+                "name": parts[0],
+                "type": parts[1],
+                "channels": parts[2],
+                "format": parts[3],
+                "flags": parts[4:],
+            }
+        )
     return connectors
 
 
@@ -108,27 +114,32 @@ def inventory(src):
         if not (d / "connectors").exists() and not (d / "params").exists():
             continue
         connectors = parse_connectors(d / "connectors")
-        modules.append({
-            "name": d.name,
-            "category": cats.get(d.name, "unlisted"),
-            "params": parse_params(d / "params"),
-            "connectors": connectors,
-            "widgets": parse_widgets(d / "params.ui"),
-            "callbacks": callbacks(d / "main.c"),
-            "shaders": len(list(d.glob("*.comp"))),
-            "inputs": sum(c["type"] in ("read", "sink", "modify") for c in connectors),
-            "outputs": sum(c["type"] in ("write", "source") for c in connectors),
-            # Feedback (between frames) is wired by the module's code, not its files.
-            "feedback": (d / "main.c").exists() and "dt_node_feedback" in (d / "main.c").read_text(errors="replace"),
-        })
+        modules.append(
+            {
+                "name": d.name,
+                "category": cats.get(d.name, "unlisted"),
+                "params": parse_params(d / "params"),
+                "connectors": connectors,
+                "widgets": parse_widgets(d / "params.ui"),
+                "callbacks": callbacks(d / "main.c"),
+                "shaders": len(list(d.glob("*.comp"))),
+                "inputs": sum(c["type"] in ("read", "sink", "modify") for c in connectors),
+                "outputs": sum(c["type"] in ("write", "source") for c in connectors),
+                # Feedback (between frames) is wired by the module's code, not its files.
+                "feedback": (d / "main.c").exists()
+                and "dt_node_feedback" in (d / "main.c").read_text(errors="replace"),
+            }
+        )
     return modules
 
 
 def markdown(modules, revision):
     count = len(modules)
+
     def share(pred):
         n = sum(1 for m in modules if pred(m))
         return f"{n} / {count}"
+
     lines = [
         "# vkdt module inventory (helios)",
         "",
@@ -160,7 +171,9 @@ def markdown(modules, revision):
 
 
 def main():
-    src = Path(sys.argv[1] if len(sys.argv) > 1 else os.environ.get("VKDT_SRC", "../vkdt")).resolve()
+    src = Path(
+        sys.argv[1] if len(sys.argv) > 1 else os.environ.get("VKDT_SRC", "../vkdt")
+    ).resolve()
     if not (src / "src" / "pipe" / "modules").exists():
         sys.exit(f"vkdt_inventory: no vkdt checkout at {src} (pass its path or set VKDT_SRC)")
     head = src / ".git" / "HEAD"
@@ -174,7 +187,9 @@ def main():
             revision = ref[:9]
     modules = inventory(src)
     docs = Path(__file__).resolve().parent.parent / "docs"
-    (docs / "vkdt-inventory.json").write_text(json.dumps({"revision": revision, "modules": modules}, indent=1) + "\n")
+    (docs / "vkdt-inventory.json").write_text(
+        json.dumps({"revision": revision, "modules": modules}, indent=1) + "\n"
+    )
     (docs / "vkdt-inventory.md").write_text(markdown(modules, revision))
     print(f"{len(modules)} modules")
 

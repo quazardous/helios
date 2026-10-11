@@ -30,6 +30,7 @@ state file, so `down` can stop an instance a previous `up` started — and the
 darktable-wbox MCP tools see the same instance when the name matches.
 """
 
+import contextlib
 import json
 import os
 import subprocess
@@ -64,7 +65,7 @@ def _load(argv):
 
     cfg = load_config(config_path)
     cfg["headless"] = _headless_from_env()
-    apply_overrides(cfg, overrides)          # explicit overrides win
+    apply_overrides(cfg, overrides)  # explicit overrides win
     cfg["_config_dir"] = str(config_path.parent)
     # Relative paths in the config (log dir, screenshots, pre_launch scripts)
     # are relative to the config file, as they are for wbox-mcp serve.
@@ -74,11 +75,11 @@ def _load(argv):
 
 def _run_pre_launch(cfg):
     for script in cfg.get("app", {}).get("pre_launch", []) or []:
-        result = subprocess.run(script, shell=True, cwd=cfg["_config_dir"],
-                                capture_output=True, text=True, timeout=30)
+        result = subprocess.run(
+            script, shell=True, cwd=cfg["_config_dir"], capture_output=True, text=True, timeout=30
+        )
         if result.returncode != 0:
-            sys.exit("pre_launch failed: %s\n%s%s"
-                     % (script, result.stdout, result.stderr))
+            sys.exit(f"pre_launch failed: {script}\n{result.stdout}{result.stderr}")
 
 
 def _warm_up(comp, x=None, y=None):
@@ -91,12 +92,11 @@ def _warm_up(comp, x=None, y=None):
     pointer-enter before the button press.
     """
     import time
+
     warm = getattr(comp, "_vptr_op", None)
     if warm:
-        try:
+        with contextlib.suppress(Exception):
             warm("warm_up")
-        except Exception:
-            pass
     if x is not None:
         comp.mouse_move(x, y)
     time.sleep(0.3)
@@ -109,8 +109,7 @@ def main():
     cfg, name, args = _load(rest)
     comp = build_compositor(cfg)
     # Where wbox-mcp serve puts screenshots, so both land in the same place.
-    comp.state.screenshot_dir = resolve_dir(cfg, "screenshot_dir",
-                                            "./screenshots")
+    comp.state.screenshot_dir = resolve_dir(cfg, "screenshot_dir", "./screenshots")
 
     if command == "up":
         _run_pre_launch(cfg)
@@ -123,6 +122,7 @@ def main():
         # would overwrite the previous one. Name it by time instead.
         if not name:
             import time
+
             name = time.strftime("wbox_%Y%m%d_%H%M%S")
         result = comp.screenshot(name)
     elif command == "click":
@@ -139,7 +139,7 @@ def main():
     elif command == "status":
         result = {"running": comp.is_running(), "headless": cfg["headless"]}
     else:
-        sys.exit("unknown command: %s\n%s" % (command, __doc__))
+        sys.exit(f"unknown command: {command}\n{__doc__}")
 
     print(json.dumps(result, default=str))
     return 1 if isinstance(result, dict) and result.get("error") else 0

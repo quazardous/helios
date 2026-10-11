@@ -28,10 +28,12 @@ for line in sys.stdin:
     elif method == "shutdown":
         reply["result"] = None
     elif method == "metadata.read":
-        reply["result"] = {"fields": [
-            {"name": "path", "value": params["image"], "source": "testee"},
-            {"name": "granted", "value": granted, "source": "testee"},
-        ]}
+        reply["result"] = {
+            "fields": [
+                {"name": "path", "value": params["image"], "source": "testee"},
+                {"name": "granted", "value": granted, "source": "testee"},
+            ]
+        }
     elif method == "echo":
         reply["result"] = {"params": params, "pid": os.getpid()}
     elif method == "crash":
@@ -41,5 +43,5 @@ for line in sys.stdin:
     elif method == "hang":
         continue  # never answers
     else:
-        reply["error"] = {"code": -32601, "message": "no method %s" % method}
+        reply["error"] = {"code": -32601, "message": f"no method {method}"}
     send(reply)

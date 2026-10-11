@@ -4,3 +4,4 @@
 CLAUDE.todo
 /.claude/
 /target
+.ruff_cache/
