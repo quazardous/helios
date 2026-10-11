@@ -157,6 +157,9 @@ enum Work {
         module: ModuleRef,
         plan: crate::module::Plan,
         inputs: Vec<(Step, usize)>,
+        /// Optional inputs left unconnected: their index among the
+        /// module's inputs and their channels.
+        absent: Vec<(usize, u32)>,
         /// Computed by the engine's accelerator.
         accelerated: bool,
     },
@@ -593,11 +596,21 @@ impl Engine {
                 };
                 let input_region = module.input_region(&plan, region);
                 let mut inputs = Vec::with_capacity(node.inputs.len());
+                let mut absent = Vec::new();
                 for (i, connection) in node.inputs.iter().enumerate() {
-                    let (src, port) = connection.ok_or_else(|| Error::Unconnected {
-                        node: node.name.clone(),
-                        port: manifest.inputs[i].name.clone(),
-                    })?;
+                    let spec = &manifest.inputs[i];
+                    let Some((src, port)) = *connection else {
+                        if spec.optional {
+                            h.update(b"helios.step.absent.v1");
+                            h.update(&(i as u64).to_le_bytes());
+                            absent.push((i, spec.channels().unwrap_or(1)));
+                            continue;
+                        }
+                        return Err(Error::Unconnected {
+                            node: node.name.clone(),
+                            port: spec.name.clone(),
+                        });
+                    };
                     let step = self.plan(graph, src, input_region, scale)?;
                     h.update(&step.key.0);
                     h.update(&(port as u64).to_le_bytes());
@@ -607,6 +620,7 @@ impl Engine {
                     module: module.clone(),
                     plan,
                     inputs,
+                    absent,
                     accelerated,
                 }
             }
@@ -719,6 +733,7 @@ impl Engine {
                 module,
                 plan,
                 inputs,
+                absent,
                 accelerated,
             } => {
                 let mut held = Vec::with_capacity(inputs.len());
@@ -748,6 +763,13 @@ impl Engine {
                             .zip(inputs)
                             .map(|((content, port), (input, _))| self.host(input, content, *port))
                             .collect::<Result<Vec<&Image>, Error>>()?;
+                        let placeholders: Vec<(usize, Image)> =
+                            absent.iter().map(|&(i, c)| (i, Image::absent(c))).collect();
+                        let mut images = images;
+                        // In index order, so each lands at its port's place.
+                        for (i, image) in &placeholders {
+                            images.insert(*i, image);
+                        }
                         Ok(Arc::new(Content::Host(module.process(
                             plan,
                             &images,

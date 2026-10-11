@@ -279,6 +279,13 @@ pub struct PortSpec {
     /// the input of a sink, the output of a source.
     #[serde(skip_serializing_if = "is_default")]
     pub io: bool,
+    /// An input that may stay unconnected: the module then gets an empty
+    /// image (no pixels, see [`Image::is_absent`]) at its place, and the
+    /// render does not fail. Inputs are required by default.
+    ///
+    /// [`Image::is_absent`]: crate::Image::is_absent
+    #[serde(skip_serializing_if = "is_default")]
+    pub optional: bool,
 }
 
 impl PortSpec {
@@ -289,7 +296,14 @@ impl PortSpec {
             format: PixelFormat::F32,
             layout: None,
             io: false,
+            optional: false,
         }
+    }
+
+    /// The same port, allowed to stay unconnected (an input).
+    pub fn optional(mut self) -> Self {
+        self.optional = true;
+        self
     }
 
     /// The channel count, when the port fixes it. Ports of other kinds

@@ -165,6 +165,17 @@ impl Image {
         Self::new(region, channels, data)
     }
 
+    /// What a module gets for an optional input left unconnected: no
+    /// pixels, an empty region at the origin.
+    pub fn absent(channels: u32) -> Self {
+        Self::new(Region::sized(0, 0), channels, Vec::new())
+    }
+
+    /// Whether this is an optional input left unconnected (no pixels).
+    pub fn is_absent(&self) -> bool {
+        self.region.is_empty()
+    }
+
     pub fn region(&self) -> Region {
         self.region
     }

@@ -270,7 +270,11 @@ impl ModuleRef {
     /// input and one output.
     pub(crate) fn acceleratable(&self) -> bool {
         let m = self.manifest();
-        self.0.gpu_kernel().is_some() && m.inputs.len() == 1 && m.outputs.len() == 1
+        // An optional input may arrive empty: the CPU code handles it.
+        self.0.gpu_kernel().is_some()
+            && m.inputs.len() == 1
+            && !m.inputs[0].optional
+            && m.outputs.len() == 1
     }
 
     /// Runs the GPU variant on an accelerator and checks the result as

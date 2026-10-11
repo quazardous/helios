@@ -294,3 +294,77 @@ fn every_computed_step_is_an_event_caused_by_its_render() {
     assert_eq!(e.describe()["counters"]["computed"], 2);
     assert_eq!(g.describe()["nodes"][1]["params"]["gain"]["float"], 2.0);
 }
+
+/// Adds its optional inputs to its first: a member left unconnected adds nothing.
+struct Sum;
+
+impl Module for Sum {
+    type Plan = ();
+
+    fn manifest(&self) -> Manifest {
+        Manifest {
+            name: "sum".into(),
+            version: 1,
+            description: "sum of the connected inputs".into(),
+            params: vec![],
+            inputs: vec![
+                PortSpec::image("a", 1).optional(),
+                PortSpec::image("b", 1).optional(),
+            ],
+            outputs: vec![PortSpec::image("output", 1)],
+            context: vec![],
+            needs: Needs::default(),
+            kind: ModuleKind::Process,
+            family: Family::Merge,
+            role: Role::General,
+        }
+    }
+
+    fn prepare(&self, _: &Params, _: &Context) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn process(&self, _: &(), inputs: &[&Image], output: Region) -> Result<Vec<Image>, String> {
+        assert_eq!(inputs.len(), 2, "one image per declared input");
+        Ok(vec![Image::from_fn(output, 1, |x, y, _| {
+            inputs
+                .iter()
+                .filter(|i| !i.is_absent())
+                .map(|i| i.pixel(x, y)[0])
+                .sum()
+        })])
+    }
+}
+
+#[test]
+fn an_optional_input_may_stay_unconnected() {
+    let mut g = Graph::new();
+    let src = g.add_source("src", ramp());
+    let one = g
+        .add_module("one", ModuleRef::new(Sum), &Params::new())
+        .unwrap();
+    let other = g
+        .add_module("other", ModuleRef::new(Sum), &Params::new())
+        .unwrap();
+    let both = g
+        .add_module("both", ModuleRef::new(Sum), &Params::new())
+        .unwrap();
+    g.connect(src, "image", one, "a").unwrap();
+    g.connect(src, "image", other, "b").unwrap();
+    g.connect(src, "image", both, "a").unwrap();
+    g.connect(src, "image", both, "b").unwrap();
+    let e = engine();
+    let r = ramp().region();
+    let a = e.render(&g, one, "output", r).unwrap();
+    let b = e.render(&g, other, "output", r).unwrap();
+    assert_eq!(a.data(), ramp().data());
+    assert_eq!(a.data(), b.data());
+    assert_ne!(
+        e.key(&g, one, r).unwrap(),
+        e.key(&g, other, r).unwrap(),
+        "the port an input is connected to is part of the key"
+    );
+    let twice = e.render(&g, both, "output", r).unwrap();
+    assert_eq!(twice.pixel(1, 0)[0], 2.0 * ramp().pixel(1, 0)[0]);
+    assert_eq!(g.extent(other).unwrap(), Some(r), "the extent follows b");
+}

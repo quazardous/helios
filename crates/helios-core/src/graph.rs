@@ -206,15 +206,15 @@ impl Graph {
     }
 
     /// The extent of what a node outputs: its source's image region,
-    /// followed up the first inputs (modules keep the geometry they are
-    /// given). `None` when no source feeds it.
+    /// followed up the first connected inputs (modules keep the geometry
+    /// they are given). `None` when no source feeds it.
     pub fn extent(&self, id: NodeId) -> Result<Option<Region>, Error> {
         let mut at = id;
         loop {
             let node = self.node(at)?;
             match &node.kind {
                 Kind::Source { image, .. } => return Ok(Some(image.region())),
-                Kind::Module { .. } => match node.inputs.first().copied().flatten() {
+                Kind::Module { .. } => match node.inputs.iter().flatten().next().copied() {
                     Some((from, _)) => at = from,
                     None => return Ok(None),
                 },

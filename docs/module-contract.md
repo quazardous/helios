@@ -105,6 +105,10 @@ Each line is a reason why darktable modules cannot be tested alone today.
   analysis inputs and outputs (histograms, masks, statistics); metadata
   outputs (processed maximum, ...).
   Any parameter may also be bound to a port of the right type (AVS style).
+  An input may be declared **optional**: left unconnected, the module gets
+  an empty image (`Image::is_absent`) at its place and the render goes on.
+  This is how a module takes a variable number of members (a mask group
+  has a fixed maximum of optional inputs, see [masks.md](masks.md)).
 - **Composition**: a module may be a macro, a subgraph of other modules
   with a chosen subset of their parameters exposed.
 - **Context inputs**: the metadata fields it reads, by name, typed by a
