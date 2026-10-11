@@ -44,7 +44,7 @@ served from the cache, which is why their p50 is near zero.
 
 ## Decision
 
-**egui** (2026-10-11, decided), as recommended: for Helios's first GUI: the cheaper per-frame cost of the graph
+**egui** (2026-10-11, decided) for Helios's first GUI: the cheaper per-frame cost of the graph
 panel and of uploads, docking with tabs and a serializable layout out of
 the box, testing by label through AccessKit, and a third less code for the
 same result. iced's explicit message flow is attractive for a large
