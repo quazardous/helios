@@ -1,0 +1,12 @@
+# taplo: TOML formatting (`taplo fmt`, or `cargo xtask lint`).
+# https://taplo.tamasfe.dev/configuration/
+
+include = ["**/*.toml"]
+exclude = ["**/target/**"]
+
+[formatting]
+indent_string = "    "
+# Arrays stay on one line or one item per line, as written: dependency
+# feature lists read best on one line even when long.
+array_auto_expand = false
+array_auto_collapse = false

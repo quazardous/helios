@@ -1,0 +1,22 @@
+# typos: spelling of code, comments and docs (`typos`, or `cargo xtask lint`).
+# https://github.com/crate-ci/typos/blob/master/docs/reference.md
+
+[files]
+extend-exclude = [
+    # Translations other than English are not English.
+    "i18n/fr/",
+    # Hashes of the English text, in hex.
+    "i18n/*/english.hashes",
+]
+
+[default.extend-words]
+# Integer pixel coordinates next to `ix`, as in vkdt's shaders.
+iy = "iy"
+# A job named after the two it waits for, in the scheduler tests.
+ba = "ba"
+# A misspelled token on purpose: the theme test checks it is reported.
+acent = "acent"
+# darktable's and vkdt's own names, kept as their sources spell them:
+# colorcorrection's parameter and vkdt's highlights module.
+ccorrect = "ccorrect"
+hilights = "hilights"
