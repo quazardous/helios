@@ -2107,13 +2107,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "helios-theme"
-version = "0.0.1"
-dependencies = [
- "serde_json",
-]
-
-[[package]]
 name = "helios-values"
 version = "0.0.1"
 dependencies = [
