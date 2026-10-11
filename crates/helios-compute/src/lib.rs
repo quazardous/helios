@@ -67,7 +67,11 @@ impl Job {
                 .and_then(|f| f.as_str().map(String::from)),
             gpu,
             pixels: region.area() as u64,
-            channels: m.outputs.first().and_then(|p| p.channels()).unwrap_or(4),
+            channels: m
+                .outputs
+                .first()
+                .and_then(helios_core::PortSpec::channels)
+                .unwrap_or(4),
         }
     }
 
@@ -227,18 +231,15 @@ impl Manager {
         self.opened.lock().expect("opened lock").clear();
         let mut new = false;
         for d in &self.present {
-            match self.settings.devices.get_mut(&d.id) {
-                Some(s) => {
-                    // Its name may change with a driver; keep the latest.
-                    s.name = d.name.clone();
-                    s.kind = d.kind;
-                }
-                None => {
-                    self.settings
-                        .devices
-                        .insert(d.id.clone(), DeviceSettings::new(d));
-                    new = true;
-                }
+            if let Some(s) = self.settings.devices.get_mut(&d.id) {
+                // Its name may change with a driver; keep the latest.
+                s.name.clone_from(&d.name);
+                s.kind = d.kind;
+            } else {
+                self.settings
+                    .devices
+                    .insert(d.id.clone(), DeviceSettings::new(d));
+                new = true;
             }
         }
         if new { self.save() } else { Ok(()) }
@@ -432,7 +433,7 @@ impl Manager {
 
     /// Whether a job fits a GPU: one buffer within what it binds, input
     /// and output within its memory budget.
-    fn fits(&self, job: &Job, d: &Device, s: &DeviceSettings) -> bool {
+    fn fits(job: &Job, d: &Device, s: &DeviceSettings) -> bool {
         let bytes = job.bytes();
         let binds = d.limits.is_none_or(|l| bytes <= l.max_binding);
         let budget = s.vram_mb.is_none_or(|mb| 2 * bytes <= mb * MIB);
@@ -471,7 +472,7 @@ impl Manager {
             .iter()
             .filter_map(|d| self.settings.devices.get(&d.id).map(|s| (d, s)))
             .filter(|(d, s)| {
-                s.enabled && s.role.takes(job.role) && (!d.kind.is_gpu() || self.fits(job, d, s))
+                s.enabled && s.role.takes(job.role) && (!d.kind.is_gpu() || Self::fits(job, d, s))
             })
             .collect();
         let cpu = &self.present[0];
@@ -583,8 +584,7 @@ impl Manager {
         };
         let at = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
+            .map_or(0, |d| d.as_secs());
         let mut reports = Vec::new();
         for id in ids {
             let device = self.present(&id).expect("present").clone();

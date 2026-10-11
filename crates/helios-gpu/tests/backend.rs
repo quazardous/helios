@@ -86,7 +86,7 @@ mod helios_testkit_blurless {
         fn prepare(&self, _: &Params, _: &Context) -> Result<(), String> {
             Ok(())
         }
-        fn process(&self, _: &(), inputs: &[&Image], _: Region) -> Result<Vec<Image>, String> {
+        fn process(&self, (): &(), inputs: &[&Image], _: Region) -> Result<Vec<Image>, String> {
             Ok(vec![inputs[0].clone()])
         }
     }
@@ -119,7 +119,7 @@ fn sigmoid_on_the_gpu_matches_the_cpu() {
         if c == 3 {
             return 1.0;
         }
-        let v = ((x * 7 + y * 13 + c as i64 * 5) % 97) as f32 / 24.0 - 0.1;
+        let v = ((x * 7 + y * 13 + i64::from(c) * 5) % 97) as f32 / 24.0 - 0.1;
         v * if c == 1 { 0.8 } else { 1.0 }
     });
     let module = ModuleRef::new(helios_module_sigmoid::Sigmoid);
@@ -174,7 +174,7 @@ fn chain(engine: &helios_core::Engine, input: &helios_core::Image) -> helios_cor
         g.connect(prev, &port, n, &module.manifest().inputs[0].name)
             .unwrap();
         prev = n;
-        port = module.manifest().outputs[0].name.clone();
+        port.clone_from(&module.manifest().outputs[0].name);
     }
     engine
         .render(&g, prev, &port, Region::new(8, 6, 48, 36))
@@ -224,7 +224,7 @@ mod broken {
         fn prepare(&self, _: &Params, _: &Context) -> Result<(), String> {
             Ok(())
         }
-        fn process(&self, _: &(), inputs: &[&Image], _: Region) -> Result<Vec<Image>, String> {
+        fn process(&self, (): &(), inputs: &[&Image], _: Region) -> Result<Vec<Image>, String> {
             Ok(vec![inputs[0].clone()])
         }
         fn gpu_kernel(&self) -> Option<GpuKernel> {

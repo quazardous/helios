@@ -20,3 +20,6 @@ pollster = "0.4"
 serde.workspace = true
 serde_json.workspace = true
 toml = "1"
+
+[lints]
+workspace = true

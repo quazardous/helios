@@ -34,6 +34,10 @@ fn text<'a>(args: &'a Json, key: &str) -> Result<&'a str, String> {
 }
 
 /// A budget field: absent leaves it, `null` clears it, a number sets it.
+#[allow(
+    clippy::option_option,
+    reason = "three states: leave the field, clear it, or set it"
+)]
 fn field(args: &Json, key: &str) -> Result<Option<Option<u64>>, String> {
     match args.get(key) {
         None => Ok(None),

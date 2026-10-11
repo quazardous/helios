@@ -81,11 +81,7 @@ impl Device {
             kind: DeviceKind::Cpu,
             backend: None,
             driver: None,
-            threads: Some(
-                std::thread::available_parallelism()
-                    .map(|n| n.get())
-                    .unwrap_or(1),
-            ),
+            threads: Some(std::thread::available_parallelism().map_or(1, std::num::NonZero::get)),
             limits: None,
         }
     }
@@ -102,6 +98,10 @@ pub trait Adapters: Send + Sync {
 
 /// The id of an adapter: its backend and PCI ids, then a number when the
 /// machine has several identical ones.
+#[allow(
+    clippy::maybe_infinite_iter,
+    reason = "`taken` is finite, so an unused number is found"
+)]
 pub fn gpu_id(backend: &str, vendor: u32, device: u32, taken: &[String]) -> String {
     let base = format!("gpu:{backend}:{vendor:04x}:{device:04x}");
     if !taken.contains(&base) {

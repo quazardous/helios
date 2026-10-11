@@ -48,7 +48,7 @@ impl Module for Lift {
     fn prepare(&self, _: &Params, _: &Context) -> Result<(), String> {
         Ok(())
     }
-    fn process(&self, _: &(), inputs: &[&Image], output: Region) -> Result<Vec<Image>, String> {
+    fn process(&self, (): &(), inputs: &[&Image], output: Region) -> Result<Vec<Image>, String> {
         let input = inputs[0].sample(output);
         let data = input.data().iter().map(|v| v + 0.1).collect();
         Ok(vec![Image::new(output, 4, data)])
@@ -88,7 +88,7 @@ fn chain(input: &Image, steps: Vec<(ModuleRef, Params)>) -> (Graph, NodeId, Stri
         g.connect(prev, &port, n, &module.manifest().inputs[0].name)
             .unwrap();
         prev = n;
-        port = module.manifest().outputs[0].name.clone();
+        port.clone_from(&module.manifest().outputs[0].name);
     }
     (g, prev, port)
 }

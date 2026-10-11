@@ -91,7 +91,7 @@ impl Gpu {
         let channels = m
             .outputs
             .first()
-            .and_then(|p| p.channels())
+            .and_then(helios_core::PortSpec::channels)
             .unwrap_or(input.channels());
         self.dispatch(&m.name, &job, &input, output, channels)
             .map(Some)
@@ -119,7 +119,7 @@ impl Gpu {
             layout: None,
             module: &shader,
             entry_point: Some(job.kernel.entry),
-            compilation_options: Default::default(),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
             cache: None,
         });
         if let Some(e) = pollster::block_on(scope.pop()) {
@@ -215,7 +215,7 @@ impl Gpu {
                 usage: wgpu::BufferUsages::UNIFORM,
             })
         };
-        let out_size = (pixels as u64) * u64::from(channels) * 4;
+        let out_size = u64::from(pixels) * u64::from(channels) * 4;
         let output_buf = d.create_buffer(&wgpu::BufferDescriptor {
             label: Some("output"),
             size: out_size.max(4),
@@ -256,9 +256,9 @@ impl Gpu {
                 },
             ],
         });
-        let mut encoder = d.create_command_encoder(&Default::default());
+        let mut encoder = d.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
         {
-            let mut pass = encoder.begin_compute_pass(&Default::default());
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
             pass.set_pipeline(&pipeline);
             pass.set_bind_group(0, &group, &[]);
             pass.dispatch_workgroups(pixels.div_ceil(64), 1, 1);
@@ -287,7 +287,7 @@ impl Gpu {
             usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        let mut encoder = d.create_command_encoder(&Default::default());
+        let mut encoder = d.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
         encoder.copy_buffer_to_buffer(buffer, 0, &readback, 0, size.max(4));
         self.queue.submit([encoder.finish()]);
         if let Some(e) = pollster::block_on(scope.pop()) {
