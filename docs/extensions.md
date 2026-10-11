@@ -1,6 +1,6 @@
 # Extensions: modules and plugins
 
-Status: **proposal, for review** (2026-10-11). It answers: what separates a
+Status: **decided** (2026-10-11). It answers: what separates a
 plugin from a module, and does Helios need both? darktable paths are
 relative to its source tree.
 

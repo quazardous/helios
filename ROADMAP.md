@@ -349,6 +349,18 @@ hash) is part of Helios; deploying a NAS is not.
 - Front: authority is server-side, but computation can happen anywhere (the
   client is a node; WebGPU / local engine; approximations replaced by the
   exact darktable render).
+- (2026-10-11, decided) **Two kinds of extension, one manifest**
+  ([docs/extensions.md](docs/extensions.md)):
+  - a **module** is a pure, deterministic unit of a network under the
+    module contract: no IO, no UI code, no commands, sandboxable;
+  - a **plugin** extends the application (panels, views, commands,
+    importers, exporters, services) and is the unit of packaging; it may
+    ship modules;
+  - saved sub-networks are user data, not a third kind.
+
+  The declarative manifest is read before any code loads. Keybindings in
+  it are suggestions only. Capabilities are enforced out of process, and
+  called a disclosure until they are.
 
 ### 2.8 Design rules
 
