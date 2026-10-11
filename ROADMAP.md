@@ -122,6 +122,13 @@ Translation goes into egui-pop too (2026-10-11, decided): an official
 `egui-pop-i18n` plugin (Fluent catalogues, language fallback, key
 extraction) built on egui-pop's public API, moved there from
 helios-i18n under the MIT licence; Helios then uses it.
+A generic image viewport goes into egui-pop too (2026-10-11, decided):
+pan and zoom, tiled rendering fed by a tile source trait (proxy then exact
+tiles), a display-transform hook, overlays with handles in image
+coordinates, before/after views, a pixel readout, thumbnails and a
+histogram from supplied data. Raw decoding, colour science, the engine and
+the scopes' computation stay in Helios, which implements the tile source
+and the display transform.
 Hard requirement (2026-10-11, decided): GPU acceleration on Linux, Windows
 and macOS, as close to Vulkan as possible, so the viewport can show buffers
 the engine computed on the GPU without copying them back. wgpu is
