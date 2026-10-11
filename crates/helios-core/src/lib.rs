@@ -28,7 +28,7 @@ pub use bus::{Bus, Envelope, Event};
 pub use describe::Describe;
 pub use engine::{Counters, Engine};
 pub use error::Error;
-pub use graph::{Graph, NodeId};
+pub use graph::{Graph, LayoutHint, NodeId};
 pub use image::{ContentHash, Image, Region};
 pub use manifest::{
     Family, Manifest, ModuleKind, Needs, ParamKind, ParamSpec, PortKind, PortSpec, Role,

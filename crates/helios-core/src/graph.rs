@@ -11,6 +11,7 @@ use serde::Serialize;
 use crate::describe::Describe;
 use crate::error::Error;
 use crate::image::{ContentHash, Image};
+use crate::manifest::ModuleKind;
 use crate::module::{Context, ModuleRef};
 use crate::params::{Params, Value};
 
@@ -193,6 +194,93 @@ impl Graph {
     }
 }
 
+/// Where a node goes when a surface draws the graph: the same answer for
+/// every surface (GUI, CLI dump, web).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub struct LayoutHint {
+    pub node: NodeId,
+    /// Column of a layered layout: 0 for nodes without inputs, else one more
+    /// than the deepest input.
+    pub rank: usize,
+    /// Shown in the overview. Proposed automatically: sources, merges (two
+    /// inputs or more), decision nodes, sinks and the network's outputs.
+    pub principal: bool,
+    /// The principal node this node is stacked under in the overview: itself
+    /// when principal, else the group of its first consumer.
+    pub group: NodeId,
+}
+
+impl Graph {
+    /// Layout hints for every node, in node order. Manual choices (pinning a
+    /// node as principal, folding one into a stack) belong to the user's
+    /// workspace and are applied on top by the surfaces.
+    pub fn layout(&self) -> Vec<LayoutHint> {
+        let n = self.nodes.len();
+        let mut consumers: Vec<Vec<NodeId>> = vec![Vec::new(); n];
+        for (i, node) in self.nodes.iter().enumerate() {
+            for (src, _) in node.inputs.iter().flatten() {
+                consumers[src.0].push(NodeId(i));
+            }
+        }
+        let mut rank = vec![None; n];
+        fn rank_of(g: &Graph, i: usize, memo: &mut [Option<usize>]) -> usize {
+            if let Some(r) = memo[i] {
+                return r;
+            }
+            let r = g.nodes[i]
+                .inputs
+                .iter()
+                .flatten()
+                .map(|(src, _)| rank_of(g, src.0, memo) + 1)
+                .max()
+                .unwrap_or(0);
+            memo[i] = Some(r);
+            r
+        }
+        let principal: Vec<bool> = (0..n)
+            .map(|i| {
+                let node = &self.nodes[i];
+                let declared = match &node.kind {
+                    Kind::Source { .. } => true,
+                    Kind::Module { module, .. } => module.manifest().kind != ModuleKind::Process,
+                };
+                declared || node.inputs.iter().flatten().count() >= 2 || consumers[i].is_empty()
+            })
+            .collect();
+        let mut group = vec![None; n];
+        fn group_of(
+            i: usize,
+            principal: &[bool],
+            consumers: &[Vec<NodeId>],
+            memo: &mut [Option<usize>],
+        ) -> usize {
+            if let Some(g) = memo[i] {
+                return g;
+            }
+            let g = if principal[i] {
+                i
+            } else {
+                // Not principal means it has a consumer; the graph is acyclic.
+                let first = consumers[i]
+                    .iter()
+                    .min()
+                    .expect("a non-principal node has a consumer");
+                group_of(first.0, principal, consumers, memo)
+            };
+            memo[i] = Some(g);
+            g
+        }
+        (0..n)
+            .map(|i| LayoutHint {
+                node: NodeId(i),
+                rank: rank_of(self, i, &mut rank),
+                principal: principal[i],
+                group: NodeId(group_of(i, &principal, &consumers, &mut group)),
+            })
+            .collect()
+    }
+}
+
 impl Describe for Graph {
     fn describe(&self) -> serde_json::Value {
         let nodes: Vec<_> = self
@@ -214,6 +302,6 @@ impl Describe for Graph {
                 }
             })
             .collect();
-        serde_json::json!({ "nodes": nodes })
+        serde_json::json!({ "nodes": nodes, "layout": self.layout() })
     }
 }

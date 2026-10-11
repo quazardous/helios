@@ -12,6 +12,15 @@ as in VS Code: each user builds the view they want. Layouts are saved per
 project workspace and follow the user (configuration, user scope). A
 minimal image-first layout stays available for small screens.
 
+## Settings pages
+
+Settings pages are generated, never laid out by hand: a setting named
+`page.group.name` appears on that page, in that group (see
+[architecture.md](architecture.md), "Configuration"). Its widget comes from
+its normalized input, the same description a module parameter has, so one
+widget library draws both, and each widget shows where the effective value
+comes from (default, global, project, user, run).
+
 ## Node header
 
 Every node of a network shows the same header, whatever surface draws it.
@@ -52,3 +61,28 @@ default; hiding it is a user setting.
   and stay in sync.
 - Edits use explicit actions (insert before, insert after, group as macro)
   rather than precise gestures.
+
+### Principal nodes, stacks and semantic zoom
+
+A network quickly grows past what a screen shows. Some nodes are principal
+because the network turns around them; the others are stacked under them.
+
+- **Overview** (zoomed out): only principal nodes and the links between
+  their groups. Each principal node carries a stack badge (`+3`) and a header
+  that aggregates its stack: the worst state (failed > waiting > stale >
+  running > queued > done) and the total queue.
+- **Detail** (zoomed in): stacks unfold into the full network. Zooming moves
+  smoothly from one to the other; a single stack can also be unfolded in
+  place.
+- **Principal nodes are proposed automatically**: sources, merges (two
+  inputs or more), decision nodes, sinks and the outputs of the network.
+  Every other node is stacked under the principal node it leads to (its
+  first consumer's group). The framework computes this (`Graph::layout`,
+  shown by `helios inspect describe graph` as `layout`), with each node's
+  rank for a layered layout, so every surface draws the same grouping.
+- **Always overridable by hand**: pin a node as principal, fold one into a
+  stack. These choices are a view: saved in the project workspace (user
+  scope of the configuration), never in the network itself.
+- A stack can be **promoted to a macro**, a real module made of a network
+  (AVS style, see [module-contract.md](module-contract.md)), when it is
+  worth reusing.
