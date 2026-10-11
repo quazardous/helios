@@ -1762,7 +1762,13 @@ name = "helios-parity"
 version = "0.0.1"
 dependencies = [
  "helios-core",
+ "helios-load",
+ "helios-module-colorin",
+ "helios-module-demosaic",
  "helios-module-exposure",
+ "helios-module-highlights",
+ "helios-module-rawprepare",
+ "helios-module-whitebalance",
  "helios-photo",
  "helios-xmp",
  "serde_json",

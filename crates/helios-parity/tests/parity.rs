@@ -5,7 +5,6 @@ use std::sync::Arc;
 
 use helios_core::{Bus, Engine, Graph, Image, ModuleRef, Params, Region, Value};
 use helios_parity::{Darktable, Item, compare, delta_e_2000, read_pfm, write_pfm};
-use helios_xmp::Layouts;
 use serde_json::json;
 
 #[test]
@@ -84,7 +83,7 @@ fn exposure_matches_darktable() {
         }
     };
     eprintln!("against {}", dt.version);
-    let layouts = Layouts::built_in();
+    let layouts = dt.layouts();
     let input = chart();
     let dir = std::env::temp_dir().join(format!("helios-parity-{}", std::process::id()));
     for (exposure, black) in [(0.0, 0.0), (1.0, 0.01), (-2.0, 0.05), (3.5, -0.02)] {

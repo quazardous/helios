@@ -47,3 +47,10 @@ opt-level = 3
 # The blur's contract runs its largest radius over every tile.
 [profile.dev.package.helios-module-blur]
 opt-level = 2
+
+# The raw chain and the parity harness work on whole sensor images.
+[profile.dev.package.helios-module-demosaic]
+opt-level = 2
+
+[profile.dev.package.helios-parity]
+opt-level = 2

@@ -43,14 +43,31 @@ impl Item {
 
 /// darktable's colorspace number for linear Rec.2020 (`DT_COLORSPACE_LIN_REC2020`).
 const LIN_REC2020: i64 = 4;
+/// darktable's colorspace number for a camera's standard matrix.
+const STANDARD_MATRIX: i64 = 11;
 
-/// A sidecar whose history is `items` between colorin and colorout, both
-/// linear Rec.2020, at the newest versions `layouts` knows, with darktable's
-/// automatic presets marked as applied so it adds nothing.
-pub fn sidecar(items: &[Item], layouts: &Layouts) -> Result<String, String> {
+/// What darktable's colorin reads the input as.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Input {
+    /// Already linear Rec.2020 (a float image): colorin changes nothing.
+    LinearRec2020,
+    /// A raw file: the camera's standard matrix, as Helios's colorin uses.
+    Camera,
+}
+
+/// A sidecar whose history is `items` between colorin (reading `input`,
+/// into linear Rec.2020) and colorout (linear Rec.2020), at the newest
+/// versions `layouts` knows, with darktable's automatic presets marked as
+/// applied so it adds nothing. Modules darktable enables by default and
+/// `items` leave out (rawprepare, white balance) keep their defaults.
+pub fn sidecar(items: &[Item], input: Input, layouts: &Layouts) -> Result<String, String> {
+    let profile = match input {
+        Input::LinearRec2020 => LIN_REC2020,
+        Input::Camera => STANDARD_MATRIX,
+    };
     let mut history = vec![Item::new(
         "colorin",
-        serde_json::json!({"type": LIN_REC2020, "type_work": LIN_REC2020}),
+        serde_json::json!({"type": profile, "type_work": LIN_REC2020}),
     )];
     for item in items {
         history.push(Item::new(&item.module, item.values.clone()));
@@ -173,8 +190,26 @@ impl Darktable {
         Ok(Darktable { cli, version })
     }
 
-    /// Renders `input` with a history of `items` (see [`sidecar`]) in a
-    /// throwaway configuration under `dir`, and reads the result back.
+    /// The params layouts of this darktable's modules: a release's own
+    /// (`layouts/`, from `tools/dt_param_layouts.sh` run on its plugins),
+    /// else those Helios was built against, which may be newer.
+    pub fn layouts(&self) -> Layouts {
+        let release = self
+            .version
+            .strip_prefix("darktable ")
+            .and_then(|v| v.rsplit_once('.'))
+            .map(|(major_minor, _)| major_minor);
+        let json = match release {
+            Some("5.6") => Some(include_str!("../layouts/darktable-5.6.json")),
+            _ => None,
+        };
+        json.and_then(|j| Layouts::from_json(j).ok())
+            .unwrap_or_else(Layouts::built_in)
+    }
+
+    /// Renders a linear Rec.2020 image with a history of `items` (see
+    /// [`sidecar`]) in a throwaway configuration under `dir`, and reads
+    /// the result back.
     pub fn render(
         &self,
         input: &Image,
@@ -184,20 +219,51 @@ impl Darktable {
     ) -> Result<Image, String> {
         std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
         let src = dir.join("input.pfm");
-        let xmp = dir.join("input.pfm.xmp");
+        write_pfm(input, &src)?;
+        self.run(&src, items, Input::LinearRec2020, layouts, dir)
+    }
+
+    /// Renders a raw file with a history of `items` after darktable's
+    /// default raw modules, read through the camera's standard matrix.
+    pub fn render_raw(
+        &self,
+        raw: &Path,
+        items: &[Item],
+        layouts: &Layouts,
+        dir: &Path,
+    ) -> Result<Image, String> {
+        std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        let name = raw.file_name().ok_or("a raw path without a name")?;
+        let src = dir.join(name);
+        std::fs::copy(raw, &src).map_err(|e| format!("{}: {e}", raw.display()))?;
+        self.run(&src, items, Input::Camera, layouts, dir)
+    }
+
+    fn run(
+        &self,
+        src: &Path,
+        items: &[Item],
+        input: Input,
+        layouts: &Layouts,
+        dir: &Path,
+    ) -> Result<Image, String> {
+        let mut xmp = src.as_os_str().to_owned();
+        xmp.push(".xmp");
+        let xmp = PathBuf::from(xmp);
         let out = dir.join("output.pfm");
         let _ = std::fs::remove_file(&out);
-        write_pfm(input, &src)?;
-        std::fs::write(&xmp, sidecar(items, layouts)?)
+        std::fs::write(&xmp, sidecar(items, input, layouts)?)
             .map_err(|e| format!("{}: {e}", xmp.display()))?;
         let run = Command::new(&self.cli)
-            .arg(&src)
+            .arg(src)
             .arg(&xmp)
             .arg(&out)
             .args(["--apply-custom-presets", "false", "--core", "--configdir"])
             .arg(dir.join("config"))
             .args(["--library", ":memory:"])
             .args(["--conf", "plugins/darkroom/workflow=none"])
+            // White balance as shot in the temperature module, as Helios's.
+            .args(["--conf", "plugins/darkroom/chromatic-adaptation=legacy"])
             .output()
             .map_err(|e| format!("darktable-cli: {e}"))?;
         if !run.status.success() || !out.exists() {
@@ -327,4 +393,72 @@ pub fn compare(ours: &Image, theirs: &Image) -> Result<Difference, String> {
         mean: sum / a.area() as f64,
         max_abs,
     })
+}
+
+/// The mean of each `factor` × `factor` block: what is left of an image
+/// once detail is gone, to tell colour differences from demosaicing ones.
+pub fn reduce(image: &Image, factor: u32) -> Image {
+    let r = image.region();
+    let (w, h) = (r.width / factor, r.height / factor);
+    let n = (factor * factor) as f32;
+    Image::from_fn(Region::sized(w, h), 3, |x, y, c| {
+        let mut sum = 0.0;
+        for dy in 0..factor as i64 {
+            for dx in 0..factor as i64 {
+                sum += image.pixel(r.x + x * factor as i64 + dx, r.y + y * factor as i64 + dy)
+                    [c as usize];
+            }
+        }
+        sum / n
+    })
+}
+
+/// Where `theirs` sits on `ours` when the two were cropped differently
+/// (raw decoders disagree on a sensor's usable area): the shift, within
+/// `reach` pixels, that best matches their luminance, and the overlapping
+/// parts at that shift.
+pub fn align(ours: &Image, theirs: &Image, reach: i64) -> (i64, i64, Image, Image) {
+    let (a, b) = (ours.region(), theirs.region());
+    let luma = |p: &[f32]| p[0] * 0.26 + p[1] * 0.68 + p[2] * 0.06;
+    let overlap = |dx: i64, dy: i64| {
+        // theirs(x, y) is ours(x + dx, y + dy).
+        let x0 = 0.max(-dx);
+        let y0 = 0.max(-dy);
+        let x1 = (b.width as i64).min(a.width as i64 - dx);
+        let y1 = (b.height as i64).min(a.height as i64 - dy);
+        (x0, y0, x1, y1)
+    };
+    let mut best = (f64::INFINITY, 0, 0);
+    for dy in -reach..=reach {
+        for dx in -reach..=reach {
+            let (x0, y0, x1, y1) = overlap(dx, dy);
+            if x1 - x0 < 16 || y1 - y0 < 16 {
+                continue;
+            }
+            // A sparse grid is enough to find the shift.
+            let (mut sum, mut count) = (0.0f64, 0u32);
+            for y in (y0..y1).step_by(((y1 - y0) / 64).max(1) as usize) {
+                for x in (x0..x1).step_by(((x1 - x0) / 64).max(1) as usize) {
+                    let p = luma(ours.pixel(a.x + x + dx, a.y + y + dy));
+                    let q = luma(theirs.pixel(b.x + x, b.y + y));
+                    sum += f64::from((p - q).abs());
+                    count += 1;
+                }
+            }
+            let score = sum / f64::from(count);
+            if score < best.0 {
+                best = (score, dx, dy);
+            }
+        }
+    }
+    let (_, dx, dy) = best;
+    let (x0, y0, x1, y1) = overlap(dx, dy);
+    let size = Region::sized((x1 - x0) as u32, (y1 - y0) as u32);
+    let cut = |img: &Image, ox: i64, oy: i64| {
+        let r = img.region();
+        Image::from_fn(size, 3, |x, y, c| {
+            img.pixel(r.x + x + ox, r.y + y + oy)[c as usize]
+        })
+    };
+    (dx, dy, cut(ours, x0 + dx, y0 + dy), cut(theirs, x0, y0))
 }
