@@ -39,6 +39,7 @@ Values are not clamped on every port: operators clamp where darktable does
 | `mask_blend` | `input`, `processed` (RGBA), `mask` → `output` | `input + (processed - input) * mask * opacity` |
 | `mask_from_luma` | `input` → `output`, `mask` | a member from a luminance range; passes the image through |
 | `mask_parametric` | `input` → `output`, `mask` | a member from channel ranges (darktable's parametric mask); passes the image through |
+| `mask_raster` | `mask` (optional) → `mask` | reuses another module's mask as a member (darktable's raster mask); 0 when unconnected |
 
 ## From darktable's tree to a sub-network
 

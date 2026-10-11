@@ -167,6 +167,14 @@ param-mask-parametric-red-invert =
     .description = invert this channel's selection
     .label = red_invert
 
+param-mask-raster-invert =
+    .description = invert the reused mask, before its opacity
+    .label = invert
+
+param-mask-raster-opacity =
+    .description = multiplies the reused mask, after its inversion
+    .label = opacity
+
 param-sigmoid-black-target =
     .description = display black, in %
     .label = black_target

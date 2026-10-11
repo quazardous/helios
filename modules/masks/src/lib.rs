@@ -21,17 +21,21 @@
 //! - [`MaskParametric`]: a member from ranges of the image's channels
 //!   (luminance, RGB, perceptual lightness, chroma and hue), darktable's
 //!   parametric mask; it passes its input through too.
+//! - [`MaskRaster`]: a member that reuses another module's mask (darktable's
+//!   raster mask), inverted and scaled.
 
 mod blend;
 mod combine;
 mod luma;
 mod parametric;
+mod raster;
 mod refine;
 
 pub use blend::MaskBlend;
 pub use combine::{MAX_MEMBERS, MaskCombine, Operator, fold};
 pub use luma::{MaskFromLuma, luminance};
 pub use parametric::{Channel, MaskParametric, ParametricPlan, Range, jzczhz};
+pub use raster::{MaskRaster, RasterPlan};
 pub use refine::{MaskBlur, MaskFeather, MaskLevels, tone_curve};
 
 use helios_core::{Params, PortSpec, Value};

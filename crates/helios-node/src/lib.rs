@@ -252,6 +252,10 @@ pub fn registry() -> BTreeMap<&'static str, ModuleRef> {
             "mask_parametric",
             ModuleRef::new(helios_module_masks::MaskParametric),
         ),
+        (
+            "mask_raster",
+            ModuleRef::new(helios_module_masks::MaskRaster),
+        ),
     ])
 }
 
