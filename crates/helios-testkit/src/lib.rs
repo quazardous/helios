@@ -271,7 +271,8 @@ mod contract_tests {
         let failures = check_contract(Divide).unwrap_err();
         assert_eq!(failures.len(), 1, "{failures:?}");
         assert!(
-            failures[0].starts_with("d = min 0: at scale 1: output `output` has a non-finite value"),
+            failures[0]
+                .starts_with("d = min 0: at scale 1: output `output` has a non-finite value"),
             "{failures:?}"
         );
     }
