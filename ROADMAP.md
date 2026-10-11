@@ -22,6 +22,10 @@ decided): a darktable prefix would present it as a darktable variant, while
 Helios is an image processing framework where darktable and vkdt meet and
 photo editing is the first application. The darktable fork keeps its name.
 
+The logo (2026-10-11, decided; `docs/brand/logo.svg`) is an iris
+diaphragm whose opening is a sun and whose blades' edges are its rays, all
+in one light; every proportion comes from the golden ratio.
+
 Underlying ambition (2026-10-10): **systematic normalization of the software
 layers**. The reference is AVS (Advanced Visual Systems, scientific imaging),
 where image processing workflows are built by assembling modules. Once every
