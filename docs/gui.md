@@ -112,8 +112,12 @@ because the network turns around them; the others are stacked under them.
 
 ## Themes and profiles
 
-Status: **proposal, for review** (2026-10-11). Research:
-[profiles-research.md](profiles-research.md).
+Status: **decided** (2026-10-11). Research:
+[profiles-research.md](profiles-research.md). Built: themes
+(`helios-theme`, the GUI's mapping and commands) and profiles
+(`helios-profile`, export, import with a diff, a workspace's profile).
+Not yet: applying a theme's font families, the keyring API for plugins,
+sync through the vault.
 
 ### Themes
 

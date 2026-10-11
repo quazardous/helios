@@ -33,6 +33,10 @@ enum Action {
     Palette,
     Theme(String),
     ThemeExport(PathBuf),
+    ProfileExport(PathBuf, Vec<helios_profile::Part>),
+    ProfileImport(PathBuf),
+    ProfileApply,
+    ProfileUse(String),
     Fullscreen,
     Minimize,
     Maximize,
@@ -88,6 +92,8 @@ pub struct Shell {
     panels: Panels,
     docks: Vec<(Area, DockState<String>)>,
     auxiliary: Vec<Auxiliary>,
+    /// Panels the user closed: a layout keeps them closed.
+    hidden: Vec<String>,
     queue: Queue,
     palette: Option<Palette>,
     pending: Vec<Chord>,
@@ -108,6 +114,11 @@ pub struct Shell {
     theme_overrides: BTreeMap<String, serde_json::Value>,
     /// The theme changed and egui has not been told yet.
     theme_pending: bool,
+    /// Where profiles are kept (`<name>.helios-profile`).
+    profiles_dir: PathBuf,
+    profile_name: String,
+    /// A profile read and shown as a diff, waiting for `profile.import.apply`.
+    pending_import: Option<helios_profile::Profile>,
 }
 
 impl Shell {
@@ -123,6 +134,7 @@ impl Shell {
             keymap: Keymap::new(),
             docks: Vec::new(),
             auxiliary: layout.auxiliary.clone(),
+            hidden: layout.hidden.clone(),
             queue: Arc::default(),
             palette: None,
             pending: Vec::new(),
@@ -141,6 +153,9 @@ impl Shell {
             theme: helios_theme::Themes::default().resolve(helios_theme::BASE, &BTreeMap::new()),
             theme_overrides: BTreeMap::new(),
             theme_pending: true,
+            profiles_dir: config_dir().join("profiles"),
+            profile_name: "default".into(),
+            pending_import: None,
         };
         shell.docks = layout
             .areas
@@ -160,6 +175,7 @@ impl Shell {
                 .filter_map(|(area, dock)| from_dock(dock).map(|n| (*area, n)))
                 .collect(),
             auxiliary: self.auxiliary.clone(),
+            hidden: self.hidden.clone(),
         }
     }
 
@@ -182,6 +198,102 @@ impl Shell {
     /// The theme in use.
     pub fn theme(&self) -> &helios_theme::Resolved {
         &self.theme
+    }
+
+    /// What the shell holds as a profile: theme, user keys, layout.
+    pub fn profile(&self) -> helios_profile::Profile {
+        use helios_profile::{Binding, Profile, System, ThemeChoice, portable_keys};
+        let keymap = self
+            .keymap
+            .bindings(Layer::User)
+            .into_iter()
+            .map(|b| Binding {
+                keys: portable_keys(&b.keys.to_string().to_lowercase(), System::current()),
+                command: b.command.clone(),
+                when: b.when.clone(),
+            })
+            .collect();
+        Profile {
+            name: self.profile_name.clone(),
+            keymap: Some(keymap),
+            theme: Some(ThemeChoice {
+                name: self.theme.name.clone(),
+                overrides: self.theme_overrides.clone(),
+            }),
+            layout: serde_json::from_str(&self.layout().to_json()).ok(),
+            ..Profile::default()
+        }
+    }
+
+    /// Applies a profile's parts the shell holds; the others stay.
+    pub fn apply_profile(&mut self, p: &helios_profile::Profile) {
+        use helios_profile::{System, local_keys};
+        self.profile_name = p.name.clone();
+        if let Some(t) = &p.theme {
+            self.set_theme(&t.name, t.overrides.clone());
+        }
+        if let Some(keys) = &p.keymap {
+            self.keymap.clear(Layer::User);
+            for b in keys {
+                let local = local_keys(&b.keys, System::current());
+                if let Err(e) =
+                    self.keymap
+                        .bind(&local, &b.command, &b.when, Layer::User, "profile")
+                {
+                    self.notes.push(format!("profile {}: {e}", p.name));
+                }
+            }
+        }
+        if let Some(layout) = &p.layout {
+            match Layout::from_json(&layout.to_string()) {
+                Ok(l) => self.set_layout(l),
+                Err(e) => self.notes.push(format!("profile {}: layout: {e}", p.name)),
+            }
+        }
+    }
+
+    /// Arranges the panels as a layout says, repaired to today's panels.
+    pub fn set_layout(&mut self, layout: Layout) {
+        let (l, notes) = layout.repair(&self.panels, &[SCREEN]);
+        self.notes.extend(notes);
+        self.docks = l.areas.iter().map(|(a, n)| (*a, to_dock(n))).collect();
+        self.auxiliary = l.auxiliary;
+        self.hidden = l.hidden;
+    }
+
+    /// Where profiles are read and written.
+    pub fn set_profiles_dir(&mut self, dir: PathBuf) {
+        self.profiles_dir = dir;
+    }
+
+    pub fn profile_name(&self) -> &str {
+        &self.profile_name
+    }
+
+    fn profile_file(&self, name: &str) -> PathBuf {
+        self.profiles_dir.join(format!("{name}.helios-profile"))
+    }
+
+    fn read_profile(&self, path: &std::path::Path) -> Result<helios_profile::Profile, String> {
+        let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        helios_profile::Profile::import(&text)
+    }
+
+    /// Uses a named profile, the parts it leaves out from the Default
+    /// profile (`default.helios-profile`, when there is one).
+    pub fn use_profile(&mut self, name: &str) -> Result<(), String> {
+        let default = self
+            .read_profile(&self.profile_file("default"))
+            .unwrap_or_default();
+        let p = if name == "default" {
+            default.clone()
+        } else {
+            self.read_profile(&self.profile_file(name))?
+        };
+        let mut p = p.over(&default);
+        p.name = name.to_string();
+        self.apply_profile(&p);
+        Ok(())
     }
 
     /// Adds a theme (a user's file, a plugin's) to those that can be chosen.
@@ -392,6 +504,56 @@ impl Shell {
                 Ok(Action::ThemeExport(path))
             }),
         );
+        add(
+            CommandSpec::new(
+                "profile.export",
+                "Export the profile (all parts, or `parts`)",
+                "Preferences",
+            ),
+            Box::new(move |a| {
+                let parts = match a.get("parts") {
+                    None | Some(Value::Null) => Vec::new(),
+                    Some(v) => {
+                        serde_json::from_value(v.clone()).map_err(|e| format!("`parts`: {e}"))?
+                    }
+                };
+                let path = a.get("path").and_then(Value::as_str).map_or_else(
+                    || config_dir().join("profiles/exported.helios-profile"),
+                    PathBuf::from,
+                );
+                Ok(Action::ProfileExport(path, parts))
+            }),
+        );
+        add(
+            CommandSpec::new(
+                "profile.import",
+                "Read a profile and show what it would change",
+                "Preferences",
+            ),
+            Box::new(move |a| {
+                a.get("path")
+                    .and_then(Value::as_str)
+                    .map(|p| Action::ProfileImport(PathBuf::from(p)))
+                    .ok_or_else(|| "`path` is missing".to_string())
+            }),
+        );
+        add(
+            CommandSpec::new(
+                "profile.import.apply",
+                "Apply the profile just read",
+                "Preferences",
+            ),
+            Box::new(|_| Ok(Action::ProfileApply)),
+        );
+        add(
+            CommandSpec::new("profile.use", "Use a saved profile by name", "Preferences"),
+            Box::new(move |a| {
+                a.get("name")
+                    .and_then(Value::as_str)
+                    .map(|n| Action::ProfileUse(n.to_string()))
+                    .ok_or_else(|| "`name` is missing".to_string())
+            }),
+        );
         for (keys, command) in [
             ("ctrl+shift+p", "workbench.palette"),
             ("f1", "workbench.palette"),
@@ -440,6 +602,7 @@ impl Shell {
             return;
         };
         self.auxiliary.retain(|a| a.panel != panel);
+        self.hidden.retain(|h| h != panel);
         match self.docks.iter_mut().find(|(a, _)| *a == area) {
             Some((_, dock)) => dock.push_to_first_leaf(panel.to_string()),
             None => {
@@ -506,11 +669,64 @@ impl Shell {
                     Err(e) => format!("cannot export the theme to {}: {e}", path.display()),
                 });
             }
+            Action::ProfileExport(path, parts) => {
+                let parts = if parts.is_empty() {
+                    helios_profile::Part::ALL.to_vec()
+                } else {
+                    parts
+                };
+                let profile = self.profile();
+                let present: Vec<_> = parts.into_iter().filter(|p| profile.has(*p)).collect();
+                // No plugin settings yet to keep home.
+                let written = profile.export(&present, &|_, _| false).and_then(|text| {
+                    path.parent()
+                        .map_or(Ok(()), std::fs::create_dir_all)
+                        .and_then(|_| std::fs::write(&path, text))
+                        .map_err(|e| format!("{}: {e}", path.display()))
+                });
+                self.notes.push(match written {
+                    Ok(()) => format!("profile exported to {}", path.display()),
+                    Err(e) => format!("profile not exported: {e}"),
+                });
+            }
+            Action::ProfileImport(path) => match self.read_profile(&path) {
+                Ok(incoming) => {
+                    let changes = helios_profile::diff(&self.profile(), &incoming);
+                    let count: usize = changes.iter().map(|d| d.changes.len()).sum();
+                    self.notes.push(format!(
+                        "profile {}: {count} changes; profile.import.apply to apply them",
+                        incoming.name
+                    ));
+                    for d in &changes {
+                        for c in &d.changes {
+                            self.notes.push(format!("{:?} {c}", d.part));
+                        }
+                    }
+                    self.pending_import = Some(incoming);
+                }
+                Err(e) => self.notes.push(format!("profile not imported: {e}")),
+            },
+            Action::ProfileApply => match self.pending_import.take() {
+                Some(p) => {
+                    let name = p.name.clone();
+                    self.apply_profile(&p);
+                    self.notes.push(format!("profile {name} applied"));
+                }
+                None => self
+                    .notes
+                    .push("no profile read to apply: profile.import first".into()),
+            },
+            Action::ProfileUse(name) => {
+                if let Err(e) = self.use_profile(&name) {
+                    self.notes.push(format!("profile {name}: {e}"));
+                }
+            }
             Action::Focus(p) => self.focus(&p),
             Action::Toggle(p) => {
                 if self.shown(&p) {
                     self.undock(&p);
                     self.auxiliary.retain(|a| a.panel != p);
+                    self.hidden.push(p);
                 } else {
                     self.dock(&p);
                 }
@@ -880,6 +1096,15 @@ fn default_path(target: &str, extension: &str) -> PathBuf {
         .collect();
     home.join("Pictures/Helios")
         .join(format!("{name}-{secs}.{extension}"))
+}
+
+/// The user's configuration directory for Helios.
+pub fn config_dir() -> PathBuf {
+    std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("helios")
 }
 
 fn placeholder(ui: &mut Ui, title: &str) {

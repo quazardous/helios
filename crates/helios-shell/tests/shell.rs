@@ -207,3 +207,23 @@ fn a_layout_round_trips_and_is_repaired_against_panels_and_screens() {
     assert!(fixed.auxiliary.is_empty());
     assert_eq!(notes.len(), 3, "{notes:?}");
 }
+
+#[test]
+fn a_closed_panel_stays_closed_when_the_layout_is_repaired() {
+    let mut layout = Layout::default_for(&panels());
+    let first = layout.placed()[0].to_string();
+    for (_, node) in &mut layout.areas {
+        if let Node::Tabs { panels, .. } = node {
+            panels.retain(|p| *p != first);
+        }
+    }
+    layout
+        .areas
+        .retain(|(_, n)| !matches!(n, Node::Tabs { panels, .. } if panels.is_empty()));
+    layout.hidden.push(first.clone());
+    let (repaired, notes) = Layout::from_json(&layout.to_json())
+        .unwrap()
+        .repair(&panels(), &["primary"]);
+    assert!(!repaired.placed().contains(&first.as_str()), "{notes:?}");
+    assert_eq!(repaired.hidden, [first]);
+}

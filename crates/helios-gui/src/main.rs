@@ -49,9 +49,14 @@ impl eframe::App for App {
 
     fn on_exit(&mut self) {
         if let Some(file) = &self.file {
+            // The workspace remembers its profile beside its layout.
+            let pointer = serde_json::json!({ "profile": self.shell.profile_name() });
             let saved = file
                 .parent()
                 .map_or(Ok(()), std::fs::create_dir_all)
+                .and_then(|_| {
+                    std::fs::write(file.with_file_name("workspace.json"), pointer.to_string())
+                })
                 .and_then(|_| std::fs::write(file, self.shell.layout().to_json()));
             if let Err(e) = saved {
                 eprintln!(
@@ -89,6 +94,20 @@ fn main() -> Result<(), String> {
     );
     shell.set_title(&name);
     shell.draw_frame(true);
+    // The workspace's profile, else the Default one; a saved layout wins
+    // over the profile's.
+    let profile = file
+        .as_ref()
+        .and_then(|f| std::fs::read_to_string(f.with_file_name("workspace.json")).ok())
+        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+        .and_then(|v| v["profile"].as_str().map(String::from))
+        .unwrap_or_else(|| "default".into());
+    if let Err(e) = shell.use_profile(&profile) {
+        shell.notes.push(format!("profile {profile}: {e}"));
+    }
+    if let Some(saved) = load(file.as_deref()) {
+        shell.set_layout(saved);
+    }
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title(format!("{name} — Helios"))

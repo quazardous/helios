@@ -194,6 +194,20 @@ impl Keymap {
             .max_by_key(|r| (r.binding.layer, r.when.specificity(), r.order))
     }
 
+    /// The bindings declared at a layer, in order (removals included).
+    pub fn bindings(&self, layer: Layer) -> Vec<&Binding> {
+        self.rules
+            .iter()
+            .filter(|r| r.binding.layer == layer)
+            .map(|r| &r.binding)
+            .collect()
+    }
+
+    /// Forgets every binding of a layer (before loading another profile's).
+    pub fn clear(&mut self, layer: Layer) {
+        self.rules.retain(|r| r.binding.layer != layer);
+    }
+
     /// What pressing `keys` (the chords so far) does here.
     pub fn resolve(&self, keys: &Keys, cx: &Context) -> Resolution {
         if let Some(r) = self.winner(keys, cx) {

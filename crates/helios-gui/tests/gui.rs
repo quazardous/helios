@@ -192,3 +192,75 @@ fn themes_switch_from_the_palette_and_export_to_a_token_file() {
     );
     assert_eq!(h.ctx.global_style().visuals.panel_fill, dark_fill);
 }
+
+#[test]
+fn a_profile_exports_imports_with_a_diff_and_is_used_by_name() {
+    let dir = std::env::temp_dir().join(format!("helios-profiles-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let mut shell = Shell::new(helios_panels(), None);
+    shell.set_profiles_dir(dir.clone());
+    shell
+        .keymap
+        .bind(
+            "ctrl+shift+e",
+            "theme.helios-light",
+            "",
+            helios_shell::keymap::Layer::User,
+            "user",
+        )
+        .unwrap();
+    let mut h = headless::harness(shell, vec2(800.0, 500.0));
+    h.run();
+    let s = h.state_mut();
+    s.run("theme.helios-high-contrast", json!(null), Origin::User)
+        .unwrap();
+    s.run("helios.log.toggle", json!(null), Origin::User)
+        .unwrap();
+    h.run();
+    // Saved as the "work" profile.
+    let file = dir.join("work.helios-profile");
+    let s = h.state_mut();
+    s.run("profile.export", json!({ "path": file }), Origin::User)
+        .unwrap();
+    h.run();
+    let text = std::fs::read_to_string(&file).unwrap();
+    assert!(text.contains("Mod+shift+e"), "{text}");
+    assert!(text.contains("helios-high-contrast"), "{text}");
+
+    // Elsewhere: another theme, then the profile is read and shown first.
+    let mut other = Shell::new(helios_panels(), None);
+    other.set_profiles_dir(dir.clone());
+    let mut h2 = headless::harness(other, vec2(800.0, 500.0));
+    h2.run();
+    let s = h2.state_mut();
+    s.run("profile.import", json!({ "path": file }), Origin::User)
+        .unwrap();
+    h2.run();
+    let notes = h2.state().notes.join("\n");
+    assert!(
+        notes.contains("helios-dark → helios-high-contrast"),
+        "{notes}"
+    );
+    assert_eq!(
+        h2.state().theme().name,
+        "helios-dark",
+        "nothing applied yet"
+    );
+    let s = h2.state_mut();
+    s.run("profile.import.apply", json!(null), Origin::User)
+        .unwrap();
+    h2.run();
+    assert_eq!(h2.state().theme().name, "helios-high-contrast");
+    assert!(!h2.state().layout().placed().contains(&"helios.log"));
+
+    // By name, as a workspace does.
+    let s = h2.state_mut();
+    s.run("theme.helios-light", json!(null), Origin::User)
+        .unwrap();
+    s.run("profile.use", json!({ "name": "work" }), Origin::User)
+        .unwrap();
+    h2.run();
+    assert_eq!(h2.state().theme().name, "helios-high-contrast");
+    assert_eq!(h2.state().profile_name(), "work");
+    std::fs::remove_dir_all(&dir).unwrap();
+}

@@ -1701,6 +1701,7 @@ dependencies = [
  "egui",
  "egui_dock",
  "egui_kittest",
+ "helios-profile",
  "helios-shell",
  "helios-theme",
  "image",

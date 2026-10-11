@@ -79,6 +79,9 @@ pub struct Auxiliary {
 pub struct Layout {
     pub areas: Vec<(Area, Node)>,
     pub auxiliary: Vec<Auxiliary>,
+    /// Panels the user closed: not put back as new ones are.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hidden: Vec<String>,
 }
 
 impl Layout {
@@ -101,6 +104,7 @@ impl Layout {
         Layout {
             areas,
             auxiliary: Vec::new(),
+            hidden: Vec::new(),
         }
     }
 
@@ -144,10 +148,15 @@ impl Layout {
                 areas.push((area, n));
             }
         }
-        let mut layout = Layout { areas, auxiliary };
+        let hidden: Vec<String> = self.hidden.into_iter().filter(|h| known(h)).collect();
+        let mut layout = Layout {
+            areas,
+            auxiliary,
+            hidden: hidden.clone(),
+        };
         let placed: Vec<String> = layout.placed().into_iter().map(str::to_string).collect();
         for p in panels.all() {
-            if !placed.contains(&p.id) {
+            if !placed.contains(&p.id) && !hidden.contains(&p.id) {
                 if !redock.contains(&p.id) {
                     notes.push(format!("new panel `{}` placed in its default area", p.id));
                 }
