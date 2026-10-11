@@ -147,6 +147,10 @@ pub fn start(dir: &Path, node_bin: &Path) -> Result<State, String> {
         .stderr(Stdio::from(
             std::fs::File::create(dir.join("node.log")).map_err(|e| e.to_string())?,
         ));
+    // Its own process group: a Ctrl-C in the terminal that started it is
+    // for that command, not for the node, which outlives it.
+    #[cfg(unix)]
+    std::os::unix::process::CommandExt::process_group(&mut command, 0);
     if cfg!(debug_assertions) {
         command
             .arg("--control")

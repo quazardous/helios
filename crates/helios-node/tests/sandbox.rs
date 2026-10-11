@@ -77,6 +77,14 @@ fn a_sandbox_is_created_started_stopped_and_cleaned() {
     let (code, _, err) = helios(&["sandbox", "start", place.s()]);
     assert_eq!(code, 1);
     assert!(err.contains("already runs"), "{err}");
+    // Its own process group: a Ctrl-C meant for the terminal's command
+    // does not reach it.
+    let pid = started["pid"].as_u64().unwrap().to_string();
+    let group = Command::new("ps")
+        .args(["-o", "pgid=", "-p", &pid])
+        .output()
+        .unwrap();
+    assert_eq!(String::from_utf8_lossy(&group.stdout).trim(), pid);
 
     let (_, stopped, _) = helios(&["sandbox", "stop", place.s()]);
     assert_eq!(stopped["stopped"], true);
