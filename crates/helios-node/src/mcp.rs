@@ -17,6 +17,8 @@ use serde_json::{Map, Value, json};
 pub enum Endpoint {
     Inspect,
     Control,
+    /// Handled by the server itself: starting and stopping a sandbox.
+    Sandbox,
 }
 
 /// A tool: its name, the request it sends, and its arguments.
@@ -107,8 +109,29 @@ const NODE: Param = Param {
     default: None,
 };
 
-/// Every tool. Tests check each one maps onto a request type.
+const DIR: Param = Param {
+    name: "dir",
+    schema: string,
+    description: "Sandbox directory (created by `helios sandbox new` or by this tool)",
+    default: None,
+};
+
+/// Every tool. Tests check each node tool maps onto a request type.
 pub const TOOLS: &[Tool] = &[
+    Tool {
+        name: "helios_sandbox_start",
+        endpoint: Endpoint::Sandbox,
+        cmd: "start",
+        description: "Starts a sandboxed node (creating the sandbox if the directory does not exist) and points this server at it",
+        params: &[DIR],
+    },
+    Tool {
+        name: "helios_sandbox_stop",
+        endpoint: Endpoint::Sandbox,
+        cmd: "stop",
+        description: "Stops a sandboxed node",
+        params: &[DIR],
+    },
     Tool {
         name: "helios_state",
         endpoint: Endpoint::Inspect,
@@ -291,10 +314,40 @@ impl Tool {
     }
 }
 
-/// The sockets the server talks to.
+/// The sockets the server talks to, and how it starts sandboxes.
 pub struct Sockets {
-    pub inspect: PathBuf,
+    pub inspect: Option<PathBuf>,
     pub control: Option<PathBuf>,
+    /// The `helios-node` executable.
+    pub node_bin: PathBuf,
+}
+
+fn sandbox(sockets: &mut Sockets, tool: &Tool, request: &Value) -> Value {
+    let dir = PathBuf::from(request["dir"].as_str().unwrap_or_default());
+    let result = match tool.cmd {
+        "start" => {
+            let created = if dir.join("sandbox.json").exists() {
+                Ok(())
+            } else {
+                crate::sandbox::create(&dir, None).map(|_| ())
+            };
+            created
+                .and_then(|()| crate::sandbox::start(&dir, &sockets.node_bin))
+                .map(|state| {
+                    sockets.inspect = Some(state.inspect.clone());
+                    sockets.control = cfg!(debug_assertions).then(|| state.control.clone());
+                    serde_json::to_value(state).expect("state serializes")
+                })
+        }
+        _ => crate::sandbox::stop(&dir).map(|ran| json!({ "stopped": ran })),
+    };
+    match result {
+        Ok(answer) => tool_result(
+            serde_json::to_string_pretty(&answer).expect("JSON values serialize"),
+            false,
+        ),
+        Err(e) => tool_result(e, true),
+    }
 }
 
 fn send(path: &Path, request: &Value) -> Result<Value, String> {
@@ -306,7 +359,7 @@ fn tool_result(text: String, is_error: bool) -> Value {
     json!({ "content": [{ "type": "text", "text": text }], "isError": is_error })
 }
 
-fn call(sockets: &Sockets, params: &Value) -> Value {
+fn call(sockets: &mut Sockets, params: &Value) -> Value {
     let name = params["name"].as_str().unwrap_or_default();
     let Some(tool) = TOOLS.iter().find(|t| t.name == name) else {
         return tool_result(format!("no tool `{name}`"), true);
@@ -315,12 +368,22 @@ fn call(sockets: &Sockets, params: &Value) -> Value {
         Ok(r) => r,
         Err(e) => return tool_result(e, true),
     };
-    let socket = match (tool.endpoint, &sockets.control) {
-        (Endpoint::Inspect, _) => &sockets.inspect,
-        (Endpoint::Control, Some(path)) => path,
-        (Endpoint::Control, None) => {
+    if tool.endpoint == Endpoint::Sandbox {
+        return sandbox(sockets, tool, &request);
+    }
+    let socket = match (tool.endpoint, &sockets.inspect, &sockets.control) {
+        (Endpoint::Sandbox, _, _) => unreachable!("handled above"),
+        (Endpoint::Inspect, Some(path), _) | (Endpoint::Control, _, Some(path)) => path,
+        (Endpoint::Inspect, None, _) => {
             return tool_result(
-                "this server was started without a control socket (--control)".into(),
+                "no node yet: pass --socket or call helios_sandbox_start".into(),
+                true,
+            );
+        }
+        (Endpoint::Control, _, None) => {
+            return tool_result(
+                "no control socket: pass --control or call helios_sandbox_start (debug builds)"
+                    .into(),
                 true,
             );
         }
@@ -335,7 +398,7 @@ fn call(sockets: &Sockets, params: &Value) -> Value {
 }
 
 /// Answers one JSON-RPC message; `None` for notifications.
-pub fn handle(sockets: &Sockets, message: &Value) -> Option<Value> {
+pub fn handle(sockets: &mut Sockets, message: &Value) -> Option<Value> {
     let id = message.get("id").cloned()?;
     let result = match message["method"].as_str().unwrap_or_default() {
         "initialize" => Ok(json!({
@@ -386,13 +449,14 @@ mod tests {
 
     #[test]
     fn every_tool_maps_onto_a_request_type() {
-        for tool in TOOLS {
+        for tool in TOOLS.iter().filter(|t| t.endpoint != Endpoint::Sandbox) {
             let request = tool.request(&example(tool)).unwrap();
             let parsed = match tool.endpoint {
                 Endpoint::Inspect => serde_json::from_value::<Request>(request.clone()).map(|_| ()),
                 Endpoint::Control => {
                     serde_json::from_value::<ControlRequest>(request.clone()).map(|_| ())
                 }
+                Endpoint::Sandbox => unreachable!("filtered out"),
             };
             assert!(
                 parsed.is_ok(),
@@ -409,7 +473,11 @@ mod tests {
         for cmd in inspect.iter().chain(&control) {
             assert!(TOOLS.iter().any(|t| t.cmd == *cmd), "no tool for `{cmd}`");
         }
-        assert_eq!(TOOLS.len(), inspect.len() + control.len());
+        let node_tools = TOOLS
+            .iter()
+            .filter(|t| t.endpoint != Endpoint::Sandbox)
+            .count();
+        assert_eq!(node_tools, inspect.len() + control.len());
     }
 
     #[test]
@@ -438,24 +506,25 @@ mod tests {
 
     #[test]
     fn notifications_get_no_answer_and_unknown_methods_an_error() {
-        let sockets = Sockets {
-            inspect: PathBuf::from("/nonexistent"),
+        let mut sockets = Sockets {
+            inspect: Some(PathBuf::from("/nonexistent")),
             control: None,
+            node_bin: PathBuf::from("helios-node"),
         };
         assert!(
             handle(
-                &sockets,
+                &mut sockets,
                 &json!({ "jsonrpc": "2.0", "method": "notifications/initialized" })
             )
             .is_none()
         );
         let answer = handle(
-            &sockets,
+            &mut sockets,
             &json!({ "jsonrpc": "2.0", "id": 1, "method": "nope" }),
         )
         .unwrap();
         assert_eq!(answer["error"]["code"], -32601);
-        let control = handle(&sockets, &json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": { "name": "helios_pause" } })).unwrap();
+        let control = handle(&mut sockets, &json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": { "name": "helios_pause" } })).unwrap();
         assert_eq!(control["result"]["isError"], true);
     }
 }

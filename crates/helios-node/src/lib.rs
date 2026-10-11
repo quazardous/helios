@@ -13,6 +13,7 @@
 //! job and comes with the photo domain.
 
 pub mod mcp;
+pub mod sandbox;
 
 use std::collections::BTreeMap;
 

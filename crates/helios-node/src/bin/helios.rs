@@ -12,6 +12,8 @@
 //!     helios control [--socket PATH] pause | resume
 //!     helios control [--socket PATH] fault NODE compute|source-read
 //!
+//!     helios sandbox new DIR [--network FILE] | start DIR | stop DIR | clean DIR
+//!
 //! The inspect socket defaults to `$HELIOS_SOCKET`, the control socket to
 //! `$HELIOS_CONTROL_SOCKET`. Output is JSON. Exit codes: 0 answered, 1 the
 //! node answered with an error (a wait that timed out prints what happened
@@ -34,7 +36,8 @@ const USAGE: &str = "usage:
   helios control [--socket PATH] set-param NODE PARAM VALUE
   helios control [--socket PATH] cancel JOB
   helios control [--socket PATH] pause | resume
-  helios control [--socket PATH] fault NODE compute|source-read";
+  helios control [--socket PATH] fault NODE compute|source-read
+  helios sandbox new DIR [--network FILE] | start DIR | stop DIR | clean DIR";
 
 fn usage(error: &str) -> ExitCode {
     eprintln!("helios: {error}\n{USAGE}");
@@ -164,8 +167,60 @@ fn parse(args: Vec<String>) -> Result<Call, String> {
     })
 }
 
+/// `helios sandbox new DIR [--network FILE] | start DIR | stop DIR | clean DIR`.
+fn sandbox(args: &[String]) -> ExitCode {
+    use helios_node::sandbox;
+
+    let node_bin = std::env::current_exe()
+        .ok()
+        .and_then(|exe| {
+            exe.parent()
+                .map(|d| d.join(format!("helios-node{}", std::env::consts::EXE_SUFFIX)))
+        })
+        .unwrap_or_else(|| PathBuf::from("helios-node"));
+    let words: Vec<&str> = args.iter().map(String::as_str).collect();
+    let result = match words.as_slice() {
+        ["new", dir] => sandbox::create(dir.as_ref(), None)
+            .map(|s| serde_json::to_value(s).expect("state serializes")),
+        ["new", dir, "--network", file] => std::fs::read_to_string(file)
+            .map_err(|e| format!("cannot read {file}: {e}"))
+            .and_then(|network| sandbox::create(dir.as_ref(), Some(&network)))
+            .map(|s| serde_json::to_value(s).expect("state serializes")),
+        ["start", dir] => sandbox::start(dir.as_ref(), &node_bin)
+            .map(|s| serde_json::to_value(s).expect("state serializes")),
+        ["stop", dir] => {
+            sandbox::stop(dir.as_ref()).map(|ran| serde_json::json!({ "stopped": ran }))
+        }
+        ["clean", dir] => {
+            sandbox::clean(dir.as_ref()).map(|()| serde_json::json!({ "removed": dir }))
+        }
+        _ => {
+            return usage(
+                "sandbox takes: new DIR [--network FILE] | start DIR | stop DIR | clean DIR",
+            );
+        }
+    };
+    match result {
+        Ok(answer) => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&answer).expect("JSON values serialize")
+            );
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("helios: {e}");
+            ExitCode::from(1)
+        }
+    }
+}
+
 fn main() -> ExitCode {
-    let call = match parse(std::env::args().skip(1).collect()) {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().is_some_and(|a| a == "sandbox") {
+        return sandbox(&args[1..]);
+    }
+    let call = match parse(args) {
         Ok(c) => c,
         Err(e) => return usage(&e),
     };

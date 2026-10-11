@@ -1,8 +1,9 @@
 //! `helios-mcp`: an MCP server (stdio) over a running node's endpoints.
 //!
-//!     helios-mcp --socket /path/to/node.sock [--control /path/to/control.sock]
+//!     helios-mcp [--socket /path/to/node.sock] [--control /path/to/control.sock]
 //!
 //! The sockets default to `$HELIOS_SOCKET` and `$HELIOS_CONTROL_SOCKET`.
+//! Started without any, it waits for `helios_sandbox_start`.
 //! Tools are listed by `tools/list`; see `helios_node::mcp`.
 
 use std::io::{BufRead, Write};
@@ -21,16 +22,25 @@ fn main() -> ExitCode {
             ("--socket", Some(p)) => inspect = Some(PathBuf::from(p)),
             ("--control", Some(p)) => control = Some(PathBuf::from(p)),
             _ => {
-                eprintln!("usage: helios-mcp --socket PATH [--control PATH]");
+                eprintln!("usage: helios-mcp [--socket PATH] [--control PATH]");
                 return ExitCode::from(2);
             }
         }
     }
-    let Some(inspect) = inspect else {
-        eprintln!("helios-mcp: no socket: pass --socket PATH or set HELIOS_SOCKET");
-        return ExitCode::from(2);
+    // Without a socket, the server starts empty: `helios_sandbox_start`
+    // starts a node and points it there.
+    let node_bin = std::env::current_exe()
+        .ok()
+        .and_then(|exe| {
+            exe.parent()
+                .map(|d| d.join(format!("helios-node{}", std::env::consts::EXE_SUFFIX)))
+        })
+        .unwrap_or_else(|| PathBuf::from("helios-node"));
+    let mut sockets = Sockets {
+        inspect,
+        control,
+        node_bin,
     };
-    let sockets = Sockets { inspect, control };
     let stdin = std::io::stdin();
     let mut stdout = std::io::stdout();
     for line in stdin.lock().lines() {
@@ -39,7 +49,7 @@ fn main() -> ExitCode {
             continue;
         }
         let answer = match serde_json::from_str::<Value>(&line) {
-            Ok(message) => handle(&sockets, &message),
+            Ok(message) => handle(&mut sockets, &message),
             Err(e) => Some(json!({
                 "jsonrpc": "2.0", "id": null,
                 "error": { "code": -32700, "message": format!("parse error: {e}") },
