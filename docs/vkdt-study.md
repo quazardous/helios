@@ -80,17 +80,17 @@ creates (`qvk`), which matters for sharing GPU memory with Helios.
 | `params.ui` (widget, min, max, groups) | ranges live in the manifest; GUI hints not decided | ranges are UI hints in vkdt, validation bounds in Helios; groups and conditional visibility have no Helios equivalent |
 | `connectors` (channels, format) | `PortSpec::Image { channels }`, f32 only | formats (f16, ui8, compressed), storage buffers (`ssbo`), geometry (`tri`), "same as input" (`&input`), wildcards |
 | read / write / source / sink | inputs, outputs, `ModuleKind::Sink`; sources are framework-owned | vkdt sources are modules (`read_source`), Helios sources are loaders by design (data access is a framework prerogative) |
-| module = sub-graph of nodes (`create_nodes`) | one `process` per module | the contract needs modules that expand into sub-networks: the macro concept (#3724, #3758) is the same idea |
+| module = sub-graph of nodes (`create_nodes`) | one `process` per module | the contract needs modules that expand into sub-networks: the macro concept (a node standing for a sub-network) is the same idea |
 | `modify_roi_in` / `out` | `input_region`, declared overlap | `modify_roi_out` (a module changing its output size: crop, resize, lens) has no Helios equivalent yet; geometry is in the manifest's "not decided" list |
 | `commit_params` | `prepare(params, context) -> plan` | equivalent |
 | `check_params` (may rebuild nodes) | none | parameters that change the structure of the network |
 | feedback connectors | none | multi-frame work: listed as an open question of the contract |
-| GPU only, shaders | CPU reference in Rust | GPU variants are #3750; vkdt shaders are GLSL, wgpu speaks WGSL (and SPIR-V on Vulkan) |
-| `.cfg` text network | JSON network description (helios-node) | straightforward conversion; vkdt stores GUI positions in the network, Helios keeps layout out of it (#3724) |
+| GPU only, shaders | CPU reference in Rust | GPU variants of modules are planned; vkdt shaders are GLSL, wgpu speaks WGSL (and SPIR-V on Vulkan) |
+| `.cfg` text network | JSON network description (helios-node) | straightforward conversion; vkdt stores GUI positions in the network, Helios keeps layout out of it (layout belongs to the user's workspace) |
 
 ## What this means for the next steps
 
-1. **Manifest round-trip (#3749)** is feasible for parameters and
+1. **Manifest round-trip** is feasible for parameters and
    connectors once Helios adds: array parameters (count), string parameters,
    port formats beyond f32 (at least f16 and ui8), storage-buffer ports, and
    "same as input" port types. These are additions to the manifest, not
@@ -103,7 +103,7 @@ creates (`qvk`), which matters for sharing GPU memory with Helios.
    geometry modules (crop, lens, resize) can be ported from either side.
 4. **GPU sharing**: running vkdt itself (bridge) means using its Vulkan
    device or importing its buffers; porting its shaders to wgpu keeps one
-   device. The choice is #3751's.
+   device. That choice comes with running vkdt modules.
 5. vkdt's file formats are simple and stable enough that the converter
    needs no vkdt code, only the files, which keeps licensing simple (the
    BSD-2 module files are read, not copied into Helios).
