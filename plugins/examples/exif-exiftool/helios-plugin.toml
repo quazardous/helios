@@ -1,0 +1,29 @@
+id = "io.github.quazardous.helios.exif-exiftool"
+name = "ExifTool metadata"
+version = "0.1.0"
+license = "GPL-3.0-or-later"
+command = ["python3", "exif_exiftool.py"]
+services = ["metadata.read"]
+activation = ["onService:metadata.read", "onCommand:exiftool.version"]
+
+[compat]
+helios = ">=0.0.1, <0.1.0"
+interfaces = { protocol = 1, "metadata.read" = 1 }
+
+[[commands]]
+id = "exiftool.version"
+title = "Show the ExifTool version"
+category = "Metadata"
+
+[settings.exiftool]
+type = "string"
+default = "exiftool"
+about = "The exiftool program to run"
+
+[[capabilities]]
+name = "images.read"
+reason = "Reads the metadata of the images Helios asks about"
+
+[[capabilities]]
+name = "process.spawn"
+reason = "Runs exiftool, which does the reading"

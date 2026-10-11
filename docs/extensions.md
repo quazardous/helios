@@ -146,3 +146,6 @@ write other files, or run programs it was not granted. Holding the process
 itself to its capabilities (namespaces, portals, seccomp) is the next
 step; until then the ambient capabilities are a disclosure the user must
 accept, not a guarantee.
+
+Examples live in `plugins/examples/`: `exif-exiftool` (Python, standard
+library alone, wraps `exiftool` for `metadata.read`).
