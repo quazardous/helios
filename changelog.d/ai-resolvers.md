@@ -1,22 +1,9 @@
 kind: added
 
-Decision nodes can now be answered by a model. Helios asks for every
-decision waiting on one, at most as many at once as the `ai_calls` limit
-allows, shows the model a preview of what the node looks at, and never
-asks twice about the same pixels. In full-AI mode the answer is applied
-and the render goes on; in AI-assisted mode it waits as a proposal for
-you to accept or correct. A model can be any program that reads the
-question as JSON and answers in JSON, so a local model or your own
-script around an online service works without Helios holding any key.
-
-Helios can also call a vision model directly: any OpenAI-compatible
-endpoint (OpenAI, or a local server speaking its protocol) or Anthropic's,
-with the key read from an environment variable, never from a file.
-
-A network can say which model answers its decisions (`resolver`), each
-decision's mode, and a brief; `helios control decisions`,
-`decision-resolve`, `decision-accept`, `decision-decide` and
-`decision-reask`, and the matching MCP tools, let you or an agent ask the
-model, review its proposals and answer. The new `decide_exposure` module
-is a first decision: how bright the image should be. The setting
-`system.ai.calls` caps how many model calls run at once (2 by default).
+Decision nodes can be answered by a model: any program reading and
+answering JSON, or an OpenAI-compatible or Anthropic endpoint whose key
+comes from the environment, applied at once (full-AI) or kept as a
+proposal to accept (AI-assisted), never asked twice about the same pixels
+and capped by `system.ai.calls`. `helios control decisions` and the
+`decision-*` commands and MCP tools let you or an agent ask, review and
+answer; `decide_exposure` is a first decision module.
