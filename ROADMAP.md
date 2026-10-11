@@ -185,6 +185,14 @@ separated, as the catalog SDK does.
 The SQL database becomes an API (the **vault**) with **cursors**. Phase 0 is
 first an iso SDK in C inside the fork (see section 3).
 
+**Storage is abstract, engines are drivers** (2026-10-11, decided). The vault
+talks to a store contract only (`Store` and its contract suite); each
+storage engine is a driver in its own crate that passes the contract.
+SQLite (rusqlite, bundled) is the first driver, an in-memory store serves
+tests. Nothing above the store names an engine, so another one (a
+key-value store, a server database for a shared catalog) is one more
+driver, not a rewrite.
+
 **Identity by content, not by path.**
 
 - (2026-10-10) Helios does not own the folders. Files stay wherever the user

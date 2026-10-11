@@ -511,8 +511,17 @@ version = "0.0.1"
 dependencies = [
  "blake3",
  "helios-core",
- "rusqlite",
  "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "helios-vault-sqlite"
+version = "0.0.1"
+dependencies = [
+ "helios-core",
+ "helios-vault",
+ "rusqlite",
  "serde_json",
 ]
 

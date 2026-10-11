@@ -2,7 +2,7 @@
 //! hold whatever keeps the rows.
 //!
 //! ```ignore
-//! helios_vault::contract::check(|| SqliteStore::in_memory().unwrap());
+//! helios_vault::contract::check(|| helios_vault_sqlite::SqliteStore::in_memory().unwrap());
 //! ```
 
 use std::path::{Path, PathBuf};

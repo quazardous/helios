@@ -56,8 +56,10 @@ A Cargo workspace (Rust):
   filter arrays, camera metadata as context, color spaces (linear Rec.2020
   working space).
 - `crates/helios-vault`: the vault: images identified by content (BLAKE3),
-  locations as data, folder import and repair scan, over SQLite or memory
-  behind one store contract.
+  locations as data, folder import and repair scan, field commands and
+  cursors, over an abstract store and its contract (an in-memory store
+  for tests).
+- `crates/helios-vault-sqlite`: the SQLite driver of the vault store.
 - `crates/helios-load`: loaders, the framework reading files into sources:
   camera raws through rawler (sensor data and camera description), JPEG,
   PNG and TIFF pictures in the working space, embedded previews.

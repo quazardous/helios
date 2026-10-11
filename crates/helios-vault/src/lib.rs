@@ -11,8 +11,9 @@
 //!   by content, reading as little as it can: same size first, then a
 //!   partial hash, then the full hash only for the remaining candidates.
 //!
-//! Rows live in a [`Store`]: [`MemoryStore`] and [`sqlite::SqliteStore`]
-//! here, both checked by the same [`contract`]. Time is passed in, never
+//! Rows live in a [`Store`], an abstraction no storage engine leaks into:
+//! [`MemoryStore`] here, drivers in their own crates (SQLite in
+//! `helios-vault-sqlite`), every one checked by the same [`contract`]. Time is passed in, never
 //! read, and every byte hashed is counted, so tests check budgets.
 
 use std::collections::BTreeMap;
@@ -28,7 +29,6 @@ use serde_json::json;
 pub mod catalog;
 pub mod contract;
 pub mod fields;
-pub mod sqlite;
 
 pub use catalog::{ApplyReport, CursorId, CursorInfo, Delta, Row};
 pub use fields::{AuditEntry, Command, Order, Query};
@@ -47,7 +47,8 @@ impl ImageId {
     }
 }
 
-fn parse_hash(hex: &str) -> Result<ContentHash, String> {
+/// A content hash from its 64 hex digits, as drivers store it.
+pub fn parse_hash(hex: &str) -> Result<ContentHash, String> {
     if hex.len() != 64 {
         return Err(format!("`{hex}` is not a 64-digit hash"));
     }

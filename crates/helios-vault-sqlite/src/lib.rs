@@ -1,4 +1,6 @@
-//! The SQLite store: one database file, readable with standard tools.
+//! The SQLite driver of the vault: one database file, readable with
+//! standard tools. It implements `helios_vault::Store` and passes the
+//! vault's contract; nothing above the store knows SQLite is there.
 
 use std::path::{Path, PathBuf};
 
@@ -8,8 +10,8 @@ use std::collections::BTreeMap;
 
 use serde_json::Value;
 
-use crate::fields::{AuditEntry, LABELS, Order, Query, RATING};
-use crate::{Image, ImageId, Location, Store, parse_hash};
+use helios_vault::fields::{AuditEntry, LABELS, Order, Query, RATING};
+use helios_vault::{Image, ImageId, Location, Store, parse_hash};
 
 const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS images (
