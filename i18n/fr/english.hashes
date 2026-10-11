@@ -1,0 +1,15 @@
+# The hash of the English text each key was translated from
+# (`cargo xtask i18n stamp`): a key whose English changed since is
+# reported by `cargo xtask i18n check`.
+command-helios-graph-toggle.title 21af19eae2a5e903
+command-param-undo.title fb070b9aa7a7570d
+command-vault-next.title 1b8945b050a7f80c
+command-vault-previous.title 8652e9ee0b82074c
+command-vault-reject.title cb419c21cee9d849
+command-workbench-palette.title 6ddb5508d068cafb
+panel-helios-filmstrip.title aa303106450875c3
+panel-helios-graph.title 2aaea6126d76b34f
+panel-helios-log.title a80c03551590b8a9
+panel-helios-modules.title a5f990b57e7ada38
+panel-helios-params.title fff7588f4a1a3651
+panel-helios-queue.title 8dd348ad2ba6981e

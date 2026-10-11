@@ -1,0 +1,20 @@
+[package]
+name = "helios-i18n"
+description = "Helios's translations: Fluent catalogs per locale with a fallback chain, message ids derived from stable ids, the English catalog generated from declarations, and its checks"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+helios-core.workspace = true
+helios-shell.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+# Apache-2.0 OR MIT (fluent-bundle, fluent-syntax, fluent-pseudo, unic-langid),
+# MIT OR Apache-2.0 (sys-locale).
+fluent-bundle = "0.16"
+fluent-syntax = "0.12"
+fluent-pseudo = "0.3"
+unic-langid = "0.9"
+sys-locale = "0.3"

@@ -35,6 +35,7 @@ helios-values = { path = "crates/helios-values" }
 helios-gui = { path = "crates/helios-gui" }
 helios-vault = { path = "crates/helios-vault" }
 helios-vault-sqlite = { path = "crates/helios-vault-sqlite" }
+helios-i18n = { path = "crates/helios-i18n" }
 blake3 = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
