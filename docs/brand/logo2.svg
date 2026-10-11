@@ -4,9 +4,12 @@
        - the sun sits on a golden point of the frame, (S/phi, S - S/phi);
        - the opening's diameter is S / phi^2, the rim and rays its radius / phi^3;
        - the blades are turned by the golden angle, 360 / phi^2;
-       - the light's stops fall at 1/phi^4, 1/phi^3, 1/phi^2, 1/phi. -->
+       - the light's stops fall at 1/phi^4, 1/phi^3, 1/phi^2, 1/phi;
+       - its brightest point is the opening's catchlight, placed as portrait
+         photographers place one in an eye: at 10 o'clock, radius / phi^2
+         from the centre. -->
   <defs>
-    <radialGradient id="sun" gradientUnits="userSpaceOnUse" cx="158.22" cy="97.78" r="223.75">
+    <radialGradient id="sun" gradientUnits="userSpaceOnUse" cx="158.22" cy="97.78" r="223.75" fx="142.05" fy="88.44">
       <stop offset="0.0000" stop-color="#fffbe6"/>
       <stop offset="0.1459" stop-color="#ffe680"/>
       <stop offset="0.2361" stop-color="#ffd23a"/>
