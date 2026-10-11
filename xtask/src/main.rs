@@ -6,11 +6,15 @@
 //!   there: reviewing, committing and tagging stay a human's call.
 //! - `check [--base REF]`: fragments are well formed and readable by an
 //!   outsider; with `--base`, code changed since REF comes with a fragment.
+//! - `i18n extract | check | stamp LOCALE [--all]`: the translation
+//!   catalogs of `i18n/` (see `i18n.rs`).
 //!
 //! A fragment is a file in `changelog.d/`, written in the same commit as the
 //! change it describes: a first line `kind: <kind>`, then one to three
 //! sentences saying what changes for a user and why it matters. See
 //! CONTRIBUTING.md.
+
+mod i18n;
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
@@ -364,8 +368,7 @@ fn fail(problems: &[String]) -> ExitCode {
     ExitCode::from(1)
 }
 
-const USAGE: &str =
-    "usage: cargo xtask changelog | release [--date YYYY-MM-DD] | check [--base REF]";
+const USAGE: &str = "usage: cargo xtask changelog | release [--date YYYY-MM-DD] | check [--base REF] | i18n extract | i18n check | i18n stamp LOCALE [--all]";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -443,6 +446,10 @@ fn main() -> ExitCode {
                 fail(&problems)
             }
         }
+        ["i18n", rest @ ..] => i18n::run(&root, rest).unwrap_or_else(|| {
+            eprintln!("usage: cargo xtask {}", i18n::USAGE);
+            ExitCode::from(2)
+        }),
         _ => {
             eprintln!("{USAGE}");
             ExitCode::from(2)
