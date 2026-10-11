@@ -37,6 +37,76 @@ param-highlights-clip =
     .description = clipping threshold, relative to the sensor's white
     .label = clip
 
+param-mask-blend-opacity =
+    .description = multiplies the mask
+    .label = opacity
+
+param-mask-blur-radius =
+    .description = standard deviation, in full-resolution pixels
+    .label = radius
+
+param-mask-combine-group-invert =
+    .description = invert the folded mask
+    .label = group_invert
+
+param-mask-combine-group-opacity =
+    .description = multiplies the folded mask, after its inversion
+    .label = group_opacity
+
+param-mask-combine-invert =
+    .description = 1 to invert a member before its opacity, by port
+    .label = invert
+
+param-mask-combine-opacity =
+    .description = each member's opacity, by port (missing values are 1)
+    .label = opacity
+
+param-mask-combine-operator =
+    .description = how the members fold together, in port order
+    .label = operator
+
+param-mask-combine-operator-choice-difference = difference
+
+param-mask-combine-operator-choice-exclusion = exclusion
+
+param-mask-combine-operator-choice-maximum = maximum
+
+param-mask-combine-operator-choice-minimum = minimum
+
+param-mask-combine-operator-choice-product = product
+
+param-mask-combine-operator-choice-screen = screen
+
+param-mask-combine-operator-choice-sum = sum
+
+param-mask-feather-radius =
+    .description = window radius, in full-resolution pixels
+    .label = radius
+
+param-mask-from-luma-high =
+    .description = luminance where the mask is full
+    .label = high
+
+param-mask-from-luma-low =
+    .description = luminance where the mask starts
+    .label = low
+
+param-mask-levels-brightness =
+    .description = shifts the mask up or down
+    .label = brightness
+
+param-mask-levels-contrast =
+    .description = steepens the mask around its middle
+    .label = contrast
+
+param-mask-levels-invert =
+    .description = invert the mask, after contrast and brightness
+    .label = invert
+
+param-mask-levels-opacity =
+    .description = multiplies the mask, last
+    .label = opacity
+
 param-sigmoid-black-target =
     .description = display black, in %
     .label = black_target

@@ -1,0 +1,13 @@
+[package]
+name = "helios-module-masks"
+description = "Mask modules for Helios: darktable's flexi mask groups as a sub-network (combine, refine, blend)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+helios-core.workspace = true
+
+[dev-dependencies]
+helios-testkit.workspace = true

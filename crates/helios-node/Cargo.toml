@@ -26,6 +26,7 @@ helios-module-colorin = { path = "../../modules/colorin" }
 helios-module-sigmoid = { path = "../../modules/sigmoid" }
 helios-module-blur = { path = "../../modules/blur" }
 helios-module-vkdt = { path = "../../modules/vkdt" }
+helios-module-masks = { path = "../../modules/masks" }
 serde.workspace = true
 serde_json.workspace = true
 

@@ -64,3 +64,7 @@ opt-level = 2
 
 [profile.dev.package.helios-parity]
 opt-level = 2
+
+# Mask refinement runs guided filters over every tile in the tests.
+[profile.dev.package.helios-module-masks]
+opt-level = 2

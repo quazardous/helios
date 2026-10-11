@@ -1892,6 +1892,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "helios-module-masks"
+version = "0.0.1"
+dependencies = [
+ "helios-core",
+ "helios-testkit",
+]
+
+[[package]]
 name = "helios-module-rawprepare"
 version = "0.0.1"
 dependencies = [
@@ -1940,6 +1948,7 @@ dependencies = [
  "helios-module-demosaic",
  "helios-module-exposure",
  "helios-module-highlights",
+ "helios-module-masks",
  "helios-module-rawprepare",
  "helios-module-sigmoid",
  "helios-module-vkdt",

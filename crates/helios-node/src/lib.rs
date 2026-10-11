@@ -230,6 +230,24 @@ pub fn registry() -> BTreeMap<&'static str, ModuleRef> {
             ModuleRef::new(helios_module_vkdt::VkdtExposure),
         ),
         ("vkdt_usm", ModuleRef::new(helios_module_vkdt::VkdtUsm)),
+        (
+            "mask_combine",
+            ModuleRef::new(helios_module_masks::MaskCombine),
+        ),
+        ("mask_blend", ModuleRef::new(helios_module_masks::MaskBlend)),
+        (
+            "mask_feather",
+            ModuleRef::new(helios_module_masks::MaskFeather),
+        ),
+        ("mask_blur", ModuleRef::new(helios_module_masks::MaskBlur)),
+        (
+            "mask_levels",
+            ModuleRef::new(helios_module_masks::MaskLevels),
+        ),
+        (
+            "mask_from_luma",
+            ModuleRef::new(helios_module_masks::MaskFromLuma),
+        ),
     ])
 }
 
