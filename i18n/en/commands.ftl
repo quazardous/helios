@@ -154,6 +154,12 @@ command-helios-viewport-moveTo =
 command-helios-viewport-toggle =
     .title = Show or hide Image
 
+command-param-copyPath =
+    .title = Copy a value's path (`path`)
+
+command-param-copyValue =
+    .title = Copy a value (`path`)
+
 command-param-get =
     .title = Read a value (`path`)
 
@@ -173,13 +179,16 @@ command-param-undo =
     .title = Undo the last change of values
 
 command-profile-export =
-    .title = Export the profile (all parts, or `parts`)
+    .title = Export the profile (all parts, or `parts`; `this_machine` flattens its variants)
 
 command-profile-import =
     .title = Read a profile and show what it would change
 
 command-profile-import-apply =
     .title = Apply the profile just read
+
+command-profile-resolved =
+    .title = Describe the profile in use as resolved for this machine: which values came from which variant
 
 command-profile-use =
     .title = Use a saved profile by name
@@ -259,6 +268,18 @@ command-vault-rate-5 =
 command-vault-reject =
     .title = Reject the selected image, or take it back
 
+command-viewport-zoom-100 =
+    .title = Image: actual pixels (100 %)
+
+command-viewport-zoom-fit =
+    .title = Image: fit to the view
+
+command-viewport-zoom-in =
+    .title = Image: zoom in
+
+command-viewport-zoom-out =
+    .title = Image: zoom out
+
 command-window-close =
     .title = Close the window
 
@@ -268,8 +289,26 @@ command-window-maximize =
 command-window-minimize =
     .title = Minimize the window
 
+command-workbench-about =
+    .title = About Helios
+
 command-workbench-fullscreen =
     .title = Toggle full screen
 
+command-workbench-keybindings =
+    .title = Keyboard shortcuts
+
 command-workbench-palette =
     .title = Show all commands
+
+command-workbench-quit =
+    .title = Quit Helios
+
+command-workbench-run =
+    .title = Run a command by id (`command`)
+
+command-workbench-systemMenu =
+    .title = Show the Helios menu
+
+command-workspace-open =
+    .title = Open a workspace in a new window (`path`)
