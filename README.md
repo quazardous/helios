@@ -69,6 +69,8 @@ A Cargo workspace (Rust):
   params decoded with darktable's own layouts (`layouts.json`, from
   `tools/dt_param_layouts.sh`), mapped to Helios modules with a report of
   what is not carried over.
+- `crates/helios-vkdt`: vkdt module files (`params`, `connectors`,
+  `params.ui`) read into Helios manifests and written back unchanged.
 - `crates/helios-export`: exports, the leaves that write files: a node
   rendered, converted from the working space to sRGB, encoded (JPEG, PNG 8
   or 16-bit, TIFF 16-bit) and written atomically, as jobs that hold their

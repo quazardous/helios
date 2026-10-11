@@ -1,0 +1,11 @@
+[package]
+name = "helios-vkdt"
+description = "vkdt module files (params, connectors, params.ui) to Helios manifests and back, losslessly"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+helios-core.workspace = true
+serde.workspace = true

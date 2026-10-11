@@ -602,6 +602,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "helios-vkdt"
+version = "0.0.1"
+dependencies = [
+ "helios-core",
+ "serde",
+]
+
+[[package]]
 name = "helios-xmp"
 version = "0.0.1"
 dependencies = [
