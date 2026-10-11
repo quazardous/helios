@@ -1,0 +1,12 @@
+[package]
+name = "helios-core"
+description = "Domain-agnostic core of Helios: module contract, graph, content-addressed buffers, event bus"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+blake3.workspace = true
+serde.workspace = true
+serde_json.workspace = true

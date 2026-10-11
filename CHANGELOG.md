@@ -23,3 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Project roadmap describing the vision, concepts and phases.
+- Design drafts: module contract, internal architecture, testing strategy.
+- First Rust crates: the core (module contract, graph, content-addressed
+  evaluation that never computes the same content twice, event bus) and a
+  test kit generating contract tests from a module's manifest.
+- darktable's exposure module, manual mode, as the first ported module.

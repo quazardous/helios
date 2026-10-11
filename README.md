@@ -10,8 +10,9 @@ exposed as an API (the vault), a kernel that schedules work on any node
 single engine, including one where an AI assembles a small, pre-calibrated
 workshop from an artistic intention.
 
-**Status: design stage.** There is no code here yet. The first phase, a
-catalog SDK inside darktable itself, happens in the
+**Status: early framework.** The first crates of the core exist (module
+contract, graph, content-addressed evaluation, event bus) with one ported
+module. Meanwhile, a catalog SDK inside darktable itself is built in the
 [darktable fork](https://github.com/quazardous/darktable) on the
 `helios/phase0-catalog-sdk` branch, with its design in `doc/helios/PHASE0.md`.
 
@@ -30,6 +31,19 @@ catalog SDK inside darktable itself, happens in the
 - [docs/iop-inventory.md](./docs/iop-inventory.md): what darktable's image
   operation modules already describe about themselves (introspection, widgets,
   tiling, OpenCL, scale awareness), as a baseline for module normalization.
+
+## Code
+
+A Cargo workspace (Rust):
+
+- `crates/helios-core`: the domain-agnostic core: module contract and
+  manifest, graph, an engine that evaluates a network without computing the
+  same content twice, the event bus, `describe()` snapshots.
+- `crates/helios-testkit`: synthetic images and contract tests generated
+  from a module's manifest.
+- `modules/exposure`: darktable's exposure module (manual mode), ported.
+
+Build and test with `cargo test --workspace`.
 
 ## Tools
 

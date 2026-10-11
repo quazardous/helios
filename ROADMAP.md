@@ -86,6 +86,19 @@ modules) with **different surfaces** on top, not two engines side by side:
 - an AI / workshops surface;
 - a cloud surface (the technology must be easy to reuse in a 100% cloud tool).
 
+(2026-10-11, decided) **Two GUIs on one engine**: in the long run,
+darktable's legacy GUI plugs onto Helios (darktable becomes a client of the
+engine and the vault), and Helios has its own diagram-oriented GUI. The GUI
+technology (portable), its widget library (viewport, graph editor, widgets
+generated from manifests) and a modern desktop (dockable, sticky panels,
+saved workspaces) are not decided; working mockups come first.
+Hard requirement (2026-10-11, decided): GPU acceleration on Linux, Windows
+and macOS, as close to Vulkan as possible, so the viewport can show buffers
+the engine computed on the GPU without copying them back. Leading
+direction, not decided: wgpu as the shared GPU layer for the GUI and the
+engine's GPU modules (Vulkan on Linux and Windows, Metal on macOS, raw
+Vulkan access for vkdt interop), with a Rust toolkit drawing on it.
+
 **Helios makes darktable and vkdt meet** (2026-10-11, decided as the
 long-term goal). darktable brings compatibility (edits, workflow, users) and
 CPU computation; vkdt brings the graph and GPU speed. The meeting point is

@@ -1,0 +1,13 @@
+[package]
+name = "helios-module-exposure"
+description = "Exposure module for Helios, ported from darktable's exposure (manual mode)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+helios-core.workspace = true
+
+[dev-dependencies]
+helios-testkit.workspace = true
