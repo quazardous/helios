@@ -1,0 +1,4 @@
+# Clippy settings shared by the workspace (lint levels live in Cargo.toml).
+
+# Product names written as words in docs, not code.
+doc-valid-idents = ["SQLite", "OpenAI", ".."]

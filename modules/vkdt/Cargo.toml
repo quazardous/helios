@@ -11,3 +11,6 @@ helios-core.workspace = true
 
 [dev-dependencies]
 helios-testkit.workspace = true
+
+[lints]
+workspace = true

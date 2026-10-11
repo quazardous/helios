@@ -12,3 +12,6 @@ helios-photo.workspace = true
 
 [dev-dependencies]
 helios-testkit.workspace = true
+
+[lints]
+workspace = true

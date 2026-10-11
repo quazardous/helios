@@ -11,3 +11,6 @@ helios-core.workspace = true
 helios-config.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+
+[lints]
+workspace = true

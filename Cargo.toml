@@ -41,6 +41,47 @@ blake3 = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
+[workspace.lints.rust]
+# Helios has no use for unsafe code. "deny" rather than "forbid" so a test
+# that must call an unsafe std function (setting an environment variable)
+# can allow it locally, with a comment saying why.
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+# Pixel code converts between integer coordinates, sample counts and float
+# values all the time; the ranges are known, so the casts are deliberate.
+cast_possible_truncation = "allow"
+cast_possible_wrap = "allow"
+cast_precision_loss = "allow"
+cast_sign_loss = "allow"
+# Image math reads best with the paper's names: x, y, r, g, b, dx, dy.
+many_single_char_names = "allow"
+similar_names = "allow"
+# Exact float comparisons are deliberate: bit-exact pixel tests and
+# identity checks such as a scale of exactly 1.0.
+float_cmp = "allow"
+# Constants copied from darktable and vkdt keep their source spelling, so
+# they can be compared with it.
+unreadable_literal = "allow"
+# Crates are named after their domain (helios-vault's Vault...).
+module_name_repetitions = "allow"
+# Errors are typed and self-describing; a "# Errors" section on every
+# fallible function would repeat them. The same goes for panics, which are
+# invariant checks.
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+# Pure functions and builders everywhere: marking each one #[must_use]
+# adds noise for little gain.
+must_use_candidate = "allow"
+return_self_not_must_use = "allow"
+# Long functions are pipelines and tables (module registries, parameter
+# lists); splitting them would scatter one idea.
+too_many_lines = "allow"
+# Owned arguments are part of the public API shape (handles and messages
+# moved into threads or stored); changing them is an API decision.
+needless_pass_by_value = "allow"
+
 # Decoding raw files in a debug build takes seconds: optimize the decoders
 # in every profile, so tests on real raws stay fast.
 # Dependencies build without debug info: the GPU and GUI stacks are large,
