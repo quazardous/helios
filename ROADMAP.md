@@ -98,15 +98,20 @@ modules) with **different surfaces** on top, not two engines side by side:
 (2026-10-11, decided) **Two GUIs on one engine**: in the long run,
 darktable's legacy GUI plugs onto Helios (darktable becomes a client of the
 engine and the vault), and Helios has its own diagram-oriented GUI. The GUI
-technology (portable), its widget library (viewport, graph editor, widgets
-generated from manifests) and a modern desktop (dockable, sticky panels,
-saved workspaces) are not decided; working mockups come first.
+technology is **egui** (2026-10-11, decided), on wgpu, after two
+prototypes measured side by side (docs/gui-prototype.md): cheaper per
+frame for large graphs and float uploads, docking with tabs and a
+serializable layout (egui_dock), widgets testable by label (AccessKit),
+and the same code compiling to the web (WebAssembly, WebGPU) for the cloud
+surface. Its widget library (viewport, graph editor, widgets generated
+from manifests) and a modern desktop (dockable, sticky panels, saved
+workspaces) come next.
 Hard requirement (2026-10-11, decided): GPU acceleration on Linux, Windows
 and macOS, as close to Vulkan as possible, so the viewport can show buffers
-the engine computed on the GPU without copying them back. Leading
-direction, not decided: wgpu as the shared GPU layer for the GUI and the
-engine's GPU modules (Vulkan on Linux and Windows, Metal on macOS, raw
-Vulkan access for vkdt interop), with a Rust toolkit drawing on it.
+the engine computed on the GPU without copying them back. wgpu is
+the shared GPU layer for the GUI and the engine's GPU modules (2026-10-11,
+decided with egui: Vulkan on Linux and Windows, Metal on macOS, raw Vulkan
+access for vkdt interop), at the version egui uses (wgpu 30 with egui 0.36).
 
 **Helios makes darktable and vkdt meet** (2026-10-11, decided as the
 long-term goal). darktable brings compatibility (edits, workflow, users) and
