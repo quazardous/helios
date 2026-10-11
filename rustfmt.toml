@@ -1,0 +1,3 @@
+# rustfmt, stable options only. cargo fmt reads the edition from
+# Cargo.toml; this lets rustfmt run alone (editors, single files) agree.
+edition = "2024"
