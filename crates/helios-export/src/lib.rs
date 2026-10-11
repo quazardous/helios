@@ -249,6 +249,10 @@ pub fn submit_with(
             return Err("cancelled".into());
         }
         let bytes = encode(&render()?, &format)?;
+        // Cancelled while rendering: nothing is written.
+        if cancel.is_cancelled() {
+            return Err("cancelled".into());
+        }
         write_atomic(&path, &bytes)?;
         let exported = Exported {
             hash: ContentHash::of(&bytes),

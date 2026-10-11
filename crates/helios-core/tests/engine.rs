@@ -182,6 +182,29 @@ fn planning_counts_the_content_keys_it_computes() {
 }
 
 #[test]
+fn a_source_given_another_image_renders_it_and_keeps_the_first_cached() {
+    let mut g = Graph::new();
+    let src = g.add_source("src", ramp());
+    let x2 = g
+        .add_module("x2", ModuleRef::new(Gain), &gain(2.0))
+        .unwrap();
+    g.connect(src, "image", x2, "input").unwrap();
+    let e = engine();
+    let first = e.render(&g, x2, "output", Region::sized(16, 8)).unwrap();
+    let other = Image::from_fn(Region::sized(4, 2), 1, |x, _, _| x as f32);
+    g.set_source(src, other).unwrap();
+    assert_eq!(g.extent(x2).unwrap(), Some(Region::sized(4, 2)));
+    let second = e.render(&g, x2, "output", Region::sized(4, 2)).unwrap();
+    assert_eq!(second.data(), &[0.0, 2.0, 4.0, 6.0, 0.0, 2.0, 4.0, 6.0]);
+    g.set_source(src, ramp()).unwrap();
+    let before = e.counters();
+    let again = e.render(&g, x2, "output", Region::sized(16, 8)).unwrap();
+    assert_eq!(e.counters().since(&before).computed, 0, "found by content");
+    assert!(first.same_buffer(&again));
+    assert!(g.set_source(x2, ramp()).is_err(), "a module takes no image");
+}
+
+#[test]
 fn identical_prefixes_are_computed_once() {
     // Two branches with the same module and parameters on the same source:
     // one computation, whatever the node names.

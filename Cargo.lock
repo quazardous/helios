@@ -2010,6 +2010,7 @@ dependencies = [
  "helios-module-sigmoid",
  "helios-module-vkdt",
  "helios-module-whitebalance",
+ "helios-photo",
  "helios-resolve",
  "helios-testkit",
  "helios-vault",

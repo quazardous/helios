@@ -244,3 +244,77 @@ fn a_model_proposes_and_a_human_accepts_through_control() {
     assert_eq!(code, 0, "{decided}");
     assert_eq!(decided["version"], 2, "{decided}");
 }
+
+#[test]
+fn a_source_takes_a_file_and_exports_take_the_network_as_it_was() {
+    let s = Sandbox::start("export", true);
+    let picture = s.dir.join("in.png");
+    image::RgbImage::from_fn(20, 10, |x, y| {
+        image::Rgb([(x * 10) as u8, (y * 20) as u8, 90])
+    })
+    .save(&picture)
+    .unwrap();
+    let (code, loaded) = s.control(&["load-source", "src", picture.to_str().unwrap()]);
+    assert_eq!(code, 0, "{loaded}");
+    assert_eq!(loaded["source"]["region"]["width"], 20, "{loaded}");
+    assert_eq!(loaded["source"]["raw"], false);
+
+    // Queued while paused, then the network changes: the first export
+    // still renders the network as it was asked.
+    let out = |name: &str| s.dir.join(name).to_str().unwrap().to_string();
+    assert_eq!(s.control(&["pause"]).0, 0);
+    let (code, first) = s.control(&["export", "exp", "--format", "png", "--to", &out("a.png")]);
+    assert_eq!(code, 0, "{first}");
+    assert_eq!(first["region"]["height"], 10, "the whole extent: {first}");
+    assert_eq!(s.control(&["set-param", "exp", "exposure", "2"]).0, 0);
+    s.control(&["export", "exp", "--format", "png", "--to", &out("b.png")]);
+    // Changed for one export only.
+    s.control(&[
+        "export",
+        "exp",
+        "--format",
+        "png",
+        "--set",
+        "exp.exposure=0",
+        "--to",
+        &out("c.png"),
+    ]);
+    s.control(&[
+        "export",
+        "exp",
+        "--format",
+        "jpeg",
+        "--quality",
+        "50",
+        "--to",
+        &out("d.jpg"),
+    ]);
+    assert_eq!(s.control(&["resume"]).0, 0);
+    assert_eq!(s.inspect(&["wait-idle"]).0, 0);
+    let read = |name: &str| std::fs::read(s.dir.join(name)).unwrap();
+    assert_ne!(read("a.png"), read("b.png"));
+    assert_eq!(
+        read("a.png"),
+        read("c.png"),
+        "exposure 0 is the network as it was"
+    );
+    let jpeg = image::load_from_memory(&read("d.jpg")).unwrap();
+    assert_eq!((jpeg.width(), jpeg.height()), (20, 10));
+
+    let (code, missing) = s.control(&["load-source", "src", "/nonexistent/x.png"]);
+    assert_eq!(code, 1);
+    assert!(
+        missing["error"]
+            .as_str()
+            .unwrap()
+            .contains("/nonexistent/x.png")
+    );
+    let (code, wrong) = s.control(&["load-source", "exp", picture.to_str().unwrap()]);
+    assert_eq!(code, 1);
+    assert!(
+        wrong["error"].as_str().unwrap().contains("not a source"),
+        "{wrong}"
+    );
+    let (code, usage) = s.control(&["export", "exp", "--to", &out("e.png")]);
+    assert_eq!(code, 2, "{usage}");
+}

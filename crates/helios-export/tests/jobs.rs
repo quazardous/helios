@@ -164,3 +164,36 @@ fn a_failed_export_says_why_and_an_unknown_format_is_refused_at_once() {
     );
     let _ = std::fs::remove_dir_all(&d);
 }
+
+#[test]
+fn an_export_cancelled_while_rendering_writes_nothing() {
+    let d = dir("cancel");
+    let path = d.join("a.png");
+    let s = setup(path.clone());
+    let (started_tx, started) = std::sync::mpsc::channel();
+    let (release, release_rx) = std::sync::mpsc::channel::<()>();
+    let image = ramp(Region::sized(8, 4), 4);
+    let job = helios_export::submit_with(
+        &s.scheduler,
+        s.bus.clone(),
+        &path,
+        Format::Png { bits: 8 },
+        move || {
+            started_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+            Ok(image)
+        },
+    )
+    .unwrap();
+    started.recv().unwrap();
+    assert!(s.scheduler.cancel(job));
+    release.send(()).unwrap();
+    assert!(s.scheduler.wait_until_idle(LONG));
+    assert_eq!(s.scheduler.job(job), Some(JobState::Cancelled));
+    let left: Vec<_> = std::fs::read_dir(&d).unwrap().collect();
+    assert!(
+        left.is_empty(),
+        "no file, not even a temporary one: {left:?}"
+    );
+    let _ = std::fs::remove_dir_all(&d);
+}

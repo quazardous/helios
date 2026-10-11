@@ -199,8 +199,23 @@ pub fn request<R: Serialize>(path: &Path, request: &R) -> io::Result<Value> {
 /// serves them only in debug builds and when asked to (see `helios-node`);
 /// the inspect endpoint stays read-only.
 pub mod control {
+    use std::collections::BTreeMap;
+    use std::path::PathBuf;
+
     use helios_core::{FaultKind, Params, Region, Value};
     use serde::{Deserialize, Serialize};
+
+    /// The format of a file an export writes.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+    #[serde(rename_all = "lowercase")]
+    pub enum FileFormat {
+        /// 8-bit JPEG, at `quality` (92 when not given).
+        Jpeg,
+        /// 8-bit PNG.
+        Png,
+        /// 16-bit TIFF.
+        Tiff,
+    }
 
     #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
     #[serde(tag = "cmd", rename_all = "snake_case")]
@@ -216,6 +231,33 @@ pub mod control {
             node: String,
             param: String,
             value: Value,
+        },
+        /// Gives a source node the image of a file (a raw or a picture),
+        /// read by the node: the network stays, its results follow the new
+        /// image. `path` is absolute.
+        LoadSource {
+            node: String,
+            path: PathBuf,
+        },
+        /// Exports a node's output port to a file, as a scheduler job
+        /// holding the destination: the file appears whole or not at all.
+        /// The network is taken as it is when asked, so a later change
+        /// (another source, another parameter) does not reach this export;
+        /// `params` changes it for this export only, by node name. The
+        /// region is the node's whole extent unless given. `path` is
+        /// absolute.
+        Export {
+            node: String,
+            #[serde(default = "output")]
+            port: String,
+            #[serde(default)]
+            region: Option<Region>,
+            path: PathBuf,
+            format: FileFormat,
+            #[serde(default)]
+            quality: Option<u8>,
+            #[serde(default)]
+            params: BTreeMap<String, Params>,
         },
         /// Cancels a job.
         Cancel {
@@ -257,5 +299,9 @@ pub mod control {
 
     fn someone() -> String {
         "user".into()
+    }
+
+    fn output() -> String {
+        "output".into()
     }
 }

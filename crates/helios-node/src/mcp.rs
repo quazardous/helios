@@ -74,6 +74,34 @@ fn param_value() -> Value {
     })
 }
 
+fn optional_region() -> Value {
+    json!({ "anyOf": [region(), { "type": "null" }] })
+}
+
+fn file_format() -> Value {
+    json!({ "type": "string", "enum": ["jpeg", "png", "tiff"] })
+}
+
+fn optional_quality() -> Value {
+    json!({ "type": ["integer", "null"], "minimum": 1, "maximum": 100 })
+}
+
+fn node_params() -> Value {
+    json!({
+        "description": "Node name to parameter values",
+        "type": "object",
+        "additionalProperties": param_values()
+    })
+}
+
+fn null() -> Value {
+    Value::Null
+}
+
+fn empty_object() -> Value {
+    json!({})
+}
+
 fn fault_kind() -> Value {
     json!({ "type": "string", "enum": ["compute", "source_read"] })
 }
@@ -241,6 +269,66 @@ pub const TOOLS: &[Tool] = &[
                 schema: param_value,
                 description: "New value",
                 default: None,
+            },
+        ],
+    },
+    Tool {
+        name: "helios_load_source",
+        endpoint: Endpoint::Control,
+        cmd: "load_source",
+        description: "Gives a source node the image of a file (a raw or a picture), read by the node; the network stays (debug control)",
+        params: &[
+            NODE,
+            Param {
+                name: "path",
+                schema: string,
+                description: "Absolute path of the file, on the node's machine",
+                default: None,
+            },
+        ],
+    },
+    Tool {
+        name: "helios_export",
+        endpoint: Endpoint::Control,
+        cmd: "export",
+        description: "Exports a node's output to a file as a scheduler job holding the destination; the file appears whole or not at all. The network is taken as it is now (debug control)",
+        params: &[
+            NODE,
+            Param {
+                name: "port",
+                schema: string,
+                description: "Output port",
+                default: Some(output_port),
+            },
+            Param {
+                name: "region",
+                schema: optional_region,
+                description: "Region in image coordinates; the node's whole extent when null",
+                default: Some(null),
+            },
+            Param {
+                name: "path",
+                schema: string,
+                description: "Absolute path of the file to write, on the node's machine",
+                default: None,
+            },
+            Param {
+                name: "format",
+                schema: file_format,
+                description: "File format",
+                default: None,
+            },
+            Param {
+                name: "quality",
+                schema: optional_quality,
+                description: "JPEG quality, 1 to 100 (92 when null)",
+                default: Some(null),
+            },
+            Param {
+                name: "params",
+                schema: node_params,
+                description: "Parameters changed for this export only, by node name",
+                default: Some(empty_object),
             },
         ],
     },
@@ -514,6 +602,8 @@ mod tests {
                     "value" => json!({ "float": 1.0 }),
                     "values" => json!({ "exposure": { "float": 1.0 } }),
                     "job" => json!(3),
+                    "format" => json!("png"),
+                    "path" => json!("/nonexistent/out.png"),
                     _ => json!("exp"),
                 };
                 (p.name.to_string(), v)
@@ -547,6 +637,8 @@ mod tests {
         let control = [
             "render",
             "set_param",
+            "load_source",
+            "export",
             "cancel",
             "pause",
             "resume",

@@ -8,6 +8,9 @@
 //!
 //!     helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] render NODE [--port PORT] --region X,Y,W,H
 //!     helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] set-param NODE PARAM VALUE
+//!     helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] load-source NODE PATH
+//!     helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] export NODE --format jpeg|png|tiff
+//!                    [--quality Q] [--port PORT] [--region X,Y,W,H] [--set NODE.PARAM=VALUE]... --to PATH
 //!     helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] cancel JOB
 //!     helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] pause | resume
 //!     helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] fault NODE compute|source-read
@@ -19,11 +22,12 @@
 //! node answered with an error (a wait that timed out prints what happened
 //! instead), 2 wrong usage, 3 the node cannot be reached.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use helios_core::{FaultKind, Region, Value};
-use helios_inspect::control::ControlRequest;
+use helios_core::{FaultKind, Params, Region, Value};
+use helios_inspect::control::{ControlRequest, FileFormat};
 use helios_inspect::{Address, Request, request_at};
 
 const USAGE: &str = "usage:
@@ -34,6 +38,9 @@ const USAGE: &str = "usage:
   helios inspect [--socket PATH|tcp://HOST:PORT --token-file FILE] wait-idle [--timeout MS]
   helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] render NODE [--port PORT] --region X,Y,W,H
   helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] set-param NODE PARAM VALUE
+  helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] load-source NODE PATH
+  helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] export NODE --format jpeg|png|tiff
+                 [--quality Q] [--port PORT] [--region X,Y,W,H] [--set NODE.PARAM=VALUE]... --to PATH
   helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] cancel JOB
   helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] pause | resume
   helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] fault NODE compute|source-read
@@ -77,6 +84,32 @@ fn value(text: &str) -> Value {
     }
 }
 
+/// `jpeg`, `png` or `tiff`.
+fn file_format(text: &str) -> Result<FileFormat, String> {
+    match text {
+        "jpeg" | "jpg" => Ok(FileFormat::Jpeg),
+        "png" => Ok(FileFormat::Png),
+        "tiff" | "tif" => Ok(FileFormat::Tiff),
+        other => Err(format!("unknown format `{other}`: jpeg, png or tiff")),
+    }
+}
+
+/// A path the node can use wherever it runs from.
+fn absolute(path: &str) -> Result<PathBuf, String> {
+    std::path::absolute(path).map_err(|e| format!("{path}: {e}"))
+}
+
+/// `NODE.PARAM=VALUE`: the node name may hold dots, the parameter not.
+fn setting(text: &str) -> Result<(String, String, String), String> {
+    let bad = || format!("--set takes NODE.PARAM=VALUE, got `{text}`");
+    let (target, v) = text.split_once('=').ok_or_else(bad)?;
+    let (node, param) = target.rsplit_once('.').ok_or_else(bad)?;
+    if node.is_empty() || param.is_empty() {
+        return Err(bad());
+    }
+    Ok((node.into(), param.into(), v.into()))
+}
+
 /// A request, serialized for its endpoint.
 struct Call {
     socket: Address,
@@ -96,6 +129,8 @@ fn parse(args: Vec<String>) -> Result<Call, String> {
     let mut words = Vec::new();
     let (mut since, mut timeout) = (0, 10_000);
     let (mut port, mut area) = ("output".to_string(), None);
+    let (mut format, mut quality, mut to) = (None, None, None);
+    let mut sets: BTreeMap<String, Params> = BTreeMap::new();
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--socket" => {
@@ -116,6 +151,26 @@ fn parse(args: Vec<String>) -> Result<Call, String> {
             "--since" => since = number(args.next(), "--since")?,
             "--timeout" => timeout = number(args.next(), "--timeout")?,
             "--port" => port = args.next().ok_or("--port needs a name")?,
+            "--format" => {
+                format = Some(file_format(
+                    &args.next().ok_or("--format needs jpeg, png or tiff")?,
+                )?);
+            }
+            "--quality" => {
+                let q = number(args.next(), "--quality")?;
+                quality = Some(
+                    u8::try_from(q)
+                        .ok()
+                        .filter(|q| (1..=100).contains(q))
+                        .ok_or("--quality takes 1 to 100")?,
+                );
+            }
+            "--to" => to = Some(absolute(&args.next().ok_or("--to needs a path")?)?),
+            "--set" => {
+                let (node, param, v) =
+                    setting(&args.next().ok_or("--set needs NODE.PARAM=VALUE")?)?;
+                sets.entry(node).or_default().set(&param, value(&v));
+            }
             "--region" => area = Some(region(&args.next().ok_or("--region needs X,Y,W,H")?)?),
             _ => words.push(arg),
         }
@@ -148,6 +203,19 @@ fn parse(args: Vec<String>) -> Result<Call, String> {
                 node: node.to_string(),
                 port,
                 region: area.ok_or("render needs --region X,Y,W,H")?,
+            },
+            ["load-source", node, path] => ControlRequest::LoadSource {
+                node: node.to_string(),
+                path: absolute(path)?,
+            },
+            ["export", node] => ControlRequest::Export {
+                node: node.to_string(),
+                port,
+                region: area,
+                path: to.ok_or("export needs --to PATH")?,
+                format: format.ok_or("export needs --format jpeg|png|tiff")?,
+                quality,
+                params: sets,
             },
             ["set-param", node, param, v] => ControlRequest::SetParam {
                 node: node.to_string(),

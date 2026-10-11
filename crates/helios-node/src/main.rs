@@ -36,6 +36,7 @@ use helios_core::{Bus, Describe, Engine, Event, Graph, JobId, NodeId, Region, Sc
 use helios_decision::Book;
 use helios_inspect::{Inspector, Listen, new_token, serve_inspector, write_token};
 use helios_node::ExportDesc;
+use helios_photo::CameraInfo;
 use helios_resolve::{Report, Resolver, Settings};
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -125,7 +126,10 @@ struct Node {
     book: Mutex<Book>,
     resolver: Option<Arc<dyn Resolver>>,
     brief: Option<String>,
-    frame: Option<Region>,
+    /// The first source: decisions look at its region.
+    frame: Option<NodeId>,
+    /// The camera of each source holding a raw.
+    cameras: Mutex<BTreeMap<NodeId, CameraInfo>>,
 }
 
 impl Node {
@@ -201,7 +205,83 @@ impl Node {
             .push((export.path.clone(), job));
         Ok(job)
     }
+}
 
+/// What only the control endpoint asks for.
+#[cfg(debug_assertions)]
+impl Node {
+    /// Exports a node's port as it is now: the job renders a copy of the
+    /// graph taken here, with `params` changed on that copy only, so later
+    /// changes (another source, another parameter) never reach it.
+    fn submit_export_now(
+        self: &Arc<Self>,
+        name: &str,
+        port: &str,
+        region: Option<Region>,
+        path: &Path,
+        format: helios_export::Format,
+        params: &BTreeMap<String, helios_core::Params>,
+    ) -> Result<(JobId, Region), String> {
+        if !path.is_absolute() {
+            return Err(format!(
+                "{}: give an absolute path, the node does not know where you are",
+                path.display()
+            ));
+        }
+        let id = self.id(name)?;
+        let mut graph = self.graph.0.read().expect("graph lock").clone();
+        for (node, values) in params {
+            let target = self.id(node)?;
+            for (param, value) in values.iter() {
+                graph
+                    .set_param(target, param, value.clone())
+                    .map_err(|e| e.to_string())?;
+            }
+        }
+        let region = match region {
+            Some(r) => r,
+            None => graph
+                .extent(id)
+                .map_err(|e| e.to_string())?
+                .ok_or_else(|| format!("`{name}` has no extent: give a region"))?,
+        };
+        let (engine, port) = (self.engine.clone(), port.to_string());
+        let job = helios_export::submit_with(
+            &self.scheduler,
+            self.bus.clone(),
+            path,
+            format,
+            move || {
+                engine
+                    .render(&graph, id, &port, region)
+                    .map_err(|e| e.to_string())
+            },
+        )?;
+        self.exports
+            .lock()
+            .expect("exports lock")
+            .push((path.to_path_buf(), job));
+        Ok((job, region))
+    }
+
+    /// Gives a source the image of a file: read and decoded with no lock
+    /// held, then swapped in under the graph's write lock.
+    fn load_source(&self, name: &str, path: &Path) -> Result<helios_node::SourceLoaded, String> {
+        if !path.is_absolute() {
+            return Err(format!(
+                "{}: give an absolute path, the node does not know where you are",
+                path.display()
+            ));
+        }
+        let id = self.id(name)?;
+        let loaded = helios_load::load(path)?;
+        let mut graph = self.graph.0.write().expect("graph lock");
+        let mut cameras = self.cameras.lock().expect("cameras lock");
+        helios_node::load_source(&mut graph, &mut cameras, id, loaded)
+    }
+}
+
+impl Node {
     /// Asks the resolver about every decision waiting on a model: inputs
     /// read under the graph's read lock, models called with no lock held,
     /// answers recorded under the write lock.
@@ -210,7 +290,11 @@ impl Node {
             .resolver
             .clone()
             .ok_or("the network names no `resolver`")?;
-        let region = self.frame.ok_or("the network has no source to decide on")?;
+        let region = {
+            let graph = self.graph.0.read().expect("graph lock");
+            self.frame.and_then(|id| graph.extent(id).ok().flatten())
+        }
+        .ok_or("the network has no source to decide on")?;
         let settings = Settings {
             region,
             scale: proxy_scale(region),
@@ -287,7 +371,8 @@ mod control {
     use std::sync::Arc;
 
     use helios_core::{Event, JobId};
-    use helios_inspect::control::ControlRequest;
+    use helios_export::Format;
+    use helios_inspect::control::{ControlRequest, FileFormat};
     use serde::Serialize;
     use serde_json::{Value, json};
 
@@ -340,6 +425,28 @@ mod control {
                     .map(|()| json!({}))
                     .map_err(|e| e.to_string())
             }),
+            ControlRequest::LoadSource { node: name, path } => node
+                .load_source(name, path)
+                .map(|loaded| json!({ "source": loaded })),
+            ControlRequest::Export {
+                node: name,
+                port,
+                region,
+                path,
+                format,
+                quality,
+                params,
+            } => {
+                let format = match format {
+                    FileFormat::Jpeg => Format::Jpeg {
+                        quality: quality.unwrap_or(92),
+                    },
+                    FileFormat::Png => Format::Png { bits: 8 },
+                    FileFormat::Tiff => Format::Tiff,
+                };
+                node.submit_export_now(name, port, *region, path, format, params)
+                    .map(|(job, region)| json!({ "job": job.0, "region": region }))
+            }
             ControlRequest::Cancel { job } => {
                 if node.scheduler.cancel(JobId(*job)) {
                     Ok(json!({}))
@@ -384,7 +491,7 @@ mod control {
             } => {
                 let mut book = node.book.lock().expect("book lock");
                 let mut graph = node.graph.0.write().expect("graph lock");
-                let inputs = match node.frame {
+                let inputs = match node.frame.and_then(|id| graph.extent(id).ok().flatten()) {
                     Some(region) => helios_decision::input_keys(&node.engine, &graph, name, region),
                     None => Ok(Vec::new()),
                 };
@@ -635,6 +742,7 @@ fn main() -> ExitCode {
         resolver,
         brief: loaded.brief.clone(),
         frame: loaded.frame,
+        cameras: Mutex::new(loaded.cameras),
     });
     let inspector = Inspector::new(bus.clone())
         .with("graph", node.graph.clone())

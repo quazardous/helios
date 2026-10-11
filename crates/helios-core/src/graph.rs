@@ -125,6 +125,24 @@ impl Graph {
         self.nodes.get_mut(id.0).ok_or(Error::Node(id.0))
     }
 
+    /// Gives a source node another image (another file loaded by the
+    /// framework): the network stays, its results are computed again for the
+    /// new content, found by their keys like any other.
+    pub fn set_source(&mut self, id: NodeId, image: Image) -> Result<(), Error> {
+        let node = self.node_mut(id)?;
+        match &mut node.kind {
+            Kind::Source { image: i, hash } => {
+                *hash = image.content_hash();
+                *i = image;
+                Ok(())
+            }
+            Kind::Module { .. } => Err(Error::Module {
+                module: node.name.clone(),
+                reason: "not a source: only a source takes an image".into(),
+            }),
+        }
+    }
+
     /// Changes one parameter of a module node. A decision node is not
     /// edited: it is answered ([`Graph::answer`]), so that every change to
     /// it is a recorded decision.

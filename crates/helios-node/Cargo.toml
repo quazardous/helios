@@ -12,6 +12,7 @@ helios-inspect.workspace = true
 helios-config.workspace = true
 helios-export.workspace = true
 helios-load.workspace = true
+helios-photo.workspace = true
 helios-testkit.workspace = true
 helios-decision.workspace = true
 helios-resolve.workspace = true
@@ -31,7 +32,7 @@ serde.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]
-image = { version = "0.25", default-features = false, features = ["png"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 
 [lints]
 workspace = true
