@@ -72,13 +72,13 @@ pub struct SqliteStore {
 
 impl SqliteStore {
     fn versions_where(&self, condition: &str, key: &str) -> Result<Vec<Version>, String> {
+        type Raw = (String, String, String, String, String, i64, Option<String>);
         let mut statement = self
             .db
             .prepare(&format!(
                 "SELECT id, image, parents, edit, origin, at, label FROM versions WHERE {condition}"
             ))
             .map_err(err)?;
-        type Raw = (String, String, String, String, String, i64, Option<String>);
         let rows: Vec<Raw> = statement
             .query_map(params![key], |r| {
                 Ok((
@@ -329,7 +329,7 @@ impl Store for SqliteStore {
         let args: Vec<String> = ids
             .iter()
             .map(ImageId::hex)
-            .chain(names.iter().map(|n| n.to_string()))
+            .chain(names.iter().map(std::string::ToString::to_string))
             .collect();
         let rows = statement
             .query_map(rusqlite::params_from_iter(args.iter()), |r| {
@@ -396,10 +396,6 @@ impl Store for SqliteStore {
     }
 
     fn audit(&self, id: &ImageId) -> Result<Vec<AuditEntry>, String> {
-        let mut statement = self
-            .db
-            .prepare("SELECT seq, at, who, job, field, old, new FROM audit WHERE image = ?1 ORDER BY seq")
-            .map_err(err)?;
         type Raw = (
             i64,
             i64,
@@ -409,6 +405,10 @@ impl Store for SqliteStore {
             Option<String>,
             Option<String>,
         );
+        let mut statement = self
+            .db
+            .prepare("SELECT seq, at, who, job, field, old, new FROM audit WHERE image = ?1 ORDER BY seq")
+            .map_err(err)?;
         let rows = statement
             .query_map(params![id.hex()], |r| {
                 Ok((

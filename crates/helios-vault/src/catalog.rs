@@ -116,12 +116,11 @@ impl<S: Store> Vault<S> {
                 if store.image(&c.image)?.is_none() {
                     return Err(format!("no image {}", c.image.hex()));
                 }
-                let value = match &c.value {
-                    Some(v) => Some(fields::normalize(&c.field, v)?),
-                    None => {
-                        fields::spec(&c.field)?;
-                        None
-                    }
+                let value = if let Some(v) = &c.value {
+                    Some(fields::normalize(&c.field, v)?)
+                } else {
+                    fields::spec(&c.field)?;
+                    None
                 };
                 if last.insert((c.image, c.field.clone()), value).is_some() {
                     report.coalesced += 1;

@@ -1,5 +1,10 @@
 //! The HTTP resolver against a local stand-in server: no network.
 
+// The resolver reads its API key from an environment variable, and setting
+// one is unsafe since the 2024 edition. Each test sets its own variable, so
+// no two threads race on the same one.
+#![allow(unsafe_code)]
+
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
 use std::sync::mpsc;

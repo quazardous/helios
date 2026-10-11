@@ -147,7 +147,10 @@ impl Node {
     }
 
     pub fn after(mut self, parents: &[&str]) -> Self {
-        self.parents = parents.iter().map(|p| p.to_string()).collect();
+        self.parents = parents
+            .iter()
+            .map(std::string::ToString::to_string)
+            .collect();
         self
     }
 
@@ -302,7 +305,7 @@ impl<S: Store> Journal<S> {
             .ok_or_else(|| Error::UnknownNode(name.into()))
     }
 
-    fn joined(&self, store: &S, item: &str, node: &Node) -> bool {
+    fn joined(store: &S, item: &str, node: &Node) -> bool {
         let accepted = node
             .parents
             .iter()
@@ -311,9 +314,9 @@ impl<S: Store> Journal<S> {
         accepted >= node.need.unwrap_or(node.parents.len())
     }
 
-    fn claimable(&self, store: &S, item: &str, node: &Node, now: u64) -> bool {
+    fn claimable(store: &S, item: &str, node: &Node, now: u64) -> bool {
         match store.get(item, &node.name) {
-            None => self.joined(store, item, node),
+            None => Self::joined(store, item, node),
             Some(r) => r.status == Status::Scheduled && r.due.is_none_or(|d| d <= now),
         }
     }
@@ -336,7 +339,7 @@ impl<S: Store> Journal<S> {
             if items.len() == max {
                 break;
             }
-            if self.claimable(&inner.store, item, node, now) {
+            if Self::claimable(&inner.store, item, node, now) {
                 let attempts = inner.store.get(item, &node.name).map_or(0, |r| r.attempts);
                 let row = Row {
                     status: Status::Running,

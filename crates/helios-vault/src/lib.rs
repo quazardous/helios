@@ -233,7 +233,7 @@ impl Store for MemoryStore {
         let rating = |id: &ImageId| {
             self.fields
                 .get(&(*id, fields::RATING.to_string()))
-                .and_then(|v| v.as_i64())
+                .and_then(serde_json::Value::as_i64)
                 .unwrap_or(0)
         };
         let mut ids: Vec<ImageId> = self
@@ -563,7 +563,7 @@ impl<S: Store> Vault<S> {
 impl<S: Store> Describe for Vault<S> {
     fn describe(&self) -> serde_json::Value {
         let store = self.store.lock().expect("store lock");
-        let images = store.images().map(|i| i.len()).unwrap_or(0);
+        let images = store.images().map_or(0, |i| i.len());
         let locations = store.all_locations().unwrap_or_default();
         let present = locations.iter().filter(|(_, l)| l.present).count();
         json!({

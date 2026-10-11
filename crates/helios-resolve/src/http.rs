@@ -47,7 +47,7 @@ impl Http {
             url: url.into(),
             model: model.into(),
             key_env: None,
-            timeout: Duration::from_secs(120),
+            timeout: Duration::from_mins(2),
         }
     }
 
@@ -174,7 +174,7 @@ impl Resolver for Http {
         let mut call = agent.post(&self.url);
         match (self.api, self.key()?) {
             (Api::OpenAi, Some(key)) => {
-                call = call.header("Authorization", format!("Bearer {key}"))
+                call = call.header("Authorization", format!("Bearer {key}"));
             }
             (Api::Anthropic, Some(key)) => call = call.header("x-api-key", key),
             (_, None) => {}

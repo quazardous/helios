@@ -371,7 +371,7 @@ pub fn record(
             }
             _ => book
                 .propose(graph, &req.node, r.options, r.model, keys, now)
-                .map(|_| false),
+                .map(|()| false),
         });
         match recorded {
             Ok(true) => report.answered.push(req.node),

@@ -1,5 +1,5 @@
 //! Resolvers behind decision nodes, with no network: scripted answers, the
-//! ai_calls limit, the cache, an external program.
+//! `ai_calls` limit, the cache, an external program.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
