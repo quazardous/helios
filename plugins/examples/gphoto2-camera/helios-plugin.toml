@@ -1,0 +1,30 @@
+id = "io.github.quazardous.helios.gphoto2-camera"
+name = "gphoto2 cameras"
+version = "0.1.0"
+license = "GPL-3.0-or-later"
+# The built binary, placed next to this manifest when the plugin is
+# packaged (`cargo build -p helios-plugin-gphoto2-camera`).
+command = ["gphoto2-camera"]
+services = ["device"]
+activation = ["onService:device"]
+
+[compat]
+helios = ">=0.0.1, <0.1.0"
+interfaces = { protocol = 1, device = 1 }
+
+[settings.gphoto2]
+type = "string"
+default = "gphoto2"
+about = "The gphoto2 program to run"
+
+[[capabilities]]
+name = "device.usb"
+reason = "Talks to the cameras plugged in over USB"
+
+[[capabilities]]
+name = "process.spawn"
+reason = "Runs gphoto2, which drives the cameras"
+
+[[capabilities]]
+name = "folder.write"
+reason = "Downloads pictures into the folder Helios hands over"

@@ -1987,6 +1987,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "helios-plugin-gphoto2-camera"
+version = "0.0.1"
+dependencies = [
+ "helios-plugin",
+ "serde_json",
+]
+
+[[package]]
 name = "helios-profile"
 version = "0.0.1"
 dependencies = [

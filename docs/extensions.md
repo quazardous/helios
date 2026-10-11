@@ -148,4 +148,7 @@ step; until then the ambient capabilities are a disclosure the user must
 accept, not a guarantee.
 
 Examples live in `plugins/examples/`: `exif-exiftool` (Python, standard
-library alone, wraps `exiftool` for `metadata.read`).
+library alone, wraps `exiftool` for `metadata.read`) and `gphoto2-camera`
+(Rust, a workspace member, wraps `gphoto2` for `device`: list, info,
+capture, download with progress; its tests run against a fake `gphoto2`
+put first on the plugin's `PATH`, no camera needed).
