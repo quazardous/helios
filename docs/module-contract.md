@@ -165,7 +165,8 @@ A decision node:
   seconds, be pending (downstream nodes show a proxy or wait), or be
   cancelled.
 
-This keeps the rule that modules are pure: the non-deterministic part is
+This keeps the rule that modules are pure (ROADMAP section 2.8, rules 2
+and 6): the non-deterministic part is
 the resolution of the node, which is outside the render and lands in the
 edit like any user action.
 

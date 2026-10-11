@@ -1,0 +1,130 @@
+# Testing and sandboxing strategy (draft)
+
+Status: **draft, not decided** (2026-10-11).
+
+Goal: **building Helios must be easy for an AI agent.** An agent works alone,
+in loops of change, run, observe. It cannot look over a developer's shoulder,
+it pays for every token of noisy output, and it cannot tell "flaky" from
+"broken" without help. So the framework itself, not only its test suite, is
+designed to be driven, observed and checked by a program. The proof that a
+change works is an observed state, a hash or a picture, never "it compiled".
+
+## What the darktable experience teaches
+
+From phase 0 work in the darktable fork (equivalence bench, offscreen runs,
+SQL inventory) and darktable's own test suite:
+
+- **Hidden background work makes tests flaky.** Thumbnail crawlers, prefetch
+  jobs and import jobs write behind the scenario's back; one bench run in
+  three lost a rating
+  ([darktable#22569](https://github.com/darktable-org/darktable/issues/22569)).
+  Waiting meant polling files and screenshots until they stopped changing.
+- **Too much needs a GUI.** Scripting needs a display, some state is only
+  reachable through the lighttable, and checking it means screenshots compared
+  byte for byte after "settling", broken by a version string or a hover.
+- **Output depends on the environment.** Tiling, memory limit, thread count
+  and OpenCL change pixels, so integration tests pin a long list of options
+  and accept a Delta E tolerance (max 2.3, mean 0.77).
+- **Observing means patching.** Finding who wrote a value took backtraces
+  added by hand, twice. Debug output is one free-text stream.
+- **What works:** headless rendering (`darktable-cli`), the module
+  introspection (`$MIN`/`$MAX`/`$DEFAULT` parsed from C comments) exposed by
+  `darktable-mcp` as schemas, golden images with a Delta E metric, a database
+  dump normalized (rows sorted, timestamps masked) and diffed, an inventory
+  whose counter must only go down.
+
+## Principles
+
+1. **Everything is observable by construction.** Every framework entity
+   (module, graph node, job, cache, store) has a stable name and a
+   `describe()` returning a structured snapshot of its state. One request
+   returns the state of the whole system. Nothing that matters is only
+   visible as pixels or log text.
+2. **No sleeping, ever.** The scheduler exposes `is_idle()` and
+   `wait_until_idle()`, plus waits on a named node's output. A failed wait
+   says what is still running and what the node holds instead.
+   (ROADMAP section 2.8, rule 3.)
+3. **Structured events, with an audit trail.** The framework emits typed
+   events with their source (module, node, job, image) and records every
+   write (who, which fields, old and new value, which job). Both are
+   queryable and filterable; modules do not log. (Rules 4 and 5.)
+4. **Determinism is a feature.** Same inputs, same outputs: no ambient time
+   (clocks are injected), no ambient randomness (seeds are inputs), no
+   ambient configuration (settings are inputs), thread count and tiling
+   declared to not change results beyond a declared tolerance. Where the
+   result is legitimately non-deterministic (decision nodes), it is recorded
+   and replayed.
+5. **Total isolation.** A test or an agent session runs in its own sandbox:
+   its own data directory, store, configuration and sockets, set by
+   environment. Tools refuse to touch a real user library. Stopping a
+   sandbox kills only what it started.
+6. **Failures on demand.** Fault injection is a command: fail this node once,
+   make this read time out, corrupt this cache entry. Error paths get tested
+   instead of hoped for.
+7. **Proof is cheap to read.** Commands answer in compact structured output
+   (JSON lines), pictures are cropped to the named node in question, diffs
+   are normalized. An agent should never have to scroll a log to know if it
+   worked.
+
+## Test layers
+
+| layer | what | runs | proof |
+|---|---|---|---|
+| module unit | `prepare` / `process` on small synthetic images | `cargo test`, milliseconds | values, hashes |
+| module contract | generated from the manifest: ranges, NaN, tiled = untiled, scale behaviour, migrations | `cargo test` | properties |
+| parity | a ported module vs the same darktable or vkdt module | needs `darktable-cli` / `vkdt-cli` | Delta E under threshold |
+| backend contract | the same test suite against every backend: CPU and GPU kernels, local and remote stores | `cargo test --features` | identical or within tolerance |
+| graph | small networks with fake modules, scheduler, cancellation, idle | `cargo test`, injected clock | event sequence, state snapshot |
+| system | a headless Helios node driven through its control socket | sandbox | `describe()` state, golden outputs |
+| surface | a UI, only when one exists, driven by element names | headless compositor (as the darktable bench does) | cropped screenshots |
+
+Golden files (images, state snapshots) live next to their test, are
+regenerated by one command, and are reviewed as diffs.
+
+## The control surface
+
+Every Helios process exposes two endpoints, JSON lines over a local socket:
+
+- **inspect** (read-only, in every build): `state`, `describe <name>`,
+  `events --since`, `audit <object>`, `wait-idle`, `wait <node>`.
+- **control** (debug builds, enabled by an environment variable): run a
+  network, set a parameter, step or pause the scheduler, inject a fault,
+  resolve a decision node.
+
+A thin CLI wraps both, and an MCP server exposes the same commands, so an
+agent drives Helios with the same verbs a script uses. darktable's
+`darktable-mcp` (module schemas, render, image statistics) is the model for
+the module side; the read-only/debug split keeps the inspect side safe to
+ship.
+
+## Fakes and fixtures
+
+- **Fake modules** with declared behaviour (delay, failure, output) to test
+  the graph and scheduler without pixels.
+- **Seeded stores**: a vault in a known state from a seed script, created in
+  the sandbox in one command.
+- **A small image corpus**: a few raws with a public license (darktable's
+  integration test images are a start), plus synthetic images generated by
+  code (ramps, patches, noise with a seed).
+- **Recorded decisions**: decision nodes run in tests from a recorded answer,
+  so tests never call a real AI model.
+
+## Continuous integration
+
+- every push: build, unit, contract and graph tests, a public-hygiene check
+  (no private paths, no private tracker ids);
+- nightly or on demand: parity against `darktable-cli` and `vkdt-cli`, the
+  performance bench, system tests in a sandbox;
+- a failing job uploads what it observed (state snapshot, events, cropped
+  pictures), not only a log.
+
+## Open questions
+
+- Which parts become a crate of their own (`helios-inspect`, a test-support
+  crate with fakes and the sandbox helper).
+- Snapshot format and tooling for golden state (plain JSON files, or a
+  snapshot testing crate).
+- How the parity tests get darktable and vkdt binaries in CI (build them,
+  or use released packages pinned to a version).
+- How much of this the darktable fork can adopt for phase 0 (an idle signal
+  for background jobs would already fix the bench).

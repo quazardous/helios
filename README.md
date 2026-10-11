@@ -22,6 +22,11 @@ catalog SDK inside darktable itself, happens in the
   competitors and measurements.
 - [docs/module-contract.md](./docs/module-contract.md): draft of what an
   image processing module is in Helios: isolated, pure, testable alone.
+- [docs/architecture.md](./docs/architecture.md): draft of how the parts of
+  Helios communicate: data on graph edges, commands to owners, a central bus
+  for orchestration.
+- [docs/testing-strategy.md](./docs/testing-strategy.md): draft of how Helios
+  is tested and sandboxed, designed so that an AI agent can build it.
 - [docs/iop-inventory.md](./docs/iop-inventory.md): what darktable's image
   operation modules already describe about themselves (introspection, widgets,
   tiling, OpenCL, scale awareness), as a baseline for module normalization.

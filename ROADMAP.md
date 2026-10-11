@@ -125,6 +125,9 @@ parameters. darktable already does part of it (reduced preview pipe,
 `dt_iop_roi_t.scale`, ~51 modules adapt their radii to the scale). To be
 declared per module: scale invariance, approximation quality.
 
+Modules are bound by the design rules of section 2.8: no hidden IO
+(rule 2), pure reads (rule 6).
+
 **Batch parallelism.** darktable exports sequentially, one image after the
 other; parallelism only exists inside a render (OpenMP, OpenCL). Database
 writes during export (tags, timestamps) are mixed with computation and must be
@@ -141,6 +144,23 @@ separated, as the catalog SDK does.
   node holding the raw, ship only the result).
 - **Adaptive visualization**: direct viewport, shared memory, tiles or a video
   stream depending on the case.
+- No implicit background work: every job is named, cancellable and visible,
+  and "wait until idle" is part of the API (section 2.8, rule 3).
+- (2026-10-11, decided) **A central bus for orchestration, not for data.**
+  Typed events coordinate the parts (state changed, job finished, buffer
+  ready); image data travels on the graph edges and stays where it is
+  computed (vkdt keeps it in GPU memory). Commands go to the owner of the
+  state. Draft in [docs/architecture.md](docs/architecture.md).
+- (2026-10-11, decided) **Data access is a framework prerogative.** Modules
+  and services declare what they need and never read or write data
+  themselves; the framework batches, projects, caches by content, prefetches
+  from declared intent, coalesces writes and skips unchanged ones, so no
+  read or write is wasted. Read and write budgets are checked by tests.
+  Above all, identical photo data is never loaded twice in RAM or VRAM:
+  buffers are addressed by content, held once per memory, shared by
+  reference, and concurrent requests for the same content are merged.
+  Explicit locks are exceptional (mainly exports and other sinks writing
+  files), acquired by the scheduler as expiring leases, never by modules.
 
 ### 2.3 Vault: the catalog as an API
 
@@ -175,7 +195,8 @@ content-addressed objects, a DAG of versions, refs, offline replicas,
 integrity. Raws are large immutable blobs stored git-annex style (hash
 pointer, separate object store), never in the history. Edits are small text
 (named parameters) and fit a version DAG; ratings, labels and tags merge best
-per field (CRDT-like). Not decided.
+per field (CRDT-like), which requires field-level writes (section 2.8,
+rule 1). Not decided.
 
 (2026-10-11) **Photos are not code.** No semantic merge: two concurrent edits
 simply coexist as two versions, and the user keeps one or both.
@@ -215,7 +236,9 @@ irreversible, so it stays a visible, confirmed step.
 **Engine version drift.** An edit records the module versions it was made
 with. A newer engine renders old edits (legacy params); an older one cannot
 render newer edits, so the edit is rendered on a capable node or the user is
-asked to upgrade. Presets and styles live in the vault so every node has the
+asked to upgrade. Rendering an old edit never rewrites it: upgrading is an
+explicit operation creating a new version (section 2.8, rule 6). Presets and
+styles live in the vault so every node has the
 same ones. This answers the objection raised by darktable maintainers on
 multi-workstation setups
 ([darktable#18599](https://github.com/darktable-org/darktable/issues/18599)).
@@ -282,6 +305,37 @@ hash) is part of Helios; deploying a NAS is not.
 - Front: authority is server-side, but computation can happen anywhere (the
   client is a node; WebGPU / local engine; approximations replaced by the
   exact darktable render).
+
+### 2.8 Design rules
+
+(2026-10-11, not decided) Six rules drawn from a darktable debugging session:
+a rating set from Lua was silently reverted one run in three, because a
+full-image load started by a background job copied the whole image record,
+decoded the raw, then wrote the stale copy back
+([darktable#22569](https://github.com/darktable-org/darktable/issues/22569)).
+Each rule removes one thing that made this hard to find.
+
+1. **Field-level writes.** A writer declares the fields it owns and updates
+   only those (patch or command), never "write back my copy". This is also
+   what per-field merge between replicas needs (2.3).
+2. **No hidden IO.** Modules never touch files, storage or the catalog; all
+   IO goes through a framework layer that can be observed, mocked and
+   serialized (2.1, [module contract](docs/module-contract.md)).
+3. **No implicit background work.** Every unit of background work goes
+   through the scheduler, named and cancellable, and the system exposes
+   "is idle / wait until idle" for tests and scripts (2.2).
+4. **Audit trail.** Writes record who, which fields, old and new value and
+   from which job, available on demand, instead of patching in backtraces.
+5. **Structured events, not free-text logs.** Events carry their source
+   (module, job, image) and can be filtered; modules do not log directly.
+6. **Pure reads.** Reading never changes stored data; migrations (legacy
+   parameters, schema upgrades) are explicit operations that create a new
+   version (2.3, engine version drift; decision nodes are recorded, not
+   recomputed, for the same reason).
+
+Rules 3 to 5 are framework requirements in the
+[testing strategy](docs/testing-strategy.md): building Helios must be easy
+for an AI agent, so the system is observable and waitable by construction.
 
 ---
 
