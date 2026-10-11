@@ -16,8 +16,8 @@
 //! pixelpipe carries but does not use; here it is passed through untouched.
 
 use helios_core::{
-    Context, Family, Image, Manifest, Module, ModuleKind, Needs, ParamKind, ParamSpec, Params,
-    PortSpec, Region, Role, Value,
+    Context, Family, GpuKernel, Image, Manifest, Module, ModuleKind, Needs, ParamKind, ParamSpec,
+    Params, PortSpec, Region, Role, Value,
 };
 use helios_photo::camera::fields::EXPOSURE_BIAS;
 
@@ -77,6 +77,17 @@ impl Module for Exposure {
             black,
             scale: 1.0 / (white - black),
         })
+    }
+
+    fn gpu_kernel(&self) -> Option<GpuKernel> {
+        Some(GpuKernel {
+            wgsl: include_str!("exposure.wgsl"),
+            entry: "main",
+        })
+    }
+
+    fn gpu_uniforms(&self, plan: &Plan) -> Vec<f32> {
+        vec![plan.black, plan.scale]
     }
 
     fn process(

@@ -44,6 +44,21 @@ impl Context {
     }
 }
 
+/// A module's GPU variant: a WGSL compute kernel, run by a GPU backend
+/// (`helios-gpu`) over the same plan as the CPU code, and checked against
+/// it. The core only carries it: it never runs it.
+///
+/// The kernel works pixel by pixel. Its bindings, group 0: `0` the input
+/// (`array<f32>`, read), `1` the output (`array<f32>`, read and write), `2`
+/// the plan's uniforms (`array<vec4<f32>>`), `3` the shape (`vec4<u32>`:
+/// pixel count, input channels, output channels). One invocation per pixel,
+/// workgroups of 64.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GpuKernel {
+    pub wgsl: &'static str,
+    pub entry: &'static str,
+}
+
 /// An image processing module: a pure computation with a declared surface.
 ///
 /// No IO, no global state, no logging, no threads of its own: everything it
@@ -88,6 +103,16 @@ pub trait Module: Send + Sync + 'static {
         inputs: &[&Image],
         output: Region,
     ) -> Result<Vec<Image>, String>;
+
+    /// The GPU variant, if the module has one.
+    fn gpu_kernel(&self) -> Option<GpuKernel> {
+        None
+    }
+
+    /// The plan as the GPU kernel's uniforms, padded to whole `vec4`s.
+    fn gpu_uniforms(&self, _plan: &Self::Plan) -> Vec<f32> {
+        Vec::new()
+    }
 }
 
 /// A module behind a uniform interface, as the graph holds it.
@@ -118,6 +143,22 @@ impl ModuleRef {
 
     pub(crate) fn input_region(&self, plan: &Plan, output: Region) -> Region {
         self.0.input_region(plan, output)
+    }
+
+    /// What a GPU backend needs to run this module with these parameters:
+    /// its kernel and the plan's uniforms. `None` when it has no GPU variant.
+    pub fn gpu_job(
+        &self,
+        params: &Params,
+        context: &Context,
+        scale: f64,
+    ) -> Result<Option<(GpuKernel, Vec<f32>)>, Error> {
+        let Some(kernel) = self.0.gpu_kernel() else {
+            return Ok(None);
+        };
+        let params = self.manifest().resolve(params)?;
+        let plan = self.prepare(&params, context, scale)?;
+        Ok(Some((kernel, self.0.gpu_uniforms(&plan))))
     }
 
     /// Runs `process` and checks the result against the manifest.
@@ -178,6 +219,8 @@ trait Erased: Send + Sync {
     fn manifest(&self) -> &Manifest;
     fn prepare(&self, params: &Params, context: &Context, scale: f64) -> Result<Plan, String>;
     fn input_region(&self, plan: &Plan, output: Region) -> Region;
+    fn gpu_kernel(&self) -> Option<GpuKernel>;
+    fn gpu_uniforms(&self, plan: &Plan) -> Vec<f32>;
     fn process(&self, plan: &Plan, inputs: &[&Image], output: Region)
     -> Result<Vec<Image>, String>;
 }
@@ -206,6 +249,16 @@ impl<M: Module> Erased for Adapter<M> {
     fn input_region(&self, plan: &Plan, output: Region) -> Region {
         self.module
             .input_region(self.plan(plan), output, self.manifest.needs.overlap)
+    }
+
+    fn gpu_kernel(&self) -> Option<GpuKernel> {
+        self.module.gpu_kernel()
+    }
+
+    fn gpu_uniforms(&self, plan: &Plan) -> Vec<f32> {
+        let mut u = self.module.gpu_uniforms(self.plan(plan));
+        u.resize(u.len().div_ceil(4).max(1) * 4, 0.0);
+        u
     }
 
     fn process(

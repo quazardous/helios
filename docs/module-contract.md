@@ -207,6 +207,16 @@ How it is built:
   themselves) sets `project.decisions.mode`; a global preference only fills
   in for nodes that set none.
 
+## GPU variants
+
+A module may carry a GPU variant next to its CPU code: a WGSL compute
+kernel and the plan packed as its uniforms (`gpu_kernel`, `gpu_uniforms`).
+The core only carries it; the GPU backend (`helios-gpu`, on wgpu) runs it,
+on the same plan, and a variant is trusted only within its tolerance of the
+CPU reference, which stays the definition of the module. The first kernels
+work pixel by pixel; neighbourhood kernels and buffers kept on the GPU
+along a network come next.
+
 ## How a module is tested
 
 Every module is testable alone, with no darktable and no framework running:
