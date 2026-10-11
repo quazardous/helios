@@ -71,6 +71,8 @@ A Cargo workspace (Rust):
   what is not carried over.
 - `crates/helios-vkdt`: vkdt module files (`params`, `connectors`,
   `params.ui`) read into Helios manifests and written back unchanged.
+- `packaging/linux`: the launcher and icons for GNOME and other freedesktop
+  desktops (`install.sh` installs them for the current user).
 - `crates/helios-export`: exports, the leaves that write files: a node
   rendered, converted from the working space to sRGB, encoded (JPEG, PNG 8
   or 16-bit, TIFF 16-bit) and written atomically, as jobs that hold their

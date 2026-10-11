@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Helios
+GenericName=Photo editor
+Comment=Image processing framework; photo editing where darktable and vkdt meet
+Exec=helios-gui %F
+Icon=io.github.quazardous.Helios
+Terminal=false
+Categories=Graphics;2DGraphics;Photography;RasterGraphics;
+MimeType=image/x-canon-cr2;image/x-canon-cr3;image/x-nikon-nef;image/x-sony-arw;image/x-fuji-raf;image/x-adobe-dng;image/x-panasonic-rw2;image/x-olympus-orf;image/jpeg;image/png;image/tiff;
+Keywords=raw;photo;darktable;vkdt;
+StartupWMClass=helios-gui
