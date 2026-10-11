@@ -54,6 +54,9 @@ A Cargo workspace (Rust):
 - `crates/helios-photo`: the photo domain: raw mosaics and their color
   filter arrays, camera metadata as context, color spaces (linear Rec.2020
   working space).
+- `crates/helios-vault`: the vault: images identified by content (BLAKE3),
+  locations as data, folder import and repair scan, over SQLite or memory
+  behind one store contract.
 - `crates/helios-journal`: the workflow level: a journal per item and node
   (claims, leases, joins, choices, retries), after grampy, with a contract
   every storage must pass.
