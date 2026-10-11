@@ -349,6 +349,75 @@ fn an_export_without_a_format_is_refused_at_load() {
 }
 
 #[test]
+fn files_are_sources_read_next_to_the_network() {
+    let images = std::env::var_os("HELIOS_TEST_IMAGES")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../../darktable/src/tests/integration/images")
+        });
+    let raw = images.join("mire1.cr2");
+    if !raw.is_file() {
+        eprintln!("skipped: no test images in {}", images.display());
+        return;
+    }
+    // A picture next to the network, written by a first node's export.
+    let make = r#"{
+      "sources": [{ "name": "src", "synthetic": { "kind": "ramp", "width": 16, "height": 8, "channels": 4 } }],
+      "exports": [{ "node": "src", "port": "image", "region": { "x": 0, "y": 0, "width": 16, "height": 8 }, "path": "pic.png" }]
+    }"#;
+    let maker = Sandbox::start("make-picture", make);
+    maker.inspect(&["wait-event", "node.idle", "--timeout", "10000"]);
+    let picture = maker.dir.join("pic.png");
+    assert!(picture.is_file());
+
+    let network = format!(
+        r#"{{
+      "sources": [
+        {{ "name": "raw", "file": {raw:?} }},
+        {{ "name": "pic", "file": {picture:?} }}
+      ],
+      "modules": [{{ "name": "exp", "module": "exposure", "params": {{ "exposure": {{ "float": 1.0 }} }} }}],
+      "connections": [{{ "from": "pic", "port": "image", "to": "exp", "input": "input" }}],
+      "renders": [
+        {{ "node": "raw", "port": "image", "region": {{ "x": 0, "y": 0, "width": 64, "height": 64 }} }},
+        {{ "node": "exp", "port": "output", "region": {{ "x": 0, "y": 0, "width": 16, "height": 8 }} }}
+      ]
+    }}"#
+    );
+    let sandbox = Sandbox::start("files", &network);
+    let (code, idle) = sandbox.inspect(&["wait-event", "node.idle", "--timeout", "30000"]);
+    assert_eq!(code, 0, "{idle}");
+    assert_eq!(idle["event"]["payload"]["failed"], 0, "{idle}");
+    let (_, graph) = sandbox.inspect(&["describe", "graph"]);
+    let nodes = graph["describe"]["nodes"].as_array().unwrap();
+    assert_eq!(nodes[0]["channels"], 1, "a raw loads as its mosaic");
+    assert_eq!(nodes[1]["channels"], 4, "a picture loads as RGBA");
+    assert_eq!(nodes[1]["region"]["width"], 16);
+}
+
+#[test]
+fn a_source_says_either_synthetic_or_file() {
+    let dir = std::env::temp_dir().join(format!("helios-system-both-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("network.json"),
+        r#"{ "sources": [{ "name": "s" }] }"#,
+    )
+    .unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_helios-node"))
+        .arg("--graph")
+        .arg(dir.join("network.json"))
+        .arg("--socket")
+        .arg(dir.join("node.sock"))
+        .output()
+        .unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("either `synthetic` or `file`"));
+}
+
+#[test]
 fn a_node_whose_stdout_is_closed_keeps_serving() {
     let dir = std::env::temp_dir().join(format!("helios-system-closed-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);

@@ -423,19 +423,15 @@ fn main() -> ExitCode {
         .and_then(|text| {
             serde_json::from_str(&text).map_err(|e| format!("{}: {e}", args.graph.display()))
         })
-        .and_then(helios_node::load);
-    let mut loaded = match loaded {
+        // Files the network names are relative to it.
+        .and_then(|desc| helios_node::load_in(desc, args.graph.parent().unwrap_or(Path::new("."))));
+    let loaded = match loaded {
         Ok(l) => l,
         Err(e) => {
             eprintln!("helios-node: {e}");
             return ExitCode::from(1);
         }
     };
-    // Export paths are relative to the network file, like its other references.
-    let base = args.graph.parent().unwrap_or(Path::new("."));
-    for e in &mut loaded.exports {
-        e.path = base.join(&e.path);
-    }
     let config = match config(&args) {
         Ok(c) => Arc::new(c),
         Err(e) => {

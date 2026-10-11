@@ -1,0 +1,16 @@
+[package]
+name = "helios-load"
+description = "Helios loaders: raw files (through rawler) and pictures read by the framework into graph sources, with camera metadata and embedded previews"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+helios-core.workspace = true
+helios-photo.workspace = true
+blake3.workspace = true
+serde.workspace = true
+# LGPL-2.1, compatible with GPL-3.0-or-later.
+rawler = { version = "0.8", default-features = false }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "tiff"] }

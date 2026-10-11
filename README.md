@@ -58,6 +58,9 @@ A Cargo workspace (Rust):
 - `crates/helios-vault`: the vault: images identified by content (BLAKE3),
   locations as data, folder import and repair scan, over SQLite or memory
   behind one store contract.
+- `crates/helios-load`: loaders, the framework reading files into sources:
+  camera raws through rawler (sensor data and camera description), JPEG,
+  PNG and TIFF pictures in the working space, embedded previews.
 - `crates/helios-export`: exports, the leaves that write files: a node
   rendered, converted from the working space to sRGB, encoded (JPEG, PNG 8
   or 16-bit, TIFF 16-bit) and written atomically, as jobs that hold their

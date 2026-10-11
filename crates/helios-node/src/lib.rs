@@ -10,8 +10,11 @@
 //! }
 //! ```
 //!
-//! Sources are synthetic images for now: loading files is the framework's
-//! job and comes with the photo domain. An export writes a node's `output`
+//! A source is a synthetic image, or a file read by the framework
+//! (`{ "name": "src", "file": "IMG_0001.CR2" }`, relative to the network
+//! file): a raw loads as its sensor mosaic, and every module that reads it,
+//! directly or not, gets the camera's description as context; a picture
+//! loads in the working space. An export writes a node's `output`
 //! port (or the `port` given) to a file whose format follows its extension,
 //! unless `format` says otherwise (`{ "format": "jpeg", "quality": 90 }`,
 //! `{ "format": "png", "bits": 16 }`, `{ "format": "tiff" }`).
@@ -19,8 +22,8 @@
 pub mod mcp;
 pub mod sandbox;
 
-use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
 
 use helios_core::{Graph, ModuleRef, NodeId, Params, Region};
 use helios_export::Format;
@@ -40,10 +43,15 @@ pub struct Description {
     pub exports: Vec<ExportDesc>,
 }
 
+/// A source: a synthetic image, or a file read by the framework.
 #[derive(Debug, Deserialize)]
 pub struct SourceDesc {
     pub name: String,
-    pub synthetic: Synthetic,
+    #[serde(default)]
+    pub synthetic: Option<Synthetic>,
+    /// A raw file or a picture, relative to the network file.
+    #[serde(default)]
+    pub file: Option<PathBuf>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -132,8 +140,32 @@ impl Loaded {
     }
 }
 
-/// Builds the graph a description says; errors name what is wrong.
+fn upstream(graph: &Graph, id: NodeId, seen: &mut BTreeSet<NodeId>) -> Result<(), String> {
+    for src in graph
+        .input_nodes(id)
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .flatten()
+    {
+        if seen.insert(src) {
+            upstream(graph, src, seen)?;
+        }
+    }
+    Ok(())
+}
+
+/// Builds the graph a description says, files read relative to the
+/// current directory; errors name what is wrong.
 pub fn load(desc: Description) -> Result<Loaded, String> {
+    load_in(desc, Path::new("."))
+}
+
+/// [`load`] for a description whose files are relative to `base` (the
+/// directory of the network file): sources and exports.
+pub fn load_in(mut desc: Description, base: &Path) -> Result<Loaded, String> {
+    for e in &mut desc.exports {
+        e.path = base.join(&e.path);
+    }
     let registry = registry();
     let mut graph = Graph::new();
     let mut nodes = BTreeMap::new();
@@ -143,8 +175,27 @@ pub fn load(desc: Description) -> Result<Loaded, String> {
             Some(_) => Err(format!("two nodes named `{name}`")),
         }
     };
+    let mut cameras = BTreeMap::new();
     for s in &desc.sources {
-        let image = match s.synthetic {
+        let synthetic = match (&s.synthetic, &s.file) {
+            (Some(synthetic), None) => synthetic,
+            (None, Some(file)) => {
+                let loaded = helios_load::load(&base.join(file))?;
+                let id = graph.add_source(&s.name, loaded.image);
+                if let Some(camera) = loaded.camera {
+                    cameras.insert(id, camera);
+                }
+                add(&s.name, id)?;
+                continue;
+            }
+            _ => {
+                return Err(format!(
+                    "source `{}`: say either `synthetic` or `file`",
+                    s.name
+                ));
+            }
+        };
+        let image = match *synthetic {
             Synthetic::Noise {
                 width,
                 height,
@@ -184,6 +235,19 @@ pub fn load(desc: Description) -> Result<Loaded, String> {
             .graph
             .connect(from, &c.port, to, &c.input)
             .map_err(|e| e.to_string())?;
+    }
+    // A module reading one raw, directly or not, gets its camera as context.
+    let ids: Vec<NodeId> = loaded.nodes.values().copied().collect();
+    for id in ids {
+        let mut seen = BTreeSet::new();
+        upstream(&loaded.graph, id, &mut seen)?;
+        let mut found = seen.iter().filter_map(|s| cameras.get(s));
+        if let (Some(camera), None) = (found.next(), found.next()) {
+            loaded
+                .graph
+                .set_context(id, camera.to_context())
+                .map_err(|e| e.to_string())?;
+        }
     }
     for r in &loaded.renders {
         loaded.node(&r.node)?;
