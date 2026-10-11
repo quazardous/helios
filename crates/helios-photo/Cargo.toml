@@ -1,0 +1,11 @@
+[package]
+name = "helios-photo"
+description = "The photo domain of Helios: raw mosaics and their color filter arrays, camera metadata as context, color spaces"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+helios-core.workspace = true
+serde.workspace = true

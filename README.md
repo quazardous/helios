@@ -48,6 +48,9 @@ A Cargo workspace (Rust):
 - `crates/helios-inspect`: the read-only inspection endpoint of a Helios
   process (state snapshots, bus events, waiting on an event) as JSON lines
   over a local socket.
+- `crates/helios-photo`: the photo domain: raw mosaics and their color
+  filter arrays, camera metadata as context, color spaces (linear Rec.2020
+  working space).
 - `crates/helios-journal`: the workflow level: a journal per item and node
   (claims, leases, joins, choices, retries), after grampy, with a contract
   every storage must pass.

@@ -12,6 +12,9 @@ pub enum Value {
     Int(i64),
     Bool(bool),
     Choice(String),
+    /// Numbers that belong together (a color matrix, white balance
+    /// coefficients); used by context fields, not by parameters yet.
+    List(Vec<f64>),
 }
 
 impl Value {
@@ -26,6 +29,13 @@ impl Value {
     pub fn as_i64(&self) -> Option<i64> {
         match self {
             Value::Int(v) => Some(*v),
+            _ => None,
+        }
+    }
+
+    pub fn as_list(&self) -> Option<&[f64]> {
+        match self {
+            Value::List(v) => Some(v),
             _ => None,
         }
     }
