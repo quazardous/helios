@@ -139,6 +139,35 @@ fn black_at(raw: &RawImage, x: usize, y: usize) -> f64 {
     ratio(f64::from(r.n), f64::from(r.d))
 }
 
+/// The black level measured on the sensor's masked photosites, when the
+/// camera has some: the median of each of the four 2 x 2 positions, by
+/// full-sensor parity (row, column), as rawspeed and so darktable measure
+/// it. rawler takes their mean, which a few hot masked photosites pull up
+/// or down.
+fn masked_black(raw: &RawImage) -> Option<[f64; 4]> {
+    let RawImageData::Integer(data) = &raw.data else {
+        return None;
+    };
+    if raw.blackareas.is_empty() || raw.cpp != 1 {
+        return None;
+    }
+    let mut samples: [Vec<u16>; 4] = Default::default();
+    for area in &raw.blackareas {
+        for y in area.p.y..(area.p.y + area.d.h).min(raw.height) {
+            for x in area.p.x..(area.p.x + area.d.w).min(raw.width) {
+                samples[(y & 1) * 2 + (x & 1)].push(data[y * raw.width + x]);
+            }
+        }
+    }
+    if samples.iter().any(Vec::is_empty) {
+        return None;
+    }
+    Some(samples.map(|mut s| {
+        s.sort_unstable();
+        f64::from(s[s.len() / 2])
+    }))
+}
+
 fn camera(
     raw: &RawImage,
     meta: Option<&RawMetadata>,
@@ -162,6 +191,7 @@ fn camera(
         .color_matrix
         .get(&Illuminant::D65)
         .or_else(|| raw.color_matrix.values().next());
+    let masked = masked_black(raw);
     let mut xyz_to_camera = [0.0; 9];
     if let Some(m) = matrix.filter(|m| m.len() >= 9) {
         for (i, v) in m.iter().take(9).enumerate() {
@@ -188,7 +218,13 @@ fn camera(
         aperture: rational(exif.and_then(|e| e.fnumber)),
         focal_length: rational(exif.and_then(|e| e.focal_length)),
         // The 2 x 2 photosites at the crop's corner, row by row.
-        black: [(0, 0), (1, 0), (0, 1), (1, 1)].map(|(dx, dy)| black_at(raw, x0 + dx, y0 + dy)),
+        black: [(0, 0), (1, 0), (0, 1), (1, 1)].map(|(dx, dy)| {
+            let (x, y) = (x0 + dx, y0 + dy);
+            match masked {
+                Some(m) => m[(y & 1) * 2 + (x & 1)],
+                None => black_at(raw, x, y),
+            }
+        }),
         white: f64::from(
             raw.whitelevel
                 .0

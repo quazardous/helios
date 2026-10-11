@@ -101,8 +101,26 @@ fn raw_chain_against_darktable_is_reported() {
             theirs.region()
         );
         let (dx, dy, ours, theirs) = align(&ours, &theirs, 24);
+        // HELIOS_PARITY_DUMP=dir keeps both aligned renders, to study them.
+        if let Some(dir) = std::env::var_os("HELIOS_PARITY_DUMP") {
+            let dir = PathBuf::from(dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            helios_parity::write_pfm(&ours, &dir.join(format!("{file}.helios.pfm"))).unwrap();
+            helios_parity::write_pfm(&theirs, &dir.join(format!("{file}.darktable.pfm"))).unwrap();
+        }
         let full = compare(&ours, &theirs).unwrap();
         let coarse = compare(&reduce(&ours, 8), &reduce(&theirs, 8)).unwrap();
         eprintln!("{file} {method}: shift ({dx}, {dy}), full {full:?}, 1/8 {coarse:?}");
+    }
+}
+
+#[test]
+#[ignore = "diagnostic: prints the camera description Helios reads"]
+fn print_camera() {
+    for file in ["mire1.cr2", "mire1-xtrans.raf"] {
+        let raw = images().join(file);
+        if let Ok(l) = helios_load::load(&raw) {
+            eprintln!("{file}: {:?}", l.camera.unwrap().to_context());
+        }
     }
 }
