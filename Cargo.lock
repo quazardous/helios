@@ -1772,6 +1772,7 @@ dependencies = [
  "helios-module-sigmoid",
  "helios-module-vkdt",
  "helios-testkit",
+ "naga",
  "pollster 0.4.0",
  "wgpu",
 ]
