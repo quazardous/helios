@@ -87,6 +87,8 @@ A Cargo workspace (Rust):
   sandboxes included.
 - `modules/sigmoid`: darktable's sigmoid tone mapper (per channel, hue
   preservation), ported.
+- `modules/blur`: a Gaussian blur whose radius is in full-resolution
+  pixels, the same look at any render scale.
 - `modules/exposure`: darktable's exposure module (manual mode, camera bias
   compensation), ported.
 - `modules/rawprepare`: darktable's rawprepare (black level and scale from

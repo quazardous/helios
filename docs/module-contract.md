@@ -124,6 +124,7 @@ the scheduler, the AI or a test generator can use it.
 
 ```text
 prepare(params, context) -> plan          pure, cheap, no pixels
+prepare_at(params, context, scale) -> plan     the same, for a render at a scale
 input_region(plan, output_region) -> input_region
 process(plan, inputs, output_region) -> outputs     pure, no IO, no globals
 ```
@@ -134,6 +135,18 @@ process(plan, inputs, output_region) -> outputs     pure, no IO, no globals
   modules. No logging: the framework records what ran, with which plan.
 - Deterministic: the same plan and inputs give the same outputs (up to a
   declared floating-point tolerance on different hardware).
+- **Render scale.** A render can ask for a region at a scale (1 is full
+  resolution, 0.5 half of it): regions are then in pixels at that scale,
+  and sources come reduced by the framework (each pixel the mean of the
+  full-resolution pixels it covers). A module whose parameters are sizes
+  in pixels (a blur radius) states them in full-resolution pixels and turns
+  them into pixels at the render's scale in `prepare_at`; its overlap
+  follows, since `input_region` gets the plan. A preview then looks like
+  the full render reduced. Modules working pixel by pixel ignore the scale.
+  Renders at different scales are cached apart. Modules that only make
+  sense at full resolution (rawprepare, demosaic: a reduced mosaic mixes
+  its colors) get their preview from a demosaiced proxy instead, as
+  darktable's preview pipe does.
 
 ## Decision nodes: where the algorithm alone is not enough
 
@@ -199,10 +212,12 @@ How it is built:
 Every module is testable alone, with no darktable and no framework running:
 
 1. **Unit tests**: `prepare` and `process` on small synthetic images.
-2. **Contract tests**, generated from the manifest: defaults and range ends
-   do not produce NaN or infinity, migrations round-trip, the declared
-   overlap is enough (tiled render equals untiled render), the declared
-   scale behaviour holds (preview render close to a downscaled full render).
+2. **Contract tests**, generated from the manifest, at full and half
+   scale: defaults and range ends do not produce NaN or infinity, renders
+   are reproducible, the declared overlap is enough (tiled render equals
+   untiled render). A module with a size in pixels also checks that its
+   half-scale render is close to its full render reduced. Migrations
+   round-trip once modules have versions to migrate.
 3. **Parity with darktable**: for a module ported from darktable, the same
    image and parameters rendered by `darktable-cli` with only that module
    active, compared within a Delta E threshold. darktable is the oracle.

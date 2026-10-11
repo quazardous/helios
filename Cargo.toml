@@ -32,3 +32,7 @@ opt-level = 3
 
 [profile.dev.package.jxl-oxide]
 opt-level = 3
+
+# The blur's contract runs its largest radius over every tile.
+[profile.dev.package.helios-module-blur]
+opt-level = 2

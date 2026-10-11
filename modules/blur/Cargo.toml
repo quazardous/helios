@@ -1,0 +1,13 @@
+[package]
+name = "helios-module-blur"
+description = "Gaussian blur module for Helios, with a radius in full-resolution pixels: the same look at any render scale"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+helios-core.workspace = true
+
+[dev-dependencies]
+helios-testkit.workspace = true

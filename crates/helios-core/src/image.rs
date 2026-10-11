@@ -204,6 +204,44 @@ impl Image {
         })
     }
 
+    /// [`Image::sample`] at a scale: `region` is in pixels at that scale,
+    /// each one the mean of the full-resolution pixels it covers (edges
+    /// replicated). At scale 1 it is `sample`.
+    pub fn sample_at(&self, region: Region, scale: f64) -> Image {
+        if scale == 1.0 {
+            return self.sample(region);
+        }
+        let r = self.region;
+        assert!(!r.is_empty(), "cannot sample an empty image");
+        let span = |v: i64| {
+            let lo = (v as f64 / scale).floor() as i64;
+            let hi = (((v + 1) as f64 / scale).floor() as i64).max(lo + 1);
+            (lo, hi)
+        };
+        let channels = self.channels as usize;
+        let mut data = Vec::with_capacity(region.area() * channels);
+        let mut sum = vec![0.0f64; channels];
+        for y in region.y..region.bottom() {
+            let (y0, y1) = span(y);
+            for x in region.x..region.right() {
+                let (x0, x1) = span(x);
+                sum.iter_mut().for_each(|s| *s = 0.0);
+                for fy in y0..y1 {
+                    let cy = fy.clamp(r.y, r.bottom() - 1);
+                    for fx in x0..x1 {
+                        let cx = fx.clamp(r.x, r.right() - 1);
+                        for (s, v) in sum.iter_mut().zip(self.pixel(cx, cy)) {
+                            *s += f64::from(*v);
+                        }
+                    }
+                }
+                let n = ((y1 - y0) * (x1 - x0)) as f64;
+                data.extend(sum.iter().map(|s| (s / n) as f32));
+            }
+        }
+        Image::new(region, self.channels, data)
+    }
+
     /// The hash of the image content: region, channel count and pixel bits.
     pub fn content_hash(&self) -> ContentHash {
         let mut h = blake3::Hasher::new();

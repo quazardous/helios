@@ -59,6 +59,21 @@ pub trait Module: Send + Sync + 'static {
     /// with defaults) and declared context fields into a plan. Cheap, no pixels.
     fn prepare(&self, params: &Params, context: &Context) -> Result<Self::Plan, String>;
 
+    /// The plan for a render at `scale` (1 is full resolution, 0.5 half of
+    /// it). Regions are then in pixels at that scale: a module whose
+    /// parameters are sizes in pixels (a blur radius) turns them into pixels
+    /// at the render's scale here, so that the result looks the same at any
+    /// scale. The default ignores the scale: most modules work pixel by pixel.
+    fn prepare_at(
+        &self,
+        params: &Params,
+        context: &Context,
+        scale: f64,
+    ) -> Result<Self::Plan, String> {
+        let _ = scale;
+        self.prepare(params, context)
+    }
+
     /// The region of each input needed to compute `output`. The default reads
     /// the output region grown by the declared overlap.
     fn input_region(&self, _plan: &Self::Plan, output: Region, overlap: u32) -> Region {
@@ -89,10 +104,15 @@ impl ModuleRef {
         self.0.manifest()
     }
 
-    pub(crate) fn prepare(&self, params: &Params, context: &Context) -> Result<Plan, Error> {
+    pub(crate) fn prepare(
+        &self,
+        params: &Params,
+        context: &Context,
+        scale: f64,
+    ) -> Result<Plan, Error> {
         let context = context.restricted_to(&self.manifest().context);
         self.0
-            .prepare(params, &context)
+            .prepare(params, &context, scale)
             .map_err(|reason| self.module_error(reason))
     }
 
@@ -156,7 +176,7 @@ pub(crate) type Plan = Arc<dyn Any + Send + Sync>;
 
 trait Erased: Send + Sync {
     fn manifest(&self) -> &Manifest;
-    fn prepare(&self, params: &Params, context: &Context) -> Result<Plan, String>;
+    fn prepare(&self, params: &Params, context: &Context, scale: f64) -> Result<Plan, String>;
     fn input_region(&self, plan: &Plan, output: Region) -> Region;
     fn process(&self, plan: &Plan, inputs: &[&Image], output: Region)
     -> Result<Vec<Image>, String>;
@@ -179,8 +199,8 @@ impl<M: Module> Erased for Adapter<M> {
         &self.manifest
     }
 
-    fn prepare(&self, params: &Params, context: &Context) -> Result<Plan, String> {
-        Ok(Arc::new(self.module.prepare(params, context)?))
+    fn prepare(&self, params: &Params, context: &Context, scale: f64) -> Result<Plan, String> {
+        Ok(Arc::new(self.module.prepare_at(params, context, scale)?))
     }
 
     fn input_region(&self, plan: &Plan, output: Region) -> Region {

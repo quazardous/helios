@@ -46,7 +46,7 @@ pub const CONTRACT_REGION: Region = Region::new(0, 0, 37, 23);
 /// Runs the contract tests of a module; returns every failure found.
 ///
 /// For the default parameters, and for each float parameter at its minimum
-/// and its maximum, it checks that:
+/// and its maximum, at full resolution and at half of it, it checks that:
 /// - every output is finite (no NaN, no infinity);
 /// - rendering again with a fresh engine gives the same bits;
 /// - rendering tile by tile gives the same bits as one render (the declared
@@ -156,9 +156,16 @@ fn check_params(
     context: &Context,
 ) -> Result<(), String> {
     let (g, node) = network(module, manifest, params, context)?;
+    for scale in [1.0, 0.5] {
+        check_at(&g, node, manifest, scale).map_err(|e| format!("at scale {scale}: {e}"))?;
+    }
+    Ok(())
+}
+
+fn check_at(g: &Graph, node: NodeId, manifest: &Manifest, scale: f64) -> Result<(), String> {
     for port in &manifest.outputs {
         let whole = engine()
-            .render(&g, node, &port.name, CONTRACT_REGION)
+            .render_at(g, node, &port.name, CONTRACT_REGION, scale)
             .map_err(|e| e.to_string())?;
         if let Some(i) = whole.data().iter().position(|v| !v.is_finite()) {
             return Err(format!(
@@ -167,7 +174,7 @@ fn check_params(
             ));
         }
         let again = engine()
-            .render(&g, node, &port.name, CONTRACT_REGION)
+            .render_at(g, node, &port.name, CONTRACT_REGION, scale)
             .map_err(|e| e.to_string())?;
         if !same_bits(&whole, &again) {
             return Err(format!(
@@ -178,7 +185,7 @@ fn check_params(
         let tiled = engine();
         for tile in CONTRACT_REGION.tiles(10) {
             let part = tiled
-                .render(&g, node, &port.name, tile)
+                .render_at(g, node, &port.name, tile, scale)
                 .map_err(|e| e.to_string())?;
             if !same_bits(&part, &whole.sample(tile)) {
                 return Err(format!(
@@ -264,7 +271,7 @@ mod contract_tests {
         let failures = check_contract(Divide).unwrap_err();
         assert_eq!(failures.len(), 1, "{failures:?}");
         assert!(
-            failures[0].starts_with("d = min 0: output `output` has a non-finite value"),
+            failures[0].starts_with("d = min 0: at scale 1: output `output` has a non-finite value"),
             "{failures:?}"
         );
     }

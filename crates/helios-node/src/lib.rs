@@ -137,6 +137,7 @@ pub fn registry() -> BTreeMap<&'static str, ModuleRef> {
         ("colorin", ModuleRef::new(helios_module_colorin::ColorIn)),
         ("exposure", ModuleRef::new(helios_module_exposure::Exposure)),
         ("sigmoid", ModuleRef::new(helios_module_sigmoid::Sigmoid)),
+        ("blur", ModuleRef::new(helios_module_blur::Blur)),
     ])
 }
 
@@ -300,14 +301,14 @@ mod tests {
     #[test]
     fn errors_say_what_is_wrong() {
         let unknown = load(parse(
-            r#"{ "modules": [{ "name": "a", "module": "blur" }] }"#,
+            r#"{ "modules": [{ "name": "a", "module": "nope" }] }"#,
         ))
         .err()
         .unwrap();
         let known: Vec<_> = registry().keys().copied().collect();
         assert_eq!(
             unknown,
-            format!("module `blur` unknown; known: {}", known.join(", "))
+            format!("module `nope` unknown; known: {}", known.join(", "))
         );
         let twice = load(parse(r#"{ "modules": [{ "name": "a", "module": "exposure" }, { "name": "a", "module": "exposure" }] }"#)).err().unwrap();
         assert_eq!(twice, "two nodes named `a`");

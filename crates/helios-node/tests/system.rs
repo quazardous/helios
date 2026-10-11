@@ -265,7 +265,7 @@ fn a_bad_network_is_refused_with_a_reason() {
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(
         dir.join("bad.json"),
-        r#"{ "modules": [{ "name": "a", "module": "blur" }] }"#,
+        r#"{ "modules": [{ "name": "a", "module": "nope" }] }"#,
     )
     .unwrap();
     let out = Command::new(env!("CARGO_BIN_EXE_helios-node"))
@@ -277,7 +277,7 @@ fn a_bad_network_is_refused_with_a_reason() {
         .unwrap();
     let _ = std::fs::remove_dir_all(&dir);
     assert_eq!(out.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&out.stderr).contains("module `blur` unknown"));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("module `nope` unknown"));
 }
 
 #[test]

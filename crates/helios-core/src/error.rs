@@ -29,6 +29,8 @@ pub enum Error {
     /// A decision node has no recorded answer yet. Transient: once it is
     /// answered, asking again renders.
     Pending { node: String },
+    /// A render scale outside (0, 1], as written.
+    Scale(String),
 }
 
 impl Error {
@@ -59,6 +61,7 @@ impl fmt::Display for Error {
             }
             Error::Module { module, reason } => write!(f, "{module}: {reason}"),
             Error::Fault { node, what } => write!(f, "{node}: injected fault ({what})"),
+            Error::Scale(scale) => write!(f, "render scale {scale} is not in (0, 1]"),
             Error::Pending { node } => write!(f, "{node}: decision pending (no recorded answer)"),
         }
     }

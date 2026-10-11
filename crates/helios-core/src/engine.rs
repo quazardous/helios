@@ -108,7 +108,8 @@ struct Step {
 }
 
 enum Work {
-    Source(Image),
+    /// A source read at a scale.
+    Source(Image, f64),
     Module {
         module: ModuleRef,
         plan: crate::module::Plan,
@@ -116,9 +117,7 @@ enum Work {
     },
     /// A decision node with no recorded answer: its inputs are planned (a
     /// surface shows what it will look at), nothing is computed.
-    Pending {
-        inputs: Vec<(Step, usize)>,
-    },
+    Pending { inputs: Vec<(Step, usize)> },
 }
 
 /// Computed content, by key, within an optional memory budget.
@@ -246,7 +245,7 @@ impl Engine {
         node: NodeId,
         region: Region,
     ) -> Result<Vec<NodeStatus>, Error> {
-        let step = self.plan(graph, node, region)?;
+        let step = self.plan(graph, node, region, 1.0)?;
         let mut out = Vec::new();
         self.collect_status(graph, &step, &mut out)?;
         Ok(out)
@@ -335,7 +334,7 @@ impl Engine {
         }
     }
 
-    /// Renders one output port of a node over a region.
+    /// Renders one output port of a node over a region, at full resolution.
     pub fn render(
         &self,
         graph: &Graph,
@@ -343,6 +342,25 @@ impl Engine {
         port: &str,
         region: Region,
     ) -> Result<Image, Error> {
+        self.render_at(graph, node, port, region, 1.0)
+    }
+
+    /// Renders at a scale: 1 is full resolution, 0.5 half of it, and so on
+    /// (above 0, at most 1). `region` is in pixels at that scale. Sources are
+    /// reduced by the framework (each pixel the mean of the full-resolution
+    /// pixels it covers); modules get the scale in `prepare_at`. A render at
+    /// a scale is cached apart from every other scale.
+    pub fn render_at(
+        &self,
+        graph: &Graph,
+        node: NodeId,
+        port: &str,
+        region: Region,
+        scale: f64,
+    ) -> Result<Image, Error> {
+        if !(scale > 0.0 && scale <= 1.0) {
+            return Err(Error::Scale(scale.to_string()));
+        }
         let (index, _) = graph.output_port(node, port)?;
         let cause = self.bus.publish(
             SOURCE,
@@ -353,19 +371,31 @@ impl Engine {
                 region,
             },
         );
-        let step = self.plan(graph, node, region)?;
+        let step = self.plan(graph, node, region, scale)?;
         let outputs = self.execute(&step, cause)?;
         Ok(outputs[index].clone())
     }
 
     /// The content key of a node's outputs over a region, without computing them.
     pub fn key(&self, graph: &Graph, node: NodeId, region: Region) -> Result<ContentHash, Error> {
-        Ok(self.plan(graph, node, region)?.key)
+        self.key_at(graph, node, region, 1.0)
     }
 
-    fn plan(&self, graph: &Graph, id: NodeId, region: Region) -> Result<Step, Error> {
+    /// The content key of a render at a scale.
+    pub fn key_at(
+        &self,
+        graph: &Graph,
+        node: NodeId,
+        region: Region,
+        scale: f64,
+    ) -> Result<ContentHash, Error> {
+        Ok(self.plan(graph, node, region, scale)?.key)
+    }
+
+    fn plan(&self, graph: &Graph, id: NodeId, region: Region, scale: f64) -> Result<Step, Error> {
         let node = graph.node(id)?;
         let mut h = blake3::Hasher::new();
+        h.update(&scale.to_le_bytes());
         h.update(&region.x.to_le_bytes());
         h.update(&region.y.to_le_bytes());
         h.update(&region.width.to_le_bytes());
@@ -374,7 +404,7 @@ impl Engine {
             Kind::Source { image, hash } => {
                 h.update(b"helios.step.source.v1");
                 h.update(&hash.0);
-                Work::Source(image.clone())
+                Work::Source(image.clone(), scale)
             }
             Kind::Module {
                 answered: false, ..
@@ -382,7 +412,7 @@ impl Engine {
                 h.update(b"helios.step.pending.v1");
                 let mut inputs = Vec::with_capacity(node.inputs.len());
                 for (src, port) in node.inputs.iter().flatten() {
-                    let step = self.plan(graph, *src, region)?;
+                    let step = self.plan(graph, *src, region, scale)?;
                     h.update(&step.key.0);
                     inputs.push((step, *port));
                 }
@@ -399,7 +429,7 @@ impl Engine {
                 h.update(manifest.name.as_bytes());
                 h.update(&manifest.version.to_le_bytes());
                 h.update(&params.canonical_bytes());
-                let plan = module.prepare(params, context)?;
+                let plan = module.prepare(params, context, scale)?;
                 h.update(&context.restricted_to(&manifest.context).canonical_bytes());
                 let input_region = module.input_region(&plan, region);
                 let mut inputs = Vec::with_capacity(node.inputs.len());
@@ -408,7 +438,7 @@ impl Engine {
                         node: node.name.clone(),
                         port: manifest.inputs[i].name.clone(),
                     })?;
-                    let step = self.plan(graph, src, input_region)?;
+                    let step = self.plan(graph, src, input_region, scale)?;
                     h.update(&step.key.0);
                     h.update(&(port as u64).to_le_bytes());
                     inputs.push((step, port));
@@ -512,7 +542,7 @@ impl Engine {
 
     fn compute(&self, step: &Step, cause: u64) -> Outputs {
         match &step.work {
-            Work::Source(image) => {
+            Work::Source(image, scale) => {
                 self.source_reads.fetch_add(1, Ordering::SeqCst);
                 if self.take_fault(step, FaultKind::SourceRead) {
                     return Err(Error::Fault {
@@ -520,7 +550,7 @@ impl Engine {
                         what: "source read".into(),
                     });
                 }
-                Ok(Arc::new(vec![image.sample(step.region)]))
+                Ok(Arc::new(vec![image.sample_at(step.region, *scale)]))
             }
             Work::Module {
                 module,

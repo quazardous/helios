@@ -468,6 +468,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "helios-module-blur"
+version = "0.0.1"
+dependencies = [
+ "helios-core",
+ "helios-testkit",
+]
+
+[[package]]
 name = "helios-module-colorin"
 version = "0.0.1"
 dependencies = [
@@ -538,6 +546,7 @@ dependencies = [
  "helios-export",
  "helios-inspect",
  "helios-load",
+ "helios-module-blur",
  "helios-module-colorin",
  "helios-module-demosaic",
  "helios-module-exposure",
