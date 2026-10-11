@@ -322,7 +322,7 @@ fn menus_are_declared_grouped_and_follow_the_context() {
             ..
         } => id.clone(),
         Shown::Separator => "-".into(),
-        _ => "?".into(),
+        Shown::Item { .. } => "?".into(),
     };
     let cx = Context::new().flag("fullScreen", true);
     let shown = m.show("system", &cx);

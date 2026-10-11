@@ -166,7 +166,10 @@ impl Descriptor {
 
     pub fn choice(label: &str, choices: &[&str], default: &str) -> Self {
         Self {
-            choices: choices.iter().map(|c| c.to_string()).collect(),
+            choices: choices
+                .iter()
+                .map(std::string::ToString::to_string)
+                .collect(),
             ..Self::base(Type::Choice, label, Value::Choice(default.into()))
         }
     }
@@ -222,7 +225,7 @@ impl Descriptor {
                 ..Self::base(Type::Text, &spec.name, spec.kind.default_value())
             },
         };
-        d.description = spec.description.clone();
+        d.description.clone_from(&spec.description);
         if let Some(h) = hint {
             if let Some((lo, hi)) = h.soft {
                 // Within the hard range, whatever the hint says.

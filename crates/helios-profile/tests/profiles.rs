@@ -312,7 +312,11 @@ fn variants_round_trip_through_export_and_import() {
     let themes = Profile::import(&p.export(&[Part::Theme], &no_exclude).unwrap()).unwrap();
     assert!(themes.keymap.is_none());
     assert_eq!(
-        themes.on.keys().map(|s| s.to_string()).collect::<Vec<_>>(),
+        themes
+            .on
+            .keys()
+            .map(std::string::ToString::to_string)
+            .collect::<Vec<_>>(),
         ["machine.laptop", "machine.studio", "freebsd"]
     );
 

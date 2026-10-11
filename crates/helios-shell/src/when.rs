@@ -178,10 +178,10 @@ impl Parser {
                 }
             }
             Some(Token::Ident(key)) => match self.peek() {
-                Some(Token::Eq) | Some(Token::Ne) => {
+                Some(Token::Eq | Token::Ne) => {
                     let eq = self.next() == Some(Token::Eq);
                     match self.next() {
-                        Some(Token::Text(t)) | Some(Token::Ident(t)) => Ok(if eq {
+                        Some(Token::Text(t) | Token::Ident(t)) => Ok(if eq {
                             When::Eq(key, t)
                         } else {
                             When::Ne(key, t)

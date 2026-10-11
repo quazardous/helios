@@ -26,6 +26,10 @@ pub enum Layer {
 
 /// One chord: modifiers and a logical key.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "one flag per modifier key, as keyboards have them"
+)]
 pub struct Chord {
     pub ctrl: bool,
     pub alt: bool,

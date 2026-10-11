@@ -351,7 +351,7 @@ impl Themes {
     ) -> BTreeMap<String, (Option<String>, Json)> {
         let mut chain = Vec::new();
         let mut at = Some(name.to_string());
-        while let Some(n) = at {
+        while let Some(n) = at.take() {
             if chain.contains(&n) {
                 problems.push(format!(
                     "`{n}` extends itself through {}",
@@ -365,7 +365,7 @@ impl Themes {
                 break;
             };
             chain.push(n.clone());
-            at = theme.extends.clone();
+            at.clone_from(&theme.extends);
         }
         let mut tokens = BTreeMap::new();
         for n in chain.iter().rev() {

@@ -271,7 +271,7 @@ impl Serialize for Selector {
 
 /// `on` as written: `on.<system or class>` and `on.machine.<name>`.
 mod on_file {
-    use super::*;
+    use super::{BTreeMap, Deserialize, Selector, Serialize, Serializer, Variant};
     use serde::Deserializer;
 
     /// Written in the order variants apply: systems and classes, then
@@ -518,7 +518,7 @@ impl Profile {
                 if let Some(over) = &v.theme {
                     let theme = self.theme.get_or_insert_default();
                     if !over.name.is_empty() {
-                        theme.name = over.name.clone();
+                        theme.name.clone_from(&over.name);
                     }
                     theme.overrides.extend(over.overrides.clone());
                 }
@@ -534,9 +534,9 @@ impl Profile {
                     }
                 }
             }
-            Part::Layout => merge_part(&mut self.layout, &v.layout),
-            Part::ExportTargets => merge_part(&mut self.export_targets, &v.export_targets),
-            Part::Ai => merge_part(&mut self.ai, &v.ai),
+            Part::Layout => merge_part(&mut self.layout, v.layout.as_ref()),
+            Part::ExportTargets => merge_part(&mut self.export_targets, v.export_targets.as_ref()),
+            Part::Ai => merge_part(&mut self.ai, v.ai.as_ref()),
         }
     }
 
@@ -601,12 +601,6 @@ impl Profile {
 
 /// Settings text with another's values over it, tables merged.
 fn merge_settings(base: Option<&str>, over: &str) -> String {
-    let (Some(Ok(mut base)), Ok(over_table)) = (
-        base.map(str::parse::<toml::Table>),
-        over.parse::<toml::Table>(),
-    ) else {
-        return over.to_string();
-    };
     fn merge(base: &mut toml::Table, over: &toml::Table) {
         for (k, v) in over {
             match (base.get_mut(k), v) {
@@ -617,6 +611,12 @@ fn merge_settings(base: Option<&str>, over: &str) -> String {
             }
         }
     }
+    let (Some(Ok(mut base)), Ok(over_table)) = (
+        base.map(str::parse::<toml::Table>),
+        over.parse::<toml::Table>(),
+    ) else {
+        return over.to_string();
+    };
     merge(&mut base, &over_table);
     base.to_string()
 }
@@ -637,7 +637,7 @@ fn merge_json(base: &mut Json, over: &Json) {
     }
 }
 
-fn merge_part(base: &mut Option<Json>, over: &Option<Json>) {
+fn merge_part(base: &mut Option<Json>, over: Option<&Json>) {
     if let Some(over) = over {
         merge_json(base.get_or_insert(Json::Null), over);
     }
@@ -847,10 +847,6 @@ fn looks_like_a_key(s: &str) -> bool {
 
 /// What in a profile file looks secret, described without the value.
 pub fn scan(text: &str) -> Vec<String> {
-    let Ok(table) = text.parse::<toml::Table>() else {
-        return vec!["the file is not TOML".into()];
-    };
-    let mut found = Vec::new();
     fn walk(prefix: &str, v: &toml::Value, found: &mut Vec<String>) {
         match v {
             toml::Value::Table(t) => {
@@ -881,6 +877,10 @@ pub fn scan(text: &str) -> Vec<String> {
             _ => {}
         }
     }
+    let Ok(table) = text.parse::<toml::Table>() else {
+        return vec!["the file is not TOML".into()];
+    };
+    let mut found = Vec::new();
     walk("", &toml::Value::Table(table), &mut found);
     found
 }
