@@ -363,6 +363,17 @@ impl Scheduler {
         }
     }
 
+    /// Declares a resource if it does not exist yet (an existing one keeps
+    /// its capacity). For resources known only at run time, such as an
+    /// export destination with a capacity of one writer.
+    pub fn ensure_resource(&self, name: &str, capacity: u64) {
+        let mut state = self.shared.state.lock().expect("scheduler lock");
+        state
+            .resources
+            .entry(name.to_string())
+            .or_insert(Resource { capacity, used: 0 });
+    }
+
     /// Queues an interactive job with no declared need; returns its id.
     pub fn submit(
         &self,

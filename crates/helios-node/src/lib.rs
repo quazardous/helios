@@ -5,19 +5,25 @@
 //!   "sources": [{ "name": "src", "synthetic": { "kind": "noise", "width": 64, "height": 48, "channels": 4, "seed": 1 } }],
 //!   "modules": [{ "name": "exp", "module": "exposure", "params": { "exposure": { "float": 1.0 } } }],
 //!   "connections": [{ "from": "src", "port": "image", "to": "exp", "input": "input" }],
-//!   "renders": [{ "node": "exp", "port": "output", "region": { "x": 0, "y": 0, "width": 64, "height": 48 } }]
+//!   "renders": [{ "node": "exp", "port": "output", "region": { "x": 0, "y": 0, "width": 64, "height": 48 } }],
+//!   "exports": [{ "node": "exp", "region": { "x": 0, "y": 0, "width": 64, "height": 48 }, "path": "out.png" }]
 //! }
 //! ```
 //!
 //! Sources are synthetic images for now: loading files is the framework's
-//! job and comes with the photo domain.
+//! job and comes with the photo domain. An export writes a node's `output`
+//! port (or the `port` given) to a file whose format follows its extension,
+//! unless `format` says otherwise (`{ "format": "jpeg", "quality": 90 }`,
+//! `{ "format": "png", "bits": 16 }`, `{ "format": "tiff" }`).
 
 pub mod mcp;
 pub mod sandbox;
 
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 
 use helios_core::{Graph, ModuleRef, NodeId, Params, Region};
+use helios_export::Format;
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -30,6 +36,8 @@ pub struct Description {
     pub connections: Vec<ConnectionDesc>,
     #[serde(default)]
     pub renders: Vec<RenderDesc>,
+    #[serde(default)]
+    pub exports: Vec<ExportDesc>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -77,6 +85,31 @@ pub struct RenderDesc {
     pub region: Region,
 }
 
+#[derive(Clone, Debug, Deserialize)]
+pub struct ExportDesc {
+    pub node: String,
+    #[serde(default = "output_port")]
+    pub port: String,
+    pub region: Region,
+    pub path: PathBuf,
+    #[serde(default)]
+    pub format: Option<Format>,
+}
+
+fn output_port() -> String {
+    "output".into()
+}
+
+impl ExportDesc {
+    /// The format asked for, else the one the path's extension names.
+    pub fn format(&self) -> Result<Format, String> {
+        self.format
+            .clone()
+            .or_else(|| Format::from_path(&self.path))
+            .ok_or_else(|| format!("no format for {}: say `format`", self.path.display()))
+    }
+}
+
 /// The modules this node can instantiate, by name.
 pub fn registry() -> BTreeMap<&'static str, ModuleRef> {
     BTreeMap::from([("exposure", ModuleRef::new(helios_module_exposure::Exposure))])
@@ -87,6 +120,7 @@ pub struct Loaded {
     pub graph: Graph,
     pub nodes: BTreeMap<String, NodeId>,
     pub renders: Vec<RenderDesc>,
+    pub exports: Vec<ExportDesc>,
 }
 
 impl Loaded {
@@ -142,6 +176,7 @@ pub fn load(desc: Description) -> Result<Loaded, String> {
         graph,
         nodes,
         renders: desc.renders,
+        exports: desc.exports,
     };
     for c in &desc.connections {
         let (from, to) = (loaded.node(&c.from)?, loaded.node(&c.to)?);
@@ -152,6 +187,10 @@ pub fn load(desc: Description) -> Result<Loaded, String> {
     }
     for r in &loaded.renders {
         loaded.node(&r.node)?;
+    }
+    for e in &loaded.exports {
+        loaded.node(&e.node)?;
+        e.format()?;
     }
     Ok(loaded)
 }

@@ -57,6 +57,10 @@ A Cargo workspace (Rust):
 - `crates/helios-vault`: the vault: images identified by content (BLAKE3),
   locations as data, folder import and repair scan, over SQLite or memory
   behind one store contract.
+- `crates/helios-export`: exports, the leaves that write files: a node
+  rendered, converted from the working space to sRGB, encoded (JPEG, PNG 8
+  or 16-bit, TIFF 16-bit) and written atomically, as jobs that hold their
+  destination so two writes to one file never race.
 - `crates/helios-journal`: the workflow level: a journal per item and node
   (claims, leases, joins, choices, retries), after grampy, with a contract
   every storage must pass.

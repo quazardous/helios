@@ -279,3 +279,71 @@ fn a_bad_network_is_refused_with_a_reason() {
     assert_eq!(out.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&out.stderr).contains("module `blur` unknown"));
 }
+
+#[test]
+fn exports_are_written_next_to_the_network_and_reported() {
+    let network = r#"{
+      "sources": [{ "name": "src", "synthetic": { "kind": "ramp", "width": 32, "height": 16, "channels": 4 } }],
+      "modules": [{ "name": "exp", "module": "exposure", "params": { "exposure": { "float": 1.0 } } }],
+      "connections": [{ "from": "src", "port": "image", "to": "exp", "input": "input" }],
+      "exports": [
+        { "node": "exp", "region": { "x": 0, "y": 0, "width": 32, "height": 16 }, "path": "out.png" },
+        { "node": "exp", "region": { "x": 0, "y": 0, "width": 32, "height": 16 }, "path": "out.tif" },
+        { "node": "exp", "region": { "x": 0, "y": 0, "width": 32, "height": 16 }, "path": "missing/out.jpg" }
+      ]
+    }"#;
+    let sandbox = Sandbox::start("exports", network);
+    let (code, idle) = sandbox.inspect(&["wait-event", "node.idle", "--timeout", "10000"]);
+    assert_eq!(code, 0, "{idle}");
+    assert_eq!(idle["event"]["payload"]["exports"], 3);
+    assert_eq!(
+        idle["event"]["payload"]["failed"], 1,
+        "missing/ does not exist"
+    );
+
+    let (_, state) = sandbox.inspect(&["state"]);
+    let states: Vec<_> = state["state"]["node"]["exports"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["state"].as_str().unwrap())
+        .collect();
+    assert_eq!(states, ["done", "done", "failed"]);
+    assert!(sandbox.dir.join("out.png").is_file());
+    assert!(sandbox.dir.join("out.tif").is_file());
+
+    let (_, events) = sandbox.inspect(&["events"]);
+    let written: Vec<_> = events["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|e| e["kind"] == "export.written")
+        .collect();
+    assert_eq!(written.len(), 2);
+    assert!(
+        written
+            .iter()
+            .all(|e| e["payload"]["bytes"].as_u64().unwrap() > 0)
+    );
+}
+
+#[test]
+fn an_export_without_a_format_is_refused_at_load() {
+    let network = r#"{
+      "sources": [{ "name": "src", "synthetic": { "kind": "ramp", "width": 4, "height": 4, "channels": 4 } }],
+      "exports": [{ "node": "src", "port": "image", "region": { "x": 0, "y": 0, "width": 4, "height": 4 }, "path": "out.webp" }]
+    }"#;
+    let dir = std::env::temp_dir().join(format!("helios-system-noformat-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("network.json"), network).unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_helios-node"))
+        .arg("--graph")
+        .arg(dir.join("network.json"))
+        .arg("--socket")
+        .arg(dir.join("node.sock"))
+        .output()
+        .unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("no format for"));
+}

@@ -1,0 +1,16 @@
+[package]
+name = "helios-export"
+description = "Helios exports: render a node, convert it to an output color space, encode it and write it atomically"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+helios-core.workspace = true
+helios-photo.workspace = true
+serde.workspace = true
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "tiff"] }
+
+[dev-dependencies]
+helios-testkit.workspace = true

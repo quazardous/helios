@@ -24,13 +24,14 @@
 
 use std::collections::BTreeMap;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::{Arc, Mutex, RwLock};
 
 use helios_config::{Config, Layer, Schema};
 use helios_core::{Bus, Describe, Engine, Event, Graph, JobId, NodeId, Region, Scheduler};
 use helios_inspect::{Inspector, Listen, new_token, serve_inspector, write_token};
+use helios_node::ExportDesc;
 use serde::Serialize;
 use serde_json::{Value, json};
 
@@ -41,6 +42,7 @@ const SOURCE: &str = "node";
 struct Ready {
     socket: String,
     renders: usize,
+    exports: usize,
 }
 
 impl Event for Ready {
@@ -61,10 +63,11 @@ impl Event for RenderDone {
     const KIND: &'static str = "node.render_done";
 }
 
-/// Every render asked for by the description is finished.
+/// Every render and export asked for by the description is finished.
 #[derive(Serialize)]
 struct Idle {
     renders: usize,
+    exports: usize,
     failed: usize,
 }
 
@@ -110,6 +113,8 @@ struct Node {
     /// Renders asked for, by description or control: their node headers are reported.
     targets: Mutex<Vec<(String, NodeId, Region)>>,
     renders: Mutex<Vec<Value>>,
+    /// Export jobs, by destination.
+    exports: Mutex<Vec<(PathBuf, JobId)>>,
     idle: Mutex<bool>,
 }
 
@@ -163,6 +168,40 @@ impl Node {
     }
 }
 
+impl Node {
+    /// Exports a node's port as a scheduler job holding the destination.
+    fn submit_export(self: &Arc<Self>, export: &ExportDesc) -> Result<JobId, String> {
+        let id = self.id(&export.node)?;
+        let (node, port, region) = (self.clone(), export.port.clone(), export.region);
+        let job = helios_export::submit_with(
+            &self.scheduler,
+            self.bus.clone(),
+            &export.path,
+            export.format()?,
+            move || {
+                let graph = node.graph.0.read().expect("graph lock");
+                node.engine
+                    .render(&graph, id, &port, region)
+                    .map_err(|e| e.to_string())
+            },
+        )?;
+        self.exports
+            .lock()
+            .expect("exports lock")
+            .push((export.path.clone(), job));
+        Ok(job)
+    }
+
+    fn export_states(&self) -> Vec<Value> {
+        self.exports
+            .lock()
+            .expect("exports lock")
+            .iter()
+            .map(|(path, job)| json!({ "path": path, "job": job, "state": self.scheduler.job(*job) }))
+            .collect()
+    }
+}
+
 /// What the node reports about itself, with the header of every node
 /// involved in each render it was asked for.
 struct Status(Arc<Node>);
@@ -184,6 +223,7 @@ impl Describe for Status {
         json!({
             "idle": *node.idle.lock().expect("idle lock"),
             "renders": *node.renders.lock().expect("renders lock"),
+            "exports": node.export_states(),
             "headers": headers,
         })
     }
@@ -384,13 +424,18 @@ fn main() -> ExitCode {
             serde_json::from_str(&text).map_err(|e| format!("{}: {e}", args.graph.display()))
         })
         .and_then(helios_node::load);
-    let loaded = match loaded {
+    let mut loaded = match loaded {
         Ok(l) => l,
         Err(e) => {
             eprintln!("helios-node: {e}");
             return ExitCode::from(1);
         }
     };
+    // Export paths are relative to the network file, like its other references.
+    let base = args.graph.parent().unwrap_or(Path::new("."));
+    for e in &mut loaded.exports {
+        e.path = base.join(&e.path);
+    }
     let config = match config(&args) {
         Ok(c) => Arc::new(c),
         Err(e) => {
@@ -417,6 +462,7 @@ fn main() -> ExitCode {
         names: loaded.nodes,
         targets: Mutex::new(Vec::new()),
         renders: Mutex::new(Vec::new()),
+        exports: Mutex::new(Vec::new()),
         idle: Mutex::new(false),
     });
     let inspector = Inspector::new(bus.clone())
@@ -471,12 +517,19 @@ fn main() -> ExitCode {
         &Ready {
             socket: address.clone(),
             renders: loaded.renders.len(),
+            exports: loaded.exports.len(),
         },
     );
 
     // Every render is a job of the scheduler; the node is idle when it is.
     for r in &loaded.renders {
         if let Err(e) = node.submit_render(&r.node, &r.port, r.region, Some(ready)) {
+            eprintln!("helios-node: {e}");
+            return ExitCode::from(1);
+        }
+    }
+    for e in &loaded.exports {
+        if let Err(e) = node.submit_export(e) {
             eprintln!("helios-node: {e}");
             return ExitCode::from(1);
         }
@@ -488,13 +541,19 @@ fn main() -> ExitCode {
         .expect("renders lock")
         .iter()
         .filter(|r| !r["error"].is_null())
-        .count();
+        .count()
+        + node
+            .export_states()
+            .iter()
+            .filter(|e| e["state"] != "done")
+            .count();
     *node.idle.lock().expect("idle lock") = true;
     bus.publish(
         SOURCE,
         Some(ready),
         &Idle {
             renders: loaded.renders.len(),
+            exports: loaded.exports.len(),
             failed,
         },
     );
