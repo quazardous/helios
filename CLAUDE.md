@@ -1,4 +1,4 @@
-# darktable-helios: rules for agents
+# Helios: rules for agents
 
 - Public project: everything written to files (code, comments, docs, commit
   messages) is in English, with no private paths, tracker IDs or links an

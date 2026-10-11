@@ -1,7 +1,8 @@
-# darktable-helios
+# Helios
 
-> A client/server, AI-first reinterpretation of darktable: the quality of
-> darktable without having to learn darktable.
+> A client/server, AI-first image processing framework. Its first
+> application is photo editing: the quality of darktable without having to
+> learn darktable.
 
 Helios builds on [darktable](https://www.darktable.org/)'s image processing
 and turns it into a set of normalized, self-describing layers: a catalog

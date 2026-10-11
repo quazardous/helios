@@ -23,7 +23,7 @@ Points marked [?] could not be verified.
    self-hosted) ask for multi-workstation and speed, not for collaboration or AI-intent.
    Studios ask for a shared catalog and client approval, but pay for Capture One and expect
    support, recent camera bodies, stability. The open question "solo photographer or small studios"
-   (darktable-helios ROADMAP, open questions) is no longer secondary: it is the first decision.
+   (Helios ROADMAP, open questions) is no longer secondary: it is the first decision.
 2. **The shared catalog is the best-supported need**, and phase 0 (catalog SDK) is its
    technical prerequisite. But upstream does not want it: phase 0 will only be accepted upstream if
    presented as a cleanup (less SQL in the GUI), never as a step toward client/server.

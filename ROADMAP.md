@@ -17,6 +17,11 @@ Helios solves: *the quality of darktable without having to learn darktable*.
 
 The name comes from Niépce's heliography and the Helios-44 lens.
 
+The project is called **Helios**, not darktable-helios (2026-10-11,
+decided): a darktable prefix would present it as a darktable variant, while
+Helios is an image processing framework where darktable and vkdt meet and
+photo editing is the first application. The darktable fork keeps its name.
+
 Underlying ambition (2026-10-10): **systematic normalization of the software
 layers**. The reference is AVS (Advanced Visual Systems, scientific imaging),
 where image processing workflows are built by assembling modules. Once every
@@ -41,7 +46,7 @@ second-system safeguard below.
    modifies darktable's libraries as needed, with justified **pull requests to
    upstream** when relevant. Minimal gap with upstream, a patch stack that
    must shrink. What cannot go upstream preferably goes here instead.
-2. **darktable-helios** (this repository): the client/server
+2. **Helios** (this repository): the client/server
    reinterpretation (kernel, vault, MCP, plugins, front). Strong divergence
    from darktable is accepted at this level.
 

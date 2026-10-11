@@ -6,7 +6,7 @@ members = ["crates/*", "modules/*", "xtask"]
 version = "0.0.1"
 edition = "2024"
 license = "GPL-3.0-or-later"
-repository = "https://github.com/quazardous/darktable-helios"
+repository = "https://github.com/quazardous/helios"
 
 [workspace.dependencies]
 helios-core = { path = "crates/helios-core" }
