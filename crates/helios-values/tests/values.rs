@@ -350,3 +350,24 @@ fn the_commands_drive_the_store_with_their_origin() {
     assert_eq!(undone["undone"], json!("set node/exposure/exposure"));
     assert_eq!(ev(&store.lock().unwrap()), 4.0);
 }
+
+#[test]
+fn a_path_is_a_text_that_says_what_it_names() {
+    let d = Descriptor::path("sidecar", PathKind::File, &["XMP"]);
+    assert_eq!(d.ty, Type::Text);
+    assert_eq!(d.default, Value::Text(String::new()));
+    let hint = d.path.as_ref().unwrap();
+    assert!(hint.accepts(std::path::Path::new("a/b.xmp")));
+    assert!(hint.accepts(std::path::Path::new("b.XMP")));
+    assert!(!hint.accepts(std::path::Path::new("b.jpg")));
+    let j = serde_json::to_value(&d).unwrap();
+    assert_eq!(j["path"], json!({ "kind": "file", "extensions": ["xmp"] }));
+    let dir = Descriptor::path("workspace", PathKind::Dir, &[]);
+    assert_eq!(
+        serde_json::to_value(&dir).unwrap()["path"],
+        json!({ "kind": "dir" })
+    );
+    // Other values say nothing of paths.
+    let text = serde_json::to_value(Descriptor::text("name", "")).unwrap();
+    assert!(text.get("path").is_none());
+}

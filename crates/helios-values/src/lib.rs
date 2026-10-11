@@ -6,6 +6,8 @@
 //! - Each path has a [`Descriptor`]: type, hard and soft range, fine and
 //!   coarse steps, unit, display scale and precision, default, label,
 //!   choices. A module's come from its manifest and its parameter hints.
+//!   A text may name a path on disk ([`PathHint`]): forms then offer to
+//!   browse for it.
 //! - Every write is a [`Set`]: an absolute value, a relative step, reset,
 //!   top or bottom, with its origin. The answer says what was applied and
 //!   whether it was clamped; a refusal says why and gives the current value.
@@ -45,6 +47,35 @@ pub enum Type {
     Text,
 }
 
+/// What a path names: a directory or a file.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PathKind {
+    Dir,
+    File,
+}
+
+/// A text that names a path on disk: what it names and, for a file, the
+/// extensions accepted (none: any). A form shows it with a Browse button.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct PathHint {
+    pub kind: PathKind,
+    /// Without the dot, lowercase (`jpg`, `xmp`).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub extensions: Vec<String>,
+}
+
+impl PathHint {
+    /// Whether a file's name has an accepted extension.
+    pub fn accepts(&self, path: &std::path::Path) -> bool {
+        self.extensions.is_empty()
+            || path
+                .extension()
+                .and_then(|e| e.to_str())
+                .is_some_and(|e| self.extensions.iter().any(|x| x.eq_ignore_ascii_case(e)))
+    }
+}
+
 /// What a value is and how it is shown and moved.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Descriptor {
@@ -75,6 +106,9 @@ pub struct Descriptor {
     /// How many bytes a text holds at most.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub capacity: Option<u32>,
+    /// A text that names a path on disk.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<PathHint>,
 }
 
 /// Decimals enough to show one step.
@@ -103,6 +137,7 @@ impl Descriptor {
             choices: Vec::new(),
             count: None,
             capacity: None,
+            path: None,
         }
     }
 
@@ -138,6 +173,18 @@ impl Descriptor {
 
     pub fn text(label: &str, default: &str) -> Self {
         Self::base(Type::Text, label, Value::Text(default.into()))
+    }
+
+    /// A text naming a directory or a file, empty by default; for a file,
+    /// the extensions accepted (none: any).
+    pub fn path(label: &str, kind: PathKind, extensions: &[&str]) -> Self {
+        Self {
+            path: Some(PathHint {
+                kind,
+                extensions: extensions.iter().map(|e| e.to_lowercase()).collect(),
+            }),
+            ..Self::base(Type::Text, label, Value::Text(String::new()))
+        }
     }
 
     /// From a module's parameter and its hint, if any.
