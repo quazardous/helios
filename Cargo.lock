@@ -728,6 +728,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "helios-shell"
+version = "0.0.1"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "helios-testkit"
 version = "0.0.1"
 dependencies = [

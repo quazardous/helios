@@ -23,6 +23,7 @@ helios-load = { path = "crates/helios-load" }
 helios-xmp = { path = "crates/helios-xmp" }
 helios-vkdt = { path = "crates/helios-vkdt" }
 helios-gpu = { path = "crates/helios-gpu" }
+helios-shell = { path = "crates/helios-shell" }
 helios-vault = { path = "crates/helios-vault" }
 blake3 = "1"
 serde = { version = "1", features = ["derive"] }
@@ -30,6 +31,11 @@ serde_json = "1"
 
 # Decoding raw files in a debug build takes seconds: optimize the decoders
 # in every profile, so tests on real raws stay fast.
+# Dependencies build without debug info: the GPU and GUI stacks are large,
+# and Helios's own crates keep theirs.
+[profile.dev.package."*"]
+debug = false
+
 [profile.dev.package.rawler]
 opt-level = 3
 

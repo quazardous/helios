@@ -75,6 +75,9 @@ A Cargo workspace (Rust):
   on the same plans as their CPU code and are checked against it.
 - `packaging/linux`: the launcher and icons for GNOME and other freedesktop
   desktops (`install.sh` installs them for the current user).
+- `crates/helios-shell`: the desktop shell's logic without a GUI toolkit:
+  commands, `when` contexts, keymap layers, declared panels, workspace
+  layouts.
 - `crates/helios-export`: exports, the leaves that write files: a node
   rendered, converted from the working space to sRGB, encoded (JPEG, PNG 8
   or 16-bit, TIFF 16-bit) and written atomically, as jobs that hold their
