@@ -257,7 +257,7 @@ separated when shown; a `when` clause hides or greys an item, a `checked`
 clause ticks it. `Shell::menu_items(id)` gives a menu as data, as it would
 open now. The logo at the top left opens the `system` menu (Alt+Space
 too): open a workspace, recent workspaces, profiles, themes, keyboard
-shortcuts, the window, about, quit.
+shortcuts, about, quit (the window has its buttons).
 
 The pictures are written by `HELIOS_DOC_PICTURES=docs/gui cargo test -p
 helios-gui --test dialogs pictures`.

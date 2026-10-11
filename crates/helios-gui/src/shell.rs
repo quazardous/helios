@@ -1341,7 +1341,6 @@ impl Shell {
             M::submenu("system", "2_preferences", 0, "system.profiles", "Profiles"),
             M::submenu("system", "2_preferences", 1, "system.themes", "Themes"),
             M::command("system", "2_preferences", 2, "workbench.keybindings"),
-            M::submenu("system", "3_window", 0, "system.window", "Window"),
             M::command("system", "4_about", 0, "workbench.about"),
             M::command("system", "9_quit", 0, "workbench.quit"),
             M::list("system.recent", "1", 0, "recent"),
@@ -1350,10 +1349,6 @@ impl Shell {
             M::command("system.profiles", "2", 1, "profile.import"),
             M::list("system.themes", "1", 0, "themes"),
             M::command("system.themes", "2", 0, "theme.export"),
-            M::command("system.window", "1", 0, "window.minimize"),
-            M::command("system.window", "1", 1, "window.maximize"),
-            M::command("system.window", "1", 2, "workbench.fullscreen").checked("fullScreen"),
-            M::command("system.window", "2", 0, "window.close"),
         ] {
             self.menus
                 .contribute(item)

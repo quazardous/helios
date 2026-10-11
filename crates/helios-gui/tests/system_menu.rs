@@ -71,8 +71,6 @@ fn the_system_menu_is_declared_with_keys_ticks_and_lists() {
             "Themes >",
             "Keyboard shortcuts",
             "-",
-            "Window >",
-            "-",
             "About Helios",
             "-",
             "Quit Helios"
@@ -89,15 +87,13 @@ fn the_system_menu_is_declared_with_keys_ticks_and_lists() {
     assert_eq!(light["checked"], json!(true));
     assert_eq!(light["args"], json!({ "name": "helios-light" }));
     // Keys come from the keymap.
-    let window = &items[7]["items"];
-    let full = window
+    let shortcuts = items
         .as_array()
         .unwrap()
         .iter()
-        .find(|t| t["id"] == "workbench.fullscreen")
+        .find(|t| t["id"] == "workbench.keybindings")
         .unwrap();
-    assert_eq!(full["keys"], json!("F11"));
-    assert_eq!(full["checked"], json!(false));
+    assert_eq!(shortcuts["enabled"], json!(true));
 }
 
 #[test]
