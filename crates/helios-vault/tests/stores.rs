@@ -20,3 +20,28 @@ fn a_journal_in_the_memory_vault_passes_the_journal_contract() {
         )
     });
 }
+
+#[test]
+fn configuration_layers_round_trip_as_text() {
+    let vault = helios_vault::Vault::new(helios_vault::MemoryStore::default());
+    assert_eq!(vault.config_layer("user").unwrap(), None);
+    vault
+        .set_config_layer("user", Some("[interface.graph]\nzoom = \"overview\"\n"))
+        .unwrap();
+    vault
+        .set_config_layer("project//photos/wedding", Some(""))
+        .unwrap();
+    assert_eq!(
+        vault.config_layer("user").unwrap().as_deref(),
+        Some("[interface.graph]\nzoom = \"overview\"\n")
+    );
+    assert_eq!(
+        vault
+            .config_layer("project//photos/wedding")
+            .unwrap()
+            .as_deref(),
+        Some("")
+    );
+    vault.set_config_layer("user", None).unwrap();
+    assert_eq!(vault.config_layer("user").unwrap(), None);
+}

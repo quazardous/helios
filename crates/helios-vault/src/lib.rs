@@ -30,6 +30,7 @@ pub mod catalog;
 pub mod contract;
 pub mod fields;
 pub mod journal;
+pub mod settings;
 pub mod versions;
 
 pub use catalog::{ApplyReport, CursorId, CursorInfo, Delta, Row};

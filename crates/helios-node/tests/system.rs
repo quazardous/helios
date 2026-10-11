@@ -521,3 +521,65 @@ fn a_raw_goes_through_the_pipe_to_a_file() {
         / (256.0 * 128.0);
     assert!(mean > 5.0 && mean < 250.0, "mean {mean}");
 }
+
+#[test]
+fn user_settings_live_in_the_vault_once_imported() {
+    let dir = std::env::temp_dir().join(format!("helios-system-vault-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("user.toml"),
+        "[interface.graph]\nzoom = \"overview\"\n",
+    )
+    .unwrap();
+    std::fs::write(dir.join("network.json"), NETWORK).unwrap();
+    let zoom = |with_file: bool| {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_helios-node"));
+        command
+            .arg("--graph")
+            .arg(dir.join("network.json"))
+            .arg("--socket")
+            .arg(dir.join("node.sock"))
+            .arg("--vault")
+            .arg(dir.join("vault.db"));
+        if with_file {
+            command.arg("--user").arg(dir.join("user.toml"));
+        }
+        let mut node = command
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut line = String::new();
+        BufReader::new(node.stdout.take().unwrap())
+            .read_line(&mut line)
+            .unwrap();
+        let out = Command::new(env!("CARGO_BIN_EXE_helios"))
+            .arg("inspect")
+            .arg("--socket")
+            .arg(dir.join("node.sock"))
+            .args(["describe", "config"])
+            .output()
+            .unwrap();
+        let _ = node.kill();
+        let _ = node.wait();
+        let answer: Value = serde_json::from_slice(&out.stdout).unwrap();
+        let s = answer["describe"]["settings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["key"] == "interface.graph.zoom")
+            .unwrap()
+            .clone();
+        (
+            s["value"].clone(),
+            s["origin"].as_str().unwrap().to_string(),
+        )
+    };
+    // First run: the file goes into the vault.
+    assert_eq!(zoom(true), (serde_json::json!("overview"), "user".into()));
+    // The file is gone; the vault still holds the layer.
+    std::fs::remove_file(dir.join("user.toml")).unwrap();
+    assert_eq!(zoom(false), (serde_json::json!("overview"), "user".into()));
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -6,7 +6,7 @@
 //! a signal.
 //!
 //!     helios-node --graph network.json --socket /path/to/node.sock
-//!                 [--global FILE] [--project DIR] [--user FILE] [--set KEY=VALUE]...
+//!                 [--global FILE] [--project DIR] [--user FILE] [--vault FILE] [--set KEY=VALUE]...
 //!                 [--control /path/to/control.sock] [--token-file FILE]
 //!
 //! An endpoint is a Unix socket path or `tcp://127.0.0.1:PORT` (port 0 picks
@@ -16,7 +16,10 @@
 //!
 //! Settings come from the files given (global layer, `DIR/helios.toml` for
 //! the project layer, user layer) and from `--set` (run layer); nothing is
-//! read from a default location behind the caller's back.
+//! read from a default location behind the caller's back. With `--vault
+//! FILE` (a SQLite vault), the user and project layers live in the vault:
+//! a layer file given and not yet in the vault is imported into it once,
+//! and from then on the vault's copy is the one read.
 //!
 //! `--control` serves the debug control endpoint (render, set a parameter,
 //! cancel, pause, resume, inject a fault). It exists only in debug builds and
@@ -433,6 +436,7 @@ struct Args {
     token_file: Option<PathBuf>,
     layers: Vec<(Layer, PathBuf)>,
     sets: Vec<(String, String)>,
+    vault: Option<PathBuf>,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -442,6 +446,7 @@ fn parse_args() -> Result<Args, String> {
     let mut token_file = None;
     let mut layers = Vec::new();
     let mut sets = Vec::new();
+    let mut vault = None;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         let mut value = || args.next().ok_or(format!("{arg} needs a value"));
@@ -455,6 +460,7 @@ fn parse_args() -> Result<Args, String> {
                 layers.push((Layer::Project, PathBuf::from(value()?).join("helios.toml")))
             }
             "--user" => layers.push((Layer::User, PathBuf::from(value()?))),
+            "--vault" => vault = Some(PathBuf::from(value()?)),
             "--set" => {
                 let v = value()?;
                 let (k, val) = v
@@ -472,7 +478,21 @@ fn parse_args() -> Result<Args, String> {
         token_file,
         layers,
         sets,
+        vault,
     })
+}
+
+/// The vault's name for a layer kept in it: `user`, or `project/<dir>`.
+fn vault_layer(layer: Layer, path: &Path) -> Option<String> {
+    match layer {
+        Layer::User => Some("user".into()),
+        Layer::Project => {
+            let dir = path.parent()?;
+            let dir = dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf());
+            Some(format!("project/{}", dir.display()))
+        }
+        _ => None,
+    }
 }
 
 /// The node's settings, from the layers it was given.
@@ -480,16 +500,56 @@ fn config(args: &Args) -> Result<Config, String> {
     let mut config = Config::new(Schema::core());
     // Lowest layer first: a value equal to what it inherits leaves its layer,
     // so what it inherits must be known when it is set.
+    let vault = args
+        .vault
+        .as_ref()
+        .map(|path| {
+            helios_vault_sqlite::SqliteStore::open(path)
+                .map(helios_vault::Vault::new)
+                .map_err(|e| format!("{}: {e}", path.display()))
+        })
+        .transpose()?;
     let mut layers: Vec<_> = args.layers.iter().collect();
     layers.sort_by_key(|(layer, _)| *layer);
-    for (layer, path) in layers {
-        config.load_file(*layer, path).map_err(|problems| {
-            let lines: Vec<String> = problems
-                .iter()
-                .map(|p| format!("{}: {p}", path.display()))
-                .collect();
+    let problems = |source: String| {
+        move |problems: Vec<helios_config::Problem>| {
+            let lines: Vec<String> = problems.iter().map(|p| format!("{source}: {p}")).collect();
             lines.join("\n")
-        })?;
+        }
+    };
+    let mut from_vault = Vec::new();
+    for (layer, path) in layers {
+        let kept = vault.as_ref().zip(vault_layer(*layer, path));
+        let Some((vault, name)) = kept else {
+            config
+                .load_file(*layer, path)
+                .map_err(problems(path.display().to_string()))?;
+            continue;
+        };
+        if vault.config_layer(&name)?.is_none() {
+            let text = std::fs::read_to_string(path)
+                .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+            vault.set_config_layer(&name, Some(&text))?;
+            eprintln!(
+                "helios-node: {} imported into the vault as `{name}`; the vault's copy is read from now on",
+                path.display()
+            );
+        }
+        from_vault.push((*layer, name));
+    }
+    // Layers kept in the vault, given as files or not.
+    if let Some(vault) = &vault {
+        if !from_vault.iter().any(|(l, _)| *l == Layer::User) {
+            from_vault.push((Layer::User, "user".into()));
+        }
+        from_vault.sort_by_key(|(layer, _)| *layer);
+        for (layer, name) in from_vault {
+            if let Some(text) = vault.config_layer(&name)? {
+                config
+                    .load_str(layer, &text)
+                    .map_err(problems(format!("vault layer `{name}`")))?;
+            }
+        }
     }
     for (key, value) in &args.sets {
         config
@@ -504,7 +564,7 @@ fn main() -> ExitCode {
         Ok(a) => a,
         Err(e) => {
             eprintln!(
-                "helios-node: {e}\nusage: helios-node --graph FILE --socket PATH [--global FILE] [--project DIR] [--user FILE] [--set KEY=VALUE]... [--control PATH] [--token-file FILE]"
+                "helios-node: {e}\nusage: helios-node --graph FILE --socket PATH [--global FILE] [--project DIR] [--user FILE] [--vault FILE] [--set KEY=VALUE]... [--control PATH] [--token-file FILE]"
             );
             return ExitCode::from(2);
         }
