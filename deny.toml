@@ -1,0 +1,69 @@
+# cargo-deny: licenses, security advisories, banned crates and sources of
+# the dependency tree. Run with `cargo deny check` (or `cargo xtask lint`).
+
+[graph]
+all-features = false
+
+[advisories]
+# RustSec advisories. A vulnerability anywhere in the tree fails the check;
+# an unmaintained crate fails it only when Helios depends on it directly,
+# since a transitive one is out of our hands until the parent moves on.
+unmaintained = "workspace"
+yanked = "warn"
+ignore = []
+
+[licenses]
+# Helios is GPL-3.0-or-later: every license below can be combined with it.
+# The list is derived from the current dependency tree (`cargo metadata`);
+# a dependency under any other license fails the check and needs a decision.
+allow = [
+    "Apache-2.0",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "ISC",
+    "MIT",
+    "Unicode-3.0",
+    "Zlib",
+    # rawler, the raw decoder (see the clarification below). The LGPL lets a
+    # GPL program link with it.
+    "LGPL-2.1-only",
+    # Helios's own crates.
+    "GPL-3.0-or-later",
+    # Data, not code: egui's bundled fonts (Ubuntu and Noto fonts) and the
+    # Mozilla root certificates in webpki-roots.
+    "OFL-1.1",
+    "Ubuntu-font-1.0",
+    "CDLA-Permissive-2.0",
+    # Not used today, but compatible with the GPLv3: accepted in advance.
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "CC0-1.0",
+    "LGPL-2.1-or-later",
+    "LGPL-3.0-or-later",
+    "MPL-2.0",
+    "Unicode-DFS-2016",
+]
+# The accepted-in-advance licenses above are not an error when unused.
+unused-allowed-license = "allow"
+confidence-threshold = 0.8
+
+# rawler declares "LGPL-2.1", the deprecated SPDX identifier that means
+# LGPL-2.1-only.
+[[licenses.clarify]]
+crate = "rawler"
+expression = "LGPL-2.1-only"
+license-files = []
+
+[bans]
+# Several versions of one crate (common in the GPU and GUI stacks) cost
+# build time, not correctness: report them, do not fail.
+multiple-versions = "warn"
+# Workspace path dependencies carry no version and count as wildcards.
+wildcards = "allow"
+
+[sources]
+# crates.io only: no dependency comes from git or another registry.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
