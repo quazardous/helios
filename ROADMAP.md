@@ -118,6 +118,10 @@ Until it provides their components, the GUI waits and the core goes on
 (2026-10-11, decided): new surfaces (graph editor, layouts, settings,
 tips) are built on egui-pop, not twice; the engine, the vault, modules,
 GPU and parity work continue in parallel.
+Translation goes into egui-pop too (2026-10-11, decided): an official
+`egui-pop-i18n` plugin (Fluent catalogues, language fallback, key
+extraction) built on egui-pop's public API, moved there from
+helios-i18n under the MIT licence; Helios then uses it.
 Hard requirement (2026-10-11, decided): GPU acceleration on Linux, Windows
 and macOS, as close to Vulkan as possible, so the viewport can show buffers
 the engine computed on the GPU without copying them back. wgpu is
