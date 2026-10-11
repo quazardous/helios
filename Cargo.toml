@@ -31,6 +31,7 @@ helios-vkdt = { path = "crates/helios-vkdt" }
 helios-gpu = { path = "crates/helios-gpu" }
 helios-compute = { path = "crates/helios-compute" }
 helios-shell = { path = "crates/helios-shell" }
+helios-plugin = { path = "crates/helios-plugin" }
 helios-values = { path = "crates/helios-values" }
 helios-gui = { path = "crates/helios-gui" }
 helios-vault = { path = "crates/helios-vault" }

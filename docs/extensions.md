@@ -83,3 +83,66 @@ contribution points):
   what they are, a disclosure.
 - One reviewed registry, plus self-hosted ones, so forks are not split from
   their extensions.
+
+## Proof of concept
+
+`crates/helios-plugin` runs external plugins out of process, behind a
+broker. It covers what is needed to judge the design, not the packaging
+(no signed archives, no registry, grants held in memory only).
+
+**Protocol.** A plugin is a directory holding `helios-plugin.toml` and any
+executable that speaks JSON-RPC 2.0 over its standard input and output,
+one message per line (the shape of LSP and MCP, without their headers).
+The broker reads the manifest first and refuses it, before anything runs,
+when the id is not a reverse domain, the Helios version is outside the
+range it gives, an interface or its version is unknown, a capability is
+unknown or comes without a reason, an activation event names nothing the
+plugin declares, or a setting's default does not fit its type. The
+manifest's command runs in the plugin's directory (a program found there
+is run from there, any other is looked up on `PATH`).
+
+The broker starts a plugin on its first activation event
+(`onStartup`, `onService:<service>`, `onCommand:<id>`) and sends
+`initialize` with the Helios version, the interface versions it speaks,
+the capabilities granted and the plugin's settings (`<id>.<key>`, typed
+by the manifest); the plugin answers, then gets `initialized`. Calls wait
+at most a timeout, after which the plugin gets `$/cancelRequest`. The
+plugin may send `$/progress` and `$/log` notifications; a request from the
+plugin is answered "method not found", since Helios offers plugins nothing
+but the calls it makes. A plugin left idle, disabled, or whose grants
+change is sent `shutdown` then `exit`, and killed if it lingers; so is
+every plugin when Helios exits.
+
+A crash costs that plugin alone: the call in flight fails at once with the
+plugin's last line of standard error, a `Crashed` notice goes out, and the
+next call restarts it, after a wait that doubles with each crash in a row.
+
+Two services: `metadata.read` (an image path in, fields out, each with the
+tag it came from: camera, lens, exposure, GPS, keywords…) and `device`
+(`device.list`, `device.info`, `device.capture`, `device.download`, with
+progress). The shell commands are `plugin.list`, `plugin.enable`,
+`plugin.disable`, `plugin.grant`, `plugin.revoke`, `metadata.read`,
+`device.list`, `device.info`, `device.capture`, `device.download`, and the
+commands plugins contribute, each run in its plugin.
+
+**What is enforced: crash isolation plus brokered data.** Each capability
+is either *brokered*, where the broker controls the access and checks it
+on every call, or *ambient*, where the plugin's process could act on its
+own:
+
+- `images.read` (brokered): a plugin is handed only the path of the image
+  it is asked about, after the broker resolved it; without the grant the
+  call is refused and the plugin not even started. Read-only is what it is
+  told, not yet what the system enforces.
+- `folder.write` (brokered): a download goes to a fresh staging folder;
+  the broker keeps only the plain files the plugin reports inside it,
+  moves them into the destination itself and removes the rest.
+- `process.spawn`, `device.usb`, `network`, `secrets`, `gpu`, `ai.models`
+  (ambient): the broker cannot police them, so it refuses to start the
+  plugin until the user grants each one.
+
+A plugin's process still runs with the user's rights: it could read or
+write other files, or run programs it was not granted. Holding the process
+itself to its capabilities (namespaces, portals, seccomp) is the next
+step; until then the ambient capabilities are a disclosure the user must
+accept, not a guarantee.

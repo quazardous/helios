@@ -1977,6 +1977,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "helios-plugin"
+version = "0.0.1"
+dependencies = [
+ "helios-shell",
+ "serde",
+ "serde_json",
+ "toml 1.1.8+spec-1.1.0",
+]
+
+[[package]]
 name = "helios-profile"
 version = "0.0.1"
 dependencies = [

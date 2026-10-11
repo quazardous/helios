@@ -1,0 +1,15 @@
+id = "org.example.testee"
+name = "Broker test plugin"
+version = "1.0.0"
+license = "GPL-3.0-or-later"
+command = ["python3", "testee.py"]
+services = ["metadata.read"]
+activation = ["onService:metadata.read"]
+
+[compat]
+helios = ">=0.0.1"
+interfaces = { protocol = 1, "metadata.read" = 1 }
+
+[[capabilities]]
+name = "images.read"
+reason = "Echoes the path it is handed, so tests see what it was given"

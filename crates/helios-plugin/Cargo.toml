@@ -1,0 +1,13 @@
+[package]
+name = "helios-plugin"
+description = "Helios plugin broker: external plugins found by their manifest, run out of process over JSON-RPC, reached only through brokered services"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+helios-shell.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml = "1"
