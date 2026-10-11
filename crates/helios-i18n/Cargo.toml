@@ -10,7 +10,6 @@ repository.workspace = true
 helios-core.workspace = true
 helios-shell.workspace = true
 serde.workspace = true
-serde_json.workspace = true
 # Apache-2.0 OR MIT (fluent-bundle, fluent-syntax, fluent-pseudo, unic-langid),
 # MIT OR Apache-2.0 (sys-locale).
 fluent-bundle = "0.16"

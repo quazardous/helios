@@ -1812,7 +1812,6 @@ dependencies = [
  "helios-core",
  "helios-shell",
  "serde",
- "serde_json",
  "sys-locale",
  "unic-langid",
 ]
