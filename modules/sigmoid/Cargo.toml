@@ -1,0 +1,13 @@
+[package]
+name = "helios-module-sigmoid"
+description = "sigmoid module for Helios, ported from darktable's sigmoid: scene-referred light to display, per channel with hue preservation"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+helios-core.workspace = true
+
+[dev-dependencies]
+helios-testkit.workspace = true

@@ -19,6 +19,7 @@ helios-module-demosaic = { path = "../../modules/demosaic" }
 helios-module-whitebalance = { path = "../../modules/whitebalance" }
 helios-module-highlights = { path = "../../modules/highlights" }
 helios-module-colorin = { path = "../../modules/colorin" }
+helios-module-sigmoid = { path = "../../modules/sigmoid" }
 serde.workspace = true
 serde_json.workspace = true
 

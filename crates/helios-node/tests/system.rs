@@ -492,7 +492,8 @@ fn a_raw_goes_through_the_pipe_to_a_file() {
         {{ "name": "hl", "module": "highlights" }},
         {{ "name": "demosaic", "module": "demosaic" }},
         {{ "name": "colorin", "module": "colorin" }},
-        {{ "name": "exp", "module": "exposure", "params": {{ "exposure": {{ "float": 1.0 }} }} }}
+        {{ "name": "exp", "module": "exposure", "params": {{ "exposure": {{ "float": 1.0 }} }} }},
+        {{ "name": "tone", "module": "sigmoid" }}
       ],
       "connections": [
         {{ "from": "raw", "port": "image", "to": "prep", "input": "input" }},
@@ -500,9 +501,10 @@ fn a_raw_goes_through_the_pipe_to_a_file() {
         {{ "from": "wb", "port": "output", "to": "hl", "input": "input" }},
         {{ "from": "hl", "port": "output", "to": "demosaic", "input": "input" }},
         {{ "from": "demosaic", "port": "output", "to": "colorin", "input": "input" }},
-        {{ "from": "colorin", "port": "output", "to": "exp", "input": "input" }}
+        {{ "from": "colorin", "port": "output", "to": "exp", "input": "input" }},
+        {{ "from": "exp", "port": "output", "to": "tone", "input": "input" }}
       ],
-      "exports": [{{ "node": "exp", "region": {region}, "path": "out.png" }}]
+      "exports": [{{ "node": "tone", "region": {region}, "path": "out.png" }}]
     }}"#
     );
     let sandbox = Sandbox::start("raw-pipe", &network);

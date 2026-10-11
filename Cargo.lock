@@ -513,6 +513,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "helios-module-sigmoid"
+version = "0.0.1"
+dependencies = [
+ "helios-core",
+ "helios-testkit",
+]
+
+[[package]]
 name = "helios-module-whitebalance"
 version = "0.0.1"
 dependencies = [
@@ -535,6 +543,7 @@ dependencies = [
  "helios-module-exposure",
  "helios-module-highlights",
  "helios-module-rawprepare",
+ "helios-module-sigmoid",
  "helios-module-whitebalance",
  "helios-testkit",
  "image",

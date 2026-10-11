@@ -83,6 +83,8 @@ A Cargo workspace (Rust):
   `pause`, `fault`...; `helios sandbox new|start|stop|clean` for isolated
   nodes); and `helios-mcp`, an MCP server giving an agent the same verbs,
   sandboxes included.
+- `modules/sigmoid`: darktable's sigmoid tone mapper (per channel, hue
+  preservation), ported.
 - `modules/exposure`: darktable's exposure module (manual mode, camera bias
   compensation), ported.
 - `modules/rawprepare`: darktable's rawprepare (black level and scale from
