@@ -164,6 +164,24 @@ fn changing_a_parameter_recomputes_only_downstream() {
 }
 
 #[test]
+fn planning_counts_the_content_keys_it_computes() {
+    let mut g = Graph::new();
+    let src = g.add_source("src", ramp());
+    let a = g.add_module("a", ModuleRef::new(Gain), &gain(2.0)).unwrap();
+    let b = g.add_module("b", ModuleRef::new(Gain), &gain(3.0)).unwrap();
+    g.connect(src, "image", a, "input").unwrap();
+    g.connect(a, "output", b, "input").unwrap();
+    let e = engine();
+    let r = Region::sized(16, 8);
+    e.render(&g, b, "output", r).unwrap();
+    assert_eq!(e.counters().keys, 3, "one key per step planned");
+    // Planning runs again on every render, cached or not.
+    let before = e.counters();
+    e.render(&g, b, "output", r).unwrap();
+    assert_eq!(e.counters().since(&before).keys, 3);
+}
+
+#[test]
 fn identical_prefixes_are_computed_once() {
     // Two branches with the same module and parameters on the same source:
     // one computation, whatever the node names.

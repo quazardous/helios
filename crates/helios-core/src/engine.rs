@@ -118,6 +118,9 @@ pub struct Counters {
     pub uploads: u64,
     /// Accelerator images read back into host memory.
     pub readbacks: u64,
+    /// Content keys computed while planning: one per step planned, every
+    /// time a render, a status or a key is asked for.
+    pub keys: u64,
 }
 
 impl Counters {
@@ -136,6 +139,7 @@ impl Counters {
             accelerated: self.accelerated - earlier.accelerated,
             uploads: self.uploads - earlier.uploads,
             readbacks: self.readbacks - earlier.readbacks,
+            keys: self.keys - earlier.keys,
         }
     }
 }
@@ -245,6 +249,7 @@ pub struct Engine {
     accelerated: AtomicU64,
     uploads: AtomicU64,
     readbacks: AtomicU64,
+    keys: AtomicU64,
 }
 
 type TrackKey = (u64, NodeId, Region);
@@ -280,6 +285,7 @@ impl Engine {
             accelerated: AtomicU64::new(0),
             uploads: AtomicU64::new(0),
             readbacks: AtomicU64::new(0),
+            keys: AtomicU64::new(0),
         }
     }
 
@@ -397,6 +403,7 @@ impl Engine {
             accelerated: self.accelerated.load(Ordering::SeqCst),
             uploads: self.uploads.load(Ordering::SeqCst),
             readbacks: self.readbacks.load(Ordering::SeqCst),
+            keys: self.keys.load(Ordering::SeqCst),
         }
     }
 
@@ -548,6 +555,7 @@ impl Engine {
     }
 
     fn plan(&self, graph: &Graph, id: NodeId, region: Region, scale: f64) -> Result<Step, Error> {
+        self.keys.fetch_add(1, Ordering::SeqCst);
         let node = graph.node(id)?;
         let mut h = blake3::Hasher::new();
         h.update(&scale.to_le_bytes());
