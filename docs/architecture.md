@@ -202,9 +202,13 @@ over work queues kept in a storage:
 - **monitoring** per node: claimable now, oldest waiting, longest running,
   retries due; this feeds the queue panel of the GUI.
 
-The journal lives in the vault. It comes with the scheduler: an in-memory
-journal first, with a contract test suite every storage must pass (grampy's
-driver contract is the model), then a vault-backed one.
+The journal lives in the vault. The `helios-journal` crate has the first
+part (2026-10-11): rows, claims with leases and tokens, joins (all or k of
+n), exclusive choices with omission, retries with a growing delay, lease
+expiry and per-node monitoring, over an in-memory store, and a contract
+every store must pass (grampy's driver contract is the model). Groups,
+lanes, waits and signals, rate limits and graph versions come next, then a
+vault-backed store.
 
 ## Configuration
 

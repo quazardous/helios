@@ -369,9 +369,9 @@ at step C); selection stays in the database during phase 0.
 - [ ] **Step A: no SQL outside `common/`**, one domain = one potential
       upstream PR, checked by an equivalence bench (SQL dump + XMP, plus GUI
       captures) and a SQL inventory whose counter must go down.
-  - [x] 1. ratings and color labels (committed c442a88a8, 2026-10-11)
-  - [ ] 2. metadata
-  - [ ] 3. tags
+  - [x] 1. ratings and color labels (c442a88a8, upstream PR darktable-org/darktable#22572)
+  - [x] 2. metadata (e14874d30, 2026-10-11)
+  - [x] 3. tags (5d5763e27, 2026-10-11)
   - [ ] 4. film rolls and images
   - [ ] 5. locations, overlays
   - [ ] 6. styles

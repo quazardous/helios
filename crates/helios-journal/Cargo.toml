@@ -1,0 +1,12 @@
+[package]
+name = "helios-journal"
+description = "The workflow level of Helios: a node journal per item, after grampy, with a contract every storage must pass"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+helios-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true

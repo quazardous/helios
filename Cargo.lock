@@ -98,6 +98,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "helios-journal"
+version = "0.0.1"
+dependencies = [
+ "helios-core",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "helios-module-exposure"
 version = "0.0.1"
 dependencies = [
