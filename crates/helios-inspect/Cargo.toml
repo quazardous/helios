@@ -1,0 +1,12 @@
+[package]
+name = "helios-inspect"
+description = "Read-only inspection endpoint of a Helios process: state snapshots and bus events as JSON lines over a local socket"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+helios-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true

@@ -68,11 +68,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "helios-inspect"
+version = "0.0.1"
+dependencies = [
+ "helios-core",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "helios-module-exposure"
 version = "0.0.1"
 dependencies = [
  "helios-core",
  "helios-testkit",
+]
+
+[[package]]
+name = "helios-node"
+version = "0.0.1"
+dependencies = [
+ "helios-core",
+ "helios-inspect",
+ "helios-module-exposure",
+ "helios-testkit",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

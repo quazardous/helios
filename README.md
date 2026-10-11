@@ -28,6 +28,10 @@ module. Meanwhile, a catalog SDK inside darktable itself is built in the
   for orchestration.
 - [docs/testing-strategy.md](./docs/testing-strategy.md): draft of how Helios
   is tested and sandboxed, designed so that an AI agent can build it.
+- [docs/gui.md](./docs/gui.md): GUI design notes: dockable panels, the node
+  header, the queue panel, the graph view.
+- [docs/ux-research.md](./docs/ux-research.md): what users ask of darktable's
+  interface and its equivalents, real workflows, and scenarios for the GUI.
 - [docs/iop-inventory.md](./docs/iop-inventory.md): what darktable's image
   operation modules already describe about themselves (introspection, widgets,
   tiling, OpenCL, scale awareness), as a baseline for module normalization.
@@ -41,6 +45,12 @@ A Cargo workspace (Rust):
   same content twice, the event bus, `describe()` snapshots.
 - `crates/helios-testkit`: synthetic images and contract tests generated
   from a module's manifest.
+- `crates/helios-inspect`: the read-only inspection endpoint of a Helios
+  process (state snapshots, bus events, waiting on an event) as JSON lines
+  over a local socket.
+- `crates/helios-node`: `helios-node`, a headless node that loads a network
+  from a JSON description, renders it and serves inspection; and `helios`,
+  the command line (`helios inspect state`, `events`, `wait-event`...).
 - `modules/exposure`: darktable's exposure module (manual mode), ported.
 
 Build and test with `cargo test --workspace`.

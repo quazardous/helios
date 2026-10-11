@@ -1,0 +1,15 @@
+[package]
+name = "helios-node"
+description = "A headless Helios node: loads a network from a JSON description, renders it and serves inspection; plus the `helios` CLI"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+helios-core.workspace = true
+helios-inspect.workspace = true
+helios-testkit.workspace = true
+helios-module-exposure = { path = "../../modules/exposure" }
+serde.workspace = true
+serde_json.workspace = true

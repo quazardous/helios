@@ -28,3 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   evaluation that never computes the same content twice, event bus) and a
   test kit generating contract tests from a module's manifest.
 - darktable's exposure module, manual mode, as the first ported module.
+- A headless node and a command line to observe it: state snapshots, bus
+  events and waiting on an event, read-only, so scripts and agents never
+  have to sleep or parse logs.
+- UX research: user feedback on darktable's interface and its equivalents,
+  real workflows, and scenarios for the GUI.
