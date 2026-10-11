@@ -1,0 +1,13 @@
+# GUI prototypes (the technology choice): built on their own, outside the
+# main workspace, so their dependencies stay out of the normal build.
+[workspace]
+resolver = "3"
+members = ["scene", "gui-egui", "gui-iced"]
+
+# Two GPU stacks with debug info take gigabytes: none here, optimized
+# dependencies so the measures mean something.
+[profile.dev]
+debug = 0
+
+[profile.dev.package."*"]
+opt-level = 2

@@ -1,6 +1,9 @@
 [workspace]
 resolver = "3"
 members = ["crates/*", "modules/*", "xtask"]
+# GUI prototypes build on their own: their dependencies stay out of the
+# normal build.
+exclude = ["proto"]
 
 [workspace.package]
 version = "0.0.1"

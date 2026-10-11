@@ -1,0 +1,18 @@
+[package]
+name = "helios-proto-egui"
+description = "GUI prototype in egui: float viewport, dockable panels, a large graph"
+version = "0.0.1"
+edition = "2024"
+license = "GPL-3.0-or-later"
+publish = false
+
+[dependencies]
+helios-proto-scene = { path = "../scene" }
+eframe = { version = "0.36", default-features = false, features = ["default_fonts", "wgpu", "wayland", "x11", "accesskit", "persistence"] }
+egui_dock = { version = "0.21", features = ["serde"] }
+bytemuck = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+egui_kittest = "0.36"

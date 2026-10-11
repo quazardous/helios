@@ -1,0 +1,12 @@
+[package]
+name = "helios-proto-scene"
+description = "What both GUI prototypes show: an HDR image through an exposure network (proxy then exact), and a large graph to draw"
+version = "0.0.1"
+edition = "2024"
+license = "GPL-3.0-or-later"
+publish = false
+
+[dependencies]
+helios-core = { path = "../../crates/helios-core" }
+helios-load = { path = "../../crates/helios-load" }
+helios-module-exposure = { path = "../../modules/exposure" }
