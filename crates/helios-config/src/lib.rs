@@ -202,6 +202,19 @@ impl Setting {
 /// same way and add them to a [`Schema`].
 pub const SETTINGS: &[Setting] = &[
     Setting {
+        key: "system.cache.budget",
+        concern: Concern::Machine,
+        label: "Render cache",
+        about: "Memory the render cache may use before evicting what was used least recently; 0 means no limit.",
+        kind: Kind::Number {
+            min: 0.0,
+            max: 1_048_576.0,
+            default: 2048.0,
+            unit: "MiB",
+            integer: true,
+        },
+    },
+    Setting {
         key: "system.scheduler.workers",
         concern: Concern::Machine,
         label: "Worker threads",

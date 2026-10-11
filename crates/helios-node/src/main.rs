@@ -190,7 +190,11 @@ fn main() -> ExitCode {
     let bus = Arc::new(Bus::with_journal(
         config.number("system.events.journal") as usize
     ));
-    let engine = Arc::new(Engine::new(bus.clone()));
+    let budget = match config.number("system.cache.budget") as usize {
+        0 => None,
+        mib => Some(mib * 1024 * 1024),
+    };
+    let engine = Arc::new(Engine::with_budget(bus.clone(), budget));
     let scheduler = Arc::new(Scheduler::new(
         bus.clone(),
         config.number("system.scheduler.workers") as usize,

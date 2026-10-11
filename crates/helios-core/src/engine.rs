@@ -66,6 +66,8 @@ pub struct Counters {
     pub computed: u64,
     /// Source regions read.
     pub source_reads: u64,
+    /// Cache entries evicted to stay within the memory budget.
+    pub evictions: u64,
 }
 
 impl Counters {
@@ -80,6 +82,7 @@ impl Counters {
             requests: self.requests - earlier.requests,
             computed: self.computed - earlier.computed,
             source_reads: self.source_reads - earlier.source_reads,
+            evictions: self.evictions - earlier.evictions,
         }
     }
 }
@@ -103,9 +106,73 @@ enum Work {
     },
 }
 
+/// Computed content, by key, within an optional memory budget.
+#[derive(Default)]
+struct Cache {
+    entries: HashMap<ContentHash, Entry>,
+    /// Bytes held by ready entries.
+    bytes: usize,
+    /// Bumped on every use, to find the least recently used entry.
+    tick: u64,
+    evictions: u64,
+}
+
+struct Entry {
+    cell: Arc<OnceLock<Outputs>>,
+    /// Bytes of its outputs, counted once they are ready.
+    size: usize,
+    last_used: u64,
+}
+
+impl Cache {
+    /// The cell for a key, created if missing, marked as just used.
+    fn cell(&mut self, key: ContentHash) -> Arc<OnceLock<Outputs>> {
+        self.tick += 1;
+        let tick = self.tick;
+        let entry = self.entries.entry(key).or_insert_with(|| Entry {
+            cell: Arc::default(),
+            size: 0,
+            last_used: tick,
+        });
+        entry.last_used = tick;
+        entry.cell.clone()
+    }
+
+    /// Counts a newly ready entry, then evicts the least recently used
+    /// ready entries (never `keep`, never content still being computed)
+    /// until the cache fits its budget.
+    fn settle(&mut self, keep: ContentHash, budget: Option<usize>) {
+        if let Some(entry) = self.entries.get_mut(&keep)
+            && entry.size == 0
+            && let Some(Ok(outputs)) = entry.cell.get()
+        {
+            entry.size = outputs
+                .iter()
+                .map(|i| std::mem::size_of_val(i.data()))
+                .sum();
+            self.bytes += entry.size;
+        }
+        let Some(budget) = budget else { return };
+        while self.bytes > budget {
+            let victim = self
+                .entries
+                .iter()
+                .filter(|(k, e)| **k != keep && e.size > 0 && e.cell.get().is_some())
+                .min_by_key(|(_, e)| e.last_used)
+                .map(|(k, _)| *k);
+            let Some(key) = victim else { break };
+            let entry = self.entries.remove(&key).expect("victim exists");
+            self.bytes -= entry.size;
+            self.evictions += 1;
+        }
+    }
+}
+
 pub struct Engine {
     bus: Arc<Bus>,
-    cache: Mutex<HashMap<ContentHash, Arc<OnceLock<Outputs>>>>,
+    cache: Mutex<Cache>,
+    /// Bytes the cache may hold; `None` for no limit.
+    budget: Option<usize>,
     requests: AtomicU64,
     computed: AtomicU64,
     source_reads: AtomicU64,
@@ -125,10 +192,18 @@ struct Track {
 }
 
 impl Engine {
+    /// An engine whose cache has no memory limit.
     pub fn new(bus: Arc<Bus>) -> Self {
+        Self::with_budget(bus, None)
+    }
+
+    /// An engine whose cache stays within `budget` bytes (`None`: no limit).
+    /// Content evicted is computed again when asked for.
+    pub fn with_budget(bus: Arc<Bus>, budget: Option<usize>) -> Self {
         Self {
             bus,
-            cache: Mutex::new(HashMap::new()),
+            cache: Mutex::new(Cache::default()),
+            budget,
             requests: AtomicU64::new(0),
             computed: AtomicU64::new(0),
             source_reads: AtomicU64::new(0),
@@ -180,8 +255,9 @@ impl Engine {
             .cache
             .lock()
             .expect("engine cache lock")
+            .entries
             .get(&step.key)
-            .cloned();
+            .map(|e| e.cell.clone());
         let (last_key, load) = self.track(step, |t| {
             (
                 t.last_key,
@@ -236,6 +312,7 @@ impl Engine {
             requests: self.requests.load(Ordering::SeqCst),
             computed: self.computed.load(Ordering::SeqCst),
             source_reads: self.source_reads.load(Ordering::SeqCst),
+            evictions: self.cache.lock().expect("engine cache lock").evictions,
         }
     }
 
@@ -327,30 +404,37 @@ impl Engine {
             t.requests += 1;
             t.last_key = Some(step.key);
         });
-        let cell = {
-            let mut cache = self.cache.lock().expect("engine cache lock");
-            cache.entry(step.key).or_default().clone()
-        };
+        let cell = self.cache.lock().expect("engine cache lock").cell(step.key);
+        let mut computed_here = false;
         // Only one thread runs the initializer; others asking for the same key wait for it.
-        cell.get_or_init(|| {
-            self.computed.fetch_add(1, Ordering::SeqCst);
-            self.track(step, |t| {
-                t.computed += 1;
-                t.running += 1;
-            });
-            let result = self.compute(step, cause);
-            self.track(step, |t| t.running -= 1);
-            let event = StepComputed {
-                node: step.node,
-                name: step.name.clone(),
-                key: step.key.short(),
-                region: step.region,
-                ok: result.is_ok(),
-            };
-            self.bus.publish(SOURCE, Some(cause), &event);
-            result
-        })
-        .clone()
+        let outputs = cell
+            .get_or_init(|| {
+                computed_here = true;
+                self.computed.fetch_add(1, Ordering::SeqCst);
+                self.track(step, |t| {
+                    t.computed += 1;
+                    t.running += 1;
+                });
+                let result = self.compute(step, cause);
+                self.track(step, |t| t.running -= 1);
+                let event = StepComputed {
+                    node: step.node,
+                    name: step.name.clone(),
+                    key: step.key.short(),
+                    region: step.region,
+                    ok: result.is_ok(),
+                };
+                self.bus.publish(SOURCE, Some(cause), &event);
+                result
+            })
+            .clone();
+        if computed_here {
+            self.cache
+                .lock()
+                .expect("engine cache lock")
+                .settle(step.key, self.budget);
+        }
+        outputs
     }
 
     fn compute(&self, step: &Step, cause: u64) -> Outputs {
@@ -378,11 +462,20 @@ impl Engine {
 
 impl Describe for Engine {
     fn describe(&self) -> serde_json::Value {
+        // Read before taking the cache lock: `counters()` takes it too.
+        let counters = self.counters();
         let cache = self.cache.lock().expect("engine cache lock");
-        let ready = cache.values().filter(|c| c.get().is_some()).count();
+        let ready = cache
+            .entries
+            .values()
+            .filter(|e| e.cell.get().is_some())
+            .count();
         serde_json::json!({
-            "cache": { "entries": cache.len(), "ready": ready },
-            "counters": self.counters(),
+            "cache": {
+                "entries": cache.entries.len(), "ready": ready,
+                "bytes": cache.bytes, "budget": self.budget, "evictions": cache.evictions,
+            },
+            "counters": counters,
         })
     }
 }
