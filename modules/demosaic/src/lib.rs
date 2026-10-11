@@ -1,7 +1,16 @@
 //! demosaic: the sensor mosaic (one value per photosite, behind a color
 //! filter) to camera RGB, three values per pixel.
 //!
-//! First method: **bilinear**, for any filter pattern. Each missing color of
+//! Methods, chosen by the `method` parameter (`auto` by default):
+//!
+//! - **RCD** (Ratio Corrected Demosaicing), darktable's default for Bayer
+//!   patterns, ported from darktable (see `rcd.rs`);
+//! - **bilinear**, for any filter pattern.
+//!
+//! `auto` is RCD on a Bayer pattern and bilinear on X-Trans, until
+//! Markesteijn (darktable's X-Trans default) is ported.
+//!
+//! Bilinear: Each missing color of
 //! a photosite is the mean of the nearest photosites of that color: those of
 //! the 3 x 3 neighbourhood, else of the 5 x 5 one (some X-Trans positions
 //! lack a red or a blue nearby). On a Bayer pattern this is darktable's
@@ -9,21 +18,33 @@
 //! declared context input, anchored at the image origin (the loader shifts
 //! it to its crop).
 //!
-//! Next: darktable's defaults (RCD for Bayer, Markesteijn for X-Trans),
-//! once parity can be measured against darktable.
-//!
 //! Known limit: within two pixels of the image border the framework
 //! replicates edge photosites, whose filter color is not the one the
 //! pattern gives there; those pixels are approximate.
 
+mod rcd;
+
 use helios_core::{
-    Context, Family, Image, Manifest, Module, ModuleKind, Needs, Params, PortSpec, Region, Role,
+    Context, Family, Image, Manifest, Module, ModuleKind, Needs, ParamKind, ParamSpec, Params,
+    PortSpec, Region, Role, Value,
 };
 use helios_photo::Cfa;
 use helios_photo::camera::fields;
 use helios_photo::cfa::Channel;
 
 pub struct Demosaic;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Method {
+    Rcd,
+    Bilinear,
+}
+
+#[derive(Debug)]
+pub struct Plan {
+    cfa: Cfa,
+    method: Method,
+}
 
 fn index(c: Channel) -> usize {
     match c {
@@ -34,14 +55,22 @@ fn index(c: Channel) -> usize {
 }
 
 impl Module for Demosaic {
-    type Plan = Cfa;
+    type Plan = Plan;
 
     fn manifest(&self) -> Manifest {
         Manifest {
             name: "demosaic".into(),
-            version: 1,
-            description: "Turn the sensor mosaic into camera RGB (bilinear)".into(),
-            params: vec![],
+            // 2: methods, RCD by default on Bayer patterns.
+            version: 2,
+            description: "Turn the sensor mosaic into camera RGB".into(),
+            params: vec![ParamSpec {
+                name: "method".into(),
+                description: "auto: RCD on Bayer patterns, bilinear on X-Trans".into(),
+                kind: ParamKind::Choice {
+                    options: vec!["auto".into(), "rcd".into(), "bilinear".into()],
+                    default: "auto".into(),
+                },
+            }],
             inputs: vec![PortSpec::image("input", 1)],
             outputs: vec![PortSpec::image("output", 4)],
             context: vec![fields::CFA.into()],
@@ -52,16 +81,70 @@ impl Module for Demosaic {
         }
     }
 
-    fn prepare(&self, _: &Params, context: &Context) -> Result<Cfa, String> {
+    fn prepare(&self, params: &Params, context: &Context) -> Result<Plan, String> {
         let name = context
             .get(fields::CFA)
             .and_then(|v| v.as_choice())
             .ok_or_else(|| format!("context field `{}`: a filter pattern needed", fields::CFA))?;
-        Cfa::parse(name)
+        let cfa = Cfa::parse(name)?;
+        let bayer = cfa.period() == 2;
+        let method = match params.get("method") {
+            Some(Value::Choice(m)) if m == "rcd" => {
+                if !bayer {
+                    return Err("RCD needs a Bayer pattern".into());
+                }
+                Method::Rcd
+            }
+            Some(Value::Choice(m)) if m == "bilinear" => Method::Bilinear,
+            _ if bayer => Method::Rcd,
+            _ => Method::Bilinear,
+        };
+        Ok(Plan { cfa, method })
     }
 
-    fn process(&self, cfa: &Cfa, inputs: &[&Image], output: Region) -> Result<Vec<Image>, String> {
+    fn input_region(&self, plan: &Plan, output: Region, overlap: u32) -> Region {
+        match plan.method {
+            Method::Bilinear => output.grow(overlap),
+            Method::Rcd => {
+                // The tile starts on an even photosite (see `rcd.rs`).
+                let g = output.grow(rcd::BORDER);
+                let (dx, dy) = (g.x.rem_euclid(2), g.y.rem_euclid(2));
+                Region::new(
+                    g.x - dx,
+                    g.y - dy,
+                    g.width + dx as u32,
+                    g.height + dy as u32,
+                )
+            }
+        }
+    }
+
+    fn process(
+        &self,
+        plan: &Plan,
+        inputs: &[&Image],
+        output: Region,
+    ) -> Result<Vec<Image>, String> {
         let input = inputs[0];
+        if plan.method == Method::Rcd {
+            let r = input.region();
+            let (stride, planes) = rcd::demosaic(
+                &plan.cfa,
+                r.x,
+                r.y,
+                r.width as usize,
+                r.height as usize,
+                1.0,
+                |col, row| input.pixel(r.x + col as i64, r.y + row as i64)[0],
+            );
+            return Ok(vec![Image::from_fn(output, 4, |x, y, c| {
+                if c == 3 {
+                    return 1.0;
+                }
+                planes[c as usize][(y - r.y) as usize * stride + (x - r.x) as usize]
+            })]);
+        }
+        let cfa = &plan.cfa;
         Ok(vec![Image::from_fn(output, 4, |x, y, c| {
             if c == 3 {
                 return 1.0;
@@ -100,19 +183,33 @@ mod tests {
         Context::new().with(fields::CFA, Value::Choice(cfa.into()))
     }
 
+    /// Demosaics `out` with a method, reading what it asks of `input`.
+    fn run_with(cfa: &str, method: &str, input: &Image, out: Region) -> Image {
+        let params = Params::new().with("method", Value::Choice(method.into()));
+        let plan = Demosaic.prepare(&params, &context(cfa)).unwrap();
+        let need = Demosaic.input_region(&plan, out, 2);
+        Demosaic
+            .process(&plan, &[&input.sample(need)], out)
+            .unwrap()
+            .remove(0)
+    }
+
     fn run(cfa: &str, input: &Image, out: Region) -> Image {
-        let plan = Demosaic.prepare(&Params::new(), &context(cfa)).unwrap();
-        Demosaic.process(&plan, &[input], out).unwrap().remove(0)
+        run_with(cfa, "auto", input, out)
+    }
+
+    fn close(a: &[f32], b: &[f32]) -> bool {
+        a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-4)
     }
 
     #[test]
     fn a_grey_scene_stays_grey_on_both_patterns() {
         let out = Region::sized(12, 12);
-        let input = Image::from_fn(out.grow(2), 1, |_, _, _| 0.4);
-        for cfa in ["RGGB", XTRANS] {
-            let rgb = run(cfa, &input, out);
+        let input = Image::from_fn(out.grow(12), 1, |_, _, _| 0.4);
+        for (cfa, method) in [("RGGB", "rcd"), ("RGGB", "bilinear"), (XTRANS, "bilinear")] {
+            let rgb = run_with(cfa, method, &input, out);
             for p in rgb.data().as_chunks::<4>().0 {
-                assert_eq!(*p, [0.4, 0.4, 0.4, 1.0], "{cfa}");
+                assert!(close(p, &[0.4, 0.4, 0.4, 1.0]), "{cfa} {method}: {p:?}");
             }
         }
     }
@@ -123,10 +220,68 @@ mod tests {
         let cfa = Cfa::parse("RGGB").unwrap();
         let color = [0.8f32, 0.5, 0.2];
         let out = Region::sized(8, 8);
-        let input = Image::from_fn(out.grow(2), 1, |x, y, _| color[index(cfa.color_at(x, y))]);
-        for p in run("RGGB", &input, out).data().as_chunks::<4>().0 {
-            assert_eq!(&p[..3], &color);
+        let input = Image::from_fn(out.grow(12), 1, |x, y, _| color[index(cfa.color_at(x, y))]);
+        for method in ["rcd", "bilinear"] {
+            for p in run_with("RGGB", method, &input, out)
+                .data()
+                .as_chunks::<4>()
+                .0
+            {
+                assert!(close(&p[..3], &color), "{method}: {p:?}");
+            }
         }
+    }
+
+    #[test]
+    fn auto_is_rcd_on_bayer_and_bilinear_on_x_trans() {
+        let plan = |cfa| {
+            Demosaic
+                .prepare(&Params::new(), &context(cfa))
+                .unwrap()
+                .method
+        };
+        assert_eq!(plan("RGGB"), Method::Rcd);
+        assert_eq!(plan(XTRANS), Method::Bilinear);
+        let rcd = Params::new().with("method", Value::Choice("rcd".into()));
+        assert!(Demosaic.prepare(&rcd, &context(XTRANS)).is_err());
+    }
+
+    #[test]
+    fn rcd_gives_the_same_pixels_whatever_the_region() {
+        // A detailed scene: whole and in odd-placed pieces, the same values.
+        let cfa = "GBRG";
+        let scene = Image::from_fn(Region::new(-20, -20, 90, 80), 1, |x, y, _| {
+            ((x * 37 + y * 11) % 23) as f32 / 23.0
+                + if (x / 5 + y / 7) % 2 == 0 { 0.3 } else { 0.0 }
+        });
+        let whole = run(cfa, &scene, Region::sized(50, 40));
+        for piece in [
+            Region::new(3, 5, 17, 11),
+            Region::new(20, 1, 9, 30),
+            Region::new(31, 27, 19, 13),
+        ] {
+            let part = run(cfa, &scene, piece);
+            assert_eq!(part.data(), whole.sample(piece).data(), "{piece}");
+        }
+    }
+
+    #[test]
+    fn rcd_follows_an_edge_better_than_bilinear() {
+        // A sharp vertical edge in a grey scene: RCD keeps the colours
+        // flatter around it than bilinear does.
+        let out = Region::sized(24, 24);
+        let input = Image::from_fn(out.grow(12), 1, |x, _, _| if x < 12 { 0.1 } else { 0.8 });
+        let spread = |img: &Image| {
+            img.data()
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|p| (p[0] - p[1]).abs() + (p[2] - p[1]).abs())
+                .sum::<f32>()
+        };
+        let rcd = spread(&run_with("RGGB", "rcd", &input, out));
+        let bilinear = spread(&run_with("RGGB", "bilinear", &input, out));
+        assert!(rcd < bilinear, "rcd {rcd}, bilinear {bilinear}");
     }
 
     #[test]
