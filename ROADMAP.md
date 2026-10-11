@@ -106,6 +106,12 @@ and the same code compiling to the web (WebAssembly, WebGPU) for the cloud
 surface. Its widget library (viewport, graph editor, widgets generated
 from manifests) and a modern desktop (dockable, sticky panels, saved
 workspaces) come next.
+**A separate UI library** (2026-10-11, decided): the widgets are
+extracted into an egui component library published on its own,
+`egui-pop` (tokens and themes, icons, the normalized dialogs and menus,
+sliders and parameter widgets, the graph view), themable, accessible,
+driven by agents and tested headless; Helios consumes it. Its licence and
+crate layout follow the research in progress (not decided).
 Hard requirement (2026-10-11, decided): GPU acceleration on Linux, Windows
 and macOS, as close to Vulkan as possible, so the viewport can show buffers
 the engine computed on the GPU without copying them back. wgpu is
