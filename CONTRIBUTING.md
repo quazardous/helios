@@ -47,6 +47,13 @@ typos flags that is right (darktable or vkdt jargon) goes in `_typos.toml`.
 A license cargo-deny rejects needs a decision before it goes in
 `deny.toml`.
 
+An optional pre-commit hook runs the fast checks (rustfmt and
+`cargo xtask check`) before each commit:
+
+```bash
+ln -s ../../tools/pre-commit .git/hooks/pre-commit
+```
+
 ## Commits
 
 One purpose per commit, and every commit builds and passes its tests. The
