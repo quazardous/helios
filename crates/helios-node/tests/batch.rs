@@ -247,6 +247,103 @@ fn a_sidecar_is_applied_on_top_of_the_network_for_its_image_only() {
     );
 }
 
+/// [`sidecar`] with darktable's rating (`-1` is a reject).
+fn rated_sidecar(ev: f64, rating: i64) -> String {
+    sidecar(ev).replace(
+        r#"xmlns:darktable="http://darktable.sf.net/""#,
+        &format!(
+            r#"xmlns:darktable="http://darktable.sf.net/" xmlns:xmp="http://ns.adobe.com/xap/1.0/" xmp:Rating="{rating}""#
+        ),
+    )
+}
+
+#[test]
+fn a_sidecar_kept_in_a_vault_is_a_version_and_its_rating_never_overwrites() {
+    use helios_vault::fields::{Command as Field, RATING, REJECTED};
+    use helios_vault::{Vault, VersionId};
+    use helios_vault_sqlite::SqliteStore;
+    let p = Place::new("sidecar-vault");
+    std::fs::write(p.join("network.json"), NETWORK).unwrap();
+    let (rated, rejected) = (p.join("rated.png"), p.join("rejected.png"));
+    picture(&rated, 16, 16);
+    picture(&rejected, 16, 12);
+    std::fs::write(p.join("rated.png.xmp"), rated_sidecar(1.0, 3)).unwrap();
+    std::fs::write(p.join("rejected.png.xmp"), rated_sidecar(0.5, -1)).unwrap();
+    let run = || {
+        let (code, lines, err) = batch(&[
+            "--network",
+            &p.s("network.json"),
+            "--out",
+            &p.s("out"),
+            "--format",
+            "png",
+            "--sidecar",
+            "--vault",
+            &p.s("vault.db"),
+            rated.to_str().unwrap(),
+            rejected.to_str().unwrap(),
+        ]);
+        assert_eq!(code, 0, "{err}\n{lines:?}");
+        lines
+    };
+    let lines = run();
+    let kept = &line_of(&lines, &rated)["sidecar"]["vault"];
+    assert_eq!(kept["added"], true, "{kept}");
+    assert_eq!(kept["rating_set"], true, "{kept}");
+
+    let vault = Vault::new(SqliteStore::open(&p.join("vault.db")).unwrap());
+    let image = vault.import_file(&rated, 2).unwrap();
+    assert_eq!(kept["image"], image.hex());
+    let versions = vault.versions(&image).unwrap();
+    assert_eq!(versions.len(), 1);
+    let version = &versions[0];
+    assert_eq!(
+        version.id,
+        VersionId::from_hex(kept["version"].as_str().unwrap()).unwrap()
+    );
+    assert_eq!(version.origin, "import:xmp");
+    // The network darktable's history describes, with what was left out.
+    assert_eq!(version.edit["modules"][0]["module"], "exposure");
+    assert_eq!(
+        version.edit["modules"][0]["params"]["exposure"]["float"],
+        1.0
+    );
+    assert!(
+        version.edit["import"]["unknown_modules"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("frobnicate")),
+        "{}",
+        version.edit
+    );
+    let field = |image, name: &str| {
+        vault.fields_of(&[image], &[name]).unwrap()[0]
+            .get(name)
+            .cloned()
+    };
+    assert_eq!(field(image, RATING), Some(json!(3)));
+    let other = vault.import_file(&rejected, 2).unwrap();
+    assert_eq!(field(other, REJECTED), Some(json!(true)));
+    assert_eq!(field(other, RATING), None);
+
+    // The user rates it here; the same sidecar imported again adds no
+    // version and leaves the rating alone.
+    vault
+        .apply(&[Field::set(image, RATING, json!(5))], "user", None, 3)
+        .unwrap();
+    let lines = run();
+    let again = &line_of(&lines, &rated)["sidecar"]["vault"];
+    assert_eq!(again["added"], false, "{again}");
+    assert_eq!(again["rating_set"], false, "{again}");
+    assert_eq!(vault.versions(&image).unwrap().len(), 1);
+    assert_eq!(field(image, RATING), Some(json!(5)));
+    let audit = vault.audit(&image).unwrap();
+    assert_eq!(
+        audit.iter().map(|e| e.who.as_str()).collect::<Vec<_>>(),
+        ["import:xmp", "user"]
+    );
+}
+
 /// A node serving the batch endpoint, started directly; killed when dropped.
 struct BatchNode {
     node: std::process::Child,

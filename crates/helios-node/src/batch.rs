@@ -11,7 +11,12 @@
 //!
 //! Each image gets one JSON line on stdout: its path, the file written, how
 //! long it took, and the error if it failed. The others go on after a
-//! failure. On an interrupt, the exports asked for are cancelled: a file is
+//! failure.
+//!
+//! With `--sidecar` and `--vault FILE`, each sidecar applied is also kept
+//! in that vault ([`keep_sidecar`]): the image, its darktable edit as a
+//! version with origin `import:xmp`, and its rating when the vault has
+//! none. On an interrupt, the exports asked for are cancelled: a file is
 //! written whole or not at all, never in part.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -39,6 +44,8 @@ pub struct Options {
     pub name: String,
     /// Apply each image's darktable sidecar on top of the network.
     pub sidecar: bool,
+    /// Keep each sidecar applied in this vault (see [`keep_sidecar`]).
+    pub vault: Option<PathBuf>,
     /// The source given each image; the network's only source by default.
     pub source: Option<String>,
     /// The node exported; the network's first export, else its only sink.
@@ -131,6 +138,51 @@ pub fn sidecar_params(
     }
     let report = json!({ "applied": applied, "skipped": skipped, "import": imported.report });
     Ok((params, report))
+}
+
+/// Who imported a sidecar: the origin of its version and the author of
+/// its rating in the audit trail.
+pub const IMPORT_XMP: &str = "import:xmp";
+
+/// Keeps a darktable sidecar's import in a vault: the image file, its edit
+/// as a version with origin `import:xmp` (the network
+/// [`helios_xmp::Imported::edit`] describes, with the import report under
+/// `import`), and its rating, only when the vault has none: a sidecar
+/// never overwrites a rating chosen here (darktable's `-1` is a reject).
+/// The version is a first edit, so importing the same sidecar again keeps
+/// one version; an image already edited gets a second head, its edit
+/// untouched.
+pub fn keep_sidecar<S: helios_vault::Store>(
+    vault: &helios_vault::Vault<S>,
+    image: &Path,
+    xml: &str,
+    now: u64,
+) -> Result<Value, String> {
+    use helios_vault::fields::{Command, Op, RATING, REJECTED};
+    let sidecar = helios_xmp::Sidecar::parse(xml)?;
+    let imported = helios_xmp::import(&sidecar, &helios_xmp::Layouts::built_in());
+    let id = vault.import_file(image, now)?;
+    let mut edit = imported.edit();
+    edit["import"] = json!(imported.report);
+    let version =
+        helios_vault::Version::new(id, Vec::new(), edit, IMPORT_XMP, now).labelled(IMPORT_XMP);
+    let added = vault.add_version(&version)?;
+    let rating = match sidecar.rating {
+        Some(-1) => Some(Command::with(id, REJECTED, Op::SetIfAbsent(json!(true)))),
+        Some(stars @ 0..=5) => Some(Command::with(id, RATING, Op::SetIfAbsent(json!(stars)))),
+        _ => None,
+    };
+    let rating_set = match rating {
+        Some(command) => vault.apply(&[command], IMPORT_XMP, None, now)?.changed > 0,
+        None => false,
+    };
+    Ok(json!({
+        "image": id.hex(),
+        "version": version.id.hex(),
+        "added": added,
+        "rating": sidecar.rating,
+        "rating_set": rating_set,
+    }))
 }
 
 /// The network a batch's own node runs: files made absolute (the network
@@ -382,6 +434,15 @@ pub fn run(
         Path::exists,
     );
 
+    let vault = match (&options.vault, options.sidecar) {
+        (Some(path), true) => Some(helios_vault::Vault::new(
+            helios_vault_sqlite::SqliteStore::open(path)
+                .map_err(|e| format!("{}: {e}", path.display()))?,
+        )),
+        (Some(_), false) => return Err("--vault keeps sidecars: it needs --sidecar".into()),
+        (None, _) => None,
+    };
+
     let mut failed = false;
     let mut cursor = 0;
     let mut running: BTreeMap<u64, Pending> = BTreeMap::new();
@@ -408,7 +469,15 @@ pub fn run(
                 sidecar: Value::Null,
             };
             next += 1;
-            match submit(&node, options, &source, &target, &modules, pending) {
+            match submit(
+                &node,
+                options,
+                vault.as_ref(),
+                &source,
+                &target,
+                &modules,
+                pending,
+            ) {
                 Ok((job, seq, pending)) => {
                     if cursor == 0 {
                         cursor = seq;
@@ -470,6 +539,7 @@ pub fn run(
 fn submit(
     node: &Node,
     options: &Options,
+    vault: Option<&helios_vault::Vault<helios_vault_sqlite::SqliteStore>>,
     source: &str,
     target: &str,
     modules: &BTreeMap<String, String>,
@@ -481,7 +551,16 @@ fn submit(
         if path.is_file() {
             let read = std::fs::read_to_string(&path)
                 .map_err(|e| format!("cannot read {}: {e}", path.display()))
-                .and_then(|xml| sidecar_params(&xml, modules));
+                .and_then(|xml| {
+                    let (params, mut report) = sidecar_params(&xml, modules)?;
+                    if let Some(vault) = vault {
+                        let now = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map_or(0, |d| d.as_secs());
+                        report["vault"] = keep_sidecar(vault, &pending.image, &xml, now)?;
+                    }
+                    Ok((params, report))
+                });
             match read {
                 Ok((p, mut report)) => {
                     report["path"] = json!(path);

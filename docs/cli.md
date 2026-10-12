@@ -49,6 +49,7 @@ Applies a network to many images, each exported to a file in `--out`:
 | `--jobs N` | `2` | exports in flight at once; the node's scheduler runs them side by side |
 | `--name TEMPLATE` | `{stem}.{ext}` | the output file name; `{stem}` is the image's name without extension, `{ext}` the format's |
 | `--sidecar` | off | applies each image's darktable sidecar (`IMG_0001.CR2.xmp`) on top of the network |
+| `--vault FILE` | | with `--sidecar`: keeps each sidecar applied in this vault (see below) |
 | `--source NAME` | the only source | the source given each image |
 | `--node NAME` | the network's first export, else the node nothing reads | the node exported |
 | `--socket ADDR --control ADDR` | | attach to a running node instead of starting one (`--token-file FILE` for TCP) |
@@ -70,6 +71,16 @@ the edit goes to the one node of the network running that module, and what
 could not be carried over is listed with the reason (a module the network
 does not run, or the XMP import's own report). An image without a sidecar
 uses the network as it is.
+
+With `--vault FILE` as well, each sidecar applied is kept in that vault:
+the image is imported, its darktable edit becomes a version with origin
+`import:xmp` (the modules in darktable's pipe order, and the import report
+under `import`), and its rating is written only when the vault has none
+(darktable's `-1` is a reject), so a sidecar never overwrites a rating
+chosen in Helios. The version is a first edit: importing the same sidecar
+again adds nothing, and an image already edited keeps its edit beside the
+import, as a second head. `sidecar.vault` says what was kept (`image`,
+`version`, `added`, `rating`, `rating_set`).
 
 A failed image (a file that does not load, an export that fails) says why
 in `error`, and the others go on; the exit code is then 1. Ctrl-C cancels the

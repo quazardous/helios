@@ -18,14 +18,16 @@
 //!     helios sandbox new DIR [--network FILE] | start DIR | stop DIR | clean DIR
 //!
 //!     helios batch --network FILE --out DIR [--format jpeg|png|tiff] [--quality Q] [--jobs N]
-//!                  [--name TEMPLATE] [--sidecar] [--source NAME] [--node NAME]
+//!                  [--name TEMPLATE] [--sidecar [--vault FILE]] [--source NAME] [--node NAME]
 //!                  [--socket ADDR --control ADDR [--token-file FILE]] IMAGES...
 //!
 //! `batch` applies a network to many images, each exported to a file in
 //! `--out` (named by `--name`, `{stem}.{ext}` by default; a name already
 //! taken gets `-1`, `-2`...). It starts its own node in a temporary sandbox,
 //! or drives the node at `--socket` and `--control`; `--sidecar` applies each
-//! image's darktable XMP history on top of the network. It prints one JSON
+//! image's darktable XMP history on top of the network, and with `--vault`
+//! keeps it there as a version with origin `import:xmp`, with the sidecar's
+//! rating when the vault has none. It prints one JSON
 //! line per image (`path`, `output`, `duration_ms`, `error`, `sidecar`) and
 //! exits with 1 when an image failed (the others go on), 130 when
 //! interrupted: Ctrl-C cancels the exports in flight and leaves no partial
@@ -64,7 +66,7 @@ const USAGE: &str = "usage:
   helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] fault NODE compute|source-read
   helios sandbox new DIR [--network FILE] | start DIR | stop DIR | clean DIR
   helios batch --network FILE --out DIR [--format jpeg|png|tiff] [--quality Q] [--jobs N]
-               [--name TEMPLATE] [--sidecar] [--source NAME] [--node NAME]
+               [--name TEMPLATE] [--sidecar [--vault FILE]] [--source NAME] [--node NAME]
                [--socket ADDR --control ADDR [--token-file FILE]] IMAGES...";
 
 fn usage(error: &str) -> ExitCode {
@@ -315,6 +317,7 @@ fn batch_options(args: &[String]) -> Result<Options, String> {
         jobs: 2,
         name: "{stem}.{ext}".into(),
         sidecar: false,
+        vault: None,
         source: None,
         node: None,
         attach: None,
@@ -342,6 +345,7 @@ fn batch_options(args: &[String]) -> Result<Options, String> {
             }
             "--name" => options.name = value()?,
             "--sidecar" => options.sidecar = true,
+            "--vault" => options.vault = Some(PathBuf::from(value()?)),
             "--source" => options.source = Some(value()?),
             "--node" => options.node = Some(value()?),
             "--socket" => socket = Some(value()?),
