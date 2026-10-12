@@ -9,86 +9,144 @@
 //! [`Options::busy_timeout`] for another one, and every write that takes
 //! more than one statement runs in one `BEGIN IMMEDIATE` transaction. There
 //! is no lock file.
+//!
+//! Schema: numbered migrations and `PRAGMA user_version`, with a verified
+//! snapshot before any change (see the `migrate` module and [`snapshot`]).
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 
 use std::collections::BTreeMap;
 
+use serde::Serialize;
 use serde_json::Value;
 
 use helios_vault::fields::{AuditEntry, LABELS, Order, Query, RATING};
 use helios_vault::{Image, ImageId, Location, Store, Version, VersionId, parse_hash};
 
-const SCHEMA: &str = "
-CREATE TABLE IF NOT EXISTS images (
-    id      TEXT PRIMARY KEY,
-    size    INTEGER NOT NULL,
-    partial TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS images_size ON images (size);
-CREATE TABLE IF NOT EXISTS locations (
-    path          TEXT PRIMARY KEY,
-    image         TEXT NOT NULL REFERENCES images (id),
-    size          INTEGER NOT NULL,
-    modified      INTEGER NOT NULL,
-    last_verified INTEGER NOT NULL,
-    present       INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS locations_image ON locations (image);
-CREATE TABLE IF NOT EXISTS fields (
-    image  TEXT NOT NULL REFERENCES images (id),
-    name   TEXT NOT NULL,
-    value  TEXT NOT NULL,   -- JSON
-    number REAL,            -- the value when it is a number, for queries
-    PRIMARY KEY (image, name)
-);
-CREATE INDEX IF NOT EXISTS fields_name_number ON fields (name, number);
-CREATE TABLE IF NOT EXISTS audit (
-    seq   INTEGER PRIMARY KEY AUTOINCREMENT,
-    at    INTEGER NOT NULL,
-    who   TEXT NOT NULL,
-    job   INTEGER,
-    image TEXT NOT NULL,
-    field TEXT NOT NULL,
-    old   TEXT,
-    new   TEXT
-);
-CREATE INDEX IF NOT EXISTS audit_image ON audit (image);
-CREATE TABLE IF NOT EXISTS versions (
-    id      TEXT PRIMARY KEY,
-    image   TEXT NOT NULL REFERENCES images (id),
-    parents TEXT NOT NULL,  -- JSON array of version ids
-    edit    TEXT NOT NULL,  -- JSON
-    origin  TEXT NOT NULL,
-    at      INTEGER NOT NULL,
-    label   TEXT
-);
-CREATE INDEX IF NOT EXISTS versions_image ON versions (image);
-CREATE TABLE IF NOT EXISTS documents (
-    ns    TEXT NOT NULL,
-    key   TEXT NOT NULL,
-    value TEXT NOT NULL,  -- JSON
-    PRIMARY KEY (ns, key)
-);
-";
+mod migrate;
+pub mod snapshot;
+
+pub use migrate::{Migrated, SCHEMA_VERSION};
 
 /// How a vault database is opened.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Options {
     /// How long a write waits for another connection's write before it
     /// fails as busy.
     pub busy_timeout: Duration,
+    /// Told how a long operation (a snapshot, a migration) advances. The
+    /// store has no bus of its own: [`Progress`] is a bus event, so the
+    /// caller can publish it as it comes.
+    pub on_progress: Option<OnProgress>,
 }
 
 impl Default for Options {
     fn default() -> Self {
         Self {
             busy_timeout: Duration::from_secs(5),
+            on_progress: None,
         }
     }
+}
+
+impl std::fmt::Debug for Options {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Options")
+            .field("busy_timeout", &self.busy_timeout)
+            .field("on_progress", &self.on_progress.is_some())
+            .finish()
+    }
+}
+
+/// Receives [`Progress`] reports.
+pub type OnProgress = Arc<dyn Fn(&Progress) + Send + Sync>;
+
+/// How far a long operation is.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Progress {
+    /// "snapshot" (pages copied) or "migration" (steps run).
+    pub stage: String,
+    pub done: u64,
+    pub total: u64,
+    /// The step starting, for a migration ("2 add an index").
+    pub step: Option<String>,
+}
+
+impl helios_core::Event for Progress {
+    const KIND: &'static str = "vault.migration_progress";
+}
+
+/// Why a vault database could not be opened.
+#[derive(Debug)]
+pub enum OpenError {
+    Sqlite(String),
+    /// Written by a newer Helios: this one does not know its schema and
+    /// does not touch it (there is no downgrade).
+    TooNew {
+        found: u32,
+        supported: u32,
+    },
+    /// The snapshot before a migration could not be made or verified;
+    /// nothing was migrated.
+    Snapshot(String),
+    /// A migration step failed; the database stays at the step before.
+    Migration {
+        version: u32,
+        name: &'static str,
+        message: String,
+        snapshot: Option<PathBuf>,
+    },
+}
+
+impl std::fmt::Display for OpenError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Sqlite(e) => write!(f, "{e}"),
+            Self::TooNew { found, supported } => write!(
+                f,
+                "this vault has schema version {found}, written by a newer Helios; \
+                 this one reads up to version {supported} and leaves it untouched"
+            ),
+            Self::Snapshot(e) => write!(
+                f,
+                "the vault was not upgraded: its snapshot failed first ({e})"
+            ),
+            Self::Migration {
+                version,
+                name,
+                message,
+                snapshot,
+            } => {
+                write!(
+                    f,
+                    "upgrading the vault to version {version} ({name}) failed: {message}"
+                )?;
+                if let Some(s) = snapshot {
+                    write!(f, "; a copy from before the upgrade is in {}", s.display())?;
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+impl std::error::Error for OpenError {}
+
+impl From<OpenError> for String {
+    fn from(e: OpenError) -> Self {
+        e.to_string()
+    }
+}
+
+/// What happened while a vault was opened.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct OpenReport {
+    /// The schema change, when there was one.
+    pub migrated: Option<Migrated>,
 }
 
 /// The settings a connection runs with, as SQLite reports them.
@@ -103,6 +161,19 @@ pub struct Pragmas {
 
 pub struct SqliteStore {
     db: Connection,
+    /// The database file; none in memory.
+    path: Option<PathBuf>,
+    options: Options,
+    report: OpenReport,
+}
+
+impl std::fmt::Debug for SqliteStore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SqliteStore")
+            .field("path", &self.path)
+            .field("report", &self.report)
+            .finish_non_exhaustive()
+    }
 }
 
 impl SqliteStore {
@@ -157,35 +228,54 @@ fn err(e: rusqlite::Error) -> String {
 impl SqliteStore {
     /// Opens (or creates) a vault database file with the default options.
     pub fn open(path: &Path) -> Result<Self, String> {
-        Self::open_with(path, &Options::default())
+        Ok(Self::open_with(path, &Options::default())?)
     }
 
-    pub fn open_with(path: &Path, options: &Options) -> Result<Self, String> {
-        Self::init(Connection::open(path).map_err(err)?, options)
+    /// Opens (or creates) a vault database file, bringing its schema to
+    /// [`SCHEMA_VERSION`].
+    pub fn open_with(path: &Path, options: &Options) -> Result<Self, OpenError> {
+        let db = Connection::open(path).map_err(|e| OpenError::Sqlite(err(e)))?;
+        Self::init(db, Some(path), options)
     }
 
     pub fn in_memory() -> Result<Self, String> {
-        Self::init(
-            Connection::open_in_memory().map_err(err)?,
-            &Options::default(),
-        )
+        let db = Connection::open_in_memory().map_err(err)?;
+        Ok(Self::init(db, None, &Options::default())?)
     }
 
-    fn init(mut db: Connection, options: &Options) -> Result<Self, String> {
-        db.busy_timeout(options.busy_timeout).map_err(err)?;
-        db.pragma_update(None, "foreign_keys", "ON").map_err(err)?;
+    fn init(mut db: Connection, path: Option<&Path>, options: &Options) -> Result<Self, OpenError> {
+        let sqlite = |e| OpenError::Sqlite(err(e));
+        db.busy_timeout(options.busy_timeout).map_err(sqlite)?;
+        db.pragma_update(None, "foreign_keys", "ON")
+            .map_err(sqlite)?;
         // WAL is kept in the file; an in-memory database answers "memory".
         let _mode: String = db
             .query_row("PRAGMA journal_mode = WAL", [], |r| r.get(0))
-            .map_err(err)?;
+            .map_err(sqlite)?;
         db.pragma_update(None, "synchronous", "NORMAL")
-            .map_err(err)?;
-        let tx = db
-            .transaction_with_behavior(TransactionBehavior::Immediate)
-            .map_err(err)?;
-        tx.execute_batch(SCHEMA).map_err(err)?;
-        tx.commit().map_err(err)?;
-        Ok(Self { db })
+            .map_err(sqlite)?;
+        let migrated =
+            migrate::migrate(&mut db, path, options, migrate::MIGRATIONS, migrate::VIEWS)?;
+        Ok(Self {
+            db,
+            path: path.map(Path::to_path_buf),
+            options: options.clone(),
+            report: OpenReport { migrated },
+        })
+    }
+
+    /// What happened while the vault was opened.
+    pub fn report(&self) -> &OpenReport {
+        &self.report
+    }
+
+    /// Takes a verified snapshot of the database now (none in memory). Call
+    /// it on a schedule: a snapshot is cheap next to losing a catalog.
+    pub fn snapshot(&self, reason: &str) -> Result<Option<PathBuf>, String> {
+        self.path
+            .as_deref()
+            .map(|path| snapshot::take(&self.db, path, reason, &self.options))
+            .transpose()
     }
 
     pub fn pragmas(&self) -> Result<Pragmas, String> {

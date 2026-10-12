@@ -62,6 +62,7 @@ fn a_vault_database_runs_in_wal_mode() {
         &path,
         &Options {
             busy_timeout: Duration::from_millis(1234),
+            ..Options::default()
         },
     )
     .unwrap();

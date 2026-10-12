@@ -61,6 +61,11 @@ thread or in the code is marked *(guess)*.
 - **Helios exposure**: at risk (early). The SQLite schema is a
   `CREATE TABLE IF NOT EXISTS` string with no `user_version`; the first
   schema change will need a migration framework.
+  *Addressed since*: numbered migrations and `user_version`, each step in a
+  transaction that drops every view and trigger first and recreates the
+  current ones last; foreign keys are off while it runs and the orphans
+  found afterwards are reported. Tested on old, current, newer and messy
+  databases (orphans, a stale view and trigger).
 - **Recommendation**: version the schema (`PRAGMA user_version`), one numbered
   migration per change, each in a transaction; drop and recreate every view
   and trigger at the end of each migration instead of patching them; run an
@@ -81,6 +86,12 @@ thread or in the code is marked *(guess)*.
   https://github.com/darktable-org/darktable/issues/15963
 - **Helios exposure**: at risk (no migration yet). ROADMAP rule 6 already
   says migrations are explicit operations, which is the right base.
+  *Addressed since*: a verified snapshot (backup API, then `quick_check` on
+  the copy) before any migration, named in the error when a step fails;
+  progress reported as a `vault.migration_progress` event (snapshot pages,
+  then steps); a database newer than the binary is refused with a clear
+  message, never downgraded. Not done: progress inside one long step, and
+  the 200k-image budget test.
 - **Recommendation**: snapshot before any migration and name it in the UI;
   report progress (rows done / total) as a scheduler job; budget-test a
   migration on a synthetic 200k-image catalog. Decide the downgrade story now:

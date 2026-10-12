@@ -8,13 +8,15 @@ repository.workspace = true
 
 [dependencies]
 helios-vault.workspace = true
+helios-core.workspace = true
+serde.workspace = true
 serde_json.workspace = true
-# MIT; SQLite itself is public domain, built in.
-rusqlite = { version = "0.40", features = ["bundled"] }
+# MIT; SQLite itself is public domain, built in. `backup` is SQLite's
+# online backup API, used for snapshots.
+rusqlite = { version = "0.40", features = ["bundled", "backup"] }
 
 [dev-dependencies]
 helios-journal.workspace = true
-helios-core.workspace = true
 
 [lints]
 workspace = true
