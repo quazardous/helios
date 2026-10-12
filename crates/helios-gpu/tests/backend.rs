@@ -295,3 +295,54 @@ fn vkdt_modules_on_the_gpu_match_their_cpu_reference() {
         assert!(c.max_abs < 1e-4, "usm {amount}, {thrs}: {c:?}");
     }
 }
+
+#[test]
+fn a_step_over_4_mpx_matches_the_cpu() {
+    let _gpu = helios_testkit::gpu_lock();
+    let Some(gpu) = gpu() else { return };
+    // 5.2 Mpx: along one dimension, 64 pixels a workgroup, it would need
+    // 81 250 workgroups, over the 65 535 a dimension is sure to allow.
+    let input = helios_testkit::noise(Region::sized(2600, 2000), 4, 5);
+    assert!(input.region().area().div_ceil(64) > 65_535);
+    let exposure = ModuleRef::new(Exposure);
+    let params = Params::new()
+        .with("exposure", Value::Float(1.0))
+        .with("black", Value::Float(0.01));
+    let c = check(
+        &gpu,
+        &exposure,
+        &params,
+        &Context::new(),
+        &input,
+        input.region(),
+    )
+    .unwrap();
+    assert!(c.max_rel < 1e-5, "exposure: {c:?}");
+    // A kernel with an overlap: its last rows read the image's last rows.
+    let blur = ModuleRef::new(helios_module_blur::Blur);
+    let params = Params::new().with("radius", Value::Float(1.0));
+    let c = check(
+        &gpu,
+        &blur,
+        &params,
+        &Context::new(),
+        &input,
+        input.region(),
+    )
+    .unwrap();
+    assert!(c.max_abs < 1e-4, "blur: {c:?}");
+}
+
+#[test]
+fn the_dispatch_grid_covers_every_pixel_within_the_limits() {
+    use helios_gpu::grid;
+    assert_eq!(grid(64, 65_535), Ok((1, 1)));
+    assert_eq!(grid(65, 65_535), Ok((2, 1)));
+    assert_eq!(grid(0, 65_535), Ok((1, 1)));
+    // 2600 x 2000: 81 250 workgroups, as two rows.
+    let (x, y) = grid(2600 * 2000, 65_535).unwrap();
+    assert_eq!((x, y), (65_535, 2));
+    assert!(u64::from(x) * u64::from(y) * 64 >= 2600 * 2000);
+    // Past what two dimensions hold: an error, not a wrong image.
+    assert!(grid(u32::MAX, 16).is_err());
+}

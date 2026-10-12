@@ -6,7 +6,8 @@
 @group(0) @binding(1) var<storage, read_write> output: array<f32>;
 // [0].x: the reach in pixels; from [1] on: weights from the centre outward.
 @group(0) @binding(2) var<uniform> plan: array<vec4<f32>, 64>;
-// [0]: pixels, input channels, output channels; [1]: input and output sizes.
+// [0]: pixels, input channels, output channels, invocations per grid row;
+// [1]: input and output sizes.
 @group(0) @binding(3) var<uniform> shape: array<vec4<u32>, 2>;
 
 fn weight(i: i32) -> f32 {
@@ -16,7 +17,7 @@ fn weight(i: i32) -> f32 {
 
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) id: vec3<u32>) {
-    let p = id.x;
+    let p = id.y * shape[0].w + id.x;
     if (p >= shape[0].x) {
         return;
     }

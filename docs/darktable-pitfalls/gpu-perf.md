@@ -69,9 +69,11 @@ documentation, not from darktable.
   opened with the adapter's limits (falling back to the adapter's buffer
   sizes, then wgpu's defaults, when a driver refuses, and saying so), the
   survey records those same limits, and `fits()` reads the opened device's
-  limits once it is open. Still open: kernels are dispatched along one
+  limits once it is open. Kernels used to be dispatched along one
   dimension, 64 pixels a workgroup, so wgpu's 65535 workgroups per
-  dimension cap a single dispatch near 4.2 Mpx whatever the buffer limits.
+  dimension capped a single dispatch near 4.2 Mpx whatever the buffer
+  limits; they now run over a two-dimensional grid (fixed 2026-10-12,
+  tested at 5.2 Mpx against the CPU).
 - Recommendation: request `required_limits` from the adapter (at least
   `max_buffer_size` and `max_storage_buffer_binding_size`), and make
   `fits()` read the limits of the opened device, not of the adapter. Add a

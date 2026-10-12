@@ -48,13 +48,18 @@ impl Context {
 /// (`helios-gpu`) over the same plan as the CPU code, and checked against
 /// it. The core only carries it: it never runs it.
 ///
-/// One invocation per output pixel, workgroups of 64. Bindings, group 0:
-/// `0` the input (`array<f32>`, read; it covers the region `input_region`
-/// asks for), `1` the output (`array<f32>`, read and write), `2` the plan's
-/// uniforms (`array<vec4<f32>>`), `3` the shape (`array<vec4<u32>, 2>`:
-/// output pixel count, input channels, output channels; then input width,
-/// input height, output width, output height). The output region sits in
-/// the input at `(input width - output width) / 2` on each side.
+/// One invocation per output pixel, workgroups of 64 along x. The
+/// invocations form a two-dimensional grid (a GPU caps workgroups per
+/// dimension, 65535 at least, which along one dimension would stop near
+/// 4.2 Mpx): pixel `id.y * shape[0].w + id.x`, and an invocation past the
+/// pixel count does nothing. Bindings, group 0: `0` the input
+/// (`array<f32>`, read; it covers the region `input_region` asks for), `1`
+/// the output (`array<f32>`, read and write), `2` the plan's uniforms
+/// (`array<vec4<f32>>`), `3` the shape (`array<vec4<u32>, 2>`: output pixel
+/// count, input channels, output channels, invocations per grid row; then
+/// input width, input height, output width, output height). The output
+/// region sits in the input at `(input width - output width) / 2` on each
+/// side.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct GpuKernel {
     pub wgsl: &'static str,

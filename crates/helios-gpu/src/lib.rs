@@ -258,6 +258,10 @@ impl Gpu {
         }
         let pipeline = self.pipeline(name, job)?;
         let pixels = output.area() as u32;
+        let (groups_x, groups_y) = grid(
+            pixels,
+            self.device.limits().max_compute_workgroups_per_dimension,
+        )?;
         let d = &self.device;
         let scope = d.push_error_scope(wgpu::ErrorFilter::Validation);
         let uniform = |data: &[u8], label: &str| {
@@ -279,7 +283,7 @@ impl Gpu {
             pixels,
             input.channels(),
             channels,
-            0u32,
+            groups_x * WORKGROUP,
             job.input.width,
             job.input.height,
             output.width,
@@ -313,7 +317,7 @@ impl Gpu {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
             pass.set_pipeline(&pipeline);
             pass.set_bind_group(0, &group, &[]);
-            pass.dispatch_workgroups(pixels.div_ceil(64), 1, 1);
+            pass.dispatch_workgroups(groups_x, groups_y, 1);
         }
         // Submitted, not waited for: the queue runs submissions in order,
         // so the next kernel or a readback sees this one's result.
@@ -355,6 +359,25 @@ impl Gpu {
         readback.unmap();
         Ok(Image::new(image.region(), image.channels(), data))
     }
+}
+
+/// Invocations in a workgroup, along x (every kernel's `@workgroup_size`).
+const WORKGROUP: u32 = 64;
+
+/// The workgroups that cover `pixels`, as a grid: as many along x as a
+/// dimension allows (`max` per dimension), then rows. A kernel finds its
+/// pixel at `id.y * x * WORKGROUP + id.x`; the last row may run past the
+/// pixel count, which kernels check.
+pub fn grid(pixels: u32, max: u32) -> Result<(u32, u32), String> {
+    let groups = pixels.div_ceil(WORKGROUP).max(1);
+    let x = groups.min(max.max(1));
+    let y = groups.div_ceil(x);
+    if y > max {
+        return Err(format!(
+            "{pixels} pixels need {x} x {y} workgroups, over the device's {max} per dimension"
+        ));
+    }
+    Ok((x, y))
 }
 
 /// What a [`DeviceImage`] made by a [`Gpu`] holds: a storage buffer, and

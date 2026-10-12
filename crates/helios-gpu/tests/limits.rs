@@ -51,7 +51,7 @@ const TAIL: &str = r"
 
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) id: vec3<u32>) {
-    let p = id.x;
+    let p = id.y * shape[0].w + id.x;
     if (p >= shape[0].x) {
         return;
     }

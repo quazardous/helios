@@ -6,7 +6,8 @@
 @group(0) @binding(1) var<storage, read_write> output: array<f32>;
 // x: amount, y: thrs.
 @group(0) @binding(2) var<uniform> plan: array<vec4<f32>, 1>;
-// [0]: pixels, input channels, output channels; [1]: input and output sizes.
+// [0]: pixels, input channels, output channels, invocations per grid row;
+// [1]: input and output sizes.
 @group(0) @binding(3) var<uniform> shape: array<vec4<u32>, 2>;
 
 fn texel(x: i32, y: i32, c: u32) -> f32 {
@@ -32,7 +33,7 @@ fn bilinear(px: f32, py: f32, c: u32) -> f32 {
 
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) id: vec3<u32>) {
-    let p = id.x;
+    let p = id.y * shape[0].w + id.x;
     if (p >= shape[0].x) {
         return;
     }
