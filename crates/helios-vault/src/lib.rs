@@ -136,11 +136,20 @@ pub trait Store: Send {
     ) -> Result<(), String>;
     /// Every document of a namespace, by key.
     fn documents(&self, ns: &str) -> Result<Vec<(String, serde_json::Value)>, String>;
+
+    /// Starts a write transaction: the calls until [`Store::commit`] are
+    /// kept whole or, after [`Store::rollback`] or a crash, not at all, and
+    /// the reads in it see no other writer. Transactions do not nest.
+    fn begin(&mut self) -> Result<(), String>;
+    fn commit(&mut self) -> Result<(), String>;
+    fn rollback(&mut self) -> Result<(), String>;
 }
 
 /// Rows in memory: the reference other stores are checked against.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct MemoryStore {
+    /// The rows as they were when the open transaction began.
+    before: Option<Box<MemoryStore>>,
     documents: BTreeMap<(String, String), serde_json::Value>,
     versions: BTreeMap<VersionId, Version>,
     images: BTreeMap<ImageId, Image>,
@@ -323,6 +332,30 @@ impl Store for MemoryStore {
             .map(|((_, k), v)| (k.clone(), v.clone()))
             .collect())
     }
+
+    fn begin(&mut self) -> Result<(), String> {
+        if self.before.is_some() {
+            return Err("a transaction is already open".into());
+        }
+        self.before = Some(Box::new(self.clone()));
+        Ok(())
+    }
+
+    fn commit(&mut self) -> Result<(), String> {
+        self.before
+            .take()
+            .map(|_| ())
+            .ok_or_else(|| "no transaction to commit".into())
+    }
+
+    fn rollback(&mut self) -> Result<(), String> {
+        let before = self
+            .before
+            .take()
+            .ok_or_else(|| "no transaction to roll back".to_string())?;
+        *self = *before;
+        Ok(())
+    }
 }
 
 /// Files the vault treats as images, by extension (raw formats and common
@@ -388,6 +421,27 @@ impl<S: Store> Vault<S> {
     pub fn with_bus(mut self, bus: std::sync::Arc<helios_core::Bus>) -> Self {
         self.bus = Some(bus);
         self
+    }
+
+    /// Runs `f` on the store in one transaction: committed when it
+    /// succeeds, rolled back when it fails.
+    pub(crate) fn transaction<T>(
+        &self,
+        f: impl FnOnce(&mut S) -> Result<T, String>,
+    ) -> Result<T, String> {
+        let mut store = self.store.lock().expect("store lock");
+        store.begin()?;
+        match f(&mut store) {
+            Ok(value) => {
+                store.commit()?;
+                Ok(value)
+            }
+            Err(e) => {
+                // The first error is the one worth reporting.
+                let _ = store.rollback();
+                Err(e)
+            }
+        }
     }
 
     pub fn reads(&self) -> Reads {
@@ -464,18 +518,21 @@ impl<S: Store> Vault<S> {
             }
             let id = ImageId(self.full_hash(&path)?);
             let partial = self.partial_hash(&path, size)?;
-            let mut store = self.store.lock().expect("store lock");
-            let new = store.add_image(&Image { id, size, partial })?;
-            store.put_location(
-                &id,
-                &Location {
-                    path,
-                    size,
-                    modified,
-                    last_verified: now,
-                    present: true,
-                },
-            )?;
+            // The image and its location go in together, or not at all.
+            let new = self.transaction(|store| {
+                let new = store.add_image(&Image { id, size, partial })?;
+                store.put_location(
+                    &id,
+                    &Location {
+                        path,
+                        size,
+                        modified,
+                        last_verified: now,
+                        present: true,
+                    },
+                )?;
+                Ok(new)
+            })?;
             if new {
                 report.added += 1;
                 self.catalog.lock().expect("catalog lock").version += 1;

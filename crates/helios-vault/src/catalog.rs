@@ -99,7 +99,12 @@ impl<S: Store> Vault<S> {
         self.reads.lock().expect("reads lock").queries += 1;
     }
 
-    /// Applies a batch of commands, all or nothing.
+    /// Applies a batch of commands, all or nothing: the checks, the reads
+    /// of the old values, the writes and their audit rows run in one store
+    /// transaction, so a crash or a failed write leaves no part of the
+    /// batch, and another process writing the same vault cannot slip in
+    /// between an old value and its change. Events go out once it is
+    /// committed.
     pub fn apply(
         &self,
         commands: &[Command],
@@ -108,46 +113,45 @@ impl<S: Store> Vault<S> {
         now: u64,
     ) -> Result<ApplyReport, String> {
         let mut report = ApplyReport::default();
-        // Check everything first, and keep only the last change of each field.
+        // Check the values first, and keep only the last change of each field.
         let mut last: BTreeMap<(ImageId, String), Option<Value>> = BTreeMap::new();
-        {
-            let store = self.store.lock().expect("store lock");
-            for c in commands {
-                if store.image(&c.image)?.is_none() {
-                    return Err(format!("no image {}", c.image.hex()));
-                }
-                let value = if let Some(v) = &c.value {
-                    Some(fields::normalize(&c.field, v)?)
-                } else {
-                    fields::spec(&c.field)?;
-                    None
-                };
-                if last.insert((c.image, c.field.clone()), value).is_some() {
-                    report.coalesced += 1;
-                }
+        for c in commands {
+            let value = if let Some(v) = &c.value {
+                Some(fields::normalize(&c.field, v)?)
+            } else {
+                fields::spec(&c.field)?;
+                None
+            };
+            if last.insert((c.image, c.field.clone()), value).is_some() {
+                report.coalesced += 1;
             }
         }
-        let mut store = self.store.lock().expect("store lock");
-        for ((image, field), new) in last {
-            let old = store.field(&image, &field)?;
-            if old == new {
-                report.unchanged += 1;
-                continue;
+        let events = self.transaction(|store| {
+            for (image, _) in last.keys() {
+                if store.image(image)?.is_none() {
+                    return Err(format!("no image {}", image.hex()));
+                }
             }
-            store.set_field(&image, &field, new.as_ref())?;
-            let entry = AuditEntry {
-                seq: 0,
-                at: now,
-                who: who.into(),
-                job,
-                image,
-                field: field.clone(),
-                old: old.clone(),
-                new: new.clone(),
-            };
-            let seq = store.add_audit(&entry)?;
-            if let Some(bus) = &self.bus {
-                let event = FieldChanged {
+            let mut events = Vec::new();
+            for ((image, field), new) in last {
+                let old = store.field(&image, &field)?;
+                if old == new {
+                    report.unchanged += 1;
+                    continue;
+                }
+                store.set_field(&image, &field, new.as_ref())?;
+                let entry = AuditEntry {
+                    seq: 0,
+                    at: now,
+                    who: who.into(),
+                    job,
+                    image,
+                    field: field.clone(),
+                    old: old.clone(),
+                    new: new.clone(),
+                };
+                let seq = store.add_audit(&entry)?;
+                events.push(FieldChanged {
                     image: image.hex(),
                     field,
                     old,
@@ -155,12 +159,16 @@ impl<S: Store> Vault<S> {
                     who: who.into(),
                     job,
                     audit: seq,
-                };
-                bus.publish("vault", job, &event);
+                });
+                report.changed += 1;
             }
-            report.changed += 1;
+            Ok(events)
+        })?;
+        if let Some(bus) = &self.bus {
+            for event in &events {
+                bus.publish("vault", job, event);
+            }
         }
-        drop(store);
         if report.changed > 0 {
             self.catalog.lock().expect("catalog lock").version += 1;
         }

@@ -28,6 +28,145 @@ pub fn check<S: Store>(make: impl Fn() -> S) {
     cursors_cost_one_query_and_report_deltas(make());
     versions_are_content_addressed_and_heads_follow_forks_and_merges(make());
     documents_round_trip_by_namespace(make());
+    transactions_keep_all_or_nothing(make());
+    a_batch_failing_at_its_audit_row_leaves_nothing(make());
+}
+
+fn transactions_keep_all_or_nothing<S: Store>(s: S) {
+    let mut s = with_images(s, 1);
+    let a = image(1).id;
+    s.begin().unwrap();
+    assert!(s.begin().is_err(), "transactions do not nest");
+    s.set_field(&a, "rating", Some(&json!(2))).unwrap();
+    s.set_document("config", "user", Some(&json!(1))).unwrap();
+    assert_eq!(
+        s.field(&a, "rating").unwrap(),
+        Some(json!(2)),
+        "a transaction reads its own writes"
+    );
+    s.rollback().unwrap();
+    assert_eq!(s.field(&a, "rating").unwrap(), None);
+    assert_eq!(s.document("config", "user").unwrap(), None);
+    s.begin().unwrap();
+    s.set_field(&a, "rating", Some(&json!(3))).unwrap();
+    s.commit().unwrap();
+    assert_eq!(s.field(&a, "rating").unwrap(), Some(json!(3)));
+    assert!(s.commit().is_err(), "nothing left to commit");
+    assert!(s.rollback().is_err(), "nothing left to roll back");
+}
+
+/// A store whose audit writes fail: the fault lands between a field write
+/// and its audit row.
+struct FailingAudit<S>(S);
+
+impl<S: Store> Store for FailingAudit<S> {
+    fn add_image(&mut self, image: &Image) -> Result<bool, String> {
+        self.0.add_image(image)
+    }
+    fn image(&self, id: &ImageId) -> Result<Option<Image>, String> {
+        self.0.image(id)
+    }
+    fn images(&self) -> Result<Vec<Image>, String> {
+        self.0.images()
+    }
+    fn put_location(&mut self, id: &ImageId, location: &Location) -> Result<(), String> {
+        self.0.put_location(id, location)
+    }
+    fn locations(&self, id: &ImageId) -> Result<Vec<Location>, String> {
+        self.0.locations(id)
+    }
+    fn at_path(&self, path: &Path) -> Result<Option<(ImageId, Location)>, String> {
+        self.0.at_path(path)
+    }
+    fn all_locations(&self) -> Result<Vec<(ImageId, Location)>, String> {
+        self.0.all_locations()
+    }
+    fn field(&self, id: &ImageId, name: &str) -> Result<Option<serde_json::Value>, String> {
+        self.0.field(id, name)
+    }
+    fn set_field(
+        &mut self,
+        id: &ImageId,
+        name: &str,
+        value: Option<&serde_json::Value>,
+    ) -> Result<(), String> {
+        self.0.set_field(id, name, value)
+    }
+    fn fields_of(
+        &self,
+        ids: &[ImageId],
+        names: &[&str],
+    ) -> Result<Vec<std::collections::BTreeMap<String, serde_json::Value>>, String> {
+        self.0.fields_of(ids, names)
+    }
+    fn select(&self, query: &Query) -> Result<Vec<ImageId>, String> {
+        self.0.select(query)
+    }
+    fn add_audit(&mut self, _: &crate::AuditEntry) -> Result<u64, String> {
+        Err("injected fault".into())
+    }
+    fn audit(&self, id: &ImageId) -> Result<Vec<crate::AuditEntry>, String> {
+        self.0.audit(id)
+    }
+    fn put_version(&mut self, version: &crate::Version) -> Result<bool, String> {
+        self.0.put_version(version)
+    }
+    fn version(&self, id: &crate::VersionId) -> Result<Option<crate::Version>, String> {
+        self.0.version(id)
+    }
+    fn versions(&self, image: &ImageId) -> Result<Vec<crate::Version>, String> {
+        self.0.versions(image)
+    }
+    fn document(&self, ns: &str, key: &str) -> Result<Option<serde_json::Value>, String> {
+        self.0.document(ns, key)
+    }
+    fn set_document(
+        &mut self,
+        ns: &str,
+        key: &str,
+        value: Option<&serde_json::Value>,
+    ) -> Result<(), String> {
+        self.0.set_document(ns, key, value)
+    }
+    fn documents(&self, ns: &str) -> Result<Vec<(String, serde_json::Value)>, String> {
+        self.0.documents(ns)
+    }
+    fn begin(&mut self) -> Result<(), String> {
+        self.0.begin()
+    }
+    fn commit(&mut self) -> Result<(), String> {
+        self.0.commit()
+    }
+    fn rollback(&mut self) -> Result<(), String> {
+        self.0.rollback()
+    }
+}
+
+fn a_batch_failing_at_its_audit_row_leaves_nothing<S: Store>(s: S) {
+    let bus = Arc::new(Bus::new());
+    let v = Vault::new(FailingAudit(with_images(s, 2))).with_bus(bus.clone());
+    let (a, b) = (image(1).id, image(2).id);
+    let set = |image, value| Command {
+        image,
+        field: "rating".into(),
+        value: Some(value),
+    };
+    let failed = v.apply(&[set(a, json!(3)), set(b, json!(4))], "user", None, 1);
+    assert!(failed.unwrap_err().contains("injected fault"));
+    let rows = v
+        .store
+        .lock()
+        .unwrap()
+        .fields_of(&[a, b], &["rating"])
+        .unwrap();
+    assert!(
+        rows.iter().all(std::collections::BTreeMap::is_empty),
+        "no field changed without its audit row: {rows:?}"
+    );
+    assert!(bus.since(0).is_empty(), "nothing announced");
+    // The store is usable again: the failed transaction is closed.
+    v.store.lock().unwrap().begin().unwrap();
+    v.store.lock().unwrap().rollback().unwrap();
 }
 
 fn documents_round_trip_by_namespace<S: Store>(mut store: S) {

@@ -1,10 +1,19 @@
 //! The SQLite driver of the vault: one database file, readable with
 //! standard tools. It implements `helios_vault::Store` and passes the
 //! vault's contract; nothing above the store knows SQLite is there.
+//!
+//! Durability: the database runs in WAL mode with `synchronous=NORMAL`, so
+//! readers never block the writer and a crash loses at most the last
+//! commits, never the file. Several connections (several processes) share
+//! one vault through SQLite's own locking: a writer waits up to
+//! [`Options::busy_timeout`] for another one, and every write that takes
+//! more than one statement runs in one `BEGIN IMMEDIATE` transaction. There
+//! is no lock file.
 
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 
 use std::collections::BTreeMap;
 
@@ -66,6 +75,32 @@ CREATE TABLE IF NOT EXISTS documents (
 );
 ";
 
+/// How a vault database is opened.
+#[derive(Clone, Debug)]
+pub struct Options {
+    /// How long a write waits for another connection's write before it
+    /// fails as busy.
+    pub busy_timeout: Duration,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Self {
+            busy_timeout: Duration::from_secs(5),
+        }
+    }
+}
+
+/// The settings a connection runs with, as SQLite reports them.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Pragmas {
+    pub journal_mode: String,
+    /// 0 OFF, 1 NORMAL, 2 FULL, 3 EXTRA.
+    pub synchronous: i64,
+    pub busy_timeout_ms: i64,
+    pub foreign_keys: bool,
+}
+
 pub struct SqliteStore {
     db: Connection,
 }
@@ -120,19 +155,76 @@ fn err(e: rusqlite::Error) -> String {
 }
 
 impl SqliteStore {
-    /// Opens (or creates) a vault database file.
+    /// Opens (or creates) a vault database file with the default options.
     pub fn open(path: &Path) -> Result<Self, String> {
-        Self::init(Connection::open(path).map_err(err)?)
+        Self::open_with(path, &Options::default())
+    }
+
+    pub fn open_with(path: &Path, options: &Options) -> Result<Self, String> {
+        Self::init(Connection::open(path).map_err(err)?, options)
     }
 
     pub fn in_memory() -> Result<Self, String> {
-        Self::init(Connection::open_in_memory().map_err(err)?)
+        Self::init(
+            Connection::open_in_memory().map_err(err)?,
+            &Options::default(),
+        )
     }
 
-    fn init(db: Connection) -> Result<Self, String> {
-        db.execute_batch("PRAGMA foreign_keys = ON;").map_err(err)?;
-        db.execute_batch(SCHEMA).map_err(err)?;
+    fn init(mut db: Connection, options: &Options) -> Result<Self, String> {
+        db.busy_timeout(options.busy_timeout).map_err(err)?;
+        db.pragma_update(None, "foreign_keys", "ON").map_err(err)?;
+        // WAL is kept in the file; an in-memory database answers "memory".
+        let _mode: String = db
+            .query_row("PRAGMA journal_mode = WAL", [], |r| r.get(0))
+            .map_err(err)?;
+        db.pragma_update(None, "synchronous", "NORMAL")
+            .map_err(err)?;
+        let tx = db
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(err)?;
+        tx.execute_batch(SCHEMA).map_err(err)?;
+        tx.commit().map_err(err)?;
         Ok(Self { db })
+    }
+
+    pub fn pragmas(&self) -> Result<Pragmas, String> {
+        let get = |name: &str| -> Result<rusqlite::types::Value, String> {
+            self.db
+                .query_row(&format!("PRAGMA {name}"), [], |r| r.get(0))
+                .map_err(err)
+        };
+        let int = |name: &str| match get(name)? {
+            rusqlite::types::Value::Integer(i) => Ok(i),
+            other => Err(format!("PRAGMA {name}: {other:?}")),
+        };
+        let journal_mode = match get("journal_mode")? {
+            rusqlite::types::Value::Text(t) => t,
+            other => return Err(format!("PRAGMA journal_mode: {other:?}")),
+        };
+        Ok(Pragmas {
+            journal_mode,
+            synchronous: int("synchronous")?,
+            busy_timeout_ms: int("busy_timeout")?,
+            foreign_keys: int("foreign_keys")? == 1,
+        })
+    }
+
+    /// Runs `f` in one write transaction: the caller's when one is open,
+    /// otherwise its own, taken at once (`BEGIN IMMEDIATE`) so that what
+    /// it reads cannot change before it writes.
+    fn write<T>(&mut self, f: impl FnOnce(&Connection) -> Result<T, String>) -> Result<T, String> {
+        if !self.db.is_autocommit() {
+            return f(&self.db);
+        }
+        let tx = self
+            .db
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(err)?;
+        // Dropping `tx` on an error rolls it back.
+        let value = f(&tx)?;
+        tx.commit().map_err(err)?;
+        Ok(value)
     }
 
     fn row_image(id: String, size: i64, partial: String) -> Result<Image, String> {
@@ -289,27 +381,32 @@ impl Store for SqliteStore {
     }
 
     fn set_field(&mut self, id: &ImageId, name: &str, value: Option<&Value>) -> Result<(), String> {
-        if self.image(id)?.is_none() {
-            return Err(format!("no image {}", id.hex()));
-        }
-        match value {
-            Some(v) => self
-                .db
-                .execute(
+        self.write(|db| {
+            let known = db
+                .query_row(
+                    "SELECT 1 FROM images WHERE id = ?1",
+                    params![id.hex()],
+                    |_| Ok(()),
+                )
+                .optional()
+                .map_err(err)?;
+            if known.is_none() {
+                return Err(format!("no image {}", id.hex()));
+            }
+            match value {
+                Some(v) => db.execute(
                     "INSERT INTO fields (image, name, value, number) VALUES (?1, ?2, ?3, ?4)
                      ON CONFLICT (image, name) DO UPDATE SET value = ?3, number = ?4",
                     params![id.hex(), name, v.to_string(), v.as_f64()],
-                )
-                .map_err(err)?,
-            None => self
-                .db
-                .execute(
+                ),
+                None => db.execute(
                     "DELETE FROM fields WHERE image = ?1 AND name = ?2",
                     params![id.hex(), name],
-                )
-                .map_err(err)?,
-        };
-        Ok(())
+                ),
+            }
+            .map_err(err)?;
+            Ok(())
+        })
     }
 
     fn fields_of(
@@ -378,8 +475,8 @@ impl Store for SqliteStore {
     }
 
     fn add_audit(&mut self, entry: &AuditEntry) -> Result<u64, String> {
-        self.db
-            .execute(
+        self.write(|db| {
+            db.execute(
                 "INSERT INTO audit (at, who, job, image, field, old, new) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                 params![
                     entry.at as i64,
@@ -392,7 +489,8 @@ impl Store for SqliteStore {
                 ],
             )
             .map_err(err)?;
-        Ok(self.db.last_insert_rowid() as u64)
+            Ok(db.last_insert_rowid() as u64)
+        })
     }
 
     fn audit(&self, id: &ImageId) -> Result<Vec<AuditEntry>, String> {
@@ -520,5 +618,26 @@ impl Store for SqliteStore {
                     .map_err(|e| format!("document {ns}/{k}: {e}"))
             })
             .collect()
+    }
+
+    fn begin(&mut self) -> Result<(), String> {
+        if !self.db.is_autocommit() {
+            return Err("a transaction is already open".into());
+        }
+        self.db.execute_batch("BEGIN IMMEDIATE").map_err(err)
+    }
+
+    fn commit(&mut self) -> Result<(), String> {
+        if self.db.is_autocommit() {
+            return Err("no transaction to commit".into());
+        }
+        self.db.execute_batch("COMMIT").map_err(err)
+    }
+
+    fn rollback(&mut self) -> Result<(), String> {
+        if self.db.is_autocommit() {
+            return Err("no transaction to roll back".into());
+        }
+        self.db.execute_batch("ROLLBACK").map_err(err)
     }
 }

@@ -115,11 +115,12 @@ an edit (`versions`, a content-addressed DAG), but nothing writes to it.
 - Granularity: field-level (`fields` table keyed by image and name). Good:
   a rating write cannot touch labels. But `labels` is one field holding a
   set, so toggling one colour rewrites the whole set (see races below).
-- Transactions: **none**. The SQLite driver (`helios-vault-sqlite/src/lib.rs`
-  `init` ~l.132) runs each statement in autocommit; `apply` is "all or
-  nothing" only for validation. A batch of N fields is N+N statements, and
-  the field write and its audit row are separate commits. Default rollback
-  journal, default `synchronous=FULL`, rusqlite's default 5 s busy timeout.
+- Transactions: one per batch (since the audit). `apply` runs the image
+  checks, the old-value reads, the field writes and their audit rows in one
+  store transaction (`Store::begin` / `commit` / `rollback`; `BEGIN
+  IMMEDIATE` in the SQLite driver), and publishes its events after the
+  commit. The SQLite driver runs in WAL mode, `synchronous=NORMAL`, with an
+  explicit 5 s busy timeout.
 - Event: `vault.field_changed` is published after each write, but only when
   the vault has a bus; the GUI builds it with `Vault::new` (no bus), so
   nothing is announced. The catalog version used by cursors is a per-process
@@ -129,9 +130,8 @@ an edit (`versions`, a content-addressed DAG), but nothing writes to it.
   new value: the change is dropped with a note, and the screen lies until
   restart.
 - `kill -9`: before the next frame, the pending change (at most one frame of
-  input). Between `set_field` and `add_audit`: the field is changed with no
-  audit row (design rule 4 broken). In the middle of a batch: part of the
-  batch is committed.
+  input). A batch being applied is lost whole: no field changes without its
+  audit row, no part of a batch is kept.
 - Tags: not modelled (`FIELDS` declares rating, labels, title, description).
   Title and description have no writer in any surface.
 
@@ -179,11 +179,11 @@ an edit (`versions`, a content-addressed DAG), but nothing writes to it.
 3. **The GUI never refreshes after its own failed write**: the shown value
    and the stored value diverge; the next toggle starts from the shown
    value and writes it back.
-4. **`Vault::apply` read-then-write without a transaction**: `field` (old)
-   and `set_field` are separate statements; with two processes on one file,
-   the audit row can record a wrong `old`, and the "unchanged, skip" test
-   can be decided on a value that another process has just replaced. The
-   in-process mutex covers one process only.
+4. **`Vault::apply` read-then-write** (fixed since the audit): the old
+   value is read inside the batch's write transaction, taken at once, so
+   another process cannot replace it between the read and the write; a
+   test runs two vaults on one file and checks that the audit trail is one
+   chain.
 5. **Parameter writes re-resolve the whole module** (`Graph::set_param`
    clones `params`, sets one, resolves all): harmless today because the
    graph lock serialises writers, but `submit_export_now` clones the graph
@@ -199,7 +199,7 @@ an edit (`versions`, a content-addressed DAG), but nothing writes to it.
 
 ## Where each step must be persisted
 
-1. **Make `Vault::apply` one transaction.** Add a transaction (or a
+1. **Make `Vault::apply` one transaction** (done). Add a transaction (or a
    `Store::apply_batch`) to the store contract: old-value read, field
    write and audit row commit together; the whole batch commits or none
    does. Publish `vault.field_changed` after commit only. Set WAL and an

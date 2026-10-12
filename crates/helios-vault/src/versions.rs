@@ -116,22 +116,30 @@ impl<S: crate::Store> crate::Vault<S> {
     /// parents must be versions of that image. Returns false when the same
     /// version was already kept: nothing changes, nothing is announced.
     pub fn add_version(&self, version: &Version) -> Result<bool, String> {
-        let mut store = self.store.lock().expect("store lock");
-        if store.image(&version.image)?.is_none() {
-            return Err(format!("no image {}", version.image.hex()));
-        }
-        for p in &version.parents {
-            match store.version(p)? {
-                Some(parent) if parent.image == version.image => {}
-                Some(_) => return Err(format!("version {} is of another image", p.hex())),
-                None => return Err(format!("no version {}", p.hex())),
+        // The checks and the write in one transaction: another process
+        // cannot remove what was checked before it is written.
+        let added = self.transaction(|store| {
+            if store.image(&version.image)?.is_none() {
+                return Err(format!("no image {}", version.image.hex()));
             }
-        }
-        if !store.put_version(version)? {
+            for p in &version.parents {
+                match store.version(p)? {
+                    Some(parent) if parent.image == version.image => {}
+                    Some(_) => return Err(format!("version {} is of another image", p.hex())),
+                    None => return Err(format!("no version {}", p.hex())),
+                }
+            }
+            store.put_version(version)
+        })?;
+        if !added {
             return Ok(false);
         }
         if let Some(bus) = &self.bus {
-            let all = store.versions(&version.image)?;
+            let all = self
+                .store
+                .lock()
+                .expect("store lock")
+                .versions(&version.image)?;
             bus.publish(
                 "vault",
                 None,
