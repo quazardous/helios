@@ -79,6 +79,20 @@ impl Region {
             && other.bottom() <= self.bottom()
     }
 
+    /// The full-resolution pixels a region at `scale` covers: those
+    /// [`Image::sample_at`] averages to make it.
+    pub fn full_resolution(&self, scale: f64) -> Region {
+        if self.is_empty() {
+            return Region::new(span(self.x, scale).0, span(self.y, scale).0, 0, 0);
+        }
+        let (x0, y0) = (span(self.x, scale).0, span(self.y, scale).0);
+        let (x1, y1) = (
+            span(self.right() - 1, scale).1,
+            span(self.bottom() - 1, scale).1,
+        );
+        Region::new(x0, y0, (x1 - x0) as u32, (y1 - y0) as u32)
+    }
+
     /// Splits the region into a grid of tiles of at most `tile` pixels a side.
     pub fn tiles(&self, tile: u32) -> Vec<Region> {
         assert!(tile > 0, "tile size must be positive");
@@ -96,6 +110,14 @@ impl Region {
         }
         out
     }
+}
+
+/// The full-resolution pixels `[lo, hi)` that pixel `v` at `scale` covers,
+/// along one axis.
+fn span(v: i64, scale: f64) -> (i64, i64) {
+    let lo = (v as f64 / scale).floor() as i64;
+    let hi = (((v + 1) as f64 / scale).floor() as i64).max(lo + 1);
+    (lo, hi)
 }
 
 impl fmt::Display for Region {
@@ -325,18 +347,13 @@ impl Image {
         }
         let r = self.region;
         assert!(!r.is_empty(), "cannot sample an empty image");
-        let span = |v: i64| {
-            let lo = (v as f64 / scale).floor() as i64;
-            let hi = (((v + 1) as f64 / scale).floor() as i64).max(lo + 1);
-            (lo, hi)
-        };
         let channels = self.channels as usize;
         let mut data = Vec::with_capacity(region.area() * channels);
         let mut sum = vec![0.0f64; channels];
         for y in region.y..region.bottom() {
-            let (y0, y1) = span(y);
+            let (y0, y1) = span(y, scale);
             for x in region.x..region.right() {
-                let (x0, x1) = span(x);
+                let (x0, x1) = span(x, scale);
                 sum.fill(0.0);
                 for fy in y0..y1 {
                     let cy = fy.clamp(r.y, r.bottom() - 1);
@@ -430,6 +447,28 @@ mod tests {
         let inner = view.crop(Region::new(2, 2, 2, 1)).unwrap();
         assert_eq!(inner.data(), &[22.0, 23.0]);
         assert!(img.crop(Region::new(4, 0, 2, 1)).is_none(), "past the edge");
+    }
+
+    #[test]
+    fn full_resolution_covers_what_sample_at_reads() {
+        assert_eq!(
+            Region::new(1, 2, 3, 1).full_resolution(0.5),
+            Region::new(2, 4, 6, 2)
+        );
+        assert_eq!(
+            Region::new(0, 0, 2, 2).full_resolution(0.3),
+            Region::new(0, 0, 6, 6)
+        );
+        let img = ramp(Region::new(-4, -4, 20, 20));
+        let r = Region::new(-1, 0, 3, 2);
+        let scale = 0.37;
+        let full = r.full_resolution(scale);
+        // Reading only the covered pixels gives the same mean.
+        let part = img.sample(full);
+        assert_eq!(
+            part.sample_at(r, scale).data(),
+            img.sample_at(r, scale).data()
+        );
     }
 
     #[test]

@@ -46,6 +46,7 @@ impl Module for Reader {
             context: vec![],
             needs: Needs {
                 overlap: self.reach,
+                ..Needs::default()
             },
             kind: ModuleKind::Process,
             family: Family::Other,

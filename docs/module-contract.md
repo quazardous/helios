@@ -147,10 +147,12 @@ process(plan, inputs, output_region) -> outputs     pure, no IO, no globals
   them into pixels at the render's scale in `prepare_at`; its overlap
   follows, since `input_region` gets the plan. A preview then looks like
   the full render reduced. Modules working pixel by pixel ignore the scale.
-  Renders at different scales are cached apart. Modules that only make
-  sense at full resolution (rawprepare, demosaic: a reduced mosaic mixes
-  its colors) get their preview from a demosaiced proxy instead, as
-  darktable's preview pipe does.
+  Renders at different scales are cached apart. A module that only makes
+  sense on full-resolution input declares it (`Needs::full_resolution`:
+  demosaic, since a reduced mosaic mixes its colours): at a scale below 1
+  the engine runs it, and everything it reads, at full resolution over
+  the pixels the render covers, then reduces its output, as darktable
+  scales after demosaic.
 
 ## Decision nodes: where the algorithm alone is not enough
 

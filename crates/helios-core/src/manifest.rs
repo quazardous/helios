@@ -321,6 +321,11 @@ impl PortSpec {
 pub struct Needs {
     /// Pixels read around each output pixel, on every side.
     pub overlap: u32,
+    /// Its inputs must be at full resolution (a sensor mosaic: reducing it
+    /// mixes the colours of its photosites). At a scale below 1 the engine
+    /// computes the module, and what it reads, at full resolution over the
+    /// pixels the render covers, then reduces its output.
+    pub full_resolution: bool,
 }
 
 /// What kind of node a module makes in a network.

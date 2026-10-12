@@ -203,6 +203,9 @@ enum Work {
     /// A decision node with no recorded answer: its inputs are planned (a
     /// surface shows what it will look at), nothing is computed.
     Pending { inputs: Vec<(Arc<Step>, usize)> },
+    /// A module that reads full-resolution input, in a render at a scale
+    /// below 1: its full-resolution step, reduced.
+    Reduce { input: Arc<Step>, scale: f64 },
 }
 
 /// A node at a scale (its bits): what planning plans once per render.
@@ -219,6 +222,11 @@ enum ShapeKind {
     Source(Image, f64),
     Pending {
         inputs: Vec<(Unit, usize)>,
+    },
+    /// The same node at full resolution, reduced to the unit's scale.
+    Reduce {
+        input: Unit,
+        scale: f64,
     },
     Module {
         module: ModuleRef,
@@ -487,10 +495,14 @@ impl Engine {
         {
             return Ok(());
         }
-        if let Work::Module { inputs, .. } | Work::Pending { inputs } = &step.work {
-            for (input, _) in inputs {
-                self.collect_status(graph, input, out)?;
+        match &step.work {
+            Work::Module { inputs, .. } | Work::Pending { inputs } => {
+                for (input, _) in inputs {
+                    self.collect_status(graph, input, out)?;
+                }
             }
+            Work::Reduce { input, .. } => self.collect_status(graph, input, out)?,
+            Work::Source(..) => {}
         }
         let (cell, wider) = {
             let cache = self.cache.lock().expect("engine cache lock");
@@ -742,6 +754,12 @@ impl Engine {
             for r in &merged {
                 match &shape.kind {
                     ShapeKind::Source(..) => {}
+                    ShapeKind::Reduce { input, scale } => {
+                        asked
+                            .entry(*input)
+                            .or_default()
+                            .push(r.full_resolution(*scale));
+                    }
                     ShapeKind::Pending { inputs } => {
                         for (src, _) in inputs {
                             asked.entry(*src).or_default().push(*r);
@@ -783,6 +801,10 @@ impl Engine {
             for r in merged {
                 let work = match &shape.kind {
                     ShapeKind::Source(image, scale) => Work::Source(image.clone(), *scale),
+                    ShapeKind::Reduce { input, scale } => Work::Reduce {
+                        input: reading(input, r.full_resolution(*scale)),
+                        scale: *scale,
+                    },
                     ShapeKind::Pending { inputs } => Work::Pending {
                         inputs: inputs.iter().map(|(u, p)| (reading(u, r), *p)).collect(),
                     },
@@ -869,6 +891,16 @@ impl Engine {
                     inputs.push((input, *port));
                 }
                 ShapeKind::Pending { inputs }
+            }
+            Kind::Module { module, .. }
+                if scale < 1.0 && module.manifest().needs.full_resolution =>
+            {
+                // Computed at full resolution, then reduced.
+                let full = (id, 1.0f64.to_bits());
+                self.shape(graph, full, shapes, order)?;
+                h.update(b"helios.step.reduce.v1");
+                h.update(&shapes[&full].lineage.0);
+                ShapeKind::Reduce { input: full, scale }
             }
             Kind::Module {
                 module,
@@ -1089,6 +1121,21 @@ impl Engine {
                         step.region,
                     )?)))
                 }
+            }
+            Work::Reduce { input, scale } => {
+                let content = self.execute(input, cause)?;
+                let ports = match content.as_ref() {
+                    Content::Host(images) => images.len(),
+                    Content::Device { .. } => 1,
+                };
+                let images = (0..ports)
+                    .map(|port| {
+                        Ok(self
+                            .host(input, &content, port)?
+                            .sample_at(step.region, *scale))
+                    })
+                    .collect::<Result<Vec<Image>, Error>>()?;
+                Ok(Arc::new(Content::Host(images)))
             }
             Work::Pending { .. } => unreachable!("execute answers pending steps itself"),
         }

@@ -56,7 +56,10 @@ impl Module for Blur {
             inputs: vec![PortSpec::image("input", 1)],
             outputs: vec![PortSpec::image("output", 1)],
             context: vec![],
-            needs: Needs { overlap: 1 },
+            needs: Needs {
+                overlap: 1,
+                ..Needs::default()
+            },
             kind: ModuleKind::Process,
             family: Family::Detail,
             role: Role::General,

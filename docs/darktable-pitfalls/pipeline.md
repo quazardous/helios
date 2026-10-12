@@ -244,7 +244,13 @@ thread. Helios state was read from `ROADMAP.md`, `docs/module-contract.md`,
   mosaic. Test `a_half_scale_render_mixes_photosites_before_demosaic` in
   `helios-module-demosaic`: a flat (0.8, 0.5, 0.2) scene through RGGB comes
   out grey (0.5, the mean of the four photosites) at half scale, while the
-  full render reduced keeps its colour.
+  full render reduced keeps its colour. **Fixed (2026-10-12):** a module
+  declares `Needs::full_resolution` (demosaic does); at a scale below 1 the
+  engine computes it, and everything upstream, at full resolution over the
+  pixels the render covers, then reduces its output. The half-scale render
+  now equals the full render reduced, bit for bit
+  (`a_half_scale_render_is_the_full_render_reduced`). The cost: a raw
+  preview demosaics the full-resolution mosaic of what it shows.
 - **Recommendation.** Let a module declare that an input must be at full
   resolution (a "no reduction upstream" flag), set it on `demosaic` (and
   `rawprepare`, `highlights` in raw space), and scale after demosaic, as
@@ -479,7 +485,9 @@ thread. Helios state was read from `ROADMAP.md`, `docs/module-contract.md`,
    order, with a `darktable-cli` test.
 2. **Stop reducing raws and gamma-encoded sources before they are linear
    and demosaiced** (pitfalls 8, 9): a "full-resolution input" declaration
-   for demosaic and friends, and linear reduction of sources.
+   for demosaic and friends, and linear reduction of sources. Done
+   2026-10-12: pictures were already linear; demosaic now reads its input
+   at full resolution.
 3. **Define global analysis before porting HLR, haze, filmic/sigmoid
    auto, tone equalizer** (pitfalls 3, 4): an analysis node on the full
    extent at a fixed scale, results recorded as parameters; testkit check

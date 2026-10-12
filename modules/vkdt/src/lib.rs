@@ -33,7 +33,10 @@ fn manifest(
         inputs: vec![PortSpec::image("input", 4)],
         outputs: vec![PortSpec::image("output", 4)],
         context: vec![],
-        needs: Needs { overlap },
+        needs: Needs {
+            overlap,
+            ..Needs::default()
+        },
         kind: ModuleKind::Process,
         family,
         role: Role::General,

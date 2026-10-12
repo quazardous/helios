@@ -89,7 +89,11 @@ impl Module for Demosaic {
             outputs: vec![PortSpec::image("output", 4)],
             // The white balance gives RCD the largest value to expect.
             context: vec![fields::CFA.into(), fields::WHITE_BALANCE.into()],
-            needs: Needs { overlap: 2 },
+            // A reduced mosaic mixes the colours of its photosites.
+            needs: Needs {
+                overlap: 2,
+                full_resolution: true,
+            },
             kind: ModuleKind::Process,
             family: Family::Detail,
             role: Role::General,
