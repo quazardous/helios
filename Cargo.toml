@@ -101,6 +101,15 @@ opt-level = 3
 [profile.dev.package.jxl-oxide]
 opt-level = 3
 
+# The engine samples, scales and caches every pixel a test renders, and the
+# test kit makes the noise the contract tests read: unoptimized, they took
+# most of the module-contract and viewport test time.
+[profile.dev.package.helios-core]
+opt-level = 2
+
+[profile.dev.package.helios-testkit]
+opt-level = 2
+
 # The blur's contract runs its largest radius over every tile.
 [profile.dev.package.helios-module-blur]
 opt-level = 2

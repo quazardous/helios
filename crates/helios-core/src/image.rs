@@ -35,18 +35,22 @@ impl Region {
         Self::new(0, 0, width, height)
     }
 
+    #[inline]
     pub fn right(&self) -> i64 {
         self.x + i64::from(self.width)
     }
 
+    #[inline]
     pub fn bottom(&self) -> i64 {
         self.y + i64::from(self.height)
     }
 
+    #[inline]
     pub fn area(&self) -> usize {
         self.width as usize * self.height as usize
     }
 
+    #[inline]
     pub fn is_empty(&self) -> bool {
         self.width == 0 || self.height == 0
     }
@@ -222,10 +226,12 @@ impl Image {
         self.region.is_empty()
     }
 
+    #[inline]
     pub fn region(&self) -> Region {
         self.region
     }
 
+    #[inline]
     pub fn channels(&self) -> u32 {
         self.channels
     }
@@ -310,6 +316,7 @@ impl Image {
     }
 
     /// The channels of the pixel at absolute coordinates, which must lie in the region.
+    #[inline]
     pub fn pixel(&self, x: i64, y: i64) -> &[f32] {
         let r = self.region;
         assert!(

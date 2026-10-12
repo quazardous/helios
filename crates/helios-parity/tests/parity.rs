@@ -86,18 +86,31 @@ fn exposure_matches_darktable() {
     let layouts = dt.layouts();
     let input = chart();
     let dir = std::env::temp_dir().join(format!("helios-parity-{}", std::process::id()));
-    for (exposure, black) in [(0.0, 0.0), (1.0, 0.01), (-2.0, 0.05), (3.5, -0.02)] {
-        let theirs = dt
-            .render(
-                &input,
-                &[Item::new(
-                    "exposure",
-                    json!({"exposure": exposure, "black": black, "compensate_hilite_pres": false}),
-                )],
-                &layouts,
-                &dir.join(format!("{exposure}_{black}")),
-            )
-            .unwrap();
+    let cases = [(0.0, 0.0), (1.0, 0.01), (-2.0, 0.05), (3.5, -0.02)];
+    // Each darktable-cli run has a directory and a library of its own, and
+    // most of its time is darktable starting: the four run at once.
+    let renders: Vec<Image> = std::thread::scope(|scope| {
+        let runs: Vec<_> = cases
+            .iter()
+            .map(|&(exposure, black)| {
+                let (dt, input, layouts, dir) = (&dt, &input, &layouts, &dir);
+                scope.spawn(move || {
+                    dt.render(
+                        input,
+                        &[Item::new(
+                            "exposure",
+                            json!({"exposure": exposure, "black": black, "compensate_hilite_pres": false}),
+                        )],
+                        layouts,
+                        &dir.join(format!("{exposure}_{black}")),
+                    )
+                    .unwrap()
+                })
+            })
+            .collect();
+        runs.into_iter().map(|r| r.join().unwrap()).collect()
+    });
+    for (&(exposure, black), theirs) in cases.iter().zip(renders) {
         if exposure != 0.0 {
             // darktable applied the history: an ignored module would pass vacuously.
             let moved = compare(&input, &theirs).unwrap();

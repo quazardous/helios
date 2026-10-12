@@ -282,96 +282,105 @@ fn a_panel_asks_the_shell_and_never_draws_a_window_itself() {
     assert!(h.state().target_rect("helios.dialog").is_ok());
 }
 
-/// Pictures of each kind in each theme, for `docs/gui.md`; written to
-/// `docs/gui/` when `HELIOS_DOC_PICTURES` is set.
+/// Pictures of each kind in the dark theme, for `docs/gui.md`; written to
+/// `docs/gui/` when `HELIOS_DOC_PICTURES` is set. One test per theme, so
+/// the two run at once.
 #[test]
-fn pictures_of_each_kind() {
+fn pictures_of_each_kind_in_the_dark_theme() {
+    pictures_of_each_kind("helios-dark");
+}
+
+/// [`pictures_of_each_kind_in_the_dark_theme`] in the light theme.
+#[test]
+fn pictures_of_each_kind_in_the_light_theme() {
+    pictures_of_each_kind("helios-light");
+}
+
+fn pictures_of_each_kind(theme: &str) {
     let out = std::env::var_os("HELIOS_DOC_PICTURES").map(std::path::PathBuf::from);
-    for theme in ["helios-dark", "helios-light"] {
-        for kind in ["confirm", "form", "menu", "system", "toast"] {
-            let mut shell = Shell::new(helios_panels(), None);
-            shell.set_theme(theme, std::collections::BTreeMap::default());
-            let target = match kind {
-                "system" => {
-                    shell.draw_frame(true);
-                    shell.set_title("photos");
-                    shell
-                        .run("workbench.systemMenu", json!(null), Origin::User)
-                        .unwrap();
-                    "helios.menu"
-                }
-                "confirm" => {
-                    shell.confirm(Confirm {
-                        title: "Delete 3 images?".into(),
-                        detail: "Their files stay on disk; edits and ratings are lost.".into(),
-                        verb: "Delete 3 images".into(),
-                        danger: true,
-                        command: "workbench.fullscreen".into(),
-                        args: json!(null),
-                    });
-                    "helios.dialog"
-                }
-                "form" => {
-                    shell.form(Form {
-                        title: "Export".into(),
-                        fields: vec![
-                            Field {
-                                key: "quality".into(),
-                                descriptor: Descriptor::int("quality", 1, 100, 92),
-                                value: helios_core::Value::Int(92),
-                            },
-                            Field {
-                                key: "format".into(),
-                                descriptor: Descriptor::choice(
-                                    "format",
-                                    &["jpeg", "tiff", "png"],
-                                    "jpeg",
-                                ),
-                                value: helios_core::Value::Choice("jpeg".into()),
-                            },
-                            Field {
-                                key: "metadata".into(),
-                                descriptor: Descriptor::bool("keep metadata", true),
-                                value: helios_core::Value::Bool(true),
-                            },
-                        ],
-                        verb: "Export".into(),
-                        command: "workbench.fullscreen".into(),
-                    });
-                    "helios.dialog"
-                }
-                "menu" => {
-                    shell.open_menu(
-                        egui::pos2(300.0, 200.0),
-                        vec![
-                            MenuItem::command("app.palette"),
-                            MenuItem::command("app.fullscreen"),
-                            MenuItem::Separator,
-                            MenuItem::command("helios.log.toggle"),
-                        ],
-                    );
-                    "helios.menu"
-                }
-                _ => {
-                    shell.notify(
-                        Level::Warning,
-                        "The vault is read-only: changes are kept in memory.",
-                    );
-                    "helios.toasts"
-                }
-            };
-            let mut h = headless::harness(shell, vec2(1280.0, 800.0));
-            h.run();
-            let picture = headless::snapshot(&mut h, target).unwrap();
-            assert!(
-                picture.width() > 100,
-                "{kind} in {theme}: {}",
-                picture.width()
-            );
-            if let Some(dir) = &out {
-                let path = dir.join(format!("{kind}-{theme}.png"));
-                helios_gui::snapshot::save(&picture, &path).unwrap();
+    for kind in ["confirm", "form", "menu", "system", "toast"] {
+        let mut shell = Shell::new(helios_panels(), None);
+        shell.set_theme(theme, std::collections::BTreeMap::default());
+        let target = match kind {
+            "system" => {
+                shell.draw_frame(true);
+                shell.set_title("photos");
+                shell
+                    .run("workbench.systemMenu", json!(null), Origin::User)
+                    .unwrap();
+                "helios.menu"
             }
+            "confirm" => {
+                shell.confirm(Confirm {
+                    title: "Delete 3 images?".into(),
+                    detail: "Their files stay on disk; edits and ratings are lost.".into(),
+                    verb: "Delete 3 images".into(),
+                    danger: true,
+                    command: "workbench.fullscreen".into(),
+                    args: json!(null),
+                });
+                "helios.dialog"
+            }
+            "form" => {
+                shell.form(Form {
+                    title: "Export".into(),
+                    fields: vec![
+                        Field {
+                            key: "quality".into(),
+                            descriptor: Descriptor::int("quality", 1, 100, 92),
+                            value: helios_core::Value::Int(92),
+                        },
+                        Field {
+                            key: "format".into(),
+                            descriptor: Descriptor::choice(
+                                "format",
+                                &["jpeg", "tiff", "png"],
+                                "jpeg",
+                            ),
+                            value: helios_core::Value::Choice("jpeg".into()),
+                        },
+                        Field {
+                            key: "metadata".into(),
+                            descriptor: Descriptor::bool("keep metadata", true),
+                            value: helios_core::Value::Bool(true),
+                        },
+                    ],
+                    verb: "Export".into(),
+                    command: "workbench.fullscreen".into(),
+                });
+                "helios.dialog"
+            }
+            "menu" => {
+                shell.open_menu(
+                    egui::pos2(300.0, 200.0),
+                    vec![
+                        MenuItem::command("app.palette"),
+                        MenuItem::command("app.fullscreen"),
+                        MenuItem::Separator,
+                        MenuItem::command("helios.log.toggle"),
+                    ],
+                );
+                "helios.menu"
+            }
+            _ => {
+                shell.notify(
+                    Level::Warning,
+                    "The vault is read-only: changes are kept in memory.",
+                );
+                "helios.toasts"
+            }
+        };
+        let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+        h.run();
+        let picture = headless::snapshot(&mut h, target).unwrap();
+        assert!(
+            picture.width() > 100,
+            "{kind} in {theme}: {}",
+            picture.width()
+        );
+        if let Some(dir) = &out {
+            let path = dir.join(format!("{kind}-{theme}.png"));
+            helios_gui::snapshot::save(&picture, &path).unwrap();
         }
     }
 }
