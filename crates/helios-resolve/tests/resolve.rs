@@ -1,8 +1,7 @@
 //! Resolvers behind decision nodes, with no network: scripted answers, the
 //! `ai_calls` limit, the cache, an external program.
 
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
 use helios_core::*;
@@ -221,21 +220,53 @@ fn the_same_pixels_are_not_asked_about_twice() {
     assert_eq!(cached.inner().calls().len(), 1);
 }
 
-/// Counts how many calls run at the same time.
+/// Counts how many calls run at the same time. Each call waits until
+/// `want` calls run together (a gate that stays open once it opened), so
+/// the overlap the limit allows is reached whatever the timing; a call
+/// beyond the limit would raise `most` above it.
 struct Slow {
-    running: AtomicUsize,
-    most: Mutex<usize>,
+    want: usize,
+    calls: Mutex<Calls>,
+    changed: Condvar,
+}
+
+#[derive(Default)]
+struct Calls {
+    running: usize,
+    most: usize,
+    open: bool,
+}
+
+impl Slow {
+    fn new(want: usize) -> Self {
+        Slow {
+            want,
+            calls: Mutex::default(),
+            changed: Condvar::new(),
+        }
+    }
+
+    fn most(&self) -> usize {
+        self.calls.lock().unwrap().most
+    }
 }
 
 impl Resolver for Slow {
     fn resolve(&self, _: &Request) -> Result<Resolution, String> {
-        let now = self.running.fetch_add(1, Ordering::SeqCst) + 1;
-        {
-            let mut most = self.most.lock().unwrap();
-            *most = (*most).max(now);
+        let mut calls = self.calls.lock().unwrap();
+        calls.running += 1;
+        calls.most = calls.most.max(calls.running);
+        if calls.running >= self.want {
+            calls.open = true;
+            self.changed.notify_all();
         }
-        std::thread::sleep(Duration::from_millis(60));
-        self.running.fetch_sub(1, Ordering::SeqCst);
+        // Generous: only a limit below `want` waits this long, and then
+        // `most` says so.
+        let (mut calls, _) = self
+            .changed
+            .wait_timeout_while(calls, Duration::from_secs(5), |c| !c.open)
+            .unwrap();
+        calls.running -= 1;
         Ok(resolution(1.0))
     }
 }
@@ -244,10 +275,7 @@ impl Resolver for Slow {
 fn the_ai_calls_limit_decides_how_many_run_at_once() {
     for (limit, expected) in [(1, 1), (3, 3)] {
         let mut s = setup(4, Mode::FullAi, limit);
-        let slow = Arc::new(Slow {
-            running: AtomicUsize::new(0),
-            most: Mutex::new(0),
-        });
+        let slow = Arc::new(Slow::new(expected));
         let report = resolve_waiting(
             &mut s.book,
             &mut s.graph,
@@ -258,7 +286,7 @@ fn the_ai_calls_limit_decides_how_many_run_at_once() {
         )
         .unwrap();
         assert_eq!(report.answered.len(), 4);
-        assert_eq!(*slow.most.lock().unwrap(), expected, "limit {limit}");
+        assert_eq!(slow.most(), expected, "limit {limit}");
     }
 }
 
