@@ -128,6 +128,9 @@ pub struct Report {
     pub unordered: Vec<(String, u32)>,
     /// History items in force, disabled ones included.
     pub items: usize,
+    /// Items darktable adds when it reads an older sidecar, which the file
+    /// does not hold (see [`HistoryItem::inserted`]), by label.
+    pub inserted: Vec<String>,
 }
 
 impl Report {
@@ -445,6 +448,7 @@ fn item_json(item: &HistoryItem, status: &Value) -> Value {
         "multi_name": item.multi_name,
         "version": item.modversion,
         "enabled": item.enabled,
+        "inserted": item.inserted,
         "attributes": attributes,
     });
     if let (Some(out), Some(status)) = (out.as_object_mut(), status.as_object()) {
@@ -484,6 +488,12 @@ pub fn import(sidecar: &Sidecar, layouts: &Layouts) -> Imported {
     out.report.pipe_order = arranged.order.source;
     out.report.unordered = arranged.unordered;
     out.report.items = arranged.items.len();
+    out.report.inserted = sidecar
+        .history
+        .iter()
+        .filter(|i| i.inserted)
+        .map(HistoryItem::label)
+        .collect();
     for item in arranged.items {
         let at = index(item);
         if !item.enabled {

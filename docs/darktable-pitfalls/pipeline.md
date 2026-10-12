@@ -66,6 +66,13 @@ thread. Helios state was read from `ROADMAP.md`, `docs/module-contract.md`,
   parity bench pins `workflow=none`, `chromatic-adaptation=legacy` and
   `--apply-custom-presets false` (`helios-parity`). XMP import of real edits
   has no rule yet for modules missing from the history.
+  *Partly addressed since* (2026-10-12): the one rule darktable applies
+  itself when it reads a sidecar is reproduced: before `xmp_version` 5, a
+  raw edit without highlights gets highlights with the clip method, put
+  second, the history end moved one further; the item is marked inserted
+  (never written back) and named in the report's `inserted`. The other
+  implicit modules (white balance, demosaic, colorin... at today's
+  defaults) are not filled in by the import.
 - **Recommendation.** Design rule: changing a default is a version bump,
   and a migration fills in the old default (ROADMAP rule 6 already says
   migrations are explicit). For imports, encode darktable's "implicit
