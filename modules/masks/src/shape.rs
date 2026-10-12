@@ -1113,7 +1113,9 @@ pub fn outline(module: &str, params: &Params) -> Result<Outline, String> {
                 handles: vec![
                     handle("centre", [x, y], &["x", "y"]),
                     handle("radius", [x + p.radius, y], &["radius"]),
-                    handle("feather", [x + p.outer, y], &["feather"]),
+                    // Across from the radius: with a thin feather the two
+                    // would sit on one another.
+                    handle("feather", [x - p.outer, y], &["feather"]),
                 ],
             })
         }
@@ -1133,7 +1135,7 @@ pub fn outline(module: &str, params: &Params) -> Result<Outline, String> {
                     handle("centre", [p.cx, p.cy], &["x", "y"]),
                     handle("radius_x", along(p.a), &["radius_x", "rotation"]),
                     handle("radius_y", across(p.b), &["radius_y", "rotation"]),
-                    handle("feather", along(p.ta), &["feather"]),
+                    handle("feather", along(-p.ta), &["feather"]),
                 ],
             })
         }
@@ -1165,9 +1167,14 @@ pub fn outline(module: &str, params: &Params) -> Result<Outline, String> {
                         [p.ax + 50.0 * tx, p.ay + 50.0 * ty],
                         &["rotation"],
                     ),
+                    // On the band's edge, along the line away from the
+                    // rotation handle, so it never covers the anchor.
                     handle(
                         "feather",
-                        [p.ax + half * p.nx, p.ay + half * p.ny],
+                        [
+                            p.ax + half * p.nx - 50.0 * tx,
+                            p.ay + half * p.ny - 50.0 * ty,
+                        ],
                         &["feather"],
                     ),
                 ],
@@ -1299,7 +1306,9 @@ mod tests {
         }
         let names: Vec<&str> = o.handles.iter().map(|h| h.name.as_str()).collect();
         assert_eq!(names, ["centre", "radius", "feather"]);
-        assert_eq!(o.handles[2].at, [65.0, 40.0]);
+        // The feather's handle across from the radius's.
+        assert_eq!(o.handles[1].at, [60.0, 40.0]);
+        assert_eq!(o.handles[2].at, [35.0, 40.0]);
 
         let g = outline(
             "mask_gradient",
