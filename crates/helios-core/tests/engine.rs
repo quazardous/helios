@@ -386,3 +386,32 @@ fn an_optional_input_may_stay_unconnected() {
     assert_eq!(twice.pixel(1, 0)[0], 2.0 * ramp().pixel(1, 0)[0]);
     assert_eq!(g.extent(other).unwrap(), Some(r), "the extent follows b");
 }
+
+/// A chain of `n` nodes, each reading the previous one on both ports: 2^n
+/// paths from the last node to the source. The source and the last node.
+fn diamonds(g: &mut Graph, n: usize) -> (NodeId, NodeId) {
+    let src = g.add_source("src", ramp());
+    let (mut last, mut port) = (src, "image");
+    for i in 0..n {
+        let node = g
+            .add_module(&format!("sum{i}"), ModuleRef::new(Sum), &Params::new())
+            .unwrap();
+        g.connect(last, port, node, "a").unwrap();
+        g.connect(last, port, node, "b").unwrap();
+        (last, port) = (node, "output");
+    }
+    (src, last)
+}
+
+#[test]
+fn the_cycle_check_visits_a_shared_node_once() {
+    // Each connection checks for a cycle upstream: walking every path
+    // would take 2^40 steps.
+    let mut g = Graph::new();
+    let (_, last) = diamonds(&mut g, 40);
+    let first = g.find("sum0").unwrap();
+    assert!(matches!(
+        g.connect(last, "output", first, "b"),
+        Err(Error::Cycle { .. })
+    ));
+}

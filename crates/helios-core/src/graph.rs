@@ -362,11 +362,20 @@ impl Graph {
         Ok(())
     }
 
-    /// Whether `upstream` feeds `node`, directly or not.
+    /// Whether `upstream` feeds `node`, directly or not. Each node is
+    /// visited once: a node read by several consumers is reached by many
+    /// paths, as many as 2^n through n diamonds.
     fn feeds(&self, upstream: NodeId, node: NodeId) -> Result<bool, Error> {
-        for (src, _) in self.node(node)?.inputs.iter().flatten() {
-            if *src == upstream || self.feeds(upstream, *src)? {
-                return Ok(true);
+        let mut seen = std::collections::HashSet::new();
+        let mut todo = vec![node];
+        while let Some(at) = todo.pop() {
+            for (src, _) in self.node(at)?.inputs.iter().flatten() {
+                if *src == upstream {
+                    return Ok(true);
+                }
+                if seen.insert(*src) {
+                    todo.push(*src);
+                }
             }
         }
         Ok(false)
