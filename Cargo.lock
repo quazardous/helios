@@ -1029,6 +1029,7 @@ dependencies = [
  "egui-pop-core",
  "egui-pop-model",
  "egui-pop-tokens",
+ "egui-pop-viewport",
 ]
 
 [[package]]
@@ -1085,6 +1086,18 @@ name = "egui-pop-tokens"
 version = "0.0.1"
 source = "git+https://github.com/quazardous/egui-pop?rev=243f16b#243f16b78e24c1154a3f7d0e7fcce516ecb10439"
 dependencies = [
+ "serde_json",
+]
+
+[[package]]
+name = "egui-pop-viewport"
+version = "0.0.1"
+source = "git+https://github.com/quazardous/egui-pop?rev=7968fca#7968fca264d0ba83798f21ddaddd247c8f850351"
+dependencies = [
+ "egui",
+ "egui-pop-core",
+ "egui-wgpu",
+ "half",
  "serde_json",
 ]
 

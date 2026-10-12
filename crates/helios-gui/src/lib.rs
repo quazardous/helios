@@ -4,6 +4,7 @@
 
 pub mod dialogs;
 pub mod dock;
+pub mod engine_source;
 pub mod frame;
 pub mod host;
 pub mod library;

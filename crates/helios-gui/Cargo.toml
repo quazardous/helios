@@ -8,7 +8,8 @@ repository.workspace = true
 
 [dependencies]
 helios-shell.workspace = true
-egui-pop.workspace = true
+# The image viewport (`egui_pop::viewport`) too.
+egui-pop = { workspace = true, features = ["viewport"] }
 helios-profile.workspace = true
 helios-scopes.workspace = true
 helios-values.workspace = true
