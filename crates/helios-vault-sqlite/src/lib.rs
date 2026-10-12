@@ -12,12 +12,22 @@
 //!
 //! Schema: numbered migrations and `PRAGMA user_version`, with a verified
 //! snapshot before any change (see the `migrate` module and [`snapshot`]).
+//!
+//! Integrity: closing a vault leaves a clean-shutdown marker in it, and
+//! opening one clears it. A vault opened without the marker was not closed
+//! (a crash, a kill, a power cut): `PRAGMA quick_check` runs before it is
+//! used, and a vault that fails it opens read-only, with the latest
+//! snapshot named ([`OpenError::Damaged`]). With several processes on one
+//! vault, the marker is a hint, not a proof: a process that opens while
+//! another one runs checks for nothing, and a crash while another process
+//! closes cleanly goes unseen until the next scheduled snapshot, whose copy
+//! is checked too.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
+use rusqlite::{Connection, OpenFlags, OptionalExtension, TransactionBehavior, params};
 
 use std::collections::BTreeMap;
 
@@ -42,6 +52,9 @@ pub struct Options {
     /// store has no bus of its own: [`Progress`] is a bus event, so the
     /// caller can publish it as it comes.
     pub on_progress: Option<OnProgress>,
+    /// How many snapshots are kept: taking one removes the oldest beyond
+    /// this (at least one is always kept).
+    pub keep_snapshots: usize,
 }
 
 impl Default for Options {
@@ -49,6 +62,7 @@ impl Default for Options {
         Self {
             busy_timeout: Duration::from_secs(5),
             on_progress: None,
+            keep_snapshots: 5,
         }
     }
 }
@@ -58,6 +72,7 @@ impl std::fmt::Debug for Options {
         f.debug_struct("Options")
             .field("busy_timeout", &self.busy_timeout)
             .field("on_progress", &self.on_progress.is_some())
+            .field("keep_snapshots", &self.keep_snapshots)
             .finish()
     }
 }
@@ -100,6 +115,51 @@ pub enum OpenError {
         message: String,
         snapshot: Option<PathBuf>,
     },
+    /// The database failed its integrity check after an unclean shutdown,
+    /// or could not be read at all.
+    Damaged(Damaged),
+}
+
+/// A vault that failed its integrity check.
+#[derive(Debug)]
+pub struct Damaged {
+    pub path: PathBuf,
+    /// What `PRAGMA quick_check` (or SQLite) reported.
+    pub problems: Vec<String>,
+    /// The latest snapshot, to restore the vault from.
+    pub snapshot: Option<PathBuf>,
+    /// The vault open read-only, when SQLite can still open it: what is
+    /// readable can be read (and exported), every write is refused.
+    pub read_only: Option<Box<SqliteStore>>,
+}
+
+fn restore_advice(path: &Path, snapshot: Option<&Path>) -> String {
+    match snapshot {
+        Some(s) => format!(
+            "the latest snapshot is {}: close Helios, then replace {} with it",
+            s.display(),
+            path.display()
+        ),
+        None => "there is no snapshot to restore from".into(),
+    }
+}
+
+impl std::fmt::Display for Damaged {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let shown: Vec<&str> = self.problems.iter().take(3).map(String::as_str).collect();
+        write!(
+            f,
+            "the vault {} is damaged ({}{}); {}",
+            self.path.display(),
+            shown.join("; "),
+            if self.problems.len() > 3 {
+                format!("; {} more", self.problems.len() - 3)
+            } else {
+                String::new()
+            },
+            restore_advice(&self.path, self.snapshot.as_deref())
+        )
+    }
 }
 
 impl std::fmt::Display for OpenError {
@@ -130,6 +190,7 @@ impl std::fmt::Display for OpenError {
                 }
                 Ok(())
             }
+            Self::Damaged(d) => d.fmt(f),
         }
     }
 }
@@ -147,6 +208,8 @@ impl From<OpenError> for String {
 pub struct OpenReport {
     /// The schema change, when there was one.
     pub migrated: Option<Migrated>,
+    /// The vault had not been closed: it was checked, and passed.
+    pub unclean_shutdown: bool,
 }
 
 /// The settings a connection runs with, as SQLite reports them.
@@ -165,6 +228,40 @@ pub struct SqliteStore {
     path: Option<PathBuf>,
     options: Options,
     report: OpenReport,
+    /// Why writes are refused, for a vault open read-only after a failed
+    /// check.
+    read_only: Option<String>,
+    /// The clean-shutdown marker is already written.
+    closed: bool,
+}
+
+/// The key of the clean-shutdown marker in `vault_state`.
+const CLEAN_SHUTDOWN: &str = "clean_shutdown";
+
+fn closed_cleanly(db: &Connection) -> bool {
+    db.query_row(
+        "SELECT 1 FROM vault_state WHERE key = ?1",
+        [CLEAN_SHUTDOWN],
+        |_| Ok(()),
+    )
+    .is_ok()
+}
+
+/// SQLite errors that mean the file itself is broken.
+fn corrupt(e: &rusqlite::Error) -> bool {
+    matches!(
+        e.sqlite_error_code(),
+        Some(rusqlite::ErrorCode::DatabaseCorrupt | rusqlite::ErrorCode::NotADatabase)
+    )
+}
+
+fn damaged(path: &Path, problems: Vec<String>) -> OpenError {
+    OpenError::Damaged(Damaged {
+        path: path.to_path_buf(),
+        problems,
+        snapshot: None,
+        read_only: None,
+    })
 }
 
 impl std::fmt::Debug for SqliteStore {
@@ -233,9 +330,45 @@ impl SqliteStore {
 
     /// Opens (or creates) a vault database file, bringing its schema to
     /// [`SCHEMA_VERSION`].
+    ///
+    /// A vault that was not closed is checked first; one that fails the
+    /// check is returned read-only inside [`OpenError::Damaged`].
     pub fn open_with(path: &Path, options: &Options) -> Result<Self, OpenError> {
         let db = Connection::open(path).map_err(|e| OpenError::Sqlite(err(e)))?;
-        Self::init(db, Some(path), options)
+        match Self::init(db, Some(path), options) {
+            // The read-write connection is closed by now.
+            Err(OpenError::Damaged(d)) => Err(OpenError::Damaged(Self::read_only(
+                path, options, d.problems,
+            ))),
+            other => other,
+        }
+    }
+
+    fn read_only(path: &Path, options: &Options, problems: Vec<String>) -> Damaged {
+        let snapshot = snapshot::list(path).pop();
+        let refusal = format!(
+            "the vault {} failed its integrity check and is open read-only; {}",
+            path.display(),
+            restore_advice(path, snapshot.as_deref())
+        );
+        let flags = OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX;
+        let read_only = Connection::open_with_flags(path, flags).ok().map(|db| {
+            let _ = db.busy_timeout(options.busy_timeout);
+            Box::new(Self {
+                db,
+                path: Some(path.to_path_buf()),
+                options: options.clone(),
+                report: OpenReport::default(),
+                read_only: Some(refusal),
+                closed: false,
+            })
+        });
+        Damaged {
+            path: path.to_path_buf(),
+            problems,
+            snapshot,
+            read_only,
+        }
     }
 
     pub fn in_memory() -> Result<Self, String> {
@@ -244,7 +377,10 @@ impl SqliteStore {
     }
 
     fn init(mut db: Connection, path: Option<&Path>, options: &Options) -> Result<Self, OpenError> {
-        let sqlite = |e| OpenError::Sqlite(err(e));
+        let sqlite = |e: rusqlite::Error| match path {
+            Some(path) if corrupt(&e) => damaged(path, vec![err(e)]),
+            _ => OpenError::Sqlite(err(e)),
+        };
         db.busy_timeout(options.busy_timeout).map_err(sqlite)?;
         db.pragma_update(None, "foreign_keys", "ON")
             .map_err(sqlite)?;
@@ -254,14 +390,64 @@ impl SqliteStore {
             .map_err(sqlite)?;
         db.pragma_update(None, "synchronous", "NORMAL")
             .map_err(sqlite)?;
+        let mut unclean_shutdown = false;
+        if let Some(path) = path {
+            let fresh = !migrate::has_tables(&db).map_err(sqlite)?;
+            if !fresh && !closed_cleanly(&db) {
+                unclean_shutdown = true;
+                let problems = snapshot::quick_check(&db).unwrap_or_else(|e| vec![e]);
+                if !problems.is_empty() {
+                    return Err(damaged(path, problems));
+                }
+            }
+        }
         let migrated =
             migrate::migrate(&mut db, path, options, migrate::MIGRATIONS, migrate::VIEWS)?;
+        if path.is_some() {
+            db.execute("DELETE FROM vault_state WHERE key = ?1", [CLEAN_SHUTDOWN])
+                .map_err(sqlite)?;
+        }
         Ok(Self {
             db,
             path: path.map(Path::to_path_buf),
             options: options.clone(),
-            report: OpenReport { migrated },
+            report: OpenReport {
+                migrated,
+                unclean_shutdown,
+            },
+            read_only: None,
+            closed: false,
         })
+    }
+
+    /// Closes the vault, leaving the clean-shutdown marker; dropping it
+    /// does the same, without the error.
+    pub fn close(mut self) -> Result<(), String> {
+        self.mark_clean()
+    }
+
+    fn mark_clean(&mut self) -> Result<(), String> {
+        if self.path.is_none() || self.read_only.is_some() || self.closed {
+            return Ok(());
+        }
+        self.closed = true;
+        if !self.db.is_autocommit() {
+            // A transaction left open is not kept.
+            self.db.execute_batch("ROLLBACK").map_err(err)?;
+        }
+        self.db
+            .execute(
+                "INSERT INTO vault_state (key, value) VALUES (?1, '1') ON CONFLICT (key) DO NOTHING",
+                [CLEAN_SHUTDOWN],
+            )
+            .map(|_| ())
+            .map_err(err)
+    }
+
+    fn writable(&self) -> Result<(), String> {
+        self.read_only
+            .as_ref()
+            .map_or(Ok(()), |why| Err(why.clone()))
     }
 
     /// What happened while the vault was opened.
@@ -304,6 +490,7 @@ impl SqliteStore {
     /// otherwise its own, taken at once (`BEGIN IMMEDIATE`) so that what
     /// it reads cannot change before it writes.
     fn write<T>(&mut self, f: impl FnOnce(&Connection) -> Result<T, String>) -> Result<T, String> {
+        self.writable()?;
         if !self.db.is_autocommit() {
             return f(&self.db);
         }
@@ -358,6 +545,7 @@ const LOCATION_COLUMNS: &str = "image, path, size, modified, last_verified, pres
 
 impl Store for SqliteStore {
     fn add_image(&mut self, image: &Image) -> Result<bool, String> {
+        self.writable()?;
         let added = self
             .db
             .execute(
@@ -397,6 +585,7 @@ impl Store for SqliteStore {
     }
 
     fn put_location(&mut self, id: &ImageId, location: &Location) -> Result<(), String> {
+        self.writable()?;
         self.db
             .execute(
                 "INSERT INTO locations (path, image, size, modified, last_verified, present)
@@ -633,6 +822,7 @@ impl Store for SqliteStore {
     }
 
     fn put_version(&mut self, v: &Version) -> Result<bool, String> {
+        self.writable()?;
         let parents: Vec<String> = v.parents.iter().map(VersionId::hex).collect();
         let added = self
             .db
@@ -676,6 +866,7 @@ impl Store for SqliteStore {
     }
 
     fn set_document(&mut self, ns: &str, key: &str, value: Option<&Value>) -> Result<(), String> {
+        self.writable()?;
         match value {
             Some(v) => self.db.execute(
                 "INSERT INTO documents (ns, key, value) VALUES (?1, ?2, ?3)
@@ -711,6 +902,7 @@ impl Store for SqliteStore {
     }
 
     fn begin(&mut self) -> Result<(), String> {
+        self.writable()?;
         if !self.db.is_autocommit() {
             return Err("a transaction is already open".into());
         }
@@ -729,5 +921,13 @@ impl Store for SqliteStore {
             return Err("no transaction to roll back".into());
         }
         self.db.execute_batch("ROLLBACK").map_err(err)
+    }
+}
+
+impl Drop for SqliteStore {
+    fn drop(&mut self) {
+        // Nothing to tell anyone at this point: a vault whose marker could
+        // not be written is checked at its next opening.
+        let _ = self.mark_clean();
     }
 }

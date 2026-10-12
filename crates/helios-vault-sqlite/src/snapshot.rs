@@ -6,7 +6,8 @@
 //! then renamed into place: a snapshot that exists is a good one. They
 //! live next to the database, in `<file>.snapshots/`, named
 //! `<sequence>-v<schema version>-<reason>.db` so that their order does not
-//! depend on a clock.
+//! depend on a clock. Taking one removes the oldest beyond
+//! [`Options::keep_snapshots`].
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -91,6 +92,12 @@ pub(crate) fn take(
     // everywhere (Windows): there, the rename is as durable as it gets.
     if let Ok(d) = std::fs::File::open(&dir) {
         let _ = d.sync_all();
+    }
+    // Rotation, once the new one is safe: the oldest go first.
+    let all = list(path);
+    let excess = all.len().saturating_sub(options.keep_snapshots.max(1));
+    for old in &all[..excess] {
+        std::fs::remove_file(old).map_err(|e| format!("{}: {e}", old.display()))?;
     }
     Ok(target)
 }

@@ -90,11 +90,20 @@ CREATE TABLE IF NOT EXISTS documents (
 
 /// Every step, in order. A step is never edited once released: a change
 /// is a new step.
-pub(crate) const MIGRATIONS: &[Migration] = &[Migration {
-    version: 1,
-    name: "initial schema",
-    sql: V1,
-}];
+pub(crate) const MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 1,
+        name: "initial schema",
+        sql: V1,
+    },
+    Migration {
+        version: 2,
+        name: "vault state",
+        // Small facts about the file itself, such as the clean-shutdown
+        // marker.
+        sql: "CREATE TABLE vault_state (key TEXT PRIMARY KEY, value TEXT NOT NULL);",
+    },
+];
 
 /// The views and triggers of the current schema (none yet), created again
 /// at the end of every step.
@@ -122,7 +131,7 @@ pub(crate) fn user_version(db: &Connection) -> Result<u32, rusqlite::Error> {
     db.query_row("PRAGMA user_version", [], |r| r.get(0))
 }
 
-fn has_tables(db: &Connection) -> Result<bool, rusqlite::Error> {
+pub(crate) fn has_tables(db: &Connection) -> Result<bool, rusqlite::Error> {
     db.query_row(
         "SELECT EXISTS (SELECT 1 FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%')",
         [],
@@ -279,7 +288,7 @@ mod tests {
         dir
     }
 
-    /// The real steps, then one that drops a column.
+    /// The first real step, then one that drops a column.
     const WITH_DROP: &[Migration] = &[
         MIGRATIONS[0],
         Migration {
@@ -298,7 +307,7 @@ mod tests {
         let path = dir.join("vault.db");
         let mut db = Connection::open(&path).unwrap();
         let options = Options::default();
-        migrate(&mut db, Some(&path), &options, MIGRATIONS, VIEWS).unwrap();
+        migrate(&mut db, Some(&path), &options, &MIGRATIONS[..1], VIEWS).unwrap();
         db.execute_batch(
             "CREATE VIEW v_partial AS SELECT id, partial FROM images;
              PRAGMA foreign_keys = OFF;
@@ -329,7 +338,7 @@ mod tests {
         let path = dir.join("vault.db");
         let mut db = Connection::open(&path).unwrap();
         let options = Options::default();
-        migrate(&mut db, Some(&path), &options, MIGRATIONS, VIEWS).unwrap();
+        migrate(&mut db, Some(&path), &options, &MIGRATIONS[..1], VIEWS).unwrap();
         let broken = [
             MIGRATIONS[0],
             Migration {

@@ -40,6 +40,16 @@ thread or in the code is marked *(guess)*.
 - **Helios exposure**: at risk. `helios-vault-sqlite` sets only
   `PRAGMA foreign_keys = ON`: no WAL, no `synchronous`, no integrity check, no
   snapshot.
+  *Addressed since*: WAL, `synchronous=NORMAL` (FULL for the snapshots), an
+  explicit busy timeout and one transaction per multi-statement write
+  (`Store::begin` / `commit` / `rollback` in the contract). A
+  clean-shutdown marker; after an unclean shutdown `quick_check` runs
+  before use, and a failure opens the vault read-only with the latest
+  snapshot named. Rotating snapshots via the backup API, checked before
+  they are renamed into place. Tested with a process killed while writing
+  and a file corrupted at a page. Not done: snapshots on a schedule (the
+  call exists, nothing schedules it), and `integrity_check` instead of
+  `quick_check` before a snapshot.
 - **Recommendation**: open with `journal_mode=WAL`, `synchronous=NORMAL`
   (FULL for the catalog if cheap enough), explicit transactions for every
   multi-row write; `quick_check` on open after an unclean shutdown (a
@@ -111,6 +121,9 @@ thread or in the code is marked *(guess)*.
 - **Helios exposure**: at risk for multi-process use (GUI, CLI, NAS agent,
   workers in `helios-journal`). Nothing in the vault handles concurrent
   processes yet.
+  *Addressed since*: no lock file; WAL and a 5 s busy timeout, write
+  transactions taken at once (`BEGIN IMMEDIATE`); a test runs two vaults
+  and a reader on one file without a busy error.
 - **Recommendation**: do not build a pid lock file. Rely on SQLite's own
   locking with WAL and a `busy_timeout`, so several readers and one writer
   coexist; if exclusive access is needed, use an OS advisory lock (released
