@@ -127,7 +127,9 @@ impl Route {
         }
     }
 
-    /// Renders on the device, falling back to the CPU when the GPU fails.
+    /// Renders on the device, falling back to the CPU when the GPU fails:
+    /// step by step in the engine (a kernel that fails runs on the CPU, a
+    /// lost device is rebuilt or left), else the whole render.
     pub fn render(
         &self,
         bus: Arc<Bus>,
@@ -136,13 +138,31 @@ impl Route {
         port: &str,
         region: Region,
     ) -> Result<Ran, Error> {
-        let first = self.engine(bus.clone()).render(graph, node, port, region);
+        let engine = self.engine(bus.clone());
+        let first = engine.render(graph, node, port, region);
         match first {
-            Ok(image) => Ok(Ran {
-                image,
-                device: self.device.clone(),
-                fell_back: self.fell_back.clone(),
-            }),
+            Ok(image) => {
+                let n = engine.counters();
+                let (device, fell_back) = match engine.fallback_reason() {
+                    // Every step that would have run on the GPU ran on the CPU.
+                    Some(why) if n.accelerated == 0 => {
+                        (CPU.into(), Some(format!("{} failed: {why}", self.name)))
+                    }
+                    Some(why) => (
+                        self.device.clone(),
+                        Some(format!(
+                            "{} step(s) fell back to the CPU: {why}",
+                            n.fallbacks
+                        )),
+                    ),
+                    None => (self.device.clone(), self.fell_back.clone()),
+                };
+                Ok(Ran {
+                    image,
+                    device,
+                    fell_back,
+                })
+            }
             Err(e) if self.accelerator.is_some() => {
                 let image = Engine::with_budget(bus, self.cpu_cache_bytes)
                     .render(graph, node, port, region)?;
@@ -428,12 +448,19 @@ impl Manager {
         json!({ "units": units })
     }
 
+    /// A GPU opened, its memory budget set from its settings (`vram_mb`,
+    /// else the device's default).
     fn opened(&self, id: &str) -> Result<OpenedGpu, String> {
         let mut opened = self.opened.lock().expect("opened lock");
-        opened
+        let gpu = opened
             .entry(id.into())
             .or_insert_with(|| self.adapters.open(id))
-            .clone()
+            .clone();
+        if let Ok(gpu) = &gpu {
+            let vram = self.settings.devices.get(id).and_then(|s| s.vram_mb);
+            gpu.accelerator.set_memory_budget(vram.map(|mb| mb * MIB));
+        }
+        gpu
     }
 
     /// What a GPU allows: its opened device's limits once it is open,

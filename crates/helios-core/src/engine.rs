@@ -33,6 +33,16 @@
 //! reads it. A chain of accelerated steps thus uploads its source once and
 //! reads back its result once. Device content is cached like host content,
 //! under the same key and within the same budget (its bytes count).
+//!
+//! The accelerator may fail; a render never does because of it. A step
+//! whose kernel fails (it does not compile, does not run, or its memory
+//! budget is spent once the engine evicted the device content it could) is
+//! computed on the CPU instead, and the engine says so on the bus
+//! ([`GpuFellBack`]). A lost or hung device ([`Failure::is_device`]) holds
+//! nothing readable: the engine drops its device content, asks the
+//! accelerator to rebuild its device and replays the render; when that
+//! fails, it goes on without the accelerator for the rest of its life and
+//! says so ([`GpuLost`]).
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -47,7 +57,7 @@ use crate::graph::{Graph, Kind, NodeId};
 use crate::image::{ContentHash, Image, Region};
 use crate::manifest::{Family, ModuleKind, Role};
 use crate::module::ModuleRef;
-use crate::module::{Accelerator, DeviceImage};
+use crate::module::{Accelerator, AcceleratorError, DeviceImage, Failure};
 use crate::status::{Load, NodeState, NodeStatus, NodeType};
 
 /// The source name the engine publishes events under.
@@ -130,6 +140,37 @@ impl Event for StepComputed {
     const KIND: &'static str = "engine.step_computed";
 }
 
+/// A step's GPU variant failed: the step was computed on the CPU instead.
+#[derive(Serialize)]
+pub struct GpuFellBack {
+    pub node: NodeId,
+    pub name: String,
+    pub module: String,
+    pub failure: Failure,
+    pub reason: String,
+}
+
+impl Event for GpuFellBack {
+    const KIND: &'static str = "engine.gpu_fell_back";
+}
+
+/// The accelerator's device was lost or hung during a render. Either it
+/// was rebuilt and the render replayed on it, or the engine computes
+/// everything on the CPU from now on.
+#[derive(Serialize)]
+pub struct GpuLost {
+    pub failure: Failure,
+    pub reason: String,
+    /// Rebuilt: the render is replayed on the new device.
+    pub recovered: bool,
+    /// What a user should read.
+    pub message: String,
+}
+
+impl Event for GpuLost {
+    const KIND: &'static str = "engine.gpu_lost";
+}
+
 /// Where an injected fault strikes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -180,6 +221,10 @@ pub struct Counters {
     /// Steps served by cropping content of the same lineage cached over a
     /// wider region.
     pub crops: u64,
+    /// Steps whose GPU variant failed, computed on the CPU instead.
+    pub fallbacks: u64,
+    /// Renders that lost the accelerator's device (lost or hung).
+    pub device_losses: u64,
 }
 
 impl Counters {
@@ -200,6 +245,8 @@ impl Counters {
             readbacks: self.readbacks - earlier.readbacks,
             keys: self.keys - earlier.keys,
             crops: self.crops - earlier.crops,
+            fallbacks: self.fallbacks - earlier.fallbacks,
+            device_losses: self.device_losses - earlier.device_losses,
         }
     }
 }
@@ -469,6 +516,13 @@ pub struct Engine {
     readbacks: AtomicU64,
     keys: AtomicU64,
     crops: AtomicU64,
+    fallbacks: AtomicU64,
+    device_losses: AtomicU64,
+    /// Why the accelerator is no longer used, once its device was lost for
+    /// good: everything runs on the CPU from then on.
+    gpu_off: Mutex<Option<String>>,
+    /// The last reason a step fell back to the CPU.
+    last_fallback: Mutex<Option<String>>,
 }
 
 type TrackKey = (u64, NodeId, Region);
@@ -522,6 +576,10 @@ impl Engine {
             readbacks: AtomicU64::new(0),
             keys: AtomicU64::new(0),
             crops: AtomicU64::new(0),
+            fallbacks: AtomicU64::new(0),
+            device_losses: AtomicU64::new(0),
+            gpu_off: Mutex::new(None),
+            last_fallback: Mutex::new(None),
         }
     }
 
@@ -531,6 +589,27 @@ impl Engine {
     pub fn with_accelerator(mut self, accelerator: Arc<dyn Accelerator>) -> Self {
         self.accelerator = Some(accelerator);
         self
+    }
+
+    /// The accelerator, unless its device was lost for good.
+    fn active(&self) -> Option<&Arc<dyn Accelerator>> {
+        if self.gpu_off.lock().expect("engine gpu lock").is_some() {
+            return None;
+        }
+        self.accelerator.as_ref()
+    }
+
+    /// Why the accelerator is no longer used (its device was lost and could
+    /// not be rebuilt), if it is not.
+    pub fn gpu_off(&self) -> Option<String> {
+        self.gpu_off.lock().expect("engine gpu lock").clone()
+    }
+
+    /// Why a step last fell back to the CPU, or why the accelerator is off:
+    /// what a caller reports when [`Counters::fallbacks`] grew.
+    pub fn fallback_reason(&self) -> Option<String> {
+        self.gpu_off()
+            .or_else(|| self.last_fallback.lock().expect("engine gpu lock").clone())
     }
 
     fn track<R>(&self, step: &Step, f: impl FnOnce(&mut Track) -> R) -> R {
@@ -647,6 +726,8 @@ impl Engine {
             readbacks: self.readbacks.load(Ordering::SeqCst),
             keys: self.keys.load(Ordering::SeqCst),
             crops: self.crops.load(Ordering::SeqCst),
+            fallbacks: self.fallbacks.load(Ordering::SeqCst),
+            device_losses: self.device_losses.load(Ordering::SeqCst),
         }
     }
 
@@ -674,8 +755,9 @@ impl Engine {
         region: Region,
         scale: f64,
     ) -> Result<Image, Error> {
-        let (step, content, index) = self.render_content(graph, node, port, region, scale)?;
-        Ok(self.host(&step, &content, index)?.sample(region))
+        self.render_content(graph, node, port, region, scale, |step, content, index| {
+            Ok(self.host(step, content, index)?.sample(region))
+        })
     }
 
     /// Renders at full resolution into the accelerator's memory, for a
@@ -702,21 +784,30 @@ impl Engine {
         region: Region,
         scale: f64,
     ) -> Result<DeviceImage, Error> {
-        let accelerator = self.accelerator.clone().ok_or(Error::NoAccelerator)?;
-        let (step, content, index) = self.render_content(graph, node, port, region, scale)?;
-        self.device(accelerator.as_ref(), &step, &step, &content, index, region)
+        if self.active().is_none() {
+            return Err(Error::NoAccelerator);
+        }
+        self.render_content(graph, node, port, region, scale, |step, content, index| {
+            // The device was lost for good during the render: the caller
+            // reads the result on the host instead.
+            let accelerator = self.active().ok_or(Error::NoAccelerator)?;
+            self.device(accelerator.as_ref(), step, step, content, index, region)
+        })
     }
 
-    /// Plans and executes a render: the requested step, its content and
-    /// the index of the port asked for.
-    fn render_content(
+    /// Plans and executes a render, then hands the requested step, its
+    /// content and the index of the port asked for to `finish` (which reads
+    /// it where the caller wants it). A lost or hung device on the way
+    /// replays the whole render: on the rebuilt device, else on the CPU.
+    fn render_content<T>(
         &self,
         graph: &Graph,
         node: NodeId,
         port: &str,
         region: Region,
         scale: f64,
-    ) -> Result<(Arc<Step>, Arc<Content>, usize), Error> {
+        finish: impl Fn(&Arc<Step>, &Arc<Content>, usize) -> Result<T, Error>,
+    ) -> Result<T, Error> {
         if !(scale > 0.0 && scale <= 1.0) {
             return Err(Error::Scale(scale.to_string()));
         }
@@ -730,27 +821,124 @@ impl Engine {
                 region,
             },
         );
-        let planned = self.plan(graph, node, region, scale)?;
-        let pins = self.pin(&planned);
-        let evictions = self.cache.lock().expect("engine cache lock").evictions;
-        let content = self.execute(&planned.root, cause, &pins);
-        // Whatever happened, the render's pins go, and the cache settles
-        // within its budget.
-        let settled = {
-            let mut cache = self.cache.lock().expect("engine cache lock");
-            for key in pins.readers.lock().expect("pins lock").keys() {
-                cache.unpin(*key);
+        let mut rebuilt = false;
+        // A render is replayed at most twice: on the rebuilt device, then
+        // on the CPU.
+        let mut replays = 0;
+        loop {
+            let planned = self.plan(graph, node, region, scale)?;
+            let pins = self.pin(&planned);
+            let evictions = self.cache.lock().expect("engine cache lock").evictions;
+            let result = self
+                .execute(&planned.root, cause, &pins)
+                .and_then(|content| finish(&planned.root, &content, index));
+            // Whatever happened, the render's pins go, and the cache settles
+            // within its budget.
+            let settled = {
+                let mut cache = self.cache.lock().expect("engine cache lock");
+                for key in pins.readers.lock().expect("pins lock").keys() {
+                    cache.unpin(*key);
+                }
+                cache.settle(None, self.budget);
+                CacheSettled {
+                    bytes: cache.bytes,
+                    budget: self.budget,
+                    entries: cache.entries.len(),
+                    evicted: cache.evictions - evictions,
+                }
+            };
+            self.bus.publish(SOURCE, Some(cause), &settled);
+            match result {
+                Err(Error::Accelerator { failure, reason }) if replays < 2 => {
+                    replays += 1;
+                    // Off already (another render lost it): replayed on
+                    // the CPU.
+                    if self.active().is_some() {
+                        self.device_lost(failure, &reason, &mut rebuilt, cause);
+                    }
+                }
+                result => return result,
             }
-            cache.settle(None, self.budget);
-            CacheSettled {
-                bytes: cache.bytes,
-                budget: self.budget,
-                entries: cache.entries.len(),
-                evicted: cache.evictions - evictions,
+        }
+    }
+
+    /// The accelerator's device was lost or hung: its content goes, and the
+    /// device is rebuilt once a render; failing that (or lost again on the
+    /// rebuilt device), the accelerator is off for good.
+    fn device_lost(&self, failure: Failure, reason: &str, rebuilt: &mut bool, cause: u64) {
+        self.device_losses.fetch_add(1, Ordering::SeqCst);
+        self.purge_device();
+        let accelerator = self.active().expect("checked by the caller").clone();
+        let recovered = if *rebuilt {
+            Err("lost again on the rebuilt device".to_string())
+        } else {
+            accelerator.recover()
+        };
+        *rebuilt = true;
+        let message = match &recovered {
+            Ok(()) => format!(
+                "The GPU ({}) failed ({}: {reason}); it was restarted and the render replayed.",
+                accelerator.id(),
+                failure.as_str()
+            ),
+            Err(why) => {
+                let message = format!(
+                    "The GPU ({}) failed ({}: {reason}) and could not be restarted ({why}); \
+                     the rest of this session renders on the CPU.",
+                    accelerator.id(),
+                    failure.as_str()
+                );
+                *self.gpu_off.lock().expect("engine gpu lock") = Some(message.clone());
+                message
             }
         };
-        self.bus.publish(SOURCE, Some(cause), &settled);
-        Ok((planned.root, content?, index))
+        self.bus.publish(
+            SOURCE,
+            Some(cause),
+            &GpuLost {
+                failure,
+                reason: reason.into(),
+                recovered: recovered.is_ok(),
+                message,
+            },
+        );
+    }
+
+    /// Drops every content held in the accelerator's memory: after a loss,
+    /// none of it can be read.
+    fn purge_device(&self) {
+        let mut cache = self.cache.lock().expect("engine cache lock");
+        let device: Vec<ContentHash> = cache
+            .entries
+            .iter()
+            .filter(|(_, e)| matches!(e.cell.get(), Some(Ok(c)) if matches!(**c, Content::Device { .. })))
+            .map(|(k, _)| *k)
+            .collect();
+        for key in device {
+            if let Some(entry) = cache.remove(key) {
+                cache.bytes -= entry.size;
+            }
+        }
+    }
+
+    /// Evicts the least recently used device content no render pins, to
+    /// free accelerator memory; `false` when there is none.
+    fn evict_device(&self) -> bool {
+        let mut cache = self.cache.lock().expect("engine cache lock");
+        let victim = cache
+            .entries
+            .iter()
+            .filter(|(k, e)| {
+                matches!(e.cell.get(), Some(Ok(c)) if matches!(**c, Content::Device { .. }))
+                    && !cache.pins.contains_key(*k)
+            })
+            .min_by_key(|(_, e)| e.last_used)
+            .map(|(k, _)| *k);
+        let Some(key) = victim else { return false };
+        let entry = cache.remove(key).expect("victim exists");
+        cache.bytes -= entry.size;
+        cache.evictions += 1;
+        true
     }
 
     /// Pins every step of a render, counting the steps that read each.
@@ -817,7 +1005,7 @@ impl Engine {
         self.readbacks.fetch_add(1, Ordering::SeqCst);
         let copy = accelerator
             .download(image)
-            .map_err(|reason| transfer_error(step, reason))?;
+            .map_err(|e| transfer_error(step, e))?;
         let copy = host.get_or_init(|| copy);
         self.cache
             .lock()
@@ -839,16 +1027,53 @@ impl Engine {
         port: usize,
         region: Region,
     ) -> Result<DeviceImage, Error> {
+        self.on_device(accelerator, step, content, port, region)?
+            .map_err(|e| transfer_error(consumer, e))
+    }
+
+    /// [`Engine::device`], an upload's failure apart from the engine's
+    /// errors (a read back that failed): the caller decides what it means.
+    fn on_device(
+        &self,
+        accelerator: &dyn Accelerator,
+        step: &Step,
+        content: &Content,
+        port: usize,
+        region: Region,
+    ) -> Result<Result<DeviceImage, AcceleratorError>, Error> {
         if let Content::Device { image, .. } = content
             && image.region() == region
         {
-            return Ok(image.clone());
+            return Ok(Ok(image.clone()));
         }
         let host = self.host(step, content, port)?.sample(region);
         self.uploads.fetch_add(1, Ordering::SeqCst);
-        accelerator
-            .upload(&host)
-            .map_err(|reason| transfer_error(consumer, reason))
+        Ok(accelerator.upload(&host))
+    }
+
+    /// Runs an accelerated step: its input on the device, then its kernel.
+    /// An allocation over the accelerator's budget evicts device content
+    /// the render does not need, and tries again while there is some.
+    fn accelerate(
+        &self,
+        accelerator: &dyn Accelerator,
+        step: &Step,
+        module: &ModuleRef,
+        plan: &crate::module::Plan,
+        input: (&Step, &Content, usize),
+        input_region: Region,
+    ) -> Result<Result<DeviceImage, AcceleratorError>, Error> {
+        loop {
+            let attempt =
+                match self.on_device(accelerator, input.0, input.1, input.2, input_region)? {
+                    Ok(on_device) => module.accelerate(accelerator, plan, &on_device, step.region),
+                    Err(e) => Err(e),
+                };
+            match attempt {
+                Err(e) if e.failure == Failure::OutOfMemory && self.evict_device() => {}
+                attempt => return Ok(attempt),
+            }
+        }
     }
 
     /// The content key of a node's outputs over a region, without computing them.
@@ -1060,7 +1285,7 @@ impl Engine {
                 h.update(&params.canonical_bytes());
                 let plan = module.prepare(params, context, scale)?;
                 h.update(&context.restricted_to(&manifest.context).canonical_bytes());
-                let accelerated = match &self.accelerator {
+                let accelerated = match self.active() {
                     Some(a) if module.acceleratable() => {
                         h.update(b"helios.step.accelerated.v1");
                         h.update(a.id().as_bytes());
@@ -1177,6 +1402,26 @@ impl Engine {
         outputs
     }
 
+    /// A step's GPU variant failed: it is computed on the CPU, and the bus
+    /// says why.
+    fn fell_back(&self, step: &Step, module: &ModuleRef, e: AcceleratorError, cause: u64) {
+        self.fallbacks.fetch_add(1, Ordering::SeqCst);
+        let module = module.manifest().name.clone();
+        *self.last_fallback.lock().expect("engine gpu lock") =
+            Some(format!("{module}: {} ({})", e.reason, e.failure.as_str()));
+        self.bus.publish(
+            SOURCE,
+            Some(cause),
+            &GpuFellBack {
+                node: step.node,
+                name: step.name.clone(),
+                module,
+                failure: e.failure,
+                reason: e.reason,
+            },
+        );
+    }
+
     /// Makes the next computation (or source read) of a node fail once, to
     /// exercise error paths on demand. Consumed by the first step it hits.
     pub fn inject_fault(&self, graph: &Graph, node: NodeId, kind: FaultKind) {
@@ -1232,42 +1477,46 @@ impl Engine {
                         what: "computation".into(),
                     });
                 }
-                if let (Some(a), true) = (&self.accelerator, accelerated) {
+                if let (Some(a), true) = (self.active(), accelerated) {
                     let (content, port) = &held[0];
-                    let input = self.device(
-                        a.as_ref(),
-                        &inputs[0].0,
-                        step,
-                        content,
-                        *port,
-                        *input_region,
-                    )?;
-                    self.accelerated.fetch_add(1, Ordering::SeqCst);
-                    let image = module.accelerate(a.as_ref(), plan, &input, step.region)?;
-                    Ok(Arc::new(Content::Device {
-                        image,
-                        host: OnceLock::new(),
-                    }))
-                } else {
-                    // Each input cropped to what the module reads: a view.
-                    let mut images = held
-                        .iter()
-                        .zip(inputs)
-                        .map(|((content, port), (input, _))| {
-                            Ok(self.host(input, content, *port)?.sample(*input_region))
-                        })
-                        .collect::<Result<Vec<Image>, Error>>()?;
-                    // In index order, so each lands at its port's place.
-                    for &(i, channels) in absent {
-                        images.insert(i, Image::absent(channels));
+                    let input = (inputs[0].0.as_ref(), content.as_ref(), *port);
+                    match self.accelerate(a.as_ref(), step, module, plan, input, *input_region)? {
+                        Ok(image) => {
+                            self.accelerated.fetch_add(1, Ordering::SeqCst);
+                            return Ok(Arc::new(Content::Device {
+                                image,
+                                host: OnceLock::new(),
+                            }));
+                        }
+                        // Nothing on the device can be read: the render is
+                        // replayed (see `render_content`).
+                        Err(e) if e.failure.is_device() => {
+                            return Err(Error::Accelerator {
+                                failure: e.failure,
+                                reason: e.reason,
+                            });
+                        }
+                        Err(e) => self.fell_back(step, module, e, cause),
                     }
-                    let images: Vec<&Image> = images.iter().collect();
-                    Ok(Arc::new(Content::Host(module.process(
-                        plan,
-                        &images,
-                        step.region,
-                    )?)))
                 }
+                // Each input cropped to what the module reads: a view.
+                let mut images = held
+                    .iter()
+                    .zip(inputs)
+                    .map(|((content, port), (input, _))| {
+                        Ok(self.host(input, content, *port)?.sample(*input_region))
+                    })
+                    .collect::<Result<Vec<Image>, Error>>()?;
+                // In index order, so each lands at its port's place.
+                for &(i, channels) in absent {
+                    images.insert(i, Image::absent(channels));
+                }
+                let images: Vec<&Image> = images.iter().collect();
+                Ok(Arc::new(Content::Host(module.process(
+                    plan,
+                    &images,
+                    step.region,
+                )?)))
             }
             Work::Reduce { input, scale } => {
                 let content = self.execute(input, cause, pins)?;
@@ -1289,15 +1538,23 @@ impl Engine {
     }
 }
 
-/// A copy to or from the accelerator failed, for `step`: its module's error.
-fn transfer_error(step: &Step, reason: String) -> Error {
+/// A copy to or from the accelerator failed, for `step`: a lost or hung
+/// device is the render's to recover from, anything else is its module's
+/// error.
+fn transfer_error(step: &Step, e: AcceleratorError) -> Error {
+    if e.failure.is_device() {
+        return Error::Accelerator {
+            failure: e.failure,
+            reason: e.reason,
+        };
+    }
     let module = match &step.work {
         Work::Module { module, .. } => module.manifest().name.clone(),
         _ => step.name.clone(),
     };
     Error::Module {
         module,
-        reason: format!("GPU: {reason}"),
+        reason: format!("GPU: {}", e.reason),
     }
 }
 
@@ -1318,6 +1575,12 @@ impl Describe for Engine {
                 "pinned": cache.pins.len(),
             },
             "counters": counters,
+            "gpu": {
+                "accelerator": self.accelerator.as_ref().map(|a| a.id().to_string()),
+                "memory": self.accelerator.as_ref().and_then(|a| a.memory()),
+                "off": self.gpu_off(),
+                "last_fallback": *self.last_fallback.lock().expect("engine gpu lock"),
+            },
         })
     }
 }

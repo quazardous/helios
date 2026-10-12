@@ -65,7 +65,7 @@ impl Accelerator for FakeGpu {
         &self.id
     }
 
-    fn upload(&self, image: &Image) -> Result<DeviceImage, String> {
+    fn upload(&self, image: &Image) -> Result<DeviceImage, helios_core::AcceleratorError> {
         Ok(DeviceImage::new(
             image.region(),
             image.channels(),
@@ -73,7 +73,7 @@ impl Accelerator for FakeGpu {
         ))
     }
 
-    fn download(&self, image: &DeviceImage) -> Result<Image, String> {
+    fn download(&self, image: &DeviceImage) -> Result<Image, helios_core::AcceleratorError> {
         Ok(image.handle::<Image>().ok_or("not mine")?.clone())
     }
 
@@ -84,7 +84,7 @@ impl Accelerator for FakeGpu {
         _: &DeviceImage,
         output: Region,
         channels: u32,
-    ) -> Result<DeviceImage, String> {
+    ) -> Result<DeviceImage, helios_core::AcceleratorError> {
         if self.fails {
             return Err("device lost".into());
         }

@@ -123,22 +123,108 @@ impl std::fmt::Debug for DeviceImage {
     }
 }
 
+/// What went wrong on an accelerator, as the engine needs to know it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Failure {
+    /// A kernel did not compile.
+    Compile,
+    /// A kernel did not run (a validation error, a wrong result shape).
+    Dispatch,
+    /// Its memory budget, or the device's memory, is spent.
+    OutOfMemory,
+    /// A wait for the device ran past its deadline: the device is hung.
+    Timeout,
+    /// The device is gone (a driver reset, a GPU unplugged).
+    DeviceLost,
+    /// Anything else.
+    Other,
+}
+
+impl Failure {
+    /// Whether the device itself is unusable: nothing it holds can be read
+    /// back, so the engine rebuilds it and replays the render (or goes on
+    /// without it), where other failures send one step to the CPU.
+    pub fn is_device(self) -> bool {
+        matches!(self, Failure::Timeout | Failure::DeviceLost)
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Failure::Compile => "compile",
+            Failure::Dispatch => "dispatch",
+            Failure::OutOfMemory => "out of memory",
+            Failure::Timeout => "timeout",
+            Failure::DeviceLost => "device lost",
+            Failure::Other => "other",
+        }
+    }
+}
+
+/// An accelerator's failure: what kind, and why in words.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AcceleratorError {
+    pub failure: Failure,
+    pub reason: String,
+}
+
+impl AcceleratorError {
+    pub fn new(failure: Failure, reason: impl Into<String>) -> Self {
+        Self {
+            failure,
+            reason: reason.into(),
+        }
+    }
+}
+
+impl From<String> for AcceleratorError {
+    fn from(reason: String) -> Self {
+        Self::new(Failure::Other, reason)
+    }
+}
+
+impl From<&str> for AcceleratorError {
+    fn from(reason: &str) -> Self {
+        Self::new(Failure::Other, reason)
+    }
+}
+
+impl std::fmt::Display for AcceleratorError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.reason)
+    }
+}
+
+/// An accelerator's memory: bytes in use and the budget they stay within.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct Memory {
+    pub used: u64,
+    pub budget: u64,
+}
+
 /// Runs modules' GPU variants for the engine (`helios-gpu` on wgpu). The
 /// engine hands it a step whose module has a kernel, one input and one
 /// output. Images stay in its memory from one step to the next: the engine
 /// uploads a host image only when a step it runs reads one, and reads a
 /// result back only when the CPU (a CPU step, or the render's caller) needs
 /// it.
+///
+/// A failure is typed ([`Failure`]): a step whose kernel fails is run on
+/// the CPU instead, an allocation over budget first makes the engine evict
+/// device content, and a lost or hung device is rebuilt ([`recover`]) and
+/// the render replayed, or the engine goes on without the accelerator.
+///
+/// [`recover`]: Accelerator::recover
 pub trait Accelerator: Send + Sync {
     /// Names the backend in content keys: its results agree with the CPU
     /// within a tolerance, not bit for bit, so they are cached apart.
     fn id(&self) -> &str;
 
     /// Copies a host image into its memory.
-    fn upload(&self, image: &Image) -> Result<DeviceImage, String>;
+    fn upload(&self, image: &Image) -> Result<DeviceImage, AcceleratorError>;
 
     /// Reads one of its images back into host memory.
-    fn download(&self, image: &DeviceImage) -> Result<Image, String>;
+    fn download(&self, image: &DeviceImage) -> Result<Image, AcceleratorError>;
 
     /// Runs `job` over `output`, reading `input` (which covers
     /// `job.input`), into `channels` channels. Input and result stay in its
@@ -150,7 +236,23 @@ pub trait Accelerator: Send + Sync {
         input: &DeviceImage,
         output: Region,
         channels: u32,
-    ) -> Result<DeviceImage, String>;
+    ) -> Result<DeviceImage, AcceleratorError>;
+
+    /// Its memory in use and its budget, when it keeps one.
+    fn memory(&self) -> Option<Memory> {
+        None
+    }
+
+    /// Sets its memory budget in bytes; `None` goes back to its default.
+    fn set_memory_budget(&self, _bytes: Option<u64>) {}
+
+    /// Rebuilds its device after a [`Failure::is_device`] failure, so work
+    /// can be replayed on it. An error when it cannot (it never could, the
+    /// rebuild failed, or it was rebuilt too often): the engine then goes
+    /// on without it.
+    fn recover(&self) -> Result<(), String> {
+        Err("this accelerator cannot rebuild its device".into())
+    }
 }
 
 /// An image processing module: a pure computation with a declared surface.
@@ -299,15 +401,16 @@ impl ModuleRef {
 
     /// Runs the GPU variant on an accelerator and checks the result as
     /// `process` does; input and result stay in the accelerator's memory. A
-    /// failure (a shader that does not compile, a lost device) is the
-    /// module's error, never a panic.
+    /// failure (a shader that does not compile, a lost device, a result of
+    /// the wrong shape) is the accelerator's error, never a panic: the
+    /// engine decides where the step runs instead.
     pub(crate) fn accelerate(
         &self,
         accelerator: &dyn Accelerator,
         plan: &Plan,
         input: &DeviceImage,
         output: Region,
-    ) -> Result<DeviceImage, Error> {
+    ) -> Result<DeviceImage, AcceleratorError> {
         let kernel = self.0.gpu_kernel().expect("checked by acceleratable");
         let job = GpuJob {
             kernel,
@@ -316,10 +419,9 @@ impl ModuleRef {
         };
         let m = self.manifest();
         let channels = m.outputs[0].channels().unwrap_or(input.channels());
-        let image = accelerator
-            .run(&m.name, &job, input, output, channels)
-            .map_err(|reason| self.module_error(format!("GPU: {reason}")))?;
-        self.check_shape(0, image.region(), image.channels(), output)?;
+        let image = accelerator.run(&m.name, &job, input, output, channels)?;
+        self.check_shape(0, image.region(), image.channels(), output)
+            .map_err(|e| AcceleratorError::new(Failure::Dispatch, e.to_string()))?;
         Ok(image)
     }
 

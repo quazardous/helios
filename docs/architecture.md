@@ -65,6 +65,37 @@ viewport sharing the engine's device; `Gpu::buffer` gives the `wgpu`
 buffer behind it (tightly packed `f32` pixels). It is shared with the
 cache: read it, never write it.
 
+### GPU failures
+
+(2026-10-12) A failing GPU never fails a render, and never gives wrong
+pixels: the CPU code is the reference a fallback runs. Accelerator
+failures are typed (`Failure`), and the engine answers each kind:
+
+- a kernel that does not compile or run: that step is computed on the
+  CPU, the rest of the chain stays on the GPU (`engine.gpu_fell_back` on
+  the bus, `Counters::fallbacks`);
+- an allocation over the device's memory budget: the engine evicts device
+  content no render needs, least recently used first, and tries again;
+  with nothing left to evict, the step runs on the CPU. The budget is one
+  per device (`helios_gpu::default_budget`, from the device's binding
+  limit and the machine's memory, or the device's `vram_mb` setting);
+  every buffer the device holds is counted, transfers included;
+- a wait past its deadline (no wait is unbounded) or a lost device:
+  nothing on the device can be read back. The engine drops its device
+  content, asks the accelerator to rebuild its device and replays the
+  render; if the rebuild fails, or the rebuilt device fails too, the
+  engine renders on the CPU for the rest of its life
+  (`engine.gpu_lost`, with a message for the user; `Engine::gpu_off`).
+
+`helios_gpu::Gpu::inject` provokes each failure on a real device, so the
+tests cover them all without a broken driver.
+
+The process has one wgpu instance and one device (`helios_gpu::shared`),
+which the GUI's window draws with as well (see
+[testing strategy](testing-strategy.md) for the Vulkan loader bug that
+makes a second one dangerous). After a rebuild the engine computes on the
+new device, but the window still holds the lost one.
+
 ### Commands: to the owner
 
 Every piece of state has one owner (the vault for catalog data, the edit for

@@ -4,7 +4,7 @@ Vision, settled concepts, phases and open questions for Helios. This is a
 living document: decisions are dated, and an idea stays "not decided" until
 it says otherwise.
 
-Last updated: 2026-10-11.
+Last updated: 2026-10-12.
 
 ---
 
@@ -155,6 +155,13 @@ the engine computed on the GPU without copying them back. wgpu is
 the shared GPU layer for the GUI and the engine's GPU modules (2026-10-11,
 decided with egui: Vulkan on Linux and Windows, Metal on macOS, raw Vulkan
 access for vkdt interop), at the version egui uses (wgpu 30 with egui 0.36).
+A process has one wgpu instance and one device (2026-10-12), which the
+window is handed by the engine's side, against a Vulkan loader crash (see
+docs/testing-strategy.md); a second GPU of the same machine is then not
+used while the first is open (not decided: whether to allow one device
+per adapter once the loader fix is widespread). A failing GPU falls back
+to the CPU per step, and a lost device is rebuilt once, else the session
+continues on the CPU (see docs/architecture.md, "GPU failures").
 **One window is one workspace** (2026-10-11, decided), as in VS Code:
 opening another project opens another window, never a project tab.
 Auxiliary windows (panels detached to another screen) belong to their

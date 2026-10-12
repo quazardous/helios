@@ -1,5 +1,7 @@
 use std::fmt;
 
+use crate::module::Failure;
+
 /// Errors of the core. Cloneable, because a failed computation is cached
 /// like a successful one: asking again for the same content gives the same
 /// answer without running it again.
@@ -34,12 +36,20 @@ pub enum Error {
     /// A result was asked in an accelerator's memory of an engine that has
     /// none.
     NoAccelerator,
+    /// The accelerator's device is lost or hung (see
+    /// [`Failure::is_device`]): nothing it holds can be read. Transient:
+    /// the engine rebuilds the device and replays the render, or replays
+    /// it without the accelerator.
+    Accelerator { failure: Failure, reason: String },
 }
 
 impl Error {
     /// Whether asking again may give another answer: such errors are not cached.
     pub fn is_transient(&self) -> bool {
-        matches!(self, Error::Fault { .. } | Error::Pending { .. })
+        matches!(
+            self,
+            Error::Fault { .. } | Error::Pending { .. } | Error::Accelerator { .. }
+        )
     }
 }
 
@@ -66,6 +76,9 @@ impl fmt::Display for Error {
             Error::Fault { node, what } => write!(f, "{node}: injected fault ({what})"),
             Error::Scale(scale) => write!(f, "render scale {scale} is not in (0, 1]"),
             Error::NoAccelerator => write!(f, "the engine has no accelerator"),
+            Error::Accelerator { failure, reason } => {
+                write!(f, "GPU {}: {reason}", failure.as_str())
+            }
             Error::Pending { node } => write!(f, "{node}: decision pending (no recorded answer)"),
         }
     }

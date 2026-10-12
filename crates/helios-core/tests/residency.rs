@@ -103,7 +103,7 @@ impl Accelerator for Fake {
         "fake"
     }
 
-    fn upload(&self, image: &Image) -> Result<DeviceImage, String> {
+    fn upload(&self, image: &Image) -> Result<DeviceImage, helios_core::AcceleratorError> {
         self.uploads.fetch_add(1, Ordering::SeqCst);
         Ok(DeviceImage::new(
             image.region(),
@@ -112,7 +112,7 @@ impl Accelerator for Fake {
         ))
     }
 
-    fn download(&self, image: &DeviceImage) -> Result<Image, String> {
+    fn download(&self, image: &DeviceImage) -> Result<Image, helios_core::AcceleratorError> {
         self.downloads.fetch_add(1, Ordering::SeqCst);
         Ok(image.handle::<Image>().ok_or("not mine")?.clone())
     }
@@ -124,7 +124,7 @@ impl Accelerator for Fake {
         input: &DeviceImage,
         output: Region,
         channels: u32,
-    ) -> Result<DeviceImage, String> {
+    ) -> Result<DeviceImage, helios_core::AcceleratorError> {
         let input = input.handle::<Image>().ok_or("not mine")?.sample(output);
         let data = input.data().iter().map(|v| v * job.uniforms[0]).collect();
         Ok(DeviceImage::new(

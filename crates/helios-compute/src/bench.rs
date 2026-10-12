@@ -70,8 +70,14 @@ pub fn calibrate(
                 .render(&g, node, "output", region)
                 .map_err(|e| format!("{name}: {e}"))?;
             let took = start.elapsed();
-            if accelerator.is_some() && engine.counters().accelerated == 0 {
-                return Err(format!("{name}: the GPU computed nothing"));
+            if accelerator.is_some() {
+                // A step that fell back ran on the CPU: its time is not the GPU's.
+                if let Some(why) = engine.fallback_reason() {
+                    return Err(format!("{name}: the GPU failed: {why}"));
+                }
+                if engine.counters().accelerated == 0 {
+                    return Err(format!("{name}: the GPU computed nothing"));
+                }
             }
             if run > 0 {
                 best = best.min(took);

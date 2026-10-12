@@ -19,6 +19,7 @@ helios-module-blur = { path = "../../modules/blur" }
 helios-module-sigmoid = { path = "../../modules/sigmoid" }
 helios-module-vkdt = { path = "../../modules/vkdt" }
 helios-testkit.workspace = true
+serde_json.workspace = true
 # MIT OR Apache-2.0; the shader compiler wgpu 30 uses, to validate every
 # WGSL file in a test that needs no GPU.
 naga = { version = "30", features = ["wgsl-in"] }

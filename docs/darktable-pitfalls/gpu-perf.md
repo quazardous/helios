@@ -26,10 +26,15 @@ documentation, not from darktable.
   https://github.com/darktable-org/darktable/issues/19150
   https://github.com/darktable-org/darktable/issues/17210
   https://github.com/darktable-org/darktable/issues/20071
-- Helios exposure: at risk. wgpu exposes no free-memory query at all; the
-  only figures are adapter limits. `helios-compute` has a per-device
-  `vram_mb` setting, which is the right shape, but its default and its
-  meaning on unified-memory devices are open.
+- Helios exposure: partly handled (2026-10-12). wgpu exposes no
+  free-memory query at all; the only figures are adapter limits. Each
+  device now has one memory budget that every buffer it holds is counted
+  against: the per-device `vram_mb` setting, else
+  `helios_gpu::default_budget` (four of the largest storage bindings, at
+  most a quarter of host RAM, which covers unified memory). An allocation
+  over it evicts device content, else runs the step on the CPU. Still
+  open: the GUI's textures are not counted, and the budget does not
+  shrink after a driver's out-of-memory error.
 - Recommendation: never derive the budget from a driver number alone.
   Default to a conservative per-kind budget (integrated/unified: a fraction
   of host RAM; discrete: user-set or calibrated), expose it in device
@@ -246,10 +251,13 @@ documentation, not from darktable.
   https://github.com/darktable-org/darktable/issues/20257
   https://github.com/darktable-org/darktable/issues/19032
   https://github.com/darktable-org/darktable/issues/22529
-- Helios exposure: at risk. `helios-gpu` waits with
-  `PollType::wait_indefinitely()`, and no device-lost callback is
-  registered, so a GPU hang blocks the calling thread forever, and because
-  the GUI shares the device, a lost device also blanks the viewport.
+- Helios exposure: partly handled (2026-10-12). Every wait has a deadline
+  (`helios_gpu::DEFAULT_TIMEOUT`, 20 s), a device-lost callback is
+  registered, and a hung or lost device is rebuilt once and the render
+  replayed, else the engine renders on the CPU for the rest of the session
+  and says so. Still open: dispatches are not split under the OS
+  watchdog, and the GUI's window keeps the lost device (the viewport
+  blanks until a restart).
 - Recommendation: split long dispatches so each submission stays well under
   the OS watchdog (Windows TDR is about 2 s by default; guess for a budget:
   100 ms), poll with a timeout, register `set_device_lost_callback`, and on
@@ -268,8 +276,11 @@ documentation, not from darktable.
   https://github.com/darktable-org/darktable/issues/11606
   https://github.com/darktable-org/darktable/issues/20071
   https://github.com/darktable-org/darktable/issues/22081
-- Helios exposure: at risk the other way: in `engine.rs` an accelerated
-  step that fails returns `Err`; there is no CPU retry.
+- Helios exposure: handled (2026-10-12). A step whose kernel fails (does
+  not compile, does not run, out of memory once eviction freed nothing) is
+  computed on the CPU; the engine publishes `engine.gpu_fell_back`
+  (node, module, failure kind, reason) and counts it
+  (`Counters::fallbacks`). Not yet surfaced in the GUI.
 - Recommendation: on a GPU error for a step, retry that step on the CPU,
   publish a bus event (device, module, reason, cost), count it in engine
   stats, and surface repeated fallbacks to the user. Cache keys already
@@ -466,14 +477,13 @@ documentation, not from darktable.
    buffer and binding limits in `Gpu::open`, and make `fits()` use the
    opened device's limits; today a 24 MP f32 RGBA image already exceeds
    wgpu's default 128 MiB binding.
-2. **Per-step CPU fallback with events (pitfall 13).** A failed GPU step
-   should be retried on the CPU and reported, not fail the render.
-3. **Hang and device-loss handling (pitfall 12).** Replace
-   `wait_indefinitely` with bounded waits, register a device-lost callback,
-   and recover; the GUI shares the device, so this protects the whole app.
+2. **Per-step CPU fallback with events (pitfall 13).** Done 2026-10-12.
+3. **Hang and device-loss handling (pitfall 12).** Done 2026-10-12 for the
+   engine; the GUI's window does not follow a rebuilt device yet.
 4. **One memory budget per device including GUI textures, declared by every
-   job (pitfalls 1, 14, 15).** Do not trust driver numbers; shrink on
-   out-of-memory errors.
+   job (pitfalls 1, 14, 15).** The engine's buffers are counted against
+   one budget per device (2026-10-12); GUI textures and per-job
+   declarations are still open, as is shrinking on out-of-memory errors.
 5. **Design tiling now, with tests (pitfalls 4, 5).** A "tiled equals
    untiled" property test per module with forced tiny tiles, and a declared
    "global" need computed as its own node, before GPU tiling code exists.

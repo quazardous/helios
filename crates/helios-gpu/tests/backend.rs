@@ -242,7 +242,7 @@ mod broken {
 }
 
 #[test]
-fn a_kernel_that_does_not_compile_is_an_error_not_a_panic() {
+fn a_kernel_that_does_not_compile_runs_its_step_on_the_cpu() {
     use std::sync::Arc;
     let _gpu = helios_testkit::gpu_lock();
     let Some(gpu) = gpu() else { return };
@@ -254,12 +254,15 @@ fn a_kernel_that_does_not_compile_is_an_error_not_a_panic() {
     g.connect(src, helios_core::graph::SOURCE_PORT, n, "input")
         .unwrap();
     let engine = helios_core::Engine::new(Arc::new(helios_core::Bus::new())).with_accelerator(gpu);
-    let err = engine
-        .render(&g, n, "output", Region::sized(8, 8))
-        .unwrap_err();
+    let out = engine.render(&g, n, "output", Region::sized(8, 8)).unwrap();
+    // The CPU code ran instead (an identity), and the engine says why.
+    let input = helios_testkit::noise(Region::sized(8, 8), 1, 2);
+    assert_eq!(out.data(), input.data());
+    assert_eq!(engine.counters().fallbacks, 1);
+    let reason = engine.fallback_reason().unwrap();
     assert!(
-        matches!(&err, helios_core::Error::Module { module, reason } if module == "broken" && reason.starts_with("GPU: kernel `main`")),
-        "{err}"
+        reason.starts_with("broken: kernel `main`") && reason.ends_with("(compile)"),
+        "{reason}"
     );
 }
 
