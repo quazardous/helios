@@ -9,16 +9,23 @@
 //!   leaves the grid showing a value that is not stored (and a field
 //!   another process changed meanwhile shows too);
 //! - applies the vault's `vault.field_changed` events (from any writer in
-//!   this process sharing its bus) to the library.
+//!   this process sharing its bus) to the library;
+//! - saves the edit of the image shown ([`Persist::open_image`]) as a
+//!   version each time the value store commits a step: a write outside a
+//!   gesture, the end of a gesture (a drag is one step, saved once when
+//!   it ends), an undo, a redo. While a gesture goes on, what it changed
+//!   is saved every [`FLUSH_SECONDS`] as a version labelled "in progress",
+//!   so a crash in the middle of a long drag loses at most that much of
+//!   it. Each save is announced on the bus as `edit.saved`.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::mpsc::Receiver;
 
-use helios_core::{Bus, Envelope};
+use helios_core::{Bus, Envelope, Graph, NodeId, Params};
 use helios_vault::fields::{Command, LABELS, Query, RATING, REJECTED};
-use helios_vault::{ImageId, Store, Vault};
+use helios_vault::{EditSession, ImageId, Store, Vault, Version, edit};
 use serde_json::Value;
 
 use crate::Shell;
@@ -31,10 +38,25 @@ const SHOWN: [&str; 3] = [RATING, REJECTED, LABELS];
 /// Who the vault's audit trail names for what the desktop writes.
 pub const WHO: &str = "user";
 
+/// How often a gesture still going (a drag) is saved, in seconds.
+pub const FLUSH_SECONDS: f64 = 1.0;
+
 pub struct Persist<S: Store> {
     vault: Arc<Vault<S>>,
     bus: Arc<Bus>,
     events: Receiver<Envelope>,
+    editing: Option<Editing>,
+}
+
+/// The edit of the image shown.
+struct Editing {
+    session: EditSession,
+    /// The module each node of the shown network runs, by node name.
+    modules: BTreeMap<String, String>,
+    /// The value store's committed steps when last saved.
+    committed: u64,
+    /// When the gesture going on was last saved (or started).
+    flushed_at: Option<f64>,
 }
 
 impl<S: Store> Persist<S> {
@@ -45,6 +67,7 @@ impl<S: Store> Persist<S> {
             vault: Arc::new(Vault::new(store).with_bus(bus.clone())),
             bus,
             events,
+            editing: None,
         }
     }
 
@@ -92,13 +115,58 @@ impl<S: Store> Persist<S> {
         Ok(files)
     }
 
+    /// Shows an image's network in the viewport with the image's saved
+    /// edit: its newest head, returned (none for an image never edited).
+    /// From then on each step is saved as a version continuing it.
+    pub fn open_image(
+        &mut self,
+        shell: &mut Shell,
+        image: ImageId,
+        mut graph: Graph,
+        node: NodeId,
+        port: &str,
+    ) -> Result<Option<Version>, String> {
+        let (session, head) = EditSession::open(&self.vault, image, WHO)?;
+        if let Some(head) = &head {
+            for skipped in edit::apply_to_graph(&mut graph, &head.edit)? {
+                shell.notify(
+                    Level::Warning,
+                    format!("Part of the saved edit does not fit this network: {skipped}"),
+                );
+            }
+        }
+        let modules = graph
+            .ids()
+            .filter_map(|id| {
+                let manifest = graph.manifest(id).ok()??;
+                Some((graph.name(id).ok()?.to_string(), manifest.name))
+            })
+            .collect();
+        shell.set_view_source(graph, node, port)?;
+        let committed = shell.values.lock().expect("value store lock").committed();
+        self.editing = Some(Editing {
+            session,
+            modules,
+            committed,
+            flushed_at: None,
+        });
+        Ok(head)
+    }
+
+    /// The edit being saved, if an image is open.
+    pub fn session(&self) -> Option<&EditSession> {
+        self.editing.as_ref().map(|e| &e.session)
+    }
+
     /// Writes what the user changed and shows what other writers did;
-    /// `now` is the time written in the audit trail, in seconds.
-    pub fn frame(&mut self, shell: &mut Shell, now: u64) {
+    /// `now` is the time in seconds (since the epoch for a real clock).
+    pub fn frame(&mut self, shell: &mut Shell, now: f64) {
+        let at = now.max(0.0) as u64;
         let changes = shell.take_library_changes();
         if !changes.is_empty() {
-            self.write(shell, changes, now);
+            self.write(shell, changes, at);
         }
+        self.save_edit(shell, now);
         while let Ok(event) = self.events.try_recv() {
             if event.kind == "vault.field_changed" {
                 let p = &event.payload;
@@ -107,6 +175,60 @@ impl<S: Store> Persist<S> {
                     shell.library_mut().show_field(image, field, new);
                 }
             }
+        }
+    }
+
+    /// Saves the edit when the value store committed a step, or while a
+    /// gesture goes on, every [`FLUSH_SECONDS`].
+    fn save_edit(&mut self, shell: &mut Shell, now: f64) {
+        let Some(e) = &mut self.editing else {
+            return;
+        };
+        let at = now.max(0.0) as u64;
+        let (committed, label, gesture, current) = {
+            let store = shell.values.lock().expect("value store lock");
+            let mut modules: BTreeMap<String, (String, Params)> = BTreeMap::new();
+            for (path, entry) in store.list("node/") {
+                let Some((node, param)) = path
+                    .strip_prefix("node/")
+                    .and_then(|rest| rest.rsplit_once('/'))
+                else {
+                    continue;
+                };
+                if let Some(module) = e.modules.get(node) {
+                    modules
+                        .entry(node.to_string())
+                        .or_insert_with(|| (module.clone(), Params::new()))
+                        .1
+                        .set(param, entry.value.clone());
+                }
+            }
+            (
+                store.committed(),
+                store.last_committed().to_string(),
+                store.open_gesture().map(String::from),
+                edit::from_modules(&modules),
+            )
+        };
+        let saved = if committed == e.committed {
+            let Some(gesture) = gesture else {
+                e.flushed_at = None;
+                return;
+            };
+            let since = *e.flushed_at.get_or_insert(now);
+            if now - since < FLUSH_SECONDS {
+                return;
+            }
+            e.flushed_at = Some(now);
+            e.session
+                .save_in_progress(&self.vault, current, &gesture, at)
+        } else {
+            e.committed = committed;
+            e.flushed_at = None;
+            e.session.save(&self.vault, current, &label, at)
+        };
+        if let Err(err) = saved {
+            shell.notify(Level::Error, format!("The edit was not saved: {err}"));
         }
     }
 

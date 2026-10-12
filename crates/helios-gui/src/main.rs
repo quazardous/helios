@@ -2,7 +2,9 @@
 //! workspace (a directory, the current one by default) in a window; with a
 //! vault, its images fill the library, and what the user rates or labels
 //! there is written back; with an image, the viewport shows it through an
-//! exposure node whose parameters are values (`node/exposure/*`).
+//! exposure node whose parameters are values (`node/exposure/*`); with
+//! both, the image is imported into the vault, opens with its saved edit,
+//! and each edit step is saved there as a version.
 //! `--snapshot <target> <file.png>` draws it offscreen instead and saves a
 //! picture of the target.
 
@@ -68,9 +70,9 @@ fn fill_library(shell: &mut Shell, persist: &Persist) -> Result<(), String> {
     Ok(())
 }
 
-/// Shows a picture (or a raw file's embedded preview) in the viewport,
-/// through an exposure node.
-fn show_image(shell: &mut Shell, path: &Path) -> Result<(), String> {
+/// A picture (or a raw file's embedded preview) through an exposure node:
+/// the network and the node the viewport shows.
+fn image_graph(path: &Path) -> Result<(helios_core::Graph, helios_core::NodeId), String> {
     let image = match helios_load::Kind::of(path) {
         helios_load::Kind::Picture => helios_load::load(path)?.image,
         helios_load::Kind::Raw => helios_load::preview(path)?
@@ -87,7 +89,7 @@ fn show_image(shell: &mut Shell, path: &Path) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
     g.connect(src, "image", exp, "input")
         .map_err(|e| e.to_string())?;
-    shell.set_view_source(g, exp, "output")
+    Ok((g, exp))
 }
 
 struct App {
@@ -102,8 +104,15 @@ impl eframe::App for App {
         if let Some(persist) = &mut self.persist {
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .map_or(0, |d| d.as_secs());
+                .map_or(0.0, |d| d.as_secs_f64());
             persist.frame(&mut self.shell, now);
+            // While a gesture goes on, come back to save it in time.
+            if self.shell.values.lock().is_ok_and(|v| v.uncommitted()) {
+                ui.ctx()
+                    .request_repaint_after(std::time::Duration::from_secs_f64(
+                        helios_gui::persist::FLUSH_SECONDS,
+                    ));
+            }
         }
     }
 
@@ -194,11 +203,8 @@ fn main() -> Result<(), String> {
     if let Some(saved) = load(file.as_deref()) {
         shell.set_layout(saved);
     }
-    if let Some(path) = image_file {
-        show_image(&mut shell, &path)?;
-    }
     let bus = std::sync::Arc::new(helios_core::Bus::new());
-    let persist = match vault_file {
+    let mut persist = match vault_file {
         Some(path) => {
             let persist = Persist::new(helios_vault_sqlite::SqliteStore::open(&path)?, bus);
             fill_library(&mut shell, &persist)?;
@@ -206,6 +212,20 @@ fn main() -> Result<(), String> {
         }
         None => None,
     };
+    if let Some(path) = image_file {
+        let (graph, node) = image_graph(&path)?;
+        match &mut persist {
+            // With a vault, the image's edit is loaded and saved there.
+            Some(persist) => {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |d| d.as_secs());
+                let image = persist.vault().import_file(&path, now)?;
+                persist.open_image(&mut shell, image, graph, node, "output")?;
+            }
+            None => shell.set_view_source(graph, node, "output")?,
+        }
+    }
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title(format!("{name} — Helios"))

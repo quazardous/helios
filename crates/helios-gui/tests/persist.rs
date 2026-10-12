@@ -82,13 +82,13 @@ fn a_label_toggled_from_a_stale_view_keeps_the_label_another_writer_added() {
     assert!(shell.library().entries[0].labels.is_empty(), "stale view");
     // The user toggles blue: one label added, red kept.
     shell.library_mut().toggle_label("blue").unwrap();
-    persist.frame(&mut shell, 2);
+    persist.frame(&mut shell, 2.0);
     assert_eq!(stored(&path, LABELS), Some(json!(["blue", "red"])));
     // And the library now shows both, read back from the vault.
     assert_eq!(shell.library().entries[0].labels, ["red", "blue"]);
     // Toggling blue again takes off blue only.
     shell.library_mut().toggle_label("blue").unwrap();
-    persist.frame(&mut shell, 3);
+    persist.frame(&mut shell, 3.0);
     assert_eq!(stored(&path, LABELS), Some(json!(["red"])));
     drop((shell, persist, other));
     let _ = std::fs::remove_dir_all(&dir);
@@ -100,13 +100,13 @@ fn taking_a_reject_back_restores_the_stars() {
     let path = vault_file(&dir);
     let (mut shell, mut persist) = open(&path, &Options::default());
     shell.library_mut().rate(4).unwrap();
-    persist.frame(&mut shell, 1);
+    persist.frame(&mut shell, 1.0);
     shell.library_mut().toggle_reject().unwrap();
-    persist.frame(&mut shell, 2);
+    persist.frame(&mut shell, 2.0);
     assert_eq!(stored(&path, REJECTED), Some(json!(true)));
     assert_eq!(stored(&path, RATING), Some(json!(4)), "the stars stay");
     shell.library_mut().toggle_reject().unwrap();
-    persist.frame(&mut shell, 3);
+    persist.frame(&mut shell, 3.0);
     assert_eq!(stored(&path, REJECTED), None);
     assert_eq!(stored(&path, RATING), Some(json!(4)));
     let entry = shell.library().entries[0].clone();
@@ -129,14 +129,14 @@ fn a_failed_write_puts_the_stored_value_back_and_says_why() {
     };
     let (mut shell, mut persist) = open(&path, &options);
     shell.library_mut().rate(2).unwrap();
-    persist.frame(&mut shell, 1);
+    persist.frame(&mut shell, 1.0);
     assert_eq!(stored(&path, RATING), Some(json!(2)));
     // Another process holds the write lock: the next write fails.
     let mut blocker = SqliteStore::open(&path).unwrap();
     blocker.begin().unwrap();
     shell.library_mut().rate(5).unwrap();
     assert_eq!(shell.library().entries[0].rating, 5, "shown at once");
-    persist.frame(&mut shell, 2);
+    persist.frame(&mut shell, 2.0);
     let notes = shell.notices();
     let last = notes.last().expect("a notice says why");
     assert!(last.text.contains("Not saved"), "{}", last.text);
@@ -175,7 +175,7 @@ fn a_change_by_another_writer_on_the_bus_shows_in_the_library() {
             1,
         )
         .unwrap();
-    persist.frame(&mut shell, 2);
+    persist.frame(&mut shell, 2.0);
     let entry = shell
         .library()
         .entries
@@ -186,5 +186,143 @@ fn a_change_by_another_writer_on_the_bus_shows_in_the_library() {
     assert_eq!(entry.rating, 3);
     assert_eq!(entry.labels, ["green"]);
     drop((shell, persist, agent));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A source and an exposure node: the network the viewport shows.
+fn network() -> (helios_core::Graph, helios_core::NodeId) {
+    let mut g = helios_core::Graph::new();
+    let src = g.add_source(
+        "source",
+        helios_core::Image::from_fn(helios_core::Region::sized(16, 8), 4, |_, _, _| 0.25),
+    );
+    let exp = g
+        .add_module(
+            "exposure",
+            helios_core::ModuleRef::new(helios_module_exposure::Exposure),
+            &helios_core::Params::new(),
+        )
+        .unwrap();
+    g.connect(src, "image", exp, "input").unwrap();
+    (g, exp)
+}
+
+const EV: &str = "node/exposure/exposure";
+
+fn set(shell: &Shell, ev: f64, gesture: Option<helios_values::GestureId>) {
+    let mut set = helios_values::Set::new(
+        EV,
+        helios_values::Change::To(helios_core::Value::Float(ev)),
+        helios_shell::commands::Origin::User,
+    );
+    if let Some(g) = gesture {
+        set = set.gesture(g);
+    }
+    shell.values.lock().unwrap().set(set).unwrap();
+}
+
+fn shown(shell: &Shell) -> f64 {
+    shell
+        .values
+        .lock()
+        .unwrap()
+        .get(EV)
+        .unwrap()
+        .value
+        .as_f64()
+        .unwrap()
+}
+
+fn saved(bus: &Bus) -> Vec<(u64, String)> {
+    bus.since(0)
+        .into_iter()
+        .filter(|e| e.kind == "edit.saved")
+        .map(|e| {
+            (
+                e.payload["step"].as_u64().unwrap(),
+                e.payload["label"].as_str().unwrap().to_string(),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn each_edit_step_is_a_version_and_reopening_loads_the_head() {
+    use helios_shell::commands::Origin;
+    let dir = scratch("edit");
+    let path = vault_file(&dir);
+    let mut shell = Shell::new(helios_panels(), None);
+    let mut persist = Persist::new(SqliteStore::open(&path).unwrap(), Arc::new(Bus::new()));
+    let (graph, exp) = network();
+    assert!(
+        persist
+            .open_image(&mut shell, id(1), graph, exp, "output")
+            .unwrap()
+            .is_none()
+    );
+    // One write, one step.
+    set(&shell, 1.0, None);
+    persist.frame(&mut shell, 10.0);
+    // A drag: saved while it goes, every FLUSH_SECONDS, then at its end.
+    let drag = shell
+        .values
+        .lock()
+        .unwrap()
+        .begin_gesture(Origin::User, "drag exposure");
+    set(&shell, 1.2, Some(drag));
+    persist.frame(&mut shell, 10.2);
+    set(&shell, 1.4, Some(drag));
+    persist.frame(&mut shell, 10.5);
+    assert_eq!(saved(persist.bus()).len(), 1, "not yet a second");
+    persist.frame(&mut shell, 11.3);
+    set(&shell, 1.6, Some(drag));
+    shell.values.lock().unwrap().end(drag);
+    persist.frame(&mut shell, 11.4);
+    // Undo and redo are steps too.
+    shell.values.lock().unwrap().undo(&Origin::User).unwrap();
+    persist.frame(&mut shell, 12.0);
+    assert!((shown(&shell) - 1.0).abs() < 1e-9);
+    shell.values.lock().unwrap().redo(&Origin::User).unwrap();
+    persist.frame(&mut shell, 13.0);
+    // A frame with no step saves nothing.
+    persist.frame(&mut shell, 14.0);
+    assert_eq!(
+        saved(persist.bus()),
+        [
+            (1, format!("set {EV}")),
+            (2, "drag exposure (in progress)".into()),
+            (3, "drag exposure".into()),
+            (4, "undo drag exposure".into()),
+            (5, "redo drag exposure".into()),
+        ]
+    );
+    let vault = persist.vault().clone();
+    let history: Vec<_> = vault
+        .versions(&id(1))
+        .unwrap()
+        .into_iter()
+        .map(|v| v.label.unwrap())
+        .collect();
+    assert_eq!(history.len(), 5);
+    assert_eq!(vault.heads(&id(1)).unwrap().len(), 1, "one line of history");
+    drop((shell, persist, vault));
+
+    // Reopened: the viewport's network has the head's values.
+    let mut shell = Shell::new(helios_panels(), None);
+    let mut persist = Persist::new(SqliteStore::open(&path).unwrap(), Arc::new(Bus::new()));
+    let (graph, exp) = network();
+    let head = persist
+        .open_image(&mut shell, id(1), graph, exp, "output")
+        .unwrap()
+        .unwrap();
+    assert_eq!(head.label.as_deref(), Some("redo drag exposure"));
+    assert!((shown(&shell) - 1.6).abs() < 1e-9, "{}", shown(&shell));
+    // And the next step continues it.
+    set(&shell, 0.5, None);
+    persist.frame(&mut shell, 20.0);
+    let next = persist.vault().heads(&id(1)).unwrap();
+    assert_eq!(next.len(), 1);
+    assert_eq!(next[0].parents, [head.id]);
+    drop((shell, persist));
     let _ = std::fs::remove_dir_all(&dir);
 }

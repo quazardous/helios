@@ -273,6 +273,9 @@ pub struct Loaded {
     pub resolver: Option<ResolverDesc>,
     /// The first source: decisions look at its region.
     pub frame: Option<NodeId>,
+    /// The file of the first source, when it is read from one: the image
+    /// whose edit a node with a vault keeps.
+    pub frame_file: Option<PathBuf>,
     /// The camera of each source loaded from a raw file.
     pub cameras: BTreeMap<NodeId, CameraInfo>,
 }
@@ -379,12 +382,16 @@ pub fn load_in(mut desc: Description, base: &Path) -> Result<Loaded, String> {
     };
     let mut cameras = BTreeMap::new();
     let mut frame = None;
+    let mut frame_file = None;
     for s in &desc.sources {
         let synthetic = match (&s.synthetic, &s.file) {
             (Some(synthetic), None) => synthetic,
             (None, Some(file)) => {
                 let loaded = helios_load::load(&base.join(file))?;
                 let id = graph.add_source(&s.name, loaded.image);
+                if frame.is_none() {
+                    frame_file = Some(base.join(file));
+                }
                 frame.get_or_insert(id);
                 if let Some(camera) = loaded.camera {
                     cameras.insert(id, camera);
@@ -450,6 +457,7 @@ pub fn load_in(mut desc: Description, base: &Path) -> Result<Loaded, String> {
         brief: desc.brief,
         resolver: desc.resolver,
         frame,
+        frame_file,
         cameras: BTreeMap::new(),
     };
     for c in &desc.connections {

@@ -28,12 +28,14 @@ use serde_json::json;
 
 pub mod catalog;
 pub mod contract;
+pub mod edit;
 pub mod fields;
 pub mod journal;
 pub mod settings;
 pub mod versions;
 
 pub use catalog::{ApplyReport, CursorId, CursorInfo, Delta, Row};
+pub use edit::{EditSaved, EditSession};
 pub use fields::{AuditEntry, Command, Order, Query};
 pub use versions::{Version, VersionId};
 
@@ -541,6 +543,41 @@ impl<S: Store> Vault<S> {
             }
         }
         Ok(report)
+    }
+
+    /// Imports one image file and returns its image: a file already known
+    /// at that path, size and modification time is not read again.
+    pub fn import_file(&self, path: &Path, now: u64) -> Result<ImageId, String> {
+        let path = std::path::absolute(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let (size, modified) = stat(&path)?;
+        let known = self.store.lock().expect("store lock").at_path(&path)?;
+        if let Some((id, location)) = known
+            && location.size == size
+            && location.modified == modified
+            && location.present
+        {
+            return Ok(id);
+        }
+        let id = ImageId(self.full_hash(&path)?);
+        let partial = self.partial_hash(&path, size)?;
+        let new = self.transaction(|store| {
+            let new = store.add_image(&Image { id, size, partial })?;
+            store.put_location(
+                &id,
+                &Location {
+                    path,
+                    size,
+                    modified,
+                    last_verified: now,
+                    present: true,
+                },
+            )?;
+            Ok(new)
+        })?;
+        if new {
+            self.catalog.lock().expect("catalog lock").version += 1;
+        }
+        Ok(id)
     }
 
     /// Marks locations whose file is gone, then looks under `roots` for the

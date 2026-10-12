@@ -166,6 +166,24 @@ impl<S: crate::Store> crate::Vault<S> {
         Ok(all)
     }
 
+    /// The line of versions that leads to `head`, oldest first: each
+    /// version's first parent, back to a first edit. Times are in seconds
+    /// and steps come faster: the line, not the time, orders a history.
+    pub fn history(&self, head: &VersionId) -> Result<Vec<Version>, String> {
+        let store = self.store.lock().expect("store lock");
+        let mut line = Vec::new();
+        let mut next = Some(*head);
+        while let Some(id) = next {
+            let version = store
+                .version(&id)?
+                .ok_or_else(|| format!("no version {}", id.hex()))?;
+            next = version.parents.first().copied();
+            line.push(version);
+        }
+        line.reverse();
+        Ok(line)
+    }
+
     /// An image's heads: its current edit, or its diverged edits.
     pub fn heads(&self, image: &ImageId) -> Result<Vec<Version>, String> {
         let all = self.versions(image)?;

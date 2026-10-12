@@ -442,6 +442,9 @@ pub struct Store {
     redo: Vec<Step>,
     /// `node/…` paths changed since the graph was last synced.
     dirty: BTreeSet<String>,
+    /// Steps committed so far, and what the last one was.
+    committed: u64,
+    last_committed: String,
 }
 
 fn clamp(v: f64, range: Option<(f64, f64)>, soft: bool) -> (f64, Clamped) {
@@ -736,8 +739,41 @@ impl Store {
     }
 
     fn push_step(&mut self, step: Step) {
+        self.commit(step.label.clone());
         self.undo.push(step);
         self.redo.clear();
+    }
+
+    fn commit(&mut self, label: String) {
+        self.committed += 1;
+        self.last_committed = label;
+    }
+
+    /// How many steps were committed: a write outside a gesture, the end
+    /// of a gesture or a group that changed something, an undo, a redo.
+    /// A host that keeps the edit saves it when this moves.
+    pub fn committed(&self) -> u64 {
+        self.committed
+    }
+
+    /// What the last committed step was: its label, or `undo <label>`,
+    /// `redo <label>`.
+    pub fn last_committed(&self) -> &str {
+        &self.last_committed
+    }
+
+    /// Whether an open gesture or group has changed values that are not
+    /// committed yet (a drag in progress).
+    pub fn uncommitted(&self) -> bool {
+        self.gestures.values().any(|g| !g.changes.is_empty())
+    }
+
+    /// The open gesture with changes, by label, if there is one.
+    pub fn open_gesture(&self) -> Option<&str> {
+        self.gestures
+            .values()
+            .find(|g| !g.changes.is_empty())
+            .map(|g| g.label.as_str())
     }
 
     fn open(&mut self, origin: Origin, label: &str, holds: bool) -> GestureId {
@@ -830,6 +866,7 @@ impl Store {
             return Err(e);
         }
         let label = step.label.clone();
+        self.commit(format!("undo {label}"));
         self.redo.push(step);
         Ok(Some(label))
     }
@@ -844,6 +881,7 @@ impl Store {
             return Err(e);
         }
         let label = step.label.clone();
+        self.commit(format!("redo {label}"));
         self.undo.push(step);
         Ok(Some(label))
     }

@@ -251,6 +251,52 @@ fn a_gesture_or_a_group_is_one_undo_step_and_a_write_another() {
     assert_eq!(ev(&store), 1.0);
 }
 
+/// What a host that saves the edit watches: a committed step is a write
+/// outside a gesture, a gesture's end, an undo or a redo; the writes of a
+/// gesture going on are not committed yet.
+#[test]
+fn committed_steps_are_counted_and_a_gesture_in_progress_is_not_one() {
+    let (_, _, mut store, _) = exposure();
+    let path = "node/exposure/exposure";
+    assert_eq!(store.committed(), 0);
+    store
+        .set(Set::new(path, Change::To(Value::Float(0.5)), Origin::User))
+        .unwrap();
+    assert_eq!(
+        (store.committed(), store.last_committed()),
+        (1, "set node/exposure/exposure")
+    );
+    let drag = store.begin_gesture(Origin::User, "drag exposure");
+    assert!(!store.uncommitted(), "an empty gesture changed nothing");
+    store
+        .set(Set::new(path, Change::To(Value::Float(0.9)), Origin::User).gesture(drag))
+        .unwrap();
+    assert_eq!(store.committed(), 1);
+    assert!(store.uncommitted());
+    assert_eq!(store.open_gesture(), Some("drag exposure"));
+    store.end(drag);
+    assert!(!store.uncommitted());
+    assert_eq!(
+        (store.committed(), store.last_committed()),
+        (2, "drag exposure")
+    );
+    store.undo(&Origin::User).unwrap();
+    assert_eq!(
+        (store.committed(), store.last_committed()),
+        (3, "undo drag exposure")
+    );
+    store.redo(&Origin::User).unwrap();
+    assert_eq!(
+        (store.committed(), store.last_committed()),
+        (4, "redo drag exposure")
+    );
+    // A write to the same value is no step.
+    store
+        .set(Set::new(path, Change::To(Value::Float(0.9)), Origin::User))
+        .unwrap();
+    assert_eq!(store.committed(), 4);
+}
+
 #[test]
 fn every_change_is_announced_once_and_no_change_is_not() {
     let (_, _, mut store, bus) = exposure();

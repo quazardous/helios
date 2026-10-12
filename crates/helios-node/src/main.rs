@@ -25,6 +25,14 @@
 //! cancel, pause, resume, inject a fault). It exists only in debug builds and
 //! only when `HELIOS_DEBUG_CONTROL` is set.
 //!
+//! With `--vault FILE` and a network whose first source is a file, the node
+//! keeps the edit of that file's image in the vault: on start it continues
+//! the image's newest version (parameters, then the decision book
+//! replayed), and each change made through control (a parameter set, a
+//! decision answered) is saved at once as a version, announced as
+//! `edit.saved`. A restart, even after `kill -9`, resumes from the last
+//! change answered.
+//!
 //! `--batch-control` serves the batch endpoint in every build: only
 //! `load-source`, `export` and `cancel`, on a Unix socket only its user can
 //! open. `helios batch` starts its own node with it, on a socket in a
@@ -114,6 +122,75 @@ impl Describe for SharedGraph {
     }
 }
 
+/// The edit of the image a node with a vault works on, kept as versions.
+struct NodeEdit {
+    vault: helios_vault::Vault<helios_vault_sqlite::SqliteStore>,
+    session: Mutex<helios_vault::EditSession>,
+}
+
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs())
+}
+
+/// What a version keeps of a node's edit: its modules' parameters, and its
+/// decisions when it has any.
+fn edit_of(graph: &Graph, book: &Book) -> Value {
+    let mut edit = helios_vault::edit::of_graph(graph);
+    let decisions = book.to_json();
+    if decisions["nodes"]
+        .as_object()
+        .is_some_and(|n| !n.is_empty())
+    {
+        edit["decisions"] = decisions;
+    }
+    edit
+}
+
+/// Binds a node to the vault image of its first source's file: the edit
+/// saved there is loaded into `graph` and `book`, and changes are saved
+/// from now on.
+fn open_edit(
+    vault_file: &Path,
+    file: &Path,
+    bus: &Arc<Bus>,
+    graph: &mut Graph,
+    book: &mut Book,
+    declared: &BTreeMap<String, helios_decision::Mode>,
+) -> Result<NodeEdit, String> {
+    let store = helios_vault_sqlite::SqliteStore::open(vault_file)
+        .map_err(|e| format!("{}: {e}", vault_file.display()))?;
+    let vault = helios_vault::Vault::new(store).with_bus(bus.clone());
+    let image = vault.import_file(file, unix_now())?;
+    let (session, head) = helios_vault::EditSession::open(&vault, image, "control")?;
+    if let Some(head) = head {
+        for skipped in helios_vault::edit::apply_to_graph(graph, &head.edit)? {
+            eprintln!("helios-node: the saved edit does not fit the network: {skipped}");
+        }
+        if !head.edit["decisions"].is_null() {
+            let mut kept = Book::from_json(head.edit["decisions"].clone())?.with_bus(bus.clone());
+            // A decision node the description adds since takes its mode.
+            for (name, mode) in declared {
+                if kept.mode(name).is_err() {
+                    kept.declare(name, *mode);
+                }
+            }
+            kept.replay(graph)?;
+            *book = kept;
+        }
+        eprintln!(
+            "helios-node: the edit of {} continues version {}",
+            file.display(),
+            head.id.hex()
+        );
+    }
+    Ok(NodeEdit {
+        vault,
+        session: Mutex::new(session),
+    })
+}
+
 /// Everything a node holds.
 struct Node {
     bus: Arc<Bus>,
@@ -135,6 +212,29 @@ struct Node {
     frame: Option<NodeId>,
     /// The camera of each source holding a raw.
     cameras: Mutex<BTreeMap<NodeId, CameraInfo>>,
+    /// The vault keeping the edit, when the node has one.
+    edit: Option<NodeEdit>,
+}
+
+impl Node {
+    /// Saves the edit as it is now as a version continuing the last one;
+    /// its id, or `None` when the node keeps no edit or nothing changed.
+    /// The session is locked first, so two changes answered at once are
+    /// saved in the order they were made.
+    fn save_edit(&self, label: &str) -> Result<Option<String>, String> {
+        let Some(edit) = &self.edit else {
+            return Ok(None);
+        };
+        let mut session = edit.session.lock().expect("edit lock");
+        let value = {
+            let book = self.book.lock().expect("book lock");
+            let graph = self.graph.0.read().expect("graph lock");
+            edit_of(&graph, &book)
+        };
+        session
+            .save(&edit.vault, value, label, unix_now())
+            .map(|saved| saved.map(|v| v.id.hex()))
+    }
 }
 
 impl Node {
@@ -548,6 +648,35 @@ mod control {
                 book.reask(&mut graph, name).map(|()| json!({}))
             }
         };
+        // A change to the edit is saved before it is answered.
+        let label = match &request {
+            ControlRequest::SetParam {
+                node: name, param, ..
+            } => Some(format!("set {name}.{param}")),
+            ControlRequest::DecisionResolve => Some("decisions resolved".into()),
+            ControlRequest::DecisionAccept { node: name, .. } => {
+                Some(format!("decision {name} accepted"))
+            }
+            ControlRequest::DecisionDecide { node: name, .. } => {
+                Some(format!("decision {name} decided"))
+            }
+            ControlRequest::DecisionReask { node: name } => {
+                Some(format!("decision {name} asked again"))
+            }
+            _ => None,
+        };
+        let result = match (result, label) {
+            (Ok(mut extra), Some(label)) => match node.save_edit(&label) {
+                Ok(saved) => {
+                    if let (Some(id), Some(map)) = (saved, extra.as_object_mut()) {
+                        map.insert("saved".into(), json!(id));
+                    }
+                    Ok(extra)
+                }
+                Err(e) => Err(format!("done, but the edit was not saved: {e}")),
+            },
+            (result, _) => result,
+        };
         match result {
             Ok(extra) => done(extra),
             Err(error) => json!({ "ok": false, "seq": seq, "error": error }),
@@ -751,7 +880,7 @@ fn main() -> ExitCode {
         })
         // Files the network names are relative to it.
         .and_then(|desc| helios_node::load_in(desc, args.graph.parent().unwrap_or(Path::new("."))));
-    let loaded = match loaded {
+    let mut loaded = match loaded {
         Ok(l) => l,
         Err(e) => {
             eprintln!("helios-node: {e}");
@@ -785,6 +914,23 @@ fn main() -> ExitCode {
             return ExitCode::from(1);
         }
     };
+    let edit = match (&args.vault, &loaded.frame_file) {
+        (Some(vault), Some(file)) => match open_edit(
+            vault,
+            file,
+            &bus,
+            &mut loaded.graph,
+            &mut book,
+            &loaded.decisions,
+        ) {
+            Ok(edit) => Some(edit),
+            Err(e) => {
+                eprintln!("helios-node: the edit cannot be kept in the vault: {e}");
+                return ExitCode::from(1);
+            }
+        },
+        _ => None,
+    };
     let budget = match config.number("system.cache.budget") as usize {
         0 => None,
         mib => Some(mib * 1024 * 1024),
@@ -811,6 +957,7 @@ fn main() -> ExitCode {
         brief: loaded.brief.clone(),
         frame: loaded.frame,
         cameras: Mutex::new(loaded.cameras),
+        edit,
     });
     let inspector = Inspector::new(bus.clone())
         .with("graph", node.graph.clone())
