@@ -17,7 +17,11 @@
 //!   decode yet, blends it does not do, disabled items. Nothing is dropped
 //!   silently: an item not applied is kept, raw params included, in the
 //!   edit's `darktable` part, and the import never stops at one.
+//! - [`files`] finds an image's sidecars in its folder: the base one, the
+//!   duplicates darktable writes as `_NN`, case variants, and the sidecars
+//!   whose image is not there.
 
+pub mod files;
 pub mod import;
 pub mod iop_order;
 pub mod layout;

@@ -29,8 +29,10 @@ from the last step saved:
   transaction; a reject is its own field, so taking it back keeps the
   stars. The desktop shows what the vault holds after each write and on
   every `vault.field_changed` event, and says why when a write fails.
-- **XMP import** (`helios batch --sidecar --vault FILE`): a version with
-  origin `import:xmp`, its import report inside, the darktable edit as it
+- **XMP import** (`helios batch --sidecar --vault FILE`,
+  `helios import-darktable --vault FILE`): a version with origin
+  `import:xmp` per sidecar (base and darktable duplicates), its import
+  report inside, the darktable edit as it
   came (the sidecar's text, each history item with its raw params and
   whether it was applied), and the sidecar's rating only when the vault
   has none.

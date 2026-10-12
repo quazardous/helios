@@ -34,6 +34,7 @@
 //! The key is read from that environment variable when a model is called.
 
 pub mod batch;
+pub mod darktable;
 pub mod mcp;
 pub mod sandbox;
 

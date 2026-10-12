@@ -361,6 +361,158 @@ fn a_sidecar_kept_in_a_vault_is_a_version_and_its_rating_never_overwrites() {
     );
 }
 
+/// The versions of an image in a vault, by label, with their exposure.
+fn kept_versions(vault_file: &Path, image: &Path) -> Vec<(String, f64)> {
+    use helios_vault::Vault;
+    use helios_vault_sqlite::SqliteStore;
+    let vault = Vault::new(SqliteStore::open(vault_file).unwrap());
+    let id = vault.import_file(image, 9).unwrap();
+    let mut out: Vec<(String, f64)> = vault
+        .versions(&id)
+        .unwrap()
+        .iter()
+        .map(|v| {
+            (
+                v.label.clone().unwrap_or_default(),
+                v.edit["modules"][0]["params"]["exposure"]["float"]
+                    .as_f64()
+                    .unwrap(),
+            )
+        })
+        .collect();
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    out
+}
+
+#[test]
+fn darktable_duplicates_are_kept_as_versions_and_the_base_is_exported() {
+    let p = Place::new("duplicates");
+    std::fs::write(p.join("network.json"), NETWORK).unwrap();
+    let photo = p.join("photo.png");
+    picture(&photo, 16, 16);
+    std::fs::write(p.join("photo.png.xmp"), rated_sidecar(1.0, 2)).unwrap();
+    std::fs::write(p.join("photo_01.png.xmp"), rated_sidecar(-1.0, 5)).unwrap();
+    // The same edit twice: still two versions, never merged.
+    std::fs::write(p.join("photo_02.png.xmp"), sidecar(-1.0)).unwrap();
+    let (code, lines, err) = batch(&[
+        "--network",
+        &p.s("network.json"),
+        "--out",
+        &p.s("out"),
+        "--format",
+        "png",
+        "--sidecar",
+        "--vault",
+        &p.s("vault.db"),
+        photo.to_str().unwrap(),
+    ]);
+    assert_eq!(code, 0, "{err}\n{lines:?}");
+    let line = line_of(&lines, &photo);
+    // The base sidecar is the one applied.
+    assert_eq!(line["sidecar"]["path"], json!(p.join("photo.png.xmp")));
+    let duplicates = line["sidecar"]["duplicates"].as_array().unwrap();
+    let numbers: Vec<_> = duplicates.iter().map(|d| d["version"].clone()).collect();
+    assert_eq!(numbers, [json!(1), json!(2)], "{line}");
+    assert!(
+        duplicates.iter().all(|d| d["vault"]["added"] == true),
+        "{line}"
+    );
+    assert_eq!(
+        kept_versions(&p.join("vault.db"), &photo),
+        [
+            ("import:xmp".to_string(), 1.0),
+            ("import:xmp duplicate 01".to_string(), -1.0),
+            ("import:xmp duplicate 02".to_string(), -1.0),
+        ]
+    );
+    // Only the base's rating is the image's.
+    assert_eq!(line["sidecar"]["vault"]["rating_set"], true);
+    assert_eq!(duplicates[0]["vault"]["rating_set"], false);
+}
+
+/// Runs `helios import-darktable`: exit code, one JSON value per line, stderr.
+fn import_darktable(args: &[&str]) -> (i32, Vec<Value>, String) {
+    let out = Command::new(env!("CARGO_BIN_EXE_helios"))
+        .arg("import-darktable")
+        .args(args)
+        .output()
+        .unwrap();
+    let lines = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap_or_else(|e| panic!("{e}: {l}")))
+        .collect();
+    (
+        out.status.code().unwrap_or(-1),
+        lines,
+        String::from_utf8_lossy(&out.stderr).to_string(),
+    )
+}
+
+#[test]
+fn a_darktable_folder_imports_with_its_duplicates_orphans_and_bare_raws() {
+    let p = Place::new("import-darktable");
+    let dir = p.join("roll");
+    let (edited, bare) = (dir.join("edited.png"), dir.join("bare.png"));
+    picture(&edited, 16, 16);
+    picture(&bare, 16, 16);
+    std::fs::write(dir.join("edited.png.xmp"), sidecar(1.0)).unwrap();
+    std::fs::write(dir.join("edited_01.png.xmp"), sidecar(2.0)).unwrap();
+    // A copy that came back with another case, next to the original.
+    std::fs::write(dir.join("edited.PNG.XMP"), sidecar(3.0)).unwrap();
+    // Its image was deleted.
+    std::fs::write(dir.join("gone.png.xmp"), sidecar(4.0)).unwrap();
+    std::fs::write(
+        dir.join("broken_02.png.xmp"),
+        r#"<rdf:Description darktable:history_end="many"/>"#,
+    )
+    .unwrap();
+    picture(&dir.join("broken.png"), 4, 4);
+    let (code, lines, err) =
+        import_darktable(&["--vault", &p.s("vault.db"), dir.to_str().unwrap()]);
+    // A sidecar that cannot be read fails the run, after the others.
+    assert_eq!(code, 1, "{err}\n{lines:?}");
+    let of = |image: &Path| {
+        lines
+            .iter()
+            .find(|l| l["image"] == json!(image))
+            .unwrap_or_else(|| panic!("no line for {}: {lines:?}", image.display()))
+    };
+    let versions: Vec<_> = of(&edited)["sidecars"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| {
+            (
+                s["version"].as_u64().unwrap(),
+                s["exact"].as_bool().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(versions, [(0, true), (0, false), (1, true)]);
+    assert_eq!(of(&edited)["conflicts"], json!([0]));
+    assert_eq!(of(&bare)["sidecars"], json!([]));
+    let broken = &of(&dir.join("broken.png"))["sidecars"][0];
+    assert!(broken["error"].is_string(), "{broken}");
+    let orphan = lines.iter().find(|l| l["orphan"].is_string()).unwrap();
+    assert_eq!(orphan["orphan"], json!(dir.join("gone.png.xmp")));
+    assert_eq!(orphan["image"], "gone.png");
+    let kept = kept_versions(&p.join("vault.db"), &edited);
+    assert_eq!(kept.len(), 3, "{kept:?}");
+    assert!(kept.contains(&("import:xmp duplicate 01".to_string(), 2.0)));
+
+    // Again: nothing new, and the bare raw is still known.
+    let (_, again, _) = import_darktable(&["--vault", &p.s("vault.db"), edited.to_str().unwrap()]);
+    assert_eq!(again.len(), 1, "{again:?}");
+    assert!(
+        again[0]["sidecars"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|s| s["vault"]["added"] == false),
+        "{again:?}"
+    );
+}
+
 /// A node serving the batch endpoint, started directly; killed when dropped.
 struct BatchNode {
     node: std::process::Child,

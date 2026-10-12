@@ -2,7 +2,7 @@
 
 `helios` talks to a running node (`helios-node`): it reads its state through
 the inspect endpoint, drives it through the debug control endpoint, manages
-sandboxes, and runs batches. Answers are JSON. Exit codes: 0 answered, 1 the
+sandboxes, runs batches and imports darktable edits. Answers are JSON. Exit codes: 0 answered, 1 the
 node answered with an error, 2 wrong usage, 3 the node cannot be reached.
 `helios` with no argument prints the full usage.
 
@@ -94,7 +94,59 @@ item, or `undone` past the history end), and its rating is written only when the
 chosen in Helios. The version is a first edit: importing the same sidecar
 again adds nothing, and an image already edited keeps its edit beside the
 import, as a second head. `sidecar.vault` says what was kept (`image`,
-`version`, `added`, `rating`, `rating_set`).
+`version`, `label`, `added`, `rating`, `rating_set`).
+
+**Duplicates.** darktable keeps its duplicates of a photo (its versions)
+as `IMG_0001_01.CR2.xmp`, `IMG_0001_02.CR2.xmp`... next to the base
+sidecar `IMG_0001.CR2.xmp`. The batch lists each folder once and finds
+them by name (see [Darktable import](#darktable-import) for the rules).
+The base sidecar is the edit exported; `sidecar.duplicates` lists the
+others (`path`, `version`, `exact`), and with `--vault` each of them is
+kept too, as its own version (`vault`, `warning`, or `error`).
+
+## Darktable import
+
+```bash
+helios import-darktable --vault library.db ~/Pictures/2024-06-trip/
+helios import-darktable --vault library.db IMG_0001.CR2 IMG_0002.CR2
+```
+
+Keeps darktable edits in a vault without exporting anything. Each path is a
+folder (its files, not its subfolders) or an image file. Every image file
+is imported, and each of its sidecars becomes a version of it with origin
+`import:xmp`, as with `batch --sidecar --vault`:
+
+- the base sidecar (`IMG_0001.CR2.xmp`) is labelled `import:xmp` and gives
+  the image its rating when the vault has none;
+- each duplicate (`IMG_0001_01.CR2.xmp`) is labelled
+  `import:xmp duplicate 01`, with darktable's name for it in parentheses
+  when it has one. A duplicate is a version of its own, even when its edit
+  is the same as another's: duplicates are never merged;
+- a case variant (`IMG_0001.CR2.XMP`, `IMG_0001.cr2.xmp`) is kept too, as
+  another version of the same number, after the one spelled as darktable
+  spells it, which stays the base; `conflicts` lists the numbers that have
+  more than one sidecar;
+- a name that is both an image's own sidecar and a duplicate of another
+  image (`DSC_01.NEF.xmp` when `DSC_01.NEF` and `DSC.NEF` both exist) goes
+  where its `xmpMM:DerivedFrom` says, else to the image of that exact
+  name. darktable's suffix is the number as it prints it (`_01`, `_100`):
+  a camera's `IMG_0001` is never taken for duplicate 1 of `IMG`.
+
+One JSON line per image, with its sidecars (`path`, `version`, `exact`, and
+`vault` or `error`, and the import's `warning`), then one line per sidecar
+whose image is not in the folder:
+
+```json
+{"image":"/trip/IMG_0001.CR2","id":"…","sidecars":[{"path":"/trip/IMG_0001.CR2.xmp","version":0,"exact":true,"vault":{…}}],"conflicts":[]}
+{"image":"/trip/IMG_0002.CR2","id":"…","sidecars":[],"conflicts":[]}
+{"orphan":"/trip/IMG_0003.CR2.xmp","image":"IMG_0003.CR2","version":0}
+```
+
+An image without a sidecar is imported with no version. An orphan is
+listed, not imported (the vault keeps images, and its image is not
+there); its `image` comes from its `xmpMM:DerivedFrom`, else from its
+name. Importing again adds nothing new. A sidecar that cannot be read
+does not stop the others: it gets an `error`, and the exit code is 1.
 
 A failed image (a file that does not load, an export that fails) says why
 in `error`, and the others go on; the exit code is then 1. Ctrl-C cancels the
