@@ -327,9 +327,14 @@ fn every_computed_step_is_an_event_caused_by_its_render() {
         [
             "engine.render_requested",
             "engine.step_computed",
-            "engine.step_computed"
+            "engine.step_computed",
+            "engine.cache_settled"
         ]
     );
+    // The cache after the render: the two steps, no budget.
+    assert_eq!(events[3].payload["entries"], 2);
+    assert_eq!(events[3].payload["evicted"], 0);
+    assert!(events[3].payload["budget"].is_null());
     assert!(events[1..].iter().all(|ev| ev.cause == Some(events[0].seq)));
     assert_eq!(
         events[1].payload["name"], "src",

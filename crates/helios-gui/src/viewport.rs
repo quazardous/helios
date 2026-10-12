@@ -96,7 +96,11 @@ fn render_thread(
     stats: Arc<Stats>,
     ctx: egui::Context,
 ) {
-    let engine = Engine::new(Arc::new(Bus::new()));
+    let budget = helios_core::engine::memory_share(
+        helios_core::engine::DEFAULT_CACHE_SHARE,
+        helios_core::engine::physical_memory(),
+    );
+    let engine = Engine::with_budget(Arc::new(Bus::new()), budget);
     let mut tiles: HashMap<(u64, u64, i64, i64), Image> = HashMap::new();
     let mut waiting: Vec<Request> = Vec::new();
     let mut generation = 0;

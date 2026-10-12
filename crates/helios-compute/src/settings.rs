@@ -72,7 +72,8 @@ pub struct DeviceSettings {
     /// GPU memory a job may take, in MiB (`None`: what the device allows).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vram_mb: Option<u64>,
-    /// The engine's cache budget, in MiB (`None`: no limit).
+    /// The engine's cache budget, in MiB (`None`: the default share of
+    /// memory, see `helios_core::engine::DEFAULT_CACHE_SHARE`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cache_mb: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -3,7 +3,7 @@
 //! starts one process per mode so each peak memory is its own.
 //!
 //! ```text
-//! stress_bench <full|tiled|proxy|edit> [--modules N] [--width W] [--height H] [--tile T]
+//! stress_bench <full|tiled|proxy|edit> [--modules N] [--width W] [--height H] [--tile T] [--budget MIB]
 //! ```
 //!
 //! - `full`: the whole image in one render.
@@ -13,11 +13,15 @@
 //!   member changed and the image rendered again; the line measures the
 //!   second render.
 //!
+//! `--budget` gives the engine's cache a budget in MiB (none by default,
+//! to measure what the network holds).
+//!
 //! The line holds the time in milliseconds, the peak resident memory in
 //! KiB (`VmHWM` of `/proc/self/status`, `null` where it is not available),
 //! and the engine's counters for the measured renders: steps asked for,
 //! computed and shared (cache hits), content keys computed while
-//! planning, and steps cropped from wider cached content.
+//! planning, steps cropped from wider cached content, and cache entries
+//! evicted to stay within the budget.
 
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -27,8 +31,7 @@ use helios_core::{Bus, Counters, Engine, Image, ModuleRef, Params, Region, Value
 use helios_module_exposure::Exposure;
 use helios_module_masks::stress::{self, Stress};
 
-const USAGE: &str =
-    "usage: stress_bench <full|tiled|proxy|edit> [--modules N] [--width W] [--height H] [--tile T]";
+const USAGE: &str = "usage: stress_bench <full|tiled|proxy|edit> [--modules N] [--width W] [--height H] [--tile T] [--budget MIB]";
 
 struct Options {
     mode: String,
@@ -36,6 +39,8 @@ struct Options {
     width: u32,
     height: u32,
     tile: u32,
+    /// The cache budget in MiB, `None` for no limit.
+    budget: Option<usize>,
 }
 
 fn options() -> Option<Options> {
@@ -50,6 +55,7 @@ fn options() -> Option<Options> {
         width: 1536,
         height: 1024,
         tile: 256,
+        budget: None,
     };
     while let Some(flag) = args.next() {
         let value = args.next()?;
@@ -58,6 +64,7 @@ fn options() -> Option<Options> {
             "--width" => o.width = value.parse().ok().filter(|w| *w > 0)?,
             "--height" => o.height = value.parse().ok().filter(|h| *h > 0)?,
             "--tile" => o.tile = value.parse().ok().filter(|t| *t > 0)?,
+            "--budget" => o.budget = Some(value.parse().ok()?),
             _ => return None,
         }
     }
@@ -88,7 +95,7 @@ fn main() -> ExitCode {
         return ExitCode::from(2);
     };
     let mut n = network(&o);
-    let engine = Engine::new(Arc::new(Bus::new()));
+    let engine = Engine::with_budget(Arc::new(Bus::new()), o.budget.map(|mib| mib << 20));
     let full = Region::sized(o.width, o.height);
     let render = |n: &Stress, region: Region, scale: f64| -> Image {
         engine
@@ -132,7 +139,7 @@ fn main() -> ExitCode {
     let c = engine.counters().since(&before);
     let peak = peak_kib().map_or_else(|| "null".into(), |k| k.to_string());
     println!(
-        "{{\"mode\":\"{}\",\"modules\":{},\"mask_nodes\":{},\"width\":{},\"height\":{},\"tile\":{},\"ms\":{ms:.1},\"peak_kib\":{peak},\"requests\":{},\"computed\":{},\"shared\":{},\"keys\":{},\"crops\":{}}}",
+        "{{\"mode\":\"{}\",\"modules\":{},\"mask_nodes\":{},\"width\":{},\"height\":{},\"tile\":{},\"ms\":{ms:.1},\"peak_kib\":{peak},\"requests\":{},\"computed\":{},\"shared\":{},\"keys\":{},\"crops\":{},\"budget_mib\":{},\"evictions\":{}}}",
         o.mode,
         o.modules,
         n.mask_nodes,
@@ -144,6 +151,8 @@ fn main() -> ExitCode {
         c.shared(),
         c.keys,
         c.crops,
+        o.budget.map_or_else(|| "null".into(), |b| b.to_string()),
+        c.evictions,
     );
     ExitCode::SUCCESS
 }

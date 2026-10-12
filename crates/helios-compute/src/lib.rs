@@ -94,7 +94,8 @@ pub struct Route {
     pub fell_back: Option<String>,
     /// CPU threads the work may use.
     pub threads: usize,
-    /// The engine's cache budget, in bytes (`None`: no limit).
+    /// The engine's cache budget, in bytes (`None`: no limit; a device
+    /// without one gets the default share of memory).
     pub cache_bytes: Option<usize>,
     accelerator: Option<Arc<dyn Accelerator>>,
     /// The CPU's cache budget, for a fallback.
@@ -466,11 +467,13 @@ impl Manager {
     }
 
     fn cache_bytes(&self, id: &str) -> Option<usize> {
-        self.settings
-            .devices
-            .get(id)
-            .and_then(|s| s.cache_mb)
-            .map(|mb| (mb * MIB) as usize)
+        match self.settings.devices.get(id).and_then(|s| s.cache_mb) {
+            Some(mb) => Some((mb * MIB) as usize),
+            None => helios_core::engine::memory_share(
+                helios_core::engine::DEFAULT_CACHE_SHARE,
+                helios_core::engine::physical_memory(),
+            ),
+        }
     }
 
     /// Which device for a job: among the devices present, enabled, of a

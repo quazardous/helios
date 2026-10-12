@@ -931,10 +931,7 @@ fn main() -> ExitCode {
         },
         _ => None,
     };
-    let budget = match config.number("system.cache.budget") as usize {
-        0 => None,
-        mib => Some(mib * 1024 * 1024),
-    };
+    let budget = config.cache_budget(helios_core::engine::physical_memory());
     let node = Arc::new(Node {
         bus: bus.clone(),
         engine: Arc::new(Engine::with_budget(bus.clone(), budget)),

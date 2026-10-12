@@ -5,7 +5,7 @@
 //! process so its peak memory is its own, prints the JSON line each run
 //! writes, and appends them, with the date and the git commit, to
 //! `target/bench/masks.jsonl`. Extra arguments go to every run
-//! (`--modules N`, `--width W`, `--height H`, `--tile T`).
+//! (`--modules N`, `--width W`, `--height H`, `--tile T`, `--budget MIB`).
 
 use std::path::Path;
 use std::process::{Command, ExitCode};
@@ -14,7 +14,8 @@ use serde_json::Value;
 
 use crate::test_times::{commit, now, target_dir};
 
-pub const USAGE: &str = "bench masks [--modules N] [--width W] [--height H] [--tile T]";
+pub const USAGE: &str =
+    "bench masks [--modules N] [--width W] [--height H] [--tile T] [--budget MIB]";
 
 const MODES: [&str; 4] = ["full", "tiled", "proxy", "edit"];
 

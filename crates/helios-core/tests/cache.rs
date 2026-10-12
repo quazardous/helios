@@ -147,3 +147,81 @@ fn content_being_computed_is_never_evicted() {
         assert_eq!(image.pixel(3, 2)[0], (3 * 7 + 2) as f32);
     });
 }
+
+/// A chain of copies: `n` steps after the source, each reading the one
+/// before.
+fn chain(n: usize) -> (Graph, NodeId) {
+    let mut g = Graph::new();
+    let mut last = g.add_source(
+        "src",
+        Image::from_fn(Region::sized(TILE * 8, TILE), 1, |x, y, _| {
+            (x * 7 + y) as f32
+        }),
+    );
+    let mut port = "image";
+    for i in 0..n {
+        let copy = g
+            .add_module(
+                &format!("copy{i}"),
+                ModuleRef::new(Copy { gate: None }),
+                &Params::new(),
+            )
+            .unwrap();
+        g.connect(last, port, copy, "input").unwrap();
+        (last, port) = (copy, "output");
+    }
+    (g, last)
+}
+
+#[test]
+fn a_render_never_evicts_what_it_still_needs() {
+    // A budget smaller than one step: without pins, every input would be
+    // evicted as soon as it is computed, before its reader ran.
+    let (g, last) = chain(6);
+    let e = Engine::with_budget(Arc::new(Bus::new()), Some(TILE_BYTES / 2));
+    let events = e.bus().subscribe();
+    let image = e.render(&g, last, "output", tile(2)).unwrap();
+    let c = e.counters();
+    assert_eq!(c.computed, 7, "each step once: none computed again");
+    assert_eq!(image.pixel(40, 3)[0], (40 * 7 + 3) as f32);
+    // Once the render is done its pins go: the cache is back within budget,
+    // and the event says so.
+    let d = e.describe();
+    assert!(
+        d["cache"]["bytes"].as_u64().unwrap() <= TILE_BYTES as u64 / 2,
+        "{d}"
+    );
+    assert_eq!(d["cache"]["pinned"], 0);
+    let settled: Vec<_> = events
+        .try_iter()
+        .filter(|ev| ev.kind == "engine.cache_settled")
+        .collect();
+    assert_eq!(settled.len(), 1);
+    assert_eq!(settled[0].payload["evicted"], 7);
+    assert_eq!(settled[0].payload["bytes"], 0);
+    assert_eq!(settled[0].payload["budget"], TILE_BYTES / 2);
+}
+
+#[test]
+fn a_small_budget_gives_the_same_result() {
+    let (g, last) = chain(5);
+    let full = Region::sized(TILE * 8, TILE);
+    let free = Engine::new(Arc::new(Bus::new()))
+        .render(&g, last, "output", full)
+        .unwrap();
+    let tight = Engine::with_budget(Arc::new(Bus::new()), Some(TILE_BYTES));
+    for t in full.tiles(TILE / 2) {
+        let part = tight.render(&g, last, "output", t).unwrap();
+        assert_eq!(part.content_hash(), free.sample(t).content_hash(), "{t}");
+    }
+    assert!(tight.counters().evictions > 0);
+}
+
+#[test]
+fn the_default_budget_is_a_share_of_memory() {
+    use helios_core::engine::{DEFAULT_CACHE_SHARE, memory_share};
+    assert_eq!(memory_share(25.0, Some(16 << 30)), Some(4 << 30));
+    assert_eq!(memory_share(0.0, Some(16 << 30)), None, "0: no limit");
+    assert_eq!(memory_share(DEFAULT_CACHE_SHARE, None), Some(2 << 30));
+    const { assert!(DEFAULT_CACHE_SHARE > 0.0 && DEFAULT_CACHE_SHARE < 100.0) };
+}

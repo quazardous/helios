@@ -19,6 +19,12 @@
 //! The engine counts every request and every computation, so tests can
 //! assert budgets ("rendering twice computes nothing the second time").
 //!
+//! The cache stays within a memory budget (see [`Engine::with_budget`]),
+//! evicting what was used least recently, but never what the current
+//! render still needs: a render pins the content of its steps until every
+//! step that reads it has run. After each render the cache's size and
+//! evictions go on the bus ([`CacheSettled`]).
+//!
 //! With an [`Accelerator`], a step it runs keeps its result in the
 //! accelerator's memory ([`DeviceImage`]): the next accelerated step reads
 //! it there. Content moves only where the other side needs it: a host image
@@ -28,7 +34,7 @@
 //! reads back its result once. Device content is cached like host content,
 //! under the same key and within the same budget (its bytes count).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -46,6 +52,33 @@ use crate::status::{Load, NodeState, NodeStatus, NodeType};
 
 /// The source name the engine publishes events under.
 const SOURCE: &str = "engine";
+
+/// The share of physical memory the render cache may use by default, in
+/// percent.
+pub const DEFAULT_CACHE_SHARE: f64 = 25.0;
+
+/// The cache budget where physical memory is not known: 2 GiB.
+const UNKNOWN_MEMORY_BUDGET: usize = 2 << 30;
+
+/// This machine's physical memory in bytes, where it is known (Linux:
+/// `MemTotal` of `/proc/meminfo`).
+pub fn physical_memory() -> Option<u64> {
+    let text = std::fs::read_to_string("/proc/meminfo").ok()?;
+    let line = text.lines().find(|l| l.starts_with("MemTotal:"))?;
+    let kib: u64 = line.split_whitespace().nth(1)?.parse().ok()?;
+    Some(kib * 1024)
+}
+
+/// A cache budget of `share` percent of `memory` bytes (2 GiB when memory
+/// is not known); `None`, no limit, for a share of 0.
+pub fn memory_share(share: f64, memory: Option<u64>) -> Option<usize> {
+    if share <= 0.0 {
+        return None;
+    }
+    Some(memory.map_or(UNKNOWN_MEMORY_BUDGET, |m| {
+        (m as f64 * share.min(100.0) / 100.0) as usize
+    }))
+}
 
 type Outputs = Result<Arc<Content>, Error>;
 
@@ -184,6 +217,19 @@ struct Step {
     work: Work,
 }
 
+impl Step {
+    /// The steps it reads.
+    fn inputs(&self) -> Vec<&Arc<Step>> {
+        match &self.work {
+            Work::Module { inputs, .. } | Work::Pending { inputs } => {
+                inputs.iter().map(|(s, _)| s).collect()
+            }
+            Work::Reduce { input, .. } => vec![input],
+            Work::Source(..) => Vec::new(),
+        }
+    }
+}
+
 enum Work {
     /// A source read at a scale.
     Source(Image, f64),
@@ -283,6 +329,8 @@ struct Cache {
     bytes: usize,
     /// Bumped on every use, to find the least recently used entry.
     tick: u64,
+    /// Keys the renders running still need, with how many renders pin each.
+    pins: HashMap<ContentHash, usize>,
     evictions: u64,
 }
 
@@ -347,6 +395,16 @@ impl Cache {
             .map(|(_, key, content)| (key, content))
     }
 
+    /// One render less needs `key`.
+    fn unpin(&mut self, key: ContentHash) {
+        if let Some(n) = self.pins.get_mut(&key) {
+            *n -= 1;
+            if *n == 0 {
+                self.pins.remove(&key);
+            }
+        }
+    }
+
     fn remove(&mut self, key: ContentHash) -> Option<Entry> {
         let entry = self.entries.remove(&key)?;
         if let Some(keys) = self.lineages.get_mut(&entry.lineage) {
@@ -360,10 +418,11 @@ impl Cache {
 
     /// Counts what a ready entry holds (again: a device entry grows when it
     /// is read back), then evicts the least recently used ready entries
-    /// (never `keep`, never content still being computed) until the cache
-    /// fits its budget.
-    fn settle(&mut self, keep: ContentHash, budget: Option<usize>) {
-        if let Some(entry) = self.entries.get_mut(&keep)
+    /// (never `keep`, never content still being computed, never content a
+    /// render pinned) until the cache fits its budget.
+    fn settle(&mut self, keep: Option<ContentHash>, budget: Option<usize>) {
+        if let Some(keep) = keep
+            && let Some(entry) = self.entries.get_mut(&keep)
             && let Some(Ok(content)) = entry.cell.get()
         {
             let size = content.bytes();
@@ -375,7 +434,12 @@ impl Cache {
             let victim = self
                 .entries
                 .iter()
-                .filter(|(k, e)| **k != keep && e.size > 0 && e.cell.get().is_some())
+                .filter(|(k, e)| {
+                    Some(**k) != keep
+                        && e.size > 0
+                        && e.cell.get().is_some()
+                        && !self.pins.contains_key(*k)
+                })
                 .min_by_key(|(_, e)| e.last_used)
                 .map(|(k, _)| *k);
             let Some(key) = victim else { break };
@@ -412,6 +476,17 @@ type TrackKey = (u64, NodeId, Region);
 /// A planned render: the step asked for (it reads every other).
 struct Planned {
     root: Arc<Step>,
+    /// Every step, producers first.
+    steps: Vec<Arc<Step>>,
+}
+
+/// What a render pins in the cache, and when each pin goes: a step's
+/// content is needed until every step reading it has run.
+struct Pins {
+    /// Steps still to run that read each pinned key.
+    readers: Mutex<HashMap<ContentHash, usize>>,
+    /// Steps whose inputs were released (a shared step runs once).
+    released: Mutex<HashSet<ContentHash>>,
 }
 
 #[derive(Default)]
@@ -655,9 +730,74 @@ impl Engine {
                 region,
             },
         );
-        let step = self.plan(graph, node, region, scale)?.root;
-        let content = self.execute(&step, cause)?;
-        Ok((step, content, index))
+        let planned = self.plan(graph, node, region, scale)?;
+        let pins = self.pin(&planned);
+        let evictions = self.cache.lock().expect("engine cache lock").evictions;
+        let content = self.execute(&planned.root, cause, &pins);
+        // Whatever happened, the render's pins go, and the cache settles
+        // within its budget.
+        let settled = {
+            let mut cache = self.cache.lock().expect("engine cache lock");
+            for key in pins.readers.lock().expect("pins lock").keys() {
+                cache.unpin(*key);
+            }
+            cache.settle(None, self.budget);
+            CacheSettled {
+                bytes: cache.bytes,
+                budget: self.budget,
+                entries: cache.entries.len(),
+                evicted: cache.evictions - evictions,
+            }
+        };
+        self.bus.publish(SOURCE, Some(cause), &settled);
+        Ok((planned.root, content?, index))
+    }
+
+    /// Pins every step of a render, counting the steps that read each.
+    fn pin(&self, planned: &Planned) -> Pins {
+        let mut readers: HashMap<ContentHash, usize> = HashMap::new();
+        for step in &planned.steps {
+            readers.entry(step.key).or_default();
+            for input in step.inputs() {
+                *readers.entry(input.key).or_default() += 1;
+            }
+        }
+        let mut cache = self.cache.lock().expect("engine cache lock");
+        for key in readers.keys() {
+            *cache.pins.entry(*key).or_default() += 1;
+        }
+        Pins {
+            readers: Mutex::new(readers),
+            released: Mutex::default(),
+        }
+    }
+
+    /// `step` has run (or was found): what it reads is one reader short,
+    /// and unpinned when no reader is left. Once per step.
+    fn release(&self, step: &Step, pins: &Pins) {
+        if !pins.released.lock().expect("pins lock").insert(step.key) {
+            return;
+        }
+        let mut unpinned = Vec::new();
+        {
+            let mut readers = pins.readers.lock().expect("pins lock");
+            for input in step.inputs() {
+                if let Some(n) = readers.get_mut(&input.key) {
+                    *n = n.saturating_sub(1);
+                    if *n == 0 {
+                        readers.remove(&input.key);
+                        unpinned.push(input.key);
+                    }
+                }
+            }
+        }
+        if !unpinned.is_empty() {
+            let mut cache = self.cache.lock().expect("engine cache lock");
+            for key in unpinned {
+                cache.unpin(key);
+            }
+            cache.settle(None, self.budget);
+        }
     }
 
     /// Output `port` of `step`'s content in host memory. Device content is
@@ -682,7 +822,7 @@ impl Engine {
         self.cache
             .lock()
             .expect("engine cache lock")
-            .settle(step.key, self.budget);
+            .settle(Some(step.key), self.budget);
         Ok(copy)
     }
 
@@ -850,10 +990,15 @@ impl Engine {
             steps.insert(*unit, planned);
         }
         let root = steps
-            .remove(&root)
-            .and_then(|s| s.into_iter().next())
+            .get(&root)
+            .and_then(|s| s.first().cloned())
             .expect("the unit asked for is planned");
-        Ok(Planned { root })
+        let steps = order
+            .iter()
+            .filter_map(|u| steps.remove(u))
+            .flatten()
+            .collect();
+        Ok(Planned { root, steps })
     }
 
     /// Plans `unit` and everything it reads, each once (`shapes`), adding
@@ -966,7 +1111,7 @@ impl Engine {
         Ok(())
     }
 
-    fn execute(&self, step: &Step, cause: u64) -> Outputs {
+    fn execute(&self, step: &Step, cause: u64, pins: &Pins) -> Outputs {
         if let Work::Pending { .. } = step.work {
             // Nothing to compute or cache: the answer is not there yet.
             return Err(Error::Pending {
@@ -983,6 +1128,7 @@ impl Engine {
             Found::Cell(cell) => cell,
             Found::Wider(content) => {
                 self.crops.fetch_add(1, Ordering::SeqCst);
+                self.release(step, pins);
                 return Ok(content);
             }
         };
@@ -996,7 +1142,7 @@ impl Engine {
                     t.computed += 1;
                     t.running += 1;
                 });
-                let result = self.compute(step, cause);
+                let result = self.compute(step, cause, pins);
                 self.track(step, |t| t.running -= 1);
                 let event = StepComputed {
                     node: step.node,
@@ -1013,8 +1159,9 @@ impl Engine {
             self.cache
                 .lock()
                 .expect("engine cache lock")
-                .settle(step.key, self.budget);
+                .settle(Some(step.key), self.budget);
         }
+        self.release(step, pins);
         if outputs.as_ref().is_err_and(Error::is_transient) {
             // A transient failure is not an answer: forget it, so asking
             // again computes again.
@@ -1053,7 +1200,7 @@ impl Engine {
         }
     }
 
-    fn compute(&self, step: &Step, cause: u64) -> Outputs {
+    fn compute(&self, step: &Step, cause: u64, pins: &Pins) -> Outputs {
         match &step.work {
             Work::Source(image, scale) => {
                 self.source_reads.fetch_add(1, Ordering::SeqCst);
@@ -1077,7 +1224,7 @@ impl Engine {
             } => {
                 let mut held = Vec::with_capacity(inputs.len());
                 for (input, port) in inputs {
-                    held.push((self.execute(input, cause)?, *port));
+                    held.push((self.execute(input, cause, pins)?, *port));
                 }
                 if self.take_fault(step, FaultKind::Compute) {
                     return Err(Error::Fault {
@@ -1123,7 +1270,7 @@ impl Engine {
                 }
             }
             Work::Reduce { input, scale } => {
-                let content = self.execute(input, cause)?;
+                let content = self.execute(input, cause, pins)?;
                 let ports = match content.as_ref() {
                     Content::Host(images) => images.len(),
                     Content::Device { .. } => 1,
@@ -1168,6 +1315,7 @@ impl Describe for Engine {
             "cache": {
                 "entries": cache.entries.len(), "ready": ready,
                 "bytes": cache.bytes, "budget": self.budget, "evictions": cache.evictions,
+                "pinned": cache.pins.len(),
             },
             "counters": counters,
         })

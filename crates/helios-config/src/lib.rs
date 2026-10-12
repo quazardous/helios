@@ -205,13 +205,26 @@ pub const SETTINGS: &[Setting] = &[
         key: "system.cache.budget",
         concern: Concern::Machine,
         label: "Render cache",
-        about: "Memory the render cache may use before evicting what was used least recently; 0 means no limit.",
+        about: "Memory the render cache may use before evicting what was used least recently; 0 means a share of the machine's memory (the setting below).",
         kind: Kind::Number {
             min: 0.0,
             max: 1_048_576.0,
-            default: 2048.0,
+            default: 0.0,
             unit: "MiB",
             integer: true,
+        },
+    },
+    Setting {
+        key: "system.cache.share",
+        concern: Concern::Machine,
+        label: "Render cache share",
+        about: "The share of the machine's memory the render cache may use when no size is set above; 0 means no limit.",
+        kind: Kind::Number {
+            min: 0.0,
+            max: 90.0,
+            default: helios_core::engine::DEFAULT_CACHE_SHARE,
+            unit: "%",
+            integer: false,
         },
     },
     Setting {
@@ -370,6 +383,16 @@ impl Config {
     }
 
     /// The effective number of a declared number setting.
+    /// The render cache's budget in bytes: `system.cache.budget` when set
+    /// (MiB), else `system.cache.share` of `memory` (bytes, 2 GiB when not
+    /// known); `None` for no limit.
+    pub fn cache_budget(&self, memory: Option<u64>) -> Option<usize> {
+        match self.number("system.cache.budget") as usize {
+            0 => helios_core::engine::memory_share(self.number("system.cache.share"), memory),
+            mib => Some(mib * 1024 * 1024),
+        }
+    }
+
     pub fn number(&self, key: &str) -> f64 {
         match self.get(key) {
             Some((Value::Number(v), _)) => v,
@@ -664,6 +687,21 @@ mod tests {
             Some((Value::Number(1024.0), Layer::Default))
         );
         assert_eq!(c.get("nope"), None);
+    }
+
+    #[test]
+    fn the_cache_budget_is_a_share_of_memory_unless_a_size_is_set() {
+        let mut c = config();
+        let memory = Some(32 << 30);
+        assert_eq!(c.cache_budget(memory), Some(8 << 30), "25 % by default");
+        assert_eq!(c.cache_budget(None), Some(2 << 30), "memory not known");
+        c.set_str(Layer::Global, "system.cache.share", "50")
+            .unwrap();
+        assert_eq!(c.cache_budget(memory), Some(16 << 30));
+        c.set_str(Layer::Global, "system.cache.share", "0").unwrap();
+        assert_eq!(c.cache_budget(memory), None, "no limit");
+        c.set_str(Layer::Run, "system.cache.budget", "512").unwrap();
+        assert_eq!(c.cache_budget(memory), Some(512 << 20), "a size wins");
     }
 
     #[test]

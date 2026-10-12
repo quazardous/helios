@@ -247,7 +247,8 @@ separated, as the catalog SDK does.
 - (2026-10-12, decided) **The cache has a memory ceiling by default.** A
   configurable budget (a share of RAM by default) with least-recently-used
   eviction; without it one 1536×1024 render held 3.9 GB, and tiles only
-  bound memory once the cache has a budget.
+  bound memory once the cache has a budget. Done 2026-10-12: 25 % of
+  memory by default, a render's working set pinned until read.
 - (2026-10-12, proposed, not decided) **Modules declare their interaction
   needs; one ergonomics layer runs the rituals.** A module declares typed
   needs (a colour sampled from a point or an area, a target, a line or a set

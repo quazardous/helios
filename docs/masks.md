@@ -157,6 +157,23 @@ after on one run each:
 A full render now computes each of the 58 nodes once; tiles compute each
 node once per tile (24 × 58).
 
+Under a cache budget (`--budget MIB`, finding 15), same machine:
+
+| mode | no budget | 256 MiB | 64 MiB |
+|---|---|---|---|
+| full: peak, evictions | 0.61 GB, 0 | 0.40 GB, 45 | 0.29 GB, 55 |
+| tiled: peak, evictions | 0.69 GB, 0 | 0.19 GB, 1101 | 0.09 GB, 1315 |
+| proxy: peak | 0.07 GB | 0.07 GB | 0.07 GB |
+| edit: computed | 7 | 11 | 56 |
+
+Computed steps do not move in a single render: what a render still needs
+is never evicted. The peak includes about 60 MB the process holds without
+a cache (the picture, the network). Tiles stay close to the budget; one
+full render does not, since its working set (each module's input, read by
+nine nodes, and the masks waiting for their group) is larger than 64 MiB
+and is pinned until read. An edit after a render under a small budget
+recomputes what the budget evicted.
+
 Planning before and after the memo (finding 12), one full render at 64×48:
 
 | modules | keys before | keys after | time before | time after | peak before | peak after |
@@ -251,11 +268,18 @@ What the port needed from the core, or shows it lacks:
     lineage (what it is made of, no region) and its region, so content
     asked over a region inside cached content of the same lineage is
     cropped from it: a tile after a full render computes nothing.
-15. **Memory has no ceiling by default.** Without a budget the cache keeps
-    every step's output: 3.9 GB for one full render of the stress network
-    at 1536×1024, 4.7 GB in tiles (each tile's halos are steps of their
-    own). With a budget, evicted content is computed again; the bench
-    runs without one, to measure what the network holds.
+15. **Memory had no ceiling by default (fixed).** Without a budget the
+    cache keeps every step's output: 3.9 GB for one full render of the
+    stress network at 1536×1024, 4.7 GB in tiles (each tile's halos are
+    steps of their own). Now the cache's budget is a share of the
+    machine's memory by default (25 %, `system.cache.share`, or a size in
+    `system.cache.budget`), least recently used content is evicted, and a
+    render pins its steps' content until every step reading it has run,
+    so nothing is computed twice within a render. The bench still runs
+    without a budget by default, to measure what the network holds;
+    `--budget` sets one. The budget bounds what stays between renders; a
+    render's own working set can exceed it (see the table above), which
+    tiles keep small.
 16. **Tiles did not save work.** In 256-pixel tiles the network computed
     9264 steps (24 tiles, 386 each): halos grow with every blur and
     feather along the chain, and finding 14 multiplied them. With union

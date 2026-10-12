@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use helios_core::{Bus, Engine, Image, ModuleRef, Params, Region, Value};
+use helios_core::{Bus, Describe, Engine, Image, ModuleRef, Params, Region, Value};
 use helios_module_exposure::Exposure;
 use helios_module_masks::stress::{self, MASK_NODES_PER_MODULE, Stress};
 
@@ -156,6 +156,37 @@ fn renders_are_bit_identical_to_planning_per_region() {
         proxy.content_hash().to_string(),
         "044d19e2fae662ca115e847a9ca67ab9dd905a6ecfae5ce8e468630742537151"
     );
+}
+
+#[test]
+fn a_small_cache_budget_gives_the_same_result_and_computes_nothing_twice() {
+    let full = Region::sized(40, 28);
+    let n = network(full);
+    let free = engine()
+        .render(&n.graph, n.output(), "output", full)
+        .unwrap();
+    // Room for a handful of one-channel masks of this size.
+    let budget = 8 * full.area() * 4;
+    let e = Engine::with_budget(Arc::new(Bus::new()), Some(budget));
+    let tight = e.render(&n.graph, n.output(), "output", full).unwrap();
+    assert!(same_bits(&tight, &free));
+    let c = e.counters();
+    assert_eq!(
+        c.computed,
+        n.graph.ids().count() as u64,
+        "what the render still needs is never evicted"
+    );
+    assert!(c.evictions > 0);
+    let d = e.describe();
+    assert!(
+        d["cache"]["bytes"].as_u64().unwrap() <= budget as u64,
+        "{d}"
+    );
+    // Tiles under the same budget still give the full render.
+    for tile in full.tiles(16) {
+        let part = e.render(&n.graph, n.output(), "output", tile).unwrap();
+        assert!(same_bits(&part, &free.sample(tile)), "tile {tile}");
+    }
 }
 
 #[test]
