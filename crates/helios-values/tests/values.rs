@@ -298,6 +298,35 @@ fn committed_steps_are_counted_and_a_gesture_in_progress_is_not_one() {
 }
 
 #[test]
+fn a_transient_value_is_announced_but_never_undone_nor_committed() {
+    let (_, _, mut store, bus) = exposure();
+    let events = bus.subscribe();
+    let zoom = "view/zoom";
+    store.declare(zoom, Descriptor::float("zoom", 0.01, 64.0, 1.0).transient());
+    store
+        .set(Set::new(zoom, Change::To(Value::Float(2.0)), Origin::User))
+        .unwrap();
+    let pan = store.begin_gesture(Origin::User, "pan");
+    store
+        .set(Set::new(zoom, Change::To(Value::Float(3.0)), Origin::User).gesture(pan))
+        .unwrap();
+    // Held by the gesture like any value, though it records nothing.
+    assert!(matches!(
+        store.set(Set::new(zoom, Change::To(Value::Float(4.0)), agent())),
+        Err(Refused::Held { .. })
+    ));
+    assert!(!store.uncommitted());
+    store.end(pan);
+    assert_eq!(store.committed(), 0);
+    assert!(store.undo_steps().is_empty());
+    assert_eq!(store.undo(&Origin::User).unwrap(), None);
+    assert_eq!(store.get(zoom).unwrap().value, Value::Float(3.0));
+    // Announced all the same, so whoever follows the view sees it.
+    let kinds: Vec<_> = events.try_iter().map(|e| e.kind).collect();
+    assert_eq!(kinds, ["param.changed", "param.changed"]);
+}
+
+#[test]
 fn every_change_is_announced_once_and_no_change_is_not() {
     let (_, _, mut store, bus) = exposure();
     let path = "node/exposure/exposure";

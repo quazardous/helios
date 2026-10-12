@@ -109,6 +109,11 @@ pub struct Descriptor {
     /// A text that names a path on disk.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub path: Option<PathHint>,
+    /// Kept out of the history (a view's zoom and position): a write is
+    /// announced like any other but never makes an undo step, so it is
+    /// never undone and never commits (nothing to save).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub transient: bool,
 }
 
 /// Decimals enough to show one step.
@@ -138,7 +143,15 @@ impl Descriptor {
             count: None,
             capacity: None,
             path: None,
+            transient: false,
         }
+    }
+
+    /// The same value kept out of the history (see
+    /// [`Descriptor::transient`]).
+    pub fn transient(mut self) -> Self {
+        self.transient = true;
+        self
     }
 
     /// A float in `[min, max]`, its fine step a hundredth of the range.
@@ -683,6 +696,7 @@ impl Store {
                 path: set.path.clone(),
             })?;
         let current = entry.value.clone();
+        let transient = entry.descriptor.transient;
         if let Some(seq) = set.if_seq
             && entry.seq != seq
         {
@@ -722,8 +736,11 @@ impl Store {
         match set.gesture.and_then(|g| self.gestures.get_mut(&g)) {
             Some(g) => {
                 g.paths.insert(set.path.clone());
-                g.changes.push(change);
+                if !transient {
+                    g.changes.push(change);
+                }
             }
+            None if transient => {}
             None => self.push_step(Step {
                 label: format!("set {}", set.path),
                 origin: set.origin,

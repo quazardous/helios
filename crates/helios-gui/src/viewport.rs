@@ -46,10 +46,17 @@ pub fn declare(store: &mut Store) {
     zoom.unit = Some("%".into());
     zoom.display_scale = 100.0;
     zoom.precision = 0;
-    store.declare(ZOOM, zoom);
-    store.declare(CENTER_X, Descriptor::float("centre x", -1e6, 1e6, 0.0));
-    store.declare(CENTER_Y, Descriptor::float("centre y", -1e6, 1e6, 0.0));
-    store.declare(FIT, Descriptor::bool("fit to the view", true));
+    // Where one looks is not an edit: never undone, never saved.
+    store.declare(ZOOM, zoom.transient());
+    store.declare(
+        CENTER_X,
+        Descriptor::float("centre x", -1e6, 1e6, 0.0).transient(),
+    );
+    store.declare(
+        CENTER_Y,
+        Descriptor::float("centre y", -1e6, 1e6, 0.0).transient(),
+    );
+    store.declare(FIT, Descriptor::bool("fit to the view", true).transient());
 }
 
 /// What the render thread did, for tests and the status bar.

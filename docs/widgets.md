@@ -86,6 +86,9 @@ sees; they are not the way to drive.
   agent may write only if the value has not changed since it read it.
 - One drag is one undo step; one agent call (or an explicit group) is one
   undo step named after it.
+- A value declared transient (where the viewport looks: its zoom and
+  centre) is announced and held during a drag like any other, but never
+  makes an undo step, so it is never undone and never saves the edit.
 - Changes not made by the user are visible: the history names their origin
   and the widget shows briefly that someone else moved it.
 - Absolute hardware faders take over softly, without jumps.
