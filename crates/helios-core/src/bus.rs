@@ -71,6 +71,18 @@ impl Bus {
     /// Publishes an event; returns its sequence number.
     pub fn publish<E: Event>(&self, source: &str, cause: Option<u64>, event: &E) -> u64 {
         let payload = serde_json::to_value(event).expect("events always serialize");
+        self.publish_value(source, cause, E::KIND, payload)
+    }
+
+    /// Publishes an event already in its JSON form, for a layer that
+    /// relays events it does not type (the GUI relays its toolkit's).
+    pub fn publish_value(
+        &self,
+        source: &str,
+        cause: Option<u64>,
+        kind: &'static str,
+        payload: serde_json::Value,
+    ) -> u64 {
         let mut inner = self.inner.lock().expect("bus lock");
         let seq = inner.next;
         inner.next += 1;
@@ -78,7 +90,7 @@ impl Bus {
             seq,
             source: source.to_string(),
             cause,
-            kind: E::KIND,
+            kind,
             payload,
         };
         inner
