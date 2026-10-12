@@ -14,7 +14,8 @@
 //! - **the journal** is Helios's [`Bus`]: egui-pop's events (a command
 //!   dispatched, done or failed, a dialog answered, a toast shown) go on
 //!   the bus beside the engine's, under `gui.*` kinds, with their sequence
-//!   number, source and cause, and egui-pop reads the bus back;
+//!   number, source and cause, and egui-pop reads the bus back (`since`,
+//!   `last_seq`): the host keeps no journal of egui-pop's own;
 //! - **the store** holds the interface's own settings (focus mode, window
 //!   place, the user's keys); Helios's values (node parameters, the
 //!   viewport) stay in `helios_values`;
@@ -29,7 +30,7 @@
 
 use std::sync::{Arc, Mutex, PoisonError};
 
-use egui_pop::api::host::{self, Dispatch, Event, Host, Journal, Reply, Resolver, Seq, Waker};
+use egui_pop::api::host::{self, Dispatch, Event, Host, Reply, Resolver, Seq, Waker};
 use egui_pop::core::binding::SharedStore;
 use egui_pop::model::commands::Origin as PopOrigin;
 use egui_pop::model::when::WhenContext;
@@ -85,9 +86,6 @@ pub struct HeliosHost {
     waker: Arc<Mutex<Waker>>,
     /// Helios's values, whose steps undo and redo walk.
     values: Option<Arc<Mutex<helios_values::Store>>>,
-    /// The trait hands out an egui-pop journal (`Host::journal`); the
-    /// events themselves are on the bus, so this one stays empty.
-    unused: Journal,
 }
 
 impl HeliosHost {
@@ -117,7 +115,6 @@ impl HeliosHost {
             store,
             waker,
             values: None,
-            unused: Journal::with_capacity(1),
         }
     }
 
@@ -195,26 +192,23 @@ impl Host for HeliosHost {
         }
     }
 
-    fn journal(&self) -> &Journal {
-        &self.unused
-    }
-
-    fn journal_mut(&mut self) -> &mut Journal {
-        &mut self.unused
-    }
-
-    fn publish(&mut self, source: &str, cause: Option<Seq>, name: &str, data: Json) -> Seq {
-        match KINDS.iter().find(|(n, _)| *n == name) {
+    fn publish(&mut self, source: &str, cause: Option<Seq>, name: &str, data: Json) -> Option<Seq> {
+        Some(match KINDS.iter().find(|(n, _)| *n == name) {
             Some((_, kind)) => self.bus.publish_value(source, cause, kind, data),
             None => {
                 self.bus
                     .publish_value(source, cause, OTHER, json!({ "name": name, "data": data }))
             }
-        }
+        })
     }
 
-    fn since(&self, seq: Seq) -> Vec<Event> {
-        self.bus
+    fn last_seq(&self) -> Option<Seq> {
+        Some(self.bus.last_seq())
+    }
+
+    fn since(&self, seq: Seq) -> Option<Vec<Event>> {
+        let events = self
+            .bus
             .since(seq)
             .into_iter()
             .map(|e| {
@@ -237,7 +231,8 @@ impl Host for HeliosHost {
                     data,
                 }
             })
-            .collect()
+            .collect();
+        Some(events)
     }
 
     fn store(&self) -> SharedStore {
@@ -361,6 +356,9 @@ mod tests {
         let back = app.handle().events_since(0);
         assert_eq!(back[1].name, "command.done");
         assert_eq!(back[1].data["result"]["args"], json!(3));
+        // The last event is the bus's, read through the host.
+        assert_eq!(app.handle().last_event(), bus.last_seq());
+        assert_eq!(app.handle().last_event(), events[1].seq);
     }
 
     #[test]

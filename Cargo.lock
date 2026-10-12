@@ -1022,7 +1022,7 @@ dependencies = [
 [[package]]
 name = "egui-pop"
 version = "0.0.1"
-source = "git+https://github.com/quazardous/egui-pop?rev=8b37b96#8b37b9629b794e1f55b08a3d0b6da232491e20e0"
+source = "git+https://github.com/quazardous/egui-pop?rev=787faec#787faec5e35d31c5c04b187bd53d303e810f9106"
 dependencies = [
  "egui",
  "egui-pop-api",
@@ -1034,7 +1034,7 @@ dependencies = [
 [[package]]
 name = "egui-pop-api"
 version = "0.0.1"
-source = "git+https://github.com/quazardous/egui-pop?rev=8b37b96#8b37b9629b794e1f55b08a3d0b6da232491e20e0"
+source = "git+https://github.com/quazardous/egui-pop?rev=787faec#787faec5e35d31c5c04b187bd53d303e810f9106"
 dependencies = [
  "eframe",
  "egui",
@@ -1049,7 +1049,7 @@ dependencies = [
 [[package]]
 name = "egui-pop-core"
 version = "0.0.1"
-source = "git+https://github.com/quazardous/egui-pop?rev=8b37b96#8b37b9629b794e1f55b08a3d0b6da232491e20e0"
+source = "git+https://github.com/quazardous/egui-pop?rev=787faec#787faec5e35d31c5c04b187bd53d303e810f9106"
 dependencies = [
  "egui",
  "egui-pop-model",
@@ -1062,7 +1062,7 @@ dependencies = [
 [[package]]
 name = "egui-pop-model"
 version = "0.0.1"
-source = "git+https://github.com/quazardous/egui-pop?rev=8b37b96#8b37b9629b794e1f55b08a3d0b6da232491e20e0"
+source = "git+https://github.com/quazardous/egui-pop?rev=787faec#787faec5e35d31c5c04b187bd53d303e810f9106"
 dependencies = [
  "log",
  "serde",
@@ -1072,7 +1072,7 @@ dependencies = [
 [[package]]
 name = "egui-pop-test"
 version = "0.0.1"
-source = "git+https://github.com/quazardous/egui-pop?rev=8b37b96#8b37b9629b794e1f55b08a3d0b6da232491e20e0"
+source = "git+https://github.com/quazardous/egui-pop?rev=787faec#787faec5e35d31c5c04b187bd53d303e810f9106"
 dependencies = [
  "egui",
  "egui-pop-api",
@@ -1083,7 +1083,7 @@ dependencies = [
 [[package]]
 name = "egui-pop-tokens"
 version = "0.0.1"
-source = "git+https://github.com/quazardous/egui-pop?rev=8b37b96#8b37b9629b794e1f55b08a3d0b6da232491e20e0"
+source = "git+https://github.com/quazardous/egui-pop?rev=787faec#787faec5e35d31c5c04b187bd53d303e810f9106"
 dependencies = [
  "serde_json",
 ]
