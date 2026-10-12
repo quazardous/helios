@@ -4,7 +4,9 @@
 //! requested node: each module prepares its plan and says which input region
 //! it needs, and every step gets a content key (hash of the module, its
 //! parameters and context, the region, and the keys of its inputs). Nothing
-//! is computed yet. **Execution** then looks each key up: content already
+//! is computed yet. A node read by several consumers over the same region is
+//! planned once per render and its step shared, so planning grows with the
+//! number of distinct steps, not with the number of paths to them. **Execution** then looks each key up: content already
 //! computed is shared by reference; content being computed by another thread
 //! is waited for (single flight); only missing content is computed.
 //!
@@ -118,8 +120,8 @@ pub struct Counters {
     pub uploads: u64,
     /// Accelerator images read back into host memory.
     pub readbacks: u64,
-    /// Content keys computed while planning: one per step planned, every
-    /// time a render, a status or a key is asked for.
+    /// Content keys computed while planning: one per distinct step (node
+    /// and region) of each render, status or key asked for.
     pub keys: u64,
 }
 
@@ -160,7 +162,7 @@ enum Work {
     Module {
         module: ModuleRef,
         plan: crate::module::Plan,
-        inputs: Vec<(Step, usize)>,
+        inputs: Vec<(Arc<Step>, usize)>,
         /// Optional inputs left unconnected: their index among the
         /// module's inputs and their channels.
         absent: Vec<(usize, u32)>,
@@ -169,7 +171,7 @@ enum Work {
     },
     /// A decision node with no recorded answer: its inputs are planned (a
     /// surface shows what it will look at), nothing is computed.
-    Pending { inputs: Vec<(Step, usize)> },
+    Pending { inputs: Vec<(Arc<Step>, usize)> },
 }
 
 /// Computed content, by key, within an optional memory budget.
@@ -254,6 +256,10 @@ pub struct Engine {
 
 type TrackKey = (u64, NodeId, Region);
 
+/// The steps planned in one render, by node and region (the graph and the
+/// scale are the render's).
+type Memo = HashMap<(NodeId, Region), Arc<Step>>;
+
 #[derive(Default)]
 struct Track {
     /// The content key last asked of this node over this region.
@@ -326,16 +332,18 @@ impl Engine {
         step: &Step,
         out: &mut Vec<NodeStatus>,
     ) -> Result<(), Error> {
-        if let Work::Module { inputs, .. } | Work::Pending { inputs } = &step.work {
-            for (input, _) in inputs {
-                self.collect_status(graph, input, out)?;
-            }
-        }
+        // A step already listed has its inputs listed before it: shared
+        // steps are walked once.
         if out
             .iter()
             .any(|s| s.node == step.node && s.region == step.region)
         {
             return Ok(());
+        }
+        if let Work::Module { inputs, .. } | Work::Pending { inputs } = &step.work {
+            for (input, _) in inputs {
+                self.collect_status(graph, input, out)?;
+            }
         }
         let cell = self
             .cache
@@ -473,7 +481,7 @@ impl Engine {
         port: &str,
         region: Region,
         scale: f64,
-    ) -> Result<(Step, Arc<Content>, usize), Error> {
+    ) -> Result<(Arc<Step>, Arc<Content>, usize), Error> {
         if !(scale > 0.0 && scale <= 1.0) {
             return Err(Error::Scale(scale.to_string()));
         }
@@ -554,7 +562,32 @@ impl Engine {
         Ok(self.plan(graph, node, region, scale)?.key)
     }
 
-    fn plan(&self, graph: &Graph, id: NodeId, region: Region, scale: f64) -> Result<Step, Error> {
+    /// Plans a render of `id` over `region` at `scale`.
+    fn plan(
+        &self,
+        graph: &Graph,
+        id: NodeId,
+        region: Region,
+        scale: f64,
+    ) -> Result<Arc<Step>, Error> {
+        self.plan_in(graph, id, region, scale, &mut HashMap::new())
+    }
+
+    /// Plans a step, or hands back the one already planned for the same
+    /// node and region in this render (`memo`): a shared input is planned
+    /// once, however many paths lead to it. The memo is keyed by the exact
+    /// region; a consumer reading a wider region gets a step of its own.
+    fn plan_in(
+        &self,
+        graph: &Graph,
+        id: NodeId,
+        region: Region,
+        scale: f64,
+        memo: &mut Memo,
+    ) -> Result<Arc<Step>, Error> {
+        if let Some(step) = memo.get(&(id, region)) {
+            return Ok(step.clone());
+        }
         self.keys.fetch_add(1, Ordering::SeqCst);
         let node = graph.node(id)?;
         let mut h = blake3::Hasher::new();
@@ -575,7 +608,7 @@ impl Engine {
                 h.update(b"helios.step.pending.v1");
                 let mut inputs = Vec::with_capacity(node.inputs.len());
                 for (src, port) in node.inputs.iter().flatten() {
-                    let step = self.plan(graph, *src, region, scale)?;
+                    let step = self.plan_in(graph, *src, region, scale, memo)?;
                     h.update(&step.key.0);
                     inputs.push((step, *port));
                 }
@@ -619,7 +652,7 @@ impl Engine {
                             port: spec.name.clone(),
                         });
                     };
-                    let step = self.plan(graph, src, input_region, scale)?;
+                    let step = self.plan_in(graph, src, input_region, scale, memo)?;
                     h.update(&step.key.0);
                     h.update(&(port as u64).to_le_bytes());
                     inputs.push((step, port));
@@ -633,14 +666,16 @@ impl Engine {
                 }
             }
         };
-        Ok(Step {
+        let step = Arc::new(Step {
             key: ContentHash(*h.finalize().as_bytes()),
             graph: graph.id(),
             node: id,
             name: node.name.clone(),
             region,
             work,
-        })
+        });
+        memo.insert((id, region), step.clone());
+        Ok(step)
     }
 
     fn execute(&self, step: &Step, cause: u64) -> Outputs {

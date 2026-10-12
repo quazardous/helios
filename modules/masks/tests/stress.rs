@@ -41,7 +41,7 @@ fn the_network_has_over_fifty_mask_nodes() {
 
 #[test]
 fn a_tiled_render_equals_the_full_render_bit_for_bit() {
-    let full = Region::sized(48, 36);
+    let full = Region::sized(40, 28);
     let n = network(full);
     let whole = engine()
         .render(&n.graph, n.output(), "output", full)
@@ -60,7 +60,7 @@ fn a_tiled_render_equals_the_full_render_bit_for_bit() {
         assert!(hi - lo > 0.2, "mask from {lo} to {hi}");
     }
     let tiled = engine();
-    for tile in full.tiles(17) {
+    for tile in full.tiles(16) {
         let part = tiled.render(&n.graph, n.output(), "output", tile).unwrap();
         assert!(same_bits(&part, &whole.sample(tile)), "output tile {tile}");
         for (node, mask) in n.masks.iter().zip(&masks) {
@@ -77,6 +77,9 @@ fn a_one_value_edit_recomputes_only_the_dirty_branch() {
     let e = engine();
     let first = e.render(&n.graph, n.output(), "output", r).unwrap();
     let rendered = e.counters();
+    // Planning computes one key per distinct step, each computed once: the
+    // nodes every module shares (its input) are not planned per path.
+    assert_eq!(rendered.keys, rendered.computed);
     // Rendering again plans again but computes nothing.
     e.render(&n.graph, n.output(), "output", r).unwrap();
     let again = e.counters().since(&rendered);

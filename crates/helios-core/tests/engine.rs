@@ -415,3 +415,21 @@ fn the_cycle_check_visits_a_shared_node_once() {
         Err(Error::Cycle { .. })
     ));
 }
+
+#[test]
+fn a_shared_input_is_planned_once_however_many_paths_lead_to_it() {
+    // 2^30 paths from the last node to the source, 31 steps.
+    let mut g = Graph::new();
+    let (_, last) = diamonds(&mut g, 30);
+    let e = engine();
+    let r = ramp().region();
+    let out = e.render(&g, last, "output", r).unwrap();
+    assert_eq!(out.pixel(1, 0)[0], 2f32.powi(30) * ramp().pixel(1, 0)[0]);
+    let c = e.counters();
+    assert_eq!(c.keys, 31, "one key per step, not per path");
+    assert_eq!(c.computed, 31);
+    // A status walks the shared steps once too.
+    let before = e.counters();
+    assert_eq!(e.status(&g, last, r).unwrap().len(), 31);
+    assert_eq!(e.counters().since(&before).keys, 31);
+}
