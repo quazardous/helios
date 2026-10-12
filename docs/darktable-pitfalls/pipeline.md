@@ -144,7 +144,14 @@ thread. Helios state was read from `ROADMAP.md`, `docs/module-contract.md`,
   untiled bit for bit. Limits: the test region is 37x23, so a module whose
   overlap exceeds the tile covers the whole image and never really tiles;
   parameters are varied one at a time (defaults, then each float at min and
-  max), not in combination.
+  max), not in combination. **Since 2026-10-12** the region grows to four
+  times the reach of the parameter set (up to 128 pixels; a reach above 32,
+  a blur at its largest radius, keeps 37x23 to stay fast in debug builds),
+  tiles are 16 pixels (a quarter of a larger region), at least two tiles are
+  cut, and every float at its minimum, then at its maximum, together, is
+  tested too. Combined maxima found that no sigmoid curve fits every
+  target at its maximum: sigmoid refuses with an error, which the contract
+  accepts for combinations only.
 - **Recommendation.** Make the contract test choose a region of at least
   4x the largest overlap the parameter set produces, assert that at least
   two tiles were cut inside the image, and add combined extremes (all
@@ -360,7 +367,12 @@ thread. Helios state was read from `ROADMAP.md`, `docs/module-contract.md`,
   https://github.com/darktable-org/darktable/issues/6572
 - **Helios exposure: partly handled.** The contract test asserts finite
   outputs at defaults, mins and maxes, but on the testkit's synthetic input,
-  not on negatives, zeros, huge values or a NaN pixel.
+  not on negatives, zeros, huge values or a NaN pixel. **Since 2026-10-12**
+  `check_contract` feeds negative, zero, huge (1e6), NaN-sprinkled and
+  mixed inputs: no panic, tiles equal the whole render, and inputs without
+  NaN give finite outputs (an error is allowed). Every ported module
+  passes. What NaN in gives (NaN out or repaired) is not declared per
+  module yet.
 - **Recommendation.** Add adversarial inputs to `check_contract`
   (negative channels, all-zero, 1e6, one NaN pixel) and state per module
   whether NaN in means NaN out or is repaired. Add an optional engine guard
@@ -499,4 +511,5 @@ thread. Helios state was read from `ROADMAP.md`, `docs/module-contract.md`,
    version and reports them.
 5. **Harden the contract tests** (pitfalls 5, 14, 15): regions large
    enough to really tile at maximum overlap, combined extreme params, and
-   adversarial inputs (negatives, zeros, huge values, NaN).
+   adversarial inputs (negatives, zeros, huge values, NaN). Done
+   2026-10-12, except a reach above 32 pixels and per-module NaN policy.

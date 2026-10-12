@@ -245,6 +245,21 @@ impl ModuleRef {
         self.0.input_region(plan, output)
     }
 
+    /// The region of its inputs it reads to compute `output` with these
+    /// parameters at `scale` (its overlap, for a test that must really
+    /// tile).
+    pub fn reads(
+        &self,
+        params: &Params,
+        context: &Context,
+        scale: f64,
+        output: Region,
+    ) -> Result<Region, Error> {
+        let params = self.manifest().resolve(params)?;
+        let plan = self.prepare(&params, context, scale)?;
+        Ok(self.input_region(&plan, output))
+    }
+
     /// What a GPU backend needs to run this module with these parameters:
     /// its kernel and the plan's uniforms. `None` when it has no GPU variant.
     pub fn gpu_job(

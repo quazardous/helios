@@ -318,11 +318,15 @@ Every module is testable alone, with no darktable and no framework running:
 
 1. **Unit tests**: `prepare` and `process` on small synthetic images.
 2. **Contract tests**, generated from the manifest, at full and half
-   scale: defaults and range ends do not produce NaN or infinity, renders
-   are reproducible, the declared overlap is enough (tiled render equals
-   untiled render). A module with a size in pixels also checks that its
-   half-scale render is close to its full render reduced. Migrations
-   round-trip once modules have versions to migrate.
+   scale: defaults, range ends and range ends combined do not produce NaN
+   or infinity, renders are reproducible, the declared overlap is enough
+   (tiled render equals untiled render, over a region four times the
+   module's reach cut in 16-pixel tiles). Adversarial inputs (negative,
+   zero, huge, NaN, mixed) never make it panic, keep tiles equal to the
+   whole render, and give finite outputs unless they hold NaN. A module
+   with a size in pixels also checks that its half-scale render is close
+   to its full render reduced. Migrations round-trip once modules have
+   versions to migrate.
 3. **Parity with darktable**: for a module ported from darktable, the same
    image and parameters rendered by `darktable-cli` with only that module
    active, compared within a Delta E threshold. darktable is the oracle.
