@@ -5,8 +5,8 @@
 # envelope (`config show`) and learns each job's real memory peak.
 #
 #   run <job> branch=<branch>          a branch pushed to GitHub
-#   run <job> branch=<b> src=helios-local
-#                                      code sent with `push helios-local`
+#   run <job> branch=<b> src=helios-local-<id>
+#                                      code sent with `push helios-local-<id>`
 #                                      (cargo xtask bench-remote --push)
 #   debug <job> branch=<branch>        (ssh -t) a shell in the job's container
 #
@@ -128,7 +128,22 @@ cores = 4
 memory = "4g"
 resources = ["gpu"]
 cwd = "/work/${src:-helios}"
-command = """cargo test -q --locked -p helios-gpu --test backend -- --nocapture 2>&1 | grep -E '^(GPU|skipped):' | sort -u | tee /out/adapter.txt; \
+command = """cp "$BENCH_RESOURCES" /out/resources.json 2> /dev/null; \
+cargo test -q --locked -p helios-gpu --test backend -- --nocapture 2>&1 | grep -E '^(GPU|skipped):' | sort -u | tee /out/adapter.txt; \
+cargo nextest run --locked --profile ci -p helios-gpu -p helios-compute; rc=$?; \
+cp target/nextest/ci/junit.xml /out/; exit $rc"""
+env = { CARGO_NET_OFFLINE = "true" }
+mounts = { target = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git" }
+timeout = "30m"
+
+# the same tests on the Intel iGPU (Mesa ANV), the second real backend
+[jobs.gpu-intel]
+cores = 4
+memory = "4g"
+resources = ["render"]
+cwd = "/work/${src:-helios}"
+command = """cp "$BENCH_RESOURCES" /out/resources.json 2> /dev/null; \
+cargo test -q --locked -p helios-gpu --test backend -- --nocapture 2>&1 | grep -E '^(GPU|skipped):' | sort -u | tee /out/adapter.txt; \
 cargo nextest run --locked --profile ci -p helios-gpu -p helios-compute; rc=$?; \
 cp target/nextest/ci/junit.xml /out/; exit $rc"""
 env = { CARGO_NET_OFFLINE = "true" }
