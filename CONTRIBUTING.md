@@ -48,6 +48,18 @@ says the work is done (a channel, a condition variable, a bus event), with
 a generous deadline that only a hang reaches. A sleep makes the test slow
 when the machine is idle and flaky when it is loaded.
 
+## Benches
+
+```bash
+cargo xtask bench masks                 # the mask stress network
+cargo xtask bench masks --modules 4     # a longer chain
+```
+
+Each mode (full, tiled, proxy, edit) runs in its own release process and
+prints one JSON line: time, peak memory, steps computed and shared, and
+content keys planned. The lines are appended to
+`target/bench/masks.jsonl` with the date and commit. See docs/masks.md.
+
 ## Linters and formatters
 
 ```bash

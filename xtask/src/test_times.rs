@@ -418,7 +418,7 @@ fn render(
 }
 
 /// The current time, UTC, as `YYYY-MM-DDTHH:MM:SSZ`.
-fn now() -> String {
+pub(crate) fn now() -> String {
     let secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .expect("clock after 1970")
@@ -433,7 +433,7 @@ fn now() -> String {
     )
 }
 
-fn commit(root: &Path) -> String {
+pub(crate) fn commit(root: &Path) -> String {
     Command::new("git")
         .args(["rev-parse", "--short", "HEAD"])
         .current_dir(root)
@@ -446,7 +446,7 @@ fn commit(root: &Path) -> String {
         )
 }
 
-fn target_dir(root: &Path) -> PathBuf {
+pub(crate) fn target_dir(root: &Path) -> PathBuf {
     std::env::var_os("CARGO_TARGET_DIR").map_or_else(|| root.join("target"), PathBuf::from)
 }
 
