@@ -486,7 +486,9 @@ pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
                 return Some(ExitCode::FAILURE);
             }
         }
-        target_dir(root)
+        // nextest's store is `target/nextest` under the workspace root,
+        // wherever CARGO_TARGET_DIR puts the build
+        root.join("target")
             .join("nextest")
             .join(profile)
             .join("junit.xml")
