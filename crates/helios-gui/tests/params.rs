@@ -198,3 +198,40 @@ fn pictures_of_the_parameters_panel() {
         }
     }
 }
+
+#[test]
+fn a_parameter_s_context_menu_runs_its_commands_on_its_path() {
+    let mut h = harness();
+    h.state_mut()
+        .run(
+            "param.set",
+            json!({ "path": EV, "value": 1.5 }),
+            Origin::User,
+        )
+        .unwrap();
+    h.run();
+    assert!((ev(&h) - 1.5).abs() < 1e-9);
+    h.get_by_role_and_label(egui::accesskit::Role::Slider, "exposure")
+        .click_secondary();
+    h.run();
+    // egui-pop's declared menu, its commands given the widget's path.
+    assert!(h.query_by_label("Copy a value's path").is_some());
+    h.get_by_label("Reset a value to its default").click();
+    h.run();
+    h.run();
+    let default = h
+        .state()
+        .values
+        .lock()
+        .unwrap()
+        .get(EV)
+        .unwrap()
+        .descriptor
+        .default
+        .as_f64()
+        .unwrap();
+    assert!((ev(&h) - default).abs() < 1e-9, "reset to {default}");
+    let run = h.state().history().pop().unwrap();
+    assert_eq!(run.id, "param.reset");
+    assert_eq!(run.args, json!({ "path": EV }));
+}

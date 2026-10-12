@@ -25,7 +25,7 @@ use helios_shell::commands::Origin;
 use helios_values::{Change, Descriptor, Entry, GestureId, Set, Store, Type};
 use serde_json::json;
 
-use crate::dialogs::{Level, MenuItem, Request, context_menu, request};
+use crate::dialogs::{Level, Request, request};
 
 /// The node whose parameters the panel shows (a node name; empty or absent:
 /// every node). The graph editor sets it.
@@ -44,6 +44,8 @@ pub struct Params {
     /// A value being typed: its path, the text, and whether it was just
     /// opened (its text then starts selected).
     typing: Option<(String, String, bool)>,
+    /// The application, for the parameters' context menu.
+    app: Option<egui_pop::api::AppHandle>,
 }
 
 /// Parses a typed number: units after it are ignored, a comma is a point.
@@ -91,6 +93,11 @@ fn write(
 }
 
 impl Params {
+    /// The application whose declared context menu the widgets open.
+    pub fn set_app(&mut self, app: egui_pop::api::AppHandle) {
+        self.app = Some(app);
+    }
+
     /// The marks of a path this frame: (moved by, at what time).
     fn moved(&mut self, path: &str, e: &Entry, now: f64) -> Option<Origin> {
         let seen = self.seen.entry(path.into()).or_insert((e.seq, None));
@@ -183,24 +190,14 @@ impl Params {
                     }
                 };
                 crate::name_rect(ui.ctx(), &format!("param:{path}"), response.rect);
-                context_menu(
-                    &response,
-                    vec![
-                        MenuItem::Command {
-                            id: "param.reset".into(),
-                            args: json!({ "path": path }),
-                        },
-                        MenuItem::Separator,
-                        MenuItem::Command {
-                            id: "param.copyPath".into(),
-                            args: json!({ "path": path }),
-                        },
-                        MenuItem::Command {
-                            id: "param.copyValue".into(),
-                            args: json!({ "path": path }),
-                        },
-                    ],
-                );
+                if let Some(app) = &self.app {
+                    egui_pop::api::menus::context_menu_with(
+                        &response,
+                        app,
+                        &crate::plugins::PARAM,
+                        json!({ "path": path }),
+                    );
+                }
                 if let Some(by) = &held {
                     let r = mark(ui, ui.visuals().warn_fg_color, false);
                     r.on_hover_text(format!("Held by {}", origin_name(by)));

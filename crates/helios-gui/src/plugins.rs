@@ -1,7 +1,8 @@
 //! Helios as egui-pop plugins: its commands declared (run by the host,
 //! see `host`), with their keys and menu entries; the system menu's lists
-//! (profiles, recent workspaces), declared again when they may have
-//! changed; and the areas, a block of egui-pop's main zone.
+//! (profiles, recent workspaces), filled by list providers when the menu
+//! opens; undo and redo held while a change is in progress; and the
+//! areas, a block of egui-pop's main zone.
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
@@ -10,6 +11,7 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use egui_pop::api::app::{STEP_REDO, STEP_UNDO};
+use egui_pop::api::menus::ListItem;
 use egui_pop::api::steps::Before;
 use egui_pop::api::zones::{self, Block};
 use egui_pop::api::{Ctx, Plugin, PluginError};
@@ -27,6 +29,8 @@ pub const SYSTEM: MenuId = MenuId::from_static("helios.system");
 pub const SYSTEM_RECENT: MenuId = MenuId::from_static("helios.system.recent");
 pub const SYSTEM_PROFILES: MenuId = MenuId::from_static("helios.system.profiles");
 pub const SYSTEM_THEMES: MenuId = MenuId::from_static("helios.system.themes");
+/// A parameter's context menu (its path given by the widget).
+pub const PARAM: MenuId = MenuId::from_static("helios.param");
 
 pub const COMMANDS: PluginId = PluginId::from_static("helios.commands");
 pub const LISTS: PluginId = PluginId::from_static("helios.lists");
@@ -112,10 +116,12 @@ pub struct ListSource {
     pub profiles_dir: PathBuf,
 }
 
-/// The system menu's lists: the saved profiles (the one in use ticked)
-/// and the recent workspaces. egui-pop's menus have no list filled when
-/// a menu opens, so the shell connects this plugin again before showing
-/// them.
+/// The lists of the system menu, filled by egui-pop's list providers.
+pub const PROFILES_LIST: &str = "helios.profiles";
+pub const RECENT_LIST: &str = "helios.recent";
+
+/// The system menu's lists, asked for each time the menu opens: the saved
+/// profiles (the one in use ticked) and the recent workspaces.
 pub struct Lists {
     pub source: Rc<RefCell<ListSource>>,
 }
@@ -130,49 +136,50 @@ impl Plugin for Lists {
     }
 
     fn connect(&mut self, ctx: &mut Ctx<'_>) -> Result<(), PluginError> {
-        let dir = self.source.borrow().profiles_dir.clone();
-        let mut names: Vec<String> = std::fs::read_dir(&dir)
-            .into_iter()
-            .flatten()
-            .flatten()
-            .filter_map(|e| {
-                e.file_name()
-                    .to_str()?
-                    .strip_suffix(".helios-profile")
-                    .map(String::from)
-            })
-            .collect();
-        if !names.contains(&"default".to_string()) {
-            names.push("default".into());
-        }
-        names.sort();
+        ctx.menu_item(MenuItem::list(SYSTEM_PROFILES, "1", 0, PROFILES_LIST))?;
+        ctx.menu_item(MenuItem::list(SYSTEM_RECENT, "1", 0, RECENT_LIST))?;
+        let source = self.source.clone();
         let use_profile = command_id("profile.use")?;
-        for (i, n) in names.iter().enumerate() {
-            let mut item = MenuItem::command(SYSTEM_PROFILES, "1", i as i32, use_profile.clone())
-                .args(json!({ "name": n }))
-                .label(n);
-            if !n.contains('\'') {
-                item = item.checked(&format!("heliosProfile == '{n}'"));
+        ctx.list_provider(PROFILES_LIST, move |_, cx| {
+            let dir = source.borrow().profiles_dir.clone();
+            let mut names: Vec<String> = std::fs::read_dir(&dir)
+                .into_iter()
+                .flatten()
+                .flatten()
+                .filter_map(|e| {
+                    e.file_name()
+                        .to_str()?
+                        .strip_suffix(".helios-profile")
+                        .map(String::from)
+                })
+                .collect();
+            if !names.contains(&"default".to_string()) {
+                names.push("default".into());
             }
-            ctx.menu_item(item)?;
-        }
+            names.sort();
+            names
+                .iter()
+                .map(|n| {
+                    ListItem::new(n, use_profile.clone(), json!({ "name": n }))
+                        .checked(cx.get("heliosProfile") == n)
+                })
+                .collect()
+        });
         let open = command_id("workspace.open")?;
-        let recent = crate::shell::recent_workspaces();
-        if recent.is_empty() {
-            // Greyed: a context key nothing sets.
-            ctx.menu_item(
-                MenuItem::command(SYSTEM_RECENT, "1", 0, open.clone())
-                    .label("No recent workspace")
-                    .when("heliosRecentWorkspace", true),
-            )?;
-        }
-        for (i, p) in recent.iter().enumerate() {
-            ctx.menu_item(
-                MenuItem::command(SYSTEM_RECENT, "1", i as i32, open.clone())
-                    .args(json!({ "path": p }))
-                    .label(&p.display().to_string()),
-            )?;
-        }
+        ctx.list_provider(RECENT_LIST, move |_, _| {
+            let recent = crate::shell::recent_workspaces();
+            if recent.is_empty() {
+                return vec![
+                    ListItem::new("No recent workspace", open.clone(), json!(null)).disabled(),
+                ];
+            }
+            recent
+                .iter()
+                .map(|p| {
+                    ListItem::new(&p.display().to_string(), open.clone(), json!({ "path": p }))
+                })
+                .collect()
+        });
         Ok(())
     }
 }

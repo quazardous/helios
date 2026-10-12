@@ -182,8 +182,6 @@ pub struct Shell {
     dialogs: Arc<OnceLock<Dialogs>>,
     /// Confirmations are answered yes by policy (a script's `--yes`).
     assume_yes: bool,
-    /// The system menu, open under this rectangle.
-    system_menu: Option<Rect>,
     /// A menu of commands asked for, open at a point.
     menu: Option<(egui::Pos2, Vec<MenuItem>)>,
     /// Every notice so far; the status bar shows the last, toasts the
@@ -239,6 +237,9 @@ impl Shell {
             declarations: &declarations,
         };
         Shell::declare_commands(&wiring, &specs);
+        // The param commands first: the menus take their titles.
+        helios_values::register(&mut lock(&registry), wiring.values.clone())
+            .expect("param commands are declared once");
         Shell::declare_menus(&wiring);
         let Wiring {
             queue,
@@ -247,8 +248,6 @@ impl Shell {
             values,
             ..
         } = wiring;
-        helios_values::register(&mut lock(&registry), values.clone())
-            .expect("param commands are declared once");
         let mut builder = App::builder()
             .host(host)
             .themes(themes.clone())
@@ -304,7 +303,6 @@ impl Shell {
             library: Rc::default(),
             dialogs,
             assume_yes: false,
-            system_menu: None,
             menu: None,
             notices: Vec::new(),
             now: 0.0,
@@ -326,6 +324,10 @@ impl Shell {
         }
         let has = |shell: &Shell, panel: &str| shell.workbench.borrow().panels.get(panel).is_some();
         if has(&shell, "helios.params") {
+            shell
+                .params
+                .borrow_mut()
+                .set_app(shell.app.handle().clone());
             let (params, values) = (shell.params.clone(), shell.values.clone());
             shell.set_content("helios.params", move |ui| {
                 let selection = lock(&values)
@@ -673,7 +675,6 @@ impl Shell {
     pub fn set_profiles_dir(&mut self, dir: PathBuf) {
         self.lists.borrow_mut().profiles_dir.clone_from(&dir);
         self.profiles_dir = dir;
-        self.redeclare(&plugins::LISTS);
     }
 
     pub fn profile_name(&self) -> &str {
@@ -1294,6 +1295,22 @@ impl Shell {
                 "theme.export",
                 &title("theme.export"),
             ),
+            // A parameter's context menu: its widget gives the path.
+            command(plugins::PARAM, "1", 0, "param.reset", &title("param.reset")),
+            command(
+                plugins::PARAM,
+                "2",
+                0,
+                "param.copyPath",
+                &title("param.copyPath"),
+            ),
+            command(
+                plugins::PARAM,
+                "2",
+                1,
+                "param.copyValue",
+                &title("param.copyValue"),
+            ),
             // The same commands in the menu bar.
             command(
                 MENU_FILE,
@@ -1424,15 +1441,14 @@ impl Shell {
 
     /// Opens a menu of commands at a position.
     pub fn open_menu(&mut self, at: egui::Pos2, items: Vec<MenuItem>) {
-        self.system_menu = None;
+        egui_pop::api::menus::close_popup(self.app.handle());
         self.menu = Some((at, items));
     }
 
     /// Opens the system menu under a rectangle (the logo's).
     fn open_system_menu(&mut self, under: Rect) {
-        self.redeclare(&plugins::LISTS);
         self.menu = None;
-        self.system_menu = Some(under);
+        egui_pop::api::menus::popup_at(self.app.handle(), &SYSTEM, under);
     }
 
     /// A declared menu as data, as it would open now: each entry's
@@ -1472,13 +1488,33 @@ impl Shell {
                         }
                         Shown::Item {
                             item: Item::List { name },
+                            enabled,
                             ..
-                        } => json!({ "kind": "list", "name": name }),
+                        } => Value::Array(
+                            h.list_items(&name, cx)
+                                .into_iter()
+                                .map(|e| {
+                                    json!({
+                                        "kind": "command",
+                                        "id": e.command,
+                                        "args": e.args,
+                                        "title": e.label,
+                                        "keys": h.keys_for(&e.command).first(),
+                                        "enabled": enabled && e.enabled && h.applies(&e.command, cx),
+                                        "checked": e.checked,
+                                    })
+                                })
+                                .collect(),
+                        ),
+                    })
+                    .flat_map(|v| match v {
+                        // A list's entries take its place.
+                        Value::Array(entries) => entries,
+                        one => vec![one],
                     })
                     .collect(),
             )
         }
-        self.redeclare(&plugins::LISTS);
         self.set_context(&self.app.handle().egui());
         let h = self.app.handle().clone();
         let cx = h.when_context();
@@ -1934,33 +1970,18 @@ impl Shell {
             let name = match o.kind {
                 OverlayKind::Dialog => "helios.dialog",
                 OverlayKind::Toasts => "helios.toasts",
+                OverlayKind::Menu => "helios.menu",
                 _ => continue,
             };
             self.rects.insert(name.into(), o.rect);
         }
     }
 
-    /// The system menu and menus asked for, in egui's popups.
+    /// Menus of commands asked for, in egui's popups (the system menu is
+    /// egui-pop's, `menus::popup_at`).
     fn menus_ui(&mut self, ctx: &Egui) {
         let h = self.app.handle().clone();
         let layer = egui::LayerId::background();
-        if let Some(under) = self.system_menu {
-            let mut open = true;
-            let shown = egui::Popup::new(Id::new("helios.system.menu"), ctx.clone(), under, layer)
-                .kind(egui::PopupKind::Menu)
-                .open_bool(&mut open)
-                .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-                .show(|ui| {
-                    ui.set_min_width(240.0);
-                    egui_pop::api::menus::show(ui, &h, &SYSTEM);
-                });
-            if let Some(r) = shown {
-                self.rects.insert("helios.menu".into(), r.response.rect);
-            }
-            if !open {
-                self.system_menu = None;
-            }
-        }
         if let Some((at, items)) = self.menu.take() {
             let mut open = true;
             let mut chosen = None;
