@@ -102,6 +102,8 @@ thread. Helios state was read from `ROADMAP.md`, `docs/module-contract.md`,
   at a fixed, declared scale, whose result is either a port or a recorded
   parameter (the decision-node pattern). Add a testkit check: rendering a
   sub-region equals the same sub-region of a full render, for every module.
+  A design that fits the engine's union planning is proposed in
+  [module-contract.md](../module-contract.md), "Full-extent analysis".
 
 ### 4. Auto-tuned parameters that keep tracking upstream changes
 

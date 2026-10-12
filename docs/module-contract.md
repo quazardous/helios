@@ -154,6 +154,85 @@ process(plan, inputs, output_region) -> outputs     pure, no IO, no globals
   the pixels the render covers, then reduces its output, as darktable
   scales after demosaic.
 
+## Full-extent analysis (design note, proposed, not decided)
+
+Written 2026-10-12, before porting haze removal, highlight
+reconstruction (segmentation, opposed), filmic or sigmoid auto-tune, the
+tone equalizer's curves and deflicker. It answers pitfalls 3 and 4 of
+[darktable-pitfalls/pipeline.md](darktable-pitfalls/pipeline.md) and
+builds on the engine's union planning.
+
+**The problem.** Some modules derive data from the whole image: a haze
+estimate, the colour statistics highlight reconstruction propagates, an
+exposure target, a histogram. darktable computed it from whatever region
+and scale the module received, so the darkroom (zoomed, cropped, a
+reduced preview) and the export disagreed, and haze removal was proposed
+for deprecation because nothing could make them agree. Helios has the
+same exposure by construction: `process` sees only its input region, and
+the region is part of every content key, so a statistic computed in
+`process` would differ per tile, per zoom and per preview scale.
+
+**The proposal: analysis is a node of its own, never hidden in
+`process`.** A module needing whole-image data is split in two: an
+*analysis* that reads the image and outputs a small value (a few numbers,
+a histogram, a curve), and the module, which reads that value as an input
+next to its image.
+
+1. **An analysis declares that it reads the whole image, at a resolution
+   it chooses**: `Needs::analysis` with a scale rule (a long edge in
+   pixels, say 1024, or full resolution when it must see single pixels).
+   Its output is a value port, not an image.
+2. **It is planned apart from the region being rendered.** The planner
+   plans units (a node at a scale) whose regions come from their
+   consumers. An analysis unit ignores them: whatever its consumers ask,
+   it asks its input for the input's whole extent (`Graph::extent`) at
+   its declared scale, as a `Reduce` step asks full-resolution input of a
+   module that needs it. Its value has no region: one step per render,
+   whatever the tiles.
+3. **It is computed once per source version.** Its key is its lineage
+   alone (module, parameters, its input's lineage at the analysis scale),
+   with no region and no render scale. A preview, a zoomed view, every
+   tile of an export and the export itself share one value, so they agree
+   by construction; it changes only when something upstream changes.
+4. **Its result reaches the module as a small parameter-like input**,
+   read whole next to the image region; its key enters the consumer's
+   lineage like any input's. Nothing in `process` depends on the region.
+5. **It can be frozen.** An auto-tuned value that keeps tracking upstream
+   edits is pitfall 4. As a decision node records an answer, an analysis
+   can run once and its result be recorded as the consumer's parameters
+   ("pick from image"), the edge removed. Live or frozen is the user's
+   choice, visible in the network.
+
+**Cost and fit.** Planning gains one unit kind, like `Reduce`: the
+analysis gives its input one demand, the extent at the analysis scale,
+merged with other reads of that input at that scale. The input is
+computed over the whole image at the analysis scale once per upstream
+change (at a 1024-pixel long edge, a proxy render); an edit downstream
+does not redo it. The value is small; the reduced input it reads is an
+ordinary cache entry, pinned until the analysis has run. The analysis
+runs before the first tile and is shared by all, so tiled equals untiled
+holds for its consumer. A GPU variant is a reduction whose small result
+comes back to the host.
+
+**What the engine needs.** A value port kind (a short `f32` buffer of
+declared length, carried in the engine's content like an image; today
+only image ports run, `PortKind::Buffer` is declared for vkdt), the
+`Needs::analysis` declaration and its planning rule (a `Work::Analyse`
+step), and testkit checks: for every module, a sub-region render equals
+the same sub-region of a full render at several scales with tiles smaller
+than any overlap; for an analysis, the value is the same for a preview, a
+tile and a full render.
+
+**Questions for the owner.**
+
+1. The scale rule: a fixed long edge per module (its author decides), a
+   machine setting, or both (a module minimum, a setting above it)?
+2. Live by default, or frozen by default with a "pick from image" action,
+   as darktable's auto buttons are?
+3. Does a cropped export analyse the crop or the whole image? Analysing
+   the input's extent lets a crop module upstream decide: a crop to the
+   sky adapts its haze estimate, consistently in preview and export.
+
 ## Decision nodes: where the algorithm alone is not enough
 
 A network must be able to contain an **AI junction**: a point where a fixed

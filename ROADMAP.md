@@ -249,6 +249,14 @@ separated, as the catalog SDK does.
   eviction; without it one 1536×1024 render held 3.9 GB, and tiles only
   bound memory once the cache has a budget. Done 2026-10-12: 25 % of
   memory by default, a render's working set pinned until read.
+- (2026-10-12, proposed, not decided) **Whole-image statistics are
+  analysis nodes.** A module needing them (haze removal, highlight
+  reconstruction, auto-tune) reads a small value from an analysis node
+  that reads its input's whole extent at a scale it declares, keyed
+  without region or render scale, so preview, tiles and export agree; the
+  value can be frozen as parameters. Design note and open questions:
+  [docs/module-contract.md](docs/module-contract.md), "Full-extent
+  analysis".
 - (2026-10-12, proposed, not decided) **Modules declare their interaction
   needs; one ergonomics layer runs the rituals.** A module declares typed
   needs (a colour sampled from a point or an area, a target, a line or a set
