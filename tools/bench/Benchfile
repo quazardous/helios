@@ -76,13 +76,19 @@ registry = "the cargo registry, shared by every branch"
 cargo-git = "the cargo git dependencies, shared by every branch"
 egui-pop-target = { about = "egui-pop's target directory, one per branch", per = "branch", lock = true }
 
+# Every job builds from a copy at a fixed path (/tmp/w/<repo>): the target
+# cache is shared by branch runs (/work/helios) and pushed code
+# (/work/helios-local-<id>), and cargo does not rebuild a workspace that only
+# moved, so env!("CARGO_MANIFEST_DIR") would point at the other place. A
+# cache built anywhere else (its /target/.built-at says where) starts empty.
+
 # ---------------------------------------------------------------- correctness
 
 [jobs.build]
 cores = 8
 memory = "6g"
 cwd = "/work/${src:-helios}"
-command = "cargo build --workspace --all-targets --locked"
+command = """mkdir -p /tmp/w/helios && cp -a . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && cargo build --workspace --all-targets --locked"""
 env = { CARGO_NET_OFFLINE = "true" }
 mounts = { target = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git" }
 timeout = "1h"
@@ -93,7 +99,7 @@ timeout = "1h"
 cores = 6
 memory = "6g"
 cwd = "/work/${src:-helios}"
-command = """cargo nextest run --workspace --locked --profile ci; rc=$?; \
+command = """mkdir -p /tmp/w/helios && cp -a . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && cargo nextest run --workspace --locked --profile ci; rc=$?; \
 cp target/nextest/ci/junit.xml /out/ \
  && cargo xtask test-times --from-junit /out/junit.xml --summary > /out/summary.md; \
 exit $rc"""
@@ -106,7 +112,7 @@ timeout = "1h"
 cores = 4
 memory = "4g"
 cwd = "/work/${src:-helios}"
-command = "cargo survival --locked"
+command = """mkdir -p /tmp/w/helios && cp -a . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && cargo survival --locked"""
 env = { CARGO_NET_OFFLINE = "true" }
 mounts = { target = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git" }
 timeout = "30m"
@@ -117,7 +123,7 @@ timeout = "30m"
 cores = 8
 memory = "6g"
 cwd = "/work/${src:-helios}"
-command = "cargo xtask check-commits ${base:-origin/main}"
+command = """mkdir -p /tmp/w/helios && cp -a . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && cargo xtask check-commits ${base:-origin/main}"""
 env = { CARGO_NET_OFFLINE = "true" }
 mounts = { target = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git" }
 timeout = "2h"
@@ -128,7 +134,7 @@ cores = 4
 memory = "4g"
 resources = ["gpu"]
 cwd = "/work/${src:-helios}"
-command = """cp "$BENCH_RESOURCES" /out/resources.json 2> /dev/null; \
+command = """mkdir -p /tmp/w/helios && cp -a . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && cp "$BENCH_RESOURCES" /out/resources.json 2> /dev/null; \
 cargo test -q --locked -p helios-gpu --test backend -- --nocapture 2>&1 | grep -E '^(GPU|skipped):' | sort -u | tee /out/adapter.txt; \
 cargo nextest run --locked --profile ci -p helios-gpu -p helios-compute; rc=$?; \
 cp target/nextest/ci/junit.xml /out/; exit $rc"""
@@ -142,7 +148,7 @@ cores = 4
 memory = "4g"
 resources = ["render"]
 cwd = "/work/${src:-helios}"
-command = """cp "$BENCH_RESOURCES" /out/resources.json 2> /dev/null; \
+command = """mkdir -p /tmp/w/helios && cp -a . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && cp "$BENCH_RESOURCES" /out/resources.json 2> /dev/null; \
 cargo test -q --locked -p helios-gpu --test backend -- --nocapture 2>&1 | grep -E '^(GPU|skipped):' | sort -u | tee /out/adapter.txt; \
 cargo nextest run --locked --profile ci -p helios-gpu -p helios-compute; rc=$?; \
 cp target/nextest/ci/junit.xml /out/; exit $rc"""
@@ -155,7 +161,7 @@ timeout = "30m"
 cores = 8
 memory = "9g"
 cwd = "/work/${src:-egui-pop}"
-command = """cargo fmt --all --check \
+command = """mkdir -p /tmp/w/egui-pop && cp -a . /tmp/w/egui-pop/ && cd /tmp/w/egui-pop && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/egui-pop ] || { rm -rf /target/* && echo /tmp/w/egui-pop > /target/.built-at; }; } && cargo fmt --all --check \
  && cargo clippy --workspace --all-targets --locked -- -D warnings \
  && cargo test --workspace --locked \
  && RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps --locked"""
@@ -171,7 +177,7 @@ cores = 8
 memory = "6g"
 exclusive = ["machine"]
 cwd = "/work/${src:-helios}"
-command = "cargo xtask bench masks && cp /target/bench/masks.jsonl /out/"
+command = """mkdir -p /tmp/w/helios && cp -a . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && cargo xtask bench masks && cp /target/bench/masks.jsonl /out/"""
 env = { CARGO_NET_OFFLINE = "true" }
 mounts = { target = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git" }
 timeout = "1h"
@@ -182,7 +188,7 @@ cores = 8
 memory = "6g"
 exclusive = ["machine"]
 cwd = "/work/${src:-helios}"
-command = """cargo xtask test-times --profile ci | tee /out/test-times.txt; rc=${PIPESTATUS[0]}; \
+command = """mkdir -p /tmp/w/helios && cp -a . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && cargo xtask test-times --profile ci | tee /out/test-times.txt; rc=${PIPESTATUS[0]}; \
 cp target/nextest/ci/junit.xml /target/test-times/history.jsonl /out/; exit $rc"""
 env = { CARGO_NET_OFFLINE = "true" }
 mounts = { target = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git" }
