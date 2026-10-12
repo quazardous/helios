@@ -20,6 +20,7 @@ fn gpu() -> Option<Gpu> {
 
 #[test]
 fn exposure_on_the_gpu_matches_the_cpu() {
+    let _gpu = helios_testkit::gpu_lock();
     let Some(gpu) = gpu() else { return };
     let input = helios_testkit::noise(Region::sized(97, 61), 4, 7);
     let module = ModuleRef::new(Exposure);
@@ -45,6 +46,7 @@ fn exposure_on_the_gpu_matches_the_cpu() {
 
 #[test]
 fn a_module_without_a_gpu_variant_says_so() {
+    let _gpu = helios_testkit::gpu_lock();
     let Some(gpu) = gpu() else { return };
     let input = helios_testkit::noise(Region::sized(4, 4), 1, 1);
     let module = ModuleRef::new(helios_testkit_blurless::Identity);
@@ -94,6 +96,7 @@ mod helios_testkit_blurless {
 
 #[test]
 fn the_blur_on_the_gpu_matches_the_cpu_with_its_overlap() {
+    let _gpu = helios_testkit::gpu_lock();
     let Some(gpu) = gpu() else { return };
     let input = helios_testkit::noise(Region::sized(80, 60), 4, 3);
     let module = ModuleRef::new(helios_module_blur::Blur);
@@ -113,6 +116,7 @@ fn the_blur_on_the_gpu_matches_the_cpu_with_its_overlap() {
 
 #[test]
 fn sigmoid_on_the_gpu_matches_the_cpu() {
+    let _gpu = helios_testkit::gpu_lock();
     let Some(gpu) = gpu() else { return };
     // Scene values up to 4 (HDR), some negative to exercise desaturation.
     let input = helios_core::Image::from_fn(Region::sized(64, 48), 4, |x, y, c| {
@@ -184,6 +188,7 @@ fn chain(engine: &helios_core::Engine, input: &helios_core::Image) -> helios_cor
 #[test]
 fn an_engine_with_the_gpu_renders_a_chain_as_the_cpu_does() {
     use std::sync::Arc;
+    let _gpu = helios_testkit::gpu_lock();
     let Some(gpu) = gpu() else { return };
     let input = helios_testkit::noise(Region::sized(64, 48), 4, 11);
     let bus = Arc::new(helios_core::Bus::new());
@@ -239,6 +244,7 @@ mod broken {
 #[test]
 fn a_kernel_that_does_not_compile_is_an_error_not_a_panic() {
     use std::sync::Arc;
+    let _gpu = helios_testkit::gpu_lock();
     let Some(gpu) = gpu() else { return };
     let mut g = helios_core::Graph::new();
     let src = g.add_source("src", helios_testkit::noise(Region::sized(8, 8), 1, 2));
@@ -260,6 +266,7 @@ fn a_kernel_that_does_not_compile_is_an_error_not_a_panic() {
 
 #[test]
 fn vkdt_modules_on_the_gpu_match_their_cpu_reference() {
+    let _gpu = helios_testkit::gpu_lock();
     let Some(gpu) = gpu() else { return };
     let input = helios_testkit::noise(Region::sized(70, 50), 4, 9);
     let exposure = ModuleRef::new(helios_module_vkdt::VkdtExposure);

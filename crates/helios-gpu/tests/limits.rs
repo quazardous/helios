@@ -23,6 +23,7 @@ fn adapter() -> Option<wgpu::Adapter> {
 
 #[test]
 fn the_opened_device_has_its_adapters_limits() {
+    let _gpu = helios_testkit::gpu_lock();
     let Some(adapter) = adapter() else { return };
     let gpu = Gpu::open(&adapter).unwrap();
     eprintln!("GPU: {}", gpu.adapter);
@@ -63,6 +64,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
 
 #[test]
 fn a_storage_binding_over_128_mib_computes() {
+    let _gpu = helios_testkit::gpu_lock();
     let Some(adapter) = adapter() else { return };
     // 4096 x 2112 RGBA f32: 132 MiB, above wgpu's default binding limit.
     let input_region = Region::sized(4096, 2112);

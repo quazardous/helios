@@ -116,6 +116,7 @@ fn both(gpu: Gpu, steps: Vec<(ModuleRef, Params)>) -> (Image, Image, Engine) {
 
 #[test]
 fn a_gpu_chain_uploads_once_and_reads_back_once() {
+    let _gpu = helios_testkit::gpu_lock();
     let Some(gpu) = gpu() else { return };
     let (cpu, out, engine) = both(gpu, vec![exposure(), blur(), sigmoid()]);
     let c = compare(&out, &cpu).unwrap();
@@ -126,6 +127,7 @@ fn a_gpu_chain_uploads_once_and_reads_back_once() {
 
 #[test]
 fn a_cpu_step_in_a_gpu_chain_costs_one_readback_and_one_upload() {
+    let _gpu = helios_testkit::gpu_lock();
     let Some(gpu) = gpu() else { return };
     let (cpu, out, engine) = both(
         gpu,
@@ -144,6 +146,7 @@ fn a_cpu_step_in_a_gpu_chain_costs_one_readback_and_one_upload() {
 
 #[test]
 fn a_render_on_the_device_stays_there_and_matches_the_cpu() {
+    let _gpu = helios_testkit::gpu_lock();
     let Some(gpu) = gpu() else { return };
     let gpu = Arc::new(gpu);
     let input = helios_testkit::noise(Region::sized(64, 48), 4, 5);

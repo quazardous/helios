@@ -1771,6 +1771,7 @@ dependencies = [
  "helios-module-blur",
  "helios-module-exposure",
  "helios-shell",
+ "helios-testkit",
  "pollster 0.4.0",
  "serde",
  "serde_json",

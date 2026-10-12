@@ -683,6 +683,7 @@ fn jobs_are_planned_with_the_opened_devices_limits() {
 
 #[test]
 fn a_real_gpu_opens_with_the_limits_it_is_listed_with() {
+    let _gpu = helios_testkit::gpu_lock();
     let adapters = WgpuAdapters::new();
     for d in adapters.list() {
         let opened = adapters.open(&d.id).unwrap();
@@ -695,6 +696,7 @@ fn a_real_gpu_opens_with_the_limits_it_is_listed_with() {
 
 #[test]
 fn the_real_adapters_are_listed_whatever_there_is() {
+    let _gpu = helios_testkit::gpu_lock();
     let adapters = WgpuAdapters::new();
     let devices = adapters.list();
     eprintln!("{} adapter(s)", devices.len());

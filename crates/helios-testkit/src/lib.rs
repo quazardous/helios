@@ -5,12 +5,30 @@
 //!   manifest, run on every module the same way (see `docs/module-contract.md`,
 //!   "How a module is tested").
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use helios_core::{
     Bus, Context, Engine, Error, Graph, Image, Manifest, Module, ModuleRef, NodeId, ParamKind,
     Params, Region, Value,
 };
+
+/// Held by a test for as long as it has a GPU device of its own open: the
+/// tests of one binary that open devices then run one at a time.
+///
+/// The Vulkan loader before 1.4.350 crashes a process that opens or closes
+/// a device on one thread while another names an object on its own device
+/// (wgpu does in debug builds); see docs/testing-strategy.md. nextest runs
+/// each test alone in its process, `cargo test` runs them on threads. Take
+/// it first, so it is released after the device is dropped:
+///
+/// ```ignore
+/// let _gpu = helios_testkit::gpu_lock();
+/// ```
+pub fn gpu_lock() -> MutexGuard<'static, ()> {
+    static GPU: Mutex<()> = Mutex::new(());
+    // A test that failed holding it leaves nothing to repair.
+    GPU.lock().unwrap_or_else(PoisonError::into_inner)
+}
 
 /// A smooth image: each channel grows along x and y, values in `[0, 1]`.
 pub fn ramp(region: Region, channels: u32) -> Image {

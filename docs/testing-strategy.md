@@ -118,12 +118,17 @@ ship.
 - a failing job uploads what it observed (state snapshot, events, cropped
   pictures), not only a log.
 
-## GPU tests share one device
+## GPU tests and the Vulkan loader
 
 The headless GUI tests (`helios_gui::headless::harness`) draw through wgpu
 on whatever Vulkan driver the machine has, lavapipe first. Every harness
 of a test process uses the same wgpu instance and device, opened by the
 first one, each with a renderer of its own. Do not open a device per test.
+
+A test that opens a GPU device of its own (the helios-gpu and
+helios-compute tests, which test opening devices) takes
+`helios_testkit::gpu_lock()` first and holds it to its end, so the tests
+of one binary that open devices run one at a time.
 
 With one device per harness, the GUI test binaries crashed with SIGSEGV
 when `cargo test` ran their tests on parallel threads (about 1 run in 10
@@ -154,10 +159,20 @@ freed record. Upstream fixed it in 1.4.350
 `loader_lock`). Any program opening Vulkan instances on two threads
 while one of them names objects can hit it.
 
+By the loader's code, closing a device on another thread is a risk as
+well: `vkDestroyDevice` frees the device's record under `loader_lock`
+while the lookup walks the same list under the other mutex. The helios-gpu
+`backend` binary, which opens a device per test, crashed with the same
+backtrace (6 runs in 120), and 0 in 160 once its tests took the lock.
+
 nextest runs each test in a process of its own, so it never met the bug.
-One shared device makes the test binaries safe under `cargo test` as well:
-the devices are enumerated once, before any object is named. It also
-saves opening a device per test.
+One shared device makes the GUI test binaries safe under `cargo test` as
+well: the devices are enumerated once and never closed. It also saves
+opening a device per test. Opening the devices without wgpu's debug
+flags (no object names) also avoided it, 0 crashes in 120 runs, but would
+take the labels out of the tests' validation messages. Any program that opens or closes Vulkan
+devices on several threads while one of them names objects can hit it
+with this loader, Helios included if it ever does.
 
 ## Open questions
 
