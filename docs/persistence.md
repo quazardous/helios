@@ -1,34 +1,74 @@
-# Persistence: where an edit step goes today
+# Persistence: where an edit step goes
 
-Status as of 2026-10-12 (read-only audit of the workspace). Line numbers are
-indicative; they drift as the code moves.
+Status as of 2026-10-12. The first part says where each edit step is
+kept now; the second is the audit made before that work, kept for its
+file and line references and its reasoning (line numbers drift as the
+code moves). What was fixed since is marked in its lists.
 
 ## Summary
 
-Only one kind of edit step reaches storage today: a **rating or colour label
-changed in the GUI library**, written field by field to the SQLite vault.
-Everything else that a user or an agent edits (module parameters, undo/redo,
-decision answers, the network itself) lives **only in process memory** and
-is lost on exit, crash or `kill -9`. The vault already has the place to keep
-an edit (`versions`, a content-addressed DAG), but nothing writes to it.
+Every edit step a user or an agent makes is now written to the vault as it
+is made, in one transaction, and a restart (even after `kill -9`) resumes
+from the last step saved:
+
+- **Parameters, undo and redo** in the desktop: each committed step of the
+  value store (a write outside a gesture, a gesture's end, an undo, a redo)
+  is saved as a version of the image's edit (`helios_vault::EditSession`);
+  a drag is saved every second while it goes (`FLUSH_SECONDS`), as a
+  version labelled "in progress". `helios-gui --vault FILE --image FILE`
+  opens the image at its head.
+- **Parameters and decisions through control or MCP**: a node started with
+  `--vault` and a file source keeps that image's edit; each `set-param` and
+  decision answer is saved before it is answered, the decision book inside
+  the version, and a restart applies the head and replays the book.
+- **Ratings, rejects, colour labels**: field commands (set, set if absent,
+  add or remove a label), applied by the vault to the stored value in one
+  transaction; a reject is its own field, so taking it back keeps the
+  stars. The desktop shows what the vault holds after each write and on
+  every `vault.field_changed` event, and says why when a write fails.
+- **XMP import** (`helios batch --sidecar --vault FILE`): a version with
+  origin `import:xmp`, its import report inside, and the sidecar's rating
+  only when the vault has none.
+
+Every save is announced on the bus: `edit.saved` (with the session's step
+number) for a version, `vault.field_changed` for a field. Tests wait on
+those, never on time.
 
 | Edit step | Held in memory | Persisted | Granularity | Bus event | `kill -9` loses |
 |---|---|---|---|---|---|
-| Parameter, GUI | value store, viewport graph | never | n/a | `param.changed` (in-process) | every edit of the session |
-| Parameter, control / MCP | node graph | never | n/a | `control.action` (in-process) | every edit since start |
-| Undo / redo (history move) | value store stacks | never | n/a | `param.changed` | the whole history |
+| Parameter, GUI | value store, viewport graph | a version per committed step | the edit, as a version continuing the head | `edit.saved` | the gesture going on since its last save (at most a second of a drag) |
+| Parameter, control / MCP | node graph | a version per change, before the answer | the edit | `edit.saved` | nothing answered |
+| Undo / redo (history move) | value store stacks | a version per move | the edit | `edit.saved` | nothing (the stacks themselves are not rebuilt on restart) |
 | Module add / remove / reorder | (no runtime verb exists) | n/a | n/a | n/a | n/a |
-| Decision answer (AI or human) | decision `Book` | never | n/a | `decision.*` (in-process) | every answer, paid model calls included |
-| Rating / colour label, GUI | library cache, pending changes | vault `fields`, next frame | field | none (vault has no bus in GUI) | at most the current frame |
+| Decision answer (AI or human) | decision `Book` | inside the version, per answer | the book | `edit.saved`, `decision.*` | nothing answered |
+| Rating / reject / colour label, GUI | library, pending commands | vault `fields`, next frame | field command | `vault.field_changed` | at most the current frame |
 | Title / description | — | only through `Vault::apply`, no caller | field | `vault.field_changed` if a bus is set | n/a |
 | Tags | not modelled | n/a | n/a | n/a | n/a |
-| XMP import | transient value in `helios batch` | never | n/a | none | nothing durable to lose; nothing kept |
+| XMP import | transient value in `helios batch` | with `--vault`: a version `import:xmp`, rating if absent | version, field | `vault.version_added` | nothing kept |
 | Configuration layer (node `--vault`) | — | vault `documents`, once at start | whole document | none | nothing |
 | Workflow journal rows | — | vault `documents` (`VaultJournal`) | whole row | — | per statement |
 
-## Paths
+**History and its end.** A version's id is the hash of its image, its
+parents and its edit; an image's history is the line of first parents back
+from a head (`Vault::history`), and the end of the history is that head.
+An undo is a new version whose values are the earlier ones, so the
+history only grows. Which head opens: the newest (latest time, then the
+longest history, then the greatest id); a session then continues the
+version it saved last, so two writers on one image make two heads and
+neither overwrites the other.
 
-### 1. Parameter change from the GUI
+**Survival scenarios** gate a release (`cargo xtask release` runs them
+first, CI runs them by name): `cargo survival` runs the desktop's (quit
+and reopen; `kill -9` in the middle of a drag) and the node's (`kill -9`
+after changes answered through control; `kill -9` during an export). After
+each, the history, its end, the ratings, the labels and the metadata must
+equal the last saved step.
+
+## The audit (before the fixes)
+
+### Paths
+
+#### 1. Parameter change from the GUI
 
 - Entry: a slider writes through `params.rs` `write()` (~l.80) → `Store::set`
   (`helios-values/src/lib.rs` ~l.675); `param.set` commands go the same way
@@ -51,7 +91,7 @@ an edit (`versions`, a content-addressed DAG), but nothing writes to it.
   A clean exit loses them too (`on_exit` saves only the layout and the
   profile pointer).
 
-### 2. Parameter change from the control endpoint / MCP
+#### 2. Parameter change from the control endpoint / MCP
 
 - Entry: MCP tool `helios_set_param` (`helios-node/src/mcp.rs` ~l.255) is
   forwarded unchanged to the control socket; `control::answer`, arm
@@ -70,7 +110,7 @@ an edit (`versions`, a content-addressed DAG), but nothing writes to it.
 - `kill -9`: every change since the node started. The control endpoint is
   debug-only, so today this mostly affects agents and tests.
 
-### 3. History move / history end
+#### 3. History move / history end
 
 - Helios has no history stack per image. The closest things are:
   - the value store's undo / redo (`Store::undo` / `redo`, ~l.824-850,
@@ -88,7 +128,7 @@ an edit (`versions`, a content-addressed DAG), but nothing writes to it.
   after the insert. It is the right home for an edit step but has **no
   caller** outside tests.
 
-### 4. Module added / removed / reordered
+#### 4. Module added / removed / reordered
 
 - No runtime verb exists: `Graph` has `add_module` and `connect` only, used
   when a network description is loaded (`helios-node/src/lib.rs` `load_in`).
@@ -96,7 +136,7 @@ an edit (`versions`, a content-addressed DAG), but nothing writes to it.
   Nothing to lose today; when these verbs arrive they inherit the same gap
   as parameters (the network is memory-only).
 
-### 5. Ratings, colour labels, tags, metadata
+#### 5. Ratings, colour labels, tags, metadata
 
 - Entry: shell commands `vault.rate.N`, `vault.reject`, `vault.label.<c>`
   (`helios-gui/src/shell.rs` ~l.940-970, actions ~l.1865-1882) →
@@ -135,7 +175,7 @@ an edit (`versions`, a content-addressed DAG), but nothing writes to it.
 - Tags: not modelled (`FIELDS` declares rating, labels, title, description).
   Title and description have no writer in any surface.
 
-### 6. XMP import
+#### 6. XMP import
 
 - Entry: `helios batch --sidecar` → `sidecar_params`
   (`helios-node/src/batch.rs` ~l.110) → `Sidecar::parse` + `helios_xmp::import`
@@ -150,7 +190,7 @@ an edit (`versions`, a content-addressed DAG), but nothing writes to it.
 - `kill -9`: nothing durable is lost because nothing durable is made; the
   next run re-imports from the sidecar.
 
-### 7. Other durable writes (for completeness)
+#### 7. Other durable writes (for completeness)
 
 - Configuration layers: `Vault::set_config_layer` (`helios-vault/src/settings.rs`)
   writes one whole TOML document, once, when a layer file is first imported
@@ -163,20 +203,23 @@ an edit (`versions`, a content-addressed DAG), but nothing writes to it.
 - The bus journal (`helios-core/src/bus.rs` ~l.45) is a bounded in-memory
   ring, not a durable log.
 
-## Read-modify-write sequences that can erase a concurrent write
+### Read-modify-write sequences that can erase a concurrent write
 
-1. **Colour labels toggled from a stale cache** (`Library::toggle_label`,
+1. **Colour labels toggled from a stale cache** (fixed: `label.add` and
+   `label.remove` commands, `Op::Add` / `Op::Remove`) (`Library::toggle_label`,
    `library.rs` ~l.198). The new set is computed from `Library.entries`,
    read once at start, and written whole. A label added meanwhile by another
    process (a node, a script, a future XMP sync) is erased. Exactly
    darktable's "metadata wiped on refresh" shape. Fix: label add / remove
    commands applied by the vault on the stored set, or a compare-and-set on
    the field.
-2. **Reject toggled from a stale cache** (`toggle_reject` ~l.187): decides
+2. **Reject toggled from a stale cache** (fixed: `rejected` is its own
+   field; schema migration 3 moves a stored `-1`) (`toggle_reject` ~l.187): decides
    between `-1` and `0` from the cached rating, and un-rejecting writes `0`,
    which erases the star rating the image had before (reject and rating
    share one field). darktable separated the reject flag for this reason.
-3. **The GUI never refreshes after its own failed write**: the shown value
+3. **The GUI never refreshes after its own failed write** (fixed: the
+   touched images are read back after every write, kept or refused): the shown value
    and the stored value diverge; the next toggle starts from the shown
    value and writes it back.
 4. **`Vault::apply` read-then-write** (fixed since the audit): the old
@@ -184,7 +227,8 @@ an edit (`versions`, a content-addressed DAG), but nothing writes to it.
    another process cannot replace it between the read and the write; a
    test runs two vaults on one file and checks that the audit trail is one
    chain.
-5. **Parameter writes re-resolve the whole module** (`Graph::set_param`
+5. **Parameter writes re-resolve the whole module** (saves now go
+   through versions, so the two copies become two heads) (`Graph::set_param`
    clones `params`, sets one, resolves all): harmless today because the
    graph lock serialises writers, but `submit_export_now` clones the graph
    and `helios_values::sync` pushes only dirty paths, so a parameter changed
@@ -197,22 +241,24 @@ an edit (`versions`, a content-addressed DAG), but nothing writes to it.
 7. **Version heads** are safe by construction: an edit never overwrites,
    it adds a version with parents; concurrent edits become two heads.
 
-## Where each step must be persisted
+### Where each step must be persisted
 
 1. **Make `Vault::apply` one transaction** (done). Add a transaction (or a
    `Store::apply_batch`) to the store contract: old-value read, field
    write and audit row commit together; the whole batch commits or none
    does. Publish `vault.field_changed` after commit only. Set WAL and an
    explicit busy timeout in the SQLite driver.
-2. **Give the GUI's vault a bus, and refresh the library from it.** Apply
+2. **Give the GUI's vault a bus, and refresh the library from it** (done,
+   except moving the write off the UI thread). Apply
    `vault.field_changed` from any writer to `Library.entries`; on a failed
    `apply`, put the shown value back and keep the change for a retry.
    Move the write off the UI thread through the scheduler.
-3. **Replace whole-set label writes by commands** (`label.add`,
+3. **Replace whole-set label writes by commands** (done) (`label.add`,
    `label.remove`) applied by the vault on the stored set, and split reject
    from rating (or make reject a separate field) so un-rejecting restores
    the stars.
-4. **Persist an edit as a version on every committed step.** Bind a surface
+4. **Persist an edit as a version on every committed step** (done; the
+   "working" ref is the session's own last version, not stored). Bind a surface
    to an image: on open, load the image's head version into the graph; on
    each gesture end, undo / redo, control `set_param`, decision answer and
    (later) module add / remove / reorder, write `Version::new(image,
@@ -220,15 +266,25 @@ an edit (`versions`, a content-addressed DAG), but nothing writes to it.
    gesture's end; the version id is content-addressed, so a retried write
    is idempotent. A durable "working" ref (the current head per surface)
    lets a restart resume exactly where the kill happened.
-5. **Store decisions with the edit.** Serialise the `Book` into the version
+5. **Store decisions with the edit** (done). Serialise the `Book` into the version
    (as its doc says), so an answer, its model and its inputs survive.
-6. **Turn an XMP import into a version** with origin `import:xmp`, keeping
+6. **Turn an XMP import into a version** (done, the report inside the
+   version's edit rather than a separate document) with origin `import:xmp`, keeping
    the `Report` as a document, and write the sidecar rating as a field
    command (only if the vault has none, never overwriting a user rating
    with a sidecar's).
-7. **Save the GUI layout on change** (debounced), not only in `on_exit`.
+7. **Save the GUI layout on change** (not done) (debounced), not only in `on_exit`.
 
-## Tests to write
+### Tests to write
+
+Status: the survival scenarios run in `helios-gui/tests/survival.rs` and
+`helios-node/tests/survival.rs` (`cargo survival`); the field-write
+contract tests in `helios-vault/src/contract.rs` and
+`helios-vault-sqlite/tests/durability.rs`. Not written yet: the decision
+scenario with a model (the node's covers a human answer), the XMP one
+with a kill (the batch test covers the import), the fault injection
+between `set_field` and `add_audit` (covered by the audit-row failure),
+and the shared catalog version for a second handle's cursor.
 
 Survival scenarios (spawn the real process, `kill -9`, reopen):
 

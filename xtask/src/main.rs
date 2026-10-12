@@ -375,6 +375,18 @@ fn missing_fragment(paths: &[String]) -> bool {
     code && !fragment
 }
 
+/// The survival scenarios (quit, `kill -9` and reopen: the edit, the
+/// ratings and the labels are where the last saved step left them) gate a
+/// release: see docs/persistence.md.
+fn survives(root: &Path) -> bool {
+    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+    Command::new(cargo)
+        .arg("survival")
+        .current_dir(root)
+        .status()
+        .is_ok_and(|s| s.success())
+}
+
 fn fail(problems: &[String]) -> ExitCode {
     for p in problems {
         eprintln!("xtask: {p}");
@@ -409,6 +421,11 @@ fn main() -> ExitCode {
             let date = words
                 .get(2)
                 .map_or_else(today, std::string::ToString::to_string);
+            if !survives(&root) {
+                return fail(
+                    &["the survival scenarios fail (`cargo survival`): no release".into()],
+                );
+            }
             match plan(&root, &date) {
                 Ok(None) => {
                     fail(&["nothing to release: no user-facing fragment in changelog.d/".into()])

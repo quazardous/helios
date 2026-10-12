@@ -310,6 +310,16 @@ rule 1). Not decided.
 (2026-10-11) **Photos are not code.** No semantic merge: two concurrent edits
 simply coexist as two versions, and the user keeps one or both.
 
+(2026-10-12, implemented; open to revision) **Each edit step is a version.**
+A surface saves every committed step (a gesture's end, an undo, a redo, a
+parameter set by an agent, a decision answered) as a version continuing
+the one it saved last, in one transaction, and a drag every second while
+it goes; an undo is a new version, so the history is the line of first
+parents and its end is the head. On open, the newest head (latest time,
+then longest history). Ratings, rejects and labels are field commands
+(set, set if absent, add, remove), never a record written back. Quit and
+`kill -9` scenarios gate a release. See docs/persistence.md.
+
 **Offline-first.** The travel laptop and the home workstation are both
 replicas; today photographers reconcile them by hand (XMP last-writer-wins,
 nothing for presets and styles).

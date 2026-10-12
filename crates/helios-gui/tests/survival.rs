@@ -1,0 +1,316 @@
+//! Survival scenarios for the desktop: a child process (this test binary,
+//! run again on one test) opens a vault, rates and labels an image, edits
+//! it through the value store as widgets do, and either quits or is killed
+//! with SIGKILL in the middle of a drag. After each, the history, its end
+//! (the head version), the ratings, the labels and the metadata must be
+//! what the last saved step left, and reopening shows exactly that.
+//!
+//! The child says what it saved on stdout from the `edit.saved` events of
+//! the bus: the parent reads those lines, it never sleeps. These scenarios
+//! gate a release: `cargo survival` runs them alone.
+
+#![cfg(unix)]
+
+use std::io::{BufRead, BufReader, Write};
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::sync::Arc;
+
+use helios_core::{Bus, Graph, NodeId};
+use helios_gui::persist::{FLUSH_SECONDS, Persist};
+use helios_gui::{Shell, helios_panels};
+use helios_shell::commands::Origin;
+use helios_vault::fields::{Command as Field, LABELS, RATING, REJECTED};
+use helios_vault::{ImageId, Vault};
+use helios_vault_sqlite::SqliteStore;
+use serde_json::{Value, json};
+
+const CHILD: &str = "HELIOS_GUI_SURVIVAL_CHILD";
+const EV: &str = "node/exposure/exposure";
+
+fn network() -> (Graph, NodeId) {
+    let mut g = Graph::new();
+    let src = g.add_source(
+        "source",
+        helios_core::Image::from_fn(helios_core::Region::sized(16, 8), 4, |_, _, _| 0.25),
+    );
+    let exp = g
+        .add_module(
+            "exposure",
+            helios_core::ModuleRef::new(helios_module_exposure::Exposure),
+            &helios_core::Params::new(),
+        )
+        .unwrap();
+    g.connect(src, "image", exp, "input").unwrap();
+    (g, exp)
+}
+
+fn set(shell: &Shell, ev: f64, gesture: Option<helios_values::GestureId>) {
+    let mut set = helios_values::Set::new(
+        EV,
+        helios_values::Change::To(helios_core::Value::Float(ev)),
+        Origin::User,
+    );
+    if let Some(g) = gesture {
+        set = set.gesture(g);
+    }
+    shell.values.lock().unwrap().set(set).unwrap();
+}
+
+fn shown(shell: &Shell) -> f64 {
+    shell
+        .values
+        .lock()
+        .unwrap()
+        .get(EV)
+        .unwrap()
+        .value
+        .as_f64()
+        .unwrap()
+}
+
+/// A shell on the vault at `path`, the photo open with its saved edit.
+fn open(path: &Path, photo: &Path) -> (Shell, Persist<SqliteStore>, ImageId) {
+    let mut shell = Shell::new(helios_panels(), None);
+    let mut persist = Persist::new(SqliteStore::open(path).unwrap(), Arc::new(Bus::new()));
+    persist.fill_library(&mut shell).unwrap();
+    shell.library_mut().select(0);
+    let image = persist.vault().import_file(photo, 1).unwrap();
+    let (graph, exp) = network();
+    persist
+        .open_image(&mut shell, image, graph, exp, "output")
+        .unwrap();
+    (shell, persist, image)
+}
+
+/// Not a test of its own: the desktop the scenarios quit or kill.
+#[test]
+fn survival_child() {
+    let Ok(dir) = std::env::var(CHILD) else {
+        return;
+    };
+    let dir = PathBuf::from(dir);
+    let scenario = std::env::var("HELIOS_GUI_SURVIVAL_SCENARIO").unwrap();
+    let (mut shell, mut persist, _) = open(&dir.join("vault.db"), &dir.join("photo.png"));
+    let events = persist.bus().subscribe();
+    let mut out = std::io::stdout();
+    let mut frame = |shell: &mut Shell, persist: &mut Persist<SqliteStore>, now: f64| {
+        persist.frame(shell, now);
+        while let Ok(e) = events.try_recv() {
+            if e.kind == "edit.saved" {
+                writeln!(
+                    out,
+                    "saved {} {}",
+                    e.payload["step"],
+                    e.payload["version"].as_str().unwrap()
+                )
+                .unwrap();
+            }
+        }
+        out.flush().unwrap();
+    };
+    // The library: three stars, a label.
+    shell.library_mut().rate(3).unwrap();
+    shell.library_mut().toggle_label("green").unwrap();
+    frame(&mut shell, &mut persist, 100.0);
+    // One write, then a drag saved while it goes.
+    set(&shell, 1.0, None);
+    frame(&mut shell, &mut persist, 101.0);
+    let drag = shell
+        .values
+        .lock()
+        .unwrap()
+        .begin_gesture(Origin::User, "drag exposure");
+    set(&shell, 1.3, Some(drag));
+    frame(&mut shell, &mut persist, 102.0);
+    set(&shell, 1.7, Some(drag));
+    frame(&mut shell, &mut persist, 102.0 + FLUSH_SECONDS);
+    if scenario == "kill" {
+        // Still dragging, past the last save: this much is lost.
+        set(&shell, 2.2, Some(drag));
+        frame(&mut shell, &mut persist, 102.5 + FLUSH_SECONDS);
+        writeln!(std::io::stdout(), "ready").unwrap();
+        std::io::stdout().flush().unwrap();
+        // Until the parent kills it (or goes away).
+        let mut line = String::new();
+        let _ = std::io::stdin().read_line(&mut line);
+        return;
+    }
+    set(&shell, 1.9, Some(drag));
+    shell.values.lock().unwrap().end(drag);
+    frame(&mut shell, &mut persist, 104.0);
+    shell.values.lock().unwrap().undo(&Origin::User).unwrap();
+    frame(&mut shell, &mut persist, 105.0);
+    shell.library_mut().toggle_reject().unwrap();
+    frame(&mut shell, &mut persist, 106.0);
+    writeln!(std::io::stdout(), "ready").unwrap();
+    // Quits: everything dropped, nothing more to save.
+}
+
+/// A scenario's directory: a vault holding the photo, titled and labelled
+/// red by another writer before the desktop starts.
+fn place(name: &str) -> (PathBuf, ImageId) {
+    let dir =
+        std::env::temp_dir().join(format!("helios-gui-survival-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    image::RgbImage::from_fn(12, 8, |x, y| {
+        image::Rgb([(x * 20) as u8, (y * 30) as u8, 90])
+    })
+    .save(dir.join("photo.png"))
+    .unwrap();
+    let vault = Vault::new(SqliteStore::open(&dir.join("vault.db")).unwrap());
+    let image = vault.import_file(&dir.join("photo.png"), 1).unwrap();
+    vault
+        .apply(
+            &[
+                Field::add(image, LABELS, "red"),
+                Field::set(image, "title", json!("harbour")),
+            ],
+            "agent",
+            None,
+            1,
+        )
+        .unwrap();
+    (dir, image)
+}
+
+/// Runs the child on a scenario; returns what it said it saved (step,
+/// version), and kills it once it is ready when `kill` is set.
+fn run_child(dir: &Path, scenario: &str, kill: bool) -> Vec<(u64, String)> {
+    let mut child = Command::new(std::env::current_exe().unwrap())
+        .args([
+            "survival_child",
+            "--exact",
+            "--nocapture",
+            "--test-threads=1",
+        ])
+        .env(CHILD, dir)
+        .env("HELIOS_GUI_SURVIVAL_SCENARIO", scenario)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut saved = Vec::new();
+    let mut ready = false;
+    for line in BufReader::new(child.stdout.take().unwrap()).lines() {
+        let line = line.unwrap();
+        if let Some(rest) = line.strip_prefix("saved ") {
+            let (step, version) = rest.split_once(' ').unwrap();
+            saved.push((step.parse().unwrap(), version.to_string()));
+        } else if line == "ready" {
+            ready = true;
+            // Killed now; or read to the end, so the child's last words
+            // never meet a closed pipe.
+            if kill {
+                break;
+            }
+        }
+    }
+    assert!(ready, "the child did not get through its scenario");
+    if kill {
+        child.kill().unwrap();
+    }
+    let status = child.wait().unwrap();
+    assert_eq!(status.success(), !kill, "{status}");
+    saved
+}
+
+/// The labels of the history leading to the image's one head, and that
+/// head.
+fn history(vault: &Vault<SqliteStore>, image: ImageId) -> (Vec<String>, helios_vault::Version) {
+    let heads = vault.heads(&image).unwrap();
+    assert_eq!(heads.len(), 1, "one line of history");
+    let labels = vault
+        .history(&heads[0].id)
+        .unwrap()
+        .into_iter()
+        .map(|v| v.label.unwrap_or_default())
+        .collect();
+    (labels, heads[0].clone())
+}
+
+fn ev_of(edit: &Value) -> f64 {
+    edit["modules"][0]["params"]["exposure"]["float"]
+        .as_f64()
+        .unwrap()
+}
+
+fn fields(vault: &Vault<SqliteStore>, image: ImageId) -> Vec<Option<Value>> {
+    let row = vault
+        .fields_of(&[image], &[RATING, LABELS, REJECTED, "title"])
+        .unwrap()
+        .remove(0);
+    [RATING, LABELS, REJECTED, "title"]
+        .iter()
+        .map(|f| row.get(*f).cloned())
+        .collect()
+}
+
+#[test]
+fn survival_quit_and_reopen_keeps_the_history_and_the_library() {
+    let (dir, image) = place("quit");
+    let saved = run_child(&dir, "quit", false);
+    let vault = Vault::new(SqliteStore::open(&dir.join("vault.db")).unwrap());
+    let (labels, head) = history(&vault, image);
+    assert_eq!(
+        labels,
+        [
+            format!("set {EV}"),
+            "drag exposure (in progress)".into(),
+            "drag exposure".into(),
+            "undo drag exposure".into(),
+        ]
+    );
+    // The end of the history is the last step the desktop announced.
+    assert_eq!(saved.last().unwrap(), &(4, head.id.hex()));
+    assert!((ev_of(&head.edit) - 1.0).abs() < 1e-9, "{}", head.edit);
+    assert_eq!(
+        fields(&vault, image),
+        [
+            Some(json!(3)),
+            Some(json!(["green", "red"])),
+            Some(json!(true)),
+            Some(json!("harbour")),
+        ]
+    );
+    drop(vault);
+    // Reopened, the desktop shows that.
+    let (shell, _persist, _) = open(&dir.join("vault.db"), &dir.join("photo.png"));
+    assert!((shown(&shell) - 1.0).abs() < 1e-9, "{}", shown(&shell));
+    let entry = shell.library().entries[0].clone();
+    assert_eq!(
+        (entry.rating, entry.rejected, entry.labels),
+        (3, true, vec!["red".to_string(), "green".to_string()])
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn survival_killed_in_the_middle_of_a_drag_keeps_the_last_saved_step() {
+    let (dir, image) = place("kill");
+    let saved = run_child(&dir, "kill", true);
+    let vault = Vault::new(SqliteStore::open(&dir.join("vault.db")).unwrap());
+    let (labels, head) = history(&vault, image);
+    assert_eq!(
+        labels,
+        [format!("set {EV}"), "drag exposure (in progress)".into()]
+    );
+    assert_eq!(saved.last().unwrap(), &(2, head.id.hex()));
+    // The drag as it was last saved, not where the kill caught it.
+    assert!((ev_of(&head.edit) - 1.7).abs() < 1e-9, "{}", head.edit);
+    assert_eq!(
+        fields(&vault, image),
+        [
+            Some(json!(3)),
+            Some(json!(["green", "red"])),
+            None,
+            Some(json!("harbour")),
+        ]
+    );
+    drop(vault);
+    let (shell, _persist, _) = open(&dir.join("vault.db"), &dir.join("photo.png"));
+    assert!((shown(&shell) - 1.7).abs() < 1e-9, "{}", shown(&shell));
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -1,2 +1,5 @@
 [alias]
 xtask = "run --quiet --package xtask --"
+# The survival scenarios alone (quit, kill -9 and reopen; see
+# docs/persistence.md): they gate a release.
+survival = "test -p helios-gui -p helios-node --test survival"

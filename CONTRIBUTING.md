@@ -153,7 +153,11 @@ fragments: `breaking` bumps the major version (the minor one before 1.0),
 `added`, `changed`, `deprecated` and `removed` bump the minor version,
 `fixed` and `security` alone bump the patch version.
 
-`cargo xtask release` writes the new section at the top of CHANGELOG.md,
+`cargo xtask release` first runs the survival scenarios (`cargo
+survival`: the desktop and a node quit or killed with `kill -9`, then
+reopened, keep every edit step, rating and label saved; see
+docs/persistence.md) and refuses to release when one fails. It then
+writes the new section at the top of CHANGELOG.md,
 bumps the version and removes the fragments. It does not commit or tag:
 review the diff, run `cargo check` to refresh Cargo.lock, then commit
 "Release X.Y.Z" and tag `vX.Y.Z`.

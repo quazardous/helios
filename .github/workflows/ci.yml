@@ -40,6 +40,9 @@ jobs:
       # (.config/nextest.toml); nextest does not run doctests.
       - run: cargo nextest run --workspace --profile ci
       - run: cargo test --workspace --doc
+      # Quit, kill -9 and reopen: the scenarios that gate a release, by name.
+      - name: survival scenarios
+        run: cargo survival
       - name: slowest tests
         if: ${{ !cancelled() }}
         run: cargo xtask test-times --from-junit target/nextest/ci/junit.xml --summary >> "$GITHUB_STEP_SUMMARY"
