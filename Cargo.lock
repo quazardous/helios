@@ -1024,7 +1024,7 @@ dependencies = [
 [[package]]
 name = "egui-pop"
 version = "0.0.1"
-source = "git+https://github.com/quazardous/egui-pop?rev=35f9ffb#35f9ffb223629ebade94944b38e5ee01ac285f4b"
+source = "git+https://github.com/quazardous/egui-pop?rev=463543d#463543d68a8772ecbe56fe975dbd4b4b9b046a5c"
 dependencies = [
  "egui",
  "egui-pop-api",
@@ -1036,7 +1036,7 @@ dependencies = [
 [[package]]
 name = "egui-pop-api"
 version = "0.0.1"
-source = "git+https://github.com/quazardous/egui-pop?rev=35f9ffb#35f9ffb223629ebade94944b38e5ee01ac285f4b"
+source = "git+https://github.com/quazardous/egui-pop?rev=463543d#463543d68a8772ecbe56fe975dbd4b4b9b046a5c"
 dependencies = [
  "egui",
  "egui-pop-core",
@@ -1049,7 +1049,7 @@ dependencies = [
 [[package]]
 name = "egui-pop-core"
 version = "0.0.1"
-source = "git+https://github.com/quazardous/egui-pop?rev=35f9ffb#35f9ffb223629ebade94944b38e5ee01ac285f4b"
+source = "git+https://github.com/quazardous/egui-pop?rev=463543d#463543d68a8772ecbe56fe975dbd4b4b9b046a5c"
 dependencies = [
  "egui",
  "egui-pop-model",
@@ -1062,7 +1062,7 @@ dependencies = [
 [[package]]
 name = "egui-pop-model"
 version = "0.0.1"
-source = "git+https://github.com/quazardous/egui-pop?rev=35f9ffb#35f9ffb223629ebade94944b38e5ee01ac285f4b"
+source = "git+https://github.com/quazardous/egui-pop?rev=463543d#463543d68a8772ecbe56fe975dbd4b4b9b046a5c"
 dependencies = [
  "log",
  "serde",
@@ -1072,7 +1072,7 @@ dependencies = [
 [[package]]
 name = "egui-pop-tokens"
 version = "0.0.1"
-source = "git+https://github.com/quazardous/egui-pop?rev=35f9ffb#35f9ffb223629ebade94944b38e5ee01ac285f4b"
+source = "git+https://github.com/quazardous/egui-pop?rev=463543d#463543d68a8772ecbe56fe975dbd4b4b9b046a5c"
 dependencies = [
  "serde_json",
 ]
