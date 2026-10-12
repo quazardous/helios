@@ -13,6 +13,7 @@ helios-config.workspace = true
 helios-export.workspace = true
 helios-load.workspace = true
 helios-photo.workspace = true
+helios-xmp.workspace = true
 helios-testkit.workspace = true
 helios-decision.workspace = true
 helios-resolve.workspace = true
@@ -30,6 +31,10 @@ helios-module-vkdt = { path = "../../modules/vkdt" }
 helios-module-masks = { path = "../../modules/masks" }
 serde.workspace = true
 serde_json.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+# MIT OR Apache-2.0: a safe flag set on Ctrl-C, for `helios batch`.
+signal-hook = "0.4"
 
 [dev-dependencies]
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }

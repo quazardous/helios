@@ -17,18 +17,36 @@
 //!
 //!     helios sandbox new DIR [--network FILE] | start DIR | stop DIR | clean DIR
 //!
+//!     helios batch --network FILE --out DIR [--format jpeg|png|tiff] [--quality Q] [--jobs N]
+//!                  [--name TEMPLATE] [--sidecar] [--source NAME] [--node NAME]
+//!                  [--socket ADDR --control ADDR [--token-file FILE]] IMAGES...
+//!
+//! `batch` applies a network to many images, each exported to a file in
+//! `--out` (named by `--name`, `{stem}.{ext}` by default; a name already
+//! taken gets `-1`, `-2`...). It starts its own node in a temporary sandbox,
+//! or drives the node at `--socket` and `--control`; `--sidecar` applies each
+//! image's darktable XMP history on top of the network. It prints one JSON
+//! line per image (`path`, `output`, `duration_ms`, `error`, `sidecar`) and
+//! exits with 1 when an image failed (the others go on), 130 when
+//! interrupted: Ctrl-C cancels the exports in flight and leaves no partial
+//! file. See `docs/cli.md`.
+//!
 //! The inspect socket defaults to `$HELIOS_SOCKET`, the control socket to
 //! `$HELIOS_CONTROL_SOCKET`. Output is JSON. Exit codes: 0 answered, 1 the
 //! node answered with an error (a wait that timed out prints what happened
 //! instead), 2 wrong usage, 3 the node cannot be reached.
 
 use std::collections::BTreeMap;
+use std::io::Write;
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use helios_core::{FaultKind, Params, Region, Value};
 use helios_inspect::control::{ControlRequest, FileFormat};
 use helios_inspect::{Address, Request, request_at};
+use helios_node::batch::{Options, Outcome};
 
 const USAGE: &str = "usage:
   helios inspect [--socket PATH|tcp://HOST:PORT --token-file FILE] state
@@ -44,7 +62,10 @@ const USAGE: &str = "usage:
   helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] cancel JOB
   helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] pause | resume
   helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] fault NODE compute|source-read
-  helios sandbox new DIR [--network FILE] | start DIR | stop DIR | clean DIR";
+  helios sandbox new DIR [--network FILE] | start DIR | stop DIR | clean DIR
+  helios batch --network FILE --out DIR [--format jpeg|png|tiff] [--quality Q] [--jobs N]
+               [--name TEMPLATE] [--sidecar] [--source NAME] [--node NAME]
+               [--socket ADDR --control ADDR [--token-file FILE]] IMAGES...";
 
 fn usage(error: &str) -> ExitCode {
     eprintln!("helios: {error}\n{USAGE}");
@@ -272,17 +293,126 @@ fn parse(args: Vec<String>) -> Result<Call, String> {
     })
 }
 
-/// `helios sandbox new DIR [--network FILE] | start DIR | stop DIR | clean DIR`.
-fn sandbox(args: &[String]) -> ExitCode {
-    use helios_node::sandbox;
-
-    let node_bin = std::env::current_exe()
+/// The `helios-node` executable next to this one.
+fn node_bin() -> PathBuf {
+    std::env::current_exe()
         .ok()
         .and_then(|exe| {
             exe.parent()
                 .map(|d| d.join(format!("helios-node{}", std::env::consts::EXE_SUFFIX)))
         })
-        .unwrap_or_else(|| PathBuf::from("helios-node"));
+        .unwrap_or_else(|| PathBuf::from("helios-node"))
+}
+
+/// The options of `helios batch`.
+fn batch_options(args: &[String]) -> Result<Options, String> {
+    let mut args = args.iter().cloned();
+    let mut options = Options {
+        network: None,
+        out: PathBuf::new(),
+        format: FileFormat::Jpeg,
+        quality: 92,
+        jobs: 2,
+        name: "{stem}.{ext}".into(),
+        sidecar: false,
+        source: None,
+        node: None,
+        attach: None,
+        images: Vec::new(),
+    };
+    let (mut out, mut socket, mut control) = (None, None, None);
+    let mut token = std::env::var("HELIOS_TOKEN").ok();
+    while let Some(arg) = args.next() {
+        let mut value = || args.next().ok_or(format!("{arg} needs a value"));
+        match arg.as_str() {
+            "--network" => options.network = Some(PathBuf::from(value()?)),
+            "--out" => out = Some(PathBuf::from(value()?)),
+            "--format" => options.format = file_format(&value()?)?,
+            "--quality" => {
+                options.quality = u8::try_from(number(Some(value()?), "--quality")?)
+                    .ok()
+                    .filter(|q| (1..=100).contains(q))
+                    .ok_or("--quality takes 1 to 100")?;
+            }
+            "--jobs" => {
+                options.jobs = usize::try_from(number(Some(value()?), "--jobs")?)
+                    .ok()
+                    .filter(|n| *n > 0)
+                    .ok_or("--jobs takes a number above 0")?;
+            }
+            "--name" => options.name = value()?,
+            "--sidecar" => options.sidecar = true,
+            "--source" => options.source = Some(value()?),
+            "--node" => options.node = Some(value()?),
+            "--socket" => socket = Some(value()?),
+            "--control" => control = Some(value()?),
+            "--token-file" => {
+                let file = value()?;
+                token = Some(
+                    std::fs::read_to_string(&file)
+                        .map_err(|e| format!("cannot read {file}: {e}"))?
+                        .trim()
+                        .to_string(),
+                );
+            }
+            flag if flag.starts_with("--") => return Err(format!("unknown option `{flag}`")),
+            _ => options.images.push(PathBuf::from(arg)),
+        }
+    }
+    options.out = out.ok_or("batch needs --out DIR")?;
+    options.attach = match (socket, control) {
+        (Some(s), Some(c)) => Some((
+            Address::parse(&s, token.clone())?,
+            Address::parse(&c, token)?,
+        )),
+        (None, None) => None,
+        _ => return Err("attaching to a node needs both --socket and --control".into()),
+    };
+    if options.attach.is_none() && options.network.is_none() {
+        return Err("batch needs --network FILE".into());
+    }
+    if options.images.is_empty() {
+        return Err("batch needs images".into());
+    }
+    Ok(options)
+}
+
+/// `helios batch`: see the module documentation.
+fn batch(args: &[String]) -> ExitCode {
+    let options = match batch_options(args) {
+        Ok(o) => o,
+        Err(e) => return usage(&e),
+    };
+    let interrupted = Arc::new(AtomicBool::new(false));
+    #[cfg(unix)]
+    for signal in [signal_hook::consts::SIGINT, signal_hook::consts::SIGTERM] {
+        if let Err(e) = signal_hook::flag::register(signal, interrupted.clone()) {
+            eprintln!("helios: cannot watch for interrupts: {e}");
+            return ExitCode::from(1);
+        }
+    }
+    let mut out = std::io::stdout();
+    let emit = |line: &serde_json::Value| {
+        // A closed stdout must not stop the batch.
+        let _ = writeln!(out, "{line}");
+        let _ = out.flush();
+    };
+    match helios_node::batch::run(&options, &node_bin(), &interrupted, emit) {
+        Ok(Outcome::Done) => ExitCode::SUCCESS,
+        Ok(Outcome::Failed) => ExitCode::from(1),
+        Ok(Outcome::Interrupted) => ExitCode::from(130),
+        Err(e) => {
+            eprintln!("helios: {e}");
+            ExitCode::from(if e.starts_with("cannot reach") { 3 } else { 1 })
+        }
+    }
+}
+
+/// `helios sandbox new DIR [--network FILE] | start DIR | stop DIR | clean DIR`.
+fn sandbox(args: &[String]) -> ExitCode {
+    use helios_node::sandbox;
+
+    let node_bin = node_bin();
     let words: Vec<&str> = args.iter().map(String::as_str).collect();
     let result = match words.as_slice() {
         ["new", dir] => sandbox::create(dir.as_ref(), None)
@@ -324,6 +454,9 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.first().is_some_and(|a| a == "sandbox") {
         return sandbox(&args[1..]);
+    }
+    if args.first().is_some_and(|a| a == "batch") {
+        return batch(&args[1..]);
     }
     let call = match parse(args) {
         Ok(c) => c,

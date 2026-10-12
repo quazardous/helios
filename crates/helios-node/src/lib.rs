@@ -33,6 +33,7 @@
 //! "model": "…", "key_env": "OPENAI_API_KEY" } }` (`api` may be `anthropic`).
 //! The key is read from that environment variable when a model is called.
 
+pub mod batch;
 pub mod mcp;
 pub mod sandbox;
 
