@@ -2058,6 +2058,7 @@ dependencies = [
  "helios-module-exposure",
  "helios-module-highlights",
  "helios-module-rawprepare",
+ "helios-module-sigmoid",
  "helios-module-vkdt",
  "helios-module-whitebalance",
  "helios-photo",
