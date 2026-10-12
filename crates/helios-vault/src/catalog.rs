@@ -1,10 +1,12 @@
 //! Commands and cursors: how the vault is written and read (see
 //! `docs/architecture.md`, "Data access").
 //!
-//! - **Commands** change fields, one field of one image each. A batch is
-//!   checked whole before anything is written, coalesced (the last change
-//!   to a field wins), and a change equal to the stored value is skipped:
-//!   no write, no audit entry, no event. Every real change is audited (who,
+//! - **Commands** change fields, one field of one image each: set, set if
+//!   absent, or add and remove a name in a set (a color label), applied by
+//!   the vault to the stored value, never a writer's copy written back. A
+//!   batch is checked whole before anything is written, the commands on
+//!   one field are folded in order into one change, and a change equal to
+//!   the stored value is skipped: no write, no audit entry, no event. Every real change is audited (who,
 //!   job, old and new value) and announced on the bus.
 //! - **Cursors** are server-side snapshots of a query: opening one is one
 //!   store query, reading a window of rows with chosen fields is one more,
@@ -74,7 +76,8 @@ pub struct ApplyReport {
     pub changed: u64,
     /// Equal to the stored value: nothing written.
     pub unchanged: u64,
-    /// Superseded by a later command on the same field in the batch.
+    /// Commands folded into the change of a field another command of the
+    /// batch already changes.
     pub coalesced: u64,
 }
 
@@ -113,28 +116,30 @@ impl<S: Store> Vault<S> {
         now: u64,
     ) -> Result<ApplyReport, String> {
         let mut report = ApplyReport::default();
-        // Check the values first, and keep only the last change of each field.
-        let mut last: BTreeMap<(ImageId, String), Option<Value>> = BTreeMap::new();
+        // Check every command first, and gather each field's operations in
+        // the order given.
+        let mut ops: BTreeMap<(ImageId, String), Vec<fields::Op>> = BTreeMap::new();
         for c in commands {
-            let value = if let Some(v) = &c.value {
-                Some(fields::normalize(&c.field, v)?)
-            } else {
-                fields::spec(&c.field)?;
-                None
-            };
-            if last.insert((c.image, c.field.clone()), value).is_some() {
+            let op = c.checked()?;
+            let list = ops.entry((c.image, c.field.clone())).or_default();
+            if !list.is_empty() {
                 report.coalesced += 1;
             }
+            list.push(op);
         }
         let events = self.transaction(|store| {
-            for (image, _) in last.keys() {
+            for (image, _) in ops.keys() {
                 if store.image(image)?.is_none() {
                     return Err(format!("no image {}", image.hex()));
                 }
             }
             let mut events = Vec::new();
-            for ((image, field), new) in last {
+            for ((image, field), list) in ops {
+                // Applied to the value stored now, read in this transaction:
+                // what another writer left in the field is the base, never
+                // the caller's copy.
                 let old = store.field(&image, &field)?;
+                let new = fields::fold(&field, old.clone(), &list)?;
                 if old == new {
                     report.unchanged += 1;
                     continue;
@@ -173,6 +178,25 @@ impl<S: Store> Vault<S> {
             self.catalog.lock().expect("catalog lock").version += 1;
         }
         Ok(report)
+    }
+
+    /// The asked fields of some images as stored now, in the order of
+    /// `ids`: one store query, however many images.
+    pub fn fields_of(
+        &self,
+        ids: &[ImageId],
+        names: &[&str],
+    ) -> Result<Vec<BTreeMap<String, Value>>, String> {
+        for name in names {
+            fields::spec(name)?;
+        }
+        let rows = self
+            .store
+            .lock()
+            .expect("store lock")
+            .fields_of(ids, names)?;
+        self.count_query();
+        Ok(rows)
     }
 
     /// The recorded changes of an image, oldest first.

@@ -103,6 +103,19 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         // marker.
         sql: "CREATE TABLE vault_state (key TEXT PRIMARY KEY, value TEXT NOT NULL);",
     },
+    Migration {
+        version: 3,
+        name: "reject apart from rating",
+        // A reject was a rating of -1, as in darktable: taking it back
+        // erased the stars. It becomes a field of its own; the stars of a
+        // rejected image were already lost, so it keeps none.
+        sql: "
+INSERT OR IGNORE INTO fields (image, name, value, number)
+    SELECT image, 'rejected', 'true', NULL FROM fields
+    WHERE name = 'rating' AND number = -1;
+DELETE FROM fields WHERE name = 'rating' AND number = -1;
+",
+    },
 ];
 
 /// The views and triggers of the current schema (none yet), created again

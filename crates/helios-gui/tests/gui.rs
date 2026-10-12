@@ -375,14 +375,13 @@ fn scopes_draw_the_image_they_are_given_in_each_mode() {
 
 #[test]
 fn the_library_rates_and_labels_what_is_selected_and_hands_the_changes_over() {
-    use helios_gui::library::{Change, Entry, REJECTED};
+    use helios_gui::library::{Change, Entry, Op};
     let entries: Vec<Entry> = ["a", "b", "c"]
         .iter()
         .map(|id| Entry {
             id: id.to_string(),
             name: format!("{id}.raf"),
-            rating: 0,
-            labels: Vec::new(),
+            ..Entry::default()
         })
         .collect();
     let mut shell = Shell::new(helios_panels(), None);
@@ -417,21 +416,25 @@ fn the_library_rates_and_labels_what_is_selected_and_hands_the_changes_over() {
     h.run();
     let s = h.state_mut();
     assert_eq!(s.library().selected, Some(0));
-    assert_eq!(s.library().entries[1].rating, REJECTED);
+    // Rejected, with its stars kept beside the reject.
+    assert_eq!(s.library().entries[1].rating, 3);
+    assert!(s.library().entries[1].rejected);
     assert_eq!(s.library().entries[1].labels, ["blue"]);
-    // The last change of each field is what the vault gets.
+    // What the user did, as commands: the last set of each field, and the
+    // label added rather than the whole set.
     let changes = s.take_library_changes();
-    let change = |image: &str, field: &str, value| Change {
+    let change = |image: &str, field: &str, op| Change {
         image: image.into(),
         field: field.into(),
-        value: Some(value),
+        op,
     };
     assert_eq!(
         changes,
         [
-            change("b", "rating", json!(REJECTED)),
-            change("b", "labels", json!(["blue"])),
-            change("a", "rating", json!(5)),
+            change("b", "rating", Op::Set(Some(json!(3)))),
+            change("b", "rejected", Op::Set(Some(json!(true)))),
+            change("b", "labels", Op::Add("blue".into())),
+            change("a", "rating", Op::Set(Some(json!(5)))),
         ]
     );
     assert!(s.take_library_changes().is_empty());

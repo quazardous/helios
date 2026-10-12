@@ -212,3 +212,37 @@ fn a_messy_database_migrates_and_reports_what_it_found() {
     drop(store);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Version 3 takes the reject out of the rating: a rating of -1 becomes
+/// the `rejected` field, other ratings stay as they were.
+#[test]
+fn a_reject_kept_as_a_rating_becomes_its_own_field() {
+    let dir = scratch("reject");
+    let path = dir.join("vault.db");
+    old_database(
+        &path,
+        2,
+        "CREATE TABLE vault_state (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+         INSERT INTO images VALUES (
+             '0303030303030303030303030303030303030303030303030303030303030303', 100,
+             '0404040404040404040404040404040404040404040404040404040404040404');
+         INSERT INTO fields VALUES (
+             '0303030303030303030303030303030303030303030303030303030303030303',
+             'rating', '-1', -1);",
+    );
+    let store = SqliteStore::open(&path).unwrap();
+    let kept = helios_vault::ImageId::from_hex(&"01".repeat(32)).unwrap();
+    let rejected = helios_vault::ImageId::from_hex(&"03".repeat(32)).unwrap();
+    assert_eq!(
+        store.field(&kept, "rating").unwrap(),
+        Some(serde_json::json!(3))
+    );
+    assert_eq!(store.field(&kept, "rejected").unwrap(), None);
+    assert_eq!(store.field(&rejected, "rating").unwrap(), None);
+    assert_eq!(
+        store.field(&rejected, "rejected").unwrap(),
+        Some(serde_json::json!(true))
+    );
+    drop(store);
+    let _ = std::fs::remove_dir_all(&dir);
+}

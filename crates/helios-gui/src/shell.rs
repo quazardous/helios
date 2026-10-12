@@ -349,6 +349,11 @@ impl Shell {
         self.library.borrow()
     }
 
+    /// The library's state, to show what the vault holds.
+    pub fn library_mut(&self) -> std::cell::RefMut<'_, crate::library::Library> {
+        self.library.borrow_mut()
+    }
+
     /// Shows a node's output in the viewport; the parameters of the
     /// graph's nodes become values (`node/<node>/<param>`), and a change to
     /// them renders again.

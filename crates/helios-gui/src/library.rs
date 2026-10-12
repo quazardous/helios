@@ -6,38 +6,83 @@
 //! thumbnails as they are read (from any thread, through
 //! [`Library::thumbnails`]), and applies what the user changes, collected
 //! with [`Shell::take_library_changes`](crate::Shell::take_library_changes)
-//! as vault field changes. The shown values change at once.
+//! as vault field commands. The shown values change at once; the host
+//! puts back what the vault holds ([`Library::show_field`]) when a write
+//! fails or another writer changes a field.
+//!
+//! A change says what the user did, never "here is my copy": a color label
+//! is added or removed, so a label another writer put on meanwhile stays,
+//! and a reject is a field of its own, so taking it back keeps the stars.
 
 use std::collections::HashMap;
 use std::sync::mpsc::{Receiver, Sender, channel};
 
 use egui::{Color32, ColorImage, TextureHandle, Ui};
 use helios_core::{Image, Region};
+pub use helios_vault::fields::Op;
+use helios_vault::fields::{LABELS as LABELS_FIELD, RATING, REJECTED};
 use serde_json::Value;
 
 /// The labels, in the order darktable gives them F1 to F5.
 pub const LABELS: [&str; 5] = ["red", "yellow", "green", "blue", "purple"];
 
-/// The rating meaning "rejected" (as in darktable and the vault).
-pub const REJECTED: i64 = -1;
-
 /// An image of the library.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Entry {
     /// The vault's id (hex).
     pub id: String,
     /// What to call it: its file name.
     pub name: String,
+    /// 0 to 5 stars.
     pub rating: i64,
+    /// Rejected; the stars stay beside it.
+    pub rejected: bool,
     pub labels: Vec<String>,
 }
 
-/// A change to one field of one image, for the vault.
+impl Entry {
+    /// Shows a field's stored value (`None`: the field is empty).
+    pub fn show(&mut self, field: &str, value: Option<&Value>) {
+        match field {
+            RATING => self.rating = value.and_then(Value::as_i64).unwrap_or(0),
+            REJECTED => self.rejected = value.and_then(Value::as_bool).unwrap_or(false),
+            LABELS_FIELD => {
+                self.labels = value
+                    .and_then(Value::as_array)
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|v| v.as_str().map(String::from))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                self.labels
+                    .sort_by_key(|l| LABELS.iter().position(|k| k == l));
+            }
+            _ => {}
+        }
+    }
+}
+
+/// A command on one field of one image, for the vault.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Change {
     pub image: String,
     pub field: String,
-    pub value: Option<Value>,
+    pub op: Op,
+}
+
+impl Change {
+    /// What a later change replaces: a set replaces a set, adding or
+    /// removing a label replaces a change of the same label.
+    fn replaces(&self, other: &Change) -> bool {
+        self.image == other.image
+            && self.field == other.field
+            && match (&self.op, &other.op) {
+                (Op::Add(a) | Op::Remove(a), Op::Add(b) | Op::Remove(b)) => a == b,
+                (Op::Set(_), Op::Set(_)) => true,
+                _ => false,
+            }
+    }
 }
 
 /// The longest side of a thumbnail, in pixels.
@@ -146,69 +191,80 @@ impl Library {
         self.reveal = true;
     }
 
-    fn change(&mut self, field: &str, value: Option<Value>) -> Result<(), String> {
+    /// Shows a change on the selected image at once, and queues it.
+    fn change(&mut self, field: &str, op: Op) -> Result<(), String> {
         let i = self.selected.ok_or("no image selected")?;
         let entry = &mut self.entries[i];
-        match field {
-            "rating" => entry.rating = value.as_ref().and_then(Value::as_i64).unwrap_or(0),
-            _ => {
-                entry.labels = value
-                    .as_ref()
-                    .and_then(Value::as_array)
-                    .map(|a| {
-                        a.iter()
-                            .filter_map(|v| v.as_str().map(String::from))
-                            .collect()
-                    })
-                    .unwrap_or_default();
+        match &op {
+            Op::Set(v) => entry.show(field, v.as_ref()),
+            Op::SetIfAbsent(_) => {}
+            Op::Add(label) => {
+                if !entry.labels.contains(label) {
+                    entry.labels.push(label.clone());
+                    entry
+                        .labels
+                        .sort_by_key(|l| LABELS.iter().position(|k| k == l));
+                }
             }
+            Op::Remove(label) => entry.labels.retain(|l| l != label),
         }
-        let image = entry.id.clone();
-        // The last change to a field wins; earlier ones need not be sent.
-        self.changes
-            .retain(|c| !(c.image == image && c.field == field));
-        self.changes.push(Change {
-            image,
+        let change = Change {
+            image: entry.id.clone(),
             field: field.into(),
-            value,
-        });
+            op,
+        };
+        // A later change replaces an earlier one of the same thing.
+        self.changes.retain(|c| !change.replaces(c));
+        self.changes.push(change);
         Ok(())
     }
 
-    /// Rates the selected image, 0 to 5 stars or [`REJECTED`].
+    /// Rates the selected image, 0 to 5 stars; a rejected image is taken
+    /// back from the reject, as in darktable.
     pub fn rate(&mut self, rating: i64) -> Result<(), String> {
-        if !(REJECTED..=5).contains(&rating) {
-            return Err(format!("a rating is {REJECTED} to 5, not {rating}"));
+        if !(0..=5).contains(&rating) {
+            return Err(format!("a rating is 0 to 5 stars, not {rating}"));
         }
-        self.change("rating", Some(Value::from(rating)))
+        let i = self.selected.ok_or("no image selected")?;
+        if self.entries[i].rejected {
+            self.change(REJECTED, Op::Set(None))?;
+        }
+        self.change(RATING, Op::Set(Some(Value::from(rating))))
     }
 
-    /// Rejects the selected image, or takes the reject back.
+    /// Rejects the selected image, or takes the reject back; the stars
+    /// are kept either way.
     pub fn toggle_reject(&mut self) -> Result<(), String> {
         let i = self.selected.ok_or("no image selected")?;
-        let rating = if self.entries[i].rating == REJECTED {
-            0
+        let op = if self.entries[i].rejected {
+            Op::Set(None)
         } else {
-            REJECTED
+            Op::Set(Some(Value::from(true)))
         };
-        self.rate(rating)
+        self.change(REJECTED, op)
     }
 
-    /// Puts a color label on the selected image, or takes it off.
+    /// Puts a color label on the selected image, or takes it off: one
+    /// label added or removed, whatever else the set holds in the vault.
     pub fn toggle_label(&mut self, label: &str) -> Result<(), String> {
         if !LABELS.contains(&label) {
             return Err(format!("`{label}` is not one of {}", LABELS.join(", ")));
         }
         let i = self.selected.ok_or("no image selected")?;
-        let mut labels = self.entries[i].labels.clone();
-        if let Some(at) = labels.iter().position(|l| l == label) {
-            labels.remove(at);
+        let op = if self.entries[i].labels.iter().any(|l| l == label) {
+            Op::Remove(label.into())
         } else {
-            labels.push(label.into());
-            labels.sort_by_key(|l| LABELS.iter().position(|k| k == l));
+            Op::Add(label.into())
+        };
+        self.change(LABELS_FIELD, op)
+    }
+
+    /// Shows a field as the vault holds it, for an image of the library:
+    /// after another writer changed it, or after a write failed.
+    pub fn show_field(&mut self, image: &str, field: &str, value: Option<&Value>) {
+        if let Some(entry) = self.entries.iter_mut().find(|e| e.id == image) {
+            entry.show(field, value);
         }
-        let value = (!labels.is_empty()).then(|| Value::from(labels));
-        self.change("labels", value)
     }
 
     fn receive(&mut self, ui: &Ui) {
@@ -257,7 +313,7 @@ impl Library {
             let fit = (area.width() / w).min(area.height() / h);
             let shown = egui::Rect::from_center_size(area.center(), egui::vec2(w, h) * fit);
             let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
-            let tint = if entry.rating == REJECTED {
+            let tint = if entry.rejected {
                 Color32::from_gray(90)
             } else {
                 Color32::WHITE
@@ -273,7 +329,7 @@ impl Library {
             );
         }
         let line = egui::pos2(rect.min.x + 4.0, rect.max.y - 9.0);
-        let stars = if entry.rating == REJECTED {
+        let stars = if entry.rejected {
             "✕".to_string()
         } else {
             "★".repeat(entry.rating.clamp(0, 5) as usize)

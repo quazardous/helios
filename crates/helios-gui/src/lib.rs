@@ -7,6 +7,7 @@ pub mod frame;
 pub mod keys;
 pub mod library;
 pub mod params;
+pub mod persist;
 pub mod scopes;
 pub mod shell;
 pub mod snapshot;

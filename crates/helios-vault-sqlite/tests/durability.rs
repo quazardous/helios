@@ -92,11 +92,7 @@ fn connections_sharing_a_file_never_fail_as_busy() {
             scope.spawn(move || {
                 for i in 0..rounds {
                     let rating = (2 * i + offset) % 6;
-                    let command = Command {
-                        image: id,
-                        field: "rating".into(),
-                        value: Some(json!(rating)),
-                    };
+                    let command = Command::set(id, "rating", json!(rating));
                     vault.apply(&[command], "user", None, i as u64).unwrap();
                 }
             });
@@ -120,5 +116,72 @@ fn connections_sharing_a_file_never_fail_as_busy() {
         );
     }
     drop((a, b));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Two handles on one file, each with a view read before the other wrote
+/// (two surfaces, or a surface and an agent): each changes only what it
+/// names. A rates and labels blue, B labels red and rejects; nothing
+/// either did is lost, and each change has its own audit row.
+#[test]
+fn two_handles_with_stale_views_keep_each_others_fields() {
+    use helios_vault::fields::{LABELS, RATING, REJECTED};
+    let dir = scratch("two-handles");
+    let path = dir.join("vault.db");
+    let mut first = SqliteStore::open(&path).unwrap();
+    first.add_image(&image(1)).unwrap();
+    let a = Vault::new(first);
+    let b = Vault::new(SqliteStore::open(&path).unwrap());
+    let id = image(1).id;
+    // Both read the image before anyone wrote.
+    let seen_by_a = a.fields_of(&[id], &[RATING, LABELS]).unwrap();
+    let seen_by_b = b.fields_of(&[id], &[RATING, LABELS]).unwrap();
+    assert_eq!(seen_by_a, seen_by_b);
+    b.apply(&[Command::add(id, LABELS, "red")], "agent", None, 1)
+        .unwrap();
+    a.apply(
+        &[
+            Command::set(id, RATING, json!(4)),
+            Command::add(id, LABELS, "blue"),
+        ],
+        "user",
+        None,
+        2,
+    )
+    .unwrap();
+    b.apply(&[Command::set(id, REJECTED, json!(true))], "agent", None, 3)
+        .unwrap();
+    // A takes the reject back from its stale view: the stars stay.
+    a.apply(&[Command::clear(id, REJECTED)], "user", None, 4)
+        .unwrap();
+    let reopened = Vault::new(SqliteStore::open(&path).unwrap());
+    let now = reopened
+        .fields_of(&[id], &[RATING, LABELS, REJECTED])
+        .unwrap();
+    assert_eq!(now[0].get(RATING), Some(&json!(4)));
+    assert_eq!(now[0].get(LABELS), Some(&json!(["blue", "red"])));
+    assert_eq!(now[0].get(REJECTED), None);
+    let trail: Vec<(String, String)> = reopened
+        .audit(&id)
+        .unwrap()
+        .into_iter()
+        .map(|e| (e.who, e.field))
+        .collect();
+    let pairs = |list: &[(&str, &str)]| -> Vec<(String, String)> {
+        list.iter()
+            .map(|(w, f)| ((*w).to_string(), (*f).to_string()))
+            .collect()
+    };
+    assert_eq!(
+        trail,
+        pairs(&[
+            ("agent", LABELS),
+            ("user", LABELS),
+            ("user", RATING),
+            ("agent", REJECTED),
+            ("user", REJECTED),
+        ])
+    );
+    drop((a, b, reopened));
     let _ = std::fs::remove_dir_all(&dir);
 }

@@ -13,7 +13,7 @@ use std::sync::Arc;
 use helios_core::{Bus, ContentHash};
 use serde_json::json;
 
-use crate::fields::{Command, Order, Query};
+use crate::fields::{Command, LABELS, Op, Order, Query, RATING, REJECTED};
 use crate::{Image, ImageId, Location, Store, Vault};
 
 /// Runs every scenario against fresh stores made by `make`.
@@ -30,6 +30,168 @@ pub fn check<S: Store>(make: impl Fn() -> S) {
     documents_round_trip_by_namespace(make());
     transactions_keep_all_or_nothing(make());
     a_batch_failing_at_its_audit_row_leaves_nothing(make());
+    label_commands_keep_what_another_writer_added(make());
+    taking_a_reject_back_keeps_the_stars(make());
+    a_default_never_overwrites_a_choice(make());
+    a_stale_writer_changes_only_its_own_fields(make());
+}
+
+fn labels_of<S: Store>(v: &Vault<S>, id: ImageId) -> Option<serde_json::Value> {
+    v.fields_of(&[id], &[LABELS]).unwrap()[0]
+        .get(LABELS)
+        .cloned()
+}
+
+/// darktable's "labels wiped on refresh": a writer whose copy of the set
+/// is stale adds or removes one label; the label another writer added
+/// meanwhile stays, because the vault applies the change to the stored
+/// set.
+fn label_commands_keep_what_another_writer_added<S: Store>(s: S) {
+    let bus = Arc::new(Bus::new());
+    let v = Vault::new(with_images(s, 1)).with_bus(bus.clone());
+    let a = image(1).id;
+    // Both writers saw no label. The agent adds red, then the user, from
+    // that stale view, adds blue.
+    v.apply(&[Command::add(a, LABELS, "red")], "agent", None, 1)
+        .unwrap();
+    v.apply(&[Command::add(a, LABELS, "blue")], "user", None, 2)
+        .unwrap();
+    assert_eq!(labels_of(&v, a), Some(json!(["blue", "red"])));
+    // Taking blue off keeps red.
+    v.apply(&[Command::remove(a, LABELS, "blue")], "user", None, 3)
+        .unwrap();
+    assert_eq!(labels_of(&v, a), Some(json!(["red"])));
+    // Removing a label that is not there changes nothing: no row, no event.
+    let before = bus.last_seq();
+    let report = v
+        .apply(&[Command::remove(a, LABELS, "green")], "user", None, 4)
+        .unwrap();
+    assert_eq!((report.changed, report.unchanged), (0, 1));
+    assert_eq!(bus.last_seq(), before);
+    // A set left empty is cleared, as a set never written.
+    v.apply(&[Command::remove(a, LABELS, "red")], "user", None, 5)
+        .unwrap();
+    assert_eq!(labels_of(&v, a), None);
+    // Commands on one field fold in order.
+    let folded = v
+        .apply(
+            &[
+                Command::add(a, LABELS, "green"),
+                Command::add(a, LABELS, "purple"),
+                Command::remove(a, LABELS, "green"),
+            ],
+            "user",
+            None,
+            6,
+        )
+        .unwrap();
+    assert_eq!((folded.changed, folded.coalesced), (1, 2));
+    assert_eq!(labels_of(&v, a), Some(json!(["purple"])));
+    assert!(
+        v.apply(&[Command::add(a, RATING, "red")], "user", None, 7)
+            .unwrap_err()
+            .contains("not a set")
+    );
+    assert!(
+        v.apply(&[Command::add(a, LABELS, "pink")], "user", None, 8)
+            .unwrap_err()
+            .contains("not one of")
+    );
+}
+
+/// darktable keeps a reject as rating -1, so taking it back writes 0 and
+/// erases the stars. Here the reject is a field of its own.
+fn taking_a_reject_back_keeps_the_stars<S: Store>(s: S) {
+    let v = Vault::new(with_images(s, 1));
+    let a = image(1).id;
+    v.apply(&[Command::set(a, RATING, json!(4))], "user", None, 1)
+        .unwrap();
+    v.apply(&[Command::set(a, REJECTED, json!(true))], "user", None, 2)
+        .unwrap();
+    let both = |v: &Vault<S>| v.fields_of(&[a], &[RATING, REJECTED]).unwrap()[0].clone();
+    assert_eq!(both(&v).get(RATING), Some(&json!(4)));
+    assert_eq!(both(&v).get(REJECTED), Some(&json!(true)));
+    v.apply(&[Command::clear(a, REJECTED)], "user", None, 3)
+        .unwrap();
+    assert_eq!(both(&v).get(RATING), Some(&json!(4)), "the stars are back");
+    assert_eq!(both(&v).get(REJECTED), None);
+    assert!(
+        v.apply(&[Command::set(a, RATING, json!(-1))], "user", None, 4)
+            .is_err(),
+        "a reject is not a rating"
+    );
+}
+
+/// A default (a sidecar's rating) fills an empty field and never replaces
+/// what is there.
+fn a_default_never_overwrites_a_choice<S: Store>(s: S) {
+    let v = Vault::new(with_images(s, 1));
+    let a = image(1).id;
+    let default = |stars: i64| Command::with(a, RATING, Op::SetIfAbsent(json!(stars)));
+    assert_eq!(
+        v.apply(&[default(3)], "import", None, 1).unwrap().changed,
+        1
+    );
+    v.apply(&[Command::set(a, RATING, json!(5))], "user", None, 2)
+        .unwrap();
+    let report = v.apply(&[default(2)], "import", None, 3).unwrap();
+    assert_eq!((report.changed, report.unchanged), (0, 1));
+    assert_eq!(
+        v.fields_of(&[a], &[RATING]).unwrap()[0].get(RATING),
+        Some(&json!(5))
+    );
+}
+
+/// darktable#22569: a decode job copied the whole image record, decoded,
+/// then wrote its stale copy back over a rating set meanwhile. A writer
+/// here changes only the fields it names: a job writing what it decoded,
+/// from a copy read before the rating changes, races a user rating the
+/// image, and every rating survives.
+fn a_stale_writer_changes_only_its_own_fields<S: Store>(s: S) {
+    let v = Vault::new(with_images(s, 1));
+    let a = image(1).id;
+    let rounds = 40;
+    std::thread::scope(|scope| {
+        scope.spawn(|| {
+            for i in 0..rounds {
+                let stars = i % 5 + 1;
+                v.apply(&[Command::set(a, RATING, json!(stars))], "user", None, i)
+                    .unwrap();
+            }
+        });
+        scope.spawn(|| {
+            // The job's copy, read once before it starts.
+            let stale = v.fields_of(&[a], &[RATING, "title"]).unwrap();
+            for i in 0..rounds {
+                let title = format!("decoded {i}");
+                v.apply(
+                    &[Command::set(a, "title", json!(title))],
+                    "decode",
+                    Some(9),
+                    i,
+                )
+                .unwrap();
+            }
+            drop(stale);
+        });
+    });
+    let now = v.fields_of(&[a], &[RATING, "title"]).unwrap()[0].clone();
+    assert_eq!(now.get(RATING), Some(&json!((rounds - 1) % 5 + 1)));
+    assert_eq!(
+        now.get("title"),
+        Some(&json!(format!("decoded {}", rounds - 1)))
+    );
+    // Every rating the user set is in the trail, each from the one before.
+    let ratings: Vec<_> = v
+        .audit(&a)
+        .unwrap()
+        .into_iter()
+        .filter(|e| e.field == RATING)
+        .collect();
+    assert_eq!(ratings.len() as u64, rounds);
+    for pair in ratings.windows(2) {
+        assert_eq!(pair[1].old, pair[0].new);
+    }
 }
 
 fn transactions_keep_all_or_nothing<S: Store>(s: S) {
@@ -146,11 +308,7 @@ fn a_batch_failing_at_its_audit_row_leaves_nothing<S: Store>(s: S) {
     let bus = Arc::new(Bus::new());
     let v = Vault::new(FailingAudit(with_images(s, 2))).with_bus(bus.clone());
     let (a, b) = (image(1).id, image(2).id);
-    let set = |image, value| Command {
-        image,
-        field: "rating".into(),
-        value: Some(value),
-    };
+    let set = |image, value| Command::set(image, "rating", value);
     let failed = v.apply(&[set(a, json!(3)), set(b, json!(4))], "user", None, 1);
     assert!(failed.unwrap_err().contains("injected fault"));
     let rows = v
@@ -448,7 +606,8 @@ fn queries_filter_and_order<S: Store>(s: S) {
     let ids: Vec<ImageId> = (1..=4).map(|i| image(i).id).collect();
     s.set_field(&ids[0], "rating", Some(&json!(2))).unwrap();
     s.set_field(&ids[1], "rating", Some(&json!(5))).unwrap();
-    s.set_field(&ids[2], "rating", Some(&json!(-1))).unwrap();
+    s.set_field(&ids[2], "rejected", Some(&json!(true)))
+        .unwrap();
     s.set_field(&ids[1], "labels", Some(&json!(["red"])))
         .unwrap();
     s.set_field(&ids[3], "labels", Some(&json!(["blue", "red"])))
@@ -470,8 +629,8 @@ fn queries_filter_and_order<S: Store>(s: S) {
     };
     assert_eq!(
         s.select(&by_rating).unwrap(),
-        vec![ids[1], ids[0], ids[3], ids[2]],
-        "unrated counts as 0, rejected as -1"
+        vec![ids[1], ids[0], ids[2], ids[3]],
+        "unrated counts as 0, then by id"
     );
 }
 
@@ -479,11 +638,7 @@ fn commands_skip_unchanged_values_coalesce_and_audit<S: Store>(s: S) {
     let bus = Arc::new(Bus::new());
     let v = Vault::new(with_images(s, 2)).with_bus(bus.clone());
     let (a, b) = (image(1).id, image(2).id);
-    let set = |image, field: &str, value| Command {
-        image,
-        field: field.into(),
-        value: Some(value),
-    };
+    let set = |image, field: &str, value| Command::set(image, field, value);
     let report = v
         .apply(
             &[
@@ -532,7 +687,7 @@ fn commands_skip_unchanged_values_coalesce_and_audit<S: Store>(s: S) {
     assert!(
         refused
             .unwrap_err()
-            .contains("not a whole number in [-1, 5]")
+            .contains("not a whole number in [0, 5]")
     );
     assert_eq!(
         v.audit(&a).unwrap().len(),
@@ -549,11 +704,7 @@ fn commands_skip_unchanged_values_coalesce_and_audit<S: Store>(s: S) {
 fn cursors_cost_one_query_and_report_deltas<S: Store>(s: S) {
     let v = Vault::new(with_images(s, 5));
     let ids: Vec<ImageId> = (1..=5).map(|i| image(i).id).collect();
-    let rate = |image, stars: i64| Command {
-        image,
-        field: "rating".into(),
-        value: Some(json!(stars)),
-    };
+    let rate = |image, stars: i64| Command::set(image, "rating", json!(stars));
     v.apply(&[rate(ids[0], 3), rate(ids[2], 5)], "user", None, 1)
         .unwrap();
     let q0 = v.reads().queries;

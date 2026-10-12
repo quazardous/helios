@@ -41,52 +41,12 @@ fn load(file: Option<&Path>) -> Option<Layout> {
     Layout::from_json(&text).ok()
 }
 
-type Vault = helios_vault::Vault<helios_vault_sqlite::SqliteStore>;
+type Persist = helios_gui::persist::Persist<helios_vault_sqlite::SqliteStore>;
 
 /// Fills the library from the vault, and reads the thumbnails behind it,
 /// one image at a time, from the first copy still present.
-fn fill_library(shell: &mut Shell, vault: &Vault) -> Result<(), String> {
-    use helios_gui::library::Entry;
-    use helios_vault::fields::{LABELS, Query, RATING};
-    let cursor = vault.open_cursor(Query::default())?;
-    let rows = vault.fetch(cursor.id, 0, cursor.count, &[RATING, LABELS])?;
-    vault.close_cursor(cursor.id);
-    let mut entries = Vec::new();
-    let mut files = Vec::new();
-    for row in rows {
-        let path = vault
-            .locations(&row.id)?
-            .into_iter()
-            .find(|l| l.present)
-            .map(|l| l.path);
-        let id = row.id.hex();
-        entries.push(Entry {
-            id: id.clone(),
-            name: path
-                .as_ref()
-                .and_then(|p| p.file_name())
-                .map_or_else(|| id[..12].to_string(), |n| n.to_string_lossy().into()),
-            rating: row
-                .fields
-                .get(RATING)
-                .and_then(serde_json::Value::as_i64)
-                .unwrap_or(0),
-            labels: row
-                .fields
-                .get(LABELS)
-                .and_then(|v| v.as_array())
-                .map(|a| {
-                    a.iter()
-                        .filter_map(|l| l.as_str().map(String::from))
-                        .collect()
-                })
-                .unwrap_or_default(),
-        });
-        if let Some(path) = path {
-            files.push((id, path));
-        }
-    }
-    shell.set_library(entries);
+fn fill_library(shell: &mut Shell, persist: &Persist) -> Result<(), String> {
+    let files = persist.fill_library(shell)?;
     let sink = shell.library_thumbnails();
     std::thread::spawn(move || {
         for (id, path) in files {
@@ -133,30 +93,17 @@ fn show_image(shell: &mut Shell, path: &Path) -> Result<(), String> {
 struct App {
     shell: Shell,
     file: Option<PathBuf>,
-    vault: Option<Vault>,
+    persist: Option<Persist>,
 }
 
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.shell.ui(ui);
-        let changes = self.shell.take_library_changes();
-        if let (Some(vault), false) = (&self.vault, changes.is_empty()) {
-            let commands: Result<Vec<_>, String> = changes
-                .into_iter()
-                .map(|c| {
-                    Ok(helios_vault::fields::Command {
-                        image: helios_vault::ImageId::from_hex(&c.image)?,
-                        field: c.field,
-                        value: c.value,
-                    })
-                })
-                .collect();
+        if let Some(persist) = &mut self.persist {
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_or(0, |d| d.as_secs());
-            if let Err(e) = commands.and_then(|c| vault.apply(&c, "user", None, now)) {
-                self.shell.notes.push(format!("vault: {e}"));
-            }
+            persist.frame(&mut self.shell, now);
         }
     }
 
@@ -250,11 +197,12 @@ fn main() -> Result<(), String> {
     if let Some(path) = image_file {
         show_image(&mut shell, &path)?;
     }
-    let vault = match vault_file {
+    let bus = std::sync::Arc::new(helios_core::Bus::new());
+    let persist = match vault_file {
         Some(path) => {
-            let vault = helios_vault::Vault::new(helios_vault_sqlite::SqliteStore::open(&path)?);
-            fill_library(&mut shell, &vault)?;
-            Some(vault)
+            let persist = Persist::new(helios_vault_sqlite::SqliteStore::open(&path)?, bus);
+            fill_library(&mut shell, &persist)?;
+            Some(persist)
         }
         None => None,
     };
@@ -275,7 +223,11 @@ fn main() -> Result<(), String> {
             if let Some(rs) = cc.wgpu_render_state.as_ref() {
                 shell.attach_gpu(rs);
             }
-            Ok(Box::new(App { shell, file, vault }))
+            Ok(Box::new(App {
+                shell,
+                file,
+                persist,
+            }))
         }),
     )
     .map_err(|e| e.to_string())
