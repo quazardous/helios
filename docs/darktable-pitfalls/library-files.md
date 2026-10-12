@@ -319,6 +319,16 @@ thread or in the code is marked *(guess)*.
 - **Helios exposure**: handled for Helios's own versions (`versions` table
   with ids and parents). At risk in the darktable importer: no handling of
   `_NN` duplicate sidecars was found in `helios-xmp` *(from grep)*.
+  *Addressed since* (2026-10-12): `helios_xmp::files` lists the folder and
+  parses names, no glob: base, `_NN` duplicates (the suffix exactly as
+  darktable prints it, so `IMG_0001` is not duplicate 1 of `IMG`), case
+  variants, and orphans whose image is gone; a name that is both an
+  image's own sidecar and another's duplicate is settled by
+  `xmpMM:DerivedFrom`. `helios batch --sidecar --vault` and
+  `helios import-darktable` keep each sidecar as its own version of the
+  image (the duplicate number is part of the edit, so equal edits are
+  never merged); only the base gives the rating. Exports still name files
+  from a template, not from version ids.
 - **Recommendation**: the darktable importer must enumerate duplicates by
   listing the folder and parsing names (not globbing), cross-checked with
   `xmpMM:DerivedFrom` (already read in `sidecar.rs`); export names derive from

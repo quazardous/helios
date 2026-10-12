@@ -21,6 +21,8 @@
 //!                  [--name TEMPLATE] [--sidecar [--vault FILE]] [--source NAME] [--node NAME]
 //!                  [--socket ADDR --control ADDR [--token-file FILE]] IMAGES...
 //!
+//!     helios import-darktable --vault FILE FOLDERS-OR-IMAGES...
+//!
 //! `batch` applies a network to many images, each exported to a file in
 //! `--out` (named by `--name`, `{stem}.{ext}` by default; a name already
 //! taken gets `-1`, `-2`...). It starts its own node in a temporary sandbox,
@@ -32,6 +34,12 @@
 //! exits with 1 when an image failed (the others go on), 130 when
 //! interrupted: Ctrl-C cancels the exports in flight and leaves no partial
 //! file. See `docs/cli.md`.
+//!
+//! `import-darktable` keeps a folder's darktable edits in a vault: every
+//! image file, and a version per sidecar, duplicates (`IMG_0001_01.CR2.xmp`)
+//! included; sidecars whose image is missing are listed as orphans. One
+//! JSON line per image and per orphan; exit 1 when a sidecar could not be
+//! kept.
 //!
 //! The inspect socket defaults to `$HELIOS_SOCKET`, the control socket to
 //! `$HELIOS_CONTROL_SOCKET`. Output is JSON. Exit codes: 0 answered, 1 the
@@ -67,7 +75,8 @@ const USAGE: &str = "usage:
   helios sandbox new DIR [--network FILE] | start DIR | stop DIR | clean DIR
   helios batch --network FILE --out DIR [--format jpeg|png|tiff] [--quality Q] [--jobs N]
                [--name TEMPLATE] [--sidecar [--vault FILE]] [--source NAME] [--node NAME]
-               [--socket ADDR --control ADDR [--token-file FILE]] IMAGES...";
+               [--socket ADDR --control ADDR [--token-file FILE]] IMAGES...
+  helios import-darktable --vault FILE FOLDERS-OR-IMAGES...";
 
 fn usage(error: &str) -> ExitCode {
     eprintln!("helios: {error}\n{USAGE}");
@@ -412,6 +421,56 @@ fn batch(args: &[String]) -> ExitCode {
     }
 }
 
+/// `helios import-darktable --vault FILE PATH...`: see `helios_node::darktable::import`.
+fn import_darktable(args: &[String]) -> ExitCode {
+    let mut vault = None;
+    let mut paths = Vec::new();
+    let mut args = args.iter();
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--vault" => match args.next() {
+                Some(v) => vault = Some(PathBuf::from(v)),
+                None => return usage("--vault needs a value"),
+            },
+            flag if flag.starts_with("--") => return usage(&format!("unknown option `{flag}`")),
+            _ => paths.push(PathBuf::from(arg)),
+        }
+    }
+    let Some(vault) = vault else {
+        return usage("import-darktable needs --vault FILE");
+    };
+    if paths.is_empty() {
+        return usage("import-darktable needs folders or images");
+    }
+    let store = match helios_vault_sqlite::SqliteStore::open(&vault) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("helios: {}: {e}", vault.display());
+            return ExitCode::from(1);
+        }
+    };
+    let vault = helios_vault::Vault::new(store);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    let mut out = std::io::stdout();
+    let mut emit = |line: &serde_json::Value| {
+        let _ = writeln!(out, "{line}");
+        let _ = out.flush();
+    };
+    let mut warn = |path: &std::path::Path, warning: &str| {
+        eprintln!("helios import-darktable: {}: {warning}", path.display());
+    };
+    match helios_node::darktable::import(&vault, &paths, now, &mut emit, &mut warn) {
+        Ok(true) => ExitCode::SUCCESS,
+        Ok(false) => ExitCode::from(1),
+        Err(e) => {
+            eprintln!("helios: {e}");
+            ExitCode::from(1)
+        }
+    }
+}
+
 /// `helios sandbox new DIR [--network FILE] | start DIR | stop DIR | clean DIR`.
 fn sandbox(args: &[String]) -> ExitCode {
     use helios_node::sandbox;
@@ -461,6 +520,9 @@ fn main() -> ExitCode {
     }
     if args.first().is_some_and(|a| a == "batch") {
         return batch(&args[1..]);
+    }
+    if args.first().is_some_and(|a| a == "import-darktable") {
+        return import_darktable(&args[1..]);
     }
     let call = match parse(args) {
         Ok(c) => c,

@@ -330,6 +330,15 @@ driver, not a rewrite.
   carries a list of locations (path, volume, last verified), used for
   redundancy count, offline availability and "which drive has it". Not to be
   confused with darktable "duplicates", which are edit variants (versions).
+  (2026-10-12, implemented; open to revision) Importing darktable edits,
+  each sidecar of a photo (base, `_NN` duplicates, case variants) becomes
+  a first-edit version of the one image, side by side as heads, never
+  merged; only the base gives the rating. A history item Helios cannot
+  apply is kept raw in the version, reported as not applied, and never
+  applied to the whole image when it was masked. Not decided: whether
+  duplicates should be a notion of their own (named variants) rather than
+  heads, and whether an orphan sidecar (its image gone) should be kept
+  somewhere instead of only listed.
   Near-duplicates (RAW+JPEG pair, burst, re-encode) have different hashes and
   are relations, also data.
 

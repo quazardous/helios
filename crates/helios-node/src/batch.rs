@@ -13,11 +13,14 @@
 //! long it took, and the error if it failed. The others go on after a
 //! failure.
 //!
-//! With `--sidecar` and `--vault FILE`, each sidecar applied is also kept
-//! in that vault ([`keep_sidecar`]): the image, its darktable edit as a
-//! version with origin `import:xmp`, and its rating when the vault has
-//! none. On an interrupt, the exports asked for are cancelled: a file is
-//! written whole or not at all, never in part.
+//! With `--sidecar`, each image's base darktable sidecar is applied; its
+//! folder is listed once to find it and its duplicates
+//! ([`helios_xmp::files`]). With `--vault FILE` as well, every sidecar of
+//! the image is kept in that vault ([`keep_sidecar`]): the image, each
+//! darktable edit (base and duplicates) as a version with origin
+//! `import:xmp`, and the base's rating when the vault has none. On an
+//! interrupt, the exports asked for are cancelled: a file is written whole
+//! or not at all, never in part.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -29,6 +32,9 @@ use helios_core::Params;
 use helios_inspect::control::{ControlRequest, FileFormat};
 use helios_inspect::{Address, Request, request_at};
 use serde_json::{Value, json};
+
+pub use crate::darktable::{IMPORT_XMP, keep_sidecar, read_sidecar};
+use crate::darktable::{Listings, keep_file};
 
 /// What `helios batch` was asked.
 #[derive(Clone, Debug)]
@@ -103,13 +109,6 @@ pub fn output_paths(
         .collect()
 }
 
-/// The sidecar darktable writes next to an image: `IMG_0001.CR2.xmp`.
-pub fn sidecar_path(image: &Path) -> PathBuf {
-    let mut name = image.as_os_str().to_owned();
-    name.push(".xmp");
-    PathBuf::from(name)
-}
-
 /// What a sidecar changes in the network: parameters by node name, and
 /// what was left out. A module of the edit goes to the one node of the
 /// network running that module; one the network does not run, or runs
@@ -139,56 +138,6 @@ pub fn sidecar_params(
         report["warning"] = json!(warning);
     }
     (params, report)
-}
-
-/// Reads and imports a sidecar's text once, for the network and the vault.
-pub fn read_sidecar(xml: &str) -> Result<(helios_xmp::Sidecar, helios_xmp::Imported), String> {
-    helios_xmp::import_text(xml, &helios_xmp::Layouts::built_in())
-}
-
-/// Who imported a sidecar: the origin of its version and the author of
-/// its rating in the audit trail.
-pub const IMPORT_XMP: &str = "import:xmp";
-
-/// Keeps a darktable sidecar's import in a vault: the image file, its edit
-/// as a version with origin `import:xmp` (the network
-/// [`helios_xmp::Imported::edit`] describes, with the import report under
-/// `import` and the darktable edit, items not applied included, under
-/// `darktable`), and its rating, only when the vault has none: a sidecar
-/// never overwrites a rating chosen here (darktable's `-1` is a reject).
-/// The version is a first edit, so importing the same sidecar again keeps
-/// one version; an image already edited gets a second head, its edit
-/// untouched.
-pub fn keep_sidecar<S: helios_vault::Store>(
-    vault: &helios_vault::Vault<S>,
-    image: &Path,
-    sidecar: &helios_xmp::Sidecar,
-    imported: &helios_xmp::Imported,
-    now: u64,
-) -> Result<Value, String> {
-    use helios_vault::fields::{Command, Op, RATING, REJECTED};
-    let id = vault.import_file(image, now)?;
-    let mut edit = imported.edit();
-    edit["import"] = json!(imported.report);
-    let version =
-        helios_vault::Version::new(id, Vec::new(), edit, IMPORT_XMP, now).labelled(IMPORT_XMP);
-    let added = vault.add_version(&version)?;
-    let rating = match sidecar.rating {
-        Some(-1) => Some(Command::with(id, REJECTED, Op::SetIfAbsent(json!(true)))),
-        Some(stars @ 0..=5) => Some(Command::with(id, RATING, Op::SetIfAbsent(json!(stars)))),
-        _ => None,
-    };
-    let rating_set = match rating {
-        Some(command) => vault.apply(&[command], IMPORT_XMP, None, now)?.changed > 0,
-        None => false,
-    };
-    Ok(json!({
-        "image": id.hex(),
-        "version": version.id.hex(),
-        "added": added,
-        "rating": sidecar.rating,
-        "rating_set": rating_set,
-    }))
 }
 
 /// The network a batch's own node runs: files made absolute (the network
@@ -449,6 +398,10 @@ pub fn run(
         (None, _) => None,
     };
 
+    let mut sidecars = Sidecars {
+        vault: vault.as_ref(),
+        listings: Listings::default(),
+    };
     let mut failed = false;
     let mut cursor = 0;
     let mut running: BTreeMap<u64, Pending> = BTreeMap::new();
@@ -478,7 +431,7 @@ pub fn run(
             match submit(
                 &node,
                 options,
-                vault.as_ref(),
+                &mut sidecars,
                 &source,
                 &target,
                 &modules,
@@ -540,48 +493,84 @@ pub fn run(
     })
 }
 
+/// Where a batch finds sidecars, and the vault it keeps them in.
+struct Sidecars<'a> {
+    vault: Option<&'a helios_vault::Vault<helios_vault_sqlite::SqliteStore>>,
+    listings: Listings,
+}
+
 /// Gives the source the image and asks for its export: the job and the
 /// sequence number of the request, or why the image cannot be exported.
 fn submit(
     node: &Node,
     options: &Options,
-    vault: Option<&helios_vault::Vault<helios_vault_sqlite::SqliteStore>>,
+    sidecars: &mut Sidecars,
     source: &str,
     target: &str,
     modules: &BTreeMap<String, String>,
     mut pending: Pending,
 ) -> Result<(u64, u64, Pending), (Pending, String)> {
     let mut params = BTreeMap::new();
+    let vault = sidecars.vault;
     if options.sidecar {
-        let path = sidecar_path(&pending.image);
-        if path.is_file() {
-            let read = std::fs::read_to_string(&path)
+        let files = match sidecars.listings.sidecars(&pending.image) {
+            Ok(files) => files,
+            Err(e) => return Err((pending, e)),
+        };
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs());
+        let mut warn = |path: &Path, warning: &str| {
+            // Once per import, beside the image's JSON line.
+            eprintln!("helios batch: {}: {warning}", path.display());
+        };
+        // The base sidecar is the edit exported; the others are kept only.
+        let (base, others) = match files.split_first() {
+            Some((first, rest)) if first.version == 0 => (Some(first), rest),
+            _ => (None, &files[..]),
+        };
+        let mut report = Value::Null;
+        if let Some(base) = base {
+            let path = &base.path;
+            let read = std::fs::read_to_string(path)
                 .map_err(|e| format!("cannot read {}: {e}", path.display()))
                 .and_then(|xml| {
                     let (sidecar, imported) = read_sidecar(&xml)?;
-                    // Once per import, beside the image's JSON line.
                     if let Some(warning) = imported.report.summary() {
-                        eprintln!("helios batch: {}: {warning}", path.display());
+                        warn(path, &warning);
                     }
                     let (params, mut report) = sidecar_params(&imported, modules);
                     if let Some(vault) = vault {
-                        let now = std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .map_or(0, |d| d.as_secs());
                         report["vault"] =
-                            keep_sidecar(vault, &pending.image, &sidecar, &imported, now)?;
+                            keep_sidecar(vault, &pending.image, 0, true, &sidecar, &imported, now)?;
                     }
                     Ok((params, report))
                 });
             match read {
-                Ok((p, mut report)) => {
-                    report["path"] = json!(path);
-                    pending.sidecar = report;
+                Ok((p, mut r)) => {
+                    r["path"] = json!(path);
+                    report = r;
                     params = p;
                 }
                 Err(e) => return Err((pending, format!("{}: {e}", path.display()))),
             }
         }
+        if !others.is_empty() {
+            let others: Vec<Value> = others
+                .iter()
+                .map(|file| match vault {
+                    Some(vault) => keep_file(vault, &pending.image, file, false, now, &mut warn),
+                    None => {
+                        json!({ "path": file.path, "version": file.version, "exact": file.exact })
+                    }
+                })
+                .collect();
+            if report.is_null() {
+                report = json!({});
+            }
+            report["duplicates"] = json!(others);
+        }
+        pending.sidecar = report;
     }
     let loaded = node.control(&ControlRequest::LoadSource {
         node: source.into(),
@@ -629,13 +618,5 @@ mod tests {
         );
         let plain = output_paths(&images[..2], out, "{stem}", "jpg", |_| false);
         assert_eq!(plain, [out.join("x"), out.join("x-1")]);
-    }
-
-    #[test]
-    fn the_sidecar_sits_next_to_the_image() {
-        assert_eq!(
-            sidecar_path(Path::new("/p/IMG_1.CR2")),
-            Path::new("/p/IMG_1.CR2.xmp")
-        );
     }
 }
