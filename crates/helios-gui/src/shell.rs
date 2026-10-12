@@ -475,7 +475,8 @@ impl Shell {
             crate::viewport::declare(&mut store);
             store.declare(
                 crate::params::SELECTION,
-                helios_values::Descriptor::text("selected node", ""),
+                // Which node one looks at is not an edit: never undone.
+                helios_values::Descriptor::text("selected node", "").transient(),
             );
         }
         let has = |shell: &Shell, panel: &str| shell.panels.iter().any(|p| p.id.as_str() == panel);
