@@ -23,6 +23,8 @@
 //!   parametric mask; it passes its input through too.
 //! - [`MaskRaster`]: a member that reuses another module's mask (darktable's
 //!   raster mask), inverted and scaled.
+//! - [`stress`]: a large chained mask network, for stress tests and the
+//!   masks bench.
 
 mod blend;
 mod combine;
@@ -30,6 +32,7 @@ mod luma;
 mod parametric;
 mod raster;
 mod refine;
+pub mod stress;
 
 pub use blend::MaskBlend;
 pub use combine::{MAX_MEMBERS, MaskCombine, Operator, fold};

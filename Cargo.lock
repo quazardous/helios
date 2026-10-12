@@ -1952,6 +1952,7 @@ name = "helios-module-masks"
 version = "0.0.1"
 dependencies = [
  "helios-core",
+ "helios-module-exposure",
  "helios-testkit",
 ]
 

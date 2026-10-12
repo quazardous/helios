@@ -10,6 +10,7 @@ repository.workspace = true
 helios-core.workspace = true
 
 [dev-dependencies]
+helios-module-exposure = { path = "../exposure" }
 helios-testkit.workspace = true
 
 [lints]
