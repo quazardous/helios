@@ -161,7 +161,8 @@ sync through the vault.
   theme, in the user's settings: the counterpart of VS Code's `[Theme]`
   keys and darktable's `user.css`. They are applied last and validated;
   unknown tokens are reported, not fatal.
-- **Settings outside the theme.** Font size, interface scale and the
+- **Settings outside the theme.** Font size, interface zoom (egui-pop's,
+  in fixed steps: `Ctrl+Alt+=`, `Ctrl+Alt+-`, `Ctrl+Alt+0`) and the
   dark/light/system preference are ordinary settings, so changing the
   theme does not undo them.
 - **Live preview** in the theme picker. `theme.export` writes the current
@@ -206,7 +207,9 @@ sync through the vault.
 - **Variants per system or machine.** Any part may hold variants under
   `[on.<selector>]` (`[on.macos.theme]`, `[[on.machine.laptop.keymap]]`),
   overriding its common values. A selector is a system (`macos`, `linux`,
-  `windows`), a screen class (`hidpi`) or a named machine
+  `windows`), a screen class (`hidpi`: the screen's own scale is 1.5 or
+  more, the interface zoom left out; followed when the window moves to
+  another screen) or a named machine
   (`machine.<name>`); a machine is named once, in `machine.toml` in the
   config directory (`name = "laptop"`), never in a profile, never synced.
   A profile is resolved for this machine when applied: common values,

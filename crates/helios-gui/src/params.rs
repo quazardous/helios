@@ -388,10 +388,13 @@ impl Params {
         );
         painter.rect_filled(filled, visuals.widgets.inactive.corner_radius, fill);
         if response.has_focus() {
+            // Snapped to whole pixels at this window's scale.
+            let mut ring = visuals.selection.stroke;
+            ring.width = egui_pop::core::scale::stroke(ui.ctx(), ring.width);
             painter.rect_stroke(
                 rect,
                 visuals.widgets.inactive.corner_radius,
-                visuals.selection.stroke,
+                ring,
                 egui::StrokeKind::Inside,
             );
         }

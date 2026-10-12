@@ -177,10 +177,10 @@ to the viewport, and it is the only one measured in physical pixels.
   `set_zoom_factor`, applied at the next pass, repainting every viewport.
   `set_pixels_per_point` is a `set_zoom_factor` in disguise.
 - `Options::zoom_with_keyboard` is **true by default**: Ctrl/Cmd + `+`, `=`,
-  `-`, `0` change `zoom_factor` (`src/gui_zoom.rs`). Neither egui-pop nor
-  Helios turns it off today, and Helios's image zoom uses the same keys
-  (`docs/shortcuts-research.md`: "Zoom in, out | Ctrl+=, Ctrl+-"): the two
-  would fire together once those keys are bound.
+  `-`, `0` change `zoom_factor` (`src/gui_zoom.rs`). egui-pop turns it off
+  (2026-10-12) and owns the interface zoom (`Ctrl+Alt+=`, `Ctrl+Alt+-`,
+  `Ctrl+Alt+0`, rebindable), so Helios's image zoom can take Ctrl+= and
+  Ctrl+- (`docs/shortcuts-research.md`) without both firing.
 - Fonts: one `Fonts` per context; `pixels_per_point` is part of the glyph
   key, so glyphs are rasterised per ppp in one shared atlas. A scale change
   costs a lazy re-rasterisation of the glyphs drawn next (a slow frame or

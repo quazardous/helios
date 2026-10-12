@@ -318,12 +318,9 @@ impl Workbench {
         if spec.allows(to) {
             let fill = visuals.selection.bg_fill.gamma_multiply(0.25);
             painter.rect_filled(rect, 4.0, fill);
-            painter.rect_stroke(
-                rect,
-                4.0,
-                visuals.selection.stroke,
-                egui::StrokeKind::Inside,
-            );
+            let mut edge = visuals.selection.stroke;
+            edge.width = egui_pop::core::scale::stroke(ctx, edge.width);
+            painter.rect_stroke(rect, 4.0, edge, egui::StrokeKind::Inside);
         } else {
             let fill = visuals.error_fg_color.gamma_multiply(0.15);
             painter.rect_filled(rect, 4.0, fill);

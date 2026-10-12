@@ -28,6 +28,7 @@ use egui_pop::api::settings_window::{SETTINGS_WINDOW, SHORTCUTS};
 use egui_pop::api::toasts::{TOASTS, Toast};
 use egui_pop::api::{App, AppHandle, DefaultPlugins, palette};
 use egui_pop::core::frame::{FrameRequest, HitTable};
+use egui_pop::core::scale;
 use egui_pop::model::ids::{CommandId, MenuId, OwnerId};
 use egui_pop::model::keymap::Layer;
 use egui_pop::model::menus::{Item, MenuItem as PopItem, Shown, show_items};
@@ -50,7 +51,8 @@ use crate::workbench::Workbench;
 
 pub use crate::workbench::Content;
 
-/// Pixels per point from which a screen is `hidpi` for profile variants.
+/// The screen's own scale (physical pixels per point, the interface zoom
+/// left out) from which it is `hidpi` for profile variants.
 const HIDPI: f32 = 1.5;
 
 /// What commands ask the shell to do; they are queued and applied at the
@@ -168,6 +170,8 @@ pub struct Shell {
     queue: Queue,
     rects: BTreeMap<String, Rect>,
     pixels_per_point: f32,
+    /// The screen's own scale, as of the last frame (none before it).
+    native_scale: Option<f32>,
     shots: VecDeque<Shot>,
     recording: Option<(String, Recorder)>,
     /// What the shell has to say: command results, layout repairs.
@@ -324,6 +328,7 @@ impl Shell {
             queue,
             rects: BTreeMap::new(),
             pixels_per_point: 1.0,
+            native_scale: None,
             shots: VecDeque::new(),
             recording: None,
             notes,
@@ -684,7 +689,7 @@ impl Shell {
     /// This machine, its screen as of the last frame.
     fn machine_now(&self) -> helios_profile::Machine {
         let mut m = self.machine.clone();
-        m.hidpi |= self.pixels_per_point >= HIDPI;
+        m.hidpi |= self.native_scale.unwrap_or(1.0) >= HIDPI;
         m
     }
 
@@ -1947,23 +1952,33 @@ impl Shell {
 
     // --- Drawing ---
 
-    /// Draws the shell for one frame.
-    pub fn ui(&mut self, ui: &mut Ui) {
-        let ctx = ui.ctx().clone();
-        if let Some(rs) = self.gpu.take() {
-            self.gpu_info = Some(egui_pop::viewport::gpu::install(&ctx, &rs));
-        }
-        let was_hidpi = self.pixels_per_point >= HIDPI;
+    /// Follows the window's scale (egui-pop's `scale::changed`, once per
+    /// change; `scale.changed` on the journal). The screen is known from
+    /// the first frame on, and again after a move to another screen: a
+    /// profile with a `hidpi` variant is applied again when the screen's
+    /// class changes. The interface zoom changes the scale, not the class.
+    fn follow_scale(&mut self, ctx: &Egui) {
         self.pixels_per_point = ctx.pixels_per_point();
-        // The screen is known from the first frame on: a profile applied
-        // before, with a `hidpi` variant, is applied again.
-        if was_hidpi != (self.pixels_per_point >= HIDPI)
+        let native = scale::Scale::of(ctx).native;
+        let changed = scale::changed(ctx).is_some() || self.native_scale.is_none();
+        let was = self.native_scale.replace(native).unwrap_or(1.0);
+        if changed
+            && (was >= HIDPI) != (native >= HIDPI)
             && let Some((source, _)) = &self.loaded
             && source.on.contains_key(&helios_profile::Selector::Hidpi)
         {
             let source = source.clone();
             self.apply_profile(&source);
         }
+    }
+
+    /// Draws the shell for one frame.
+    pub fn ui(&mut self, ui: &mut Ui) {
+        let ctx = ui.ctx().clone();
+        if let Some(rs) = self.gpu.take() {
+            self.gpu_info = Some(egui_pop::viewport::gpu::install(&ctx, &rs));
+        }
+        self.follow_scale(&ctx);
         self.now = ctx.input(|i| i.time);
         for event in ctx.input(|i| i.events.clone()) {
             if let Event::Screenshot { image, .. } = event {
@@ -2245,7 +2260,13 @@ pub mod headless {
     }
 
     /// A shell drawn offscreen at a size, on the wgpu renderer.
-    pub fn harness<'a>(mut shell: Shell, size: egui::Vec2) -> Harness<'a, Shell> {
+    pub fn harness<'a>(shell: Shell, size: egui::Vec2) -> Harness<'a, Shell> {
+        harness_at(shell, size, 1.0)
+    }
+
+    /// As [`harness`], on a screen of this native scale (physical pixels
+    /// per point; egui-pop's test kit runs at `egui_pop_test::SCALES`).
+    pub fn harness_at<'a>(mut shell: Shell, size: egui::Vec2, scale: f32) -> Harness<'a, Shell> {
         // The shared device, with a renderer of our own: the textures and
         // the viewport's GPU objects belong to this harness alone.
         let mut rs = device().clone();
@@ -2259,6 +2280,7 @@ pub mod headless {
         let title = shell.window_title();
         let mut h = Harness::builder()
             .with_size(size)
+            .with_pixels_per_point(scale)
             .renderer(egui_kittest::wgpu::WgpuTestRenderer::from_render_state(rs))
             .build_ui_state(|ui, shell: &mut Shell| shell.ui(ui), shell);
         // The window's title, as a window manager reports it: the frame's
