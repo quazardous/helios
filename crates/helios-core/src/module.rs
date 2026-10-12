@@ -66,6 +66,19 @@ pub struct GpuKernel {
     pub entry: &'static str,
 }
 
+/// Where a module's outputs depend on anything at all, and what they hold
+/// everywhere else (a drawn shape is 0 away from it). The engine plans a
+/// step outside `region` without its inputs and fills it with `fill`
+/// instead of running the module, so `process` must give exactly `fill`
+/// (bit for bit) on every channel of every output outside `region`: a
+/// tiled render, some tiles filled, then equals one render.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Extent {
+    /// In pixels at the render's scale.
+    pub region: Region,
+    pub fill: f32,
+}
+
 /// What a GPU backend needs to run a module over a region.
 #[derive(Clone, Debug, PartialEq)]
 pub struct GpuJob {
@@ -292,6 +305,12 @@ pub trait Module: Send + Sync + 'static {
         self.prepare(params, context)
     }
 
+    /// Where its outputs depend on its inputs and parameters (see
+    /// [`Extent`]); `None`, the default, for everywhere.
+    fn extent(&self, _plan: &Self::Plan) -> Option<Extent> {
+        None
+    }
+
     /// The region of each input needed to compute `output`. The default reads
     /// the output region grown by the declared overlap.
     fn input_region(&self, _plan: &Self::Plan, output: Region, overlap: u32) -> Region {
@@ -350,6 +369,10 @@ impl ModuleRef {
 
     pub(crate) fn input_region(&self, plan: &Plan, output: Region) -> Region {
         self.0.input_region(plan, output)
+    }
+
+    pub(crate) fn extent(&self, plan: &Plan) -> Option<Extent> {
+        self.0.extent(plan)
     }
 
     /// The region of its inputs it reads to compute `output` with these
@@ -505,6 +528,7 @@ trait Erased: Send + Sync {
     fn param_hints(&self) -> Vec<ParamHint>;
     fn prepare(&self, params: &Params, context: &Context, scale: f64) -> Result<Plan, String>;
     fn input_region(&self, plan: &Plan, output: Region) -> Region;
+    fn extent(&self, plan: &Plan) -> Option<Extent>;
     fn gpu_kernel(&self) -> Option<GpuKernel>;
     fn gpu_uniforms(&self, plan: &Plan) -> Vec<f32>;
     fn process(&self, plan: &Plan, inputs: &[&Image], output: Region)
@@ -539,6 +563,10 @@ impl<M: Module> Erased for Adapter<M> {
     fn input_region(&self, plan: &Plan, output: Region) -> Region {
         self.module
             .input_region(Self::plan(plan), output, self.manifest.needs.overlap)
+    }
+
+    fn extent(&self, plan: &Plan) -> Option<Extent> {
+        self.module.extent(Self::plan(plan))
     }
 
     fn gpu_kernel(&self) -> Option<GpuKernel> {

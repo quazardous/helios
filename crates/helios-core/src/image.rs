@@ -76,6 +76,16 @@ impl Region {
         Region::new(x, y, (right - x) as u32, (bottom - y) as u32)
     }
 
+    /// Whether the two share at least one pixel.
+    pub fn overlaps(&self, other: &Region) -> bool {
+        !self.is_empty()
+            && !other.is_empty()
+            && self.x < other.right()
+            && other.x < self.right()
+            && self.y < other.bottom()
+            && other.y < self.bottom()
+    }
+
     pub fn contains(&self, other: &Region) -> bool {
         other.x >= self.x
             && other.y >= self.y
@@ -484,6 +494,16 @@ mod tests {
         let b = Region::new(-2, 3, 3, 5);
         assert_eq!(a.bounds(&b), Region::new(-2, 0, 6, 8));
         assert!(a.bounds(&b).contains(&a) && a.bounds(&b).contains(&b));
+    }
+
+    #[test]
+    fn overlapping_regions_share_a_pixel() {
+        let a = Region::new(0, 0, 4, 4);
+        assert!(a.overlaps(&Region::new(3, 3, 2, 2)));
+        assert!(!a.overlaps(&Region::new(4, 0, 2, 2)), "edges touch only");
+        assert!(!a.overlaps(&Region::new(-2, 1, 2, 1)));
+        assert!(!a.overlaps(&Region::new(1, 1, 0, 3)), "an empty region");
+        assert!(Region::new(-5, -5, 20, 20).overlaps(&a));
     }
 
     #[test]

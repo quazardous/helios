@@ -37,8 +37,8 @@ pub use manifest::{
     PortSpec, Role,
 };
 pub use module::{
-    Accelerator, AcceleratorError, Context, DeviceImage, Failure, GpuJob, GpuKernel, Memory,
-    Module, ModuleRef,
+    Accelerator, AcceleratorError, Context, DeviceImage, Extent, Failure, GpuJob, GpuKernel,
+    Memory, Module, ModuleRef,
 };
 pub use params::{Params, Value};
 pub use scheduler::{CancelToken, JobId, JobSpec, JobState, Priority, Scheduler};

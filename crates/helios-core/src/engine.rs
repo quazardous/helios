@@ -57,7 +57,7 @@ use crate::graph::{Graph, Kind, NodeId};
 use crate::image::{ContentHash, Image, Region};
 use crate::manifest::{Family, ModuleKind, Role};
 use crate::module::ModuleRef;
-use crate::module::{Accelerator, AcceleratorError, DeviceImage, Failure};
+use crate::module::{Accelerator, AcceleratorError, DeviceImage, Extent, Failure};
 use crate::status::{Load, NodeState, NodeStatus, NodeType};
 
 /// The source name the engine publishes events under.
@@ -225,6 +225,10 @@ pub struct Counters {
     pub fallbacks: u64,
     /// Renders that lost the accelerator's device (lost or hung).
     pub device_losses: u64,
+    /// Steps outside their module's extent, filled with its constant
+    /// instead of running it (counted in `computed` too): see
+    /// [`crate::Extent`].
+    pub filled: u64,
 }
 
 impl Counters {
@@ -247,6 +251,7 @@ impl Counters {
             crops: self.crops - earlier.crops,
             fallbacks: self.fallbacks - earlier.fallbacks,
             device_losses: self.device_losses - earlier.device_losses,
+            filled: self.filled - earlier.filled,
         }
     }
 }
@@ -292,6 +297,9 @@ enum Work {
         absent: Vec<(usize, u32)>,
         /// Computed by the engine's accelerator.
         accelerated: bool,
+        /// Outside the module's extent: every output holds this value, and
+        /// nothing is read (`inputs` is empty) or run.
+        fill: Option<f32>,
     },
     /// A decision node with no recorded answer: its inputs are planned (a
     /// surface shows what it will look at), nothing is computed.
@@ -327,6 +335,8 @@ enum ShapeKind {
         inputs: Vec<(Unit, usize)>,
         absent: Vec<(usize, u32)>,
         accelerated: bool,
+        /// Where its outputs depend on anything (see [`crate::Extent`]).
+        extent: Option<Extent>,
     },
 }
 
@@ -518,6 +528,7 @@ pub struct Engine {
     crops: AtomicU64,
     fallbacks: AtomicU64,
     device_losses: AtomicU64,
+    filled: AtomicU64,
     /// Why the accelerator is no longer used, once its device was lost for
     /// good: everything runs on the CPU from then on.
     gpu_off: Mutex<Option<String>>,
@@ -578,6 +589,7 @@ impl Engine {
             crops: AtomicU64::new(0),
             fallbacks: AtomicU64::new(0),
             device_losses: AtomicU64::new(0),
+            filled: AtomicU64::new(0),
             gpu_off: Mutex::new(None),
             last_fallback: Mutex::new(None),
         }
@@ -728,6 +740,7 @@ impl Engine {
             crops: self.crops.load(Ordering::SeqCst),
             fallbacks: self.fallbacks.load(Ordering::SeqCst),
             device_losses: self.device_losses.load(Ordering::SeqCst),
+            filled: self.filled.load(Ordering::SeqCst),
         }
     }
 
@@ -1130,6 +1143,10 @@ impl Engine {
                             asked.entry(*src).or_default().push(*r);
                         }
                     }
+                    // Filled: it reads nothing.
+                    ShapeKind::Module {
+                        extent: Some(e), ..
+                    } if !e.region.overlaps(r) => {}
                     ShapeKind::Module {
                         module,
                         plan,
@@ -1179,18 +1196,24 @@ impl Engine {
                         inputs,
                         absent,
                         accelerated,
+                        extent,
                     } => {
                         let input_region = module.input_region(plan, r);
+                        let fill = extent.filter(|e| !e.region.overlaps(&r)).map(|e| e.fill);
                         Work::Module {
                             module: module.clone(),
                             plan: plan.clone(),
-                            inputs: inputs
-                                .iter()
-                                .map(|(u, p)| (reading(u, input_region), *p))
-                                .collect(),
+                            inputs: match fill {
+                                Some(_) => Vec::new(),
+                                None => inputs
+                                    .iter()
+                                    .map(|(u, p)| (reading(u, input_region), *p))
+                                    .collect(),
+                            },
                             input_region,
                             absent: absent.clone(),
                             accelerated: *accelerated,
+                            fill,
                         }
                     }
                 };
@@ -1315,12 +1338,14 @@ impl Engine {
                     h.update(&(port as u64).to_le_bytes());
                     inputs.push((input, port));
                 }
+                let extent = module.extent(&plan);
                 ShapeKind::Module {
                     module: module.clone(),
                     plan,
                     inputs,
                     absent,
                     accelerated,
+                    extent,
                 }
             }
         };
@@ -1466,7 +1491,27 @@ impl Engine {
                 input_region,
                 absent,
                 accelerated,
+                fill,
             } => {
+                if let Some(fill) = *fill {
+                    self.filled.fetch_add(1, Ordering::SeqCst);
+                    let area = step.region.area();
+                    return Ok(Arc::new(Content::Host(
+                        module
+                            .manifest()
+                            .outputs
+                            .iter()
+                            .map(|port| {
+                                let channels = port.channels().unwrap_or(1);
+                                Image::new(
+                                    step.region,
+                                    channels,
+                                    vec![fill; area * channels as usize],
+                                )
+                            })
+                            .collect(),
+                    )));
+                }
                 let mut held = Vec::with_capacity(inputs.len());
                 for (input, port) in inputs {
                     held.push((self.execute(input, cause, pins)?, *port));
