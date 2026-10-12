@@ -1,6 +1,7 @@
 # Masks
 
-Status: **first step** (2026-10-11). How darktable's flexi masks map onto a
+Status: **second step** (2026-10-12): groups, refinement, parametric and
+raster members, and a stress network with its bench. How darktable's flexi masks map onto a
 Helios network, and what porting them taught about the core. The modules
 live in `modules/masks` (crate `helios-module-masks`).
 
@@ -43,8 +44,9 @@ Values are not clamped on every port: operators clamp where darktable does
 
 ## From darktable's tree to a sub-network
 
-- **Member** → a node with a one-channel output (`mask_from_luma` today;
-  drawn shapes, parametric channels, raster and AI masks later), connected
+- **Member** → a node with a one-channel output (`mask_from_luma`,
+  `mask_parametric`, `mask_raster` today; drawn shapes and AI masks
+  later), connected
   to a port of its group. Its opacity and inversion are the group's
   `opacity[i]` and `invert[i]` for that port: inversion first, then
   opacity, as darktable does.
@@ -104,9 +106,52 @@ gives 0.33; the tests check both. A group with no connected member gives 1
 - `mask_levels`: darktable's mask tone curve with an opacity of 1, skipped
   as there when contrast and brightness are both under 0.01.
 
-Not ported yet: the details threshold (it needs darktable's Scharr detail
-mask, an analysis of the raw), drawn shapes, parametric, raster and AI
-members, and the preview bypass of a refinement.
+Not ported yet:
+
+- drawn shapes (circle, ellipse, path, brush, gradient) and AI object
+  members;
+- the details threshold (it needs darktable's Scharr detail mask, an
+  analysis of the raw);
+- the parametric mask's display-referred spaces: darktable's Lab and RGB
+  (display) blendif, with their HSL channels (`mask_parametric` covers
+  the scene-referred RGB space: luminance, RGB and JzCzhz);
+- the preview bypass of a refinement;
+- the raster mask of a module disabled in the history (darktable keeps the
+  last one computed; here the source is either connected or not).
+
+## Stress network and bench
+
+`helios_module_masks::stress` builds a chain of masked modules, each with
+18 mask nodes (three groups using all seven operators, element and group
+refinement, parametric, luminance and raster members, the raster member
+reusing the previous module's mask), an exposure as the processed module,
+and a blend. Three modules make 54 mask nodes. Its tests check that a
+tiled render equals the full render bit for bit (output and each module's
+mask) and that a one-value edit recomputes only the dirty branch: the
+seven steps from the edited member to the output, seen in the bus's
+`engine.step_computed` events and the engine's counters.
+
+`cargo xtask bench masks` renders it once per mode, each in its own
+release process: `full` (one render), `tiled` (256-pixel tiles), `proxy`
+(scale 0.25) and `edit` (a render after one value changed), and appends
+one JSON line per mode to `target/bench/masks.jsonl`. Three modules at
+1536×1024, on a loaded machine (times are indicative):
+
+| mode | time | peak memory | computed / asked | keys planned |
+|---|---|---|---|---|
+| full | 44 s | 3.9 GB | 386 / 533 | 386 |
+| tiled | 48 s | 4.7 GB | 9264 / 12792 | 9264 |
+| proxy | 3.1 s | 0.19 GB | 259 / 365 | 259 |
+| edit | 2.0 s | 3.9 GB | 7 / 14 | 386 |
+
+Planning before and after the memo (finding 12), one full render at 64×48:
+
+| modules | keys before | keys after | time before | time after | peak before | peak after |
+|---|---|---|---|---|---|---|
+| 3 | 3009 | 386 | 523 ms | 471 ms | 23 MB | 22 MB |
+| 4 | 29497 | 874 | 1573 ms | 1567 ms | 66 MB | 54 MB |
+| 5 | 288969 | 1609 | 4249 ms | 3162 ms | 235 MB | 113 MB |
+| 6 | 2830713 | 2591 | 18687 ms | 6746 ms | 1406 MB | 210 MB |
 
 ## Crash-test findings
 
@@ -163,3 +208,31 @@ What the port needed from the core, or shows it lacks:
 11. **GPU path.** The accelerator ran any module with a kernel and one
     input; a module whose input is optional is now left to the CPU, since
     the input may arrive empty. No mask module has a GPU variant yet.
+12. **Planning was exponential in shared inputs.** The engine planned the
+    graph as a tree: a node read by several consumers was planned again on
+    every path, and a masked module reads its input from nine places, so
+    each chained module multiplied planning by about ten (2.8 million keys
+    for six modules). Fixed: planned steps are kept per node and region
+    within one render and shared. Keys now equal the distinct steps.
+13. **The cycle check was exponential too.** `Graph::connect` walked every
+    path upstream of the new input; it now visits each node once.
+14. **Every distinct region is a distinct step.** Steps and the cache are
+    keyed by the exact region. Consumers with different reaches (a blur, a
+    feather, a raster member reading another module's mask) ask the same
+    node for different regions, and each one is computed apart: the stress
+    network's 58 nodes take 386 steps for one full render, the source alone
+    25, and the pixels computed are about 17 times one pass over the image.
+    This is most of the full render's time and memory now. Planning each
+    node once over the union of what its consumers read, and handing each a
+    crop, would bring it close to one pass; it changes what a step is (its
+    region is no longer the one asked for), so it is a decision of its own.
+    The raster test documents the same effect on a smaller graph.
+15. **Memory has no ceiling by default.** Without a budget the cache keeps
+    every step's output: 3.9 GB for one full render of the stress network
+    at 1536×1024, 4.7 GB in tiles (each tile's halos are steps of their
+    own). With a budget, evicted content is computed again; the bench
+    runs without one, to measure what the network holds.
+16. **Tiles do not save work yet.** In 256-pixel tiles the network computes
+    9264 steps (24 tiles, 386 each): halos grow with every blur and
+    feather along the chain, and finding 14 multiplies them. Tiles bound a
+    render's working set only once the cache has a budget.
