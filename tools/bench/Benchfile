@@ -60,14 +60,21 @@ submodules = true
 repo = "https://github.com/hanatos/vkdt.git"
 ref = "afc34256fb22bcaf6dcf6503d19d5f9a6f477af5"
 
+# egui-pop, Helios's UI library: its own jobs below; `egui_pop=<branch>`
+# picks the branch (main by default), `src=egui-pop-local` runs pushed code
+[checkout.egui-pop]
+repo = "https://github.com/quazardous/egui-pop.git"
+ref = "${egui_pop:-main}"
+
 # the job's env applies here too: CARGO_NET_OFFLINE is lifted for the fetch
 [fetch]
-run = ["cd /work/${src:-helios} && CARGO_NET_OFFLINE=false cargo fetch --locked"]
+run = ["for d in /work/helios /work/egui-pop /work/${src:-helios}; do (cd $d && CARGO_NET_OFFLINE=false cargo fetch --locked) || exit 1; done"]
 
 [cache]
 target = { about = "the cargo target directory, one per branch", per = "branch", lock = true }
 registry = "the cargo registry, shared by every branch"
 cargo-git = "the cargo git dependencies, shared by every branch"
+egui-pop-target = { about = "egui-pop's target directory, one per branch", per = "branch", lock = true }
 
 # ---------------------------------------------------------------- correctness
 
@@ -119,7 +126,7 @@ timeout = "2h"
 [jobs.gpu]
 cores = 4
 memory = "4g"
-exclusive = ["gpu"]
+resources = ["gpu"]
 cwd = "/work/${src:-helios}"
 command = """cargo test -q --locked -p helios-gpu --test backend -- --nocapture 2>&1 | grep -E '^(GPU|skipped):' | sort -u | tee /out/adapter.txt; \
 cargo nextest run --locked --profile ci -p helios-gpu -p helios-compute; rc=$?; \
@@ -127,6 +134,19 @@ cp target/nextest/ci/junit.xml /out/; exit $rc"""
 env = { CARGO_NET_OFFLINE = "true" }
 mounts = { target = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git" }
 timeout = "30m"
+
+# egui-pop's gate: fmt, clippy, the workspace tests with the doctests, docs
+[jobs.egui-pop-gate]
+cores = 8
+memory = "9g"
+cwd = "/work/${src:-egui-pop}"
+command = """cargo fmt --all --check \
+ && cargo clippy --workspace --all-targets --locked -- -D warnings \
+ && cargo test --workspace --locked \
+ && RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps --locked"""
+env = { CARGO_NET_OFFLINE = "true" }
+mounts = { egui-pop-target = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git" }
+timeout = "1h"
 
 # ---------------------------------------------------------------- timings
 # alone on the machine, so the numbers compare from one run to the next
