@@ -172,6 +172,39 @@ command-helios-viewport-toggle =
     .description = Opens Image where it was, or closes it.
     .title = Show or hide Image
 
+command-mask-add-circle =
+    .title = Masks: add a circle at the view's centre
+
+command-mask-add-ellipse =
+    .title = Masks: add an ellipse at the view's centre
+
+command-mask-add-gradient =
+    .title = Masks: add a gradient across the view's centre
+
+command-mask-add-path =
+    .title = Masks: draw a path (click its points; with `corners`, made at once)
+
+command-mask-cancel =
+    .title = Masks: stop drawing the path
+
+command-mask-handle-move =
+    .title = Masks: move a shape's handle (`handle`: centre, radius, feather, corner.2...) to `x`, `y`, one undo step
+
+command-mask-path-close =
+    .title = Masks: close the path being drawn
+
+command-mask-point-add =
+    .title = Masks: add a point to the selected path, on its edge nearest `x`, `y`
+
+command-mask-point-remove =
+    .title = Masks: remove the selected path point (or `point`)
+
+command-mask-point-smooth =
+    .title = Masks: make the selected path point (or `point`) smooth, or sharp with `smooth: false`
+
+command-mask-select =
+    .title = Masks: select a mask, a shape of it, a path point (`mask`, `shape`, `point`)
+
 command-param-copyPath =
     .title = Copy a value's path (`path`)
 

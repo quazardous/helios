@@ -171,6 +171,39 @@ command-helios-viewport-toggle =
     .title = Afficher ou masquer Image
     .description = Ouvre l’image là où elle était, ou la ferme.
 
+command-mask-add-circle =
+    .title = Masques : ajouter un cercle au centre de la vue
+
+command-mask-add-ellipse =
+    .title = Masques : ajouter une ellipse au centre de la vue
+
+command-mask-add-gradient =
+    .title = Masques : ajouter un dégradé passant par le centre de la vue
+
+command-mask-add-path =
+    .title = Masques : tracer un chemin (cliquer ses points ; avec `corners`, créé d’un coup)
+
+command-mask-cancel =
+    .title = Masques : arrêter de tracer le chemin
+
+command-mask-handle-move =
+    .title = Masques : déplacer une poignée d’une forme (`handle` : centre, rayon, adoucissement, corner.2...) en `x`, `y`, une seule étape d’annulation
+
+command-mask-path-close =
+    .title = Masques : fermer le chemin en cours de tracé
+
+command-mask-point-add =
+    .title = Masques : ajouter un point au chemin sélectionné, sur son bord le plus proche de `x`, `y`
+
+command-mask-point-remove =
+    .title = Masques : supprimer le point sélectionné du chemin (ou `point`)
+
+command-mask-point-smooth =
+    .title = Masques : rendre lisse le point sélectionné du chemin (ou `point`), ou anguleux avec `smooth: false`
+
+command-mask-select =
+    .title = Masques : sélectionner un masque, une de ses formes, un point de chemin (`mask`, `shape`, `point`)
+
 command-param-copyPath =
     .title = Copier le chemin d’une valeur (`path`)
 

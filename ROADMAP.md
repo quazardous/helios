@@ -138,6 +138,12 @@ Helios's viewport runs on it (2026-10-12): the engine is its tile source,
 a Rec.2020-to-sRGB matrix its display transform, the view kept in the
 value store; the "before" of a comparison is the edit as it was opened
 (not decided: the unedited image, or a snapshot taken by hand).
+Drawn masks are edited on it (2026-10-12): the mask's shapes outlined,
+the selected one's handles on egui-pop's overlay kit, a drag one undo
+step, shapes created by `mask.*` commands and keys (see docs/gui.md).
+Not decided: whether creating or deleting a shape (a change of the
+network, not of a value) becomes an undo step, and how a network edited
+so is saved with the image's edit.
 The desktop runs on egui-pop's workbench (2026-10-12): its window frame,
 per-window scale and interface zoom, panels in areas with auxiliary
 windows and arrangements (Helios's image-first layout a template), the

@@ -2,6 +2,7 @@
 # whose English changed since is reported by the catalogue check.
 category-developer 3bef768f6a95f10d
 category-help dd64739b1d2f8ca8
+category-masks 6849246780dae374
 category-preferences 0f02ef52eedd2e4d
 category-vault 3414f176735e33d7
 category-workspace d29e383b2905127c
@@ -74,6 +75,17 @@ command-helios-viewport-focus.title b3f710ebe431fda4
 command-helios-viewport-moveTo.title 8653b4bdbc43ce4e
 command-helios-viewport-toggle.description e6f4ec5aa395c2db
 command-helios-viewport-toggle.title 5499a6f5a26ee5dc
+command-mask-add-circle.title 853e800a379c3a26
+command-mask-add-ellipse.title 369f2cd0736ffec6
+command-mask-add-gradient.title a0410f60ded15dd6
+command-mask-add-path.title 783872ff7bffbf60
+command-mask-cancel.title 567fb47b601c0c5e
+command-mask-handle-move.title 902f9df0115deb93
+command-mask-path-close.title f0e547ab2261baa9
+command-mask-point-add.title 401692401e7affdf
+command-mask-point-remove.title 0fc3db962d8bf4b5
+command-mask-point-smooth.title 7faf1f59162a07af
+command-mask-select.title 49bc0924e1d4aa53
 command-param-copyPath.title f347a7d3f946183d
 command-param-copyValue.title 910593755a63cea8
 command-param-get.title 2fb6a5e31fe75e81

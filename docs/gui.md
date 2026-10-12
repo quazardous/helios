@@ -424,6 +424,60 @@ and the colour (`helios-gui/src/viewport.rs`).
 
 ![The image viewport, the readout under the pointer](gui/viewport-wbox.png)
 
+### Drawn masks
+
+The viewport draws the shapes of the mask being edited (a `mask_combine`
+node: `view/masks/mask`, the network's first by default) and edits them
+(2026-10-12, `helios-gui/src/masks.rs`).
+
+- **What shows.** Each shape's edge and the end of its feather (dashed),
+  from `helios_module_masks::outline`, mapped to the screen by the
+  viewport: the selected shape full, the others faint. The selected
+  shape's handles are egui-pop's handle kit (24-point targets): the
+  centre (move), a radius (size), a rotation, the feather; a path's
+  corners, and the Bézier handles of its selected point when they are
+  off their corner. A gradient's rotation and feather handles sit at
+  least 80 points along its line, clear of its anchor.
+- **A drag** writes the parameters the handle moves through the value
+  store, as one gesture: one undo step, held against agents meanwhile;
+  Escape puts the values back and leaves no step. Shift constrains the
+  angle (a rotation to 15° steps, a move to the axes and diagonals),
+  Ctrl moves the handle a tenth of the pointer. A path's corner carries
+  its handles; a Bézier handle's partner mirrors it.
+- **Clicks.** A click on a shape's edge selects it (the Parameters panel
+  follows), on a path's corner selects that point. A double click on the
+  selected path's edge adds a point there, the curve kept; Delete removes
+  the selected point (a path keeps three). A double click on a handle
+  resets it (a rotation to 0, a feather to none, a corner to sharp); the
+  wheel over a handle adjusts it (a size or feather, a rotation), one
+  undo step while it turns. Elsewhere the viewport's grammar holds: the
+  wheel zooms, a double click fits.
+- **Creating.** `mask.add.circle`, `mask.add.ellipse` and
+  `mask.add.gradient` (`C`, `E`, `G` with the image focused) place a shape
+  at the view's centre, sized to it; `mask.add.path` (`P`) starts the
+  path tool: each click adds a corner, a click on the first one or Enter
+  closes it, Escape gives up. The new node takes the mask's next free
+  port.
+- **State.** The mask, the shape and the point selected, the tool and the
+  path being drawn are transient values (`view/masks/*`), never undo
+  steps; the shapes' parameters are the nodes' (`node/<shape>/*`).
+- **Agents** do the same through commands: `mask.select`, `mask.add.*`
+  (with `params`, and `corners` for a path), `mask.path.close`,
+  `mask.cancel`, `mask.point.add`, `mask.point.remove`,
+  `mask.point.smooth`, `mask.handle.move` (one undo step).
+
+Not yet: creating a shape is not an undo step and is not saved with the
+image's edit (both change the network, which the value store does not
+hold), shapes cannot be deleted or reordered from the viewport, and the
+`--image` network has one mask (on its exposure).
+
+![A circle and a path edited on the viewport](gui/masks-wbox.png)
+
+The picture is a run of `helios-gui --image` in wbox, driven by its
+keys and pointer: the exposure raised, `C` for a circle, `P` and five
+clicks for a path, a double click adding a point to it, then the
+circle's radius and feather dragged.
+
 The picture is a run of `helios-gui --image` in wbox (a headless nested
 compositor). Beside the same run of the viewport it replaced, the image's
 pixels differ by at most one code value (egui-pop's tiles are half

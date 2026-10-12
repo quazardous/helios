@@ -6,6 +6,7 @@ pub mod dialogs;
 pub mod engine_source;
 pub mod host;
 pub mod library;
+pub mod masks;
 pub mod params;
 pub mod persist;
 mod plugins;

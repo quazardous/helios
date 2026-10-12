@@ -24,6 +24,8 @@ helios-vault.workspace = true
 helios-vault-sqlite.workspace = true
 # The demo image chain of `helios-gui --image`.
 helios-module-exposure = { path = "../../modules/exposure" }
+# The drawn mask shapes the viewport edits (their outlines and handles).
+helios-module-masks = { path = "../../modules/masks" }
 serde.workspace = true
 serde_json.workspace = true
 # MIT OR Apache-2.0 (egui, eframe, egui_kittest).

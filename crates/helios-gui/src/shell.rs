@@ -83,6 +83,8 @@ enum Action {
     Zoom(crate::viewport::ZoomTo),
     /// Before and after side by side, or not.
     Compare,
+    /// A drawn-mask command, as whom.
+    Mask(crate::masks::Command, Origin),
     Copy(String),
     SystemMenu,
     /// A command, its arguments, as whom.
@@ -473,6 +475,7 @@ impl Shell {
         {
             let mut store = lock(&shell.values);
             crate::viewport::declare(&mut store);
+            crate::masks::declare(&mut store);
             store.declare(
                 crate::params::SELECTION,
                 // Which node one looks at is not an edit: never undone.
@@ -1364,6 +1367,7 @@ impl Shell {
             ),
             Box::new(|_, _| Ok(Action::Compare)),
         );
+        Shell::declare_mask_commands(&mut add);
         add(
             CommandSpec::new("scopes.stops", "Scopes: in stops (log)", "View"),
             Box::new(|_, _| Ok(Action::ScopeStops(true))),
@@ -1442,6 +1446,33 @@ impl Shell {
         ] {
             d.keys.push((k.into(), command.into(), library.into()));
         }
+        // Drawing masks, while the image has the focus. Escape and Enter
+        // bind only while a path is drawn: otherwise Escape is the
+        // viewport's (it cancels a drag).
+        let image = "focusedPanel == 'helios.viewport'";
+        for (k, command, when) in [
+            ("C", "mask.add.circle", image.to_string()),
+            ("E", "mask.add.ellipse", image.to_string()),
+            ("G", "mask.add.gradient", image.to_string()),
+            ("P", "mask.add.path", image.to_string()),
+            (
+                "Enter",
+                "mask.path.close",
+                format!("{image} && maskTool == 'path'"),
+            ),
+            (
+                "Escape",
+                "mask.cancel",
+                format!("{image} && maskTool == 'path'"),
+            ),
+            (
+                "Delete",
+                "mask.point.remove",
+                format!("{image} && maskPoint"),
+            ),
+        ] {
+            d.keys.push((k.into(), command.into(), when));
+        }
         // egui-pop's palette is the palette; Helios's name for it stays
         // for scripts.
         d.hidden.insert("workbench.palette".into());
@@ -1449,6 +1480,160 @@ impl Shell {
             d.checked
                 .insert(format!("theme.{name}"), format!("heliosTheme == '{name}'"));
         }
+    }
+
+    /// The drawn-mask commands (`mask.*`): what the viewport's handles,
+    /// clicks and keys do, for the palette and agents too.
+    fn declare_mask_commands(add: &mut impl FnMut(CommandSpec, ActionOf)) {
+        use crate::masks::Command;
+        fn point(args: &Value) -> Result<[f64; 2], String> {
+            let n = |k: &str| args.get(k).and_then(Value::as_f64);
+            match (n("x"), n("y")) {
+                (Some(x), Some(y)) => Ok([x, y]),
+                _ => Err("`x` and `y` (image pixels) are missing".into()),
+            }
+        }
+        fn index(args: &Value, key: &str) -> Option<usize> {
+            args.get(key)
+                .and_then(Value::as_u64)
+                .and_then(|n| usize::try_from(n).ok())
+        }
+        fn params(args: &Value) -> Result<helios_core::Params, String> {
+            let mut p = helios_core::Params::new();
+            let Some(map) = args.get("params").and_then(Value::as_object) else {
+                return Ok(p);
+            };
+            for (k, v) in map {
+                let v = match v {
+                    Value::Number(n) => helios_core::Value::Float(n.as_f64().unwrap_or(0.0)),
+                    Value::Bool(b) => helios_core::Value::Bool(*b),
+                    Value::String(s) => helios_core::Value::Choice(s.clone()),
+                    other => return Err(format!("`params.{k}`: {other} is not a value")),
+                };
+                p.set(k, v);
+            }
+            Ok(p)
+        }
+        let text =
+            |args: &Value, key: &str| args.get(key).and_then(Value::as_str).map(String::from);
+        add(
+            CommandSpec::new(
+                "mask.select",
+                "Masks: select a mask, a shape of it, a path point (`mask`, `shape`, `point`)",
+                "Masks",
+            ),
+            Box::new(move |a, origin| {
+                Ok(Action::Mask(
+                    Command::Select {
+                        mask: text(a, "mask"),
+                        shape: text(a, "shape"),
+                        point: a.get("point").and_then(Value::as_i64),
+                    },
+                    origin.clone(),
+                ))
+            }),
+        );
+        for (kind, title) in [
+            ("circle", "Masks: add a circle at the view's centre"),
+            ("ellipse", "Masks: add an ellipse at the view's centre"),
+            ("gradient", "Masks: add a gradient across the view's centre"),
+            (
+                "path",
+                "Masks: draw a path (click its points; with `corners`, made at once)",
+            ),
+        ] {
+            add(
+                CommandSpec::new(&format!("mask.add.{kind}"), title, "Masks"),
+                Box::new(move |a, origin| {
+                    let corners = match a.get("corners") {
+                        None | Some(Value::Null) => Vec::new(),
+                        Some(v) => serde_json::from_value(v.clone())
+                            .map_err(|e| format!("`corners` ([[x, y], ...]): {e}"))?,
+                    };
+                    Ok(Action::Mask(
+                        Command::Add {
+                            kind: kind.into(),
+                            params: params(a)?,
+                            corners,
+                        },
+                        origin.clone(),
+                    ))
+                }),
+            );
+        }
+        add(
+            CommandSpec::new(
+                "mask.path.close",
+                "Masks: close the path being drawn",
+                "Masks",
+            ),
+            Box::new(|_, origin| Ok(Action::Mask(Command::Close, origin.clone()))),
+        );
+        add(
+            CommandSpec::new("mask.cancel", "Masks: stop drawing the path", "Masks"),
+            Box::new(|_, origin| Ok(Action::Mask(Command::Cancel, origin.clone()))),
+        );
+        add(
+            CommandSpec::new(
+                "mask.point.add",
+                "Masks: add a point to the selected path, on its edge nearest `x`, `y`",
+                "Masks",
+            ),
+            Box::new(|a, origin| {
+                Ok(Action::Mask(
+                    Command::PointAdd { at: point(a)? },
+                    origin.clone(),
+                ))
+            }),
+        );
+        add(
+            CommandSpec::new(
+                "mask.point.remove",
+                "Masks: remove the selected path point (or `point`)",
+                "Masks",
+            ),
+            Box::new(|a, origin| {
+                Ok(Action::Mask(
+                    Command::PointRemove {
+                        point: index(a, "point"),
+                    },
+                    origin.clone(),
+                ))
+            }),
+        );
+        add(
+            CommandSpec::new(
+                "mask.point.smooth",
+                "Masks: make the selected path point (or `point`) smooth, or sharp with `smooth: false`",
+                "Masks",
+            ),
+            Box::new(|a, origin| {
+                Ok(Action::Mask(
+                    Command::PointSmooth {
+                        point: index(a, "point"),
+                        smooth: a.get("smooth").and_then(Value::as_bool).unwrap_or(true),
+                    },
+                    origin.clone(),
+                ))
+            }),
+        );
+        add(
+            CommandSpec::new(
+                "mask.handle.move",
+                "Masks: move a shape's handle (`handle`: centre, radius, feather, corner.2...) to `x`, `y`, one undo step",
+                "Masks",
+            ),
+            Box::new(move |a, origin| {
+                Ok(Action::Mask(
+                    Command::Move {
+                        shape: text(a, "shape"),
+                        handle: text(a, "handle").ok_or("`handle` is missing")?,
+                        to: point(a)?,
+                    },
+                    origin.clone(),
+                ))
+            }),
+        );
     }
 
     /// The menus Helios contributes: its system menu, and its commands in
@@ -1801,6 +1986,12 @@ impl Shell {
             "fullScreen",
             flag(ctx.input(|i| i.viewport().fullscreen.unwrap_or(false))),
         );
+        {
+            // What the mask keys need: the tool, a path point selected.
+            let store = lock(&self.values);
+            h.set_context("maskTool", &crate::masks::tool(&store));
+            h.set_context("maskPoint", flag(crate::masks::point(&store).is_some()));
+        }
         h.set_context("heliosTheme", &self.theme_name);
         h.set_context("heliosProfile", &self.profile_name);
     }
@@ -1962,6 +2153,10 @@ impl Shell {
                 .map_err(|e| format!("vault.label: {e}"))?,
             Action::Step(n) => self.library.borrow_mut().step(n),
             Action::Zoom(z) => self.viewport.borrow_mut().zoom(z, &self.values),
+            Action::Mask(command, origin) => {
+                let mut store = lock(&self.values);
+                return self.viewport.borrow_mut().mask(command, origin, &mut store);
+            }
             Action::Compare => {
                 use crate::viewport::COMPARE;
                 let mut store = lock(&self.values);

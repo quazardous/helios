@@ -5,6 +5,8 @@ category-developer = Developer
 
 category-help = Help
 
+category-masks = Masks
+
 category-preferences = Preferences
 
 category-vault = Vault

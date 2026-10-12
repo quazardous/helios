@@ -155,9 +155,9 @@ announced on the bus and saved with the network like any other value.
 
 Not ported: brushes, darktable's per-point path feather (one feather per
 path here), the gradient's curvature, and clone shapes (retouch). The
-viewport's handles that draw and move shapes are a separate step; what
-they read and write is listed in the module's documentation
-(`helios_module_masks::shape`).
+viewport draws and edits the shapes (see [gui.md](gui.md), "Drawn
+masks"); what its handles read and write is listed in the module's
+documentation (`helios_module_masks::shape`).
 
 ## From darktable's drawn masks
 

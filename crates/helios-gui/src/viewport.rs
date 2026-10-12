@@ -18,6 +18,9 @@
 //!   like any value. The viewport's View signals drive them: a drag is one
 //!   gesture holding them against other origins, and none of it is an
 //!   undoable edit (the values are transient).
+//! - **Drawn masks**: the selected mask's shapes are outlined over the
+//!   image and the selected shape's handles edit it (see
+//!   [`crate::masks`]).
 //! - **Pictures**: `viewport.display` is what is on screen;
 //!   `viewport.scene` is the float data of the view before the display
 //!   transform.
@@ -186,6 +189,8 @@ pub struct Viewport {
     gesture: Option<GestureId>,
     /// The values under the pointer, once they arrived.
     readout: Option<Readout>,
+    /// Editing the drawn masks: drags, hooks, what was drawn.
+    masks: crate::masks::Masks,
     pub stats: Arc<Stats>,
 }
 
@@ -219,6 +224,7 @@ impl Default for Viewport {
             edited: None,
             gesture: None,
             readout: None,
+            masks: crate::masks::Masks::default(),
             stats,
         }
     }
@@ -239,6 +245,239 @@ impl Viewport {
             port: port.into(),
         });
         Ok(())
+    }
+
+    /// Shows the graph as it is now (after a node was added).
+    fn reshow(&mut self) {
+        let Some(e) = &self.edited else { return };
+        match Shown::new(Arc::new(e.graph.clone()), e.node, &e.port) {
+            Ok(shown) => self.after.show(shown),
+            Err(e) => eprintln!("helios-gui: viewport: {e}"),
+        }
+    }
+
+    /// The mask editing: what was drawn last frame.
+    pub fn masks(&self) -> &crate::masks::Masks {
+        &self.masks
+    }
+
+    /// The part of the image in view, in image pixels (the whole image
+    /// before the first frame).
+    fn visible(&self) -> Option<[f64; 4]> {
+        let [w, h] = self.after.size()?;
+        let (w, h) = (f64::from(w), f64::from(h));
+        let v = self
+            .state
+            .mapping()
+            .and_then(|m| m.visible())
+            .unwrap_or([0.0, 0.0, w, h]);
+        let v = [v[0].max(0.0), v[1].max(0.0), v[2].min(w), v[3].min(h)];
+        Some(if v[2] > v[0] && v[3] > v[1] {
+            v
+        } else {
+            [0.0, 0.0, w, h]
+        })
+    }
+
+    /// Adds a shape to the mask edited, wired into a free port of its
+    /// `mask_combine`, its parameters bound to the store; selects it.
+    fn add_shape(
+        &mut self,
+        store: &mut Store,
+        module: &str,
+        params: &helios_core::Params,
+    ) -> Result<String, String> {
+        let e = self.edited.as_mut().ok_or("no image is open")?;
+        let mask = crate::masks::current_mask(&e.graph, store)
+            .ok_or("the image's network has no mask to draw in (a mask_combine node)")?;
+        let (id, name) = crate::masks::add_node(&mut e.graph, &mask, module, params)?;
+        helios_values::bind_node(store, &e.graph, id)?;
+        self.reshow();
+        crate::masks::select(store, &name);
+        Ok(name)
+    }
+
+    /// Writes some of a node's parameters as one undo step.
+    fn write_step(
+        store: &mut Store,
+        label: &str,
+        origin: &Origin,
+        node: &str,
+        writes: Vec<(String, Value)>,
+    ) -> Result<(), String> {
+        let g = store.begin_group(origin.clone(), label);
+        let mut out = Ok(());
+        for (param, value) in writes {
+            let path = helios_values::node_path(node, &param);
+            if let Err(e) = store.set(Set::new(&path, Change::To(value), origin.clone()).gesture(g))
+            {
+                out = Err(e.to_string());
+                break;
+            }
+        }
+        store.end(g);
+        out
+    }
+
+    /// A shape of the mask edited, as the store holds it now: `name`, or
+    /// the selected one.
+    fn shape(&self, store: &Store, name: Option<&str>) -> Result<crate::masks::Member, String> {
+        let selected = match name {
+            Some(n) => n.to_string(),
+            None => match store.get(crate::masks::SHAPE).map(|e| &e.value) {
+                Some(Value::Text(t)) if !t.is_empty() => t.clone(),
+                _ => return Err("no shape is selected".into()),
+            },
+        };
+        let e = self.edited.as_ref().ok_or("no image is open")?;
+        let mask = crate::masks::current_mask(&e.graph, store).ok_or("the image has no mask")?;
+        crate::masks::members(&e.graph, store, &mask)
+            .into_iter()
+            .find(|m| m.node == selected)
+            .ok_or_else(|| format!("`{selected}` is not a shape of the mask `{mask}`"))
+    }
+
+    /// The selected shape, a path.
+    fn path(&self, store: &Store) -> Result<crate::masks::Member, String> {
+        let m = self.shape(store, None)?;
+        if m.module == "mask_path" {
+            Ok(m)
+        } else {
+            Err(format!("`{}` is not a path", m.node))
+        }
+    }
+
+    /// Runs a mask command (see [`crate::masks::Command`]).
+    pub fn mask(
+        &mut self,
+        command: crate::masks::Command,
+        origin: Origin,
+        store: &mut Store,
+    ) -> Result<serde_json::Value, String> {
+        use crate::masks::{self as masks, Command};
+        use serde_json::json;
+        let stop = |store: &mut Store| {
+            write(store, masks::TOOL, Value::Choice("none".into()), None);
+            write(store, masks::DRAFT, Value::List(Vec::new()), None);
+        };
+        match command {
+            Command::Select { mask, shape, point } => {
+                if let Some(mask) = mask {
+                    let e = self.edited.as_ref().ok_or("no image is open")?;
+                    if e.graph.find(&mask).is_none() {
+                        return Err(format!("no mask `{mask}`"));
+                    }
+                    write(store, masks::MASK, Value::Text(mask), None);
+                }
+                if let Some(shape) = shape {
+                    if !shape.is_empty() {
+                        self.shape(store, Some(&shape))?;
+                    }
+                    masks::select(store, &shape);
+                }
+                if let Some(p) = point {
+                    write(store, masks::POINT, Value::Int(p), None);
+                }
+                Ok(json!({}))
+            }
+            Command::Add {
+                kind,
+                params,
+                corners,
+            } => {
+                let module =
+                    masks::module_of(&kind).ok_or_else(|| format!("no shape kind `{kind}`"))?;
+                let mut p = if module == "mask_path" {
+                    if corners.is_empty() {
+                        write(store, masks::DRAFT, Value::List(Vec::new()), None);
+                        write(store, masks::TOOL, Value::Choice("path".into()), None);
+                        return Ok(json!({ "tool": "path" }));
+                    }
+                    if corners.len() < 3 {
+                        return Err("a path needs three points at least".into());
+                    }
+                    masks::path_params(&corners)
+                } else {
+                    masks::placed_shape(module, self.visible().ok_or("no image is open")?)
+                };
+                for (k, v) in params.iter() {
+                    p.set(k, v.clone());
+                }
+                let name = self.add_shape(store, module, &p)?;
+                Ok(json!({ "shape": name }))
+            }
+            Command::Close => {
+                if masks::tool(store) != "path" {
+                    return Err("no path is being drawn".into());
+                }
+                let corners = masks::draft(store);
+                if corners.len() < 3 {
+                    return Err("a path needs three points at least".into());
+                }
+                let name = self.add_shape(store, "mask_path", &masks::path_params(&corners))?;
+                stop(store);
+                Ok(json!({ "shape": name }))
+            }
+            Command::Cancel => {
+                stop(store);
+                Ok(json!({}))
+            }
+            Command::PointAdd { at } => {
+                let m = self.path(store)?;
+                let (points, n) = masks::inserted(&m.params, at)?;
+                let label = format!("add a point to {}", m.node);
+                Self::write_step(
+                    store,
+                    &label,
+                    &origin,
+                    &m.node,
+                    vec![("points".into(), points)],
+                )?;
+                write(store, masks::POINT, Value::Int(n as i64), None);
+                Ok(json!({ "point": n }))
+            }
+            Command::PointRemove { point } => {
+                let m = self.path(store)?;
+                let n = point
+                    .or_else(|| masks::point(store))
+                    .ok_or("no path point is selected")?;
+                let points = masks::removed(&m.params, n)?;
+                let label = format!("remove a point of {}", m.node);
+                Self::write_step(
+                    store,
+                    &label,
+                    &origin,
+                    &m.node,
+                    vec![("points".into(), points)],
+                )?;
+                write(store, masks::POINT, Value::Int(-1), None);
+                Ok(json!({}))
+            }
+            Command::PointSmooth { point, smooth } => {
+                let m = self.path(store)?;
+                let n = point
+                    .or_else(|| masks::point(store))
+                    .ok_or("no path point is selected")?;
+                let points = masks::smoothed(&m.params, n, smooth)?;
+                let what = if smooth { "smooth" } else { "sharpen" };
+                let label = format!("{what} a point of {}", m.node);
+                Self::write_step(
+                    store,
+                    &label,
+                    &origin,
+                    &m.node,
+                    vec![("points".into(), points)],
+                )?;
+                Ok(json!({}))
+            }
+            Command::Move { shape, handle, to } => {
+                let m = self.shape(store, shape.as_deref())?;
+                let writes = masks::drag_writes(&m.module, &handle, &m.params, to)?;
+                let label = format!("drag {} {}", m.node, handle.split('.').next().unwrap_or(""));
+                Self::write_step(store, &label, &origin, &m.node, writes)?;
+                Ok(json!({}))
+            }
+        }
     }
 
     /// Brings the shown graph up to the store's node values; a change
@@ -333,11 +572,21 @@ impl Viewport {
     pub fn ui(&mut self, ui: &mut Ui, store: &Mutex<Store>) {
         let (mut view, compare) = {
             let store = store.lock().unwrap_or_else(PoisonError::into_inner);
+            let (modifiers, pointer) = ui.input(|i| (i.modifiers, i.pointer.hover_pos()));
+            self.masks.hook(self.state.hooks_mut());
+            self.masks.prepare(
+                self.edited.as_ref().map(|e| &e.graph),
+                &store,
+                self.state.mapping().as_ref(),
+                modifiers,
+                pointer,
+            );
             (view_of(&store), compare_of(&store))
         };
         let out = egui_pop::viewport::Viewport::new("helios.viewport")
             .source(&self.after)
             .before(&self.before)
+            .overlays(self.masks.overlays())
             .compare(compare)
             .readout(true)
             .label("Image")
@@ -352,6 +601,27 @@ impl Viewport {
         }
         self.readout = out.readout;
         let mut store = store.lock().unwrap_or_else(PoisonError::into_inner);
+        let now = ui.input(|i| i.time);
+        self.masks.signals(&out.signals, &mut store, now);
+        if let Some(m) = out.mapping {
+            if out.response.clicked()
+                && !self.masks.dragging()
+                && let Some(pos) = out.response.interact_pointer_pos()
+                && self.masks.click(pos, &m, &mut store).is_some()
+                && let Err(e) = self.mask(crate::masks::Command::Close, Origin::User, &mut store)
+            {
+                eprintln!("helios-gui: masks: {e}");
+            }
+            if let Some(at) = self.masks.take_double()
+                && let Err(e) = self.mask(
+                    crate::masks::Command::PointAdd { at },
+                    Origin::User,
+                    &mut store,
+                )
+            {
+                eprintln!("helios-gui: masks: {e}");
+            }
+        }
         for signal in out.signals {
             match signal {
                 Signal::View { view, phase, .. } => match phase {

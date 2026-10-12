@@ -2,7 +2,8 @@
 //! workspace (a directory, the current one by default) in a window; with a
 //! vault, its images fill the library, and what the user rates or labels
 //! there is written back; with an image, the viewport shows it through an
-//! exposure node whose parameters are values (`node/exposure/*`); with
+//! exposure node whose parameters are values (`node/exposure/*`), applied
+//! through a mask whose shapes the viewport draws (`node/mask/*`); with
 //! both, the image is imported into the vault, opens with its saved edit,
 //! and each edit step is saved there as a version.
 //! `--snapshot <target> <file.png>` draws it offscreen instead and saves a
@@ -91,7 +92,31 @@ fn image_graph(path: &Path) -> Result<(helios_core::Graph, helios_core::NodeId),
         .map_err(|e| e.to_string())?;
     g.connect(src, "image", exp, "input")
         .map_err(|e| e.to_string())?;
-    Ok((g, exp))
+    // The exposure through a mask the viewport draws in: with no shape
+    // yet the mask is 1 everywhere, so the exposure applies fully.
+    let mask = g
+        .add_module(
+            "mask",
+            helios_core::ModuleRef::new(helios_module_masks::MaskCombine),
+            &helios_core::Params::new(),
+        )
+        .map_err(|e| e.to_string())?;
+    let blend = g
+        .add_module(
+            "blend",
+            helios_core::ModuleRef::new(helios_module_masks::MaskBlend),
+            &helios_core::Params::new(),
+        )
+        .map_err(|e| e.to_string())?;
+    for (from, out, port) in [
+        (src, "image", "input"),
+        (exp, "output", "processed"),
+        (mask, "mask", "mask"),
+    ] {
+        g.connect(from, out, blend, port)
+            .map_err(|e| e.to_string())?;
+    }
+    Ok((g, blend))
 }
 
 struct App {
