@@ -18,7 +18,8 @@
 //! - Every change is announced on the bus (`param.changed`: path, old, new,
 //!   origin, sequence); a write equal to the value changes nothing and
 //!   announces nothing, so a change never loops back.
-//! - Undo: one step per gesture or group, else one per write.
+//! - Undo: one step per gesture or group, else one per write; a cancelled
+//!   gesture puts its values back and is no step.
 
 mod commands;
 mod graph;
@@ -831,6 +832,31 @@ impl Store {
                 changes: g.changes,
             });
         }
+    }
+
+    /// Cancels a gesture or a group (Escape during a drag): every value it
+    /// changed is put back as it was before it began, announced like any
+    /// write, and nothing becomes an undo step. Returns how many values
+    /// were put back.
+    pub fn cancel(&mut self, id: GestureId) -> usize {
+        let Some(g) = self.gestures.remove(&id) else {
+            return 0;
+        };
+        // The first old value of each path is what it was before.
+        let mut before: Vec<(String, Value)> = Vec::new();
+        for (path, old, _) in g.changes {
+            if !before.iter().any(|(p, _)| *p == path) {
+                before.push((path, old));
+            }
+        }
+        let mut n = 0;
+        for (path, value) in before {
+            if self.entries.get(&path).is_some_and(|e| e.value != value) {
+                self.write(&path, value, &g.origin);
+                n += 1;
+            }
+        }
+        n
     }
 
     /// The undo steps, oldest first.

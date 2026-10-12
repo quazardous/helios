@@ -251,6 +251,40 @@ fn a_gesture_or_a_group_is_one_undo_step_and_a_write_another() {
     assert_eq!(ev(&store), 1.0);
 }
 
+#[test]
+fn a_cancelled_gesture_puts_its_values_back_and_is_no_undo_step() {
+    let (_, _, mut store, bus) = exposure();
+    let path = "node/exposure/exposure";
+    store
+        .set(Set::new(path, Change::To(Value::Float(0.5)), Origin::User))
+        .unwrap();
+    let committed = store.committed();
+    let rx = bus.subscribe();
+    let drag = store.begin_gesture(Origin::User, "drag exposure");
+    for v in [0.8, 1.2] {
+        store
+            .set(Set::new(path, Change::To(Value::Float(v)), Origin::User).gesture(drag))
+            .unwrap();
+    }
+    assert_eq!(store.cancel(drag), 1);
+    assert_eq!(ev(&store), 0.5);
+    assert_eq!(store.committed(), committed);
+    assert_eq!(store.undo_steps().len(), 1);
+    assert!(!store.uncommitted());
+    // The value put back is announced, so the graph follows.
+    let news: Vec<_> = rx
+        .try_iter()
+        .filter(|e| e.kind == "param.changed")
+        .collect();
+    assert_eq!(news.len(), 3, "{news:?}");
+    assert!(store.take_dirty().contains(&path.to_string()));
+    // The gesture is gone: an agent writes again.
+    store
+        .set(Set::new(path, Change::To(Value::Float(2.0)), agent()))
+        .unwrap();
+    assert_eq!(store.cancel(drag), 0);
+}
+
 /// What a host that saves the edit watches: a committed step is a write
 /// outside a gesture, a gesture's end, an undo or a redo; the writes of a
 /// gesture going on are not committed yet.
