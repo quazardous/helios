@@ -289,8 +289,12 @@ helios-gui --test dialogs pictures`.
 Parameter widgets are generated from value descriptors and bound to the
 value store (see [widgets.md](widgets.md)); a widget never holds its
 value. A number is a slider over its soft range: a drag is one gesture
-(one undo step; an agent's write meanwhile is refused), the wheel and the
-arrows step (Shift coarse), a double click resets, Enter types a value
+(one undo step; an agent's write meanwhile is refused), the arrows step
+(Shift coarse), a double click resets. The wheel
+scrolls the panel: a slider takes the wheel only when it has focus or
+while a modifier is held, so scrolling past sliders never changes a value
+(decided 2026-10-12, after darktable's most complained-about default).
+Enter types a value
 (units and either decimal mark accepted; past the soft range it is forced
 up to the hard one, and says so). A dot on the left marks a value changed
 from its default (click: reset); a diamond on the right, a value just
