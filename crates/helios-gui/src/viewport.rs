@@ -19,7 +19,8 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
+use std::time::{Duration, Instant};
 
 use eframe::egui_wgpu::{self, wgpu};
 use egui::{Rect, Sense, Ui};
@@ -60,6 +61,51 @@ pub struct Stats {
     pub tiles_reused: AtomicU64,
     /// Exact renders given up for a newer view.
     pub cancelled: AtomicU64,
+    /// Requests sent to the render thread, and requests it is done with.
+    requests: Mutex<Requests>,
+    idle: Condvar,
+}
+
+#[derive(Default, Debug)]
+struct Requests {
+    sent: u64,
+    answered: u64,
+}
+
+impl Stats {
+    fn sent(&self) {
+        self.requests.lock().expect("viewport requests").sent += 1;
+    }
+
+    /// `n` requests consumed: rendered (the result sent first), superseded
+    /// by a newer one, or cancelled.
+    fn answered(&self, n: u64) {
+        if n == 0 {
+            return;
+        }
+        self.requests.lock().expect("viewport requests").answered += n;
+        self.idle.notify_all();
+    }
+
+    /// Waits until the render thread is done with every request sent so
+    /// far, their results waiting for the next frame; false when `timeout`
+    /// passes first.
+    pub fn wait_idle(&self, timeout: Duration) -> bool {
+        let deadline = Instant::now() + timeout;
+        let mut requests = self.requests.lock().expect("viewport requests");
+        while requests.answered < requests.sent {
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return false;
+            }
+            requests = self
+                .idle
+                .wait_timeout(requests, left)
+                .expect("viewport requests")
+                .0;
+        }
+        true
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -119,28 +165,32 @@ fn render_thread(
                 Err(TryRecvError::Disconnected) => return,
             }
         }
+        // The older ones are superseded: answered at once.
         let newest = |kind: Kind, w: &mut Vec<Request>| {
             let i = w.iter().rposition(|r| r.kind == kind)?;
             let r = w.remove(i);
+            let before = w.len();
             w.retain(|x| x.kind != kind);
+            stats.answered((before - w.len()) as u64);
             Some(r)
         };
         let proxy = newest(Kind::Proxy, &mut waiting);
         let exact = newest(Kind::Exact, &mut waiting);
-        if let Some(r) = proxy
-            && let Ok(image) = engine.render_at(&r.graph, r.node, &r.port, r.region, r.scale)
-        {
-            generation += 1;
-            let _ = results.send(Layer {
-                version: r.version,
-                kind: Kind::Proxy,
-                scale: r.scale,
-                image,
-                generation,
-            });
-            // Counted once sent: whoever reads the count finds the layer.
-            stats.proxies.fetch_add(1, Ordering::Relaxed);
-            ctx.request_repaint();
+        if let Some(r) = proxy {
+            if let Ok(image) = engine.render_at(&r.graph, r.node, &r.port, r.region, r.scale) {
+                generation += 1;
+                let _ = results.send(Layer {
+                    version: r.version,
+                    kind: Kind::Proxy,
+                    scale: r.scale,
+                    image,
+                    generation,
+                });
+                // Counted once sent: whoever reads the count finds the layer.
+                stats.proxies.fetch_add(1, Ordering::Relaxed);
+                ctx.request_repaint();
+            }
+            stats.answered(1);
         }
         let Some(r) = exact else { continue };
         tiles.retain(|k, _| k.0 == r.version);
@@ -189,6 +239,7 @@ fn render_thread(
         }
         if cancelled {
             stats.cancelled.fetch_add(1, Ordering::Relaxed);
+            stats.answered(1);
             continue;
         }
         generation += 1;
@@ -200,6 +251,7 @@ fn render_thread(
             generation,
         });
         stats.exacts.fetch_add(1, Ordering::Relaxed);
+        stats.answered(1);
         ctx.request_repaint();
     }
 }
@@ -405,7 +457,9 @@ impl Viewport {
         let (Some(src), Some(rq)) = (&self.source, &self.requests) else {
             return;
         };
-        let _ = rq.send(Request {
+        // Counted before it is sent, so the answer never comes first.
+        self.stats.sent();
+        let sent = rq.send(Request {
             version: self.version,
             graph: src.shared.clone(),
             node: src.node,
@@ -414,6 +468,10 @@ impl Viewport {
             scale,
             region,
         });
+        if sent.is_err() {
+            // The render thread is gone: nothing will answer it.
+            self.stats.answered(1);
+        }
     }
 
     fn write(store: &mut Store, path: &str, value: Value, gesture: Option<GestureId>) {

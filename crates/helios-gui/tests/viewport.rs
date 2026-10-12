@@ -40,15 +40,22 @@ fn shell() -> Shell {
     shell
 }
 
-/// Steps frames until `done`, waiting for the render thread.
+/// Steps frames until `done`, waiting after each for the render thread to
+/// answer what the frame asked. A frame is a quarter of a second of the
+/// harness's clock, so the view settles within a few.
 fn until(h: &mut egui_kittest::Harness<'_, Shell>, done: impl Fn(&Shell) -> bool) {
-    for _ in 0..400 {
+    for _ in 0..40 {
+        h.step();
+        let stats = h.state().viewport_stats();
+        // Generous: only a hung render thread reaches it.
+        assert!(
+            stats.wait_idle(Duration::from_mins(1)),
+            "the render thread never answered: {stats:?}"
+        );
         h.step();
         if done(h.state()) {
-            h.step();
             return;
         }
-        std::thread::sleep(Duration::from_millis(10));
     }
     panic!(
         "the viewport never got there: {:?}",
