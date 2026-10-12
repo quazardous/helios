@@ -15,7 +15,9 @@ minimal image-first layout stays available for small screens.
 **One window is one workspace (decided 2026-10-11).** A window holds one
 project; another project opens another window. A detached panel opens an
 auxiliary window of the same workspace: closing it docks the panel back,
-closing the workspace closes them all. Tabs live inside editor groups
+closing the workspace closes them all. Each window follows the scale of
+the screen it is on (a detached image on a 2x screen beside a main
+window at 1x: both crisp, `tests/scale.rs`). Tabs live inside editor groups
 (several graphs or images side by side), never at the project level.
 
 The shell is a framework from the start:

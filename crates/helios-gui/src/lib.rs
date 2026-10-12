@@ -15,6 +15,7 @@ pub mod shell;
 pub mod snapshot;
 pub mod theme;
 pub mod viewport;
+mod windows;
 mod workbench;
 
 pub use shell::{Shell, headless, name_rect};

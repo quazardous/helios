@@ -291,7 +291,11 @@ device's texture limit). What follows is kept as the record of why.
   shows 80 %.
 - `shell.pixels_per_point` is copied from the main window's context at the
   start of `Shell::ui`. If the viewport panel is detached into an auxiliary
-  window on another monitor, "100 %" uses the wrong monitor's scale. (The
+  window on another monitor, "100 %" uses the wrong monitor's scale.
+  (Fixed since: the zoom is egui-pop's, in physical pixels of the window
+  that draws it; `tests/scale.rs` checks 100 % in a detached 2x window.
+  `shell.pixels_per_point` is the main window's and only crops its
+  pictures, which refuse a target drawn in a detached window.) (The
   viewport's own render requests use `ctx.pixels_per_point()` of the window
   that draws it, which is right; so do `Paint::prepare` and the shader,
   which work in physical pixels through `ScreenDescriptor`.)
@@ -409,7 +413,14 @@ grip 5 pt inside the client area, `ViewportCommand::StartDrag` and
     atlas below a fill limit.
 - **Mixed DPI**: kittest embeds immediate viewports as windows inside the
   root (`embed_viewports` is true), so two windows at two scales cannot be
-  rendered there. Cover it in two layers:
+  rendered there by kittest alone. Since 2026-10-12,
+  `helios_gui::headless::harness_with_windows` turns embedding off and
+  runs each detached panel's window in a pass of its own, as eframe does,
+  on a screen of the scale the test sets (`Windows::set_scale`), and
+  renders it on the harness's device (`Windows::render`);
+  `tests/scale.rs` checks a viewport detached to a 2x screen beside a
+  main window at 1x (scales, fit, 100 %, whole-pixel strokes, pictures).
+  Cover the rest in layers:
   - unit level: the viewport and frame code takes ppp as an argument;
     tests call it at two scales and assert tile requests, "100 %" and grips;
   - a single-window scenario: Helios at 1x, open an image at 100 %, switch
@@ -433,7 +444,8 @@ grip 5 pt inside the client area, `ViewportCommand::StartDrag` and
 | Gap | Upstream | Workaround |
 |---|---|---|
 | kittest cannot change the native scale mid-run (`set_pixels_per_point` changes zoom) | egui_kittest, issue to file | `set_native_scale` through `input_mut()` |
-| kittest renders one viewport only | egui_kittest | unit tests with ppp as input, wbox runs |
+| kittest renders one viewport only | egui_kittest | `harness_with_windows` (Helios; for egui-pop's test kit once settled), wbox runs |
+| the viewport overlay's strokes (selected shape, handles: 1.5 and 3 pt) are not snapped | egui-pop | none yet: blurred at 1.25 and 1.5, the handles' outline at 1 |
 | `zoom_with_keyboard` on by default, keys collide with content zoom | config, not a bug | turn off at install, egui-pop commands |
 | no helper to snap stroke widths at fractional ppp | egui, could be proposed | `egui_pop_core::scale::stroke` |
 | no `WM_NCHITTEST` hook (Snap Layouts) | winit, issue to find or file | native frame on Windows, or subclassing in Helios |

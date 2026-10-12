@@ -229,8 +229,16 @@ Statements marked [guess] are inference, not read in a thread.
   https://github.com/darktable-org/darktable/issues/20297 ,
   https://github.com/darktable-org/darktable/issues/10839 ,
   https://github.com/darktable-org/darktable/pull/11179
-- **Helios exposure: at risk.** Auxiliary windows on other screens are a
-  decided feature, and the viewport asks for tiles.
+- **Helios exposure: mostly handled (2026-10-12).** Auxiliary windows on
+  other screens are a decided feature, and the viewport asks for tiles.
+  Each window reads its own scale where it paints (egui-pop's `Scale`),
+  the zoom counts physical pixels of the window that shows the image, and
+  a headless test (`tests/scale.rs`, `harness_with_windows`) runs the
+  viewport detached on a 2x screen beside a 1x main window: the whole
+  image fits, 100 % is one image pixel per physical pixel, strokes are
+  whole pixels in both. Left: egui-pop's handle kit draws 1.5 point
+  outlines at every scale (blurred at 1, 1.25 and 1.5), and the
+  fractional-scale runs of a real compositor (wbox) are not automated.
 - **Recommendation.** Read `pixels_per_point` per viewport every frame, and
   request tiles in physical pixels of the window that shows them. Define
   100% once: one image pixel per physical screen pixel. Label it in the

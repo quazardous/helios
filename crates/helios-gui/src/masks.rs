@@ -1083,6 +1083,9 @@ fn faded(c: Color32, a: f32) -> Color32 {
 fn paint_faint(painter: &Painter, m: &Mapping, f: &Faint) {
     let t = ViewportTokens::of(painter.ctx());
     let s = |p: &[f64; 2]| m.image_to_screen(*p);
+    // Widths in whole pixels of the window drawn in, so lines stay crisp
+    // at every scale (egui-pop's `scale::snap`).
+    let w = |points: f32| egui_pop::core::scale::snap(points, m.ppp);
     for (o, selected) in &f.shapes {
         let (edge, closed, feather) = (&o.edge, &o.closed, &o.feather);
         let alpha = if *selected { 0.9 } else { 0.45 };
@@ -1091,8 +1094,8 @@ fn paint_faint(painter: &Painter, m: &Mapping, f: &Faint) {
             // Over a dark line, as egui-pop draws its shapes, so it reads
             // on any image.
             for stroke in [
-                Stroke::new(2.5, faded(t.handle_outline, alpha)),
-                Stroke::new(1.0, faded(t.guide, alpha)),
+                Stroke::new(w(2.5), faded(t.handle_outline, alpha)),
+                Stroke::new(w(1.0), faded(t.guide, alpha)),
             ] {
                 if *closed {
                     painter.add(egui::Shape::closed_line(pts.clone(), stroke));
@@ -1104,7 +1107,7 @@ fn paint_faint(painter: &Painter, m: &Mapping, f: &Faint) {
         if feather.is_empty() {
             continue;
         }
-        let stroke = Stroke::new(1.0, faded(t.guide, alpha));
+        let stroke = Stroke::new(w(1.0), faded(t.guide, alpha));
         if *closed {
             let pts: Vec<Pos2> = feather.iter().map(s).collect();
             dashed(painter, &pts, true, stroke);
@@ -1117,16 +1120,16 @@ fn paint_faint(painter: &Painter, m: &Mapping, f: &Faint) {
         }
     }
     for (corner, handle) in &f.controls {
-        painter.line_segment([s(corner), s(handle)], Stroke::new(1.0, t.guide));
+        painter.line_segment([s(corner), s(handle)], Stroke::new(w(1.0), t.guide));
     }
     if !f.draft.is_empty() {
         let mut pts: Vec<Pos2> = f.draft.iter().map(s).collect();
-        let stroke = Stroke::new(1.5, t.guide);
+        let stroke = Stroke::new(w(1.5), t.guide);
         painter.add(egui::Shape::line(pts.clone(), stroke));
         if let Some(p) = f.pointer {
             pts.push(p);
             let n = pts.len();
-            dashed(painter, &pts[n - 2..], false, Stroke::new(1.0, t.guide));
+            dashed(painter, &pts[n - 2..], false, Stroke::new(w(1.0), t.guide));
         }
         for (i, p) in f.draft.iter().enumerate() {
             let kind = if i == 0 {

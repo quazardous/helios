@@ -138,11 +138,15 @@ pub fn wgpu_setup(gpu: &helios_gpu::Gpu) -> eframe::egui_wgpu::WgpuSetup {
 }
 
 /// Names a widget's rectangle for this frame, so it can be pictured by
-/// that name (`gui.snapshot {target: name}`).
+/// that name (`gui.snapshot {target: name}`). The rectangle is in the
+/// points of the window it is drawn in, which is kept with it.
 pub fn name_rect(ctx: &Egui, name: &str, rect: Rect) {
+    let window = ctx.viewport_id();
     ctx.data_mut(|d| {
-        d.get_temp_mut_or_default::<BTreeMap<String, Rect>>(Id::new("helios.named"))
-            .insert(name.to_string(), rect);
+        d.get_temp_mut_or_default::<BTreeMap<String, (Rect, egui::ViewportId)>>(Id::new(
+            "helios.named",
+        ))
+        .insert(name.to_string(), (rect, window));
     });
 }
 
@@ -234,6 +238,8 @@ pub struct Shell {
     seen: u64,
     queue: Queue,
     rects: BTreeMap<String, Rect>,
+    /// The window of each named rectangle drawn outside the main one.
+    rect_windows: BTreeMap<String, egui::ViewportId>,
     pixels_per_point: f32,
     /// The screen's own scale, as of the last frame (none before it).
     native_scale: Option<f32>,
@@ -437,6 +443,7 @@ impl Shell {
             seen: 0,
             queue,
             rects: BTreeMap::new(),
+            rect_windows: BTreeMap::new(),
             pixels_per_point: 1.0,
             native_scale: None,
             shots: VecDeque::new(),
@@ -983,6 +990,17 @@ impl Shell {
             .ok_or_else(|| format!("nothing named `{target}` is shown"))
     }
 
+    /// The window a target was drawn in at the last frame: the main one
+    /// (`ViewportId::ROOT`) unless its panel is detached.
+    pub fn target_window(&self, target: &str) -> egui::ViewportId {
+        self.rect_windows
+            .get(target)
+            .copied()
+            .unwrap_or(egui::ViewportId::ROOT)
+    }
+
+    /// The main window's physical pixels per point (a detached panel's
+    /// window has its own: `ui.ctx().pixels_per_point()` where it draws).
     pub fn pixels_per_point(&self) -> f32 {
         self.pixels_per_point
     }
@@ -2246,6 +2264,18 @@ impl Shell {
         }
     }
 
+    /// A target's rectangle in the main window's screenshot: a target in
+    /// a detached panel's window is not in it (that window has a scale and
+    /// pixels of its own).
+    fn pictured_rect(&self, target: &str) -> Result<Rect, String> {
+        if self.target_window(target) != egui::ViewportId::ROOT {
+            return Err(format!(
+                "`{target}` is in a detached window, which pictures do not reach yet"
+            ));
+        }
+        self.target_rect(target)
+    }
+
     fn on_screenshot(&mut self, image: &egui::ColorImage) {
         let full = snapshot::from_color_image(image);
         let Some(shot) = self.shots.pop_front() else {
@@ -2254,7 +2284,7 @@ impl Shell {
         match shot {
             Shot::Save { target, path } => {
                 let note = self
-                    .target_rect(&target)
+                    .pictured_rect(&target)
                     .map(|r| snapshot::crop(&full, r, self.pixels_per_point))
                     .and_then(|img| snapshot::save(&img, &path))
                     .map_or_else(
@@ -2264,12 +2294,13 @@ impl Shell {
                 self.note(note);
             }
             Shot::Frame => {
-                if let Some((target, rec)) = &mut self.recording {
-                    let pushed = self
-                        .rects
-                        .get(target.as_str())
-                        .ok_or_else(|| format!("nothing named `{target}` is shown"))
-                        .map(|r| snapshot::crop(&full, *r, self.pixels_per_point))
+                let target = self.recording.as_ref().map(|(t, _)| t.clone());
+                if let Some(target) = target
+                    && let rect = self.pictured_rect(&target)
+                    && let Some((_, rec)) = &mut self.recording
+                {
+                    let pushed = rect
+                        .map(|r| snapshot::crop(&full, r, self.pixels_per_point))
                         .and_then(|img| rec.push(&img));
                     if let Err(e) = pushed {
                         self.warn(format!("recording stopped: {e}"));
@@ -2344,7 +2375,10 @@ impl Shell {
         self.set_context(&ctx);
 
         self.rects.clear();
-        ctx.data_mut(|d| d.remove::<BTreeMap<String, Rect>>(Id::new("helios.named")));
+        self.rect_windows.clear();
+        ctx.data_mut(|d| {
+            d.remove::<BTreeMap<String, (Rect, egui::ViewportId)>>(Id::new("helios.named"));
+        });
         self.rects.insert("window".into(), ctx.content_rect());
 
         self.status_bar(ui);
@@ -2353,8 +2387,15 @@ impl Shell {
         self.workbench_refusals();
         self.menus_ui(&ctx);
 
-        let named = ctx.data(|d| d.get_temp::<BTreeMap<String, Rect>>(Id::new("helios.named")));
-        self.rects.extend(named.unwrap_or_default());
+        let named = ctx.data(|d| {
+            d.get_temp::<BTreeMap<String, (Rect, egui::ViewportId)>>(Id::new("helios.named"))
+        });
+        for (name, (rect, window)) in named.unwrap_or_default() {
+            if window != egui::ViewportId::ROOT {
+                self.rect_windows.insert(name.clone(), window);
+            }
+            self.rects.insert(name, rect);
+        }
         self.overlay_rects();
 
         if self.recording.is_some() {
@@ -2567,6 +2608,8 @@ pub fn config_dir() -> PathBuf {
 pub mod headless {
     use std::sync::{Arc, OnceLock};
 
+    pub use crate::windows::{Drawn, Windows, harness_with_windows};
+
     use super::{Recorder, RgbaImage, Shell, snapshot};
     use eframe::egui_wgpu::{RenderState, Renderer, RendererOptions, wgpu};
     use egui::mutex::RwLock;
@@ -2623,7 +2666,17 @@ pub mod headless {
 
     /// As [`harness`], on a screen of this native scale (physical pixels
     /// per point; egui-pop's test kit runs at `egui_pop_test::SCALES`).
-    pub fn harness_at<'a>(mut shell: Shell, size: egui::Vec2, scale: f32) -> Harness<'a, Shell> {
+    pub fn harness_at<'a>(shell: Shell, size: egui::Vec2, scale: f32) -> Harness<'a, Shell> {
+        harness_parts(shell, size, scale).0
+    }
+
+    /// As [`harness_at`], with the render state the harness draws with
+    /// (its renderer holds the textures and the viewport's GPU objects).
+    pub(crate) fn harness_parts<'a>(
+        mut shell: Shell,
+        size: egui::Vec2,
+        scale: f32,
+    ) -> (Harness<'a, Shell>, RenderState) {
         // The shared device, with a renderer of our own: the textures and
         // the viewport's GPU objects belong to this harness alone.
         let mut rs = device().clone();
@@ -2638,7 +2691,9 @@ pub mod headless {
         let mut h = Harness::builder()
             .with_size(size)
             .with_pixels_per_point(scale)
-            .renderer(egui_kittest::wgpu::WgpuTestRenderer::from_render_state(rs))
+            .renderer(egui_kittest::wgpu::WgpuTestRenderer::from_render_state(
+                rs.clone(),
+            ))
             .build_ui_state(|ui, shell: &mut Shell| shell.ui(ui), shell);
         // The window's title, as a window manager reports it: the frame's
         // title bar shows it.
@@ -2647,7 +2702,7 @@ pub mod headless {
             .entry(egui::ViewportId::ROOT)
             .or_default()
             .title = Some(title);
-        h
+        (h, rs)
     }
 
     /// A picture of a target as drawn now.
