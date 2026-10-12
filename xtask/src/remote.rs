@@ -474,6 +474,12 @@ fn summary(req: &Request, id: &str, code: u8, took: Duration, dir: Option<&Path>
     );
     let Some(dir) = dir else { return };
     println!("bench-remote: results in {}", dir.display());
+    if let Some(warning) = std::fs::read_to_string(dir.join("conditions.json"))
+        .ok()
+        .and_then(|text| conditions_warning(&text))
+    {
+        println!("bench-remote: {warning}");
+    }
     let mut files: Vec<String> = std::fs::read_dir(dir.join("out"))
         .map(|rd| {
             rd.flatten()
@@ -485,6 +491,42 @@ fn summary(req: &Request, id: &str, code: u8, took: Duration, dir: Option<&Path>
     if !files.is_empty() {
         println!("bench-remote: out/ has {}", files.join(", "));
     }
+}
+
+/// The warning to print when the box says a run's conditions were not
+/// comparable (throttled, another tenant, ...): its timings must not be
+/// compared with other runs. `None` for a comparable run or an unreadable file.
+fn conditions_warning(json: &str) -> Option<String> {
+    let c: serde_json::Value = serde_json::from_str(json).ok()?;
+    if c.get("comparable")?.as_bool()? {
+        return None;
+    }
+    let mut why: Vec<String> = c
+        .get("flags")
+        .and_then(|f| f.as_array())
+        .map(|f| {
+            f.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+    if let Some(n) = c.get("throttle_events").and_then(serde_json::Value::as_u64) {
+        why.push(format!("{n} throttle events"));
+    }
+    if let Some(t) = c
+        .pointer("/cpu_temp/max")
+        .and_then(serde_json::Value::as_f64)
+    {
+        why.push(format!("cpu {t:.0} °C max"));
+    }
+    Some(format!(
+        "NOT comparable ({}): do not compare this run's timings",
+        if why.is_empty() {
+            "the box says so".into()
+        } else {
+            why.join(", ")
+        }
+    ))
 }
 
 pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
@@ -576,6 +618,21 @@ fn remote(root: &Path, req: &mut Request) -> Result<ExitCode, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_run_on_a_throttled_box_is_flagged() {
+        assert_eq!(conditions_warning(r#"{"comparable": true}"#), None);
+        assert_eq!(conditions_warning("not json"), None);
+        let w = conditions_warning(
+            r#"{"comparable": false, "flags": ["throttled"], "throttle_events": 737,
+                "cpu_temp": {"max": 96.0}}"#,
+        )
+        .expect("a warning");
+        assert!(
+            w.contains("throttled") && w.contains("737") && w.contains("96 °C"),
+            "{w}"
+        );
+    }
 
     #[test]
     fn each_checkout_pushes_under_its_own_name() {
