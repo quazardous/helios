@@ -1,8 +1,9 @@
 //! Helios as egui-pop plugins: its commands declared (run by the host,
 //! see `host`), with their keys and menu entries; the system menu's lists
 //! (profiles, recent workspaces), filled by list providers when the menu
-//! opens; undo and redo held while a change is in progress; and the
-//! areas, a block of egui-pop's main zone.
+//! opens; undo and redo held while a change is in progress; the
+//! window's frame opening Helios's system menu; and the areas, a block
+//! of egui-pop's main zone.
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
@@ -11,7 +12,8 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use egui_pop::api::app::{STEP_REDO, STEP_UNDO};
-use egui_pop::api::menus::ListItem;
+use egui_pop::api::frame::{FramePlugin, STEP_SYSTEM_MENU};
+use egui_pop::api::menus::{ListItem, popup_at};
 use egui_pop::api::steps::Before;
 use egui_pop::api::zones::{self, Block};
 use egui_pop::api::{Ctx, Plugin, PluginError};
@@ -36,6 +38,7 @@ pub const COMMANDS: PluginId = PluginId::from_static("helios.commands");
 pub const LISTS: PluginId = PluginId::from_static("helios.lists");
 pub const WORKBENCH: PluginId = PluginId::from_static("helios.workbench");
 pub const HISTORY: PluginId = PluginId::from_static("helios.history");
+pub const FRAME: PluginId = PluginId::from_static("helios.frame");
 
 /// What Helios declares beside its commands' registry entries: default
 /// keys (with their `when`), menu entries, ticks, commands kept out of the
@@ -211,6 +214,37 @@ impl Plugin for History {
                 }
             });
         }
+        Ok(())
+    }
+}
+
+/// The window's frame is egui-pop's (`FramePlugin`): its title bar, its
+/// edges and the steps of its buttons. Its system menu (the bar's menu
+/// button, a right click on the caption, `Alt+Space`) is Helios's,
+/// opened as a popup where the frame asks: the `frame.system_menu` step
+/// is replaced.
+pub struct Frame;
+
+impl Plugin for Frame {
+    fn id(&self) -> PluginId {
+        FRAME
+    }
+
+    fn title(&self) -> String {
+        "Helios frame".into()
+    }
+
+    fn requires(&self) -> Vec<PluginId> {
+        vec![FramePlugin::default().id()]
+    }
+
+    fn connect(&mut self, ctx: &mut Ctx<'_>) -> Result<(), PluginError> {
+        ctx.replace(STEP_SYSTEM_MENU, |app, args| {
+            let x = args["x"].as_f64().unwrap_or(0.0) as f32;
+            let y = args["y"].as_f64().unwrap_or(0.0) as f32;
+            let open = popup_at(app, &SYSTEM, egui::pos2(x, y));
+            Ok(json!({ "open": open, "menu": SYSTEM }))
+        });
         Ok(())
     }
 }

@@ -237,10 +237,17 @@ Helios declares into it:
   position, maximized, full screen with `F11` and a way out at the top
   edge), kept between runs with the interface's other settings (focus
   mode, the user's keys) under `~/.config/helios/ui/`;
+- **the window's frame** (egui-pop's `FramePlugin`, 2026-10-12): the
+  title bar (a menu button, the window's title, the minimize, maximize
+  and close buttons) and resize edges never thinner than 6 physical
+  pixels, drawn by Helios on the desktop; the `window.frame` setting
+  gives the system's frame back. Its buttons are egui-pop's
+  `frame.*` steps, which Helios's `window.minimize`, `window.maximize`
+  and `window.close` commands run too;
 - **keys**: egui-pop's keymap resolves them (layers, `when` clauses, a
   text field keeping plain keys), with the traces its debug bridge shows.
 
-Helios keeps what is its own: its title bar and status bar, its areas
+Helios keeps what is its own: its status bar, its areas
 (docked panels, auxiliary windows, tabs dragged between areas, see
 "Panels"), drawn as a block of egui-pop's main zone until egui-pop's
 workbench takes them over, and its panels.
@@ -305,20 +312,21 @@ recorded.
 
   ![A toast](gui/toast-helios-dark.png)
 
-- **Window**: auxiliary windows share the frame Helios draws (title bar
-  and buttons), titled "`<panel>` — Helios".
+- **Window**: auxiliary windows share the window's frame (title bar
+  and buttons) when Helios draws it, titled "`<panel>` — Helios".
 
 **Menus are declared** (egui-pop's menus): a menu is an id to which the
 shell, a panel or a plugin contributes items, each a command (with
 arguments and a label of its own), or a submenu. Items sit in ordered
 groups, separated when shown; a `when` clause hides or greys an item, a
 `checked` clause ticks it. `Shell::menu_items(id)` gives a menu as data,
-as it would open now. The logo at the top left opens the `helios.system`
-menu (Alt+Space too): open a workspace, recent workspaces, profiles,
-themes (the one in use ticked), keyboard shortcuts, about, quit (the
-window has its buttons). egui-pop's menus have no list filled when a menu
-opens: the profiles and recent workspaces are declared again before the
-system menu shows.
+as it would open now. The frame's menu button at the top left opens the
+`helios.system` menu, as a right click on the title bar and Alt+Space
+do: Helios replaces the frame's `frame.system_menu` step with a popup
+of its own menu. It holds: open a workspace, recent workspaces,
+profiles, themes (the one in use ticked), keyboard shortcuts, about,
+quit (the window has its buttons). The profiles and recent workspaces
+are lists filled when the menu opens (egui-pop's list providers).
 
 ![The system menu](gui/system-helios-dark.png)
 

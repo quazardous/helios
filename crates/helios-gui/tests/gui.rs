@@ -146,7 +146,8 @@ fn f11_toggles_full_screen_and_the_frame_has_its_buttons() {
     shell.draw_frame(true);
     let mut h = headless::harness(shell, vec2(1024.0, 700.0));
     h.run();
-    h.get_by_label("photos");
+    // egui-pop's frame, its title the window's.
+    h.get_by_label("photos — Helios");
     // F11 is egui-pop's full screen (its window plugin).
     h.key_press(Key::F11);
     h.run();
@@ -589,6 +590,7 @@ fn helios_s_declarations_sit_cleanly_in_egui_pop() {
         .command(&CommandId::from_static("vault.rate.3"))
         .unwrap();
     assert_eq!(rate.category, "Vault");
-    let keys = app.keys_for(&CommandId::from_static("workbench.systemMenu"));
+    // Alt+Space is the frame's (egui-pop's), which opens Helios's menu.
+    let keys = app.keys_for(&egui_pop::api::frame::CMD_SYSTEM_MENU);
     assert_eq!(keys, ["Alt+Space"]);
 }

@@ -3,11 +3,12 @@
 //!
 //! egui-pop draws what every application shares, from declarations: the
 //! menu bar and menus, the command palette, dialogs, toasts, the settings
-//! window with its shortcuts editor, the window's place, and the keys,
-//! resolved by its keymap. Helios declares its commands there and runs
-//! them on its own kernel (see `host`), draws its title bar and status
-//! bar, and its areas (docked panels and auxiliary windows, see
-//! `workbench`) as a block of egui-pop's main zone.
+//! window with its shortcuts editor, the window's place and frame, and
+//! the keys, resolved by its keymap. Helios declares its commands there
+//! and runs them on its own kernel (see `host`), opens its system menu
+//! from the frame, draws its status bar, and its areas (docked panels and
+//! auxiliary windows, see `workbench`) as a block of egui-pop's main
+//! zone.
 //!
 //! Everything the user can do goes through a command, so a key, the
 //! palette, a menu, a script and an agent reach the same actions.
@@ -21,10 +22,12 @@ use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use egui::{Context as Egui, Event, Id, Rect, Ui};
 use egui_pop::api::app::OverlayKind;
 use egui_pop::api::dialogs::{self, Choose, ChooseOption, DIALOGS, Dialogs};
+use egui_pop::api::frame::{self, FramePlugin, SETTING_FRAME};
 use egui_pop::api::host::{Reply, Resolver};
 use egui_pop::api::settings_window::{SETTINGS_WINDOW, SHORTCUTS};
 use egui_pop::api::toasts::{TOASTS, Toast};
 use egui_pop::api::{App, AppHandle, DefaultPlugins, palette};
+use egui_pop::core::frame::{FrameRequest, HitTable};
 use egui_pop::model::ids::{CommandId, MenuId, OwnerId};
 use egui_pop::model::keymap::Layer;
 use egui_pop::model::menus::{Item, MenuItem as PopItem, Shown, show_items};
@@ -169,9 +172,8 @@ pub struct Shell {
     recording: Option<(String, Recorder)>,
     /// What the shell has to say: command results, layout repairs.
     pub notes: Vec<String>,
+    /// The workspace's name, which the window's title shows.
     title: String,
-    /// The window's frame is drawn by Helios (see `frame`).
-    framed: bool,
     themes: crate::theme::Themes,
     theme: crate::theme::Tokens,
     theme_name: String,
@@ -281,6 +283,14 @@ impl Shell {
             .plugin(plugins::History {
                 values: values.clone(),
             })
+            // The window's frame: Helios's own on the desktop, the
+            // system's elsewhere (tests, pictures, tools) until asked.
+            .plugin(if ui_settings.is_some() {
+                FramePlugin::own()
+            } else {
+                FramePlugin::system()
+            })
+            .plugin(plugins::Frame)
             .plugin(plugins::Areas {
                 workbench: workbench.clone(),
             })
@@ -318,7 +328,6 @@ impl Shell {
             recording: None,
             notes,
             title: String::new(),
-            framed: false,
             theme: crate::theme::resolve(&themes, crate::theme::DEFAULT, &BTreeMap::new()),
             themes,
             theme_name: crate::theme::DEFAULT.into(),
@@ -765,15 +774,38 @@ impl Shell {
         self.themes.add(theme);
     }
 
-    /// The window's title, shown in the frame Helios draws.
+    /// The workspace's name, for the window's title.
     pub fn set_title(&mut self, title: &str) {
         self.title = title.into();
     }
 
+    /// The window's title: the workspace, then Helios. The frame's title
+    /// bar shows it.
+    pub fn window_title(&self) -> String {
+        if self.title.is_empty() {
+            "Helios".into()
+        } else {
+            format!("{} — Helios", self.title)
+        }
+    }
+
     /// Draws the window's frame (title bar, buttons, resize edges) instead
-    /// of the system's; the window is then opened without decorations.
+    /// of the system's, or gives it back: egui-pop's `window.frame`
+    /// setting, which the frame follows from the next frame.
     pub fn draw_frame(&mut self, on: bool) {
-        self.framed = on;
+        use egui_pop::model::values::{Change, Set, Value as PopValue};
+        let path = format!("settings/{SETTING_FRAME}");
+        let choice = if on { "own" } else { "system" };
+        let set = Set::new(
+            &path,
+            Change::To(PopValue::Choice(choice.into())),
+            egui_pop::model::commands::Origin::User,
+        )
+        .untracked();
+        let done = lock(&self.app.handle().store()).set(set).map(|_| ());
+        if let Err(e) = done {
+            self.warn(format!("window frame: {e}"));
+        }
     }
 
     /// The panel that has the focus.
@@ -1258,11 +1290,6 @@ impl Shell {
         );
         drop(registry);
         let mut d = w.declarations.borrow_mut();
-        d.keys.push((
-            "Alt+Space".into(),
-            "workbench.systemMenu".into(),
-            String::new(),
-        ));
         // As in darktable's lighttable, while the library has the focus
         // (egui-pop leaves plain keys to a text field being typed in).
         let library = "focusedPanel == 'helios.vault' || focusedPanel == 'helios.filmstrip'";
@@ -1507,12 +1534,6 @@ impl Shell {
         self.menu = Some((at, items));
     }
 
-    /// Opens the system menu under a rectangle (the logo's).
-    fn open_system_menu(&mut self, under: Rect) {
-        self.menu = None;
-        egui_pop::api::menus::popup_at(self.app.handle(), &SYSTEM, under);
-    }
-
     /// A declared menu as data, as it would open now: each entry's
     /// command, title, keys, whether it applies and whether it is ticked;
     /// submenus nested.
@@ -1659,20 +1680,24 @@ impl Shell {
                 let on = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
                 ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!on));
             }
-            Action::Minimize => ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true)),
+            // The frame's steps, which plugins may veto or replace.
+            Action::Minimize => frame::request(self.app.handle(), ctx, FrameRequest::Minimize),
             Action::Maximize => {
-                let on = ctx.input(|i| i.viewport().maximized.unwrap_or(false));
-                ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!on));
+                frame::request(self.app.handle(), ctx, FrameRequest::ToggleMaximize);
             }
-            Action::Close => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+            Action::Close => frame::request(self.app.handle(), ctx, FrameRequest::Close),
             Action::SystemMenu => {
-                let under = self.rects.get("helios.logo").copied().unwrap_or_else(|| {
-                    Rect::from_min_size(
-                        egui::pos2(8.0, crate::frame::TITLE_HEIGHT),
-                        egui::Vec2::ZERO,
-                    )
-                });
-                self.open_system_menu(under);
+                // Under the title bar's start, where its menu button is
+                // (the window's top left when the system draws the frame).
+                self.menu = None;
+                let at = HitTable::of(ctx)
+                    .get(egui::ViewportId::ROOT)
+                    .and_then(|r| r.caption)
+                    .map_or(egui::pos2(0.0, 0.0), |c| {
+                        let ppp = ctx.pixels_per_point();
+                        egui::pos2(c.x as f32 / ppp, (c.y + c.h) as f32 / ppp)
+                    });
+                frame::request(self.app.handle(), ctx, FrameRequest::SystemMenu(at));
             }
             Action::Run(id, args, origin) => return self.run(&id, args, origin),
             Action::About => self.open_dialog(dialogs::Info::new(
@@ -1940,9 +1965,6 @@ impl Shell {
             self.apply_profile(&source);
         }
         self.now = ctx.input(|i| i.time);
-        if self.framed {
-            crate::frame::resize_handles(&ctx);
-        }
         for event in ctx.input(|i| i.events.clone()) {
             if let Event::Screenshot { image, .. } = event {
                 self.on_screenshot(&image);
@@ -1980,10 +2002,6 @@ impl Shell {
         ctx.data_mut(|d| d.remove::<BTreeMap<String, Rect>>(Id::new("helios.named")));
         self.rects.insert("window".into(), ctx.content_rect());
 
-        let fullscreen = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
-        if self.framed && !fullscreen {
-            self.title_bar(ui);
-        }
         self.status_bar(ui);
         self.viewport.borrow_mut().sync(&mut lock(&self.values));
         self.app.show(ui);
@@ -1991,7 +2009,8 @@ impl Shell {
         for w in warnings {
             self.warn(w);
         }
-        self.workbench.borrow_mut().windows(&ctx, self.framed);
+        let framed = frame::own_frame(self.app.handle());
+        self.workbench.borrow_mut().windows(&ctx, framed);
         self.menus_ui(&ctx);
 
         let named = ctx.data(|d| d.get_temp::<BTreeMap<String, Rect>>(Id::new("helios.named")));
@@ -2048,32 +2067,6 @@ impl Shell {
                 self.menu = Some((at, items));
             }
         }
-    }
-
-    fn title_bar(&mut self, ui: &mut Ui) {
-        let request = egui::Panel::top("helios.titlebar")
-            .exact_size(crate::frame::TITLE_HEIGHT)
-            .frame(egui::Frame::NONE.fill(ui.visuals().panel_fill))
-            .show(ui, |ui| crate::frame::title_bar(ui, &self.title))
-            .inner;
-        let command = match request {
-            Some(crate::frame::Request::Minimize) => "window.minimize",
-            Some(crate::frame::Request::ToggleMaximize) => "window.maximize",
-            Some(crate::frame::Request::Close) => "window.close",
-            Some(crate::frame::Request::SystemMenu(_)) => {
-                let named = ui
-                    .ctx()
-                    .data(|d| d.get_temp::<BTreeMap<String, Rect>>(Id::new("helios.named")));
-                let logo = named.and_then(|n| n.get("helios.logo").copied());
-                if let Some(logo) = logo {
-                    self.rects.insert("helios.logo".into(), logo);
-                    self.open_system_menu(logo);
-                }
-                return;
-            }
-            None => return,
-        };
-        let _ = self.run(command, Value::Null, Origin::User);
     }
 
     fn status_bar(&mut self, ui: &mut Ui) {
@@ -2263,10 +2256,19 @@ pub mod headless {
         )));
         shell.attach_gpu(&rs);
         shell.still = true;
-        Harness::builder()
+        let title = shell.window_title();
+        let mut h = Harness::builder()
             .with_size(size)
             .renderer(egui_kittest::wgpu::WgpuTestRenderer::from_render_state(rs))
-            .build_ui_state(|ui, shell: &mut Shell| shell.ui(ui), shell)
+            .build_ui_state(|ui, shell: &mut Shell| shell.ui(ui), shell);
+        // The window's title, as a window manager reports it: the frame's
+        // title bar shows it.
+        h.input_mut()
+            .viewports
+            .entry(egui::ViewportId::ROOT)
+            .or_default()
+            .title = Some(title);
+        h
     }
 
     /// A picture of a target as drawn now.

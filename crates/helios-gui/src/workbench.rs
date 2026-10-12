@@ -405,23 +405,28 @@ impl Workbench {
             let panel = aux.panel.clone();
             ctx.show_viewport_immediate(ViewportId::from_hash_of(&panel), builder, |ui, _| {
                 if framed {
+                    use egui_pop::core::frame::{Button, FrameRequest, TitleBar, resize_edges};
                     let vctx = ui.ctx().clone();
-                    crate::frame::resize_handles(&vctx);
+                    resize_edges(&vctx);
                     let request = egui::Panel::top("helios.titlebar")
-                        .exact_size(crate::frame::TITLE_HEIGHT)
-                        .frame(egui::Frame::NONE.fill(ui.visuals().panel_fill))
-                        .show(ui, |ui| crate::frame::title_bar(ui, &window_title))
-                        .inner;
+                        .frame(egui::Frame::NONE)
+                        .show(ui, |ui| {
+                            TitleBar::new(&window_title)
+                                .button(Button::Minimize, false)
+                                .show(ui, |_| {}, |_| {})
+                        })
+                        .inner
+                        .request;
                     match request {
-                        Some(crate::frame::Request::Minimize) => {
+                        Some(FrameRequest::Minimize) => {
                             vctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
                         }
-                        Some(crate::frame::Request::ToggleMaximize) => {
+                        Some(FrameRequest::ToggleMaximize) => {
                             let on = vctx.input(|i| i.viewport().maximized.unwrap_or(false));
                             vctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!on));
                         }
-                        Some(crate::frame::Request::Close) => back.push(panel.clone()),
-                        Some(crate::frame::Request::SystemMenu(_)) | None => {}
+                        Some(FrameRequest::Close) => back.push(panel.clone()),
+                        Some(FrameRequest::SystemMenu(_)) | None => {}
                     }
                 }
                 egui::CentralPanel::default().show(ui, |ui| {

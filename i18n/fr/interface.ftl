@@ -25,6 +25,9 @@ panel-app-main =
 plugin-helios-commands =
     .title = Helios
 
+plugin-helios-frame =
+    .title = Cadre de Helios
+
 plugin-helios-history =
     .title = Historique de Helios
 

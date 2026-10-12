@@ -198,7 +198,6 @@ fn main() -> Result<(), String> {
         |n| n.to_string_lossy().into(),
     );
     shell.set_title(&name);
-    shell.draw_frame(true);
     // The workspace's profile, else the Default one; a saved layout wins
     // over the profile's.
     let profile = file
@@ -241,11 +240,12 @@ fn main() -> Result<(), String> {
     let gpu = helios_gpu::shared::gpu().map_err(|e| format!("no GPU to draw with: {e}"))?;
     let mut options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_title(format!("{name} — Helios"))
+            .with_title(shell.window_title())
             .with_app_id("helios-gui")
             .with_inner_size([1280.0, 800.0])
             .with_min_inner_size([640.0, 400.0])
-            // Helios draws its own frame (see `frame.rs`).
+            // egui-pop's frame is Helios's by default (its `window.frame`
+            // setting gives the system's back, and the window follows).
             .with_decorations(false),
         ..Default::default()
     };

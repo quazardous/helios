@@ -237,6 +237,7 @@ param-whitebalance-mode.label fb7fa70993198320
 param-whitebalance-red.description 722fa3ef16bb771a
 param-whitebalance-red.label c52ebe3823cca04a
 plugin-helios-commands.title 28daeae8a505789f
+plugin-helios-frame.title 56244fc898eadb9c
 plugin-helios-history.title 930c24429cb329d7
 plugin-helios-lists.title 70a8f95b6cc02a1c
 plugin-helios-workbench.title 43f0563e9981a775

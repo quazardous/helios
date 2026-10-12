@@ -26,6 +26,9 @@ panel-app-main =
 plugin-helios-commands =
     .title = Helios
 
+plugin-helios-frame =
+    .title = Helios frame
+
 plugin-helios-history =
     .title = Helios history
 

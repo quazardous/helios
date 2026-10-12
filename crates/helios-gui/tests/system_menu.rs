@@ -1,6 +1,6 @@
-//! The logo and the system menu: declared menus (egui-pop's) whose
-//! entries are commands, with their keys, ticks and lists read again when
-//! they open.
+//! The frame's menu button and the system menu: declared menus
+//! (egui-pop's) whose entries are commands, with their keys, ticks and
+//! lists read again when they open.
 
 use egui::{Key, Modifiers, vec2};
 use egui_kittest::kittest::Queryable;
@@ -29,10 +29,12 @@ fn titles(items: &Value) -> Vec<String> {
 }
 
 #[test]
-fn the_logo_opens_the_system_menu_and_alt_space_too() {
+fn the_frame_s_menu_button_opens_the_system_menu_and_alt_space_too() {
     let mut h = headless::harness(framed(), vec2(1280.0, 800.0));
     h.run();
-    let logo = h.state().target_rect("helios.logo").unwrap();
+    // egui-pop's frame draws the title bar; its menu button opens
+    // Helios's system menu.
+    let logo = h.get_by_label("Window menu").rect();
     h.hover_at(logo.center());
     h.run();
     h.event(egui::Event::PointerButton {
