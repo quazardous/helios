@@ -60,6 +60,21 @@ prints one JSON line: time, peak memory, steps computed and shared, and
 content keys planned. The lines are appended to
 `target/bench/masks.jsonl` with the date and commit. See docs/masks.md.
 
+## Bench box
+
+Long jobs (the full build, the test suite, the timings, the tests on a
+real GPU) also run on a shared bench box, on a pushed branch or on the
+working tree as it is:
+
+```bash
+cargo xtask bench-remote test                  # the current branch, as GitHub has it
+cargo xtask bench-remote test --push           # this working tree
+cargo xtask bench-remote bench-masks branch=main
+```
+
+Exit 75 means the box could not serve the job (off, in maintenance, its
+GPU gone), never a test failure. See docs/bench.md.
+
 ## Linters and formatters
 
 ```bash

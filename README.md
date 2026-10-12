@@ -31,6 +31,8 @@ module. Meanwhile, a catalog SDK inside darktable itself is built in the
   for orchestration.
 - [docs/testing-strategy.md](./docs/testing-strategy.md): draft of how Helios
   is tested and sandboxed, designed so that an AI agent can build it.
+- [docs/bench.md](./docs/bench.md): the bench box, a remote runner for full
+  builds, the test suite, timings and GPU tests (`cargo xtask bench-remote`).
 - [docs/gui.md](./docs/gui.md): GUI design notes: dockable panels, the node
   header, the queue panel, the graph view.
 - [docs/ux-research.md](./docs/ux-research.md): what users ask of darktable's

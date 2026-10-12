@@ -5,3 +5,5 @@ CLAUDE.todo
 /.claude/
 /target
 .ruff_cache/
+# the bench box (HELIOS_BENCH_HOST, HELIOS_BENCH_KEY): see docs/bench.md
+tools/bench/local.env
