@@ -20,7 +20,7 @@ use egui_pop::model::commands::CommandSpec;
 use egui_pop::model::ids::{CommandId, MenuId, PluginId};
 use egui_pop::model::keymap::Layer;
 use egui_pop::model::menus::MenuItem;
-use helios_shell::commands::Registry;
+use helios_shell::commands::{CommandSpec as HeliosSpec, Registry};
 use serde_json::json;
 
 /// The system menu, opened by the logo (Alt+Space too).
@@ -63,8 +63,23 @@ pub fn menu_title(title: &str) -> String {
     }
 }
 
+/// A command of Helios's registry as egui-pop declares it: its `when`,
+/// and the tick and palette visibility Helios gives it.
+pub fn declared(spec: &HeliosSpec, d: &Declarations) -> Result<CommandSpec, PluginError> {
+    let mut s =
+        CommandSpec::new(command_id(&spec.id)?, &spec.title, &spec.category).when(&spec.when);
+    if let Some(c) = d.checked.get(&spec.id) {
+        s = s.checked(c);
+    }
+    if d.hidden.contains(&spec.id) {
+        s = s.hidden();
+    }
+    Ok(s)
+}
+
 /// Every command of Helios's registry, declared to egui-pop: its menus,
-/// palette, keymap and traces see them, and the host runs them.
+/// palette, keymap and traces see them, and the host runs them. A command
+/// registered later is declared on its own (`Shell::register`).
 pub struct Commands {
     pub registry: Arc<Mutex<Registry>>,
     pub declarations: Rc<RefCell<Declarations>>,
@@ -89,15 +104,7 @@ impl Plugin for Commands {
             .cloned()
             .collect();
         for spec in specs {
-            let mut s = CommandSpec::new(command_id(&spec.id)?, &spec.title, &spec.category)
-                .when(&spec.when);
-            if let Some(c) = d.checked.get(&spec.id) {
-                s = s.checked(c);
-            }
-            if d.hidden.contains(&spec.id) {
-                s = s.hidden();
-            }
-            ctx.declare(s)?;
+            ctx.declare(declared(&spec, &d)?)?;
         }
         for (keys, command, when) in &d.keys {
             ctx.keybinding(keys, command_id(command)?, when, Layer::Default)?;

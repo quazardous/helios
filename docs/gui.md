@@ -220,7 +220,12 @@ sync through the vault.
 - **Keymaps across systems.** Bindings use `Mod` (Ctrl on Linux and
   Windows, Cmd on macOS); a binding may still name a system. MIDI and
   controller bindings are a separate part, since devices differ between
-  machines.
+  machines. The keymap part is the user's layer of egui-pop's keymap as
+  a whole document (`export_keymap`, `load_keymap`, 2026-10-12): each
+  binding keeps its `when` clause, a default key taken away is a
+  `-<command>` entry without keys, and applying a profile says how many
+  bindings changed and which keys conflict (egui-pop's `keys.load`
+  step). Not yet: keys unbound from every command.
 - **Variants per system or machine.** Any part may hold variants under
   `[on.<selector>]` (`[on.macos.theme]`, `[[on.machine.laptop.keymap]]`),
   overriding its common values. A selector is a system (`macos`, `linux`,

@@ -31,7 +31,7 @@ use egui_pop::core::frame::{FrameRequest, HitTable};
 use egui_pop::core::scale;
 use egui_pop::model::ids::PanelId;
 use egui_pop::model::ids::{CommandId, MenuId, OwnerId};
-use egui_pop::model::keymap::Layer;
+use egui_pop::model::keymap::{DocBinding, KeymapDoc, Layer};
 use egui_pop::model::layout::Layout;
 use egui_pop::model::menus::{Item, MenuItem as PopItem, Shown, show_items};
 use egui_pop::model::panels::{Area, PanelSpec};
@@ -165,6 +165,8 @@ pub struct Shell {
     app: App,
     registry: Arc<Mutex<Registry>>,
     lists: Rc<RefCell<ListSource>>,
+    /// Keys, menu entries and ticks of Helios's commands.
+    declarations: Rc<RefCell<Declarations>>,
     /// The panels declared, and what each draws.
     panels: Vec<PanelSpec>,
     contents: Contents,
@@ -330,6 +332,7 @@ impl Shell {
             app,
             registry,
             lists,
+            declarations,
             panels,
             contents,
             seen: 0,
@@ -437,15 +440,20 @@ impl Shell {
         self.app.save().map_err(|e| e.to_string())
     }
 
-    /// Declares a command on Helios's registry, and to the interface.
+    /// Declares a command on Helios's registry, and to the interface at
+    /// once (egui-pop's `App::declare`): its menus, palette entry and keys
+    /// follow, no plugin reconnected.
     pub fn register(
         &mut self,
         spec: CommandSpec,
         handler: impl Fn(&Value, &Origin) -> Result<Value, String> + Send + Sync + 'static,
     ) -> Result<(), String> {
+        let declared =
+            plugins::declared(&spec, &self.declarations.borrow()).map_err(|e| e.to_string())?;
         lock(&self.registry).register(spec, handler)?;
-        self.redeclare(&plugins::COMMANDS);
-        Ok(())
+        self.app
+            .declare(&OwnerId::from(&plugins::COMMANDS), declared)
+            .map_err(|e| e.to_string())
     }
 
     /// Every command Helios declares, by id.
@@ -484,15 +492,6 @@ impl Shell {
                 result: r.result,
             })
             .collect()
-    }
-
-    /// Connects a plugin again, so what it declares is read again.
-    fn redeclare(&mut self, plugin: &egui_pop::model::ids::PluginId) {
-        self.app.disconnect(plugin);
-        if let Err(e) = self.app.connect(plugin) {
-            self.notes.push(format!("{plugin}: {e}"));
-        }
-        self.app.rebuild();
     }
 
     /// The image the scopes measure (working data, before the display
@@ -646,30 +645,26 @@ impl Shell {
         Ok(())
     }
 
-    /// The user's own key bindings: keys, command, `when`.
-    fn user_bindings(&self) -> Vec<(String, String, String)> {
-        self.app
-            .keymap()
-            .export(&OwnerId::USER, Layer::User)
-            .bindings
-            .into_iter()
-            .filter_map(|b| {
-                let c = b.command.filter(|c| !c.starts_with('-'))?;
-                Some((b.keys, c, b.when))
-            })
-            .collect()
-    }
-
-    /// What the shell holds as a profile: theme, user keys, layout.
+    /// What the shell holds as a profile: theme, user keys, layout. The
+    /// keys are the user's layer as egui-pop exports it
+    /// (`AppHandle::export_keymap`): each binding with its `when`, and the
+    /// default keys a rebinding took away (`-<command>`, no keys).
     pub fn profile(&self) -> helios_profile::Profile {
         use helios_profile::{Binding, Profile, System, ThemeChoice, portable_keys};
         let keymap = self
-            .user_bindings()
+            .app
+            .handle()
+            .export_keymap(Layer::User)
+            .bindings
             .into_iter()
-            .map(|(keys, command, when)| Binding {
-                keys: portable_keys(&keys.to_lowercase(), System::current()),
-                command,
-                when,
+            // A profile binds commands; keys unbound from every command
+            // (no command) have no place in it yet.
+            .filter_map(|b| {
+                Some(Binding {
+                    keys: portable_keys(&b.keys.to_lowercase(), System::current()),
+                    command: b.command?,
+                    when: b.when,
+                })
             })
             .collect();
         Profile {
@@ -737,22 +732,37 @@ impl Shell {
             self.set_theme(&t.name, t.overrides.clone());
         }
         if let Some(keys) = &p.keymap {
-            let handle = self.app.handle().clone();
-            for (_, command, _) in self.user_bindings() {
-                if let Ok(id) = CommandId::new(command) {
-                    handle.reset_keys(id);
+            // The whole user layer, replaced through egui-pop's `keys.load`
+            // step: scopes and `when` clauses kept, what changed said.
+            let doc = KeymapDoc {
+                bindings: keys
+                    .iter()
+                    .map(|b| DocBinding {
+                        keys: local_keys(&b.keys, System::current()),
+                        command: Some(b.command.clone()),
+                        when: b.when.clone(),
+                        ..DocBinding::default()
+                    })
+                    .collect(),
+            };
+            match self.app.load_keymap(&doc, Layer::User) {
+                Ok(diff) => {
+                    let changed = diff.added.len() + diff.removed.len() + diff.changed.len();
+                    if changed > 0 {
+                        self.note(format!(
+                            "profile {}: {changed} key bindings changed",
+                            p.name
+                        ));
+                    }
+                    for s in diff.skipped {
+                        self.warn(format!("profile {}: keys skipped: {s}", p.name));
+                    }
+                    for c in diff.conflicts {
+                        self.warn(format!("profile {}: keys in conflict: {c}", p.name));
+                    }
                 }
+                Err(e) => self.warn(format!("profile {}: keys: {e}", p.name)),
             }
-            for b in keys {
-                // egui-pop's user keymap takes a command's keys, not a
-                // `when` of their own: the command's applies.
-                let local = local_keys(&b.keys, System::current());
-                match CommandId::new(b.command.as_str()) {
-                    Ok(id) => handle.rebind(id, Some(local)),
-                    Err(e) => self.warn(format!("profile {}: {e}", p.name)),
-                }
-            }
-            self.app.process_requests();
         }
         if let Some(layout) = &p.layout {
             match Layout::from_json(&layout.to_string()) {
