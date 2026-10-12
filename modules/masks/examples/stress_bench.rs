@@ -3,7 +3,7 @@
 //! starts one process per mode so each peak memory is its own.
 //!
 //! ```text
-//! stress_bench <full|tiled|proxy|edit> [--modules N] [--width W] [--height H] [--tile T] [--budget MIB]
+//! stress_bench <full|tiled|proxy|edit> [--modules N] [--width W] [--height H] [--tile T] [--budget MIB] [--shapes 0|1]
 //! ```
 //!
 //! - `full`: the whole image in one render.
@@ -14,13 +14,15 @@
 //!   second render.
 //!
 //! `--budget` gives the engine's cache a budget in MiB (none by default,
-//! to measure what the network holds).
+//! to measure what the network holds). `--shapes 1` adds a group of four
+//! drawn shapes (circle, ellipse, gradient, path) to each module's mask.
 //!
 //! The line holds the time in milliseconds, the peak resident memory in
 //! KiB (`VmHWM` of `/proc/self/status`, `null` where it is not available),
 //! and the engine's counters for the measured renders: steps asked for,
 //! computed and shared (cache hits), content keys computed while
-//! planning, steps cropped from wider cached content, and cache entries
+//! planning, steps cropped from wider cached content, steps filled outside
+//! a module's extent (a shape's tiles away from it), and cache entries
 //! evicted to stay within the budget.
 
 use std::process::ExitCode;
@@ -31,7 +33,7 @@ use helios_core::{Bus, Counters, Engine, Image, ModuleRef, Params, Region, Value
 use helios_module_exposure::Exposure;
 use helios_module_masks::stress::{self, Stress};
 
-const USAGE: &str = "usage: stress_bench <full|tiled|proxy|edit> [--modules N] [--width W] [--height H] [--tile T] [--budget MIB]";
+const USAGE: &str = "usage: stress_bench <full|tiled|proxy|edit> [--modules N] [--width W] [--height H] [--tile T] [--budget MIB] [--shapes 0|1]";
 
 struct Options {
     mode: String,
@@ -41,6 +43,8 @@ struct Options {
     tile: u32,
     /// The cache budget in MiB, `None` for no limit.
     budget: Option<usize>,
+    /// Each module's mask has a group of drawn shapes.
+    shapes: bool,
 }
 
 fn options() -> Option<Options> {
@@ -56,6 +60,7 @@ fn options() -> Option<Options> {
         height: 1024,
         tile: 256,
         budget: None,
+        shapes: false,
     };
     while let Some(flag) = args.next() {
         let value = args.next()?;
@@ -65,6 +70,13 @@ fn options() -> Option<Options> {
             "--height" => o.height = value.parse().ok().filter(|h| *h > 0)?,
             "--tile" => o.tile = value.parse().ok().filter(|t| *t > 0)?,
             "--budget" => o.budget = Some(value.parse().ok()?),
+            "--shapes" => {
+                o.shapes = match value.as_str() {
+                    "0" => false,
+                    "1" => true,
+                    _ => return None,
+                };
+            }
             _ => return None,
         }
     }
@@ -73,12 +85,18 @@ fn options() -> Option<Options> {
 
 fn network(o: &Options) -> Stress {
     let full = Region::sized(o.width, o.height);
-    stress::build(stress::picture(full), o.modules, |k| {
+    let processed = |k: usize| {
         (
             ModuleRef::new(Exposure),
             Params::new().with("exposure", Value::Float(0.5 - k as f64 * 0.4)),
         )
-    })
+    };
+    let picture = stress::picture(full);
+    if o.shapes {
+        stress::build_with_shapes(picture, o.modules, processed)
+    } else {
+        stress::build(picture, o.modules, processed)
+    }
     .expect("the stress network builds")
 }
 
@@ -139,18 +157,20 @@ fn main() -> ExitCode {
     let c = engine.counters().since(&before);
     let peak = peak_kib().map_or_else(|| "null".into(), |k| k.to_string());
     println!(
-        "{{\"mode\":\"{}\",\"modules\":{},\"mask_nodes\":{},\"width\":{},\"height\":{},\"tile\":{},\"ms\":{ms:.1},\"peak_kib\":{peak},\"requests\":{},\"computed\":{},\"shared\":{},\"keys\":{},\"crops\":{},\"budget_mib\":{},\"evictions\":{}}}",
+        "{{\"mode\":\"{}\",\"modules\":{},\"mask_nodes\":{},\"width\":{},\"height\":{},\"tile\":{},\"shapes\":{},\"ms\":{ms:.1},\"peak_kib\":{peak},\"requests\":{},\"computed\":{},\"shared\":{},\"keys\":{},\"crops\":{},\"filled\":{},\"budget_mib\":{},\"evictions\":{}}}",
         o.mode,
         o.modules,
         n.mask_nodes,
         o.width,
         o.height,
         o.tile,
+        o.shapes,
         c.requests,
         c.computed,
         c.shared(),
         c.keys,
         c.crops,
+        c.filled,
         o.budget.map_or_else(|| "null".into(), |b| b.to_string()),
         c.evictions,
     );

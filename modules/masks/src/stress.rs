@@ -14,6 +14,14 @@
 //! input -> blend.input, input -> the processed module -> blend.processed
 //! ```
 //!
+//! With shapes ([`build_with_shapes`]), each module's root gets a fourth
+//! member, a group of four drawn shapes (circle, ellipse, gradient, path)
+//! placed across the image:
+//!
+//! ```text
+//! circle, ellipse, gradient (inverted), path -> group S -> root.in3
+//! ```
+//!
 //! The nine groups of three modules use all seven operators ([`OPERATORS`]).
 //! Every module after the first reuses the previous module's mask through
 //! [`crate::MaskRaster`], so the chain is wired both through its images
@@ -21,13 +29,21 @@
 
 use helios_core::{Error, Graph, Image, ModuleRef, NodeId, Params, Value};
 
+use crate::shape::path_values;
 use crate::{
-    MAX_MEMBERS, MaskBlend, MaskBlur, MaskCombine, MaskFeather, MaskFromLuma, MaskLevels,
-    MaskParametric, MaskRaster,
+    MAX_MEMBERS, MaskBlend, MaskBlur, MaskCircle, MaskCombine, MaskEllipse, MaskFeather,
+    MaskFromLuma, MaskGradient, MaskLevels, MaskParametric, MaskPath, MaskRaster, PathPoint,
 };
 
 /// Mask nodes per masked module (the processed module is not one).
 pub const MASK_NODES_PER_MODULE: usize = 18;
+
+/// Mask nodes the shapes add to each masked module: four shapes and their
+/// group.
+pub const SHAPE_NODES_PER_MODULE: usize = 5;
+
+/// The operator of each module's shape group, by module (cycling).
+pub const SHAPE_OPERATORS: [&str; 3] = ["maximum", "difference", "minimum"];
 
 /// The operators of groups A, B and the root, by module (cycling): all
 /// seven, with the root's keeping the mask's range wide.
@@ -67,7 +83,27 @@ pub fn build(
     modules: usize,
     processed: impl Fn(usize) -> (ModuleRef, Params),
 ) -> Result<Stress, Error> {
+    build_inner(image, modules, processed, false)
+}
+
+/// [`build`], each module's mask also folding a group of four drawn
+/// shapes into its root.
+pub fn build_with_shapes(
+    image: Image,
+    modules: usize,
+    processed: impl Fn(usize) -> (ModuleRef, Params),
+) -> Result<Stress, Error> {
+    build_inner(image, modules, processed, true)
+}
+
+fn build_inner(
+    image: Image,
+    modules: usize,
+    processed: impl Fn(usize) -> (ModuleRef, Params),
+    shapes: bool,
+) -> Result<Stress, Error> {
     assert!(modules > 0, "a stress network has at least one module");
+    let size = image.region();
     let mut g = Graph::new();
     let source = g.add_source("image", image);
     let mut input = (source, "image");
@@ -175,18 +211,18 @@ pub fn build(
             &[((group_b, "mask"), "mask")],
         )?;
 
-        // The root: both groups and a lightness member.
+        // The root: both groups and a lightness member (and the shapes).
         let lightness = b.parametric("lightness", input, &[0.0, 0.5, 0.0, 0.2])?;
-        let root = b.add(
-            "root",
-            ModuleRef::new(MaskCombine),
-            operator(2),
-            &[
-                ((a_levels, "mask"), "in0"),
-                ((b_levels, "mask"), "in1"),
-                ((lightness, "mask"), "in2"),
-            ],
-        )?;
+        let mut members = vec![
+            ((a_levels, "mask"), "in0"),
+            ((b_levels, "mask"), "in1"),
+            ((lightness, "mask"), "in2"),
+        ];
+        if shapes {
+            let group = b.shapes(size, SHAPE_OPERATORS[k % SHAPE_OPERATORS.len()])?;
+            members.push(((group, "mask"), "in3"));
+        }
+        let root = b.add("root", ModuleRef::new(MaskCombine), operator(2), &members)?;
         let mask = b.add(
             "root.levels",
             ModuleRef::new(MaskLevels),
@@ -209,7 +245,10 @@ pub fn build(
                 ((mask, "mask"), "mask"),
             ],
         )?;
-        debug_assert_eq!(b.nodes, MASK_NODES_PER_MODULE);
+        debug_assert_eq!(
+            b.nodes,
+            MASK_NODES_PER_MODULE + if shapes { SHAPE_NODES_PER_MODULE } else { 0 }
+        );
         outputs.push(blend);
         masks.push(mask);
         input = (blend, "output");
@@ -219,7 +258,8 @@ pub fn build(
         source,
         outputs,
         masks,
-        mask_nodes: modules * MASK_NODES_PER_MODULE,
+        mask_nodes: modules
+            * (MASK_NODES_PER_MODULE + if shapes { SHAPE_NODES_PER_MODULE } else { 0 }),
     })
 }
 
@@ -267,6 +307,83 @@ impl Builder<'_> {
 
 fn radius(r: f64) -> Params {
     Params::new().with("radius", Value::Float(r))
+}
+
+impl Builder<'_> {
+    /// Four shapes over an image of `size`, placed apart by module, and
+    /// their group.
+    fn shapes(&mut self, size: helios_core::Region, operator: &str) -> Result<NodeId, Error> {
+        let (w, h) = (f64::from(size.width), f64::from(size.height));
+        let shift = 0.1 * self.k as f64;
+        let f = |v: f64| Value::Float(v);
+        let circle = self.add(
+            "circle",
+            ModuleRef::new(MaskCircle),
+            Params::new()
+                .with("x", f(w * (0.25 + shift)))
+                .with("y", f(h * 0.3))
+                .with("radius", f(h * 0.12))
+                .with("feather", f(h * 0.05)),
+            &[],
+        )?;
+        let ellipse = self.add(
+            "ellipse",
+            ModuleRef::new(MaskEllipse),
+            Params::new()
+                .with("x", f(w * 0.6))
+                .with("y", f(h * (0.6 - shift)))
+                .with("radius_x", f(w * 0.15))
+                .with("radius_y", f(h * 0.08))
+                .with("rotation", f(25.0 + 30.0 * self.k as f64))
+                .with("feather", f(h * 0.04)),
+            &[],
+        )?;
+        let gradient = self.add(
+            "gradient",
+            ModuleRef::new(MaskGradient),
+            Params::new()
+                .with("x", f(w * 0.5))
+                .with("y", f(h * 0.5))
+                .with("rotation", f(60.0 * self.k as f64))
+                .with("feather", f(h * 0.3))
+                .with("profile", Value::Choice("sigmoid".into()))
+                .with("invert", Value::Bool(true))
+                .with("opacity", f(0.7)),
+            &[],
+        )?;
+        let corner = |x: f64, y: f64| PathPoint::corner(w * x, h * y);
+        let path = self.add(
+            "path",
+            ModuleRef::new(MaskPath),
+            Params::new()
+                .with(
+                    "points",
+                    path_values(&[
+                        corner(0.1, 0.7),
+                        PathPoint {
+                            before: [w * 0.25, h * 0.55],
+                            after: [w * 0.4, h * 0.85],
+                            ..corner(0.3, 0.65)
+                        },
+                        corner(0.35, 0.95),
+                        corner(0.15, 0.9),
+                    ]),
+                )
+                .with("feather", f(h * 0.03)),
+            &[],
+        )?;
+        self.add(
+            "s",
+            ModuleRef::new(MaskCombine),
+            Params::new().with("operator", Value::Choice(operator.into())),
+            &[
+                ((circle, "mask"), "in0"),
+                ((ellipse, "mask"), "in1"),
+                ((gradient, "mask"), "in2"),
+                ((path, "mask"), "in3"),
+            ],
+        )
+    }
 }
 
 /// Per-member values for a group, the rest left at 1.

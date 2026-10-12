@@ -226,7 +226,12 @@ seven steps from the edited member to the output, seen in the bus's
 `cargo xtask bench masks` renders it once per mode, each in its own
 release process: `full` (one render), `tiled` (256-pixel tiles), `proxy`
 (scale 0.25) and `edit` (a render after one value changed), and appends
-one JSON line per mode to `target/bench/masks.jsonl`. Three modules at
+one JSON line per mode to `target/bench/masks.jsonl`. Each mode runs
+twice: the network as it is, then with shapes (`stress::build_with_shapes`:
+each module's root also folds a group of a circle, an ellipse, an inverted
+sigmoid gradient and a Bézier path, five more mask nodes a module);
+`--shapes 0` or `--shapes 1` runs one. The line counts the steps filled
+outside a shape's extent (`filled`). Three modules at
 1536×1024, on a loaded machine (times are indicative):
 
 | mode | time | peak memory | computed / asked | keys planned |

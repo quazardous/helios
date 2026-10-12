@@ -6,6 +6,9 @@
 //! writes, and appends them, with the date and the git commit, to
 //! `target/bench/masks.jsonl`. Extra arguments go to every run
 //! (`--modules N`, `--width W`, `--height H`, `--tile T`, `--budget MIB`).
+//! Without `--shapes`, every mode runs twice: the network as it is, then
+//! with a group of drawn shapes in every module's mask (`--shapes 1`);
+//! `--shapes 0` or `--shapes 1` runs one of them.
 
 use std::path::Path;
 use std::process::{Command, ExitCode};
@@ -15,7 +18,7 @@ use serde_json::Value;
 use crate::test_times::{commit, now, target_dir};
 
 pub const USAGE: &str =
-    "bench masks [--modules N] [--width W] [--height H] [--tile T] [--budget MIB]";
+    "bench masks [--modules N] [--width W] [--height H] [--tile T] [--budget MIB] [--shapes 0|1]";
 
 const MODES: [&str; 4] = ["full", "tiled", "proxy", "edit"];
 
@@ -40,9 +43,22 @@ pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
         .join("examples")
         .join("stress_bench");
     let (date, commit) = (now(), commit(root));
+    let variants: &[&[&str]] = if rest.contains(&"--shapes") {
+        &[&[]]
+    } else {
+        &[&["--shapes", "0"], &["--shapes", "1"]]
+    };
+    let runs = variants
+        .iter()
+        .flat_map(|extra| MODES.iter().map(move |mode| (*mode, *extra)));
     let mut lines = Vec::new();
-    for mode in MODES {
-        let output = match Command::new(&binary).arg(mode).args(rest).output() {
+    for (mode, extra) in runs {
+        let output = match Command::new(&binary)
+            .arg(mode)
+            .args(rest)
+            .args(extra)
+            .output()
+        {
             Ok(o) if o.status.success() => o,
             Ok(o) => {
                 eprintln!(

@@ -213,3 +213,28 @@ fn a_full_render_computes_each_node_once() {
         (steps as u64, steps as u64, 1)
     );
 }
+
+#[test]
+fn with_shapes_tiles_still_equal_the_full_render_and_some_are_filled() {
+    let full = Region::sized(96, 64);
+    let n = stress::build_with_shapes(stress::picture(full), 3, |k| {
+        (
+            ModuleRef::new(Exposure),
+            Params::new().with("exposure", Value::Float(0.5 - k as f64 * 0.4)),
+        )
+    })
+    .unwrap();
+    assert_eq!(
+        n.mask_nodes,
+        3 * (MASK_NODES_PER_MODULE + stress::SHAPE_NODES_PER_MODULE)
+    );
+    let whole = engine()
+        .render(&n.graph, n.output(), "output", full)
+        .unwrap();
+    let tiled = engine();
+    for tile in full.tiles(16) {
+        let part = tiled.render(&n.graph, n.output(), "output", tile).unwrap();
+        assert!(same_bits(&part, &whole.sample(tile)), "output tile {tile}");
+    }
+    assert!(tiled.counters().filled > 0, "{:?}", tiled.counters());
+}
