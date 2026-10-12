@@ -17,6 +17,11 @@
 # downloads the crates first. Results land in /out, fetched with
 # `fetch <id>`.
 
+# Helios's space on the box: the per-branch target caches, the registry and
+# the image fit in 40g (applied on upload, within the box's envelope)
+[project]
+disk = "40g"
+
 [image]
 from = "registry.fedoraproject.org/fedora:44"
 run = [
