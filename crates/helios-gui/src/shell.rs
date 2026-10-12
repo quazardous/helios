@@ -283,7 +283,20 @@ impl Shell {
             })
             .plugin(plugins::Areas {
                 workbench: workbench.clone(),
-            });
+            })
+            .plugin(
+                egui_pop::i18n::I18nPlugin::new()
+                    .catalogues(helios_i18n::CATALOGUES)
+                    .env(helios_i18n::ENV)
+                    // A shell without the user's settings (tests, pictures,
+                    // tools) speaks English; the desktop follows the
+                    // language setting, the system's by default.
+                    .language(if ui_settings.is_some() {
+                        egui_pop::i18n::plugin::SYSTEM
+                    } else {
+                        "en"
+                    }),
+            );
         if let Some(dir) = ui_settings {
             builder = builder.persist(dir);
         }

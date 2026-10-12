@@ -1,6 +1,6 @@
 [package]
 name = "helios-declarations"
-description = "Everything Helios declares with English text (the desktop's commands and panels, the modules' parameters), gathered for tools: the English catalog is generated from it"
+description = "Everything Helios declares with English text (the desktop's commands, panels and interface, the modules' parameters), gathered for tools: the English catalogue is generated from it"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -9,6 +9,7 @@ publish = false
 
 [dependencies]
 helios-gui.workspace = true
+egui-pop = { workspace = true, features = ["i18n"] }
 helios-i18n.workspace = true
 helios-node = { path = "../helios-node" }
 serde_json.workspace = true

@@ -1,6 +1,6 @@
 [package]
 name = "helios-i18n"
-description = "Helios's translations: Fluent catalogs per locale with a fallback chain, message ids derived from stable ids, the English catalog generated from declarations, and its checks"
+description = "Helios's translations: its catalogues (i18n/<locale>/*.ftl) built in, the message ids of what Helios declares, and its English catalogue generated from those declarations, over egui-pop's translation plugin"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -9,14 +9,9 @@ repository.workspace = true
 [dependencies]
 helios-core.workspace = true
 helios-shell.workspace = true
+# MIT: catalogues, lookups, the extractor and the checks.
+egui-pop-i18n.workspace = true
 serde.workspace = true
-# Apache-2.0 OR MIT (fluent-bundle, fluent-syntax, fluent-pseudo, unic-langid),
-# MIT OR Apache-2.0 (sys-locale).
-fluent-bundle = "0.16"
-fluent-syntax = "0.12"
-fluent-pseudo = "0.3"
-unic-langid = "0.9"
-sys-locale = "0.3"
 
 [lints]
 workspace = true

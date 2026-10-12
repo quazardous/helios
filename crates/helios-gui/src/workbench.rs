@@ -353,6 +353,7 @@ impl Workbench {
         *content_rect = ui.max_rect();
         area_rects.clear();
         let mut viewer = Viewer {
+            ctx: ui.ctx().clone(),
             panels,
             contents,
             focused,
@@ -392,10 +393,7 @@ impl Workbench {
     pub fn windows(&mut self, ctx: &Egui, framed: bool) {
         let mut back = Vec::new();
         for aux in &mut self.auxiliary {
-            let title = self
-                .panels
-                .get(&aux.panel)
-                .map_or_else(|| aux.panel.clone(), |p| p.title.clone());
+            let title = panel_title(ctx, &self.panels, &aux.panel);
             // The same title and, when Helios draws the main window's
             // frame, the same frame.
             let window_title = format!("{title} — Helios");
@@ -444,6 +442,15 @@ impl Workbench {
     }
 }
 
+/// A panel's title in the interface's language (egui-pop's
+/// `panel-<id>.title`), else its declared English, else its id.
+fn panel_title(ctx: &Egui, panels: &Panels, id: &str) -> String {
+    panels.get(id).map_or_else(
+        || id.to_string(),
+        |p| egui_pop::core::strings::panel_title(ctx, id, &p.title),
+    )
+}
+
 fn placeholder(ui: &mut Ui, title: &str) {
     ui.centered_and_justified(|ui| {
         ui.weak(title);
@@ -461,6 +468,8 @@ fn show_dock(ui: &mut Ui, id: &str, dock: &mut DockState<String>, viewer: &mut V
 }
 
 struct Viewer<'a> {
+    /// Where titles are translated.
+    ctx: Egui,
     panels: &'a Panels,
     contents: &'a mut BTreeMap<String, Content>,
     focused: &'a mut Option<String>,
@@ -474,10 +483,7 @@ impl TabViewer for Viewer<'_> {
     }
 
     fn title(&mut self, tab: &mut String) -> egui::WidgetText {
-        self.panels
-            .get(tab)
-            .map_or_else(|| tab.clone(), |p| p.title.clone())
-            .into()
+        panel_title(&self.ctx, self.panels, tab).into()
     }
 
     fn ui(&mut self, ui: &mut Ui, tab: &mut String) {
@@ -489,8 +495,8 @@ impl TabViewer for Viewer<'_> {
         if let Some(c) = self.contents.get_mut(tab) {
             c(ui);
         } else {
-            let title = self.panels.get(tab).map_or(tab.as_str(), |p| &p.title);
-            placeholder(ui, title);
+            let title = panel_title(ui.ctx(), self.panels, tab);
+            placeholder(ui, &title);
         }
     }
 

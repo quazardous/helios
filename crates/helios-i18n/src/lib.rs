@@ -1,32 +1,56 @@
-//! Helios's translations, over Fluent (`fluent-bundle`).
+//! Helios's translations, over egui-pop's translation plugin
+//! (`egui-pop-i18n`: catalogues, fallback chains, the language setting,
+//! the extractor and the checks).
 //!
-//! - [`ids`]: message ids derived mechanically from stable ids (a
-//!   command's, a panel's, a module parameter's), never from labels; the
-//!   scheme is documented there.
-//! - [`catalog`]: [`I18n`], one bundle per locale; a lookup gives the
-//!   stable id and the English text, and falls back along `fr-CA` → `fr` →
-//!   that English. Plugins add their own catalogs at run time under their
-//!   id; the locale switches at run time; `x-pseudo` shows accented,
-//!   longer English.
-//! - [`locale`]: which locale to use (`HELIOS_LANG`, then the setting, then
-//!   the system's), and the fallback chain.
-//! - [`extract`]: the English catalog generated from the declarations
-//!   (`cargo xtask i18n extract`).
-//! - [`check`]: coverage, missing, orphan and changed keys per locale, and
-//!   the faults that fail a build (`cargo xtask i18n check`).
+//! What stays here is Helios's own:
 //!
-//! Catalogs live in the repository's `i18n/<locale>/` as one file per area
-//! (`commands.ftl`, `panels.ftl`, `modules.ftl`). `i18n/en` is generated
-//! and never edited; the other locales are translations of it, embedded in
-//! the build.
+//! - [`CATALOGUES`]: the repository's `i18n/<locale>/*.ftl`, built in,
+//!   given to `I18nPlugin::catalogues` by the desktop;
+//! - [`ids`]: the message ids of what Helios declares (commands, panels,
+//!   module parameters), derived from stable ids, never from labels;
+//! - [`extract`]: the English catalogue (`i18n/en`) generated from those
+//!   declarations (`cargo xtask i18n extract`).
+//!
+//! Catalogues live in `i18n/<locale>/` as one file per area
+//! (`commands.ftl`, `panels.ftl`, `modules.ftl`, `interface.ftl`).
+//! `i18n/en` is generated and never edited; the other locales are
+//! translations of it.
 
-pub mod catalog;
-pub mod check;
 pub mod extract;
 pub mod ids;
-pub mod locale;
 
-pub use catalog::I18n;
+pub use egui_pop_i18n::{Catalogue, I18n};
 pub use extract::Declarations;
-pub use fluent_bundle::{FluentArgs, FluentValue};
 pub use ids::MessageId;
+
+mod builtin {
+    include!(concat!(env!("OUT_DIR"), "/builtin.rs"));
+}
+
+/// Helios's catalogues, every locale's, built in.
+pub static CATALOGUES: &[Catalogue] = builtin::BUILTIN;
+
+/// The environment variable naming the language, before the system's,
+/// when the language setting is `system`.
+pub const ENV: &str = "HELIOS_LANG";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_builtin_catalogues_load_beside_egui_pops() {
+        let i = I18n::with_egui_pop("fr");
+        i.add_catalogues(CATALOGUES).unwrap();
+        assert!(i.locales().iter().any(|l| l == "fr"));
+        assert_eq!(i.t(&ids::panel_title("helios.graph").key(), &[]), "Graphe");
+    }
+
+    #[test]
+    fn the_repository_catalogues_have_no_fault() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../i18n");
+        let catalogs = egui_pop_i18n::check::Catalogs::read(&dir).unwrap();
+        let r = egui_pop_i18n::check::check(&catalogs);
+        assert!(r.faults.is_empty(), "{r}");
+    }
+}

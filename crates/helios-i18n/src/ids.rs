@@ -21,7 +21,12 @@
 //! ASCII letter or digit becomes `-` (`vault.rate.3` gives
 //! `command-vault-rate-3`, `decide_exposure` gives `decide-exposure`). Two
 //! ids that differ only by those characters would share a message: the
-//! English catalog's generation refuses them.
+//! English catalogue's generation refuses them.
+//!
+//! The command and panel keys are the ones egui-pop derives for every
+//! application (`egui_pop_core::strings`), so its menus, palette and
+//! workbench find Helios's translations; a plugin adding its own
+//! catalogue is held to its own keys by `egui_pop_i18n::catalog::owned_by`.
 
 use std::fmt;
 
@@ -112,27 +117,6 @@ pub fn param_choice(module: &str, name: &str, value: &str) -> MessageId {
     MessageId::new(format!("{}-choice-{}", param(module, name), slug(value)))
 }
 
-/// The areas whose message ids carry an owner's id right after them.
-const AREAS: [&str; 3] = ["command", "panel", "param"];
-
-/// Whether a message belongs to `owner` (a plugin or a module, by its
-/// stable id): `<owner>-…` for its free messages, or `<area>-<owner>-…`
-/// for its commands, panels and parameters.
-pub fn owned_by(owner: &str, message: &str) -> bool {
-    let owner = slug(owner);
-    let prefixed = |rest: &str| {
-        rest.strip_prefix(owner.as_str())
-            .is_some_and(|r| r.starts_with('-'))
-    };
-    prefixed(message)
-        || AREAS.iter().any(|area| {
-            message
-                .strip_prefix(area)
-                .and_then(|r| r.strip_prefix('-'))
-                .is_some_and(prefixed)
-        })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -161,15 +145,5 @@ mod tests {
             "param-demosaic-method-choice-rcd"
         );
         assert_eq!(slug("a b/é"), "a-b--");
-    }
-
-    #[test]
-    fn owners_are_recognized_after_the_area() {
-        assert!(owned_by("acme", "acme-greeting"));
-        assert!(owned_by("acme", "command-acme-run"));
-        assert!(owned_by("acme.denoise", "param-acme-denoise-strength"));
-        assert!(!owned_by("acme", "acmex-greeting"));
-        assert!(!owned_by("acme", "command-view-palette"));
-        assert!(!owned_by("acme", "panel-helios-acme"));
     }
 }

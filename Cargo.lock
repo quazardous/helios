@@ -1021,12 +1021,13 @@ dependencies = [
 
 [[package]]
 name = "egui-pop"
-version = "0.0.1"
-source = "git+https://github.com/quazardous/egui-pop?rev=243f16b#243f16b78e24c1154a3f7d0e7fcce516ecb10439"
+version = "0.1.0"
+source = "git+https://github.com/quazardous/egui-pop?rev=c4868fb#c4868fb6e893d49565e25c25d2e947447fae4e82"
 dependencies = [
  "egui",
  "egui-pop-api",
  "egui-pop-core",
+ "egui-pop-i18n",
  "egui-pop-model",
  "egui-pop-tokens",
  "egui-pop-viewport",
@@ -1034,8 +1035,8 @@ dependencies = [
 
 [[package]]
 name = "egui-pop-api"
-version = "0.0.1"
-source = "git+https://github.com/quazardous/egui-pop?rev=243f16b#243f16b78e24c1154a3f7d0e7fcce516ecb10439"
+version = "0.1.0"
+source = "git+https://github.com/quazardous/egui-pop?rev=c4868fb#c4868fb6e893d49565e25c25d2e947447fae4e82"
 dependencies = [
  "eframe",
  "egui",
@@ -1049,8 +1050,8 @@ dependencies = [
 
 [[package]]
 name = "egui-pop-core"
-version = "0.0.1"
-source = "git+https://github.com/quazardous/egui-pop?rev=243f16b#243f16b78e24c1154a3f7d0e7fcce516ecb10439"
+version = "0.1.0"
+source = "git+https://github.com/quazardous/egui-pop?rev=c4868fb#c4868fb6e893d49565e25c25d2e947447fae4e82"
 dependencies = [
  "egui",
  "egui-pop-model",
@@ -1061,9 +1062,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "egui-pop-i18n"
+version = "0.1.0"
+source = "git+https://github.com/quazardous/egui-pop?rev=c4868fb#c4868fb6e893d49565e25c25d2e947447fae4e82"
+dependencies = [
+ "egui",
+ "egui-pop-api",
+ "egui-pop-core",
+ "egui-pop-model",
+ "fluent-bundle",
+ "fluent-pseudo",
+ "fluent-syntax",
+ "intl-memoizer",
+ "serde",
+ "serde_json",
+ "sys-locale",
+ "unic-langid",
+]
+
+[[package]]
 name = "egui-pop-model"
-version = "0.0.1"
-source = "git+https://github.com/quazardous/egui-pop?rev=243f16b#243f16b78e24c1154a3f7d0e7fcce516ecb10439"
+version = "0.1.0"
+source = "git+https://github.com/quazardous/egui-pop?rev=c4868fb#c4868fb6e893d49565e25c25d2e947447fae4e82"
 dependencies = [
  "log",
  "serde",
@@ -1072,8 +1092,8 @@ dependencies = [
 
 [[package]]
 name = "egui-pop-test"
-version = "0.0.1"
-source = "git+https://github.com/quazardous/egui-pop?rev=243f16b#243f16b78e24c1154a3f7d0e7fcce516ecb10439"
+version = "0.1.0"
+source = "git+https://github.com/quazardous/egui-pop?rev=c4868fb#c4868fb6e893d49565e25c25d2e947447fae4e82"
 dependencies = [
  "egui",
  "egui-pop-api",
@@ -1083,16 +1103,16 @@ dependencies = [
 
 [[package]]
 name = "egui-pop-tokens"
-version = "0.0.1"
-source = "git+https://github.com/quazardous/egui-pop?rev=243f16b#243f16b78e24c1154a3f7d0e7fcce516ecb10439"
+version = "0.1.0"
+source = "git+https://github.com/quazardous/egui-pop?rev=c4868fb#c4868fb6e893d49565e25c25d2e947447fae4e82"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "egui-pop-viewport"
-version = "0.0.1"
-source = "git+https://github.com/quazardous/egui-pop?rev=243f16b#243f16b78e24c1154a3f7d0e7fcce516ecb10439"
+version = "0.1.0"
+source = "git+https://github.com/quazardous/egui-pop?rev=c4868fb#c4868fb6e893d49565e25c25d2e947447fae4e82"
 dependencies = [
  "egui",
  "egui-pop-core",
@@ -1824,6 +1844,7 @@ dependencies = [
 name = "helios-declarations"
 version = "0.0.1"
 dependencies = [
+ "egui-pop",
  "helios-gui",
  "helios-i18n",
  "helios-node",
@@ -1870,6 +1891,7 @@ dependencies = [
  "egui_kittest",
  "helios-core",
  "helios-gpu",
+ "helios-i18n",
  "helios-load",
  "helios-module-exposure",
  "helios-photo",
@@ -1888,14 +1910,10 @@ dependencies = [
 name = "helios-i18n"
 version = "0.0.1"
 dependencies = [
- "fluent-bundle",
- "fluent-pseudo",
- "fluent-syntax",
+ "egui-pop-i18n",
  "helios-core",
  "helios-shell",
  "serde",
- "sys-locale",
- "unic-langid",
 ]
 
 [[package]]
@@ -5700,6 +5718,7 @@ checksum = "e450f9b2ed1dff33c94c12589a87338689467b9c4f5d8a5710bd09a847d2c8a7"
 name = "xtask"
 version = "0.0.1"
 dependencies = [
+ "egui-pop-i18n",
  "helios-i18n",
  "serde_json",
 ]

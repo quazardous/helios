@@ -122,6 +122,11 @@ Translation goes into egui-pop too (2026-10-11, decided): an official
 `egui-pop-i18n` plugin (Fluent catalogues, language fallback, key
 extraction) built on egui-pop's public API, moved there from
 helios-i18n under the MIT licence; Helios then uses it.
+Done (2026-10-12): the desktop runs egui-pop-i18n (a Language setting,
+egui-pop's own text and Helios's in English and French); helios-i18n
+keeps only Helios's catalogues, its message ids and the English
+generated from its declarations, and `cargo xtask i18n` calls egui-pop's
+extractor and checks.
 A generic image viewport goes into egui-pop too (2026-10-11, decided):
 pan and zoom, tiled rendering fed by a tile source trait (proxy then exact
 tiles), a display-transform hook, overlays with handles in image
