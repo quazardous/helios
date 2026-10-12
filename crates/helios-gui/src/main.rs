@@ -117,6 +117,9 @@ impl eframe::App for App {
     }
 
     fn on_exit(&mut self) {
+        if let Err(e) = self.shell.save() {
+            eprintln!("helios-gui: cannot save the interface's settings: {e}");
+        }
         if let Some(file) = &self.file {
             // The workspace remembers its profile beside its layout.
             let pointer = serde_json::json!({ "profile": self.shell.profile_name() });
@@ -182,7 +185,14 @@ fn main() -> Result<(), String> {
         eprintln!("helios-gui: cannot remember the workspace: {e}");
     }
     let file = layout_file(&workspace);
-    let mut shell = Shell::new(helios_panels(), load(file.as_deref()));
+    // The interface's settings (window place, focus mode, the user's
+    // keys) are the user's, beside Helios's other settings.
+    let ui_settings = helios_gui::shell::config_dir().join("ui");
+    let mut shell = Shell::build(
+        helios_panels(),
+        load(file.as_deref()),
+        Some(ui_settings.clone()),
+    );
     let name = workspace.file_name().map_or_else(
         || workspace.display().to_string(),
         |n| n.to_string_lossy().into(),
@@ -226,7 +236,7 @@ fn main() -> Result<(), String> {
             None => shell.set_view_source(graph, node, "output")?,
         }
     }
-    let options = eframe::NativeOptions {
+    let mut options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title(format!("{name} — Helios"))
             .with_app_id("helios-gui")
@@ -236,6 +246,16 @@ fn main() -> Result<(), String> {
             .with_decorations(false),
         ..Default::default()
     };
+    // The window's place from the last run, repaired (the screens are not
+    // known before the window exists: only bounds are checked).
+    if let Ok(Some(read)) = egui_pop::core::persist::Persist::new(&ui_settings)
+        .load::<egui_pop::model::values::SettingsDoc>(
+        "settings",
+        &egui_pop::model::values::settings_schema(),
+    ) && let Some(state) = egui_pop::api::window::from_settings(&read.value)
+    {
+        egui_pop::api::window::apply(&mut options, state.repair(&[]));
+    }
     eframe::run_native(
         "helios-gui",
         options,

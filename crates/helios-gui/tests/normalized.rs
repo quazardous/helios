@@ -15,11 +15,12 @@ const FORBIDDEN: &[&str] = &[
     "show_viewport",
 ];
 
-/// Where the shell draws them: its dialogs, its own windows (the palette,
-/// auxiliary windows) and its frame.
+/// Where the shell draws them: its menus' popups, the auxiliary windows
+/// of its areas and its frame. Dialogs, toasts, the palette and the
+/// settings window are egui-pop's.
 const SHELL: &[&str] = &[
-    "crates/helios-gui/src/dialogs.rs",
     "crates/helios-gui/src/shell.rs",
+    "crates/helios-gui/src/workbench.rs",
     "crates/helios-gui/src/frame.rs",
 ];
 

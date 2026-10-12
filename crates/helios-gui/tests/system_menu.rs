@@ -1,7 +1,9 @@
-//! The logo and the system menu: declared menus whose entries are
-//! commands, with their keys, ticks and lists filled when they open.
+//! The logo and the system menu: declared menus (egui-pop's) whose
+//! entries are commands, with their keys, ticks and lists read again when
+//! they open.
 
 use egui::{Key, Modifiers, vec2};
+use egui_kittest::kittest::Queryable;
 use helios_gui::{Shell, headless, helios_panels};
 use helios_shell::commands::Origin;
 use serde_json::{Value, json};
@@ -60,7 +62,7 @@ fn the_logo_opens_the_system_menu_and_alt_space_too() {
 fn the_system_menu_is_declared_with_keys_ticks_and_lists() {
     let mut shell = framed();
     shell.set_theme("helios-light", std::collections::BTreeMap::default());
-    let items = shell.menu_items("system");
+    let items = shell.menu_items("helios.system");
     assert_eq!(
         titles(&items),
         [
@@ -115,37 +117,19 @@ fn about_and_keyboard_shortcuts_open_shell_dialogs() {
         .run("workbench.keybindings", json!(null), Origin::User)
         .unwrap();
     h.run();
-    let keys = h
-        .state_mut()
-        .run("dialog.current", json!(null), Origin::User)
-        .unwrap();
-    assert_eq!(keys["kind"], json!("picker"));
-    let palette = keys["choices"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|c| c["value"] == "workbench.palette")
-        .unwrap();
-    let keys = palette["detail"].as_str().unwrap();
+    // egui-pop's settings window, on its shortcuts editor: every command
+    // with the keys the keymap binds, which a click there changes.
+    let app = h.state().app().handle().clone();
+    assert!(egui_pop::api::settings_window::is_open(&app));
+    let keys = app.keys_for(&egui_pop::api::app::CMD_PALETTE);
     assert!(
-        keys.contains("Ctrl+Shift+P") && keys.contains("F1"),
-        "{keys}"
+        keys.iter().any(|k| k == "Ctrl+Shift+P") && keys.iter().any(|k| k == "F1"),
+        "{keys:?}"
     );
-    // Choosing one runs it.
-    h.state_mut()
-        .run(
-            "dialog.answer",
-            json!({ "choice": "workbench.palette" }),
-            Origin::User,
-        )
-        .unwrap();
-    h.run();
     assert!(
-        h.state()
-            .registry
-            .history()
-            .iter()
-            .any(|r| r.id == "workbench.palette")
+        h.query_by_label("Change the keys of Window: Show the Helios menu")
+            .is_some(),
+        "Helios's commands are listed"
     );
 }
 
@@ -162,9 +146,9 @@ fn opening_a_workspace_without_a_path_asks_for_one() {
         .unwrap();
     assert_eq!(form["kind"], json!("form"));
     assert_eq!(form["command"], json!("workspace.open"));
-    // A directory field: Browse, and the recent workspaces.
+    // A directory field, with Browse.
     let field = &form["fields"][0];
     assert_eq!(field["key"], json!("path"));
     assert_eq!(field["descriptor"]["path"], json!({ "kind": "dir" }));
-    assert!(h.state().target_rect("helios.dialog.browse.path").is_ok());
+    h.get_by_label("Browse…");
 }

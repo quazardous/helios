@@ -19,5 +19,6 @@ pub fn collect() -> Declarations {
         .values()
         .map(|m| (m.manifest(), m.param_hints()))
         .collect();
-    Declarations::from_specs(shell.registry.specs(), panels.all(), modules)
+    let commands = shell.specs();
+    Declarations::from_specs(&commands, panels.all(), modules)
 }

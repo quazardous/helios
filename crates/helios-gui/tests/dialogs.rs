@@ -1,9 +1,10 @@
-//! The shell's windows, dialogs, menus and notices: one set, drawn the
-//! same way, answered by a human or an agent alike.
+//! The shell's windows, dialogs, menus and notices: one set (egui-pop's
+//! components), drawn the same way, answered by a human or an agent alike.
 
 use egui::{Key, vec2};
+use egui_kittest::kittest::{NodeT, Queryable};
 use helios_gui::dialogs::{
-    Choice, Confirm, Field, Form, Level, MenuItem, Picker, Places, Request, request,
+    Choice, Confirm, Field, Form, Level, MenuItem, Picker, Request, request,
 };
 use helios_gui::{Shell, headless, helios_panels};
 use helios_shell::commands::{CommandSpec, Origin};
@@ -75,7 +76,6 @@ fn an_agent_answers_a_dialog_by_command_with_its_origin() {
     assert_eq!(log_area(h.state()), "Editors");
     let run = h
         .state()
-        .registry
         .history()
         .iter()
         .find(|r| r.id == "helios.log.moveTo")
@@ -145,7 +145,7 @@ fn a_form_is_built_from_descriptors_and_answered_with_values() {
 }
 
 #[test]
-fn a_picker_filters_as_one_types_and_enter_takes_the_first() {
+fn a_picker_runs_its_command_with_the_value_chosen() {
     let mut shell = Shell::new(helios_panels(), None);
     shell.pick(Picker {
         title: "Move the log to".into(),
@@ -161,18 +161,42 @@ fn a_picker_filters_as_one_types_and_enter_takes_the_first() {
         arg: "area".into(),
     });
     let mut h = harness(shell);
-    h.event(egui::Event::Text("secondary".into()));
-    h.run();
-    h.key_press(Key::Enter);
+    // egui-pop's choice has no search yet: one clicks a label.
+    h.get_by_label("secondary side bar").click();
     h.run();
     assert_eq!(log_area(h.state()), "SecondarySideBar");
+
+    // An agent chooses by value.
+    let mut shell = Shell::new(helios_panels(), None);
+    shell.pick(Picker {
+        title: "Move the log to".into(),
+        choices: ["editors", "primary_side_bar"]
+            .iter()
+            .map(|a| Choice {
+                value: a.to_string(),
+                label: a.replace('_', " "),
+                detail: None,
+            })
+            .collect(),
+        command: "helios.log.moveTo".into(),
+        arg: "area".into(),
+    });
+    let mut h = harness(shell);
+    h.state_mut()
+        .run(
+            "dialog.answer",
+            json!({ "choice": "primary_side_bar" }),
+            Origin::Agent("a1".into()),
+        )
+        .unwrap();
+    h.run();
+    assert_eq!(log_area(h.state()), "PrimarySideBar");
 }
 
 #[test]
 fn a_menu_lists_commands_with_their_keys_and_greys_what_does_not_apply() {
     let mut shell = Shell::new(helios_panels(), None);
     shell
-        .registry
         .register(
             CommandSpec::new("test.palette_only", "Only with the palette", "Test")
                 .when("paletteVisible"),
@@ -193,10 +217,18 @@ fn a_menu_lists_commands_with_their_keys_and_greys_what_does_not_apply() {
     );
     let mut h = harness(shell);
     assert!(h.state().target_rect("helios.menu").is_ok());
-    // The palette-only entry is greyed: the first one the keys reach is
-    // full screen, then the move.
-    h.key_press(Key::ArrowDown);
-    h.key_press(Key::Enter);
+    // The palette-only entry is greyed; the others show their keys.
+    assert!(
+        h.get_by_label("Only with the palette")
+            .accesskit_node()
+            .is_disabled()
+    );
+    assert!(
+        !h.get_by_label("Move Log to an area")
+            .accesskit_node()
+            .is_disabled()
+    );
+    h.get_by_label("Move Log to an area").click();
     h.run();
     assert_eq!(log_area(h.state()), "Editors");
     assert!(h.state().target_rect("helios.menu").is_err(), "closed");
@@ -304,8 +336,8 @@ fn pictures_of_each_kind() {
                     shell.open_menu(
                         egui::pos2(300.0, 200.0),
                         vec![
-                            MenuItem::command("workbench.palette"),
-                            MenuItem::command("workbench.fullscreen"),
+                            MenuItem::command("app.palette"),
+                            MenuItem::command("app.fullscreen"),
                             MenuItem::Separator,
                             MenuItem::command("helios.log.toggle"),
                         ],
@@ -350,30 +382,15 @@ fn tree(name: &str, dirs: &[&str], files: &[&str]) -> std::path::PathBuf {
     root
 }
 
-fn click(h: &mut egui_kittest::Harness<'static, Shell>, target: &str) {
-    let at = h.state().target_rect(target).unwrap().center();
-    h.hover_at(at);
-    h.run();
-    for pressed in [true, false] {
-        h.event(egui::Event::PointerButton {
-            pos: at,
-            button: egui::PointerButton::Primary,
-            pressed,
-            modifiers: egui::Modifiers::NONE,
-        });
-    }
-    h.run();
-}
-
-fn press(h: &mut egui_kittest::Harness<'static, Shell>, key: Key) {
-    h.key_press(key);
-    h.run();
-}
-
 fn current(h: &mut egui_kittest::Harness<'static, Shell>) -> serde_json::Value {
     h.state_mut()
         .run("dialog.current", json!(null), Origin::User)
         .unwrap()
+}
+
+fn click(h: &mut egui_kittest::Harness<'static, Shell>, label: &str) {
+    h.get_by_label(label).click();
+    h.run();
 }
 
 fn path_form(key: &str, descriptor: Descriptor, value: &std::path::Path) -> Form {
@@ -389,68 +406,56 @@ fn path_form(key: &str, descriptor: Descriptor, value: &std::path::Path) -> Form
     }
 }
 
-/// The shell's own picker, as when no system chooser answers.
-fn own_picker(mut shell: Shell) -> Shell {
-    shell.set_places(Places {
-        native: false,
-        recent: Vec::new(),
-    });
-    shell
-}
-
 #[test]
 fn browse_walks_folders_in_the_own_picker_and_fills_the_field() {
     let root = tree("dirs", &["a/inner", "b"], &["notes.txt"]);
-    let mut shell = own_picker(Shell::new(helios_panels(), None));
+    let mut shell = Shell::new(helios_panels(), None);
     shell.form(path_form(
         "dir",
         Descriptor::path("folder", PathKind::Dir, &[]),
         &root,
     ));
     let mut h = harness(shell);
-    click(&mut h, "helios.dialog.browse.dir");
-    let shown = |p: &std::path::Path| json!(p.display().to_string());
-    assert_eq!(current(&mut h)["browsing"]["dir"], shown(&root));
-    // "..", then a and b: no files when choosing a folder.
-    press(&mut h, Key::ArrowDown);
-    press(&mut h, Key::Enter);
-    assert_eq!(current(&mut h)["browsing"]["dir"], shown(&root.join("a")));
-    // ".." is first: back up, where the folder left is selected.
-    press(&mut h, Key::Enter);
-    assert_eq!(current(&mut h)["browsing"]["dir"], shown(&root));
-    press(&mut h, Key::ArrowDown);
-    press(&mut h, Key::Enter);
-    assert_eq!(current(&mut h)["browsing"]["dir"], shown(&root.join("b")));
-    click(&mut h, "helios.dialog.primary");
+    click(&mut h, "Browse…");
+    // The folder's subfolders, no files when choosing a folder.
+    assert!(h.query_by_label("a/").is_some() && h.query_by_label("b/").is_some());
+    assert!(h.query_by_label("notes.txt").is_none());
+    click(&mut h, "a/");
+    assert!(h.query_by_label("inner/").is_some(), "in a");
+    click(&mut h, "Up");
+    click(&mut h, "b/");
+    click(&mut h, "Choose this folder");
     let form = current(&mut h);
-    assert!(form.get("browsing").is_none(), "{form}");
     assert_eq!(form["kind"], json!("form"));
-    assert_eq!(form["values"]["dir"], shown(&root.join("b")));
+    assert_eq!(
+        form["values"]["dir"],
+        json!(root.join("b").display().to_string())
+    );
+    assert!(
+        h.query_by_label("Choose this folder").is_none(),
+        "the picker closed"
+    );
     let _ = std::fs::remove_dir_all(&root);
 }
 
 #[test]
-fn a_file_field_lists_accepted_files_and_escape_goes_back_to_the_form() {
+fn a_file_field_lists_accepted_files_and_closing_the_picker_keeps_the_form() {
     let root = tree("files", &[], &["photo.jpg", "photo.xmp"]);
-    let mut shell = own_picker(Shell::new(helios_panels(), None));
+    let mut shell = Shell::new(helios_panels(), None);
     shell.form(path_form(
         "sidecar",
         Descriptor::path("sidecar", PathKind::File, &["xmp"]),
         &root,
     ));
     let mut h = harness(shell);
-    click(&mut h, "helios.dialog.browse.sidecar");
-    assert!(current(&mut h).get("browsing").is_some());
-    press(&mut h, Key::Escape);
+    click(&mut h, "Browse…");
+    assert!(h.query_by_label("photo.jpg").is_none(), "not accepted");
+    click(&mut h, "Close the picker");
     let form = current(&mut h);
     assert_eq!(form["kind"], json!("form"), "the form stays");
-    assert!(form.get("browsing").is_none());
-    click(&mut h, "helios.dialog.browse.sidecar");
-    // "..", then the one file accepted.
-    press(&mut h, Key::ArrowDown);
-    press(&mut h, Key::Enter);
+    click(&mut h, "Browse…");
+    click(&mut h, "photo.xmp");
     let form = current(&mut h);
-    assert!(form.get("browsing").is_none(), "{form}");
     assert_eq!(
         form["values"]["sidecar"],
         json!(root.join("photo.xmp").display().to_string())

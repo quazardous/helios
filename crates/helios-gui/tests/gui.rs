@@ -84,7 +84,8 @@ fn keys_open_the_palette_which_runs_a_command() {
     assert!(!h.state().palette_open());
     let placed = h.state().layout();
     assert!(!placed.placed().contains(&"helios.queue"));
-    let last = h.state().registry.history().last().unwrap();
+    let history = h.state().history();
+    let last = history.last().unwrap();
     assert_eq!(last.id, "helios.queue.toggle");
     assert_eq!(last.origin, Origin::User);
 }
@@ -122,7 +123,7 @@ fn commands_move_panels_and_the_layout_follows() {
     assert!(
         matches!(&side.1, Node::Tabs { panels, .. } if panels.contains(&"helios.scopes".to_string()))
     );
-    assert_eq!(h.state().focused(), Some("helios.scopes"));
+    assert_eq!(h.state().focused().as_deref(), Some("helios.scopes"));
 }
 
 #[test]
@@ -146,10 +147,12 @@ fn f11_toggles_full_screen_and_the_frame_has_its_buttons() {
     let mut h = headless::harness(shell, vec2(1024.0, 700.0));
     h.run();
     h.get_by_label("photos");
+    // F11 is egui-pop's full screen (its window plugin).
     h.key_press(Key::F11);
     h.run();
-    let last = h.state().registry.history().last().unwrap();
-    assert_eq!(last.id, "workbench.fullscreen");
+    let history = h.state().history();
+    let last = history.last().unwrap();
+    assert_eq!(last.id, "app.fullscreen");
     assert!(last.result.is_ok());
     let s = h.state_mut();
     for id in ["window.minimize", "window.maximize", "window.close"] {
@@ -204,14 +207,7 @@ fn a_profile_exports_imports_with_a_diff_and_is_used_by_name() {
     let mut shell = Shell::new(helios_panels(), None);
     shell.set_profiles_dir(dir.clone());
     shell
-        .keymap
-        .bind(
-            "ctrl+shift+e",
-            "theme.helios-light",
-            "",
-            helios_shell::keymap::Layer::User,
-            "user",
-        )
+        .bind_user_keys("ctrl+shift+e", "theme.helios-light")
         .unwrap();
     let mut h = headless::harness(shell, vec2(800.0, 500.0));
     h.run();
@@ -466,7 +462,7 @@ fn the_shell_runs_the_value_commands_with_their_origin() {
         .unwrap();
     assert!((a["value"].as_f64().unwrap() - 1.79).abs() < 1e-9, "{a}");
     assert_eq!(
-        shell.registry.history().last().unwrap().origin,
+        shell.history().last().unwrap().origin,
         Origin::Agent("a1".into())
     );
 }
@@ -577,4 +573,22 @@ fn move_to_does_what_a_drag_does_under_the_same_rules() {
         h.state().notes.last().map(String::as_str),
         Some("Graph stays out of the bottom panel")
     );
+}
+
+#[test]
+fn helios_s_declarations_sit_cleanly_in_egui_pop() {
+    use egui_pop::model::ids::CommandId;
+    let shell = Shell::new(helios_panels(), None);
+    // No two commands claim the same keys; every binding runs a command.
+    egui_pop_test::assert_keymap_clean(shell.app());
+    let app = shell.app().handle();
+    let diagnostics = app.diagnostics();
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    // Helios's commands are egui-pop's, with Helios's keys.
+    let rate = app
+        .command(&CommandId::from_static("vault.rate.3"))
+        .unwrap();
+    assert_eq!(rate.category, "Vault");
+    let keys = app.keys_for(&CommandId::from_static("workbench.systemMenu"));
+    assert_eq!(keys, ["Alt+Space"]);
 }

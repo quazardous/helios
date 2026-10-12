@@ -1,5 +1,6 @@
-//! Helios's desktop: the shell of `helios-shell` drawn with egui, and the
-//! framework's own pictures and recordings of it.
+//! Helios's desktop: an egui-pop application around Helios's areas and
+//! panels, its commands run by Helios's kernel, and the framework's own
+//! pictures and recordings of it.
 
 pub mod dialogs;
 pub mod dock;
@@ -9,11 +10,13 @@ pub mod keys;
 pub mod library;
 pub mod params;
 pub mod persist;
+mod plugins;
 pub mod scopes;
 pub mod shell;
 pub mod snapshot;
 pub mod theme;
 pub mod viewport;
+mod workbench;
 
 pub use shell::{Shell, headless, name_rect};
 

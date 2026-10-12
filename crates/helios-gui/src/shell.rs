@@ -1,37 +1,56 @@
-//! The desktop shell drawn with egui: areas docked from the workspace's
-//! layout, detached panels in their own windows, the command palette, keys
-//! resolved by the keymap, and pictures of any named part of it.
+//! The desktop shell: an egui-pop application (`egui_pop::api::App`) with
+//! Helios's plugins, around Helios's own frame, areas and status bar.
 //!
-//! Everything the user can do goes through a command of the registry, so
-//! a key, the palette, a script and an agent reach the same actions.
+//! egui-pop draws what every application shares, from declarations: the
+//! menu bar and menus, the command palette, dialogs, toasts, the settings
+//! window with its shortcuts editor, the window's place, and the keys,
+//! resolved by its keymap. Helios declares its commands there and runs
+//! them on its own kernel (see `host`), draws its title bar and status
+//! bar, and its areas (docked panels and auxiliary windows, see
+//! `workbench`) as a block of egui-pop's main zone.
+//!
+//! Everything the user can do goes through a command, so a key, the
+//! palette, a menu, a script and an agent reach the same actions.
 
+use std::cell::RefCell;
 use std::collections::{BTreeMap, VecDeque};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::rc::Rc;
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
-use egui::{Align2, Context as Egui, Event, Id, Key, Rect, Ui, ViewportBuilder, ViewportId};
-use egui_dock::{DockArea, DockState, TabViewer};
-use helios_shell::commands::{CommandSpec, Origin, Registry};
-use helios_shell::keymap::{Chord, Keymap, Keys, Layer, Resolution};
-use helios_shell::layout::{Auxiliary, Layout, Node};
+use egui::{Context as Egui, Event, Id, Rect, Ui};
+use egui_pop::api::dialogs::{self, Choose, DIALOGS, Dialogs};
+use egui_pop::api::host::{Reply, Resolver};
+use egui_pop::api::settings_window::{SETTINGS_WINDOW, SHORTCUTS};
+use egui_pop::api::toasts::{TOASTS, Toast};
+use egui_pop::api::{App, AppHandle, DefaultPlugins, palette};
+use egui_pop::model::ids::{CommandId, MenuId, OwnerId};
+use egui_pop::model::keymap::Layer;
+use egui_pop::model::menus::{Item, MenuItem as PopItem, Shown, show_items};
+use helios_core::Bus;
+use helios_shell::commands::{CommandSpec, Origin, Registry, Run};
+use helios_shell::layout::Layout;
 use helios_shell::panels::{Area, PanelSpec, Panels};
-use helios_shell::when::Context;
 use image::RgbaImage;
 use serde_json::{Value, json};
 
-use crate::dock::{from_dock, to_dock};
-use crate::keys::chord;
+use crate::dialogs::{Answer, Level, MenuItem, Notice};
+use crate::host::{HeliosHost, Later, to_helios, to_pop};
+use crate::plugins::{
+    self, Declarations, ListSource, SYSTEM, SYSTEM_PROFILES, SYSTEM_RECENT, SYSTEM_THEMES,
+    menu_title,
+};
 use crate::snapshot::{self, Recorder};
+use crate::workbench::Workbench;
 
-/// The screen auxiliary windows are said to be on, until egui names
-/// monitors.
-const SCREEN: &str = "primary";
+pub use crate::workbench::Content;
 
 /// Pixels per point from which a screen is `hidpi` for profile variants.
 const HIDPI: f32 = 1.5;
 
 /// What commands ask the shell to do; they are queued and applied at the
-/// next frame, where the shell's state is at hand.
+/// next frame, where the shell's state is at hand. The command shows as
+/// running until then (see `host::Later`).
 enum Action {
     Palette,
     Theme(String),
@@ -58,11 +77,12 @@ enum Action {
     Zoom(Zoom),
     Copy(String),
     SystemMenu,
-    RunCommand(String),
+    /// A command, its arguments, as whom.
+    Run(String, Value, Origin),
     About,
     Keybindings,
     OpenWorkspace(Option<PathBuf>),
-    Answer(crate::dialogs::Answer, Origin),
+    Answer(Answer, Origin),
     AssumeYes(bool),
     Dock(String),
     Snapshot {
@@ -77,7 +97,7 @@ enum Action {
     RecordStop,
 }
 
-type Queue = Arc<Mutex<Vec<Action>>>;
+type Queue = Arc<Mutex<Vec<(Action, Option<Resolver>)>>>;
 
 /// What the viewport's zoom commands ask for.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -88,22 +108,13 @@ enum Zoom {
 }
 
 /// How a command turns its arguments into an action.
-type ActionOf = Box<dyn Fn(&Value) -> Result<Action, String> + Send + Sync>;
+type ActionOf = Box<dyn Fn(&Value, &Origin) -> Result<Action, String> + Send + Sync>;
 
 /// A picture asked of the window, waiting for egui's screenshot.
 enum Shot {
     Save { target: String, path: PathBuf },
     Frame,
 }
-
-struct Palette {
-    query: String,
-    selected: usize,
-    opened: bool,
-}
-
-/// Draws a panel's content.
-pub type Content = Box<dyn FnMut(&mut Ui)>;
 
 /// Names a widget's rectangle for this frame, so it can be pictured by
 /// that name (`gui.snapshot {target: name}`).
@@ -114,33 +125,31 @@ pub fn name_rect(ctx: &Egui, name: &str, rect: Rect) {
     });
 }
 
-#[allow(
-    clippy::struct_excessive_bools,
-    reason = "independent switches (framed, pending theme, auto-answer, still), not states of one machine"
-)]
-pub struct Shell {
-    pub registry: Registry,
-    pub keymap: Keymap,
-    panels: Panels,
-    docks: Vec<(Area, DockState<String>)>,
-    auxiliary: Vec<Auxiliary>,
-    /// Panels the user closed: a layout keeps them closed.
-    hidden: Vec<String>,
+/// What commands are wired to, before the shell exists: declaring them
+/// comes before building the application that reads them.
+struct Wiring<'a> {
+    registry: &'a Arc<Mutex<Registry>>,
     queue: Queue,
-    palette: Option<Palette>,
-    pending: Vec<Chord>,
-    focused: Option<String>,
-    cx: Context,
+    later: &'a Later,
+    dialogs: Arc<OnceLock<Dialogs>>,
+    resolved_view: Arc<Mutex<Value>>,
+    values: Arc<Mutex<helios_values::Store>>,
+    themes: &'a crate::theme::Themes,
+    declarations: &'a Rc<RefCell<Declarations>>,
+}
+
+fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+pub struct Shell {
+    app: App,
+    registry: Arc<Mutex<Registry>>,
+    lists: Rc<RefCell<ListSource>>,
+    workbench: Rc<RefCell<Workbench>>,
+    queue: Queue,
     rects: BTreeMap<String, Rect>,
-    /// Where each area was drawn last frame (the editors always are).
-    area_rects: BTreeMap<Area, Rect>,
-    /// The window's content, where hidden areas offer a drop zone.
-    content_rect: Rect,
-    /// The panel whose tab is being dragged, the area it comes from and
-    /// where the pointer was last seen.
-    dragging: Option<(String, Area, egui::Pos2)>,
     pixels_per_point: f32,
-    contents: BTreeMap<String, Content>,
     shots: VecDeque<Shot>,
     recording: Option<(String, Recorder)>,
     /// What the shell has to say: command results, layout repairs.
@@ -150,9 +159,10 @@ pub struct Shell {
     framed: bool,
     themes: crate::theme::Themes,
     theme: crate::theme::Tokens,
+    theme_name: String,
     theme_overrides: BTreeMap<String, serde_json::Value>,
-    /// The theme changed and egui has not been told yet.
-    theme_pending: bool,
+    /// The theme egui-pop last installed, as seen by the shell.
+    installed: Option<crate::theme::ThemeSpec>,
     /// Where profiles are kept (`<name>.helios-profile`).
     profiles_dir: PathBuf,
     profile_name: String,
@@ -165,33 +175,25 @@ pub struct Shell {
     loaded: Option<(helios_profile::Profile, helios_profile::Resolved)>,
     /// What `profile.resolved` answers.
     resolved_view: Arc<Mutex<Value>>,
-    scopes: std::rc::Rc<std::cell::RefCell<crate::scopes::Scopes>>,
-    library: std::rc::Rc<std::cell::RefCell<crate::library::Library>>,
-    /// Dialogs waiting to be answered, the first one shown.
-    dialogs: VecDeque<crate::dialogs::Open>,
-    /// What `dialog.current` answers: the shown dialog, described.
-    dialog_view: Arc<Mutex<Option<Value>>>,
+    scopes: Rc<RefCell<crate::scopes::Scopes>>,
+    library: Rc<RefCell<crate::library::Library>>,
+    /// egui-pop's dialogs, once the application is built (`dialog.current`).
+    dialogs: Arc<OnceLock<Dialogs>>,
     /// Confirmations are answered yes by policy (a script's `--yes`).
     assume_yes: bool,
-    /// An open menu: where, its entries, the selected one.
-    menu: Option<(egui::Pos2, MenuSource, usize)>,
-    /// The menus contributed so far, by id (`system`).
-    pub menus: helios_shell::menus::Menus,
-    /// The theme in use, by name.
-    theme_name: String,
+    /// The system menu, open under this rectangle.
+    system_menu: Option<Rect>,
+    /// A menu of commands asked for, open at a point.
+    menu: Option<(egui::Pos2, Vec<MenuItem>)>,
     /// Every notice so far; the status bar shows the last, toasts the
-    /// recent warnings and errors.
-    notices: Vec<crate::dialogs::Notice>,
-    dismissed: Vec<usize>,
+    /// warnings and errors.
+    notices: Vec<Notice>,
     /// The GUI's clock, in seconds, as of this frame.
     now: f64,
-    viewport: std::rc::Rc<std::cell::RefCell<crate::viewport::Viewport>>,
-    params: std::rc::Rc<std::cell::RefCell<crate::params::Params>>,
+    viewport: Rc<RefCell<crate::viewport::Viewport>>,
+    params: Rc<RefCell<crate::params::Params>>,
     /// Every value widgets and agents edit (`param.*` commands).
-    pub values: std::sync::Arc<std::sync::Mutex<helios_values::Store>>,
-    /// Where path fields browse: the system's chooser or Helios's own
-    /// picker, and the recent workspaces.
-    places: crate::dialogs::Places,
+    pub values: Arc<Mutex<helios_values::Store>>,
     /// Headless runs: no cursor blink and no animation, so a frame settles
     /// and a test's `run` ends.
     still: bool,
@@ -201,90 +203,124 @@ impl Shell {
     /// A shell over declared panels, in a saved layout (repaired) or the
     /// default one.
     pub fn new(panels: Panels, layout: Option<Layout>) -> Shell {
-        let (layout, notes) = match layout {
-            Some(l) => l.repair(&panels, &[SCREEN]),
-            None => (Layout::default_for(&panels), Vec::new()),
-        };
-        let mut shell = Shell {
-            registry: Registry::new(),
-            keymap: Keymap::new(),
-            docks: Vec::new(),
-            auxiliary: layout.auxiliary.clone(),
-            hidden: layout.hidden.clone(),
+        Shell::build(panels, layout, None)
+    }
+
+    /// As [`Shell::new`], keeping the interface's settings (window place,
+    /// focus mode, the user's keys) in `ui_settings`.
+    pub fn build(panels: Panels, layout: Option<Layout>, ui_settings: Option<PathBuf>) -> Shell {
+        let registry = Arc::new(Mutex::new(Registry::new()));
+        let bus = Arc::new(Bus::new());
+        let host = HeliosHost::new(registry.clone(), bus, Arc::default());
+        let later = host.later();
+        let specs: Vec<PanelSpec> = panels.all().to_vec();
+        let (workbench, notes) = Workbench::new(panels, layout);
+        let workbench = Rc::new(RefCell::new(workbench));
+        let themes = crate::theme::themes();
+        let declarations = Rc::new(RefCell::new(Declarations::default()));
+        let lists = Rc::new(RefCell::new(ListSource {
+            profiles_dir: config_dir().join("profiles"),
+        }));
+        // Commands are declared before the application is built: its
+        // plugins read the registry when they connect.
+        let wiring = Wiring {
+            registry: &registry,
             queue: Arc::default(),
-            palette: None,
-            pending: Vec::new(),
-            focused: None,
-            cx: Context::new(),
+            later: &later,
+            dialogs: Arc::default(),
+            resolved_view: Arc::new(Mutex::new(Value::Null)),
+            values: Arc::default(),
+            themes: &themes,
+            declarations: &declarations,
+        };
+        Shell::declare_commands(&wiring, &specs);
+        Shell::declare_menus(&wiring);
+        let Wiring {
+            queue,
+            dialogs,
+            resolved_view,
+            values,
+            ..
+        } = wiring;
+        helios_values::register(&mut lock(&registry), values.clone())
+            .expect("param commands are declared once");
+        let mut builder = App::builder()
+            .host(host)
+            .themes(themes.clone())
+            .theme(crate::theme::ThemeSpec::new(crate::theme::DEFAULT))
+            .plugins(DefaultPlugins)
+            .plugin(plugins::Commands {
+                registry: registry.clone(),
+                declarations: declarations.clone(),
+            })
+            .plugin(plugins::Lists {
+                source: lists.clone(),
+            })
+            .plugin(plugins::Areas {
+                workbench: workbench.clone(),
+            });
+        if let Some(dir) = ui_settings {
+            builder = builder.persist(dir);
+        }
+        let app = builder
+            .build(&Egui::default())
+            .unwrap_or_else(|e| panic!("Helios's application builds: {e}"));
+        if let Some(d) = app.handle().service(&DIALOGS) {
+            let _ = dialogs.set((*d).clone());
+        }
+        let mut shell = Shell {
+            app,
+            registry,
+            lists,
+            workbench,
+            queue,
             rects: BTreeMap::new(),
-            area_rects: BTreeMap::new(),
-            content_rect: Rect::NOTHING,
-            dragging: None,
             pixels_per_point: 1.0,
-            contents: BTreeMap::new(),
             shots: VecDeque::new(),
             recording: None,
             notes,
-            panels,
             title: String::new(),
             framed: false,
-            themes: crate::theme::themes(),
-            theme: crate::theme::resolve(
-                &crate::theme::themes(),
-                crate::theme::DEFAULT,
-                &BTreeMap::new(),
-            ),
+            theme: crate::theme::resolve(&themes, crate::theme::DEFAULT, &BTreeMap::new()),
+            themes,
+            theme_name: crate::theme::DEFAULT.into(),
             theme_overrides: BTreeMap::new(),
-            theme_pending: true,
+            installed: None,
             profiles_dir: config_dir().join("profiles"),
             profile_name: "default".into(),
             pending_import: None,
             machine: helios_profile::Machine::here(&config_dir().join("machine.toml")),
             loaded: None,
-            resolved_view: Arc::new(Mutex::new(Value::Null)),
-            scopes: std::rc::Rc::default(),
-            library: std::rc::Rc::default(),
-            values: Arc::default(),
-            viewport: std::rc::Rc::default(),
-            params: std::rc::Rc::default(),
-            dialogs: VecDeque::new(),
-            dialog_view: Arc::default(),
+            resolved_view,
+            scopes: Rc::default(),
+            library: Rc::default(),
+            dialogs,
             assume_yes: false,
-            still: false,
-            places: crate::dialogs::Places {
-                native: std::env::var_os("HELIOS_NO_NATIVE_DIALOGS").is_none(),
-                recent: recent_workspaces(),
-            },
+            system_menu: None,
             menu: None,
-            menus: helios_shell::menus::Menus::new(),
-            theme_name: crate::theme::DEFAULT.into(),
             notices: Vec::new(),
-            dismissed: Vec::new(),
             now: 0.0,
+            viewport: Rc::default(),
+            params: Rc::default(),
+            values,
+            still: false,
         };
-        shell.docks = layout
-            .areas
-            .iter()
-            .map(|(area, node)| (*area, to_dock(node)))
-            .collect();
-        shell.declare_commands();
-        shell.declare_menus();
-        helios_values::register(&mut shell.registry, shell.values.clone())
-            .expect("param commands are declared once");
+        for d in shell.app.handle().diagnostics() {
+            shell.notes.push(format!("{}: {}", d.code, d.message));
+        }
         {
-            let mut store = shell.values.lock().expect("value store lock");
+            let mut store = lock(&shell.values);
             crate::viewport::declare(&mut store);
             store.declare(
                 crate::params::SELECTION,
                 helios_values::Descriptor::text("selected node", ""),
             );
         }
-        if shell.panels.get("helios.params").is_some() {
+        let has = |shell: &Shell, panel: &str| shell.workbench.borrow().panels.get(panel).is_some();
+        if has(&shell, "helios.params") {
             let (params, values) = (shell.params.clone(), shell.values.clone());
             shell.set_content("helios.params", move |ui| {
-                let selection = values
-                    .lock()
-                    .expect("value store lock")
+                let selection = lock(&values)
                     .get(crate::params::SELECTION)
                     .and_then(|e| match &e.value {
                         helios_core::Value::Text(t) if !t.is_empty() => Some(t.clone()),
@@ -295,18 +331,18 @@ impl Shell {
                     .panel_ui(ui, &values, selection.as_deref());
             });
         }
-        if shell.panels.get("helios.viewport").is_some() {
+        if has(&shell, "helios.viewport") {
             let (viewport, values) = (shell.viewport.clone(), shell.values.clone());
             shell.set_content("helios.viewport", move |ui| {
                 viewport.borrow_mut().ui(ui, &values);
             });
         }
-        if shell.panels.get("helios.scopes").is_some() {
+        if has(&shell, "helios.scopes") {
             let scopes = shell.scopes.clone();
             shell.set_content("helios.scopes", move |ui| scopes.borrow_mut().ui(ui));
         }
         for (panel, strip) in [("helios.vault", false), ("helios.filmstrip", true)] {
-            if shell.panels.get(panel).is_some() {
+            if has(&shell, panel) {
                 let library = shell.library.clone();
                 shell.set_content(panel, move |ui| {
                     let mut library = library.borrow_mut();
@@ -319,6 +355,57 @@ impl Shell {
             }
         }
         shell
+    }
+
+    /// The egui-pop application (its handle: services, menus, history).
+    pub fn app(&self) -> &App {
+        &self.app
+    }
+
+    /// Saves the interface's settings and the user's keys (when built
+    /// with a place for them).
+    pub fn save(&self) -> Result<(), String> {
+        self.app.save().map_err(|e| e.to_string())
+    }
+
+    /// Declares a command on Helios's registry, and to the interface.
+    pub fn register(
+        &mut self,
+        spec: CommandSpec,
+        handler: impl Fn(&Value, &Origin) -> Result<Value, String> + Send + Sync + 'static,
+    ) -> Result<(), String> {
+        lock(&self.registry).register(spec, handler)?;
+        self.redeclare(&plugins::COMMANDS);
+        Ok(())
+    }
+
+    /// Every command Helios declares, by id.
+    pub fn specs(&self) -> Vec<CommandSpec> {
+        lock(&self.registry).specs().cloned().collect()
+    }
+
+    /// The last command runs, Helios's and the interface's, oldest first.
+    pub fn history(&self) -> Vec<Run> {
+        self.app
+            .handle()
+            .history()
+            .into_iter()
+            .map(|r| Run {
+                id: r.id.to_string(),
+                args: r.args,
+                origin: to_helios(&r.origin),
+                result: r.result,
+            })
+            .collect()
+    }
+
+    /// Connects a plugin again, so what it declares is read again.
+    fn redeclare(&mut self, plugin: &egui_pop::model::ids::PluginId) {
+        self.app.disconnect(plugin);
+        if let Err(e) = self.app.connect(plugin) {
+            self.notes.push(format!("{plugin}: {e}"));
+        }
+        self.app.rebuild();
     }
 
     /// The image the scopes measure (working data, before the display
@@ -364,7 +451,7 @@ impl Shell {
         port: &str,
     ) -> Result<(), String> {
         {
-            let mut store = self.values.lock().expect("value store lock");
+            let mut store = lock(&self.values);
             for id in graph.ids() {
                 helios_values::bind_node(&mut store, &graph, id)?;
             }
@@ -380,7 +467,7 @@ impl Shell {
     }
 
     /// What the viewport's render thread did.
-    pub fn viewport_stats(&self) -> std::sync::Arc<crate::viewport::Stats> {
+    pub fn viewport_stats(&self) -> Arc<crate::viewport::Stats> {
         self.viewport.borrow().stats.clone()
     }
 
@@ -391,20 +478,15 @@ impl Shell {
 
     /// The layout as it stands, to be saved with the workspace.
     pub fn layout(&self) -> Layout {
-        Layout {
-            areas: self
-                .docks
-                .iter()
-                .filter_map(|(area, dock)| from_dock(dock).map(|n| (*area, n)))
-                .collect(),
-            auxiliary: self.auxiliary.clone(),
-            hidden: self.hidden.clone(),
-        }
+        self.workbench.borrow().layout()
     }
 
     /// Gives a panel its content; panels without one show a placeholder.
     pub fn set_content(&mut self, panel: &str, content: impl FnMut(&mut Ui) + 'static) {
-        self.contents.insert(panel.into(), Box::new(content));
+        self.workbench
+            .borrow_mut()
+            .contents
+            .insert(panel.into(), Box::new(content));
     }
 
     /// Switches to a theme, with the user's overrides; problems (an
@@ -423,7 +505,9 @@ impl Shell {
         }
         let resolved = if known { name } else { crate::theme::DEFAULT };
         self.theme = crate::theme::resolve(&self.themes, resolved, &self.theme_overrides);
-        self.theme_pending = true;
+        let mut spec = crate::theme::ThemeSpec::new(resolved);
+        spec.overrides.clone_from(&self.theme_overrides);
+        self.app.handle().theme().set(spec);
         let problems: Vec<String> = self
             .theme
             .resolved()
@@ -446,17 +530,39 @@ impl Shell {
         &self.theme
     }
 
+    /// Binds keys to a command in the user's keymap (what a profile
+    /// carries), from the next frame.
+    pub fn bind_user_keys(&mut self, keys: &str, command: &str) -> Result<(), String> {
+        let id = CommandId::new(command).map_err(|e| e.to_string())?;
+        self.app.handle().rebind(id, Some(keys.to_string()));
+        self.app.process_requests();
+        Ok(())
+    }
+
+    /// The user's own key bindings: keys, command, `when`.
+    fn user_bindings(&self) -> Vec<(String, String, String)> {
+        self.app
+            .keymap()
+            .export(&OwnerId::USER, Layer::User)
+            .bindings
+            .into_iter()
+            .filter_map(|b| {
+                let c = b.command.filter(|c| !c.starts_with('-'))?;
+                Some((b.keys, c, b.when))
+            })
+            .collect()
+    }
+
     /// What the shell holds as a profile: theme, user keys, layout.
     pub fn profile(&self) -> helios_profile::Profile {
         use helios_profile::{Binding, Profile, System, ThemeChoice, portable_keys};
         let keymap = self
-            .keymap
-            .bindings(Layer::User)
+            .user_bindings()
             .into_iter()
-            .map(|b| Binding {
-                keys: portable_keys(&b.keys.to_string().to_lowercase(), System::current()),
-                command: b.command.clone(),
-                when: b.when.clone(),
+            .map(|(keys, command, when)| Binding {
+                keys: portable_keys(&keys.to_lowercase(), System::current()),
+                command,
+                when,
             })
             .collect();
         Profile {
@@ -493,7 +599,7 @@ impl Shell {
                 from.join(", ")
             ));
         }
-        *self.resolved_view.lock().expect("resolved view") = json!({
+        *lock(&self.resolved_view) = json!({
             "profile": p.name,
             "machine": machine,
             "from": resolved.from,
@@ -524,16 +630,22 @@ impl Shell {
             self.set_theme(&t.name, t.overrides.clone());
         }
         if let Some(keys) = &p.keymap {
-            self.keymap.clear(Layer::User);
-            for b in keys {
-                let local = local_keys(&b.keys, System::current());
-                if let Err(e) =
-                    self.keymap
-                        .bind(&local, &b.command, &b.when, Layer::User, "profile")
-                {
-                    self.warn(format!("profile {}: {e}", p.name));
+            let handle = self.app.handle().clone();
+            for (_, command, _) in self.user_bindings() {
+                if let Ok(id) = CommandId::new(command) {
+                    handle.reset_keys(id);
                 }
             }
+            for b in keys {
+                // egui-pop's user keymap takes a command's keys, not a
+                // `when` of their own: the command's applies.
+                let local = local_keys(&b.keys, System::current());
+                match CommandId::new(b.command.as_str()) {
+                    Ok(id) => handle.rebind(id, Some(local)),
+                    Err(e) => self.warn(format!("profile {}: {e}", p.name)),
+                }
+            }
+            self.app.process_requests();
         }
         if let Some(layout) = &p.layout {
             match Layout::from_json(&layout.to_string()) {
@@ -545,16 +657,15 @@ impl Shell {
 
     /// Arranges the panels as a layout says, repaired to today's panels.
     pub fn set_layout(&mut self, layout: Layout) {
-        let (l, notes) = layout.repair(&self.panels, &[SCREEN]);
+        let notes = self.workbench.borrow_mut().set_layout(layout);
         self.notes.extend(notes);
-        self.docks = l.areas.iter().map(|(a, n)| (*a, to_dock(n))).collect();
-        self.auxiliary = l.auxiliary;
-        self.hidden = l.hidden;
     }
 
     /// Where profiles are read and written.
     pub fn set_profiles_dir(&mut self, dir: PathBuf) {
+        self.lists.borrow_mut().profiles_dir.clone_from(&dir);
         self.profiles_dir = dir;
+        self.redeclare(&plugins::LISTS);
     }
 
     pub fn profile_name(&self) -> &str {
@@ -585,7 +696,8 @@ impl Shell {
         Ok(())
     }
 
-    /// Adds a theme (a user's file, a plugin's) to those that can be chosen.
+    /// Adds a theme (a user's file, a plugin's) to those that can be
+    /// chosen; it is offered from the next start.
     pub fn add_theme(&mut self, theme: egui_pop::tokens::TokenFile) {
         self.themes.add(theme);
     }
@@ -602,16 +714,17 @@ impl Shell {
     }
 
     /// The panel that has the focus.
-    pub fn focused(&self) -> Option<&str> {
-        self.focused.as_deref()
+    pub fn focused(&self) -> Option<String> {
+        self.workbench.borrow().focused.clone()
     }
 
     pub fn palette_open(&self) -> bool {
-        self.palette.is_some()
+        palette::is_open(self.app.handle())
     }
 
     /// Where a target was drawn at the last frame: `window`, a panel id or
-    /// a name given by [`name_rect`].
+    /// a name given by [`name_rect`]; `helios.dialog`, `helios.toasts` and
+    /// `helios.menu` for what egui-pop and the shell show over the rest.
     pub fn target_rect(&self, target: &str) -> Result<Rect, String> {
         self.rects
             .get(target)
@@ -623,90 +736,110 @@ impl Shell {
         self.pixels_per_point
     }
 
-    /// Runs a command as `origin`, in the context of the last frame.
+    /// Runs a command as `origin`, in the context of the last frame. A
+    /// command whose work waits for the next frame answers
+    /// `{"queued": true}`; its result goes to the history and the bus.
     pub fn run(&mut self, id: &str, args: Value, origin: Origin) -> Result<Value, String> {
-        let result = self.registry.run(id, args, origin, &self.cx);
+        let result = match CommandId::new(id) {
+            Ok(c) => match self.app.run(&c, args, to_pop(&origin)) {
+                Reply::Done(r) => r,
+                Reply::Later(_) => Ok(json!({ "queued": true })),
+            },
+            Err(e) => Err(e.to_string()),
+        };
         if let Err(e) = &result {
             self.warn(e.clone());
         }
         result
     }
 
-    fn declare_commands(&mut self) {
-        let view = self.dialog_view.clone();
-        self.registry
+    fn declare_commands(w: &Wiring<'_>, panels: &[PanelSpec]) {
+        let mut registry = lock(w.registry);
+        let view = w.dialogs.clone();
+        registry
             .register(
                 CommandSpec::new(
                     "dialog.current",
                     "Describe the dialog waiting for an answer",
                     "Window",
                 ),
-                move |_, _| {
-                    Ok(view
-                        .lock()
-                        .expect("dialog view")
-                        .clone()
-                        .unwrap_or(Value::Null))
-                },
+                move |_, _| Ok(view.get().map_or(Value::Null, describe)),
             )
             .expect("shell commands are declared once");
-        let view = self.resolved_view.clone();
-        self.registry
+        let view = w.resolved_view.clone();
+        registry
             .register(
                 CommandSpec::new(
                     "profile.resolved",
                     "Describe the profile in use as resolved for this machine: which values came from which variant",
                     "Preferences",
                 ),
-                move |_, _| Ok(view.lock().expect("resolved view").clone()),
+                move |_, _| Ok(lock(&view).clone()),
             )
             .expect("shell commands are declared once");
-        let q = self.queue.clone();
-        self.registry
-            .register(
-                CommandSpec::new(
-                    "dialog.answer",
-                    "Answer the dialog (`answer`: primary or cancel; `values` for a form; `choice` for a picker)",
-                    "Window",
-                ),
-                move |args, origin| {
-                    use crate::dialogs::Answer;
-                    let answer = if let Some(c) = args.get("choice") {
-                        Answer::Values(c.clone())
-                    } else if let Some(v) = args.get("values") {
-                        Answer::Values(v.clone())
-                    } else {
-                        match args.get("answer").and_then(Value::as_str) {
-                            Some("primary") => Answer::Primary,
-                            Some("cancel") => Answer::Cancel,
-                            _ => return Err("`answer` is primary or cancel".into()),
-                        }
-                    };
-                    q.lock()
-                        .expect("queue")
-                        .push(Action::Answer(answer, origin.clone()));
-                    Ok(json!({"queued": true}))
-                },
-            )
-            .expect("shell commands are declared once");
-        let q = self.queue.clone();
-        let push = move |a: Action| q.lock().expect("queue").push(a);
+        let (q, later) = (w.queue.clone(), w.later.clone());
+        let push = move |a: Action| lock(&q).push((a, later.take()));
         let mut add = |spec: CommandSpec, action: ActionOf| {
             let push = push.clone();
-            self.registry
-                .register(spec, move |args, _| {
-                    push(action(args)?);
+            registry
+                .register(spec, move |args, origin| {
+                    push(action(args, origin)?);
                     Ok(json!({"queued": true}))
                 })
                 .expect("shell commands are declared once");
         };
         add(
             CommandSpec::new(
+                "dialog.answer",
+                "Answer the dialog (`answer`: primary or cancel; `values` for a form; `choice` for a picker)",
+                "Window",
+            ),
+            Box::new(|args, origin| {
+                let answer = if let Some(c) = args.get("choice") {
+                    Answer::Choice(match c {
+                        Value::String(s) => s.clone(),
+                        other => other.to_string(),
+                    })
+                } else if let Some(v) = args.get("values") {
+                    Answer::Values(v.clone())
+                } else {
+                    match args.get("answer").and_then(Value::as_str) {
+                        Some("primary") => Answer::Primary,
+                        Some("cancel") => Answer::Cancel,
+                        _ => return Err("`answer` is primary or cancel".into()),
+                    }
+                };
+                Ok(Action::Answer(answer, origin.clone()))
+            }),
+        );
+        add(
+            CommandSpec::new(
+                "dialog.picked",
+                "Run a picker's command with the value chosen",
+                "Window",
+            ),
+            Box::new(|args, origin| {
+                let command = args["command"].as_str().ok_or("`command` is missing")?;
+                let arg = args["arg"].as_str().ok_or("`arg` is missing")?;
+                let i = args["choice"].as_u64().ok_or("`choice` is missing")?;
+                let value = args["values"]
+                    .get(i as usize)
+                    .cloned()
+                    .ok_or_else(|| format!("no choice {i}"))?;
+                Ok(Action::Run(
+                    command.into(),
+                    json!({ arg: value }),
+                    origin.clone(),
+                ))
+            }),
+        );
+        add(
+            CommandSpec::new(
                 "dialog.assumeYes",
                 "Answer confirmations yes by policy (`on`)",
                 "Window",
             ),
-            Box::new(|a| {
+            Box::new(|a, _| {
                 Ok(Action::AssumeYes(
                     a.get("on").and_then(Value::as_bool).unwrap_or(true),
                 ))
@@ -714,28 +847,28 @@ impl Shell {
         );
         add(
             CommandSpec::new("workbench.systemMenu", "Show the Helios menu", "Window"),
-            Box::new(|_| Ok(Action::SystemMenu)),
+            Box::new(|_, _| Ok(Action::SystemMenu)),
         );
         add(
             CommandSpec::new("workbench.run", "Run a command by id (`command`)", "Window"),
-            Box::new(|a| {
+            Box::new(|a, origin| {
                 a.get("command")
                     .and_then(Value::as_str)
-                    .map(|c| Action::RunCommand(c.into()))
+                    .map(|c| Action::Run(c.into(), Value::Null, origin.clone()))
                     .ok_or_else(|| "`command` is missing".to_string())
             }),
         );
         add(
             CommandSpec::new("workbench.about", "About Helios", "Help"),
-            Box::new(|_| Ok(Action::About)),
+            Box::new(|_, _| Ok(Action::About)),
         );
         add(
             CommandSpec::new("workbench.keybindings", "Keyboard shortcuts", "Preferences"),
-            Box::new(|_| Ok(Action::Keybindings)),
+            Box::new(|_, _| Ok(Action::Keybindings)),
         );
         add(
             CommandSpec::new("workbench.quit", "Quit Helios", "Window"),
-            Box::new(|_| Ok(Action::Close)),
+            Box::new(|_, _| Ok(Action::Close)),
         );
         add(
             CommandSpec::new(
@@ -743,7 +876,7 @@ impl Shell {
                 "Open a workspace in a new window (`path`)",
                 "Workspace",
             ),
-            Box::new(|a| {
+            Box::new(|a, _| {
                 Ok(Action::OpenWorkspace(
                     a.get("path")
                         .and_then(Value::as_str)
@@ -754,7 +887,7 @@ impl Shell {
         );
         add(
             CommandSpec::new("workbench.palette", "Show all commands", "View"),
-            Box::new(|_| Ok(Action::Palette)),
+            Box::new(|_, _| Ok(Action::Palette)),
         );
         let string = |args: &Value, key: &str| -> Result<String, String> {
             args.get(key)
@@ -768,7 +901,7 @@ impl Shell {
                 "Take a picture of a panel or a widget",
                 "Developer",
             ),
-            Box::new(move |a| {
+            Box::new(move |a, _| {
                 let target = string(a, "target").unwrap_or_else(|_| "window".into());
                 let path =
                     string(a, "path").map_or_else(|_| default_path(&target, "png"), Into::into);
@@ -777,7 +910,7 @@ impl Shell {
         );
         add(
             CommandSpec::new("gui.record.start", "Start recording a video", "Developer"),
-            Box::new(move |a| {
+            Box::new(move |a, _| {
                 let target = string(a, "target").unwrap_or_else(|_| "window".into());
                 let path =
                     string(a, "path").map_or_else(|_| default_path(&target, "mp4"), Into::into);
@@ -787,10 +920,9 @@ impl Shell {
         );
         add(
             CommandSpec::new("gui.record.stop", "Stop recording", "Developer"),
-            Box::new(|_| Ok(Action::RecordStop)),
+            Box::new(|_, _| Ok(Action::RecordStop)),
         );
-        let specs: Vec<PanelSpec> = self.panels.all().to_vec();
-        for p in specs {
+        for p in panels {
             let id = p.id.clone();
             let (focus, toggle) = (id.clone(), id.clone());
             add(
@@ -799,7 +931,7 @@ impl Shell {
                     &format!("Focus {}", p.title),
                     "View",
                 ),
-                Box::new(move |_| Ok(Action::Focus(focus.clone()))),
+                Box::new(move |_, _| Ok(Action::Focus(focus.clone()))),
             );
             add(
                 CommandSpec::new(
@@ -807,7 +939,7 @@ impl Shell {
                     &format!("Show or hide {}", p.title),
                     "View",
                 ),
-                Box::new(move |_| Ok(Action::Toggle(toggle.clone()))),
+                Box::new(move |_, _| Ok(Action::Toggle(toggle.clone()))),
             );
             let move_to = id.clone();
             add(
@@ -816,7 +948,7 @@ impl Shell {
                     &format!("Move {} to an area (`area`)", p.title),
                     "View",
                 ),
-                Box::new(move |a| {
+                Box::new(move |a, _| {
                     let area = a
                         .get("area")
                         .cloned()
@@ -833,7 +965,7 @@ impl Shell {
                     &format!("Move {} to a new window", p.title),
                     "View",
                 ),
-                Box::new(move |_| Ok(Action::Detach(detach.clone()))),
+                Box::new(move |_, _| Ok(Action::Detach(detach.clone()))),
             );
             add(
                 CommandSpec::new(
@@ -841,7 +973,7 @@ impl Shell {
                     &format!("Dock {} back in its area", p.title),
                     "View",
                 ),
-                Box::new(move |_| Ok(Action::Dock(id.clone()))),
+                Box::new(move |_, _| Ok(Action::Dock(id.clone()))),
             );
         }
         for (id, title, action) in [
@@ -860,10 +992,10 @@ impl Shell {
         ] {
             add(
                 CommandSpec::new(id, title, "View"),
-                Box::new(move |_| Ok(action())),
+                Box::new(move |_, _| Ok(action())),
             );
         }
-        let names = crate::theme::choosable(&self.themes);
+        let names = crate::theme::choosable(w.themes);
         for name in names {
             let title = name
                 .trim_start_matches("helios-")
@@ -883,12 +1015,12 @@ impl Shell {
                     &format!("Theme: {title}"),
                     "Preferences",
                 ),
-                Box::new(move |_| Ok(Action::Theme(picked.clone()))),
+                Box::new(move |_, _| Ok(Action::Theme(picked.clone()))),
             );
         }
         add(
             CommandSpec::new("theme.select", "Use a theme by name", "Preferences"),
-            Box::new(move |a| {
+            Box::new(move |a, _| {
                 a.get("name")
                     .and_then(Value::as_str)
                     .map(|n| Action::Theme(n.to_string()))
@@ -901,18 +1033,10 @@ impl Shell {
                 "Export the theme in use, overrides merged",
                 "Preferences",
             ),
-            Box::new(move |a| {
+            Box::new(move |a, _| {
                 // By default next to the user's settings, where themes are read.
                 let path = a.get("path").and_then(Value::as_str).map_or_else(
-                    || {
-                        let config = std::env::var_os("XDG_CONFIG_HOME")
-                            .map(PathBuf::from)
-                            .or_else(|| {
-                                std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config"))
-                            })
-                            .unwrap_or_else(|| PathBuf::from("."));
-                        config.join("helios/themes/exported.tokens.json")
-                    },
+                    || config_dir().join("themes/exported.tokens.json"),
                     PathBuf::from,
                 );
                 Ok(Action::ThemeExport(path))
@@ -937,7 +1061,7 @@ impl Shell {
         ] {
             add(
                 CommandSpec::new(id, title, "View"),
-                Box::new(move |_| Ok(Action::ScopeMode(mode))),
+                Box::new(move |_, _| Ok(Action::ScopeMode(mode))),
             );
         }
         add(
@@ -946,7 +1070,7 @@ impl Shell {
                 "Rate the selected image (`stars`, 0 to 5)",
                 "Vault",
             ),
-            Box::new(|a| {
+            Box::new(|a, _| {
                 a.get("stars")
                     .and_then(Value::as_i64)
                     .map(Action::Rate)
@@ -957,7 +1081,7 @@ impl Shell {
             let title = format!("Rate the selected image {n} stars");
             add(
                 CommandSpec::new(&format!("vault.rate.{n}"), &title, "Vault"),
-                Box::new(move |_| Ok(Action::Rate(n))),
+                Box::new(move |_, _| Ok(Action::Rate(n))),
             );
         }
         add(
@@ -966,36 +1090,36 @@ impl Shell {
                 "Reject the selected image, or take it back",
                 "Vault",
             ),
-            Box::new(|_| Ok(Action::Reject)),
+            Box::new(|_, _| Ok(Action::Reject)),
         );
         for label in crate::library::LABELS {
             let title = format!("Toggle the {label} label on the selected image");
             add(
                 CommandSpec::new(&format!("vault.label.{label}"), &title, "Vault"),
-                Box::new(move |_| Ok(Action::Label(label.into()))),
+                Box::new(move |_, _| Ok(Action::Label(label.into()))),
             );
         }
         add(
             CommandSpec::new("vault.next", "Select the next image", "Vault"),
-            Box::new(|_| Ok(Action::Step(1))),
+            Box::new(|_, _| Ok(Action::Step(1))),
         );
         add(
             CommandSpec::new("vault.previous", "Select the previous image", "Vault"),
-            Box::new(|_| Ok(Action::Step(-1))),
+            Box::new(|_, _| Ok(Action::Step(-1))),
         );
         for (id, title, value) in [
             ("param.copyPath", "Copy a value's path (`path`)", false),
             ("param.copyValue", "Copy a value (`path`)", true),
         ] {
-            let values = self.values.clone();
+            let values = w.values.clone();
             add(
                 CommandSpec::new(id, title, "Values"),
-                Box::new(move |a| {
+                Box::new(move |a, _| {
                     let path = string(a, "path")?;
                     if !value {
                         return Ok(Action::Copy(path));
                     }
-                    let store = values.lock().expect("value store lock");
+                    let store = lock(&values);
                     let e = store
                         .get(&path)
                         .ok_or_else(|| format!("no value at `{path}`"))?;
@@ -1017,16 +1141,16 @@ impl Shell {
         ] {
             add(
                 CommandSpec::new(id, title, "View"),
-                Box::new(move |_| Ok(Action::Zoom(zoom))),
+                Box::new(move |_, _| Ok(Action::Zoom(zoom))),
             );
         }
         add(
             CommandSpec::new("scopes.stops", "Scopes: in stops (log)", "View"),
-            Box::new(|_| Ok(Action::ScopeStops(true))),
+            Box::new(|_, _| Ok(Action::ScopeStops(true))),
         );
         add(
             CommandSpec::new("scopes.linear", "Scopes: linear", "View"),
-            Box::new(|_| Ok(Action::ScopeStops(false))),
+            Box::new(|_, _| Ok(Action::ScopeStops(false))),
         );
         add(
             CommandSpec::new(
@@ -1034,7 +1158,7 @@ impl Shell {
                 "Export the profile (all parts, or `parts`; `this_machine` flattens its variants)",
                 "Preferences",
             ),
-            Box::new(move |a| {
+            Box::new(move |a, _| {
                 let this_machine = a
                     .get("this_machine")
                     .and_then(Value::as_bool)
@@ -1058,7 +1182,7 @@ impl Shell {
                 "Read a profile and show what it would change",
                 "Preferences",
             ),
-            Box::new(move |a| {
+            Box::new(move |a, _| {
                 a.get("path")
                     .and_then(Value::as_str)
                     .map(|p| Action::ProfileImport(PathBuf::from(p)))
@@ -1071,106 +1195,164 @@ impl Shell {
                 "Apply the profile just read",
                 "Preferences",
             ),
-            Box::new(|_| Ok(Action::ProfileApply)),
+            Box::new(|_, _| Ok(Action::ProfileApply)),
         );
         add(
             CommandSpec::new("profile.use", "Use a saved profile by name", "Preferences"),
-            Box::new(move |a| {
+            Box::new(move |a, _| {
                 a.get("name")
                     .and_then(Value::as_str)
                     .map(|n| Action::ProfileUse(n.to_string()))
                     .ok_or_else(|| "`name` is missing".to_string())
             }),
         );
-        for (keys, command) in [
-            ("alt+space", "workbench.systemMenu"),
-            ("ctrl+shift+p", "workbench.palette"),
-            ("f1", "workbench.palette"),
-            ("f11", "workbench.fullscreen"),
+        drop(registry);
+        let mut d = w.declarations.borrow_mut();
+        d.keys.push((
+            "Alt+Space".into(),
+            "workbench.systemMenu".into(),
+            String::new(),
+        ));
+        // As in darktable's lighttable, while the library has the focus
+        // (egui-pop leaves plain keys to a text field being typed in).
+        let library = "focusedPanel == 'helios.vault' || focusedPanel == 'helios.filmstrip'";
+        for n in 0..=5 {
+            d.keys
+                .push((n.to_string(), format!("vault.rate.{n}"), library.into()));
+        }
+        for (k, command) in [
+            ("R", "vault.reject"),
+            ("Right", "vault.next"),
+            ("Left", "vault.previous"),
         ] {
-            self.keymap
-                .bind(keys, command, "", Layer::Default, "shell")
-                .expect("shell keys parse");
+            d.keys.push((k.into(), command.into(), library.into()));
         }
-        // As in darktable's lighttable, while the library has the focus.
-        let library = "(focusedPanel == 'helios.vault' || focusedPanel == 'helios.filmstrip') && !textInputFocus";
-        let mut keys: Vec<(String, String)> = (0..=5)
-            .map(|n| (n.to_string(), format!("vault.rate.{n}")))
-            .collect();
-        keys.push(("r".into(), "vault.reject".into()));
-        keys.push(("right".into(), "vault.next".into()));
-        keys.push(("left".into(), "vault.previous".into()));
-        for (k, command) in keys {
-            self.keymap
-                .bind(&k, &command, library, Layer::Default, "shell")
-                .expect("library keys parse");
+        // egui-pop's palette is the palette; Helios's name for it stays
+        // for scripts.
+        for hidden in ["workbench.palette", "dialog.picked"] {
+            d.hidden.insert(hidden.into());
+        }
+        for name in crate::theme::choosable(w.themes) {
+            d.checked
+                .insert(format!("theme.{name}"), format!("heliosTheme == '{name}'"));
         }
     }
 
-    fn context(&self, ctx: &Egui) -> Context {
-        let mut cx = Context::new()
-            .flag("textInputFocus", ctx.egui_wants_keyboard_input())
-            .flag("paletteVisible", self.palette.is_some())
-            .flag(
-                "fullScreen",
-                ctx.input(|i| i.viewport().fullscreen.unwrap_or(false)),
-            );
-        if let Some(p) = &self.focused {
-            cx.set("focusedPanel", p);
-        }
-        cx
-    }
-
-    // --- Layout changes ---
-
-    fn shown(&self, panel: &str) -> bool {
-        self.docks
-            .iter()
-            .any(|(_, d)| d.find_tab(&panel.to_string()).is_some())
-            || self.auxiliary.iter().any(|a| a.panel == panel)
-    }
-
-    fn undock(&mut self, panel: &str) {
-        for (_, dock) in &mut self.docks {
-            if let Some(path) = dock.find_tab(&panel.to_string()) {
-                dock.remove_tab(path);
-            }
-        }
-        self.docks.retain(|(_, d)| from_dock(d).is_some());
-        if self.focused.as_deref() == Some(panel) {
-            self.focused = None;
-        }
-    }
-
-    /// Puts a panel back in its default area.
-    fn dock(&mut self, panel: &str) {
-        let Some(area) = self.panels.get(panel).map(|p| p.area) else {
-            return;
+    /// The menus Helios contributes: its system menu, and its commands in
+    /// egui-pop's menu bar.
+    fn declare_menus(w: &Wiring<'_>) {
+        use egui_pop::api::app::{MENU_FILE, MENU_HELP};
+        let command = |menu: MenuId, group: &str, order: i32, id: &str, title: &str| {
+            PopItem::command(
+                menu,
+                group,
+                order,
+                CommandId::new(id).expect("Helios's command ids are valid"),
+            )
+            .label(&menu_title(title))
         };
-        self.auxiliary.retain(|a| a.panel != panel);
-        self.hidden.retain(|h| h != panel);
-        if let Some((_, dock)) = self.docks.iter_mut().find(|(a, _)| *a == area) {
-            dock.push_to_first_leaf(panel.to_string());
-        } else {
-            self.docks.push((
-                area,
-                to_dock(&Node::Tabs {
-                    panels: vec![panel.to_string()],
-                    active: 0,
-                }),
-            ));
-            self.docks.sort_by_key(|(a, _)| *a);
+        let specs: BTreeMap<String, String> = lock(w.registry)
+            .specs()
+            .map(|s| (s.id.clone(), s.title.clone()))
+            .collect();
+        let title = |id: &str| specs.get(id).cloned().unwrap_or_else(|| id.to_string());
+        let mut items = vec![
+            command(
+                SYSTEM,
+                "1_workspace",
+                0,
+                "workspace.open",
+                &title("workspace.open"),
+            ),
+            PopItem::submenu(SYSTEM, "1_workspace", 1, SYSTEM_RECENT, "Recent workspaces"),
+            PopItem::submenu(SYSTEM, "2_preferences", 0, SYSTEM_PROFILES, "Profiles"),
+            PopItem::submenu(SYSTEM, "2_preferences", 1, SYSTEM_THEMES, "Themes"),
+            command(
+                SYSTEM,
+                "2_preferences",
+                2,
+                "workbench.keybindings",
+                &title("workbench.keybindings"),
+            ),
+            command(
+                SYSTEM,
+                "4_about",
+                0,
+                "workbench.about",
+                &title("workbench.about"),
+            ),
+            command(
+                SYSTEM,
+                "9_quit",
+                0,
+                "workbench.quit",
+                &title("workbench.quit"),
+            ),
+            command(
+                SYSTEM_PROFILES,
+                "2",
+                0,
+                "profile.export",
+                &title("profile.export"),
+            ),
+            command(
+                SYSTEM_PROFILES,
+                "2",
+                1,
+                "profile.import",
+                &title("profile.import"),
+            ),
+            command(
+                SYSTEM_THEMES,
+                "2",
+                0,
+                "theme.export",
+                &title("theme.export"),
+            ),
+            // The same commands in the menu bar.
+            command(
+                MENU_FILE,
+                "1_workspace",
+                0,
+                "workspace.open",
+                &title("workspace.open"),
+            ),
+            command(
+                MENU_HELP,
+                "4_about",
+                0,
+                "workbench.about",
+                &title("workbench.about"),
+            ),
+        ];
+        let select = CommandId::from_static("theme.select");
+        for (i, name) in crate::theme::choosable(w.themes).iter().enumerate() {
+            items.push(
+                PopItem::command(SYSTEM_THEMES, "1", i as i32, select.clone())
+                    .args(json!({ "name": name }))
+                    .label(name)
+                    .checked(&format!("heliosTheme == '{name}'")),
+            );
         }
+        w.declarations.borrow_mut().menus = items;
     }
 
-    // --- Dialogs, menus and notices (see `dialogs`) ---
+    // --- Dialogs, menus and notices ---
 
     /// Shows a notice: the status bar always, a toast unless it is plain
     /// information. Kept in `notes` too.
-    pub fn notify(&mut self, level: crate::dialogs::Level, text: impl Into<String>) {
+    pub fn notify(&mut self, level: Level, text: impl Into<String>) {
         let text = text.into();
         self.notes.push(text.clone());
-        self.notices.push(crate::dialogs::Notice {
+        let toast = match level {
+            Level::Info => None,
+            Level::Warning => Some(Toast::warning(&text)),
+            Level::Error => Some(Toast::error(&text)),
+        };
+        if let (Some(t), Some(toasts)) = (toast, self.app.handle().service(&TOASTS)) {
+            toasts.notify(t);
+        }
+        self.notices.push(Notice {
             level,
             text,
             action: None,
@@ -1179,16 +1361,20 @@ impl Shell {
     }
 
     fn note(&mut self, text: impl Into<String>) {
-        self.notify(crate::dialogs::Level::Info, text);
+        self.notify(Level::Info, text);
     }
 
     fn warn(&mut self, text: impl Into<String>) {
-        self.notify(crate::dialogs::Level::Warning, text);
+        self.notify(Level::Warning, text);
     }
 
-    fn open(&mut self, dialog: crate::dialogs::Dialog) {
-        self.dialogs.push_back(crate::dialogs::Open::new(dialog));
-        self.refresh_dialog_view();
+    fn open_dialog(&mut self, dialog: impl Into<dialogs::Dialog>) {
+        match self.dialogs.get() {
+            Some(d) => {
+                d.open(dialog);
+            }
+            None => self.warn("no dialogs to show this in"),
+        }
     }
 
     /// Asks before running a command. Under the yes policy it runs at once,
@@ -1196,505 +1382,185 @@ impl Shell {
     pub fn confirm(&mut self, c: crate::dialogs::Confirm) {
         if self.assume_yes {
             let text = format!("{}: confirmed by policy", c.verb);
-            self.notify(crate::dialogs::Level::Warning, text);
+            self.notify(Level::Warning, text);
             let _ = self.run(&c.command, c.args, Origin::Script("policy".into()));
             return;
         }
-        self.open(crate::dialogs::Dialog::Confirm(c));
-    }
-
-    /// Where path fields browse. `headless::harness` turns the system's
-    /// chooser off.
-    pub fn set_places(&mut self, places: crate::dialogs::Places) {
-        self.places = places;
+        let command = match CommandId::new(c.command.as_str()) {
+            Ok(id) => id,
+            Err(e) => return self.warn(e.to_string()),
+        };
+        let mut d = dialogs::Confirm::new(&c.title, &c.verb, command)
+            .detail(&c.detail)
+            .args(c.args);
+        if c.danger {
+            d = d.danger();
+        }
+        self.open_dialog(d);
     }
 
     /// Asks for values, then runs the form's command with them.
     pub fn form(&mut self, f: crate::dialogs::Form) {
-        self.open(crate::dialogs::Dialog::Form(f));
+        let command = match CommandId::new(f.command.as_str()) {
+            Ok(id) => id,
+            Err(e) => return self.warn(e.to_string()),
+        };
+        let mut form = dialogs::Form::new(&f.title, &f.verb, command);
+        for field in &f.fields {
+            form = form.field_at(
+                &field.key,
+                crate::dialogs::descriptor(&field.descriptor),
+                crate::dialogs::value(&field.value),
+            );
+        }
+        self.open_dialog(form);
     }
 
     /// Asks for a choice, then runs the picker's command with it.
     pub fn pick(&mut self, p: crate::dialogs::Picker) {
-        self.open(crate::dialogs::Dialog::Picker(p));
+        let labels: Vec<String> = p
+            .choices
+            .iter()
+            .map(|c| match &c.detail {
+                Some(d) => format!("{} ({d})", c.label),
+                None => c.label.clone(),
+            })
+            .collect();
+        let labels: Vec<&str> = labels.iter().map(String::as_str).collect();
+        let mut choose = Choose::new(&p.title, &labels, CommandId::from_static("dialog.picked"));
+        choose.args = json!({
+            "command": p.command,
+            "arg": p.arg,
+            "values": p.choices.iter().map(|c| c.value.clone()).collect::<Vec<_>>(),
+        });
+        self.open_dialog(choose);
     }
 
     /// Opens a menu of commands at a position.
-    pub fn open_menu(&mut self, at: egui::Pos2, items: Vec<crate::dialogs::MenuItem>) {
-        self.menu = Some((at, MenuSource::Items(items), 0));
+    pub fn open_menu(&mut self, at: egui::Pos2, items: Vec<MenuItem>) {
+        self.system_menu = None;
+        self.menu = Some((at, items));
     }
 
-    /// Opens a declared menu (see `helios_shell::menus`) at a position.
-    pub fn open_declared_menu(&mut self, at: egui::Pos2, menu: &str) {
-        self.menu = Some((at, MenuSource::Declared(menu.into()), 0));
+    /// Opens the system menu under a rectangle (the logo's).
+    fn open_system_menu(&mut self, under: Rect) {
+        self.redeclare(&plugins::LISTS);
+        self.menu = None;
+        self.system_menu = Some(under);
     }
 
     /// A declared menu as data, as it would open now: each entry's
     /// command, title, keys, whether it applies and whether it is ticked;
     /// submenus nested.
-    pub fn menu_items(&self, menu: &str) -> Value {
-        fn rows(list: &[crate::dialogs::Row]) -> Value {
-            use crate::dialogs::Row;
+    pub fn menu_items(&mut self, menu: &str) -> Value {
+        fn rows(h: &AppHandle, menu: &MenuId, cx: &egui_pop::model::when::WhenContext) -> Value {
+            let shown = show_items(&h.menu(menu), cx);
             Value::Array(
-                list.iter()
-                    .map(|r| match r {
-                        Row::Separator => json!({ "kind": "separator" }),
-                        Row::Submenu(label, sub) => {
-                            json!({ "kind": "submenu", "label": label, "items": rows(sub) })
+                shown
+                    .into_iter()
+                    .map(|s| match s {
+                        Shown::Separator => json!({ "kind": "separator" }),
+                        Shown::Item {
+                            item: Item::Submenu { menu, label },
+                            ..
+                        } => json!({ "kind": "submenu", "label": label, "items": rows(h, &menu, cx) }),
+                        Shown::Item {
+                            item: Item::Command { id, args, label },
+                            enabled,
+                            checked,
+                            ..
+                        } => {
+                            let title = label.unwrap_or_else(|| {
+                                h.command(&id)
+                                    .map_or_else(|| id.to_string(), |s| menu_title(&s.title))
+                            });
+                            json!({
+                                "kind": "command",
+                                "id": id,
+                                "args": args,
+                                "title": title,
+                                "keys": h.keys_for(&id).first(),
+                                "enabled": enabled && h.applies(&id, cx),
+                                "checked": checked,
+                            })
                         }
-                        Row::Entry(e) => json!({
-                            "kind": "command",
-                            "id": e.id,
-                            "args": e.args,
-                            "title": e.title,
-                            "keys": e.keys,
-                            "enabled": e.disabled.is_none(),
-                            "checked": e.checked,
-                        }),
+                        Shown::Item {
+                            item: Item::List { name },
+                            ..
+                        } => json!({ "kind": "list", "name": name }),
                     })
                     .collect(),
             )
         }
-        rows(&self.declared_rows(menu))
-    }
-
-    /// A declared menu's rows in the current context.
-    fn declared_rows(&self, menu: &str) -> Vec<crate::dialogs::Row> {
-        use crate::dialogs::{Entry, Row};
-        use helios_shell::menus::{Item, Shown};
-        let mut rows = Vec::new();
-        for shown in self.menus.show(menu, &self.cx) {
-            match shown {
-                Shown::Separator => rows.push(Row::Separator),
-                Shown::Item {
-                    item: Item::Command { id, args },
-                    enabled,
-                    checked,
-                } => {
-                    let Some(spec) = self.registry.spec(&id) else {
-                        continue;
-                    };
-                    rows.push(Row::Entry(Entry {
-                        title: menu_title(&spec.title),
-                        keys: self
-                            .keymap
-                            .keys_for(&id)
-                            .first()
-                            .map(std::string::ToString::to_string),
-                        disabled: (!enabled).then(|| format!("Not available here ({})", spec.when)),
-                        checked,
-                        id,
-                        args,
-                    }));
-                }
-                Shown::Item {
-                    item: Item::Submenu { menu, label },
-                    ..
-                } => rows.push(Row::Submenu(label, self.declared_rows(&menu))),
-                Shown::Item {
-                    item: Item::List { name },
-                    ..
-                } => rows.extend(self.list_rows(&name)),
-            }
-        }
-        rows
-    }
-
-    /// The entries of a list the shell fills when a menu opens.
-    fn list_rows(&self, name: &str) -> Vec<crate::dialogs::Row> {
-        use crate::dialogs::{Entry, Row};
-        let entry = |id: &str, args: Value, title: String, checked: bool| {
-            Row::Entry(Entry {
-                id: id.into(),
-                args,
-                title,
-                keys: None,
-                disabled: None,
-                checked,
-            })
-        };
-        match name {
-            "themes" => crate::theme::choosable(&self.themes)
-                .into_iter()
-                .map(|t| {
-                    let checked = t == self.theme_name;
-                    entry("theme.select", json!({ "name": t }), t, checked)
-                })
-                .collect(),
-            "profiles" => {
-                let mut names: Vec<String> = std::fs::read_dir(&self.profiles_dir)
-                    .into_iter()
-                    .flatten()
-                    .flatten()
-                    .filter_map(|e| {
-                        e.file_name()
-                            .to_str()?
-                            .strip_suffix(".helios-profile")
-                            .map(String::from)
-                    })
-                    .collect();
-                if !names.contains(&"default".to_string()) {
-                    names.push("default".into());
-                }
-                names.sort();
-                names
-                    .into_iter()
-                    .map(|n| {
-                        let checked = n == self.profile_name;
-                        entry("profile.use", json!({ "name": n }), n, checked)
-                    })
-                    .collect()
-            }
-            "recent" => {
-                let recent = recent_workspaces();
-                if recent.is_empty() {
-                    return vec![Row::Entry(Entry {
-                        id: "workspace.open".into(),
-                        args: Value::Null,
-                        title: "No recent workspace".into(),
-                        keys: None,
-                        disabled: Some("Nothing opened yet".into()),
-                        checked: false,
-                    })];
-                }
-                recent
-                    .into_iter()
-                    .map(|p| {
-                        entry(
-                            "workspace.open",
-                            json!({ "path": p }),
-                            p.display().to_string(),
-                            false,
-                        )
-                    })
-                    .collect()
-            }
-            _ => Vec::new(),
-        }
-    }
-
-    /// The menus Helios itself contributes.
-    fn declare_menus(&mut self) {
-        use helios_shell::menus::MenuItem as M;
-        for item in [
-            M::command("system", "1_workspace", 0, "workspace.open"),
-            M::submenu(
-                "system",
-                "1_workspace",
-                1,
-                "system.recent",
-                "Recent workspaces",
-            ),
-            M::submenu("system", "2_preferences", 0, "system.profiles", "Profiles"),
-            M::submenu("system", "2_preferences", 1, "system.themes", "Themes"),
-            M::command("system", "2_preferences", 2, "workbench.keybindings"),
-            M::command("system", "4_about", 0, "workbench.about"),
-            M::command("system", "9_quit", 0, "workbench.quit"),
-            M::list("system.recent", "1", 0, "recent"),
-            M::list("system.profiles", "1", 0, "profiles"),
-            M::command("system.profiles", "2", 0, "profile.export"),
-            M::command("system.profiles", "2", 1, "profile.import"),
-            M::list("system.themes", "1", 0, "themes"),
-            M::command("system.themes", "2", 0, "theme.export"),
-        ] {
-            self.menus
-                .contribute(item)
-                .expect("the shell's menus parse");
+        self.redeclare(&plugins::LISTS);
+        self.set_context(&self.app.handle().egui());
+        let h = self.app.handle().clone();
+        let cx = h.when_context();
+        match MenuId::new(menu) {
+            Ok(id) => rows(&h, &id, &cx),
+            Err(_) => Value::Array(Vec::new()),
         }
     }
 
     /// The notices so far, oldest first.
-    pub fn notices(&self) -> &[crate::dialogs::Notice] {
+    pub fn notices(&self) -> &[Notice] {
         &self.notices
     }
 
-    fn refresh_dialog_view(&mut self) {
-        *self.dialog_view.lock().expect("dialog view") =
-            self.dialogs.front().map(crate::dialogs::Open::describe);
-    }
-
-    fn answer(&mut self, answer: crate::dialogs::Answer, origin: Origin) {
-        let Some(open) = self.dialogs.front() else {
-            self.warn("no dialog to answer");
-            return;
+    /// Answers the dialog shown, as `origin` (applied at the next frame).
+    fn answer(&mut self, answer: Answer, origin: &Origin) -> Result<(), String> {
+        let d = self.dialogs.get().ok_or("no dialogs")?.clone();
+        let (_, dialog) = d.current().ok_or("no dialog to answer")?;
+        let answer = match (answer, &dialog) {
+            (Answer::Cancel, _) => dialogs::Answer::Cancel,
+            (Answer::Choice(c), dialogs::Dialog::Choose(choose)) => {
+                let values = choose.args["values"].as_array();
+                let index = c
+                    .parse::<usize>()
+                    .ok()
+                    .filter(|i| *i < choose.options.len())
+                    .or_else(|| values.and_then(|v| v.iter().position(|x| x == &json!(c))))
+                    .or_else(|| choose.options.iter().position(|o| *o == c))
+                    .ok_or_else(|| format!("no choice `{c}`"))?;
+                dialogs::Answer::Choose { index }
+            }
+            (Answer::Choice(_), _) => return Err("this dialog has no choices".into()),
+            (_, dialogs::Dialog::Choose(_)) => return Err("answer a choice with `choice`".into()),
+            (Answer::Primary, _) => dialogs::Answer::Accept {
+                values: serde_json::Map::new(),
+            },
+            (Answer::Values(v), _) => dialogs::Answer::Accept {
+                values: v.as_object().cloned().ok_or("`values` is an object")?,
+            },
         };
-        match open.resolve(&answer) {
-            Ok(run) => {
-                self.dialogs.pop_front();
-                self.refresh_dialog_view();
-                if let Some((command, args)) = run
-                    && let Err(e) = self.run(&command, args, origin)
-                {
-                    self.warn(format!("{command}: {e}"));
-                }
-            }
-            Err(e) => self.warn(e),
-        }
+        d.answer(answer, to_pop(origin))
     }
 
-    /// A menu's items resolved against the registry, the keymap and the
-    /// context.
-    fn menu_rows(&self, items: &[crate::dialogs::MenuItem]) -> Vec<crate::dialogs::Row> {
-        use crate::dialogs::{Entry, MenuItem, Row};
-        items
-            .iter()
-            .filter_map(|item| match item {
-                MenuItem::Separator => Some(Row::Separator),
-                MenuItem::Submenu { label, items } => {
-                    Some(Row::Submenu(label.clone(), self.menu_rows(items)))
-                }
-                MenuItem::Command { id, args } => {
-                    let spec = self.registry.spec(id)?;
-                    let applies = self
-                        .registry
-                        .available(&self.cx)
-                        .iter()
-                        .any(|s| s.id == *id);
-                    Some(Row::Entry(Entry {
-                        id: id.clone(),
-                        args: args.clone(),
-                        title: menu_title(&spec.title),
-                        keys: self
-                            .keymap
-                            .keys_for(id)
-                            .first()
-                            .map(std::string::ToString::to_string),
-                        disabled: (!applies).then(|| format!("Not available here ({})", spec.when)),
-                        checked: false,
-                    }))
-                }
-            })
-            .collect()
+    /// Sets the context keys commands and keys are tested against.
+    fn set_context(&self, ctx: &Egui) {
+        let h = self.app.handle();
+        let flag = |on: bool| if on { "true" } else { "false" };
+        h.set_context(
+            "focusedPanel",
+            self.workbench.borrow().focused.as_deref().unwrap_or(""),
+        );
+        h.set_context("paletteVisible", flag(palette::is_open(h)));
+        h.set_context(
+            "fullScreen",
+            flag(ctx.input(|i| i.viewport().fullscreen.unwrap_or(false))),
+        );
+        h.set_context("heliosTheme", &self.theme_name);
+        h.set_context("heliosProfile", &self.profile_name);
     }
 
-    /// Dialogs, menus and toasts, over everything else.
-    fn overlays(&mut self, ctx: &Egui) {
-        use crate::dialogs::{Request, take_requests};
-        for r in take_requests(ctx) {
-            match r {
-                Request::Confirm(c) => self.confirm(c),
-                Request::Form(f) => self.form(f),
-                Request::Picker(p) => self.pick(p),
-                Request::Menu { at, items } => self.open_menu(at, items),
-                Request::Notify(level, text) => self.notify(level, text),
-            }
-        }
-        let look = crate::dialogs::Look::of(&self.theme);
-        if let Some(open) = self.dialogs.front_mut() {
-            let answer = crate::dialogs::dialog_ui(ctx, &look, open, &self.places);
-            self.refresh_dialog_view();
-            if let Some(a) = answer {
-                self.answer(a, Origin::User);
-            }
-        } else if let Some((at, source, mut selected)) = self.menu.take() {
-            let rows = match &source {
-                MenuSource::Items(items) => self.menu_rows(items),
-                MenuSource::Declared(id) => self.declared_rows(id),
-            };
-            match crate::dialogs::menu_ui(ctx, at, &rows, &mut selected) {
-                Some(Some((id, args))) => {
-                    let _ = self.run(&id, args, Origin::User);
-                }
-                Some(None) => {}
-                None => self.menu = Some((at, source, selected)),
-            }
-        }
-        if let Some(command) =
-            crate::dialogs::toasts_ui(ctx, &look, &self.notices, &mut self.dismissed)
-        {
-            let _ = self.run(&command, Value::Null, Origin::User);
-        }
-    }
-
-    /// Moves a panel to an area, into the tabs under `at` when given,
-    /// else the area's first tabs; refused when the panel may not be there.
-    fn move_to(&mut self, panel: &str, area: Area, at: Option<egui::Pos2>) -> Result<(), String> {
-        let spec = self
-            .panels
-            .get(panel)
-            .ok_or_else(|| format!("no panel `{panel}`"))?;
-        if !spec.allows(area) {
-            return Err(format!("{} stays out of {}", spec.title, area.name()));
-        }
-        self.undock(panel);
-        self.auxiliary.retain(|a| a.panel != panel);
-        self.hidden.retain(|h| h != panel);
-        let tab = panel.to_string();
-        if let Some((_, dock)) = self.docks.iter_mut().find(|(a, _)| *a == area) {
-            let leaf = at.and_then(|at| {
-                dock.main_surface()
-                    .iter()
-                    .position(|n| matches!(n, egui_dock::Node::Leaf(l) if l.rect.contains(at)))
-            });
-            match leaf {
-                Some(i) => {
-                    let tree = dock.main_surface_mut();
-                    let node = egui_dock::NodeIndex(i);
-                    tree.set_focused_node(node);
-                    tree.push_to_focused_leaf(tab);
-                }
-                None => dock.push_to_first_leaf(tab),
-            }
-        } else {
-            self.docks.push((
-                area,
-                to_dock(&Node::Tabs {
-                    panels: vec![tab],
-                    active: 0,
-                }),
-            ));
-            self.docks.sort_by_key(|(a, _)| *a);
-        }
-        self.focused = Some(panel.to_string());
-        Ok(())
-    }
-
-    /// The area a drop at `at` goes to: the one drawn there, else the
-    /// zone of a hidden side or bottom area along the window's edges.
-    fn area_at(&self, at: egui::Pos2) -> Option<Area> {
-        let shown = |a: Area| self.docks.iter().any(|(d, _)| *d == a);
-        let edge = 48.0;
-        let c = self.content_rect;
-        if c.is_positive() {
-            if !shown(Area::PrimarySideBar) && at.x < c.left() + edge {
-                return Some(Area::PrimarySideBar);
-            }
-            if !shown(Area::SecondarySideBar) && at.x > c.right() - edge {
-                return Some(Area::SecondarySideBar);
-            }
-            if !shown(Area::BottomPanel) && at.y > c.bottom() - edge {
-                return Some(Area::BottomPanel);
-            }
-        }
-        self.area_rects
-            .iter()
-            .filter(|(a, _)| **a != Area::Editors)
-            .find(|(_, r)| r.contains(at))
-            .map(|(a, _)| *a)
-            .or_else(|| {
-                self.area_rects
-                    .get(&Area::Editors)
-                    .filter(|r| r.contains(at))
-                    .map(|_| Area::Editors)
-            })
-    }
-
-    /// The tab egui is dragging, if it is one of the docks' tabs.
-    fn dragged_tab(&self, ctx: &Egui) -> Option<(String, Area)> {
-        let id = ctx.dragged_id()?;
-        self.docks.iter().find_map(|(area, dock)| {
-            let base = Id::new(format!("helios.area.{area:?}"));
-            dock.iter_all_tabs().find_map(|(path, tab)| {
-                // How egui_dock names a tab's drag (`show/leaf.rs`).
-                let tab_id = base
-                    .with((path.surface, "surface"))
-                    .with((path.node_path().node, "node"))
-                    .with((path.tab.0, "tab"));
-                (tab_id == id).then(|| (tab.clone(), *area))
-            })
-        })
-    }
-
-    /// Follows a tab drag; when it is dropped over another area, `egui_dock`
-    /// (which only sees its own area) leaves it where it was, and the shell
-    /// moves it, or says why it may not go there.
-    fn follow_drag(&mut self, ctx: &Egui) {
-        let pos = ctx.input(|i| i.pointer.latest_pos());
-        if let Some((panel, from)) = self.dragged_tab(ctx) {
-            let at = pos.or(self.dragging.as_ref().map(|d| d.2));
-            if let Some(at) = at {
-                self.dragging = Some((panel, from, at));
-            }
-            return;
-        }
-        let Some((panel, from, last)) = self.dragging.take() else {
-            return;
-        };
-        let at = pos.unwrap_or(last);
-        let Some(to) = self.area_at(at).filter(|a| *a != from) else {
-            return;
-        };
-        if let Err(e) = self.move_to(&panel, to, Some(at)) {
-            self.warn(e);
-        }
-    }
-
-    /// While a tab is dragged over another area, shows whether it may go
-    /// there.
-    fn drop_hint(&mut self, ctx: &Egui) {
-        let Some((panel, from, at)) = self.dragging.clone() else {
-            return;
-        };
-        let Some(to) = self.area_at(at).filter(|a| *a != from) else {
-            return;
-        };
-        let Some(spec) = self.panels.get(&panel) else {
-            return;
-        };
-        let c = self.content_rect;
-        let edge = 48.0;
-        let rect = self.area_rects.get(&to).copied().unwrap_or(match to {
-            Area::PrimarySideBar => {
-                Rect::from_min_max(c.min, egui::pos2(c.left() + edge, c.bottom()))
-            }
-            Area::SecondarySideBar => {
-                Rect::from_min_max(egui::pos2(c.right() - edge, c.top()), c.max)
-            }
-            Area::BottomPanel => Rect::from_min_max(egui::pos2(c.left(), c.bottom() - edge), c.max),
-            Area::Editors => c,
-        });
-        let visuals = ctx.global_style().visuals.clone();
-        let painter = ctx.layer_painter(egui::LayerId::new(
-            egui::Order::Foreground,
-            Id::new("helios.drop"),
-        ));
-        if spec.allows(to) {
-            let fill = visuals.selection.bg_fill.gamma_multiply(0.25);
-            painter.rect_filled(rect, 4.0, fill);
-            painter.rect_stroke(
-                rect,
-                4.0,
-                visuals.selection.stroke,
-                egui::StrokeKind::Inside,
-            );
-        } else {
-            let fill = visuals.error_fg_color.gamma_multiply(0.15);
-            painter.rect_filled(rect, 4.0, fill);
-            painter.text(
-                rect.center(),
-                Align2::CENTER_CENTER,
-                format!("{} stays out of {}", spec.title, to.name()),
-                egui::FontId::proportional(13.0),
-                visuals.error_fg_color,
-            );
-        }
-        name_rect(ctx, "helios.drop", rect);
-    }
-
-    fn focus(&mut self, panel: &str) {
-        if !self.shown(panel) {
-            self.dock(panel);
-        }
-        for (_, dock) in &mut self.docks {
-            if let Some(path) = dock.find_tab(&panel.to_string()) {
-                let _ = dock.set_active_tab(path);
-                dock.set_focused_node_and_surface(path.node_path());
-            }
-        }
-        self.focused = Some(panel.to_string());
-    }
-
-    fn apply(&mut self, ctx: &Egui, action: Action) {
+    fn apply(&mut self, ctx: &Egui, action: Action) -> Result<Value, String> {
         match action {
             Action::Palette => {
-                self.palette = match self.palette {
-                    Some(_) => None,
-                    None => Some(Palette {
-                        query: String::new(),
-                        selected: 0,
-                        opened: false,
-                    }),
-                }
+                return self.run(
+                    egui_pop::api::app::CMD_PALETTE.as_str(),
+                    Value::Null,
+                    Origin::User,
+                );
             }
             Action::Fullscreen => {
                 let on = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
@@ -1707,57 +1573,28 @@ impl Shell {
             }
             Action::Close => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
             Action::SystemMenu => {
-                let at = self
-                    .rects
-                    .get("helios.logo")
-                    .map_or(egui::pos2(8.0, crate::frame::TITLE_HEIGHT), |r| {
-                        r.left_bottom()
-                    });
-                self.open_declared_menu(at, "system");
-            }
-            Action::RunCommand(id) => {
-                let _ = self.run(&id, Value::Null, Origin::User);
-            }
-            Action::About => self.open(crate::dialogs::Dialog::Info(crate::dialogs::Info {
-                title: format!("Helios {}", env!("CARGO_PKG_VERSION")),
-                lines: vec![
-                    "A node-based photo developer.".into(),
-                    "Free software under the GNU General Public License, version 3 or later."
-                        .into(),
-                    "Source: https://github.com/quazardous/helios".into(),
-                ],
-            })),
-            Action::Keybindings => {
-                let mut choices: Vec<crate::dialogs::Choice> = self
-                    .registry
-                    .available(&self.cx)
-                    .into_iter()
-                    .filter_map(|spec| {
-                        // Every key bound to it.
-                        let keys: Vec<String> = self
-                            .keymap
-                            .keys_for(&spec.id)
-                            .iter()
-                            .map(std::string::ToString::to_string)
-                            .collect();
-                        if keys.is_empty() {
-                            return None;
-                        }
-                        let keys = keys.join(" · ");
-                        Some(crate::dialogs::Choice {
-                            value: spec.id.clone(),
-                            label: format!("{}: {}", spec.category, spec.title),
-                            detail: Some(keys),
-                        })
-                    })
-                    .collect();
-                choices.sort_by(|a, b| a.label.cmp(&b.label));
-                self.pick(crate::dialogs::Picker {
-                    title: "Keyboard shortcuts".into(),
-                    choices,
-                    command: "workbench.run".into(),
-                    arg: "command".into(),
+                let under = self.rects.get("helios.logo").copied().unwrap_or_else(|| {
+                    Rect::from_min_size(
+                        egui::pos2(8.0, crate::frame::TITLE_HEIGHT),
+                        egui::Vec2::ZERO,
+                    )
                 });
+                self.open_system_menu(under);
+            }
+            Action::Run(id, args, origin) => return self.run(&id, args, origin),
+            Action::About => self.open_dialog(dialogs::Info::new(
+                &format!("Helios {}", env!("CARGO_PKG_VERSION")),
+                "A node-based photo developer.\n\
+                 Free software under the GNU General Public License, version 3 or later.\n\
+                 Source: https://github.com/quazardous/helios",
+            )),
+            Action::Keybindings => {
+                let w = self
+                    .app
+                    .handle()
+                    .service(&SETTINGS_WINDOW)
+                    .ok_or("no settings window")?;
+                w.open(Some(SHORTCUTS));
             }
             Action::OpenWorkspace(None) => self.form(crate::dialogs::Form {
                 title: "Open a workspace".into(),
@@ -1775,18 +1612,10 @@ impl Shell {
             }),
             Action::OpenWorkspace(Some(path)) => {
                 // One window per workspace: another process opens it.
-                let opened = std::env::current_exe()
-                    .map_err(|e| e.to_string())
-                    .and_then(|exe| {
-                        std::process::Command::new(exe)
-                            .arg(&path)
-                            .spawn()
-                            .map_err(|e| e.to_string())
-                    });
-                match opened {
-                    Ok(_) => self.note(format!("opening {}", path.display())),
-                    Err(e) => self.warn(format!("cannot open {}: {e}", path.display())),
-                }
+                std::env::current_exe()
+                    .and_then(|exe| std::process::Command::new(exe).arg(&path).spawn())
+                    .map_err(|e| format!("cannot open {}: {e}", path.display()))?;
+                self.note(format!("opening {}", path.display()));
             }
             Action::Theme(name) => {
                 let overrides = self.theme_overrides.clone();
@@ -1797,14 +1626,11 @@ impl Shell {
                 let mut tokens = self.theme.resolved().to_dtcg();
                 tokens["$name"] = json!(self.theme_name);
                 let text = serde_json::to_string_pretty(&tokens).expect("tokens serialize");
-                let saved = path
-                    .parent()
+                path.parent()
                     .map_or(Ok(()), std::fs::create_dir_all)
-                    .and_then(|()| std::fs::write(&path, text));
-                self.note(match saved {
-                    Ok(()) => format!("theme exported to {}", path.display()),
-                    Err(e) => format!("cannot export the theme to {}: {e}", path.display()),
-                });
+                    .and_then(|()| std::fs::write(&path, text))
+                    .map_err(|e| format!("cannot export the theme to {}: {e}", path.display()))?;
+                self.note(format!("theme exported to {}", path.display()));
             }
             Action::ProfileExport(path, parts, this_machine) => {
                 let parts = if parts.is_empty() {
@@ -1822,127 +1648,72 @@ impl Shell {
                 };
                 let present: Vec<_> = parts.into_iter().filter(|p| profile.has(*p)).collect();
                 // No plugin settings yet to keep home.
-                let written = profile.export(&present, &|_, _| false).and_then(|text| {
-                    path.parent()
-                        .map_or(Ok(()), std::fs::create_dir_all)
-                        .and_then(|()| std::fs::write(&path, text))
-                        .map_err(|e| format!("{}: {e}", path.display()))
-                });
-                self.note(match written {
-                    Ok(()) => format!("profile exported to {}", path.display()),
-                    Err(e) => format!("profile not exported: {e}"),
-                });
+                profile
+                    .export(&present, &|_, _| false)
+                    .and_then(|text| {
+                        path.parent()
+                            .map_or(Ok(()), std::fs::create_dir_all)
+                            .and_then(|()| std::fs::write(&path, text))
+                            .map_err(|e| format!("{}: {e}", path.display()))
+                    })
+                    .map_err(|e| format!("profile not exported: {e}"))?;
+                self.note(format!("profile exported to {}", path.display()));
             }
-            Action::ProfileImport(path) => match Self::read_profile(&path) {
-                Ok(incoming) => {
-                    let changes = helios_profile::diff(&self.profile(), &incoming);
-                    let count: usize = changes.iter().map(|d| d.changes.len()).sum();
-                    self.note(format!(
-                        "profile {}: {count} changes; profile.import.apply to apply them",
-                        incoming.name
-                    ));
-                    for d in &changes {
-                        for c in &d.changes {
-                            self.note(format!("{:?} {c}", d.part));
-                        }
+            Action::ProfileImport(path) => {
+                let incoming =
+                    Self::read_profile(&path).map_err(|e| format!("profile not imported: {e}"))?;
+                let changes = helios_profile::diff(&self.profile(), &incoming);
+                let count: usize = changes.iter().map(|d| d.changes.len()).sum();
+                self.note(format!(
+                    "profile {}: {count} changes; profile.import.apply to apply them",
+                    incoming.name
+                ));
+                for d in &changes {
+                    for c in &d.changes {
+                        self.note(format!("{:?} {c}", d.part));
                     }
-                    self.pending_import = Some(incoming);
                 }
-                Err(e) => self.warn(format!("profile not imported: {e}")),
-            },
-            Action::ProfileApply => match self.pending_import.take() {
-                Some(p) => {
-                    let name = p.name.clone();
-                    self.apply_profile(&p);
-                    self.note(format!("profile {name} applied"));
-                }
-                None => self
-                    .notes
-                    .push("no profile read to apply: profile.import first".into()),
-            },
-            Action::ProfileUse(name) => {
-                if let Err(e) = self.use_profile(&name) {
-                    self.warn(format!("profile {name}: {e}"));
-                }
+                self.pending_import = Some(incoming);
             }
+            Action::ProfileApply => {
+                let p = self
+                    .pending_import
+                    .take()
+                    .ok_or("no profile read to apply: profile.import first")?;
+                let name = p.name.clone();
+                self.apply_profile(&p);
+                self.note(format!("profile {name} applied"));
+            }
+            Action::ProfileUse(name) => self
+                .use_profile(&name)
+                .map_err(|e| format!("profile {name}: {e}"))?,
             Action::ScopeMode(mode) => self.scopes.borrow_mut().set_mode(mode),
             Action::ScopeStops(on) => self.scopes.borrow_mut().set_stops(on),
-            Action::Rate(n) => {
-                let result = self.library.borrow_mut().rate(n);
-                if let Err(e) = result {
-                    self.warn(format!("vault.rate: {e}"));
-                }
-            }
-            Action::Reject => {
-                let result = self.library.borrow_mut().toggle_reject();
-                if let Err(e) = result {
-                    self.warn(format!("vault.reject: {e}"));
-                }
-            }
-            Action::Label(l) => {
-                let result = self.library.borrow_mut().toggle_label(&l);
-                if let Err(e) = result {
-                    self.warn(format!("vault.label: {e}"));
-                }
-            }
+            Action::Rate(n) => self
+                .library
+                .borrow_mut()
+                .rate(n)
+                .map_err(|e| format!("vault.rate: {e}"))?,
+            Action::Reject => self
+                .library
+                .borrow_mut()
+                .toggle_reject()
+                .map_err(|e| format!("vault.reject: {e}"))?,
+            Action::Label(l) => self
+                .library
+                .borrow_mut()
+                .toggle_label(&l)
+                .map_err(|e| format!("vault.label: {e}"))?,
             Action::Step(n) => self.library.borrow_mut().step(n),
-            Action::Focus(p) => self.focus(&p),
-            Action::Toggle(p) => {
-                if self.shown(&p) {
-                    self.undock(&p);
-                    self.auxiliary.retain(|a| a.panel != p);
-                    self.hidden.push(p);
-                } else {
-                    self.dock(&p);
-                }
-            }
-            Action::Zoom(z) => {
-                use crate::viewport::{CENTER_X, CENTER_Y, FIT, ZOOM};
-                use helios_core::Value as V;
-                let current = self.viewport.borrow().effective_zoom;
-                let mut store = self.values.lock().expect("value store lock");
-                let set = |store: &mut helios_values::Store, path: &str, v: V| {
-                    let _ = store.set(helios_values::Set::new(
-                        path,
-                        helios_values::Change::To(v),
-                        Origin::User,
-                    ));
-                };
-                let fitted = store
-                    .get(FIT)
-                    .and_then(|e| e.value.as_bool())
-                    .unwrap_or(true);
-                match z {
-                    Zoom::Fit => set(&mut store, FIT, V::Bool(true)),
-                    Zoom::Actual | Zoom::By(_) => {
-                        if fitted {
-                            // Leaving fit keeps the image where it was.
-                            let extent = self.viewport.borrow().graph_extent();
-                            if let Some((w, h)) = extent {
-                                set(&mut store, CENTER_X, V::Float(w / 2.0));
-                                set(&mut store, CENTER_Y, V::Float(h / 2.0));
-                            }
-                        }
-                        let zoom = match z {
-                            Zoom::Actual => 1.0 / f64::from(self.pixels_per_point),
-                            Zoom::By(f) => current * f,
-                            Zoom::Fit => unreachable!(),
-                        };
-                        set(&mut store, ZOOM, V::Float(zoom));
-                        set(&mut store, FIT, V::Bool(false));
-                    }
-                }
-            }
+            Action::Focus(p) => self.workbench.borrow_mut().focus(&p),
+            Action::Toggle(p) => self.workbench.borrow_mut().toggle(&p),
+            Action::Zoom(z) => self.zoom(z),
             Action::Copy(text) => {
                 ctx.copy_text(text.clone());
                 self.note(format!("copied {text}"));
             }
-            Action::MoveTo(p, area) => {
-                if let Err(e) = self.move_to(&p, area, None) {
-                    self.warn(e);
-                }
-            }
-            Action::Answer(answer, origin) => self.answer(answer, origin),
+            Action::MoveTo(p, area) => self.workbench.borrow_mut().move_to(&p, area, None)?,
+            Action::Answer(answer, origin) => self.answer(answer, &origin)?,
             Action::AssumeYes(on) => {
                 self.assume_yes = on;
                 self.note(if on {
@@ -1952,34 +1723,22 @@ impl Shell {
                 });
             }
             Action::Detach(p) => {
-                if !self.auxiliary.iter().any(|a| a.panel == p) {
-                    let r = self.rects.get(&p).copied().unwrap_or(Rect::from_min_size(
-                        egui::pos2(80.0, 80.0),
-                        egui::vec2(480.0, 360.0),
-                    ));
-                    self.undock(&p);
-                    self.auxiliary.push(Auxiliary {
-                        panel: p,
-                        screen: SCREEN.into(),
-                        rect: [r.min.x, r.min.y, r.width(), r.height()],
-                    });
-                }
+                let was = self.rects.get(&p).copied();
+                self.workbench.borrow_mut().detach(&p, was);
             }
             Action::Dock(p) => {
-                if self.auxiliary.iter().any(|a| a.panel == p) {
-                    self.dock(&p);
+                let mut wb = self.workbench.borrow_mut();
+                if wb.auxiliary.iter().any(|a| a.panel == p) {
+                    wb.dock(&p);
                 }
             }
             Action::Snapshot { target, path } if target == "viewport.scene" => {
                 // The float data, before the display transform.
-                let saved = self
-                    .viewport_scene()
+                self.viewport_scene()
                     .ok_or_else(|| "the viewport shows nothing yet".to_string())
-                    .and_then(|scene| snapshot::save_scene(&scene, &path));
-                match saved {
-                    Ok(()) => self.note(format!("viewport.scene saved to {}", path.display())),
-                    Err(e) => self.warn(format!("viewport.scene: {e}")),
-                }
+                    .and_then(|scene| snapshot::save_scene(&scene, &path))
+                    .map_err(|e| format!("viewport.scene: {e}"))?;
+                self.note(format!("viewport.scene saved to {}", path.display()));
             }
             Action::Snapshot { target, path } => {
                 self.shots.push_back(Shot::Save { target, path });
@@ -1990,34 +1749,68 @@ impl Shell {
             }
             Action::RecordStop => {
                 if let Some((_, rec)) = self.recording.take() {
-                    let note = match rec.finish() {
-                        Ok(p) => format!("recording saved to {}", p.display()),
-                        Err(e) => format!("recording failed: {e}"),
-                    };
-                    self.note(note);
+                    let p = rec.finish().map_err(|e| format!("recording failed: {e}"))?;
+                    self.note(format!("recording saved to {}", p.display()));
                 }
+            }
+        }
+        Ok(Value::Null)
+    }
+
+    fn zoom(&mut self, z: Zoom) {
+        use crate::viewport::{CENTER_X, CENTER_Y, FIT, ZOOM};
+        use helios_core::Value as V;
+        let current = self.viewport.borrow().effective_zoom;
+        let mut store = lock(&self.values);
+        let set = |store: &mut helios_values::Store, path: &str, v: V| {
+            let _ = store.set(helios_values::Set::new(
+                path,
+                helios_values::Change::To(v),
+                Origin::User,
+            ));
+        };
+        let fitted = store
+            .get(FIT)
+            .and_then(|e| e.value.as_bool())
+            .unwrap_or(true);
+        match z {
+            Zoom::Fit => set(&mut store, FIT, V::Bool(true)),
+            Zoom::Actual | Zoom::By(_) => {
+                if fitted {
+                    // Leaving fit keeps the image where it was.
+                    let extent = self.viewport.borrow().graph_extent();
+                    if let Some((w, h)) = extent {
+                        set(&mut store, CENTER_X, V::Float(w / 2.0));
+                        set(&mut store, CENTER_Y, V::Float(h / 2.0));
+                    }
+                }
+                let zoom = match z {
+                    Zoom::Actual => 1.0 / f64::from(self.pixels_per_point),
+                    Zoom::By(f) => current * f,
+                    Zoom::Fit => unreachable!(),
+                };
+                set(&mut store, ZOOM, V::Float(zoom));
+                set(&mut store, FIT, V::Bool(false));
             }
         }
     }
 
-    // --- Input ---
-
-    fn on_key(&mut self, key: Key, modifiers: egui::Modifiers) {
-        let c = chord(key, modifiers);
-        let mut keys = self.pending.clone();
-        keys.push(c.clone());
-        match self.keymap.resolve(&Keys(keys.clone()), &self.cx) {
-            Resolution::Run(command) => {
-                self.pending.clear();
-                let _ = self.run(&command, Value::Null, Origin::User);
+    /// Applies what commands queued; an action may run commands that queue
+    /// more (a dialog's answer): they apply in the same frame, a bounded
+    /// number of rounds.
+    fn apply_queue(&mut self, ctx: &Egui) {
+        for _ in 0..8 {
+            let actions = std::mem::take(&mut *lock(&self.queue));
+            if actions.is_empty() {
+                break;
             }
-            Resolution::Pending => self.pending = keys,
-            Resolution::Nothing => {
-                // A chord that breaks a sequence may start another one.
-                let was_pending = !self.pending.is_empty();
-                self.pending.clear();
-                if was_pending {
-                    self.on_key(key, modifiers);
+            for (a, resolver) in actions {
+                let result = self.apply(ctx, a);
+                if let Err(e) = &result {
+                    self.warn(e.clone());
+                }
+                if let Some(r) = resolver {
+                    r.resolve(result);
                 }
             }
         }
@@ -2074,50 +1867,41 @@ impl Shell {
             self.apply_profile(&source);
         }
         self.now = ctx.input(|i| i.time);
-        self.cx = self.context(&ctx);
         if self.framed {
             crate::frame::resize_handles(&ctx);
         }
-
         for event in ctx.input(|i| i.events.clone()) {
-            match event {
-                Event::Key {
-                    key,
-                    pressed: true,
-                    repeat: false,
-                    modifiers,
-                    ..
-                } if self.dialogs.is_empty()
-                    && self.menu.is_none()
-                    && (self.palette.is_none() || key == Key::F1 || modifiers.ctrl) =>
-                {
-                    self.on_key(key, modifiers);
-                }
-                Event::Screenshot { image, .. } => self.on_screenshot(&image),
-                _ => {}
+            if let Event::Screenshot { image, .. } = event {
+                self.on_screenshot(&image);
             }
         }
-        // An action may run commands that queue more (a dialog's answer):
-        // they apply in the same frame, a bounded number of rounds.
-        for _ in 0..8 {
-            let actions: Vec<Action> = std::mem::take(&mut *self.queue.lock().expect("queue"));
-            if actions.is_empty() {
-                break;
-            }
-            for a in actions {
-                self.apply(&ctx, a);
+        // What panels asked for during the last frame.
+        for r in crate::dialogs::take_requests(&ctx) {
+            use crate::dialogs::Request;
+            match r {
+                Request::Confirm(c) => self.confirm(c),
+                Request::Form(f) => self.form(f),
+                Request::Picker(p) => self.pick(p),
+                Request::Menu { at, items } => self.open_menu(at, items),
+                Request::Notify(level, text) => self.notify(level, text),
             }
         }
-        if self.theme_pending {
-            egui_pop::theme::install_tokens(&ctx, self.theme.clone());
+        self.set_context(&ctx);
+        self.app.logic(&ctx);
+        self.apply_queue(&ctx);
+        // The theme asked for is installed here, before anything is drawn.
+        self.app.logic(&ctx);
+        let spec = self.app.handle().theme().spec();
+        if self.installed.as_ref() != Some(&spec) {
             if self.still {
                 ctx.all_styles_mut(|style| {
                     style.visuals.text_cursor.blink = false;
                     style.animation_time = 0.0;
                 });
             }
-            self.theme_pending = false;
+            self.installed = Some(spec);
         }
+        self.set_context(&ctx);
 
         self.rects.clear();
         ctx.data_mut(|d| d.remove::<BTreeMap<String, Rect>>(Id::new("helios.named")));
@@ -2128,21 +1912,85 @@ impl Shell {
             self.title_bar(ui);
         }
         self.status_bar(ui);
-        self.viewport
-            .borrow_mut()
-            .sync(&mut self.values.lock().expect("value store lock"));
-        self.areas(ui);
-        self.windows(&ctx);
-        self.palette_ui(&ctx);
-        self.overlays(&ctx);
+        self.viewport.borrow_mut().sync(&mut lock(&self.values));
+        self.app.show(ui);
+        let warnings = std::mem::take(&mut self.workbench.borrow_mut().warnings);
+        for w in warnings {
+            self.warn(w);
+        }
+        self.workbench.borrow_mut().windows(&ctx, self.framed);
+        self.menus_ui(&ctx);
 
         let named = ctx.data(|d| d.get_temp::<BTreeMap<String, Rect>>(Id::new("helios.named")));
         self.rects.extend(named.unwrap_or_default());
+        self.overlay_rects(&ctx);
 
         if self.recording.is_some() {
             self.shots.push_back(Shot::Frame);
             ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::default()));
             ctx.request_repaint();
+        }
+    }
+
+    /// Names where egui-pop drew the dialog and the toasts.
+    fn overlay_rects(&mut self, ctx: &Egui) {
+        let h = self.app.handle();
+        if let Some((id, _)) = self.dialogs.get().and_then(Dialogs::current)
+            && let Some(r) = ctx.memory(|m| m.area_rect(Id::new(("egui_pop.dialog", id))))
+        {
+            self.rects.insert("helios.dialog".into(), r);
+        }
+        if h.service(&TOASTS).is_some_and(|t| !t.shown().is_empty())
+            && let Some(r) = ctx.memory(|m| m.area_rect(Id::new("egui_pop.toasts")))
+        {
+            self.rects.insert("helios.toasts".into(), r);
+        }
+    }
+
+    /// The system menu and menus asked for, in egui's popups.
+    fn menus_ui(&mut self, ctx: &Egui) {
+        let h = self.app.handle().clone();
+        let layer = egui::LayerId::background();
+        if let Some(under) = self.system_menu {
+            let mut open = true;
+            let shown = egui::Popup::new(Id::new("helios.system.menu"), ctx.clone(), under, layer)
+                .kind(egui::PopupKind::Menu)
+                .open_bool(&mut open)
+                .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                .show(|ui| {
+                    ui.set_min_width(240.0);
+                    egui_pop::api::menus::show(ui, &h, &SYSTEM);
+                });
+            if let Some(r) = shown {
+                self.rects.insert("helios.menu".into(), r.response.rect);
+            }
+            if !open {
+                self.system_menu = None;
+            }
+        }
+        if let Some((at, items)) = self.menu.take() {
+            let mut open = true;
+            let mut chosen = None;
+            let cx = h.when_context();
+            let shown = egui::Popup::new(Id::new("helios.menu"), ctx.clone(), at, layer)
+                .kind(egui::PopupKind::Menu)
+                .open_bool(&mut open)
+                .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                .show(|ui| {
+                    ui.set_min_width(200.0);
+                    egui::containers::menu::menu_style(ui.style_mut());
+                    ui.with_layout(egui::Layout::top_down_justified(egui::Align::Min), |ui| {
+                        menu_rows(ui, &h, &cx, &items, &mut chosen);
+                    });
+                });
+            if let Some(r) = shown {
+                self.rects.insert("helios.menu".into(), r.response.rect);
+            }
+            if let Some((id, args)) = chosen {
+                let _ = self.run(&id, args, Origin::User);
+            } else if open {
+                self.menu = Some((at, items));
+            }
         }
     }
 
@@ -2156,8 +2004,15 @@ impl Shell {
             Some(crate::frame::Request::Minimize) => "window.minimize",
             Some(crate::frame::Request::ToggleMaximize) => "window.maximize",
             Some(crate::frame::Request::Close) => "window.close",
-            Some(crate::frame::Request::SystemMenu(at)) => {
-                self.open_declared_menu(at, "system");
+            Some(crate::frame::Request::SystemMenu(_)) => {
+                let named = ui
+                    .ctx()
+                    .data(|d| d.get_temp::<BTreeMap<String, Rect>>(Id::new("helios.named")));
+                let logo = named.and_then(|n| n.get("helios.logo").copied());
+                if let Some(logo) = logo {
+                    self.rects.insert("helios.logo".into(), logo);
+                    self.open_system_menu(logo);
+                }
                 return;
             }
             None => return,
@@ -2166,12 +2021,13 @@ impl Shell {
     }
 
     fn status_bar(&mut self, ui: &mut Ui) {
+        let pending = self.app.handle().pending_keys();
         egui::Panel::bottom("helios.status")
             .exact_size(22.0)
             .show(ui, |ui| {
                 ui.horizontal_centered(|ui| {
-                    if !self.pending.is_empty() {
-                        ui.label(format!("{} …", Keys(self.pending.clone())));
+                    if let Some(keys) = &pending {
+                        ui.label(format!("{keys} …"));
                         ui.separator();
                     }
                     if self.recording.is_some() {
@@ -2184,190 +2040,66 @@ impl Shell {
                 });
             });
     }
+}
 
-    fn areas(&mut self, ui: &mut Ui) {
-        let Shell {
-            docks,
-            panels,
-            contents,
-            rects,
-            focused,
-            area_rects,
-            content_rect,
-            ..
-        } = self;
-        *content_rect = ui.max_rect();
-        area_rects.clear();
-        let mut viewer = Viewer {
-            panels,
-            contents,
-            rects,
-            focused,
-        };
-        // Side areas first, the editors take what is left.
-        let mut editors = None;
-        for (area, dock) in docks.iter_mut() {
-            let id = format!("helios.area.{area:?}");
-            let panel = match area {
-                Area::Editors => {
-                    editors = Some(dock);
-                    continue;
-                }
-                Area::PrimarySideBar => egui::Panel::left(id.clone()).default_size(260.0),
-                Area::SecondarySideBar => egui::Panel::right(id.clone()).default_size(260.0),
-                Area::BottomPanel => egui::Panel::bottom(id.clone()).default_size(200.0),
-            };
-            let shown = panel.resizable(true).show(ui, |ui| {
-                show_dock(ui, &id, dock, &mut viewer);
-            });
-            area_rects.insert(*area, shown.response.rect);
-        }
-        let shown = egui::CentralPanel::default().show(ui, |ui| {
-            if let Some(dock) = editors {
-                show_dock(ui, "helios.area.Editors", dock, &mut viewer);
-            }
-        });
-        area_rects.insert(Area::Editors, shown.response.rect);
-        let ctx = ui.ctx().clone();
-        self.follow_drag(&ctx);
-        self.drop_hint(&ctx);
-    }
-
-    fn windows(&mut self, ctx: &Egui) {
-        let mut back = Vec::new();
-        for aux in &mut self.auxiliary {
-            let title = self
-                .panels
-                .get(&aux.panel)
-                .map_or_else(|| aux.panel.clone(), |p| p.title.clone());
-            // The same title and, when Helios draws the main window's
-            // frame, the same frame.
-            let window_title = format!("{title} — Helios");
-            let framed = self.framed;
-            let builder = ViewportBuilder::default()
-                .with_title(window_title.clone())
-                .with_decorations(!framed)
-                .with_inner_size([aux.rect[2], aux.rect[3]]);
-            let mut content = self.contents.get_mut(&aux.panel);
-            let rects = &mut self.rects;
-            let panel = aux.panel.clone();
-            ctx.show_viewport_immediate(ViewportId::from_hash_of(&panel), builder, |ui, _| {
-                if framed {
-                    let vctx = ui.ctx().clone();
-                    crate::frame::resize_handles(&vctx);
-                    let request = egui::Panel::top("helios.titlebar")
-                        .exact_size(crate::frame::TITLE_HEIGHT)
-                        .frame(egui::Frame::NONE.fill(ui.visuals().panel_fill))
-                        .show(ui, |ui| crate::frame::title_bar(ui, &window_title))
-                        .inner;
-                    match request {
-                        Some(crate::frame::Request::Minimize) => {
-                            vctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
-                        }
-                        Some(crate::frame::Request::ToggleMaximize) => {
-                            let on = vctx.input(|i| i.viewport().maximized.unwrap_or(false));
-                            vctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!on));
-                        }
-                        Some(crate::frame::Request::Close) => back.push(panel.clone()),
-                        Some(crate::frame::Request::SystemMenu(_)) | None => {}
-                    }
-                }
-                egui::CentralPanel::default().show(ui, |ui| {
-                    rects.insert(panel.clone(), ui.max_rect());
-                    match content.as_deref_mut() {
-                        Some(c) => c(ui),
-                        None => placeholder(ui, &title),
-                    }
-                });
-                if ui.input(|i| i.viewport().close_requested()) {
-                    back.push(panel.clone());
-                }
-            });
-        }
-        for p in back {
-            self.dock(&p);
-        }
-    }
-
-    fn palette_ui(&mut self, ctx: &Egui) {
-        let Some(mut palette) = self.palette.take() else {
-            return;
-        };
-        let mut run = None;
-        let mut close = false;
-        let matches: Vec<(String, String, Option<String>)> = self
-            .registry
-            .search(&palette.query, &self.cx)
-            .into_iter()
-            .filter(|s| s.id != "workbench.palette")
-            .take(12)
-            .map(|s| {
-                let keys = self
-                    .keymap
-                    .keys_for(&s.id)
-                    .first()
-                    .map(std::string::ToString::to_string);
-                (s.id.clone(), format!("{}: {}", s.category, s.title), keys)
+/// A dialog as `dialog.current` describes it: egui-pop's description, a
+/// form's values by field key.
+fn describe(d: &Dialogs) -> Value {
+    let mut out = d.describe();
+    if out["kind"] == "form"
+        && let Some(fields) = out["fields"].as_array()
+    {
+        let values: serde_json::Map<String, Value> = fields
+            .iter()
+            .filter_map(|f| {
+                let key = f["key"].as_str()?;
+                // A value is serialized as `{"<type>": value}`.
+                let v = f["value"].as_object()?.values().next()?.clone();
+                Some((key.to_string(), v))
             })
             .collect();
-        egui::Window::new("Commands")
-            .id(Id::new("helios.palette"))
-            .title_bar(false)
-            .resizable(false)
-            .anchor(Align2::CENTER_TOP, [0.0, 48.0])
-            .fixed_size([520.0, 0.0])
-            .show(ctx, |ui| {
-                let edit = ui.add(
-                    egui::TextEdit::singleline(&mut palette.query)
-                        .hint_text("Type a command")
-                        .desired_width(f32::INFINITY),
-                );
-                if !palette.opened {
-                    edit.request_focus();
-                    palette.opened = true;
-                }
-                if edit.changed() {
-                    palette.selected = 0;
-                }
-                let (down, up, enter, escape) = ui.input(|i| {
-                    (
-                        i.key_pressed(Key::ArrowDown),
-                        i.key_pressed(Key::ArrowUp),
-                        i.key_pressed(Key::Enter),
-                        i.key_pressed(Key::Escape),
-                    )
-                });
-                let n = matches.len();
-                if n > 0 {
-                    if down {
-                        palette.selected = (palette.selected + 1) % n;
-                    }
-                    if up {
-                        palette.selected = (palette.selected + n - 1) % n;
-                    }
-                }
+        out["values"] = Value::Object(values);
+    }
+    out
+}
+
+/// The rows of a menu asked for: each command with its title and keys,
+/// greyed with the reason where it does not apply.
+fn menu_rows(
+    ui: &mut Ui,
+    h: &AppHandle,
+    cx: &egui_pop::model::when::WhenContext,
+    items: &[MenuItem],
+    chosen: &mut Option<(String, Value)>,
+) {
+    for item in items {
+        match item {
+            MenuItem::Separator => {
                 ui.separator();
-                for (i, (id, title, keys)) in matches.iter().enumerate() {
-                    let row =
-                        crate::dialogs::list_row(ui, i == palette.selected, title, keys.as_deref());
-                    if row.clicked() {
-                        run = Some(id.clone());
-                    }
+            }
+            MenuItem::Submenu { label, items } => {
+                ui.menu_button(label, |ui| menu_rows(ui, h, cx, items, chosen));
+            }
+            MenuItem::Command { id, args } => {
+                let Ok(cid) = CommandId::new(id.as_str()) else {
+                    continue;
+                };
+                let Some(spec) = h.command(&cid) else {
+                    continue;
+                };
+                let mut button = egui::Button::new(menu_title(&spec.title));
+                if let Some(k) = h.keys_for(&cid).first() {
+                    button = button.shortcut_text(k.clone());
                 }
-                if n == 0 {
-                    ui.weak("No command matches");
+                let applies = h.applies(&cid, cx);
+                let r = ui.add_enabled(applies, button);
+                if !applies {
+                    r.on_disabled_hover_text(format!("Does not apply here ({})", spec.when));
+                } else if r.clicked() {
+                    *chosen = Some((id.clone(), args.clone()));
+                    ui.close();
                 }
-                if enter {
-                    run = run
-                        .take()
-                        .or_else(|| matches.get(palette.selected).map(|m| m.0.clone()));
-                }
-                close = escape;
-            });
-        if let Some(id) = run {
-            let _ = self.run(&id, Value::Null, Origin::User);
-        } else if !close {
-            self.palette = Some(palette);
+            }
         }
     }
 }
@@ -2391,21 +2123,6 @@ fn default_path(target: &str, extension: &str) -> PathBuf {
         .collect();
     home.join("Pictures/Helios")
         .join(format!("{name}-{secs}.{extension}"))
-}
-
-/// A command's title as a menu shows it: without the hint of its
-/// arguments (`Open a workspace (`path`)`), which the palette keeps.
-fn menu_title(title: &str) -> String {
-    match title.rfind(" (`") {
-        Some(i) if title.ends_with(')') => title[..i].to_string(),
-        _ => title.to_string(),
-    }
-}
-
-/// What a menu shows: items given by the caller, or a declared menu.
-enum MenuSource {
-    Items(Vec<crate::dialogs::MenuItem>),
-    Declared(String),
 }
 
 fn recent_file() -> PathBuf {
@@ -2446,64 +2163,6 @@ pub fn config_dir() -> PathBuf {
         .join("helios")
 }
 
-fn placeholder(ui: &mut Ui, title: &str) {
-    ui.centered_and_justified(|ui| {
-        ui.weak(title);
-    });
-}
-
-fn show_dock(ui: &mut Ui, id: &str, dock: &mut DockState<String>, viewer: &mut Viewer) {
-    DockArea::new(dock)
-        .id(Id::new(id))
-        .show_close_buttons(false)
-        .show_add_buttons(false)
-        .show_leaf_close_all_buttons(false)
-        .show_leaf_collapse_buttons(false)
-        .show_inside(ui, viewer);
-}
-
-struct Viewer<'a> {
-    panels: &'a Panels,
-    contents: &'a mut BTreeMap<String, Content>,
-    rects: &'a mut BTreeMap<String, Rect>,
-    focused: &'a mut Option<String>,
-}
-
-impl TabViewer for Viewer<'_> {
-    type Tab = String;
-
-    fn id(&mut self, tab: &mut String) -> Id {
-        Id::new(("helios.panel", tab.as_str()))
-    }
-
-    fn title(&mut self, tab: &mut String) -> egui::WidgetText {
-        self.panels
-            .get(tab)
-            .map_or_else(|| tab.clone(), |p| p.title.clone())
-            .into()
-    }
-
-    fn ui(&mut self, ui: &mut Ui, tab: &mut String) {
-        let rect = ui.max_rect();
-        self.rects.insert(tab.clone(), rect);
-        if ui.input(|i| i.pointer.any_pressed()) && ui.rect_contains_pointer(rect) {
-            *self.focused = Some(tab.clone());
-        }
-        if let Some(c) = self.contents.get_mut(tab) {
-            c(ui);
-        } else {
-            let title = self.panels.get(tab).map_or(tab.as_str(), |p| &p.title);
-            placeholder(ui, title);
-        }
-    }
-
-    fn allowed_in_windows(&self, _tab: &mut String) -> bool {
-        // Detached panels get real windows, through `<panel>.detach`; a tab
-        // dropped over another area is moved there by the shell.
-        false
-    }
-}
-
 /// Headless rendering, for tests, agents and machines without a display.
 pub mod headless {
     use super::{Recorder, RgbaImage, Shell, snapshot};
@@ -2517,8 +2176,6 @@ pub mod headless {
             eframe::egui_wgpu::RendererOptions::PREDICTABLE,
         );
         shell.attach_gpu(&rs);
-        // Never a window of the system's from a headless run.
-        shell.places.native = false;
         shell.still = true;
         Harness::builder()
             .with_size(size)
