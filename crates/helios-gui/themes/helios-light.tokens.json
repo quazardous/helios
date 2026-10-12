@@ -2,7 +2,9 @@
   "$extends": "pop-light",
   "$description": "Helios's light theme: egui-pop's light theme, a neutral mid-grey surround to judge photos on, and Helios's own tokens.",
   "viewport": {
-    "surround": {"$type": "color", "$value": "#808080", "$description": "Helios component token: behind the photo being edited. Neutral mid grey: a white surround would make a photo look darker than it is."}
+    "surround": {"$type": "color", "$value": "#808080", "$description": "Helios component token: behind the photo being edited. Neutral mid grey: a white surround would make a photo look darker than it is."},
+    "background": {"$type": "color", "$value": "{viewport.surround}", "$description": "egui-pop's viewport: around the image, the surround."},
+    "backdrop": {"$type": "color", "$value": "{viewport.surround}", "$description": "egui-pop's viewport: under the image until its tiles arrive, the surround too."}
   },
   "state": {
     "$type": "color",

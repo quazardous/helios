@@ -80,11 +80,12 @@ equal the last saved step.
   - `helios_values::Store` (`helios-values/src/lib.rs` ~l.435): `entries`
     (current values), `undo` / `redo` stacks, open `gestures`, `dirty` set;
     shared as `Shell::values` (`helios-gui/src/shell.rs` ~l.196).
-  - The viewport's `Source.graph` (`helios-gui/src/viewport.rs` ~l.253),
+  - The viewport's edited graph (`Edited.graph`, `helios-gui/src/viewport.rs`),
     brought up to date by `Viewport::sync` → `helios_values::sync`
     (`shell.rs` ~l.1910, `helios-values/src/graph.rs` `sync`) → `Graph::set_param`
     (`helios-core/src/graph.rs` ~l.149), plus an `Arc<Graph>` copy for the
-    render thread.
+    tile source's render thread (`helios-gui/src/engine_source.rs`). The
+    view (`view/viewport/*`) is transient: never undone, never saved.
 - Persisted: never. The graph comes from `show_image` (`helios-gui/src/main.rs`)
   with default parameters, unrelated to any vault image or version; the
   library selection does not load an edit either.

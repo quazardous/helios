@@ -13,8 +13,6 @@ egui-pop = { workspace = true, features = ["viewport"] }
 helios-profile.workspace = true
 helios-scopes.workspace = true
 helios-values.workspace = true
-# MIT OR Apache-2.0.
-bytemuck = "1"
 helios-core.workspace = true
 # The process's one GPU device, which the window draws with.
 helios-gpu.workspace = true

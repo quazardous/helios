@@ -268,8 +268,11 @@ command-vault-rate-5 =
 command-vault-reject =
     .title = Reject the selected image, or take it back
 
+command-viewport-compare =
+    .title = Image: before and after side by side
+
 command-viewport-zoom-100 =
-    .title = Image: actual pixels (100 %)
+    .title = Image: actual pixels (100 %, 1 image pixel = 1 screen pixel)
 
 command-viewport-zoom-fit =
     .title = Image: fit to the view

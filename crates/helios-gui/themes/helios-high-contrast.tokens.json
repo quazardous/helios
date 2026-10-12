@@ -2,7 +2,9 @@
   "$extends": "pop-high-contrast",
   "$description": "Helios's high contrast theme: egui-pop's (black surfaces, white text, strong outlines, larger text) and Helios's own tokens.",
   "viewport": {
-    "surround": {"$type": "color", "$value": "#000000", "$description": "Helios component token: behind the photo being edited. Black, as the surfaces around it."}
+    "surround": {"$type": "color", "$value": "#000000", "$description": "Helios component token: behind the photo being edited. Black, as the surfaces around it."},
+    "background": {"$type": "color", "$value": "{viewport.surround}", "$description": "egui-pop's viewport: around the image, the surround."},
+    "backdrop": {"$type": "color", "$value": "{viewport.surround}", "$description": "egui-pop's viewport: under the image until its tiles arrive, the surround too."}
   },
   "state": {
     "$type": "color",

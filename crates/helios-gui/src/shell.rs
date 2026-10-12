@@ -42,6 +42,7 @@ use crate::plugins::{
     menu_title,
 };
 use crate::snapshot::{self, Recorder};
+use crate::viewport::ZoomTo;
 use crate::workbench::Workbench;
 
 pub use crate::workbench::Content;
@@ -75,7 +76,9 @@ enum Action {
     Toggle(String),
     Detach(String),
     MoveTo(String, Area),
-    Zoom(Zoom),
+    Zoom(crate::viewport::ZoomTo),
+    /// Before and after side by side, or not.
+    Compare,
     Copy(String),
     SystemMenu,
     /// A command, its arguments, as whom.
@@ -99,14 +102,6 @@ enum Action {
 }
 
 type Queue = Arc<Mutex<Vec<(Action, Option<Resolver>)>>>;
-
-/// What the viewport's zoom commands ask for.
-#[derive(Clone, Copy, Debug, PartialEq)]
-enum Zoom {
-    Fit,
-    Actual,
-    By(f64),
-}
 
 /// How a command turns its arguments into an action.
 type ActionOf = Box<dyn Fn(&Value, &Origin) -> Result<Action, String> + Send + Sync>;
@@ -209,6 +204,10 @@ pub struct Shell {
     /// The GUI's clock, in seconds, as of this frame.
     now: f64,
     viewport: Rc<RefCell<crate::viewport::Viewport>>,
+    /// The render state the viewport's GPU path waits to be installed on.
+    gpu: Option<eframe::egui_wgpu::RenderState>,
+    /// What installing it found.
+    gpu_info: Option<egui_pop::viewport::gpu::GpuInfo>,
     params: Rc<RefCell<crate::params::Params>>,
     /// Every value widgets and agents edit (`param.*` commands).
     pub values: Arc<Mutex<helios_values::Store>>,
@@ -326,6 +325,8 @@ impl Shell {
             notices: Vec::new(),
             now: 0.0,
             viewport: Rc::default(),
+            gpu: None,
+            gpu_info: None,
             params: Rc::default(),
             values,
             still: false,
@@ -489,25 +490,41 @@ impl Shell {
         self.viewport.borrow_mut().set_source(graph, node, port)
     }
 
-    /// Gives the viewport the GPU objects it draws with, on the render
-    /// state the window (or a test harness) draws with: the process's one
-    /// device ([`wgpu_setup`]), never one of the window's own.
+    /// Gives the viewport the GPU path it draws with, on the render state
+    /// the window (or a test harness) draws with: the process's one device
+    /// ([`wgpu_setup`]), never one of the window's own. Installed on the
+    /// next frame, in its context.
     pub fn attach_gpu(&mut self, rs: &eframe::egui_wgpu::RenderState) {
         debug_assert!(
             helios_gpu::shared::owns(&rs.instance),
             "the window opened a wgpu instance of its own: hand it wgpu_setup()"
         );
-        crate::viewport::install(rs);
+        self.gpu = Some(rs.clone());
     }
 
-    /// What the viewport's render thread did.
-    pub fn viewport_stats(&self) -> Arc<crate::viewport::Stats> {
+    /// The viewport's GPU path, once installed: `None` draws on the CPU.
+    pub fn viewport_gpu(&self) -> Option<egui_pop::viewport::gpu::GpuInfo> {
+        self.gpu_info
+    }
+
+    /// What the viewport's render threads did.
+    pub fn viewport_stats(&self) -> Arc<crate::engine_source::Stats> {
         self.viewport.borrow().stats.clone()
+    }
+
+    /// The viewport: its egui-pop state, its readout, its scene.
+    pub fn viewport(&self) -> std::cell::Ref<'_, crate::viewport::Viewport> {
+        self.viewport.borrow()
+    }
+
+    /// The viewport, to set its hooks.
+    pub fn viewport_mut(&self) -> std::cell::RefMut<'_, crate::viewport::Viewport> {
+        self.viewport.borrow_mut()
     }
 
     /// The float data the viewport shows, before the display transform.
     pub fn viewport_scene(&self) -> Option<helios_core::Image> {
-        self.viewport.borrow().scene().cloned()
+        self.viewport.borrow().scene()
     }
 
     /// The layout as it stands, to be saved with the workspace.
@@ -1142,20 +1159,28 @@ impl Shell {
             );
         }
         for (id, title, zoom) in [
-            ("viewport.zoom.fit", "Image: fit to the view", Zoom::Fit),
+            ("viewport.zoom.fit", "Image: fit to the view", ZoomTo::Fit),
             (
                 "viewport.zoom.100",
-                "Image: actual pixels (100 %)",
-                Zoom::Actual,
+                "Image: actual pixels (100 %, 1 image pixel = 1 screen pixel)",
+                ZoomTo::Actual,
             ),
-            ("viewport.zoom.in", "Image: zoom in", Zoom::By(1.25)),
-            ("viewport.zoom.out", "Image: zoom out", Zoom::By(0.8)),
+            ("viewport.zoom.in", "Image: zoom in", ZoomTo::In),
+            ("viewport.zoom.out", "Image: zoom out", ZoomTo::Out),
         ] {
             add(
                 CommandSpec::new(id, title, "View"),
                 Box::new(move |_, _| Ok(Action::Zoom(zoom))),
             );
         }
+        add(
+            CommandSpec::new(
+                "viewport.compare",
+                "Image: before and after side by side",
+                "View",
+            ),
+            Box::new(|_, _| Ok(Action::Compare)),
+        );
         add(
             CommandSpec::new("scopes.stops", "Scopes: in stops (log)", "View"),
             Box::new(|_, _| Ok(Action::ScopeStops(true))),
@@ -1762,7 +1787,22 @@ impl Shell {
             Action::Step(n) => self.library.borrow_mut().step(n),
             Action::Focus(p) => self.workbench.borrow_mut().focus(&p),
             Action::Toggle(p) => self.workbench.borrow_mut().toggle(&p),
-            Action::Zoom(z) => self.zoom(z),
+            Action::Zoom(z) => self.viewport.borrow_mut().zoom(z, &self.values),
+            Action::Compare => {
+                use crate::viewport::COMPARE;
+                let mut store = lock(&self.values);
+                let on = store
+                    .get(COMPARE)
+                    .and_then(|e| e.value.as_bool())
+                    .unwrap_or(false);
+                store
+                    .set(helios_values::Set::new(
+                        COMPARE,
+                        helios_values::Change::To(helios_core::Value::Bool(!on)),
+                        Origin::User,
+                    ))
+                    .map_err(|e| e.to_string())?;
+            }
             Action::Copy(text) => {
                 ctx.copy_text(text.clone());
                 self.note(format!("copied {text}"));
@@ -1810,44 +1850,6 @@ impl Shell {
             }
         }
         Ok(Value::Null)
-    }
-
-    fn zoom(&mut self, z: Zoom) {
-        use crate::viewport::{CENTER_X, CENTER_Y, FIT, ZOOM};
-        use helios_core::Value as V;
-        let current = self.viewport.borrow().effective_zoom;
-        let mut store = lock(&self.values);
-        let set = |store: &mut helios_values::Store, path: &str, v: V| {
-            let _ = store.set(helios_values::Set::new(
-                path,
-                helios_values::Change::To(v),
-                Origin::User,
-            ));
-        };
-        let fitted = store
-            .get(FIT)
-            .and_then(|e| e.value.as_bool())
-            .unwrap_or(true);
-        match z {
-            Zoom::Fit => set(&mut store, FIT, V::Bool(true)),
-            Zoom::Actual | Zoom::By(_) => {
-                if fitted {
-                    // Leaving fit keeps the image where it was.
-                    let extent = self.viewport.borrow().graph_extent();
-                    if let Some((w, h)) = extent {
-                        set(&mut store, CENTER_X, V::Float(w / 2.0));
-                        set(&mut store, CENTER_Y, V::Float(h / 2.0));
-                    }
-                }
-                let zoom = match z {
-                    Zoom::Actual => 1.0 / f64::from(self.pixels_per_point),
-                    Zoom::By(f) => current * f,
-                    Zoom::Fit => unreachable!(),
-                };
-                set(&mut store, ZOOM, V::Float(zoom));
-                set(&mut store, FIT, V::Bool(false));
-            }
-        }
     }
 
     /// Applies what commands queued; an action may run commands that queue
@@ -1910,6 +1912,9 @@ impl Shell {
     /// Draws the shell for one frame.
     pub fn ui(&mut self, ui: &mut Ui) {
         let ctx = ui.ctx().clone();
+        if let Some(rs) = self.gpu.take() {
+            self.gpu_info = Some(egui_pop::viewport::gpu::install(&ctx, &rs));
+        }
         let was_hidpi = self.pixels_per_point >= HIDPI;
         self.pixels_per_point = ctx.pixels_per_point();
         // The screen is known from the first frame on: a profile applied

@@ -346,3 +346,49 @@ by another origin's gesture. Each widget is found by its path
 menu resets, copies the path or copies the value.
 
 ![The Parameters panel, the exposure moved by an agent](gui/params-helios-dark.png)
+
+## Image viewport
+
+The image panel is egui-pop's viewport (`egui_pop::viewport`, decided
+2026-10-11, built 2026-10-12): egui-pop draws, Helios supplies the pixels
+and the colour (`helios-gui/src/viewport.rs`).
+
+- **Pixels.** The engine is the viewport's tile source
+  (`engine_source.rs`): a proxy of the whole image at a power of two
+  first, then the exact tiles of what is visible at the view's scale,
+  rendered on a thread of their own a union of neighbouring tiles at a
+  time; a tile the view no longer needs is skipped. An edit renders
+  again; the old tiles stay on screen until the new ones arrive.
+- **Colour.** Tiles are linear Rec.2020 floats (the working space); the
+  display transform, a matrix to sRGB primaries then egui-pop's clamp and
+  encoding, runs in egui-pop's shader on the GPU.
+- **The view** lives in the value store (`view/viewport/zoom`,
+  `center_x`, `center_y`, `fit`), so commands, keys and agents move it.
+  The zoom counts physical screen pixels per image pixel: 100 % is one
+  image pixel on one screen pixel at any window scale. A drag is one
+  gesture (an agent's write meanwhile is refused); none of it is an undo
+  step nor saves the edit.
+- **Gestures** are egui-pop's: a drag (the middle button anywhere, or
+  Space and drag) pans and Escape puts it back, the wheel zooms around the
+  pointer and stops at 100 % when it crosses it (Shift and the wheel
+  pans), a double click fits; with the viewport focused, `+` and `-` walk
+  the zoom ladder, `0` fits, `1` is 100 %, `2` is 200 %, the arrows pan. The commands
+  `viewport.zoom.fit`, `viewport.zoom.100`, `viewport.zoom.in` and
+  `viewport.zoom.out` do the same from the palette and for agents.
+- **Before and after.** `viewport.compare` shows them side by side
+  ("before" left of a split dragged by its handle, `view/viewport/split`);
+  holding `\` shows "before" alone. "Before" is the edit as it was
+  opened (not decided: the unedited image, or a snapshot taken by hand).
+- **Readout.** The working-space R, G, B of the pixel under the pointer
+  show in the bottom left corner.
+- **Pictures.** `viewport.display` is what is on screen,
+  `viewport.scene` the float data of the view before the display
+  transform (`gui.snapshot`).
+
+![The image viewport, the readout under the pointer](gui/viewport-wbox.png)
+
+The picture is a run of `helios-gui --image` in wbox (a headless nested
+compositor). Beside the same run of the viewport it replaced, the image's
+pixels differ by at most one code value (egui-pop's tiles are half
+floats), 96 % not at all; the surround is now the theme's
+`viewport.surround`, aliased to egui-pop's `viewport.background`.

@@ -275,7 +275,13 @@ right, since egui does the per-viewport work, but these points need owning:
 Reference: `docs/darktable-pitfalls/ui-platforms.md` §10 ("define 100% once:
 one image pixel per physical screen pixel"), darktable #10839 and PR #11179.
 
-### 3.1 What the code does today
+### 3.1 What the code did (before 2026-10-12)
+
+Done since: the viewport runs on egui-pop's (`egui-pop-viewport`), which
+does all of §3.2 (a physical zoom stored in `view/viewport/zoom`, 1.0 for
+100 %; whole-pixel offsets; the ladder and the wheel's detent at 100 %;
+one mapping for drawing and the readout; half-float tiles within the
+device's texture limit). What follows is kept as the record of why.
 
 - `viewport.rs` keeps `View::zoom` as **points on screen per image pixel**
   and stores it as `view/viewport/zoom`, displayed ×100 with a `%` unit.

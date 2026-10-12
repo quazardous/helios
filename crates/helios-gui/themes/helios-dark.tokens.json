@@ -2,7 +2,9 @@
   "$extends": "pop-dark",
   "$description": "Helios's dark theme: egui-pop's dark theme (warm greys, the logo's sun gold as accent) and Helios's own tokens.",
   "viewport": {
-    "surround": {"$type": "color", "$value": "#141414", "$description": "Helios component token: behind the photo being edited. Neutral dark grey: the warm greys of the panels would tint how a photo's colours look."}
+    "surround": {"$type": "color", "$value": "#141414", "$description": "Helios component token: behind the photo being edited. Neutral dark grey: the warm greys of the panels would tint how a photo's colours look."},
+    "background": {"$type": "color", "$value": "{viewport.surround}", "$description": "egui-pop's viewport: around the image, the surround."},
+    "backdrop": {"$type": "color", "$value": "{viewport.surround}", "$description": "egui-pop's viewport: under the image until its tiles arrive, the surround too."}
   },
   "state": {
     "$type": "color",

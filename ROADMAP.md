@@ -129,6 +129,10 @@ coordinates, before/after views, a pixel readout, thumbnails and a
 histogram from supplied data. Raw decoding, colour science, the engine and
 the scopes' computation stay in Helios, which implements the tile source
 and the display transform.
+Helios's viewport runs on it (2026-10-12): the engine is its tile source,
+a Rec.2020-to-sRGB matrix its display transform, the view kept in the
+value store; the "before" of a comparison is the edit as it was opened
+(not decided: the unedited image, or a snapshot taken by hand).
 egui-pop wraps the application's kernel; it is not the kernel (2026-10-12,
 decided). egui-pop owns what is UI: command declarations (for menus, the
 palette, the keymap and traces), focus, overlays, layout, theme and UI
