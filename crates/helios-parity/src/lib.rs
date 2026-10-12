@@ -33,6 +33,8 @@ pub const MEAN_DELTA_E: f64 = 0.77;
 pub struct Item {
     pub module: String,
     pub values: Value,
+    /// The module's instance (`multi_priority`), 0 for the first.
+    pub instance: u32,
 }
 
 impl Item {
@@ -40,7 +42,15 @@ impl Item {
         Item {
             module: module.into(),
             values,
+            instance: 0,
         }
+    }
+
+    /// The same item for another instance of its module.
+    #[must_use]
+    pub fn instance(mut self, instance: u32) -> Item {
+        self.instance = instance;
+        self
     }
 }
 
@@ -73,7 +83,7 @@ pub fn sidecar(items: &[Item], input: Input, layouts: &Layouts) -> Result<String
         serde_json::json!({"type": profile, "type_work": LIN_REC2020}),
     )];
     for item in items {
-        history.push(Item::new(&item.module, item.values.clone()));
+        history.push(Item::new(&item.module, item.values.clone()).instance(item.instance));
     }
     history.push(Item::new(
         "colorout",
@@ -93,9 +103,14 @@ pub fn sidecar(items: &[Item], input: Input, layouts: &Layouts) -> Result<String
                 let _ = write!(hex, "{b:02x}");
                 hex
             });
+        let name = if item.instance == 0 {
+            String::new()
+        } else {
+            item.instance.to_string()
+        };
         lines.push(format!(
-            r#"<rdf:li darktable:num="{i}" darktable:operation="{}" darktable:enabled="1" darktable:modversion="{version}" darktable:params="{params}" darktable:multi_name="" darktable:multi_priority="0"/>"#,
-            item.module
+            r#"<rdf:li darktable:num="{i}" darktable:operation="{}" darktable:enabled="1" darktable:modversion="{version}" darktable:params="{params}" darktable:multi_name="{name}" darktable:multi_priority="{}"/>"#,
+            item.module, item.instance
         ));
     }
     Ok(format!(
@@ -221,10 +236,15 @@ impl Darktable {
         layouts: &Layouts,
         dir: &Path,
     ) -> Result<Image, String> {
+        self.render_sidecar(input, &sidecar(items, Input::LinearRec2020, layouts)?, dir)
+    }
+
+    /// Renders a linear Rec.2020 image with a sidecar's text, as is.
+    pub fn render_sidecar(&self, input: &Image, xmp: &str, dir: &Path) -> Result<Image, String> {
         std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
         let src = dir.join("input.pfm");
         write_pfm(input, &src)?;
-        self.run(&src, items, Input::LinearRec2020, layouts, dir)
+        self.run(&src, xmp, dir)
     }
 
     /// Renders a raw file with a history of `items` after darktable's
@@ -240,24 +260,16 @@ impl Darktable {
         let name = raw.file_name().ok_or("a raw path without a name")?;
         let src = dir.join(name);
         std::fs::copy(raw, &src).map_err(|e| format!("{}: {e}", raw.display()))?;
-        self.run(&src, items, Input::Camera, layouts, dir)
+        self.run(&src, &sidecar(items, Input::Camera, layouts)?, dir)
     }
 
-    fn run(
-        &self,
-        src: &Path,
-        items: &[Item],
-        input: Input,
-        layouts: &Layouts,
-        dir: &Path,
-    ) -> Result<Image, String> {
+    fn run(&self, src: &Path, sidecar: &str, dir: &Path) -> Result<Image, String> {
         let mut xmp = src.as_os_str().to_owned();
         xmp.push(".xmp");
         let xmp = PathBuf::from(xmp);
         let out = dir.join("output.pfm");
         let _ = std::fs::remove_file(&out);
-        std::fs::write(&xmp, sidecar(items, input, layouts)?)
-            .map_err(|e| format!("{}: {e}", xmp.display()))?;
+        std::fs::write(&xmp, sidecar).map_err(|e| format!("{}: {e}", xmp.display()))?;
         let run = Command::new(&self.cli)
             .arg(src)
             .arg(&xmp)

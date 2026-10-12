@@ -30,8 +30,8 @@ Two defects came out of this inventory and were checked in the code:
 
 - **XMP import order.** The import chains modules in the order they were
   last edited, while darktable processes them in its pipe order
-  (`iop_order_version`, `iop_order_list`), which is never read
-  ([pipeline.md](pipeline.md), pitfall 1).
+  (`iop_order_version`, `iop_order_list`), which was never read
+  ([pipeline.md](pipeline.md), pitfall 1). Fixed on 2026-10-12.
 - **GPU limits.** The device is opened with wgpu's default limits (128 MiB
   per storage binding), while the scheduler admits jobs against the
   adapter's much larger limits, so a 24 MP f32 image passes the check and

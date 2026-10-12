@@ -76,16 +76,18 @@ fn a_current_sidecar_imports_with_its_values_and_reports_the_rest() {
     assert_eq!(fields["mode"], "EXPOSURE_MODE_MANUAL");
 
     let imported = import(&sidecar, &layouts);
+    // In darktable's v5.0 pipe order, not in the order of the history.
     let modules: Vec<_> = imported.nodes.iter().map(|n| n.module.as_str()).collect();
+    assert_eq!(imported.report.pipe_order, "v5.0 RAW");
     assert_eq!(
         modules,
         [
             "rawprepare",
-            "demosaic",
-            "colorin",
             "whitebalance",
             "highlights",
-            "exposure"
+            "demosaic",
+            "exposure",
+            "colorin"
         ],
         "{:#?}",
         imported.report

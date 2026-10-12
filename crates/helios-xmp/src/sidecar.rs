@@ -20,6 +20,8 @@ pub struct HistoryItem {
     pub params: Vec<u8>,
     pub multi_name: String,
     pub multi_priority: u32,
+    /// The item's place in the pipe, in sidecars older than `xmp_version` 4.
+    pub iop_order: Option<f64>,
 }
 
 /// What a sidecar says about an image and its edit.
@@ -30,6 +32,12 @@ pub struct Sidecar {
     pub rating: Option<i64>,
     /// How many history items are applied (the rest were undone).
     pub history_end: Option<u32>,
+    /// The version of darktable's sidecar format.
+    pub xmp_version: Option<u32>,
+    /// darktable's built-in pipe order, by number (see [`crate::iop_order`]).
+    pub iop_order_version: Option<u32>,
+    /// A pipe order spelled out: operation and instance pairs.
+    pub iop_order_list: Option<String>,
     pub history: Vec<HistoryItem>,
 }
 
@@ -108,6 +116,7 @@ fn item(attrs: &[(String, String)]) -> Result<HistoryItem, String> {
         multi_priority: number(attrs, "darktable:multi_priority")
             .map_err(named)?
             .unwrap_or(0),
+        iop_order: number(attrs, "darktable:iop_order").map_err(named)?,
         operation,
     })
 }
@@ -126,6 +135,10 @@ impl Sidecar {
                     sidecar.derived_from = get(&attrs, "xmpMM:DerivedFrom").map(str::to_string);
                     sidecar.rating = number(&attrs, "xmp:Rating")?;
                     sidecar.history_end = number(&attrs, "darktable:history_end")?;
+                    sidecar.xmp_version = number(&attrs, "darktable:xmp_version")?;
+                    sidecar.iop_order_version = number(&attrs, "darktable:iop_order_version")?;
+                    sidecar.iop_order_list =
+                        get(&attrs, "darktable:iop_order_list").map(str::to_string);
                 }
                 Event::Start(e) if e.name().as_ref() == "darktable:history" => in_history = true,
                 Event::End(e) if e.name().as_ref() == "darktable:history" => in_history = false,
@@ -144,6 +157,7 @@ impl Sidecar {
 
     /// The items in force: those before `history_end`, the last one of each
     /// module instance (operation and instance priority), in history order.
+    /// darktable runs them in pipe order: see [`Sidecar::in_pipe_order`].
     pub fn effective(&self) -> Vec<&HistoryItem> {
         let end = self.history_end.unwrap_or(u32::MAX) as usize;
         let applied: Vec<&HistoryItem> = self.history.iter().take(end).collect();
@@ -155,5 +169,10 @@ impl Sidecar {
             out.push(item);
         }
         out
+    }
+
+    /// The items in force, in the order darktable runs them.
+    pub fn in_pipe_order(&self) -> crate::iop_order::Arranged<'_> {
+        crate::iop_order::arrange(self)
     }
 }

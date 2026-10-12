@@ -110,3 +110,96 @@ fn exposure_matches_darktable() {
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Helios's exposure modules of an imported edit, chained in its order.
+fn helios_imported_exposures(input: &Image, nodes: &[&helios_xmp::Node]) -> Image {
+    let module = ModuleRef::new(helios_module_exposure::Exposure);
+    let mut g = Graph::new();
+    let mut prev = g.add_source("src", input.clone());
+    let mut port = helios_core::graph::SOURCE_PORT;
+    for (i, node) in nodes.iter().enumerate() {
+        let n = g
+            .add_module(&format!("exposure {i}"), module.clone(), &node.params)
+            .unwrap();
+        g.connect(prev, port, n, "input").unwrap();
+        (prev, port) = (n, "output");
+    }
+    Engine::new(Arc::new(Bus::new()))
+        .render(&g, prev, port, input.region())
+        .unwrap()
+}
+
+/// Two exposure instances edited in one order and run in the other, as the
+/// sidecar's `iop_order_list` says: the imported edit renders as darktable
+/// does, and the history order would not.
+#[test]
+fn an_imported_edit_runs_in_darktables_pipe_order() {
+    let dt = match Darktable::find() {
+        Ok(dt) => dt,
+        Err(e) => {
+            eprintln!("skipped: {e}");
+            return;
+        }
+    };
+    let layouts = dt.layouts();
+    let items = [
+        Item::new(
+            "exposure",
+            json!({"exposure": 1.0, "black": 0.1, "compensate_hilite_pres": false}),
+        ),
+        Item::new(
+            "exposure",
+            json!({"exposure": 0.5, "black": -0.05, "compensate_hilite_pres": false}),
+        )
+        .instance(1),
+    ];
+    // darktable's v5.0 order with the second instance before the first.
+    let list: Vec<String> = helios_xmp::iop_order::Preset::V50
+        .table()
+        .iter()
+        .flat_map(|(_, op)| {
+            if *op == "exposure" {
+                vec!["exposure,1".to_string(), "exposure,0".to_string()]
+            } else {
+                vec![format!("{op},0")]
+            }
+        })
+        .collect();
+    let xmp = helios_parity::sidecar(&items, helios_parity::Input::LinearRec2020, &layouts)
+        .unwrap()
+        .replace(
+            "darktable:history_end=",
+            &format!(
+                r#"darktable:iop_order_version="0" darktable:iop_order_list="{}" darktable:history_end="#,
+                list.join(",")
+            ),
+        );
+    let input = chart();
+    let dir = std::env::temp_dir().join(format!("helios-parity-order-{}", std::process::id()));
+    let theirs = dt.render_sidecar(&input, &xmp, &dir).unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+
+    let imported = helios_xmp::import(
+        &helios_xmp::Sidecar::parse(&xmp).unwrap(),
+        &helios_xmp::Layouts::built_in(),
+    );
+    let exposures: Vec<&helios_xmp::Node> = imported
+        .nodes
+        .iter()
+        .filter(|n| n.module == "exposure")
+        .collect();
+    assert_eq!(exposures.len(), 2, "{:#?}", imported.report);
+    assert_eq!(
+        exposures[0].multi_name, "1",
+        "the list runs instance 1 first"
+    );
+    let ours = helios_imported_exposures(&input, &exposures);
+    let d = compare(&ours, &theirs).unwrap();
+    eprintln!("pipe order: {d:?}");
+    assert!(d.passes(), "{d:?}");
+    // The history order computes another image: the case tells them apart.
+    let history = helios_imported_exposures(&input, &[exposures[1], exposures[0]]);
+    let wrong = compare(&history, &theirs).unwrap();
+    eprintln!("history order: {wrong:?}");
+    assert!(!wrong.passes(), "{wrong:?}");
+}

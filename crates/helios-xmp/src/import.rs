@@ -39,12 +39,19 @@ pub struct Report {
     pub dropped_fields: Vec<(String, String, Value)>,
     /// Disabled items, kept out of the network.
     pub disabled: Vec<String>,
+    /// The pipe order the modules were put in: darktable's preset name, or
+    /// `custom` for an order the sidecar spells out.
+    pub pipe_order: String,
+    /// Items the sidecar's order does not place, `(operation, instance)`:
+    /// placed next to their module's other instances, or by the rank
+    /// darktable's preset gives them.
+    pub unordered: Vec<(String, u32)>,
 }
 
 /// An edit read from a sidecar.
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct Imported {
-    /// In history order.
+    /// In darktable's pipe order.
     pub nodes: Vec<Node>,
     pub report: Report,
 }
@@ -171,7 +178,7 @@ pub const ORIGIN: &str = "import:xmp";
 
 impl Imported {
     /// The edit as a network after a source named `src`, the modules
-    /// chained in history order (output to input), in the shape of a
+    /// chained in pipe order (output to input), in the shape of a
     /// `helios-node` network description: what the vault keeps as a
     /// version (`Version::new(image, parents, imported.edit(), ORIGIN, now)`).
     pub fn edit(&self) -> Value {
@@ -201,10 +208,14 @@ impl Imported {
     }
 }
 
-/// Reads a sidecar's effective history into Helios modules.
+/// Reads a sidecar's effective history into Helios modules, in the order
+/// darktable runs them.
 pub fn import(sidecar: &Sidecar, layouts: &Layouts) -> Imported {
     let mut out = Imported::default();
-    for item in sidecar.effective() {
+    let arranged = sidecar.in_pipe_order();
+    out.report.pipe_order = arranged.order.source;
+    out.report.unordered = arranged.unordered;
+    for item in arranged.items {
         if !item.enabled {
             out.report.disabled.push(item.operation.clone());
             continue;

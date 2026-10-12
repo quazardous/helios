@@ -29,13 +29,15 @@ thread. Helios state was read from `ROADMAP.md`, `docs/module-contract.md`,
   https://github.com/darktable-org/darktable/issues/8634,
   https://github.com/darktable-org/darktable/issues/22550,
   https://github.com/darktable-org/darktable/pull/3908
-- **Helios exposure: at risk (observed in code).**
-  `helios-xmp::Sidecar::effective()` keeps the last item of each
-  (operation, multi_priority) and moves it to the end, and
-  `Imported::edit()` chains the nodes in that order. A history
-  "exposure, sigmoid, exposure (tweaked)" therefore becomes
-  `sigmoid -> exposure`, which inverts the pipe. `darktable:iop_order_version`
-  and `darktable:iop_order_list` are not read.
+- **Helios exposure: handled (fixed 2026-10-12).** The import chained
+  the effective history in last-edited order, so "exposure, sigmoid,
+  exposure (tweaked)" became `sigmoid -> exposure`. `helios-xmp` now reads
+  `iop_order_version` / `iop_order_list` (and the per-item order of older
+  sidecars), embeds darktable's order tables (`iop_order` module, checked
+  against a darktable checkout), and imports in pipe order; modules the
+  order does not place are reported in `Report::unordered`. A
+  `darktable-cli` parity test covers two instances run against their
+  history order.
 - **Recommendation.** Rebuild the chain from darktable's order: read
   `iop_order_version` / `iop_order_list` from the sidecar, ship darktable's
   generated order tables (v3.0, v5.0 "scene-referred", legacy) as data, sort
