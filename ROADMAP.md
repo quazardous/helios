@@ -129,6 +129,18 @@ coordinates, before/after views, a pixel readout, thumbnails and a
 histogram from supplied data. Raw decoding, colour science, the engine and
 the scopes' computation stay in Helios, which implements the tile source
 and the display transform.
+egui-pop wraps the application's kernel; it is not the kernel (2026-10-12,
+decided). egui-pop owns what is UI: command declarations (for menus, the
+palette, the keymap and traces), focus, overlays, layout, theme and UI
+settings. Command execution, domain state, events and persistence belong to
+the application, behind a host contract (dispatch with a deferred result, an
+event stream with sequence, source and cause, a settings store, a way to
+wake the UI from another thread). egui-pop ships a minimal default host
+(in-process handlers and a small bus) so a simple application has nothing
+to write; Helios plugs its bus and its node into the contract.
+egui-pop is not set in stone (2026-10-12, decided): it exists to help build
+Helios, adapts to Helios's needs and keeps Helios's code clean, breaking
+its API before 1.0 when that is the cleaner path.
 Hard requirement (2026-10-11, decided): GPU acceleration on Linux, Windows
 and macOS, as close to Vulkan as possible, so the viewport can show buffers
 the engine computed on the GPU without copying them back. wgpu is
