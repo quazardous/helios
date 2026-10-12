@@ -141,6 +141,14 @@ to write; Helios plugs its bus and its node into the contract.
 egui-pop is not set in stone (2026-10-12, decided): it exists to help build
 Helios, adapts to Helios's needs and keeps Helios's code clean, breaking
 its API before 1.0 when that is the cleaner path.
+egui-pop's mechanisms are open and tweakable by design (2026-10-12,
+decided): egui-pop handles the plumbing (shortcuts, commands, layout,
+windows) but every feature exposes its lifecycle at each step, so the
+application can observe it (signals on the host's journal), veto or
+redirect it (before hooks), replace it (run hooks with a sane default) or
+extend it (after hooks). Each hook is optional and traced in the debug
+bridge; egui-pop never hides a step the application may need to own (first
+case: undo and redo, answered by Helios's version history).
 Hard requirement (2026-10-11, decided): GPU acceleration on Linux, Windows
 and macOS, as close to Vulkan as possible, so the viewport can show buffers
 the engine computed on the GPU without copying them back. wgpu is
