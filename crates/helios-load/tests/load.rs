@@ -132,3 +132,31 @@ fn errors_name_the_file() {
     let _ = std::fs::remove_dir_all(&dir);
     assert!(err.contains("garbage.nef"), "{err}");
 }
+
+/// The gamma risk of the darktable pitfalls inventory, dismissed for
+/// pictures: the loader removes the sRGB curve, so the framework's box
+/// mean at a scale below 1 averages linear light. A one-pixel black and
+/// white checkerboard at half scale is linear mid-grey (0.5), not the
+/// encoded mean (0.5 encoded, 0.214 linear).
+#[test]
+fn a_picture_is_reduced_in_linear_light() {
+    let dir = std::env::temp_dir().join(format!("helios-load-linear-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("checker.png");
+    let checker = image::RgbImage::from_fn(4, 4, |x, y| {
+        if (x + y) % 2 == 0 {
+            image::Rgb([255, 255, 255])
+        } else {
+            image::Rgb([0, 0, 0])
+        }
+    });
+    checker.save(&path).unwrap();
+    let loaded = load(&path).unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+    let half = loaded.image.sample_at(Region::sized(2, 2), 0.5);
+    for p in half.data().chunks_exact(4) {
+        for v in &p[..3] {
+            assert!((v - 0.5).abs() < 1e-3, "{p:?}");
+        }
+    }
+}

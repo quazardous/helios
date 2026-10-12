@@ -213,9 +213,15 @@ thread. Helios state was read from `ROADMAP.md`, `docs/module-contract.md`,
   https://github.com/darktable-org/darktable/issues/17758,
   https://github.com/darktable-org/darktable/issues/8016,
   https://github.com/darktable-org/darktable/pull/13635
-- **Helios exposure: at risk.** `Engine::render_at` reduces *sources* by a
-  box mean in their own encoding (`Image::sample_at`) before any module
-  runs. For a gamma-encoded source this is the #8410 error *(inference)*.
+- **Helios exposure: handled for loaded pictures (tested).**
+  `Engine::render_at` reduces *sources* by a box mean in their own encoding
+  (`Image::sample_at`) before any module runs, but `helios-load` removes the
+  sRGB curve when it decodes a picture, so the mean is taken in linear
+  light: a one-pixel black and white checkerboard at half scale gives
+  linear 0.5, not the encoded mean (test `a_picture_is_reduced_in_linear_light`
+  in `helios-load`). The engine does not know a source's encoding: a source
+  built by hand from encoded values would still be averaged wrongly, so
+  sources are linear by contract.
 - **Recommendation.** Declare each source's encoding; reduce only linear
   data, or linearize first. Add a test with a 1-pixel black/white
   checkerboard in sRGB: half-scale render must equal the linear mean.
@@ -232,10 +238,13 @@ thread. Helios state was read from `ROADMAP.md`, `docs/module-contract.md`,
   https://github.com/darktable-org/darktable/pull/22304,
   https://github.com/darktable-org/darktable/pull/19217,
   https://github.com/darktable-org/darktable/pull/4931
-- **Helios exposure: at risk (inference, not tested).** The engine reduces
-  the raw source at scale < 1 before `demosaic`, which does not use the
-  scale; a 2x2 mean of a Bayer mosaic mixes R, G and B photosites, which
-  `demosaic` then reads as a mosaic.
+- **Helios exposure: real (tested).** The engine reduces the raw source at
+  scale < 1 before `demosaic`, which does not use the scale; a 2x2 mean of a
+  Bayer mosaic mixes R, G and B photosites, which `demosaic` then reads as a
+  mosaic. Test `a_half_scale_render_mixes_photosites_before_demosaic` in
+  `helios-module-demosaic`: a flat (0.8, 0.5, 0.2) scene through RGGB comes
+  out grey (0.5, the mean of the four photosites) at half scale, while the
+  full render reduced keeps its colour.
 - **Recommendation.** Let a module declare that an input must be at full
   resolution (a "no reduction upstream" flag), set it on `demosaic` (and
   `rawprepare`, `highlights` in raw space), and scale after demosaic, as
