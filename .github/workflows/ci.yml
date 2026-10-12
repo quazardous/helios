@@ -15,6 +15,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.95
         with:
           components: clippy, rustfmt
+      # Shared with the commits job: the dependencies are built once.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: workspace
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-nextest
@@ -54,6 +58,34 @@ jobs:
           else
             cargo xtask check
           fi
+
+  # Every commit of the push or pull request but its head (the test job
+  # gates the head) builds and passes the fast tests, so bisecting keeps
+  # working: `cargo xtask check-commits`, capped at 20 commits, stops at the
+  # first broken one and names it in the job summary.
+  commits:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@1.95
+      # The test job saves this cache; this job only reads it.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: workspace
+          save-if: false
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+      # A pull request walks its base..head (not the merge commit checked
+      # out), a push its before..after. A null or unknown base (a first or
+      # forced push) falls back to the merge base with origin/main.
+      - name: check each commit
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          HEAD: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: cargo xtask check-commits "${BASE:-0}..$HEAD"
 
   # Every linter of `cargo xtask lint`, installed so none is skipped:
   # rustfmt, clippy, cargo-deny, cargo-machete, taplo, typos, shellcheck, ruff.

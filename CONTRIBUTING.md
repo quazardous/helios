@@ -99,6 +99,21 @@ ln -s ../../tools/pre-commit .git/hooks/pre-commit
 One purpose per commit, and every commit builds and passes its tests. The
 message says what changes and why, in plain sentences.
 
+Before pushing a series of commits, agents included, check each one:
+
+```bash
+cargo xtask check-commits                 # @{upstream}..HEAD, else origin/main..HEAD
+cargo xtask check-commits HEAD~3..HEAD    # a given range
+```
+
+Every commit of the range but the last (run the full gate on that one)
+is checked out in a temporary worktree under `target/` and goes through
+`cargo check --workspace --all-targets`, the fast tests (nextest without
+the parity tests, the headless GUI tests and the masks stress test) and
+`cargo xtask check`. The walk stops at the first broken commit and names
+it. It is capped at the 20 newest commits; the older ones are listed as
+skipped. CI runs the same walk on each push and pull request.
+
 ## Changelog
 
 The changelog is not a commit log: it tells a user what changed for them

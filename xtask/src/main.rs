@@ -15,6 +15,8 @@
 //! - `test-times [--profile P] [--top N]`: run the tests under
 //!   cargo-nextest, record their durations and show the slowest and the
 //!   ones getting slower (see `test_times.rs`).
+//! - `check-commits [RANGE]`: every commit of a series, but its head,
+//!   builds and passes the fast tests and `check` (see `commits.rs`).
 //!
 //! A fragment is a file in `changelog.d/`, written in the same commit as the
 //! change it describes: a first line `kind: <kind>`, then one to three
@@ -22,6 +24,7 @@
 //! CONTRIBUTING.md.
 
 mod bench;
+mod commits;
 mod i18n;
 mod lint;
 mod test_times;
@@ -379,7 +382,7 @@ fn fail(problems: &[String]) -> ExitCode {
     ExitCode::from(1)
 }
 
-const USAGE: &str = "usage: cargo xtask changelog | release [--date YYYY-MM-DD] | check [--base REF] | lint [--fix] [--require-all] | test-times [--profile P] [--top N] [--from-junit FILE [--summary]] | bench masks [--modules N] | i18n extract | i18n check | i18n stamp LOCALE [--all]";
+const USAGE: &str = "usage: cargo xtask changelog | release [--date YYYY-MM-DD] | check [--base REF] | lint [--fix] [--require-all] | test-times [--profile P] [--top N] [--from-junit FILE [--summary]] | check-commits [BASE..HEAD | BASE] | bench masks [--modules N] | i18n extract | i18n check | i18n stamp LOCALE [--all]";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -465,6 +468,10 @@ fn main() -> ExitCode {
         }),
         ["test-times", rest @ ..] => test_times::run(&root, rest).unwrap_or_else(|| {
             eprintln!("usage: cargo xtask {}", test_times::USAGE);
+            ExitCode::from(2)
+        }),
+        ["check-commits", rest @ ..] => commits::run(&root, rest).unwrap_or_else(|| {
+            eprintln!("usage: cargo xtask {}", commits::USAGE);
             ExitCode::from(2)
         }),
         ["bench", rest @ ..] => bench::run(&root, rest).unwrap_or_else(|| {
