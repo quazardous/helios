@@ -22,6 +22,49 @@ pub struct HistoryItem {
     pub multi_priority: u32,
     /// The item's place in the pipe, in sidecars older than `xmp_version` 4.
     pub iop_order: Option<f64>,
+    /// The version of the blend params' layout, when the item has some.
+    pub blendop_version: Option<u32>,
+    /// The blend params as darktable wrote them, decompressed.
+    #[serde(skip)]
+    pub blendop_params: Vec<u8>,
+    /// Every attribute of the item as the sidecar spells it, params in
+    /// their own encoding: what writes the item back unchanged.
+    #[serde(skip)]
+    pub attributes: Vec<(String, String)>,
+    /// Why the item could not be read in full. It stays in the history,
+    /// in its place, and is never applied.
+    pub unreadable: Option<String>,
+}
+
+impl HistoryItem {
+    /// An attribute as the sidecar spells it.
+    pub fn attribute(&self, key: &str) -> Option<&str> {
+        get(&self.attributes, key)
+    }
+
+    /// The instance's name as people gave it: empty for the names
+    /// darktable gives the instances its automatic presets add
+    /// (`_builtin_auto`, `_builtin_scene-referred default`...).
+    pub fn instance_name(&self) -> &str {
+        if self.multi_name.starts_with("_builtin_") {
+            ""
+        } else {
+            &self.multi_name
+        }
+    }
+
+    /// The item as people name it: its operation, its instance's name or
+    /// number when it is not the first, and its params version.
+    pub fn label(&self) -> String {
+        let instance = if !self.instance_name().is_empty() {
+            format!(" {}", self.instance_name())
+        } else if self.multi_priority > 0 {
+            format!(" {}", self.multi_priority)
+        } else {
+            String::new()
+        };
+        format!("{}{instance} v{}", self.operation, self.modversion)
+    }
 }
 
 /// What a sidecar says about an image and its edit.
@@ -38,6 +81,8 @@ pub struct Sidecar {
     pub iop_order_version: Option<u32>,
     /// A pipe order spelled out: operation and instance pairs.
     pub iop_order_list: Option<String>,
+    /// The name darktable shows for this version of the image, if any.
+    pub version_name: Option<String>,
     pub history: Vec<HistoryItem>,
 }
 
@@ -60,8 +105,9 @@ pub fn decode_params(text: &str) -> Result<Vec<u8>, String> {
         (0..text.len())
             .step_by(2)
             .map(|i| {
-                u8::from_str_radix(&text[i..i + 2], 16)
-                    .map_err(|_| format!("params: `{}` is not hex", &text[i..i + 2]))
+                text.get(i..i + 2)
+                    .and_then(|pair| u8::from_str_radix(pair, 16).ok())
+                    .ok_or_else(|| format!("params: `{}` is not hex", &text[i..]))
             })
             .collect()
     }
@@ -100,29 +146,71 @@ fn number<T: std::str::FromStr>(
         .transpose()
 }
 
-fn item(attrs: &[(String, String)]) -> Result<HistoryItem, String> {
-    let required =
-        |key: &str| get(attrs, key).ok_or_else(|| format!("history item without `{key}`"));
-    let operation = required("darktable:operation")?.to_string();
-    let named = |e: String| format!("history item `{operation}`: {e}");
-    Ok(HistoryItem {
-        num: number(attrs, "darktable:num").map_err(named)?.unwrap_or(0),
-        enabled: get(attrs, "darktable:enabled") == Some("1"),
-        modversion: number(attrs, "darktable:modversion")
-            .map_err(named)?
-            .ok_or_else(|| named("no `darktable:modversion`".into()))?,
-        params: decode_params(required("darktable:params")?).map_err(named)?,
-        multi_name: get(attrs, "darktable:multi_name").unwrap_or("").to_string(),
-        multi_priority: number(attrs, "darktable:multi_priority")
-            .map_err(named)?
-            .unwrap_or(0),
-        iop_order: number(attrs, "darktable:iop_order").map_err(named)?,
+/// Reads a history item. An item darktable could not have written (an
+/// attribute missing or not a number, params that do not decode) is kept
+/// with what could be read and the reason: dropping it would shift
+/// `history_end` onto other items.
+fn item(attrs: Vec<(String, String)>, position: usize) -> HistoryItem {
+    let mut problems: Vec<String> = Vec::new();
+    let mut read = |key: &str| -> Option<u32> {
+        number(&attrs, key).unwrap_or_else(|e| {
+            problems.push(e);
+            None
+        })
+    };
+    let num = read("darktable:num");
+    let modversion = read("darktable:modversion");
+    let multi_priority = read("darktable:multi_priority");
+    let blendop_version = read("darktable:blendop_version");
+    let iop_order = number(&attrs, "darktable:iop_order").unwrap_or_else(|e| {
+        problems.push(e);
+        None
+    });
+    let operation = get(&attrs, "darktable:operation").unwrap_or("").to_string();
+    if operation.is_empty() {
+        problems.push("no `darktable:operation`".into());
+    }
+    if get(&attrs, "darktable:modversion").is_none() {
+        problems.push("no `darktable:modversion`".into());
+    }
+    let params = get(&attrs, "darktable:params")
+        .ok_or_else(|| "no `darktable:params`".to_string())
+        .and_then(decode_params)
+        .unwrap_or_else(|e| {
+            problems.push(e);
+            Vec::new()
+        });
+    let blendop_params = get(&attrs, "darktable:blendop_params")
+        .map(|text| {
+            decode_params(text).unwrap_or_else(|e| {
+                problems.push(format!("blend {e}"));
+                Vec::new()
+            })
+        })
+        .unwrap_or_default();
+    HistoryItem {
+        // Without a number, the item keeps its place in the document.
+        num: num.unwrap_or_else(|| u32::try_from(position).unwrap_or(u32::MAX)),
+        enabled: get(&attrs, "darktable:enabled") == Some("1"),
+        modversion: modversion.unwrap_or(0),
+        params,
+        multi_name: get(&attrs, "darktable:multi_name")
+            .unwrap_or("")
+            .to_string(),
+        multi_priority: multi_priority.unwrap_or(0),
+        iop_order,
+        blendop_version,
+        blendop_params,
         operation,
-    })
+        unreadable: (!problems.is_empty()).then(|| problems.join("; ")),
+        attributes: attrs,
+    }
 }
 
 impl Sidecar {
-    /// Reads a sidecar's text.
+    /// Reads a sidecar's text. Only XML that cannot be read fails: a
+    /// history item that cannot be read is kept, marked (see
+    /// [`HistoryItem::unreadable`]).
     pub fn parse(xml: &str) -> Result<Sidecar, String> {
         let mut reader = Reader::from_str(xml);
         let mut sidecar = Sidecar::default();
@@ -139,18 +227,22 @@ impl Sidecar {
                     sidecar.iop_order_version = number(&attrs, "darktable:iop_order_version")?;
                     sidecar.iop_order_list =
                         get(&attrs, "darktable:iop_order_list").map(str::to_string);
+                    sidecar.version_name =
+                        get(&attrs, "darktable:version_name").map(str::to_string);
                 }
                 Event::Start(e) if e.name().as_ref() == "darktable:history" => in_history = true,
                 Event::End(e) if e.name().as_ref() == "darktable:history" => in_history = false,
                 Event::Start(e) | Event::Empty(e)
                     if in_history && e.name().as_ref() == "rdf:li" =>
                 {
-                    sidecar.history.push(item(&attributes(&e)?)?);
+                    let position = sidecar.history.len();
+                    sidecar.history.push(item(attributes(&e)?, position));
                 }
                 Event::Eof => break,
                 _ => {}
             }
         }
+        // A stable sort: items with the same number keep the document's order.
         sidecar.history.sort_by_key(|i| i.num);
         Ok(sidecar)
     }

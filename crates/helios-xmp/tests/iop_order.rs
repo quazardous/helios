@@ -261,7 +261,11 @@ fn an_unknown_module_is_reported_and_runs_last() {
     assert_eq!(order(&s), ["exposure 0", "not_a_module 0"]);
     let report = import(&s, &Layouts::built_in()).report;
     assert_eq!(report.unordered, [("not_a_module".to_string(), 0)]);
-    assert_eq!(report.unknown_modules, ["not_a_module"]);
+    assert_eq!(report.not_applied[0].operation, "not_a_module");
+    assert_eq!(
+        report.not_applied[0].reason,
+        helios_xmp::Reason::UnknownModule
+    );
 }
 
 #[test]

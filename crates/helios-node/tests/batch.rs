@@ -230,12 +230,18 @@ fn a_sidecar_is_applied_on_top_of_the_network_for_its_image_only() {
         "{line}"
     );
     assert!(
-        line["sidecar"]["import"]["unknown_modules"]
+        line["sidecar"]["import"]["not_applied"]
             .as_array()
             .unwrap()
-            .contains(&json!("frobnicate")),
+            .iter()
+            .any(|n| n["operation"] == "frobnicate" && n["reason"]["kind"] == "unknown_module"),
         "{line}"
     );
+    // Said once, in the line and on stderr.
+    let warning =
+        "1 of 2 history items not applied, kept for later: frobnicate v1 (no Helios module)";
+    assert_eq!(line["sidecar"]["warning"], warning, "{line}");
+    assert_eq!(err.matches(warning).count(), 1, "{err}");
     assert!(line_of(&lines, &plain)["sidecar"].is_null());
     let (bright, same) = (
         mean(&p.join("out/edited.png")),
@@ -309,12 +315,23 @@ fn a_sidecar_kept_in_a_vault_is_a_version_and_its_rating_never_overwrites() {
         1.0
     );
     assert!(
-        version.edit["import"]["unknown_modules"]
+        version.edit["import"]["not_applied"]
             .as_array()
             .unwrap()
-            .contains(&json!("frobnicate")),
+            .iter()
+            .any(|n| n["operation"] == "frobnicate"),
         "{}",
         version.edit
+    );
+    // The item not applied is kept as darktable wrote it.
+    let kept_item = &version.edit["darktable"]["history"][1];
+    assert_eq!(kept_item["status"], "not_applied", "{}", version.edit);
+    assert_eq!(kept_item["attributes"]["darktable:params"], "00");
+    assert!(
+        version.edit["darktable"]["sidecar"]
+            .as_str()
+            .unwrap()
+            .contains("frobnicate")
     );
     let field = |image, name: &str| {
         vault.fields_of(&[image], &[name]).unwrap()[0]

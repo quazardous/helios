@@ -14,7 +14,9 @@
 //! - [`import`] turns the effective history into Helios modules and
 //!   parameters, and reports everything it could not carry over: modules
 //!   Helios does not have, fields without a counterpart, versions it cannot
-//!   decode yet, disabled items. Nothing is dropped silently.
+//!   decode yet, blends it does not do, disabled items. Nothing is dropped
+//!   silently: an item not applied is kept, raw params included, in the
+//!   edit's `darktable` part, and the import never stops at one.
 
 pub mod import;
 pub mod iop_order;
@@ -22,6 +24,6 @@ pub mod layout;
 pub mod legacy;
 pub mod sidecar;
 
-pub use import::{Imported, Node, ORIGIN, Report, import};
+pub use import::{Imported, Node, NotApplied, ORIGIN, Reason, Report, import, import_text};
 pub use layout::{Layouts, decode, encode};
 pub use sidecar::{HistoryItem, Sidecar};

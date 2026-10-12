@@ -115,11 +115,9 @@ pub fn sidecar_path(image: &Path) -> PathBuf {
 /// network running that module; one the network does not run, or runs
 /// more than once, is left out and named.
 pub fn sidecar_params(
-    xml: &str,
+    imported: &helios_xmp::Imported,
     modules: &BTreeMap<String, String>,
-) -> Result<(BTreeMap<String, Params>, Value), String> {
-    let sidecar = helios_xmp::Sidecar::parse(xml)?;
-    let imported = helios_xmp::import(&sidecar, &helios_xmp::Layouts::built_in());
+) -> (BTreeMap<String, Params>, Value) {
     let mut params: BTreeMap<String, Params> = BTreeMap::new();
     let (mut applied, mut skipped) = (Vec::new(), Vec::new());
     for n in &imported.nodes {
@@ -136,8 +134,16 @@ pub fn sidecar_params(
             _ => skipped.push(json!({ "operation": n.operation, "reason": format!("several `{}` nodes or instances", n.module) })),
         }
     }
-    let report = json!({ "applied": applied, "skipped": skipped, "import": imported.report });
-    Ok((params, report))
+    let mut report = json!({ "applied": applied, "skipped": skipped, "import": imported.report });
+    if let Some(warning) = imported.report.summary() {
+        report["warning"] = json!(warning);
+    }
+    (params, report)
+}
+
+/// Reads and imports a sidecar's text once, for the network and the vault.
+pub fn read_sidecar(xml: &str) -> Result<(helios_xmp::Sidecar, helios_xmp::Imported), String> {
+    helios_xmp::import_text(xml, &helios_xmp::Layouts::built_in())
 }
 
 /// Who imported a sidecar: the origin of its version and the author of
@@ -147,7 +153,8 @@ pub const IMPORT_XMP: &str = "import:xmp";
 /// Keeps a darktable sidecar's import in a vault: the image file, its edit
 /// as a version with origin `import:xmp` (the network
 /// [`helios_xmp::Imported::edit`] describes, with the import report under
-/// `import`), and its rating, only when the vault has none: a sidecar
+/// `import` and the darktable edit, items not applied included, under
+/// `darktable`), and its rating, only when the vault has none: a sidecar
 /// never overwrites a rating chosen here (darktable's `-1` is a reject).
 /// The version is a first edit, so importing the same sidecar again keeps
 /// one version; an image already edited gets a second head, its edit
@@ -155,12 +162,11 @@ pub const IMPORT_XMP: &str = "import:xmp";
 pub fn keep_sidecar<S: helios_vault::Store>(
     vault: &helios_vault::Vault<S>,
     image: &Path,
-    xml: &str,
+    sidecar: &helios_xmp::Sidecar,
+    imported: &helios_xmp::Imported,
     now: u64,
 ) -> Result<Value, String> {
     use helios_vault::fields::{Command, Op, RATING, REJECTED};
-    let sidecar = helios_xmp::Sidecar::parse(xml)?;
-    let imported = helios_xmp::import(&sidecar, &helios_xmp::Layouts::built_in());
     let id = vault.import_file(image, now)?;
     let mut edit = imported.edit();
     edit["import"] = json!(imported.report);
@@ -552,12 +558,18 @@ fn submit(
             let read = std::fs::read_to_string(&path)
                 .map_err(|e| format!("cannot read {}: {e}", path.display()))
                 .and_then(|xml| {
-                    let (params, mut report) = sidecar_params(&xml, modules)?;
+                    let (sidecar, imported) = read_sidecar(&xml)?;
+                    // Once per import, beside the image's JSON line.
+                    if let Some(warning) = imported.report.summary() {
+                        eprintln!("helios batch: {}: {warning}", path.display());
+                    }
+                    let (params, mut report) = sidecar_params(&imported, modules);
                     if let Some(vault) = vault {
                         let now = std::time::SystemTime::now()
                             .duration_since(std::time::UNIX_EPOCH)
                             .map_or(0, |d| d.as_secs());
-                        report["vault"] = keep_sidecar(vault, &pending.image, &xml, now)?;
+                        report["vault"] =
+                            keep_sidecar(vault, &pending.image, &sidecar, &imported, now)?;
                     }
                     Ok((params, report))
                 });
