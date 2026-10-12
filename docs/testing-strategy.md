@@ -118,6 +118,47 @@ ship.
 - a failing job uploads what it observed (state snapshot, events, cropped
   pictures), not only a log.
 
+## GPU tests share one device
+
+The headless GUI tests (`helios_gui::headless::harness`) draw through wgpu
+on whatever Vulkan driver the machine has, lavapipe first. Every harness
+of a test process uses the same wgpu instance and device, opened by the
+first one, each with a renderer of its own. Do not open a device per test.
+
+With one device per harness, the GUI test binaries crashed with SIGSEGV
+when `cargo test` ran their tests on parallel threads (about 1 run in 10
+of the `gui` binary with every Mesa driver installed, 1 in 3 with RADV and
+two drivers that find no GPU, 0 in 60 with lavapipe alone). Every core
+dump showed the same two threads:
+
+```text
+crashing thread                           other thread
+#0 loader_get_icd_and_device              #8  dlclose
+#1 terminator_SetDebugUtilsObjectNameEXT  #9  loader_unload_scanned_icd
+#2 SetDebugUtilsObjectNameEXT             #10 vkEnumeratePhysicalDevices
+#3 ash ... set_debug_utils_object_name    #11 ash ... enumerate_physical_devices
+#4 wgpu_hal::vulkan ... set_object_name   ... wgpu_hal::vulkan enumerate_adapters
+#5 wgpu_hal::vulkan ... create_buffer     ... egui_kittest create_render_state
+```
+
+The bug is in the Vulkan loader, not in Mesa, wgpu or Helios. In loader
+1.4.341, `vkEnumeratePhysicalDevices` unloads the drivers that report no
+device (`unload_drivers_without_physical_devices`): it frees the driver's
+record before unlinking it from the instance, holding `loader_lock`.
+`vkSetDebugUtilsObjectNameEXT`, which wgpu calls to label each object in
+debug builds, looks the device up by walking every instance's driver list
+under another mutex (`loader_global_instance_list_lock`), and reads the
+freed record. Upstream fixed it in 1.4.350
+([Vulkan-Loader#1866](https://github.com/KhronosGroup/Vulkan-Loader/pull/1866),
+"Use recursive mutexes to fix deadlocks in loader": the walk now takes
+`loader_lock`). Any program opening Vulkan instances on two threads
+while one of them names objects can hit it.
+
+nextest runs each test in a process of its own, so it never met the bug.
+One shared device makes the test binaries safe under `cargo test` as well:
+the devices are enumerated once, before any object is named. It also
+saves opening a device per test.
+
 ## Open questions
 
 - Which parts become a crate of their own (`helios-inspect`, a test-support

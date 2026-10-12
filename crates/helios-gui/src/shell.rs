@@ -2165,16 +2165,41 @@ pub fn config_dir() -> PathBuf {
 
 /// Headless rendering, for tests, agents and machines without a display.
 pub mod headless {
+    use std::sync::{Arc, OnceLock};
+
     use super::{Recorder, RgbaImage, Shell, snapshot};
+    use eframe::egui_wgpu::{RenderState, Renderer, RendererOptions};
+    use egui::mutex::RwLock;
     use egui_kittest::Harness;
+
+    /// The process's one GPU device, opened by the first harness.
+    ///
+    /// One device for every harness, never one each: before 1.4.350, the
+    /// Vulkan loader drops the drivers without a device when an instance
+    /// enumerates its devices, while `vkSetDebugUtilsObjectNameEXT` on
+    /// another thread walks those drivers under a different lock. Harnesses
+    /// opened on parallel test threads crashed the process that way (see
+    /// docs/testing-strategy.md).
+    fn device() -> &'static RenderState {
+        static DEVICE: OnceLock<RenderState> = OnceLock::new();
+        DEVICE.get_or_init(|| {
+            egui_kittest::wgpu::create_render_state(
+                egui_kittest::wgpu::default_wgpu_setup(),
+                RendererOptions::PREDICTABLE,
+            )
+        })
+    }
 
     /// A shell drawn offscreen at a size, on the wgpu renderer.
     pub fn harness<'a>(mut shell: Shell, size: egui::Vec2) -> Harness<'a, Shell> {
-        // Our own render state, so the viewport's GPU objects live on it.
-        let rs = egui_kittest::wgpu::create_render_state(
-            egui_kittest::wgpu::default_wgpu_setup(),
-            eframe::egui_wgpu::RendererOptions::PREDICTABLE,
-        );
+        // The shared device, with a renderer of our own: the textures and
+        // the viewport's GPU objects belong to this harness alone.
+        let mut rs = device().clone();
+        rs.renderer = Arc::new(RwLock::new(Renderer::new(
+            &rs.device,
+            rs.target_format,
+            RendererOptions::PREDICTABLE,
+        )));
         shell.attach_gpu(&rs);
         shell.still = true;
         Harness::builder()
