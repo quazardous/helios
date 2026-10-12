@@ -6,7 +6,6 @@ pub mod dialogs;
 pub mod dock;
 pub mod frame;
 pub mod host;
-pub mod keys;
 pub mod library;
 pub mod params;
 pub mod persist;

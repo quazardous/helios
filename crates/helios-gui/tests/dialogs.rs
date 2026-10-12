@@ -288,10 +288,18 @@ fn a_panel_asks_the_shell_and_never_draws_a_window_itself() {
 fn pictures_of_each_kind() {
     let out = std::env::var_os("HELIOS_DOC_PICTURES").map(std::path::PathBuf::from);
     for theme in ["helios-dark", "helios-light"] {
-        for kind in ["confirm", "form", "menu", "toast"] {
+        for kind in ["confirm", "form", "menu", "system", "toast"] {
             let mut shell = Shell::new(helios_panels(), None);
             shell.set_theme(theme, std::collections::BTreeMap::default());
             let target = match kind {
+                "system" => {
+                    shell.draw_frame(true);
+                    shell.set_title("photos");
+                    shell
+                        .run("workbench.systemMenu", json!(null), Origin::User)
+                        .unwrap();
+                    "helios.menu"
+                }
                 "confirm" => {
                     shell.confirm(Confirm {
                         title: "Delete 3 images?".into(),

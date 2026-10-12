@@ -35,6 +35,12 @@ The shell is a framework from the start:
 - the layout, auxiliary windows and their screens included, is saved per
   workspace in the user scope.
 
+Built: the areas, docked with `egui_dock` from the workspace's layout,
+with auxiliary windows and tabs dragged between areas under each panel's
+rules (`helios-gui/src/workbench.rs`), drawn inside egui-pop's
+application (see "Windows, dialogs and menus") until egui-pop's workbench
+takes them over.
+
 ## Settings pages
 
 Settings pages are generated, never laid out by hand: a setting named
@@ -217,14 +223,46 @@ sync through the vault.
 
 ## Windows, dialogs and menus
 
+**On egui-pop's application framework (2026-10-12).** The desktop is an
+egui-pop application (`egui_pop::api::App`, with its `DefaultPlugins`):
+egui-pop draws, from declarations, what every application shares, and
+Helios declares into it:
+
+- **the menu bar** (File, Edit, View, Help) and every menu, the
+  **command palette** (`Ctrl+Shift+P`, `F1`: a fuzzy match, the recent
+  commands first, a command's arguments asked for), the **dialogs**, the
+  **toasts**, the **settings window** (`Ctrl+,`) with its **shortcuts
+  editor** (a command's keys changed by pressing them, conflicts said,
+  each change taken back by its reset) and the **window's place** (size,
+  position, maximized, full screen with `F11` and a way out at the top
+  edge), kept between runs with the interface's other settings (focus
+  mode, the user's keys) under `~/.config/helios/ui/`;
+- **keys**: egui-pop's keymap resolves them (layers, `when` clauses, a
+  text field keeping plain keys), with the traces its debug bridge shows.
+
+Helios keeps what is its own: its title bar and status bar, its areas
+(docked panels, auxiliary windows, tabs dragged between areas, see
+"Panels"), drawn as a block of egui-pop's main zone until egui-pop's
+workbench takes them over, and its panels.
+
+**Commands run on Helios's kernel.** egui-pop wraps the kernel through a
+host contract (`helios_gui::host`): every command of Helios's registry is
+declared to egui-pop (its menus, palette, keymap and traces see it) and
+runs on the registry, the control surface agents and scripts reach too.
+A command whose work waits for the next frame shows as running until its
+result arrives, and its failure is shown; egui-pop's events (a command
+dispatched, done or failed, a dialog answered, a toast shown) go on
+Helios's bus under `gui.*` kinds, with their sequence number, source and
+cause, beside the engine's; events from elsewhere wake the window.
+
 **Normalized (decided 2026-10-11).** Panels, widgets, modules and plugins
 never draw a window, a popup, a menu or a dialog: they ask the shell
-(`helios_gui::dialogs`), which draws a small closed set of kinds, the same
-everywhere, from the theme's tokens (`size.dialog`, `space.dialog`,
-`size.toast`, `accent.base`, `danger`). A test fails if anything else
-creates one (`crates/helios-gui/tests/normalized.rs`). Every open dialog is
-also data: `dialog.current` describes it and `dialog.answer` answers it,
-so an agent sees and answers what a human would, its origin recorded.
+(`helios_gui::dialogs`), which hands them to egui-pop's components, the
+same everywhere, drawn from the theme's tokens. A test fails if anything
+else creates one (`crates/helios-gui/tests/normalized.rs`). Every open
+dialog is also data: `dialog.current` describes it and `dialog.answer`
+answers it, so an agent sees and answers what a human would, its origin
+recorded.
 
 - **Confirm**: a question, its consequences in one line, Cancel then the
   action on the right. The action is named by its verb ("Delete 3
@@ -243,46 +281,48 @@ so an agent sees and answers what a human would, its origin recorded.
 
   A **path field** (a descriptor made with `Descriptor::path`: a
   directory, or a file with its accepted extensions) is a text field and
-  a Browse… button. Browse opens the system's chooser through the `rfd`
-  crate (on Linux the XDG desktop portal, no GTK), on its own thread so
-  the window keeps drawing; the path chosen fills the field. When no
-  chooser shows up, in headless runs, or with `HELIOS_NO_NATIVE_DIALOGS`
-  set, Helios's own picker opens in the dialog, in the picker's look:
-  the recent workspaces first (for a directory), `..`, the subfolders
-  (and the accepted files), a path to type; arrows and Enter go in and
-  up, Escape goes back to the form. A directory field also lists the
-  recent workspaces under it; "Open a workspace" is such a form.
+  a Browse… button opening egui-pop's in-app picker: the folder, Up, its
+  subfolders (and the accepted files); Choose this folder, or a file,
+  fills the field; Close the picker goes back to the form. "Open a
+  workspace" is such a form. Not yet: the system's chooser (egui-pop's
+  would block the window while it is open), the recent workspaces offered
+  first, the picker walked by keys.
 
-- **Picker**: a list to choose from with search, the palette's look;
-  arrows and Enter, or a click.
+- **Picker**: a list to choose from, egui-pop's choice; its command runs
+  with the value chosen. Not yet: a search as one types.
 - **Menu and context menu**: entries are commands, nothing else. Titles
   come from the commands, keys from the keymap, so a menu never shows a
   key that does not work; an entry whose `when` does not hold is greyed
-  with the reason. Arrows, Enter and Escape work.
+  with the reason.
 
   ![A menu](gui/menu-helios-dark.png)
 
-- **Notice**: shown in the status bar; warnings and errors also as a toast
-  at the bottom right, with an optional action (a command). A notice
-  never takes the focus; errors stay until dismissed.
+- **Notice**: shown in the status bar; warnings and errors also as a
+  toast at the bottom right, with an optional action (a command). A
+  notice never takes the focus; errors stay until dismissed.
 
   ![A toast](gui/toast-helios-dark.png)
 
 - **Window**: auxiliary windows share the frame Helios draws (title bar
   and buttons), titled "`<panel>` — Helios".
 
-**Menus are declared** (`helios_shell::menus`): a menu is an id to which
-the shell, a panel or a plugin contributes items, each a command (with
-arguments), a submenu, or a list the shell fills when the menu opens
-(themes, profiles, recent workspaces). Items sit in ordered groups,
-separated when shown; a `when` clause hides or greys an item, a `checked`
-clause ticks it. `Shell::menu_items(id)` gives a menu as data, as it would
-open now. The logo at the top left opens the `system` menu (Alt+Space
-too): open a workspace, recent workspaces, profiles, themes, keyboard
-shortcuts, about, quit (the window has its buttons).
+**Menus are declared** (egui-pop's menus): a menu is an id to which the
+shell, a panel or a plugin contributes items, each a command (with
+arguments and a label of its own), or a submenu. Items sit in ordered
+groups, separated when shown; a `when` clause hides or greys an item, a
+`checked` clause ticks it. `Shell::menu_items(id)` gives a menu as data,
+as it would open now. The logo at the top left opens the `helios.system`
+menu (Alt+Space too): open a workspace, recent workspaces, profiles,
+themes (the one in use ticked), keyboard shortcuts, about, quit (the
+window has its buttons). egui-pop's menus have no list filled when a menu
+opens: the profiles and recent workspaces are declared again before the
+system menu shows.
 
-The pictures are written by `HELIOS_DOC_PICTURES=docs/gui cargo test -p
-helios-gui --test dialogs pictures`.
+![The system menu](gui/system-helios-dark.png)
+
+The pictures are written by `HELIOS_DOC_PICTURES=$PWD/docs/gui cargo test
+-p helios-gui --test dialogs pictures` (and `--test params pictures`), from
+the repository's root: headless, never on the desktop.
 
 ## Parameters
 

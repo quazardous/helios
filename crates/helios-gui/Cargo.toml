@@ -1,6 +1,6 @@
 [package]
 name = "helios-gui"
-description = "The Helios desktop: an egui shell (docking, auxiliary windows, palette, keys) over helios-shell, with headless snapshots"
+description = "The Helios desktop: an egui-pop application around docked areas and auxiliary windows, its commands run by Helios's kernel, with headless snapshots"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

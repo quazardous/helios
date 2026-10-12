@@ -1,6 +1,6 @@
 [package]
 name = "helios-shell"
-description = "The Helios desktop shell's logic, without a GUI toolkit: commands, when-contexts, keymap resolution, declared panels, workspace layouts"
+description = "The Helios desktop shell's logic, without a GUI toolkit: commands, when-contexts, declared panels, workspace layouts"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

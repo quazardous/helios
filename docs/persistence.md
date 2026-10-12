@@ -76,10 +76,10 @@ equal the last saved step.
 - In-memory holders:
   - `helios_values::Store` (`helios-values/src/lib.rs` ~l.435): `entries`
     (current values), `undo` / `redo` stacks, open `gestures`, `dirty` set;
-    shared as `Shell::values` (`helios-gui/src/shell.rs` ~l.191).
+    shared as `Shell::values` (`helios-gui/src/shell.rs` ~l.196).
   - The viewport's `Source.graph` (`helios-gui/src/viewport.rs` ~l.253),
     brought up to date by `Viewport::sync` → `helios_values::sync`
-    (`shell.rs` ~l.2128, `helios-values/src/graph.rs` `sync`) → `Graph::set_param`
+    (`shell.rs` ~l.1910, `helios-values/src/graph.rs` `sync`) → `Graph::set_param`
     (`helios-core/src/graph.rs` ~l.149), plus an `Arc<Graph>` copy for the
     render thread.
 - Persisted: never. The graph comes from `show_image` (`helios-gui/src/main.rs`)
@@ -88,8 +88,8 @@ equal the last saved step.
 - Event: `param.changed` (path, old, new, origin, seq) on the in-process bus.
   No event says "saved", because nothing saves.
 - `kill -9`: every parameter change and the whole undo history are lost.
-  A clean exit loses them too (`on_exit` saves only the layout and the
-  profile pointer).
+  A clean exit loses them too (`on_exit` saves only the layout, the
+  profile pointer and the interface's own settings).
 
 #### 2. Parameter change from the control endpoint / MCP
 
@@ -139,7 +139,7 @@ equal the last saved step.
 #### 5. Ratings, colour labels, tags, metadata
 
 - Entry: shell commands `vault.rate.N`, `vault.reject`, `vault.label.<c>`
-  (`helios-gui/src/shell.rs` ~l.940-970, actions ~l.1865-1882) →
+  (`helios-gui/src/shell.rs` ~l.1064-1100, actions ~l.1687-1705) →
   `Library::rate` / `toggle_reject` / `toggle_label`
   (`helios-gui/src/library.rs` ~l.179-211) → `Library::change` (~l.149).
 - In-memory holders:
@@ -200,6 +200,9 @@ equal the last saved step.
   on storage errors rather than continuing on unkept rows.
 - GUI layout, workspace profile pointer: written in `on_exit` only; a kill
   loses the session's layout changes. Recent workspaces: written at start.
+- The interface's settings (window place, focus mode, the user's keys),
+  kept by egui-pop: two versioned documents (`settings`, `keymap`) under
+  `~/.config/helios/ui/`, written whole in `on_exit` only.
 - The bus journal (`helios-core/src/bus.rs` ~l.45) is a bounded in-memory
   ring, not a durable log.
 
