@@ -1995,6 +1995,7 @@ name = "helios-module-masks"
 version = "0.0.1"
 dependencies = [
  "helios-core",
+ "helios-gpu",
  "helios-module-exposure",
  "helios-testkit",
 ]
@@ -2159,6 +2160,7 @@ version = "0.0.1"
 dependencies = [
  "helios-core",
  "helios-module-exposure",
+ "helios-module-masks",
  "helios-shell",
  "serde",
  "serde_json",

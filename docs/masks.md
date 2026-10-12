@@ -1,7 +1,8 @@
 # Masks
 
-Status: **second step** (2026-10-12): groups, refinement, parametric and
-raster members, and a stress network with its bench. How darktable's flexi masks map onto a
+Status: **third step** (2026-10-12): groups, refinement, parametric,
+raster and drawn shape members (circle, ellipse, gradient, path), and a
+stress network with its bench. How darktable's flexi masks map onto a
 Helios network, and what porting them taught about the core. The modules
 live in `modules/masks` (crate `helios-module-masks`).
 
@@ -41,12 +42,16 @@ Values are not clamped on every port: operators clamp where darktable does
 | `mask_from_luma` | `input` → `output`, `mask` | a member from a luminance range; passes the image through |
 | `mask_parametric` | `input` → `output`, `mask` | a member from channel ranges (darktable's parametric mask); passes the image through |
 | `mask_raster` | `mask` (optional) → `mask` | reuses another module's mask as a member (darktable's raster mask); 0 when unconnected |
+| `mask_circle` | → `mask` | a drawn circle: centre, radius, feather |
+| `mask_ellipse` | → `mask` | a drawn ellipse: centre, half-axes, rotation, feather (equidistant or proportional) |
+| `mask_gradient` | → `mask` | a drawn linear gradient: a point of its line, rotation, transition width, linear or sigmoid |
+| `mask_path` | → `mask` | a drawn closed path: up to 64 points with Bézier handles (a polygon when handles sit on their corners), feather |
 
 ## From darktable's tree to a sub-network
 
 - **Member** → a node with a one-channel output (`mask_from_luma`,
-  `mask_parametric`, `mask_raster` today; drawn shapes and AI masks
-  later), connected
+  `mask_parametric`, `mask_raster`, `mask_circle`, `mask_ellipse`,
+  `mask_gradient`, `mask_path` today; AI masks later), connected
   to a port of its group. Its opacity and inversion are the group's
   `opacity[i]` and `invert[i]` for that port: inversion first, then
   opacity, as darktable does.
@@ -93,6 +98,67 @@ Exclusion is not associative: (0.6, 0.5, 0.9) gives 0.63, (0.9, 0.5, 0.6)
 gives 0.33; the tests check both. A group with no connected member gives 1
 (darktable's "no active mask element": the module applies fully).
 
+## Drawn shapes
+
+The four shape members read no image: each is a source of one channel,
+`(invert ? 1 − v : v) · opacity` where `v` is the shape's value, like
+every member. Their parameters are ordinary module parameters, so they
+live in the value store (`node/<node>/<param>`): edits are undoable,
+announced on the bus and saved with the network like any other value.
+
+- **Image coordinates.** Positions and lengths are full-resolution pixels
+  of the image the network reads (`x` from the left, `y` from the top;
+  pixel `(i, j)` covers `[i, i + 1) × [j, j + 1)`). A render at scale `s`
+  evaluates its pixel `(i, j)` at `((i + 0.5) / s, (j + 0.5) / s)`, so a
+  shape stays where it was drawn at every zoom, crop and tile.
+  Rotations are degrees from the x axis toward the y axis (clockwise on
+  screen).
+- **Falloff.** Circle and ellipse use darktable's quadratic falloff along
+  each ray from the centre, `((t² − l²) / (t² − r²))²` between the edge
+  `r` and the feather's end `t`; an ellipse's feather is either one width
+  (`equidistant`, darktable's default) or `proportional` to each half-axis
+  (`feather` is then its width along the longer one). The path falls off
+  linearly with the distance outside it (darktable's path falloff), inside
+  by the even-odd rule. The gradient goes from 0 to 1 across its line over
+  `feather`, linearly or along an error function (darktable's sigmoid,
+  whose `compression` is `feather / (2 · diagonal)`); rotation 0 is full
+  above the line, 90 full left of it, as in darktable.
+- **Anti-aliasing.** Each pixel is the mean of the profile over the
+  pixel's width across the edge (a box filter along the distance, in
+  closed form by Gauss-Legendre quadrature, exact for the polynomial
+  profiles): a hard edge gets the pixel's coverage, so a hard circle's
+  mask sums to its area within 0.2 %.
+- **Paths.** A path's Bézier segments are cut into straight pieces within
+  0.1 image pixel of the curve, independently of the render's scale (a
+  preview draws the same polygon), at most 31 pieces a segment.
+- **Extent.** Each shape but the gradient declares its bounding box plus
+  its feather and half a render pixel as its extent (see
+  `docs/module-contract.md`): a tile outside it is filled with the
+  member's constant (0, or its opacity when inverted) without running the
+  module. Inside, a far pixel's window lies on one side of the profile and
+  gives the constant exactly, so filled and computed tiles agree bit for
+  bit.
+- **Tiles.** Each pixel depends on its own centre only (a path's rows
+  find crossings and nearby sides per row, giving exactly what reading
+  every side gives), so a tiled render equals the untiled one bit for
+  bit; the tests check it for every shape at scales 1, 0.5, 0.37 and 0.25
+  with tiles of 7, 32 and 64 pixels, and the group operators over shapes,
+  tiled.
+- **GPU.** Each shape has a WGSL kernel (`shapes.wgsl`: circle, ellipse,
+  gradient; `path.wgsl`), run over the engine's two-dimensional grid as a
+  module without inputs (it reads a one-pixel placeholder and learns its
+  output's origin from the shape binding). The path kernel reads the
+  polygon the CPU plan flattened (at most 64 × 31 points, in a 16 KiB
+  uniform buffer) and every side for every pixel. GPU (`f32`) and CPU
+  (`f64`) agree within 2·10⁻³ (`shape::GPU_TOLERANCE`), tested at several
+  scales and regions.
+
+Not ported: brushes, darktable's per-point path feather (one feather per
+path here), the gradient's curvature, and clone shapes (retouch). The
+viewport's handles that draw and move shapes are a separate step; what
+they read and write is listed in the module's documentation
+(`helios_module_masks::shape`).
+
 ## Refinement
 
 - `mask_blur`: Gaussian, sigma = radius × render scale, reach 3 sigma.
@@ -108,7 +174,7 @@ gives 0.33; the tests check both. A group with no connected member gives 1
 
 Not ported yet:
 
-- drawn shapes (circle, ellipse, path, brush, gradient) and AI object
+- brushes, curved gradients, per-point path feathers and AI object
   members;
 - the details threshold (it needs darktable's Scharr detail mask, an
   analysis of the raw);

@@ -23,6 +23,11 @@
 //!   parametric mask; it passes its input through too.
 //! - [`MaskRaster`]: a member that reuses another module's mask (darktable's
 //!   raster mask), inverted and scaled.
+//! - [`MaskCircle`], [`MaskEllipse`], [`MaskGradient`], [`MaskPath`]: drawn
+//!   shape members (darktable's drawn masks) in image pixels, rasterised
+//!   anti-aliased at the render's scale, with a GPU variant; each declares
+//!   its extent, so tiles away from it are filled without running it (see
+//!   [`shape`]).
 //! - [`stress`]: a large chained mask network, for stress tests and the
 //!   masks bench.
 
@@ -32,6 +37,7 @@ mod luma;
 mod parametric;
 mod raster;
 mod refine;
+pub mod shape;
 pub mod stress;
 
 pub use blend::MaskBlend;
@@ -40,6 +46,7 @@ pub use luma::{MaskFromLuma, luminance};
 pub use parametric::{Channel, MaskParametric, ParametricPlan, Range, jzczhz};
 pub use raster::{MaskRaster, RasterPlan};
 pub use refine::{MaskBlur, MaskFeather, MaskLevels, tone_curve};
+pub use shape::{MaskCircle, MaskEllipse, MaskGradient, MaskPath, PathPoint, outline};
 
 use helios_core::{Params, PortSpec, Value};
 
