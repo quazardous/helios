@@ -112,3 +112,51 @@ opt-level = 2
 # Mask refinement runs guided filters over every tile in the tests.
 [profile.dev.package.helios-module-masks]
 opt-level = 2
+
+# A raw export goes through every module of the raw chain, the export's
+# colour conversion, and the encoders and the content hash: unoptimized,
+# one raw took about 55 s in a debug build, about 9 s with these.
+[profile.dev.package.helios-module-rawprepare]
+opt-level = 2
+
+[profile.dev.package.helios-module-whitebalance]
+opt-level = 2
+
+[profile.dev.package.helios-module-highlights]
+opt-level = 2
+
+[profile.dev.package.helios-module-colorin]
+opt-level = 2
+
+[profile.dev.package.helios-module-exposure]
+opt-level = 2
+
+[profile.dev.package.helios-module-sigmoid]
+opt-level = 2
+
+[profile.dev.package.helios-export]
+opt-level = 2
+
+[profile.dev.package.helios-photo]
+opt-level = 2
+
+[profile.dev.package.image]
+opt-level = 3
+
+[profile.dev.package.png]
+opt-level = 3
+
+[profile.dev.package.fdeflate]
+opt-level = 3
+
+[profile.dev.package.miniz_oxide]
+opt-level = 3
+
+[profile.dev.package.crc32fast]
+opt-level = 3
+
+[profile.dev.package.simd-adler32]
+opt-level = 3
+
+[profile.dev.package.blake3]
+opt-level = 3
