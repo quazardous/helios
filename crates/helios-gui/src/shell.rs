@@ -19,6 +19,7 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 use egui::{Context as Egui, Event, Id, Rect, Ui};
+use egui_pop::api::app::OverlayKind;
 use egui_pop::api::dialogs::{self, Choose, ChooseOption, DIALOGS, Dialogs};
 use egui_pop::api::host::{Reply, Resolver};
 use egui_pop::api::settings_window::{SETTINGS_WINDOW, SHORTCUTS};
@@ -1917,7 +1918,7 @@ impl Shell {
 
         let named = ctx.data(|d| d.get_temp::<BTreeMap<String, Rect>>(Id::new("helios.named")));
         self.rects.extend(named.unwrap_or_default());
-        self.overlay_rects(&ctx);
+        self.overlay_rects();
 
         if self.recording.is_some() {
             self.shots.push_back(Shot::Frame);
@@ -1926,18 +1927,16 @@ impl Shell {
         }
     }
 
-    /// Names where egui-pop drew the dialog and the toasts.
-    fn overlay_rects(&mut self, ctx: &Egui) {
-        let h = self.app.handle();
-        if let Some((id, _)) = self.dialogs.get().and_then(Dialogs::current)
-            && let Some(r) = ctx.memory(|m| m.area_rect(Id::new(("egui_pop.dialog", id))))
-        {
-            self.rects.insert("helios.dialog".into(), r);
-        }
-        if h.service(&TOASTS).is_some_and(|t| !t.shown().is_empty())
-            && let Some(r) = ctx.memory(|m| m.area_rect(Id::new("egui_pop.toasts")))
-        {
-            self.rects.insert("helios.toasts".into(), r);
+    /// Names where egui-pop drew the dialog and the toasts, as it reports
+    /// them.
+    fn overlay_rects(&mut self) {
+        for o in self.app.handle().overlay_rects() {
+            let name = match o.kind {
+                OverlayKind::Dialog => "helios.dialog",
+                OverlayKind::Toasts => "helios.toasts",
+                _ => continue,
+            };
+            self.rects.insert(name.into(), o.rect);
         }
     }
 
