@@ -34,7 +34,15 @@ pub struct HistoryItem {
     /// Why the item could not be read in full. It stays in the history,
     /// in its place, and is never applied.
     pub unreadable: Option<String>,
+    /// Not in the file: added as darktable adds it when it reads the
+    /// sidecar (see [`Sidecar::parse`]). Never written back.
+    pub inserted: bool,
 }
+
+/// darktable's highlights params (version 4) for the clip method, and blend
+/// params that do not blend, as `src/common/exif.cc` inserts them.
+const CLIP_HIGHLIGHTS: &str = "000000000000803f00000000000000000000803f000000001e00000006000000cdcccc3e000000400000000000000000";
+const NO_BLEND: &str = "gz11eJxjYGBgkGAAgRNODGiAEV0AJ2iwh+CRyscOAAdeGQQ=";
 
 impl HistoryItem {
     /// An attribute as the sidecar spells it.
@@ -204,7 +212,32 @@ fn item(attrs: Vec<(String, String)>, position: usize) -> HistoryItem {
         operation,
         unreadable: (!problems.is_empty()).then(|| problems.join("; ")),
         attributes: attrs,
+        inserted: false,
     }
+}
+
+/// The highlights item darktable adds to older raw edits.
+fn clip_highlights() -> HistoryItem {
+    let attrs = [
+        ("darktable:num", "1"),
+        ("darktable:operation", "highlights"),
+        ("darktable:enabled", "1"),
+        ("darktable:modversion", "4"),
+        ("darktable:params", CLIP_HIGHLIGHTS),
+        ("darktable:multi_name", ""),
+        ("darktable:multi_priority", "0"),
+        ("darktable:blendop_version", "13"),
+        ("darktable:blendop_params", NO_BLEND),
+    ];
+    let mut item = item(
+        attrs
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+            .collect(),
+        0,
+    );
+    item.inserted = true;
+    item
 }
 
 impl Sidecar {
@@ -244,7 +277,27 @@ impl Sidecar {
         }
         // A stable sort: items with the same number keep the document's order.
         sidecar.history.sort_by_key(|i| i.num);
+        sidecar.add_implicit_highlights();
         Ok(sidecar)
+    }
+
+    /// darktable's rule for sidecars older than `xmp_version` 5, which did
+    /// not record modules left at their defaults: a raw edit (it has
+    /// rawprepare) without highlights gets highlights with the clip method,
+    /// the default of the time, not today's. darktable puts it second,
+    /// after the first item, and moves the history end one further
+    /// (`dt_exif_xmp_read_data`). The item is marked [`HistoryItem::inserted`].
+    fn add_implicit_highlights(&mut self) {
+        let has = |op: &str| self.history.iter().any(|i| i.operation == op);
+        if self.xmp_version.unwrap_or(0) >= 5 || !has("rawprepare") || has("highlights") {
+            return;
+        }
+        let len = u32::try_from(self.history.len()).unwrap_or(u32::MAX);
+        let at = self.history.len().min(1);
+        self.history.insert(at, clip_highlights());
+        if let Some(end) = self.history_end {
+            self.history_end = Some(end.min(len).saturating_add(1));
+        }
     }
 
     /// The items in force: those before `history_end`, the last one of each
