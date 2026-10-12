@@ -138,6 +138,11 @@ Helios's viewport runs on it (2026-10-12): the engine is its tile source,
 a Rec.2020-to-sRGB matrix its display transform, the view kept in the
 value store; the "before" of a comparison is the edit as it was opened
 (not decided: the unedited image, or a snapshot taken by hand).
+The desktop runs on egui-pop's workbench (2026-10-12): its window frame,
+per-window scale and interface zoom, panels in areas with auxiliary
+windows and arrangements (Helios's image-first layout a template), the
+keymap changed at run time (profiles as keymap documents), and its
+exit; layouts saved before migrate (see docs/gui.md).
 egui-pop wraps the application's kernel; it is not the kernel (2026-10-12,
 decided). egui-pop owns what is UI: command declarations (for menus, the
 palette, the keymap and traces), focus, overlays, layout, theme and UI

@@ -26,7 +26,7 @@ use egui_pop::api::frame::{self, FramePlugin, SETTING_FRAME};
 use egui_pop::api::host::{Reply, Resolver};
 use egui_pop::api::settings_window::{SETTINGS_WINDOW, SHORTCUTS};
 use egui_pop::api::toasts::{TOASTS, Toast};
-use egui_pop::api::{App, AppHandle, DefaultPlugins, palette};
+use egui_pop::api::{App, AppBuilder, AppHandle, DefaultPlugins, palette};
 use egui_pop::core::frame::{FrameRequest, HitTable};
 use egui_pop::core::scale;
 use egui_pop::model::ids::PanelId;
@@ -157,6 +157,64 @@ struct Wiring<'a> {
     declarations: &'a Rc<RefCell<Declarations>>,
 }
 
+/// What the shell keeps of its wiring until egui-pop's application is
+/// built.
+struct Parts {
+    registry: Arc<Mutex<Registry>>,
+    lists: Rc<RefCell<ListSource>>,
+    declarations: Rc<RefCell<Declarations>>,
+    panels: Vec<PanelSpec>,
+    contents: Contents,
+    queue: Queue,
+    themes: crate::theme::Themes,
+    resolved_view: Arc<Mutex<Value>>,
+    dialogs: Arc<OnceLock<Dialogs>>,
+    values: Arc<Mutex<helios_values::Store>>,
+}
+
+/// A shell whose egui-pop application is still to build: in a test
+/// harness's context, or in a window by egui-pop's `run_native_with`.
+pub struct ShellBuilder {
+    app: AppBuilder,
+    parts: Parts,
+}
+
+impl ShellBuilder {
+    /// Runs `f` when the application closes, before the `app.exit` step
+    /// (which saves the interface's settings).
+    #[must_use]
+    pub fn on_exit(mut self, f: impl FnMut(&AppHandle) + 'static) -> Self {
+        self.app = self.app.on_exit(f);
+        self
+    }
+
+    /// The shell, its application built on a context of its own (tests,
+    /// tools, pictures; a harness draws it in its own).
+    pub fn build(self) -> Shell {
+        let app = self
+            .app
+            .build(&Egui::default())
+            .unwrap_or_else(|e| panic!("Helios's application builds: {e}"));
+        Shell::assemble(self.parts, app)
+    }
+
+    /// Opens the window (egui-pop's `run_native_with`): the window's
+    /// place from the last run, the application built on the window's
+    /// context, then `make` gives eframe the application around the
+    /// shell, which calls [`Shell::exit`] when the window closes.
+    pub fn run_native(
+        self,
+        title: &str,
+        options: eframe::NativeOptions,
+        make: impl FnOnce(Shell, &eframe::CreationContext<'_>) -> Box<dyn eframe::App> + 'static,
+    ) -> eframe::Result {
+        let parts = self.parts;
+        self.app.run_native_with(title, options, move |app, cc| {
+            make(Shell::assemble(parts, app), cc)
+        })
+    }
+}
+
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
 }
@@ -241,6 +299,17 @@ impl Shell {
         layout: Option<Layout>,
         ui_settings: Option<PathBuf>,
     ) -> Shell {
+        let mut shell = Shell::builder(panels, ui_settings).build();
+        if let Some(layout) = layout {
+            shell.set_layout(layout);
+        }
+        shell
+    }
+
+    /// A shell to build: its commands and plugins declared, egui-pop's
+    /// application not built yet ([`ShellBuilder::build`], or
+    /// [`ShellBuilder::run_native`] in a window).
+    pub fn builder(panels: Vec<PanelSpec>, ui_settings: Option<PathBuf>) -> ShellBuilder {
         let registry = Arc::new(Mutex::new(Registry::new()));
         let bus = Arc::new(Bus::new());
         // Helios's values: what widgets and agents edit, and what Edit >
@@ -322,9 +391,37 @@ impl Shell {
         if let Some(dir) = ui_settings {
             builder = builder.persist(dir);
         }
-        let app = builder
-            .build(&Egui::default())
-            .unwrap_or_else(|e| panic!("Helios's application builds: {e}"));
+        ShellBuilder {
+            app: builder,
+            parts: Parts {
+                registry,
+                lists,
+                declarations,
+                panels,
+                contents,
+                queue,
+                themes,
+                resolved_view,
+                dialogs,
+                values,
+            },
+        }
+    }
+
+    /// The shell around egui-pop's application, once built.
+    fn assemble(parts: Parts, app: App) -> Shell {
+        let Parts {
+            registry,
+            lists,
+            declarations,
+            panels,
+            contents,
+            queue,
+            themes,
+            resolved_view,
+            dialogs,
+            values,
+        } = parts;
         if let Some(d) = app.handle().service(&DIALOGS) {
             let _ = dialogs.set((*d).clone());
         }
@@ -373,9 +470,6 @@ impl Shell {
             shell.notes.push(format!("{}: {}", d.code, d.message));
         }
         shell.seen = shell.app.handle().last_event();
-        if let Some(layout) = layout {
-            shell.set_layout(layout);
-        }
         {
             let mut store = lock(&shell.values);
             crate::viewport::declare(&mut store);
@@ -438,6 +532,17 @@ impl Shell {
     /// with a place for them).
     pub fn save(&self) -> Result<(), String> {
         self.app.save().map_err(|e| e.to_string())
+    }
+
+    /// The application closes (egui-pop's `App::exit`): the builder's
+    /// `on_exit` functions, then the `app.exit` step, whose default saves
+    /// the interface's settings, the user's keys and the layout.
+    pub fn exit(&mut self) -> Result<(), String> {
+        use egui_pop::api::steps::Outcome;
+        match self.app.exit() {
+            Outcome::Done(r) => r.map(|_| ()),
+            Outcome::Vetoed { by, reason } => Err(format!("exit stopped by `{by}`: {reason}")),
+        }
     }
 
     /// Declares a command on Helios's registry, and to the interface at

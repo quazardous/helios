@@ -261,7 +261,11 @@ Helios declares into it:
   each change taken back by its reset) and the **window's place** (size,
   position, maximized, full screen with `F11` and a way out at the top
   edge), kept between runs with the interface's other settings (focus
-  mode, the user's keys) under `~/.config/helios/ui/`;
+  mode, the user's keys) under `~/.config/helios/ui/`. egui-pop opens
+  the window (`run_native_with`: its place from the last run, repaired;
+  the desktop's focus mode read) and closes it: Helios's `on_exit` saves
+  the workspace's layout and profile, then egui-pop's `app.exit` step
+  saves the interface's settings, keys and layout;
 - **the window's frame** (egui-pop's `FramePlugin`, 2026-10-12): the
   title bar (a menu button, the window's title, the minimize, maximize
   and close buttons) and resize edges never thinner than 6 physical

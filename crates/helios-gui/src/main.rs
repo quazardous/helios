@@ -96,7 +96,6 @@ fn image_graph(path: &Path) -> Result<(helios_core::Graph, helios_core::NodeId),
 
 struct App {
     shell: Shell,
-    file: Option<PathBuf>,
     persist: Option<Persist>,
 }
 
@@ -119,26 +118,56 @@ impl eframe::App for App {
     }
 
     fn on_exit(&mut self) {
-        if let Err(e) = self.shell.save() {
+        // egui-pop's exit: the workspace saved (`save_workspace`), then
+        // the `app.exit` step saves the interface's settings and keys.
+        if let Err(e) = self.shell.exit() {
             eprintln!("helios-gui: cannot save the interface's settings: {e}");
         }
-        if let Some(file) = &self.file {
-            // The workspace remembers its profile beside its layout.
-            let pointer = serde_json::json!({ "profile": self.shell.profile_name() });
-            let saved = file
-                .parent()
-                .map_or(Ok(()), std::fs::create_dir_all)
-                .and_then(|()| {
-                    std::fs::write(file.with_file_name("workspace.json"), pointer.to_string())
-                })
-                .and_then(|()| std::fs::write(file, self.shell.layout().to_json()));
-            if let Err(e) = saved {
-                eprintln!(
-                    "helios-gui: cannot save the layout to {}: {e}",
-                    file.display()
-                );
-            }
+    }
+}
+
+/// Saves the workspace's layout and, beside it, the profile it uses,
+/// as the application closes (egui-pop's `on_exit`).
+fn save_workspace(file: &Path, app: &egui_pop::api::AppHandle) {
+    let profile = app.context().get("heliosProfile").to_string();
+    let pointer = serde_json::json!({ "profile": profile });
+    let saved = file
+        .parent()
+        .map_or(Ok(()), std::fs::create_dir_all)
+        .and_then(|()| std::fs::write(file.with_file_name("workspace.json"), pointer.to_string()))
+        .and_then(|()| std::fs::write(file, app.layout().to_json()));
+    if let Err(e) = saved {
+        eprintln!(
+            "helios-gui: cannot save the layout to {}: {e}",
+            file.display()
+        );
+    }
+}
+
+/// Fills the library from the vault and shows the image asked for (its
+/// edit loaded from the vault, and saved there, when there is one).
+fn open(
+    shell: &mut Shell,
+    persist: Option<&mut Persist>,
+    image: Option<(PathBuf, (helios_core::Graph, helios_core::NodeId))>,
+) -> Result<(), String> {
+    if let Some(persist) = &persist {
+        fill_library(shell, persist)?;
+    }
+    let Some((path, (graph, node))) = image else {
+        return Ok(());
+    };
+    match persist {
+        Some(persist) => {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_secs());
+            let image = persist.vault().import_file(&path, now)?;
+            persist
+                .open_image(shell, image, graph, node, "output")
+                .map(|_| ())
         }
+        None => shell.set_view_source(graph, node, "output"),
     }
 }
 
@@ -190,16 +219,10 @@ fn main() -> Result<(), String> {
     // The interface's settings (window place, focus mode, the user's
     // keys) are the user's, beside Helios's other settings.
     let ui_settings = helios_gui::shell::config_dir().join("ui");
-    let mut shell = Shell::build(
-        helios_panels(),
-        load(file.as_deref()),
-        Some(ui_settings.clone()),
-    );
     let name = workspace.file_name().map_or_else(
         || workspace.display().to_string(),
         |n| n.to_string_lossy().into(),
     );
-    shell.set_title(&name);
     // The workspace's profile, else the Default one; a saved layout wins
     // over the profile's.
     let profile = file
@@ -208,41 +231,28 @@ fn main() -> Result<(), String> {
         .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
         .and_then(|v| v["profile"].as_str().map(String::from))
         .unwrap_or_else(|| "default".into());
-    if let Err(e) = shell.use_profile(&profile) {
-        shell.notes.push(format!("profile {profile}: {e}"));
-    }
-    if let Some(saved) = load(file.as_deref()) {
-        shell.set_layout(saved);
-    }
     let bus = std::sync::Arc::new(helios_core::Bus::new());
-    let mut persist = match vault_file {
-        Some(path) => {
-            let persist = Persist::new(helios_vault_sqlite::SqliteStore::open(&path)?, bus);
-            fill_library(&mut shell, &persist)?;
-            Some(persist)
-        }
+    let persist = match vault_file {
+        Some(path) => Some(Persist::new(
+            helios_vault_sqlite::SqliteStore::open(&path)?,
+            bus,
+        )),
         None => None,
     };
-    if let Some(path) = image_file {
-        let (graph, node) = image_graph(&path)?;
-        match &mut persist {
-            // With a vault, the image's edit is loaded and saved there.
-            Some(persist) => {
-                let now = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map_or(0, |d| d.as_secs());
-                let image = persist.vault().import_file(&path, now)?;
-                persist.open_image(&mut shell, image, graph, node, "output")?;
-            }
-            None => shell.set_view_source(graph, node, "output")?,
-        }
+    let image = image_file
+        .map(|path| image_graph(&path).map(|g| (path, g)))
+        .transpose()?;
+    let mut builder = Shell::builder(helios_panels(), Some(ui_settings));
+    if let Some(file) = file.clone() {
+        builder = builder.on_exit(move |app| save_workspace(&file, app));
     }
     // The window draws with the process's one device, which the engine
     // computes on (see `helios_gui::shell::wgpu_setup`).
     let gpu = helios_gpu::shared::gpu().map_err(|e| format!("no GPU to draw with: {e}"))?;
+    let title = format!("{name} — Helios");
     let mut options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_title(shell.window_title())
+            .with_title(title.clone())
             .with_app_id("helios-gui")
             .with_inner_size([1280.0, 800.0])
             .with_min_inner_size([640.0, 400.0])
@@ -252,29 +262,25 @@ fn main() -> Result<(), String> {
         ..Default::default()
     };
     options.wgpu_options.wgpu_setup = helios_gui::shell::wgpu_setup(&gpu);
-    // The window's place from the last run, repaired (the screens are not
-    // known before the window exists: only bounds are checked).
-    if let Ok(Some(read)) = egui_pop::core::persist::Persist::new(&ui_settings)
-        .load::<egui_pop::model::values::SettingsDoc>(
-        "settings",
-        &egui_pop::model::values::settings_schema(),
-    ) && let Some(state) = egui_pop::api::window::from_settings(&read.value)
-    {
-        egui_pop::api::window::apply(&mut options, state.repair(&[]));
-    }
-    eframe::run_native(
-        "helios-gui",
-        options,
-        Box::new(|cc| {
+    // egui-pop opens the window where it was last (repaired) and builds
+    // the application on its context.
+    builder
+        .run_native("helios-gui", options, move |mut shell, cc| {
             if let Some(rs) = cc.wgpu_render_state.as_ref() {
                 shell.attach_gpu(rs);
             }
-            Ok(Box::new(App {
-                shell,
-                file,
-                persist,
-            }))
-        }),
-    )
-    .map_err(|e| e.to_string())
+            shell.set_title(&name);
+            if let Err(e) = shell.use_profile(&profile) {
+                shell.notes.push(format!("profile {profile}: {e}"));
+            }
+            if let Some(saved) = load(file.as_deref()) {
+                shell.set_layout(saved);
+            }
+            let mut persist = persist;
+            if let Err(e) = open(&mut shell, persist.as_mut(), image) {
+                shell.notify(helios_gui::dialogs::Level::Error, e);
+            }
+            Box::new(App { shell, persist })
+        })
+        .map_err(|e| e.to_string())
 }
