@@ -32,10 +32,11 @@ Two defects came out of this inventory and were checked in the code:
   last edited, while darktable processes them in its pipe order
   (`iop_order_version`, `iop_order_list`), which was never read
   ([pipeline.md](pipeline.md), pitfall 1). Fixed on 2026-10-12.
-- **GPU limits.** The device is opened with wgpu's default limits (128 MiB
+- **GPU limits.** The device was opened with wgpu's default limits (128 MiB
   per storage binding), while the scheduler admits jobs against the
-  adapter's much larger limits, so a 24 MP f32 image passes the check and
-  fails on the device ([gpu-perf.md](gpu-perf.md), pitfall 3).
+  adapter's much larger limits, so a 24 MP f32 image passed the check and
+  failed on the device ([gpu-perf.md](gpu-perf.md), pitfall 3). Fixed on
+  2026-10-12.
 
 ## Priorities across themes
 

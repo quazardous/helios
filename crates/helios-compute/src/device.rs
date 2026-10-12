@@ -53,6 +53,27 @@ pub struct Limits {
     pub max_binding: u64,
 }
 
+impl Limits {
+    /// The numbers the compute manager plans with, from wgpu's.
+    pub fn of(limits: &wgpu::Limits) -> Limits {
+        Limits {
+            max_buffer: limits.max_buffer_size,
+            max_binding: limits.max_storage_buffer_binding_size,
+        }
+    }
+}
+
+/// A GPU opened: the engine's accelerator, and what its device allows.
+#[derive(Clone)]
+pub struct OpenedGpu {
+    pub accelerator: Arc<dyn Accelerator>,
+    /// The opened device's limits, which jobs must fit (`None`: unknown,
+    /// the survey's are used).
+    pub limits: Option<Limits>,
+    /// Why the device allows less than its adapter, when it does.
+    pub note: Option<String>,
+}
+
 /// A device as discovered.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Device {
@@ -93,7 +114,7 @@ pub trait Adapters: Send + Sync {
     fn list(&self) -> Vec<Device>;
 
     /// Opens a device listed under `id`.
-    fn open(&self, id: &str) -> Result<Arc<dyn Accelerator>, String>;
+    fn open(&self, id: &str) -> Result<OpenedGpu, String>;
 }
 
 /// The id of an adapter: its backend and PCI ids, then a number when the
@@ -145,7 +166,10 @@ impl WgpuAdapters {
         let mut found: Vec<(Device, wgpu::Adapter)> = Vec::new();
         for adapter in adapters {
             let info = adapter.get_info();
-            let limits = adapter.limits();
+            // What the device will be opened with: one source for planning
+            // and for the device (a driver that refuses them is reported
+            // when it opens, and its own limits are used from then on).
+            let limits = helios_gpu::requested_limits(&adapter);
             let backend = format!("{:?}", info.backend).to_lowercase();
             let taken: Vec<String> = found.iter().map(|(d, _)| d.id.clone()).collect();
             let device = Device {
@@ -166,10 +190,7 @@ impl WgpuAdapters {
                 )
                 .filter(|d| !d.is_empty()),
                 threads: None,
-                limits: Some(Limits {
-                    max_buffer: limits.max_buffer_size,
-                    max_binding: limits.max_storage_buffer_binding_size,
-                }),
+                limits: Some(Limits::of(&limits)),
             };
             found.push((device, adapter));
         }
@@ -182,12 +203,17 @@ impl Adapters for WgpuAdapters {
         self.adapters().into_iter().map(|(d, _)| d).collect()
     }
 
-    fn open(&self, id: &str) -> Result<Arc<dyn Accelerator>, String> {
+    fn open(&self, id: &str) -> Result<OpenedGpu, String> {
         let (_, adapter) = self
             .adapters()
             .into_iter()
             .find(|(d, _)| d.id == id)
             .ok_or_else(|| format!("no GPU `{id}` here"))?;
-        Ok(Arc::new(helios_gpu::Gpu::open(&adapter)?))
+        let gpu = helios_gpu::Gpu::open(&adapter)?;
+        Ok(OpenedGpu {
+            limits: Some(Limits::of(&gpu.limits())),
+            note: gpu.limits_note.clone(),
+            accelerator: Arc::new(gpu),
+        })
     }
 }

@@ -31,7 +31,7 @@ use helios_core::{
 use serde::Serialize;
 use serde_json::{Value as Json, json};
 
-pub use device::{Adapters, CPU, Device, DeviceKind, Limits, WgpuAdapters};
+pub use device::{Adapters, CPU, Device, DeviceKind, Limits, OpenedGpu, WgpuAdapters};
 pub use remote::RemoteState;
 pub use settings::{Calibration, DeviceSettings, RemoteSettings, Role, Settings};
 
@@ -188,7 +188,7 @@ pub struct Budget {
 }
 
 /// A GPU opened, or why it did not open.
-type Opened = Result<Arc<dyn Accelerator>, String>;
+type Opened = Result<OpenedGpu, String>;
 
 /// The compute units of this machine, their devices and settings.
 pub struct Manager {
@@ -401,6 +401,9 @@ impl Manager {
                 if let Some(d) = present {
                     v["device"] = serde_json::to_value(d).expect("devices serialize");
                 }
+                if let Some(Ok(o)) = self.opened.lock().expect("opened lock").get(id) {
+                    v["opened"] = json!({ "limits": o.limits, "note": o.note });
+                }
                 v
             })
             .collect();
@@ -423,7 +426,7 @@ impl Manager {
         json!({ "units": units })
     }
 
-    fn opened(&self, id: &str) -> Result<Arc<dyn Accelerator>, String> {
+    fn opened(&self, id: &str) -> Result<OpenedGpu, String> {
         let mut opened = self.opened.lock().expect("opened lock");
         opened
             .entry(id.into())
@@ -431,11 +434,23 @@ impl Manager {
             .clone()
     }
 
-    /// Whether a job fits a GPU: one buffer within what it binds, input
-    /// and output within its memory budget.
-    fn fits(job: &Job, d: &Device, s: &DeviceSettings) -> bool {
+    /// What a GPU allows: its opened device's limits once it is open,
+    /// before that the survey's, which are what it is opened with.
+    fn limits(&self, d: &Device) -> Option<Limits> {
+        match self.opened.lock().expect("opened lock").get(&d.id) {
+            Some(Ok(OpenedGpu {
+                limits: Some(limits),
+                ..
+            })) => Some(*limits),
+            _ => d.limits,
+        }
+    }
+
+    /// Whether a job fits a GPU with `limits`: one buffer within what it
+    /// binds and creates, input and output within its memory budget.
+    fn fits(job: &Job, limits: Option<Limits>, s: &DeviceSettings) -> bool {
         let bytes = job.bytes();
-        let binds = d.limits.is_none_or(|l| bytes <= l.max_binding);
+        let binds = limits.is_none_or(|l| bytes <= l.max_binding && bytes <= l.max_buffer);
         let budget = s.vram_mb.is_none_or(|mb| 2 * bytes <= mb * MIB);
         binds && budget
     }
@@ -472,7 +487,9 @@ impl Manager {
             .iter()
             .filter_map(|d| self.settings.devices.get(&d.id).map(|s| (d, s)))
             .filter(|(d, s)| {
-                s.enabled && s.role.takes(job.role) && (!d.kind.is_gpu() || Self::fits(job, d, s))
+                s.enabled
+                    && s.role.takes(job.role)
+                    && (!d.kind.is_gpu() || Self::fits(job, self.limits(d), s))
             })
             .collect();
         let cpu = &self.present[0];
@@ -526,12 +543,15 @@ impl Manager {
         } else {
             reason
         };
-        let (d, _) = chosen;
+        let (d, s) = chosen;
         if d.id == cpu.id {
             return self.on_cpu(reason, None);
         }
         match self.opened(&d.id) {
-            Ok(accelerator) => Route {
+            // The device opened with less than its survey said (a driver
+            // refused its adapter's limits): route again on what it allows.
+            Ok(opened) if !Self::fits(job, opened.limits.or(d.limits), s) => self.route(job),
+            Ok(OpenedGpu { accelerator, .. }) => Route {
                 device: d.id.clone(),
                 name: d.name.clone(),
                 kind: d.kind,
@@ -590,7 +610,7 @@ impl Manager {
             let device = self.present(&id).expect("present").clone();
             let speeds = if device.kind.is_gpu() {
                 self.opened(&id)
-                    .and_then(|a| bench::calibrate(Some(a), self.bench_tile))
+                    .and_then(|o| bench::calibrate(Some(o.accelerator), self.bench_tile))
             } else {
                 bench::calibrate(None, self.bench_tile)
             };
@@ -609,5 +629,53 @@ impl Manager {
         }
         self.save()?;
         Ok(reports)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_job_fits_the_limits_it_is_given() {
+        let gpu = Device {
+            id: "gpu".into(),
+            name: "GPU".into(),
+            kind: DeviceKind::DiscreteGpu,
+            backend: None,
+            driver: None,
+            threads: None,
+            limits: None,
+        };
+        let s = DeviceSettings::new(&gpu);
+        // 24 MP RGBA f32: 384 MB, one buffer.
+        let job = Job {
+            role: Role::Both,
+            family: None,
+            gpu: true,
+            pixels: 24_000_000,
+            channels: 4,
+        };
+        let limits = |max_buffer: u64, max_binding: u64| {
+            Some(Limits {
+                max_buffer,
+                max_binding,
+            })
+        };
+        // wgpu's defaults: 256 MiB buffers, 128 MiB bindings.
+        assert!(!Manager::fits(&job, limits(256 << 20, 128 << 20), &s));
+        // A binding large enough in a buffer too small.
+        assert!(!Manager::fits(&job, limits(256 << 20, 2 << 30), &s));
+        assert!(Manager::fits(&job, limits(2 << 30, 2 << 30), &s));
+        assert!(
+            Manager::fits(&job, None, &s),
+            "unknown limits do not refuse"
+        );
+        // The memory budget counts input and output.
+        let budget = DeviceSettings {
+            vram_mb: Some(512),
+            ..s
+        };
+        assert!(!Manager::fits(&job, limits(2 << 30, 2 << 30), &budget));
     }
 }

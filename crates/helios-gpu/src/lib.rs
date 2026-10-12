@@ -22,11 +22,37 @@ use helios_core::{
 };
 use wgpu::util::DeviceExt;
 
+/// The limits [`Gpu::open`] asks a device for: all the adapter allows.
+/// The compute manager plans with them before any device is open.
+pub fn requested_limits(adapter: &wgpu::Adapter) -> wgpu::Limits {
+    adapter.limits()
+}
+
+/// The limits [`Gpu::open`] tries, in order: the adapter's, then wgpu's
+/// defaults with the adapter's buffer sizes (what images need), then
+/// wgpu's defaults.
+fn limit_steps(adapter: &wgpu::Adapter) -> [(&'static str, wgpu::Limits); 3] {
+    let full = requested_limits(adapter);
+    let buffers = wgpu::Limits {
+        max_buffer_size: full.max_buffer_size,
+        max_storage_buffer_binding_size: full.max_storage_buffer_binding_size,
+        ..wgpu::Limits::default()
+    };
+    [
+        ("the adapter's limits", full),
+        ("the adapter's buffer sizes", buffers),
+        ("wgpu's default limits", wgpu::Limits::default()),
+    ]
+}
+
 pub struct Gpu {
     device: wgpu::Device,
     queue: wgpu::Queue,
     /// The adapter's description, for reports.
     pub adapter: String,
+    /// Why the device has smaller limits than its adapter, when the driver
+    /// refused the adapter's own (see [`Gpu::open`]).
+    pub limits_note: Option<String>,
     id: String,
     /// Compiled kernels, by source and entry point.
     pipelines: Mutex<HashMap<(&'static str, &'static str), wgpu::ComputePipeline>>,
@@ -46,19 +72,44 @@ impl Gpu {
         Gpu::open(&adapter)
     }
 
-    /// Opens a device on a given adapter (one the compute manager chose).
+    /// Opens a device on a given adapter (one the compute manager chose),
+    /// with the adapter's own limits ([`requested_limits`]): wgpu's
+    /// defaults would cap a storage binding at 128 MiB, below a 24 MP f32
+    /// image. A driver that refuses its adapter's maximum is asked for
+    /// less, buffer sizes first, and [`Gpu::limits_note`] says so; the
+    /// device's real limits are [`Gpu::limits`].
     pub fn open(adapter: &wgpu::Adapter) -> Result<Gpu, String> {
         let info = adapter.get_info();
-        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-            label: Some("helios"),
-            ..Default::default()
-        }))
-        .map_err(|e| format!("no GPU device: {e}"))?;
-        Ok(Gpu::from_device(
-            device,
-            queue,
-            &format!("{} ({:?}, {:?})", info.name, info.device_type, info.backend),
-        ))
+        let mut refused = Vec::new();
+        for (name, limits) in limit_steps(adapter) {
+            match pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+                label: Some("helios"),
+                required_limits: limits,
+                ..Default::default()
+            })) {
+                Ok((device, queue)) => {
+                    let mut gpu = Gpu::from_device(
+                        device,
+                        queue,
+                        &format!("{} ({:?}, {:?})", info.name, info.device_type, info.backend),
+                    );
+                    if !refused.is_empty() {
+                        gpu.limits_note = Some(format!(
+                            "opened with {name}: the driver refused {}",
+                            refused.join("; ")
+                        ));
+                    }
+                    return Ok(gpu);
+                }
+                Err(e) => refused.push(format!("{name} ({e})")),
+            }
+        }
+        Err(format!("no GPU device: {}", refused.join("; ")))
+    }
+
+    /// What the device allows: the limits the engine's jobs must fit.
+    pub fn limits(&self) -> wgpu::Limits {
+        self.device.limits()
     }
 
     /// A device someone else opened (the GUI's).
@@ -67,6 +118,7 @@ impl Gpu {
             device,
             queue,
             adapter: adapter.into(),
+            limits_note: None,
             id: format!("wgpu {adapter}"),
             pipelines: Mutex::default(),
         }

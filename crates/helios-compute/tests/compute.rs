@@ -8,8 +8,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use helios_compute::{
-    Adapters, Budget, CPU, Calibration, Device, DeviceKind, Job, Limits, Manager, RemoteSettings,
-    RemoteState, Role, Settings, WgpuAdapters, commands,
+    Adapters, Budget, CPU, Calibration, Device, DeviceKind, Job, Limits, Manager, OpenedGpu,
+    RemoteSettings, RemoteState, Role, Settings, WgpuAdapters, commands,
 };
 use helios_core::{
     Accelerator, Bus, Describe, DeviceImage, GpuJob, Graph, Image, ModuleRef, Params, Region,
@@ -49,6 +49,8 @@ enum Behaviour {
     NoDevice,
     /// Opens, then fails every run.
     Fails,
+    /// Opens with smaller limits than listed: 1 MiB bindings.
+    Shrinks,
 }
 
 /// A GPU that writes zeros, counting its runs.
@@ -121,19 +123,31 @@ impl Adapters for Fake {
             .collect()
     }
 
-    fn open(&self, id: &str) -> Result<Arc<dyn Accelerator>, String> {
+    fn open(&self, id: &str) -> Result<OpenedGpu, String> {
         let devices = self.devices.lock().unwrap();
-        let (_, b) = devices
+        let (d, b) = devices
             .iter()
             .find(|(d, _)| d.id == id)
             .ok_or("no such GPU")?;
+        let shrinks = *b == Behaviour::Shrinks;
         match b {
             Behaviour::NoDevice => Err("no GPU device: out of memory".into()),
-            b => Ok(Arc::new(FakeGpu {
-                id: format!("fake {id}"),
-                fails: *b == Behaviour::Fails,
-                runs: self.runs.clone(),
-            })),
+            b => Ok(OpenedGpu {
+                accelerator: Arc::new(FakeGpu {
+                    id: format!("fake {id}"),
+                    fails: *b == Behaviour::Fails,
+                    runs: self.runs.clone(),
+                }),
+                limits: if shrinks {
+                    Some(Limits {
+                        max_buffer: 1 << 20,
+                        max_binding: 1 << 20,
+                    })
+                } else {
+                    d.limits
+                },
+                note: shrinks.then(|| "the driver refused the adapter's limits".to_string()),
+            }),
         }
     }
 }
@@ -618,6 +632,65 @@ fn a_remote_unit_is_probed_over_its_socket() {
         }
     );
     assert_eq!(m.list()["units"][1]["probe"]["state"], "reachable");
+}
+
+#[test]
+fn jobs_are_planned_with_the_opened_devices_limits() {
+    let d = dir("shrinks");
+    let fake = Fake::with(vec![(
+        gpu("gpu:vulkan:1:1", "Shrinking", DeviceKind::DiscreteGpu),
+        Behaviour::Shrinks,
+    )]);
+    let m = Manager::open(&d, Box::new(fake)).unwrap();
+    // 64 x 64 RGBA f32 is 64 KiB: it fits the 1 MiB the device opened with.
+    let small = exposure_job(Role::Interactive);
+    assert_eq!(m.route(&small).device, "gpu:vulkan:1:1");
+    // 4 MiB fits the survey's 256 MiB, not the device: the CPU takes it.
+    let large = Job::for_module(
+        Role::Interactive,
+        &ModuleRef::new(helios_module_exposure::Exposure),
+        &Params::new(),
+        Region::sized(1024, 1024),
+    );
+    assert_eq!(m.route(&large).device, CPU);
+    // The opened device and why it allows less are listed.
+    let listed = &m.list()["units"][0]["devices"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|v| v["id"] == "gpu:vulkan:1:1")
+        .cloned()
+        .unwrap();
+    assert_eq!(listed["opened"]["limits"]["max_binding"], 1 << 20);
+    assert!(
+        listed["opened"]["note"]
+            .as_str()
+            .unwrap()
+            .contains("refused")
+    );
+    // Opened first by a large job: it is routed again on what opened.
+    let m = Manager::open(
+        &dir("shrinks-first"),
+        Box::new(Fake::with(vec![(
+            gpu("gpu:vulkan:1:1", "Shrinking", DeviceKind::DiscreteGpu),
+            Behaviour::Shrinks,
+        )])),
+    )
+    .unwrap();
+    assert_eq!(m.route(&large).device, CPU);
+    assert_eq!(m.route(&small).device, "gpu:vulkan:1:1");
+}
+
+#[test]
+fn a_real_gpu_opens_with_the_limits_it_is_listed_with() {
+    let adapters = WgpuAdapters::new();
+    for d in adapters.list() {
+        let opened = adapters.open(&d.id).unwrap();
+        eprintln!("{} {}: {:?} {:?}", d.id, d.name, opened.limits, opened.note);
+        if opened.note.is_none() {
+            assert_eq!(opened.limits, d.limits, "{}", d.name);
+        }
+    }
 }
 
 #[test]

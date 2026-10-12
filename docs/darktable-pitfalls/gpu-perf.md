@@ -63,13 +63,15 @@ documentation, not from darktable.
 - Evidence:
   https://github.com/darktable-org/darktable/issues/16383
   https://github.com/darktable-org/darktable/pull/21694
-- Helios exposure: at risk, with a concrete mismatch in the code.
-  `Gpu::open` calls `request_device` with `DeviceDescriptor::default()`, so
-  the device gets wgpu's default limits (256 MiB max buffer, 128 MiB max
-  storage binding), while `helios-compute`'s `fits()` checks jobs against
-  `adapter.limits()`, which are usually far larger. A job accepted by
-  `fits()` can then fail validation on the opened device. A 24 MP RGBA f32
-  image is about 384 MB, already above the default binding size.
+- Helios exposure: handled (fixed 2026-10-12). `Gpu::open` used wgpu's
+  default limits (256 MiB max buffer, 128 MiB max storage binding) while
+  `fits()` checked jobs against `adapter.limits()`. The device is now
+  opened with the adapter's limits (falling back to the adapter's buffer
+  sizes, then wgpu's defaults, when a driver refuses, and saying so), the
+  survey records those same limits, and `fits()` reads the opened device's
+  limits once it is open. Still open: kernels are dispatched along one
+  dimension, 64 pixels a workgroup, so wgpu's 65535 workgroups per
+  dimension cap a single dispatch near 4.2 Mpx whatever the buffer limits.
 - Recommendation: request `required_limits` from the adapter (at least
   `max_buffer_size` and `max_storage_buffer_binding_size`), and make
   `fits()` read the limits of the opened device, not of the adapter. Add a
