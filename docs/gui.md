@@ -35,11 +35,28 @@ The shell is a framework from the start:
 - the layout, auxiliary windows and their screens included, is saved per
   workspace in the user scope.
 
-Built: the areas, docked with `egui_dock` from the workspace's layout,
-with auxiliary windows and tabs dragged between areas under each panel's
-rules (`helios-gui/src/workbench.rs`), drawn inside egui-pop's
-application (see "Windows, dialogs and menus") until egui-pop's workbench
-takes them over.
+Built on egui-pop's workbench (2026-10-12, `helios-gui/src/workbench.rs`):
+Helios declares its panels with their rules (the areas each may be in,
+the size it opens at, whether it detaches), and egui-pop docks them in
+the centre, the start and end side bars and the bottom panel over
+`egui_dock`, as tabs and splits, with auxiliary windows and tabs
+dragged between areas; a drop the rules refuse is said where it
+happens and in the status bar. The layout changes only through
+egui-pop's steps (`workbench.move`, `workbench.focus`, `workbench.show`,
+`workbench.hide`, `workbench.detach`, `workbench.attach`), which a
+plugin may veto. Each panel has `<panel>.focus` and `<panel>.toggle`
+(egui-pop's), and Helios's `<panel>.moveTo` (`area`: `center`,
+`start_side`, `end_side`, `bottom`; the older `editors`,
+`primary_side_bar`, `secondary_side_bar`, `bottom_panel` still read),
+`<panel>.detach` and `<panel>.dock`.
+
+The workspace's layout is egui-pop's layout document; one saved by
+Helios before (no version, the older area names) is migrated when read.
+**Arrangements** (egui-pop's) are named layouts saved, switched and
+reset (`workbench.arrangement.*`), kept with the interface's settings;
+Helios offers its own as templates: `Image`, the image-first layout
+for small screens and culling (the image, the filmstrip under it,
+every other panel closed).
 
 ## Settings pages
 
@@ -250,10 +267,9 @@ Helios declares into it:
 - **keys**: egui-pop's keymap resolves them (layers, `when` clauses, a
   text field keeping plain keys), with the traces its debug bridge shows.
 
-Helios keeps what is its own: its status bar, its areas
-(docked panels, auxiliary windows, tabs dragged between areas, see
-"Panels"), drawn as a block of egui-pop's main zone until egui-pop's
-workbench takes them over, and its panels.
+Helios keeps what is its own: its status bar, its panels and their
+content (egui-pop's workbench places them, see "Panels"), and its
+system menu.
 
 **Commands run on Helios's kernel.** egui-pop wraps the kernel through a
 host contract (`helios_gui::host`): every command of Helios's registry is
@@ -316,7 +332,8 @@ recorded.
   ![A toast](gui/toast-helios-dark.png)
 
 - **Window**: auxiliary windows share the window's frame (title bar
-  and buttons) when Helios draws it, titled "`<panel>` — Helios".
+  and buttons) when Helios draws it, titled "`<panel>` — `<window>`"
+  (the main window's title: "Parameters — photos — Helios").
 
 **Menus are declared** (egui-pop's menus): a menu is an id to which the
 shell, a panel or a plugin contributes items, each a command (with

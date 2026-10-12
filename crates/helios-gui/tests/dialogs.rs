@@ -24,7 +24,7 @@ fn move_log(danger: bool) -> Confirm {
         verb: "Move the log".into(),
         danger,
         command: "helios.log.moveTo".into(),
-        args: json!({ "area": "editors" }),
+        args: json!({ "area": "center" }),
     }
 }
 
@@ -54,7 +54,7 @@ fn a_destructive_confirmation_starts_on_cancel_and_enter_keeps_it_safe() {
     h.run();
     assert_eq!(
         log_area(h.state()),
-        "BottomPanel",
+        "Bottom",
         "Enter on a danger dialog cancels"
     );
     assert!(h.state().target_rect("helios.dialog").is_err(), "closed");
@@ -73,7 +73,7 @@ fn an_agent_answers_a_dialog_by_command_with_its_origin() {
         )
         .unwrap();
     h.run();
-    assert_eq!(log_area(h.state()), "Editors");
+    assert_eq!(log_area(h.state()), "Center");
     let run = h
         .state()
         .history()
@@ -97,7 +97,7 @@ fn enter_runs_the_primary_action_of_a_safe_confirmation() {
     let mut h = harness(shell);
     h.key_press(Key::Enter);
     h.run();
-    assert_eq!(log_area(h.state()), "Editors");
+    assert_eq!(log_area(h.state()), "Center");
 }
 
 #[test]
@@ -107,12 +107,8 @@ fn a_form_is_built_from_descriptors_and_answered_with_values() {
         title: "Move the log".into(),
         fields: vec![Field {
             key: "area".into(),
-            descriptor: Descriptor::choice(
-                "area",
-                &["editors", "primary_side_bar", "bottom_panel"],
-                "bottom_panel",
-            ),
-            value: helios_core::Value::Choice("bottom_panel".into()),
+            descriptor: Descriptor::choice("area", &["center", "start_side", "bottom"], "bottom"),
+            value: helios_core::Value::Choice("bottom".into()),
         }],
         verb: "Move".into(),
         command: "helios.log.moveTo".into(),
@@ -122,7 +118,7 @@ fn a_form_is_built_from_descriptors_and_answered_with_values() {
         .state_mut()
         .run("dialog.current", json!(null), Origin::User)
         .unwrap();
-    assert_eq!(current["values"], json!({ "area": "bottom_panel" }));
+    assert_eq!(current["values"], json!({ "area": "bottom" }));
     // A wrong value is refused and the form stays.
     h.state_mut()
         .run(
@@ -136,12 +132,12 @@ fn a_form_is_built_from_descriptors_and_answered_with_values() {
     h.state_mut()
         .run(
             "dialog.answer",
-            json!({ "values": { "area": "primary_side_bar" } }),
+            json!({ "values": { "area": "start_side" } }),
             Origin::Agent("a1".into()),
         )
         .unwrap();
     h.run();
-    assert_eq!(log_area(h.state()), "PrimarySideBar");
+    assert_eq!(log_area(h.state()), "StartSide");
 }
 
 #[test]
@@ -149,7 +145,7 @@ fn a_picker_runs_its_command_with_the_value_chosen() {
     let mut shell = Shell::new(helios_panels(), None);
     shell.pick(Picker {
         title: "Move the log to".into(),
-        choices: ["editors", "primary_side_bar", "secondary_side_bar"]
+        choices: ["center", "start_side", "end_side"]
             .iter()
             .map(|a| Choice {
                 value: a.to_string(),
@@ -164,19 +160,19 @@ fn a_picker_runs_its_command_with_the_value_chosen() {
     // The filter has the focus: typing narrows the list, Enter takes the
     // first shown.
     h.get_by_role(egui::accesskit::Role::TextInput)
-        .type_text("second");
+        .type_text("end");
     h.run();
-    assert!(h.query_by_label("editors").is_none());
+    assert!(h.query_by_label("center").is_none());
     h.key_press(Key::Enter);
     h.run();
     h.run();
-    assert_eq!(log_area(h.state()), "SecondarySideBar");
+    assert_eq!(log_area(h.state()), "EndSide");
 
     // An agent chooses by value.
     let mut shell = Shell::new(helios_panels(), None);
     shell.pick(Picker {
         title: "Move the log to".into(),
-        choices: ["editors", "primary_side_bar"]
+        choices: ["center", "start_side"]
             .iter()
             .map(|a| Choice {
                 value: a.to_string(),
@@ -191,12 +187,12 @@ fn a_picker_runs_its_command_with_the_value_chosen() {
     h.state_mut()
         .run(
             "dialog.answer",
-            json!({ "choice": "primary_side_bar" }),
+            json!({ "choice": "start_side" }),
             Origin::Agent("a1".into()),
         )
         .unwrap();
     h.run();
-    assert_eq!(log_area(h.state()), "PrimarySideBar");
+    assert_eq!(log_area(h.state()), "StartSide");
 }
 
 #[test]
@@ -217,7 +213,7 @@ fn a_menu_lists_commands_with_their_keys_and_greys_what_does_not_apply() {
             MenuItem::command("workbench.fullscreen"),
             MenuItem::Command {
                 id: "helios.log.moveTo".into(),
-                args: json!({ "area": "editors" }),
+                args: json!({ "area": "center" }),
             },
         ],
     );
@@ -236,7 +232,7 @@ fn a_menu_lists_commands_with_their_keys_and_greys_what_does_not_apply() {
     );
     h.get_by_label("Move Log to an area").click();
     h.run();
-    assert_eq!(log_area(h.state()), "Editors");
+    assert_eq!(log_area(h.state()), "Center");
     assert!(h.state().target_rect("helios.menu").is_err(), "closed");
 }
 
@@ -266,7 +262,7 @@ fn the_yes_policy_confirms_at_once_and_says_so() {
     let mut h = harness(shell);
     h.state_mut().confirm(move_log(true));
     h.run();
-    assert_eq!(log_area(h.state()), "Editors");
+    assert_eq!(log_area(h.state()), "Center");
     assert_eq!(
         h.state().notes.last().map(String::as_str),
         Some("Move the log: confirmed by policy")

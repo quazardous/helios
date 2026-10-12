@@ -26,12 +26,14 @@ command-helios-filmstrip-dock =
     .title = Dock Filmstrip back in its area
 
 command-helios-filmstrip-focus =
+    .description = Shows Filmstrip and gives it the keyboard.
     .title = Focus Filmstrip
 
 command-helios-filmstrip-moveTo =
     .title = Move Filmstrip to an area (`area`)
 
 command-helios-filmstrip-toggle =
+    .description = Opens Filmstrip where it was, or closes it.
     .title = Show or hide Filmstrip
 
 command-helios-graph-detach =
@@ -41,12 +43,14 @@ command-helios-graph-dock =
     .title = Dock Graph back in its area
 
 command-helios-graph-focus =
+    .description = Shows Graph and gives it the keyboard.
     .title = Focus Graph
 
 command-helios-graph-moveTo =
     .title = Move Graph to an area (`area`)
 
 command-helios-graph-toggle =
+    .description = Opens Graph where it was, or closes it.
     .title = Show or hide Graph
 
 command-helios-log-detach =
@@ -56,12 +60,14 @@ command-helios-log-dock =
     .title = Dock Log back in its area
 
 command-helios-log-focus =
+    .description = Shows Log and gives it the keyboard.
     .title = Focus Log
 
 command-helios-log-moveTo =
     .title = Move Log to an area (`area`)
 
 command-helios-log-toggle =
+    .description = Opens Log where it was, or closes it.
     .title = Show or hide Log
 
 command-helios-modules-detach =
@@ -71,12 +77,14 @@ command-helios-modules-dock =
     .title = Dock Modules back in its area
 
 command-helios-modules-focus =
+    .description = Shows Modules and gives it the keyboard.
     .title = Focus Modules
 
 command-helios-modules-moveTo =
     .title = Move Modules to an area (`area`)
 
 command-helios-modules-toggle =
+    .description = Opens Modules where it was, or closes it.
     .title = Show or hide Modules
 
 command-helios-params-detach =
@@ -86,12 +94,14 @@ command-helios-params-dock =
     .title = Dock Parameters back in its area
 
 command-helios-params-focus =
+    .description = Shows Parameters and gives it the keyboard.
     .title = Focus Parameters
 
 command-helios-params-moveTo =
     .title = Move Parameters to an area (`area`)
 
 command-helios-params-toggle =
+    .description = Opens Parameters where it was, or closes it.
     .title = Show or hide Parameters
 
 command-helios-queue-detach =
@@ -101,12 +111,14 @@ command-helios-queue-dock =
     .title = Dock Queue back in its area
 
 command-helios-queue-focus =
+    .description = Shows Queue and gives it the keyboard.
     .title = Focus Queue
 
 command-helios-queue-moveTo =
     .title = Move Queue to an area (`area`)
 
 command-helios-queue-toggle =
+    .description = Opens Queue where it was, or closes it.
     .title = Show or hide Queue
 
 command-helios-scopes-detach =
@@ -116,12 +128,14 @@ command-helios-scopes-dock =
     .title = Dock Scopes back in its area
 
 command-helios-scopes-focus =
+    .description = Shows Scopes and gives it the keyboard.
     .title = Focus Scopes
 
 command-helios-scopes-moveTo =
     .title = Move Scopes to an area (`area`)
 
 command-helios-scopes-toggle =
+    .description = Opens Scopes where it was, or closes it.
     .title = Show or hide Scopes
 
 command-helios-vault-detach =
@@ -131,12 +145,14 @@ command-helios-vault-dock =
     .title = Dock Vault back in its area
 
 command-helios-vault-focus =
+    .description = Shows Vault and gives it the keyboard.
     .title = Focus Vault
 
 command-helios-vault-moveTo =
     .title = Move Vault to an area (`area`)
 
 command-helios-vault-toggle =
+    .description = Opens Vault where it was, or closes it.
     .title = Show or hide Vault
 
 command-helios-viewport-detach =
@@ -146,12 +162,14 @@ command-helios-viewport-dock =
     .title = Dock Image back in its area
 
 command-helios-viewport-focus =
+    .description = Shows Image and gives it the keyboard.
     .title = Focus Image
 
 command-helios-viewport-moveTo =
     .title = Move Image to an area (`area`)
 
 command-helios-viewport-toggle =
+    .description = Opens Image where it was, or closes it.
     .title = Show or hide Image
 
 command-param-copyPath =

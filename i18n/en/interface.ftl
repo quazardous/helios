@@ -20,9 +20,6 @@ menu-helios-system-recent =
 menu-helios-system-themes =
     .label = Themes
 
-panel-app-main =
-    .title = Main
-
 plugin-helios-commands =
     .title = Helios
 

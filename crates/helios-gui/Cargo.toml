@@ -26,10 +26,9 @@ helios-vault-sqlite.workspace = true
 helios-module-exposure = { path = "../../modules/exposure" }
 serde.workspace = true
 serde_json.workspace = true
-# MIT OR Apache-2.0 (egui, eframe, egui_kittest), MIT (egui_dock).
+# MIT OR Apache-2.0 (egui, eframe, egui_kittest).
 egui = "0.36"
 eframe = { version = "0.36", default-features = false, features = ["default_fonts", "wgpu", "wayland", "x11", "accesskit"] }
-egui_dock = { version = "0.21", features = ["serde"] }
 egui_kittest = { version = "0.36", features = ["eframe", "wgpu"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
 

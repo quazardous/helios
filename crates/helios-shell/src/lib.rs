@@ -4,15 +4,11 @@
 //! - [`when`]: the context expressions that say where a command applies
 //!   (`graphFocus && !textInputFocus`);
 //! - [`commands`]: every action is a named command, run the same way from a
-//!   menu, a key, the palette, an agent or a test;
-//! - [`panels`]: panels are declared, the shell places them in its areas;
-//! - [`layout`]: a workspace's arrangement (areas, editor groups, tabs,
-//!   auxiliary windows), saved and restored.
+//!   menu, a key, the palette, an agent or a test.
 //!
-//! Keys and menus are declared to egui-pop, the UI library the desktop is
-//! built on, which resolves keys and draws menus from its own model.
+//! Keys, menus, panels and their layout are declared to egui-pop, the UI
+//! library the desktop is built on, which resolves keys, draws menus and
+//! places panels (its workbench) from its own model.
 
 pub mod commands;
-pub mod layout;
-pub mod panels;
 pub mod when;

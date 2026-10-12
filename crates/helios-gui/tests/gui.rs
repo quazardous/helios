@@ -3,35 +3,115 @@
 
 use egui::{Key, Modifiers, vec2};
 use egui_kittest::kittest::Queryable;
-use helios_gui::dock::{from_dock, to_dock};
+use egui_pop::model::ids::PanelId;
+use egui_pop::model::layout::{Layout, Node};
+use egui_pop::model::panels::Area;
 use helios_gui::snapshot::Recorder;
 use helios_gui::{Shell, headless, helios_panels, name_rect};
 use helios_shell::commands::Origin;
-use helios_shell::layout::Node;
-use helios_shell::panels::Area;
 use serde_json::json;
+
+fn id(p: &str) -> PanelId {
+    PanelId::new(p).unwrap()
+}
 
 fn tabs(p: &[&str], active: usize) -> Node {
     Node::Tabs {
-        panels: p.iter().map(std::string::ToString::to_string).collect(),
+        panels: p.iter().map(|p| id(p)).collect(),
         active,
     }
 }
 
+/// Whether a layout places (docks or detaches) a panel.
+fn places(layout: &Layout, panel: &str) -> bool {
+    layout.placed().contains(&&id(panel))
+}
+
+/// A layout as Helios saved it before egui-pop's workbench (no version,
+/// its own area names), in a workspace's `layout.json`.
+const SAVED_BEFORE: &str = r#"{
+  "areas": [
+    ["editors", { "kind": "tabs", "panels": ["helios.viewport", "helios.graph"], "active": 1 }],
+    ["primary_side_bar", { "kind": "split", "vertical": true, "ratio": 0.4,
+      "a": { "kind": "tabs", "panels": ["helios.vault"], "active": 0 },
+      "b": { "kind": "tabs", "panels": ["helios.modules"], "active": 0 } }],
+    ["secondary_side_bar", { "kind": "tabs", "panels": ["helios.params", "helios.scopes"], "active": 0 }],
+    ["bottom_panel", { "kind": "tabs", "panels": ["helios.filmstrip", "helios.queue"], "active": 0 }]
+  ],
+  "auxiliary": [{ "panel": "helios.log", "screen": "primary", "rect": [80.0, 80.0, 480.0, 360.0] }]
+}"#;
+
 #[test]
-fn layout_nodes_round_trip_through_the_dock() {
-    let node = Node::Split {
-        vertical: false,
-        ratio: 0.3,
-        a: Box::new(tabs(&["a", "b"], 1)),
-        b: Box::new(Node::Split {
+fn a_layout_saved_before_egui_pop_s_workbench_migrates() {
+    let layout = Layout::from_json(SAVED_BEFORE).unwrap();
+    let area = |a: Area| layout.areas.iter().find(|(x, _)| *x == a).map(|(_, n)| n);
+    assert_eq!(
+        area(Area::Center),
+        Some(&tabs(&["helios.viewport", "helios.graph"], 1))
+    );
+    assert_eq!(
+        area(Area::StartSide),
+        Some(&Node::Split {
             vertical: true,
-            ratio: 0.6,
-            a: Box::new(tabs(&["c"], 0)),
-            b: Box::new(tabs(&["d", "e"], 0)),
-        }),
-    };
-    assert_eq!(from_dock(&to_dock(&node)), Some(node));
+            ratio: 0.4,
+            a: Box::new(tabs(&["helios.vault"], 0)),
+            b: Box::new(tabs(&["helios.modules"], 0)),
+        })
+    );
+    assert_eq!(
+        area(Area::EndSide),
+        Some(&tabs(&["helios.params", "helios.scopes"], 0))
+    );
+    assert_eq!(
+        area(Area::Bottom),
+        Some(&tabs(&["helios.filmstrip", "helios.queue"], 0))
+    );
+    assert_eq!(layout.auxiliary[0].panel, id("helios.log"));
+    // The shell opens in it, nothing of Helios's moved by the repair.
+    let shell = Shell::new(helios_panels(), Some(layout.clone()));
+    let open = shell.layout();
+    for (a, node) in &layout.areas {
+        let now = open.areas.iter().find(|(x, _)| x == a).unwrap();
+        assert_eq!(&now.1, node, "{a:?}");
+    }
+    assert_eq!(open.auxiliary, layout.auxiliary);
+    assert!(
+        !shell.notes.iter().any(|n| n.contains("helios.")),
+        "{:?}",
+        shell.notes
+    );
+    // Written back as egui-pop's document, it reads the same.
+    let again = Layout::from_json(&open.to_json()).unwrap();
+    assert_eq!(again, open);
+    assert!(open.to_json().contains("\"start_side\""));
+}
+
+#[test]
+fn helios_s_layouts_are_arrangement_templates() {
+    use egui_pop::api::arrangements;
+    let mut h = headless::harness(Shell::new(helios_panels(), None), vec2(1024.0, 700.0));
+    h.run();
+    let app = h.state().app().handle().clone();
+    assert!(arrangements::names(&app).contains(&helios_gui::IMAGE_FIRST.to_string()));
+    assert!(arrangements::switch(&app, helios_gui::IMAGE_FIRST).ok());
+    h.run();
+    let layout = h.state().layout();
+    assert!(places(&layout, "helios.viewport") && places(&layout, "helios.filmstrip"));
+    assert!(!places(&layout, "helios.params") && !places(&layout, "helios.vault"));
+    // Saved by name in the host's store, then reset to the template.
+    let s = h.state_mut();
+    s.run("helios.params.toggle", json!(null), Origin::User)
+        .unwrap();
+    h.run();
+    assert!(arrangements::save(&app, "Mine").ok());
+    assert!(arrangements::saved(&app).contains_key("Mine"));
+    assert!(arrangements::switch(&app, helios_gui::IMAGE_FIRST).ok());
+    assert!(arrangements::reset(&app).ok());
+    h.run();
+    assert!(!places(&h.state().layout(), "helios.params"));
+    assert!(arrangements::switch(&app, "Mine").ok());
+    h.run();
+    assert!(places(&h.state().layout(), "helios.params"));
 }
 
 #[test]
@@ -82,8 +162,7 @@ fn keys_open_the_palette_which_runs_a_command() {
     h.key_press(Key::Enter);
     h.run();
     assert!(!h.state().palette_open());
-    let placed = h.state().layout();
-    assert!(!placed.placed().contains(&"helios.queue"));
+    assert!(!places(&h.state().layout(), "helios.queue"));
     let history = h.state().history();
     let last = history.last().unwrap();
     assert_eq!(last.id, "helios.queue.toggle");
@@ -103,8 +182,8 @@ fn commands_move_panels_and_the_layout_follows() {
     h.run();
     let layout = h.state().layout();
     assert_eq!(layout.auxiliary.len(), 1);
-    assert_eq!(layout.auxiliary[0].panel, "helios.log");
-    assert!(!layout.placed().contains(&"helios.scopes"));
+    assert_eq!(layout.auxiliary[0].panel, id("helios.log"));
+    assert!(!places(&layout, "helios.scopes"));
     // The detached panel is still drawn (embedded headless) and pictured.
     assert!(headless::snapshot(&mut h, "helios.log").is_ok());
 
@@ -118,11 +197,9 @@ fn commands_move_panels_and_the_layout_follows() {
     let side = layout
         .areas
         .iter()
-        .find(|(a, _)| *a == Area::SecondarySideBar)
+        .find(|(a, _)| *a == Area::EndSide)
         .unwrap();
-    assert!(
-        matches!(&side.1, Node::Tabs { panels, .. } if panels.contains(&"helios.scopes".to_string()))
-    );
+    assert!(side.1.panels().contains(&&id("helios.scopes")));
     assert_eq!(h.state().focused().as_deref(), Some("helios.scopes"));
 }
 
@@ -252,7 +329,7 @@ fn a_profile_exports_imports_with_a_diff_and_is_used_by_name() {
         .unwrap();
     h2.run();
     assert_eq!(h2.state().theme_name(), "helios-high-contrast");
-    assert!(!h2.state().layout().placed().contains(&"helios.log"));
+    assert!(!places(&h2.state().layout(), "helios.log"));
 
     // By name, as a workspace does.
     let s = h2.state_mut();
@@ -486,31 +563,19 @@ fn drag_tab(h: &mut egui_kittest::Harness<'_, Shell>, panel: &str, to: egui::Pos
 }
 
 fn area_of(shell: &Shell, panel: &str) -> Option<Area> {
-    shell
-        .layout()
-        .areas
-        .iter()
-        .find(|(_, n)| {
-            serde_json::to_string(n)
-                .unwrap()
-                .contains(&format!("\"{panel}\""))
-        })
-        .map(|(a, _)| *a)
+    shell.layout().area_of(&id(panel))
 }
 
 #[test]
 fn a_tab_dragged_to_another_area_moves_there_and_stays_after_a_restart() {
     let mut h = headless::harness(Shell::new(helios_panels(), None), vec2(1280.0, 800.0));
     h.run();
-    assert_eq!(
-        area_of(h.state(), "helios.vault"),
-        Some(Area::PrimarySideBar)
-    );
+    assert_eq!(area_of(h.state(), "helios.vault"), Some(Area::StartSide));
     let target = h.state().target_rect("helios.params").unwrap().center();
     drag_tab(&mut h, "helios.vault", target);
     assert_eq!(
         area_of(h.state(), "helios.vault"),
-        Some(Area::SecondarySideBar),
+        Some(Area::EndSide),
         "{:?}",
         h.state().notes
     );
@@ -535,17 +600,15 @@ fn a_tab_that_may_not_go_there_goes_back_and_says_why() {
         h.hover_at(from + (target - from) * (k as f32 / 8.0));
         h.run();
     }
-    assert!(
-        h.state().target_rect("helios.drop").is_ok(),
-        "a drop hint is shown"
-    );
     h.drop_at(target);
     h.run();
     h.run();
-    assert_eq!(area_of(h.state(), "helios.viewport"), Some(Area::Editors));
+    assert_eq!(area_of(h.state(), "helios.viewport"), Some(Area::Center));
+    // egui-pop's workbench refuses it (a toast); Helios's status bar says
+    // it too.
     assert_eq!(
         h.state().notes.last().map(String::as_str),
-        Some("Image stays out of the primary side bar")
+        Some("Image stays out of the start side bar")
     );
 }
 
@@ -568,8 +631,8 @@ fn move_to_does_what_a_drag_does_under_the_same_rules() {
         .unwrap();
     let mut h = headless::harness(shell, vec2(1280.0, 800.0));
     h.run();
-    assert_eq!(area_of(h.state(), "helios.log"), Some(Area::Editors));
-    assert_eq!(area_of(h.state(), "helios.graph"), Some(Area::Editors));
+    assert_eq!(area_of(h.state(), "helios.log"), Some(Area::Center));
+    assert_eq!(area_of(h.state(), "helios.graph"), Some(Area::Center));
     assert_eq!(
         h.state().notes.last().map(String::as_str),
         Some("Graph stays out of the bottom panel")

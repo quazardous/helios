@@ -6,9 +6,9 @@
 //! window with its shortcuts editor, the window's place and frame, and
 //! the keys, resolved by its keymap. Helios declares its commands there
 //! and runs them on its own kernel (see `host`), opens its system menu
-//! from the frame, draws its status bar, and its areas (docked panels and
-//! auxiliary windows, see `workbench`) as a block of egui-pop's main
-//! zone.
+//! from the frame, draws its status bar, and gives its panels to
+//! egui-pop's workbench (areas, auxiliary windows, arrangements, see
+//! `workbench`).
 //!
 //! Everything the user can do goes through a command, so a key, the
 //! palette, a menu, a script and an agent reach the same actions.
@@ -29,13 +29,14 @@ use egui_pop::api::toasts::{TOASTS, Toast};
 use egui_pop::api::{App, AppHandle, DefaultPlugins, palette};
 use egui_pop::core::frame::{FrameRequest, HitTable};
 use egui_pop::core::scale;
+use egui_pop::model::ids::PanelId;
 use egui_pop::model::ids::{CommandId, MenuId, OwnerId};
 use egui_pop::model::keymap::Layer;
+use egui_pop::model::layout::Layout;
 use egui_pop::model::menus::{Item, MenuItem as PopItem, Shown, show_items};
+use egui_pop::model::panels::{Area, PanelSpec};
 use helios_core::Bus;
 use helios_shell::commands::{CommandSpec, Origin, Registry, Run};
-use helios_shell::layout::Layout;
-use helios_shell::panels::{Area, PanelSpec, Panels};
 use image::RgbaImage;
 use serde_json::{Value, json};
 
@@ -47,7 +48,7 @@ use crate::plugins::{
 };
 use crate::snapshot::{self, Recorder};
 use crate::viewport::ZoomTo;
-use crate::workbench::Workbench;
+use crate::workbench::Contents;
 
 pub use crate::workbench::Content;
 
@@ -77,8 +78,6 @@ enum Action {
     Minimize,
     Maximize,
     Close,
-    Focus(String),
-    Toggle(String),
     Detach(String),
     MoveTo(String, Area),
     Zoom(crate::viewport::ZoomTo),
@@ -166,7 +165,11 @@ pub struct Shell {
     app: App,
     registry: Arc<Mutex<Registry>>,
     lists: Rc<RefCell<ListSource>>,
-    workbench: Rc<RefCell<Workbench>>,
+    /// The panels declared, and what each draws.
+    panels: Vec<PanelSpec>,
+    contents: Contents,
+    /// The journal read up to here, for the workbench's refusals.
+    seen: u64,
     queue: Queue,
     rects: BTreeMap<String, Rect>,
     pixels_per_point: f32,
@@ -225,13 +228,17 @@ pub struct Shell {
 impl Shell {
     /// A shell over declared panels, in a saved layout (repaired) or the
     /// default one.
-    pub fn new(panels: Panels, layout: Option<Layout>) -> Shell {
+    pub fn new(panels: Vec<PanelSpec>, layout: Option<Layout>) -> Shell {
         Shell::build(panels, layout, None)
     }
 
     /// As [`Shell::new`], keeping the interface's settings (window place,
     /// focus mode, the user's keys) in `ui_settings`.
-    pub fn build(panels: Panels, layout: Option<Layout>, ui_settings: Option<PathBuf>) -> Shell {
+    pub fn build(
+        panels: Vec<PanelSpec>,
+        layout: Option<Layout>,
+        ui_settings: Option<PathBuf>,
+    ) -> Shell {
         let registry = Arc::new(Mutex::new(Registry::new()));
         let bus = Arc::new(Bus::new());
         // Helios's values: what widgets and agents edit, and what Edit >
@@ -240,9 +247,7 @@ impl Shell {
         let host =
             HeliosHost::new(registry.clone(), bus, Arc::default()).with_values(values.clone());
         let later = host.later();
-        let specs: Vec<PanelSpec> = panels.all().to_vec();
-        let (workbench, notes) = Workbench::new(panels, layout);
-        let workbench = Rc::new(RefCell::new(workbench));
+        let contents = Contents::default();
         let themes = crate::theme::themes();
         let declarations = Rc::new(RefCell::new(Declarations::default()));
         let lists = Rc::new(RefCell::new(ListSource {
@@ -260,7 +265,7 @@ impl Shell {
             themes: &themes,
             declarations: &declarations,
         };
-        Shell::declare_commands(&wiring, &specs);
+        Shell::declare_commands(&wiring, &panels);
         // The param commands first: the menus take their titles.
         helios_values::register(&mut lock(&registry), wiring.values.clone())
             .expect("param commands are declared once");
@@ -295,8 +300,9 @@ impl Shell {
                 FramePlugin::system()
             })
             .plugin(plugins::Frame)
-            .plugin(plugins::Areas {
-                workbench: workbench.clone(),
+            .plugin(crate::workbench::Panels {
+                specs: panels.clone(),
+                contents: contents.clone(),
             })
             .plugin(
                 egui_pop::i18n::I18nPlugin::new()
@@ -324,14 +330,16 @@ impl Shell {
             app,
             registry,
             lists,
-            workbench,
+            panels,
+            contents,
+            seen: 0,
             queue,
             rects: BTreeMap::new(),
             pixels_per_point: 1.0,
             native_scale: None,
             shots: VecDeque::new(),
             recording: None,
-            notes,
+            notes: Vec::new(),
             title: String::new(),
             theme: crate::theme::resolve(&themes, crate::theme::DEFAULT, &BTreeMap::new()),
             themes,
@@ -361,6 +369,10 @@ impl Shell {
         for d in shell.app.handle().diagnostics() {
             shell.notes.push(format!("{}: {}", d.code, d.message));
         }
+        shell.seen = shell.app.handle().last_event();
+        if let Some(layout) = layout {
+            shell.set_layout(layout);
+        }
         {
             let mut store = lock(&shell.values);
             crate::viewport::declare(&mut store);
@@ -369,7 +381,7 @@ impl Shell {
                 helios_values::Descriptor::text("selected node", ""),
             );
         }
-        let has = |shell: &Shell, panel: &str| shell.workbench.borrow().panels.get(panel).is_some();
+        let has = |shell: &Shell, panel: &str| shell.panels.iter().any(|p| p.id.as_str() == panel);
         if has(&shell, "helios.params") {
             shell
                 .params
@@ -439,6 +451,24 @@ impl Shell {
     /// Every command Helios declares, by id.
     pub fn specs(&self) -> Vec<CommandSpec> {
         lock(&self.registry).specs().cloned().collect()
+    }
+
+    /// The commands egui-pop's workbench declares for Helios's panels
+    /// (`<panel>.focus`, `<panel>.toggle`), run in the interface.
+    pub fn panel_commands(&self) -> Vec<CommandSpec> {
+        let owner = egui_pop::model::ids::OwnerId::from(&crate::workbench::PANELS);
+        self.app
+            .handle()
+            .commands()
+            .into_iter()
+            .filter(|(_, o)| *o == owner)
+            .map(|(c, _)| CommandSpec::new(c.id.as_str(), &c.title, &c.category))
+            .collect()
+    }
+
+    /// The panels declared.
+    pub fn panels(&self) -> &[PanelSpec] {
+        &self.panels
     }
 
     /// The last command runs, Helios's and the interface's, oldest first.
@@ -556,14 +586,13 @@ impl Shell {
 
     /// The layout as it stands, to be saved with the workspace.
     pub fn layout(&self) -> Layout {
-        self.workbench.borrow().layout()
+        self.app.handle().layout()
     }
 
     /// Gives a panel its content; panels without one show a placeholder.
     pub fn set_content(&mut self, panel: &str, content: impl FnMut(&mut Ui) + 'static) {
-        self.workbench
+        self.contents
             .borrow_mut()
-            .contents
             .insert(panel.into(), Box::new(content));
     }
 
@@ -733,9 +762,12 @@ impl Shell {
         }
     }
 
-    /// Arranges the panels as a layout says, repaired to today's panels.
+    /// Arranges the panels as a layout says, repaired to today's panels
+    /// (egui-pop's workbench); the repairs are noted. A layout saved by
+    /// Helios before egui-pop's workbench reads the same
+    /// (`Layout::from_json` migrates its area names).
     pub fn set_layout(&mut self, layout: Layout) {
-        let notes = self.workbench.borrow_mut().set_layout(layout);
+        let notes = self.app.handle().set_layout(layout);
         self.notes.extend(notes);
     }
 
@@ -815,7 +847,7 @@ impl Shell {
 
     /// The panel that has the focus.
     pub fn focused(&self) -> Option<String> {
-        self.workbench.borrow().focused.clone()
+        self.app.handle().focused_panel().map(|p| p.to_string())
     }
 
     pub fn palette_open(&self) -> bool {
@@ -1001,25 +1033,10 @@ impl Shell {
             CommandSpec::new("gui.record.stop", "Stop recording", "Developer"),
             Box::new(|_, _| Ok(Action::RecordStop)),
         );
+        // `<panel>.focus` and `<panel>.toggle` are egui-pop's, declared
+        // with each panel.
         for p in panels {
-            let id = p.id.clone();
-            let (focus, toggle) = (id.clone(), id.clone());
-            add(
-                CommandSpec::new(
-                    &format!("{id}.focus"),
-                    &format!("Focus {}", p.title),
-                    "View",
-                ),
-                Box::new(move |_, _| Ok(Action::Focus(focus.clone()))),
-            );
-            add(
-                CommandSpec::new(
-                    &format!("{id}.toggle"),
-                    &format!("Show or hide {}", p.title),
-                    "View",
-                ),
-                Box::new(move |_, _| Ok(Action::Toggle(toggle.clone()))),
-            );
+            let id = p.id.to_string();
             let move_to = id.clone();
             add(
                 CommandSpec::new(
@@ -1028,12 +1045,12 @@ impl Shell {
                     "View",
                 ),
                 Box::new(move |a, _| {
-                    let area = a
+                    let name = a
                         .get("area")
-                        .cloned()
-                        .ok_or("`area` is missing: editors, primary_side_bar, secondary_side_bar or bottom_panel")?;
-                    let area: Area =
-                        serde_json::from_value(area).map_err(|e| format!("`area`: {e}"))?;
+                        .and_then(Value::as_str)
+                        .ok_or("`area` is missing: center, start_side, end_side or bottom")?;
+                    let area = crate::workbench::area_named(name)
+                        .ok_or_else(|| format!("`area`: no area `{name}`"))?;
                     Ok(Action::MoveTo(move_to.clone(), area))
                 }),
             );
@@ -1661,7 +1678,7 @@ impl Shell {
         let flag = |on: bool| if on { "true" } else { "false" };
         h.set_context(
             "focusedPanel",
-            self.workbench.borrow().focused.as_deref().unwrap_or(""),
+            h.focused_panel().as_ref().map_or("", PanelId::as_str),
         );
         h.set_context("paletteVisible", flag(palette::is_open(h)));
         h.set_context(
@@ -1828,8 +1845,6 @@ impl Shell {
                 .toggle_label(&l)
                 .map_err(|e| format!("vault.label: {e}"))?,
             Action::Step(n) => self.library.borrow_mut().step(n),
-            Action::Focus(p) => self.workbench.borrow_mut().focus(&p),
-            Action::Toggle(p) => self.workbench.borrow_mut().toggle(&p),
             Action::Zoom(z) => self.viewport.borrow_mut().zoom(z, &self.values),
             Action::Compare => {
                 use crate::viewport::COMPARE;
@@ -1850,7 +1865,11 @@ impl Shell {
                 ctx.copy_text(text.clone());
                 self.note(format!("copied {text}"));
             }
-            Action::MoveTo(p, area) => self.workbench.borrow_mut().move_to(&p, area, None)?,
+            // The workbench's steps: the panel's rules, then any plugin,
+            // may refuse.
+            Action::MoveTo(p, area) => {
+                return workbench_outcome(self.app.handle().move_panel(&panel_id(&p)?, area));
+            }
             Action::Answer(answer, origin) => self.answer(answer, &origin)?,
             Action::AssumeYes(on) => {
                 self.assume_yes = on;
@@ -1861,13 +1880,13 @@ impl Shell {
                 });
             }
             Action::Detach(p) => {
-                let was = self.rects.get(&p).copied();
-                self.workbench.borrow_mut().detach(&p, was);
+                return workbench_outcome(self.app.handle().detach_panel(&panel_id(&p)?));
             }
             Action::Dock(p) => {
-                let mut wb = self.workbench.borrow_mut();
-                if wb.auxiliary.iter().any(|a| a.panel == p) {
-                    wb.dock(&p);
+                let id = panel_id(&p)?;
+                let h = self.app.handle();
+                if h.layout().auxiliary.iter().any(|a| a.panel == id) {
+                    return workbench_outcome(h.attach_panel(&id));
                 }
             }
             Action::Snapshot { target, path } if target == "viewport.scene" => {
@@ -2020,12 +2039,7 @@ impl Shell {
         self.status_bar(ui);
         self.viewport.borrow_mut().sync(&mut lock(&self.values));
         self.app.show(ui);
-        let warnings = std::mem::take(&mut self.workbench.borrow_mut().warnings);
-        for w in warnings {
-            self.warn(w);
-        }
-        let framed = frame::own_frame(self.app.handle());
-        self.workbench.borrow_mut().windows(&ctx, framed);
+        self.workbench_refusals();
         self.menus_ui(&ctx);
 
         let named = ctx.data(|d| d.get_temp::<BTreeMap<String, Rect>>(Id::new("helios.named")));
@@ -2036,6 +2050,22 @@ impl Shell {
             self.shots.push_back(Shot::Frame);
             ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::default()));
             ctx.request_repaint();
+        }
+    }
+
+    /// What the workbench refused this frame (a tab dropped where its
+    /// panel may not go), from egui-pop's journal: said in the status bar
+    /// (egui-pop shows the toast).
+    fn workbench_refusals(&mut self) {
+        let h = self.app.handle().clone();
+        let events = h.events_since(self.seen);
+        self.seen = h.last_event();
+        for e in events {
+            if e.name == "workbench.refused"
+                && let Some(why) = e.data["reason"].as_str()
+            {
+                self.note(why.to_string());
+            }
         }
     }
 
@@ -2144,6 +2174,22 @@ fn menu_rows(
                 }
             }
         }
+    }
+}
+
+/// A panel's id, checked.
+fn panel_id(id: &str) -> Result<PanelId, String> {
+    PanelId::new(id).map_err(|e| e.to_string())
+}
+
+/// A workbench step's outcome as a command's result.
+fn workbench_outcome(out: Option<egui_pop::api::steps::Outcome>) -> Result<Value, String> {
+    use egui_pop::api::steps::Outcome;
+    match out {
+        Some(Outcome::Done(r)) => r,
+        Some(Outcome::Vetoed { by, reason }) => Err(format!("stopped by `{by}`: {reason}")),
+        // Asked while the areas are drawn: done at the frame's end.
+        None => Ok(Value::Null),
     }
 }
 

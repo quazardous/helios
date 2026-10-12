@@ -10,7 +10,6 @@ use egui_pop_i18n::extract::{self, English, Found};
 
 use helios_core::{Manifest, ParamHint, ParamKind};
 use helios_shell::commands::CommandSpec;
-use helios_shell::panels::PanelSpec;
 use serde::{Deserialize, Serialize};
 
 use crate::ids::{self, MessageId};
@@ -63,11 +62,12 @@ pub struct Declarations {
 }
 
 impl Declarations {
-    /// From the declarations themselves: command specs, panel specs, and
-    /// each module's manifest with its parameter hints.
+    /// From the declarations themselves: command specs, panels (an id and
+    /// a title, as egui-pop's workbench declares them), and each module's
+    /// manifest with its parameter hints.
     pub fn from_specs<'a>(
         commands: impl IntoIterator<Item = &'a CommandSpec>,
-        panels: impl IntoIterator<Item = &'a PanelSpec>,
+        panels: impl IntoIterator<Item = Panel>,
         modules: impl IntoIterator<Item = (&'a Manifest, Vec<ParamHint>)>,
     ) -> Self {
         Self {
@@ -78,13 +78,7 @@ impl Declarations {
                     title: c.title.clone(),
                 })
                 .collect(),
-            panels: panels
-                .into_iter()
-                .map(|p| Panel {
-                    id: p.id.clone(),
-                    title: p.title.clone(),
-                })
-                .collect(),
+            panels: panels.into_iter().collect(),
             modules: modules
                 .into_iter()
                 .map(|(m, hints)| Module {
@@ -154,10 +148,24 @@ impl Declarations {
     /// empty texts are left out (Fluent has no empty value).
     pub fn english_files(&self) -> Result<BTreeMap<&'static str, String>, String> {
         let mut areas = self.areas();
-        let interface = areas.entry("interface.ftl").or_default();
+        // A message lives in one file: an attribute of a message another
+        // area holds (a panel command's description, which egui-pop
+        // declares) goes beside it.
+        let owner: BTreeMap<String, &'static str> = areas
+            .iter()
+            .flat_map(|(file, units)| {
+                units.iter().map(|(id, _)| {
+                    (
+                        egui_pop_i18n::catalog::split_key(&id.key()).0.to_string(),
+                        *file,
+                    )
+                })
+            })
+            .collect();
         for (key, text) in &self.interface {
             let (id, attr) = egui_pop_i18n::catalog::split_key(key);
-            interface.push((
+            let file = owner.get(id).copied().unwrap_or("interface.ftl");
+            areas.entry(file).or_default().push((
                 match attr {
                     Some(a) => MessageId::attr(id, a),
                     None => MessageId::new(id),
@@ -231,7 +239,7 @@ mod tests {
         ];
         let m = manifest();
         let hints = vec![ParamHint::new("gain").label("Gain")];
-        Declarations::from_specs(&commands, &[], [(&m, hints)])
+        Declarations::from_specs(&commands, [], [(&m, hints)])
     }
 
     #[test]
@@ -271,7 +279,7 @@ mod tests {
             CommandSpec::new("a.b", "One", "X"),
             CommandSpec::new("a_b", "Two", "X"),
         ];
-        let d = Declarations::from_specs(&commands, &[], []);
+        let d = Declarations::from_specs(&commands, [], []);
         assert!(d.english_files().unwrap_err().contains("command-a-b.title"));
     }
 

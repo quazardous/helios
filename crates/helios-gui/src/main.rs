@@ -10,8 +10,8 @@
 
 use std::path::{Path, PathBuf};
 
+use egui_pop::model::layout::Layout;
 use helios_gui::{Shell, headless, helios_panels};
-use helios_shell::layout::Layout;
 
 /// Where a workspace's layout is kept: in the user's configuration, not
 /// in the workspace.
@@ -38,6 +38,8 @@ fn layout_file(workspace: &Path) -> Option<PathBuf> {
     )
 }
 
+/// A workspace's saved layout: egui-pop's layout document, which also
+/// reads (and migrates) the layouts Helios saved before.
 fn load(file: Option<&Path>) -> Option<Layout> {
     let text = std::fs::read_to_string(file?).ok()?;
     Layout::from_json(&text).ok()

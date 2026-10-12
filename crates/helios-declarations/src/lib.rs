@@ -25,14 +25,20 @@ const MENUS: [MenuId; 2] = [
 /// module registry.
 pub fn collect() -> Declarations {
     let shell = helios_gui::Shell::new(helios_gui::helios_panels(), None);
-    let panels = helios_gui::helios_panels();
+    let panels = shell.panels().iter().map(|p| helios_i18n::extract::Panel {
+        id: p.id.to_string(),
+        title: p.title.clone(),
+    });
     let modules = helios_node::registry();
     let modules: Vec<_> = modules
         .values()
         .map(|m| (m.manifest(), m.param_hints()))
         .collect();
-    let commands = shell.specs();
-    let mut d = Declarations::from_specs(&commands, panels.all(), modules);
+    // Helios's registry, and each panel's commands, which egui-pop's
+    // workbench declares.
+    let mut commands = shell.specs();
+    commands.extend(shell.panel_commands());
+    let mut d = Declarations::from_specs(&commands, panels, modules);
     // What egui-pop's catalogues translate, and what the areas above
     // already hold, is not Helios's to write again.
     let egui_pop = egui_pop::i18n::I18n::with_egui_pop("en").keys("en");

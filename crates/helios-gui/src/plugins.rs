@@ -2,8 +2,8 @@
 //! see `host`), with their keys and menu entries; the system menu's lists
 //! (profiles, recent workspaces), filled by list providers when the menu
 //! opens; undo and redo held while a change is in progress; the
-//! window's frame opening Helios's system menu; and the areas, a block
-//! of egui-pop's main zone.
+//! window's frame opening Helios's system menu. Helios's panels are
+//! declared by `workbench`.
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
@@ -15,16 +15,13 @@ use egui_pop::api::app::{STEP_REDO, STEP_UNDO};
 use egui_pop::api::frame::{FramePlugin, STEP_SYSTEM_MENU};
 use egui_pop::api::menus::{ListItem, popup_at};
 use egui_pop::api::steps::Before;
-use egui_pop::api::zones::{self, Block};
 use egui_pop::api::{Ctx, Plugin, PluginError};
 use egui_pop::model::commands::CommandSpec;
-use egui_pop::model::ids::{BlockId, CommandId, MenuId, PluginId};
+use egui_pop::model::ids::{CommandId, MenuId, PluginId};
 use egui_pop::model::keymap::Layer;
 use egui_pop::model::menus::MenuItem;
 use helios_shell::commands::Registry;
 use serde_json::json;
-
-use crate::workbench::Workbench;
 
 /// The system menu, opened by the logo (Alt+Space too).
 pub const SYSTEM: MenuId = MenuId::from_static("helios.system");
@@ -36,7 +33,6 @@ pub const PARAM: MenuId = MenuId::from_static("helios.param");
 
 pub const COMMANDS: PluginId = PluginId::from_static("helios.commands");
 pub const LISTS: PluginId = PluginId::from_static("helios.lists");
-pub const WORKBENCH: PluginId = PluginId::from_static("helios.workbench");
 pub const HISTORY: PluginId = PluginId::from_static("helios.history");
 pub const FRAME: PluginId = PluginId::from_static("helios.frame");
 
@@ -245,32 +241,6 @@ impl Plugin for Frame {
             let open = popup_at(app, &SYSTEM, egui::pos2(x, y));
             Ok(json!({ "open": open, "menu": SYSTEM }))
         });
-        Ok(())
-    }
-}
-
-/// The areas, drawn in egui-pop's main zone.
-pub struct Areas {
-    pub workbench: Rc<RefCell<Workbench>>,
-}
-
-impl Plugin for Areas {
-    fn id(&self) -> PluginId {
-        WORKBENCH
-    }
-
-    fn title(&self) -> String {
-        "Helios areas".into()
-    }
-
-    fn connect(&mut self, ctx: &mut Ctx<'_>) -> Result<(), PluginError> {
-        let wb = self.workbench.clone();
-        ctx.block(
-            zones::MAIN,
-            Block::add(BlockId::from_static("helios.areas"), 0, move |ui, _| {
-                wb.borrow_mut().ui(ui);
-            }),
-        );
         Ok(())
     }
 }

@@ -26,12 +26,14 @@ command-helios-filmstrip-dock =
 
 command-helios-filmstrip-focus =
     .title = Aller à Pellicule
+    .description = Affiche la pellicule et lui donne le clavier.
 
 command-helios-filmstrip-moveTo =
     .title = Déplacer Pellicule vers une zone (`area`)
 
 command-helios-filmstrip-toggle =
     .title = Afficher ou masquer Pellicule
+    .description = Ouvre la pellicule là où elle était, ou la ferme.
 
 command-helios-graph-detach =
     .title = Déplacer Graphe dans une nouvelle fenêtre
@@ -41,12 +43,14 @@ command-helios-graph-dock =
 
 command-helios-graph-focus =
     .title = Aller à Graphe
+    .description = Affiche le graphe et lui donne le clavier.
 
 command-helios-graph-moveTo =
     .title = Déplacer Graphe vers une zone (`area`)
 
 command-helios-graph-toggle =
     .title = Afficher ou masquer le graphe
+    .description = Ouvre le graphe là où il était, ou le ferme.
 
 command-helios-log-detach =
     .title = Déplacer Journal dans une nouvelle fenêtre
@@ -56,12 +60,14 @@ command-helios-log-dock =
 
 command-helios-log-focus =
     .title = Aller à Journal
+    .description = Affiche le journal et lui donne le clavier.
 
 command-helios-log-moveTo =
     .title = Déplacer Journal vers une zone (`area`)
 
 command-helios-log-toggle =
     .title = Afficher ou masquer Journal
+    .description = Ouvre le journal là où il était, ou le ferme.
 
 command-helios-modules-detach =
     .title = Déplacer Modules dans une nouvelle fenêtre
@@ -71,12 +77,14 @@ command-helios-modules-dock =
 
 command-helios-modules-focus =
     .title = Aller à Modules
+    .description = Affiche les modules et leur donne le clavier.
 
 command-helios-modules-moveTo =
     .title = Déplacer Modules vers une zone (`area`)
 
 command-helios-modules-toggle =
     .title = Afficher ou masquer Modules
+    .description = Ouvre les modules là où ils étaient, ou les ferme.
 
 command-helios-params-detach =
     .title = Déplacer Paramètres dans une nouvelle fenêtre
@@ -86,12 +94,14 @@ command-helios-params-dock =
 
 command-helios-params-focus =
     .title = Aller à Paramètres
+    .description = Affiche les paramètres et leur donne le clavier.
 
 command-helios-params-moveTo =
     .title = Déplacer Paramètres vers une zone (`area`)
 
 command-helios-params-toggle =
     .title = Afficher ou masquer Paramètres
+    .description = Ouvre les paramètres là où ils étaient, ou les ferme.
 
 command-helios-queue-detach =
     .title = Déplacer File d’attente dans une nouvelle fenêtre
@@ -101,12 +111,14 @@ command-helios-queue-dock =
 
 command-helios-queue-focus =
     .title = Aller à File d’attente
+    .description = Affiche la file d’attente et lui donne le clavier.
 
 command-helios-queue-moveTo =
     .title = Déplacer File d’attente vers une zone (`area`)
 
 command-helios-queue-toggle =
     .title = Afficher ou masquer File d’attente
+    .description = Ouvre la file d’attente là où elle était, ou la ferme.
 
 command-helios-scopes-detach =
     .title = Déplacer Mesures dans une nouvelle fenêtre
@@ -116,12 +128,14 @@ command-helios-scopes-dock =
 
 command-helios-scopes-focus =
     .title = Aller à Mesures
+    .description = Affiche les mesures et leur donne le clavier.
 
 command-helios-scopes-moveTo =
     .title = Déplacer Mesures vers une zone (`area`)
 
 command-helios-scopes-toggle =
     .title = Afficher ou masquer Mesures
+    .description = Ouvre les mesures là où elles étaient, ou les ferme.
 
 command-helios-vault-detach =
     .title = Déplacer Coffre dans une nouvelle fenêtre
@@ -131,12 +145,14 @@ command-helios-vault-dock =
 
 command-helios-vault-focus =
     .title = Aller à Coffre
+    .description = Affiche le coffre et lui donne le clavier.
 
 command-helios-vault-moveTo =
     .title = Déplacer Coffre vers une zone (`area`)
 
 command-helios-vault-toggle =
     .title = Afficher ou masquer Coffre
+    .description = Ouvre le coffre là où il était, ou le ferme.
 
 command-helios-viewport-detach =
     .title = Déplacer Image dans une nouvelle fenêtre
@@ -146,12 +162,14 @@ command-helios-viewport-dock =
 
 command-helios-viewport-focus =
     .title = Aller à Image
+    .description = Affiche l’image et lui donne le clavier.
 
 command-helios-viewport-moveTo =
     .title = Déplacer Image vers une zone (`area`)
 
 command-helios-viewport-toggle =
     .title = Afficher ou masquer Image
+    .description = Ouvre l’image là où elle était, ou la ferme.
 
 command-param-copyPath =
     .title = Copier le chemin d’une valeur (`path`)
