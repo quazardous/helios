@@ -237,6 +237,16 @@ separated, as the catalog SDK does.
   reference, and concurrent requests for the same content are merged.
   Explicit locks are exceptional (mainly exports and other sinks writing
   files), acquired by the scheduler as expiring leases, never by modules.
+- (2026-10-12, decided) **A node is computed once per render, over the
+  union of what its consumers read.** Planning collects the regions each
+  consumer asks of a node, computes the node once over their union, and
+  hands each consumer its crop; a step is no longer one exact region. (The
+  stress network of 58 mask nodes took 386 steps, about 17 times the pixels
+  of one pass, when each distinct region was its own step.)
+- (2026-10-12, decided) **The cache has a memory ceiling by default.** A
+  configurable budget (a share of RAM by default) with least-recently-used
+  eviction; without it one 1536×1024 render held 3.9 GB, and tiles only
+  bound memory once the cache has a budget.
 
 ### 2.3 Vault: the catalog as an API
 
