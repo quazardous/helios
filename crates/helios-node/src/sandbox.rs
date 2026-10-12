@@ -119,6 +119,31 @@ fn is_our_node(pid: u32, state: &State) -> bool {
 /// Starts the sandbox's node (`node_bin` is the `helios-node` executable)
 /// and returns once it serves. The control endpoint is served in debug builds.
 pub fn start(dir: &Path, node_bin: &Path) -> Result<State, String> {
+    launch(dir, node_bin, false)
+}
+
+/// Starts the sandbox's node like [`start`], with the batch endpoint
+/// (`load-source`, `export`, `cancel`) on the control socket instead of the
+/// debug one: what `helios batch` needs, in every build.
+pub fn start_batch(dir: &Path, node_bin: &Path) -> Result<State, String> {
+    launch(dir, node_bin, true)
+}
+
+/// Creates the runtime directory, open to this user only: the sockets in
+/// it are the node's way in. Changing its mode also proves it is ours (only
+/// its owner may), so a directory planted by another user is refused.
+fn private_dir(dir: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))
+            .map_err(|e| format!("{}: {e}", dir.display()))?;
+    }
+    Ok(())
+}
+
+fn launch(dir: &Path, node_bin: &Path, batch: bool) -> Result<State, String> {
     let dir = dir
         .canonicalize()
         .map_err(|e| format!("{}: {e}", dir.display()))?;
@@ -128,7 +153,7 @@ pub fn start(dir: &Path, node_bin: &Path) -> Result<State, String> {
     {
         return Err(format!("the sandbox node already runs (pid {pid})"));
     }
-    std::fs::create_dir_all(runtime_dir(&dir)).map_err(|e| e.to_string())?;
+    private_dir(&runtime_dir(&dir))?;
     let mut command = Command::new(node_bin);
     command
         .arg("--graph")
@@ -151,7 +176,9 @@ pub fn start(dir: &Path, node_bin: &Path) -> Result<State, String> {
     // for that command, not for the node, which outlives it.
     #[cfg(unix)]
     std::os::unix::process::CommandExt::process_group(&mut command, 0);
-    if cfg!(debug_assertions) {
+    if batch {
+        command.arg("--batch-control").arg(&state.control);
+    } else if cfg!(debug_assertions) {
         command
             .arg("--control")
             .arg(&state.control)

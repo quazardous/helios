@@ -7,7 +7,7 @@
 //!
 //!     helios-node --graph network.json --socket /path/to/node.sock
 //!                 [--global FILE] [--project DIR] [--user FILE] [--vault FILE] [--set KEY=VALUE]...
-//!                 [--control /path/to/control.sock] [--token-file FILE]
+//!                 [--control /path/to/control.sock] [--batch-control PATH] [--token-file FILE]
 //!
 //! An endpoint is a Unix socket path or `tcp://127.0.0.1:PORT` (port 0 picks
 //! one); with TCP the node writes a session token to `--token-file` (readable
@@ -24,6 +24,11 @@
 //! `--control` serves the debug control endpoint (render, set a parameter,
 //! cancel, pause, resume, inject a fault). It exists only in debug builds and
 //! only when `HELIOS_DEBUG_CONTROL` is set.
+//!
+//! `--batch-control` serves the batch endpoint in every build: only
+//! `load-source`, `export` and `cancel`, on a Unix socket only its user can
+//! open. `helios batch` starts its own node with it, on a socket in a
+//! private directory made for that run.
 
 use std::collections::BTreeMap;
 use std::io::Write;
@@ -207,8 +212,7 @@ impl Node {
     }
 }
 
-/// What only the control endpoint asks for.
-#[cfg(debug_assertions)]
+/// What only the control endpoints ask for.
 impl Node {
     /// Exports a node's port as it is now: the job renders a copy of the
     /// graph taken here, with `params` changed on that copy only, so later
@@ -363,10 +367,14 @@ impl Describe for Status {
     }
 }
 
-#[cfg(debug_assertions)]
 mod control {
-    //! The debug control endpoint: every action goes to the owner of what
-    //! it changes, and is announced on the bus.
+    //! The control endpoints: every action goes to the owner of what it
+    //! changes, and is announced on the bus.
+    //!
+    //! Two scopes share this code. The debug endpoint (`--control`, debug
+    //! builds with `HELIOS_DEBUG_CONTROL` set) answers every verb. The batch
+    //! endpoint (`--batch-control`, every build) answers only what a batch
+    //! export needs: give a source a file, export, cancel a job.
 
     use std::sync::Arc;
 
@@ -395,7 +403,41 @@ mod control {
             .map_or(0, |d| d.as_secs())
     }
 
-    pub fn answer(node: &Arc<Node>, request: ControlRequest) -> Value {
+    /// Which verbs an endpoint answers.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum Scope {
+        /// Every verb: the debug control endpoint.
+        #[cfg_attr(
+            not(debug_assertions),
+            allow(
+                dead_code,
+                reason = "the debug endpoint is not served in release builds"
+            )
+        )]
+        Debug,
+        /// `load-source`, `export` and `cancel`: the batch endpoint.
+        Batch,
+    }
+
+    impl Scope {
+        fn allows(self, request: &ControlRequest) -> bool {
+            self == Self::Debug
+                || matches!(
+                    request,
+                    ControlRequest::LoadSource { .. }
+                        | ControlRequest::Export { .. }
+                        | ControlRequest::Cancel { .. }
+                )
+        }
+    }
+
+    pub fn answer(node: &Arc<Node>, scope: Scope, request: ControlRequest) -> Value {
+        if !scope.allows(&request) {
+            return json!({
+                "ok": false,
+                "error": "the batch endpoint only answers load-source, export and cancel",
+            });
+        }
         let seq = node
             .bus
             .publish(SOURCE, None, &Action { request: &request });
@@ -513,6 +555,28 @@ mod control {
     }
 }
 
+/// Serves the batch endpoint: `load-source`, `export` and `cancel` only,
+/// in every build. A Unix socket only, readable and writable by this user
+/// alone: whoever reaches it can read and write the user's files through
+/// the node, as the user could anyway.
+fn serve_batch_control(node: &Arc<Node>, listen: &Listen) -> Result<String, String> {
+    let Listen::Unix(path) = listen else {
+        return Err("--batch-control takes a Unix socket path, not a TCP address".into());
+    };
+    let node = node.clone();
+    let bound = helios_inspect::serve_at(listen, None, move |request| {
+        control::answer(&node, control::Scope::Batch, request)
+    })
+    .map_err(|e| format!("cannot serve the batch endpoint on {}: {e}", path.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+            .map_err(|e| format!("{}: {e}", path.display()))?;
+    }
+    Ok(bound.address)
+}
+
 /// Serves the control endpoint, if this build and environment allow it.
 fn serve_control(node: &Arc<Node>, listen: &Listen, token: Option<&str>) -> Result<String, String> {
     #[cfg(debug_assertions)]
@@ -524,7 +588,7 @@ fn serve_control(node: &Arc<Node>, listen: &Listen, token: Option<&str>) -> Resu
         }
         let node = node.clone();
         helios_inspect::serve_at(listen, token, move |request| {
-            control::answer(&node, request)
+            control::answer(&node, control::Scope::Debug, request)
         })
         .map(|bound| bound.address)
         .map_err(|e| format!("cannot serve control on {listen:?}: {e}"))
@@ -540,6 +604,7 @@ struct Args {
     graph: PathBuf,
     socket: Listen,
     control: Option<Listen>,
+    batch_control: Option<Listen>,
     token_file: Option<PathBuf>,
     layers: Vec<(Layer, PathBuf)>,
     sets: Vec<(String, String)>,
@@ -550,6 +615,7 @@ fn parse_args() -> Result<Args, String> {
     let mut graph = None;
     let mut socket = None;
     let mut control = None;
+    let mut batch_control = None;
     let mut token_file = None;
     let mut layers = Vec::new();
     let mut sets = Vec::new();
@@ -561,6 +627,7 @@ fn parse_args() -> Result<Args, String> {
             "--graph" => graph = Some(PathBuf::from(value()?)),
             "--socket" => socket = Some(Listen::parse(&value()?)?),
             "--control" => control = Some(Listen::parse(&value()?)?),
+            "--batch-control" => batch_control = Some(Listen::parse(&value()?)?),
             "--token-file" => token_file = Some(PathBuf::from(value()?)),
             "--global" => layers.push((Layer::Global, PathBuf::from(value()?))),
             "--project" => {
@@ -582,6 +649,7 @@ fn parse_args() -> Result<Args, String> {
         graph: graph.ok_or("missing --graph FILE")?,
         socket: socket.ok_or("missing --socket PATH")?,
         control,
+        batch_control,
         token_file,
         layers,
         sets,
@@ -671,7 +739,7 @@ fn main() -> ExitCode {
         Ok(a) => a,
         Err(e) => {
             eprintln!(
-                "helios-node: {e}\nusage: helios-node --graph FILE --socket PATH [--global FILE] [--project DIR] [--user FILE] [--vault FILE] [--set KEY=VALUE]... [--control PATH] [--token-file FILE]"
+                "helios-node: {e}\nusage: helios-node --graph FILE --socket PATH [--global FILE] [--project DIR] [--user FILE] [--vault FILE] [--set KEY=VALUE]... [--control PATH] [--batch-control PATH] [--token-file FILE]"
             );
             return ExitCode::from(2);
         }
@@ -785,12 +853,25 @@ fn main() -> ExitCode {
             }
         },
     };
+    let batch_address = match &args.batch_control {
+        None => None,
+        Some(listen) => match serve_batch_control(&node, listen) {
+            Ok(address) => Some(address),
+            Err(e) => {
+                eprintln!("helios-node: {e}");
+                return ExitCode::from(1);
+            }
+        },
+    };
     // Whoever started the node may stop reading once it knows the node
     // serves: a closed stdout must not kill the node (`println!` panics).
     let mut out = std::io::stdout();
     let _ = writeln!(out, "ready {address}");
     if let Some(control) = &control_address {
         let _ = writeln!(out, "control {control}");
+    }
+    if let Some(batch) = &batch_address {
+        let _ = writeln!(out, "batch-control {batch}");
     }
     let _ = out.flush();
     let ready = bus.publish(
