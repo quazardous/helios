@@ -3,10 +3,12 @@
 //! reads the store every frame and writes through it, as the user.
 //!
 //! - A float or an int is a slider over the soft range: a drag is one
-//!   gesture (one undo step, agents kept off meanwhile), the wheel and the
-//!   arrows step (Shift coarse, Ctrl finer), a double click resets, Enter
-//!   types a value (units allowed, `,` or `.`); a typed value past the soft
-//!   range is forced up to the hard one, and says so.
+//!   gesture (one undo step, agents kept off meanwhile), the arrows step
+//!   (Shift coarse), a double click resets, Enter types a value (units
+//!   allowed, `,` or `.`); a typed value past the soft range is forced up
+//!   to the hard one, and says so. The wheel scrolls the panel: a slider
+//!   takes it only with the focus or while Alt is held. Steps in a row (a
+//!   held arrow, a turned wheel) are one undo step.
 //! - A bool is a toggle, a choice a list (the arrows step it), a list of
 //!   numbers a row each, a text a field.
 //! - Marks: changed from its default (a dot that resets), held by someone
@@ -19,7 +21,7 @@
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 
-use egui::{Key, Sense, Ui, WidgetInfo, WidgetType};
+use egui::{Key, Modifiers, Sense, Ui, WidgetInfo, WidgetType};
 use helios_core::Value;
 use helios_shell::commands::Origin;
 use helios_values::{Change, Descriptor, Entry, GestureId, Set, Store, Type};
@@ -34,6 +36,9 @@ pub const SELECTION: &str = "view/graph/selection";
 /// How long a change by someone else stays marked, in seconds.
 const MOVED_SECONDS: f64 = 2.0;
 
+/// Steps further apart than this, in seconds, are undo steps of their own.
+const STEPS_GAP: f64 = 0.5;
+
 /// What the widgets remember between frames: never values.
 #[derive(Default)]
 pub struct Params {
@@ -41,6 +46,9 @@ pub struct Params {
     /// origin moved it.
     seen: BTreeMap<String, (u64, Option<f64>)>,
     gesture: Option<(String, GestureId)>,
+    /// Steps in a row on one path (keys, the wheel): one group, and when
+    /// its last step was.
+    steps: Option<(String, GestureId, f64)>,
     /// A value being typed: its path, the text, and whether it was just
     /// opened (its text then starts selected).
     typing: Option<(String, String, bool)>,
@@ -93,6 +101,38 @@ fn write(
 }
 
 impl Params {
+    /// A step of a slider (an arrow, a wheel notch), in the group of the
+    /// steps just before it on the same path.
+    fn step(&mut self, s: &mut Store, path: &str, change: Change, label: &str, now: f64) {
+        let group = match &mut self.steps {
+            Some((p, g, last)) if p == path && now - *last <= STEPS_GAP => {
+                *last = now;
+                *g
+            }
+            _ => {
+                if let Some((_, g, _)) = self.steps.take() {
+                    s.end(g);
+                }
+                let g = s.begin_group(Origin::User, &format!("step {label}"));
+                self.steps = Some((path.into(), g, now));
+                g
+            }
+        };
+        write(s, path, change, Some(group), false);
+    }
+
+    /// Ends a row of steps once it has paused.
+    fn end_steps(&mut self, store: &Mutex<Store>, now: f64) {
+        if self
+            .steps
+            .as_ref()
+            .is_some_and(|(_, _, last)| now - last > STEPS_GAP)
+            && let Some((_, g, _)) = self.steps.take()
+        {
+            store.lock().expect("value store lock").end(g);
+        }
+    }
+
     /// The application whose declared context menu the widgets open.
     pub fn set_app(&mut self, app: egui_pop::api::AppHandle) {
         self.app = Some(app);
@@ -236,7 +276,15 @@ impl Params {
             let (_, text, fresh) = self.typing.as_mut().expect("typing");
             let edit_id = id.with("typed");
             let edit = ui.put(rect, egui::TextEdit::singleline(text).id(edit_id));
-            edit.request_focus();
+            // The focus is taken once, when typing opens: a click elsewhere
+            // takes it away and ends the typing, the value untouched.
+            let opened = *fresh;
+            if opened {
+                edit.request_focus();
+            } else if !edit.has_focus() && !edit.lost_focus() {
+                self.typing = None;
+                return edit;
+            }
             if std::mem::take(fresh) {
                 // Typing replaces the value shown.
                 let mut state =
@@ -337,9 +385,10 @@ impl Params {
                 }
             })
         };
+        let now = ui.input(|i| i.time);
         if response.has_focus() {
             if let Some(change) = ui.input(steps) {
-                write(&mut s, path, change, None, false);
+                self.step(&mut s, path, change, &d.label, now);
             }
             if ui.input(|i| i.key_pressed(Key::Enter)) {
                 self.typing = Some((
@@ -349,23 +398,38 @@ impl Params {
                 ));
             }
         }
-        if response.hovered() {
-            let scroll = ui.input(|i| i.smooth_scroll_delta.y);
-            if scroll.abs() > 0.5 {
-                let n = scroll.signum() as i64;
-                let coarse = ui.input(|i| i.modifiers.shift);
-                write(
-                    &mut s,
-                    path,
-                    if coarse {
-                        Change::Coarse(n)
-                    } else {
-                        Change::Step(n)
-                    },
-                    None,
-                    false,
-                );
+        // The wheel scrolls the panel, unless the slider has the focus or
+        // Alt is held over it: then each notch (a touchpad's stream as one)
+        // steps it and the panel stays.
+        let wheel_held = ui.input(|i| i.modifiers.matches_logically(Modifiers::ALT));
+        if response.hovered() && (response.has_focus() || wheel_held) {
+            let (wheel, coarse) = ui.input(|i| {
+                let sum: f32 = i
+                    .events
+                    .iter()
+                    .filter_map(|e| match e {
+                        egui::Event::MouseWheel { delta, .. } => Some(delta.y + delta.x),
+                        _ => None,
+                    })
+                    .sum();
+                (sum, i.modifiers.shift)
+            });
+            if wheel != 0.0 {
+                let n = if wheel > 0.0 { 1 } else { -1 };
+                let change = if coarse {
+                    Change::Coarse(n)
+                } else {
+                    Change::Step(n)
+                };
+                self.step(&mut s, path, change, &d.label, now);
             }
+            // egui spreads a notch's scroll over a few frames: what is left
+            // of it is eaten too, so the panel stays.
+            ui.input_mut(|i| {
+                i.smooth_scroll_delta = egui::Vec2::ZERO;
+                i.events
+                    .retain(|e| !matches!(e, egui::Event::MouseWheel { .. }));
+            });
         }
         drop(s);
 
@@ -426,13 +490,14 @@ impl Params {
             if d.description.is_empty() { &d.label } else { &d.description },
             path,
             shown(d, &d.default),
-            "Drag, wheel or arrows to change (Shift: finer drag, coarser steps); double click resets; Enter types a value"
+            "Drag or arrows to change, the wheel once focused or with Alt (Shift: finer drag, coarser steps); double click resets; Enter types a value"
         ))
     }
 
     /// The Parameters panel: the selected node's values, or every node's,
     /// grouped by node in the manifest's order.
     pub fn panel_ui(&mut self, ui: &mut Ui, store: &Mutex<Store>, selection: Option<&str>) {
+        self.end_steps(store, ui.input(|i| i.time));
         let paths: Vec<(String, String)> = {
             let s = store.lock().expect("value store lock");
             let mut entries = s.list("node/");

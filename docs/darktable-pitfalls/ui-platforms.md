@@ -116,7 +116,10 @@ Statements marked [guess] are inference, not read in a thread.
   with `textInputFocus`, a single letter never fires in a text field, and a
   notice never takes focus. Still at risk from background updates (agents,
   imports, remote edits) that rebuild widgets and lose egui focus ids
-  [guess].
+  [guess]. Tested since 2026-10-12 (`tests/input.rs`): an agent's write
+  while a value is typed leaves the focus, a typed letter runs no
+  shortcut, and a click elsewhere ends typing (the typed entry used to
+  take the focus back every frame, a trap the scenarios caught).
 - **Recommendation.** Make it a rule, with a test, that nothing but a user
   gesture moves keyboard focus. Keep widget ids stable across rebuilds.
   Run a test that types into a text field while an import and an agent
@@ -158,8 +161,11 @@ Statements marked [guess] are inference, not read in a thread.
   and a "make it a preference" reflex.
 - **Evidence.**
   https://github.com/darktable-org/darktable/pull/16869
-- **Helios exposure: at risk, directly.** docs/gui.md, "Parameters", says
-  "the wheel and the arrows step" on a slider.
+- **Helios exposure: handled (2026-10-12).** The wheel scrolls the
+  Parameters panel; a slider takes it only with the focus or Alt held
+  (docs/gui.md, "Parameters"). The Parameters panel's own slider still
+  stepped on hover until the raw-event scenarios (`helios-gui`'s
+  `tests/input.rs`) caught it.
 - **Recommendation.** By default, the wheel scrolls the panel. A slider
   takes the wheel only once it has focus (click or keyboard), or while a
   modifier is held. Decide this before users get used to the other
