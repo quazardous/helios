@@ -144,6 +144,19 @@ one JSON line per mode to `target/bench/masks.jsonl`. Three modules at
 | proxy | 3.1 s | 0.19 GB | 259 / 365 | 259 |
 | edit | 2.0 s | 3.9 GB | 7 / 14 | 386 |
 
+With union planning (finding 14), the same machine and load, before and
+after on one run each:
+
+| mode | time before | time after | peak before | peak after | computed before | computed after |
+|---|---|---|---|---|---|---|
+| full | 62.8 s | 7.0 s | 3.9 GB | 0.61 GB | 386 | 58 |
+| tiled | 73.1 s | 8.2 s | 4.7 GB | 0.69 GB | 9264 | 1392 |
+| proxy | 1.5 s | 0.32 s | 0.19 GB | 0.07 GB | 259 | 58 |
+| edit | 1.4 s | 0.89 s | 4.0 GB | 0.66 GB | 7 | 7 |
+
+A full render now computes each of the 58 nodes once; tiles compute each
+node once per tile (24 × 58).
+
 Planning before and after the memo (finding 12), one full render at 64×48:
 
 | modules | keys before | keys after | time before | time after | peak before | peak after |
@@ -216,8 +229,8 @@ What the port needed from the core, or shows it lacks:
     within one render and shared. Keys now equal the distinct steps.
 13. **The cycle check was exponential too.** `Graph::connect` walked every
     path upstream of the new input; it now visits each node once.
-14. **Every distinct region is a distinct step.** Steps and the cache are
-    keyed by the exact region. Consumers with different reaches (a blur, a
+14. **Every distinct region was a distinct step (fixed).** Steps and the
+    cache were keyed by the exact region. Consumers with different reaches (a blur, a
     feather, a raster member reading another module's mask) ask the same
     node for different regions, and each one is computed apart: the stress
     network's 58 nodes take 386 steps for one full render, the source alone
@@ -226,13 +239,25 @@ What the port needed from the core, or shows it lacks:
     node once over the union of what its consumers read, and handing each a
     crop, would bring it close to one pass; it changes what a step is (its
     region is no longer the one asked for), so it is a decision of its own.
-    The raster test documents the same effect on a smaller graph.
+    Decided and done (2026-10-12): planning gathers, consumers first, the
+    regions each node is read over and computes the node once over their
+    union, each consumer reading a crop (a view into the same buffer, no
+    copy). Reads far apart stay apart: two regions merge when their
+    bounding box has no more pixels than the two apart, so a merge never
+    computes more than it saves. The stress network never reaches that
+    limit (its reads all overlap); it is a cost rule, not a tuned number,
+    and a network with reads far apart (a lens correction, a retouch
+    source) would tell whether a looser one pays. A step's key is its
+    lineage (what it is made of, no region) and its region, so content
+    asked over a region inside cached content of the same lineage is
+    cropped from it: a tile after a full render computes nothing.
 15. **Memory has no ceiling by default.** Without a budget the cache keeps
     every step's output: 3.9 GB for one full render of the stress network
     at 1536×1024, 4.7 GB in tiles (each tile's halos are steps of their
     own). With a budget, evicted content is computed again; the bench
     runs without one, to measure what the network holds.
-16. **Tiles do not save work yet.** In 256-pixel tiles the network computes
+16. **Tiles did not save work.** In 256-pixel tiles the network computed
     9264 steps (24 tiles, 386 each): halos grow with every blur and
-    feather along the chain, and finding 14 multiplies them. Tiles bound a
+    feather along the chain, and finding 14 multiplied them. With union
+    planning a tile computes each node once (1392 steps); halos remain. Tiles bound a
     render's working set only once the cache has a budget.

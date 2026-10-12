@@ -146,21 +146,10 @@ fn a_module_reuses_another_modules_mask_without_computing_it_again() {
         .map(|ev| ev.payload["name"].as_str().unwrap().to_string())
         .collect();
     computed.sort();
-    // A's output was not rendered yet: its blend runs, and so do the red
-    // member and the image over `r` (A's blur read them over a wider
-    // region, a different content key). A's mask and the raster member
-    // are shared.
-    assert_eq!(
-        computed,
-        [
-            "a.blend",
-            "a.red",
-            "b.blend",
-            "b.group",
-            "b.luminance",
-            "image"
-        ]
-    );
+    // A's output was not rendered yet: its blend runs. The red member and
+    // the image over `r` are cropped from what A's blur read of them over
+    // a wider region; A's mask and the raster member are shared.
+    assert_eq!(computed, ["a.blend", "b.blend", "b.group", "b.luminance"]);
 }
 
 #[test]

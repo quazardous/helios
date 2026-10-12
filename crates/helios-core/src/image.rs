@@ -2,10 +2,12 @@
 //!
 //! An [`Image`] is an immutable buffer of interleaved `f32` channels covering a
 //! [`Region`] of an image plane. It is shared by reference (cloning is cheap),
-//! so the same pixels are held once in memory whoever uses them.
+//! so the same pixels are held once in memory whoever uses them. A crop of an
+//! image ([`Image::crop`], [`Image::sample`] inside it) is a view into the
+//! same buffer, not a copy.
 
 use std::fmt;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use serde::{Deserialize, Serialize};
 
@@ -58,6 +60,16 @@ impl Region {
             self.width + 2 * margin,
             self.height + 2 * margin,
         )
+    }
+
+    /// The smallest region holding both.
+    pub fn bounds(&self, other: &Region) -> Region {
+        let (x, y) = (self.x.min(other.x), self.y.min(other.y));
+        let (right, bottom) = (
+            self.right().max(other.right()),
+            self.bottom().max(other.bottom()),
+        );
+        Region::new(x, y, (right - x) as u32, (bottom - y) as u32)
     }
 
     pub fn contains(&self, other: &Region) -> bool {
@@ -128,12 +140,21 @@ impl Serialize for ContentHash {
     }
 }
 
-/// An immutable image buffer: interleaved `f32` channels over a region.
+/// An immutable image buffer: interleaved `f32` channels over a region, or
+/// a view of a part of one.
 #[derive(Clone)]
 pub struct Image {
     region: Region,
     channels: u32,
-    data: Arc<[f32]>,
+    /// The pixels, shared by every clone and every view of them.
+    buffer: Arc<[f32]>,
+    /// Where the first value of the region sits in `buffer`.
+    offset: usize,
+    /// Values from one row of the region to the next in `buffer`.
+    stride: usize,
+    /// For a view whose rows are not contiguous in `buffer`: its pixels
+    /// row after row, copied the first time [`Image::data`] is asked.
+    packed: Arc<OnceLock<Vec<f32>>>,
 }
 
 impl Image {
@@ -148,7 +169,10 @@ impl Image {
         Self {
             region,
             channels,
-            data: data.into(),
+            buffer: data.into(),
+            offset: 0,
+            stride: region.width as usize * channels as usize,
+            packed: Arc::default(),
         }
     }
 
@@ -184,8 +208,83 @@ impl Image {
         self.channels
     }
 
+    /// Values in a row of the region.
+    fn row_len(&self) -> usize {
+        self.region.width as usize * self.channels as usize
+    }
+
+    /// Whether the region's rows follow each other in the buffer.
+    fn contiguous(&self) -> bool {
+        self.stride == self.row_len() || self.region.height <= 1
+    }
+
+    /// The pixels, row after row. A view whose rows are not contiguous in
+    /// its buffer (a crop narrower than the image it comes from) copies them
+    /// once, the first time: read such a view with [`Image::row`] or
+    /// [`Image::pixel`] to avoid the copy.
     pub fn data(&self) -> &[f32] {
-        &self.data
+        if self.contiguous() {
+            return &self.buffer
+                [self.offset..self.offset + self.region.area() * self.channels as usize];
+        }
+        self.packed.get_or_init(|| self.to_vec())
+    }
+
+    /// The pixels, row after row, in a vector of their own.
+    pub fn to_vec(&self) -> Vec<f32> {
+        if self.contiguous() {
+            return self.data().to_vec();
+        }
+        let mut out = Vec::with_capacity(self.region.area() * self.channels as usize);
+        for y in self.region.y..self.region.bottom() {
+            out.extend_from_slice(self.row(y));
+        }
+        out
+    }
+
+    /// The values of row `y` (absolute), which must lie in the region.
+    pub fn row(&self, y: i64) -> &[f32] {
+        let r = self.region;
+        assert!(y >= r.y && y < r.bottom(), "row {y} outside {r}");
+        let start = self.offset + (y - r.y) as usize * self.stride;
+        &self.buffer[start..start + self.row_len()]
+    }
+
+    /// Bytes of its pixels (and of its packed copy, if one was made). A
+    /// view counts its own pixels, not the whole buffer it shares.
+    pub fn bytes(&self) -> usize {
+        let own = self.region.area() * self.channels as usize * std::mem::size_of::<f32>();
+        own + self
+            .packed
+            .get()
+            .map_or(0, |p| std::mem::size_of_val(p.as_slice()))
+    }
+
+    /// A view of `region`, which must lie inside this image's region: no
+    /// pixel is copied. `None` when it does not lie inside.
+    pub fn crop(&self, region: Region) -> Option<Image> {
+        let r = self.region;
+        if !r.contains(&region) {
+            return None;
+        }
+        if region == r {
+            return Some(self.clone());
+        }
+        let offset = if region.is_empty() {
+            self.offset
+        } else {
+            self.offset
+                + (region.y - r.y) as usize * self.stride
+                + (region.x - r.x) as usize * self.channels as usize
+        };
+        Some(Image {
+            region,
+            channels: self.channels,
+            buffer: self.buffer.clone(),
+            offset,
+            stride: self.stride,
+            packed: Arc::default(),
+        })
     }
 
     /// The channels of the pixel at absolute coordinates, which must lie in the region.
@@ -195,16 +294,18 @@ impl Image {
             x >= r.x && x < r.right() && y >= r.y && y < r.bottom(),
             "({x}, {y}) outside {r}"
         );
-        let i =
-            ((y - r.y) as usize * r.width as usize + (x - r.x) as usize) * self.channels as usize;
-        &self.data[i..i + self.channels as usize]
+        let i = self.offset
+            + (y - r.y) as usize * self.stride
+            + (x - r.x) as usize * self.channels as usize;
+        &self.buffer[i..i + self.channels as usize]
     }
 
     /// The pixels of `region`, replicating the edge pixels where it extends past
-    /// this image (the framework's border policy for neighbourhood reads).
+    /// this image (the framework's border policy for neighbourhood reads). A
+    /// region inside the image is a view ([`Image::crop`]), not a copy.
     pub fn sample(&self, region: Region) -> Image {
-        if region == self.region {
-            return self.clone();
+        if let Some(view) = self.crop(region) {
+            return view;
         }
         let r = self.region;
         assert!(!r.is_empty(), "cannot sample an empty image");
@@ -262,15 +363,17 @@ impl Image {
         h.update(&self.region.width.to_le_bytes());
         h.update(&self.region.height.to_le_bytes());
         h.update(&self.channels.to_le_bytes());
-        for v in self.data.iter() {
-            h.update(&v.to_bits().to_le_bytes());
+        for y in self.region.y..self.region.bottom() {
+            for v in self.row(y) {
+                h.update(&v.to_bits().to_le_bytes());
+            }
         }
         ContentHash(*h.finalize().as_bytes())
     }
 
     /// Whether two images share the same buffer in memory.
     pub fn same_buffer(&self, other: &Image) -> bool {
-        Arc::ptr_eq(&self.data, &other.data)
+        Arc::ptr_eq(&self.buffer, &other.buffer)
     }
 }
 
@@ -306,6 +409,35 @@ mod tests {
         assert_eq!(outer.data(), &[0.0, 0.0, 0.0, 0.0]);
         let corner = img.sample(Region::new(3, 2, 2, 2));
         assert_eq!(corner.data(), &[23.0, 23.0, 23.0, 23.0]);
+    }
+
+    #[test]
+    fn a_crop_is_a_view_that_reads_like_a_copy() {
+        let img = ramp(Region::sized(5, 4));
+        let part = Region::new(1, 1, 3, 2);
+        let view = img.crop(part).unwrap();
+        assert!(view.same_buffer(&img), "no pixel copied");
+        assert_eq!(view.pixel(2, 2), img.pixel(2, 2));
+        assert_eq!(view.row(1), &[11.0, 12.0, 13.0]);
+        assert_eq!(view.data(), &[11.0, 12.0, 13.0, 21.0, 22.0, 23.0]);
+        assert_eq!(view.to_vec(), view.data());
+        let copy = Image::from_fn(part, 1, |x, y, _| (x + 10 * y) as f32);
+        assert_eq!(view.content_hash(), copy.content_hash());
+        // A crop of a crop, and full rows (contiguous: no packed copy).
+        let rows = img.crop(Region::new(0, 1, 5, 2)).unwrap();
+        assert_eq!(rows.data(), &img.data()[5..15]);
+        assert_eq!(rows.bytes(), 10 * 4);
+        let inner = view.crop(Region::new(2, 2, 2, 1)).unwrap();
+        assert_eq!(inner.data(), &[22.0, 23.0]);
+        assert!(img.crop(Region::new(4, 0, 2, 1)).is_none(), "past the edge");
+    }
+
+    #[test]
+    fn bounds_hold_both_regions() {
+        let a = Region::new(0, 0, 4, 4);
+        let b = Region::new(-2, 3, 3, 5);
+        assert_eq!(a.bounds(&b), Region::new(-2, 0, 6, 8));
+        assert!(a.bounds(&b).contains(&a) && a.bounds(&b).contains(&b));
     }
 
     #[test]

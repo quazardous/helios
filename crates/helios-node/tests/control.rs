@@ -160,7 +160,9 @@ fn faults_trigger_error_paths_once() {
     );
 
     assert_eq!(s.control(&["fault", "src", "source-read"]).0, 0);
-    s.control(&["render", "exp", "--region", "0,0,4,4"]);
+    // Outside what was rendered: a region inside it would be cropped from
+    // the cache, with no source read for the fault to strike.
+    s.control(&["render", "exp", "--region", "32,16,4,4"]);
     s.inspect(&["wait-idle"]);
     assert_eq!(
         s.last_render()["error"],

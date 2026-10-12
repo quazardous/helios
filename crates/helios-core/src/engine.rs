@@ -1,14 +1,20 @@
 //! Evaluates a graph, never computing the same content twice.
 //!
 //! Evaluation runs in two passes. **Planning** walks the graph from the
-//! requested node: each module prepares its plan and says which input region
-//! it needs, and every step gets a content key (hash of the module, its
-//! parameters and context, the region, and the keys of its inputs). Nothing
-//! is computed yet. A node read by several consumers over the same region is
-//! planned once per render and its step shared, so planning grows with the
-//! number of distinct steps, not with the number of paths to them. **Execution** then looks each key up: content already
-//! computed is shared by reference; content being computed by another thread
-//! is waited for (single flight); only missing content is computed.
+//! requested node, once per node however many paths lead to it. It first
+//! collects, consumers before producers, the regions each consumer reads of
+//! each node (each module prepares its plan and says which input region it
+//! needs), then gives each node one step over the union of those regions:
+//! the bounding box, or a few boxes when they lie far apart (see
+//! [`unions`]). Each consumer reads its region as a crop of that step's
+//! output, a view into the same buffer. Every step gets a content key: the
+//! hash of its *lineage* (the module, its parameters and context, the scale,
+//! and the lineages of its inputs, but no region) and of its region.
+//! Nothing is computed yet. **Execution** then looks each key up: content
+//! already computed is shared by reference; content being computed by
+//! another thread is waited for (single flight); content of the same
+//! lineage cached over a wider region is cropped; only missing content is
+//! computed.
 //!
 //! The engine counts every request and every computation, so tests can
 //! assert budgets ("rendering twice computes nothing the second time").
@@ -59,10 +65,8 @@ impl Content {
     /// Bytes held, in host and device memory.
     fn bytes(&self) -> usize {
         match self {
-            Content::Host(images) => images.iter().map(|i| std::mem::size_of_val(i.data())).sum(),
-            Content::Device { image, host } => {
-                image.bytes() + host.get().map_or(0, |i| std::mem::size_of_val(i.data()))
-            }
+            Content::Host(images) => images.iter().map(Image::bytes).sum(),
+            Content::Device { image, host } => image.bytes() + host.get().map_or(0, Image::bytes),
         }
     }
 }
@@ -103,6 +107,22 @@ pub enum FaultKind {
     SourceRead,
 }
 
+/// The cache after a render: what it holds and what it evicted.
+#[derive(Serialize)]
+pub struct CacheSettled {
+    /// Bytes held by ready entries.
+    pub bytes: usize,
+    /// The budget, `None` without a limit.
+    pub budget: Option<usize>,
+    pub entries: usize,
+    /// Entries evicted during the render.
+    pub evicted: u64,
+}
+
+impl Event for CacheSettled {
+    const KIND: &'static str = "engine.cache_settled";
+}
+
 /// What the engine did, since it was created.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct Counters {
@@ -120,9 +140,13 @@ pub struct Counters {
     pub uploads: u64,
     /// Accelerator images read back into host memory.
     pub readbacks: u64,
-    /// Content keys computed while planning: one per distinct step (node
-    /// and region) of each render, status or key asked for.
+    /// Content keys computed while planning: one per step (a node over
+    /// the union of what its consumers read) of each render, status or key
+    /// asked for.
     pub keys: u64,
+    /// Steps served by cropping content of the same lineage cached over a
+    /// wider region.
+    pub crops: u64,
 }
 
 impl Counters {
@@ -142,6 +166,7 @@ impl Counters {
             uploads: self.uploads - earlier.uploads,
             readbacks: self.readbacks - earlier.readbacks,
             keys: self.keys - earlier.keys,
+            crops: self.crops - earlier.crops,
         }
     }
 }
@@ -149,6 +174,9 @@ impl Counters {
 /// A step of an evaluation, planned but not run.
 struct Step {
     key: ContentHash,
+    /// The content's identity without its region: content of the same
+    /// lineage over a wider region holds this step's pixels.
+    lineage: ContentHash,
     graph: u64,
     node: NodeId,
     name: String,
@@ -162,7 +190,10 @@ enum Work {
     Module {
         module: ModuleRef,
         plan: crate::module::Plan,
+        /// Steps read, each over a region holding `input_region`.
         inputs: Vec<(Arc<Step>, usize)>,
+        /// The region of every input the module reads.
+        input_region: Region,
         /// Optional inputs left unconnected: their index among the
         /// module's inputs and their channels.
         absent: Vec<(usize, u32)>,
@@ -174,10 +205,72 @@ enum Work {
     Pending { inputs: Vec<(Arc<Step>, usize)> },
 }
 
+/// A node at a scale (its bits): what planning plans once per render.
+type Unit = (NodeId, u64);
+
+/// A unit as planning knows it before regions: its lineage and what it reads.
+struct Shape {
+    lineage: ContentHash,
+    name: String,
+    kind: ShapeKind,
+}
+
+enum ShapeKind {
+    Source(Image, f64),
+    Pending {
+        inputs: Vec<(Unit, usize)>,
+    },
+    Module {
+        module: ModuleRef,
+        plan: crate::module::Plan,
+        inputs: Vec<(Unit, usize)>,
+        absent: Vec<(usize, u32)>,
+        accelerated: bool,
+    },
+}
+
+/// The regions a node is computed over, from the regions its consumers
+/// read: two regions are merged into their bounding box when the box has
+/// no more pixels than the two apart (so a merge never computes more than
+/// it saves), until no two can be. Overlapping reads (the same image read
+/// with different halos) become one region; reads far apart stay apart.
+pub fn unions(mut regions: Vec<Region>) -> Vec<Region> {
+    regions.sort_by_key(|r| (r.y, r.x, r.height, r.width));
+    regions.dedup();
+    loop {
+        let mut merged = None;
+        'pairs: for i in 0..regions.len() {
+            for j in i + 1..regions.len() {
+                let (a, b) = (regions[i], regions[j]);
+                let bounds = a.bounds(&b);
+                if bounds.area() <= a.area() + b.area() {
+                    merged = Some((i, j, bounds));
+                    break 'pairs;
+                }
+            }
+        }
+        let Some((i, j, bounds)) = merged else {
+            return regions;
+        };
+        regions[i] = bounds;
+        regions.remove(j);
+    }
+}
+
+/// What a lookup in the cache finds for a step.
+enum Found {
+    /// The step's own entry, ready or not.
+    Cell(Arc<OnceLock<Outputs>>),
+    /// Ready content of the same lineage over a wider region.
+    Wider(Arc<Content>),
+}
+
 /// Computed content, by key, within an optional memory budget.
 #[derive(Default)]
 struct Cache {
     entries: HashMap<ContentHash, Entry>,
+    /// Keys of the entries of each lineage, to find a wider region.
+    lineages: HashMap<ContentHash, Vec<ContentHash>>,
     /// Bytes held by ready entries.
     bytes: usize,
     /// Bumped on every use, to find the least recently used entry.
@@ -187,23 +280,74 @@ struct Cache {
 
 struct Entry {
     cell: Arc<OnceLock<Outputs>>,
+    lineage: ContentHash,
+    region: Region,
     /// Bytes of its outputs, counted once they are ready.
     size: usize,
     last_used: u64,
 }
 
 impl Cache {
-    /// The cell for a key, created if missing, marked as just used.
-    fn cell(&mut self, key: ContentHash) -> Arc<OnceLock<Outputs>> {
+    /// The step's own cell if it has one; else ready content of its
+    /// lineage over a wider region; else a new cell. What is found is
+    /// marked as just used.
+    fn find(&mut self, step: &Step) -> Found {
         self.tick += 1;
         let tick = self.tick;
-        let entry = self.entries.entry(key).or_insert_with(|| Entry {
-            cell: Arc::default(),
-            size: 0,
-            last_used: tick,
-        });
-        entry.last_used = tick;
-        entry.cell.clone()
+        if let Some(entry) = self.entries.get_mut(&step.key) {
+            entry.last_used = tick;
+            return Found::Cell(entry.cell.clone());
+        }
+        if let Some((key, content)) = self.wider(step) {
+            self.entries.get_mut(&key).expect("listed").last_used = tick;
+            return Found::Wider(content);
+        }
+        let cell: Arc<OnceLock<Outputs>> = Arc::default();
+        self.entries.insert(
+            step.key,
+            Entry {
+                cell: cell.clone(),
+                lineage: step.lineage,
+                region: step.region,
+                size: 0,
+                last_used: tick,
+            },
+        );
+        self.lineages
+            .entry(step.lineage)
+            .or_default()
+            .push(step.key);
+        Found::Cell(cell)
+    }
+
+    /// Ready content of `step`'s lineage over a region holding its own,
+    /// the smallest such: its key and content.
+    fn wider(&self, step: &Step) -> Option<(ContentHash, Arc<Content>)> {
+        self.lineages
+            .get(&step.lineage)?
+            .iter()
+            .filter_map(|key| {
+                let entry = &self.entries[key];
+                match entry.cell.get() {
+                    Some(Ok(content)) if entry.region.contains(&step.region) => {
+                        Some((entry.region.area(), *key, content.clone()))
+                    }
+                    _ => None,
+                }
+            })
+            .min_by_key(|(area, ..)| *area)
+            .map(|(_, key, content)| (key, content))
+    }
+
+    fn remove(&mut self, key: ContentHash) -> Option<Entry> {
+        let entry = self.entries.remove(&key)?;
+        if let Some(keys) = self.lineages.get_mut(&entry.lineage) {
+            keys.retain(|k| *k != key);
+            if keys.is_empty() {
+                self.lineages.remove(&entry.lineage);
+            }
+        }
+        Some(entry)
     }
 
     /// Counts what a ready entry holds (again: a device entry grows when it
@@ -227,7 +371,7 @@ impl Cache {
                 .min_by_key(|(_, e)| e.last_used)
                 .map(|(k, _)| *k);
             let Some(key) = victim else { break };
-            let entry = self.entries.remove(&key).expect("victim exists");
+            let entry = self.remove(key).expect("victim exists");
             self.bytes -= entry.size;
             self.evictions += 1;
         }
@@ -252,13 +396,15 @@ pub struct Engine {
     uploads: AtomicU64,
     readbacks: AtomicU64,
     keys: AtomicU64,
+    crops: AtomicU64,
 }
 
 type TrackKey = (u64, NodeId, Region);
 
-/// The steps planned in one render, by node and region (the graph and the
-/// scale are the render's).
-type Memo = HashMap<(NodeId, Region), Arc<Step>>;
+/// A planned render: the step asked for (it reads every other).
+struct Planned {
+    root: Arc<Step>,
+}
 
 #[derive(Default)]
 struct Track {
@@ -292,6 +438,7 @@ impl Engine {
             uploads: AtomicU64::new(0),
             readbacks: AtomicU64::new(0),
             keys: AtomicU64::new(0),
+            crops: AtomicU64::new(0),
         }
     }
 
@@ -320,7 +467,7 @@ impl Engine {
         node: NodeId,
         region: Region,
     ) -> Result<Vec<NodeStatus>, Error> {
-        let step = self.plan(graph, node, region, 1.0)?;
+        let step = self.plan(graph, node, region, 1.0)?.root;
         let mut out = Vec::new();
         self.collect_status(graph, &step, &mut out)?;
         Ok(out)
@@ -345,13 +492,12 @@ impl Engine {
                 self.collect_status(graph, input, out)?;
             }
         }
-        let cell = self
-            .cache
-            .lock()
-            .expect("engine cache lock")
-            .entries
-            .get(&step.key)
-            .map(|e| e.cell.clone());
+        let (cell, wider) = {
+            let cache = self.cache.lock().expect("engine cache lock");
+            let cell = cache.entries.get(&step.key).map(|e| e.cell.clone());
+            let wider = cell.is_none() && cache.wider(step).is_some();
+            (cell, wider)
+        };
         let (last_key, load) = self.track(step, |t| {
             (
                 t.last_key,
@@ -368,6 +514,7 @@ impl Engine {
             Some(Some(Ok(_))) => NodeState::Done,
             Some(Some(Err(_))) => NodeState::Failed,
             Some(None) => NodeState::Running,
+            None if wider => NodeState::Done,
             None if last_key.is_some_and(|k| k != step.key) => NodeState::Stale,
             None => NodeState::Idle,
         };
@@ -412,6 +559,7 @@ impl Engine {
             uploads: self.uploads.load(Ordering::SeqCst),
             readbacks: self.readbacks.load(Ordering::SeqCst),
             keys: self.keys.load(Ordering::SeqCst),
+            crops: self.crops.load(Ordering::SeqCst),
         }
     }
 
@@ -440,7 +588,7 @@ impl Engine {
         scale: f64,
     ) -> Result<Image, Error> {
         let (step, content, index) = self.render_content(graph, node, port, region, scale)?;
-        Ok(self.host(&step, &content, index)?.clone())
+        Ok(self.host(&step, &content, index)?.sample(region))
     }
 
     /// Renders at full resolution into the accelerator's memory, for a
@@ -469,7 +617,7 @@ impl Engine {
     ) -> Result<DeviceImage, Error> {
         let accelerator = self.accelerator.clone().ok_or(Error::NoAccelerator)?;
         let (step, content, index) = self.render_content(graph, node, port, region, scale)?;
-        self.device(accelerator.as_ref(), &step, &content, index)
+        self.device(accelerator.as_ref(), &step, &step, &content, index, region)
     }
 
     /// Plans and executes a render: the requested step, its content and
@@ -495,7 +643,7 @@ impl Engine {
                 region,
             },
         );
-        let step = self.plan(graph, node, region, scale)?;
+        let step = self.plan(graph, node, region, scale)?.root;
         let content = self.execute(&step, cause)?;
         Ok((step, content, index))
     }
@@ -526,24 +674,29 @@ impl Engine {
         Ok(copy)
     }
 
-    /// Output `port` of `step`'s content in the accelerator's memory,
-    /// uploaded if it is in host memory (for `consumer`, which reads it).
+    /// Output `port` of `step`'s content over `region` in the
+    /// accelerator's memory, for `consumer`, which reads it. Device content
+    /// over that very region is handed as is; otherwise its crop is
+    /// uploaded (device content over a wider region is read back first).
     fn device(
         &self,
         accelerator: &dyn Accelerator,
+        step: &Step,
         consumer: &Step,
         content: &Content,
         port: usize,
+        region: Region,
     ) -> Result<DeviceImage, Error> {
-        match content {
-            Content::Device { image, .. } => Ok(image.clone()),
-            Content::Host(images) => {
-                self.uploads.fetch_add(1, Ordering::SeqCst);
-                accelerator
-                    .upload(&images[port])
-                    .map_err(|reason| transfer_error(consumer, reason))
-            }
+        if let Content::Device { image, .. } = content
+            && image.region() == region
+        {
+            return Ok(image.clone());
         }
+        let host = self.host(step, content, port)?.sample(region);
+        self.uploads.fetch_add(1, Ordering::SeqCst);
+        accelerator
+            .upload(&host)
+            .map_err(|reason| transfer_error(consumer, reason))
     }
 
     /// The content key of a node's outputs over a region, without computing them.
@@ -559,48 +712,150 @@ impl Engine {
         region: Region,
         scale: f64,
     ) -> Result<ContentHash, Error> {
-        Ok(self.plan(graph, node, region, scale)?.key)
+        Ok(self.plan(graph, node, region, scale)?.root.key)
     }
 
-    /// Plans a render of `id` over `region` at `scale`.
+    /// Plans a render of `id` over `region` at `scale`: each node it reads
+    /// once, consumers before producers to gather the regions each node is
+    /// read over, then the steps, producers first.
     fn plan(
         &self,
         graph: &Graph,
         id: NodeId,
         region: Region,
         scale: f64,
-    ) -> Result<Arc<Step>, Error> {
-        self.plan_in(graph, id, region, scale, &mut HashMap::new())
+    ) -> Result<Planned, Error> {
+        let root: Unit = (id, scale.to_bits());
+        let mut shapes = HashMap::new();
+        let mut order = Vec::new();
+        self.shape(graph, root, &mut shapes, &mut order)?;
+
+        // The regions each unit is read over, then their unions.
+        let mut asked: HashMap<Unit, Vec<Region>> = HashMap::from([(root, vec![region])]);
+        let mut regions: HashMap<Unit, Vec<Region>> = HashMap::new();
+        for unit in order.iter().rev() {
+            let Some(reads) = asked.remove(unit) else {
+                continue;
+            };
+            let merged = unions(reads);
+            let shape: &Shape = &shapes[unit];
+            for r in &merged {
+                match &shape.kind {
+                    ShapeKind::Source(..) => {}
+                    ShapeKind::Pending { inputs } => {
+                        for (src, _) in inputs {
+                            asked.entry(*src).or_default().push(*r);
+                        }
+                    }
+                    ShapeKind::Module {
+                        module,
+                        plan,
+                        inputs,
+                        ..
+                    } => {
+                        let need = module.input_region(plan, *r);
+                        for (src, _) in inputs {
+                            asked.entry(*src).or_default().push(need);
+                        }
+                    }
+                }
+            }
+            regions.insert(*unit, merged);
+        }
+
+        // The steps, producers first, each reading the union of its input
+        // that holds what it needs.
+        let mut steps: HashMap<Unit, Vec<Arc<Step>>> = HashMap::new();
+        for unit in &order {
+            let Some(merged) = regions.remove(unit) else {
+                continue;
+            };
+            let shape = &shapes[unit];
+            let reading = |src: &Unit, need: Region| -> Arc<Step> {
+                steps[src]
+                    .iter()
+                    .filter(|s| s.region.contains(&need))
+                    .min_by_key(|s| s.region.area())
+                    .cloned()
+                    .expect("a union holds every region read of it")
+            };
+            let mut planned = Vec::with_capacity(merged.len());
+            for r in merged {
+                let work = match &shape.kind {
+                    ShapeKind::Source(image, scale) => Work::Source(image.clone(), *scale),
+                    ShapeKind::Pending { inputs } => Work::Pending {
+                        inputs: inputs.iter().map(|(u, p)| (reading(u, r), *p)).collect(),
+                    },
+                    ShapeKind::Module {
+                        module,
+                        plan,
+                        inputs,
+                        absent,
+                        accelerated,
+                    } => {
+                        let input_region = module.input_region(plan, r);
+                        Work::Module {
+                            module: module.clone(),
+                            plan: plan.clone(),
+                            inputs: inputs
+                                .iter()
+                                .map(|(u, p)| (reading(u, input_region), *p))
+                                .collect(),
+                            input_region,
+                            absent: absent.clone(),
+                            accelerated: *accelerated,
+                        }
+                    }
+                };
+                self.keys.fetch_add(1, Ordering::SeqCst);
+                let mut h = blake3::Hasher::new();
+                h.update(b"helios.step.v2");
+                h.update(&shape.lineage.0);
+                h.update(&r.x.to_le_bytes());
+                h.update(&r.y.to_le_bytes());
+                h.update(&r.width.to_le_bytes());
+                h.update(&r.height.to_le_bytes());
+                planned.push(Arc::new(Step {
+                    key: ContentHash(*h.finalize().as_bytes()),
+                    lineage: shape.lineage,
+                    graph: graph.id(),
+                    node: unit.0,
+                    name: shape.name.clone(),
+                    region: r,
+                    work,
+                }));
+            }
+            steps.insert(*unit, planned);
+        }
+        let root = steps
+            .remove(&root)
+            .and_then(|s| s.into_iter().next())
+            .expect("the unit asked for is planned");
+        Ok(Planned { root })
     }
 
-    /// Plans a step, or hands back the one already planned for the same
-    /// node and region in this render (`memo`): a shared input is planned
-    /// once, however many paths lead to it. The memo is keyed by the exact
-    /// region; a consumer reading a wider region gets a step of its own.
-    fn plan_in(
+    /// Plans `unit` and everything it reads, each once (`shapes`), adding
+    /// them to `order` producers first: their lineages and what they read.
+    fn shape(
         &self,
         graph: &Graph,
-        id: NodeId,
-        region: Region,
-        scale: f64,
-        memo: &mut Memo,
-    ) -> Result<Arc<Step>, Error> {
-        if let Some(step) = memo.get(&(id, region)) {
-            return Ok(step.clone());
+        unit: Unit,
+        shapes: &mut HashMap<Unit, Shape>,
+        order: &mut Vec<Unit>,
+    ) -> Result<(), Error> {
+        if shapes.contains_key(&unit) {
+            return Ok(());
         }
-        self.keys.fetch_add(1, Ordering::SeqCst);
+        let (id, bits) = unit;
+        let scale = f64::from_bits(bits);
         let node = graph.node(id)?;
         let mut h = blake3::Hasher::new();
         h.update(&scale.to_le_bytes());
-        h.update(&region.x.to_le_bytes());
-        h.update(&region.y.to_le_bytes());
-        h.update(&region.width.to_le_bytes());
-        h.update(&region.height.to_le_bytes());
-        let work = match &node.kind {
+        let kind = match &node.kind {
             Kind::Source { image, hash } => {
                 h.update(b"helios.step.source.v1");
                 h.update(&hash.0);
-                Work::Source(image.clone(), scale)
+                ShapeKind::Source(image.clone(), scale)
             }
             Kind::Module {
                 answered: false, ..
@@ -608,11 +863,12 @@ impl Engine {
                 h.update(b"helios.step.pending.v1");
                 let mut inputs = Vec::with_capacity(node.inputs.len());
                 for (src, port) in node.inputs.iter().flatten() {
-                    let step = self.plan_in(graph, *src, region, scale, memo)?;
-                    h.update(&step.key.0);
-                    inputs.push((step, *port));
+                    let input = (*src, bits);
+                    self.shape(graph, input, shapes, order)?;
+                    h.update(&shapes[&input].lineage.0);
+                    inputs.push((input, *port));
                 }
-                Work::Pending { inputs }
+                ShapeKind::Pending { inputs }
             }
             Kind::Module {
                 module,
@@ -635,7 +891,6 @@ impl Engine {
                     }
                     _ => false,
                 };
-                let input_region = module.input_region(&plan, region);
                 let mut inputs = Vec::with_capacity(node.inputs.len());
                 let mut absent = Vec::new();
                 for (i, connection) in node.inputs.iter().enumerate() {
@@ -652,12 +907,13 @@ impl Engine {
                             port: spec.name.clone(),
                         });
                     };
-                    let step = self.plan_in(graph, src, input_region, scale, memo)?;
-                    h.update(&step.key.0);
+                    let input = (src, bits);
+                    self.shape(graph, input, shapes, order)?;
+                    h.update(&shapes[&input].lineage.0);
                     h.update(&(port as u64).to_le_bytes());
-                    inputs.push((step, port));
+                    inputs.push((input, port));
                 }
-                Work::Module {
+                ShapeKind::Module {
                     module: module.clone(),
                     plan,
                     inputs,
@@ -666,16 +922,16 @@ impl Engine {
                 }
             }
         };
-        let step = Arc::new(Step {
-            key: ContentHash(*h.finalize().as_bytes()),
-            graph: graph.id(),
-            node: id,
-            name: node.name.clone(),
-            region,
-            work,
-        });
-        memo.insert((id, region), step.clone());
-        Ok(step)
+        shapes.insert(
+            unit,
+            Shape {
+                lineage: ContentHash(*h.finalize().as_bytes()),
+                name: node.name.clone(),
+                kind,
+            },
+        );
+        order.push(unit);
+        Ok(())
     }
 
     fn execute(&self, step: &Step, cause: u64) -> Outputs {
@@ -690,7 +946,14 @@ impl Engine {
             t.requests += 1;
             t.last_key = Some(step.key);
         });
-        let cell = self.cache.lock().expect("engine cache lock").cell(step.key);
+        let found = self.cache.lock().expect("engine cache lock").find(step);
+        let cell = match found {
+            Found::Cell(cell) => cell,
+            Found::Wider(content) => {
+                self.crops.fetch_add(1, Ordering::SeqCst);
+                return Ok(content);
+            }
+        };
         let mut computed_here = false;
         // Only one thread runs the initializer; others asking for the same key wait for it.
         let outputs = cell
@@ -729,7 +992,7 @@ impl Engine {
                 .get(&step.key)
                 .is_some_and(|e| Arc::ptr_eq(&e.cell, &cell))
             {
-                cache.entries.remove(&step.key);
+                cache.remove(step.key);
             }
         }
         outputs
@@ -776,6 +1039,7 @@ impl Engine {
                 module,
                 plan,
                 inputs,
+                input_region,
                 absent,
                 accelerated,
             } => {
@@ -791,7 +1055,14 @@ impl Engine {
                 }
                 if let (Some(a), true) = (&self.accelerator, accelerated) {
                     let (content, port) = &held[0];
-                    let input = self.device(a.as_ref(), step, content, *port)?;
+                    let input = self.device(
+                        a.as_ref(),
+                        &inputs[0].0,
+                        step,
+                        content,
+                        *port,
+                        *input_region,
+                    )?;
                     self.accelerated.fetch_add(1, Ordering::SeqCst);
                     let image = module.accelerate(a.as_ref(), plan, &input, step.region)?;
                     Ok(Arc::new(Content::Device {
@@ -799,18 +1070,19 @@ impl Engine {
                         host: OnceLock::new(),
                     }))
                 } else {
-                    let images = held
+                    // Each input cropped to what the module reads: a view.
+                    let mut images = held
                         .iter()
                         .zip(inputs)
-                        .map(|((content, port), (input, _))| self.host(input, content, *port))
-                        .collect::<Result<Vec<&Image>, Error>>()?;
-                    let placeholders: Vec<(usize, Image)> =
-                        absent.iter().map(|&(i, c)| (i, Image::absent(c))).collect();
-                    let mut images = images;
+                        .map(|((content, port), (input, _))| {
+                            Ok(self.host(input, content, *port)?.sample(*input_region))
+                        })
+                        .collect::<Result<Vec<Image>, Error>>()?;
                     // In index order, so each lands at its port's place.
-                    for (i, image) in &placeholders {
-                        images.insert(*i, image);
+                    for &(i, channels) in absent {
+                        images.insert(i, Image::absent(channels));
                     }
+                    let images: Vec<&Image> = images.iter().collect();
                     Ok(Arc::new(Content::Host(module.process(
                         plan,
                         &images,

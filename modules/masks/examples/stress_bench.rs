@@ -16,8 +16,8 @@
 //! The line holds the time in milliseconds, the peak resident memory in
 //! KiB (`VmHWM` of `/proc/self/status`, `null` where it is not available),
 //! and the engine's counters for the measured renders: steps asked for,
-//! computed and shared (cache hits), and content keys computed while
-//! planning.
+//! computed and shared (cache hits), content keys computed while
+//! planning, and steps cropped from wider cached content.
 
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -132,7 +132,7 @@ fn main() -> ExitCode {
     let c = engine.counters().since(&before);
     let peak = peak_kib().map_or_else(|| "null".into(), |k| k.to_string());
     println!(
-        "{{\"mode\":\"{}\",\"modules\":{},\"mask_nodes\":{},\"width\":{},\"height\":{},\"tile\":{},\"ms\":{ms:.1},\"peak_kib\":{peak},\"requests\":{},\"computed\":{},\"shared\":{},\"keys\":{}}}",
+        "{{\"mode\":\"{}\",\"modules\":{},\"mask_nodes\":{},\"width\":{},\"height\":{},\"tile\":{},\"ms\":{ms:.1},\"peak_kib\":{peak},\"requests\":{},\"computed\":{},\"shared\":{},\"keys\":{},\"crops\":{}}}",
         o.mode,
         o.modules,
         n.mask_nodes,
@@ -143,6 +143,7 @@ fn main() -> ExitCode {
         c.computed,
         c.shared(),
         c.keys,
+        c.crops,
     );
     ExitCode::SUCCESS
 }

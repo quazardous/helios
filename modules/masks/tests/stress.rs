@@ -124,3 +124,61 @@ fn a_one_value_edit_recomputes_only_the_dirty_branch() {
     assert_eq!(delta.keys, rendered.keys);
     assert!(!same_bits(&first, &edited), "the edit shows");
 }
+
+/// The network renders as it did when each distinct region asked of a
+/// node was a step of its own: union planning changes what is computed,
+/// not one bit of the result. Hashes of that engine's renders (x86-64
+/// Linux: the picture uses `sin`, whose last bit may differ elsewhere).
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+#[test]
+fn renders_are_bit_identical_to_planning_per_region() {
+    let full = Region::sized(40, 28);
+    let n = network(full);
+    let e = engine();
+    let out = e.render(&n.graph, n.output(), "output", full).unwrap();
+    assert_eq!(
+        out.content_hash().to_string(),
+        "be5fc8fae33abbd5fa7911851bc609f4b789fafb144389d5f762df7c700aa447"
+    );
+    let masks = [
+        "edf263826520723bde9fc239e6c7b61cda222f15b9968078dd8b0252691cf468",
+        "15073ed52245dbfecdc5dc3fadd87c6443b4993d29a70cec37fcd2c7faac7e70",
+        "b7d994b2f42c6df3944f9f37f34581178e30665f22f3db72c0620f042603f639",
+    ];
+    for (node, hash) in n.masks.iter().zip(masks) {
+        let mask = e.render(&n.graph, *node, "mask", full).unwrap();
+        assert_eq!(mask.content_hash().to_string(), hash);
+    }
+    let proxy = engine()
+        .render_at(&n.graph, n.output(), "output", Region::sized(10, 7), 0.25)
+        .unwrap();
+    assert_eq!(
+        proxy.content_hash().to_string(),
+        "044d19e2fae662ca115e847a9ca67ab9dd905a6ecfae5ce8e468630742537151"
+    );
+}
+
+#[test]
+fn a_full_render_computes_each_node_once() {
+    let r = Region::sized(48, 32);
+    let n = network(r);
+    let e = engine();
+    let events = e.bus().subscribe();
+    e.render(&n.graph, n.output(), "output", r).unwrap();
+    let mut names: Vec<String> = events
+        .try_iter()
+        .filter(|ev| ev.kind == "engine.step_computed")
+        .map(|ev| ev.payload["name"].as_str().unwrap().to_string())
+        .collect();
+    let steps = names.len();
+    names.sort();
+    names.dedup();
+    assert_eq!(steps, names.len(), "one step per node");
+    // Every node: the mask nodes, the processed modules and the source.
+    assert_eq!(steps, n.graph.ids().count());
+    let c = e.counters();
+    assert_eq!(
+        (c.computed, c.keys, c.source_reads),
+        (steps as u64, steps as u64, 1)
+    );
+}
