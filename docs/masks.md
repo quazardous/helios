@@ -159,6 +159,32 @@ viewport's handles that draw and move shapes are a separate step; what
 they read and write is listed in the module's documentation
 (`helios_module_masks::shape`).
 
+## From darktable's drawn masks
+
+`helios_xmp::drawn` reads a sidecar's `darktable:masks_history` (each
+form's points are its C structs, hex or `gz` encoded like history params)
+and maps each form onto a member, given a `Frame`: the size of the image
+darktable's pipe starts from and where Helios's image starts in it (the
+loader's crop). It reads masks versions 4 to 6 (darktable's current is 6).
+
+| darktable form | Helios | carried over | lost |
+|---|---|---|---|
+| circle | `mask_circle` | centre, radius, feather (by the smaller side) | nothing |
+| ellipse | `mask_ellipse` | centre, half-axes, rotation, feather, equidistant or proportional | nothing |
+| gradient | `mask_gradient` | anchor, rotation, compression (`feather = 2 · compression · diagonal`), linear or sigmoid | the curvature (reported when not 0); `steepness`, which darktable does not use |
+| path | `mask_path` | corners and both handles of up to 64 points | the feather per point: one mean feather (reported when they differ by more than 1 %); paths of more points are skipped |
+| group | `mask_combine` | members in order, each one's inversion, opacity and operator (union and sum → `maximum`, intersection → `minimum`, difference, exclusion) | a group whose later members use different operators is a chain of two-member groups, which the importer builds |
+| brush, clone, AI object | skipped, with why | | |
+
+Every member lists its losses and every skipped form says why. Two
+approximations hold for all: darktable computes a shape on a coarse grid
+(up to 4 pixels) and interpolates, Helios computes every pixel; and
+darktable distorts a shape through the modules before it (lens, crop,
+rotation), which Helios does not do yet. Wiring the members into a
+module's mask needs the module's blend parameters (its `mask_id`), not
+decoded yet: the importer (`helios_xmp::import`) does not call this
+mapping yet.
+
 ## Refinement
 
 - `mask_blur`: Gaussian, sigma = radius × render scale, reach 3 sigma.

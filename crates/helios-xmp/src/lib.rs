@@ -21,6 +21,7 @@
 //!   duplicates darktable writes as `_NN`, case variants, and the sidecars
 //!   whose image is not there.
 
+pub mod drawn;
 pub mod files;
 pub mod import;
 pub mod iop_order;
