@@ -422,7 +422,8 @@ impl Gpu {
     }
 
     /// Runs a module's GPU variant over `output`, reading `source` (edges
-    /// replicated where the module reads past it, as the engine does).
+    /// replicated where the module reads past it, as the engine does; a
+    /// module without inputs reads the engine's placeholder instead).
     /// `Ok(None)` when the module has none.
     pub fn run(
         &self,
@@ -435,8 +436,13 @@ impl Gpu {
         let Some(job) = module.gpu_job(params, context, 1.0, output)? else {
             return Ok(None);
         };
-        let input = source.sample(job.input);
         let m = module.manifest();
+        // A module without inputs reads the engine's placeholder.
+        let input = if m.inputs.is_empty() {
+            ModuleRef::placeholder(output)
+        } else {
+            source.sample(job.input)
+        };
         let channels = m
             .outputs
             .first()
@@ -652,6 +658,10 @@ impl Gpu {
                 job.input.height,
                 output.width,
                 output.height,
+                output.x as i32 as u32,
+                output.y as i32 as u32,
+                job.input.x as i32 as u32,
+                job.input.y as i32 as u32,
             ];
             let shape_buf = uniform(bytemuck::cast_slice(&shape), "shape");
             let group = d.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -943,13 +953,11 @@ pub fn check(
         .map_err(|e| e.to_string())?;
     g.set_context(node, context.clone())
         .map_err(|e| e.to_string())?;
-    g.connect(
-        src,
-        helios_core::graph::SOURCE_PORT,
-        node,
-        &module.manifest().inputs[0].name,
-    )
-    .map_err(|e| e.to_string())?;
+    // A module without inputs (a generator) leaves the source unread.
+    if let Some(port) = module.manifest().inputs.first() {
+        g.connect(src, helios_core::graph::SOURCE_PORT, node, &port.name)
+            .map_err(|e| e.to_string())?;
+    }
     let engine = helios_core::Engine::new(std::sync::Arc::new(helios_core::Bus::new()));
     let port = &module.manifest().outputs[0].name;
     let cpu = engine

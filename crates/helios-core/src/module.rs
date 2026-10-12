@@ -59,7 +59,13 @@ impl Context {
 /// count, input channels, output channels, invocations per grid row; then
 /// input width, input height, output width, output height). The output
 /// region sits in the input at `(input width - output width) / 2` on each
-/// side.
+/// side. A third `vec4` of the shape holds the output's origin and the
+/// input's, `x` and `y` (`bitcast<i32>`): output x, output y, input x,
+/// input y; a kernel that does not need them declares `array<vec4<u32>, 2>`
+/// as before. A module without inputs (a generator, such as a drawn mask
+/// shape) reads a one-pixel placeholder holding 0 at the output's origin,
+/// so its kernel has the same bindings; it must still use binding 0
+/// (`_ = input[0];`), since a pipeline's layout comes from its shader.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct GpuKernel {
     pub wgsl: &'static str,
@@ -407,18 +413,33 @@ impl ModuleRef {
         Ok(Some(GpuJob {
             kernel,
             uniforms: self.0.gpu_uniforms(&plan),
-            input: self.input_region(&plan, output),
+            input: self.gpu_input(&plan, output),
         }))
     }
 
+    /// The region a GPU kernel reads: its input's, or for a module without
+    /// inputs the placeholder's, one pixel at the output's origin.
+    fn gpu_input(&self, plan: &Plan, output: Region) -> Region {
+        if self.manifest().inputs.is_empty() {
+            Self::placeholder(output).region()
+        } else {
+            self.input_region(plan, output)
+        }
+    }
+
+    /// What a module without inputs reads on an accelerator for `output`:
+    /// one pixel holding 0 at the output's origin.
+    pub fn placeholder(output: Region) -> Image {
+        Image::new(Region::new(output.x, output.y, 1, 1), 1, vec![0.0])
+    }
+
     /// Whether an accelerator can run this module: a GPU variant, one
-    /// input and one output.
+    /// output, and one input or none.
     pub(crate) fn acceleratable(&self) -> bool {
         let m = self.manifest();
         // An optional input may arrive empty: the CPU code handles it.
         self.0.gpu_kernel().is_some()
-            && m.inputs.len() == 1
-            && !m.inputs[0].optional
+            && (m.inputs.is_empty() || (m.inputs.len() == 1 && !m.inputs[0].optional))
             && m.outputs.len() == 1
     }
 
@@ -438,7 +459,7 @@ impl ModuleRef {
         let job = GpuJob {
             kernel,
             uniforms: self.0.gpu_uniforms(plan),
-            input: self.input_region(plan, output),
+            input: self.gpu_input(plan, output),
         };
         let m = self.manifest();
         let channels = m.outputs[0].channels().unwrap_or(input.channels());

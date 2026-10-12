@@ -348,3 +348,97 @@ fn the_dispatch_grid_covers_every_pixel_within_the_limits() {
     // Past what two dimensions hold: an error, not a wrong image.
     assert!(grid(u32::MAX, 16).is_err());
 }
+
+/// A generator: no input, its value a function of where the pixel is,
+/// `x + 1000 y` (negative coordinates too), read from the shape's origins.
+mod generator {
+    use helios_core::*;
+
+    pub struct Coordinates;
+
+    pub const WGSL: &str = "
+@group(0) @binding(0) var<storage, read> input: array<f32>;
+@group(0) @binding(1) var<storage, read_write> output: array<f32>;
+@group(0) @binding(2) var<uniform> plan: array<vec4<f32>, 1>;
+@group(0) @binding(3) var<uniform> shape: array<vec4<u32>, 3>;
+
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) id: vec3<u32>) {
+    let p = id.y * shape[0].w + id.x;
+    if (p >= shape[0].x) {
+        return;
+    }
+    let w = shape[1].z;
+    let x = bitcast<i32>(shape[2].x) + i32(p % w);
+    let y = bitcast<i32>(shape[2].y) + i32(p / w);
+    output[p] = f32(x) + 1000.0 * f32(y) + plan[0].x + input[0];
+}
+";
+
+    impl Module for Coordinates {
+        type Plan = ();
+        fn manifest(&self) -> Manifest {
+            Manifest {
+                name: "coordinates".into(),
+                version: 1,
+                description: String::new(),
+                params: vec![],
+                inputs: vec![],
+                outputs: vec![PortSpec::image("output", 1)],
+                context: vec![],
+                needs: Needs::default(),
+                kind: ModuleKind::Process,
+                family: Family::Other,
+                role: Role::General,
+            }
+        }
+        fn prepare(&self, _: &Params, _: &Context) -> Result<(), String> {
+            Ok(())
+        }
+        fn process(&self, (): &(), _: &[&Image], output: Region) -> Result<Vec<Image>, String> {
+            Ok(vec![Image::from_fn(output, 1, |x, y, _| {
+                x as f32 + 1000.0 * y as f32 + 0.5
+            })])
+        }
+        fn gpu_kernel(&self) -> Option<GpuKernel> {
+            Some(GpuKernel {
+                wgsl: WGSL,
+                entry: "main",
+            })
+        }
+        fn gpu_uniforms(&self, (): &()) -> Vec<f32> {
+            vec![0.5]
+        }
+    }
+}
+
+#[test]
+fn a_module_without_inputs_runs_on_the_gpu_where_its_output_is() {
+    let _gpu = helios_testkit::gpu_lock();
+    let Some(gpu) = gpu() else { return };
+    let module = ModuleRef::new(generator::Coordinates);
+    let unused = helios_testkit::noise(Region::sized(2, 2), 1, 3);
+    for region in [Region::new(-7, -3, 19, 5), Region::new(130, 40, 70, 9)] {
+        let c = check(
+            &gpu,
+            &module,
+            &Params::new(),
+            &Context::new(),
+            &unused,
+            region,
+        )
+        .unwrap();
+        assert_eq!(c.max_abs, 0.0, "{region}: {c:?}");
+    }
+
+    let mut g = helios_core::Graph::new();
+    let node = g.add_module("xy", module, &Params::new()).unwrap();
+    let engine = helios_core::Engine::new(std::sync::Arc::new(helios_core::Bus::new()))
+        .with_accelerator(gpu);
+    let region = Region::new(-5, 2, 33, 4);
+    let out = engine.render(&g, node, "output", region).unwrap();
+    assert_eq!(out.pixel(-5, 2)[0], -5.0 + 2000.0 + 0.5);
+    assert_eq!(out.pixel(27, 5)[0], 27.0 + 5000.0 + 0.5);
+    let n = engine.counters();
+    assert_eq!((n.accelerated, n.uploads, n.fallbacks), (1, 1, 0), "{n:?}");
+}

@@ -1065,23 +1065,30 @@ impl Engine {
     }
 
     /// Runs an accelerated step: its input on the device, then its kernel.
-    /// An allocation over the accelerator's budget evicts device content
-    /// the render does not need, and tries again while there is some.
+    /// A module without inputs (a generator) reads a one-pixel placeholder
+    /// instead (see [`crate::GpuKernel`]). An allocation over the
+    /// accelerator's budget evicts device content the render does not
+    /// need, and tries again while there is some.
     fn accelerate(
         &self,
         accelerator: &dyn Accelerator,
         step: &Step,
         module: &ModuleRef,
         plan: &crate::module::Plan,
-        input: (&Step, &Content, usize),
+        input: Option<(&Step, &Content, usize)>,
         input_region: Region,
     ) -> Result<Result<DeviceImage, AcceleratorError>, Error> {
         loop {
-            let attempt =
-                match self.on_device(accelerator, input.0, input.1, input.2, input_region)? {
-                    Ok(on_device) => module.accelerate(accelerator, plan, &on_device, step.region),
-                    Err(e) => Err(e),
-                };
+            let on_device = if let Some((s, content, port)) = input {
+                self.on_device(accelerator, s, content, port, input_region)?
+            } else {
+                self.uploads.fetch_add(1, Ordering::SeqCst);
+                accelerator.upload(&ModuleRef::placeholder(step.region))
+            };
+            let attempt = match on_device {
+                Ok(on_device) => module.accelerate(accelerator, plan, &on_device, step.region),
+                Err(e) => Err(e),
+            };
             match attempt {
                 Err(e) if e.failure == Failure::OutOfMemory && self.evict_device() => {}
                 attempt => return Ok(attempt),
@@ -1523,8 +1530,9 @@ impl Engine {
                     });
                 }
                 if let (Some(a), true) = (self.active(), accelerated) {
-                    let (content, port) = &held[0];
-                    let input = (inputs[0].0.as_ref(), content.as_ref(), *port);
+                    let input = held
+                        .first()
+                        .map(|(content, port)| (inputs[0].0.as_ref(), content.as_ref(), *port));
                     match self.accelerate(a.as_ref(), step, module, plan, input, *input_region)? {
                         Ok(image) => {
                             self.accelerated.fetch_add(1, Ordering::SeqCst);
