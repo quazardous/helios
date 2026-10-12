@@ -1022,7 +1022,7 @@ dependencies = [
 [[package]]
 name = "egui-pop"
 version = "0.0.1"
-source = "git+https://github.com/quazardous/egui-pop?rev=463543d#463543d68a8772ecbe56fe975dbd4b4b9b046a5c"
+source = "git+https://github.com/quazardous/egui-pop?rev=8b37b96#8b37b9629b794e1f55b08a3d0b6da232491e20e0"
 dependencies = [
  "egui",
  "egui-pop-api",
@@ -1034,12 +1034,13 @@ dependencies = [
 [[package]]
 name = "egui-pop-api"
 version = "0.0.1"
-source = "git+https://github.com/quazardous/egui-pop?rev=463543d#463543d68a8772ecbe56fe975dbd4b4b9b046a5c"
+source = "git+https://github.com/quazardous/egui-pop?rev=8b37b96#8b37b9629b794e1f55b08a3d0b6da232491e20e0"
 dependencies = [
  "eframe",
  "egui",
  "egui-pop-core",
  "egui-pop-model",
+ "egui_dock",
  "log",
  "serde",
  "serde_json",
@@ -1048,7 +1049,7 @@ dependencies = [
 [[package]]
 name = "egui-pop-core"
 version = "0.0.1"
-source = "git+https://github.com/quazardous/egui-pop?rev=463543d#463543d68a8772ecbe56fe975dbd4b4b9b046a5c"
+source = "git+https://github.com/quazardous/egui-pop?rev=8b37b96#8b37b9629b794e1f55b08a3d0b6da232491e20e0"
 dependencies = [
  "egui",
  "egui-pop-model",
@@ -1061,7 +1062,7 @@ dependencies = [
 [[package]]
 name = "egui-pop-model"
 version = "0.0.1"
-source = "git+https://github.com/quazardous/egui-pop?rev=463543d#463543d68a8772ecbe56fe975dbd4b4b9b046a5c"
+source = "git+https://github.com/quazardous/egui-pop?rev=8b37b96#8b37b9629b794e1f55b08a3d0b6da232491e20e0"
 dependencies = [
  "log",
  "serde",
@@ -1071,7 +1072,7 @@ dependencies = [
 [[package]]
 name = "egui-pop-test"
 version = "0.0.1"
-source = "git+https://github.com/quazardous/egui-pop?rev=463543d#463543d68a8772ecbe56fe975dbd4b4b9b046a5c"
+source = "git+https://github.com/quazardous/egui-pop?rev=8b37b96#8b37b9629b794e1f55b08a3d0b6da232491e20e0"
 dependencies = [
  "egui",
  "egui-pop-api",
@@ -1082,7 +1083,7 @@ dependencies = [
 [[package]]
 name = "egui-pop-tokens"
 version = "0.0.1"
-source = "git+https://github.com/quazardous/egui-pop?rev=463543d#463543d68a8772ecbe56fe975dbd4b4b9b046a5c"
+source = "git+https://github.com/quazardous/egui-pop?rev=8b37b96#8b37b9629b794e1f55b08a3d0b6da232491e20e0"
 dependencies = [
  "serde_json",
 ]

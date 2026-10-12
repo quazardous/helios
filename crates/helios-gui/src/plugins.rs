@@ -9,6 +9,8 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex, PoisonError};
 
+use egui_pop::api::app::{STEP_REDO, STEP_UNDO};
+use egui_pop::api::steps::Before;
 use egui_pop::api::zones::{self, Block};
 use egui_pop::api::{Ctx, Plugin, PluginError};
 use egui_pop::model::commands::CommandSpec;
@@ -29,6 +31,7 @@ pub const SYSTEM_THEMES: MenuId = MenuId::from_static("helios.system.themes");
 pub const COMMANDS: PluginId = PluginId::from_static("helios.commands");
 pub const LISTS: PluginId = PluginId::from_static("helios.lists");
 pub const WORKBENCH: PluginId = PluginId::from_static("helios.workbench");
+pub const HISTORY: PluginId = PluginId::from_static("helios.history");
 
 /// What Helios declares beside its commands' registry entries: default
 /// keys (with their `when`), menu entries, ticks, commands kept out of the
@@ -169,6 +172,37 @@ impl Plugin for Lists {
                     .args(json!({ "path": p }))
                     .label(&p.display().to_string()),
             )?;
+        }
+        Ok(())
+    }
+}
+
+/// Undo and redo wait for a change in progress: while a gesture (a drag)
+/// holds values, egui-pop's `edit.undo` and `edit.redo` steps are vetoed,
+/// with the reason, rather than undoing under the user's hand.
+pub struct History {
+    pub values: Arc<Mutex<helios_values::Store>>,
+}
+
+impl Plugin for History {
+    fn id(&self) -> PluginId {
+        HISTORY
+    }
+
+    fn title(&self) -> String {
+        "Helios history".into()
+    }
+
+    fn connect(&mut self, ctx: &mut Ctx<'_>) -> Result<(), PluginError> {
+        for step in [STEP_UNDO, STEP_REDO] {
+            let values = self.values.clone();
+            ctx.before(step, move |_, _| {
+                let v = values.lock().unwrap_or_else(PoisonError::into_inner);
+                match v.open_gesture() {
+                    Some(g) => Before::Veto(format!("{g} is in progress")),
+                    None => Before::Go,
+                }
+            });
         }
         Ok(())
     }

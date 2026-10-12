@@ -211,7 +211,11 @@ impl Shell {
     pub fn build(panels: Panels, layout: Option<Layout>, ui_settings: Option<PathBuf>) -> Shell {
         let registry = Arc::new(Mutex::new(Registry::new()));
         let bus = Arc::new(Bus::new());
-        let host = HeliosHost::new(registry.clone(), bus, Arc::default());
+        // Helios's values: what widgets and agents edit, and what Edit >
+        // Undo walks back through the host.
+        let values: Arc<Mutex<helios_values::Store>> = Arc::default();
+        let host =
+            HeliosHost::new(registry.clone(), bus, Arc::default()).with_values(values.clone());
         let later = host.later();
         let specs: Vec<PanelSpec> = panels.all().to_vec();
         let (workbench, notes) = Workbench::new(panels, layout);
@@ -229,7 +233,7 @@ impl Shell {
             later: &later,
             dialogs: Arc::default(),
             resolved_view: Arc::new(Mutex::new(Value::Null)),
-            values: Arc::default(),
+            values,
             themes: &themes,
             declarations: &declarations,
         };
@@ -255,6 +259,9 @@ impl Shell {
             })
             .plugin(plugins::Lists {
                 source: lists.clone(),
+            })
+            .plugin(plugins::History {
+                values: values.clone(),
             })
             .plugin(plugins::Areas {
                 workbench: workbench.clone(),

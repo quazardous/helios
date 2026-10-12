@@ -18,6 +18,12 @@
 //! - **the store** holds the interface's own settings (focus mode, window
 //!   place, the user's keys); Helios's values (node parameters, the
 //!   viewport) stay in `helios_values`;
+//! - **undo and redo**: egui-pop's Edit > Undo and Redo (`Ctrl+Z`...) ask
+//!   the host, which answers from Helios's value store
+//!   ([`HeliosHost::with_values`]): its steps, their labels ("Undo drag
+//!   exposure"), and an undo or redo as a step of its own, which the
+//!   vault saves as a version (`persist`). The interface settings keep
+//!   their own undo, in the settings window;
 //! - **the waker**: a thread follows the bus and asks for a frame when an
 //!   event comes from elsewhere (a render done, a node's status).
 
@@ -60,6 +66,10 @@ const KINDS: &[(&str, &str)] = &[
     ("command.failed", "gui.command.failed"),
     ("dialog.answered", "gui.dialog.answered"),
     ("toast.shown", "gui.toast.shown"),
+    ("edit.undone", "gui.edit.undone"),
+    ("edit.redone", "gui.edit.redone"),
+    ("edit.undo_failed", "gui.edit.undo_failed"),
+    ("edit.redo_failed", "gui.edit.redo_failed"),
 ];
 
 /// The kind of an egui-pop event whose name is not in [`KINDS`]; its
@@ -73,6 +83,8 @@ pub struct HeliosHost {
     later: Later,
     store: SharedStore,
     waker: Arc<Mutex<Waker>>,
+    /// Helios's values, whose steps undo and redo walk.
+    values: Option<Arc<Mutex<helios_values::Store>>>,
     /// The trait hands out an egui-pop journal (`Host::journal`); the
     /// events themselves are on the bus, so this one stays empty.
     unused: Journal,
@@ -104,8 +116,21 @@ impl HeliosHost {
             later: Later::default(),
             store,
             waker,
+            values: None,
             unused: Journal::with_capacity(1),
         }
+    }
+
+    /// Undo and redo walk the steps of these values.
+    pub fn with_values(mut self, values: Arc<Mutex<helios_values::Store>>) -> Self {
+        self.values = Some(values);
+        self
+    }
+
+    fn values(&self) -> Option<std::sync::MutexGuard<'_, helios_values::Store>> {
+        self.values
+            .as_ref()
+            .map(|v| v.lock().unwrap_or_else(PoisonError::into_inner))
     }
 
     /// Where queuing handlers take their resolver.
@@ -221,6 +246,36 @@ impl Host for HeliosHost {
 
     fn set_waker(&mut self, waker: Waker) {
         *self.waker.lock().unwrap_or_else(PoisonError::into_inner) = waker;
+    }
+
+    fn can_undo(&self) -> bool {
+        self.values().is_some_and(|v| !v.undo_steps().is_empty())
+    }
+
+    fn can_redo(&self) -> bool {
+        self.values().is_some_and(|v| !v.redo_steps().is_empty())
+    }
+
+    fn undo_label(&self) -> Option<String> {
+        self.values()?.undo_steps().last().map(|s| s.label.clone())
+    }
+
+    fn redo_label(&self) -> Option<String> {
+        self.values()?.redo_steps().last().map(|s| s.label.clone())
+    }
+
+    fn undo(&mut self, origin: &PopOrigin) -> Result<Option<String>, String> {
+        match self.values() {
+            Some(mut v) => v.undo(&to_helios(origin)).map_err(|e| e.to_string()),
+            None => Ok(None),
+        }
+    }
+
+    fn redo(&mut self, origin: &PopOrigin) -> Result<Option<String>, String> {
+        match self.values() {
+            Some(mut v) => v.redo(&to_helios(origin)).map_err(|e| e.to_string()),
+            None => Ok(None),
+        }
     }
 }
 

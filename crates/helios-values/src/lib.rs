@@ -821,6 +821,11 @@ impl Store {
         &self.undo
     }
 
+    /// The redo steps, oldest first: the next redo is the last.
+    pub fn redo_steps(&self) -> &[Step] {
+        &self.redo
+    }
+
     /// Puts back the values a step changed, as a write by `origin`.
     fn replay(&mut self, step: &Step, origin: &Origin, back: bool) -> Result<(), Refused> {
         let changes: Vec<(String, Value)> = if back {

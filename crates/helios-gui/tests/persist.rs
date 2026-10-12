@@ -326,3 +326,80 @@ fn each_edit_step_is_a_version_and_reopening_loads_the_head() {
     drop((shell, persist));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn ctrl_z_undoes_a_drag_as_a_version_redo_replays_it_and_a_drag_going_on_stops_it() {
+    use egui::{Key, Modifiers};
+    use helios_shell::commands::Origin;
+    let dir = scratch("undo");
+    let path = vault_file(&dir);
+    let mut shell = Shell::new(helios_panels(), None);
+    let mut persist = Persist::new(SqliteStore::open(&path).unwrap(), Arc::new(Bus::new()));
+    let (graph, exp) = network();
+    persist
+        .open_image(&mut shell, id(1), graph, exp, "output")
+        .unwrap();
+    let start = shown(&shell);
+    let drag = shell
+        .values
+        .lock()
+        .unwrap()
+        .begin_gesture(Origin::User, "drag exposure");
+    set(&shell, start + 1.5, Some(drag));
+    shell.values.lock().unwrap().end(drag);
+    persist.frame(&mut shell, 10.0);
+    let mut h = helios_gui::headless::harness(shell, egui::vec2(1280.0, 800.0));
+    h.run();
+    // Edit > Undo names the step it would take back.
+    let undo = h
+        .state()
+        .app()
+        .handle()
+        .command(&egui_pop::api::app::CMD_UNDO)
+        .unwrap();
+    assert_eq!(
+        h.state().app().handle().command_title(&undo),
+        "Undo drag exposure"
+    );
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    h.run();
+    assert!((shown(h.state()) - start).abs() < 1e-9, "the drag undone");
+    persist.frame(h.state_mut(), 11.0);
+    h.key_press_modifiers(Modifiers::COMMAND | Modifiers::SHIFT, Key::Z);
+    h.run();
+    assert!((shown(h.state()) - (start + 1.5)).abs() < 1e-9, "redone");
+    persist.frame(h.state_mut(), 12.0);
+    assert_eq!(
+        saved(persist.bus()),
+        [
+            (1, "drag exposure".into()),
+            (2, "undo drag exposure".into()),
+            (3, "redo drag exposure".into()),
+        ]
+    );
+    // A drag going on: the undo is vetoed, the value stays, and the
+    // journal says why.
+    let before = h.state().app().handle().last_event();
+    let drag = h
+        .state()
+        .values
+        .lock()
+        .unwrap()
+        .begin_gesture(Origin::User, "drag exposure");
+    set(h.state(), start + 2.0, Some(drag));
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    h.run();
+    assert!((shown(h.state()) - (start + 2.0)).abs() < 1e-9);
+    let failed = h
+        .state()
+        .app()
+        .handle()
+        .events_since(before)
+        .into_iter()
+        .find(|e| e.name == "edit.undo_failed")
+        .expect("the veto is on the journal");
+    assert_eq!(failed.data["reason"], "drag exposure is in progress");
+    h.state().values.lock().unwrap().end(drag);
+    drop((h, persist));
+    let _ = std::fs::remove_dir_all(&dir);
+}

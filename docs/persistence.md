@@ -16,7 +16,10 @@ from the last step saved:
   is saved as a version of the image's edit (`helios_vault::EditSession`);
   a drag is saved every second while it goes (`FLUSH_SECONDS`), as a
   version labelled "in progress". `helios-gui --vault FILE --image FILE`
-  opens the image at its head.
+  opens the image at its head. Edit > Undo and Redo (`Ctrl+Z`,
+  `Ctrl+Shift+Z`, `Ctrl+Y`) are egui-pop's commands answered by Helios's
+  host from these steps, so each one is a step saved as a version too;
+  they are held while a drag is in progress.
 - **Parameters and decisions through control or MCP**: a node started with
   `--vault` and a file source keeps that image's edit; each `set-param` and
   decision answer is saved before it is answered, the decision book inside
