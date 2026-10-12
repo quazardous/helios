@@ -1,0 +1,154 @@
+# Helios's jobs on a bench box (a self-service remote runner, see
+# docs/bench.md), as a Benchfile: the image, where the code comes from, and
+# what each job runs and requests (threads, a memory estimate, exclusive
+# resources, mounts, a timeout). The box refuses a request above its
+# envelope (`config show`) and learns each job's real memory peak.
+#
+#   run <job> branch=<branch>          a branch pushed to GitHub
+#   run <job> branch=<b> src=helios-local
+#                                      code sent with `push helios-local`
+#                                      (cargo xtask bench-remote --push)
+#   debug <job> branch=<branch>        (ssh -t) a shell in the job's container
+#
+# Upload it with `config benchfile < tools/bench/Benchfile`. Each job has
+# its own checkout at /work/helios, so jobs on different branches run side
+# by side; the target directory is kept per branch and used by one job at a
+# time, the cargo registry is shared. Jobs run without network: [fetch]
+# downloads the crates first. Results land in /out, fetched with
+# `fetch <id>`.
+
+[image]
+from = "registry.fedoraproject.org/fedora:44"
+run = [
+  # build tools; Mesa's lavapipe (software Vulkan) for the GPU backend and
+  # the GUI snapshot tests; labwc for headless GUI runs through wbox
+  """dnf -y install git-core gcc gcc-c++ make pkgconf-pkg-config findutils procps-ng \
+      tar xz which python3 wayland-devel libxkbcommon-devel \
+      mesa-vulkan-drivers vulkan-loader vulkan-tools labwc \
+ && dnf clean all""",
+  # every download is pinned and checked: rustup-init 1.29.1 (its published
+  # sha256), cargo-nextest 0.9.148, wbox-mcp at a commit
+  # the toolchain of rust-toolchain.toml, outside CARGO_HOME (a cache)
+  """curl -sSfL -o /tmp/rustup-init \
+      https://static.rust-lang.org/rustup/archive/1.29.1/x86_64-unknown-linux-gnu/rustup-init \
+ && echo "dda7234360b7f578ca8b0ddcb80145646fa61a67c1720a5abc7051b35c9fcb71  /tmp/rustup-init" | sha256sum -c - \
+ && chmod +x /tmp/rustup-init \
+ && CARGO_HOME=/opt/cargo /tmp/rustup-init -y --no-modify-path \
+      --profile minimal --default-toolchain 1.95 -c clippy -c rustfmt \
+ && rm /tmp/rustup-init""",
+  """curl -sSfL -o /tmp/nextest.tar.gz \
+      https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-0.9.148/cargo-nextest-0.9.148-x86_64-unknown-linux-gnu.tar.gz \
+ && echo "223ba936714cc861a9cdedad5a8eb664dfdd69d6fbdf6cea6aa8184f523290dc  /tmp/nextest.tar.gz" | sha256sum -c - \
+ && tar -xzf /tmp/nextest.tar.gz -C /usr/local/bin && rm /tmp/nextest.tar.gz""",
+  # wbox drives a headless labwc (no job uses it yet; debug shells may)
+  """python3 -m venv /opt/wbox \
+ && /opt/wbox/bin/pip install --quiet \
+      "git+https://github.com/quazardous/wbox-mcp.git@a2f3eab914e7d1db142f98887a3be623a6821402\"""",
+]
+# CARGO_HOME is the registry cache; the toolchain lives in /opt. Line
+# tables only and no incremental state keep the per-branch target small.
+env = { RUSTUP_HOME = "/opt/rustup", CARGO_HOME = "/cargo", PATH = "/opt/cargo/bin:/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin", CARGO_TARGET_DIR = "/target", CARGO_INCREMENTAL = "0", CARGO_PROFILE_DEV_DEBUG = "line-tables-only", CARGO_PROFILE_TEST_DEBUG = "line-tables-only", RUST_BACKTRACE = "1", VKDT_SRC = "/work/vkdt", WBOX_PYTHON = "/opt/wbox/bin/python3", WLR_RENDERER = "pixman", HOME = "/tmp/home", XDG_RUNTIME_DIR = "/tmp/xdg" }
+
+[checkout.helios]
+repo = "https://github.com/quazardous/helios.git"
+ref = "${branch}"
+submodules = true
+
+# vkdt's module files, read by the manifest round-trip test, at the commit
+# the converter was checked on (the same as CI)
+[checkout.vkdt]
+repo = "https://github.com/hanatos/vkdt.git"
+ref = "afc34256fb22bcaf6dcf6503d19d5f9a6f477af5"
+
+# the job's env applies here too: CARGO_NET_OFFLINE is lifted for the fetch
+[fetch]
+run = ["cd /work/${src:-helios} && CARGO_NET_OFFLINE=false cargo fetch --locked"]
+
+[cache]
+target = { about = "the cargo target directory, one per branch", per = "branch", lock = true }
+registry = "the cargo registry, shared by every branch"
+cargo-git = "the cargo git dependencies, shared by every branch"
+
+# ---------------------------------------------------------------- correctness
+
+[jobs.build]
+cores = 8
+memory = "6g"
+cwd = "/work/${src:-helios}"
+command = "cargo build --workspace --all-targets --locked"
+env = { CARGO_NET_OFFLINE = "true" }
+mounts = { target = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git" }
+timeout = "1h"
+
+# the CI profile (no retry, no fail-fast), its JUnit report and a Markdown
+# summary of the slowest tests in /out
+[jobs.test]
+cores = 6
+memory = "6g"
+cwd = "/work/${src:-helios}"
+command = """cargo nextest run --workspace --locked --profile ci; rc=$?; \
+cp target/nextest/ci/junit.xml /out/ \
+ && cargo xtask test-times --from-junit /out/junit.xml --summary > /out/summary.md; \
+exit $rc"""
+env = { CARGO_NET_OFFLINE = "true" }
+mounts = { target = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git" }
+timeout = "1h"
+
+# quit, kill -9 and reopen: the scenarios that gate a release
+[jobs.survival]
+cores = 4
+memory = "4g"
+cwd = "/work/${src:-helios}"
+command = "cargo survival --locked"
+env = { CARGO_NET_OFFLINE = "true" }
+mounts = { target = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git" }
+timeout = "30m"
+
+# every commit of base..HEAD but the head builds and passes the fast tests
+# (base=<commit or branch>, origin/main by default)
+[jobs.check-commits]
+cores = 8
+memory = "6g"
+cwd = "/work/${src:-helios}"
+command = "cargo xtask check-commits ${base:-origin/main}"
+env = { CARGO_NET_OFFLINE = "true" }
+mounts = { target = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git" }
+timeout = "2h"
+
+# the GPU backend's tests on the box's NVIDIA GPU, not lavapipe
+[jobs.gpu]
+cores = 4
+memory = "4g"
+exclusive = ["gpu"]
+cwd = "/work/${src:-helios}"
+command = """cargo test -q --locked -p helios-gpu --test backend -- --nocapture 2>&1 | grep -E '^(GPU|skipped):' | sort -u | tee /out/adapter.txt; \
+cargo nextest run --locked --profile ci -p helios-gpu -p helios-compute; rc=$?; \
+cp target/nextest/ci/junit.xml /out/; exit $rc"""
+env = { CARGO_NET_OFFLINE = "true" }
+mounts = { target = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git" }
+timeout = "30m"
+
+# ---------------------------------------------------------------- timings
+# alone on the machine, so the numbers compare from one run to the next
+
+[jobs.bench-masks]
+cores = 8
+memory = "6g"
+exclusive = ["machine"]
+cwd = "/work/${src:-helios}"
+command = "cargo xtask bench masks && cp /target/bench/masks.jsonl /out/"
+env = { CARGO_NET_OFFLINE = "true" }
+mounts = { target = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git" }
+timeout = "1h"
+
+# the per-branch history (in the target cache) says which tests got slower
+[jobs.test-times]
+cores = 8
+memory = "6g"
+exclusive = ["machine"]
+cwd = "/work/${src:-helios}"
+command = """cargo xtask test-times --profile ci | tee /out/test-times.txt; rc=${PIPESTATUS[0]}; \
+cp target/nextest/ci/junit.xml /target/test-times/history.jsonl /out/; exit $rc"""
+env = { CARGO_NET_OFFLINE = "true" }
+mounts = { target = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git" }
+timeout = "1h"
