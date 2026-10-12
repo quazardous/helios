@@ -30,8 +30,10 @@ from the last step saved:
   stars. The desktop shows what the vault holds after each write and on
   every `vault.field_changed` event, and says why when a write fails.
 - **XMP import** (`helios batch --sidecar --vault FILE`): a version with
-  origin `import:xmp`, its import report inside, and the sidecar's rating
-  only when the vault has none.
+  origin `import:xmp`, its import report inside, the darktable edit as it
+  came (the sidecar's text, each history item with its raw params and
+  whether it was applied), and the sidecar's rating only when the vault
+  has none.
 
 Every save is announced on the bus: `edit.saved` (with the session's step
 number) for a version, `vault.field_changed` for a field. Tests wait on

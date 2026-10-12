@@ -72,10 +72,24 @@ could not be carried over is listed with the reason (a module the network
 does not run, or the XMP import's own report). An image without a sidecar
 uses the network as it is.
 
+A history item Helios cannot apply (a module it does not have, a params
+version it cannot read, a blend or mask, a second instance of a module
+darktable runs once, an entry it cannot read) never stops the import and
+never moves the items around it. It is listed in `sidecar.import.not_applied`
+with its operation, instance, version and reason, and one line sums them up,
+in `sidecar.warning` and once on stderr:
+
+```text
+helios batch: /photos/IMG_0001.CR2.xmp: 4 of 9 history items not applied, kept for later: flip v2, colorout v5, gamma v1 (no Helios module); exposure v6 (blending not supported)
+```
+
 With `--vault FILE` as well, each sidecar applied is kept in that vault:
 the image is imported, its darktable edit becomes a version with origin
-`import:xmp` (the modules in darktable's pipe order, and the import report
-under `import`), and its rating is written only when the vault has none
+`import:xmp` (the modules in darktable's pipe order, the import report
+under `import`, and under `darktable` the sidecar's text and each of its
+history items with its raw params and what became of it: `applied` to a
+node, `not_applied` with the reason, `disabled`, `replaced` by a later
+item, or `undone` past the history end), and its rating is written only when the vault has none
 (darktable's `-1` is a reject), so a sidecar never overwrites a rating
 chosen in Helios. The version is a first edit: importing the same sidecar
 again adds nothing, and an image already edited keeps its edit beside the

@@ -262,6 +262,16 @@ thread or in the code is marked *(guess)*.
   darktable. At risk: `sidecar.rs` reads `multi_priority` and `history_end`,
   but no `iop_order` / `iop_order_version` handling was found in
   `helios-xmp` *(from grep; instance order may not match darktable's)*.
+  *Addressed since* (2026-10-12): the pipe order is read
+  ([pipeline.md](pipeline.md), pitfall 1). An item Helios cannot apply (a
+  module it does not have, a params version it cannot migrate, a blend or
+  mask, a second instance of a single-instance module, an entry it cannot
+  read) is kept in the imported version with its raw attributes and the
+  sidecar's text, reported in `not_applied` with its name, version and
+  reason, and summed up in one warning per import; it never aborts the
+  import, never moves `history_end`, and a masked item is never applied to
+  the whole image. Not done: rejecting NaN or out-of-range params after a
+  migration.
 - **Recommendation**: keep the byte-for-byte legacy tests and add render
   tests on real old sidecars (2.6, 3.x, 4.x) through the parity bench;
   read darktable's `iop_order_version` / `iop_order_list` and test a

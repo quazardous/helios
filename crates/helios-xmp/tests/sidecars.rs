@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use helios_core::Value as Param;
 use helios_xmp::sidecar::decode_params;
-use helios_xmp::{Layouts, Sidecar, decode, import};
+use helios_xmp::{Layouts, Reason, Sidecar, decode, import};
 
 fn tests_dir() -> Option<PathBuf> {
     let dir = std::env::var_os("HELIOS_DT_TESTS").map_or_else(
@@ -111,12 +111,21 @@ fn a_current_sidecar_imports_with_its_values_and_reports_the_rest() {
         "spektrafilm",
     ] {
         assert!(
-            report.unknown_modules.iter().any(|m| m == missing),
+            report
+                .not_applied
+                .iter()
+                .any(|m| m.operation == missing && m.reason == Reason::UnknownModule),
             "{missing}: {report:#?}"
         );
     }
     assert_eq!(report.disabled, ["sigmoid"]);
-    assert!(report.unsupported_versions.is_empty(), "{report:#?}");
+    assert!(
+        report
+            .not_applied
+            .iter()
+            .all(|m| m.reason == Reason::UnknownModule),
+        "{report:#?}"
+    );
 }
 
 #[test]
@@ -158,17 +167,23 @@ fn every_test_sidecar_reads_and_nothing_is_lost_silently() {
                 let imported = import(&sidecar, &layouts);
                 // Every effective item is accounted for: a node or a line of the report.
                 let r = &imported.report;
-                let accounted = imported.nodes.len()
-                    + r.unknown_modules.len()
-                    + r.unsupported_versions.len()
-                    + r.undecodable.len()
-                    + r.disabled.len();
+                let accounted = imported.nodes.len() + r.not_applied.len() + r.disabled.len();
                 assert_eq!(accounted, sidecar.effective().len(), "{}", path.display());
+                assert_eq!(r.items, sidecar.effective().len(), "{}", path.display());
+                let unreadable: Vec<_> = r
+                    .not_applied
+                    .iter()
+                    .filter(|m| matches!(m.reason, Reason::Unreadable { .. }))
+                    .collect();
+                assert!(unreadable.is_empty(), "{}: {unreadable:?}", path.display());
+                // Every item of the history is kept in the edit, raw params included.
+                let kept = imported.darktable["history"].as_array().unwrap();
+                assert_eq!(kept.len(), sidecar.history.len(), "{}", path.display());
                 assert!(
-                    r.undecodable.is_empty(),
-                    "{}: {:?}",
-                    path.display(),
-                    r.undecodable
+                    kept.iter()
+                        .all(|i| i["attributes"]["darktable:params"].is_string()),
+                    "{}",
+                    path.display()
                 );
                 sidecars += 1;
             }
@@ -213,7 +228,12 @@ fn old_sidecars_import_their_values_after_migration() {
     let sidecar = read(&dir, "0001-exposure/exposure.xmp");
     let imported = import(&sidecar, &Layouts::built_in());
     let r = &imported.report;
-    assert!(r.unsupported_versions.is_empty(), "{r:#?}");
+    assert!(
+        r.not_applied
+            .iter()
+            .all(|m| m.reason == Reason::UnknownModule),
+        "{r:#?}"
+    );
     for presence in ["rawprepare", "demosaic"] {
         assert!(
             r.params_not_read.iter().any(|(m, _)| m == presence),
@@ -241,6 +261,12 @@ fn an_imported_edit_is_a_chained_network() {
     use helios_core::Params;
     use helios_xmp::{Imported, Node};
     let node = |op: &str, multi: &str, module: &str| Node {
+        name: if multi.is_empty() {
+            op.into()
+        } else {
+            format!("{op} {multi}")
+        },
+        instance: multi.parse().unwrap_or(0),
         operation: op.into(),
         multi_name: multi.into(),
         module: module.into(),
