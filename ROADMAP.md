@@ -247,6 +247,21 @@ separated, as the catalog SDK does.
   configurable budget (a share of RAM by default) with least-recently-used
   eviction; without it one 1536×1024 render held 3.9 GB, and tiles only
   bound memory once the cache has a budget.
+- (2026-10-12, proposed, not decided) **Modules declare their interaction
+  needs; one ergonomics layer runs the rituals.** A module declares typed
+  needs (a colour sampled from a point or an area, a target, a line or a set
+  of lines, a region, a range picked from the image, a mask...) and how the
+  gathered data becomes parameters; one layer runs the gestures the same way
+  everywhere, per interaction profile (Lightroom, darktable, Helios). A tool
+  the layer cannot serve writes its own ritual inside the same contract
+  (state, undo, Esc, keyboard alternative, profile remapping, traces) and
+  can be promoted to a shared one. Study: [docs/ergonomics/](docs/ergonomics/README.md).
+- (2026-10-12, idea, not decided) **AI-defined rituals and a ritual
+  editor.** Rituals become data composed only from registered primitives,
+  scoped to a project and driving a process network; an AI can propose one
+  on the fly, validated, dry-run and confirmed by a human before it is
+  saved; a ritual editor edits and tries them. Until then the ritual
+  contract stays serialisable and free of hidden state.
 
 ### 2.3 Vault: the catalog as an API
 
