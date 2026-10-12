@@ -4,8 +4,9 @@
 //! 1. `box`: is the box there and serving? Unreachable or in maintenance,
 //!    the run stops there.
 //! 2. With `--push`, the working tree (tracked and untracked files, not the
-//!    ignored ones) goes to the box with `push helios-local`, and the job
-//!    runs on it (`src=helios-local`) instead of the pushed branch.
+//!    ignored ones) goes to the box with `push helios-local-<id>`, one name
+//!    per checkout so parallel worktrees never overwrite each other, and the
+//!    job runs on it (`src=helios-local-<id>`) instead of the pushed branch.
 //! 3. `run <job> [key=value...]`, its log followed; `branch=` defaults to
 //!    the current branch. On a dropped connection, `wait <id>` reattaches.
 //! 4. `fetch <id>`, extracted to `target/bench-remote/<id>/` (the job's
@@ -34,8 +35,17 @@ pub const USAGE: &str = "bench-remote <job> [key=value...] [--push]";
 /// The exit code of a job the box could not serve.
 pub const EX_TEMPFAIL: u8 = 75;
 
-/// The name local code is pushed under, at `/work/helios-local` on the box.
-const PUSHED: &str = "helios-local";
+/// The name local code is pushed under, at `/work/<name>` on the box: one
+/// per checkout (a hash of its path), so two worktrees pushing at once do not
+/// overwrite each other's code.
+fn pushed_name(root: &Path) -> String {
+    // FNV-1a: stable across runs and Rust versions, unlike the std hasher
+    let mut h: u32 = 0x811c_9dc5;
+    for b in root.to_string_lossy().bytes() {
+        h = (h ^ u32::from(b)).wrapping_mul(0x0100_0193);
+    }
+    format!("helios-local-{h:08x}")
+}
 
 /// The box's user when `HELIOS_BENCH_HOST` names a host only.
 const DEFAULT_USER: &str = "bench-helios";
@@ -403,7 +413,7 @@ fn push(b: &Bench, root: &Path, empty: bool) -> Result<(), String> {
         }
     });
     let out = b
-        .ssh(10, &["push", PUSHED])
+        .ssh(10, &["push", &pushed_name(root)])
         .stdin(tar.stdout.take().expect("piped"))
         .output()
         .map_err(|e| format!("cannot run ssh: {e}"))?;
@@ -500,7 +510,7 @@ fn remote(root: &Path, req: &mut Request) -> Result<ExitCode, String> {
         if let Err(e) = push(&b, root, false) {
             return Ok(unavailable(&e));
         }
-        req.params.push(("src".into(), PUSHED.into()));
+        req.params.push(("src".into(), pushed_name(root)));
     } else {
         warn_unpushed(root, &branch);
     }
@@ -566,6 +576,14 @@ fn remote(root: &Path, req: &mut Request) -> Result<ExitCode, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn each_checkout_pushes_under_its_own_name() {
+        let a = pushed_name(Path::new("/w/helios"));
+        assert_eq!(a, pushed_name(Path::new("/w/helios")), "stable");
+        assert_ne!(a, pushed_name(Path::new("/w/helios/.claude/worktrees/x")));
+        assert!(a.starts_with("helios-local-") && valid_value(&a));
+    }
 
     fn req(job: &str, params: &[(&str, &str)], push: bool) -> Request {
         Request {

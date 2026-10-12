@@ -73,8 +73,10 @@ Without `--push`, the box checks the branch out from GitHub: push it first
 (`bench-remote` warns when the local branch differs from `origin`). With
 `--push`, the tracked and untracked files of the working tree (not the
 ignored ones) are sent to the box and the job runs on them; the target
-cache used is the current branch's when GitHub has it, else main's. Two
-`--push` runs at once overwrite each other's code: run one at a time.
+cache used is the current branch's when GitHub has it, else main's. Each
+checkout pushes under its own name (`helios-local-<id>`, a hash of its
+path), so worktrees can push at the same time; two `--push` runs from the
+same checkout still share it.
 `check-commits` needs the git history, so it runs on a branch, not on
 pushed code.
 
