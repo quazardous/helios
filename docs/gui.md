@@ -289,7 +289,9 @@ recorded.
   first, the picker walked by keys.
 
 - **Picker**: a list to choose from, egui-pop's choice; its command runs
-  with the value chosen. Not yet: a search as one types.
+  with the value chosen. A filter field above the list narrows it as one
+  types, the arrows move through it and Enter takes the highlighted
+  entry.
 - **Menu and context menu**: entries are commands, nothing else. Titles
   come from the commands, keys from the keymap, so a menu never shows a
   key that does not work; an entry whose `when` does not hold is greyed

@@ -10,9 +10,6 @@ command-dialog-assumeYes =
 command-dialog-current =
     .title = Describe the dialog waiting for an answer
 
-command-dialog-picked =
-    .title = Run a picker's command with the value chosen
-
 command-gui-record-start =
     .title = Start recording a video
 

@@ -161,8 +161,14 @@ fn a_picker_runs_its_command_with_the_value_chosen() {
         arg: "area".into(),
     });
     let mut h = harness(shell);
-    // egui-pop's choice has no search yet: one clicks a label.
-    h.get_by_label("secondary side bar").click();
+    // The filter has the focus: typing narrows the list, Enter takes the
+    // first shown.
+    h.get_by_role(egui::accesskit::Role::TextInput)
+        .type_text("second");
+    h.run();
+    assert!(h.query_by_label("editors").is_none());
+    h.key_press(Key::Enter);
+    h.run();
     h.run();
     assert_eq!(log_area(h.state()), "SecondarySideBar");
 

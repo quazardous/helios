@@ -19,7 +19,7 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 use egui::{Context as Egui, Event, Id, Rect, Ui};
-use egui_pop::api::dialogs::{self, Choose, DIALOGS, Dialogs};
+use egui_pop::api::dialogs::{self, Choose, ChooseOption, DIALOGS, Dialogs};
 use egui_pop::api::host::{Reply, Resolver};
 use egui_pop::api::settings_window::{SETTINGS_WINDOW, SHORTCUTS};
 use egui_pop::api::toasts::{TOASTS, Toast};
@@ -770,7 +770,7 @@ impl Shell {
                     "Describe the dialog waiting for an answer",
                     "Window",
                 ),
-                move |_, _| Ok(view.get().map_or(Value::Null, describe)),
+                move |_, _| Ok(view.get().map_or(Value::Null, Dialogs::describe)),
             )
             .expect("shell commands are declared once");
         let view = w.resolved_view.clone();
@@ -817,27 +817,6 @@ impl Shell {
                     }
                 };
                 Ok(Action::Answer(answer, origin.clone()))
-            }),
-        );
-        add(
-            CommandSpec::new(
-                "dialog.picked",
-                "Run a picker's command with the value chosen",
-                "Window",
-            ),
-            Box::new(|args, origin| {
-                let command = args["command"].as_str().ok_or("`command` is missing")?;
-                let arg = args["arg"].as_str().ok_or("`arg` is missing")?;
-                let i = args["choice"].as_u64().ok_or("`choice` is missing")?;
-                let value = args["values"]
-                    .get(i as usize)
-                    .cloned()
-                    .ok_or_else(|| format!("no choice {i}"))?;
-                Ok(Action::Run(
-                    command.into(),
-                    json!({ arg: value }),
-                    origin.clone(),
-                ))
             }),
         );
         add(
@@ -1236,9 +1215,7 @@ impl Shell {
         }
         // egui-pop's palette is the palette; Helios's name for it stays
         // for scripts.
-        for hidden in ["workbench.palette", "dialog.picked"] {
-            d.hidden.insert(hidden.into());
-        }
+        d.hidden.insert("workbench.palette".into());
         for name in crate::theme::choosable(w.themes) {
             d.checked
                 .insert(format!("theme.{name}"), format!("heliosTheme == '{name}'"));
@@ -1423,24 +1400,25 @@ impl Shell {
         self.open_dialog(form);
     }
 
-    /// Asks for a choice, then runs the picker's command with it.
+    /// Asks for a choice (filtered as one types), then runs the picker's
+    /// command with the value chosen as its `arg`.
     pub fn pick(&mut self, p: crate::dialogs::Picker) {
-        let labels: Vec<String> = p
+        let command = match CommandId::new(p.command.as_str()) {
+            Ok(id) => id,
+            Err(e) => return self.warn(e.to_string()),
+        };
+        let options = p
             .choices
             .iter()
-            .map(|c| match &c.detail {
-                Some(d) => format!("{} ({d})", c.label),
-                None => c.label.clone(),
+            .map(|c| {
+                let o = ChooseOption::new(&c.label, json!(c.value));
+                match &c.detail {
+                    Some(d) => o.hint(d),
+                    None => o,
+                }
             })
             .collect();
-        let labels: Vec<&str> = labels.iter().map(String::as_str).collect();
-        let mut choose = Choose::new(&p.title, &labels, CommandId::from_static("dialog.picked"));
-        choose.args = json!({
-            "command": p.command,
-            "arg": p.arg,
-            "values": p.choices.iter().map(|c| c.value.clone()).collect::<Vec<_>>(),
-        });
-        self.open_dialog(choose);
+        self.open_dialog(Choose::with_options(&p.title, options, command).value_key(&p.arg));
     }
 
     /// Opens a menu of commands at a position.
@@ -1521,15 +1499,24 @@ impl Shell {
         let answer = match (answer, &dialog) {
             (Answer::Cancel, _) => dialogs::Answer::Cancel,
             (Answer::Choice(c), dialogs::Dialog::Choose(choose)) => {
-                let values = choose.args["values"].as_array();
-                let index = c
-                    .parse::<usize>()
-                    .ok()
-                    .filter(|i| *i < choose.options.len())
-                    .or_else(|| values.and_then(|v| v.iter().position(|x| x == &json!(c))))
-                    .or_else(|| choose.options.iter().position(|o| *o == c))
-                    .ok_or_else(|| format!("no choice `{c}`"))?;
-                dialogs::Answer::Choose { index }
+                // By value, else by label, else by index.
+                match choose.options.iter().find(|o| o.value == json!(c)) {
+                    Some(o) => dialogs::Answer::Value {
+                        value: o.value.clone(),
+                    },
+                    None => dialogs::Answer::Choose {
+                        index: choose
+                            .options
+                            .iter()
+                            .position(|o| o.label == c)
+                            .or_else(|| {
+                                c.parse::<usize>()
+                                    .ok()
+                                    .filter(|i| *i < choose.options.len())
+                            })
+                            .ok_or_else(|| format!("no choice `{c}`"))?,
+                    },
+                }
             }
             (Answer::Choice(_), _) => return Err("this dialog has no choices".into()),
             (_, dialogs::Dialog::Choose(_)) => return Err("answer a choice with `choice`".into()),
@@ -2047,27 +2034,6 @@ impl Shell {
                 });
             });
     }
-}
-
-/// A dialog as `dialog.current` describes it: egui-pop's description, a
-/// form's values by field key.
-fn describe(d: &Dialogs) -> Value {
-    let mut out = d.describe();
-    if out["kind"] == "form"
-        && let Some(fields) = out["fields"].as_array()
-    {
-        let values: serde_json::Map<String, Value> = fields
-            .iter()
-            .filter_map(|f| {
-                let key = f["key"].as_str()?;
-                // A value is serialized as `{"<type>": value}`.
-                let v = f["value"].as_object()?.values().next()?.clone();
-                Some((key.to_string(), v))
-            })
-            .collect();
-        out["values"] = Value::Object(values);
-    }
-    out
 }
 
 /// The rows of a menu asked for: each command with its title and keys,
