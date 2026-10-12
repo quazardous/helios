@@ -3,19 +3,21 @@
 //! bind on it. Without any GPU adapter (software ones count), skipped,
 //! saying so. Headless: no window, no display handle.
 
+use std::sync::Arc;
+
 use helios_core::{Accelerator, GpuJob, GpuKernel, Image, Region};
 use helios_gpu::Gpu;
 
-fn adapter() -> Option<wgpu::Adapter> {
-    let instance =
-        wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
-    match pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-        power_preference: wgpu::PowerPreference::HighPerformance,
-        ..Default::default()
-    })) {
-        Ok(a) => Some(a),
+/// The process's device, and the adapter it was opened on.
+fn gpu() -> Option<(Arc<Gpu>, wgpu::Adapter)> {
+    match helios_gpu::shared::gpu() {
+        Ok(gpu) => {
+            eprintln!("GPU: {}", gpu.adapter);
+            let adapter = gpu.handles().adapter;
+            Some((gpu, adapter))
+        }
         Err(e) => {
-            eprintln!("skipped: no GPU adapter: {e}");
+            eprintln!("skipped: {e}");
             None
         }
     }
@@ -24,9 +26,7 @@ fn adapter() -> Option<wgpu::Adapter> {
 #[test]
 fn the_opened_device_has_its_adapters_limits() {
     let _gpu = helios_testkit::gpu_lock();
-    let Some(adapter) = adapter() else { return };
-    let gpu = Gpu::open(&adapter).unwrap();
-    eprintln!("GPU: {}", gpu.adapter);
+    let Some((gpu, adapter)) = gpu() else { return };
     let (asked, got) = (helios_gpu::requested_limits(&adapter), gpu.limits());
     assert_eq!(asked, adapter.limits());
     if let Some(note) = &gpu.limits_note {
@@ -65,7 +65,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
 #[test]
 fn a_storage_binding_over_128_mib_computes() {
     let _gpu = helios_testkit::gpu_lock();
-    let Some(adapter) = adapter() else { return };
+    let Some((gpu, adapter)) = gpu() else { return };
     // 4096 x 2112 RGBA f32: 132 MiB, above wgpu's default binding limit.
     let input_region = Region::sized(4096, 2112);
     let pixels = input_region.area();
@@ -76,8 +76,6 @@ fn a_storage_binding_over_128_mib_computes() {
         eprintln!("skipped: the adapter binds at most {limits:?}");
         return;
     }
-    let gpu = Gpu::open(&adapter).unwrap();
-    eprintln!("GPU: {}", gpu.adapter);
     let mut data = vec![0.0f32; pixels * 4];
     for (i, px) in data.chunks_exact_mut(4).enumerate() {
         // Pixel numbers below 2^24 are exact in f32.
@@ -96,7 +94,7 @@ fn a_storage_binding_over_128_mib_computes() {
         uniforms: vec![2.0, 0.0, 0.0, 0.0],
         input: input_region,
     };
-    let result = Accelerator::run(&gpu, "tail", &job, &input, output, 4).unwrap();
+    let result = Accelerator::run(gpu.as_ref(), "tail", &job, &input, output, 4).unwrap();
     let result = gpu.download(&result).unwrap();
     for p in 0..64 {
         let expected = (pixels - 64 + p) as f32 * 2.0;

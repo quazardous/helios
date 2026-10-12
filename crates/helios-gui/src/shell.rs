@@ -117,6 +117,25 @@ enum Shot {
     Frame,
 }
 
+/// What a window (eframe) or a test harness draws with: the process's one
+/// GPU device (`helios_gpu::shared`), which the engine computes on too.
+///
+/// The window is handed the engine's device rather than the engine the
+/// window's: processes without a window (the node, exports, batches) open
+/// it the same way, it exists before any window does (a render may start
+/// first), and device loss is handled where the device is owned. Letting
+/// eframe open its own would make a second instance and device, which the
+/// Vulkan loader before 1.4.350 crashes on (see `helios_gpu::shared`).
+pub fn wgpu_setup(gpu: &helios_gpu::Gpu) -> eframe::egui_wgpu::WgpuSetup {
+    let h = gpu.handles();
+    eframe::egui_wgpu::WgpuSetup::Existing(eframe::egui_wgpu::WgpuSetupExisting {
+        instance: h.instance,
+        adapter: h.adapter,
+        device: h.device,
+        queue: h.queue,
+    })
+}
+
 /// Names a widget's rectangle for this frame, so it can be pictured by
 /// that name (`gui.snapshot {target: name}`).
 pub fn name_rect(ctx: &Egui, name: &str, rect: Rect) {
@@ -471,8 +490,13 @@ impl Shell {
     }
 
     /// Gives the viewport the GPU objects it draws with, on the render
-    /// state the window (or a test harness) draws with.
+    /// state the window (or a test harness) draws with: the process's one
+    /// device ([`wgpu_setup`]), never one of the window's own.
     pub fn attach_gpu(&mut self, rs: &eframe::egui_wgpu::RenderState) {
+        debug_assert!(
+            helios_gpu::shared::owns(&rs.instance),
+            "the window opened a wgpu instance of its own: hand it wgpu_setup()"
+        );
         crate::viewport::install(rs);
     }
 
@@ -2161,23 +2185,49 @@ pub mod headless {
     use std::sync::{Arc, OnceLock};
 
     use super::{Recorder, RgbaImage, Shell, snapshot};
-    use eframe::egui_wgpu::{RenderState, Renderer, RendererOptions};
+    use eframe::egui_wgpu::{RenderState, Renderer, RendererOptions, wgpu};
     use egui::mutex::RwLock;
     use egui_kittest::Harness;
 
-    /// The process's one GPU device, opened by the first harness.
+    /// The render state on the process's one GPU device
+    /// (`helios_gpu::shared`), made by the first harness.
     ///
     /// One device for every harness, never one each: before 1.4.350, the
     /// Vulkan loader drops the drivers without a device when an instance
     /// enumerates its devices, while `vkSetDebugUtilsObjectNameEXT` on
     /// another thread walks those drivers under a different lock. Harnesses
     /// opened on parallel test threads crashed the process that way (see
-    /// docs/testing-strategy.md).
+    /// docs/testing-strategy.md). The device is the one the window and the
+    /// engine use in production; when the harness opens it first, it
+    /// prefers a software adapter (lavapipe), as `egui_kittest` does, so
+    /// pictures do not depend on the machine's GPU.
     fn device() -> &'static RenderState {
         static DEVICE: OnceLock<RenderState> = OnceLock::new();
         DEVICE.get_or_init(|| {
+            let gpu = helios_gpu::shared::gpu_choosing(|adapters| {
+                adapters
+                    .iter()
+                    .enumerate()
+                    .min_by_key(|(i, a)| {
+                        let info = a.get_info();
+                        let kind = match info.device_type {
+                            wgpu::DeviceType::Cpu => 0,
+                            wgpu::DeviceType::DiscreteGpu => 1,
+                            _ => 2,
+                        };
+                        let backend = match info.backend {
+                            wgpu::Backend::Metal => 0,
+                            wgpu::Backend::Vulkan => 1,
+                            wgpu::Backend::Dx12 => 2,
+                            _ => 4,
+                        };
+                        (kind, backend, *i)
+                    })
+                    .map(|(i, _)| i)
+            })
+            .expect("a GPU adapter for the headless harness");
             egui_kittest::wgpu::create_render_state(
-                egui_kittest::wgpu::default_wgpu_setup(),
+                super::wgpu_setup(&gpu),
                 RendererOptions::PREDICTABLE,
             )
         })

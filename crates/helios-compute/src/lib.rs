@@ -224,7 +224,8 @@ impl Manager {
         Ok(manager)
     }
 
-    /// Looks for devices again; GPUs that failed to open are tried again.
+    /// Looks for devices again (real GPUs are enumerated once a process,
+    /// see `helios_gpu::shared`); GPUs that failed to open are tried again.
     pub fn rescan(&mut self) -> Result<(), String> {
         self.present = std::iter::once(Device::cpu())
             .chain(self.adapters.list())

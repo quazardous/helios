@@ -11,8 +11,8 @@ use helios_core::{
 };
 use helios_gpu::{Gpu, compare};
 
-fn gpu() -> Option<Gpu> {
-    match Gpu::new() {
+fn gpu() -> Option<std::sync::Arc<Gpu>> {
+    match helios_gpu::shared::gpu() {
         Ok(g) => {
             eprintln!("GPU: {}", g.adapter);
             Some(g)
@@ -102,14 +102,14 @@ const REGION: Region = Region {
 
 /// The CPU reference and a GPU engine's render of the same chain, with the
 /// GPU engine.
-fn both(gpu: Gpu, steps: Vec<(ModuleRef, Params)>) -> (Image, Image, Engine) {
+fn both(gpu: Arc<Gpu>, steps: Vec<(ModuleRef, Params)>) -> (Image, Image, Engine) {
     let input = helios_testkit::noise(Region::sized(64, 48), 4, 11);
     let (g, node, port) = chain(&input, steps);
     let bus = Arc::new(Bus::new());
     let cpu = Engine::new(bus.clone())
         .render(&g, node, &port, REGION)
         .unwrap();
-    let engine = Engine::new(bus).with_accelerator(Arc::new(gpu));
+    let engine = Engine::new(bus).with_accelerator(gpu);
     let out = engine.render(&g, node, &port, REGION).unwrap();
     (cpu, out, engine)
 }
@@ -148,7 +148,6 @@ fn a_cpu_step_in_a_gpu_chain_costs_one_readback_and_one_upload() {
 fn a_render_on_the_device_stays_there_and_matches_the_cpu() {
     let _gpu = helios_testkit::gpu_lock();
     let Some(gpu) = gpu() else { return };
-    let gpu = Arc::new(gpu);
     let input = helios_testkit::noise(Region::sized(64, 48), 4, 5);
     let (g, node, port) = chain(&input, vec![exposure(), blur(), sigmoid()]);
     let bus = Arc::new(Bus::new());

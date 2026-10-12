@@ -1,18 +1,21 @@
 //! The GPU backend: modules' WGSL variants run on wgpu (Vulkan on Linux and
 //! Windows, Metal on macOS), on the same plans as their CPU code.
 //!
-//! A [`Gpu`] holds a device: its own ([`Gpu::new`]), or one handed over by
-//! the GUI ([`Gpu::from_device`]) so the viewport and the engine share it
-//! and computed buffers need no copy to be shown. [`Gpu::run`] uploads the
-//! input, runs the module's kernel and reads the result back. A [`Gpu`] is
-//! also the engine's [`Accelerator`]: an engine given one
-//! (`Engine::with_accelerator`) computes every step that has a GPU variant
-//! on it, and images stay in GPU buffers from one such step to the next.
-//! `Engine::render_device` hands a render's result as a buffer on the
-//! device ([`Gpu::buffer`]), for a viewport that shares it.
+//! A [`Gpu`] holds a device. A process has one, opened through [`shared`]
+//! ([`shared::gpu`]), which the GUI's window draws with as well, so the
+//! viewport and the engine share it and computed buffers need no copy to
+//! be shown. [`Gpu::run`] uploads the input, runs the module's kernel and
+//! reads the result back. A [`Gpu`] is also the engine's [`Accelerator`]:
+//! an engine given one (`Engine::with_accelerator`) computes every step
+//! that has a GPU variant on it, and images stay in GPU buffers from one
+//! such step to the next. `Engine::render_device` hands a render's result
+//! as a buffer on the device ([`Gpu::buffer`]), for a viewport that shares
+//! it.
 //!
 //! [`check`] runs a module on both backends and compares: a GPU variant is
 //! only trusted within its tolerance of the CPU reference.
+
+pub mod shared;
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -46,6 +49,7 @@ fn limit_steps(adapter: &wgpu::Adapter) -> [(&'static str, wgpu::Limits); 3] {
 }
 
 pub struct Gpu {
+    wgpu_adapter: wgpu::Adapter,
     device: wgpu::Device,
     queue: wgpu::Queue,
     /// The adapter's description, for reports.
@@ -59,26 +63,13 @@ pub struct Gpu {
 }
 
 impl Gpu {
-    /// Opens the best adapter there is, software ones included (lavapipe in
-    /// CI). An error when there is none.
-    pub fn new() -> Result<Gpu, String> {
-        let instance =
-            wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::HighPerformance,
-            ..Default::default()
-        }))
-        .map_err(|e| format!("no GPU adapter: {e}"))?;
-        Gpu::open(&adapter)
-    }
-
-    /// Opens a device on a given adapter (one the compute manager chose),
+    /// Opens a device on an adapter (through [`shared`], once a process),
     /// with the adapter's own limits ([`requested_limits`]): wgpu's
     /// defaults would cap a storage binding at 128 MiB, below a 24 MP f32
     /// image. A driver that refuses its adapter's maximum is asked for
     /// less, buffer sizes first, and [`Gpu::limits_note`] says so; the
     /// device's real limits are [`Gpu::limits`].
-    pub fn open(adapter: &wgpu::Adapter) -> Result<Gpu, String> {
+    pub(crate) fn open(adapter: &wgpu::Adapter) -> Result<Gpu, String> {
         let info = adapter.get_info();
         let mut refused = Vec::new();
         for (name, limits) in limit_steps(adapter) {
@@ -88,11 +79,17 @@ impl Gpu {
                 ..Default::default()
             })) {
                 Ok((device, queue)) => {
-                    let mut gpu = Gpu::from_device(
+                    let described =
+                        format!("{} ({:?}, {:?})", info.name, info.device_type, info.backend);
+                    let mut gpu = Gpu {
+                        wgpu_adapter: adapter.clone(),
                         device,
                         queue,
-                        &format!("{} ({:?}, {:?})", info.name, info.device_type, info.backend),
-                    );
+                        id: format!("wgpu {described}"),
+                        adapter: described,
+                        limits_note: None,
+                        pipelines: Mutex::default(),
+                    };
                     if !refused.is_empty() {
                         gpu.limits_note = Some(format!(
                             "opened with {name}: the driver refused {}",
@@ -112,15 +109,15 @@ impl Gpu {
         self.device.limits()
     }
 
-    /// A device someone else opened (the GUI's).
-    pub fn from_device(device: wgpu::Device, queue: wgpu::Queue, adapter: &str) -> Gpu {
-        Gpu {
-            device,
-            queue,
-            adapter: adapter.into(),
-            limits_note: None,
-            id: format!("wgpu {adapter}"),
-            pipelines: Mutex::default(),
+    /// What a window needs to draw with this device (eframe's
+    /// `WgpuSetupExisting`): the process's instance, the adapter, the
+    /// device and its queue.
+    pub fn handles(&self) -> Handles {
+        Handles {
+            instance: shared::instance().clone(),
+            adapter: self.wgpu_adapter.clone(),
+            device: self.device.clone(),
+            queue: self.queue.clone(),
         }
     }
 
@@ -378,6 +375,15 @@ pub fn grid(pixels: u32, max: u32) -> Result<(u32, u32), String> {
         ));
     }
     Ok((x, y))
+}
+
+/// The wgpu objects behind a [`Gpu`], for a window that draws with them.
+#[derive(Clone)]
+pub struct Handles {
+    pub instance: wgpu::Instance,
+    pub adapter: wgpu::Adapter,
+    pub device: wgpu::Device,
+    pub queue: wgpu::Queue,
 }
 
 /// What a [`DeviceImage`] made by a [`Gpu`] holds: a storage buffer, and

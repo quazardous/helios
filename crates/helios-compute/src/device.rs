@@ -134,42 +134,27 @@ pub fn gpu_id(backend: &str, vendor: u32, device: u32, taken: &[String]) -> Stri
         .expect("an unused number exists")
 }
 
-/// The GPUs wgpu sees.
-pub struct WgpuAdapters {
-    instance: wgpu::Instance,
-}
-
-impl Default for WgpuAdapters {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+/// The GPUs wgpu sees, through the process's one instance
+/// (`helios_gpu::shared`): adapters enumerated once a process, and one
+/// device opened, so a second GPU listed here does not open while the
+/// first is open.
+#[derive(Default)]
+pub struct WgpuAdapters;
 
 impl WgpuAdapters {
     pub fn new() -> Self {
-        Self {
-            instance: wgpu::Instance::new(
-                wgpu::InstanceDescriptor::new_without_display_handle_from_env(),
-            ),
-        }
+        Self
     }
 
-    /// Adapters on the primary APIs (Vulkan, Metal, DX12); OpenGL only when
-    /// none is there, as it shows the same GPUs again.
-    fn adapters(&self) -> Vec<(Device, wgpu::Adapter)> {
-        let mut adapters =
-            pollster::block_on(self.instance.enumerate_adapters(wgpu::Backends::PRIMARY));
-        if adapters.is_empty() {
-            adapters =
-                pollster::block_on(self.instance.enumerate_adapters(wgpu::Backends::SECONDARY));
-        }
-        let mut found: Vec<(Device, wgpu::Adapter)> = Vec::new();
-        for adapter in adapters {
+    /// Each adapter as a device, with its index among the process's.
+    fn adapters() -> Vec<(Device, usize)> {
+        let mut found: Vec<(Device, usize)> = Vec::new();
+        for (index, adapter) in helios_gpu::shared::adapters().iter().enumerate() {
             let info = adapter.get_info();
             // What the device will be opened with: one source for planning
             // and for the device (a driver that refuses them is reported
             // when it opens, and its own limits are used from then on).
-            let limits = helios_gpu::requested_limits(&adapter);
+            let limits = helios_gpu::requested_limits(adapter);
             let backend = format!("{:?}", info.backend).to_lowercase();
             let taken: Vec<String> = found.iter().map(|(d, _)| d.id.clone()).collect();
             let device = Device {
@@ -192,7 +177,7 @@ impl WgpuAdapters {
                 threads: None,
                 limits: Some(Limits::of(&limits)),
             };
-            found.push((device, adapter));
+            found.push((device, index));
         }
         found
     }
@@ -200,20 +185,19 @@ impl WgpuAdapters {
 
 impl Adapters for WgpuAdapters {
     fn list(&self) -> Vec<Device> {
-        self.adapters().into_iter().map(|(d, _)| d).collect()
+        Self::adapters().into_iter().map(|(d, _)| d).collect()
     }
 
     fn open(&self, id: &str) -> Result<OpenedGpu, String> {
-        let (_, adapter) = self
-            .adapters()
+        let (_, index) = Self::adapters()
             .into_iter()
             .find(|(d, _)| d.id == id)
             .ok_or_else(|| format!("no GPU `{id}` here"))?;
-        let gpu = helios_gpu::Gpu::open(&adapter)?;
+        let gpu = helios_gpu::shared::gpu_on(index)?;
         Ok(OpenedGpu {
             limits: Some(Limits::of(&gpu.limits())),
             note: gpu.limits_note.clone(),
-            accelerator: Arc::new(gpu),
+            accelerator: gpu,
         })
     }
 }

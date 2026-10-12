@@ -236,6 +236,9 @@ fn main() -> Result<(), String> {
             None => shell.set_view_source(graph, node, "output")?,
         }
     }
+    // The window draws with the process's one device, which the engine
+    // computes on (see `helios_gui::shell::wgpu_setup`).
+    let gpu = helios_gpu::shared::gpu().map_err(|e| format!("no GPU to draw with: {e}"))?;
     let mut options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title(format!("{name} — Helios"))
@@ -246,6 +249,7 @@ fn main() -> Result<(), String> {
             .with_decorations(false),
         ..Default::default()
     };
+    options.wgpu_options.wgpu_setup = helios_gui::shell::wgpu_setup(&gpu);
     // The window's place from the last run, repaired (the screens are not
     // known before the window exists: only bounds are checked).
     if let Ok(Some(read)) = egui_pop::core::persist::Persist::new(&ui_settings)

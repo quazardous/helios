@@ -5,8 +5,8 @@ use helios_core::{Context, ModuleRef, Params, Region, Value};
 use helios_gpu::{Gpu, check};
 use helios_module_exposure::Exposure;
 
-fn gpu() -> Option<Gpu> {
-    match Gpu::new() {
+fn gpu() -> Option<std::sync::Arc<Gpu>> {
+    match helios_gpu::shared::gpu() {
         Ok(g) => {
             eprintln!("GPU: {}", g.adapter);
             Some(g)
@@ -193,7 +193,7 @@ fn an_engine_with_the_gpu_renders_a_chain_as_the_cpu_does() {
     let input = helios_testkit::noise(Region::sized(64, 48), 4, 11);
     let bus = Arc::new(helios_core::Bus::new());
     let cpu = chain(&helios_core::Engine::new(bus.clone()), &input);
-    let engine = helios_core::Engine::new(bus).with_accelerator(Arc::new(gpu));
+    let engine = helios_core::Engine::new(bus).with_accelerator(gpu);
     let out = chain(&engine, &input);
     let c = helios_gpu::compare(&out, &cpu).unwrap();
     assert!(c.max_abs < 1e-4, "{c:?}");
@@ -253,8 +253,7 @@ fn a_kernel_that_does_not_compile_is_an_error_not_a_panic() {
         .unwrap();
     g.connect(src, helios_core::graph::SOURCE_PORT, n, "input")
         .unwrap();
-    let engine =
-        helios_core::Engine::new(Arc::new(helios_core::Bus::new())).with_accelerator(Arc::new(gpu));
+    let engine = helios_core::Engine::new(Arc::new(helios_core::Bus::new())).with_accelerator(gpu);
     let err = engine
         .render(&g, n, "output", Region::sized(8, 8))
         .unwrap_err();

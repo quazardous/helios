@@ -16,7 +16,6 @@ helios-module-exposure = { path = "../../modules/exposure" }
 helios-module-blur = { path = "../../modules/blur" }
 # MIT OR Apache-2.0; the version helios-gpu uses.
 wgpu = "30"
-pollster = "0.4"
 serde.workspace = true
 serde_json.workspace = true
 toml = "1"

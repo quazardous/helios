@@ -685,8 +685,15 @@ fn jobs_are_planned_with_the_opened_devices_limits() {
 fn a_real_gpu_opens_with_the_limits_it_is_listed_with() {
     let _gpu = helios_testkit::gpu_lock();
     let adapters = WgpuAdapters::new();
+    let mut opened_one = false;
     for d in adapters.list() {
-        let opened = adapters.open(&d.id).unwrap();
+        // One device a process: once one is open, the others say so.
+        let opened = match adapters.open(&d.id) {
+            Ok(o) => o,
+            Err(e) if opened_one && e.contains("one device a process") => continue,
+            Err(e) => panic!("{}: {e}", d.name),
+        };
+        opened_one = true;
         eprintln!("{} {}: {:?} {:?}", d.id, d.name, opened.limits, opened.note);
         if opened.note.is_none() {
             assert_eq!(opened.limits, d.limits, "{}", d.name);

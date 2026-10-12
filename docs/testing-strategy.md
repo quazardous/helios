@@ -120,15 +120,24 @@ ship.
 
 ## GPU tests and the Vulkan loader
 
+A Helios process has one wgpu instance and one GPU device, tests and
+production alike: `helios_gpu::shared` creates the instance, enumerates
+the adapters once and opens the device; the engine computes on it, the
+compute manager lists its adapters through it, and the GUI hands that
+device to eframe (`WgpuSetup::Existing`) instead of letting eframe open
+its own. Nothing else may create an instance or open a device: the
+`one_device` test of helios-gpu scans the sources for it, debug builds
+assert a second creation, and the GUI asserts that its window draws on
+the shared instance.
+
 The headless GUI tests (`helios_gui::headless::harness`) draw through wgpu
 on whatever Vulkan driver the machine has, lavapipe first. Every harness
-of a test process uses the same wgpu instance and device, opened by the
-first one, each with a renderer of its own. Do not open a device per test.
+of a test process uses that one device, each with a renderer of its own.
+Do not open a device per test.
 
-A test that opens a GPU device of its own (the helios-gpu and
-helios-compute tests, which test opening devices) takes
-`helios_testkit::gpu_lock()` first and holds it to its end, so the tests
-of one binary that open devices run one at a time.
+A GPU test (helios-gpu, helios-compute) takes `helios_testkit::gpu_lock()`
+first and holds it to its end, so the tests of one binary that use the
+device run one at a time (some inject faults into it).
 
 With one device per harness, the GUI test binaries crashed with SIGSEGV
 when `cargo test` ran their tests on parallel threads (about 1 run in 10
