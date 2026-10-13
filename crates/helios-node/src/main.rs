@@ -758,7 +758,7 @@ mod control {
                 None,
                 &Message::new(
                     "node-batch-only",
-                    "the batch endpoint only answers load-source, export and cancel",
+                    "the batch endpoint only answers load-source, export, cancel, job.cancel, batch_start and batch_end",
                 ),
             );
         }

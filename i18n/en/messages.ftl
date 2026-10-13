@@ -319,7 +319,7 @@ gui-vault-unreadable = Cannot read the vault: { $error }
 
 gui-window-frame-error = window frame: { $error }
 
-node-batch-only = the batch endpoint only answers load-source, export and cancel
+node-batch-only = the batch endpoint only answers load-source, export, cancel, job.cancel, batch_start and batch_end
 
 node-edit-not-saved = done, but the edit was not saved: { $error }
 

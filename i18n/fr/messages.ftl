@@ -234,7 +234,7 @@ gui-size-kib = { $size } Kio
 
 gui-size-mib = { $size } Mio
 
-node-batch-only = le point d’accès des lots ne répond qu’à load-source, export et cancel
+node-batch-only = le point d’accès des lots ne répond qu’à load-source, export, cancel, job.cancel, batch_start et batch_end
 
 node-edit-not-saved = fait, mais la retouche n’a pas été enregistrée : { $error }
 
