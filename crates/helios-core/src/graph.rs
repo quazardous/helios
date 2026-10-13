@@ -380,6 +380,28 @@ impl Graph {
         Ok(())
     }
 
+    /// Leaves an input port unconnected; returns the node and output port
+    /// that fed it, if one did. A required input left so makes rendering
+    /// the node fail with `Unconnected`; an optional one gets an empty
+    /// image.
+    pub fn disconnect(
+        &mut self,
+        to: NodeId,
+        in_port: &str,
+    ) -> Result<Option<(NodeId, String)>, Error> {
+        let target = self.node(to)?;
+        let Kind::Module { module, .. } = &target.kind else {
+            return Err(Error::Port {
+                module: target.name.clone(),
+                port: in_port.into(),
+            });
+        };
+        let in_index = module.manifest().input_index(in_port)?;
+        let was = self.input_ports(to)?[in_index].clone();
+        self.node_mut(to)?.inputs[in_index] = None;
+        Ok(was)
+    }
+
     /// Whether `upstream` feeds `node`, directly or not. Each node is
     /// visited once: a node read by several consumers is reached by many
     /// paths, as many as 2^n through n diamonds.

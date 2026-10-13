@@ -418,6 +418,32 @@ fn an_optional_input_may_stay_unconnected() {
     assert_eq!(g.extent(other).unwrap(), Some(r), "the extent follows b");
 }
 
+#[test]
+fn a_disconnected_input_renders_as_never_connected() {
+    let mut g = Graph::new();
+    let src = g.add_source("src", ramp());
+    let both = g
+        .add_module("both", ModuleRef::new(Sum), &Params::new())
+        .unwrap();
+    g.connect(src, "image", both, "a").unwrap();
+    g.connect(src, "image", both, "b").unwrap();
+    let was = g.disconnect(both, "b").unwrap();
+    assert_eq!(was, Some((src, "image".to_string())));
+    assert_eq!(g.input_nodes(both).unwrap(), vec![Some(src), None]);
+    assert_eq!(g.disconnect(both, "b").unwrap(), None, "already empty");
+    let r = ramp().region();
+    let out = engine().render(&g, both, "output", r).unwrap();
+    assert_eq!(out.data(), ramp().data());
+    assert!(matches!(
+        g.disconnect(both, "nope"),
+        Err(Error::Port { .. })
+    ));
+    assert!(matches!(
+        g.disconnect(src, "image"),
+        Err(Error::Port { .. })
+    ));
+}
+
 /// A chain of `n` nodes, each reading the previous one on both ports: 2^n
 /// paths from the last node to the source. The source and the last node.
 fn diamonds(g: &mut Graph, n: usize) -> (NodeId, NodeId) {
