@@ -141,6 +141,21 @@ timeout = "1h"
 # fast compile and lint feedback: clippy on every target, the repository
 # checks (changelog fragments...), the translation catalogues' coverage
 # in /out/i18n.txt
+# the desktop's release binary, kept as the output `gui`: the owner's
+# "Helios Dev" launcher runs the latest one from main, fetched with
+# tools/bench/fetch-gui.sh, so no local build is needed
+[jobs.build-gui]
+checkouts = ["helios", "vkdt", "egui-pop"]
+cores = 5
+memory = "6g"
+cwd = "/work/${src:-helios}"
+command = """mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && \
+cargo build --locked --release -p helios-gui && cp /target/release/helios-gui /out/helios-gui && git rev-parse --short HEAD > /out/commit.txt"""
+env = { CARGO_NET_OFFLINE = "true" }
+mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
+outputs = { gui = { path = "helios-gui", kind = "file" } }
+timeout = "1h"
+
 [jobs.lint]
 checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 5

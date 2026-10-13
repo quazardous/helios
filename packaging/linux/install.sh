@@ -2,16 +2,23 @@
 # Installs Helios's launcher and icons for the current user, where GNOME and
 # other freedesktop desktops look for them; `--uninstall` removes them.
 # `--dev` installs "Helios Dev" instead, launching this checkout's debug
-# build (`cargo build -p helios-gui`), beside a released Helios.
+# build (`cargo build -p helios-gui`), beside a released Helios; with
+# `--box`, the bench box's latest build instead (target/box/helios-gui,
+# fetched by tools/bench/fetch-gui.sh).
 #
-#   packaging/linux/install.sh [--dev] [--uninstall]
+#   packaging/linux/install.sh [--dev [--box]] [--uninstall]
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 id=io.github.quazardous.Helios
 dev=""
+built=target/debug/helios-gui
 if [ "${1:-}" = "--dev" ]; then
   dev=1
   shift
+  if [ "${1:-}" = "--box" ]; then
+    built=target/box/helios-gui
+    shift
+  fi
 fi
 data="${XDG_DATA_HOME:-$HOME/.local/share}"
 icons="$data/icons/hicolor"
@@ -22,8 +29,8 @@ if [ -n "$dev" ]; then
   if [ "${1:-}" = "--uninstall" ]; then
     rm -f "$launcher"
   else
-    bin="$(cd "$here/../.." && pwd)/target/debug/helios-gui"
-    [ -x "$bin" ] || echo "note: $bin is not built yet (cargo build -p helios-gui)" >&2
+    bin="$(cd "$here/../.." && pwd)/$built"
+    [ -x "$bin" ] || echo "note: $bin is not there yet (cargo build -p helios-gui, or tools/bench/fetch-gui.sh)" >&2
     mkdir -p "$(dirname "$launcher")"
     sed -e "s|^Name=Helios$|Name=Helios Dev|" \
         -e "s|^Exec=helios-gui|Exec=\"$bin\"|" \
