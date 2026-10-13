@@ -75,14 +75,22 @@ fn fill_library(shell: &mut Shell, persist: &Persist) -> Result<(), String> {
     Ok(())
 }
 
-/// A picture (or a raw file's embedded preview) through an exposure node:
-/// the network and the node the viewport shows.
-fn image_graph(path: &Path) -> Result<(helios_core::Graph, helios_core::NodeId), String> {
+/// A picture (or a raw file's embedded preview) through the network of
+/// the template the workspace was made from, else through an exposure
+/// node: the network and the node the viewport shows.
+fn image_graph(
+    path: &Path,
+    template: Option<&helios_template::Bundle>,
+) -> Result<(helios_core::Graph, helios_core::NodeId), String> {
     let image = match helios_load::Kind::of(path) {
         helios_load::Kind::Picture => helios_load::load(path)?.image,
         helios_load::Kind::Raw => helios_load::preview(path)?
             .ok_or_else(|| format!("{}: no preview to show", path.display()))?,
     };
+    if let Some(t) = template {
+        let built = t.build_with(&helios_gui::templates::modules(), &image, None)?;
+        return Ok((built.graph, built.view.0));
+    }
     let mut g = helios_core::Graph::new();
     let src = g.add_source("source", image);
     let exp = g
@@ -124,6 +132,9 @@ fn image_graph(path: &Path) -> Result<(helios_core::Graph, helios_core::NodeId),
 struct App {
     shell: Shell,
     persist: Option<Persist>,
+    /// The template the workspace was made from: an image opened goes
+    /// through its network.
+    template: Option<helios_template::Bundle>,
 }
 
 impl App {
@@ -132,7 +143,7 @@ impl App {
     /// this window shows).
     fn open(&mut self, open: Open) {
         let done = match open {
-            Open::Image(path) => image_graph(&path)
+            Open::Image(path) => image_graph(&path, self.template.as_ref())
                 .and_then(|g| show_image(&mut self.shell, self.persist.as_mut(), path, g)),
             Open::Workspace(dir) => {
                 let dir = dir.canonicalize().unwrap_or(dir);
@@ -196,11 +207,13 @@ impl eframe::App for App {
 }
 
 /// Saves the profile the workspace uses as the application closes
-/// (egui-pop's `on_exit`); egui-pop's `app.exit` step saves its layout.
+/// (egui-pop's `on_exit`), keeping what else the file says (the template
+/// it was made from); egui-pop's `app.exit` step saves its layout.
 fn save_workspace(dir: &Path, app: &egui_pop::api::AppHandle) {
     let profile = app.context().get("heliosProfile").to_string();
-    let pointer = serde_json::json!({ "profile": profile });
     let file = dir.join("workspace.json");
+    let mut pointer = helios_gui::templates::read_json(&file);
+    pointer["profile"] = serde_json::json!(profile);
     let saved =
         std::fs::create_dir_all(dir).and_then(|()| std::fs::write(&file, pointer.to_string()));
     if let Err(e) = saved {
@@ -327,8 +340,20 @@ fn main() -> Result<(), String> {
         )),
         None => None,
     };
+    // The template the workspace was made from, if it was.
+    let template = match helios_gui::templates::workspace_template(
+        &helios_gui::shell::config_dir(),
+        &workspace,
+    ) {
+        Some(Ok(t)) => Some(t),
+        Some(Err(e)) => {
+            warn(&format!("the workspace's template: {e}"));
+            None
+        }
+        None => None,
+    };
     let image = image_file
-        .map(|path| image_graph(&path).map(|g| (path, g)))
+        .map(|path| image_graph(&path, template.as_ref()).map(|g| (path, g)))
         .transpose()?;
     let earlier = earlier_layout(&workspace, &ui_settings);
     let builder = Shell::builder(helios_panels(), Some(ui_settings))
@@ -365,6 +390,10 @@ fn main() -> Result<(), String> {
             if let Err(e) = shell.use_profile(&profile) {
                 shell.notes.push(format!("profile {profile}: {e}"));
             }
+            // The template's keys, in the workspace's keymap layer.
+            if let Some(t) = &template {
+                shell.apply_template_tools(&t.template.meta.name, &t.template.tools);
+            }
             // The workspace's layout wins over the profile's: egui-pop's
             // document is loaded again (or an earlier Helios's, once).
             if let Some(saved) = earlier {
@@ -376,7 +405,11 @@ fn main() -> Result<(), String> {
             if let Err(e) = open(&mut shell, persist.as_mut(), image) {
                 shell.notify(helios_gui::dialogs::Level::Error, e);
             }
-            Box::new(App { shell, persist })
+            Box::new(App {
+                shell,
+                persist,
+                template,
+            })
         })
         .map_err(|e| e.to_string())
 }

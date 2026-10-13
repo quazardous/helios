@@ -22,6 +22,8 @@ helios-gpu.workspace = true
 helios-photo.workspace = true
 helios-display.workspace = true
 helios-load.workspace = true
+# Workspace templates: the built-in ones, a workspace created from one.
+helios-template.workspace = true
 helios-vault.workspace = true
 helios-vault-sqlite.workspace = true
 # The demo image chain of `helios-gui --image`.

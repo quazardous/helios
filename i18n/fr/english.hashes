@@ -123,6 +123,7 @@ command-workbench-palette.title 6ddb5508d068cafb
 command-workbench-quit.title fda91000eb874652
 command-workbench-run.title e0ffb620171da04e
 command-workbench-systemMenu.title f5046dbb28364688
+command-workspace-new.title 7052cc0b42d1fd13
 command-workspace-open.title 0e1f5d4978032923
 engine-failure-compile bdbfcdcb7849b864
 engine-failure-device-lost 874c27f010c56b3f
@@ -175,6 +176,13 @@ gui-masks-one-at-a-time 2964a289a93bafbc
 gui-masks-root-stays 2fd89ec847b9ade1
 gui-masks-show f610532bac2c2c0b
 gui-masks-unlock 52d38f3a80ff723a
+gui-new-workspace-created 6ffa8013c877eae5
+gui-new-workspace-directory 790976655fc2525e
+gui-new-workspace-form-title 829508c4adb268a4
+gui-new-workspace-template e70109422c5ad48b
+gui-new-workspace-title 3f6529e05bdd824f
+gui-new-workspace-unknown df9d6423e49d571f
+gui-new-workspace-verb bd8bd1041b1d098d
 gui-no-dialogs 043d25e5150191ec
 gui-open-workspace-directory 790976655fc2525e
 gui-open-workspace-title 7ff73f083df7a8eb
@@ -209,6 +217,7 @@ gui-size-kib 053b6d255ce6ae14
 gui-size-mib c606f1325b47a11e
 gui-snapshot-failed 9fc35f847a376d40
 gui-snapshot-saved b4ee66de70743f70
+gui-template-keys-error 79b6acf6ef87110a
 gui-theme-exported bd511001e8a42de3
 gui-theme-problem 96dfd71611027a04
 gui-theme-unknown 440ee9790a2a4952

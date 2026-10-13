@@ -322,5 +322,8 @@ command-workbench-run =
 command-workbench-systemMenu =
     .title = Show the Helios menu
 
+command-workspace-new =
+    .title = New workspace from a template (`template`, `path`)
+
 command-workspace-open =
     .title = Open a workspace in a new window (`path`)

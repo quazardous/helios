@@ -1993,6 +1993,7 @@ dependencies = [
  "helios-profile",
  "helios-scopes",
  "helios-shell",
+ "helios-template",
  "helios-values",
  "helios-vault",
  "helios-vault-sqlite",

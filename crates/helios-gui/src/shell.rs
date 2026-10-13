@@ -95,6 +95,9 @@ enum Action {
     About,
     Keybindings,
     OpenWorkspace(Option<PathBuf>),
+    /// A workspace from a template (its id), in a directory; what is
+    /// missing is asked.
+    NewWorkspace(Option<String>, Option<PathBuf>),
     Answer(Answer, Origin),
     AssumeYes(bool),
     Dock(String),
@@ -549,6 +552,11 @@ impl Shell {
         };
         for d in shell.app.handle().diagnostics() {
             shell.notes.push(format!("{}: {}", d.code, d.message));
+        }
+        // The built-in templates' text, each under its own keys, once
+        // the translation plugin has loaded Helios's catalogues.
+        if let Err(e) = crate::templates::add_texts(&shell.i18n, &crate::templates::builtin()) {
+            shell.notes.push(e);
         }
         shell.seen = shell.app.handle().last_event();
         {
@@ -1341,6 +1349,25 @@ impl Shell {
                         .and_then(Value::as_str)
                         .filter(|p| !p.is_empty())
                         .map(PathBuf::from),
+                ))
+            }),
+        );
+        add(
+            CommandSpec::new(
+                "workspace.new",
+                "New workspace from a template (`template`, `path`)",
+                "Workspace",
+            ),
+            Box::new(|a, _| {
+                let text = |key: &str| {
+                    a.get(key)
+                        .and_then(Value::as_str)
+                        .filter(|s| !s.is_empty())
+                        .map(String::from)
+                };
+                Ok(Action::NewWorkspace(
+                    text("template"),
+                    text("path").map(PathBuf::from),
                 ))
             }),
         );
@@ -2382,6 +2409,126 @@ impl Shell {
         h.set_context("heliosProfile", &self.profile_name);
     }
 
+    /// Loads a workspace template's keys into egui-pop's workspace keymap
+    /// layer: over the defaults, under the user's own keys.
+    pub fn apply_template_tools(&mut self, name: &str, tools: &helios_template::format::Tools) {
+        use helios_profile::{System, local_keys};
+        let doc = KeymapDoc {
+            bindings: tools
+                .keymap
+                .iter()
+                .map(|b| DocBinding {
+                    keys: local_keys(&b.keys, System::current()),
+                    command: Some(b.command.clone()),
+                    when: b.when.clone(),
+                    ..DocBinding::default()
+                })
+                .collect(),
+        };
+        if let Err(e) = self.app.load_keymap(&doc, Layer::Workspace) {
+            self.warn(
+                Message::new(
+                    "gui-template-keys-error",
+                    "template { $name }: keys: { $error }",
+                )
+                .with("name", name)
+                .with("error", e),
+            );
+        }
+    }
+
+    /// A workspace from a template: the templates to pick from (with
+    /// their scenario) without one, the directory to ask for without
+    /// one, else the workspace created and opened in its window.
+    fn new_workspace(
+        &mut self,
+        ctx: &Egui,
+        template: Option<String>,
+        path: Option<PathBuf>,
+    ) -> Result<Value, String> {
+        let templates = crate::templates::builtin();
+        let name = |s: &Self, b: &helios_template::Bundle| {
+            s.text(Message::new(&b.name_key(), &b.template.meta.name))
+        };
+        let Some(id) = template else {
+            let choices = templates
+                .iter()
+                .map(|b| crate::dialogs::Choice {
+                    value: b.template.id.clone(),
+                    label: name(self, b),
+                    detail: Some(
+                        self.text(Message::new(&b.scenario_key(), &b.template.meta.scenario)),
+                    ),
+                })
+                .collect();
+            self.pick(crate::dialogs::Picker {
+                title: self.text(Message::new(
+                    "gui-new-workspace-title",
+                    "New workspace from a template",
+                )),
+                choices,
+                command: "workspace.new".into(),
+                arg: "template".into(),
+            });
+            return Ok(Value::Null);
+        };
+        let bundle = templates
+            .iter()
+            .find(|b| b.template.id == id)
+            .ok_or_else(|| {
+                self.text(
+                    Message::new("gui-new-workspace-unknown", "no template { $id }")
+                        .with("id", &id),
+                )
+            })?;
+        let Some(path) = path else {
+            let ids: Vec<&str> = templates.iter().map(|b| b.template.id.as_str()).collect();
+            self.form(crate::dialogs::Form {
+                title: self.text(
+                    Message::new(
+                        "gui-new-workspace-form-title",
+                        "New workspace: { $template }",
+                    )
+                    .with("template", name(self, bundle)),
+                ),
+                fields: vec![
+                    crate::dialogs::Field {
+                        key: "template".into(),
+                        descriptor: helios_values::Descriptor::choice(
+                            &self.text(Message::new("gui-new-workspace-template", "template")),
+                            &ids,
+                            &id,
+                        ),
+                        value: helios_core::Value::Choice(id.clone()),
+                    },
+                    crate::dialogs::Field {
+                        key: "path".into(),
+                        descriptor: helios_values::Descriptor::path(
+                            &self.text(Message::new("gui-new-workspace-directory", "directory")),
+                            helios_values::PathKind::Dir,
+                            &[],
+                        ),
+                        value: helios_core::Value::Text(String::new()),
+                    },
+                ],
+                verb: self.text(Message::new("gui-new-workspace-verb", "Create")),
+                command: "workspace.new".into(),
+            });
+            return Ok(Value::Null);
+        };
+        let catalogue = crate::templates::catalogue(&self.panels, self.specs());
+        let created = crate::templates::create_workspace(bundle, &catalogue, &path, &config_dir())?;
+        self.note(
+            Message::new(
+                "gui-new-workspace-created",
+                "workspace { $path } created from { $template }",
+            )
+            .with("path", created.workspace.display().to_string())
+            .with("template", name(self, bundle)),
+        );
+        self.apply(ctx, Action::OpenWorkspace(Some(created.workspace)))
+    }
+
     fn apply(&mut self, ctx: &Egui, action: Action) -> Result<Value, String> {
         match action {
             Action::Palette => {
@@ -2466,6 +2613,9 @@ impl Shell {
                     })
                     .map_err(|e| format!("cannot open {}: {e}", path.display()))?;
                 self.note(Message::new("gui-opening", "opening { $path }").with("path", &path));
+            }
+            Action::NewWorkspace(template, path) => {
+                return self.new_workspace(ctx, template, path);
             }
             Action::Theme(name) => {
                 let overrides = self.theme_overrides.clone();

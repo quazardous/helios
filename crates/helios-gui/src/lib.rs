@@ -17,6 +17,7 @@ mod plugins;
 pub mod scopes;
 pub mod shell;
 pub mod snapshot;
+pub mod templates;
 pub mod theme;
 pub mod viewport;
 mod windows;

@@ -122,6 +122,20 @@ gui-masks-show = Afficher { $name } : son opacité à fond
 
 gui-masks-unlock = Déverrouiller { $name }
 
+gui-new-workspace-created = espace de travail { $path } créé depuis { $template }
+
+gui-new-workspace-directory = dossier
+
+gui-new-workspace-form-title = Nouvel espace de travail : { $template }
+
+gui-new-workspace-template = modèle
+
+gui-new-workspace-title = Nouvel espace de travail depuis un modèle
+
+gui-new-workspace-unknown = aucun modèle { $id }
+
+gui-new-workspace-verb = Créer
+
 gui-no-dialogs = aucune boîte de dialogue pour montrer ceci
 
 gui-open-workspace-directory = dossier
@@ -171,6 +185,8 @@ gui-scene-saved = viewport.scene sauvé dans { $path }
 gui-snapshot-failed = capture échouée : { $error }
 
 gui-snapshot-saved = { $target } capturé dans { $path }
+
+gui-template-keys-error = modèle { $name } : raccourcis : { $error }
 
 gui-theme-exported = thème exporté vers { $path }
 

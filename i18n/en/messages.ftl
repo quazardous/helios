@@ -125,6 +125,20 @@ gui-masks-show = Show { $name }: its opacity full
 
 gui-masks-unlock = Unlock { $name }
 
+gui-new-workspace-created = workspace { $path } created from { $template }
+
+gui-new-workspace-directory = directory
+
+gui-new-workspace-form-title = New workspace: { $template }
+
+gui-new-workspace-template = template
+
+gui-new-workspace-title = New workspace from a template
+
+gui-new-workspace-unknown = no template { $id }
+
+gui-new-workspace-verb = Create
+
 gui-no-dialogs = no dialogs to show this in
 
 gui-open-workspace-directory = directory
@@ -192,6 +206,8 @@ gui-size-mib = { $size } MiB
 gui-snapshot-failed = snapshot failed: { $error }
 
 gui-snapshot-saved = { $target } pictured to { $path }
+
+gui-template-keys-error = template { $name }: keys: { $error }
 
 gui-theme-exported = theme exported to { $path }
 
