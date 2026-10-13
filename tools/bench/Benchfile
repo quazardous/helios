@@ -111,8 +111,8 @@ run = ["for d in /work/helios /work/egui-pop /work/${src:-helios}; do (cd $d && 
 # they build (Helios's `branch`, egui-pop's `egui_pop`), so neither needs the
 # other's parameter; all of it regenerates (tmp, the default).
 [storage]
-target = { about = "Helios's cargo target directories, one per branch", lock = true }
-egui-pop-target = { about = "egui-pop's cargo target directories, one per egui-pop branch", lock = true }
+target = { about = "Helios's cargo target directories, one per branch, a new one starting from main's", lock = true, seed = "main" }
+egui-pop-target = { about = "egui-pop's cargo target directories, one per egui-pop branch, a new one starting from main's", lock = true, seed = "main" }
 registry = "the cargo registry, shared by every job"
 darktable-build = { about = "darktable-cli builds for the mask parity, one per pinned checkout", lock = true }
 cargo-git = "the cargo git dependencies, shared by every job"
