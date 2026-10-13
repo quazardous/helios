@@ -430,7 +430,7 @@ impl Viewport {
         };
         match command {
             Command::MemberMove { group, index, .. } => {
-                let item = net.item(&member)?;
+                let item = net.member(&member)?;
                 let group = group
                     .or_else(|| item.group.clone())
                     .ok_or("the module's mask stays the root")?;
@@ -450,7 +450,7 @@ impl Viewport {
             }
             Command::MemberDelete { .. } => {
                 let parent = net
-                    .item(&member)?
+                    .member(&member)?
                     .group
                     .clone()
                     .ok_or("the module's mask cannot be deleted from its tree")?;

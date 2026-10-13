@@ -4,10 +4,13 @@
 //! - **What it shows.** The network is read from the graph and the value
 //!   store every frame ([`network`]): the module's mask (the group a
 //!   `mask_blend` reads) is the root, each `mask_combine` a branch with
-//!   its operator, each member a leaf (a drawn shape, a parametric,
-//!   luminance, raster or AI object member) with its icon, its refinements (blur,
-//!   feather, levels between it and its group), its inversion and its
-//!   opacity. Members are listed in port order: the order they fold in.
+//!   its operator, each member a row (a drawn shape, a parametric,
+//!   luminance, raster or AI object member) with its icon, its inversion
+//!   and its opacity. Members are listed in port order: the order they
+//!   fold in, a member wired to two ports once per port. The refinements
+//!   (blur, feather, levels) between a member and its group, or between
+//!   the module's mask and its blend, are rows under what they refine,
+//!   selected to edit their parameters.
 //! - **Live.** What changed since the last frame reaches the view through
 //!   its `TreeHandle` (a branch's children set again, a label updated),
 //!   whoever changed it: the viewport, the Parameters panel, an agent, an
@@ -215,20 +218,25 @@ pub fn restore_marks(store: &mut Store, marks: &Json) {
     }
 }
 
-/// One node of the tree: a group or a member.
+/// One row of the tree: a group, a member or a refinement.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Item {
+    /// The row's key in the tree: the node's name, or for a member's
+    /// second port and on, the name with its place (`spot@mask#3`).
+    pub key: String,
     /// The node: a `mask_combine` for a group, the member's node otherwise.
     pub node: String,
     pub module: String,
-    /// The group it belongs to (`None`: the module's mask, the root).
+    /// The group it belongs to (`None`: the module's mask, the root, or a
+    /// refinement).
     pub group: Option<String>,
     /// The group's port it is wired to.
     pub port: usize,
     /// The node wired to that port: the member, or its last refinement.
     pub head: String,
-    /// The refinements between the member and the port, member first.
-    pub refinements: Vec<String>,
+    /// For a refinement, the key of the row it refines (a member, a
+    /// group, the root).
+    pub refines: Option<String>,
     /// A group's operator.
     pub operator: Option<String>,
     /// Inverted before its opacity: by its group, or the root's own.
@@ -246,6 +254,13 @@ impl Item {
     /// A drawn shape, which the viewport edits.
     pub fn is_shape(&self) -> bool {
         masks::KINDS.iter().any(|(_, m)| *m == self.module)
+    }
+
+    /// A refinement (blur, feather, levels) of a member or a group: a row
+    /// of its own, its parameters edited when it is selected, but nothing
+    /// that moves, hides or inverts in a group.
+    pub fn is_refinement(&self) -> bool {
+        self.refines.is_some()
     }
 
     /// What the tree calls it: its label, or its node's name.
@@ -268,22 +283,31 @@ impl Item {
             "mask_raster" => "🖼",
             // An AI object member: a model found it.
             "mask_object" => "✨",
+            // Refinements: a blur, a feather, levels.
+            "mask_blur" => "≈",
+            "mask_feather" => "〰",
+            "mask_levels" => "📶",
             _ => "⛶",
         }
     }
 
-    /// The row's label: the name, a group's operator, then what changes
-    /// the member (refinements, inversion, opacity). The icon is drawn
-    /// apart ([`Item::icon`]).
+    /// The row's label in English (see [`Item::label_with`]).
     pub fn text(&self) -> String {
+        self.label_with(&|m: Message| m.english)
+    }
+
+    /// The row's label, its words said by `tr`: the name, a group's
+    /// operator or a refinement's kind, then what changes the member
+    /// (inversion, opacity). The icon is drawn apart ([`Item::icon`]).
+    pub fn label_with(&self, tr: &dyn Fn(Message) -> String) -> String {
         let mut s = self.name().to_string();
         if let Some(op) = &self.operator {
             s.push_str(" — ");
             s.push_str(op);
         }
-        for r in &self.refinements {
-            s.push_str(" · ");
-            s.push_str(r.strip_prefix("mask_").unwrap_or(r));
+        if let Some(kind) = refinement_kind(&self.module) {
+            s.push_str(" — ");
+            s.push_str(&tr(kind));
         }
         if self.invert {
             s.push_str(" · inverted");
@@ -295,15 +319,25 @@ impl Item {
     }
 
     /// Its node in the view: the decorated label, the plain name a
-    /// rename starts from.
-    fn tree_node(&self) -> Node<String> {
-        let node = if self.is_group() {
-            Node::branch(self.node.clone(), self.text())
+    /// rename starts from; a branch when rows go under it.
+    fn tree_node(&self, label: String, branch: bool) -> Node<String> {
+        let node = if branch {
+            Node::branch(self.key.clone(), label)
         } else {
-            Node::leaf(self.node.clone(), self.text())
+            Node::leaf(self.key.clone(), label)
         };
         node.with_name(self.name())
     }
+}
+
+/// What a refinement module does, as its row says it.
+fn refinement_kind(module: &str) -> Option<Message> {
+    Some(match module {
+        "mask_blur" => Message::new("gui-masks-refine-blur", "blur"),
+        "mask_feather" => Message::new("gui-masks-refine-feather", "feather"),
+        "mask_levels" => Message::new("gui-masks-refine-levels", "levels"),
+        _ => return None,
+    })
 }
 
 /// A module's mask network as the tree shows it.
@@ -315,9 +349,16 @@ pub struct Network {
     pub blend: Option<String>,
     /// The module it masks: the node the blend's `processed` reads.
     pub masked: Option<String>,
+    /// The rows, by key.
     pub items: BTreeMap<String, Item>,
     /// Each group's members, in port order.
     pub children: BTreeMap<String, Vec<String>>,
+    /// The refinements under a row (a member, a group, the root), from the
+    /// one nearest what they refine.
+    pub refined: BTreeMap<String, Vec<String>>,
+    /// The rows' labels in the interface's language, by key
+    /// ([`Network::translate`]); English without them.
+    pub labels: BTreeMap<String, String>,
 }
 
 impl Network {
@@ -327,20 +368,52 @@ impl Network {
             .ok_or_else(|| format!("`{key}` is not in the mask"))
     }
 
+    /// The rows' labels said in the interface's language by `tr`.
+    pub fn translate(&mut self, tr: &dyn Fn(Message) -> String) {
+        self.labels = self
+            .items
+            .iter()
+            .map(|(k, i)| (k.clone(), i.label_with(tr)))
+            .collect();
+    }
+
+    /// The rows under a row: a group's members in port order, then the
+    /// refinements of what the row is.
+    pub fn under(&self, key: &str) -> Vec<&String> {
+        self.children
+            .get(key)
+            .into_iter()
+            .flatten()
+            .chain(self.refined.get(key).into_iter().flatten())
+            .collect()
+    }
+
+    /// The rows that have rows under them.
+    pub fn branches(&self) -> BTreeSet<&String> {
+        self.children.keys().chain(self.refined.keys()).collect()
+    }
+
     /// The nodes of a branch (`None`: the root), as the view takes them.
     pub fn nodes_of(&self, parent: Option<&String>) -> Vec<Node<String>> {
         let keys: Vec<&String> = match parent {
             None => self.root.iter().collect(),
-            Some(g) => self
-                .children
-                .get(g)
-                .map(|c| c.iter().collect())
-                .unwrap_or_default(),
+            Some(k) => self.under(k),
         };
         keys.into_iter()
             .filter_map(|k| self.items.get(k))
-            .map(Item::tree_node)
+            .map(|i| {
+                let label = self.labels.get(&i.key).cloned().unwrap_or_else(|| i.text());
+                let branch = (i.is_group() && self.children.contains_key(&i.key))
+                    || self.refined.contains_key(&i.key);
+                i.tree_node(label, branch)
+            })
             .collect()
+    }
+
+    /// The row a row is under: a refinement's, a member's group.
+    pub fn parent(&self, key: &str) -> Option<String> {
+        let item = self.items.get(key)?;
+        item.refines.clone().or_else(|| item.group.clone())
     }
 
     /// Whether `key` is `ancestor` or under it.
@@ -350,7 +423,7 @@ impl Network {
             if k == ancestor {
                 return true;
             }
-            at = self.items.get(&k).and_then(|i| i.group.clone());
+            at = self.parent(&k);
         }
         false
     }
@@ -363,15 +436,78 @@ impl Network {
             .is_none_or(|r| self.children.get(r).is_none_or(Vec::is_empty))
     }
 
-    /// The groups above a node, nearest first.
+    /// The rows above a row, nearest first.
     pub fn ancestors(&self, key: &str) -> Vec<String> {
         let mut out = Vec::new();
-        let mut at = self.items.get(key).and_then(|i| i.group.clone());
+        let mut at = self.parent(key);
         while let Some(g) = at {
-            at = self.items.get(&g).and_then(|i| i.group.clone());
+            at = self.parent(&g);
             out.push(g);
         }
         out
+    }
+
+    /// A member of a group or the root, which a command moves, takes out,
+    /// inverts, hides or locks; a refinement is none of these.
+    pub fn member(&self, key: &str) -> Result<&Item, String> {
+        let item = self.item(key)?;
+        match &item.refines {
+            None => Ok(item),
+            Some(owner) => Err(format!(
+                "`{}` refines `{}`: it has no place of its own in a group",
+                item.name(),
+                self.items.get(owner).map_or(owner.as_str(), Item::name)
+            )),
+        }
+    }
+
+    /// A key for a row of `node` at `place` (a group's port): the node's
+    /// name, unless a row has it already.
+    fn key_for(&self, node: &str, place: &str) -> String {
+        if !self.items.contains_key(node) {
+            return node.to_string();
+        }
+        let key = format!("{node}@{place}");
+        let mut n = 2;
+        let mut out = key.clone();
+        while self.items.contains_key(&out) {
+            out = format!("{key}.{n}");
+            n += 1;
+        }
+        out
+    }
+
+    /// Adds the refinement rows of `chain` (member first) under `owner`.
+    fn add_refinements(
+        &mut self,
+        graph: &Graph,
+        store: &Store,
+        owner: &str,
+        chain: &[NodeId],
+        place: &str,
+    ) {
+        for id in chain {
+            let name = name_of(graph, *id);
+            let key = self.key_for(&name, place);
+            self.items.insert(
+                key.clone(),
+                Item {
+                    key: key.clone(),
+                    node: name.clone(),
+                    module: module_of(graph, *id).unwrap_or_default(),
+                    group: None,
+                    port: 0,
+                    head: name.clone(),
+                    refines: Some(owner.to_string()),
+                    operator: None,
+                    invert: false,
+                    opacity: 1.0,
+                    label: label_of(store, &name),
+                    locked: is_locked(store, &name),
+                },
+            );
+            self.refined.entry(owner.to_string()).or_default().push(key);
+        }
     }
 }
 
@@ -418,13 +554,13 @@ fn consumers(graph: &Graph) -> BTreeMap<NodeId, Vec<(NodeId, String)>> {
 
 /// A branch's member: the node behind its refinements, and them, member
 /// first.
-fn subject(graph: &Graph, head: NodeId) -> (NodeId, Vec<String>) {
+fn subject(graph: &Graph, head: NodeId) -> (NodeId, Vec<NodeId>) {
     let mut at = head;
     let mut refinements = Vec::new();
-    while let Some(m) = module_of(graph, at).filter(|m| REFINEMENTS.contains(&m.as_str())) {
+    while module_of(graph, at).is_some_and(|m| REFINEMENTS.contains(&m.as_str())) {
         match input_of(graph, at, "mask") {
             Some((src, _)) => {
-                refinements.push(m);
+                refinements.push(at);
                 at = src;
             }
             None => break,
@@ -505,7 +641,7 @@ pub fn network(graph: &Graph, store: &Store, prefer: Option<&str>) -> Network {
         .find_map(|id| root_of(graph, &consumers, id));
     let mut net = Network::default();
     // The refinements between the module's mask and its blend: they change
-    // the result, so its row lists them as a member's lists its own.
+    // the result, so they are rows under it, as a member's are under it.
     let mut root_refinements = Vec::new();
     let root = match found {
         Some((root, blend)) => {
@@ -527,12 +663,13 @@ pub fn network(graph: &Graph, store: &Store, prefer: Option<&str>) -> Network {
     net.items.insert(
         root_name.clone(),
         Item {
+            key: root_name.clone(),
             node: root_name.clone(),
             module: "mask_combine".into(),
             group: None,
             port: 0,
             head: root_name.clone(),
-            refinements: root_refinements,
+            refines: None,
             operator: params
                 .get("operator")
                 .and_then(Value::as_choice)
@@ -546,6 +683,7 @@ pub fn network(graph: &Graph, store: &Store, prefer: Option<&str>) -> Network {
             locked: is_locked(store, &root_name),
         },
     );
+    net.add_refinements(graph, store, &root_name, &root_refinements, "blend");
     net.root = Some(root_name);
     let mut seen = BTreeSet::from([root]);
     walk(graph, store, root, &mut net, &mut seen);
@@ -578,12 +716,13 @@ fn walk(
     for (port, head) in inputs.into_iter().enumerate() {
         let Some(head) = head else { continue };
         let (node, refinements) = subject(graph, head);
-        // A node read twice shows once.
-        if !seen.insert(node) {
-            continue;
-        }
+        // A node read twice shows once per port; a group's members show
+        // under its first row only.
+        let first = seen.insert(node);
         let module = module_of(graph, node).unwrap_or_default();
         let name = name_of(graph, node);
+        let place = format!("{group_name}#{port}");
+        let key = net.key_for(&name, &place);
         let operator = (module == "mask_combine")
             .then(|| masks::params_of(graph, store, node))
             .and_then(|p| {
@@ -592,14 +731,15 @@ fn walk(
                     .map(String::from)
             });
         net.items.insert(
-            name.clone(),
+            key.clone(),
             Item {
+                key: key.clone(),
                 node: name.clone(),
                 module: module.clone(),
                 group: Some(group_name.clone()),
                 port,
                 head: name_of(graph, head),
-                refinements,
+                refines: None,
                 operator,
                 invert: invert.get(port).copied().unwrap_or(0) != 0,
                 opacity: opacity.get(port).copied().unwrap_or(1.0),
@@ -607,8 +747,9 @@ fn walk(
                 locked: is_locked(store, &name),
             },
         );
-        members.push(name);
-        if module == "mask_combine" {
+        net.add_refinements(graph, store, &key, &refinements, &place);
+        members.push(key);
+        if module == "mask_combine" && first {
             walk(graph, store, node, net, seen);
         }
     }
@@ -651,27 +792,37 @@ fn put(store: &mut Store, path: &str, value: Value) {
     let _ = store.set(Set::new(path, Change::To(value), Origin::User));
 }
 
-/// Selects a node of the tree: a group becomes the mask the viewport
+/// Selects a row of the tree: a group becomes the mask the viewport
 /// edits, a member's group too and a shape the viewport's selected
-/// shape; the Parameters panel shows the node.
+/// shape; the Parameters panel shows the node (a refinement's too, the
+/// mask of what it refines edited).
 pub fn select(store: &mut Store, net: &Network, key: &str) {
     let Some(item) = net.items.get(key) else {
         return;
     };
-    let group = if item.is_group() {
-        Some(key)
+    let owner = item
+        .refines
+        .as_deref()
+        .and_then(|o| net.items.get(o))
+        .unwrap_or(item);
+    let group = if owner.is_group() {
+        Some(owner.node.as_str())
     } else {
-        item.group.as_deref()
+        owner.group.as_deref()
     };
     if let Some(g) = group {
         put(store, masks::MASK, Value::Text(g.into()));
     }
     if item.is_shape() {
-        masks::select(store, key);
+        masks::select(store, &item.node);
     } else {
         put(store, masks::SHAPE, Value::Text(String::new()));
         put(store, masks::POINT, Value::Int(-1));
-        put(store, crate::params::SELECTION, Value::Text(key.into()));
+        put(
+            store,
+            crate::params::SELECTION,
+            Value::Text(item.node.clone()),
+        );
     }
 }
 
@@ -690,6 +841,13 @@ pub fn drop_place(
         ));
     };
     let item = net.item(key)?;
+    if item.is_refinement() {
+        return Err(Message::new(
+            "gui-masks-refinement-stays",
+            "`{ $name }` stays with what it refines",
+        )
+        .with("name", item.name()));
+    }
     if item.group.is_none() {
         return Err(Message::new(
             "gui-masks-root-stays",
@@ -702,8 +860,14 @@ pub fn drop_place(
         );
     }
     let t = net.item(target)?;
+    if t.is_refinement() && position != Position::Inside {
+        return Err(Message::new(
+            "gui-masks-beside-refinement",
+            "nothing goes beside a refinement: drop on a member or into a group",
+        ));
+    }
     let group = match position {
-        Position::Inside if t.is_group() => target.to_string(),
+        Position::Inside if t.is_group() => t.node.clone(),
         Position::Inside => {
             return Err(Message::new(
                 "gui-masks-not-a-group",
@@ -856,7 +1020,7 @@ pub fn move_member(
     group: &str,
     index: usize,
 ) -> Result<Vec<NodeId>, String> {
-    let item = net.item(member)?.clone();
+    let item = net.member(member)?.clone();
     let from_name = item
         .group
         .clone()
@@ -898,7 +1062,7 @@ pub fn move_member(
 /// Refuses to move a member (to `group`, else out of the mask) when it,
 /// its group or `group` is locked.
 fn unlocked(net: &Network, member: &str, group: Option<&str>) -> Result<(), String> {
-    let item = net.item(member)?;
+    let item = net.member(member)?;
     if item.locked {
         return Err(format!("`{}` is locked", item.name()));
     }
@@ -914,7 +1078,7 @@ fn unlocked(net: &Network, member: &str, group: Option<&str>) -> Result<(), Stri
 /// node stays in the network, unconnected: the graph cannot remove one.
 /// Returns the group rewired.
 pub fn remove_member(graph: &mut Graph, net: &Network, member: &str) -> Result<NodeId, String> {
-    let item = net.item(member)?.clone();
+    let item = net.member(member)?.clone();
     let from_name = item
         .group
         .clone()
@@ -985,7 +1149,7 @@ pub fn toggle_invert(
     member: &str,
     origin: &Origin,
 ) -> Result<bool, String> {
-    let item = net.item(member)?;
+    let item = net.member(member)?;
     let on = !item.invert;
     let label = format!("invert {}", item.name());
     let write = match &item.group {
@@ -1014,7 +1178,7 @@ pub fn set_opacity(
     opacity: Option<f64>,
     origin: &Origin,
 ) -> Result<f64, String> {
-    let item = net.item(member)?;
+    let item = net.member(member)?;
     let to = opacity
         .unwrap_or(if item.opacity > 0.0 { 0.0 } else { 1.0 })
         .clamp(0.0, 1.0);
@@ -1071,7 +1235,7 @@ pub fn set_locked(
     locked: Option<bool>,
     origin: &Origin,
 ) -> Result<bool, String> {
-    let item = net.item(member)?;
+    let item = net.member(member)?;
     let path = lock_path(&item.node);
     if store.get(&path).is_none() {
         store.declare(&path, lock_descriptor(&item.node));
@@ -1159,7 +1323,7 @@ impl MaskTree {
         if self.state.model().children(None).is_some() && !shows(&self.state, None, &roots) {
             handle.set_children(None, Ok(roots));
         }
-        for group in net.children.keys() {
+        for group in net.branches() {
             let parent = Some(group.clone());
             let nodes = net.nodes_of(parent.as_ref());
             if self.state.model().loaded(parent.as_ref()).is_some()
@@ -1179,8 +1343,15 @@ impl MaskTree {
         if desired == self.desired {
             return;
         }
+        // A member shown once per port: any of its rows will do.
+        let cursor_node = self
+            .state
+            .selection()
+            .cursor()
+            .and_then(|c| net.items.get(c))
+            .map(|i| i.node.as_str());
         match &desired {
-            Some(k) if self.state.selection().cursor() != Some(k) => {
+            Some(k) if cursor_node != net.items.get(k).map(|i| i.node.as_str()) => {
                 // A node the view has not loaded yet waits for its
                 // branch, which opening its groups loads.
                 for g in net.ancestors(k) {
@@ -1204,10 +1375,12 @@ impl MaskTree {
         let net = {
             let store = values.lock().unwrap_or_else(PoisonError::into_inner);
             let v = viewport.borrow();
-            let net = v
+            let mut net = v
                 .graph()
                 .map(|g| network(g, &store, None))
                 .unwrap_or_default();
+            let ctx = ui.ctx().clone();
+            net.translate(&|m: Message| crate::i18n::text(&ctx, m));
             self.follow(&net);
             self.follow_selection(&net, &store);
             net
@@ -1252,17 +1425,21 @@ impl MaskTree {
             ui.add(egui::Label::new(egui::RichText::new(text).weak()).wrap());
         }
         let mut commands = Vec::new();
+        // The row selected, when it is a member (or the root): a
+        // refinement is neither inverted, hidden nor taken out.
         let current = self
             .state
             .selection()
             .cursor()
             .and_then(|k| net.items.get(k))
+            .filter(|i| !i.is_refinement())
             .cloned();
         ui.horizontal(|ui| {
             ui.add_enabled_ui(current.is_some(), |ui| {
                 let (inverted, visible) = current
                     .as_ref()
                     .map_or((false, true), |c| (c.invert, c.opacity > 0.0));
+                let member = current.as_ref().map(|c| c.key.clone());
                 if ui
                     .selectable_label(inverted, tr(Message::new("gui-masks-invert", "Invert")))
                     .on_hover_text(tr(Message::new(
@@ -1271,7 +1448,9 @@ impl MaskTree {
                     )))
                     .clicked()
                 {
-                    commands.push(Command::MemberInvert { member: None });
+                    commands.push(Command::MemberInvert {
+                        member: member.clone(),
+                    });
                 }
                 if ui
                     .selectable_label(visible, tr(Message::new("gui-masks-opacity", "Opacity")))
@@ -1282,7 +1461,7 @@ impl MaskTree {
                     .clicked()
                 {
                     commands.push(Command::MemberOpacity {
-                        member: None,
+                        member: member.clone(),
                         opacity: None,
                     });
                 }
@@ -1299,7 +1478,7 @@ impl MaskTree {
                     .clicked()
                 {
                     commands.push(Command::MemberDelete {
-                        member: None,
+                        member: member.clone(),
                         confirmed: false,
                     });
                 }
@@ -1332,7 +1511,7 @@ impl MaskTree {
             && ui.input(|i| i.key_pressed(egui::Key::Delete))
         {
             commands.push(Command::MemberDelete {
-                member: None,
+                member: current.as_ref().map(|c| c.key.clone()),
                 confirmed: false,
             });
         }
@@ -1376,7 +1555,7 @@ impl MaskTree {
                     cursor: Some(k), ..
                 } => {
                     select(&mut store, &net, &k);
-                    self.desired = Some(k);
+                    self.desired = selected(&net, &store);
                 }
                 Signal::Rename { key, to, .. } => commands.push(Command::MemberRename {
                     member: Some(key),
@@ -1422,9 +1601,13 @@ impl MaskTree {
 /// A row's eye and lock, right to left: they act on that row's member,
 /// not on the selection.
 fn row_toggles(ui: &mut Ui, item: &Item, commands: &mut Vec<Command>) {
+    // A refinement has no opacity in a group and does not move.
+    if item.is_refinement() {
+        return;
+    }
     let ctx = ui.ctx().clone();
     let name = item.name();
-    let member = Some(item.node.clone());
+    let member = Some(item.key.clone());
     let visible = item.opacity > 0.0;
     let (icon, tone, hint) = if visible {
         (

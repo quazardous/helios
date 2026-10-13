@@ -721,14 +721,16 @@ selected module's mask network as a tree, on egui-pop's `TreeView`
 
 - **What shows.** The module's mask (the group its `mask_blend` reads)
   is the root; each group (`mask_combine`) is a branch with its
-  operator, each member a leaf with its icon beside it (circle, ellipse,
-  gradient, path, brush, parametric, luminance, raster, AI object), its refinements
-  (blur, feather, levels between it and its group), and its inversion
-  and opacity in its group when they are not the default. The root's
-  row lists the refinements between it and the blend, so every node the
-  engine renders for the mask shows (a test compares the panel's tree
-  with the network rendered). Members are
-  listed in port order, the order they fold in. Each row ends with an
+  operator, each member a row with its icon beside it (circle, ellipse,
+  gradient, path, brush, parametric, luminance, raster, AI object), and
+  its inversion and opacity in its group when they are not the default.
+  The refinements (blur, feather, levels) are rows of their own under
+  what they refine: a member's between it and its group, the root's
+  between it and the blend, after its members. So every node the engine
+  renders for the mask shows (a test compares the panel's tree with the
+  network rendered). Members are listed in port order, the order they
+  fold in; a member wired to two ports of a group shows once per port,
+  each row acting on its own port. Each row ends with an
   eye and a lock, which act on that row without selecting it. The selected module
   is `view/graph/selection`: a masked module shows its mask, a mask's
   node the mask it is in, and an unmasked one the first masked module's;
@@ -742,6 +744,9 @@ selected module's mask network as a tree, on egui-pop's `TreeView`
 - **Selection, both ways.** Selecting a shape in the tree selects it on
   the viewport (its handles, the Parameters panel), its group becoming
   the mask the viewport edits; selecting a group makes it that mask.
+  Selecting a refinement shows its parameters in the Parameters panel;
+  it is not inverted, hidden, locked or moved (no eye or lock on its
+  row, and a drag of it is refused).
   A shape selected on the viewport, by a click or `mask.select`, is
   selected in the tree.
 - **Edits.** F2 renames a member in place: a label in the store

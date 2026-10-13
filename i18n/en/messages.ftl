@@ -145,6 +145,8 @@ gui-masks-add = Add…
 
 gui-masks-add-hint = Add a shape or a parametric member to the selected group. With the image focused: C a circle, E an ellipse, G a gradient, P a path.
 
+gui-masks-beside-refinement = nothing goes beside a refinement: drop on a member or into a group
+
 gui-masks-empty = The mask is empty: { $module } applies everywhere. Add a shape or a parametric member to limit it.
 
 gui-masks-group-full = the group `{ $group }` holds { $count } members already
@@ -196,6 +198,14 @@ gui-masks-one-at-a-time = members move one at a time
 gui-masks-opacity = Opacity
 
 gui-masks-opacity-hint = Turn the selected member's opacity off, or back to full (its row's eye does the same)
+
+gui-masks-refine-blur = blur
+
+gui-masks-refine-feather = feather
+
+gui-masks-refine-levels = levels
+
+gui-masks-refinement-stays = `{ $name }` stays with what it refines
 
 gui-masks-root-stays = the module's mask stays the root
 

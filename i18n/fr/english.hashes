@@ -167,6 +167,7 @@ gui-job-export-done 5fdda5b0fb93ec0f
 gui-job-export-failed f5ce199f9e1502ae
 gui-library-file f5342066f92b83c2
 gui-library-not-saved f4c82ef926e77b5e
+gui-masks-beside-refinement 129a0c6bb2a976a6
 gui-masks-group-full 2c68b91eff216a00
 gui-masks-group-locked f0ab1d4f18c4a0d0
 gui-masks-hide 03abd3631c09e3ca
@@ -186,6 +187,10 @@ gui-masks-menu-rename d18d5eae53db6fcd
 gui-masks-not-a-group eba03cc34e0ccbe4
 gui-masks-nothing-beside-root 49719c5af23e3929
 gui-masks-one-at-a-time 2964a289a93bafbc
+gui-masks-refine-blur 8985b4a5a487087e
+gui-masks-refine-feather 81c6f1c9d4c2abde
+gui-masks-refine-levels ea0b5385660a49f8
+gui-masks-refinement-stays e14959a658e0b2cb
 gui-masks-root-stays 2fd89ec847b9ade1
 gui-masks-show f610532bac2c2c0b
 gui-masks-unlock 52d38f3a80ff723a

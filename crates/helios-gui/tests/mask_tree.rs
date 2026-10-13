@@ -692,36 +692,28 @@ fn the_panel_lists_every_mask_node_the_pipeline_renders() {
     let mut h = harness_of(refined());
     let check = |h: &Harness<'_, Shell>| {
         let net = h.state().mask_tree().network();
-        let rendered = rendered_mask(h);
-        let refinements = ["mask_blur", "mask_feather", "mask_levels"];
-        // Groups and members: one row each, the same nodes.
-        let mut listed: Vec<String> = net.items.keys().cloned().collect();
+        // Groups, members and refinements: a row each, the same nodes.
+        let mut listed: Vec<String> = net.items.values().map(|i| i.node.clone()).collect();
         listed.sort();
-        let members: Vec<String> = rendered
-            .iter()
-            .filter(|(_, m)| !refinements.contains(&m.as_str()))
-            .map(|(n, _)| n.clone())
-            .collect();
-        assert_eq!(listed, members);
+        let rendered: Vec<String> = rendered_mask(h).into_iter().map(|(n, _)| n).collect();
+        assert_eq!(listed, rendered);
         assert_eq!(rows(h).len(), net.items.len(), "{:?}", rows(h));
-        // Refinements: on the row of what they refine, the root's too.
-        let mut shown: Vec<String> = net
-            .items
-            .values()
-            .flat_map(|i| i.refinements.clone())
-            .collect();
-        shown.sort();
-        let mut wanted: Vec<String> = rendered
-            .iter()
-            .filter(|(_, m)| refinements.contains(&m.as_str()))
-            .map(|(_, m)| m.clone())
-            .collect();
-        wanted.sort();
-        assert_eq!(shown, wanted);
     };
     check(&h);
-    assert_eq!(rows(&h)[0], "▣ mask — maximum · blur");
-    assert!(rows(&h).contains(&"  ○ spot · feather".to_string()));
+    // Refinements are rows under what they refine: the root's blur after
+    // its members, the spot's feather under the spot.
+    assert_eq!(
+        rows(&h),
+        [
+            "▣ mask — maximum",
+            "  ▣ inner — minimum",
+            "    ○ dot",
+            "  ○ spot",
+            "    〰 edge — feather",
+            "  ◎ oval",
+            "  ≈ soft — blur",
+        ]
+    );
     // Still equal after the network changes: a member moved, one taken
     // out, one added.
     run(
@@ -734,6 +726,92 @@ fn the_panel_lists_every_mask_node_the_pipeline_renders() {
     check(&h);
     run(&mut h, "mask.add.parametric", json!(null));
     check(&h);
+}
+
+#[test]
+fn a_refinement_row_selected_shows_its_parameters() {
+    let mut h = harness_of(refined());
+    run(&mut h, "helios.params.focus", json!(null));
+    click_row(&mut h, "edge — feather");
+    // The Parameters panel shows the feather; the viewport edits the
+    // mask the spot is in, no shape selected.
+    assert_eq!(text(&h, "view/graph/selection"), "edge");
+    assert_eq!(cursor(&h).as_deref(), Some("edge"));
+    assert_eq!(text(&h, MASK), "mask");
+    assert_eq!(text(&h, SHAPE), "");
+    let params = h.state().target_rect("helios.params").unwrap();
+    assert!(
+        h.query_all_by_label("edge")
+            .any(|n| params.contains(n.rect().center())),
+        "the Parameters panel shows the feather"
+    );
+    assert!(
+        h.state()
+            .values
+            .lock()
+            .unwrap()
+            .get("node/edge/radius")
+            .is_some()
+    );
+    // The root's blur, likewise.
+    click_row(&mut h, "soft — blur");
+    assert_eq!(text(&h, "view/graph/selection"), "soft");
+    assert_eq!(text(&h, MASK), "mask");
+    assert!(
+        h.query_all_by_label("soft")
+            .any(|n| params.contains(n.rect().center()))
+    );
+    // A refinement is neither inverted, hidden nor moved: refused, said.
+    run(&mut h, "mask.member.invert", json!({ "member": "soft" }));
+    let notices: Vec<String> = h.state().notices().iter().map(|n| n.text.clone()).collect();
+    assert!(
+        notices
+            .iter()
+            .any(|n| n.contains("soft") && n.contains("refines")),
+        "{notices:?}"
+    );
+    let net = h.state().mask_tree().network();
+    let refused = mask_tree::drop_place(
+        &net,
+        &["edge".to_string()],
+        "oval",
+        egui_pop::views::tree::Position::Before,
+    )
+    .unwrap_err();
+    assert_eq!(refused.key, "gui-masks-refinement-stays");
+    assert!(steps(&h).is_empty(), "{:?}", steps(&h));
+}
+
+#[test]
+fn a_member_wired_to_two_ports_shows_once_per_port() {
+    let (mut g, blend) = graph();
+    let (spot, mask) = (g.find("spot").unwrap(), g.find("mask").unwrap());
+    g.connect(spot, "mask", mask, "in3").unwrap();
+    let mut h = harness_of((g, blend));
+    assert_eq!(
+        rows(&h),
+        [
+            "▣ mask — maximum",
+            "  ▣ inner — minimum",
+            "    ○ dot",
+            "  ○ spot",
+            "  ◎ oval",
+            "  ○ spot",
+        ]
+    );
+    // Each row is its own port: the second one's opacity.
+    run(
+        &mut h,
+        "mask.member.opacity",
+        json!({ "member": "spot@mask#3", "opacity": 0.5 }),
+    );
+    assert_eq!(&floats(&h, "node/mask/opacity")[..4], [1.0, 1.0, 1.0, 0.5]);
+    assert_eq!(rows(&h)[3], "  ○ spot");
+    assert_eq!(rows(&h)[5], "  ○ spot · 50 %");
+    // Either row selects the spot on the viewport, and stays selected.
+    click_row(&mut h, "spot · 50 %");
+    assert_eq!(text(&h, SHAPE), "spot");
+    assert_eq!(cursor(&h).as_deref(), Some("spot@mask#3"));
 }
 
 /// The exposure through a mask with no member yet, as `--image` opens.

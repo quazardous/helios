@@ -78,6 +78,8 @@ gui-job-export-failed = Échec de l’export
 
 gui-library-not-saved = Non enregistré, la bibliothèque montre ce que contient le coffre : { $error }
 
+gui-masks-beside-refinement = rien ne va à côté d’un affinage : déposez sur un membre ou dans un groupe
+
 gui-masks-group-full = le groupe « { $group } » contient déjà { $count } membres
 
 gui-masks-group-locked = le groupe « { $group } » est verrouillé : ses membres restent
@@ -115,6 +117,14 @@ gui-masks-not-a-group = « { $name } » n’est pas un groupe : seul un groupe a
 gui-masks-nothing-beside-root = rien ne va à côté du masque du module : déposez dedans
 
 gui-masks-one-at-a-time = les membres se déplacent un par un
+
+gui-masks-refine-blur = flou
+
+gui-masks-refine-feather = fondu
+
+gui-masks-refine-levels = niveaux
+
+gui-masks-refinement-stays = « { $name } » reste avec ce qu’il affine
 
 gui-masks-root-stays = le masque du module reste la racine
 
