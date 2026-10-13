@@ -9,7 +9,10 @@
 //!   leaves the grid showing a value that is not stored (and a field
 //!   another process changed meanwhile shows too);
 //! - applies the vault's `vault.field_changed` events (from any writer in
-//!   this process sharing its bus) to the library;
+//!   this process sharing its bus) to the library, and its stacks again
+//!   on `vault.stack_changed`;
+//! - runs the vault query of the library's search filter, and keeps a
+//!   stack expanded or collapsed as the user left it;
 //! - saves the edit of the image shown ([`Persist::open_image`]), with
 //!   the labels and locks of its mask nodes (its `marks`), as a
 //!   version each time the value store commits a step: a write outside a
@@ -25,7 +28,7 @@ use std::sync::Arc;
 use std::sync::mpsc::Receiver;
 
 use helios_core::{Bus, Envelope, Graph, Message, NodeId, Params};
-use helios_vault::fields::{Command, LABELS, Query, RATING, REJECTED};
+use helios_vault::fields::{Command, LABELS, PICKED, Query, RATING, REJECTED, TAGS};
 use helios_vault::{EditSession, ImageId, Store, Vault, Version, edit};
 use serde_json::Value;
 
@@ -34,7 +37,7 @@ use crate::dialogs::Level;
 use crate::library::{Change, Entry};
 
 /// The fields the library shows.
-const SHOWN: [&str; 3] = [RATING, REJECTED, LABELS];
+const SHOWN: [&str; 5] = [RATING, REJECTED, PICKED, LABELS, TAGS];
 
 /// Who the vault's audit trail names for what the desktop writes.
 pub const WHO: &str = "user";
@@ -112,6 +115,7 @@ impl<S: Store> Persist<S> {
                     .ok()
                     .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                     .and_then(|d| i64::try_from(d.as_secs()).ok());
+                entry.day = entry.modified.and_then(crate::library::day_text);
             }
             for field in SHOWN {
                 entry.show(field, row.fields.get(field));
@@ -122,7 +126,23 @@ impl<S: Store> Persist<S> {
             }
         }
         shell.set_library(entries);
+        self.show_stacks(shell)?;
         Ok(files)
+    }
+
+    /// Shows the vault's stacks in the library.
+    pub fn show_stacks(&self, shell: &mut Shell) -> Result<(), String> {
+        let stacks = self.vault.stacks()?;
+        shell.library_mut().set_stacks(&stacks);
+        Ok(())
+    }
+
+    /// The images the vault holds for a query, in its order.
+    fn select(&self, query: Query) -> Result<Vec<String>, String> {
+        let cursor = self.vault.open_cursor(query)?;
+        let rows = self.vault.fetch(cursor.id, 0, cursor.count, &[]);
+        self.vault.close_cursor(cursor.id);
+        Ok(rows?.into_iter().map(|r| r.id.hex()).collect())
     }
 
     /// Shows an image's network in the viewport with the image's saved
@@ -187,14 +207,37 @@ impl<S: Store> Persist<S> {
             self.write(shell, changes, at);
         }
         self.save_edit(shell, now);
+        let expansions = shell.library_mut().take_expansions();
+        for (stack, expanded) in expansions {
+            if let Err(e) = self.vault.set_stack_expanded(&stack, expanded) {
+                shell.notify(Level::Warning, e);
+            }
+        }
+        let query = shell.library_mut().take_query();
+        if let Some(query) = query {
+            match self.select(query) {
+                Ok(ids) => shell.library_mut().set_matches(ids),
+                Err(e) => shell.notify(
+                    Level::Error,
+                    Message::new("gui-vault-unreadable", "Cannot read the vault: { $error }")
+                        .with("error", e),
+                ),
+            }
+        }
+        let mut stacks_changed = false;
         while let Ok(event) = self.events.try_recv() {
-            if event.kind == "vault.field_changed" {
+            if event.kind == "vault.stack_changed" {
+                stacks_changed = true;
+            } else if event.kind == "vault.field_changed" {
                 let p = &event.payload;
                 if let (Some(image), Some(field)) = (p["image"].as_str(), p["field"].as_str()) {
                     let new = Some(&p["new"]).filter(|v| !v.is_null());
                     shell.library_mut().show_field(image, field, new);
                 }
             }
+        }
+        if stacks_changed && let Err(e) = self.show_stacks(shell) {
+            shell.notify(Level::Error, e);
         }
     }
 

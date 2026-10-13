@@ -1,5 +1,8 @@
 # Traduction de ../en/panels.ftl, sous les mêmes clés.
 
+panel-helios-compare =
+    .title = Comparer
+
 panel-helios-filmstrip =
     .title = Pellicule
 

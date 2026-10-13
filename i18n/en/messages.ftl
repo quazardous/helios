@@ -77,9 +77,31 @@ gui-job-export-done = Export finished
 
 gui-job-export-failed = Export failed
 
+gui-library-auto-advance = Auto-advance
+
+gui-library-compare-hint = Select two to four images to compare them
+
+gui-library-count = { $shown } of { $total }
+
+gui-library-empty = No images: import a folder into the vault
+
 gui-library-file = { $size } · modified { $day }
 
+gui-library-images = Images
+
+gui-library-keep-best = Keep the best: pick it, reject the others
+
+gui-library-no-cursor = No image under the cursor
+
+gui-library-none = No images
+
 gui-library-not-saved = Not saved, the library shows what the vault holds: { $error }
+
+gui-library-search = Search images
+
+gui-library-sync = Sync zoom and pan
+
+gui-library-tags = Tags
 
 gui-masks-group-full = the group `{ $group }` holds { $count } members already
 

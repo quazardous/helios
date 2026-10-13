@@ -533,7 +533,7 @@ fn the_library_rates_and_labels_what_is_selected_and_hands_the_changes_over() {
     s.set_library(reordered);
     assert_eq!(s.library().selected, Some(2));
     h.run();
-    let shot = headless::snapshot(&mut h, "helios.library.strip.1").unwrap();
+    let shot = headless::snapshot(&mut h, "helios.library.strip").unwrap();
     assert!(shot.width() > 30, "{}", shot.width());
 }
 

@@ -34,25 +34,32 @@ use egui_pop::model::panels::{Area, PanelSpec};
 /// The panels Helios declares today, with the areas each may be moved to
 /// (egui-pop's placement rules); each shows a placeholder until its
 /// widget lands. Every panel may be detached into a window of its own.
+/// The culling panels (Compare) start closed: a template's layout, or the
+/// user, opens them.
 pub fn helios_panels() -> Vec<PanelSpec> {
     use Area::{Bottom, Center, EndSide, StartSide};
     let sides = [StartSide, EndSide, Bottom];
+    let anywhere = [Center, StartSide, EndSide, Bottom];
     [
-        ("helios.viewport", "Image", Center, &[Center][..]),
-        ("helios.graph", "Graph", Center, &[Center][..]),
-        ("helios.vault", "Vault", StartSide, &sides[..]),
-        ("helios.modules", "Modules", StartSide, &sides[..]),
-        ("helios.masks", "Masks", StartSide, &sides[..]),
-        ("helios.params", "Parameters", EndSide, &sides[..]),
-        ("helios.scopes", "Scopes", EndSide, &sides[..]),
-        ("helios.filmstrip", "Filmstrip", Bottom, &sides[..]),
-        ("helios.queue", "Queue", Bottom, &[][..]),
-        ("helios.log", "Log", Bottom, &[][..]),
+        ("helios.viewport", "Image", Center, &[Center][..], true),
+        ("helios.graph", "Graph", Center, &[Center][..], true),
+        ("helios.vault", "Vault", StartSide, &anywhere[..], true),
+        ("helios.modules", "Modules", StartSide, &sides[..], true),
+        ("helios.masks", "Masks", StartSide, &sides[..], true),
+        ("helios.params", "Parameters", EndSide, &sides[..], true),
+        ("helios.scopes", "Scopes", EndSide, &sides[..], true),
+        ("helios.filmstrip", "Filmstrip", Bottom, &sides[..], true),
+        ("helios.queue", "Queue", Bottom, &[][..], true),
+        ("helios.log", "Log", Bottom, &[][..], true),
+        ("helios.compare", "Compare", Center, &anywhere[..], false),
     ]
     .into_iter()
-    .map(|(id, title, area, areas)| {
+    .map(|(id, title, area, areas, open)| {
         let id = PanelId::new(id).expect("Helios's panel ids are valid");
-        let spec = PanelSpec::new(id, title, area).only_in(areas);
+        let mut spec = PanelSpec::new(id, title, area).only_in(areas);
+        if !open {
+            spec = spec.closed();
+        }
         // The sizes Helios's areas open at.
         match area {
             Center => spec,

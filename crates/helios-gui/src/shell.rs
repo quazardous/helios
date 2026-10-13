@@ -72,8 +72,14 @@ enum Action {
     ScopeStops(bool),
     Rate(i64),
     Reject,
+    /// Pick, reject or unflag (culling).
+    Flag(egui_pop::views::library::Flag),
     Label(String),
     Step(i64),
+    /// Culling's auto-advance: on, off, or toggled.
+    AutoAdvance(Option<bool>),
+    /// Expand or collapse the stack under the library's cursor.
+    ToggleStack,
     Fullscreen,
     Minimize,
     Maximize,
@@ -455,6 +461,8 @@ impl Shell {
             })
             // egui-pop's data views (the Masks panel's tree).
             .plugin(egui_pop::views::ViewsPlugin)
+            // The photo library's steps and commands (the library panels).
+            .plugin(egui_pop::views::library::LibraryPlugin)
             // The window's frame: Helios's own on the desktop, the
             // system's elsewhere (tests, pictures, tools) until asked.
             .plugin(if ui_settings.is_some() {
@@ -638,15 +646,23 @@ impl Shell {
             let scopes = shell.scopes.clone();
             shell.set_content("helios.scopes", move |ui| scopes.borrow_mut().ui(ui));
         }
-        for (panel, strip) in [("helios.vault", false), ("helios.filmstrip", true)] {
+        shell
+            .library
+            .borrow_mut()
+            .set_app(shell.app.handle().clone());
+        for (panel, view) in [
+            ("helios.vault", 0),
+            ("helios.filmstrip", 1),
+            ("helios.compare", 2),
+        ] {
             if has(&shell, panel) {
                 let library = shell.library.clone();
                 shell.set_content(panel, move |ui| {
                     let mut library = library.borrow_mut();
-                    if strip {
-                        library.filmstrip(ui);
-                    } else {
-                        library.grid(ui);
+                    match view {
+                        0 => library.grid(ui),
+                        1 => library.filmstrip(ui),
+                        _ => library.compare_ui(ui),
                     }
                 });
             }
@@ -1596,6 +1612,43 @@ impl Shell {
                 Box::new(move |_, _| Ok(Action::Label(label.into()))),
             );
         }
+        {
+            use egui_pop::views::library::Flag;
+            for (id, title, flag) in [
+                ("vault.flag.pick", "Pick the selected images", Flag::Pick),
+                (
+                    "vault.flag.reject",
+                    "Reject the selected images",
+                    Flag::Reject,
+                ),
+                (
+                    "vault.flag.none",
+                    "Take the pick or reject off the selected images",
+                    Flag::None,
+                ),
+            ] {
+                add(
+                    CommandSpec::new(id, title, "Vault"),
+                    Box::new(move |_, _| Ok(Action::Flag(flag))),
+                );
+            }
+        }
+        add(
+            CommandSpec::new(
+                "vault.autoAdvance",
+                "Culling: move to the next image after each mark (`on`; toggled when absent)",
+                "Vault",
+            ),
+            Box::new(|a, _| Ok(Action::AutoAdvance(a.get("on").and_then(Value::as_bool)))),
+        );
+        add(
+            CommandSpec::new(
+                "vault.stack.toggle",
+                "Expand or collapse the stack of the selected image",
+                "Vault",
+            ),
+            Box::new(|_, _| Ok(Action::ToggleStack)),
+        );
         add(
             CommandSpec::new("vault.next", "Select the next image", "Vault"),
             Box::new(|_, _| Ok(Action::Step(1))),
@@ -1717,7 +1770,9 @@ impl Shell {
         let mut d = w.declarations.borrow_mut();
         // As in darktable's lighttable, while the library has the focus
         // (egui-pop leaves plain keys to a text field being typed in).
-        let library = "focusedPanel == 'helios.vault' || focusedPanel == 'helios.filmstrip'";
+        // Culling keys as in Lightroom: P, X, U flag, 6 to 9 label, S
+        // opens a stack.
+        let library = "focusedPanel == 'helios.vault' || focusedPanel == 'helios.filmstrip' || focusedPanel == 'helios.compare'";
         for n in 0..=5 {
             d.keys
                 .push((n.to_string(), format!("vault.rate.{n}"), library.into()));
@@ -1726,6 +1781,14 @@ impl Shell {
             ("R", "vault.reject"),
             ("Right", "vault.next"),
             ("Left", "vault.previous"),
+            ("P", "vault.flag.pick"),
+            ("X", "vault.flag.reject"),
+            ("U", "vault.flag.none"),
+            ("6", "vault.label.red"),
+            ("7", "vault.label.yellow"),
+            ("8", "vault.label.green"),
+            ("9", "vault.label.blue"),
+            ("S", "vault.stack.toggle"),
         ] {
             d.keys.push((k.into(), command.into(), library.into()));
         }
@@ -2744,6 +2807,20 @@ impl Shell {
                 .toggle_label(&l)
                 .map_err(|e| format!("vault.label: {e}"))?,
             Action::Step(n) => self.library.borrow_mut().step(n),
+            Action::Flag(flag) => self
+                .library
+                .borrow_mut()
+                .flag(flag)
+                .map_err(|e| format!("vault.flag: {e}"))?,
+            Action::AutoAdvance(on) => {
+                let mut library = self.library.borrow_mut();
+                library.auto_advance = on.unwrap_or(!library.auto_advance);
+            }
+            Action::ToggleStack => self
+                .library
+                .borrow_mut()
+                .toggle_stack()
+                .map_err(|e| format!("vault.stack.toggle: {e}"))?,
             Action::Zoom(z) => self.viewport.borrow_mut().zoom(z, &self.values),
             Action::Mask(command, origin) => {
                 let mut store = lock(&self.values);
@@ -2983,6 +3060,10 @@ impl Shell {
         self.status_bar();
         self.viewport.borrow_mut().sync(&mut lock(&self.values));
         self.app.show(ui);
+        let refused = std::mem::take(&mut self.library.borrow_mut().notes);
+        for n in refused {
+            self.warn(n);
+        }
         self.workbench_refusals();
         self.engine_notices();
         self.job_notices();

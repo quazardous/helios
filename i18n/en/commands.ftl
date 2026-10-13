@@ -19,6 +19,15 @@ command-gui-record-stop =
 command-gui-snapshot =
     .title = Take a picture of a panel or a widget
 
+command-helios-compare-detach =
+    .title = Move Compare to a new window
+
+command-helios-compare-dock =
+    .title = Dock Compare back in its area
+
+command-helios-compare-moveTo =
+    .title = Move Compare to an area (`area`)
+
 command-helios-filmstrip-detach =
     .title = Move Filmstrip to a new window
 
@@ -232,6 +241,18 @@ command-theme-helios-light =
 command-theme-select =
     .title = Use a theme by name
 
+command-vault-autoAdvance =
+    .title = Culling: move to the next image after each mark (`on`; toggled when absent)
+
+command-vault-flag-none =
+    .title = Take the pick or reject off the selected images
+
+command-vault-flag-pick =
+    .title = Pick the selected images
+
+command-vault-flag-reject =
+    .title = Reject the selected images
+
 command-vault-label-blue =
     .title = Toggle the blue label on the selected image
 
@@ -276,6 +297,9 @@ command-vault-rate-5 =
 
 command-vault-reject =
     .title = Reject the selected image, or take it back
+
+command-vault-stack-toggle =
+    .title = Expand or collapse the stack of the selected image
 
 command-viewport-compare =
     .title = Image: before and after side by side

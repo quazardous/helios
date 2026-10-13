@@ -339,6 +339,24 @@ impl Drop for App {
 }
 
 impl App {
+    /// Opens an image the library activated (Enter, a double click) in
+    /// the viewport, from its first copy still present.
+    fn open_from_library(&mut self, id: &str) -> Result<(), String> {
+        let persist = self.persist.as_mut().ok_or("no vault open")?;
+        let image = helios_vault::ImageId::from_hex(id)?;
+        let path = persist
+            .vault()
+            .locations(&image)?
+            .into_iter()
+            .find(|l| l.present)
+            .map(|l| l.path)
+            .ok_or_else(|| format!("no copy of image {id} is present"))?;
+        let (graph, node) = image_graph(&path, self.template.as_ref())?;
+        persist
+            .open_image(&mut self.shell, image, graph, node, "output")
+            .map(|_| ())
+    }
+
     /// Opens what a later launch or a link asked for: an image in the
     /// viewport, a workspace in a window of its own (none for the one
     /// this window shows).
@@ -389,6 +407,12 @@ impl eframe::App for App {
         }
         for open in self.shell.take_opens() {
             self.open(open);
+        }
+        let activated = self.shell.library_mut().take_activated();
+        if let Some(id) = activated
+            && let Err(e) = self.open_from_library(&id)
+        {
+            self.shell.notify(helios_gui::dialogs::Level::Error, e);
         }
         if self.refill.swap(false, Ordering::Relaxed)
             && let Some(persist) = &self.persist

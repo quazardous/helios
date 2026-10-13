@@ -186,13 +186,58 @@ palette or by an agent:
 | `library.stacks.list` | |
 | `library.stacks.dissolve` | `stack` |
 
-There is no culling panel yet: showing the jobs, the stacks and the
-suggestions waits for the library widgets of the UI library.
+## Culling on the desktop
+
+The library panels are egui-pop's photo library widgets (its
+`docs/library.md`) over the vault:
+
+- **Vault**: the search field, the marks of the image under the cursor
+  (stars, colour labels, pick or reject, tags) and a virtualised thumbnail
+  grid. Thumbnails are the raws' embedded previews (a picture itself),
+  read in the background and shown as they arrive.
+- **Filmstrip**: the same images in one row, sharing the grid's
+  selection.
+- **Compare** (closed by default): the two to four images selected side
+  by side, zoom and pan synced; mark one best, then **Keep the best**
+  picks it and rejects the others.
+
+Marks go to the vault as fields: `rating`, `labels`, `picked` and
+`rejected` (a reject wins over a pick; taking either back keeps the
+stars), and `tags`. Each mark runs egui-pop's library step
+(`library.rate`, `library.flag`, `library.label`, `library.tag`), from a
+key, the grid, the marks bar or an agent's `library.*` command, so a
+plugin may veto or redirect it; what ran is what is written. A mark
+applies to the selection, else to the image under the cursor.
+
+**Culling keys**, while a library panel has the focus (Lightroom's, and
+darktable's R), each a command a profile or a template may rebind:
+
+| Keys | Command |
+|------|---------|
+| 0 to 5 | `vault.rate.N` |
+| P, X, U | `vault.flag.pick`, `vault.flag.reject`, `vault.flag.none` |
+| R | `vault.reject` (toggled) |
+| 6, 7, 8, 9 | `vault.label.red`, `.yellow`, `.green`, `.blue` |
+| S | `vault.stack.toggle` |
+| Left, Right | `vault.previous`, `vault.next` |
+
+`vault.autoAdvance` (or the Auto-advance box) moves the cursor to the
+next image after each mark, as Lightroom's Caps Lock mode. The grid's
+own keys (arrows, Shift and Ctrl with them, Space, Ctrl+A, Enter, + and
+-) work as egui-pop describes; Enter or a double click opens the image
+in the viewport.
+
+**Search.** The search field's rating, labels, flags and tags become a
+vault query (several labels: any of them; several tags: all of them);
+its words (in the name or a tag) and dates (the file's day) are matched
+on what the library holds. A filter shows stacks flattened.
 
 ## Not yet
 
 - Phones over MTP as a source (mount them as folders).
 - An interactive answer to `--duplicates ask` (the files are listed).
+- Thumbnails are read in the library's order, not the ones in view
+  first; the comparison draws them at their size (256 pixels).
 - Burst identifiers from maker notes; capture times of pictures (JPEG,
   TIFF) from their EXIF, which fall back to the file's date.
 - Cancelling an import halfway (the job runs to its end).

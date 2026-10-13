@@ -1,6 +1,9 @@
 # Generated from Helios's declarations and code by `cargo xtask i18n extract`:
 # do not edit. Translations live in i18n/<locale>/ under the same names.
 
+panel-helios-compare =
+    .title = Compare
+
 panel-helios-filmstrip =
     .title = Filmstrip
 

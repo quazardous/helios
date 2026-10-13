@@ -18,6 +18,15 @@ command-gui-record-stop =
 command-gui-snapshot =
     .title = Prendre une image d’un panneau ou d’un widget
 
+command-helios-compare-detach =
+    .title = Déplacer Comparer dans une nouvelle fenêtre
+
+command-helios-compare-dock =
+    .title = Remettre Comparer dans sa zone
+
+command-helios-compare-moveTo =
+    .title = Déplacer Comparer vers une zone (`area`)
+
 command-helios-filmstrip-detach =
     .title = Déplacer Pellicule dans une nouvelle fenêtre
 
@@ -231,6 +240,18 @@ command-theme-helios-light =
 command-theme-select =
     .title = Utiliser un thème, par son nom
 
+command-vault-autoAdvance =
+    .title = Tri : passer à l’image suivante après chaque marque (`on` ; basculé en son absence)
+
+command-vault-flag-none =
+    .title = Retirer le choix ou le rejet des images sélectionnées
+
+command-vault-flag-pick =
+    .title = Choisir les images sélectionnées
+
+command-vault-flag-reject =
+    .title = Rejeter les images sélectionnées
+
 command-vault-label-blue =
     .title = Basculer l’étiquette bleue de l’image sélectionnée
 
@@ -275,6 +296,9 @@ command-vault-rate-5 =
 
 command-vault-reject =
     .title = Rejeter l’image sélectionnée, ou annuler son rejet
+
+command-vault-stack-toggle =
+    .title = Déplier ou replier la pile de l’image sélectionnée
 
 command-viewport-compare =
     .title = Image : avant et après côte à côte

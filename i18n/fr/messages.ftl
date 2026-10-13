@@ -296,3 +296,25 @@ xmp-reason-unknown-module = pas de module Helios
 xmp-reason-unreadable = illisible : { $error }
 
 xmp-reason-unsupported-version = version non prise en charge (lit { $known })
+
+gui-library-auto-advance = Avance automatique
+
+gui-library-compare-hint = Sélectionnez de deux à quatre images pour les comparer
+
+gui-library-count = { $shown } sur { $total }
+
+gui-library-empty = Aucune image : importez un dossier dans le coffre
+
+gui-library-images = Images
+
+gui-library-keep-best = Garder la meilleure : la choisir, rejeter les autres
+
+gui-library-no-cursor = Aucune image sous le curseur
+
+gui-library-none = Aucune image
+
+gui-library-search = Rechercher des images
+
+gui-library-sync = Synchroniser le zoom et le déplacement
+
+gui-library-tags = Mots-clés
