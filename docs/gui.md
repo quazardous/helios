@@ -285,9 +285,9 @@ Helios declares into it:
 - **keys**: egui-pop's keymap resolves them (layers, `when` clauses, a
   text field keeping plain keys), with the traces its debug bridge shows.
 
-Helios keeps what is its own: its status bar, its panels and their
-content (egui-pop's workbench places them, see "Panels"), and its
-system menu.
+Helios keeps what is its own: its status line (a block of egui-pop's
+status bar, beside the jobs item), its panels and their content
+(egui-pop's workbench places them, see "Panels"), and its system menu.
 
 **Commands run on Helios's kernel.** egui-pop wraps the kernel through a
 host contract (`helios_gui::host`): every command of Helios's registry is
@@ -373,6 +373,27 @@ are lists filled when the menu opens (egui-pop's list providers).
 The pictures are written by `HELIOS_DOC_PICTURES=$PWD/docs/gui cargo test
 -p helios-gui --test dialogs pictures` (and `--test params pictures`), from
 the repository's root: headless, never on the desktop.
+
+## Jobs
+
+What runs in the background shows in egui-pop's jobs centre (decided
+2026-10-13): the Jobs panel (closed until asked for) and the popover of
+the status bar's jobs item, the same list in both. Each job has its
+title, a bar of its estimated overall percentage, "n of m", the current
+step and item, the time left, why it failed, Cancel, and a chevron that
+opens its log console (a terminal over the job's log lines,
+`JobConsolesPlugin`). The status bar's item shows a ring with the
+overall estimate and how many jobs go on or failed.
+
+Helios's work reports through `helios_core::jobs` as `job.*` events on
+the shell's bus, which egui-pop reads as its journal (see
+[jobs.md](jobs.md)): an export (its render, encode and write steps, the
+file written in its log), the GPU calibration (each device's reference
+modules, its speeds in the log). Cancel runs `job.cancel` in the desktop,
+which stops the job the way it gave when it started: an export queued
+never runs, an export rendering writes nothing. A long export or batch
+that ends while no Helios window has the focus is said on the desktop
+(see "Platform services").
 
 ## Platform services
 
