@@ -153,11 +153,11 @@ gui-param-default = { $path } · default { $value }
 
 gui-param-held = { $label }: held to { $value }
 
-gui-param-hint = Drag or arrows to change, the wheel once focused or with Alt (Shift: finer drag, coarser steps); double click resets; Enter types a value
-
-gui-param-not-a-number = { $label }: `{ $typed }` is not a number
+gui-param-hint = Drag to change (Ctrl finer, Shift coarser), arrows to step, the wheel once focused or with Alt; double click resets; Enter types a value or an expression (x is the value)
 
 gui-param-past-range = { $label }: past its usual range
+
+gui-param-picker = Pick { $label } from the image
 
 gui-params-hide-values = Hide the values
 

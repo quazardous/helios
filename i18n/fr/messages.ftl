@@ -204,11 +204,11 @@ gui-param-default = { $path } · par défaut { $value }
 
 gui-param-held = { $label } : maintenu à { $value }
 
-gui-param-hint = Glisser ou flèches pour changer, la molette une fois le focus pris ou avec Alt (Maj : glissé plus fin, pas plus grands) ; double clic pour réinitialiser ; Entrée pour saisir une valeur
-
-gui-param-not-a-number = { $label } : « { $typed } » n’est pas un nombre
+gui-param-hint = Glisser pour changer (Ctrl plus fin, Maj plus grand), flèches pour avancer d’un pas, la molette une fois le focus pris ou avec Alt ; double clic pour réinitialiser ; Entrée pour saisir une valeur ou une expression (x est la valeur)
 
 gui-param-past-range = { $label } : au-delà de sa plage habituelle
+
+gui-param-picker = Prélever { $label } dans l’image
 
 gui-size-bytes = { $size } o
 

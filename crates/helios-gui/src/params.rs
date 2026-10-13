@@ -2,13 +2,16 @@
 //! value store (see `docs/widgets.md`). A widget never holds its value: it
 //! reads the store every frame and writes through it, as the user.
 //!
-//! - A float or an int is a slider over the soft range: a drag is one
-//!   gesture (one undo step, agents kept off meanwhile), the arrows step
-//!   (Shift coarse), a double click resets, Enter types a value (units
-//!   allowed, `,` or `.`); a typed value past the soft range is forced up
-//!   to the hard one, and says so. The wheel scrolls the panel: a slider
-//!   takes it only with the focus or while Alt is held. Steps in a row (a
-//!   held arrow, a turned wheel) are one undo step.
+//! - A float or an int is egui-pop's slider (`egui_pop::core::slider`),
+//!   built from the descriptor: a drag is one gesture (one undo step,
+//!   agents kept off meanwhile; Ctrl finer, Shift coarser, Escape gives it
+//!   up), the arrows step, a double click resets, Enter types a value or
+//!   an expression (units allowed, `,` or `.`); a typed value past the
+//!   soft range is forced up to the hard one, and says so. The wheel
+//!   scrolls the panel: a slider takes it only with the focus or while Alt
+//!   is held. Steps in a row (a held arrow, a turned wheel) are one undo
+//!   step. Each finished change runs egui-pop's `slider.change` step
+//!   first, so a plugin can veto, snap or follow it.
 //! - A bool is a toggle, a choice a list (the arrows step it), a text a
 //!   field. A list of numbers folds into a summary (`12 points` for a
 //!   path's points, else `32 values`) that opens below its row, a point
@@ -23,8 +26,10 @@
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 
-use egui::{Key, Modifiers, Sense, Ui, WidgetInfo, WidgetType};
+use egui::{Sense, Ui};
+use egui_pop::api::sliders;
 use egui_pop::core::icon::{Icon, Tone};
+use egui_pop::core::slider::{Cause, Slider, SliderOutput};
 use helios_core::{Message, Value};
 use helios_shell::commands::Origin;
 use helios_values::{Change, Descriptor, Entry, GestureId, Set, Store, Type};
@@ -52,21 +57,21 @@ pub struct Params {
     /// Steps in a row on one path (keys, the wheel): one group, and when
     /// its last step was.
     steps: Option<(String, GestureId, f64)>,
-    /// A value being typed: its path, the text, and whether it was just
-    /// opened (its text then starts selected).
-    typing: Option<(String, String, bool)>,
+    /// Each slider's id and bar as last drawn, to close its typed entry
+    /// on a press elsewhere (see [`Params::close_typing`]).
+    bars: BTreeMap<String, (egui::Id, egui::Rect)>,
     /// The application, for the parameters' context menu.
     app: Option<egui_pop::api::AppHandle>,
 }
 
-/// Parses a typed number: units after it are ignored, a comma is a point.
+/// The journal event a parameter's picker button publishes (`path`): a
+/// picker tool answers it by sampling the image.
+pub const PICKER_EVENT: &str = "param.picker";
+
+/// Parses a typed number or expression as the sliders do: units after it
+/// are ignored, a comma is a decimal separator.
 pub fn parse_typed(text: &str) -> Option<f64> {
-    let t = text.trim().replace(',', ".");
-    let end = t
-        .char_indices()
-        .find(|(i, c)| !(c.is_ascii_digit() || *c == '.' || (*i == 0 && (*c == '-' || *c == '+'))))
-        .map_or(t.len(), |(i, _)| i);
-    t[..end].parse().ok()
+    egui_pop::core::slider::parse_typed(text)
 }
 
 /// A value as shown in English: display scale, precision, unit.
@@ -321,7 +326,13 @@ impl Params {
         });
     }
 
-    /// A slider for a number, over the soft range.
+    /// A slider for a number: egui-pop's slider built from the
+    /// descriptor (soft and hard ranges, steps, unit, precision, default,
+    /// a logarithmic bar and a picker when the module asks). Its gestures
+    /// (fine and coarse drags, keys, the wheel only once focused, typed
+    /// expressions, a double click's reset) are egui-pop's; each finished
+    /// change runs the `slider.change` step, then is written to the store
+    /// as the user: a drag as one gesture, steps in a row as one group.
     fn slider(
         &mut self,
         ui: &mut Ui,
@@ -331,258 +342,52 @@ impl Params {
     ) -> egui::Response {
         let d = &entry.descriptor;
         let shown_label = label(ui.ctx(), path, d);
-        let v = entry.value.as_f64().unwrap_or(0.0);
-        let (lo, hi) = d.soft.or(d.hard).unwrap_or((0.0, 1.0));
-        // Room is kept on the right for the marks.
-        let width = (ui.available_width() - 28.0).clamp(80.0, 320.0);
-        let height = ui.spacing().interact_size.y + 4.0;
-        let (rect, response) =
-            ui.allocate_exact_size(egui::vec2(width, height), Sense::click_and_drag());
-        let id = response.id;
-        let visuals = ui.visuals().clone();
-        let outside = v < lo || v > hi;
-
-        // Typing a value.
-        if self.typing.as_ref().is_some_and(|(p, _, _)| p == path) {
-            let (_, text, fresh) = self.typing.as_mut().expect("typing");
-            let edit_id = id.with("typed");
-            let edit = ui.put(rect, egui::TextEdit::singleline(text).id(edit_id));
-            // The focus is taken once, when typing opens: a click elsewhere
-            // takes it away and ends the typing, the value untouched.
-            let opened = *fresh;
-            if opened {
-                edit.request_focus();
-            } else if !edit.has_focus() && !edit.lost_focus() {
-                self.typing = None;
-                return edit;
-            }
-            if std::mem::take(fresh) {
-                // Typing replaces the value shown.
-                let mut state =
-                    egui::text_edit::TextEditState::load(ui.ctx(), edit_id).unwrap_or_default();
-                let all = egui::text::CCursorRange::two(
-                    egui::text::CCursor::new(0),
-                    egui::text::CCursor::new(text.chars().count()),
-                );
-                state.cursor.set_char_range(Some(all));
-                state.store(ui.ctx(), edit_id);
-            }
-            let (enter, escape) =
-                ui.input(|i| (i.key_pressed(Key::Enter), i.key_pressed(Key::Escape)));
-            if enter {
-                let typed = self.typing.take().map(|(_, t, _)| t).unwrap_or_default();
-                if let Some(x) = parse_typed(&typed) {
-                    let value = x / d.display_scale;
-                    let force = value < lo || value > hi;
-                    let mut s = store.lock().expect("value store lock");
-                    let change = Change::To(match d.ty {
-                        Type::Int => Value::Int(value.round() as i64),
-                        _ => Value::Float(value),
-                    });
-                    if let Some(a) = write(&mut s, path, change, None, force) {
-                        let note = match (force, a.clamped) {
-                            (_, helios_values::Clamped::Hard) => Some(
-                                Message::new("gui-param-held", "{ $label }: held to { $value }")
-                                    .with("label", &shown_label)
-                                    .with(
-                                        "value",
-                                        shown_in(&crate::i18n::locale(ui.ctx()), d, &a.value),
-                                    ),
-                            ),
-                            (true, _) => Some(
-                                Message::new(
-                                    "gui-param-past-range",
-                                    "{ $label }: past its usual range",
-                                )
-                                .with("label", &shown_label),
-                            ),
-                            _ => None,
-                        };
-                        if let Some(n) = note {
-                            request(ui.ctx(), Request::Notify(Level::Info, n));
-                        }
-                    }
-                } else {
-                    request(
-                        ui.ctx(),
-                        Request::Notify(
-                            Level::Warning,
-                            Message::new(
-                                "gui-param-not-a-number",
-                                "{ $label }: `{ $typed }` is not a number",
-                            )
-                            .with("label", &shown_label)
-                            .with("typed", typed),
-                        ),
-                    );
-                }
-            } else if escape {
-                self.typing = None;
-            }
-            return edit;
-        }
-
-        // Dragging: one gesture.
-        let mut s = store.lock().expect("value store lock");
-        if response.drag_started() {
-            let g = s.begin_gesture(Origin::User, &format!("drag {}", d.label));
-            self.gesture = Some((path.into(), g));
-        }
-        let gesture = self
-            .gesture
-            .as_ref()
-            .filter(|(p, _)| p == path)
-            .map(|(_, g)| *g);
-        if response.dragged() && gesture.is_some() {
-            let fine = ui.input(|i| if i.modifiers.shift { 0.1 } else { 1.0 });
-            let delta = f64::from(response.drag_delta().x / rect.width()) * (hi - lo) * fine;
-            if delta != 0.0 {
-                let to = v + delta;
-                let change = Change::To(match d.ty {
-                    Type::Int => Value::Int(to.round() as i64),
-                    _ => Value::Float(to),
-                });
-                write(&mut s, path, change, gesture, false);
-            }
-        }
-        if response.drag_stopped()
-            && let Some((_, g)) = self.gesture.take()
-        {
-            s.end(g);
-        }
-        if response.double_clicked() {
-            write(&mut s, path, Change::Reset, None, false);
-        } else if response.clicked() {
-            response.request_focus();
-        }
-        // Wheel and arrows: steps.
-        let steps = |i: &egui::InputState| -> Option<Change> {
-            let n = if i.key_pressed(Key::ArrowRight) || i.key_pressed(Key::ArrowUp) {
-                1
-            } else if i.key_pressed(Key::ArrowLeft) || i.key_pressed(Key::ArrowDown) {
-                -1
-            } else {
-                0
-            };
-            (n != 0).then_some({
-                if i.modifiers.shift {
-                    Change::Coarse(n)
-                } else {
-                    Change::Step(n)
-                }
-            })
-        };
-        let now = ui.input(|i| i.time);
-        if response.has_focus() {
-            if let Some(change) = ui.input(steps) {
-                self.step(&mut s, path, change, &d.label, now);
-            }
-            if ui.input(|i| i.key_pressed(Key::Enter)) {
-                self.typing = Some((
-                    path.into(),
-                    crate::i18n::fixed(
-                        &crate::i18n::locale(ui.ctx()),
-                        v * d.display_scale,
-                        d.precision as usize,
-                    ),
-                    true,
-                ));
-            }
-        }
-        // The wheel scrolls the panel, unless the slider has the focus or
-        // Alt is held over it: then each notch (a touchpad's stream as one)
-        // steps it and the panel stays.
-        let wheel_held = ui.input(|i| i.modifiers.matches_logically(Modifiers::ALT));
-        if response.hovered() && (response.has_focus() || wheel_held) {
-            let (wheel, coarse) = ui.input(|i| {
-                let sum: f32 = i
-                    .events
-                    .iter()
-                    .filter_map(|e| match e {
-                        egui::Event::MouseWheel { delta, .. } => Some(delta.y + delta.x),
-                        _ => None,
-                    })
-                    .sum();
-                (sum, i.modifiers.shift)
-            });
-            if wheel != 0.0 {
-                let n = if wheel > 0.0 { 1 } else { -1 };
-                let change = if coarse {
-                    Change::Coarse(n)
-                } else {
-                    Change::Step(n)
-                };
-                self.step(&mut s, path, change, &d.label, now);
-            }
-            // egui spreads a notch's scroll over a few frames: what is left
-            // of it is eaten too, so the panel stays.
-            ui.input_mut(|i| {
-                i.smooth_scroll_delta = egui::Vec2::ZERO;
-                i.events
-                    .retain(|e| !matches!(e, egui::Event::MouseWheel { .. }));
-            });
-        }
-        drop(s);
-
-        // Paint: the track, the filled part, the label and the value.
-        let painter = ui.painter_at(rect);
-        painter.rect_filled(
-            rect,
-            visuals.widgets.inactive.corner_radius,
-            visuals.widgets.inactive.bg_fill,
-        );
-        let t = ((v - lo) / (hi - lo)).clamp(0.0, 1.0) as f32;
-        let fill = if outside {
-            visuals.warn_fg_color.gamma_multiply(0.5)
-        } else {
-            visuals.selection.bg_fill
-        };
-        let filled = egui::Rect::from_min_max(
-            rect.min,
-            egui::pos2(rect.left() + rect.width() * t, rect.bottom()),
-        );
-        painter.rect_filled(filled, visuals.widgets.inactive.corner_radius, fill);
-        if response.has_focus() {
-            // Snapped to whole pixels at this window's scale.
-            let mut ring = visuals.selection.stroke;
-            ring.width = egui_pop::core::scale::stroke(ui.ctx(), ring.width);
-            painter.rect_stroke(
-                rect,
-                visuals.widgets.inactive.corner_radius,
-                ring,
-                egui::StrokeKind::Inside,
-            );
-        }
-        let text = visuals.text_color();
-        let font = egui::TextStyle::Body.resolve(ui.style());
-        painter.text(
-            rect.left_center() + egui::vec2(6.0, 0.0),
-            egui::Align2::LEFT_CENTER,
-            &shown_label,
-            font.clone(),
-            text,
-        );
-        let locale = crate::i18n::locale(ui.ctx());
-        let value_text = shown_in(&locale, d, &entry.value);
-        painter.text(
-            rect.right_center() - egui::vec2(6.0, 0.0),
-            egui::Align2::RIGHT_CENTER,
-            &value_text,
-            font,
-            if outside { visuals.warn_fg_color } else { text },
-        );
-        let label = shown_label.clone();
-        let enabled = ui.is_enabled();
-        response.widget_info(|| {
-            let mut info = WidgetInfo::slider(enabled, v * d.display_scale, &label);
-            info.typ = WidgetType::Slider;
-            // The value as read, in the interface's language.
-            info.current_text_value = Some(value_text.clone());
-            info
-        });
         let ctx = ui.ctx().clone();
+        let mut v = entry.value.as_f64().unwrap_or(0.0);
+        let mut spec = crate::dialogs::descriptor(d);
+        spec.label.clone_from(&shown_label);
+        let picker = crate::i18n::text(
+            &ctx,
+            Message::new("gui-param-picker", "Pick { $label } from the image")
+                .with("label", &shown_label),
+        );
+        // Room is kept on the right for the marks.
+        let width = (ui.available_width() - 28.0).clamp(120.0, 320.0);
+        let height = ui.spacing().interact_size.y;
+        self.close_typing(ui, path);
+        let app = self.app.clone();
+        let out = ui
+            .allocate_ui(egui::vec2(width, height), |ui| {
+                ui.set_width(width);
+                let mut slider = Slider::from_descriptor(&mut v, &spec);
+                if d.unit.as_deref() == Some("EV") {
+                    // As darktable shows exposures: `+0.70 EV`.
+                    slider = slider.signed();
+                }
+                if d.logarithmic {
+                    slider = slider.logarithmic();
+                }
+                if d.picker {
+                    slider = slider.quad(Icon::Picker, &picker);
+                }
+                if let Some(app) = &app {
+                    slider = slider.on_change(sliders::hook(app, path));
+                }
+                slider.show(ui)
+            })
+            .inner;
+        self.bars
+            .insert(path.into(), (out.response.id, out.response.rect));
+        if out.quad_clicked()
+            && let Some(app) = &self.app
+        {
+            app.publish("helios.params", None, PICKER_EVENT, json!({ "path": path }));
+        }
+        self.apply(&ctx, store, path, d, &shown_label, &out);
+
+        let locale = crate::i18n::locale(&ctx);
         let about = description(&ctx, path, d);
-        response.on_hover_text(format!(
+        out.response.on_hover_text(format!(
             "{}\n{}\n{}",
             if about.is_empty() { &shown_label } else { &about },
             crate::i18n::text(
@@ -595,10 +400,131 @@ impl Params {
                 &ctx,
                 Message::new(
                     "gui-param-hint",
-                    "Drag or arrows to change, the wheel once focused or with Alt (Shift: finer drag, coarser steps); double click resets; Enter types a value",
+                    "Drag to change (Ctrl finer, Shift coarser), arrows to step, the wheel once focused or with Alt; double click resets; Enter types a value or an expression (x is the value)",
                 ),
             ),
         ))
+    }
+
+    /// Closes a slider's typed entry, its text dropped, on a press outside
+    /// its bar or on Escape, and lets go of the keyboard: the entry would
+    /// otherwise take the focus back on every frame it is drawn
+    /// (egui-pop's typed entry asks for it each frame), and a click on the
+    /// image would leave the keys in the field.
+    fn close_typing(&self, ui: &Ui, path: &str) {
+        let Some((id, bar)) = self.bars.get(path).copied() else {
+            return;
+        };
+        let typing = egui_pop::core::slider::typing_id(id);
+        if ui.data(|d| d.get_temp::<String>(typing)).is_none() {
+            return;
+        }
+        let away = ui.input(|i| {
+            i.pointer.any_pressed() && i.pointer.interact_pos().is_some_and(|p| !bar.contains(p))
+        });
+        let escape = ui.input(|i| i.key_pressed(egui::Key::Escape));
+        if away || escape {
+            ui.data_mut(|d| d.remove::<String>(typing));
+            ui.memory_mut(|m| m.surrender_focus(typing.with("edit")));
+        }
+    }
+
+    /// Writes what a slider changed this frame to the store, as the user.
+    fn apply(
+        &mut self,
+        ctx: &egui::Context,
+        store: &Mutex<Store>,
+        path: &str,
+        d: &Descriptor,
+        shown_label: &str,
+        out: &SliderOutput,
+    ) {
+        let value = |x: f64| match d.ty {
+            Type::Int => Value::Int(x.round() as i64),
+            _ => Value::Float(x),
+        };
+        let (lo, hi) = d.soft.or(d.hard).unwrap_or((f64::MIN, f64::MAX));
+        let now = ctx.input(|i| i.time);
+        let mut s = store.lock().expect("value store lock");
+        let mut drag_ended = false;
+        for c in &out.changes {
+            match c.cause {
+                // A drag's frames: one gesture, other origins kept off.
+                Cause::Drag if !c.done => {
+                    let held = self
+                        .gesture
+                        .as_ref()
+                        .filter(|(p, _)| p == path)
+                        .map(|(_, g)| *g);
+                    let g = held.unwrap_or_else(|| {
+                        let g = s.begin_gesture(Origin::User, &format!("drag {}", d.label));
+                        self.gesture = Some((path.into(), g));
+                        g
+                    });
+                    write(&mut s, path, Change::To(value(c.to)), Some(g), false);
+                }
+                // Its release, as the step left it: one undo step.
+                Cause::Drag => {
+                    drag_ended = true;
+                    match self.gesture.take() {
+                        Some((p, g)) if p == path => {
+                            write(&mut s, path, Change::To(value(c.to)), Some(g), false);
+                            s.end(g);
+                        }
+                        other => {
+                            self.gesture = other;
+                            write(&mut s, path, Change::To(value(c.to)), None, false);
+                        }
+                    }
+                }
+                Cause::Key | Cause::Wheel | Cause::Access => {
+                    self.step(&mut s, path, Change::To(value(c.to)), &d.label, now);
+                }
+                Cause::Reset => {
+                    write(&mut s, path, Change::Reset, None, false);
+                }
+                // Typed past the soft range: forced, up to the hard one.
+                Cause::Typed => {
+                    let force = c.to < lo || c.to > hi;
+                    let note =
+                        write(&mut s, path, Change::To(value(c.to)), None, force).and_then(|a| {
+                            match (force, a.clamped) {
+                                (_, helios_values::Clamped::Hard) => Some(
+                                    Message::new(
+                                        "gui-param-held",
+                                        "{ $label }: held to { $value }",
+                                    )
+                                    .with("label", shown_label)
+                                    .with(
+                                        "value",
+                                        shown_in(&crate::i18n::locale(ctx), d, &a.value),
+                                    ),
+                                ),
+                                (true, _) => Some(
+                                    Message::new(
+                                        "gui-param-past-range",
+                                        "{ $label }: past its usual range",
+                                    )
+                                    .with("label", shown_label),
+                                ),
+                                _ => None,
+                            }
+                        });
+                    if let Some(n) = note {
+                        request(ctx, Request::Notify(Level::Info, n));
+                    }
+                }
+            }
+        }
+        // A drag given up (Escape, or vetoed at its release): what it
+        // wrote is put back and leaves no undo step.
+        if out.response.drag_stopped()
+            && !drag_ended
+            && self.gesture.as_ref().is_some_and(|(p, _)| p == path)
+            && let Some((_, g)) = self.gesture.take()
+        {
+            s.cancel(g);
+        }
     }
 
     /// The Parameters panel: the selected node's values, or every node's,

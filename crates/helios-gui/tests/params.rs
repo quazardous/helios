@@ -68,8 +68,8 @@ fn widgets_come_from_descriptors_and_are_found_by_path() {
     h.get_by_role_and_label(egui::accesskit::Role::Slider, "exposure");
 }
 
-/// Values are written in the interface's language: French puts a comma
-/// and a narrow space before `%`; an exposure is signed.
+/// Values are written in the interface's language (egui-pop's
+/// `Strings::number`): French puts a comma; an exposure is signed.
 #[test]
 fn values_are_written_in_the_interface_language() {
     use egui::accesskit::Role;
@@ -93,7 +93,17 @@ fn values_are_written_in_the_interface_language() {
     h.run();
     h.run();
     assert_eq!(read(&h, "exposition").as_deref(), Some("+0,70 EV"));
-    assert_eq!(read(&h, "noir").as_deref(), Some("0,00\u{202f}%"));
+    assert_eq!(read(&h, "noir").as_deref(), Some("0,00 %"));
+    // A negative exposure: its minus sign, no plus, the comma.
+    h.state_mut()
+        .run(
+            "param.set",
+            json!({ "path": EV, "value": -1.25 }),
+            Origin::User,
+        )
+        .unwrap();
+    h.run();
+    assert_eq!(read(&h, "exposition").as_deref(), Some("-1,25 EV"));
 }
 
 /// The labels are the modules' translations (`param-<module>-<name>`),
@@ -143,13 +153,152 @@ fn a_drag_is_one_gesture_that_keeps_agents_off() {
     assert!(refused.unwrap_err().contains("held"));
     press(&h, from + vec2(50.0, 0.0), false);
     h.run();
-    let store = h.state().values.lock().unwrap();
-    let steps: Vec<&str> = store
-        .undo_steps()
-        .iter()
-        .map(|s| s.label.as_str())
+    {
+        let store = h.state().values.lock().unwrap();
+        let steps: Vec<&str> = store
+            .undo_steps()
+            .iter()
+            .map(|s| s.label.as_str())
+            .collect();
+        assert_eq!(steps, ["drag exposure"], "one step for the whole drag");
+    }
+    // The release ran egui-pop's `slider.change` step once, from the
+    // value before the drag.
+    let changes: Vec<serde_json::Value> = h
+        .state()
+        .app()
+        .handle()
+        .events_since(0)
+        .into_iter()
+        .filter(|e| e.name == "slider.change")
+        .map(|e| e.data)
         .collect();
-    assert_eq!(steps, ["drag exposure"], "one step for the whole drag");
+    assert_eq!(changes.len(), 1, "{changes:?}");
+    // One undo puts the whole drag back.
+    h.state()
+        .values
+        .lock()
+        .unwrap()
+        .undo(&Origin::User)
+        .unwrap();
+    assert_eq!(ev(&h), 0.0);
+}
+
+/// Escape during a drag puts the value back and leaves no undo step.
+#[test]
+fn escape_gives_a_drag_up_without_a_trace() {
+    let mut h = harness();
+    let r = h.state().target_rect(&format!("param:{EV}")).unwrap();
+    let from = r.center();
+    h.hover_at(from);
+    h.run();
+    press(&h, from, true);
+    h.run();
+    for k in 1..=3 {
+        h.hover_at(from + vec2(10.0 * k as f32, 0.0));
+        h.run();
+    }
+    assert!(ev(&h) > 0.0);
+    h.key_press(Key::Escape);
+    h.run();
+    press(&h, from + vec2(30.0, 0.0), false);
+    h.run();
+    assert_eq!(ev(&h), 0.0);
+    assert!(h.state().values.lock().unwrap().undo_steps().is_empty());
+}
+
+/// The wheel scrolls past a slider: it steps one only once focused (or
+/// with Alt held over it).
+#[test]
+fn the_wheel_steps_a_slider_only_once_focused() {
+    let mut h = harness();
+    // Steps, not `run`: a tooltip fading in keeps asking for frames.
+    let wheel = |h: &mut egui_kittest::Harness<'_, Shell>, modifiers: Modifiers| {
+        let at = h
+            .state()
+            .target_rect(&format!("param:{EV}"))
+            .unwrap()
+            .center();
+        h.event(egui::Event::PointerMoved(at));
+        h.event(egui::Event::ModifiersChanged(modifiers));
+        h.event(egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Line,
+            phase: egui::TouchPhase::Move,
+            delta: vec2(0.0, 1.0),
+            modifiers,
+        });
+        for _ in 0..4 {
+            h.step();
+        }
+        h.event(egui::Event::ModifiersChanged(Modifiers::NONE));
+        for _ in 0..4 {
+            h.step();
+        }
+    };
+    wheel(&mut h, Modifiers::NONE);
+    assert_eq!(ev(&h), 0.0, "not focused: the wheel scrolls the panel");
+    wheel(&mut h, Modifiers::ALT);
+    assert!((ev(&h) - 0.02).abs() < 1e-9, "Alt held: {}", ev(&h));
+    // Focused by a click: the wheel steps it.
+    let at = h
+        .state()
+        .target_rect(&format!("param:{EV}"))
+        .unwrap()
+        .center();
+    press(&h, at, true);
+    press(&h, at, false);
+    for _ in 0..4 {
+        h.step();
+    }
+    wheel(&mut h, Modifiers::NONE);
+    assert!((ev(&h) - 0.04).abs() < 1e-9, "focused: {}", ev(&h));
+}
+
+/// Enter types an expression of the current value, `x`.
+#[test]
+fn a_typed_expression_sets_the_value() {
+    let mut h = harness();
+    h.state_mut()
+        .run(
+            "param.set",
+            json!({ "path": EV, "value": 1.5 }),
+            Origin::User,
+        )
+        .unwrap();
+    h.run();
+    let at = h
+        .state()
+        .target_rect(&format!("param:{EV}"))
+        .unwrap()
+        .center();
+    h.hover_at(at);
+    press(&h, at, true);
+    press(&h, at, false);
+    h.run();
+    h.key_press(Key::Enter);
+    h.run();
+    clear_typed(&mut h);
+    h.event(egui::Event::Text("x * 2 - 0,5".into()));
+    h.run();
+    h.key_press(Key::Enter);
+    h.run();
+    assert!((ev(&h) - 2.5).abs() < 1e-9, "{}", ev(&h));
+    // The typed value is an undo step of its own.
+    h.state()
+        .values
+        .lock()
+        .unwrap()
+        .undo(&Origin::User)
+        .unwrap();
+    assert!((ev(&h) - 1.5).abs() < 1e-9, "{}", ev(&h));
+}
+
+/// Empties the typed entry (it opens on the value shown).
+fn clear_typed(h: &mut egui_kittest::Harness<'_, Shell>) {
+    for _ in 0..12 {
+        h.key_press(Key::Backspace);
+    }
+    h.run();
 }
 
 #[test]
@@ -186,12 +335,14 @@ fn keys_step_enter_types_and_double_click_resets() {
     h.key_press(Key::ArrowRight);
     h.run();
     assert!((ev(&h) - 0.02).abs() < 1e-9, "{}", ev(&h));
+    // Shift: ten steps at once (up to the coarse step).
     h.key_press_modifiers(Modifiers::SHIFT, Key::ArrowRight);
     h.run();
-    assert!((ev(&h) - 0.27).abs() < 1e-9, "{}", ev(&h));
+    assert!((ev(&h) - 0.22).abs() < 1e-9, "{}", ev(&h));
     // Enter types; past the soft range (-3..4 EV) is forced, up to the hard one.
     h.key_press(Key::Enter);
     h.run();
+    clear_typed(&mut h);
     h.event(egui::Event::Text("6,5 EV".into()));
     h.run();
     h.key_press(Key::Enter);
