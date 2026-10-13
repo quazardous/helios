@@ -921,13 +921,10 @@ impl MaskTree {
         }
         match &desired {
             Some(k) if self.state.selection().cursor() != Some(k) => {
+                // A node the view has not loaded yet waits for its
+                // branch, which opening its groups loads.
                 for g in net.ancestors(k) {
                     self.state.set_expanded(&g, true);
-                }
-                // A node the view has not loaded yet would leave the
-                // selection at once: asked again next pass.
-                if !self.state.model().contains(k) {
-                    return;
                 }
                 self.state.set_selection([k.clone()], Some(k.clone()));
             }
