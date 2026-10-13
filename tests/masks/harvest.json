@@ -1,0 +1,1079 @@
+{
+  "format": "darktable-mask-harvest",
+  "format_version": 1,
+  "source_kind": "xmp",
+  "darktable_version": "5.7.0+1266~g5a6425e788",
+  "current_blend_version": 15,
+  "current_masks_version": 7,
+  "contents": "Mask configurations only, read from XMP sidecars. No file names, no folder names, no shape or group names, no module instance names, no image content, no thumbnails, no timestamps, no EXIF, no GPS. Image identity is reduced to a sequential index.",
+  "image_dimensions": "read from each sidecar's own image file, metadata only, nothing else about it opened. Where that file is missing a nominal 3:2 canvas is used instead and the edit is marked dimensions_known: 0; mask geometry is stored normalized, so that only sets the aspect a replay draws on, identically for the classic and migrated renders it compares.",
+  "edits": [
+    {
+      "index": 0,
+      "image_index": 0,
+      "image": {
+        "width": 6000,
+        "height": 4000,
+        "dimensions_known": 0
+      },
+      "operation": "exposure",
+      "multi_priority": 0,
+      "enabled": 1,
+      "blendop_version": 14,
+      "blend": {
+        "mask_mode": 3,
+        "mask_mode_names": ["enabled", "drawn"],
+        "blend_cst": 4,
+        "blend_cst_name": "rgb_scene",
+        "blend_mode": 24,
+        "blend_parameter": 0,
+        "opacity": 100,
+        "mask_combine": 2,
+        "mask_id": 1004,
+        "blendif": 0,
+        "feathering_radius": 0,
+        "feathering_guide": 5,
+        "blur_radius": 0,
+        "contrast": 0,
+        "brightness": 0,
+        "details": 0,
+        "feather_version": 1,
+        "blendif_parameters": [0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1],
+        "blendif_boost_factors": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        "raster_mask_source": "",
+        "raster_mask_instance": 0,
+        "raster_mask_id": 0,
+        "raster_mask_invert": 0
+      },
+      "forms": [
+        {
+          "formid": 12,
+          "type": 64,
+          "type_name": "brush",
+          "version": 6,
+          "source": [0, 0, 0],
+          "points_count": 4,
+          "points": [
+            {
+              "corner": [0.200000003, 0.300000012],
+              "ctrl1": [0.166666672, 0.275000006],
+              "ctrl2": [0.233333334, 0.325000018],
+              "border": [0.0299999993, 0.0299999993],
+              "density": 1,
+              "hardness": 0.5,
+              "state": 2
+            },
+            {
+              "corner": [0.400000006, 0.449999988],
+              "ctrl1": [0.333333343, 0.433333337],
+              "ctrl2": [0.466666669, 0.466666639],
+              "border": [0.0399999991, 0.0399999991],
+              "density": 1,
+              "hardness": 0.5,
+              "state": 2
+            },
+            {
+              "corner": [0.600000024, 0.400000006],
+              "ctrl1": [0.541666687, 0.366666675],
+              "ctrl2": [0.658333361, 0.433333337],
+              "border": [0.0500000007, 0.0500000007],
+              "density": 1,
+              "hardness": 0.5,
+              "state": 2
+            },
+            {
+              "corner": [0.75, 0.649999976],
+              "ctrl1": [0.725000024, 0.60833329],
+              "ctrl2": [0.774999976, 0.691666663],
+              "border": [0.0399999991, 0.0399999991],
+              "density": 1,
+              "hardness": 0.5,
+              "state": 2
+            }
+          ]
+        },
+        {
+          "formid": 1004,
+          "type": 4,
+          "type_name": "group",
+          "version": 6,
+          "source": [0, 0, 0],
+          "points_count": 1,
+          "points": [
+            {
+              "formid": 12,
+              "parentid": 1004,
+              "state": 11,
+              "opacity": 1
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "index": 1,
+      "image_index": 1,
+      "image": {
+        "width": 6000,
+        "height": 4000,
+        "dimensions_known": 0
+      },
+      "operation": "exposure",
+      "multi_priority": 0,
+      "enabled": 1,
+      "blendop_version": 14,
+      "blend": {
+        "mask_mode": 3,
+        "mask_mode_names": ["enabled", "drawn"],
+        "blend_cst": 4,
+        "blend_cst_name": "rgb_scene",
+        "blend_mode": 24,
+        "blend_parameter": 0,
+        "opacity": 100,
+        "mask_combine": 2,
+        "mask_id": 1000,
+        "blendif": 0,
+        "feathering_radius": 0,
+        "feathering_guide": 5,
+        "blur_radius": 0,
+        "contrast": 0,
+        "brightness": 0,
+        "details": 0,
+        "feather_version": 1,
+        "blendif_parameters": [0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1],
+        "blendif_boost_factors": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        "raster_mask_source": "",
+        "raster_mask_instance": 0,
+        "raster_mask_id": 0,
+        "raster_mask_invert": 0
+      },
+      "forms": [
+        {
+          "formid": 1,
+          "type": 1,
+          "type_name": "circle",
+          "version": 6,
+          "source": [0, 0, 0],
+          "points_count": 1,
+          "points": [
+            {
+              "center": [0.400000006, 0.449999988],
+              "radius": 0.150000006,
+              "border": 0.0500000007
+            }
+          ]
+        },
+        {
+          "formid": 1000,
+          "type": 4,
+          "type_name": "group",
+          "version": 6,
+          "source": [0, 0, 0],
+          "points_count": 1,
+          "points": [
+            {
+              "formid": 1,
+              "parentid": 1000,
+              "state": 11,
+              "opacity": 1
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "index": 2,
+      "image_index": 2,
+      "image": {
+        "width": 6000,
+        "height": 4000,
+        "dimensions_known": 0
+      },
+      "operation": "exposure",
+      "multi_priority": 0,
+      "enabled": 1,
+      "blendop_version": 14,
+      "blend": {
+        "mask_mode": 3,
+        "mask_mode_names": ["enabled", "drawn"],
+        "blend_cst": 4,
+        "blend_cst_name": "rgb_scene",
+        "blend_mode": 24,
+        "blend_parameter": 0,
+        "opacity": 100,
+        "mask_combine": 2,
+        "mask_id": 1001,
+        "blendif": 0,
+        "feathering_radius": 0,
+        "feathering_guide": 5,
+        "blur_radius": 0,
+        "contrast": 0,
+        "brightness": 0,
+        "details": 0,
+        "feather_version": 1,
+        "blendif_parameters": [0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1],
+        "blendif_boost_factors": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        "raster_mask_source": "",
+        "raster_mask_instance": 0,
+        "raster_mask_id": 0,
+        "raster_mask_invert": 0
+      },
+      "forms": [
+        {
+          "formid": 2,
+          "type": 32,
+          "type_name": "ellipse",
+          "version": 6,
+          "source": [0, 0, 0],
+          "points_count": 1,
+          "points": [
+            {
+              "center": [0.600000024, 0.5],
+              "radius": [0.200000003, 0.100000001],
+              "rotation": 30,
+              "border": 0.0500000007,
+              "flags": 0
+            }
+          ]
+        },
+        {
+          "formid": 1001,
+          "type": 4,
+          "type_name": "group",
+          "version": 6,
+          "source": [0, 0, 0],
+          "points_count": 1,
+          "points": [
+            {
+              "formid": 2,
+              "parentid": 1001,
+              "state": 11,
+              "opacity": 1
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "index": 3,
+      "image_index": 3,
+      "image": {
+        "width": 6000,
+        "height": 4000,
+        "dimensions_known": 0
+      },
+      "operation": "exposure",
+      "multi_priority": 0,
+      "enabled": 1,
+      "blendop_version": 15,
+      "blend": {
+        "mask_mode": 17,
+        "mask_mode_names": ["enabled", "flexi"],
+        "blend_cst": 4,
+        "blend_cst_name": "rgb_scene",
+        "blend_mode": 24,
+        "blend_parameter": 0,
+        "opacity": 100,
+        "mask_combine": 2,
+        "mask_id": 1008,
+        "blendif": 0,
+        "feathering_radius": 0,
+        "feathering_guide": 5,
+        "blur_radius": 0,
+        "contrast": 0,
+        "brightness": 0,
+        "details": 0,
+        "feather_version": 1,
+        "blendif_parameters": [0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1],
+        "blendif_boost_factors": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        "raster_mask_source": "",
+        "raster_mask_instance": 0,
+        "raster_mask_id": 0,
+        "raster_mask_invert": 0
+      },
+      "forms": [
+        {
+          "formid": 41,
+          "type": 64,
+          "type_name": "brush",
+          "version": 7,
+          "source": [0, 0, 0],
+          "points_count": 3,
+          "points": [
+            {
+              "corner": [0.150000006, 0.699999988],
+              "ctrl1": [0.100000009, 0.716666639],
+              "ctrl2": [0.200000003, 0.683333337],
+              "border": [0.0299999993, 0.0299999993],
+              "density": 1,
+              "hardness": 0.699999988,
+              "state": 2
+            },
+            {
+              "corner": [0.449999988, 0.600000024],
+              "ctrl1": [0.341666669, 0.591666698],
+              "ctrl2": [0.558333337, 0.608333349],
+              "border": [0.0399999991, 0.0399999991],
+              "density": 1,
+              "hardness": 0.699999988,
+              "state": 2
+            },
+            {
+              "corner": [0.800000012, 0.75],
+              "ctrl1": [0.741666675, 0.725000024],
+              "ctrl2": [0.858333349, 0.774999976],
+              "border": [0.0299999993, 0.0299999993],
+              "density": 1,
+              "hardness": 0.699999988,
+              "state": 2
+            }
+          ]
+        },
+        {
+          "formid": 42,
+          "type": 1,
+          "type_name": "circle",
+          "version": 7,
+          "source": [0, 0, 0],
+          "points_count": 1,
+          "points": [
+            {
+              "center": [0.5, 0.400000006],
+              "radius": 0.200000003,
+              "border": 0.0500000007
+            }
+          ]
+        },
+        {
+          "formid": 43,
+          "type": 16,
+          "type_name": "gradient",
+          "version": 7,
+          "source": [0, 0, 0],
+          "points_count": 1,
+          "points": [
+            {
+              "anchor": [0.5, 0.349999994],
+              "rotation": 10,
+              "compression": 0.0500000007,
+              "steepness": 0,
+              "curvature": 0,
+              "state": 2
+            }
+          ]
+        },
+        {
+          "formid": 44,
+          "type": 1,
+          "type_name": "circle",
+          "version": 7,
+          "source": [0, 0, 0],
+          "points_count": 1,
+          "points": [
+            {
+              "center": [0.200000003, 0.200000003],
+              "radius": 0.100000001,
+              "border": 0.0199999996
+            }
+          ]
+        },
+        {
+          "formid": 45,
+          "type": 4,
+          "type_name": "group",
+          "version": 7,
+          "source": [0, 0, 0],
+          "points_count": 3,
+          "points": [
+            {
+              "formid": 545,
+              "parentid": 45,
+              "state": 331776,
+              "opacity": 1,
+              "refinement": {
+                "enabled": 0,
+                "feathering_radius": 0,
+                "feathering_guide": 5,
+                "blur_radius": 0,
+                "contrast": 0,
+                "brightness": 0,
+                "details": 0
+              },
+              "group_opacity": 0.699999988
+            },
+            {
+              "formid": 42,
+              "parentid": 45,
+              "state": 3,
+              "opacity": 1,
+              "refinement": {
+                "enabled": 0,
+                "feathering_radius": 0,
+                "feathering_guide": 5,
+                "blur_radius": 0,
+                "contrast": 0,
+                "brightness": 0,
+                "details": 0
+              },
+              "group_opacity": 1
+            },
+            {
+              "formid": 43,
+              "parentid": 45,
+              "state": 3,
+              "opacity": 1,
+              "refinement": {
+                "enabled": 0,
+                "feathering_radius": 0,
+                "feathering_guide": 5,
+                "blur_radius": 0,
+                "contrast": 0,
+                "brightness": 0,
+                "details": 0
+              },
+              "group_opacity": 1
+            }
+          ]
+        },
+        {
+          "formid": 1008,
+          "type": 4,
+          "type_name": "group",
+          "version": 7,
+          "source": [0, 0, 0],
+          "points_count": 4,
+          "points": [
+            {
+              "formid": 1508,
+              "parentid": 1008,
+              "state": 262144,
+              "opacity": 1,
+              "refinement": {
+                "enabled": 0,
+                "feathering_radius": 0,
+                "feathering_guide": 5,
+                "blur_radius": 0,
+                "contrast": 0,
+                "brightness": 0,
+                "details": 0
+              },
+              "group_opacity": 1
+            },
+            {
+              "formid": 41,
+              "parentid": 1008,
+              "state": 3,
+              "opacity": 1,
+              "refinement": {
+                "enabled": 1,
+                "feathering_radius": 0,
+                "feathering_guide": 5,
+                "blur_radius": 3,
+                "contrast": 0,
+                "brightness": 0,
+                "details": 0
+              },
+              "group_opacity": 1
+            },
+            {
+              "formid": 45,
+              "parentid": 1008,
+              "state": 3,
+              "opacity": 1,
+              "refinement": {
+                "enabled": 0,
+                "feathering_radius": 0,
+                "feathering_guide": 5,
+                "blur_radius": 0,
+                "contrast": 0,
+                "brightness": 0,
+                "details": 0
+              },
+              "group_opacity": 1
+            },
+            {
+              "formid": 44,
+              "parentid": 1008,
+              "state": 259,
+              "opacity": 1,
+              "refinement": {
+                "enabled": 0,
+                "feathering_radius": 0,
+                "feathering_guide": 5,
+                "blur_radius": 0,
+                "contrast": 0,
+                "brightness": 0,
+                "details": 0
+              },
+              "group_opacity": 1
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "index": 4,
+      "image_index": 4,
+      "image": {
+        "width": 6000,
+        "height": 4000,
+        "dimensions_known": 0
+      },
+      "operation": "exposure",
+      "multi_priority": 0,
+      "enabled": 1,
+      "blendop_version": 15,
+      "blend": {
+        "mask_mode": 17,
+        "mask_mode_names": ["enabled", "flexi"],
+        "blend_cst": 4,
+        "blend_cst_name": "rgb_scene",
+        "blend_mode": 24,
+        "blend_parameter": 0,
+        "opacity": 100,
+        "mask_combine": 2,
+        "mask_id": 1007,
+        "blendif": 0,
+        "feathering_radius": 0,
+        "feathering_guide": 5,
+        "blur_radius": 0,
+        "contrast": 0,
+        "brightness": 0,
+        "details": 0,
+        "feather_version": 1,
+        "blendif_parameters": [0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1],
+        "blendif_boost_factors": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        "raster_mask_source": "",
+        "raster_mask_instance": 0,
+        "raster_mask_id": 0,
+        "raster_mask_invert": 0
+      },
+      "forms": [
+        {
+          "formid": 31,
+          "type": 1,
+          "type_name": "circle",
+          "version": 7,
+          "source": [0, 0, 0],
+          "points_count": 1,
+          "points": [
+            {
+              "center": [0.400000006, 0.5],
+              "radius": 0.150000006,
+              "border": 0.0599999987
+            }
+          ]
+        },
+        {
+          "formid": 32,
+          "type": 32,
+          "type_name": "ellipse",
+          "version": 7,
+          "source": [0, 0, 0],
+          "points_count": 1,
+          "points": [
+            {
+              "center": [0.600000024, 0.449999988],
+              "radius": [0.200000003, 0.100000001],
+              "rotation": -20,
+              "border": 0.0500000007,
+              "flags": 0
+            }
+          ]
+        },
+        {
+          "formid": 1007,
+          "type": 4,
+          "type_name": "group",
+          "version": 7,
+          "source": [0, 0, 0],
+          "points_count": 3,
+          "points": [
+            {
+              "formid": 1507,
+              "parentid": 1007,
+              "state": 262656,
+              "opacity": 1,
+              "refinement": {
+                "enabled": 0,
+                "feathering_radius": 0,
+                "feathering_guide": 5,
+                "blur_radius": 0,
+                "contrast": 0,
+                "brightness": 0,
+                "details": 0
+              },
+              "group_opacity": 0.899999976
+            },
+            {
+              "formid": 31,
+              "parentid": 1007,
+              "state": 3,
+              "opacity": 1,
+              "refinement": {
+                "enabled": 0,
+                "feathering_radius": 0,
+                "feathering_guide": 5,
+                "blur_radius": 0,
+                "contrast": 0,
+                "brightness": 0,
+                "details": 0
+              },
+              "group_opacity": 1
+            },
+            {
+              "formid": 32,
+              "parentid": 1007,
+              "state": 3,
+              "opacity": 0.699999988,
+              "refinement": {
+                "enabled": 0,
+                "feathering_radius": 0,
+                "feathering_guide": 5,
+                "blur_radius": 0,
+                "contrast": 0,
+                "brightness": 0,
+                "details": 0
+              },
+              "group_opacity": 1
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "index": 5,
+      "image_index": 5,
+      "image": {
+        "width": 6000,
+        "height": 4000,
+        "dimensions_known": 0
+      },
+      "operation": "exposure",
+      "multi_priority": 0,
+      "enabled": 1,
+      "blendop_version": 14,
+      "blend": {
+        "mask_mode": 3,
+        "mask_mode_names": ["enabled", "drawn"],
+        "blend_cst": 4,
+        "blend_cst_name": "rgb_scene",
+        "blend_mode": 24,
+        "blend_parameter": 0,
+        "opacity": 100,
+        "mask_combine": 2,
+        "mask_id": 1002,
+        "blendif": 0,
+        "feathering_radius": 0,
+        "feathering_guide": 5,
+        "blur_radius": 0,
+        "contrast": 0,
+        "brightness": 0,
+        "details": 0,
+        "feather_version": 1,
+        "blendif_parameters": [0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1],
+        "blendif_boost_factors": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        "raster_mask_source": "",
+        "raster_mask_instance": 0,
+        "raster_mask_id": 0,
+        "raster_mask_invert": 0
+      },
+      "forms": [
+        {
+          "formid": 3,
+          "type": 16,
+          "type_name": "gradient",
+          "version": 6,
+          "source": [0, 0, 0],
+          "points_count": 1,
+          "points": [
+            {
+              "anchor": [0.5, 0.5],
+              "rotation": 20,
+              "compression": 0.100000001,
+              "steepness": 0,
+              "curvature": 0,
+              "state": 2
+            }
+          ]
+        },
+        {
+          "formid": 1002,
+          "type": 4,
+          "type_name": "group",
+          "version": 6,
+          "source": [0, 0, 0],
+          "points_count": 1,
+          "points": [
+            {
+              "formid": 3,
+              "parentid": 1002,
+              "state": 11,
+              "opacity": 1
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "index": 6,
+      "image_index": 6,
+      "image": {
+        "width": 6000,
+        "height": 4000,
+        "dimensions_known": 0
+      },
+      "operation": "exposure",
+      "multi_priority": 0,
+      "enabled": 1,
+      "blendop_version": 14,
+      "blend": {
+        "mask_mode": 3,
+        "mask_mode_names": ["enabled", "drawn"],
+        "blend_cst": 4,
+        "blend_cst_name": "rgb_scene",
+        "blend_mode": 24,
+        "blend_parameter": 0,
+        "opacity": 80,
+        "mask_combine": 2,
+        "mask_id": 1006,
+        "blendif": 0,
+        "feathering_radius": 0,
+        "feathering_guide": 5,
+        "blur_radius": 4,
+        "contrast": 0,
+        "brightness": 0,
+        "details": 0,
+        "feather_version": 1,
+        "blendif_parameters": [0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1],
+        "blendif_boost_factors": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        "raster_mask_source": "",
+        "raster_mask_instance": 0,
+        "raster_mask_id": 0,
+        "raster_mask_invert": 0
+      },
+      "forms": [
+        {
+          "formid": 21,
+          "type": 32,
+          "type_name": "ellipse",
+          "version": 6,
+          "source": [0, 0, 0],
+          "points_count": 1,
+          "points": [
+            {
+              "center": [0.5, 0.5],
+              "radius": [0.300000012, 0.200000003],
+              "rotation": -15,
+              "border": 0.0399999991,
+              "flags": 0
+            }
+          ]
+        },
+        {
+          "formid": 22,
+          "type": 1,
+          "type_name": "circle",
+          "version": 6,
+          "source": [0, 0, 0],
+          "points_count": 1,
+          "points": [
+            {
+              "center": [0.620000005, 0.5],
+              "radius": 0.200000003,
+              "border": 0.0500000007
+            }
+          ]
+        },
+        {
+          "formid": 23,
+          "type": 1,
+          "type_name": "circle",
+          "version": 6,
+          "source": [0, 0, 0],
+          "points_count": 1,
+          "points": [
+            {
+              "center": [0.600000024, 0.449999988],
+              "radius": 0.0599999987,
+              "border": 0.0199999996
+            }
+          ]
+        },
+        {
+          "formid": 1006,
+          "type": 4,
+          "type_name": "group",
+          "version": 6,
+          "source": [0, 0, 0],
+          "points_count": 3,
+          "points": [
+            {
+              "formid": 21,
+              "parentid": 1006,
+              "state": 11,
+              "opacity": 1
+            },
+            {
+              "formid": 22,
+              "parentid": 1006,
+              "state": 19,
+              "opacity": 1
+            },
+            {
+              "formid": 23,
+              "parentid": 1006,
+              "state": 35,
+              "opacity": 0.800000012
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "index": 7,
+      "image_index": 7,
+      "image": {
+        "width": 6000,
+        "height": 4000,
+        "dimensions_known": 0
+      },
+      "operation": "exposure",
+      "multi_priority": 0,
+      "enabled": 1,
+      "blendop_version": 14,
+      "blend": {
+        "mask_mode": 3,
+        "mask_mode_names": ["enabled", "drawn"],
+        "blend_cst": 4,
+        "blend_cst_name": "rgb_scene",
+        "blend_mode": 24,
+        "blend_parameter": 0,
+        "opacity": 100,
+        "mask_combine": 2,
+        "mask_id": 1005,
+        "blendif": 0,
+        "feathering_radius": 0,
+        "feathering_guide": 5,
+        "blur_radius": 0,
+        "contrast": 0,
+        "brightness": 0,
+        "details": 0,
+        "feather_version": 1,
+        "blendif_parameters": [0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1],
+        "blendif_boost_factors": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        "raster_mask_source": "",
+        "raster_mask_instance": 0,
+        "raster_mask_id": 0,
+        "raster_mask_invert": 0
+      },
+      "forms": [
+        {
+          "formid": 13,
+          "type": 1,
+          "type_name": "circle",
+          "version": 6,
+          "source": [0, 0, 0],
+          "points_count": 1,
+          "points": [
+            {
+              "center": [0.300000012, 0.5],
+              "radius": 0.119999997,
+              "border": 0.0399999991
+            }
+          ]
+        },
+        {
+          "formid": 14,
+          "type": 32,
+          "type_name": "ellipse",
+          "version": 6,
+          "source": [0, 0, 0],
+          "points_count": 1,
+          "points": [
+            {
+              "center": [0.649999976, 0.449999988],
+              "radius": [0.180000007, 0.100000001],
+              "rotation": 60,
+              "border": 0.0299999993,
+              "flags": 0
+            }
+          ]
+        },
+        {
+          "formid": 1005,
+          "type": 4,
+          "type_name": "group",
+          "version": 6,
+          "source": [0, 0, 0],
+          "points_count": 2,
+          "points": [
+            {
+              "formid": 13,
+              "parentid": 1005,
+              "state": 11,
+              "opacity": 1
+            },
+            {
+              "formid": 14,
+              "parentid": 1005,
+              "state": 15,
+              "opacity": 0.600000024
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "index": 8,
+      "image_index": 8,
+      "image": {
+        "width": 6000,
+        "height": 4000,
+        "dimensions_known": 0
+      },
+      "operation": "exposure",
+      "multi_priority": 0,
+      "enabled": 1,
+      "blendop_version": 14,
+      "blend": {
+        "mask_mode": 3,
+        "mask_mode_names": ["enabled", "drawn"],
+        "blend_cst": 4,
+        "blend_cst_name": "rgb_scene",
+        "blend_mode": 24,
+        "blend_parameter": 0,
+        "opacity": 100,
+        "mask_combine": 6,
+        "mask_id": 1003,
+        "blendif": 0,
+        "feathering_radius": 0,
+        "feathering_guide": 5,
+        "blur_radius": 0,
+        "contrast": 0,
+        "brightness": 0,
+        "details": 0,
+        "feather_version": 1,
+        "blendif_parameters": [0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1],
+        "blendif_boost_factors": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        "raster_mask_source": "",
+        "raster_mask_instance": 0,
+        "raster_mask_id": 0,
+        "raster_mask_invert": 0
+      },
+      "forms": [
+        {
+          "formid": 11,
+          "type": 2,
+          "type_name": "path",
+          "version": 6,
+          "source": [0, 0, 0],
+          "points_count": 5,
+          "points": [
+            {
+              "corner": [0.300000012, 0.25],
+              "ctrl1": [0.225000024, 0.291666657],
+              "ctrl2": [0.375, 0.208333328],
+              "border": [0.0299999993, 0.0299999993],
+              "state": 2
+            },
+            {
+              "corner": [0.699999988, 0.300000012],
+              "ctrl1": [0.625, 0.225000024],
+              "ctrl2": [0.774999976, 0.375],
+              "border": [0.0299999993, 0.0299999993],
+              "state": 2
+            },
+            {
+              "corner": [0.75, 0.699999988],
+              "ctrl1": [0.791666687, 0.616666675],
+              "ctrl2": [0.708333313, 0.783333302],
+              "border": [0.0299999993, 0.0299999993],
+              "state": 2
+            },
+            {
+              "corner": [0.449999988, 0.800000012],
+              "ctrl1": [0.533333302, 0.824999988],
+              "ctrl2": [0.366666645, 0.775000036],
+              "border": [0.0299999993, 0.0299999993],
+              "state": 2
+            },
+            {
+              "corner": [0.25, 0.550000012],
+              "ctrl1": [0.275000006, 0.641666651],
+              "ctrl2": [0.225000009, 0.458333343],
+              "border": [0.0299999993, 0.0299999993],
+              "state": 2
+            }
+          ]
+        },
+        {
+          "formid": 1003,
+          "type": 4,
+          "type_name": "group",
+          "version": 6,
+          "source": [0, 0, 0],
+          "points_count": 1,
+          "points": [
+            {
+              "formid": 11,
+              "parentid": 1003,
+              "state": 11,
+              "opacity": 1
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "sidecars_found": 9,
+    "sidecars_parsed": 9,
+    "history_entries_scanned": 54,
+    "edits_harvested": 9,
+    "images_with_masks": 9,
+    "forms_harvested": 26,
+    "skipped_no_mask": 0,
+    "skipped_unsupported_blendop_size": 0,
+    "dimensions_from_image": 0,
+    "dimensions_nominal": 9
+  },
+  "coverage": {
+    "mask_combine": {
+      "inverted": 0,
+      "inclusive": 9,
+      "drawn_mask_polarity": 1
+    },
+    "cases": {
+      "drawn_only": 7,
+      "parametric_only": 0,
+      "drawn_and_parametric": 0,
+      "raster": 0,
+      "already_flexi": 2
+    },
+    "refinements": {
+      "feathering": 0,
+      "details": 0,
+      "blur": 1,
+      "contrast_or_brightness": 0,
+      "per_shape_refinement": 1,
+      "custom_group_opacity": 2
+    },
+    "form_types": {
+      "circle": 7,
+      "ellipse": 4,
+      "path": 1,
+      "brush": 2,
+      "gradient": 2,
+      "group": 10
+    },
+    "blendop_versions": {
+      "14": 7,
+      "15": 2
+    },
+    "masks_versions": {
+      "6": 17,
+      "7": 9
+    }
+  }
+}

@@ -369,8 +369,27 @@ HELIOS_DARKTABLE_CLI=… cargo run --release -p helios-parity --bin mask-parity 
 ```
 
 Its `/out` holds `junit.xml`, `summary.md`, `results.json`, both masks of
-each fixture (a quarter of their size, `masks/*.pgm`) and darktable's
-build log.
+each fixture (a quarter of their size, `masks/*.pgm`), the harvest and
+darktable's build logs.
+
+First run (2026-10-13), every fixture passing, the classic ones the same
+through both builds:
+
+| fixture | mask ΔE mean | mask ΔE p99.9 | mask Δ p99.9 |
+|---|---|---|---|
+| circle | 0.002 | 0.12 | 0.010 |
+| ellipse | 0.002 | 0.14 | 0.011 |
+| gradient | 0.003 | 0.01 | 0.001 |
+| path | 0.008 | 0.49 | 0.027 |
+| brush | 0.005 | 0.40 | 0.042 |
+| group-union | 0.001 | 0.12 | 0.012 |
+| group-mixed | 0.003 | 0.20 | 0.013 |
+| flexi-screen | 0.004 | 0.11 | 0.008 |
+| flexi-nested | 0.002 | 0.37 | 0.040 |
+
+The largest differences sit on the edges of the path and the brush,
+where darktable rasterises (a 4-pixel grid for shapes, rays pixel by
+pixel for a brush) and Helios averages each pixel.
 
 ## Refinement
 
