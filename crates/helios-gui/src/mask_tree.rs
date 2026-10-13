@@ -38,6 +38,7 @@ use egui_pop::core::icon::{Icon, Source, Tone};
 use egui_pop::model::ids::MenuId;
 use egui_pop::views::tree::{Node, Position, Signal, Sink, TreeSource, TreeState, TreeView};
 use helios_core::{Graph, Message, NodeId, Value};
+use helios_module_masks::{Operator, fold};
 use helios_shell::commands::Origin;
 use helios_values::{Change, Descriptor, Set, Store, node_path};
 use serde_json::Value as Json;
@@ -303,7 +304,7 @@ impl Item {
         let mut s = self.name().to_string();
         if let Some(op) = &self.operator {
             s.push_str(" — ");
-            s.push_str(op);
+            s.push_str(&tr(operator_effect(op)));
         }
         if let Some(kind) = refinement_kind(&self.module) {
             s.push_str(" — ");
@@ -327,6 +328,22 @@ impl Item {
             Node::leaf(self.key.clone(), label)
         };
         node.with_name(self.name())
+    }
+}
+
+/// What a group's operator does with its members, as its row says it:
+/// darktable's union, intersection, difference and exclusion, by their
+/// effect rather than their formula (see `helios_module_masks::Operator`).
+pub fn operator_effect(operator: &str) -> Message {
+    match operator {
+        "maximum" => Message::new("gui-masks-op-maximum", "union"),
+        "screen" => Message::new("gui-masks-op-screen", "soft union"),
+        "minimum" => Message::new("gui-masks-op-minimum", "intersection"),
+        "product" => Message::new("gui-masks-op-product", "multiply"),
+        "sum" => Message::new("gui-masks-op-sum", "add"),
+        "difference" => Message::new("gui-masks-op-difference", "subtract from the first"),
+        "exclusion" => Message::new("gui-masks-op-exclusion", "exclude"),
+        other => Message::plain(other),
     }
 }
 
@@ -1598,8 +1615,8 @@ impl MaskTree {
     }
 }
 
-/// A row's eye and lock, right to left: they act on that row's member,
-/// not on the selection.
+/// A row's eye and lock, right to left, and a group's operator drawn
+/// before them: they act on that row's member, not on the selection.
 fn row_toggles(ui: &mut Ui, item: &Item, commands: &mut Vec<Command>) {
     // A refinement has no opacity in a group and does not move.
     if item.is_refinement() {
@@ -1657,6 +1674,61 @@ fn row_toggles(ui: &mut Ui, item: &Item, commands: &mut Vec<Command>) {
             locked: None,
         });
     }
+    if let Some(op) = item.operator.as_deref().filter(|_| item.is_group()) {
+        let hint = crate::i18n::text(
+            &ctx,
+            Message::new(
+                "gui-masks-operator-hint",
+                "{ $effect }: how the members fold, in port order (the operator { $operator })",
+            )
+            .with("effect", crate::i18n::text(&ctx, operator_effect(op)))
+            .with("operator", op),
+        );
+        operator_glyph(ui, op, &hint);
+    }
+}
+
+/// A group's operator, drawn: two soft discs folded by it a cell at a
+/// time, the accent's strength the result, their outlines muted. The
+/// picture is the operator's own result on two members, not a symbol.
+fn operator_glyph(ui: &mut Ui, operator: &str, hint: &str) -> egui::Response {
+    const W: usize = 20;
+    const H: usize = 14;
+    const R: f32 = 5.5;
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(W as f32, H as f32), egui::Sense::hover());
+    if ui.is_rect_visible(rect) {
+        let t = crate::theme::Tokens::of(ui.ctx());
+        let op = Operator::from_name(operator).unwrap_or(Operator::Maximum);
+        let centres = [egui::pos2(7.0, 7.0), egui::pos2(13.0, 7.0)];
+        // Full inside, fading over the last two points of the radius.
+        let disc = |c: egui::Pos2, p: egui::Pos2| ((R - c.distance(p)) / 2.0 + 0.5).clamp(0.0, 1.0);
+        let mut mesh = egui::Mesh::default();
+        for y in 0..H {
+            for x in 0..W {
+                let p = egui::pos2(x as f32 + 0.5, y as f32 + 0.5);
+                let v = fold(op, centres.map(|c| (disc(c, p), 1.0, false))).unwrap_or(0.0);
+                if v > 0.0 {
+                    let cell = egui::Rect::from_min_size(
+                        rect.min + egui::vec2(x as f32, y as f32),
+                        egui::vec2(1.0, 1.0),
+                    );
+                    mesh.add_colored_rect(cell, t.accent.default.gamma_multiply(v));
+                }
+            }
+        }
+        let painter = ui.painter();
+        painter.add(egui::Shape::mesh(mesh));
+        for c in centres {
+            painter.circle_stroke(
+                rect.min + c.to_vec2(),
+                R,
+                egui::Stroke::new(1.0, t.text.muted),
+            );
+        }
+    }
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Image, true, hint));
+    response.on_hover_text(hint)
 }
 
 fn add_items() -> Vec<MenuItem> {

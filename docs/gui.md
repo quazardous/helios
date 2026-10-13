@@ -721,7 +721,11 @@ selected module's mask network as a tree, on egui-pop's `TreeView`
 
 - **What shows.** The module's mask (the group its `mask_blend` reads)
   is the root; each group (`mask_combine`) is a branch with its
-  operator, each member a row with its icon beside it (circle, ellipse,
+  operator named by its effect (union for maximum, soft union for
+  screen, intersection for minimum, multiply for product, add for sum,
+  subtract from the first for difference, exclude for exclusion) and
+  previewed before its row's eye: two soft discs folded by the
+  operator, drawn in the theme's accent; each member a row with its icon beside it (circle, ellipse,
   gradient, path, brush, parametric, luminance, raster, AI object), and
   its inversion and opacity in its group when they are not the default.
   The refinements (blur, feather, levels) are rows of their own under

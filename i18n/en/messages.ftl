@@ -195,9 +195,25 @@ gui-masks-of = Mask of { $module }
 
 gui-masks-one-at-a-time = members move one at a time
 
+gui-masks-op-difference = subtract from the first
+
+gui-masks-op-exclusion = exclude
+
+gui-masks-op-maximum = union
+
+gui-masks-op-minimum = intersection
+
+gui-masks-op-product = multiply
+
+gui-masks-op-screen = soft union
+
+gui-masks-op-sum = add
+
 gui-masks-opacity = Opacity
 
 gui-masks-opacity-hint = Turn the selected member's opacity off, or back to full (its row's eye does the same)
+
+gui-masks-operator-hint = { $effect }: how the members fold, in port order (the operator { $operator })
 
 gui-masks-refine-blur = blur
 

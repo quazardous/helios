@@ -187,6 +187,14 @@ gui-masks-menu-rename d18d5eae53db6fcd
 gui-masks-not-a-group eba03cc34e0ccbe4
 gui-masks-nothing-beside-root 49719c5af23e3929
 gui-masks-one-at-a-time 2964a289a93bafbc
+gui-masks-op-difference ecad90e05e7610d0
+gui-masks-op-exclusion 574ded37bc60ee41
+gui-masks-op-maximum 5bd6e2d18bdc3962
+gui-masks-op-minimum 6c6cb011faf4edae
+gui-masks-op-product f7f0c4130e761d65
+gui-masks-op-screen 8edb503254da730c
+gui-masks-op-sum c33425a34f6f6c62
+gui-masks-operator-hint bff544dcf33a4223
 gui-masks-refine-blur 8985b4a5a487087e
 gui-masks-refine-feather 81c6f1c9d4c2abde
 gui-masks-refine-levels ea0b5385660a49f8

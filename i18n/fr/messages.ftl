@@ -118,6 +118,22 @@ gui-masks-nothing-beside-root = rien ne va à côté du masque du module : dépo
 
 gui-masks-one-at-a-time = les membres se déplacent un par un
 
+gui-masks-op-difference = soustraire du premier
+
+gui-masks-op-exclusion = exclure
+
+gui-masks-op-maximum = union
+
+gui-masks-op-minimum = intersection
+
+gui-masks-op-product = multiplier
+
+gui-masks-op-screen = union douce
+
+gui-masks-op-sum = ajouter
+
+gui-masks-operator-hint = { $effect } : comment les membres se combinent, dans l’ordre des ports (l’opérateur { $operator })
+
 gui-masks-refine-blur = flou
 
 gui-masks-refine-feather = fondu

@@ -245,8 +245,8 @@ fn the_tree_shows_the_module_s_mask_with_icons_and_operators() {
     assert_eq!(
         rows(&h),
         [
-            "▣ mask — maximum",
-            "  ▣ inner — minimum",
+            "▣ mask — union",
+            "  ▣ inner — intersection",
             "    ○ dot",
             "  ○ spot",
             "  ◎ oval",
@@ -256,6 +256,47 @@ fn the_tree_shows_the_module_s_mask_with_icons_and_operators() {
     let net = h.state().mask_tree().network();
     assert_eq!(net.root.as_deref(), Some("mask"));
     assert_eq!(net.blend.as_deref(), Some("blend"));
+}
+
+#[test]
+fn group_operators_are_named_by_their_effect_with_a_preview() {
+    let mut h = harness();
+    // Each operator by what it does to the members, the row's glyph
+    // saying it too.
+    for (operator, effect) in [
+        ("maximum", "union"),
+        ("screen", "soft union"),
+        ("minimum", "intersection"),
+        ("product", "multiply"),
+        ("sum", "add"),
+        ("difference", "subtract from the first"),
+        ("exclusion", "exclude"),
+    ] {
+        h.state()
+            .values
+            .lock()
+            .unwrap()
+            .set(helios_values::Set::new(
+                "node/mask/operator",
+                helios_values::Change::To(Value::Choice(operator.into())),
+                Origin::User,
+            ))
+            .unwrap();
+        for _ in 0..3 {
+            h.step();
+        }
+        assert_eq!(rows(&h)[0], format!("▣ mask — {effect}"));
+        assert_eq!(
+            mask_tree::operator_effect(operator).english,
+            effect,
+            "{operator}"
+        );
+        let glyph =
+            format!("{effect}: how the members fold, in port order (the operator {operator})");
+        assert!(in_panel(&h, &glyph), "{glyph}");
+    }
+    // The nested group keeps its own.
+    assert_eq!(rows(&h)[1], "  ▣ inner — intersection");
 }
 
 #[test]
@@ -310,7 +351,7 @@ fn selection_is_two_way_between_the_tree_and_the_viewport() {
     assert_eq!(text(&h, "view/graph/selection"), "dot");
     assert_eq!(h.state().viewport().masks().overlays()[0].id, "dot");
     // A group selected: the viewport edits it, no shape.
-    click_row(&mut h, "mask — maximum");
+    click_row(&mut h, "mask — union");
     assert_eq!(text(&h, MASK), "mask");
     assert_eq!(text(&h, SHAPE), "");
     // The viewport selects (its click, an agent): the tree follows.
@@ -389,7 +430,7 @@ fn a_drop_reorders_members_and_their_values_follow() {
         "the tree shows the network's order"
     );
     // Into another group: the spot joins the inner group.
-    let (from, inner) = (row(&h, "spot"), row(&h, "inner — minimum"));
+    let (from, inner) = (row(&h, "spot"), row(&h, "inner — intersection"));
     drag(&mut h, from.center(), inner.center());
     assert_eq!(wired(&h, "inner"), ["dot", "spot"]);
     assert_eq!(wired(&h, "mask"), ["inner", "oval"]);
@@ -403,7 +444,7 @@ fn a_drop_the_network_cannot_take_is_vetoed() {
     let mut h = harness();
     let before = rows(&h);
     // Nothing goes beside the module's mask.
-    let (oval, root) = (row(&h, "oval"), row(&h, "mask — maximum"));
+    let (oval, root) = (row(&h, "oval"), row(&h, "mask — union"));
     drag(&mut h, oval.center(), root.center_top() + vec2(0.0, 2.0));
     assert_eq!(rows(&h), before);
     assert_eq!(wired(&h, "mask"), ["inner", "spot", "oval"]);
@@ -630,7 +671,7 @@ fn a_row_s_eye_and_lock_act_on_that_row() {
         "mask.member.lock",
         json!({ "member": "inner", "locked": true }),
     );
-    let (spot, inner) = (row(&h, "spot"), row(&h, "inner — minimum"));
+    let (spot, inner) = (row(&h, "spot"), row(&h, "inner — intersection"));
     drag(&mut h, spot.center(), inner.center());
     assert_eq!(wired(&h, "inner"), ["dot"]);
     // Unlocked, the oval moves again.
@@ -705,8 +746,8 @@ fn the_panel_lists_every_mask_node_the_pipeline_renders() {
     assert_eq!(
         rows(&h),
         [
-            "▣ mask — maximum",
-            "  ▣ inner — minimum",
+            "▣ mask — union",
+            "  ▣ inner — intersection",
             "    ○ dot",
             "  ○ spot",
             "    〰 edge — feather",
@@ -791,8 +832,8 @@ fn a_member_wired_to_two_ports_shows_once_per_port() {
     assert_eq!(
         rows(&h),
         [
-            "▣ mask — maximum",
-            "  ▣ inner — minimum",
+            "▣ mask — union",
+            "  ▣ inner — intersection",
             "    ○ dot",
             "  ○ spot",
             "  ◎ oval",
@@ -851,7 +892,7 @@ fn an_empty_mask_says_the_module_applies_everywhere() {
     const EMPTY: &str = "The mask is empty: exposure applies everywhere. \
                          Add a shape or a parametric member to limit it.";
     let mut h = harness_of(empty());
-    assert_eq!(rows(&h), ["▣ mask — maximum"]);
+    assert_eq!(rows(&h), ["▣ mask — union"]);
     assert!(in_panel(&h, "Mask of exposure"));
     assert!(in_panel(&h, EMPTY));
     // A member limits it: the message goes.
@@ -881,7 +922,7 @@ fn taking_out_a_group_that_holds_members_is_asked_first() {
     let mut h = harness();
     // Delete on the inner group, which holds the dot: asked, nothing
     // taken out meanwhile.
-    click_row(&mut h, "inner — minimum");
+    click_row(&mut h, "inner — intersection");
     h.key_press(Key::Delete);
     for _ in 0..3 {
         h.step();
@@ -899,7 +940,7 @@ fn taking_out_a_group_that_holds_members_is_asked_first() {
     }
     assert_eq!(wired(&h, "mask"), ["inner", "spot", "oval"]);
     // The row's menu asks too; answered yes, the group goes.
-    let at = row(&h, "inner — minimum").center();
+    let at = row(&h, "inner — intersection").center();
     right_click(&mut h, at);
     h.get_by_label("Take out of the mask").click();
     for _ in 0..3 {
@@ -952,7 +993,7 @@ fn a_right_click_never_takes_anything_out() {
     let mut h = harness();
     let radius = float(&h, "node/spot/radius");
     // On a row: its menu opens, nothing goes.
-    for label in ["spot", "inner — minimum", "dot"] {
+    for label in ["spot", "inner — intersection", "dot"] {
         let at = row(&h, label).center();
         right_click(&mut h, at);
         h.key_press(Key::Escape);
@@ -1088,7 +1129,7 @@ fn the_panel_follows_a_new_network_and_undo() {
     for _ in 0..3 {
         h.step();
     }
-    assert_eq!(rows(&h), ["▣ mask — maximum"]);
+    assert_eq!(rows(&h), ["▣ mask — union"]);
     assert_eq!(cursor(&h), None);
     assert!(h.state().viewport().masks().overlays().is_empty());
     assert!(in_panel(&h, "Mask of exposure"));
