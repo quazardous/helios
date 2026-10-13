@@ -356,9 +356,14 @@ render without the exposure, blended through Helios's mask
 (`base · (1 + mask)` at +1 EV), is compared with darktable's masked render
 in Delta E 2000: the mask alone, in the render's own terms, without the
 two raw chains' differences (decoder crops are aligned by luminance, and
-the 12 pixels at the edges, where demosaicing differs, are left out). It
-passes within darktable's thresholds as a port: a mean of at most 0.77
-and a 99.9th percentile of at most 2.3. For the record the job also gives
+the 12 pixels at the edges, where demosaicing differs, are left out),
+with the comparison the parity jobs share (`helios_photo::compare`:
+identical pixels pass at once). It passes within darktable's thresholds
+as a port, a mean of at most 0.77 and a 99.9th percentile of at most 2.3,
+and within two caps added on 2026-10-13 so a fault on a few hundred
+pixels fails even when the rest matches: a 99.99th percentile of at most
+1.5 and a max of at most 2.3 (darktable's own max), against a worst max
+of 1.03 (brush, path) on that day. For the record the job also gives
 the mask's own difference (darktable's read back as `masked / unmasked -
 1` where the image is not too dark) and Helios's whole chain against
 darktable's.

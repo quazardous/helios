@@ -5,8 +5,10 @@
 //!
 //! The mask is judged alone, in the render's own terms: darktable's render
 //! without the exposure, blended through Helios's mask, against
-//! darktable's masked render, in Delta E 2000 (darktable's thresholds, the
-//! max at the 99.9th percentile). The raw chains of the two (decoders,
+//! darktable's masked render, in Delta E 2000, judged by
+//! [`helios_parity::MASK_PARITY`]: darktable's thresholds with the max at
+//! the 99.9th percentile, and caps on the 99.99th percentile and the max.
+//! The raw chains of the two (decoders,
 //! demosaic) stay out of it; how far they are is reported apart.
 //!
 //! ```text
@@ -28,7 +30,7 @@ use std::time::Instant;
 
 use helios_core::{Bus, Engine, Image, Region};
 use helios_parity::masks::{self, EXPOSURE, Fixture};
-use helios_parity::{DEMOSAIC_MARGIN, Darktable, Difference, align, compare};
+use helios_parity::{DEMOSAIC_MARGIN, Darktable, Difference, MASK_PARITY, align, compare};
 use helios_xmp::drawn::Frame;
 use helios_xmp::{Layouts, Sidecar, import_with};
 use serde_json::{Value, json};
@@ -357,10 +359,11 @@ fn main() -> ExitCode {
         };
         match &r {
             Ok(o) => eprintln!(
-                "{}: mask ΔE mean {:.3} p99.9 {:.3} max {:.2}; mask |Δ| mean {:.4} p99.9 {:.4}; chain ΔE mean {:.3} p99.9 {:.3}; shift {:?}; {:.1} s",
+                "{}: mask ΔE mean {:.3} p99.9 {:.3} p99.99 {:.3} max {:.2}; mask |Δ| mean {:.4} p99.9 {:.4}; chain ΔE mean {:.3} p99.9 {:.3}; shift {:?}; {:.1} s",
                 o.name,
                 o.mask.mean,
                 o.mask.p999,
+                o.mask.p9999,
                 o.mask.max,
                 o.mask_mean,
                 o.mask_p999,
@@ -378,7 +381,7 @@ fn main() -> ExitCode {
     let mut junit = String::new();
     let failures = results
         .iter()
-        .filter(|(_, r)| !r.as_ref().is_ok_and(|o| o.mask.passes_as_a_port()))
+        .filter(|(_, r)| !r.as_ref().is_ok_and(|o| o.mask.within(&MASK_PARITY)))
         .count();
     let _ = writeln!(
         junit,
@@ -386,23 +389,22 @@ fn main() -> ExitCode {
         results.len()
     );
     let mut summary = format!(
-        "# Drawn-mask parity\n\nAgainst {}. darktable's unmasked render blended through Helios's mask, against darktable's masked render: Delta E 2000, passing at a mean of at most {} and a 99.9th percentile of at most {} (darktable's thresholds). The mask's own difference (0 to 1) and the whole chain's Delta E are given for the record.\n\n| fixture | raw | mask ΔE mean | mask ΔE p99.9 | mask ΔE max | mask Δ mean | mask Δ p99.9 | chain ΔE mean | chain ΔE p99.9 | result |\n|---|---|---|---|---|---|---|---|---|---|\n",
-        dt.version,
-        helios_parity::MEAN_DELTA_E,
-        helios_parity::MAX_DELTA_E
+        "# Drawn-mask parity\n\nAgainst {}. darktable's unmasked render blended through Helios's mask, against darktable's masked render: Delta E 2000, passing at a mean of at most {}, a 99.9th percentile of at most {} (darktable's thresholds), a 99.99th percentile of at most {} and a max of at most {}. The mask's own difference (0 to 1) and the whole chain's Delta E are given for the record.\n\n| fixture | raw | mask ΔE mean | mask ΔE p99.9 | mask ΔE p99.99 | mask ΔE max | mask Δ mean | mask Δ p99.9 | chain ΔE mean | chain ΔE p99.9 | result |\n|---|---|---|---|---|---|---|---|---|---|---|\n",
+        dt.version, MASK_PARITY.mean, MASK_PARITY.p999, MASK_PARITY.p9999, MASK_PARITY.max
     );
     let mut json_out = Vec::new();
     for (name, r) in &results {
         match r {
             Ok(o) => {
-                let pass = o.mask.passes_as_a_port();
+                let pass = o.mask.within(&MASK_PARITY);
                 let _ = writeln!(
                     summary,
-                    "| {} | {} | {:.3} | {:.3} | {:.2} | {:.4} | {:.4} | {:.3} | {:.3} | {} |",
+                    "| {} | {} | {:.3} | {:.3} | {:.3} | {:.2} | {:.4} | {:.4} | {:.3} | {:.3} | {} |",
                     o.name,
                     o.raw,
                     o.mask.mean,
                     o.mask.p999,
+                    o.mask.p9999,
                     o.mask.max,
                     o.mask_mean,
                     o.mask_p999,
@@ -419,21 +421,21 @@ fn main() -> ExitCode {
                 if !pass {
                     let _ = write!(
                         junit,
-                        "<failure message=\"mask Delta E mean {:.3}, p99.9 {:.3}\"/>",
-                        o.mask.mean, o.mask.p999
+                        "<failure message=\"mask Delta E {}\"/>",
+                        escape(&o.mask.beyond(&MASK_PARITY).join(", "))
                     );
                 }
                 let _ = writeln!(junit, "</testcase>");
                 json_out.push(json!({
                     "fixture": o.name, "raw": o.raw, "pass": pass,
-                    "mask_delta_e": { "mean": o.mask.mean, "p999": o.mask.p999, "max": o.mask.max },
+                    "mask_delta_e": { "identical": o.mask.identical, "mean": o.mask.mean, "p999": o.mask.p999, "p9999": o.mask.p9999, "max": o.mask.max },
                     "mask_difference": { "mean": o.mask_mean, "p999": o.mask_p999 },
                     "chain_delta_e": { "mean": o.chain.mean, "p999": o.chain.p999, "max": o.chain.max },
                     "shift": [o.shift.0, o.shift.1],
                 }));
             }
             Err(e) => {
-                let _ = writeln!(summary, "| {name} | | | | | | | | | error: {e} |");
+                let _ = writeln!(summary, "| {name} | | | | | | | | | | error: {e} |");
                 let _ = writeln!(
                     junit,
                     "<testcase classname=\"mask-parity\" name=\"{}\"><error message=\"{}\"/></testcase>",

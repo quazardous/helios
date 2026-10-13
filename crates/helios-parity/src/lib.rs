@@ -21,7 +21,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use helios_core::{Image, Region};
-use helios_photo::color::{REC2020_TO_XYZ, apply};
+pub use helios_photo::compare::{Difference, Thresholds, delta_e_2000, lab};
+use helios_photo::compare::{Pixels, difference};
 use helios_xmp::{Layouts, encode};
 use serde_json::Value;
 
@@ -309,142 +310,61 @@ impl Darktable {
     }
 }
 
-/// Linear Rec.2020 to CIE Lab (D65 white).
-pub fn lab(rgb: [f64; 3]) -> [f64; 3] {
-    let [x, y, z] = apply(&REC2020_TO_XYZ, rgb);
-    let white = apply(&REC2020_TO_XYZ, [1.0, 1.0, 1.0]);
-    let f = |t: f64| {
-        if t > 216.0 / 24389.0 {
-            t.cbrt()
-        } else {
-            (24389.0 / 27.0 * t + 16.0) / 116.0
-        }
-    };
-    let (fx, fy, fz) = (f(x / white[0]), f(y / white[1]), f(z / white[2]));
-    [116.0 * fy - 16.0, 500.0 * (fx - fy), 200.0 * (fy - fz)]
-}
+/// A difference, judged by darktable's integration thresholds: a max of
+/// at most [`MAX_DELTA_E`] and a mean of at most [`MEAN_DELTA_E`].
+pub const DARKTABLE: Thresholds = Thresholds {
+    mean: MEAN_DELTA_E,
+    max: MAX_DELTA_E,
+    ..Thresholds::NONE
+};
 
-/// CIE Delta E 2000 between two Lab colours.
-pub fn delta_e_2000(a: [f64; 3], b: [f64; 3]) -> f64 {
-    use std::f64::consts::PI;
-    let [l1, a1, b1] = a;
-    let [l2, a2, b2] = b;
-    let c1 = a1.hypot(b1);
-    let c2 = a2.hypot(b2);
-    let cm = f64::midpoint(c1, c2);
-    let g = 0.5 * (1.0 - (cm.powi(7) / (cm.powi(7) + 25f64.powi(7))).sqrt());
-    let (a1p, a2p) = ((1.0 + g) * a1, (1.0 + g) * a2);
-    let (c1p, c2p) = (a1p.hypot(b1), a2p.hypot(b2));
-    let hue = |b: f64, a: f64| {
-        if a == 0.0 && b == 0.0 {
-            0.0
-        } else {
-            b.atan2(a).rem_euclid(2.0 * PI)
-        }
-    };
-    let (h1p, h2p) = (hue(b1, a1p), hue(b2, a2p));
-    let dl = l2 - l1;
-    let dc = c2p - c1p;
-    let dh = if c1p * c2p == 0.0 {
-        0.0
-    } else {
-        let d = h2p - h1p;
-        if d > PI {
-            d - 2.0 * PI
-        } else if d < -PI {
-            d + 2.0 * PI
-        } else {
-            d
-        }
-    };
-    let dhh = 2.0 * (c1p * c2p).sqrt() * (dh / 2.0).sin();
-    let lm = f64::midpoint(l1, l2);
-    let cmp = f64::midpoint(c1p, c2p);
-    let hm = if c1p * c2p == 0.0 {
-        h1p + h2p
-    } else if (h1p - h2p).abs() <= PI {
-        f64::midpoint(h1p, h2p)
-    } else if h1p + h2p < 2.0 * PI {
-        (h1p + h2p + 2.0 * PI) / 2.0
-    } else {
-        (h1p + h2p - 2.0 * PI) / 2.0
-    };
-    let t = 1.0 - 0.17 * (hm - PI / 6.0).cos()
-        + 0.24 * (2.0 * hm).cos()
-        + 0.32 * (3.0 * hm + PI / 30.0).cos()
-        - 0.20 * (4.0 * hm - 63.0 * PI / 180.0).cos();
-    let dtheta = PI / 6.0 * (-((hm * 180.0 / PI - 275.0) / 25.0).powi(2)).exp();
-    let rc = 2.0 * (cmp.powi(7) / (cmp.powi(7) + 25f64.powi(7))).sqrt();
-    let sl = 1.0 + 0.015 * (lm - 50.0).powi(2) / (20.0 + (lm - 50.0).powi(2)).sqrt();
-    let sc = 1.0 + 0.045 * cmp;
-    let sh = 1.0 + 0.015 * cmp * t;
-    let rt = -(2.0 * dtheta).sin() * rc;
-    ((dl / sl).powi(2) + (dc / sc).powi(2) + (dhh / sh).powi(2) + rt * (dc / sc) * (dhh / sh))
-        .sqrt()
-}
+/// darktable's thresholds with the max taken at the 99.9th percentile:
+/// for a port rather than darktable against itself. In near-black noise a
+/// rounding difference flips a demosaic's choice of direction, and Lab
+/// turns a few thousandths into a large Delta E (on mire1.cr2, 0.005 % of
+/// pixels, all below 0.02).
+pub const AS_A_PORT: Thresholds = Thresholds {
+    mean: MEAN_DELTA_E,
+    p999: MAX_DELTA_E,
+    ..Thresholds::NONE
+};
 
-/// How far two renders are, in Delta E 2000 over every pixel.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Difference {
-    pub max: f64,
-    pub mean: f64,
-    /// The 99.9th percentile: the max of all but one pixel in a thousand.
-    pub p999: f64,
-    /// The largest difference of a channel value, for the record.
-    pub max_abs: f64,
-}
+/// The `mask-parity` job's thresholds: [`AS_A_PORT`], with the 99.99th
+/// percentile and the max capped too, so a fault on a few hundred pixels
+/// (an edge drawn off by one) fails even when the rest matches. The caps
+/// sit above the worst fixture's values when they were set, with room for
+/// noise: see docs/masks.md, "Parity with darktable".
+pub const MASK_PARITY: Thresholds = Thresholds {
+    mean: MEAN_DELTA_E,
+    p999: MAX_DELTA_E,
+    p9999: MASK_P9999,
+    max: MASK_MAX,
+};
 
-impl Difference {
-    /// Within darktable's integration thresholds.
-    pub fn passes(&self) -> bool {
-        self.max <= MAX_DELTA_E && self.mean <= MEAN_DELTA_E
-    }
-
-    /// Within darktable's thresholds, the max taken at the 99.9th
-    /// percentile. For a port rather than darktable against itself: in
-    /// near-black noise a rounding difference flips a demosaic's choice of
-    /// direction, and Lab turns a few thousandths into a large Delta E
-    /// (on mire1.cr2, 0.005 % of pixels, all below 0.02).
-    pub fn passes_as_a_port(&self) -> bool {
-        self.p999 <= MAX_DELTA_E && self.mean <= MEAN_DELTA_E
-    }
-}
+/// The `mask-parity` bound on the 99.99th percentile.
+pub const MASK_P9999: f64 = 1.5;
+/// The `mask-parity` cap on the max: darktable's own, on every pixel.
+pub const MASK_MAX: f64 = MAX_DELTA_E;
 
 /// Compares the RGB channels of two images of the same size, wherever
-/// they sit, as linear Rec.2020.
+/// they sit, as linear Rec.2020 (see [`helios_photo::compare`]).
 pub fn compare(ours: &Image, theirs: &Image) -> Result<Difference, String> {
     let (a, b) = (ours.region(), theirs.region());
     if (a.width, a.height) != (b.width, b.height) {
         return Err(format!("sizes differ: {a} against {b}"));
     }
-    let (mut max, mut sum, mut max_abs) = (0.0f64, 0.0f64, 0.0f64);
-    let mut all = Vec::with_capacity(a.area());
-    for y in 0..i64::from(a.height) {
-        for x in 0..i64::from(a.width) {
-            let p = ours.pixel(a.x + x, a.y + y);
-            let q = theirs.pixel(b.x + x, b.y + y);
-            let rgb = |p: &[f32]| [f64::from(p[0]), f64::from(p[1]), f64::from(p[2])];
-            for c in 0..3 {
-                max_abs = max_abs.max(f64::from((p[c] - q[c]).abs()));
-            }
-            let d = delta_e_2000(lab(rgb(p)), lab(rgb(q)));
-            max = max.max(d);
-            sum += d;
-            all.push(d);
-        }
-    }
-    let rank = ((all.len() as f64 * 0.999) as usize).min(all.len().saturating_sub(1));
-    let p999 = if all.is_empty() {
-        0.0
-    } else {
-        *all.select_nth_unstable_by(rank, f64::total_cmp).1
-    };
-    Ok(Difference {
-        max,
-        mean: sum / a.area() as f64,
-        p999,
-        max_abs,
-    })
+    difference(&pixels(ours)?, &pixels(theirs)?)
+}
+
+/// An image's pixels, as the comparison reads them.
+fn pixels(img: &Image) -> Result<Pixels<'_>, String> {
+    let r = img.region();
+    Pixels::new(
+        img.data(),
+        img.channels() as usize,
+        r.width as usize,
+        r.height as usize,
+    )
 }
 
 /// The mean of each `factor` × `factor` block: what is left of an image

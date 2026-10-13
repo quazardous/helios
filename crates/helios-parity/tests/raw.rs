@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use helios_core::{Bus, Engine, Graph, Image, ModuleRef, Params};
-use helios_parity::{DEMOSAIC_MARGIN, Darktable, Item, align, compare, inset, reduce};
+use helios_parity::{AS_A_PORT, DEMOSAIC_MARGIN, Darktable, Item, align, compare, inset, reduce};
 use serde_json::json;
 
 fn images() -> PathBuf {
@@ -76,7 +76,7 @@ fn darktable(dt: &Darktable, raw: &Path, method: &str) -> Image {
 
 /// darktable's default chain (RCD on Bayer, Markesteijn on X-Trans)
 /// against Helios's, judged with darktable's thresholds (max at the 99.9th
-/// percentile, see `Difference::passes_as_a_port`) away from the image's
+/// percentile, see `AS_A_PORT`) away from the image's
 /// edges, where darktable fills pixels with another method. The
 /// difference with detail averaged out (1/8) is reported too: it is
 /// colour alone.
@@ -118,7 +118,7 @@ fn raw_chain_matches_darktable() {
         let full = compare(&ours, &theirs).unwrap();
         let coarse = compare(&reduce(&ours, 8), &reduce(&theirs, 8)).unwrap();
         eprintln!("{file} {method}: shift ({dx}, {dy}), full {full:?}, 1/8 {coarse:?}");
-        assert!(full.passes_as_a_port(), "{file}: {full:?}");
+        assert!(full.within(&AS_A_PORT), "{file}: {full:?}");
     }
 }
 

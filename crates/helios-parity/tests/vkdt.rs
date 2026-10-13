@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use helios_core::{Bus, Engine, Graph, Image, ModuleRef, Params, Region, Value};
 use helios_parity::vkdt::Vkdt;
-use helios_parity::{compare, inset};
+use helios_parity::{DARKTABLE, compare, inset};
 
 fn helios(module: ModuleRef, params: Params, input: &Image) -> Image {
     let mut g = Graph::new();
@@ -74,7 +74,7 @@ fn ported_vkdt_modules_match_vkdt() {
             .unwrap();
         let d = compare(&inset(&ours, margin), &inset(&theirs, margin)).unwrap();
         eprintln!("vkdt {name} {values:?}: {d:?}");
-        assert!(d.passes(), "{name} {values:?}: {d:?}");
+        assert!(d.within(&DARKTABLE), "{name} {values:?}: {d:?}");
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -156,7 +156,7 @@ fn ported_vkdt_contrast_matches_vkdt() {
         let whole = compare(&ours, &theirs).unwrap();
         let d = compare(&inset(&ours, margin), &inset(&theirs, margin)).unwrap();
         eprintln!("vkdt contrast {values:?}: inside {d:?}, whole image {whole:?}");
-        assert!(d.passes(), "contrast {values:?}: {d:?}");
+        assert!(d.within(&DARKTABLE), "contrast {values:?}: {d:?}");
     }
     let _ = std::fs::remove_dir_all(&dir);
 }

@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use helios_core::{Bus, Engine, Graph, Image, ModuleRef, Params, Region, Value};
-use helios_parity::{Darktable, Item, compare, delta_e_2000, read_pfm, write_pfm};
+use helios_parity::{DARKTABLE, Darktable, Item, compare, delta_e_2000, read_pfm, write_pfm};
 use serde_json::json;
 
 #[test]
@@ -119,7 +119,10 @@ fn exposure_matches_darktable() {
         let ours = helios_exposure(&input, exposure, black);
         let d = compare(&ours, &theirs).unwrap();
         eprintln!("exposure {exposure}, black {black}: {d:?}");
-        assert!(d.passes(), "exposure {exposure}, black {black}: {d:?}");
+        assert!(
+            d.within(&DARKTABLE),
+            "exposure {exposure}, black {black}: {d:?}"
+        );
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -209,10 +212,10 @@ fn an_imported_edit_runs_in_darktables_pipe_order() {
     let ours = helios_imported_exposures(&input, &exposures);
     let d = compare(&ours, &theirs).unwrap();
     eprintln!("pipe order: {d:?}");
-    assert!(d.passes(), "{d:?}");
+    assert!(d.within(&DARKTABLE), "{d:?}");
     // The history order computes another image: the case tells them apart.
     let history = helios_imported_exposures(&input, &[exposures[1], exposures[0]]);
     let wrong = compare(&history, &theirs).unwrap();
     eprintln!("history order: {wrong:?}");
-    assert!(!wrong.passes(), "{wrong:?}");
+    assert!(!wrong.within(&DARKTABLE), "{wrong:?}");
 }
