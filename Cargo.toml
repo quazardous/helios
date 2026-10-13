@@ -36,6 +36,7 @@ helios-gui = { path = "crates/helios-gui" }
 helios-vault = { path = "crates/helios-vault" }
 helios-vault-sqlite = { path = "crates/helios-vault-sqlite" }
 helios-i18n = { path = "crates/helios-i18n" }
+helios-display = { path = "crates/helios-display" }
 # MIT: the UI library and application framework Helios is built on.
 # Pinned to a commit until egui-pop 0.1 is on crates.io, then to that
 # version. Its eframe support (the window's place) runs on the same

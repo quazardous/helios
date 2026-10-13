@@ -19,6 +19,7 @@ helios-core.workspace = true
 # The process's one GPU device, which the window draws with.
 helios-gpu.workspace = true
 helios-photo.workspace = true
+helios-display.workspace = true
 helios-load.workspace = true
 helios-vault.workspace = true
 helios-vault-sqlite.workspace = true

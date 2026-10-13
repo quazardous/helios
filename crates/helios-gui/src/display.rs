@@ -7,11 +7,21 @@
 //! viewport draws it when the window's surface carries it, and sRGB
 //! otherwise, with the reason (egui-pop's `display::resolve`). Only the
 //! image asks for it: egui's interface stays sRGB.
+//!
+//! The debug bridge's `helios.display` collector says what the display
+//! offers (`helios_display::probe`: the session, the compositor's colour
+//! management) and what the window resolved (wanted, surface, drawn and
+//! why); egui-pop's `viewport` collector, registered here too, gives it
+//! per viewport.
+
+use std::sync::OnceLock;
 
 use egui_pop::api::{AppHandle, Ctx, Plugin, PluginError};
+use egui_pop::core::debug::FnCollector;
 use egui_pop::model::ids::{PluginId, SettingId};
 use egui_pop::model::values::Descriptor;
-use egui_pop::viewport::display::DisplayTarget;
+use egui_pop::viewport::display::{self as pop_display, DisplayTarget};
+use serde_json::{Value as Json, json};
 
 use crate::viewport::rec2020_gamma22;
 
@@ -40,7 +50,43 @@ pub fn wanted(wide_gamut: bool) -> DisplayTarget {
     }
 }
 
-/// Declares the display's settings.
+/// What the display offers, asked once per process (one connection to
+/// the compositor).
+pub fn offer() -> &'static helios_display::Offer {
+    static OFFER: OnceLock<helios_display::Offer> = OnceLock::new();
+    OFFER.get_or_init(helios_display::probe)
+}
+
+/// The `helios.display` snapshot: the setting, what the display offers,
+/// and what the main window resolved.
+pub fn snapshot(ctx: &egui::Context, wide_gamut: bool) -> Json {
+    let offer = offer();
+    let r = pop_display::resolution(ctx);
+    json!({
+        "wide_gamut_preview": wide_gamut,
+        "session": offer.session,
+        "color_management": offer.color_management,
+        "error": offer.error,
+        "resolution": {
+            "wanted": r.wanted.describe(),
+            "surface": r.surface.describe(),
+            "drawn": r.drawn.describe(),
+            "faithful": r.faithful(),
+            "reason": r.reason(),
+        },
+        "expected": helios_display::drawn(offer),
+    })
+}
+
+fn collector(app: AppHandle) -> FnCollector {
+    FnCollector::new(
+        "helios.display",
+        "What the display offers (session, the compositor's colour management) and what the image is drawn in.",
+    )
+    .snapshot(move |ctx| snapshot(ctx, wide_gamut(&app)))
+}
+
+/// Declares the display's settings and its debug collectors.
 pub struct Display;
 
 impl Plugin for Display {
@@ -59,6 +105,8 @@ impl Plugin for Display {
                 "Shows the image in Rec.2020 where the window can carry it (Wayland with colour management), so colours outside sRGB are not clipped. Elsewhere the image stays sRGB.",
             ),
         )?;
+        ctx.collector(collector(ctx.app()))?;
+        ctx.collector(egui_pop::viewport::debug::collector())?;
         Ok(())
     }
 }
@@ -66,6 +114,19 @@ impl Plugin for Display {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_snapshot_says_what_is_drawn_and_why() {
+        let ctx = egui::Context::default();
+        pop_display::want(&ctx, egui::ViewportId::ROOT, wanted(true));
+        let s = snapshot(&ctx, true);
+        assert_eq!(s["wide_gamut_preview"], true);
+        // No surface configured for it: sRGB, with the reason.
+        assert_eq!(s["resolution"]["faithful"], false);
+        assert!(s["resolution"]["drawn"].as_str().unwrap().contains("sRGB"));
+        assert!(s["resolution"]["reason"].is_string());
+        assert_eq!(s["expected"]["encoding"], "sRGB");
+    }
 
     #[test]
     fn off_wants_srgb_and_on_wants_rec2020() {

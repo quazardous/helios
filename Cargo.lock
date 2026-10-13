@@ -1898,6 +1898,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "helios-display"
+version = "0.0.1"
+dependencies = [
+ "serde",
+ "serde_json",
+ "wayland-client",
+ "wayland-protocols",
+]
+
+[[package]]
 name = "helios-export"
 version = "0.0.1"
 dependencies = [
@@ -1936,6 +1946,7 @@ dependencies = [
  "egui-pop-test",
  "egui_kittest",
  "helios-core",
+ "helios-display",
  "helios-gpu",
  "helios-i18n",
  "helios-load",
@@ -2088,6 +2099,7 @@ dependencies = [
  "helios-config",
  "helios-core",
  "helios-decision",
+ "helios-display",
  "helios-export",
  "helios-inspect",
  "helios-load",

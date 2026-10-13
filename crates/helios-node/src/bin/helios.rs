@@ -23,6 +23,8 @@
 //!
 //!     helios import-darktable --vault FILE FOLDERS-OR-IMAGES...
 //!
+//!     helios doctor display
+//!
 //! `batch` applies a network to many images, each exported to a file in
 //! `--out` (named by `--name`, `{stem}.{ext}` by default; a name already
 //! taken gets `-1`, `-2`...). It starts its own node in a temporary sandbox,
@@ -34,6 +36,13 @@
 //! exits with 1 when an image failed (the others go on), 130 when
 //! interrupted: Ctrl-C cancels the exports in flight and leaves no partial
 //! file. See `docs/cli.md`.
+//!
+//! `doctor display` says what the display offers the desktop: the session
+//! (Wayland, X11 or none), on Wayland what the compositor's colour
+//! management (`wp_color_management_v1`) supports, and what the viewport
+//! draws there with the Wide-gamut preview setting on, and why. It asks
+//! the compositor only; the running desktop's debug bridge says what its
+//! window actually resolved.
 //!
 //! `import-darktable` keeps a folder's darktable edits in a vault: every
 //! image file, and a version per sidecar, duplicates (`IMG_0001_01.CR2.xmp`)
@@ -76,7 +85,8 @@ const USAGE: &str = "usage:
   helios batch --network FILE --out DIR [--format jpeg|png|tiff] [--quality Q] [--jobs N]
                [--name TEMPLATE] [--sidecar [--vault FILE]] [--source NAME] [--node NAME]
                [--socket ADDR --control ADDR [--token-file FILE]] IMAGES...
-  helios import-darktable --vault FILE FOLDERS-OR-IMAGES...";
+  helios import-darktable --vault FILE FOLDERS-OR-IMAGES...
+  helios doctor display";
 
 fn usage(error: &str) -> ExitCode {
     eprintln!("helios: {error}\n{USAGE}");
@@ -517,6 +527,27 @@ fn sandbox(args: &[String]) -> ExitCode {
     }
 }
 
+/// `helios doctor display`: what the display offers, as JSON.
+fn doctor(args: &[String]) -> ExitCode {
+    match args {
+        [what] if what == "display" => {
+            let offer = helios_display::probe();
+            let report = serde_json::json!({
+                "session": offer.session,
+                "color_management": offer.color_management,
+                "error": offer.error,
+                "viewport": helios_display::drawn(&offer),
+            });
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&report).expect("JSON values serialize")
+            );
+            ExitCode::SUCCESS
+        }
+        _ => usage("doctor takes `display`"),
+    }
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.first().is_some_and(|a| a == "sandbox") {
@@ -527,6 +558,9 @@ fn main() -> ExitCode {
     }
     if args.first().is_some_and(|a| a == "import-darktable") {
         return import_darktable(&args[1..]);
+    }
+    if args.first().is_some_and(|a| a == "doctor") {
+        return doctor(&args[1..]);
     }
     let call = match parse(args) {
         Ok(c) => c,

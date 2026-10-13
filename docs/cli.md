@@ -174,3 +174,19 @@ a Unix socket in a directory made for that run and open to its user alone.
 The other control verbs (render, set-param, pause, fault injection,
 decisions) stay in debug builds. With `--socket` and `--control`, the batch
 drives a running node through either endpoint.
+
+## Doctor
+
+```sh
+helios doctor display
+```
+
+Says what the display offers the desktop, as JSON: the `session`
+(`wayland`, `x11` or `none`); on Wayland, what the compositor's colour
+management (`wp_color_management_v1`) announces (`color_management`:
+its version, features, named primaries and transfer functions, rendering
+intents; `null` when it has none); `error` when the compositor could not
+be asked; and `viewport`, the encoding the image is drawn in there with
+the Wide-gamut preview setting on, and why. It asks the compositor only:
+the running desktop's debug bridge (`helios.display` collector) says what
+its window actually resolved.

@@ -1,0 +1,22 @@
+[package]
+name = "helios-display"
+description = "What the display offers Helios: the session (Wayland, X11), the Wayland compositor's colour management (wp_color_management_v1), and what the desktop's viewport draws on it"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# MIT: a Wayland client in Rust, to ask the compositor what it offers.
+wayland-client = "0.31"
+# MIT: the colour-management protocol's bindings (staging).
+wayland-protocols = { version = "0.32", features = ["client", "staging"] }
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true

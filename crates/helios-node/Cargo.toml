@@ -19,6 +19,7 @@ helios-decision.workspace = true
 helios-resolve.workspace = true
 helios-vault.workspace = true
 helios-vault-sqlite.workspace = true
+helios-display.workspace = true
 helios-module-exposure = { path = "../../modules/exposure" }
 helios-module-rawprepare = { path = "../../modules/rawprepare" }
 helios-module-demosaic = { path = "../../modules/demosaic" }
