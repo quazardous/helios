@@ -240,6 +240,15 @@ the images selected (two or more), else over every image; **Show**
 selects a group's images, to look at them in the grid or the Compare
 panel.
 
+**Duplicates.** The **Duplicates** panel (closed by default) lists the
+exact duplicates each import from the desktop found: the file, what it
+duplicates (the library's copies, or the earlier file of the same
+import), and what the import's policy did with it (skipped, or kept as
+one more copy). With `ask`, each one waits for an answer there, **Keep**
+or **Skip** (or all of them at once), and a note says so when the import
+asks: keeping imports that file again with `keep`, placed and renamed as
+its import said; skipping leaves it untouched. Nothing is deleted.
+
 **Search.** The search field's rating, labels, flags and tags become a
 vault query (several labels: any of them; several tags: all of them);
 its words (in the name or a tag) and dates (the file's day) are matched
@@ -248,7 +257,8 @@ on what the library holds. A filter shows stacks flattened.
 ## Not yet
 
 - Phones over MTP as a source (mount them as folders).
-- An interactive answer to `--duplicates ask` (the files are listed).
+- An interactive answer to `--duplicates ask` on the command line (the
+  files are listed; the desktop asks, in its Duplicates panel).
 - Thumbnails are read in the library's order, not the ones in view
   first; the comparison draws them at their size (256 pixels).
 - Burst identifiers from maker notes; capture times of pictures (JPEG,

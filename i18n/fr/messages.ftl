@@ -342,3 +342,33 @@ gui-stacks-suggest = Suggérer des piles
 gui-stacks-suggest-hint = Sur les images sélectionnées (deux ou plus), sinon sur toutes les images
 
 gui-stacks-top = Proposée au-dessus : la plus nette
+
+gui-duplicates-asked = La garder comme copie de plus, ou l’ignorer ?
+
+gui-duplicates-clear = Effacer les réponses données
+
+gui-duplicates-declined = Ignoré
+
+gui-duplicates-keep = Garder
+
+gui-duplicates-keep-all = Tout garder
+
+gui-duplicates-kept = Gardé comme copie de plus
+
+gui-duplicates-located = Gardé comme copie de plus, selon la règle de l’import
+
+gui-duplicates-none = Aucun doublon trouvé à l’import
+
+gui-duplicates-of-library = Déjà dans la bibliothèque : { $at }
+
+gui-duplicates-of-source = Le même fichier que { $first }, plus tôt dans cet import
+
+gui-duplicates-skip = Ignorer
+
+gui-duplicates-skip-all = Tout ignorer
+
+gui-duplicates-skipped = Ignoré, selon la règle de l’import
+
+gui-duplicates-waiting = { $count } doublons attendent une réponse
+
+gui-duplicates-waiting-note = { $count } doublons attendent une réponse dans le panneau Doublons

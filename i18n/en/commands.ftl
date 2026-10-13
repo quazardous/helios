@@ -28,6 +28,15 @@ command-helios-compare-dock =
 command-helios-compare-moveTo =
     .title = Move Compare to an area (`area`)
 
+command-helios-duplicates-detach =
+    .title = Move Duplicates to a new window
+
+command-helios-duplicates-dock =
+    .title = Dock Duplicates back in its area
+
+command-helios-duplicates-moveTo =
+    .title = Move Duplicates to an area (`area`)
+
 command-helios-filmstrip-detach =
     .title = Move Filmstrip to a new window
 

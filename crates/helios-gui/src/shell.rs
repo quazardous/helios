@@ -318,6 +318,8 @@ pub struct Shell {
     library: Rc<RefCell<crate::library::Library>>,
     /// The Stacks panel's proposals.
     stack_review: Rc<RefCell<crate::stack_review::Review>>,
+    /// The duplicates imports found (the Duplicates panel).
+    duplicates: Rc<RefCell<crate::duplicates::Duplicates>>,
     /// egui-pop's dialogs, once the application is built (`dialog.current`).
     dialogs: Arc<OnceLock<Dialogs>>,
     /// Confirmations are answered yes by policy (a script's `--yes`).
@@ -564,6 +566,7 @@ impl Shell {
             scopes: Rc::default(),
             library: Rc::default(),
             stack_review: Rc::default(),
+            duplicates: Rc::default(),
             dialogs,
             assume_yes: false,
             menu: None,
@@ -653,6 +656,12 @@ impl Shell {
             .library
             .borrow_mut()
             .set_app(shell.app.handle().clone());
+        if has(&shell, crate::duplicates::PANEL) {
+            let duplicates = shell.duplicates.clone();
+            shell.set_content(crate::duplicates::PANEL, move |ui| {
+                duplicates.borrow_mut().ui(ui);
+            });
+        }
         if has(&shell, crate::stack_review::PANEL) {
             let (review, library) = (shell.stack_review.clone(), shell.library.clone());
             shell.set_content(crate::stack_review::PANEL, move |ui| {
@@ -809,6 +818,22 @@ impl Shell {
     /// The library's state, to show what the vault holds.
     pub fn library_mut(&self) -> std::cell::RefMut<'_, crate::library::Library> {
         self.library.borrow_mut()
+    }
+
+    /// Where an import's lines go, with its arguments (`library.import`'s),
+    /// from any thread: its duplicates fill the Duplicates panel.
+    pub fn duplicates_sink(&self) -> std::sync::mpsc::Sender<(Value, Value)> {
+        self.duplicates.borrow().sink()
+    }
+
+    /// The duplicates imports found, to read.
+    pub fn duplicates(&self) -> std::cell::Ref<'_, crate::duplicates::Duplicates> {
+        self.duplicates.borrow()
+    }
+
+    /// The duplicates imports found, to answer them.
+    pub fn duplicates_mut(&self) -> std::cell::RefMut<'_, crate::duplicates::Duplicates> {
+        self.duplicates.borrow_mut()
     }
 
     /// The Stacks panel's proposals, to read.
@@ -3081,6 +3106,18 @@ impl Shell {
 
         self.status_bar();
         self.viewport.borrow_mut().sync(&mut lock(&self.values));
+        // Duplicates an import asks about: said once, answered in the
+        // Duplicates panel.
+        let asked = self.duplicates.borrow_mut().receive();
+        if asked > 0 {
+            self.note(
+                Message::new(
+                    "gui-duplicates-waiting-note",
+                    "{ $count } duplicates wait for an answer in the Duplicates panel",
+                )
+                .with("count", asked),
+            );
+        }
         self.app.show(ui);
         let refused = std::mem::take(&mut self.library.borrow_mut().notes);
         for n in refused {

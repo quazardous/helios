@@ -63,6 +63,36 @@ gui-confirmed-by-policy = { $verb }: confirmed by policy
 
 gui-copied = copied { $text }
 
+gui-duplicates-asked = Keep it as one more copy, or skip it?
+
+gui-duplicates-clear = Clear the answered
+
+gui-duplicates-declined = Skipped
+
+gui-duplicates-keep = Keep
+
+gui-duplicates-keep-all = Keep all
+
+gui-duplicates-kept = Kept as one more copy
+
+gui-duplicates-located = Kept as one more copy, as the import's policy said
+
+gui-duplicates-none = No duplicates found at import
+
+gui-duplicates-of-library = Already in the library: { $at }
+
+gui-duplicates-of-source = The same file as { $first }, earlier in this import
+
+gui-duplicates-skip = Skip
+
+gui-duplicates-skip-all = Skip all
+
+gui-duplicates-skipped = Skipped, as the import's policy said
+
+gui-duplicates-waiting = { $count } duplicates wait for an answer
+
+gui-duplicates-waiting-note = { $count } duplicates wait for an answer in the Duplicates panel
+
 gui-edit-does-not-fit = Part of the saved edit does not fit this network: { $part }
 
 gui-edit-not-saved = The edit was not saved: { $error }

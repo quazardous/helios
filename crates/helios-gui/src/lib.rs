@@ -4,6 +4,7 @@
 
 pub mod dialogs;
 pub mod display;
+pub mod duplicates;
 pub mod engine_source;
 pub mod host;
 pub mod i18n;
@@ -35,7 +36,7 @@ use egui_pop::model::panels::{Area, PanelSpec};
 /// The panels Helios declares today, with the areas each may be moved to
 /// (egui-pop's placement rules); each shows a placeholder until its
 /// widget lands. Every panel may be detached into a window of its own.
-/// The culling panels (Compare, Stacks) start closed: a template's layout, or the
+/// The culling panels (Compare, Stacks, Duplicates) start closed: a template's layout, or the
 /// user, opens them.
 pub fn helios_panels() -> Vec<PanelSpec> {
     use Area::{Bottom, Center, EndSide, StartSide};
@@ -54,6 +55,13 @@ pub fn helios_panels() -> Vec<PanelSpec> {
         ("helios.log", "Log", Bottom, &[][..], true),
         ("helios.compare", "Compare", Center, &anywhere[..], false),
         ("helios.stacks", "Stacks", EndSide, &sides[..], false),
+        (
+            "helios.duplicates",
+            "Duplicates",
+            EndSide,
+            &sides[..],
+            false,
+        ),
     ]
     .into_iter()
     .map(|(id, title, area, areas, open)| {

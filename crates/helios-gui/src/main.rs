@@ -107,8 +107,9 @@ fn seconds() -> u64 {
 
 /// The library operations as commands (see `helios_library`): an import
 /// runs as a job on the shell's jobs (`job.*`, in the jobs centre, where
-/// it is cancelled), the library filled again when it ends; stack suggestions are recorded, and applied once
-/// accepted. No panel of their own yet.
+/// it is cancelled), the library filled again when it ends, its
+/// duplicates listed in the Duplicates panel; stack suggestions are
+/// recorded, and applied once accepted (the Stacks panel answers them).
 fn library_commands(
     shell: &mut Shell,
     persist: &Persist,
@@ -123,6 +124,9 @@ fn library_commands(
     let text = |args: &Value, key: &str| args.get(key).and_then(Value::as_str).map(String::from);
     let (vault, jobs) = (persist.vault().clone(), shell.jobs());
     let (done, ctx) = (refill.clone(), ctx.clone());
+    // Each file's line goes to the Duplicates panel with the import's
+    // arguments, so a duplicate kept is imported again the same way.
+    let lines = shell.duplicates_sink();
     shell.register(
         CommandSpec::new(
             "library.import",
@@ -146,16 +150,20 @@ fn library_commands(
                 options.duplicates = Duplicates::parse(&policy)?;
             }
             let (vault, jobs, done, ctx) = (vault.clone(), jobs.clone(), done.clone(), ctx.clone());
+            let (lines, asked) = (lines.clone(), args.clone());
             std::thread::spawn(move || {
                 let sources = [std::path::PathBuf::from(path)];
-                // The job's events say how it went; the lines are for the CLI.
+                // The job's events say how it went; the lines feed the
+                // Duplicates panel.
                 let ended = helios_library::import::import(
                     vault.as_ref(),
                     &jobs,
                     &sources,
                     &options,
                     seconds(),
-                    &mut |_: &Value| {},
+                    &mut |line: &Value| {
+                        let _ = lines.send((asked.clone(), line.clone()));
+                    },
                 );
                 if let Err(e) = ended {
                     warn(&format!("import: {e}"));
@@ -407,6 +415,13 @@ impl eframe::App for App {
         }
         for open in self.shell.take_opens() {
             self.open(open);
+        }
+        // Duplicates the user chose to keep, imported again.
+        let imports = self.shell.duplicates_mut().take_imports();
+        for args in imports {
+            let _ = self
+                .shell
+                .run("library.import", args, helios_shell::commands::Origin::User);
         }
         let activated = self.shell.library_mut().take_activated();
         if let Some(id) = activated

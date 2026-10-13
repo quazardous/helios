@@ -4,6 +4,9 @@
 panel-helios-compare =
     .title = Compare
 
+panel-helios-duplicates =
+    .title = Duplicates
+
 panel-helios-filmstrip =
     .title = Filmstrip
 

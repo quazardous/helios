@@ -3,6 +3,9 @@
 panel-helios-compare =
     .title = Comparer
 
+panel-helios-duplicates =
+    .title = Doublons
+
 panel-helios-filmstrip =
     .title = Pellicule
 

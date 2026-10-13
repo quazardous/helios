@@ -27,6 +27,15 @@ command-helios-compare-dock =
 command-helios-compare-moveTo =
     .title = Déplacer Comparer vers une zone (`area`)
 
+command-helios-duplicates-detach =
+    .title = Déplacer Doublons dans une nouvelle fenêtre
+
+command-helios-duplicates-dock =
+    .title = Remettre Doublons dans sa zone
+
+command-helios-duplicates-moveTo =
+    .title = Déplacer Doublons vers une zone (`area`)
+
 command-helios-filmstrip-detach =
     .title = Déplacer Pellicule dans une nouvelle fenêtre
 
