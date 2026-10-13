@@ -258,10 +258,37 @@ pub mod control {
             quality: Option<u8>,
             #[serde(default)]
             params: BTreeMap<String, Params>,
+            /// The batch job it is part of ([`ControlRequest::BatchStart`]),
+            /// which the export's job is a child of.
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            batch: Option<String>,
         },
         /// Cancels a job.
         Cancel {
             job: u64,
+        },
+        /// Cancels a job people follow by its id (`export-3`, `batch-1`),
+        /// as egui-pop's jobs centre asks: the job stops the way it gave
+        /// when it started and says `job.cancelled`.
+        #[serde(rename = "job.cancel")]
+        JobCancel {
+            id: String,
+        },
+        /// Starts a batch job, the parent of the exports asked for with its
+        /// id as `batch`: answers its id (`batch-1`). Cancelling it
+        /// cancels its exports and refuses new ones.
+        BatchStart {
+            title: String,
+            total: u64,
+        },
+        /// Ends a batch job: cancelled when it was, or said so here;
+        /// failed when some of its images failed; else finished.
+        BatchEnd {
+            id: String,
+            #[serde(default)]
+            failed: u64,
+            #[serde(default)]
+            cancelled: bool,
         },
         /// Stops starting jobs; running ones finish.
         Pause,

@@ -456,6 +456,18 @@ pub const TOOLS: &[Tool] = &[
         }],
     },
     Tool {
+        name: "helios_job_cancel",
+        endpoint: Endpoint::Control,
+        cmd: "job.cancel",
+        description: "Cancels a job people follow by its id (`export-3`, `batch-1`, from the job.* events)",
+        params: &[Param {
+            name: "id",
+            schema: string,
+            description: "The job's id",
+            default: None,
+        }],
+    },
+    Tool {
         name: "helios_pause",
         endpoint: Endpoint::Control,
         cmd: "pause",
@@ -1076,6 +1088,7 @@ mod tests {
             "load_source",
             "export",
             "cancel",
+            "job.cancel",
             "pause",
             "resume",
             "fault",

@@ -26,10 +26,16 @@ otherwise; `--set NODE.PARAM=VALUE` (repeatable) changes a parameter for this
 export only. The answer carries the job id: wait for its
 `scheduler.job_ended` event. Paths are made absolute before they are sent.
 
+Each export is also a job people follow (`job.*` events on the node's
+bus, see [jobs.md](jobs.md)), named by an id such as `export-3`.
+`job-cancel ID` cancels a job by that id, as the desktop's jobs centre
+does: an export queued or running (it writes nothing), or a whole batch
+with its exports.
+
 The control endpoint is served by debug builds only, when the node is
 started with `--control` and `HELIOS_DEBUG_CONTROL` is set (a sandbox does
-both). `load-source`, `export` and `cancel` are also answered by the batch
-endpoint, which every build serves (see below).
+both). `load-source`, `export`, `cancel` and `job-cancel` are also
+answered by the batch endpoint, which every build serves (see below).
 
 A refusal answers `{"ok": false, "error": ...}` in English; when the node
 says it by key (a file it cannot load, a node it does not have, a job

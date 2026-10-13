@@ -656,6 +656,7 @@ fn submit(
         format: options.format,
         quality: Some(options.quality),
         params,
+        batch: None,
     });
     match asked {
         Ok(answer) => {

@@ -34,17 +34,24 @@
 //! change answered.
 //!
 //! `--batch-control` serves the batch endpoint in every build: only
-//! `load-source`, `export` and `cancel`, on a Unix socket only its user can
+//! `load-source`, `export`, `cancel`, `job.cancel` and the batch job's
+//! `batch_start` and `batch_end`, on a Unix socket only its user can
 //! open. `helios batch` starts its own node with it, on a socket in a
 //! private directory made for that run.
+//!
+//! Its exports and batches are jobs people follow (`helios_core::jobs`,
+//! `job.*` on its bus): `job.cancel` with a job's id cancels it, a batch
+//! with its exports.
 
 use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
 use helios_config::{Config, Layer, Schema};
+use helios_core::jobs::{Jobs, Report as JobReport, Start};
 use helios_core::{Bus, Describe, Engine, Event, Graph, JobId, Message, NodeId, Region, Scheduler};
 use helios_decision::Book;
 use helios_inspect::{Inspector, Listen, new_token, serve_inspector, write_token};
@@ -221,7 +228,26 @@ struct Node {
     cameras: Mutex<BTreeMap<NodeId, CameraInfo>>,
     /// The vault keeping the edit, when the node has one.
     edit: Option<NodeEdit>,
+    /// Where its exports and batches report (`job.*` on its bus), and
+    /// what `job.cancel` cancels.
+    jobs: Jobs,
+    /// The batch jobs running, by id.
+    batches: Mutex<BTreeMap<String, Batch>>,
 }
+
+/// A batch job: the parent of the exports a batch asks for.
+struct Batch {
+    report: JobReport,
+    total: u64,
+    /// Cancelled: its exports are cancelled, new ones refused.
+    stopped: Arc<AtomicBool>,
+    /// Its exports' scheduler jobs; locked while one is added, so a cancel
+    /// never misses it.
+    children: Arc<Mutex<Vec<JobId>>>,
+}
+
+/// The batches' job ids in this node: `batch-1`, `batch-2`...
+static NEXT_BATCH: AtomicU64 = AtomicU64::new(1);
 
 impl Node {
     /// Saves the edit as it is now as a version continuing the last one;
@@ -301,9 +327,9 @@ impl Node {
     fn submit_export(self: &Arc<Self>, export: &ExportDesc) -> Result<JobId, String> {
         let id = self.id(&export.node)?;
         let (node, port, region) = (self.clone(), export.port.clone(), export.region);
-        let job = helios_export::submit_with(
+        let job = helios_export::submit_reported(
             &self.scheduler,
-            self.bus.clone(),
+            &self.jobs,
             &export.path,
             export.format()?,
             move || {
@@ -326,6 +352,10 @@ impl Node {
     /// Exports a node's port as it is now: the job renders a copy of the
     /// graph taken here, with `params` changed on that copy only, so later
     /// changes (another source, another parameter) never reach it.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the fields of the control request, one by one"
+    )]
     fn submit_export_now(
         self: &Arc<Self>,
         name: &str,
@@ -334,6 +364,7 @@ impl Node {
         path: &Path,
         format: helios_export::Format,
         params: &BTreeMap<String, helios_core::Params>,
+        batch: Option<&str>,
     ) -> Result<(JobId, Region), Message> {
         absolute(path)?;
         let id = self.id(name)?;
@@ -363,22 +394,97 @@ impl Node {
                 })?,
         };
         let (engine, port) = (self.engine.clone(), port.to_string());
-        let job = helios_export::submit_with(
-            &self.scheduler,
-            self.bus.clone(),
-            path,
-            format,
-            move || {
-                engine
-                    .render(&graph, id, &port, region)
-                    .map_err(|e| e.to_string())
-            },
-        )?;
+        let render = move || {
+            engine
+                .render(&graph, id, &port, region)
+                .map_err(|e| e.to_string())
+        };
+        let job = match batch {
+            None => {
+                helios_export::submit_reported(&self.scheduler, &self.jobs, path, format, render)?
+            }
+            Some(batch) => {
+                let (stopped, children) = {
+                    let batches = self.batches.lock().expect("batches lock");
+                    let b = batches
+                        .get(batch)
+                        .ok_or_else(|| Message::plain(format!("no running batch `{batch}`")))?;
+                    (b.stopped.clone(), b.children.clone())
+                };
+                // Held until the export is listed: a cancel of the batch
+                // waits for it, then cancels it too.
+                let mut children = children.lock().expect("children lock");
+                if stopped.load(Ordering::SeqCst) {
+                    return Err(Message::new("batch-cancelled", "cancelled"));
+                }
+                let job = helios_export::submit_child(
+                    &self.scheduler,
+                    &self.jobs,
+                    batch,
+                    path,
+                    format,
+                    render,
+                )?;
+                children.push(job);
+                job
+            }
+        };
         self.exports
             .lock()
             .expect("exports lock")
             .push((path.to_path_buf(), job));
         Ok((job, region))
+    }
+
+    /// Starts a batch job: its id. Cancelled (`job.cancel`), it cancels
+    /// its exports, queued or running, and refuses new ones.
+    fn batch_start(&self, title: &str, total: u64) -> String {
+        let id = format!("batch-{}", NEXT_BATCH.fetch_add(1, Ordering::Relaxed));
+        let report = self
+            .jobs
+            .start(Start::new(&id, title, "batch").total(total));
+        let stopped = Arc::new(AtomicBool::new(false));
+        let children: Arc<Mutex<Vec<JobId>>> = Arc::default();
+        {
+            let (stopped, children) = (stopped.clone(), children.clone());
+            let canceller = self.scheduler.canceller();
+            report.on_cancel(move || {
+                stopped.store(true, Ordering::SeqCst);
+                for job in children.lock().expect("children lock").iter() {
+                    canceller.cancel(*job);
+                }
+            });
+        }
+        self.batches.lock().expect("batches lock").insert(
+            id.clone(),
+            Batch {
+                report,
+                total,
+                stopped,
+                children,
+            },
+        );
+        id
+    }
+
+    /// Ends a batch job: cancelled when it was (here or by `job.cancel`),
+    /// failed when some of its images failed, else finished.
+    fn batch_end(&self, id: &str, failed: u64, cancelled: bool) -> Result<(), Message> {
+        let batch = self
+            .batches
+            .lock()
+            .expect("batches lock")
+            .remove(id)
+            .ok_or_else(|| Message::plain(format!("no running batch `{id}`")))?;
+        let report = &batch.report;
+        if cancelled || batch.stopped.load(Ordering::SeqCst) {
+            report.cancelled();
+        } else if failed > 0 {
+            report.failed(&format!("{failed} of {} images failed", batch.total));
+        } else {
+            report.finished();
+        }
+        Ok(())
     }
 
     /// Gives a source the image of a file: read and decoded with no lock
@@ -507,7 +613,8 @@ mod control {
     //! Two scopes share this code. The debug endpoint (`--control`, debug
     //! builds with `HELIOS_DEBUG_CONTROL` set) answers every verb. The batch
     //! endpoint (`--batch-control`, every build) answers only what a batch
-    //! export needs: give a source a file, export, cancel a job.
+    //! export needs: give a source a file, export, cancel a job, and the
+    //! batch's own job.
 
     use std::sync::Arc;
 
@@ -548,7 +655,8 @@ mod control {
             )
         )]
         Debug,
-        /// `load-source`, `export` and `cancel`: the batch endpoint.
+        /// `load-source`, `export`, `cancel`, `job.cancel`, `batch_start`
+        /// and `batch_end`: the batch endpoint.
         Batch,
     }
 
@@ -560,6 +668,9 @@ mod control {
                     ControlRequest::LoadSource { .. }
                         | ControlRequest::Export { .. }
                         | ControlRequest::Cancel { .. }
+                        | ControlRequest::JobCancel { .. }
+                        | ControlRequest::BatchStart { .. }
+                        | ControlRequest::BatchEnd { .. }
                 )
         }
     }
@@ -628,6 +739,7 @@ mod control {
                 format,
                 quality,
                 params,
+                batch,
             } => {
                 let format = match format {
                     FileFormat::Jpeg => Format::Jpeg {
@@ -636,9 +748,22 @@ mod control {
                     FileFormat::Png => Format::Png { bits: 8 },
                     FileFormat::Tiff => Format::Tiff,
                 };
-                node.submit_export_now(name, port, *region, path, format, params)
+                node.submit_export_now(name, port, *region, path, format, params, batch.as_deref())
                     .map(|(job, region)| json!({ "job": job.0, "region": region }))
             }
+            ControlRequest::JobCancel { id } => node
+                .jobs
+                .cancel(id)
+                .map(|()| json!({ "cancelling": id }))
+                .map_err(Message::plain),
+            ControlRequest::BatchStart { title, total } => {
+                Ok(json!({ "id": node.batch_start(title, *total) }))
+            }
+            ControlRequest::BatchEnd {
+                id,
+                failed,
+                cancelled,
+            } => node.batch_end(id, *failed, *cancelled).map(|()| json!({})),
             ControlRequest::Cancel { job } => {
                 if node.scheduler.cancel(JobId(*job)) {
                     Ok(json!({}))
@@ -1014,6 +1139,8 @@ fn main() -> ExitCode {
         frame: loaded.frame,
         cameras: Mutex::new(loaded.cameras),
         edit,
+        jobs: Jobs::new(bus.clone()),
+        batches: Mutex::new(BTreeMap::new()),
     });
     let inspector = Inspector::new(bus.clone())
         .with("graph", node.graph.clone())

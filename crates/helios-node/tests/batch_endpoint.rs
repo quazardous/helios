@@ -1,6 +1,7 @@
 //! The batch endpoint (`helios-node --batch-control`), served in every
 //! build: a socket only its user opens, which answers `load-source`,
-//! `export` and `cancel` and refuses the debug verbs.
+//! `export`, `cancel`, `job.cancel` and the batch job's verbs, and refuses
+//! the debug verbs.
 
 #![cfg(unix)]
 
@@ -25,9 +26,11 @@ struct Node {
 }
 
 impl Node {
-    fn start() -> Self {
-        let dir =
-            std::env::temp_dir().join(format!("helios-batch-endpoint-{}", std::process::id()));
+    fn start(name: &str) -> Self {
+        let dir = std::env::temp_dir().join(format!(
+            "helios-batch-endpoint-{name}-{}",
+            std::process::id()
+        ));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("network.json"), NETWORK).unwrap();
@@ -84,7 +87,7 @@ fn picture(path: &Path) {
 
 #[test]
 fn the_batch_endpoint_answers_only_what_a_batch_needs() {
-    let node = Node::start();
+    let node = Node::start("scope");
     let mode = std::fs::metadata(node.dir.join("batch.sock"))
         .unwrap()
         .permissions()
@@ -157,5 +160,80 @@ fn the_batch_endpoint_takes_no_tcp_address() {
         String::from_utf8_lossy(&out.stderr).contains("Unix socket"),
         "{}",
         String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+/// `job.cancel` on the batch endpoint: a batch job cancelled by its id
+/// says so on the node's bus and refuses the exports asked for after.
+#[test]
+fn a_batch_job_is_cancelled_by_its_id() {
+    use helios_inspect::control::{ControlRequest, FileFormat};
+
+    let node = Node::start("job-cancel");
+    let control =
+        |r: &ControlRequest| helios_inspect::request(&node.dir.join("batch.sock"), r).unwrap();
+    let started = control(&ControlRequest::BatchStart {
+        title: "Batch 2 images".into(),
+        total: 2,
+    });
+    assert_eq!(started["ok"], true, "{started}");
+    let id = started["id"].as_str().unwrap().to_string();
+    assert!(id.starts_with("batch-"), "{id}");
+    let cancel = node.batch(&["job-cancel", &id]);
+    assert_eq!(cancel["ok"], true, "{cancel}");
+    let pic = node.dir.join("in.png");
+    picture(&pic);
+    let loaded = node.batch(&["load-source", "src", pic.to_str().unwrap()]);
+    assert_eq!(loaded["ok"], true, "{loaded}");
+    let out = node.dir.join("late.png");
+    let refused = control(&ControlRequest::Export {
+        node: "exp".into(),
+        port: "output".into(),
+        region: None,
+        path: out.clone(),
+        format: FileFormat::Png,
+        quality: None,
+        params: std::collections::BTreeMap::new(),
+        batch: Some(id.clone()),
+    });
+    assert_eq!(refused["ok"], false, "{refused}");
+    assert_eq!(refused["message"]["key"], "batch-cancelled", "{refused}");
+    let ended = control(&ControlRequest::BatchEnd {
+        id: id.clone(),
+        failed: 0,
+        cancelled: false,
+    });
+    assert_eq!(ended["ok"], true, "{ended}");
+    assert!(!out.exists());
+    let events = node.call("inspect", "node.sock", &["events"]);
+    let jobs: Vec<(&str, &str)> = events["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|e| e["kind"].as_str().unwrap().starts_with("job."))
+        .map(|e| {
+            (
+                e["kind"].as_str().unwrap(),
+                e["payload"]["id"].as_str().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        jobs,
+        [
+            ("job.started", id.as_str()),
+            ("job.cancelling", id.as_str()),
+            ("job.cancelled", id.as_str())
+        ]
+    );
+    // A job the node does not run: refused, never out of scope.
+    let unknown = node.batch(&["job-cancel", "export-999"]);
+    assert_eq!(unknown["ok"], false, "{unknown}");
+    assert!(
+        unknown["error"]
+            .as_str()
+            .unwrap()
+            .contains("no running job"),
+        "{unknown}"
     );
 }

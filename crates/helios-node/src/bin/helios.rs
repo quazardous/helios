@@ -12,6 +12,7 @@
 //!     helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] export NODE --format jpeg|png|tiff
 //!                    [--quality Q] [--port PORT] [--region X,Y,W,H] [--set NODE.PARAM=VALUE]... --to PATH
 //!     helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] cancel JOB
+//!     helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] job-cancel ID
 //!     helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] pause | resume
 //!     helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] fault NODE compute|source-read
 //!
@@ -102,6 +103,7 @@ const USAGE: &str = "usage:
   helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] export NODE --format jpeg|png|tiff
                  [--quality Q] [--port PORT] [--region X,Y,W,H] [--set NODE.PARAM=VALUE]... --to PATH
   helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] cancel JOB
+  helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] job-cancel ID
   helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] pause | resume
   helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] fault NODE compute|source-read
   helios sandbox new DIR [--network FILE] | start DIR | stop DIR | clean DIR
@@ -288,6 +290,7 @@ fn parse(args: Vec<String>) -> Result<Call, String> {
                 format: format.ok_or("export needs --format jpeg|png|tiff")?,
                 quality,
                 params: sets,
+                batch: None,
             },
             ["set-param", node, param, v] => ControlRequest::SetParam {
                 node: node.to_string(),
@@ -299,6 +302,7 @@ fn parse(args: Vec<String>) -> Result<Call, String> {
                     .parse()
                     .map_err(|_| format!("`{job}` is not a job id"))?,
             },
+            ["job-cancel", id] => ControlRequest::JobCancel { id: id.to_string() },
             ["pause"] => ControlRequest::Pause,
             ["resume"] => ControlRequest::Resume,
             ["fault", node, kind] => ControlRequest::Fault {

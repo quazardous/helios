@@ -682,6 +682,64 @@ fn an_interrupt_cancels_the_exports_and_leaves_no_file() {
     );
 }
 
+/// The `job.*` events of a node, from its journal.
+#[cfg(debug_assertions)]
+fn job_events(node: &Sandbox) -> Vec<Value> {
+    node.inspect(&["events"])["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|e| e["kind"].as_str().unwrap().starts_with("job."))
+        .cloned()
+        .collect()
+}
+
+/// A node cancels a job on `job.cancel` with its id: a queued export
+/// says `job.cancelled` and writes nothing.
+#[cfg(debug_assertions)]
+#[test]
+fn a_node_cancels_an_export_on_job_cancel() {
+    let p = Place::new("job-cancel");
+    let node = Sandbox::start(p.join("node"), NETWORK);
+    let pic = p.join("in.png");
+    picture(&pic, 8, 8);
+    assert_eq!(
+        node.control(&["load-source", "src", pic.to_str().unwrap()])["ok"],
+        true
+    );
+    // Paused: the export waits in the queue.
+    node.control(&["pause"]);
+    let out = p.join("out.png");
+    let asked = node.control(&[
+        "export",
+        "exp",
+        "--format",
+        "png",
+        "--to",
+        out.to_str().unwrap(),
+    ]);
+    assert_eq!(asked["ok"], true, "{asked}");
+    let started = node.inspect(&["wait-event", "job.started"]);
+    let id = started["event"]["payload"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(id.starts_with("export-"), "{started}");
+    let cancel = node.control(&["job-cancel", &id]);
+    assert_eq!(cancel["ok"], true, "{cancel}");
+    node.control(&["resume"]);
+    assert_eq!(node.inspect(&["wait-idle"])["ok"], true);
+    let ends: Vec<Value> = job_events(&node)
+        .into_iter()
+        .filter(|e| e["payload"]["id"] == id.as_str())
+        .map(|e| e["kind"].clone())
+        .collect();
+    assert_eq!(ends.first(), Some(&json!("job.started")), "{ends:?}");
+    assert!(ends.contains(&json!("job.cancelling")), "{ends:?}");
+    assert_eq!(ends.last(), Some(&json!("job.cancelled")), "{ends:?}");
+    assert!(!out.exists(), "a cancelled export writes nothing");
+}
+
 /// darktable's public test raws (`HELIOS_TEST_IMAGES`, else a darktable
 /// checkout next to this repository).
 fn test_images() -> Option<PathBuf> {
