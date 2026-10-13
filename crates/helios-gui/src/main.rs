@@ -90,6 +90,13 @@ fn who(origin: &helios_shell::commands::Origin) -> String {
     }
 }
 
+/// The time in seconds since the epoch, as the vault's link counts it.
+fn seconds_f64() -> f64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0.0, |d| d.as_secs_f64())
+}
+
 fn seconds() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -361,7 +368,15 @@ impl App {
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         if ui.ctx().input(|i| i.viewport().close_requested()) {
+            // The window closes after this frame: nothing to draw (work
+            // waiting for a frame, thumbnails or tiles, would hold the
+            // window up), only what the user changed to write.
             quit::requested();
+            if let Some(persist) = &mut self.persist {
+                persist.frame(&mut self.shell, seconds_f64());
+                quit::mark("vault written (closing frame)");
+            }
+            return;
         }
         self.shell.ui(ui);
         // The GPU path is installed by now: the image's own surface
@@ -380,11 +395,7 @@ impl eframe::App for App {
             warn(&format!("cannot fill the library: {e}"));
         }
         if let Some(persist) = &mut self.persist {
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map_or(0.0, |d| d.as_secs_f64());
-            persist.frame(&mut self.shell, now);
-            quit::mark("vault written (last frame)");
+            persist.frame(&mut self.shell, seconds_f64());
             // While a gesture goes on, come back to save it in time.
             if self.shell.values.lock().is_ok_and(|v| v.uncommitted()) {
                 ui.ctx()
@@ -545,6 +556,9 @@ fn main() -> Result<(), String> {
         )),
         None => None,
     };
+    // Held here, the vault outlives the window: it closes once the
+    // window is gone (see `helios_gui::quit`).
+    let vault = persist.as_ref().map(|p| p.vault().clone());
     // The template the workspace was made from, if it was.
     let template = match helios_gui::templates::workspace_template(
         &helios_gui::shell::config_dir(),
@@ -627,5 +641,13 @@ fn main() -> Result<(), String> {
         })
         .map_err(|e| e.to_string());
     quit::mark("window closed (eframe returned)");
+    // The window is gone: what is left runs against its deadline.
+    let mut finisher = quit::Finisher::default();
+    if let Some(vault) = vault {
+        finisher.spawn("vault closed", quit::VAULT_DEADLINE, move || drop(vault));
+    }
+    for left in finisher.finish() {
+        warn(&format!("quit: {left} was left unfinished"));
+    }
     ran
 }
