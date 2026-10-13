@@ -21,12 +21,15 @@
 //!   `tools/bench/Benchfile` on the bench box, its results fetched to
 //!   `target/bench-remote/<id>/`; exit 75 when the box cannot serve it
 //!   (see `remote.rs` and docs/bench.md).
+//! - `affected [BASE] [--filter | --critical]`: the crates, tests and box
+//!   jobs a change since BASE touches (see `affected.rs`).
 //!
 //! A fragment is a file in `changelog.d/`, written in the same commit as the
 //! change it describes: a first line `kind: <kind>`, then one to three
 //! sentences saying what changes for a user and why it matters. See
 //! CONTRIBUTING.md.
 
+mod affected;
 mod bench;
 mod commits;
 mod i18n;
@@ -399,7 +402,7 @@ fn fail(problems: &[String]) -> ExitCode {
     ExitCode::from(1)
 }
 
-const USAGE: &str = "usage: cargo xtask changelog | release [--date YYYY-MM-DD] | check [--base REF] | lint [--fix] [--require-all] | test-times [--profile P] [--top N] [--from-junit FILE [--summary]] | check-commits [BASE..HEAD | BASE] | bench masks [--modules N] [--budget MIB] | bench-remote <job> [key=value...] [--push] | i18n extract | i18n check | i18n stamp LOCALE [--all]";
+const USAGE: &str = "usage: cargo xtask changelog | release [--date YYYY-MM-DD] | check [--base REF] | lint [--fix] [--require-all] | test-times [--profile P] [--top N] [--from-junit FILE [--summary]] | check-commits [BASE..HEAD | BASE] | bench masks [--modules N] [--budget MIB] | bench-remote <job> [key=value...] [--push] | affected [BASE] [--filter | --critical] | i18n extract | i18n check | i18n stamp LOCALE [--all]";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -502,6 +505,10 @@ fn main() -> ExitCode {
         }),
         ["bench-remote", rest @ ..] => remote::run(&root, rest).unwrap_or_else(|| {
             eprintln!("usage: cargo xtask {}", remote::USAGE);
+            ExitCode::from(2)
+        }),
+        ["affected", rest @ ..] => affected::run(&root, rest).unwrap_or_else(|| {
+            eprintln!("usage: cargo xtask {}", affected::USAGE);
             ExitCode::from(2)
         }),
         ["i18n", rest @ ..] => i18n::run(&root, rest).unwrap_or_else(|| {
