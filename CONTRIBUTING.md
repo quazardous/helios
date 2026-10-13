@@ -119,15 +119,23 @@ Before pushing a series of commits, agents included, check each one:
 ```bash
 cargo xtask check-commits                 # @{upstream}..HEAD, else origin/main..HEAD
 cargo xtask check-commits HEAD~3..HEAD    # a given range
+cargo xtask check-commits --full          # every fast test on every commit
 ```
 
 Every commit of the range but the last (run the full gate on that one)
 is checked out in a temporary worktree under `target/` and goes through
-`cargo check --workspace --all-targets`, the fast tests (nextest without
-the parity tests, the headless GUI tests and the masks stress test) and
-`cargo xtask check`. The walk stops at the first broken commit and names
-it. It is capped at the 20 newest commits; the older ones are listed as
-skipped. CI runs the same walk on each push and pull request.
+`cargo build --workspace --all-targets`, clippy with `-D warnings`, the
+tests that commit touches and `cargo xtask check`. The tests are chosen
+as `cargo xtask affected` chooses them, from the commit's own diff
+against its parent: the fast tests (nextest without the parity tests,
+the headless GUI tests and the masks stress test) of the crates it
+changes and of their dependents, plus the critical set. A commit that
+changes `Cargo.lock`, xtask, CI or another path that runs everything
+runs every fast test and the critical set; `--full` runs every fast test
+on every commit. The walk stops at the first broken commit and names it,
+and the report says, per commit, what ran and why. It is capped at the
+20 newest commits; the older ones are listed as skipped. CI runs the
+same walk on each push and pull request.
 
 ## Changelog
 

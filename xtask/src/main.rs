@@ -15,8 +15,9 @@
 //! - `test-times [--profile P] [--top N]`: run the tests under
 //!   cargo-nextest, record their durations and show the slowest and the
 //!   ones getting slower (see `test_times.rs`).
-//! - `check-commits [RANGE]`: every commit of a series, but its head,
-//!   builds and passes the fast tests and `check` (see `commits.rs`).
+//! - `check-commits [--full] [RANGE]`: every commit of a series, but its
+//!   head, builds, passes clippy, the tests it touches (every fast test
+//!   with `--full`) and `check` (see `commits.rs`).
 //! - `bench-remote <job> [key=value...] [--push]`: a job of
 //!   `tools/bench/Benchfile` on the bench box, its results fetched to
 //!   `target/bench-remote/<id>/`; exit 75 when the box cannot serve it
@@ -403,7 +404,7 @@ fn fail(problems: &[String]) -> ExitCode {
     ExitCode::from(1)
 }
 
-const USAGE: &str = "usage: cargo xtask changelog | release [--date YYYY-MM-DD] | check [--base REF] | lint [--fix] [--require-all] | test-times [--profile P] [--top N] [--from-junit FILE [--summary]] | check-commits [BASE..HEAD | BASE] | bench masks [--modules N] [--budget MIB] | bench-remote <job> [key=value...] [--push] | bench-remote --affected [base=REF] [key=value...] [--push] | affected [BASE] [--filter | --critical] | i18n extract | i18n check | i18n stamp LOCALE [--all]";
+const USAGE: &str = "usage: cargo xtask changelog | release [--date YYYY-MM-DD] | check [--base REF] | lint [--fix] [--require-all] | test-times [--profile P] [--top N] [--from-junit FILE [--summary]] | check-commits [--full] [BASE..HEAD | BASE] | bench masks [--modules N] [--budget MIB] | bench-remote <job> [key=value...] [--push] | bench-remote --affected [base=REF] [key=value...] [--push] | affected [BASE] [--filter | --critical] | i18n extract | i18n check | i18n stamp LOCALE [--all]";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();

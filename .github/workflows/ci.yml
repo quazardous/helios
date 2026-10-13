@@ -63,9 +63,10 @@ jobs:
           fi
 
   # Every commit of the push or pull request but its head (the test job
-  # gates the head) builds and passes the fast tests, so bisecting keeps
-  # working: `cargo xtask check-commits`, capped at 20 commits, stops at the
-  # first broken one and names it in the job summary.
+  # gates the head) builds, passes clippy and the tests it touches (the
+  # critical set included), so bisecting keeps working:
+  # `cargo xtask check-commits`, capped at 20 commits, stops at the first
+  # broken one and names it in the job summary, with what each commit ran.
   commits:
     runs-on: ubuntu-latest
     steps:
@@ -73,6 +74,12 @@ jobs:
         with:
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@1.95
+        with:
+          components: clippy
+      # The critical set runs desktop tests (persist, survival): the same
+      # software Vulkan as the test job, so they see the same machine.
+      - name: software Vulkan
+        run: sudo apt-get update -q && sudo apt-get install -yq mesa-vulkan-drivers
       # The test job saves this cache; this job only reads it.
       - uses: Swatinem/rust-cache@v2
         with:
