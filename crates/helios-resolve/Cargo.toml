@@ -7,6 +7,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+helios-ai.workspace = true
 helios-core.workspace = true
 helios-decision.workspace = true
 helios-export.workspace = true
@@ -14,8 +15,7 @@ helios-export.workspace = true
 helios-module-masks = { path = "../../modules/masks" }
 serde.workspace = true
 serde_json.workspace = true
-# MIT OR Apache-2.0: an HTTP client (rustls), and base64 for images.
-ureq = { version = "3", features = ["json"] }
+# MIT OR Apache-2.0: base64 for images.
 base64 = "0.22"
 
 [lints]

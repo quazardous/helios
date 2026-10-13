@@ -21,8 +21,11 @@
 //! [`http::Http`] (an OpenAI-compatible or Anthropic vision endpoint, its
 //! key read from the environment, or an endpoint speaking the command's
 //! JSON). [`Routed`] picks one by the name a decision's question gives
-//! (its `resolver` parameter). None is configured by default: Helios ships
-//! no model and calls no network on its own.
+//! (its `resolver` parameter); given the AI service ([`Routed::through`]),
+//! it answers the rest through the AI routing map ([`model::ThroughAi`]):
+//! a capability's name (`segmentation`) picks that capability's route, no
+//! name the `vision` one. None is configured by default: Helios ships no
+//! model and calls no network on its own.
 //!
 //! **A decision with a question** (see `helios_core::Module::question`)
 //! sends it with the request ([`Request::question`]): an AI object mask's
@@ -43,6 +46,7 @@
 
 pub mod command;
 pub mod http;
+pub mod model;
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::mpsc;
@@ -217,11 +221,16 @@ impl Resolver for Scripted {
 }
 
 /// Picks a resolver by the name a decision's question gives (its
-/// `resolver` parameter), the default one when it names none.
+/// `resolver` parameter), the default one when it names none. Given the AI
+/// service, a request its resolvers do not cover goes through the AI
+/// routing map: one naming a capability to that capability's route, one
+/// naming none (with no default) to the `vision` route, or `segmentation`
+/// for a mask.
 #[derive(Default)]
 pub struct Routed {
     default: Option<Arc<dyn Resolver>>,
     named: BTreeMap<String, Arc<dyn Resolver>>,
+    ai: Option<Arc<helios_ai::Ai>>,
 }
 
 impl Routed {
@@ -240,19 +249,34 @@ impl Routed {
         self.named.insert(name.into(), resolver);
         self
     }
+
+    /// Answers what the resolvers above do not cover through the AI
+    /// service's routing map.
+    pub fn through(mut self, ai: Arc<helios_ai::Ai>) -> Self {
+        self.ai = Some(ai);
+        self
+    }
 }
 
 impl Resolver for Routed {
     fn resolve(&self, request: &Request) -> Result<Resolution, String> {
         let name = request.asked("resolver");
-        let resolver = if name.is_empty() {
-            self.default.as_ref().ok_or("no resolver is configured")?
-        } else {
-            self.named
-                .get(name)
-                .ok_or_else(|| format!("no resolver named `{name}`"))?
-        };
-        resolver.resolve(request)
+        if name.is_empty() {
+            if let Some(resolver) = &self.default {
+                return resolver.resolve(request);
+            }
+            let ai = self.ai.as_ref().ok_or("no resolver is configured")?;
+            return model::ThroughAi::new(ai.clone(), None).resolve(request);
+        }
+        if let Some(resolver) = self.named.get(name) {
+            return resolver.resolve(request);
+        }
+        match (&self.ai, helios_ai::Capability::parse(name)) {
+            (Some(ai), Some(capability)) => {
+                model::ThroughAi::new(ai.clone(), Some(capability)).resolve(request)
+            }
+            _ => Err(format!("no resolver named `{name}`")),
+        }
     }
 }
 

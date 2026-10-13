@@ -16,16 +16,24 @@
 //! inline (`png_base64`) is posted as it is, and the reply is the
 //! command's answer, its mask inline too (see [`crate::command`]). A
 //! segmentation model behind a small local server fits there.
+//!
+//! The chat endpoints are `helios-ai`'s providers, given the endpoint
+//! whole (see [`crate::model::chat_resolution`]): the same wire formats
+//! serve decisions and the AI service.
 
+use std::sync::Arc;
 use std::time::Duration;
 
-use base64::Engine as _;
-use base64::engine::general_purpose::STANDARD;
+use helios_ai::anthropic::Anthropic;
+use helios_ai::openai::OpenAiCompat;
+use helios_ai::provider::{ModelProvider, ProviderConfig, ProviderKind};
+use helios_ai::secrets::{KeySource, MemorySecrets};
+use helios_ai::transport::{HttpCall, Ureq, send_json};
 use helios_core::{ParamKind, ParamSpec};
-use helios_export::{Format, encode};
-use serde_json::{Value, json};
+use serde_json::Value;
 
 use crate::command::{request_inline, resolution_json};
+use crate::model::chat_resolution;
 use crate::{Request, Resolution, Resolver};
 
 /// Which protocol the endpoint speaks.
@@ -129,44 +137,38 @@ pub fn prompt(request: &Request) -> String {
     )
 }
 
-/// The JSON object in a model's text, fenced in a code block or not.
-fn json_in(text: &str) -> Result<Value, String> {
-    let start = text.find('{').ok_or("the model's reply holds no JSON")?;
-    let end = text.rfind('}').ok_or("the model's reply holds no JSON")?;
-    serde_json::from_str(&text[start..=end]).map_err(|e| format!("the model's JSON: {e}"))
-}
-
 impl Http {
-    /// Posts `body`, returns the reply's JSON.
+    /// Posts `body` to a `helios` endpoint, returns the reply's JSON.
     fn post(&self, body: &Value) -> Result<Value, String> {
-        let agent: ureq::Agent = ureq::Agent::config_builder()
-            .timeout_global(Some(self.timeout))
-            .http_status_as_error(false)
-            .build()
-            .into();
-        let mut call = agent.post(&self.url);
-        match (self.api, self.key()?) {
-            (Api::OpenAi | Api::Helios, Some(key)) => {
-                call = call.header("Authorization", format!("Bearer {key}"));
-            }
-            (Api::Anthropic, Some(key)) => call = call.header("x-api-key", key),
-            (_, None) => {}
+        let mut call = HttpCall::post(&self.url, body.clone(), self.timeout);
+        if let Some(key) = self.key()? {
+            call = call.header("Authorization", format!("Bearer {key}"));
         }
-        if self.api == Api::Anthropic {
-            call = call.header("anthropic-version", "2023-06-01");
+        send_json(&Ureq, &call)
+    }
+
+    /// The chat provider this endpoint is, through `helios-ai`.
+    fn provider(&self) -> Box<dyn ModelProvider> {
+        let kind = if self.api == Api::Anthropic {
+            ProviderKind::Anthropic
+        } else {
+            ProviderKind::OpenAi
+        };
+        let mut entry = ProviderConfig::new("http", kind);
+        entry.url = Some(self.url.clone());
+        entry.key = self.key_env.clone().map(KeySource::Env);
+        entry.timeout = Some(self.timeout.as_secs());
+        let transport = Arc::new(Ureq);
+        // The key comes from the environment, never from a keyring here.
+        let secrets = Arc::new(MemorySecrets::default());
+        match kind {
+            ProviderKind::Anthropic => Box::new(
+                Anthropic::new(&entry, &self.url, transport, secrets).with_messages_url(&self.url),
+            ),
+            _ => Box::new(
+                OpenAiCompat::new(&entry, &self.url, transport, secrets).with_chat_url(&self.url),
+            ),
         }
-        let mut response = call
-            .send_json(body)
-            .map_err(|e| format!("{}: {e}", self.url))?;
-        let status = response.status().as_u16();
-        let reply = response
-            .body_mut()
-            .read_to_string()
-            .map_err(|e| format!("{}: {e}", self.url))?;
-        if !(200..300).contains(&status) {
-            return Err(format!("{} answered {status}: {}", self.url, reply.trim()));
-        }
-        serde_json::from_str(&reply).map_err(|e| format!("{}: {e}", self.url))
     }
 }
 
@@ -182,56 +184,6 @@ impl Resolver for Http {
                 self.url
             ));
         }
-        let images = request
-            .inputs
-            .iter()
-            .map(|i| encode(&i.image, &Format::Png { bits: 8 }).map(|png| STANDARD.encode(png)))
-            .collect::<Result<Vec<_>, _>>()?;
-        let text = prompt(request);
-        let body = match self.api {
-            Api::OpenAi => {
-                let mut content = vec![json!({"type": "text", "text": text})];
-                for b64 in &images {
-                    content.push(json!({
-                        "type": "image_url",
-                        "image_url": {"url": format!("data:image/png;base64,{b64}")}
-                    }));
-                }
-                json!({
-                    "model": self.model,
-                    "messages": [{"role": "user", "content": content}],
-                    "response_format": {"type": "json_object"}
-                })
-            }
-            Api::Anthropic | Api::Helios => {
-                let mut content: Vec<Value> = images
-                    .iter()
-                    .map(|b64| {
-                        json!({"type": "image", "source":
-                            {"type": "base64", "media_type": "image/png", "data": b64}})
-                    })
-                    .collect();
-                content.push(json!({"type": "text", "text": text}));
-                json!({
-                    "model": self.model,
-                    "max_tokens": 1024,
-                    "messages": [{"role": "user", "content": content}]
-                })
-            }
-        };
-        let reply = self.post(&body)?;
-        let said = match self.api {
-            Api::OpenAi => reply.pointer("/choices/0/message/content"),
-            Api::Anthropic | Api::Helios => reply.pointer("/content/0/text"),
-        }
-        .and_then(Value::as_str)
-        .ok_or("the reply holds no message text")?;
-        let mut answer = json_in(said)?;
-        // The model is the one configured; its name is not the model's to give.
-        answer["model"] = json!({"name": self.model, "version": reply
-            .get("model")
-            .and_then(Value::as_str)
-            .unwrap_or("")});
-        resolution_json(request, &answer)
+        chat_resolution(self.provider().as_ref(), &self.model, request)
     }
 }

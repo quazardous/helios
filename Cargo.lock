@@ -2256,13 +2256,13 @@ name = "helios-resolve"
 version = "0.0.1"
 dependencies = [
  "base64 0.22.1",
+ "helios-ai",
  "helios-core",
  "helios-decision",
  "helios-export",
  "helios-module-masks",
  "serde",
  "serde_json",
- "ureq",
 ]
 
 [[package]]
