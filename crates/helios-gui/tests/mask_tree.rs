@@ -791,3 +791,68 @@ fn an_empty_mask_says_the_module_applies_everywhere() {
             .any(|_| true)
     );
 }
+
+fn dialog(h: &mut Harness<'_, Shell>) -> serde_json::Value {
+    h.state_mut()
+        .run("dialog.current", json!(null), Origin::User)
+        .unwrap()
+}
+
+#[test]
+fn taking_out_a_group_that_holds_members_is_asked_first() {
+    let mut h = harness();
+    // Delete on the inner group, which holds the dot: asked, nothing
+    // taken out meanwhile.
+    click_row(&mut h, "inner — minimum");
+    h.key_press(Key::Delete);
+    for _ in 0..3 {
+        h.step();
+    }
+    let asked = dialog(&mut h);
+    assert_eq!(asked["kind"], json!("confirm"), "{asked}");
+    assert_eq!(asked["verb"], json!("Take out"));
+    assert_eq!(wired(&h, "mask"), ["inner", "spot", "oval"]);
+    // Cancelled: still there.
+    h.state_mut()
+        .run("dialog.answer", json!({ "answer": "cancel" }), Origin::User)
+        .unwrap();
+    for _ in 0..3 {
+        h.step();
+    }
+    assert_eq!(wired(&h, "mask"), ["inner", "spot", "oval"]);
+    // The row's menu asks too; answered yes, the group goes.
+    let at = row(&h, "inner — minimum").center();
+    right_click(&mut h, at);
+    h.get_by_label("Take out of the mask").click();
+    for _ in 0..3 {
+        h.step();
+    }
+    assert_eq!(wired(&h, "mask"), ["inner", "spot", "oval"]);
+    h.state_mut()
+        .run(
+            "dialog.answer",
+            json!({ "answer": "primary" }),
+            Origin::User,
+        )
+        .unwrap();
+    for _ in 0..3 {
+        h.step();
+    }
+    assert_eq!(wired(&h, "mask"), ["spot", "oval"]);
+    // A shape goes unasked, and so does a group for an agent.
+    run(&mut h, "mask.member.delete", json!({ "member": "spot" }));
+    assert_eq!(wired(&h, "mask"), ["oval"]);
+    assert_eq!(dialog(&mut h), json!(null));
+    let mut h = harness();
+    h.state_mut()
+        .run(
+            "mask.member.delete",
+            json!({ "member": "inner" }),
+            Origin::Agent("a1".into()),
+        )
+        .unwrap();
+    for _ in 0..3 {
+        h.step();
+    }
+    assert_eq!(wired(&h, "mask"), ["spot", "oval"]);
+}

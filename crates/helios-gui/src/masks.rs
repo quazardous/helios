@@ -674,8 +674,13 @@ pub enum Command {
         index: Option<usize>,
     },
     /// Take a member (the selected one by default) out of the mask:
-    /// rewiring, not an undo step.
-    MemberDelete { member: Option<String> },
+    /// rewiring, not an undo step. A person taking out a group that
+    /// holds members is asked first, unless `confirmed` (see
+    /// [`crate::mask_tree::confirm_take_out`]).
+    MemberDelete {
+        member: Option<String>,
+        confirmed: bool,
+    },
     /// Invert a member (the selected one by default), or back; one undo
     /// step.
     MemberInvert { member: Option<String> },

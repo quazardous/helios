@@ -2212,7 +2212,11 @@ impl Shell {
             ),
             Box::new(move |a, origin| {
                 Ok(Action::Mask(
-                    Command::MemberDelete { member: member(a) },
+                    Command::MemberDelete {
+                        member: member(a),
+                        // Answered yes: a group with members goes unasked.
+                        confirmed: a.get("confirmed").and_then(Value::as_bool) == Some(true),
+                    },
                     origin.clone(),
                 ))
             }),
@@ -3171,6 +3175,34 @@ impl Shell {
                 .map_err(|e| format!("vault.stack.toggle: {e}"))?,
             Action::Zoom(z) => self.viewport.borrow_mut().zoom(z, &self.values),
             Action::Mask(command, origin) => {
+                // A person taking out a group that holds members (the
+                // row's menu, the palette, a key) is asked first; agents
+                // and scripts are not.
+                if let crate::masks::Command::MemberDelete {
+                    member,
+                    confirmed: false,
+                } = &command
+                    && origin == Origin::User
+                {
+                    let ask = {
+                        let store = lock(&self.values);
+                        let viewport = self.viewport.borrow();
+                        viewport.graph().and_then(|g| {
+                            let net = crate::mask_tree::network(g, &store, member.as_deref());
+                            let key = crate::mask_tree::member_or_selected(
+                                &net,
+                                &store,
+                                member.as_deref(),
+                            )
+                            .ok()?;
+                            crate::mask_tree::confirm_take_out(ctx, &net, &key)
+                        })
+                    };
+                    if let Some(ask) = ask {
+                        self.confirm(ask);
+                        return Ok(json!({ "asked": true }));
+                    }
+                }
                 let mut store = lock(&self.values);
                 return self.viewport.borrow_mut().mask(command, origin, &mut store);
             }

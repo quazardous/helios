@@ -415,7 +415,7 @@ impl Viewport {
         use serde_json::json;
         let named = match &command {
             Command::MemberMove { member, .. }
-            | Command::MemberDelete { member }
+            | Command::MemberDelete { member, .. }
             | Command::MemberInvert { member }
             | Command::MemberOpacity { member, .. }
             | Command::MemberRename { member, .. }

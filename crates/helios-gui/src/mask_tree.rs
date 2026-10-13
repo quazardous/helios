@@ -39,7 +39,7 @@ use helios_shell::commands::Origin;
 use helios_values::{Change, Descriptor, Set, Store, node_path};
 use serde_json::Value as Json;
 
-use crate::dialogs::{Level, MenuItem, Request, request};
+use crate::dialogs::{Confirm, Level, MenuItem, Request, request};
 use crate::masks::{self, Command};
 
 /// The panel's id.
@@ -930,6 +930,34 @@ pub fn remove_member(graph: &mut Graph, net: &Network, member: &str) -> Result<N
     Ok(from)
 }
 
+/// What a person is asked before taking a member out: nothing for a
+/// shape or an empty group, a confirmation for a group that holds members,
+/// which go with it while taking out is not an undo step. Its primary
+/// action runs `mask.member.delete` again, `confirmed`.
+pub fn confirm_take_out(ctx: &egui::Context, net: &Network, member: &str) -> Option<Confirm> {
+    let item = net.items.get(member)?;
+    let holds = net.children.get(member).is_some_and(|c| !c.is_empty());
+    if !item.is_group() || item.group.is_none() || !holds {
+        return None;
+    }
+    let tr = |m: Message| crate::i18n::text(ctx, m);
+    Some(Confirm {
+        title: tr(Message::new(
+            "gui-masks-take-out-group",
+            "Take the group { $name } out of the mask?",
+        )
+        .with("name", item.name())),
+        detail: tr(Message::new(
+            "gui-masks-take-out-group-detail",
+            "Its members go with it, and taking out is not an undo step yet.",
+        )),
+        verb: tr(Message::new("gui-masks-take-out-verb", "Take out")),
+        danger: true,
+        command: "mask.member.delete".into(),
+        args: serde_json::json!({ "member": member, "confirmed": true }),
+    })
+}
+
 /// Writes values as one undo step.
 fn write_step(
     store: &mut Store,
@@ -1270,7 +1298,10 @@ impl MaskTree {
                     )))
                     .clicked()
                 {
-                    commands.push(Command::MemberDelete { member: None });
+                    commands.push(Command::MemberDelete {
+                        member: None,
+                        confirmed: false,
+                    });
                 }
             });
             let add = ui
@@ -1300,7 +1331,10 @@ impl MaskTree {
             && current.as_ref().is_some_and(|c| c.group.is_some())
             && ui.input(|i| i.key_pressed(egui::Key::Delete))
         {
-            commands.push(Command::MemberDelete { member: None });
+            commands.push(Command::MemberDelete {
+                member: None,
+                confirmed: false,
+            });
         }
         // A rename asked for by a command starts from the node's name.
         if let Some(key) = self.rename.take()
@@ -1367,6 +1401,17 @@ impl MaskTree {
             }
         }
         for c in commands {
+            // A group that holds members is not taken out without asking.
+            if let Command::MemberDelete {
+                member,
+                confirmed: false,
+            } = &c
+                && let Ok(key) = member_or_selected(&net, &store, member.as_deref())
+                && let Some(ask) = confirm_take_out(ui.ctx(), &net, &key)
+            {
+                request(ui.ctx(), Request::Confirm(ask));
+                continue;
+            }
             if let Err(e) = viewport.borrow_mut().mask(c, Origin::User, &mut store) {
                 request(ui.ctx(), Request::Notify(Level::Warning, e.into()));
             }

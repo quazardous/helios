@@ -763,6 +763,10 @@ selected module's mask network as a tree, on egui-pop's `TreeView`
   refused, no path point added, removed or smoothed), and keeps a group's members where they are. Take out (a button)
   or Delete (with the tree focused) takes the selected member out of
   its group; a right click only opens the row's menu, never deletes.
+  A group that holds members is taken out only once a person confirms
+  (a danger dialog, its members going with it while taking out is not an
+  undo step); agents and the confirmed command
+  (`mask.member.delete` with `confirmed: true`) are not asked.
   The buttons and the line naming the mask say their keys and gestures
   when hovered (F2, Delete, drag and drop, `C`, `E`, `G`, `P` on the
   image), in the interface's language. A member dragged

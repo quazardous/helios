@@ -203,7 +203,13 @@ gui-masks-show = Show { $name }: its opacity full
 
 gui-masks-take-out = Take out
 
+gui-masks-take-out-group = Take the group { $name } out of the mask?
+
+gui-masks-take-out-group-detail = Its members go with it, and taking out is not an undo step yet.
+
 gui-masks-take-out-hint = Take the selected member out of the mask (Delete, the tree focused). Not an undo step yet.
+
+gui-masks-take-out-verb = Take out
 
 gui-masks-tree-hint = F2 renames the selected row. Drag a row to reorder it or into a group. Right-click a row for its menu: it never deletes anything.
 
