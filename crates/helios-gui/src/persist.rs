@@ -10,7 +10,8 @@
 //!   another process changed meanwhile shows too);
 //! - applies the vault's `vault.field_changed` events (from any writer in
 //!   this process sharing its bus) to the library;
-//! - saves the edit of the image shown ([`Persist::open_image`]) as a
+//! - saves the edit of the image shown ([`Persist::open_image`]), with
+//!   the labels and locks of its mask nodes (its `marks`), as a
 //!   version each time the value store commits a step: a write outside a
 //!   gesture, the end of a gesture (a drag is one step, saved once when
 //!   it ends), an undo, a redo. While a gesture goes on, what it changed
@@ -156,7 +157,13 @@ impl<S: Store> Persist<S> {
             })
             .collect();
         shell.set_view_source(graph, node, port)?;
-        let committed = shell.values.lock().expect("value store lock").committed();
+        let committed = {
+            let mut store = shell.values.lock().expect("value store lock");
+            // The labels and locks it was saved with; another image's go.
+            let marks = head.as_ref().map_or(&Value::Null, |h| &h.edit["marks"]);
+            crate::mask_tree::restore_marks(&mut store, marks);
+            store.committed()
+        };
         self.editing = Some(Editing {
             session,
             modules,
@@ -216,11 +223,17 @@ impl<S: Store> Persist<S> {
                         .set(param, entry.value.clone());
                 }
             }
+            let mut current = edit::from_modules(&modules);
+            // The Masks panel's labels and locks, kept with the edit.
+            let marks = crate::mask_tree::marks(&store);
+            if !marks.is_empty() {
+                current["marks"] = Value::Object(marks);
+            }
             (
                 store.committed(),
                 store.last_committed().to_string(),
                 store.open_gesture().map(String::from),
-                edit::from_modules(&modules),
+                current,
             )
         };
         let saved = if committed == e.committed {

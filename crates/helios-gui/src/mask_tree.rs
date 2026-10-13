@@ -16,7 +16,8 @@
 //! - **Edits** are commands (`mask.member.*`, `mask.add.*`): a rename
 //!   (F2) is a label in the store (`label/<node>`), a lock a flag there
 //!   (`lock/<node>`), an inversion or an opacity the group's values, each
-//!   one undo step. A row's eye and lock, and its context menu, act on
+//!   one undo step. Labels and locks are saved with the image's edit, as
+//!   its `marks` ([`marks`], [`restore_marks`]). A row's eye and lock, and its context menu, act on
 //!   that row's member whatever is selected. Moving a member
 //!   (drag and drop) or deleting one rewires the network, which the store
 //!   does not hold: not an undo step, and a drop the network cannot take
@@ -138,6 +139,80 @@ pub fn lock_path(node: &str) -> String {
 /// out and whose shape is not edited; a group whose members stay.
 pub fn is_locked(store: &Store, node: &str) -> bool {
     store.get(&lock_path(node)).and_then(|e| e.value.as_bool()) == Some(true)
+}
+
+fn label_descriptor(node: &str) -> Descriptor {
+    Descriptor::text(&format!("label of {node}"), "")
+}
+
+fn lock_descriptor(node: &str) -> Descriptor {
+    Descriptor::bool(&format!("{node} locked"), false)
+}
+
+/// A node's marks in an edit's `marks`, made when missing.
+fn mark<'a>(
+    out: &'a mut serde_json::Map<String, Json>,
+    node: &str,
+) -> &'a mut serde_json::Map<String, Json> {
+    match out
+        .entry(node)
+        .or_insert_with(|| Json::Object(serde_json::Map::new()))
+    {
+        Json::Object(m) => m,
+        _ => unreachable!("a node's marks are an object"),
+    }
+}
+
+/// The labels and locks of the nodes, as an image's edit keeps them
+/// (its `marks`): `{ "<node>": { "label": "Face", "locked": true } }`,
+/// with only what a node was given (a label, a lock).
+pub fn marks(store: &Store) -> serde_json::Map<String, Json> {
+    let mut out = serde_json::Map::new();
+    for (path, e) in store.list("label/") {
+        if let (Some(node), Value::Text(t)) = (path.strip_prefix("label/"), &e.value)
+            && !t.trim().is_empty()
+        {
+            mark(&mut out, node).insert("label".into(), Json::from(t.as_str()));
+        }
+    }
+    for (path, e) in store.list("lock/") {
+        if let Some(node) = path.strip_prefix("lock/")
+            && e.value.as_bool() == Some(true)
+        {
+            mark(&mut out, node).insert("locked".into(), Json::Bool(true));
+        }
+    }
+    out
+}
+
+/// Gives the nodes the labels and locks of an edit's `marks` (see
+/// [`marks`]; null: none), every other node unnamed and unlocked. Outside
+/// the undo history: what an image opens with.
+pub fn restore_marks(store: &mut Store, marks: &Json) {
+    let held: Vec<String> = store
+        .list("label/")
+        .into_iter()
+        .chain(store.list("lock/"))
+        .map(|(p, _)| p.to_string())
+        .collect();
+    for path in held {
+        if let Some(d) = store.get(&path).map(|e| e.descriptor.clone()) {
+            let none = d.default.clone();
+            store.declare_with(&path, d, none);
+        }
+    }
+    for (node, m) in marks.as_object().into_iter().flatten() {
+        if let Some(label) = m.get("label").and_then(Json::as_str) {
+            store.declare_with(
+                &label_path(node),
+                label_descriptor(node),
+                Value::Text(label.into()),
+            );
+        }
+        if m.get("locked").and_then(Json::as_bool) == Some(true) {
+            store.declare_with(&lock_path(node), lock_descriptor(node), Value::Bool(true));
+        }
+    }
 }
 
 /// One node of the tree: a group or a member.
@@ -929,10 +1004,7 @@ pub fn rename(
     let item = net.item(member)?;
     let path = label_path(&item.node);
     if store.get(&path).is_none() {
-        store.declare(
-            &path,
-            Descriptor::text(&format!("label of {}", item.node), ""),
-        );
+        store.declare(&path, label_descriptor(&item.node));
     }
     let label = label.trim();
     write_step(
@@ -955,10 +1027,7 @@ pub fn set_locked(
     let item = net.item(member)?;
     let path = lock_path(&item.node);
     if store.get(&path).is_none() {
-        store.declare(
-            &path,
-            Descriptor::bool(&format!("{} locked", item.node), false),
-        );
+        store.declare(&path, lock_descriptor(&item.node));
     }
     let on = locked.unwrap_or(!item.locked);
     let label = format!("{} {}", if on { "lock" } else { "unlock" }, item.name());

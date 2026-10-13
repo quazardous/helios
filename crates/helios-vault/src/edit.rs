@@ -25,7 +25,11 @@
 //! The network's shape (its sources and connections) belongs to the
 //! surface; a version carries the parameters of its modules by name, and
 //! the decision book when there is one. An imported sidecar's version
-//! also carries its connections and its import report.
+//! also carries its connections and its import report. A surface may
+//! keep what the person said about its nodes as `marks` (the desktop's
+//! labels and locks of mask nodes: `{ "<node>": { "label": "Face",
+//! "locked": true } }`); a surface that does not use them carries them
+//! over to the versions it saves.
 //!
 //! Every save is announced on the vault's bus as `edit.saved`, with the
 //! session's step number: a test waits for that event, it never sleeps.

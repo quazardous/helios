@@ -403,3 +403,88 @@ fn ctrl_z_undoes_a_drag_as_a_version_redo_replays_it_and_a_drag_going_on_stops_i
     drop((h, persist));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// An exposure through a mask holding one circle, `spot`: the blend is
+/// what the viewport shows.
+fn masked_network() -> (helios_core::Graph, helios_core::NodeId) {
+    use helios_core::{ModuleRef, Params, Value as V};
+    use helios_module_masks::{MaskBlend, MaskCircle, MaskCombine};
+    let (mut g, exp) = network();
+    let src = g.find("source").unwrap();
+    let mask = g
+        .add_module("mask", ModuleRef::new(MaskCombine), &Params::new())
+        .unwrap();
+    let spot = g
+        .add_module(
+            "spot",
+            ModuleRef::new(MaskCircle),
+            &Params::new()
+                .with("x", V::Float(8.0))
+                .with("y", V::Float(4.0))
+                .with("radius", V::Float(3.0)),
+        )
+        .unwrap();
+    g.connect(spot, "mask", mask, "in0").unwrap();
+    let blend = g
+        .add_module("blend", ModuleRef::new(MaskBlend), &Params::new())
+        .unwrap();
+    g.connect(src, "image", blend, "input").unwrap();
+    g.connect(exp, "output", blend, "processed").unwrap();
+    g.connect(mask, "mask", blend, "mask").unwrap();
+    (g, blend)
+}
+
+#[test]
+fn mask_labels_and_locks_are_saved_with_the_edit() {
+    use helios_gui::mask_tree;
+    use helios_shell::commands::Origin;
+    let dir = scratch("marks");
+    let path = vault_file(&dir);
+    let mut shell = Shell::new(helios_panels(), None);
+    let mut persist = Persist::new(SqliteStore::open(&path).unwrap(), Arc::new(Bus::new()));
+    let (graph, blend) = masked_network();
+    persist
+        .open_image(&mut shell, id(1), graph, blend, "output")
+        .unwrap();
+    // The spot named and locked: two steps, saved with the edit.
+    {
+        let v = shell.viewport();
+        let mut store = shell.values.lock().unwrap();
+        let net = mask_tree::network(v.graph().unwrap(), &store, None);
+        mask_tree::rename(&mut store, &net, "spot", "Face", &Origin::User).unwrap();
+        mask_tree::set_locked(&mut store, &net, "spot", Some(true), &Origin::User).unwrap();
+    }
+    persist.frame(&mut shell, 1.0);
+    let heads = persist.vault().heads(&id(1)).unwrap();
+    assert_eq!(
+        heads[0].edit["marks"],
+        json!({ "spot": { "label": "Face", "locked": true } })
+    );
+    drop((shell, persist));
+
+    // Reopened: the spot has its label and its lock, not as undo steps.
+    let mut shell = Shell::new(helios_panels(), None);
+    let mut persist = Persist::new(SqliteStore::open(&path).unwrap(), Arc::new(Bus::new()));
+    let (graph, blend) = masked_network();
+    persist
+        .open_image(&mut shell, id(1), graph, blend, "output")
+        .unwrap();
+    {
+        let store = shell.values.lock().unwrap();
+        assert_eq!(mask_tree::label_of(&store, "spot").as_deref(), Some("Face"));
+        assert!(mask_tree::is_locked(&store, "spot"));
+        assert!(store.undo_steps().is_empty());
+    }
+    // Another image opened in this shell does not take them.
+    let (graph, blend) = masked_network();
+    persist
+        .open_image(&mut shell, id(2), graph, blend, "output")
+        .unwrap();
+    {
+        let store = shell.values.lock().unwrap();
+        assert_eq!(mask_tree::label_of(&store, "spot"), None);
+        assert!(!mask_tree::is_locked(&store, "spot"));
+    }
+    drop((shell, persist));
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -126,6 +126,9 @@ impl Describe for SharedGraph {
 struct NodeEdit {
     vault: helios_vault::Vault<helios_vault_sqlite::SqliteStore>,
     session: Mutex<helios_vault::EditSession>,
+    /// The head's `marks` (the desktop's labels and locks), which a node
+    /// does not change: carried over to each version it saves.
+    marks: Value,
 }
 
 fn unix_now() -> u64 {
@@ -164,6 +167,9 @@ fn open_edit(
     let vault = helios_vault::Vault::new(store).with_bus(bus.clone());
     let image = vault.import_file(file, unix_now())?;
     let (session, head) = helios_vault::EditSession::open(&vault, image, "control")?;
+    let marks = head
+        .as_ref()
+        .map_or(Value::Null, |h| h.edit["marks"].clone());
     if let Some(head) = head {
         for skipped in helios_vault::edit::apply_to_graph(graph, &head.edit)? {
             eprintln!("helios-node: the saved edit does not fit the network: {skipped}");
@@ -188,6 +194,7 @@ fn open_edit(
     Ok(NodeEdit {
         vault,
         session: Mutex::new(session),
+        marks,
     })
 }
 
@@ -226,11 +233,14 @@ impl Node {
             return Ok(None);
         };
         let mut session = edit.session.lock().expect("edit lock");
-        let value = {
+        let mut value = {
             let book = self.book.lock().expect("book lock");
             let graph = self.graph.0.read().expect("graph lock");
             edit_of(&graph, &book)
         };
+        if !edit.marks.is_null() {
+            value["marks"] = edit.marks.clone();
+        }
         session
             .save(&edit.vault, value, label, unix_now())
             .map(|saved| saved.map(|v| v.id.hex()))

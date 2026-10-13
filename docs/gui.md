@@ -600,7 +600,9 @@ selected module's mask network as a tree, on egui-pop's `TreeView`
   selected in the tree.
 - **Edits.** F2 renames a member in place: a label in the store
   (`label/<node>`), the node keeping its name, one undo step; the field
-  starts from the name, not from the row's decorations. Invert and
+  starts from the name, not from the row's decorations. Labels and
+  locks are saved with the image's edit (its `marks`) and come back
+  when it opens again. Invert and
   Opacity (the row of buttons) toggle the selected member's inversion
   and its opacity (none or full) in its group, one undo step each; for
   the root, the group's own. A row's context menu (`helios.masks.row`,
@@ -631,8 +633,7 @@ the value store does not hold: they are not undo steps and are not saved
 with the image's edit; an undo across them may give a group's opacities
 and inversions to the members now on those ports. A deleted member stays
 in the network, unconnected (the graph cannot remove a node yet), and
-the Parameters panel still lists it. Labels and locks are not saved with
-the edit either. A drawn shape's own opacity and inversion (its parameters) are
+the Parameters panel still lists it. A drawn shape's own opacity and inversion (its parameters) are
 not shown in the tree, only its group's for it.
 
 ![The Masks panel beside the image](gui/mask-tree-wbox.png)
