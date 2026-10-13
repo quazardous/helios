@@ -24,6 +24,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-10-13
+
+### Added
+
+- The Masks panel and the Scopes can float over the image as palettes:
+  float them from their tab, drag them by their header, dock them back on
+  a side, and hide them all with Tab. The Portrait retouch template opens
+  with the Scopes floating over the image.
+- A Navigator panel shows the whole image with a frame around the part in
+  view: drag the frame or click elsewhere to move the view, zoom from its
+  buttons or the wheel, double click to fit. It can dock in a side bar or
+  float over the image.
+- Ctrl+P opens quick open: type the name of a module of the image's
+  network, an image of the library or a recent workspace, and Enter goes
+  there. Every command stays in the command palette (Ctrl+Shift+P), with
+  its shortcut.
+
+### Changed
+
+- The histogram now measures the edited image as the pipeline outputs it,
+  shows when shadows or highlights clip, and moves the exposure when you
+  drag it, as in darktable: one undo step per drag, Escape to give it up.
+
 ## [0.4.0] - 2026-10-13
 
 ### Added
