@@ -89,10 +89,16 @@ whose images are jobs of their own.
   device's reference modules as items, its speeds as log lines, a device
   that failed as a failed item; cancelled between two modules.
 
-Not yet: the library import reports through `helios_core::job`, whose
-events name the job by a number (`job`) and its item `current`; egui-pop's
-jobs model needs `id` and `item`, so the import shows in the jobs centre
-once it reports through `helios_core::jobs`. `helios batch` runs as a client of a node and does not report a
+- **The library import** (`helios_library::import::import`, the
+  desktop's `library.import`, `helios import`): each file as an item, a
+  log line per file brought in, a file that failed as a failed item;
+  cancelled before its next file, a copy under way removed (see
+  [library.md](library.md)).
+
+`helios_core::jobs` is the only way a job reports: the older
+`helios_core::job`, whose events named a job by a number, is gone.
+
+Not yet: `helios batch` runs as a client of a node and does not report a
 batch job of its own (each of its exports reports on the node's bus);
 the desktop does not follow a node's bus, so work run in a node shows in
 the jobs centre only once the desktop relays it.
