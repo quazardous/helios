@@ -54,6 +54,16 @@ export-png-bits = le PNG a 8 ou 16 bits, pas { $bits }
 
 export-write-failed = impossible d’écrire { $path } : { $error }
 
+gui-param-default = { $path } · par défaut { $value }
+
+gui-param-held = { $label } : maintenu à { $value }
+
+gui-param-hint = Glisser ou flèches pour changer, la molette une fois le focus pris ou avec Alt (Maj : glissé plus fin, pas plus grands) ; double clic pour réinitialiser ; Entrée pour saisir une valeur
+
+gui-param-not-a-number = { $label } : « { $typed } » n’est pas un nombre
+
+gui-param-past-range = { $label } : au-delà de sa plage habituelle
+
 xmp-not-applied = { $count ->
     [one] { $count } élément d’historique sur { $items } non appliqué, conservé pour plus tard : { $groups }
    *[other] { $count } éléments d’historique sur { $items } non appliqués, conservés pour plus tard : { $groups }

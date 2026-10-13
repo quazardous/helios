@@ -55,6 +55,16 @@ export-png-bits = PNG has 8 or 16 bits, not { $bits }
 
 export-write-failed = cannot write { $path }: { $error }
 
+gui-param-default = { $path } · default { $value }
+
+gui-param-held = { $label }: held to { $value }
+
+gui-param-hint = Drag or arrows to change, the wheel once focused or with Alt (Shift: finer drag, coarser steps); double click resets; Enter types a value
+
+gui-param-not-a-number = { $label }: `{ $typed }` is not a number
+
+gui-param-past-range = { $label }: past its usual range
+
 xmp-not-applied = { $count } of { $items } history items not applied, kept for later: { $groups }
 
 xmp-not-applied-group = { $labels } ({ $reason })

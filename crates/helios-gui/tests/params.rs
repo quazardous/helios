@@ -68,6 +68,34 @@ fn widgets_come_from_descriptors_and_are_found_by_path() {
     h.get_by_role_and_label(egui::accesskit::Role::Slider, "exposure");
 }
 
+/// Values are written in the interface's language: French puts a comma
+/// and a narrow space before `%`; an exposure is signed.
+#[test]
+fn values_are_written_in_the_interface_language() {
+    use egui::accesskit::Role;
+
+    let mut h = harness();
+    h.state_mut()
+        .run(
+            "param.set",
+            json!({ "path": EV, "value": 0.7 }),
+            Origin::User,
+        )
+        .unwrap();
+    h.run();
+    let read = |h: &egui_kittest::Harness<'_, Shell>, label: &str| {
+        h.get_by_role_and_label(Role::Slider, label).value()
+    };
+    assert_eq!(read(&h, "exposure").as_deref(), Some("+0.70 EV"));
+    assert_eq!(read(&h, "black").as_deref(), Some("0.00 %"));
+    let app = h.state().app().handle().clone();
+    egui_pop::i18n::plugin::set_language(&app, "fr").unwrap();
+    h.run();
+    h.run();
+    assert_eq!(read(&h, "exposure").as_deref(), Some("+0,70 EV"));
+    assert_eq!(read(&h, "black").as_deref(), Some("0,00\u{202f}%"));
+}
+
 #[test]
 fn a_drag_is_one_gesture_that_keeps_agents_off() {
     let mut h = harness();

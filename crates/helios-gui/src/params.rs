@@ -22,7 +22,7 @@ use std::collections::BTreeMap;
 use std::sync::Mutex;
 
 use egui::{Key, Modifiers, Sense, Ui, WidgetInfo, WidgetType};
-use helios_core::Value;
+use helios_core::{Message, Value};
 use helios_shell::commands::Origin;
 use helios_values::{Change, Descriptor, Entry, GestureId, Set, Store, Type};
 use serde_json::json;
@@ -66,20 +66,31 @@ pub fn parse_typed(text: &str) -> Option<f64> {
     t[..end].parse().ok()
 }
 
-/// A value as shown: display scale, precision, unit.
+/// A value as shown in English: display scale, precision, unit.
 pub fn shown(d: &Descriptor, v: &Value) -> String {
+    shown_in("en", d, v)
+}
+
+/// A value as shown in a language: display scale, precision with the
+/// language's decimal separator, unit. Exposures are signed (`+0.70 EV`),
+/// as darktable shows them.
+pub fn shown_in(locale: &str, d: &Descriptor, v: &Value) -> String {
+    let with_unit = |s: String| match d.unit.as_deref() {
+        Some("%") => {
+            let gap = egui_pop::i18n::format::separators(locale).percent;
+            format!("{s}{}%", if gap.is_empty() { " " } else { gap })
+        }
+        Some(u) => format!("{s} {u}"),
+        None => s,
+    };
     match v {
         Value::Float(x) => {
-            let s = format!("{:.*}", d.precision as usize, x * d.display_scale);
-            match &d.unit {
-                Some(u) => format!("{s} {u}"),
-                None => s,
-            }
+            let x = x * d.display_scale;
+            let s = crate::i18n::fixed(locale, x, d.precision as usize);
+            let signed = d.unit.as_deref() == Some("EV") && !s.starts_with('-') && x > 0.0;
+            with_unit(if signed { format!("+{s}") } else { s })
         }
-        Value::Int(x) => match &d.unit {
-            Some(u) => format!("{x} {u}"),
-            None => x.to_string(),
-        },
+        Value::Int(x) => with_unit(x.to_string()),
         Value::Bool(b) => if *b { "on" } else { "off" }.into(),
         Value::Choice(c) | Value::Text(c) => c.clone(),
         Value::List(l) => format!("{l:?}"),
@@ -226,7 +237,7 @@ impl Params {
                     }
                     (_, v) => {
                         ui.label(&d.label);
-                        ui.weak(shown(d, v))
+                        ui.weak(shown_in(&crate::i18n::locale(ui.ctx()), d, v))
                     }
                 };
                 crate::name_rect(ui.ctx(), &format!("param:{path}"), response.rect);
@@ -310,14 +321,25 @@ impl Params {
                     });
                     if let Some(a) = write(&mut s, path, change, None, force) {
                         let note = match (force, a.clamped) {
-                            (_, helios_values::Clamped::Hard) => {
-                                Some(format!("{}: held to {}", d.label, shown(d, &a.value)))
-                            }
-                            (true, _) => Some(format!("{}: past its usual range", d.label)),
+                            (_, helios_values::Clamped::Hard) => Some(
+                                Message::new("gui-param-held", "{ $label }: held to { $value }")
+                                    .with("label", &d.label)
+                                    .with(
+                                        "value",
+                                        shown_in(&crate::i18n::locale(ui.ctx()), d, &a.value),
+                                    ),
+                            ),
+                            (true, _) => Some(
+                                Message::new(
+                                    "gui-param-past-range",
+                                    "{ $label }: past its usual range",
+                                )
+                                .with("label", &d.label),
+                            ),
                             _ => None,
                         };
                         if let Some(n) = note {
-                            request(ui.ctx(), Request::Notify(Level::Info, n.into()));
+                            request(ui.ctx(), Request::Notify(Level::Info, n));
                         }
                     }
                 } else {
@@ -325,7 +347,12 @@ impl Params {
                         ui.ctx(),
                         Request::Notify(
                             Level::Warning,
-                            format!("{}: `{typed}` is not a number", d.label).into(),
+                            Message::new(
+                                "gui-param-not-a-number",
+                                "{ $label }: `{ $typed }` is not a number",
+                            )
+                            .with("label", &d.label)
+                            .with("typed", typed),
                         ),
                     );
                 }
@@ -393,7 +420,11 @@ impl Params {
             if ui.input(|i| i.key_pressed(Key::Enter)) {
                 self.typing = Some((
                     path.into(),
-                    format!("{:.*}", d.precision as usize, v * d.display_scale),
+                    crate::i18n::fixed(
+                        &crate::i18n::locale(ui.ctx()),
+                        v * d.display_scale,
+                        d.precision as usize,
+                    ),
                     true,
                 ));
             }
@@ -471,10 +502,12 @@ impl Params {
             font.clone(),
             text,
         );
+        let locale = crate::i18n::locale(ui.ctx());
+        let value_text = shown_in(&locale, d, &entry.value);
         painter.text(
             rect.right_center() - egui::vec2(6.0, 0.0),
             egui::Align2::RIGHT_CENTER,
-            shown(d, &entry.value),
+            &value_text,
             font,
             if outside { visuals.warn_fg_color } else { text },
         );
@@ -483,14 +516,27 @@ impl Params {
         response.widget_info(|| {
             let mut info = WidgetInfo::slider(enabled, v * d.display_scale, &label);
             info.typ = WidgetType::Slider;
+            // The value as read, in the interface's language.
+            info.current_text_value = Some(value_text.clone());
             info
         });
+        let ctx = ui.ctx().clone();
         response.on_hover_text(format!(
-            "{}\n{} · default {}\n{}",
+            "{}\n{}\n{}",
             if d.description.is_empty() { &d.label } else { &d.description },
-            path,
-            shown(d, &d.default),
-            "Drag or arrows to change, the wheel once focused or with Alt (Shift: finer drag, coarser steps); double click resets; Enter types a value"
+            crate::i18n::text(
+                &ctx,
+                Message::new("gui-param-default", "{ $path } · default { $value }")
+                    .with("path", path)
+                    .with("value", shown_in(&locale, d, &d.default)),
+            ),
+            crate::i18n::text(
+                &ctx,
+                Message::new(
+                    "gui-param-hint",
+                    "Drag or arrows to change, the wheel once focused or with Alt (Shift: finer drag, coarser steps); double click resets; Enter types a value",
+                ),
+            ),
         ))
     }
 
