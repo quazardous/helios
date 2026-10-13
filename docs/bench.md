@@ -106,7 +106,16 @@ ssh -i ~/.ssh/bench-helios bench-helios@<host> fetch <id> > r.tar
 ssh -t -i ~/.ssh/bench-helios bench-helios@<host> debug test branch=main   # a shell in the job's container
 ```
 
-After changing the Benchfile, upload it:
+After changing the Benchfile on a branch, upload it under that branch's
+name. Jobs run with `branch=<branch>` then use it, and every other branch
+keeps the default Benchfile:
+
+```bash
+ssh -i ~/.ssh/bench-helios bench-helios@<host> config benchfile <branch> < tools/bench/Benchfile
+```
+
+The default Benchfile is the one on `main`. Upload it, with no branch name,
+only from `main`, once the change is merged:
 
 ```bash
 ssh -i ~/.ssh/bench-helios bench-helios@<host> config benchfile < tools/bench/Benchfile
