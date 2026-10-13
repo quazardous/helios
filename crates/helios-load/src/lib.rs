@@ -35,6 +35,19 @@ pub struct Loaded {
     pub image: Image,
     /// For raw files: the camera and its sensor, as context.
     pub camera: Option<CameraInfo>,
+    /// For raw files: where the image sits on the sensor.
+    pub sensor: Option<Sensor>,
+}
+
+/// Where a raw's image sits on its sensor: the full photosite grid (what
+/// darktable's pipe starts from, and what its drawn masks are normalised
+/// to) and the corner of the crop the loader keeps.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub struct Sensor {
+    pub width: u32,
+    pub height: u32,
+    pub crop_x: u32,
+    pub crop_y: u32,
 }
 
 /// What kind of file a path is, by its extension.
@@ -67,17 +80,18 @@ fn read(path: &Path) -> Result<(String, Arc<Vec<u8>>), String> {
 pub fn load(path: &Path) -> Result<Loaded, String> {
     let (hash, bytes) = read(path)?;
     let named = |e: String| format!("{}: {e}", path.display());
-    let (image, camera) = match Kind::of(path) {
-        Kind::Picture => (picture(&bytes).map_err(named)?, None),
+    let (image, camera, sensor) = match Kind::of(path) {
+        Kind::Picture => (picture(&bytes).map_err(named)?, None, None),
         Kind::Raw => {
-            let (image, camera) = raw(bytes).map_err(named)?;
-            (image, Some(camera))
+            let (image, camera, sensor) = raw(bytes).map_err(named)?;
+            (image, Some(camera), Some(sensor))
         }
     };
     Ok(Loaded {
         hash,
         image,
         camera,
+        sensor,
     })
 }
 
@@ -241,7 +255,7 @@ fn camera(
     }
 }
 
-fn raw(bytes: Arc<Vec<u8>>) -> Result<(Image, CameraInfo), String> {
+fn raw(bytes: Arc<Vec<u8>>) -> Result<(Image, CameraInfo, Sensor), String> {
     let source = RawSource::new_from_shared_vec(bytes);
     let decoder = rawler::get_decoder(&source).map_err(|e| e.to_string())?;
     let params = RawDecodeParams::default();
@@ -295,5 +309,11 @@ fn raw(bytes: Arc<Vec<u8>>) -> Result<(Image, CameraInfo), String> {
     }
     let image = Image::new(Region::sized(w as u32, h as u32), 1, data);
     let camera = camera(&raw, meta.as_ref(), cfa, (x0, y0));
-    Ok((image, camera))
+    let sensor = Sensor {
+        width: raw.width as u32,
+        height: raw.height as u32,
+        crop_x: x0 as u32,
+        crop_y: y0 as u32,
+    };
+    Ok((image, camera, sensor))
 }
