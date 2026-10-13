@@ -2032,6 +2032,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "helios-library"
+version = "0.0.1"
+dependencies = [
+ "blake3",
+ "helios-core",
+ "helios-load",
+ "helios-vault",
+ "helios-xmp",
+ "image",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "helios-load"
 version = "0.0.1"
 dependencies = [

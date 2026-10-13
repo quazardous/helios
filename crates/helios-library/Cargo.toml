@@ -1,0 +1,22 @@
+[package]
+name = "helios-library"
+description = "Helios library operations: import from folders and cards (copied or referenced, renamed, duplicates found by content), near-duplicate signals"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+helios-core.workspace = true
+helios-load.workspace = true
+helios-vault.workspace = true
+helios-xmp.workspace = true
+blake3.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+[lints]
+workspace = true
