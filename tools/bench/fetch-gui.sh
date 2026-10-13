@@ -14,7 +14,10 @@ case "$host" in *@*) ;; *) host="bench-helios@$host" ;; esac
 key="${HELIOS_BENCH_KEY:-$HOME/.ssh/bench-helios}"
 dest="$root/target/box/helios-gui"
 mkdir -p "$(dirname "$dest")"
-ssh -o IdentitiesOnly=yes -i "$key" "$host" fetch latest build-gui "branch=${1:-main}" gui >"$dest.part"
-chmod +x "$dest.part"
-mv -f "$dest.part" "$dest"
+# the output comes as a tar holding the one file
+tmp="$(mktemp -d "$(dirname "$dest")/.fetch.XXXXXX")"
+trap 'rm -rf "$tmp"' EXIT
+ssh -o IdentitiesOnly=yes -i "$key" "$host" fetch latest build-gui "branch=${1:-main}" gui |
+  tar -x -C "$tmp" helios-gui
+mv -f "$tmp/helios-gui" "$dest"
 echo "$dest"
