@@ -8,8 +8,7 @@
 //! `<id>-anything`), so a plugin never rewrites Helios's text or another
 //! plugin's. The one exception is its commands' titles, whose keys are
 //! the commands' own (`command-<command id>`): a catalogue may hold the
-//! title of a command its manifest declares, and of no other; and its own
-//! `plugin-<id>` message, which egui-pop's ownership rule leaves out.
+//! title of a command its manifest declares, and of no other.
 //!
 //! ```text
 //! plugin-org-example-exif =
@@ -122,13 +121,9 @@ pub fn add(
     commands: &[String],
     catalogues: &[PluginCatalogue],
 ) -> Result<usize, String> {
-    // Its own title message (`plugin-<id>`), which egui-pop's ownership
-    // rule (`<area>-<owner>-…`) does not cover, and its commands' titles.
-    // Workaround: egui-pop dba812e (main) makes `owned_by` accept
-    // `plugin-<id>` itself; once the egui-pop pin includes it, the title
-    // goes through `add_owned` and only the commands' titles stay here.
-    let mut declared: Vec<String> = commands.iter().map(|c| ids::command(c)).collect();
-    declared.push(title(id).id);
+    // Its commands' titles, which egui-pop's ownership rule does not
+    // cover: their keys are the commands' own.
+    let declared: Vec<String> = commands.iter().map(|c| ids::command(c)).collect();
     let mut parts = Vec::new();
     for c in catalogues {
         let (mut owned, mut titles, mut n) = (String::new(), String::new(), 0);
@@ -184,6 +179,8 @@ mod tests {
         assert!(catalogues.iter().any(|c| c.locale == "fr"));
         let n = add(&i, ID, &["exiftool.version".into()], &catalogues).unwrap();
         assert!(n >= 3, "{n}");
+        // Its title is its own, by egui-pop's ownership rule.
+        assert!(owned_by(ID, &title(ID).id));
         assert_eq!(i.t(&title(ID).key(), &[]), "Métadonnées ExifTool");
         assert!(
             i.t(&description(ID).key(), &[])
@@ -213,6 +210,9 @@ mod tests {
             "panel-helios-graph =\n    .title = Pirate\n",
             "command-view-palette =\n    .title = Pirate\n",
             "other-plugin-hello = Pirate\n",
+            // Another plugin's title, and one whose id only starts alike.
+            "plugin-org-example-other =\n    .title = Pirate\n",
+            "plugin-io-github-quazardous-helios-exif-exiftool2 =\n    .title = Pirate\n",
         ] {
             let e = add(&i, ID, &["exiftool.version".into()], &pirate(source)).unwrap_err();
             assert!(e.contains("belongs neither"), "{e}");
