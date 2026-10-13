@@ -7,11 +7,19 @@
 //! [`Report::not_applied`] with its name, version and reason, and kept
 //! with its raw params in the edit ([`Imported::darktable`]), so a later
 //! Helios can apply it and the sidecar can be written back as it was.
+//!
+//! A module blending through a drawn mask gets its mask as a sub-network
+//! ([`NodeMask`]): the shapes and groups of its form, its inversion and
+//! refinement, and a `mask_blend` with its opacity. That needs the image's
+//! size ([`Frame`]): without one, or when the mask would differ from
+//! darktable's, the item is not applied and the report says why.
 
 use helios_core::{Arg, Message, Params, Value as Param};
 use serde::Serialize;
 use serde_json::{Map, Value, json};
 
+use crate::blend::{self, Blend};
+use crate::drawn::{self, Frame, MaskNet, Problem};
 use crate::layout::{self, Layouts};
 use crate::legacy;
 use crate::sidecar::{HistoryItem, Sidecar};
@@ -31,6 +39,59 @@ pub struct Node {
     /// The Helios module.
     pub module: String,
     pub params: Params,
+    /// The mask it blends through, if any.
+    pub mask: Option<NodeMask>,
+}
+
+/// A module's blending: its mask as a sub-network and its opacity, mixed
+/// by a `mask_blend` named after the module (`<node> blend`).
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct NodeMask {
+    pub net: MaskNet,
+    /// The global opacity, 0 to 1.
+    pub opacity: f64,
+}
+
+/// A blend Helios does not do yet.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum BlendIssue {
+    /// A blend mode other than normal (its darktable number).
+    Mode { mode: u32 },
+    /// Mixing in another colour space than scene-referred RGB.
+    Space { space: i32 },
+    /// A parametric mask (darktable's blend if).
+    Parametric,
+    /// Another module's raster mask.
+    Raster,
+    /// The details threshold of the mask refinement.
+    Details,
+    /// The guided-filter feathering of the mask refinement.
+    Feathering,
+    /// A flexi mask tree.
+    Flexi,
+}
+
+impl BlendIssue {
+    /// In a few words, for people, by key.
+    pub fn describe(&self) -> Message {
+        match self {
+            BlendIssue::Mode { mode } => {
+                Message::new("xmp-blend-mode", "blend mode { $mode }").with("mode", *mode)
+            }
+            BlendIssue::Space { space } => {
+                Message::new("xmp-blend-space", "blending in colour space { $space }")
+                    .with("space", *space)
+            }
+            BlendIssue::Parametric => Message::new("xmp-blend-parametric", "a parametric mask"),
+            BlendIssue::Raster => Message::new("xmp-blend-raster", "a raster mask"),
+            BlendIssue::Details => {
+                Message::new("xmp-blend-details", "the mask's details threshold")
+            }
+            BlendIssue::Feathering => Message::new("xmp-blend-feathering", "the mask's feathering"),
+            BlendIssue::Flexi => Message::new("xmp-blend-flexi", "a flexi mask"),
+        }
+    }
 }
 
 /// A node's name for an item, unique among `taken`.
@@ -70,6 +131,12 @@ pub enum Reason {
     UnknownBlendVersion { blendop_version: u32 },
     /// Another instance of a module darktable runs only once.
     ExtraInstance,
+    /// A blend Helios does not do yet.
+    Blend { issue: BlendIssue },
+    /// A drawn mask that cannot be carried over.
+    Mask { problem: Problem },
+    /// A drawn mask, and the import was not given the image's size.
+    MaskWithoutImage,
 }
 
 impl Reason {
@@ -99,6 +166,18 @@ impl Reason {
             Reason::ExtraInstance => Message::new(
                 "xmp-reason-extra-instance",
                 "a second instance of a single-instance module",
+            ),
+            Reason::Blend { issue } => {
+                Message::new("xmp-reason-blend", "blending not supported: { $what }")
+                    .with("what", issue.describe())
+            }
+            Reason::Mask { problem } => {
+                Message::new("xmp-reason-mask", "drawn mask not supported: { $why }")
+                    .with("why", problem.describe())
+            }
+            Reason::MaskWithoutImage => Message::new(
+                "xmp-reason-mask-without-image",
+                "a drawn mask, read without its image",
             ),
         }
     }
@@ -322,18 +401,16 @@ fn blends(operation: &str) -> bool {
     matches!(operation, "highlights" | "exposure" | "sigmoid")
 }
 
-/// The newest blend params version darktable writes (`DEVELOP_BLEND_VERSION`).
-const BLEND_VERSION: u32 = 14;
-
-/// Whether an item's blend params leave its output as it is.
-fn check_blend(item: &HistoryItem) -> Result<(), Reason> {
+/// An item's blend params: `None` when they leave its output as it is,
+/// else the blend to build, or why Helios cannot.
+fn check_blend(item: &HistoryItem) -> Result<Option<Blend>, Reason> {
     let p = &item.blendop_params;
     // darktable reads all-zero blend params as its defaults: no blending.
     if !blends(&item.operation) || p.iter().all(|b| *b == 0) {
-        return Ok(());
+        return Ok(None);
     }
     let blendop_version = item.blendop_version.unwrap_or(0);
-    if !(1..=BLEND_VERSION).contains(&blendop_version) {
+    if !(1..=*blend::VERSIONS.end()).contains(&blendop_version) {
         return Err(Reason::UnknownBlendVersion { blendop_version });
     }
     // The first word is the blend mode up to version 4, the mask mode
@@ -345,14 +422,114 @@ fn check_blend(item: &HistoryItem) -> Result<(), Reason> {
             error: format!("blend params of {} bytes", p.len()),
         })?;
     if first == 0 {
-        Ok(())
-    } else {
-        Err(Reason::Blending { blendop_version })
+        return Ok(None);
     }
+    if !blend::VERSIONS.contains(&blendop_version) {
+        return Err(Reason::Blending { blendop_version });
+    }
+    let b = Blend::read(blendop_version, p).map_err(|error| Reason::Unreadable { error })?;
+    let issue = |issue| Err(Reason::Blend { issue });
+    let mode = b.mask_mode;
+    let normal = b.blend_mode == blend::NORMAL;
+    // Uniformly at full opacity in normal mode: the output as it is, in
+    // any colour space.
+    if mode & !blend::mode::ENABLED == 0 && b.opacity() >= 1.0 && normal {
+        return Ok(None);
+    }
+    if !normal {
+        return issue(BlendIssue::Mode { mode: b.blend_mode });
+    }
+    if b.blend_cst != blend::RGB_SCENE {
+        return issue(BlendIssue::Space { space: b.blend_cst });
+    }
+    if mode & blend::mode::FLEXI != 0 {
+        return issue(BlendIssue::Flexi);
+    }
+    if mode & blend::mode::RASTER != 0 {
+        return issue(BlendIssue::Raster);
+    }
+    if mode & blend::mode::CONDITIONAL != 0 {
+        return issue(BlendIssue::Parametric);
+    }
+    if mode & blend::mode::MASK != 0 {
+        if b.details != 0.0 {
+            return issue(BlendIssue::Details);
+        }
+        if b.feathering_radius > 0.1 {
+            return issue(BlendIssue::Feathering);
+        }
+    }
+    Ok(Some(b))
+}
+
+/// The mask network of a module blending with `b`, named after the node
+/// `name`: its drawn mask (or 1, uniformly), inverted, blurred and through
+/// its tone curve, in darktable's order (`dt_develop_blend_process`); the
+/// opacity goes to the blend.
+fn mask_net(
+    b: &Blend,
+    forms: &[&drawn::Form],
+    frame: Option<&Frame>,
+    name: &str,
+) -> Result<NodeMask, Reason> {
+    let constant = |value: f64| {
+        // A group without members gives 1, scaled to the value.
+        let mut net = MaskNet::default();
+        net.nodes.push(drawn::MaskNode {
+            name: format!("{name} mask"),
+            module: "mask_combine",
+            params: Params::new().with("group_opacity", Param::Float(value)),
+        });
+        net.mask = format!("{name} mask");
+        net
+    };
+    if b.mask_mode & blend::mode::MASK == 0 {
+        return Ok(NodeMask {
+            net: constant(1.0),
+            opacity: b.opacity(),
+        });
+    }
+    let root = i64::from(b.mask_id);
+    let mut net = if root > 0 && forms.iter().any(|f| f.id == root) {
+        let frame = frame.ok_or(Reason::MaskWithoutImage)?;
+        let mut net =
+            drawn::network(forms, root, frame, name).map_err(|problem| Reason::Mask { problem })?;
+        if b.inverted() {
+            net.invert(format!("{name} mask invert"));
+        }
+        net
+    } else {
+        // A drawn mask without its form: darktable fills 1, or 0 inverted.
+        constant(if b.inverted() { 0.0 } else { 1.0 })
+    };
+    if b.blur_radius > 0.1 {
+        net.then(
+            format!("{name} mask blur"),
+            "mask_blur",
+            Params::new().with("radius", Param::Float(f64::from(b.blur_radius))),
+        );
+    }
+    if b.contrast.abs() >= 0.01 || b.brightness.abs() >= 0.01 {
+        net.then(
+            format!("{name} mask levels"),
+            "mask_levels",
+            Params::new()
+                .with("contrast", Param::Float(f64::from(b.contrast)))
+                .with("brightness", Param::Float(f64::from(b.brightness))),
+        );
+    }
+    Ok(NodeMask {
+        net,
+        opacity: b.opacity(),
+    })
 }
 
 /// An item in force turned into a Helios node, or why it cannot be.
-fn apply(item: &HistoryItem, layouts: &Layouts, report: &mut Report) -> Result<Mapped, Reason> {
+fn apply(
+    item: &HistoryItem,
+    layouts: &Layouts,
+    report: &mut Report,
+) -> Result<(Mapped, Option<Blend>), Reason> {
     if let Some(error) = &item.unreadable {
         return Err(Reason::Unreadable {
             error: error.clone(),
@@ -368,7 +545,7 @@ fn apply(item: &HistoryItem, layouts: &Layouts, report: &mut Report) -> Result<M
     if item.multi_priority > 0 && single_instance(&item.operation) {
         return Err(Reason::ExtraInstance);
     }
-    check_blend(item)?;
+    let blend = check_blend(item)?;
     let layout = layouts
         .get(&item.operation, current)
         .expect("a known version");
@@ -379,7 +556,10 @@ fn apply(item: &HistoryItem, layouts: &Layouts, report: &mut Report) -> Result<M
             .params_not_read
             .push((item.operation.clone(), item.modversion));
         // An empty decode: the mapping reads nothing from these modules.
-        return Ok(map(&item.operation, &Map::new(), report).expect("mapped"));
+        return Ok((
+            map(&item.operation, &Map::new(), report).expect("mapped"),
+            blend,
+        ));
     } else {
         match legacy::upgrade(&item.operation, item.modversion, &item.params, current) {
             Some(Ok(bytes)) => {
@@ -413,7 +593,7 @@ fn apply(item: &HistoryItem, layouts: &Layouts, report: &mut Report) -> Result<M
                 .push((item.operation.clone(), name.clone(), value.clone()));
         }
     }
-    Ok(mapped)
+    Ok((mapped, blend))
 }
 
 /// Where an imported edit comes from, as a version records it.
@@ -427,29 +607,57 @@ impl Imported {
     /// The darktable edit it came from, items not applied included, is
     /// kept under `darktable` (see [`Imported::darktable`]).
     pub fn edit(&self) -> Value {
-        let mut modules = Vec::new();
-        let mut connections = Vec::new();
-        let mut previous = ("src".to_string(), "image");
-        for n in &self.nodes {
-            modules.push(json!({
-                "name": n.name,
-                "module": n.module,
-                "params": n.params,
-            }));
-            connections.push(json!({
-                "from": previous.0,
-                "port": previous.1,
-                "to": n.name,
-                "input": "input",
-            }));
-            previous = (n.name.clone(), "output");
-        }
+        let (modules, connections, _) = chain(&self.nodes, ("src", "image"));
         let mut edit = json!({ "modules": modules, "connections": connections });
         if !self.darktable.is_null() {
             edit["darktable"] = self.darktable.clone();
         }
         edit
     }
+}
+
+/// `nodes` chained in their order after the output `port` of node `from`,
+/// as a network description's modules and connections, and the output the
+/// chain ends with. A masked node is followed by its blend (`<node>
+/// blend`), mixing its input and output through its mask's nodes.
+pub fn chain(nodes: &[Node], from: (&str, &str)) -> (Vec<Value>, Vec<Value>, (String, String)) {
+    let mut modules = Vec::new();
+    let mut connections = Vec::new();
+    let mut previous = (from.0.to_string(), from.1.to_string());
+    let mut connect = |from: &(String, String), to: &str, input: &str| {
+        connections.push(json!({ "from": from.0, "port": from.1, "to": to, "input": input }));
+    };
+    for n in nodes {
+        modules.push(json!({ "name": n.name, "module": n.module, "params": n.params }));
+        connect(&previous, &n.name, "input");
+        let output = (n.name.clone(), "output".to_string());
+        let Some(mask) = &n.mask else {
+            previous = output;
+            continue;
+        };
+        for m in &mask.net.nodes {
+            modules.push(json!({ "name": m.name, "module": m.module, "params": m.params }));
+        }
+        for l in &mask.net.links {
+            let from = match l.from.as_str() {
+                drawn::INPUT => previous.clone(),
+                drawn::OUTPUT => output.clone(),
+                other => (other.to_string(), l.port.clone()),
+            };
+            connect(&from, &l.to, &l.input);
+        }
+        let blend = format!("{} blend", n.name);
+        modules.push(json!({
+            "name": blend,
+            "module": "mask_blend",
+            "params": Params::new().with("opacity", Param::Float(mask.opacity)),
+        }));
+        connect(&previous, &blend, "input");
+        connect(&output, &blend, "processed");
+        connect(&(mask.net.mask.clone(), "mask".to_string()), &blend, "mask");
+        previous = (blend, "output".to_string());
+    }
+    (modules, connections, previous)
 }
 
 /// What became of a history item.
@@ -488,8 +696,16 @@ pub fn import_text(xml: &str, layouts: &Layouts) -> Result<(Sidecar, Imported), 
 /// Reads a sidecar's effective history into Helios modules, in the order
 /// darktable runs them. Items Helios cannot apply are reported and kept
 /// with their raw params, in their place: the import never stops at one.
+/// Without the image's frame, an item with a drawn mask is not applied
+/// (see [`import_with`]).
 pub fn import(sidecar: &Sidecar, layouts: &Layouts) -> Imported {
+    import_with(sidecar, layouts, None)
+}
+
+/// [`import`], placing drawn masks in the image `frame` describes.
+pub fn import_with(sidecar: &Sidecar, layouts: &Layouts, frame: Option<&Frame>) -> Imported {
     let mut out = Imported::default();
+    let forms = drawn::in_force(&sidecar.masks, sidecar.history_end);
     let index = |item: &HistoryItem| {
         sidecar
             .history
@@ -519,9 +735,23 @@ pub fn import(sidecar: &Sidecar, layouts: &Layouts) -> Imported {
             status[at] = json!({ "status": "disabled" });
             continue;
         }
-        match apply(item, layouts, &mut out.report) {
-            Ok(mapped) => {
-                let name = node_name(item, &out.nodes);
+        let name = node_name(item, &out.nodes);
+        let applied = apply(item, layouts, &mut out.report).and_then(|(mapped, blend)| {
+            let mask = match blend {
+                Some(b) => {
+                    if b.mask_mode & blend::mode::MASK != 0
+                        && let Some(e) = &sidecar.masks_unreadable
+                    {
+                        return Err(Reason::Unreadable { error: e.clone() });
+                    }
+                    Some(mask_net(&b, &forms, frame, &name)?)
+                }
+                None => None,
+            };
+            Ok((mapped, mask))
+        });
+        match applied {
+            Ok((mapped, mask)) => {
                 status[at] = json!({ "status": "applied", "node": name });
                 out.nodes.push(Node {
                     name,
@@ -530,6 +760,7 @@ pub fn import(sidecar: &Sidecar, layouts: &Layouts) -> Imported {
                     instance: item.multi_priority,
                     module: mapped.module.into(),
                     params: mapped.params,
+                    mask,
                 });
             }
             Err(reason) => {

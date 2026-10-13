@@ -121,6 +121,12 @@ pub fn sidecar_params(
     let mut params: BTreeMap<String, Params> = BTreeMap::new();
     let (mut applied, mut skipped) = (Vec::new(), Vec::new());
     for n in &imported.nodes {
+        // Its mask is nodes the network does not have: the module alone
+        // would change the whole image.
+        if n.mask.is_some() {
+            skipped.push(json!({ "operation": n.operation, "reason": "a masked module: the network has no node for its mask" }));
+            continue;
+        }
         let mut running = modules.iter().filter(|(_, m)| **m == n.module);
         match (running.next(), running.next()) {
             (Some((node, _)), None) if !params.contains_key(node) => {

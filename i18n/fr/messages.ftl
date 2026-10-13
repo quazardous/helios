@@ -168,6 +168,38 @@ node-path-not-absolute = { $path } : donnez un chemin absolu, le nœud ne sait p
 
 node-source-refused = `{ $name }` ne peut pas prendre l’image : { $error }
 
+xmp-blend-details = le seuil de détails du masque
+
+xmp-blend-feathering = l’adoucissement du masque
+
+xmp-blend-flexi = un masque flexi
+
+xmp-blend-mode = le mode de fusion { $mode }
+
+xmp-blend-parametric = un masque paramétrique
+
+xmp-blend-raster = un masque raster
+
+xmp-blend-space = une fusion dans l’espace de couleur { $space }
+
+xmp-mask-empty-group = le groupe de masques { $id } est vide
+
+xmp-mask-lost = le masque perdrait { $what }
+
+xmp-mask-missing = un groupe de masques renvoie à la forme { $id }, absente de l’historique
+
+xmp-mask-size = des points de forme de { $bytes } octets, { $expected } attendus
+
+xmp-mask-too-deep = des groupes de masques imbriqués trop profond
+
+xmp-mask-too-many-points = une forme de { $count } points, { $max } au plus
+
+xmp-mask-unknown-type = un type de forme inconnu ({ $kind })
+
+xmp-mask-unsupported = une forme { $form }, que Helios ne dessine pas encore
+
+xmp-mask-version = version de masques { $version } non prise en charge (lit 4 à 6)
+
 xmp-not-applied = { $count ->
     [one] { $count } élément d’historique sur { $items } non appliqué, conservé pour plus tard : { $groups }
    *[other] { $count } éléments d’historique sur { $items } non appliqués, conservés pour plus tard : { $groups }
@@ -175,9 +207,15 @@ xmp-not-applied = { $count ->
 
 xmp-not-applied-group = { $labels } ({ $reason })
 
+xmp-reason-blend = fusion non prise en charge : { $what }
+
 xmp-reason-blending = fusion non prise en charge
 
 xmp-reason-extra-instance = une seconde instance d’un module à instance unique
+
+xmp-reason-mask = masque dessiné non pris en charge : { $why }
+
+xmp-reason-mask-without-image = un masque dessiné, lu sans son image
 
 xmp-reason-unknown-blend-version = paramètres de fusion v{ $version } non pris en charge
 

@@ -169,13 +169,51 @@ node-path-not-absolute = { $path }: give an absolute path, the node does not kno
 
 node-source-refused = `{ $name }` cannot take the image: { $error }
 
+xmp-blend-details = the mask's details threshold
+
+xmp-blend-feathering = the mask's feathering
+
+xmp-blend-flexi = a flexi mask
+
+xmp-blend-mode = blend mode { $mode }
+
+xmp-blend-parametric = a parametric mask
+
+xmp-blend-raster = a raster mask
+
+xmp-blend-space = blending in colour space { $space }
+
+xmp-mask-empty-group = mask group { $id } is empty
+
+xmp-mask-lost = the mask would lose { $what }
+
+xmp-mask-missing = a mask group refers to shape { $id }, not in the history
+
+xmp-mask-size = shape points of { $bytes } bytes, { $expected } expected
+
+xmp-mask-too-deep = mask groups nested too deep
+
+xmp-mask-too-many-points = a shape of { $count } points, at most { $max }
+
+xmp-mask-unknown-type = an unknown shape type ({ $kind })
+
+xmp-mask-unsupported = a { $form } shape, which Helios does not draw yet
+
+xmp-mask-version = masks version { $version } not supported (reads 4 to 6)
+
 xmp-not-applied = { $count } of { $items } history items not applied, kept for later: { $groups }
 
 xmp-not-applied-group = { $labels } ({ $reason })
 
+xmp-reason-blend = blending not supported: { $what }
+
 xmp-reason-blending = blending not supported
 
 xmp-reason-extra-instance = a second instance of a single-instance module
+
+xmp-reason-mask = drawn mask not supported: { $why }
+
+xmp-reason-mask-without-image = a drawn mask, read without its image
 
 xmp-reason-unknown-blend-version = blend params v{ $version } not supported
 

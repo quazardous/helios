@@ -92,6 +92,11 @@ pub struct Sidecar {
     /// The name darktable shows for this version of the image, if any.
     pub version_name: Option<String>,
     pub history: Vec<HistoryItem>,
+    /// The drawn masks' history (`darktable:masks_history`), every form
+    /// of every item that changed them (see [`crate::drawn::in_force`]).
+    pub masks: Vec<crate::drawn::Form>,
+    /// Why the masks' history could not be read, if it could not.
+    pub masks_unreadable: Option<String>,
 }
 
 /// darktable's params encoding: hex, or `gz` + two digits + base64 of zlib data.
@@ -277,6 +282,10 @@ impl Sidecar {
         }
         // A stable sort: items with the same number keep the document's order.
         sidecar.history.sort_by_key(|i| i.num);
+        match crate::drawn::read(xml) {
+            Ok(forms) => sidecar.masks = forms,
+            Err(e) => sidecar.masks_unreadable = Some(e),
+        }
         sidecar.add_implicit_highlights();
         Ok(sidecar)
     }

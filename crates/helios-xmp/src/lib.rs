@@ -17,10 +17,13 @@
 //!   decode yet, blends it does not do, disabled items. Nothing is dropped
 //!   silently: an item not applied is kept, raw params included, in the
 //!   edit's `darktable` part, and the import never stops at one.
+//! - [`blend`] reads a module's blend params, and [`drawn`] its drawn
+//!   mask: both make the mask sub-network a masked module gets.
 //! - [`files`] finds an image's sidecars in its folder: the base one, the
 //!   duplicates darktable writes as `_NN`, case variants, and the sidecars
 //!   whose image is not there.
 
+pub mod blend;
 pub mod drawn;
 pub mod files;
 pub mod import;
@@ -29,6 +32,9 @@ pub mod layout;
 pub mod legacy;
 pub mod sidecar;
 
-pub use import::{Imported, Node, NotApplied, ORIGIN, Reason, Report, import, import_text};
+pub use import::{
+    BlendIssue, Imported, Node, NodeMask, NotApplied, ORIGIN, Reason, Report, import, import_text,
+    import_with,
+};
 pub use layout::{Layouts, decode, encode};
 pub use sidecar::{HistoryItem, Sidecar};

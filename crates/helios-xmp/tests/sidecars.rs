@@ -271,6 +271,7 @@ fn an_imported_edit_is_a_chained_network() {
         multi_name: multi.into(),
         module: module.into(),
         params: Params::new().with("exposure", Param::Float(1.0)),
+        mask: None,
     };
     let imported = Imported {
         nodes: vec![

@@ -181,26 +181,72 @@ inversion moved with it (finding 2).
 `helios_xmp::drawn` reads a sidecar's `darktable:masks_history` (each
 form's points are its C structs, hex or `gz` encoded like history params)
 and maps each form onto a member, given a `Frame`: the size of the image
-darktable's pipe starts from and where Helios's image starts in it (the
-loader's crop). It reads masks versions 4 to 6 (darktable's current is 6).
+darktable's pipe starts from (the raw's full photosite grid, which the
+loader gives as `Loaded::sensor`) and where Helios's image starts in it
+(the loader's crop). It reads masks versions 4 to 6 (darktable's current
+is 6).
 
-| darktable form | Helios | carried over | lost |
+| darktable form | Helios | carried over | refused (the mask would differ) |
 |---|---|---|---|
-| circle | `mask_circle` | centre, radius, feather (by the smaller side) | nothing |
-| ellipse | `mask_ellipse` | centre, half-axes, rotation, feather, equidistant or proportional | nothing |
-| gradient | `mask_gradient` | anchor, rotation, compression (`feather = 2 · compression · diagonal`), linear or sigmoid | the curvature (reported when not 0); `steepness`, which darktable does not use |
-| path | `mask_path` | corners and both handles of up to 64 points | the feather per point: one mean feather (reported when they differ by more than 1 %); paths of more points are skipped |
-| group | `mask_combine` | members in order, each one's inversion, opacity and operator (union and sum → `maximum`, intersection → `minimum`, difference, exclusion) | a group whose later members use different operators is a chain of two-member groups, which the importer builds |
-| brush, clone, AI object | skipped, with why | | |
+| circle | `mask_circle` | centre, radius, feather (by the smaller side) | |
+| ellipse | `mask_ellipse` | centre, half-axes, rotation, feather, equidistant or proportional | |
+| gradient | `mask_gradient` | anchor, rotation, compression (`feather = 2 · compression · diagonal`), linear or sigmoid | a curvature other than 0 |
+| path | `mask_path` | corners and both handles of up to 64 points, the feather | feathers differing by point (more than 1 %), more than 64 points |
+| brush | `mask_brush` | corners, both handles, size, hardness and density of up to 256 points | a point whose two sizes differ, more than 256 points |
+| group | `mask_combine` chain | members in order, each one's inversion, opacity and operator | |
+| clone, AI object, unknown type or version | | | always |
 
-Every member lists its losses and every skipped form says why. Two
-approximations hold for all: darktable computes a shape on a coarse grid
-(up to 4 pixels) and interpolates, Helios computes every pixel; and
+**A group** folds from 0, member by member, each with its own operator
+(darktable's `_group_get_mask_roi`): union → `maximum`, intersection →
+`minimum`, difference, exclusion, sum → `sum` (a real sum, capped at 1),
+and a member without operator replaces what came before. Consecutive
+members with the same operator share one `mask_combine` (up to 8 ports);
+when the operator changes, the next node takes what came before on its
+first port, so a group is a chain and order-dependent operators keep
+their meaning. A first member intersected or subtracted from darktable's
+0 gives 0: the chain starts from a constant 0 (a `mask_combine` without
+member, its group opacity 0). Nested groups are followed, at most 8 deep;
+a form two groups share is one node read twice.
+
+**A module's mask.** `helios_xmp::blend` reads the module's blend params
+(version 14, darktable's current, and 15, the flexi masks', with the same
+layout). `import_with` gives a masked module its mask as nodes named
+after it, then a `mask_blend` (`<node> blend`) mixing its input and
+output:
+
+```text
+shapes -> groups -> [invert] -> [mask_blur] -> [mask_levels] -> <node> blend (opacity)
+input ---------------------------------------------------------> input
+input -> <node> ------------------------------------------------> processed
+```
+
+in darktable's order (`dt_develop_blend_process`): the drawn mask, its
+inversion (either of darktable's two inversion bits), the blur, the tone
+curve (contrast, brightness), then the opacity, which darktable applies
+before the refinement and the tone curve takes out and puts back: the
+same result. A uniform blend (no drawn mask) at an opacity below 100 % is
+a constant mask of 1; at 100 % in normal mode it is no blend at all. A
+drawn mask whose form is missing is darktable's fill: 1, or 0 inverted.
+
+**Never a wrong mask.** The item is not applied, and the import's summary
+says why by key (`xmp-not-applied`, each reason with its own), when the
+mask would differ from darktable's: a form refused above, a group
+referring to a form not in the history, groups nested too deep, a blend
+mode other than normal, a blend colour space other than scene-referred
+RGB, a parametric or raster mask, the details threshold, the
+guided-filter feathering (Helios's guide is the luminance, darktable's
+the colour: see Refinement), a flexi mask, or blend params of a version
+not read. `import` (without the image's frame, as the vault import and
+the batch's sidecars read them) keeps masked items out with
+`xmp-reason-mask-without-image`; the batch, which maps an edit onto a
+network's existing nodes, keeps masked modules out too.
+
+Two approximations hold for all: darktable computes a shape on a coarse
+grid (up to 4 pixels) and interpolates, Helios computes every pixel; and
 darktable distorts a shape through the modules before it (lens, crop,
-rotation), which Helios does not do yet. Wiring the members into a
-module's mask needs the module's blend parameters (its `mask_id`), not
-decoded yet: the importer (`helios_xmp::import`) does not call this
-mapping yet.
+rotation), which Helios does not do yet (a raw's own crop is the
+`Frame`'s origin). How close the result is, is measured against
+darktable-cli (see "Parity with darktable" below).
 
 ## Refinement
 
@@ -217,8 +263,7 @@ mapping yet.
 
 Not ported yet:
 
-- brushes, curved gradients, per-point path feathers and AI object
-  members;
+- curved gradients, per-point path feathers and AI object members;
 - the details threshold (it needs darktable's Scharr detail mask, an
   analysis of the raw);
 - the parametric mask's display-referred spaces: darktable's Lab and RGB
