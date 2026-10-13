@@ -1986,6 +1986,7 @@ dependencies = [
  "helios-display",
  "helios-gpu",
  "helios-i18n",
+ "helios-library",
  "helios-load",
  "helios-module-exposure",
  "helios-module-masks",

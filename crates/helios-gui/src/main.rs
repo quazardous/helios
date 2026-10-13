@@ -14,6 +14,8 @@
 //! opens a window of its own (see `helios_gui::platform`).
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use egui_pop::model::layout::Layout;
 use egui_pop::platform::instance::{self, Instance, Launch, Single};
@@ -72,6 +74,184 @@ fn fill_library(shell: &mut Shell, persist: &Persist) -> Result<(), String> {
             }
         }
     });
+    Ok(())
+}
+
+/// Who ran a command, as the vault records it.
+fn who(origin: &helios_shell::commands::Origin) -> String {
+    use helios_shell::commands::Origin;
+    match origin {
+        Origin::User => "user".into(),
+        Origin::Agent(id) => format!("agent:{id}"),
+        Origin::Script(id) => format!("script:{id}"),
+        Origin::Midi => "midi".into(),
+        Origin::Remote(id) => format!("remote:{id}"),
+    }
+}
+
+fn seconds() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs())
+}
+
+/// The library operations as commands (see `helios_library`): an import
+/// runs as a job announced on the bus (`job.*`), the library filled again
+/// when it ends; stack suggestions are recorded, and applied once
+/// accepted. No panel of their own yet.
+fn library_commands(
+    shell: &mut Shell,
+    persist: &Persist,
+    refill: &Arc<AtomicBool>,
+    ctx: &egui::Context,
+) -> Result<(), String> {
+    use helios_library::import::{Duplicates, Options, Placement};
+    use helios_library::stacks;
+    use helios_shell::commands::CommandSpec;
+    use serde_json::{Value, json};
+
+    let text = |args: &Value, key: &str| args.get(key).and_then(Value::as_str).map(String::from);
+    let (vault, bus) = (persist.vault().clone(), persist.bus().clone());
+    let (done, ctx) = (refill.clone(), ctx.clone());
+    shell.register(
+        CommandSpec::new(
+            "library.import",
+            "Import a folder or a card (`path`; `copy`, `into`, `rename`, `duplicates`)",
+            "Library",
+        ),
+        move |args, _| {
+            let path = text(args, "path").ok_or("`path` is missing")?;
+            let mut options = Options::default();
+            if args.get("copy").and_then(Value::as_bool).unwrap_or(false)
+                || args.get("into").is_some()
+            {
+                options.placement = Placement::Copy {
+                    into: text(args, "into").map(Into::into),
+                };
+            }
+            if let Some(pattern) = text(args, "rename") {
+                options.rename = Some(helios_library::rename::Pattern::parse(&pattern)?);
+            }
+            if let Some(policy) = text(args, "duplicates") {
+                options.duplicates = Duplicates::parse(&policy)?;
+            }
+            let (vault, bus, done, ctx) = (vault.clone(), bus.clone(), done.clone(), ctx.clone());
+            std::thread::spawn(move || {
+                let sources = [std::path::PathBuf::from(path)];
+                // The job's events say how it went; the lines are for the CLI.
+                let ended = helios_library::import::import(
+                    vault.as_ref(),
+                    Some(bus),
+                    &sources,
+                    &options,
+                    seconds(),
+                    &mut |_: &Value| {},
+                );
+                if let Err(e) = ended {
+                    warn(&format!("import: {e}"));
+                }
+                done.store(true, Ordering::Relaxed);
+                ctx.request_repaint();
+            });
+            Ok(json!({ "queued": true }))
+        },
+    )?;
+    let (vault, bus) = (persist.vault().clone(), persist.bus().clone());
+    shell.register(
+        CommandSpec::new(
+            "library.stacks.suggest",
+            "Suggest stacks (`images`: ids, every image when absent; `resolver`)",
+            "Library",
+        ),
+        move |args, _| {
+            let images = args
+                .get("images")
+                .and_then(Value::as_array)
+                .map(|ids| {
+                    ids.iter()
+                        .map(|i| helios_vault::ImageId::from_hex(i.as_str().unwrap_or("")))
+                        .collect::<Result<Vec<_>, _>>()
+                })
+                .transpose()?
+                .unwrap_or_default();
+            let resolver = text(args, "resolver").unwrap_or_else(|| stacks::RULES.into());
+            let resolvers = stacks::Resolvers::default();
+            stacks::suggest(
+                vault.as_ref(),
+                Some(bus.as_ref()),
+                &resolvers,
+                &resolver,
+                &images,
+                seconds(),
+            )
+            .map(|d| stacks::to_json(&d))
+        },
+    )?;
+    let (vault, bus) = (persist.vault().clone(), persist.bus().clone());
+    shell.register(
+        CommandSpec::new(
+            "library.stacks.accept",
+            "Accept a stack suggestion (`decision`; `groups`: the ones taken, all when absent)",
+            "Library",
+        ),
+        move |args, origin| {
+            let id = text(args, "decision").ok_or("`decision` is missing")?;
+            let groups: Option<Vec<usize>> =
+                args.get("groups").and_then(Value::as_array).map(|g| {
+                    g.iter()
+                        .filter_map(Value::as_u64)
+                        .map(|n| n as usize)
+                        .collect()
+                });
+            let who = who(origin);
+            stacks::accept(
+                vault.as_ref(),
+                Some(bus.as_ref()),
+                &id,
+                groups.as_deref(),
+                &who,
+                seconds(),
+            )
+            .map(|d| stacks::to_json(&d))
+        },
+    )?;
+    let (vault, bus) = (persist.vault().clone(), persist.bus().clone());
+    shell.register(
+        CommandSpec::new(
+            "library.stacks.decline",
+            "Decline a stack suggestion (`decision`)",
+            "Library",
+        ),
+        move |args, origin| {
+            let id = text(args, "decision").ok_or("`decision` is missing")?;
+            let who = who(origin);
+            stacks::decline(vault.as_ref(), Some(bus.as_ref()), &id, &who, seconds())
+                .map(|d| stacks::to_json(&d))
+        },
+    )?;
+    let vault = persist.vault().clone();
+    shell.register(
+        CommandSpec::new("library.stacks.list", "List the stacks", "Library"),
+        move |_, _| {
+            vault
+                .stacks()
+                .map(|s| serde_json::to_value(s).expect("stacks serialize"))
+        },
+    )?;
+    let vault = persist.vault().clone();
+    shell.register(
+        CommandSpec::new(
+            "library.stacks.dissolve",
+            "Dissolve a stack, keeping its images (`stack`)",
+            "Library",
+        ),
+        move |args, _| {
+            let id = text(args, "stack").ok_or("`stack` is missing")?;
+            vault
+                .dissolve_stack(&id)
+                .map(|s| serde_json::to_value(s).expect("stacks serialize"))
+        },
+    )?;
     Ok(())
 }
 
@@ -135,6 +315,8 @@ struct App {
     /// The template the workspace was made from: an image opened goes
     /// through its network.
     template: Option<helios_template::Bundle>,
+    /// Set when an import ended: the library is filled again.
+    refill: Arc<AtomicBool>,
 }
 
 impl App {
@@ -177,6 +359,12 @@ impl eframe::App for App {
         }
         for open in self.shell.take_opens() {
             self.open(open);
+        }
+        if self.refill.swap(false, Ordering::Relaxed)
+            && let Some(persist) = &self.persist
+            && let Err(e) = fill_library(&mut self.shell, persist)
+        {
+            warn(&format!("cannot fill the library: {e}"));
         }
         if let Some(persist) = &mut self.persist {
             let now = std::time::SystemTime::now()
@@ -405,10 +593,17 @@ fn main() -> Result<(), String> {
             if let Err(e) = open(&mut shell, persist.as_mut(), image) {
                 shell.notify(helios_gui::dialogs::Level::Error, e);
             }
+            let refill = Arc::new(AtomicBool::new(false));
+            if let Some(p) = &persist
+                && let Err(e) = library_commands(&mut shell, p, &refill, &cc.egui_ctx)
+            {
+                shell.notes.push(format!("library commands: {e}"));
+            }
             Box::new(App {
                 shell,
                 persist,
                 template,
+                refill,
             })
         })
         .map_err(|e| e.to_string())

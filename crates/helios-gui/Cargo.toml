@@ -26,6 +26,8 @@ helios-load.workspace = true
 helios-template.workspace = true
 helios-vault.workspace = true
 helios-vault-sqlite.workspace = true
+# Import and stack suggestions, as commands.
+helios-library.workspace = true
 # The demo image chain of `helios-gui --image`.
 helios-module-exposure = { path = "../../modules/exposure" }
 # The drawn mask shapes the viewport edits (their outlines and handles).
