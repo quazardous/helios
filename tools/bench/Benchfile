@@ -30,7 +30,7 @@ run = [
   # the GUI snapshot tests; labwc for headless GUI runs through wbox
   """dnf -y install git-core gcc gcc-c++ make pkgconf-pkg-config findutils procps-ng \
       tar xz which python3 wayland-devel libxkbcommon-devel \
-      mesa-vulkan-drivers vulkan-loader vulkan-tools labwc \
+      mesa-vulkan-drivers vulkan-loader vulkan-tools labwc sccache \
  && dnf clean all""",
   # every download is pinned and checked: rustup-init 1.29.1 (its published
   # sha256), cargo-nextest 0.9.148, wbox-mcp at a commit
@@ -59,7 +59,7 @@ run = [
 ]
 # CARGO_HOME is the registry cache; the toolchain lives in /opt. Line
 # tables only and no incremental state keep the per-branch target small.
-env = { RUSTUP_HOME = "/opt/rustup", CARGO_HOME = "/cargo", PATH = "/opt/cargo/bin:/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin", CARGO_TARGET_DIR = "/target", CARGO_INCREMENTAL = "0", CARGO_PROFILE_DEV_DEBUG = "line-tables-only", CARGO_PROFILE_TEST_DEBUG = "line-tables-only", RUST_BACKTRACE = "1", VKDT_SRC = "/work/vkdt", WBOX_PYTHON = "/opt/wbox/bin/python3", WLR_RENDERER = "pixman", HOME = "/tmp/home", XDG_RUNTIME_DIR = "/tmp/xdg" }
+env = { RUSTUP_HOME = "/opt/rustup", CARGO_HOME = "/cargo", PATH = "/opt/cargo/bin:/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin", CARGO_TARGET_DIR = "/target", CARGO_INCREMENTAL = "0", RUSTC_WRAPPER = "sccache", SCCACHE_DIR = "/sccache", SCCACHE_CACHE_SIZE = "12G", CARGO_PROFILE_DEV_DEBUG = "line-tables-only", CARGO_PROFILE_TEST_DEBUG = "line-tables-only", RUST_BACKTRACE = "1", VKDT_SRC = "/work/vkdt", WBOX_PYTHON = "/opt/wbox/bin/python3", WLR_RENDERER = "pixman", HOME = "/tmp/home", XDG_RUNTIME_DIR = "/tmp/xdg" }
 
 [checkout.helios]
 repo = "https://github.com/quazardous/helios.git"
@@ -117,6 +117,7 @@ egui-pop-target = { about = "egui-pop's cargo target directories, one per egui-p
 registry = "the cargo registry, shared by every job"
 darktable-build = { about = "darktable-cli builds for the mask parity, one per pinned checkout", lock = true }
 cargo-git = "the cargo git dependencies, shared by every job"
+sccache = "sccache's compile cache, shared by every job and branch: a branch reuses what another compiled"
 
 # Every job builds from a copy at a fixed path (/tmp/w/<repo>): the target
 # cache is shared by branch runs (/work/helios) and pushed code
@@ -133,7 +134,7 @@ memory = "6g"
 cwd = "/work/${src:-helios}"
 command = """mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && cargo build --workspace --all-targets --locked"""
 env = { CARGO_NET_OFFLINE = "true" }
-mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git" }
+mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
 timeout = "1h"
 
 # fast compile and lint feedback: clippy on every target, the repository
@@ -148,7 +149,7 @@ command = """mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ &&
  && cargo xtask check \
  && cargo xtask i18n check | tee /out/i18n.txt; exit ${PIPESTATUS[0]}"""
 env = { CARGO_NET_OFFLINE = "true" }
-mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git" }
+mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
 timeout = "1h"
 
 # the CI profile (no retry, no fail-fast), its JUnit report and a Markdown
@@ -163,7 +164,7 @@ cp target/nextest/ci/junit.xml /out/ \
  && cargo xtask test-times --from-junit /out/junit.xml --summary > /out/summary.md; \
 exit $rc"""
 env = { CARGO_NET_OFFLINE = "true" }
-mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git" }
+mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
 timeout = "1h"
 
 # the tests a change touches (base=<commit or branch>, origin/main by
@@ -182,7 +183,7 @@ cp target/nextest/ci/junit.xml /out/ \
  && cargo xtask test-times --from-junit /out/junit.xml --summary > /out/summary.md; \
 exit $rc"""
 env = { CARGO_NET_OFFLINE = "true" }
-mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git" }
+mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
 timeout = "1h"
 
 # quit, kill -9 and reopen: the scenarios that gate a release
@@ -193,7 +194,7 @@ memory = "4g"
 cwd = "/work/${src:-helios}"
 command = """mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && cargo survival --locked"""
 env = { CARGO_NET_OFFLINE = "true" }
-mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git" }
+mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
 timeout = "30m"
 
 # every commit of base..HEAD but the head builds and passes the fast tests
@@ -205,7 +206,7 @@ memory = "6g"
 cwd = "/work/${src:-helios}"
 command = """mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && cargo xtask check-commits ${base:-origin/main}"""
 env = { CARGO_NET_OFFLINE = "true" }
-mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git" }
+mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
 timeout = "2h"
 
 # the GPU backend's tests on the box's NVIDIA GPU, not lavapipe
@@ -220,7 +221,7 @@ cargo test -q --locked -p helios-gpu --test backend -- --nocapture 2>&1 | grep -
 cargo nextest run --locked --profile ci -p helios-gpu -p helios-compute; rc=$?; \
 cp target/nextest/ci/junit.xml /out/; exit $rc"""
 env = { CARGO_NET_OFFLINE = "true" }
-mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git" }
+mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
 timeout = "30m"
 
 # the same tests on the Intel iGPU (Mesa ANV), the second real backend
@@ -235,7 +236,7 @@ cargo test -q --locked -p helios-gpu --test backend -- --nocapture 2>&1 | grep -
 cargo nextest run --locked --profile ci -p helios-gpu -p helios-compute; rc=$?; \
 cp target/nextest/ci/junit.xml /out/; exit $rc"""
 env = { CARGO_NET_OFFLINE = "true" }
-mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git" }
+mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
 timeout = "30m"
 
 # egui-pop's gate: fmt, clippy, the workspace tests with the doctests, docs
@@ -249,7 +250,7 @@ command = """mkdir -p /tmp/w/egui-pop && cp -r --preserve=mode . /tmp/w/egui-pop
  && cargo test --workspace --locked \
  && RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps --locked"""
 env = { CARGO_NET_OFFLINE = "true" }
-mounts = { "egui-pop-target/${egui_pop:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git" }
+mounts = { "egui-pop-target/${egui_pop:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
 timeout = "1h"
 
 # egui-pop's gallery snapshots regenerated (UPDATE_SNAPSHOTS=1, on lavapipe
@@ -265,7 +266,7 @@ UPDATE_SNAPSHOTS=1 cargo test --locked -p egui-pop-gallery --test gallery; rc=$?
 mkdir -p /out/snapshots && find crates/egui-pop-gallery/tests/snapshots -name '*.png' ! -name '*.new.png' ! -name '*.old.png' ! -name '*.diff.png' -exec cp -t /out/snapshots/ {} + ; \
 exit $rc"""
 env = { CARGO_NET_OFFLINE = "true" }
-mounts = { "egui-pop-target/${egui_pop:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git" }
+mounts = { "egui-pop-target/${egui_pop:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
 timeout = "1h"
 
 # egui-pop's translation catalogues regenerated (UPDATE_CATALOGUES=1: the
@@ -281,7 +282,7 @@ UPDATE_CATALOGUES=1 cargo test --locked -p egui-pop-i18n --test catalogues; rc=$
 cp -r crates/egui-pop-i18n/locales /out/ ; \
 exit $rc"""
 env = { CARGO_NET_OFFLINE = "true" }
-mounts = { "egui-pop-target/${egui_pop:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git" }
+mounts = { "egui-pop-target/${egui_pop:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
 timeout = "1h"
 
 # ---------------------------------------------------------------- raw corpus
@@ -311,7 +312,7 @@ command = """mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ &&
 flag=; [ "${bless:-no}" = yes ] && flag=--bless; \
 cargo run -q --locked -p helios-corpus -- --dir /corpus --out /out $flag"""
 env = { CARGO_NET_OFFLINE = "true" }
-mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", raw-corpus = "/corpus" }
+mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", raw-corpus = "/corpus", sccache = "/sccache" }
 timeout = "30m"
 
 # ---------------------------------------------------------------- mask parity
@@ -335,7 +336,7 @@ done; \
 cargo build -q --release --locked -p helios-parity --bin mask-parity \
  && HELIOS_DARKTABLE_CLI=/dt/classic/prefix/bin/darktable-cli /target/release/mask-parity --corpus /corpus --out /out --darktable-flexi /dt/flexi/prefix/bin/darktable-cli"""
 env = { CARGO_NET_OFFLINE = "true" }
-mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", raw-corpus = "/corpus", "darktable-build/classic" = "/dt/classic", "darktable-build/flexi" = "/dt/flexi" }
+mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", raw-corpus = "/corpus", "darktable-build/classic" = "/dt/classic", "darktable-build/flexi" = "/dt/flexi", sccache = "/sccache" }
 timeout = "2h"
 
 # ---------------------------------------------------------------- timings
@@ -349,7 +350,7 @@ exclusive = ["machine"]
 cwd = "/work/${src:-helios}"
 command = """mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && cargo xtask bench masks && cp /target/bench/masks.jsonl /out/"""
 env = { CARGO_NET_OFFLINE = "true" }
-mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git" }
+mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
 timeout = "1h"
 
 # the per-branch history (in the target cache) says which tests got slower
@@ -362,5 +363,5 @@ cwd = "/work/${src:-helios}"
 command = """mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && cargo xtask test-times --profile ci | tee /out/test-times.txt; rc=${PIPESTATUS[0]}; \
 cp target/nextest/ci/junit.xml /target/test-times/history.jsonl /out/; exit $rc"""
 env = { CARGO_NET_OFFLINE = "true" }
-mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git" }
+mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
 timeout = "1h"
