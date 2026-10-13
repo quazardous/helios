@@ -68,7 +68,15 @@ gui-library-not-saved = Non enregistré, la bibliothèque montre ce que contient
 
 gui-masks-group-full = le groupe « { $group } » contient déjà { $count } membres
 
+gui-masks-group-locked = le groupe « { $group } » est verrouillé : ses membres restent
+
+gui-masks-hide = Masquer { $name } : son opacité éteinte
+
 gui-masks-into-itself = un groupe ne peut pas aller en lui-même
+
+gui-masks-lock = Verrouiller { $name } contre les déplacements et les modifications
+
+gui-masks-locked = « { $name } » est verrouillé
 
 gui-masks-not-a-group = « { $name } » n’est pas un groupe : seul un groupe accueille des membres
 
@@ -77,6 +85,10 @@ gui-masks-nothing-beside-root = rien ne va à côté du masque du module : dépo
 gui-masks-one-at-a-time = les membres se déplacent un par un
 
 gui-masks-root-stays = le masque du module reste la racine
+
+gui-masks-show = Afficher { $name } : son opacité à fond
+
+gui-masks-unlock = Déverrouiller { $name }
 
 gui-no-dialogs = aucune boîte de dialogue pour montrer ceci
 

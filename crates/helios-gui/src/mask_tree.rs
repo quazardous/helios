@@ -14,8 +14,10 @@
 //!   undo. The selection follows the viewport's selected shape and
 //!   `view/graph/selection`, and selecting in the tree sets them.
 //! - **Edits** are commands (`mask.member.*`, `mask.add.*`): a rename
-//!   (F2) is a label in the store (`label/<node>`), an inversion or an
-//!   opacity the group's values, each one undo step. Moving a member
+//!   (F2) is a label in the store (`label/<node>`), a lock a flag there
+//!   (`lock/<node>`), an inversion or an opacity the group's values, each
+//!   one undo step. A row's eye and lock, and its context menu, act on
+//!   that row's member whatever is selected. Moving a member
 //!   (drag and drop) or deleting one rewires the network, which the store
 //!   does not hold: not an undo step, and a drop the network cannot take
 //!   ([`drop_place`]) is refused while dragging and vetoed before the
@@ -28,7 +30,7 @@ use std::sync::{Mutex, PoisonError};
 
 use egui::Ui;
 use egui_pop::api::AppHandle;
-use egui_pop::core::icon::Source;
+use egui_pop::core::icon::{Icon, Source, Tone};
 use egui_pop::model::ids::MenuId;
 use egui_pop::views::tree::{Node, Position, Signal, Sink, TreeSource, TreeState, TreeView};
 use helios_core::{Graph, Message, NodeId, Value};
@@ -50,10 +52,11 @@ pub const ROW_MENU: MenuId = MenuId::from_static("helios.masks.row");
 /// Its Add submenu.
 pub const ROW_MENU_ADD: MenuId = MenuId::from_static("helios.masks.row.add");
 /// The commands of a row's menu, in order.
-pub const ROW_COMMANDS: [&str; 4] = [
+pub const ROW_COMMANDS: [&str; 5] = [
     "mask.member.rename",
     "mask.member.invert",
     "mask.member.opacity",
+    "mask.member.lock",
     "mask.member.delete",
 ];
 /// What Add adds: a shape or a parametric member.
@@ -86,6 +89,17 @@ pub fn label_of(store: &Store, node: &str) -> Option<String> {
     }
 }
 
+/// Where a node's lock lives in the store (true: locked).
+pub fn lock_path(node: &str) -> String {
+    format!("lock/{node}")
+}
+
+/// Whether a node is locked: a member that does not move, is not taken
+/// out and whose shape is not edited; a group whose members stay.
+pub fn is_locked(store: &Store, node: &str) -> bool {
+    store.get(&lock_path(node)).and_then(|e| e.value.as_bool()) == Some(true)
+}
+
 /// One node of the tree: a group or a member.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Item {
@@ -106,6 +120,7 @@ pub struct Item {
     pub invert: bool,
     pub opacity: f64,
     pub label: Option<String>,
+    pub locked: bool,
 }
 
 impl Item {
@@ -392,6 +407,7 @@ pub fn network(graph: &Graph, store: &Store, prefer: Option<&str>) -> Network {
                 .and_then(Value::as_f64)
                 .unwrap_or(1.0),
             label: label_of(store, &root_name),
+            locked: is_locked(store, &root_name),
         },
     );
     net.root = Some(root_name);
@@ -452,6 +468,7 @@ fn walk(
                 invert: invert.get(port).copied().unwrap_or(0) != 0,
                 opacity: opacity.get(port).copied().unwrap_or(1.0),
                 label: label_of(store, &name),
+                locked: is_locked(store, &name),
             },
         );
         members.push(name);
@@ -543,6 +560,11 @@ pub fn drop_place(
             "the module's mask stays the root",
         ));
     }
+    if item.locked {
+        return Err(
+            Message::new("gui-masks-locked", "`{ $name }` is locked").with("name", item.name())
+        );
+    }
     let t = net.item(target)?;
     let group = match position {
         Position::Inside if t.is_group() => target.to_string(),
@@ -565,6 +587,18 @@ pub fn drop_place(
             "gui-masks-into-itself",
             "a group cannot go into itself",
         ));
+    }
+    if let Some(g) = [item.group.as_deref(), Some(group.as_str())]
+        .into_iter()
+        .flatten()
+        .filter_map(|g| net.items.get(g))
+        .find(|g| g.locked)
+    {
+        return Err(Message::new(
+            "gui-masks-group-locked",
+            "the group `{ $group }` is locked: its members stay",
+        )
+        .with("group", g.name()));
     }
     let others: Vec<&String> = net
         .children
@@ -691,6 +725,7 @@ pub fn move_member(
         .group
         .clone()
         .ok_or("the module's mask stays the root")?;
+    unlocked(net, member, Some(group))?;
     let to_item = net.item(group)?;
     if !to_item.is_group() {
         return Err(format!("`{}` is not a group", to_item.name()));
@@ -724,6 +759,21 @@ pub fn move_member(
     Ok(vec![from, to])
 }
 
+/// Refuses to move a member (to `group`, else out of the mask) when it,
+/// its group or `group` is locked.
+fn unlocked(net: &Network, member: &str, group: Option<&str>) -> Result<(), String> {
+    let item = net.item(member)?;
+    if item.locked {
+        return Err(format!("`{}` is locked", item.name()));
+    }
+    for g in [item.group.as_deref(), group].into_iter().flatten() {
+        if net.items.get(g).is_some_and(|g| g.locked) {
+            return Err(format!("the group `{g}` is locked: its members stay"));
+        }
+    }
+    Ok(())
+}
+
 /// Takes a member out of its group (a group with what is under it); the
 /// node stays in the network, unconnected: the graph cannot remove one.
 /// Returns the group rewired.
@@ -733,6 +783,7 @@ pub fn remove_member(graph: &mut Graph, net: &Network, member: &str) -> Result<N
         .group
         .clone()
         .ok_or("the module's mask cannot be deleted from its tree")?;
+    unlocked(net, member, None)?;
     let from = find(graph, &from_name)?;
     let rest: Vec<Slot> = slots(graph, from)?
         .into_iter()
@@ -848,6 +899,29 @@ pub fn rename(
         &format!("rename {} to {label}", item.name()),
         vec![(path, Value::Text(label.into()))],
     )
+}
+
+/// Locks a node of the mask or unlocks it (`locked`; `None`: the other
+/// way round); one undo step. Returns whether it is locked now.
+pub fn set_locked(
+    store: &mut Store,
+    net: &Network,
+    member: &str,
+    locked: Option<bool>,
+    origin: &Origin,
+) -> Result<bool, String> {
+    let item = net.item(member)?;
+    let path = lock_path(&item.node);
+    if store.get(&path).is_none() {
+        store.declare(
+            &path,
+            Descriptor::bool(&format!("{} locked", item.node), false),
+        );
+    }
+    let on = locked.unwrap_or(!item.locked);
+    let label = format!("{} {}", if on { "lock" } else { "unlock" }, item.name());
+    write_step(store, origin, &label, vec![(path, Value::Bool(on))])?;
+    Ok(on)
 }
 
 /// Whether the view's branch shows these nodes, in this order.
@@ -1058,11 +1132,18 @@ impl MaskTree {
             self.state.rename(&key);
         }
         let ctx = ui.ctx().clone();
+        // What the rows' toggles ask, run with the panel's commands.
+        let mut toggles = Vec::new();
         let mut view = TreeView::new(TREE)
             .label("Masks")
             .drag_drop(true)
             .rename(true)
             .icon(|n| net.items.get(&n.key).map(|i| Source::glyph(i.icon())))
+            .row_widgets(|ui, n| {
+                if let Some(item) = net.items.get(&n.key) {
+                    row_toggles(ui, item, &mut toggles);
+                }
+            })
             // What the network cannot take is refused while dragging (the
             // target marked), and its drop vetoed with the reason.
             .can_drop(|keys, target, position| {
@@ -1076,6 +1157,7 @@ impl MaskTree {
             view = TreeView::context_menu(view.app(app), app, ROW_MENU);
         }
         let out = view.show(ui, &mut self.state, &net);
+        commands.extend(toggles);
         let mut store = values.lock().unwrap_or_else(PoisonError::into_inner);
         for signal in out.signals {
             match signal {
@@ -1112,6 +1194,63 @@ impl MaskTree {
                 request(ui.ctx(), Request::Notify(Level::Warning, e.into()));
             }
         }
+    }
+}
+
+/// A row's eye and lock, right to left: they act on that row's member,
+/// not on the selection.
+fn row_toggles(ui: &mut Ui, item: &Item, commands: &mut Vec<Command>) {
+    let ctx = ui.ctx().clone();
+    let name = item.name();
+    let member = Some(item.node.clone());
+    let visible = item.opacity > 0.0;
+    let (icon, tone, hint) = if visible {
+        (
+            Icon::Visible,
+            Tone::Default,
+            Message::new("gui-masks-hide", "Hide { $name }: its opacity off"),
+        )
+    } else {
+        (
+            Icon::Hidden,
+            Tone::Muted,
+            Message::new("gui-masks-show", "Show { $name }: its opacity full"),
+        )
+    };
+    let hint = crate::i18n::text(&ctx, hint.with("name", name));
+    if ui
+        .add(icon.tone(tone).label(&hint).sense_click())
+        .on_hover_text(&hint)
+        .clicked()
+    {
+        commands.push(Command::MemberOpacity {
+            member: member.clone(),
+            opacity: None,
+        });
+    }
+    let (icon, tone, hint) = if item.locked {
+        (
+            Icon::Lock,
+            Tone::Warning,
+            Message::new("gui-masks-unlock", "Unlock { $name }"),
+        )
+    } else {
+        (
+            Icon::Unlock,
+            Tone::Muted,
+            Message::new("gui-masks-lock", "Lock { $name } against moves and edits"),
+        )
+    };
+    let hint = crate::i18n::text(&ctx, hint.with("name", name));
+    if ui
+        .add(icon.tone(tone).label(&hint).sense_click())
+        .on_hover_text(&hint)
+        .clicked()
+    {
+        commands.push(Command::MemberLock {
+            member,
+            locked: None,
+        });
     }
 }
 

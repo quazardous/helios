@@ -61,6 +61,7 @@ command-mask-cancel.title 567fb47b601c0c5e
 command-mask-handle-move.title 902f9df0115deb93
 command-mask-member-delete.title 99ca7824e9b03357
 command-mask-member-invert.title 2f1e4681e72c28fc
+command-mask-member-lock.title e0f597c839e45f03
 command-mask-member-move.title 9e329d3b22f0e06b
 command-mask-member-opacity.title eae2ade4d86d9eea
 command-mask-member-rename.title a1e9c7c64d3f8504
@@ -147,11 +148,17 @@ gui-gesture-in-progress c25ee937ebc97642
 gui-library-file f5342066f92b83c2
 gui-library-not-saved f4c82ef926e77b5e
 gui-masks-group-full 2c68b91eff216a00
+gui-masks-group-locked f0ab1d4f18c4a0d0
+gui-masks-hide 03abd3631c09e3ca
 gui-masks-into-itself 305dc650ad3093a9
+gui-masks-lock daabf9e3e9615c44
+gui-masks-locked 95c739d95735fbe0
 gui-masks-not-a-group eba03cc34e0ccbe4
 gui-masks-nothing-beside-root 49719c5af23e3929
 gui-masks-one-at-a-time 2964a289a93bafbc
 gui-masks-root-stays 2fd89ec847b9ade1
+gui-masks-show f610532bac2c2c0b
+gui-masks-unlock 52d38f3a80ff723a
 gui-no-dialogs 043d25e5150191ec
 gui-open-workspace-directory 790976655fc2525e
 gui-open-workspace-title 7ff73f083df7a8eb

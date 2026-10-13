@@ -410,7 +410,8 @@ impl Viewport {
             | Command::MemberDelete { member }
             | Command::MemberInvert { member }
             | Command::MemberOpacity { member, .. }
-            | Command::MemberRename { member, .. } => member.clone(),
+            | Command::MemberRename { member, .. }
+            | Command::MemberLock { member, .. } => member.clone(),
             _ => return Err("not a member command".into()),
         };
         let net = self.mask_network(store, named.as_deref())?;
@@ -465,6 +466,10 @@ impl Viewport {
             Command::MemberRename { label, .. } => {
                 tree::rename(store, &net, &member, &label, origin)?;
                 Ok(json!({ "member": member, "label": label.trim() }))
+            }
+            Command::MemberLock { locked, .. } => {
+                let on = tree::set_locked(store, &net, &member, locked, origin)?;
+                Ok(json!({ "member": member, "locked": on }))
             }
             _ => unreachable!("matched above"),
         }
@@ -649,6 +654,9 @@ impl Viewport {
             }
             Command::Move { shape, handle, to } => {
                 let m = self.shape(store, shape.as_deref())?;
+                if crate::mask_tree::is_locked(store, &m.node) {
+                    return Err(format!("`{}` is locked", m.node));
+                }
                 let writes = masks::drag_writes(&m.module, &handle, &m.params, to)?;
                 let label = format!("drag {} {}", m.node, handle.split('.').next().unwrap_or(""));
                 Self::write_step(store, &label, &origin, &m.node, writes)?;

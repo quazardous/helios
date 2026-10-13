@@ -476,3 +476,90 @@ fn a_row_s_menu_acts_on_that_row_whatever_is_selected() {
     let field = h.get(by().label_contains("Rename"));
     assert_eq!(field.value().as_deref(), Some("oval"));
 }
+
+#[test]
+fn a_row_s_eye_and_lock_act_on_that_row() {
+    let mut h = harness();
+    click_row(&mut h, "dot");
+    // The spot's eye turns its opacity off, the dot staying selected.
+    h.get_by_label("Hide spot: its opacity off").click();
+    for _ in 0..3 {
+        h.step();
+    }
+    assert!(
+        rows(&h).contains(&"  ○ spot · 0 %".to_string()),
+        "{:?}",
+        rows(&h)
+    );
+    assert_eq!(cursor(&h).as_deref(), Some("dot"));
+    h.get_by_label("Show spot: its opacity full").click();
+    for _ in 0..3 {
+        h.step();
+    }
+    assert!(rows(&h).contains(&"  ○ spot".to_string()));
+    // The oval's lock: one undo step; the oval no longer moves, nor
+    // leaves the mask.
+    h.get_by_label("Lock oval against moves and edits").click();
+    for _ in 0..3 {
+        h.step();
+    }
+    assert_eq!(
+        steps(&h),
+        ["opacity of spot", "opacity of spot", "lock oval"]
+    );
+    assert_eq!(cursor(&h).as_deref(), Some("dot"));
+    let (oval, spot) = (row(&h, "oval"), row(&h, "spot"));
+    drag(&mut h, oval.center(), spot.center_top() + vec2(0.0, 3.0));
+    assert_eq!(wired(&h, "mask"), ["inner", "spot", "oval"]);
+    let notices: Vec<String> = h.state().notices().iter().map(|n| n.text.clone()).collect();
+    assert!(
+        notices
+            .iter()
+            .any(|n| n.contains("oval") && n.contains("is locked")),
+        "{notices:?}"
+    );
+    // Commands are queued: a refusal is a notice.
+    let locked = |h: &Harness<'_, Shell>| {
+        h.state()
+            .notices()
+            .iter()
+            .filter(|n| n.text.contains("locked"))
+            .count()
+    };
+    let before = locked(&h);
+    run(&mut h, "mask.member.delete", json!({ "member": "oval" }));
+    assert_eq!(wired(&h, "mask"), ["inner", "spot", "oval"]);
+    assert_eq!(locked(&h), before + 1);
+    // Its shape shows no handles on the viewport, and agents cannot
+    // drag them.
+    run(
+        &mut h,
+        "mask.select",
+        json!({ "mask": "mask", "shape": "oval" }),
+    );
+    let overlays = h.state().viewport().masks().overlays().to_vec();
+    assert_eq!(overlays.len(), 1);
+    assert_eq!(overlays[0].id, "oval");
+    assert!(overlays[0].handles.is_empty());
+    run(
+        &mut h,
+        "mask.handle.move",
+        json!({ "shape": "oval", "handle": "centre", "x": 10.0, "y": 10.0 }),
+    );
+    assert_eq!(locked(&h), before + 2);
+    assert!(!steps(&h).iter().any(|s| s.starts_with("drag oval")));
+    // A locked group keeps its members: nothing joins the inner group.
+    run(
+        &mut h,
+        "mask.member.lock",
+        json!({ "member": "inner", "locked": true }),
+    );
+    let (spot, inner) = (row(&h, "spot"), row(&h, "inner — minimum"));
+    drag(&mut h, spot.center(), inner.center());
+    assert_eq!(wired(&h, "inner"), ["dot"]);
+    // Unlocked, the oval moves again.
+    run(&mut h, "mask.member.lock", json!({ "member": "oval" }));
+    let (oval, spot) = (row(&h, "oval"), row(&h, "spot"));
+    drag(&mut h, oval.center(), spot.center_top() + vec2(0.0, 3.0));
+    assert_eq!(wired(&h, "mask"), ["inner", "oval", "spot"]);
+}

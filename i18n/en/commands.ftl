@@ -136,6 +136,9 @@ command-mask-member-delete =
 command-mask-member-invert =
     .title = Masks: invert the selected member (or `member`), or back
 
+command-mask-member-lock =
+    .title = Masks: lock the selected member (or `member`) against moves and edits, or unlock it; `locked` sets it
+
 command-mask-member-move =
     .title = Masks: move a member (`member`, the selected one by default) to `index` of `group` (its own, last, by default); rewires the network, no undo step
 

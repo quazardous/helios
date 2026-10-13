@@ -691,6 +691,12 @@ pub enum Command {
         member: Option<String>,
         label: String,
     },
+    /// Lock a member (the selected one by default), or unlock it
+    /// (`locked`; without it, the other way round); one undo step.
+    MemberLock {
+        member: Option<String>,
+        locked: Option<bool>,
+    },
 }
 
 impl Masks {
@@ -818,7 +824,11 @@ impl Masks {
             if !on {
                 continue;
             }
-            let o = overlay_of(member, point, mapping);
+            let mut o = overlay_of(member, point, mapping);
+            // A locked shape is shown, not edited.
+            if crate::mask_tree::is_locked(store, &member.node) {
+                o.handles.clear();
+            }
             let centre = centre_of(&member.params);
             for h in &o.handles {
                 let name = &member.outline.handles[h.index as usize].name;

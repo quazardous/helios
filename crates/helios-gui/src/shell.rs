@@ -1893,6 +1893,22 @@ impl Shell {
                 None => Ok(Action::RenameInTree(member(a))),
             }),
         );
+        add(
+            CommandSpec::new(
+                "mask.member.lock",
+                "Masks: lock the selected member (or `member`) against moves and edits, or unlock it; `locked` sets it",
+                "Masks",
+            ),
+            Box::new(move |a, origin| {
+                Ok(Action::Mask(
+                    Command::MemberLock {
+                        member: member(a),
+                        locked: a.get("locked").and_then(Value::as_bool),
+                    },
+                    origin.clone(),
+                ))
+            }),
+        );
     }
 
     /// The menus Helios contributes: its system menu, and its commands in

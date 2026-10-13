@@ -135,6 +135,9 @@ command-mask-member-delete =
 command-mask-member-invert =
     .title = Masques : inverser le membre sélectionné (ou `member`), ou le rétablir
 
+command-mask-member-lock =
+    .title = Masques : verrouiller le membre sélectionné (ou `member`) contre les déplacements et les modifications, ou le déverrouiller ; `locked` le fixe
+
 command-mask-member-move =
     .title = Masques : déplacer un membre (`member`, le sélectionné par défaut) à l’`index` de `group` (son groupe, en dernier, par défaut) ; recâble le réseau, sans étape d’annulation
 

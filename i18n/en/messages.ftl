@@ -71,7 +71,15 @@ gui-library-not-saved = Not saved, the library shows what the vault holds: { $er
 
 gui-masks-group-full = the group `{ $group }` holds { $count } members already
 
+gui-masks-group-locked = the group `{ $group }` is locked: its members stay
+
+gui-masks-hide = Hide { $name }: its opacity off
+
 gui-masks-into-itself = a group cannot go into itself
+
+gui-masks-lock = Lock { $name } against moves and edits
+
+gui-masks-locked = `{ $name }` is locked
 
 gui-masks-not-a-group = `{ $name }` is not a group: only a group takes members
 
@@ -80,6 +88,10 @@ gui-masks-nothing-beside-root = nothing goes beside the module's mask: drop insi
 gui-masks-one-at-a-time = members move one at a time
 
 gui-masks-root-stays = the module's mask stays the root
+
+gui-masks-show = Show { $name }: its opacity full
+
+gui-masks-unlock = Unlock { $name }
 
 gui-no-dialogs = no dialogs to show this in
 
