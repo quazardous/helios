@@ -221,7 +221,8 @@ timeout = "30m"
 
 # a release prepared from main's fragments (`cargo xtask release`: the
 # survival scenarios first, then the CHANGELOG section, the version bump
-# and the fragments removed), Cargo.lock refreshed; the change as
+# and the fragments removed), Cargo.lock refreshed and every test run on
+# the new version (a version check can refuse what passed before); the change as
 # /out/release.patch, to apply, commit "Release X.Y.Z" and tag (see
 # CONTRIBUTING.md)
 [jobs.release]
@@ -230,7 +231,7 @@ cores = 5
 memory = "6g"
 cwd = "/work/${src:-helios}"
 command = """mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && \
-cargo xtask release && cargo check --offline --workspace && \
+cargo xtask release && cargo check --offline --workspace && cargo nextest run --workspace --profile ci && \
 git add -A && git diff --cached --binary > /out/release.patch && grep -m1 '^version' Cargo.toml > /out/version.txt"""
 env = { CARGO_NET_OFFLINE = "true" }
 mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
