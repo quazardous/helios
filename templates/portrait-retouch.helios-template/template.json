@@ -1,0 +1,57 @@
+{
+  "format": 1,
+  "id": "helios.portrait-retouch",
+  "version": 1,
+  "meta": {
+    "name": "Portrait retouch",
+    "scenario": "Retouch a portrait: brighten the face through a feathered mask drawn on the image, with the Masks panel and the parameters at hand.",
+    "tags": ["portrait", "masks"]
+  },
+  "network": {
+    "sources": ["source"],
+    "nodes": [
+      {
+        "name": "exposure",
+        "module": "exposure",
+        "params": { "exposure": { "float": 0.5 } }
+      },
+      {
+        "name": "retouch",
+        "composite": { "id": "helios.masked-adjustment", "version": 1 },
+        "params": { "feather": { "float": 8.0 } },
+        "open": true
+      }
+    ],
+    "connections": [
+      { "from": "source", "port": "image", "to": "exposure", "input": "input" },
+      { "from": "source", "port": "image", "to": "retouch", "input": "input" },
+      { "from": "exposure", "port": "output", "to": "retouch", "input": "processed" }
+    ],
+    "view": { "node": "retouch", "port": "output" },
+    "presets": [
+      {
+        "id": "soft",
+        "name": "Soft",
+        "values": {
+          "exposure": { "exposure": { "float": 0.3 } },
+          "retouch": { "feather": { "float": 16.0 } }
+        }
+      },
+      {
+        "id": "bright",
+        "name": "Bright",
+        "values": { "exposure": { "exposure": { "float": 1.0 } } }
+      }
+    ]
+  },
+  "tools": {
+    "toolbox": ["mask.add.ellipse", "mask.add.circle", "mask.add.path", "mask.add.gradient"],
+    "default": "mask.add.ellipse",
+    "keymap": [
+      { "keys": "E", "command": "mask.add.ellipse", "when": "focusedPanel == 'helios.masks'" },
+      { "keys": "C", "command": "mask.add.circle", "when": "focusedPanel == 'helios.masks'" },
+      { "keys": "P", "command": "mask.add.path", "when": "focusedPanel == 'helios.masks'" },
+      { "keys": "G", "command": "mask.add.gradient", "when": "focusedPanel == 'helios.masks'" }
+    ]
+  }
+}

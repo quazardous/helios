@@ -7,6 +7,8 @@ extend-exclude = [
     "i18n/fr/",
     # A plugin's own translations, beside its manifest.
     "plugins/*/*/i18n/fr/",
+    # A template's own translations, in its bundle.
+    "templates/*/i18n/fr/",
     # Hashes of the English text, in hex.
     "i18n/*/english.hashes",
 ]
