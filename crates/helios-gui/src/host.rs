@@ -147,9 +147,14 @@ impl HeliosHost {
             .name("helios-gui-waker".into())
             .spawn(move || {
                 // Ends when the bus is gone. The GUI's own events are
-                // published on its thread, which is awake already.
-                for e in events {
-                    if !e.kind.starts_with("gui.") {
+                // published on its thread, which is awake already. A burst
+                // (a node's progress, relayed) asks for one frame.
+                while let Ok(first) = events.recv() {
+                    let mut from_elsewhere = !first.kind.starts_with("gui.");
+                    for e in events.try_iter() {
+                        from_elsewhere |= !e.kind.starts_with("gui.");
+                    }
+                    if from_elsewhere {
                         let w = wake.lock().unwrap_or_else(PoisonError::into_inner).clone();
                         w.wake();
                     }

@@ -2077,6 +2077,7 @@ dependencies = [
  "helios-export",
  "helios-gpu",
  "helios-i18n",
+ "helios-inspect",
  "helios-library",
  "helios-load",
  "helios-module-exposure",

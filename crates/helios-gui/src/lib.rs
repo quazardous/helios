@@ -20,6 +20,7 @@ mod plugins;
 pub mod preview;
 pub mod quick_open;
 pub mod quit;
+pub mod relay;
 pub mod scopes;
 pub mod shell;
 pub mod snapshot;

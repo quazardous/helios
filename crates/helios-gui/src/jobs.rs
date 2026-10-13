@@ -18,8 +18,12 @@
 //! - A long export or batch that ends while no Helios window has the
 //!   focus says so on the desktop ([`Ended`], then
 //!   `platform::job_finished`).
+//! - A connected node's jobs come through a relay ([`crate::relay`]),
+//!   ids `node:<name>/<id>`; the ones of a node lost for too long are
+//!   taken out of the jobs centre ([`Forgotten`]).
 
 use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use egui_pop::api::AppHandle;
@@ -90,6 +94,61 @@ impl Ended {
             });
         }
         ends
+    }
+}
+
+/// The nodes the desktop follows, by name.
+pub type Relays = Rc<RefCell<BTreeMap<String, crate::relay::Relay>>>;
+
+/// The node jobs a relay forgot (`node.jobs_forgotten` in the journal),
+/// taken out of the jobs centre.
+#[derive(Debug, Default)]
+pub struct Forgotten {
+    seen: Seq,
+    /// Not yet ended in the jobs centre's model when asked: tried again
+    /// next frame.
+    pending: Vec<String>,
+}
+
+impl Forgotten {
+    /// Starts after what the journal holds now.
+    pub fn after(seq: Seq) -> Self {
+        Self {
+            seen: seq,
+            pending: Vec::new(),
+        }
+    }
+
+    /// Takes the jobs forgotten since the last call out of the jobs
+    /// centre (with their children); how many went.
+    pub fn take(&mut self, app: &AppHandle) -> usize {
+        for e in app.events_since(self.seen) {
+            self.seen = e.seq;
+            if e.name == crate::relay::FORGOTTEN {
+                self.pending.extend(
+                    e.data["ids"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|id| id.as_str().map(str::to_string)),
+                );
+            }
+        }
+        let Some(centre) = app.service(&egui_pop::api::jobs::JOBS) else {
+            self.pending.clear();
+            return 0;
+        };
+        let mut gone = 0;
+        self.pending.retain(|id| match centre.job(id) {
+            None => false,
+            Some(_) if centre.dismiss(id) => {
+                gone += 1;
+                false
+            }
+            // Its end is not folded yet.
+            Some(_) => true,
+        });
+        gone
     }
 }
 

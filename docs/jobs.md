@@ -115,7 +115,30 @@ whose images are jobs of their own.
   (`idle_timeout_s`, ten minutes by default). Its exports already asked
   for go on.
 
-Not yet: the desktop does not follow a node's bus, so work run in a node
-(a batch, its exports) shows in the jobs centre only once the desktop
-relays the node's `job.*` events and sends its Cancel there as
-`job.cancel`.
+## A node's jobs on the desktop
+
+The desktop follows a running node's jobs when told about it:
+`helios-gui --node NAME=INSPECT[,CONTROL]` (repeatable; a `tcp://`
+address takes the node's token from `--token-file FILE` or
+`HELIOS_TOKEN`), or `Shell::follow_node` with a
+`helios_gui::relay::NodeLink`. A relay (`helios_gui::relay`) runs on a
+thread of its own, off the UI thread:
+
+- **Catching up, then following.** It reads the node's jobs whole
+  (`describe jobs`: the running ones with their progress so far, the
+  last ones ended), then subscribes to the node's `job.*` events after
+  that point (`subscribe`, pushed by the node).
+- **Republishing.** Each event goes on the shell's bus with the job's
+  id, and its parent's, as `node:<name>/<id>`: the jobs centre shows a
+  node's batch as a parent with its exports as children. The bus's
+  waker asks the window for one frame per burst of events.
+- **A dropped link.** No line from the node (not even its heartbeat,
+  every second) for five seconds, or the connection closed: the node's
+  running jobs are marked lost (paused, "lost: node NAME is out of
+  reach" in their log), and the relay tries again every second. Back,
+  it catches up: the jobs still running go on where they are, the ones
+  that ended meanwhile end as they did (failed when the node no longer
+  remembers how), the new ones start. A node that restarted leaves its
+  old jobs failed. Still lost after a minute, the jobs fail and leave
+  the jobs centre (`node.jobs_forgotten`). Each change of the link is
+  `node.link` on the bus (`node`, `up`, `error`).

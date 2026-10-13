@@ -8,6 +8,10 @@
 //! and each edit step is saved there as a version.
 //! `--snapshot <target> <file.png>` draws it offscreen instead and saves a
 //! picture of the target.
+//! `--node NAME=INSPECT[,CONTROL]` (repeatable) follows a running node's
+//! jobs in the jobs centre, Cancel going to its control endpoint; a
+//! `tcp://` address takes the node's session token from `--token-file
+//! FILE` or `HELIOS_TOKEN` (see `helios_gui::relay`).
 //!
 //! Helios runs once per user: a later launch hands its files, workspaces
 //! and `helios://` links to the running one and exits; `--new-instance`
@@ -525,6 +529,36 @@ fn show_image(
     }
 }
 
+/// The nodes `--node NAME=INSPECT[,CONTROL]` names, their `tcp://`
+/// addresses with the token of `--token-file FILE`, else `HELIOS_TOKEN`.
+fn node_links(args: &[String]) -> Result<Vec<helios_gui::relay::NodeLink>, String> {
+    let value = |flag: &str| -> Result<Vec<&String>, String> {
+        let mut values = Vec::new();
+        for (i, a) in args.iter().enumerate() {
+            if a == flag {
+                values.push(
+                    args.get(i + 1)
+                        .ok_or_else(|| format!("{flag} takes a value"))?,
+                );
+            }
+        }
+        Ok(values)
+    };
+    let token = match value("--token-file")?.last() {
+        Some(file) => Some(
+            std::fs::read_to_string(file.as_str())
+                .map_err(|e| format!("--token-file {file}: {e}"))?
+                .trim()
+                .to_string(),
+        ),
+        None => std::env::var("HELIOS_TOKEN").ok(),
+    };
+    value("--node")?
+        .into_iter()
+        .map(|link| helios_gui::relay::NodeLink::parse(link, token.as_deref()))
+        .collect()
+}
+
 fn main() -> Result<(), String> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if let [flag, target, out] = args.as_slice()
@@ -562,6 +596,7 @@ fn main() -> Result<(), String> {
         Open::Image(p) => Some(p.clone()),
         Open::Workspace(_) => None,
     });
+    let nodes = node_links(&args)?;
     let vault_file = args
         .iter()
         .position(|a| a == "--vault")
@@ -670,6 +705,11 @@ fn main() -> Result<(), String> {
                 shell.set_layout(saved);
             } else if let Err(e) = shell.load_layout() {
                 shell.notes.push(format!("layout: {e}"));
+            }
+            for link in nodes {
+                if let Err(e) = shell.follow_node(link) {
+                    shell.notes.push(e);
+                }
             }
             let mut persist = persist;
             if let Err(e) = open(&mut shell, persist.as_mut(), image) {

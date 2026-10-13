@@ -204,6 +204,7 @@ struct Parts {
     opens: crate::platform::Opens,
     jobs: helios_core::jobs::Jobs,
     status: crate::jobs::Status,
+    relays: crate::jobs::Relays,
 }
 
 /// A shell whose egui-pop application is still to build: in a test
@@ -382,6 +383,10 @@ pub struct Shell {
     status: crate::jobs::Status,
     /// The jobs' ends read up to here, for the desktop notification.
     ended: crate::jobs::Ended,
+    /// The nodes followed, whose jobs show in the jobs centre.
+    relays: crate::jobs::Relays,
+    /// The lost nodes' jobs to take out of the jobs centre.
+    forgotten: crate::jobs::Forgotten,
 }
 
 impl Shell {
@@ -415,6 +420,7 @@ impl Shell {
         // reads as its journal (its jobs centre).
         let jobs = helios_core::jobs::Jobs::new(bus.clone());
         let status = crate::jobs::Status::default();
+        let relays = crate::jobs::Relays::default();
         // Helios's values: what widgets and agents edit, and what Edit >
         // Undo walks back through the host.
         let values: Arc<Mutex<helios_values::Store>> = Arc::default();
@@ -531,6 +537,7 @@ impl Shell {
                 opens,
                 jobs,
                 status,
+                relays,
             },
         }
     }
@@ -553,6 +560,7 @@ impl Shell {
             opens,
             jobs,
             status,
+            relays,
         } = parts;
         if let Some(d) = app.handle().service(&DIALOGS) {
             let _ = dialogs.set((*d).clone());
@@ -618,6 +626,8 @@ impl Shell {
             jobs,
             status,
             ended: crate::jobs::Ended::default(),
+            relays,
+            forgotten: crate::jobs::Forgotten::default(),
         };
         for d in shell.app.handle().diagnostics() {
             shell.notes.push(format!("{}: {}", d.code, d.message));
@@ -629,6 +639,7 @@ impl Shell {
         }
         shell.seen = shell.app.handle().last_event();
         shell.ended = crate::jobs::Ended::after(shell.seen);
+        shell.forgotten = crate::jobs::Forgotten::after(shell.seen);
         {
             let mut store = lock(&shell.values);
             crate::viewport::declare(&mut store);
@@ -3542,12 +3553,45 @@ impl Shell {
     }
 
     /// The exports and batches that ended since the last frame: said on
-    /// the desktop when long and unseen (`job_finished`).
+    /// the desktop when long and unseen (`job_finished`). The jobs of a
+    /// node lost for too long leave the jobs centre.
     fn job_notices(&mut self) {
         let ends = self.ended.take(self.app.handle());
         for end in ends {
             self.job_finished(&end);
         }
+        self.forgotten.take(self.app.handle());
+    }
+
+    /// Follows a node's jobs in the jobs centre (see `crate::relay`):
+    /// its jobs show as `node:<name>/<id>`, Cancel goes to its control
+    /// endpoint. A node of the same name followed already is replaced.
+    pub fn follow_node(&mut self, link: crate::relay::NodeLink) -> Result<(), String> {
+        self.follow_node_with(link, crate::relay::Timing::default())
+    }
+
+    /// [`Shell::follow_node`], waiting as `timing` says.
+    pub fn follow_node_with(
+        &mut self,
+        link: crate::relay::NodeLink,
+        timing: crate::relay::Timing,
+    ) -> Result<(), String> {
+        let name = link.name.clone();
+        let relay = crate::relay::Relay::start(link, self.jobs.bus().clone(), timing)?;
+        self.relays.borrow_mut().insert(name, relay);
+        Ok(())
+    }
+
+    /// Drops the link to a followed node, as a network failure would: it
+    /// is followed again at the relay's next attempt. Whether the node is
+    /// followed.
+    pub fn drop_node_link(&self, name: &str) -> bool {
+        let relays = self.relays.borrow();
+        let Some(relay) = relays.get(name) else {
+            return false;
+        };
+        relay.drop_link();
+        true
     }
 }
 

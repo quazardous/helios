@@ -245,7 +245,7 @@ impl Opens {
 }
 
 /// Flags of `helios-gui` followed by a value that is not something to open.
-const VALUED: [&str; 1] = ["--vault"];
+const VALUED: [&str; 3] = ["--vault", "--node", "--token-file"];
 
 /// What a launch's arguments ask to open: paths (relative ones from
 /// `cwd`), `file://` URIs as a file manager passes them, `--image FILE`.

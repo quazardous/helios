@@ -429,6 +429,11 @@ log), once the desktop opens a compute manager, which it does not yet. A long ex
 that ends while no Helios window has the focus is said on the desktop
 (see "Platform services").
 
+A running node's jobs show there too: `helios-gui --node
+NAME=INSPECT[,CONTROL]` follows it (see [jobs.md](jobs.md), "A node's
+jobs on the desktop"), its batch as a parent with its exports as
+children, ids `node:<name>/<id>`.
+
 ## Platform services
 
 **On egui-pop's platform services (2026-10-13).** The desktop window adds
