@@ -352,6 +352,42 @@ env = { CARGO_NET_OFFLINE = "true" }
 mounts = { "egui-pop-target/${egui_pop:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
 timeout = "1h"
 
+# egui-pop's frame times under background load (its docs/threading.md):
+# the gallery's `threading` example, headless, one JSON line per scenario
+# in /out/threading.jsonl (`scenarios=` picks some)
+[jobs.egui-pop-threading]
+checkouts = ["egui-pop"]
+cores = 8
+memory = "6g"
+timing = true
+cwd = "/work/${src:-egui-pop}"
+command = """mkdir -p /tmp/w/egui-pop && cp -r --preserve=mode . /tmp/w/egui-pop/ && cd /tmp/w/egui-pop && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/egui-pop ] || { rm -rf /target/* && echo /tmp/w/egui-pop > /target/.built-at; }; } && \
+cargo build --release --locked -p egui-pop-gallery --features trace --example threading && \
+THREADING_OUT=/out/threading.jsonl /target/release/examples/threading ${scenarios:-} | tee /out/threading.txt; exit ${PIPESTATUS[0]}"""
+env = { CARGO_NET_OFFLINE = "true" }
+mounts = { "egui-pop-target/${egui_pop:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
+timeout = "1h"
+
+# egui-pop's viewport tile intake on the NVIDIA GPU (its docs/threading.md):
+# the viewport crate's `gpu_tiles` example, each intake in its own process
+# for a storm (period 8) and views held (period 30), one JSON line per run
+# in /out/gpu-tiles.jsonl (`intakes=` picks some); the adapter in each line
+[jobs.egui-pop-gpu-tiles]
+checkouts = ["egui-pop"]
+cores = 4
+memory = "4g"
+resources = ["gpu"]
+timing = true
+cwd = "/work/${src:-egui-pop}"
+command = """mkdir -p /tmp/w/egui-pop && cp -r --preserve=mode . /tmp/w/egui-pop/ && cd /tmp/w/egui-pop && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/egui-pop ] || { rm -rf /target/* && echo /tmp/w/egui-pop > /target/.built-at; }; } && cp "$BENCH_RESOURCES" /out/resources.json 2> /dev/null; \
+vulkaninfo --summary > /out/vulkaninfo.txt 2>&1; \
+cargo build --release --locked -p egui-pop-viewport --example gpu_tiles || exit 1; \
+for period in 8 30; do for intake in ${intakes:-gpu-ui gpu-worker gpu-render cpu-ui cpu-worker}; do \
+GPU_TILES_OUT=/out/gpu-tiles.jsonl /target/release/examples/gpu_tiles $intake $period || exit 1; done; done"""
+env = { CARGO_NET_OFFLINE = "true" }
+mounts = { "egui-pop-target/${egui_pop:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
+timeout = "1h"
+
 # egui-pop's translation catalogues regenerated (UPDATE_CATALOGUES=1: the
 # English one from the code, new translations stamped): the locales of
 # crates/egui-pop-i18n land in /out/locales, to review and commit
