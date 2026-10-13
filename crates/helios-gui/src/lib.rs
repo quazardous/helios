@@ -7,6 +7,7 @@ pub mod display;
 pub mod engine_source;
 pub mod host;
 pub mod i18n;
+pub mod jobs;
 pub mod library;
 pub mod mask_tree;
 pub mod masks;

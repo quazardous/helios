@@ -269,7 +269,15 @@ impl Plugin for History {
 /// frame's own menu block. Its system menu (the bar's menu button, a
 /// right click on the caption, `Alt+Space`) is Helios's, opened as a
 /// popup where the frame asks: the `frame.system_menu` step is replaced.
-pub struct Frame;
+/// Helios's status line is a block of egui-pop's status bar, beside its
+/// jobs item.
+pub struct Frame {
+    pub status: crate::jobs::Status,
+}
+
+/// Helios's status line in the status bar (keys pending, a recording,
+/// the last note).
+pub const BLOCK_STATUS: BlockId = BlockId::from_static("helios.frame.status");
 
 /// The block at the start of the title bar: the menu button, the logo,
 /// the application's name.
@@ -327,6 +335,14 @@ impl Plugin for Frame {
         ctx.block(
             zones::CAPTION_START,
             Block::replace(frame::BLOCK_MENU, BLOCK_LOGO, caption_start),
+        );
+        ctx.block(
+            zones::STATUS_BAR,
+            Block::add(
+                BLOCK_STATUS,
+                100,
+                crate::jobs::status_block(self.status.clone()),
+            ),
         );
         ctx.replace(STEP_SYSTEM_MENU, |app, args| {
             let x = args["x"].as_f64().unwrap_or(0.0) as f32;

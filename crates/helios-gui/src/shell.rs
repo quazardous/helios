@@ -186,6 +186,8 @@ struct Parts {
     /// The catalogues of the application's translation plugin.
     i18n: egui_pop::i18n::I18n,
     opens: crate::platform::Opens,
+    jobs: helios_core::jobs::Jobs,
+    status: crate::jobs::Status,
 }
 
 /// A shell whose egui-pop application is still to build: in a test
@@ -345,6 +347,12 @@ pub struct Shell {
     /// GPU fallback was already said.
     engine_seen: u64,
     fell_back: BTreeSet<String>,
+    /// Where background work reports (`job.*` on the shell's bus).
+    jobs: helios_core::jobs::Jobs,
+    /// Helios's status line, drawn in egui-pop's status bar.
+    status: crate::jobs::Status,
+    /// The jobs' ends read up to here, for the desktop notification.
+    ended: crate::jobs::Ended,
 }
 
 impl Shell {
@@ -374,6 +382,10 @@ impl Shell {
     pub fn builder(panels: Vec<PanelSpec>, ui_settings: Option<PathBuf>) -> ShellBuilder {
         let registry = Arc::new(Mutex::new(Registry::new()));
         let bus = Arc::new(Bus::new());
+        // Background work reports on the shell's bus, which egui-pop
+        // reads as its journal (its jobs centre).
+        let jobs = helios_core::jobs::Jobs::new(bus.clone());
+        let status = crate::jobs::Status::default();
         // Helios's values: what widgets and agents edit, and what Edit >
         // Undo walks back through the host.
         let values: Arc<Mutex<helios_values::Store>> = Arc::default();
@@ -450,7 +462,13 @@ impl Shell {
             } else {
                 FramePlugin::system()
             })
-            .plugin(plugins::Frame)
+            .plugin(plugins::Frame {
+                status: status.clone(),
+            })
+            // The jobs centre, its status bar item and each job's log
+            // console as a terminal.
+            .plugin(crate::jobs::plugin(jobs.clone()))
+            .plugin(egui_pop::editors::JobConsolesPlugin)
             .plugin(crate::display::Display)
             .plugin(crate::platform::Platform::new(opens.clone()))
             .plugin(crate::workbench::Panels {
@@ -477,6 +495,8 @@ impl Shell {
                 workspace,
                 i18n,
                 opens,
+                jobs,
+                status,
             },
         }
     }
@@ -497,6 +517,8 @@ impl Shell {
             workspace,
             i18n,
             opens,
+            jobs,
+            status,
         } = parts;
         if let Some(d) = app.handle().service(&DIALOGS) {
             let _ = dialogs.set((*d).clone());
@@ -549,6 +571,9 @@ impl Shell {
             engine_seen: 0,
             fell_back: BTreeSet::new(),
             opens,
+            jobs,
+            status,
+            ended: crate::jobs::Ended::default(),
         };
         for d in shell.app.handle().diagnostics() {
             shell.notes.push(format!("{}: {}", d.code, d.message));
@@ -559,6 +584,7 @@ impl Shell {
             shell.notes.push(e);
         }
         shell.seen = shell.app.handle().last_event();
+        shell.ended = crate::jobs::Ended::after(shell.seen);
         {
             let mut store = lock(&shell.values);
             crate::viewport::declare(&mut store);
@@ -2950,11 +2976,12 @@ impl Shell {
         });
         self.rects.insert("window".into(), ctx.content_rect());
 
-        self.status_bar(ui);
+        self.status_bar();
         self.viewport.borrow_mut().sync(&mut lock(&self.values));
         self.app.show(ui);
         self.workbench_refusals();
         self.engine_notices();
+        self.job_notices();
         self.menus_ui(&ctx);
 
         let named = ctx.data(|d| {
@@ -3038,25 +3065,29 @@ impl Shell {
         }
     }
 
-    fn status_bar(&mut self, ui: &mut Ui) {
-        let pending = self.app.handle().pending_keys();
-        egui::Panel::bottom("helios.status")
-            .exact_size(22.0)
-            .show(ui, |ui| {
-                ui.horizontal_centered(|ui| {
-                    if let Some(keys) = &pending {
-                        ui.label(format!("{keys} …"));
-                        ui.separator();
-                    }
-                    if self.recording.is_some() {
-                        ui.colored_label(ui.visuals().error_fg_color, "● REC");
-                        ui.separator();
-                    }
-                    if let Some(note) = self.notes.last() {
-                        ui.label(note);
-                    }
-                });
-            });
+    /// Helios's status line, which its block draws in egui-pop's status
+    /// bar (beside the jobs item).
+    fn status_bar(&self) {
+        let mut line = self.status.borrow_mut();
+        line.recording = self.recording.is_some();
+        line.note = self.notes.last().cloned();
+    }
+
+    /// Where background work in this process reports: `job.*` events on
+    /// the shell's bus, shown in the jobs centre, cancelled from it
+    /// (see `crate::jobs`). An import, an export started from the
+    /// desktop, a calibration: each starts its job here.
+    pub fn jobs(&self) -> helios_core::jobs::Jobs {
+        self.jobs.clone()
+    }
+
+    /// The exports and batches that ended since the last frame: said on
+    /// the desktop when long and unseen (`job_finished`).
+    fn job_notices(&mut self) {
+        let ends = self.ended.take(self.app.handle());
+        for end in ends {
+            self.job_finished(&end);
+        }
     }
 }
 

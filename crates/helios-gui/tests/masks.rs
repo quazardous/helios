@@ -597,7 +597,18 @@ fn the_shapes_not_selected_are_drawn_faint_with_no_handles() {
     };
     let on = m.image_to_screen([300.0, 100.0]);
     let off = on + vec2(0.0, 8.0);
-    assert!((px(on) - px(off)).abs() > 30, "{} vs {}", px(on), px(off));
+    // The line is thin: it is looked for within two pixels of where the
+    // mapping puts it (antialiased, it may fall between two rows).
+    let edge = (-2..=2)
+        .map(|dy| (px(on + vec2(0.0, dy as f32)) - px(off)).abs())
+        .max()
+        .unwrap_or(0);
+    assert!(
+        edge > 30,
+        "{} vs {} (best {edge}); at {on:?} in {r:?}, mapping {m:?}",
+        px(on),
+        px(off)
+    );
 }
 
 #[test]
