@@ -200,3 +200,81 @@ fn an_export_cancelled_while_rendering_writes_nothing() {
     );
     let _ = std::fs::remove_dir_all(&d);
 }
+
+/// An export is a job people follow: started when queued, its steps, a
+/// log line, finished; its id cancels it through the jobs.
+#[test]
+fn an_export_reports_its_job_and_is_cancelled_by_its_id() {
+    use helios_core::jobs::Jobs;
+
+    let d = dir("reported");
+    let s = setup(d.join("a.png"));
+    let jobs = Jobs::new(s.bus.clone());
+    let image = ramp(Region::sized(8, 4), 4);
+    helios_export::submit_reported(
+        &s.scheduler,
+        &jobs,
+        &d.join("a.png"),
+        Format::Png { bits: 8 },
+        move || Ok(image),
+    )
+    .unwrap();
+    assert!(s.scheduler.wait_until_idle(LONG));
+    let events: Vec<_> = s
+        .bus
+        .since(0)
+        .into_iter()
+        .filter(|e| e.kind.starts_with("job."))
+        .collect();
+    let kinds: Vec<&str> = events.iter().map(|e| e.kind).collect();
+    assert_eq!(kinds.first(), Some(&"job.started"));
+    assert_eq!(kinds.last(), Some(&"job.finished"));
+    assert!(kinds.contains(&"job.log"), "{kinds:?}");
+    let started = &events[0].payload;
+    assert_eq!(started["kind"], "export");
+    assert_eq!(started["title"], "Export a.png");
+    assert_eq!(started["steps"].as_array().unwrap().len(), 3);
+    let steps: Vec<&str> = events
+        .iter()
+        .filter_map(|e| e.payload["step"].as_str())
+        .collect();
+    assert_eq!(steps, ["render", "encode", "write"]);
+
+    // Cancelled by its id while it renders: nothing is written.
+    let path = d.join("b.png");
+    let (started_tx, started) = std::sync::mpsc::channel();
+    let (release, release_rx) = std::sync::mpsc::channel::<()>();
+    let image = ramp(Region::sized(8, 4), 4);
+    let seen = s.bus.last_seq();
+    helios_export::submit_reported(
+        &s.scheduler,
+        &jobs,
+        &path,
+        Format::Png { bits: 8 },
+        move || {
+            started_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+            Ok(image)
+        },
+    )
+    .unwrap();
+    started.recv().unwrap();
+    let id = jobs
+        .cancellable()
+        .pop()
+        .expect("the export can be cancelled");
+    jobs.cancel(&id).unwrap();
+    release.send(()).unwrap();
+    assert!(s.scheduler.wait_until_idle(LONG));
+    assert!(!path.exists());
+    let kinds: Vec<&str> = s
+        .bus
+        .since(seen)
+        .iter()
+        .filter(|e| e.kind.starts_with("job."))
+        .map(|e| e.kind)
+        .collect();
+    assert!(kinds.contains(&"job.cancelling"), "{kinds:?}");
+    assert_eq!(kinds.last(), Some(&"job.cancelled"));
+    let _ = std::fs::remove_dir_all(&d);
+}

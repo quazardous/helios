@@ -13,8 +13,10 @@
 
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 
+use helios_core::jobs::{Jobs, Progress, Report, Start};
 use helios_core::{
     Bus, ContentHash, Engine, Event, Graph, Image, JobId, JobSpec, Message, NodeId, Priority,
     Region, Scheduler,
@@ -258,34 +260,145 @@ pub fn submit_with(
     format: Format,
     render: impl FnOnce() -> Result<Image, String> + Send + 'static,
 ) -> Result<JobId, Message> {
+    submit_reported(scheduler, &Jobs::new(bus), path, format, render)
+}
+
+/// The steps of an export, as its job reports them: the render weighs
+/// most.
+pub const STEPS: [(&str, &str, f64); 3] = [
+    ("render", "Render", 3.0),
+    ("encode", "Encode", 1.0),
+    ("write", "Write", 1.0),
+];
+
+/// Says the job's end when its work never ran: the scheduler dropped it,
+/// cancelled before it started.
+struct Unstarted(Option<Arc<Report>>);
+
+impl Drop for Unstarted {
+    fn drop(&mut self) {
+        if let Some(report) = self.0.take() {
+            report.cancelled();
+        }
+    }
+}
+
+/// An export's work, its steps said through `step`; cancelled before a
+/// write, nothing is written.
+fn run(
+    stopped: &dyn Fn() -> bool,
+    render: impl FnOnce() -> Result<Image, String>,
+    format: &Format,
+    path: &Path,
+    step: &dyn Fn(&str),
+) -> Result<Exported, Message> {
+    let cancelled = || Message::new("export-cancelled", "cancelled");
+    if stopped() {
+        return Err(cancelled());
+    }
+    step("render");
+    let image = render().map_err(Message::plain)?;
+    step("encode");
+    let bytes = encode(&image, format)?;
+    // Cancelled while rendering: nothing is written.
+    if stopped() {
+        return Err(cancelled());
+    }
+    step("write");
+    write_atomic(path, &bytes)?;
+    Ok(Exported {
+        hash: ContentHash::of(&bytes),
+        bytes: bytes.len() as u64,
+        path: path.to_path_buf(),
+    })
+}
+
+/// The exports' job ids in this process: `export-1`, `export-2`...
+static NEXT: AtomicU64 = AtomicU64::new(1);
+
+/// [`submit_with`] reporting to `jobs`: the export is a job people follow
+/// (`job.*` on the jobs' bus: started when queued, its steps, a log line,
+/// its end), and [`Jobs::cancel`] with its id (`export-<n>`) cancels it,
+/// queued or running.
+pub fn submit_reported(
+    scheduler: &Scheduler,
+    jobs: &Jobs,
+    path: &Path,
+    format: Format,
+    render: impl FnOnce() -> Result<Image, String> + Send + 'static,
+) -> Result<JobId, Message> {
     let dest = destination(path);
     scheduler.ensure_resource(&dest, 1);
     let spec = JobSpec::new(&format!("export {}", path.display()))
         .priority(Priority::Batch)
         .needs(&dest, 1);
     let path = path.to_path_buf();
-    let id = Arc::new(OnceLock::new());
+    let item = path.file_name().map_or_else(
+        || path.display().to_string(),
+        |n| n.to_string_lossy().into(),
+    );
+    let mut start = Start::new(
+        &format!("export-{}", NEXT.fetch_add(1, Ordering::Relaxed)),
+        &format!("Export {item}"),
+        "export",
+    )
+    .total(1);
+    for (id, title, weight) in STEPS {
+        start = start.step(id, title, weight);
+    }
+    let report = Arc::new(jobs.start(start));
+    let mut unstarted = Unstarted(Some(report.clone()));
+    let bus = jobs.bus().clone();
+    let id: Arc<OnceLock<JobId>> = Arc::new(OnceLock::new());
     let job_id = id.clone();
-    let cancelled = || Message::new("export-cancelled", "cancelled");
+    // Asked to stop through the jobs: the work sees it whenever it comes,
+    // and the scheduler cancels the job once it has its id.
+    let asked = Arc::new(AtomicBool::new(false));
+    {
+        let asked = asked.clone();
+        let id = id.clone();
+        let canceller = scheduler.canceller();
+        report.on_cancel(move || {
+            asked.store(true, Ordering::SeqCst);
+            if let Some(job) = id.get() {
+                canceller.cancel(*job);
+            }
+        });
+    }
     let job = scheduler.submit_message(spec, move |cancel| {
-        if cancel.is_cancelled() {
-            return Err(cancelled());
+        // It runs: its end is said here, not by the guard.
+        let report = unstarted.0.take().expect("the work runs once");
+        let stopped = || cancel.is_cancelled() || asked.load(Ordering::SeqCst);
+        let step = |s: &str| report.progress(Progress::new().done(0).item(&item).step(s));
+        let outcome = run(&stopped, render, &format, &path, &step);
+        match &outcome {
+            Ok(exported) => {
+                report.progress(Progress::new().counts(1, 1));
+                report.log(format!(
+                    "{}: {} bytes written",
+                    exported.path.display(),
+                    exported.bytes
+                ));
+                report.finished();
+                // A worker can start the job before `submit_message`
+                // returns its id.
+                let job = *job_id.wait();
+                bus.publish(
+                    "export",
+                    None,
+                    &Written {
+                        job,
+                        exported: exported.clone(),
+                    },
+                );
+            }
+            Err(_) if stopped() => report.cancelled(),
+            Err(why) => {
+                report.log(&why.english);
+                report.failed(&why.english);
+            }
         }
-        let bytes = encode(&render().map_err(Message::plain)?, &format)?;
-        // Cancelled while rendering: nothing is written.
-        if cancel.is_cancelled() {
-            return Err(cancelled());
-        }
-        write_atomic(&path, &bytes)?;
-        let exported = Exported {
-            hash: ContentHash::of(&bytes),
-            bytes: bytes.len() as u64,
-            path,
-        };
-        // A worker can start the job before `submit_spec` returns its id.
-        let job = *job_id.wait();
-        bus.publish("export", None, &Written { job, exported });
-        Ok(())
+        outcome.map(|_| ())
     });
     let _ = id.set(job);
     Ok(job)
