@@ -2268,6 +2268,7 @@ dependencies = [
  "helios-module-whitebalance",
  "helios-photo",
  "helios-resolve",
+ "helios-template",
  "helios-testkit",
  "helios-vault",
  "helios-vault-sqlite",

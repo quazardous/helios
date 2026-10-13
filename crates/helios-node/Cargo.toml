@@ -22,6 +22,7 @@ helios-vault.workspace = true
 helios-vault-sqlite.workspace = true
 helios-library.workspace = true
 helios-display.workspace = true
+helios-template.workspace = true
 helios-module-exposure = { path = "../../modules/exposure" }
 helios-module-rawprepare = { path = "../../modules/rawprepare" }
 helios-module-demosaic = { path = "../../modules/demosaic" }

@@ -13,6 +13,13 @@
 //! `cmd` are the dotted names (`ai.providers.list`); the tool names use
 //! underscores, which every MCP client accepts.
 //!
+//! The `helios_workspace_*` tools are answered by the server itself too,
+//! on a workspace's files (`helios_template::workspace::tools`): its
+//! parts listed, edited, reset to its template, parts of another added as
+//! a copy, saved as a template, each with a dry run, each step undone by
+//! `helios_workspace_undo`. A desktop showing that workspace reads the
+//! files when it opens it.
+//!
 //! Transport: JSON-RPC 2.0, one message per line on stdin and stdout.
 
 use std::path::PathBuf;
@@ -32,6 +39,8 @@ pub enum Endpoint {
     Sandbox,
     /// Handled by the server itself, through the AI service.
     Ai,
+    /// Handled by the server itself, on a workspace's files.
+    Workspace,
 }
 
 /// A tool: its name, the request it sends, and its arguments.
@@ -276,8 +285,168 @@ const DIR: Param = Param {
     default: None,
 };
 
+const WORKSPACE: Param = Param {
+    name: "workspace",
+    schema: string,
+    description: "The workspace's directory, an absolute path",
+    default: None,
+};
+
+const CONFIG: Param = optional(
+    "config",
+    optional_string,
+    "Helios's configuration directory; the user's when null",
+);
+
+const DRY_RUN: Param = Param {
+    name: "dry_run",
+    schema: boolean,
+    description: "Say what would change, write nothing",
+    default: Some(no),
+};
+
+const SOURCE: Param = Param {
+    name: "source",
+    schema: string,
+    description: "A template's id (built in or the user's), a template bundle's directory, or a workspace's directory",
+    default: None,
+};
+
 /// Every tool. Tests check each node tool maps onto a request type.
 pub const TOOLS: &[Tool] = &[
+    Tool {
+        name: "helios_workspace_parts",
+        endpoint: Endpoint::Workspace,
+        cmd: "workspace.parts",
+        description: "The parts of a workspace (network, layout, keys, toolbox, library), or of another workspace or template given as `source`",
+        params: &[
+            WORKSPACE,
+            optional(
+                "source",
+                optional_string,
+                "A template's id or directory, or a workspace's directory; the workspace itself when null",
+            ),
+            CONFIG,
+        ],
+    },
+    Tool {
+        name: "helios_workspace_state",
+        endpoint: Endpoint::Workspace,
+        cmd: "workspace.state",
+        description: "A workspace as it stands, whole: its name, description and icon, its network, tools, library and layout",
+        params: &[WORKSPACE, CONFIG],
+    },
+    Tool {
+        name: "helios_workspace_edit",
+        endpoint: Endpoint::Workspace,
+        cmd: "workspace.edit",
+        description: "Edits a workspace as one undoable step: `changes` sets its name, description, icon, network, tools, library or layout, written as in a template; checked first",
+        params: &[
+            WORKSPACE,
+            Param {
+                name: "changes",
+                schema: object,
+                description: "The parts changed: name, description, icon, network, tools, library (null for none), layout",
+                default: None,
+            },
+            DRY_RUN,
+            CONFIG,
+        ],
+    },
+    Tool {
+        name: "helios_workspace_reset",
+        endpoint: Endpoint::Workspace,
+        cmd: "workspace.reset",
+        description: "Resets a workspace to the template it was made from, as one undoable step; its name, description and icon stay",
+        params: &[WORKSPACE, DRY_RUN, CONFIG],
+    },
+    Tool {
+        name: "helios_workspace_import_parts",
+        endpoint: Endpoint::Workspace,
+        cmd: "workspace.import_parts",
+        description: "Copies parts of another workspace or template into a workspace, as one undoable step: the network as an opened composite under a free name, panels, keys, tools, library settings. A dry run returns the changes and the conflicts; each conflict needs a side in `picks` (ours or theirs) before it applies. Nothing records where the parts came from",
+        params: &[
+            WORKSPACE,
+            SOURCE,
+            Param {
+                name: "parts",
+                schema: strings,
+                description: "network, layout, keys, toolbox, library; every part when empty",
+                default: Some(empty_list),
+            },
+            Param {
+                name: "picks",
+                schema: object,
+                description: "The side kept for each conflict, by its id (view, panel:<id>, key:<keys>, library): ours or theirs",
+                default: Some(empty_object),
+            },
+            DRY_RUN,
+            CONFIG,
+        ],
+    },
+    Tool {
+        name: "helios_workspace_save_as_template",
+        endpoint: Endpoint::Workspace,
+        cmd: "workspace.save_as_template",
+        description: "Saves a workspace as a template among the user's: a review of what goes in (network, layout, keys, toolbox, library), what is stripped (images, edit history, absolute paths, secrets, embedded data) and what is asked on create (paths, the import source); validated, versioned, with its English and French text. A dry run returns the review only",
+        params: &[
+            WORKSPACE,
+            Param {
+                name: "id",
+                schema: string,
+                description: "The template's id: lowercase words joined by '.' or '-' (user.wedding)",
+                default: None,
+            },
+            Param {
+                name: "name",
+                schema: string,
+                description: "Its name, in English",
+                default: None,
+            },
+            Param {
+                name: "description",
+                schema: string,
+                description: "The scenario it is made for, in English",
+                default: None,
+            },
+            optional("icon", optional_string, "A short generic icon name"),
+            optional(
+                "version",
+                optional_integer,
+                "Its version; 1 when null, and above the one saved to replace it",
+            ),
+            optional(
+                "translations",
+                optional_object,
+                "Its name and description in other languages, by locale: {\"fr\": {\"name\": …, \"description\": …}}",
+            ),
+            optional(
+                "without",
+                optional_strings,
+                "Parts left out: keys, toolbox, library",
+            ),
+            optional(
+                "ask",
+                optional_strings,
+                "The values asked on create, by id; every one proposed when null",
+            ),
+            Param {
+                name: "overwrite",
+                schema: boolean,
+                description: "Replace a template of that id whatever its version",
+                default: Some(no),
+            },
+            DRY_RUN,
+            CONFIG,
+        ],
+    },
+    Tool {
+        name: "helios_workspace_undo",
+        endpoint: Endpoint::Workspace,
+        cmd: "workspace.undo",
+        description: "Undoes the last step these tools made on a workspace",
+        params: &[WORKSPACE, CONFIG],
+    },
     Tool {
         name: "helios_sandbox_start",
         endpoint: Endpoint::Sandbox,
@@ -978,8 +1147,19 @@ fn call(sockets: &mut Sockets, params: &Value) -> Value {
     if tool.endpoint == Endpoint::Ai {
         return ai_call(sockets, &request);
     }
+    if tool.endpoint == Endpoint::Workspace {
+        return match workspace_call(&request) {
+            Ok(answer) => tool_result(
+                serde_json::to_string_pretty(&answer).expect("JSON values serialize"),
+                false,
+            ),
+            Err(e) => tool_result(e, true),
+        };
+    }
     let socket = match (tool.endpoint, &sockets.inspect, &sockets.control) {
-        (Endpoint::Sandbox | Endpoint::Ai, _, _) => unreachable!("handled above"),
+        (Endpoint::Sandbox | Endpoint::Ai | Endpoint::Workspace, _, _) => {
+            unreachable!("handled above")
+        }
         (Endpoint::Inspect, Some(path), _) | (Endpoint::Control, _, Some(path)) => path,
         (Endpoint::Inspect, None, _) => {
             return tool_result(
@@ -1001,6 +1181,41 @@ fn call(sockets: &mut Sockets, params: &Value) -> Value {
             answer["ok"] != true,
         ),
         Err(e) => tool_result(e, true),
+    }
+}
+
+/// What a template may name, seen from here: this node's modules and the
+/// composites Helios ships (panels and commands are the desktop's, not
+/// checked).
+pub fn workspace_catalogue() -> helios_template::Catalogue {
+    let mut c = helios_template::Catalogue::new().modules(crate::registry());
+    for file in helios_template::shipped::composites() {
+        c.add_composite(file);
+    }
+    c
+}
+
+/// A `helios_workspace_*` tool, on the workspace's files.
+fn workspace_call(request: &Value) -> Result<Value, String> {
+    use helios_template::workspace::{config_dir, tools};
+    let config = request["config"]
+        .as_str()
+        .map_or_else(config_dir, PathBuf::from);
+    let mut args = request.clone();
+    if let Some(o) = args.as_object_mut() {
+        o.remove("cmd");
+        o.remove("config");
+    }
+    let catalogue = workspace_catalogue();
+    match request["cmd"].as_str().unwrap_or_default() {
+        "workspace.parts" => tools::parts_of(&config, &args),
+        "workspace.state" => tools::state(&config, &args),
+        "workspace.edit" => tools::edit(&config, &args, &catalogue),
+        "workspace.reset" => tools::reset(&config, &args, &catalogue),
+        "workspace.import_parts" => tools::import_parts(&config, &args, &catalogue),
+        "workspace.save_as_template" => tools::save_as_template(&config, &args, &catalogue),
+        "workspace.undo" => tools::undo(&config, &args),
+        other => Err(format!("no workspace tool `{other}`")),
     }
 }
 
@@ -1059,17 +1274,21 @@ mod tests {
 
     #[test]
     fn every_tool_maps_onto_a_request_type() {
-        for tool in TOOLS
-            .iter()
-            .filter(|t| !matches!(t.endpoint, Endpoint::Sandbox | Endpoint::Ai))
-        {
+        for tool in TOOLS.iter().filter(|t| {
+            !matches!(
+                t.endpoint,
+                Endpoint::Sandbox | Endpoint::Ai | Endpoint::Workspace
+            )
+        }) {
             let request = tool.request(&example(tool)).unwrap();
             let parsed = match tool.endpoint {
                 Endpoint::Inspect => serde_json::from_value::<Request>(request.clone()).map(|_| ()),
                 Endpoint::Control => {
                     serde_json::from_value::<ControlRequest>(request.clone()).map(|_| ())
                 }
-                Endpoint::Sandbox | Endpoint::Ai => unreachable!("filtered out"),
+                Endpoint::Sandbox | Endpoint::Ai | Endpoint::Workspace => {
+                    unreachable!("filtered out")
+                }
             };
             assert!(
                 parsed.is_ok(),
@@ -1103,7 +1322,12 @@ mod tests {
         }
         let node_tools = TOOLS
             .iter()
-            .filter(|t| !matches!(t.endpoint, Endpoint::Sandbox | Endpoint::Ai))
+            .filter(|t| {
+                !matches!(
+                    t.endpoint,
+                    Endpoint::Sandbox | Endpoint::Ai | Endpoint::Workspace
+                )
+            })
             .count();
         assert_eq!(node_tools, inspect.len() + control.len());
     }
@@ -1225,6 +1449,96 @@ mod tests {
             result["isError"] == true,
             serde_json::from_str(text).unwrap_or(json!(text)),
         )
+    }
+
+    #[test]
+    fn an_agent_edits_a_workspace_through_mcp_with_dry_runs() {
+        let root =
+            std::env::temp_dir().join(format!("helios-mcp-workspace-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let config = root.join("config");
+        let portrait = helios_template::shipped::templates()
+            .into_iter()
+            .find(|b| b.template.id == "helios.portrait-retouch")
+            .unwrap();
+        let (dir, _) = helios_template::workspace::create(
+            &portrait,
+            &std::collections::BTreeMap::new(),
+            &workspace_catalogue(),
+            &root.join("work"),
+            &config,
+        )
+        .unwrap();
+        let mut s = Sockets {
+            inspect: None,
+            control: None,
+            node_bin: PathBuf::from("helios-node"),
+            ai: None,
+        };
+        let args = |extra: Value| {
+            let mut a = json!({ "workspace": dir, "config": config });
+            for (k, v) in extra.as_object().unwrap() {
+                a[k] = v.clone();
+            }
+            a
+        };
+        let nodes = |s: &mut Sockets| {
+            let (failed, state) = tool(s, "helios_workspace_state", args(json!({})));
+            assert!(!failed, "{state}");
+            state["template"]["network"]["nodes"]
+                .as_array()
+                .unwrap()
+                .len()
+        };
+        let (failed, parts) = tool(&mut s, "helios_workspace_parts", args(json!({})));
+        assert!(!failed, "{parts}");
+        assert_eq!(parts["parts"][0]["part"], "network");
+        // An import's dry run: the conflict to pick, nothing written.
+        let intake = json!({ "source": "helios.import-cull-dedupe" });
+        let mut dry = intake.clone();
+        dry["dry_run"] = json!(true);
+        let (failed, diff) = tool(&mut s, "helios_workspace_import_parts", args(dry));
+        assert!(!failed, "{diff}");
+        assert_eq!(diff["unresolved"], json!(["view"]));
+        assert_eq!(nodes(&mut s), 2);
+        let (failed, _) = tool(
+            &mut s,
+            "helios_workspace_import_parts",
+            args(intake.clone()),
+        );
+        assert!(failed, "a conflict without a side is refused");
+        let mut picked = intake;
+        picked["picks"] = json!({ "view": "ours" });
+        let (failed, done) = tool(&mut s, "helios_workspace_import_parts", args(picked));
+        assert!(!failed, "{done}");
+        assert_eq!(nodes(&mut s), 3);
+        // Saved as a template: reviewed first, then written.
+        let template =
+            json!({ "id": "user.agent", "name": "Agent's", "description": "Made by an agent" });
+        let mut dry = template.clone();
+        dry["dry_run"] = json!(true);
+        let (failed, review) = tool(&mut s, "helios_workspace_save_as_template", args(dry));
+        assert!(!failed && review["ok"] == true, "{review}");
+        let bundle = helios_template::workspace::template_dir(&config, "user.agent");
+        assert!(!bundle.exists());
+        let (failed, written) = tool(&mut s, "helios_workspace_save_as_template", args(template));
+        assert!(!failed, "{written}");
+        assert!(bundle.is_dir());
+        // Reset, its dry run first, then undone.
+        let (failed, dry) = tool(
+            &mut s,
+            "helios_workspace_reset",
+            args(json!({ "dry_run": true })),
+        );
+        assert!(!failed && dry["changed"] == true, "{dry}");
+        assert_eq!(nodes(&mut s), 3);
+        let (failed, _) = tool(&mut s, "helios_workspace_reset", args(json!({})));
+        assert!(!failed);
+        assert_eq!(nodes(&mut s), 2);
+        let (failed, undone) = tool(&mut s, "helios_workspace_undo", args(json!({})));
+        assert!(!failed, "{undone}");
+        assert_eq!(nodes(&mut s), 3);
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
