@@ -25,7 +25,7 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
-use egui::{Color32, Modifiers, Painter, Pos2, Stroke};
+use egui::{Color32, Painter, Pos2, Stroke};
 use egui_pop::viewport::hooks::HandleMove;
 use egui_pop::viewport::overlay::{self, HIT_RADIUS, Handle, HandleKind, Overlay, Shape};
 use egui_pop::viewport::tokens::ViewportTokens;
@@ -339,6 +339,7 @@ pub fn overlay_of(member: &Member, point: Option<usize>, m: Option<&Mapping>) ->
         },
         handles: shown(member, point, m),
         label: None,
+        style: overlay::Style::default(),
     }
 }
 
@@ -541,10 +542,7 @@ enum Constraint {
 /// What the `before_handle` hook knows, set before each frame.
 #[derive(Default)]
 struct Snap {
-    modifiers: Modifiers,
     constraints: BTreeMap<(String, u32), Constraint>,
-    /// The handle dragged and where it started.
-    start: Option<((String, u32), [f64; 2])>,
 }
 
 /// What the `after_paint` hook draws, set before each frame.
@@ -679,20 +677,14 @@ impl Masks {
         self.hooked = true;
         let snap = self.snap.clone();
         hooks.before_handle = Some(Box::new(move |mv: &HandleMove, _m: &Mapping| {
-            let mut s = snap.borrow_mut();
+            let s = snap.borrow();
             let key = (mv.overlay.clone(), mv.handle);
-            let start = match &s.start {
-                Some((k, at)) if *k == key => *at,
-                _ => {
-                    s.start = Some((key.clone(), mv.from));
-                    mv.from
-                }
-            };
+            let start = mv.start;
             let mut to = mv.to;
-            if s.modifiers.command {
+            if mv.modifiers.command {
                 to = add(start, scale(sub(to, start), FINE));
             }
-            if s.modifiers.shift {
+            if mv.modifiers.shift {
                 to = match s.constraints.get(&key).copied().unwrap_or(Constraint::None) {
                     Constraint::Angle(pivot) => {
                         let d = sub(to, pivot);
@@ -746,7 +738,6 @@ impl Masks {
         graph: Option<&Graph>,
         store: &Store,
         mapping: Option<&Mapping>,
-        modifiers: Modifiers,
         pointer: Option<Pos2>,
     ) {
         let mask = graph.and_then(|g| current_mask(g, store));
@@ -766,7 +757,6 @@ impl Masks {
             ..Faint::default()
         };
         let mut snap = self.snap.borrow_mut();
-        snap.modifiers = modifiers;
         snap.constraints.clear();
         self.overlays.clear();
         let mut edge = None;
@@ -890,14 +880,12 @@ impl Masks {
                     && let Some(d) = self.drag.take()
                 {
                     store.end(d.gesture);
-                    self.snap.borrow_mut().start = None;
                 }
             }
             Phase::Cancel => {
                 if let Some(d) = self.drag.take() {
                     store.cancel(d.gesture);
                 }
-                self.snap.borrow_mut().start = None;
             }
             Phase::Once => {}
         }

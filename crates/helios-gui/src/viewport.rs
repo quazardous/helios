@@ -689,13 +689,12 @@ impl Viewport {
     pub fn ui(&mut self, ui: &mut Ui, store: &Mutex<Store>) {
         let (mut view, compare) = {
             let store = store.lock().unwrap_or_else(PoisonError::into_inner);
-            let (modifiers, pointer) = ui.input(|i| (i.modifiers, i.pointer.hover_pos()));
+            let pointer = ui.input(|i| i.pointer.hover_pos());
             self.masks.hook(self.state.hooks_mut());
             self.masks.prepare(
                 self.edited.as_ref().map(|e| &e.graph),
                 &store,
                 self.state.mapping().as_ref(),
-                modifiers,
                 pointer,
             );
             (view_of(&store), compare_of(&store))

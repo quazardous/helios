@@ -220,7 +220,7 @@ impl ShellBuilder {
     ) -> eframe::Result {
         let parts = self.parts;
         self.app.run_native_with(title, options, move |app, cc| {
-            make(Shell::assemble(parts, app), cc)
+            Ok(make(Shell::assemble(parts, app), cc))
         })
     }
 }
@@ -608,14 +608,19 @@ impl Shell {
     }
 
     /// The commands egui-pop's workbench declares for Helios's panels
-    /// (`<panel>.focus`, `<panel>.toggle`), run in the interface.
+    /// with texts of their own (`<panel>.detach`, `<panel>.moveTo`...),
+    /// run in the interface. A panel's `focus` and `toggle` commands are
+    /// left out: they read texts egui-pop shares between every panel.
     pub fn panel_commands(&self) -> Vec<CommandSpec> {
         let owner = egui_pop::model::ids::OwnerId::from(&crate::workbench::PANELS);
+        let ctx = self.app.handle().egui();
         self.app
             .handle()
             .commands()
             .into_iter()
-            .filter(|(_, o)| *o == owner)
+            .filter(|(c, o)| {
+                *o == owner && egui_pop::core::strings::panel_command(&ctx, c.id.as_str()).is_none()
+            })
             .map(|(c, _)| CommandSpec::new(c.id.as_str(), &c.title, &c.category))
             .collect()
     }

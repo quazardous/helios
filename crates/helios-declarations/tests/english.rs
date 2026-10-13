@@ -36,7 +36,9 @@ fn the_english_catalog_matches_the_declarations() {
 fn the_declarations_cover_the_desktop_and_the_modules() {
     let d = helios_declarations::collect();
     assert!(d.commands.iter().any(|c| c.id == "workbench.palette"));
-    assert!(d.commands.iter().any(|c| c.id == "helios.graph.toggle"));
+    assert!(d.commands.iter().any(|c| c.id == "helios.graph.detach"));
+    // A panel's focus and toggle commands read texts egui-pop shares.
+    assert!(!d.commands.iter().any(|c| c.id == "helios.graph.toggle"));
     assert!(d.commands.iter().any(|c| c.id.starts_with("param.")));
     assert!(d.panels.iter().any(|p| p.id == "helios.graph"));
     assert!(d.modules.iter().any(|m| m.name == "exposure"));
