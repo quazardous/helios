@@ -2135,7 +2135,8 @@ impl Shell {
     fn open_dialog(&mut self, dialog: impl Into<dialogs::Dialog>) {
         match self.dialogs.get() {
             Some(d) => {
-                d.open(dialog);
+                // A dialog, as egui-pop's spec with its defaults.
+                d.open(Into::<dialogs::Dialog>::into(dialog));
             }
             None => self.warn(Message::new("gui-no-dialogs", "no dialogs to show this in")),
         }
