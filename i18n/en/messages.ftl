@@ -141,6 +141,8 @@ gui-library-sync = Sync zoom and pan
 
 gui-library-tags = Tags
 
+gui-masks-empty = The mask is empty: { $module } applies everywhere. Add a shape or a parametric member to limit it.
+
 gui-masks-group-full = the group `{ $group }` holds { $count } members already
 
 gui-masks-group-locked = the group `{ $group }` is locked: its members stay
@@ -173,9 +175,13 @@ gui-masks-menu-opacity = Opacity off or full
 
 gui-masks-menu-rename = Rename…
 
+gui-masks-none = No mask: the selected module is not masked
+
 gui-masks-not-a-group = `{ $name }` is not a group: only a group takes members
 
 gui-masks-nothing-beside-root = nothing goes beside the module's mask: drop inside it
+
+gui-masks-of = Mask of { $module }
 
 gui-masks-one-at-a-time = members move one at a time
 

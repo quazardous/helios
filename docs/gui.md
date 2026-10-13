@@ -731,7 +731,10 @@ selected module's mask network as a tree, on egui-pop's `TreeView`
   listed in port order, the order they fold in. Each row ends with an
   eye and a lock, which act on that row without selecting it. The selected module
   is `view/graph/selection`: a masked module shows its mask, a mask's
-  node the mask it is in.
+  node the mask it is in, and an unmasked one the first masked module's;
+  a line above the tree names the module masked ("Mask of exposure").
+  A mask with no member applies the module everywhere, and says so above
+  the tree rather than leaving a lone row that looks broken.
 - **Live.** The tree is read from the graph and the value store every
   frame, and what changed reaches the view through its `TreeHandle`:
   a shape drawn on the viewport, an agent's write, an undo, a member

@@ -313,6 +313,8 @@ pub struct Network {
     pub root: Option<String>,
     /// The blend applying it (its `input` is what parametric members read).
     pub blend: Option<String>,
+    /// The module it masks: the node the blend's `processed` reads.
+    pub masked: Option<String>,
     pub items: BTreeMap<String, Item>,
     /// Each group's members, in port order.
     pub children: BTreeMap<String, Vec<String>>,
@@ -351,6 +353,14 @@ impl Network {
             at = self.items.get(&k).and_then(|i| i.group.clone());
         }
         false
+    }
+
+    /// Whether the module's mask has no member: the group then lets the
+    /// module apply everywhere (darktable's "no active mask element").
+    pub fn is_empty(&self) -> bool {
+        self.root
+            .as_ref()
+            .is_none_or(|r| self.children.get(r).is_none_or(Vec::is_empty))
     }
 
     /// The groups above a node, nearest first.
@@ -500,6 +510,7 @@ pub fn network(graph: &Graph, store: &Store, prefer: Option<&str>) -> Network {
     let root = match found {
         Some((root, blend)) => {
             net.blend = Some(name_of(graph, blend));
+            net.masked = input_of(graph, blend, "processed").map(|(m, _)| name_of(graph, m));
             if let Some((head, _)) = input_of(graph, blend, "mask") {
                 root_refinements = subject(graph, head).1;
             }
@@ -1175,8 +1186,37 @@ impl MaskTree {
         };
         self.shown = net.clone();
         if net.root.is_none() {
-            ui.weak("No mask: the selected module is not masked");
+            ui.weak(crate::i18n::text(
+                ui.ctx(),
+                Message::new(
+                    "gui-masks-none",
+                    "No mask: the selected module is not masked",
+                ),
+            ));
             return;
+        }
+        // Whose mask this is: the panel follows the selection, and falls
+        // back to the first masked module when the selected one has none.
+        if let Some(module) = &net.masked {
+            ui.weak(crate::i18n::text(
+                ui.ctx(),
+                Message::new("gui-masks-of", "Mask of { $module }").with("module", module),
+            ));
+        }
+        // An empty mask changes nothing on the image: say why, rather
+        // than leave an empty tree that looks broken. Above the tree,
+        // which takes the rest of the panel's height.
+        if net.is_empty() {
+            let module = net.masked.clone().unwrap_or_default();
+            let text = crate::i18n::text(
+                ui.ctx(),
+                Message::new(
+                    "gui-masks-empty",
+                    "The mask is empty: { $module } applies everywhere. Add a shape or a parametric member to limit it.",
+                )
+                .with("module", module),
+            );
+            ui.add(egui::Label::new(egui::RichText::new(text).weak()).wrap());
         }
         let mut commands = Vec::new();
         let current = self

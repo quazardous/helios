@@ -735,3 +735,59 @@ fn the_panel_lists_every_mask_node_the_pipeline_renders() {
     run(&mut h, "mask.add.parametric", json!(null));
     check(&h);
 }
+
+/// The exposure through a mask with no member yet, as `--image` opens.
+fn empty() -> (Graph, NodeId) {
+    use helios_module_masks::{MaskBlend, MaskCombine};
+    let mut g = Graph::new();
+    let src = g.add_source(
+        "source",
+        Image::from_fn(Region::sized(W, H), 4, |_, _, c| match c {
+            0..=2 => 0.2,
+            _ => 1.0,
+        }),
+    );
+    let exp = module(
+        &mut g,
+        "exposure",
+        ModuleRef::new(helios_module_exposure::Exposure),
+        &Params::new(),
+    );
+    g.connect(src, "image", exp, "input").unwrap();
+    let mask = module(&mut g, "mask", ModuleRef::new(MaskCombine), &Params::new());
+    let blend = module(&mut g, "blend", ModuleRef::new(MaskBlend), &Params::new());
+    g.connect(src, "image", blend, "input").unwrap();
+    g.connect(exp, "output", blend, "processed").unwrap();
+    g.connect(mask, "mask", blend, "mask").unwrap();
+    (g, blend)
+}
+
+fn in_panel(h: &Harness<'_, Shell>, label: &str) -> bool {
+    let panel = h.state().target_rect(mask_tree::PANEL).unwrap();
+    h.query_all_by_label(label)
+        .any(|n| panel.contains(n.rect().center()))
+}
+
+#[test]
+fn an_empty_mask_says_the_module_applies_everywhere() {
+    const EMPTY: &str = "The mask is empty: exposure applies everywhere. \
+                         Add a shape or a parametric member to limit it.";
+    let mut h = harness_of(empty());
+    assert_eq!(rows(&h), ["▣ mask — maximum"]);
+    assert!(in_panel(&h, "Mask of exposure"));
+    assert!(in_panel(&h, EMPTY));
+    // A member limits it: the message goes.
+    run(&mut h, "mask.add.circle", json!(null));
+    assert_eq!(rows(&h).len(), 2, "{:?}", rows(&h));
+    assert!(!in_panel(&h, EMPTY));
+    // Taken out again, the mask is empty again.
+    run(&mut h, "mask.member.delete", json!({ "member": "circle" }));
+    assert!(in_panel(&h, EMPTY));
+    // The panel says whose mask it shows on the full network too.
+    let h = harness();
+    assert!(in_panel(&h, "Mask of exposure"));
+    assert!(
+        !h.query_all_by_label_contains("The mask is empty")
+            .any(|_| true)
+    );
+}
