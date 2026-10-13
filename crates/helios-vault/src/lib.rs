@@ -9,7 +9,9 @@
 //!   known at the same path, size and modification time is not read again;
 //! - **repair** marks vanished locations and relinks moved or renamed files
 //!   by content, reading as little as it can: same size first, then a
-//!   partial hash, then the full hash only for the remaining candidates.
+//!   partial hash, then the full hash only for the remaining candidates;
+//! - **stacks** group images shown as one, and each image's import
+//!   **signals** are kept beside it ([`stacks`]).
 //!
 //! Rows live in a [`Store`], an abstraction no storage engine leaks into:
 //! [`MemoryStore`] here, drivers in their own crates (SQLite in
@@ -32,11 +34,13 @@ pub mod edit;
 pub mod fields;
 pub mod journal;
 pub mod settings;
+pub mod stacks;
 pub mod versions;
 
 pub use catalog::{ApplyReport, CursorId, CursorInfo, Delta, Row};
 pub use edit::{EditSaved, EditSession};
 pub use fields::{AuditEntry, Command, Order, Query};
+pub use stacks::Stack;
 pub use versions::{Version, VersionId};
 
 /// An image, identified by the hash of its file.
@@ -578,6 +582,38 @@ impl<S: Store> Vault<S> {
             self.catalog.lock().expect("catalog lock").version += 1;
         }
         Ok(id)
+    }
+
+    /// The image a path is known as, with what was seen there.
+    pub fn at_path(&self, path: &Path) -> Result<Option<(ImageId, Location)>, String> {
+        self.store.lock().expect("store lock").at_path(path)
+    }
+
+    /// Records a file whose content hash the caller has just computed
+    /// (while copying it, say), so it is not read in full again: only its
+    /// partial hash is. Returns whether the image is new to the vault.
+    pub fn import_hashed(&self, path: &Path, id: ImageId, now: u64) -> Result<bool, String> {
+        let path = std::path::absolute(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let (size, modified) = stat(&path)?;
+        let partial = self.partial_hash(&path, size)?;
+        let new = self.transaction(|store| {
+            let new = store.add_image(&Image { id, size, partial })?;
+            store.put_location(
+                &id,
+                &Location {
+                    path,
+                    size,
+                    modified,
+                    last_verified: now,
+                    present: true,
+                },
+            )?;
+            Ok(new)
+        })?;
+        if new {
+            self.catalog.lock().expect("catalog lock").version += 1;
+        }
+        Ok(new)
     }
 
     /// Marks locations whose file is gone, then looks under `roots` for the
