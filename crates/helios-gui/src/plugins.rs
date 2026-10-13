@@ -128,8 +128,10 @@ pub struct ListSource {
 pub const PROFILES_LIST: &str = "helios.profiles";
 pub const RECENT_LIST: &str = "helios.recent";
 
-/// The system menu's lists, asked for each time the menu opens: the saved
-/// profiles (the one in use ticked) and the recent workspaces.
+/// The lists of Helios's menus, asked for each time a menu opens: the
+/// saved profiles (the one in use ticked) and the recent workspaces in the
+/// system menu, and the commands of a row's menu in the Masks panel under
+/// their short labels, in the interface's language.
 pub struct Lists {
     pub source: Rc<RefCell<ListSource>>,
 }
@@ -173,6 +175,26 @@ impl Plugin for Lists {
                 })
                 .collect()
         });
+        // A row's menu in the Masks panel: the commands act on the row
+        // (its key comes with the menu's arguments), each under a verb.
+        ctx.menu_item(MenuItem::list(
+            crate::mask_tree::ROW_MENU,
+            "1_member",
+            0,
+            crate::mask_tree::ROW_LIST,
+        ))?;
+        ctx.menu_item(MenuItem::list(
+            crate::mask_tree::ROW_MENU_ADD,
+            "1",
+            0,
+            crate::mask_tree::ROW_ADD_LIST,
+        ))?;
+        ctx.list_provider(crate::mask_tree::ROW_LIST, |app, _| {
+            labelled(crate::mask_tree::row_entries(&app.egui()))
+        });
+        ctx.list_provider(crate::mask_tree::ROW_ADD_LIST, |app, _| {
+            labelled(crate::mask_tree::add_entries(&app.egui()))
+        });
         let open = command_id("workspace.open")?;
         ctx.list_provider(RECENT_LIST, move |_, _| {
             let recent = crate::shell::recent_workspaces();
@@ -190,6 +212,18 @@ impl Plugin for Lists {
         });
         Ok(())
     }
+}
+
+/// Menu entries from labels and command ids, run without arguments of
+/// their own (the menu's are given to them).
+fn labelled<C: AsRef<str>>(entries: Vec<(String, C)>) -> Vec<ListItem> {
+    entries
+        .into_iter()
+        .filter_map(|(label, id)| {
+            let id = CommandId::new(id.as_ref()).ok()?;
+            Some(ListItem::new(&label, id, serde_json::Value::Null))
+        })
+        .collect()
 }
 
 /// Undo and redo wait for a change in progress: while a gesture (a drag)

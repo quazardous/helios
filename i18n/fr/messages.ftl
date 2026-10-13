@@ -90,6 +90,26 @@ gui-masks-lock = Verrouiller { $name } contre les déplacements et les modificat
 
 gui-masks-locked = « { $name } » est verrouillé
 
+gui-masks-menu-add-circle = Cercle
+
+gui-masks-menu-add-ellipse = Ellipse
+
+gui-masks-menu-add-gradient = Dégradé
+
+gui-masks-menu-add-parametric = Paramétrique
+
+gui-masks-menu-add-path = Chemin
+
+gui-masks-menu-delete = Retirer du masque
+
+gui-masks-menu-invert = Inverser
+
+gui-masks-menu-lock = Verrouiller ou déverrouiller
+
+gui-masks-menu-opacity = Opacité éteinte ou à fond
+
+gui-masks-menu-rename = Renommer…
+
 gui-masks-not-a-group = « { $name } » n’est pas un groupe : seul un groupe accueille des membres
 
 gui-masks-nothing-beside-root = rien ne va à côté du masque du module : déposez dedans

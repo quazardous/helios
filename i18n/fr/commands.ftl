@@ -130,22 +130,22 @@ command-mask-handle-move =
     .title = Masques : déplacer une poignée d’une forme (`handle` : centre, rayon, adoucissement, corner.2...) en `x`, `y`, une seule étape d’annulation
 
 command-mask-member-delete =
-    .title = Masques : retirer le membre sélectionné (ou `member`) du masque ; recâble le réseau, sans étape d’annulation
+    .title = Masques : retirer un membre (`member`, le sélectionné par défaut) du masque ; recâble le réseau, sans étape d’annulation
 
 command-mask-member-invert =
-    .title = Masques : inverser le membre sélectionné (ou `member`), ou le rétablir
+    .title = Masques : inverser un membre (`member`, le sélectionné par défaut), ou le rétablir
 
 command-mask-member-lock =
-    .title = Masques : verrouiller le membre sélectionné (ou `member`) contre les déplacements et les modifications, ou le déverrouiller ; `locked` le fixe
+    .title = Masques : verrouiller un membre (`member`, le sélectionné par défaut) contre les déplacements et les modifications, ou le déverrouiller ; `locked` le fixe
 
 command-mask-member-move =
     .title = Masques : déplacer un membre (`member`, le sélectionné par défaut) à l’`index` de `group` (son groupe, en dernier, par défaut) ; recâble le réseau, sans étape d’annulation
 
 command-mask-member-opacity =
-    .title = Masques : régler l’opacité (`opacity`, de 0 à 1) du membre sélectionné (ou `member`) ; sans elle, l’éteindre ou la remettre à fond
+    .title = Masques : régler l’opacité (`opacity`, de 0 à 1) d’un membre (`member`, le sélectionné par défaut) ; sans elle, l’éteindre ou la remettre à fond
 
 command-mask-member-rename =
-    .title = Masques : nommer le membre sélectionné (ou `member`) `label` ; sans lui, le renommer dans le panneau Masques
+    .title = Masques : nommer un membre (`member`, le sélectionné par défaut) `label` ; sans lui, le renommer dans le panneau Masques
 
 command-mask-path-close =
     .title = Masques : fermer le chemin en cours de tracé

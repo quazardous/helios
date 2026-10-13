@@ -131,22 +131,22 @@ command-mask-handle-move =
     .title = Masks: move a shape's handle (`handle`: centre, radius, feather, corner.2...) to `x`, `y`, one undo step
 
 command-mask-member-delete =
-    .title = Masks: take the selected member (or `member`) out of the mask; rewires the network, no undo step
+    .title = Masks: take a member (`member`, the selected one by default) out of the mask; rewires the network, no undo step
 
 command-mask-member-invert =
-    .title = Masks: invert the selected member (or `member`), or back
+    .title = Masks: invert a member (`member`, the selected one by default), or back
 
 command-mask-member-lock =
-    .title = Masks: lock the selected member (or `member`) against moves and edits, or unlock it; `locked` sets it
+    .title = Masks: lock a member (`member`, the selected one by default) against moves and edits, or unlock it; `locked` sets it
 
 command-mask-member-move =
     .title = Masks: move a member (`member`, the selected one by default) to `index` of `group` (its own, last, by default); rewires the network, no undo step
 
 command-mask-member-opacity =
-    .title = Masks: set the selected member's (or `member`'s) `opacity`, 0 to 1; without it, off or back to full
+    .title = Masks: set a member's (`member`, the selected one by default) `opacity`, 0 to 1; without it, off or back to full
 
 command-mask-member-rename =
-    .title = Masks: name the selected member (or `member`) `label`; without it, rename in the Masks panel
+    .title = Masks: name a member (`member`, the selected one by default) `label`; without it, rename in the Masks panel
 
 command-mask-path-close =
     .title = Masks: close the path being drawn

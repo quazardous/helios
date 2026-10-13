@@ -605,7 +605,10 @@ selected module's mask network as a tree, on egui-pop's `TreeView`
   and its opacity (none or full) in its group, one undo step each; for
   the root, the group's own. A row's context menu (`helios.masks.row`,
   a right click) runs the same commands on that row's member, whatever
-  is selected, and adds members (Add). A row's eye turns its member's
+  is selected, and adds members (Add); its entries are short verbs
+  (Rename…, Invert, Opacity off or full, Lock or unlock, Take out of
+  the mask), filled when it opens in the interface's language, while
+  the palette keeps the commands' titles with their arguments. A row's eye turns its member's
   opacity off or back to full; its lock (`lock/<node>`, one undo step)
   keeps a member from moving, from leaving the mask and, for a shape,
   from being edited (no handles on the viewport, `mask.handle.move`

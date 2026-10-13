@@ -51,6 +51,11 @@ pub const TREE: &str = "helios.masks.tree";
 pub const ROW_MENU: MenuId = MenuId::from_static("helios.masks.row");
 /// Its Add submenu.
 pub const ROW_MENU_ADD: MenuId = MenuId::from_static("helios.masks.row.add");
+/// The list filling a row's menu: its commands under short labels
+/// ([`row_entries`]), asked for each time the menu opens.
+pub const ROW_LIST: &str = "helios.masks.row.member";
+/// The list filling its Add submenu ([`add_entries`]).
+pub const ROW_ADD_LIST: &str = "helios.masks.row.add";
 /// The commands of a row's menu, in order.
 pub const ROW_COMMANDS: [&str; 5] = [
     "mask.member.rename",
@@ -61,6 +66,41 @@ pub const ROW_COMMANDS: [&str; 5] = [
 ];
 /// What Add adds: a shape or a parametric member.
 pub const ADD_KINDS: [&str; 5] = ["circle", "ellipse", "gradient", "path", "parametric"];
+
+/// A row's menu: each of [`ROW_COMMANDS`] with its short label in the
+/// language of `ctx`. The palette keeps the commands' titles, which say
+/// their arguments; the menu acts on its row, so a verb is enough.
+pub fn row_entries(ctx: &egui::Context) -> Vec<(String, &'static str)> {
+    let labels = [
+        Message::new("gui-masks-menu-rename", "Rename…"),
+        Message::new("gui-masks-menu-invert", "Invert"),
+        Message::new("gui-masks-menu-opacity", "Opacity off or full"),
+        Message::new("gui-masks-menu-lock", "Lock or unlock"),
+        Message::new("gui-masks-menu-delete", "Take out of the mask"),
+    ];
+    labels
+        .into_iter()
+        .map(|m| crate::i18n::text(ctx, m))
+        .zip(ROW_COMMANDS)
+        .collect()
+}
+
+/// The Add submenu: each of [`ADD_KINDS`] with its short label in the
+/// language of `ctx`, and its command (`mask.add.<kind>`).
+pub fn add_entries(ctx: &egui::Context) -> Vec<(String, String)> {
+    let labels = [
+        Message::new("gui-masks-menu-add-circle", "Circle"),
+        Message::new("gui-masks-menu-add-ellipse", "Ellipse"),
+        Message::new("gui-masks-menu-add-gradient", "Gradient"),
+        Message::new("gui-masks-menu-add-path", "Path"),
+        Message::new("gui-masks-menu-add-parametric", "Parametric"),
+    ];
+    labels
+        .into_iter()
+        .map(|m| crate::i18n::text(ctx, m))
+        .zip(ADD_KINDS.map(|k| format!("mask.add.{k}")))
+        .collect()
+}
 
 /// The member a command's arguments name: `member`, else the row its
 /// menu was opened on (`key`, with `tree` this tree).

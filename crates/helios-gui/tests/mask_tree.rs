@@ -464,33 +464,69 @@ fn right_click(h: &mut Harness<'_, Shell>, at: Pos2) {
     }
 }
 
+/// A menu as its titles: `-` a separator, `label >` a submenu.
+fn titles(items: &serde_json::Value) -> Vec<String> {
+    items
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| match i["kind"].as_str().unwrap() {
+            "separator" => "-".into(),
+            "submenu" => format!("{} >", i["label"].as_str().unwrap()),
+            _ => i["title"].as_str().unwrap().to_string(),
+        })
+        .collect()
+}
+
+#[test]
+fn a_row_s_menu_says_its_commands_in_short() {
+    let mut h = harness();
+    let items = h.state_mut().menu_items("helios.masks.row");
+    assert_eq!(
+        titles(&items),
+        [
+            "Rename…",
+            "Invert",
+            "Opacity off or full",
+            "Lock or unlock",
+            "Take out of the mask",
+            "-",
+            "Add >"
+        ]
+    );
+    assert_eq!(items[0]["id"], "mask.member.rename");
+    assert_eq!(items[4]["id"], "mask.member.delete");
+    assert_eq!(
+        titles(&items[6]["items"]),
+        ["Circle", "Ellipse", "Gradient", "Path", "Parametric"]
+    );
+    assert_eq!(items[6]["items"][4]["id"], "mask.add.parametric");
+}
+
 #[test]
 fn a_row_s_menu_acts_on_that_row_whatever_is_selected() {
     let mut h = harness();
     click_row(&mut h, "spot");
     assert_eq!(cursor(&h).as_deref(), Some("spot"));
-    // The oval's menu inverts the oval, the spot staying selected.
+    // The oval's menu turns the oval's opacity off, the spot staying
+    // selected.
     let at = row(&h, "oval").center();
     right_click(&mut h, at);
-    h.get_by_label("Masks: invert the selected member (or `member`), or back")
-        .click();
+    h.get_by_label("Opacity off or full").click();
     for _ in 0..3 {
         h.step();
     }
     assert!(
-        rows(&h).contains(&"  ◎ oval · inverted".to_string()),
+        rows(&h).contains(&"  ◎ oval · 0 %".to_string()),
         "{:?}",
         rows(&h)
     );
     assert!(rows(&h).contains(&"  ○ spot".to_string()));
     assert_eq!(cursor(&h).as_deref(), Some("spot"));
     // Its rename starts on the oval, from its name.
-    let at = row(&h, "oval · inverted").center();
+    let at = row(&h, "oval · 0 %").center();
     right_click(&mut h, at);
-    h.get_by_label(
-        "Masks: name the selected member (or `member`) `label`; without it, rename in the Masks panel",
-    )
-    .click();
+    h.get_by_label("Rename…").click();
     for _ in 0..3 {
         h.step();
     }

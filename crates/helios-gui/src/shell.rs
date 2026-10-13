@@ -1869,7 +1869,7 @@ impl Shell {
         add(
             CommandSpec::new(
                 "mask.member.delete",
-                "Masks: take the selected member (or `member`) out of the mask; rewires the network, no undo step",
+                "Masks: take a member (`member`, the selected one by default) out of the mask; rewires the network, no undo step",
                 "Masks",
             ),
             Box::new(move |a, origin| {
@@ -1882,7 +1882,7 @@ impl Shell {
         add(
             CommandSpec::new(
                 "mask.member.invert",
-                "Masks: invert the selected member (or `member`), or back",
+                "Masks: invert a member (`member`, the selected one by default), or back",
                 "Masks",
             ),
             Box::new(move |a, origin| {
@@ -1895,7 +1895,7 @@ impl Shell {
         add(
             CommandSpec::new(
                 "mask.member.opacity",
-                "Masks: set the selected member's (or `member`'s) `opacity`, 0 to 1; without it, off or back to full",
+                "Masks: set a member's (`member`, the selected one by default) `opacity`, 0 to 1; without it, off or back to full",
                 "Masks",
             ),
             Box::new(move |a, origin| {
@@ -1911,7 +1911,7 @@ impl Shell {
         add(
             CommandSpec::new(
                 "mask.member.rename",
-                "Masks: name the selected member (or `member`) `label`; without it, rename in the Masks panel",
+                "Masks: name a member (`member`, the selected one by default) `label`; without it, rename in the Masks panel",
                 "Masks",
             ),
             Box::new(move |a, origin| match text(a, "label") {
@@ -1928,7 +1928,7 @@ impl Shell {
         add(
             CommandSpec::new(
                 "mask.member.lock",
-                "Masks: lock the selected member (or `member`) against moves and edits, or unlock it; `locked` sets it",
+                "Masks: lock a member (`member`, the selected one by default) against moves and edits, or unlock it; `locked` sets it",
                 "Masks",
             ),
             Box::new(move |a, origin| {
@@ -1946,7 +1946,7 @@ impl Shell {
     /// The menus Helios contributes: its system menu, and its commands in
     /// egui-pop's menu bar.
     fn declare_menus(w: &Wiring<'_>) {
-        use crate::mask_tree::{ADD_KINDS, ROW_COMMANDS, ROW_MENU, ROW_MENU_ADD};
+        use crate::mask_tree::{ROW_MENU, ROW_MENU_ADD};
         use egui_pop::api::app::{MENU_FILE, MENU_HELP};
         let command = |menu: MenuId, group: &str, order: i32, id: &str, title: &str| {
             PopItem::command(
@@ -2048,20 +2048,9 @@ impl Shell {
             ),
         ];
         // A row's context menu in the Masks panel: its commands act on
-        // that row's member, the tree giving its key.
-        let id = |id: &str| CommandId::new(id).expect("Helios's command ids are valid");
-        for (i, c) in ROW_COMMANDS.iter().enumerate() {
-            items.push(PopItem::command(ROW_MENU, "1_member", i as i32, id(c)));
-        }
+        // that row's member, the tree giving its key. Its entries are
+        // lists (`plugins::Lists`), for their short, translated labels.
         items.push(PopItem::submenu(ROW_MENU, "2_add", 0, ROW_MENU_ADD, "Add"));
-        for (i, kind) in ADD_KINDS.iter().enumerate() {
-            items.push(PopItem::command(
-                ROW_MENU_ADD,
-                "1",
-                i as i32,
-                id(&format!("mask.add.{kind}")),
-            ));
-        }
         let select = CommandId::from_static("theme.select");
         for (i, name) in crate::theme::choosable(w.themes).iter().enumerate() {
             items.push(

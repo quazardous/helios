@@ -93,6 +93,26 @@ gui-masks-lock = Lock { $name } against moves and edits
 
 gui-masks-locked = `{ $name }` is locked
 
+gui-masks-menu-add-circle = Circle
+
+gui-masks-menu-add-ellipse = Ellipse
+
+gui-masks-menu-add-gradient = Gradient
+
+gui-masks-menu-add-parametric = Parametric
+
+gui-masks-menu-add-path = Path
+
+gui-masks-menu-delete = Take out of the mask
+
+gui-masks-menu-invert = Invert
+
+gui-masks-menu-lock = Lock or unlock
+
+gui-masks-menu-opacity = Opacity off or full
+
+gui-masks-menu-rename = Rename…
+
 gui-masks-not-a-group = `{ $name }` is not a group: only a group takes members
 
 gui-masks-nothing-beside-root = nothing goes beside the module's mask: drop inside it
