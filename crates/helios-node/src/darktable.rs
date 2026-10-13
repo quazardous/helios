@@ -137,8 +137,9 @@ pub fn keep_file<S: helios_vault::Store>(
         .and_then(|xml| {
             let (sidecar, imported) = read_sidecar(&xml)?;
             if let Some(warning) = imported.report.summary() {
-                warn(&file.path, &warning);
-                out["warning"] = json!(warning);
+                warn(&file.path, &warning.english);
+                out["warning"] = json!(warning.english);
+                out["warning_message"] = json!(warning);
             }
             keep_sidecar(vault, image, file.version, base, &sidecar, &imported, now)
         });

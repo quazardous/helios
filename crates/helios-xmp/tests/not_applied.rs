@@ -113,7 +113,11 @@ fn an_unknown_module_or_version_is_kept_and_the_rest_applies() {
     assert_eq!(r.items, 4);
 
     // One line says it, once, for the whole import.
-    let summary = r.summary().unwrap();
+    let message = r.summary().unwrap();
+    // By key, for an interface to translate; each reason too.
+    assert_eq!(message.key, "xmp-not-applied");
+    assert_eq!(message.args["count"], helios_core::Arg::Number(2.0));
+    let summary = message.english;
     assert!(
         summary.starts_with("2 of 4 history items not applied"),
         "{summary}"

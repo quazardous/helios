@@ -54,3 +54,19 @@ export-not-a-file = { $path } is not a file path
 export-png-bits = PNG has 8 or 16 bits, not { $bits }
 
 export-write-failed = cannot write { $path }: { $error }
+
+xmp-not-applied = { $count } of { $items } history items not applied, kept for later: { $groups }
+
+xmp-not-applied-group = { $labels } ({ $reason })
+
+xmp-reason-blending = blending not supported
+
+xmp-reason-extra-instance = a second instance of a single-instance module
+
+xmp-reason-unknown-blend-version = blend params v{ $version } not supported
+
+xmp-reason-unknown-module = no Helios module
+
+xmp-reason-unreadable = unreadable: { $error }
+
+xmp-reason-unsupported-version = version not supported (reads { $known })

@@ -109,6 +109,41 @@ mod tests {
     }
 
     #[test]
+    fn an_import_summary_reads_in_french_with_its_reasons_and_plural() {
+        let i = I18n::with_egui_pop("fr");
+        i.add_catalogues(CATALOGUES).unwrap();
+        // As `helios_xmp::Report::summary` builds it; keys through
+        // variables, the extractor reads the code's.
+        let (summary, group, unknown) = (
+            "xmp-not-applied",
+            "xmp-not-applied-group",
+            "xmp-reason-unknown-module",
+        );
+        let groups = |n: usize| {
+            Arg::list(
+                (0..n).map(|k| {
+                    Message::new(group, "{ $labels } ({ $reason })")
+                        .with("labels", format!("m{k} v1"))
+                        .with("reason", Message::new(unknown, "no Helios module"))
+                }),
+                "; ",
+            )
+        };
+        let m = |n: usize| {
+            Message::new(summary, "{ $count } of { $items } …")
+                .with("count", n)
+                .with("items", 4_usize)
+                .with("groups", groups(n))
+        };
+        assert_eq!(
+            message(&i, &m(2)),
+            "2 éléments d’historique sur 4 non appliqués, conservés pour plus tard : \
+             m0 v1 (pas de module Helios); m1 v1 (pas de module Helios)"
+        );
+        assert!(message(&i, &m(1)).starts_with("1 élément d’historique sur 4 non appliqué,"));
+    }
+
+    #[test]
     fn the_repository_catalogues_have_no_fault() {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../i18n");
         let catalogs = egui_pop_i18n::check::Catalogs::read(&dir).unwrap();

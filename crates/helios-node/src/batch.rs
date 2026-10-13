@@ -136,7 +136,8 @@ pub fn sidecar_params(
     }
     let mut report = json!({ "applied": applied, "skipped": skipped, "import": imported.report });
     if let Some(warning) = imported.report.summary() {
-        report["warning"] = json!(warning);
+        report["warning"] = json!(warning.english);
+        report["warning_message"] = json!(warning);
     }
     (params, report)
 }
@@ -588,7 +589,7 @@ fn submit(
                 .and_then(|xml| {
                     let (sidecar, imported) = read_sidecar(&xml).map_err(Message::plain)?;
                     if let Some(warning) = imported.report.summary() {
-                        warn(path, &warning);
+                        warn(path, &warning.english);
                     }
                     let (params, mut report) = sidecar_params(&imported, modules);
                     if let Some(vault) = vault {

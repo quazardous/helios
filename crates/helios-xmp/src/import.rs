@@ -8,7 +8,7 @@
 //! with its raw params in the edit ([`Imported::darktable`]), so a later
 //! Helios can apply it and the sidecar can be written back as it was.
 
-use helios_core::{Params, Value as Param};
+use helios_core::{Arg, Message, Params, Value as Param};
 use serde::Serialize;
 use serde_json::{Map, Value, json};
 
@@ -73,20 +73,33 @@ pub enum Reason {
 }
 
 impl Reason {
-    /// In a few words, for people.
-    pub fn describe(&self) -> String {
+    /// In a few words, for people, by key.
+    pub fn describe(&self) -> Message {
         match self {
-            Reason::UnknownModule => "no Helios module".into(),
+            Reason::UnknownModule => Message::new("xmp-reason-unknown-module", "no Helios module"),
             Reason::UnsupportedVersion { known } => {
                 let known: Vec<String> = known.iter().map(|v| format!("v{v}")).collect();
-                format!("version not supported (reads {})", known.join(", "))
+                Message::new(
+                    "xmp-reason-unsupported-version",
+                    "version not supported (reads { $known })",
+                )
+                .with("known", known.join(", "))
             }
-            Reason::Unreadable { error } => format!("unreadable: {error}"),
-            Reason::Blending { .. } => "blending not supported".into(),
-            Reason::UnknownBlendVersion { blendop_version } => {
-                format!("blend params v{blendop_version} not supported")
+            Reason::Unreadable { error } => {
+                Message::new("xmp-reason-unreadable", "unreadable: { $error }").with("error", error)
             }
-            Reason::ExtraInstance => "a second instance of a single-instance module".into(),
+            Reason::Blending { .. } => {
+                Message::new("xmp-reason-blending", "blending not supported")
+            }
+            Reason::UnknownBlendVersion { blendop_version } => Message::new(
+                "xmp-reason-unknown-blend-version",
+                "blend params v{ $version } not supported",
+            )
+            .with("version", *blendop_version),
+            Reason::ExtraInstance => Message::new(
+                "xmp-reason-extra-instance",
+                "a second instance of a single-instance module",
+            ),
         }
     }
 }
@@ -136,11 +149,12 @@ pub struct Report {
 impl Report {
     /// One line saying what was not applied, grouped by reason, or `None`
     /// when everything in force was applied: what an import warns once.
-    pub fn summary(&self) -> Option<String> {
+    /// By key (`xmp-not-applied`), each reason too.
+    pub fn summary(&self) -> Option<Message> {
         if self.not_applied.is_empty() {
             return None;
         }
-        let mut groups: Vec<(String, Vec<&str>)> = Vec::new();
+        let mut groups: Vec<(Message, Vec<&str>)> = Vec::new();
         for item in &self.not_applied {
             let reason = item.reason.describe();
             match groups.iter_mut().find(|(r, _)| *r == reason) {
@@ -148,16 +162,20 @@ impl Report {
                 None => groups.push((reason, vec![&item.label])),
             }
         }
-        let groups: Vec<String> = groups
-            .into_iter()
-            .map(|(reason, labels)| format!("{} ({reason})", labels.join(", ")))
-            .collect();
-        Some(format!(
-            "{} of {} history items not applied, kept for later: {}",
-            self.not_applied.len(),
-            self.items,
-            groups.join("; ")
-        ))
+        let groups = groups.into_iter().map(|(reason, labels)| {
+            Message::new("xmp-not-applied-group", "{ $labels } ({ $reason })")
+                .with("labels", labels.join(", "))
+                .with("reason", reason)
+        });
+        Some(
+            Message::new(
+                "xmp-not-applied",
+                "{ $count } of { $items } history items not applied, kept for later: { $groups }",
+            )
+            .with("count", self.not_applied.len())
+            .with("items", self.items)
+            .with("groups", Arg::list(groups, "; ")),
+        )
     }
 }
 

@@ -88,6 +88,9 @@ in `sidecar.warning` and once on stderr:
 helios batch: /photos/IMG_0001.CR2.xmp: 4 of 9 history items not applied, kept for later: flip v2, colorout v5, gamma v1 (no Helios module); exposure v6 (blending not supported)
 ```
 
+`sidecar.warning_message` holds the same line by key (`xmp-not-applied`,
+each reason with its own key), for a client to show it translated.
+
 With `--vault FILE` as well, each sidecar applied is kept in that vault:
 the image is imported, its darktable edit becomes a version with origin
 `import:xmp` (the modules in darktable's pipe order, the import report
