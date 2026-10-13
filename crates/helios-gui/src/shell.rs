@@ -247,6 +247,14 @@ impl ShellBuilder {
         self
     }
 
+    /// The window manager's focus mode, read beforehand (else egui-pop
+    /// reads it as the window opens, a child process on Linux).
+    #[must_use]
+    pub fn system_focus(mut self, system: egui_pop::core::focus_mode::SystemFocus) -> Self {
+        self.app = self.app.system_focus(system);
+        self
+    }
+
     /// The shell, its application built on a context of its own (tests,
     /// tools, pictures; a harness draws it in its own).
     pub fn build(self) -> Shell {

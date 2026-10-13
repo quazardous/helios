@@ -21,6 +21,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use egui_pop::core::focus_mode::SystemFocus;
 use egui_pop::model::layout::Layout;
 use egui_pop::platform::instance::{self, Instance, Launch, Single};
 use helios_gui::platform::{self, Open};
@@ -540,6 +541,40 @@ fn show_image(
     }
 }
 
+/// How long the window waits for the window manager's focus mode: past
+/// it, the window opens as click to focus.
+const FOCUS_MODE_DEADLINE: std::time::Duration = std::time::Duration::from_millis(250);
+
+/// The window manager's focus mode, being read on a thread of its own (a
+/// child process on Linux: `gsettings`, `kreadconfig`) from the start on.
+struct FocusReading {
+    started: std::time::Instant,
+    read: std::sync::mpsc::Receiver<SystemFocus>,
+}
+
+fn read_focus_mode() -> FocusReading {
+    let (tx, read) = std::sync::mpsc::channel();
+    let _ = std::thread::Builder::new()
+        .name("helios-focus-mode".into())
+        .spawn(move || {
+            let _ = tx.send(egui_pop::core::focus_mode::read_system());
+        });
+    FocusReading {
+        started: std::time::Instant::now(),
+        read,
+    }
+}
+
+/// The focus mode read, waited for until [`FOCUS_MODE_DEADLINE`] after
+/// the reading started; click to focus past it (said in the log).
+fn focus_mode(reading: &FocusReading) -> SystemFocus {
+    let left = FOCUS_MODE_DEADLINE.saturating_sub(reading.started.elapsed());
+    reading.read.recv_timeout(left).unwrap_or_else(|_| {
+        warn("the window manager's focus mode was not read in time: click to focus");
+        SystemFocus::default()
+    })
+}
+
 /// The nodes `--node NAME=INSPECT[,CONTROL]` names, their `tcp://`
 /// addresses with the token of `--token-file FILE`, else `HELIOS_TOKEN`.
 fn node_links(args: &[String]) -> Result<Vec<helios_gui::relay::NodeLink>, String> {
@@ -610,6 +645,7 @@ fn main() -> Result<(), String> {
             gpu
         })
         .map_err(|e| format!("no thread to open the GPU: {e}"))?;
+    let focus_reading = read_focus_mode();
     if args.last().is_some_and(|a| a == "--image") {
         return Err("--image takes a FILE".into());
     }
@@ -690,7 +726,8 @@ fn main() -> Result<(), String> {
     let builder = Shell::builder(helios_panels(), Some(ui_settings))
         .workspace(&workspace)
         .on_exit(move |app| save_workspace(&dir, app))
-        .desktop(instance);
+        .desktop(instance)
+        .system_focus(focus_mode(&focus_reading));
     start::mark("shell declared (commands, themes, translations)");
     let gpu = gpu_opening
         .join()
