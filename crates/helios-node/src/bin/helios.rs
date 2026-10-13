@@ -416,7 +416,11 @@ fn batch(args: &[String]) -> ExitCode {
         Ok(Outcome::Interrupted) => ExitCode::from(130),
         Err(e) => {
             eprintln!("helios: {e}");
-            ExitCode::from(if e.starts_with("cannot reach") { 3 } else { 1 })
+            ExitCode::from(if e.key == helios_node::batch::UNREACHABLE {
+                3
+            } else {
+                1
+            })
         }
     }
 }

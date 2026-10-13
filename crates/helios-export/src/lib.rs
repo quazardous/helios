@@ -7,14 +7,17 @@
 //! the destination, then renamed, so a reader never sees half a file. Two
 //! exports to the same destination never race: the caller runs them as
 //! scheduler jobs holding the destination as a resource ([`destination`]).
+//!
+//! What goes wrong is said by key ([`Message`], `export-…`): the job's end
+//! on the bus carries it, for an interface to show in its language.
 
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
 use helios_core::{
-    Bus, ContentHash, Engine, Event, Graph, Image, JobId, JobSpec, NodeId, Priority, Region,
-    Scheduler,
+    Bus, ContentHash, Engine, Event, Graph, Image, JobId, JobSpec, Message, NodeId, Priority,
+    Region, Scheduler,
 };
 use helios_photo::color::{self, Mat3};
 use image::codecs::jpeg::JpegEncoder;
@@ -73,10 +76,14 @@ fn rec2020_to_srgb() -> Mat3 {
 }
 
 /// Encoded sRGB values in [0, 1], three per pixel, row by row.
-fn to_srgb(image: &Image) -> Result<Vec<f64>, String> {
+fn to_srgb(image: &Image) -> Result<Vec<f64>, Message> {
     let channels = image.channels() as usize;
     if channels != 1 && channels < 3 {
-        return Err(format!("cannot export an image of {channels} channels"));
+        return Err(Message::new(
+            "export-channels",
+            "cannot export an image of { $channels } channels",
+        )
+        .with("channels", channels));
     }
     let m = rec2020_to_srgb();
     let mut out = Vec::with_capacity(image.region().area() * 3);
@@ -98,7 +105,7 @@ fn to_srgb(image: &Image) -> Result<Vec<f64>, String> {
 }
 
 /// Encodes an image (linear Rec.2020) into the bytes of a file.
-pub fn encode(image: &Image, format: &Format) -> Result<Vec<u8>, String> {
+pub fn encode(image: &Image, format: &Format) -> Result<Vec<u8>, Message> {
     let (w, h) = (image.region().width, image.region().height);
     let srgb = to_srgb(image)?;
     let eight = || {
@@ -120,19 +127,30 @@ pub fn encode(image: &Image, format: &Format) -> Result<Vec<u8>, String> {
         Format::Png { bits: 16 } => {
             DynamicImage::ImageRgb16(sixteen()).write_to(&mut out, ImageFormat::Png)
         }
-        Format::Png { bits } => return Err(format!("PNG has 8 or 16 bits, not {bits}")),
+        Format::Png { bits } => {
+            return Err(
+                Message::new("export-png-bits", "PNG has 8 or 16 bits, not { $bits }")
+                    .with("bits", u32::from(*bits)),
+            );
+        }
         Format::Tiff => DynamicImage::ImageRgb16(sixteen()).write_to(&mut out, ImageFormat::Tiff),
     };
-    result.map_err(|e| e.to_string())?;
+    result.map_err(|e| {
+        Message::new(
+            "export-encode-failed",
+            "cannot encode the image: { $error }",
+        )
+        .with("error", e.to_string())
+    })?;
     Ok(out.into_inner())
 }
 
 /// Writes bytes so that `path` holds either its old content or the new one,
 /// never a part: a temporary file next to it, then a rename.
-pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
-    let name = path
-        .file_name()
-        .ok_or_else(|| format!("{} is not a file path", path.display()))?;
+pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), Message> {
+    let name = path.file_name().ok_or_else(|| {
+        Message::new("export-not-a-file", "{ $path } is not a file path").with("path", path)
+    })?;
     let temp = path.with_file_name(format!(
         ".{}.helios-{}",
         name.to_string_lossy(),
@@ -141,7 +159,9 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
     let written = std::fs::write(&temp, bytes).and_then(|()| std::fs::rename(&temp, path));
     written.map_err(|e| {
         let _ = std::fs::remove_file(&temp);
-        format!("cannot write {}: {e}", path.display())
+        Message::new("export-write-failed", "cannot write { $path }: { $error }")
+            .with("path", path)
+            .with("error", e.to_string())
     })
 }
 
@@ -163,10 +183,10 @@ pub fn export(
     region: Region,
     path: &Path,
     format: &Format,
-) -> Result<Exported, String> {
+) -> Result<Exported, Message> {
     let image = engine
         .render(graph, node, port, region)
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| Message::plain(e.to_string()))?;
     let bytes = encode(&image, format)?;
     write_atomic(path, &bytes)?;
     Ok(Exported {
@@ -188,11 +208,13 @@ pub struct Request {
 }
 
 impl Request {
-    pub fn format(&self) -> Result<Format, String> {
+    pub fn format(&self) -> Result<Format, Message> {
         self.format
             .clone()
             .or_else(|| Format::from_path(&self.path))
-            .ok_or_else(|| format!("no format for {}", self.path.display()))
+            .ok_or_else(|| {
+                Message::new("export-no-format", "no format for { $path }").with("path", &self.path)
+            })
     }
 }
 
@@ -217,7 +239,7 @@ pub fn submit(
     engine: Arc<Engine>,
     graph: Arc<Graph>,
     request: Request,
-) -> Result<JobId, String> {
+) -> Result<JobId, Message> {
     let format = request.format()?;
     let path = request.path.clone();
     submit_with(scheduler, bus, &path, format, move || {
@@ -235,7 +257,7 @@ pub fn submit_with(
     path: &Path,
     format: Format,
     render: impl FnOnce() -> Result<Image, String> + Send + 'static,
-) -> Result<JobId, String> {
+) -> Result<JobId, Message> {
     let dest = destination(path);
     scheduler.ensure_resource(&dest, 1);
     let spec = JobSpec::new(&format!("export {}", path.display()))
@@ -244,14 +266,15 @@ pub fn submit_with(
     let path = path.to_path_buf();
     let id = Arc::new(OnceLock::new());
     let job_id = id.clone();
-    let job = scheduler.submit_spec(spec, move |cancel| {
+    let cancelled = || Message::new("export-cancelled", "cancelled");
+    let job = scheduler.submit_message(spec, move |cancel| {
         if cancel.is_cancelled() {
-            return Err("cancelled".into());
+            return Err(cancelled());
         }
-        let bytes = encode(&render()?, &format)?;
+        let bytes = encode(&render().map_err(Message::plain)?, &format)?;
         // Cancelled while rendering: nothing is written.
         if cancel.is_cancelled() {
-            return Err("cancelled".into());
+            return Err(cancelled());
         }
         write_atomic(&path, &bytes)?;
         let exported = Exported {

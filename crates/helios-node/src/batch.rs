@@ -10,8 +10,9 @@
 //! or attaches to a running node's batch or debug control endpoint.
 //!
 //! Each image gets one JSON line on stdout: its path, the file written, how
-//! long it took, and the error if it failed. The others go on after a
-//! failure.
+//! long it took, and the error if it failed, in English (`error`) and by
+//! key when it has one (`message`, a [`Message`] to show translated). The
+//! others go on after a failure.
 //!
 //! With `--sidecar`, each image's base darktable sidecar is applied; its
 //! folder is listed once to find it and its duplicates
@@ -28,7 +29,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
-use helios_core::Params;
+use helios_core::{Message, Params};
 use helios_inspect::control::{ControlRequest, FileFormat};
 use helios_inspect::{Address, Request, request_at};
 use serde_json::{Value, json};
@@ -186,27 +187,33 @@ impl Drop for Node {
 }
 
 impl Node {
-    fn call(address: &Address, body: &Value) -> Result<Value, String> {
-        let answer = request_at(address, body)
-            .map_err(|e| format!("cannot reach the node at {address}: {e}"))?;
+    fn call(address: &Address, body: &Value) -> Result<Value, Message> {
+        let answer = request_at(address, body).map_err(|e| {
+            Message::new(
+                "batch-node-unreachable",
+                "cannot reach the node at { $address }: { $error }",
+            )
+            .with("address", address.to_string())
+            .with("error", e.to_string())
+        })?;
         if answer["ok"] == true {
             Ok(answer)
         } else {
-            Err(answer["error"]
-                .as_str()
-                .unwrap_or("the node refused")
-                .to_string())
+            Err(match answer["error"].as_str() {
+                Some(e) => Message::plain(e),
+                None => Message::new("batch-node-refused", "the node refused"),
+            })
         }
     }
 
-    fn control(&self, request: &ControlRequest) -> Result<Value, String> {
+    fn control(&self, request: &ControlRequest) -> Result<Value, Message> {
         Self::call(
             &self.control,
             &serde_json::to_value(request).expect("requests serialize"),
         )
     }
 
-    fn inspect(&self, request: &Request) -> Result<Value, String> {
+    fn inspect(&self, request: &Request) -> Result<Value, Message> {
         Self::call(
             &self.inspect,
             &serde_json::to_value(request).expect("requests serialize"),
@@ -255,7 +262,7 @@ fn pick(
     graph: &Value,
     options: &Options,
     first_export: Option<String>,
-) -> Result<(String, String), String> {
+) -> Result<(String, String), Message> {
     let nodes = graph["nodes"].as_array().cloned().unwrap_or_default();
     let names = |kind: &str| -> Vec<String> {
         nodes
@@ -268,12 +275,15 @@ fn pick(
         Some(s) => s.clone(),
         None => match names("source").as_slice() {
             [one] => one.clone(),
-            [] => return Err("the network has no source".into()),
+            [] => {
+                return Err(Message::new("batch-no-source", "the network has no source"));
+            }
             many => {
-                return Err(format!(
-                    "the network has several sources ({}): say --source NAME",
-                    many.join(", ")
-                ));
+                return Err(Message::new(
+                    "batch-several-sources",
+                    "the network has several sources ({ $names }): say --source NAME",
+                )
+                .with("names", many.join(", ")));
             }
         },
     };
@@ -293,10 +303,11 @@ fn pick(
             [one] => one.clone(),
             [] => source.clone(),
             many => {
-                return Err(format!(
-                    "the network ends in several nodes ({}): say --node NAME",
-                    many.join(", ")
-                ));
+                return Err(Message::new(
+                    "batch-several-ends",
+                    "the network ends in several nodes ({ $names }): say --node NAME",
+                )
+                .with("names", many.join(", ")));
             }
         },
     };
@@ -311,14 +322,26 @@ struct Pending {
     sidecar: Value,
 }
 
-fn line(p: &Pending, error: Option<&str>) -> Value {
-    json!({
+fn line(p: &Pending, error: Option<&Message>) -> Value {
+    let mut line = json!({
         "path": p.image,
         "output": if error.is_none() { json!(p.output) } else { Value::Null },
         "duration_ms": p.started.elapsed().as_millis() as u64,
-        "error": error,
+        "error": error.map(|e| &e.english),
         "sidecar": p.sidecar,
-    })
+    });
+    if let Some(e) = error.filter(|e| e.is_keyed()) {
+        line["message"] = json!(e);
+    }
+    line
+}
+
+/// The key of a node that cannot be reached (as `Node::call` writes it):
+/// it stops the whole batch.
+pub const UNREACHABLE: &str = "batch-node-unreachable";
+
+fn cancelled_message() -> Message {
+    Message::new("batch-cancelled", "cancelled")
 }
 
 /// How a batch ended.
@@ -340,10 +363,13 @@ pub fn run(
     node_bin: &Path,
     interrupted: &Arc<AtomicBool>,
     mut emit: impl FnMut(&Value),
-) -> Result<Outcome, String> {
-    std::fs::create_dir_all(&options.out)
-        .map_err(|e| format!("cannot create {}: {e}", options.out.display()))?;
-    let out = std::path::absolute(&options.out).map_err(|e| e.to_string())?;
+) -> Result<Outcome, Message> {
+    std::fs::create_dir_all(&options.out).map_err(|e| {
+        Message::new("batch-cannot-create", "cannot create { $path }: { $error }")
+            .with("path", &options.out)
+            .with("error", e.to_string())
+    })?;
+    let out = std::path::absolute(&options.out).map_err(|e| Message::plain(e.to_string()))?;
     let (node, first_export) = match (&options.attach, &options.network) {
         (Some((inspect, control)), network) => {
             let first = match network {
@@ -358,7 +384,12 @@ pub fn run(
             (node, first)
         }
         (None, Some(network)) => own_node(network, options.jobs, node_bin)?,
-        (None, None) => return Err("batch needs --network FILE, or a node to attach to".into()),
+        (None, None) => {
+            return Err(Message::new(
+                "batch-needs-network",
+                "batch needs --network FILE, or a node to attach to",
+            ));
+        }
     };
     let graph = node.inspect(&Request::Describe {
         entity: "graph".into(),
@@ -392,9 +423,14 @@ pub fn run(
     let vault = match (&options.vault, options.sidecar) {
         (Some(path), true) => Some(helios_vault::Vault::new(
             helios_vault_sqlite::SqliteStore::open(path)
-                .map_err(|e| format!("{}: {e}", path.display()))?,
+                .map_err(|e| Message::plain(format!("{}: {e}", path.display())))?,
         )),
-        (Some(_), false) => return Err("--vault keeps sidecars: it needs --sidecar".into()),
+        (Some(_), false) => {
+            return Err(Message::new(
+                "batch-vault-needs-sidecar",
+                "--vault keeps sidecars: it needs --sidecar",
+            ));
+        }
         (None, _) => None,
     };
 
@@ -414,9 +450,14 @@ pub fn run(
                 let _ = node.control(&ControlRequest::Cancel { job: *job });
             }
             for image in &images[next..] {
-                emit(
-                    &json!({ "path": image, "output": null, "duration_ms": 0, "error": "cancelled", "sidecar": null }),
-                );
+                emit(&json!({
+                    "path": image,
+                    "output": null,
+                    "duration_ms": 0,
+                    "error": cancelled_message().english,
+                    "message": cancelled_message(),
+                    "sidecar": null,
+                }));
             }
             next = images.len();
         }
@@ -443,7 +484,8 @@ pub fn run(
                     }
                     running.insert(job, pending);
                 }
-                Err((pending, error)) => {
+                Err(refused) => {
+                    let (pending, error) = *refused;
                     failed = true;
                     emit(&line(&pending, Some(&error)));
                 }
@@ -460,7 +502,7 @@ pub fn run(
         });
         let Ok(ended) = ended else {
             if let Err(e) = ended
-                && e.starts_with("cannot reach")
+                && e.key == UNREACHABLE
             {
                 return Err(e);
             }
@@ -476,11 +518,16 @@ pub fn run(
         };
         match event["payload"]["state"].as_str() {
             Some("done") => emit(&line(&pending, None)),
-            Some("cancelled") => emit(&line(&pending, Some("cancelled"))),
+            Some("cancelled") => emit(&line(&pending, Some(&cancelled_message()))),
             _ => {
                 failed = true;
-                let error = event["payload"]["error"].as_str().unwrap_or("failed");
-                emit(&line(&pending, Some(error)));
+                // The job's message by key, else its English.
+                let error = serde_json::from_value::<Message>(event["payload"]["message"].clone())
+                    .unwrap_or_else(|_| match event["payload"]["error"].as_str() {
+                        Some(e) => Message::plain(e),
+                        None => Message::new("batch-failed", "failed"),
+                    });
+                emit(&line(&pending, Some(&error)));
             }
         }
     }
@@ -509,13 +556,13 @@ fn submit(
     target: &str,
     modules: &BTreeMap<String, String>,
     mut pending: Pending,
-) -> Result<(u64, u64, Pending), (Pending, String)> {
+) -> Result<(u64, u64, Pending), Box<(Pending, Message)>> {
     let mut params = BTreeMap::new();
     let vault = sidecars.vault;
     if options.sidecar {
         let files = match sidecars.listings.sidecars(&pending.image) {
             Ok(files) => files,
-            Err(e) => return Err((pending, e)),
+            Err(e) => return Err(Box::new((pending, Message::plain(e)))),
         };
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -533,16 +580,21 @@ fn submit(
         if let Some(base) = base {
             let path = &base.path;
             let read = std::fs::read_to_string(path)
-                .map_err(|e| format!("cannot read {}: {e}", path.display()))
+                .map_err(|e| {
+                    Message::new("batch-cannot-read", "cannot read { $path }: { $error }")
+                        .with("path", path)
+                        .with("error", e.to_string())
+                })
                 .and_then(|xml| {
-                    let (sidecar, imported) = read_sidecar(&xml)?;
+                    let (sidecar, imported) = read_sidecar(&xml).map_err(Message::plain)?;
                     if let Some(warning) = imported.report.summary() {
                         warn(path, &warning);
                     }
                     let (params, mut report) = sidecar_params(&imported, modules);
                     if let Some(vault) = vault {
                         report["vault"] =
-                            keep_sidecar(vault, &pending.image, 0, true, &sidecar, &imported, now)?;
+                            keep_sidecar(vault, &pending.image, 0, true, &sidecar, &imported, now)
+                                .map_err(Message::plain)?;
                     }
                     Ok((params, report))
                 });
@@ -552,7 +604,14 @@ fn submit(
                     report = r;
                     params = p;
                 }
-                Err(e) => return Err((pending, format!("{}: {e}", path.display()))),
+                Err(e) => {
+                    let e = if e.is_keyed() {
+                        e
+                    } else {
+                        Message::plain(format!("{}: {e}", path.display()))
+                    };
+                    return Err(Box::new((pending, e)));
+                }
             }
         }
         if !others.is_empty() {
@@ -577,7 +636,7 @@ fn submit(
         path: pending.image.clone(),
     });
     if let Err(e) = loaded {
-        return Err((pending, e));
+        return Err(Box::new((pending, e)));
     }
     let asked = node.control(&ControlRequest::Export {
         node: target.into(),
@@ -594,13 +653,31 @@ fn submit(
             let seq = answer["seq"].as_u64().unwrap_or_default();
             Ok((job, seq, pending))
         }
-        Err(e) => Err((pending, e)),
+        Err(e) => Err(Box::new((pending, e))),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_failed_image_says_why_in_english_and_by_key() {
+        let p = Pending {
+            image: "a.png".into(),
+            output: "out/a.jpg".into(),
+            started: Instant::now(),
+            sidecar: Value::Null,
+        };
+        let failed = line(&p, Some(&cancelled_message()));
+        assert_eq!(failed["error"], "cancelled");
+        assert_eq!(failed["message"]["key"], "batch-cancelled");
+        assert!(failed["output"].is_null());
+        let plain = line(&p, Some(&Message::plain("broken.png: not a picture")));
+        assert_eq!(plain["error"], "broken.png: not a picture");
+        assert!(plain.get("message").is_none());
+        assert!(line(&p, None)["error"].is_null());
+    }
 
     #[test]
     fn names_that_collide_get_a_number() {

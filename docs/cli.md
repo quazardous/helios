@@ -66,6 +66,11 @@ Each image prints one JSON line on stdout, in the order they finish:
 {"path":"/photos/IMG_0001.CR2","output":"/out/IMG_0001.jpg","duration_ms":1840,"error":null,"sidecar":null}
 ```
 
+An image that failed has its `error` in English and, when Helios said it
+by key, a `message` too (`{"key", "args", "english"}`): a client shows it
+in its user's language from Helios's catalogues
+(`i18n/<locale>/messages.ftl`).
+
 With `--sidecar`, `sidecar` reports what the sidecar changed: each module of
 the edit goes to the one node of the network running that module, and what
 could not be carried over is listed with the reason (a module the network

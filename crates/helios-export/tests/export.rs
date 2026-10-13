@@ -70,6 +70,7 @@ fn every_format_decodes_to_the_right_size() {
     assert!(
         encode(&image, &Format::Png { bits: 12 })
             .unwrap_err()
+            .english
             .contains("8 or 16 bits")
     );
 }
@@ -87,7 +88,8 @@ fn files_are_replaced_whole_and_no_temporary_file_stays() {
         .collect();
     assert_eq!(names, vec!["out.png"]);
     let err = write_atomic(&d.join("missing/out.png"), b"x").unwrap_err();
-    assert!(err.contains("missing/out.png"), "{err}");
+    assert!(err.english.contains("missing/out.png"), "{err}");
+    assert_eq!(err.key, "export-write-failed");
     let _ = std::fs::remove_dir_all(&d);
 }
 

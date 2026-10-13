@@ -129,6 +129,8 @@ fn a_failed_export_says_why_and_an_unknown_format_is_refused_at_once() {
             .unwrap()
             .contains("missing/a.tif")
     );
+    // Said by key too, for an interface to translate.
+    assert_eq!(ended.payload["message"]["key"], "export-write-failed");
 
     let webp = Request {
         path: d.join("a.webp"),
@@ -142,7 +144,8 @@ fn a_failed_export_says_why_and_an_unknown_format_is_refused_at_once() {
         webp,
     )
     .unwrap_err();
-    assert!(err.contains("no format"), "{err}");
+    assert_eq!(err.key, "export-no-format");
+    assert!(err.english.contains("no format"), "{err}");
     let forced = Request {
         path: d.join("a.webp"),
         format: Some(Format::Png { bits: 16 }),

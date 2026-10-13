@@ -26,6 +26,7 @@ use serde::Serialize;
 
 use crate::bus::{Bus, Event};
 use crate::describe::Describe;
+use crate::message::Message;
 
 const SOURCE: &str = "scheduler";
 
@@ -101,8 +102,8 @@ impl CancelToken {
     }
 }
 
-/// What a job runs. It returns an error message when it fails.
-pub type Work = Box<dyn FnOnce(&CancelToken) -> Result<(), String> + Send>;
+/// What a job runs. It returns a message for people when it fails.
+pub type Work = Box<dyn FnOnce(&CancelToken) -> Result<(), Message> + Send>;
 
 #[derive(Serialize)]
 pub struct JobQueued {
@@ -131,7 +132,11 @@ pub struct JobEnded {
     pub job: JobId,
     pub name: String,
     pub state: JobState,
+    /// Why it failed, in English.
     pub error: Option<String>,
+    /// Why it failed, by key, when the job said it with one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<Message>,
 }
 
 impl Event for JobEnded {
@@ -167,6 +172,8 @@ struct JobInfo {
     spec: JobSpec,
     state: JobState,
     error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    message: Option<Message>,
 }
 
 struct Pending {
@@ -291,6 +298,7 @@ impl Shared {
                 name: info.spec.name.clone(),
                 state: info.state,
                 error: info.error.clone(),
+                message: info.message.clone(),
             },
         );
         state.finish(info);
@@ -390,6 +398,16 @@ impl Scheduler {
         spec: JobSpec,
         work: impl FnOnce(&CancelToken) -> Result<(), String> + Send + 'static,
     ) -> JobId {
+        self.submit_message(spec, move |cancel| work(cancel).map_err(Message::plain))
+    }
+
+    /// [`Scheduler::submit_spec`] for work that says why it failed by key
+    /// ([`Message`]): the job's end carries the message.
+    pub fn submit_message(
+        &self,
+        spec: JobSpec,
+        work: impl FnOnce(&CancelToken) -> Result<(), Message> + Send + 'static,
+    ) -> JobId {
         let mut state = self.shared.state.lock().expect("scheduler lock");
         state.next += 1;
         let id = JobId(state.next);
@@ -409,6 +427,7 @@ impl Scheduler {
                 spec,
                 state: JobState::Failed,
                 error: Some(reason),
+                message: None,
             };
             self.shared.ended(&mut state, info, cause);
             return id;
@@ -418,6 +437,7 @@ impl Scheduler {
             spec,
             state: JobState::Queued,
             error: None,
+            message: None,
         };
         state.queue.push_back(Pending {
             info,
@@ -561,10 +581,14 @@ fn worker(shared: &Shared) {
         state.running.remove(&info.id);
         state.release(&info.spec);
         let mut info = info;
-        (info.state, info.error) = match result {
-            _ if token.is_cancelled() => (JobState::Cancelled, None),
-            Ok(()) => (JobState::Done, None),
-            Err(e) => (JobState::Failed, Some(e)),
+        (info.state, info.error, info.message) = match result {
+            _ if token.is_cancelled() => (JobState::Cancelled, None, None),
+            Ok(()) => (JobState::Done, None, None),
+            Err(e) => (
+                JobState::Failed,
+                Some(e.english.clone()),
+                e.is_keyed().then_some(e),
+            ),
         };
         shared.ended(&mut state, info, cause);
     }

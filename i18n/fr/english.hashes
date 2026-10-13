@@ -1,5 +1,16 @@
 # The hash of the English text each key was translated from: a key
 # whose English changed since is reported by the catalogue check.
+batch-cancelled 3fa4bf73465b82da
+batch-cannot-create 4a1d10311d5aa5a3
+batch-cannot-read 85ea10f780b3cbdf
+batch-failed d15aea9ea7f99692
+batch-needs-network 4e81514523690f41
+batch-no-source c04a8a08b5cbd994
+batch-node-refused e41ff51226b69a9e
+batch-node-unreachable dddd9b8cc4c4fa49
+batch-several-ends 64a674c6169d3f03
+batch-several-sources 9e966f5d4cf4a738
+batch-vault-needs-sidecar 31b3ffb415090a18
 category-developer 3bef768f6a95f10d
 category-masks 6849246780dae374
 category-preferences 0f02ef52eedd2e4d
@@ -121,6 +132,13 @@ engine-failure-timeout e67f323685d7d71e
 engine-gpu-fell-back 0da2d994751a1bde
 engine-gpu-lost 4b3b2ca3f755506a
 engine-gpu-lost-recovered 9d95ae8ade99141c
+export-cancelled 3fa4bf73465b82da
+export-channels d2dceec74dc9797b
+export-encode-failed 559d33de9b184768
+export-no-format 386fb46cc3dafa93
+export-not-a-file 95c780d0920978d5
+export-png-bits 7417c9b85a17189f
+export-write-failed 34d8ef0da0f905fa
 menu-helios-system-profiles.label 493fa9da88311dbf
 menu-helios-system-recent.label 570a956d04ae773e
 menu-helios-system-themes.label 399519de8e880133
