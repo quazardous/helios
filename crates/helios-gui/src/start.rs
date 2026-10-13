@@ -15,8 +15,11 @@
 //! The marks a script waits for are [`FIRST_FRAME`] (the first frame
 //! presented) and [`INTERACTIVE`] (the first frame that saw a key or the
 //! pointer, built).
-//! Nothing is marked before [`begin`]; a mark costs a lock.
+//! Nothing is marked before [`begin`] nor once the start is over (both
+//! marks made): a step that runs again later (a theme installed) marks
+//! its first time only. A mark costs a lock.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, PoisonError};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
@@ -33,6 +36,12 @@ pub const INTERACTIVE: &str = "interactive (an input answered)";
 /// When `main` began, and when the last step was marked.
 static CLOCK: Mutex<Option<(Instant, Instant)>> = Mutex::new(None);
 
+/// Set once the start is over: marks are no longer made.
+static OVER: AtomicBool = AtomicBool::new(false);
+
+/// Set once the first frame is built.
+static FIRST_BUILT: AtomicBool = AtomicBool::new(false);
+
 /// `main` began: the start's clock starts (once).
 pub fn begin() {
     {
@@ -46,8 +55,12 @@ pub fn begin() {
     mark("main");
 }
 
-/// Marks a step of the start (nothing before [`begin`]).
+/// Marks a step of the start (nothing before [`begin`], nothing once it
+/// is over).
 pub fn mark(step: &str) {
+    if OVER.load(Ordering::Relaxed) {
+        return;
+    }
     let (total, since_last) = {
         let mut clock = CLOCK.lock().unwrap_or_else(PoisonError::into_inner);
         let Some((start, last)) = clock.as_mut() else {
@@ -68,11 +81,19 @@ pub fn mark(step: &str) {
     }
 }
 
+/// Marks a step of the first frame (nothing in the frames after it).
+pub fn mark_in_first_frame(step: &str) {
+    if !FIRST_BUILT.load(Ordering::Relaxed) {
+        mark(step);
+    }
+}
+
 /// Marks the frames that end the start: the first one built, then
 /// presented (when the next one begins), then the first one that answered
 /// an input (a key, the pointer). It stops marking once all are.
 #[derive(Default)]
 pub struct Frames {
+    began: bool,
     built: u32,
     presented: bool,
     answered: bool,
@@ -82,9 +103,21 @@ impl Frames {
     /// A frame begins (eframe's `raw_input_hook`): the one before it was
     /// painted and presented.
     pub fn begin(&mut self) {
+        if self.built == 0 && !self.began {
+            self.began = true;
+            mark("first frame begins");
+        }
         if self.built > 0 && !self.presented {
             self.presented = true;
             mark(FIRST_FRAME);
+            self.over_when_done();
+        }
+    }
+
+    /// Once every mark is made, the start is over: later marks are none.
+    fn over_when_done(&self) {
+        if self.done() {
+            OVER.store(true, Ordering::Relaxed);
         }
     }
 
@@ -93,12 +126,14 @@ impl Frames {
     pub fn end(&mut self, saw_input: bool, next: impl FnOnce()) {
         self.built += 1;
         if self.built == 1 {
+            FIRST_BUILT.store(true, Ordering::Relaxed);
             mark("first frame built");
             next();
         }
         if saw_input && !self.answered {
             self.answered = true;
             mark(INTERACTIVE);
+            self.over_when_done();
         }
     }
 

@@ -404,6 +404,7 @@ impl eframe::App for App {
             }
             return;
         }
+        start::mark_in_first_frame("egui's pass begun (fonts ready)");
         self.shell.ui(ui);
         // The GPU path is installed by now: the image's own surface
         // follows the Wide-gamut preview setting.
