@@ -85,8 +85,9 @@ enum Action {
     Compare,
     /// A drawn-mask command, as whom.
     Mask(crate::masks::Command, Origin),
-    /// Rename the Masks panel's selected node in place.
-    RenameInTree,
+    /// Rename a node of the Masks panel (its selected one by default) in
+    /// place.
+    RenameInTree(Option<String>),
     Copy(String),
     SystemMenu,
     /// A command, its arguments, as whom.
@@ -1821,6 +1822,8 @@ impl Shell {
         use crate::masks::Command;
         let text =
             |args: &Value, key: &str| args.get(key).and_then(Value::as_str).map(String::from);
+        // `member`, else the row of the Masks panel its menu opened on.
+        let member = crate::mask_tree::row_member;
         add(
             CommandSpec::new(
                 "mask.member.move",
@@ -1830,7 +1833,7 @@ impl Shell {
             Box::new(move |a, origin| {
                 Ok(Action::Mask(
                     Command::MemberMove {
-                        member: text(a, "member"),
+                        member: member(a),
                         group: text(a, "group"),
                         index: a
                             .get("index")
@@ -1849,9 +1852,7 @@ impl Shell {
             ),
             Box::new(move |a, origin| {
                 Ok(Action::Mask(
-                    Command::MemberDelete {
-                        member: text(a, "member"),
-                    },
+                    Command::MemberDelete { member: member(a) },
                     origin.clone(),
                 ))
             }),
@@ -1864,9 +1865,7 @@ impl Shell {
             ),
             Box::new(move |a, origin| {
                 Ok(Action::Mask(
-                    Command::MemberInvert {
-                        member: text(a, "member"),
-                    },
+                    Command::MemberInvert { member: member(a) },
                     origin.clone(),
                 ))
             }),
@@ -1880,7 +1879,7 @@ impl Shell {
             Box::new(move |a, origin| {
                 Ok(Action::Mask(
                     Command::MemberOpacity {
-                        member: text(a, "member"),
+                        member: member(a),
                         opacity: a.get("opacity").and_then(Value::as_f64),
                     },
                     origin.clone(),
@@ -1896,12 +1895,12 @@ impl Shell {
             Box::new(move |a, origin| match text(a, "label") {
                 Some(label) => Ok(Action::Mask(
                     Command::MemberRename {
-                        member: text(a, "member"),
+                        member: member(a),
                         label,
                     },
                     origin.clone(),
                 )),
-                None => Ok(Action::RenameInTree),
+                None => Ok(Action::RenameInTree(member(a))),
             }),
         );
     }
@@ -1909,6 +1908,7 @@ impl Shell {
     /// The menus Helios contributes: its system menu, and its commands in
     /// egui-pop's menu bar.
     fn declare_menus(w: &Wiring<'_>) {
+        use crate::mask_tree::{ADD_KINDS, ROW_COMMANDS, ROW_MENU, ROW_MENU_ADD};
         use egui_pop::api::app::{MENU_FILE, MENU_HELP};
         let command = |menu: MenuId, group: &str, order: i32, id: &str, title: &str| {
             PopItem::command(
@@ -2009,6 +2009,21 @@ impl Shell {
                 &title("workbench.about"),
             ),
         ];
+        // A row's context menu in the Masks panel: its commands act on
+        // that row's member, the tree giving its key.
+        let id = |id: &str| CommandId::new(id).expect("Helios's command ids are valid");
+        for (i, c) in ROW_COMMANDS.iter().enumerate() {
+            items.push(PopItem::command(ROW_MENU, "1_member", i as i32, id(c)));
+        }
+        items.push(PopItem::submenu(ROW_MENU, "2_add", 0, ROW_MENU_ADD, "Add"));
+        for (i, kind) in ADD_KINDS.iter().enumerate() {
+            items.push(PopItem::command(
+                ROW_MENU_ADD,
+                "1",
+                i as i32,
+                id(&format!("mask.add.{kind}")),
+            ));
+        }
         let select = CommandId::from_static("theme.select");
         for (i, name) in crate::theme::choosable(w.themes).iter().enumerate() {
             items.push(
@@ -2481,8 +2496,8 @@ impl Shell {
                 let mut store = lock(&self.values);
                 return self.viewport.borrow_mut().mask(command, origin, &mut store);
             }
-            Action::RenameInTree => {
-                self.mask_tree.borrow_mut().start_rename()?;
+            Action::RenameInTree(member) => {
+                self.mask_tree.borrow_mut().start_rename(member)?;
             }
             Action::Compare => {
                 use crate::viewport::COMPARE;

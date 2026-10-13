@@ -30,7 +30,7 @@ use egui::Ui;
 use egui_pop::api::steps::Before;
 use egui_pop::api::{AppHandle, Ctx, Plugin, PluginError};
 use egui_pop::core::icon::Source;
-use egui_pop::model::ids::PluginId;
+use egui_pop::model::ids::{MenuId, PluginId};
 use egui_pop::views::steps::TREE_DROP;
 use egui_pop::views::tree::{Node, Position, Signal, Sink, TreeSource, TreeState, TreeView};
 use helios_core::{Graph, Message, NodeId, Value};
@@ -45,6 +45,32 @@ use crate::masks::{self, Command};
 pub const PANEL: &str = "helios.masks";
 /// The tree's id in egui-pop's steps (`tree.drop`...).
 pub const TREE: &str = "helios.masks.tree";
+
+/// A row's context menu: commands on the member right-clicked, which get
+/// `{"tree": TREE, "key": <its node>}` (see [`row_member`]).
+pub const ROW_MENU: MenuId = MenuId::from_static("helios.masks.row");
+/// Its Add submenu.
+pub const ROW_MENU_ADD: MenuId = MenuId::from_static("helios.masks.row.add");
+/// The commands of a row's menu, in order.
+pub const ROW_COMMANDS: [&str; 4] = [
+    "mask.member.rename",
+    "mask.member.invert",
+    "mask.member.opacity",
+    "mask.member.delete",
+];
+/// What Add adds: a shape or a parametric member.
+pub const ADD_KINDS: [&str; 5] = ["circle", "ellipse", "gradient", "path", "parametric"];
+
+/// The member a command's arguments name: `member`, else the row its
+/// menu was opened on (`key`, with `tree` this tree).
+pub fn row_member(args: &Json) -> Option<String> {
+    let text = |k: &str| args.get(k).and_then(Json::as_str).map(String::from);
+    text("member").or_else(|| {
+        (args.get("tree").and_then(Json::as_str) == Some(TREE))
+            .then(|| text("key"))
+            .flatten()
+    })
+}
 
 /// The refinement modules: between a member and its group's port.
 const REFINEMENTS: [&str; 3] = ["mask_blur", "mask_feather", "mask_levels"];
@@ -864,13 +890,11 @@ impl MaskTree {
         }
     }
 
-    /// Starts renaming the selected node in place, at the next pass.
-    pub fn start_rename(&mut self) -> Result<(), String> {
-        let key = self
-            .state
-            .selection()
-            .cursor()
-            .cloned()
+    /// Starts renaming a node (the selected one by default) in place, at
+    /// the next pass.
+    pub fn start_rename(&mut self, key: Option<String>) -> Result<(), String> {
+        let key = key
+            .or_else(|| self.state.selection().cursor().cloned())
             .ok_or("nothing is selected in the Masks panel")?;
         self.rename = Some(key);
         Ok(())
@@ -1035,24 +1059,11 @@ impl MaskTree {
             .rename(true)
             .icon(|n| net.items.get(&n.key).map(|i| Source::glyph(i.icon())));
         if let Some(app) = &self.app {
-            view = view.app(app);
+            // A declared menu, which egui-pop's menus draw (as the
+            // Parameters panel's), not one of the panel's own.
+            view = TreeView::context_menu(view.app(app), app, ROW_MENU);
         }
         let out = view.show(ui, &mut self.state, &net);
-        let secondary = ui.input(|i| {
-            i.pointer
-                .secondary_clicked()
-                .then(|| i.pointer.interact_pos())
-                .flatten()
-        });
-        if let Some(at) = secondary.filter(|p| out.response.rect.contains(*p)) {
-            request(
-                ui.ctx(),
-                Request::Menu {
-                    at,
-                    items: context_items(),
-                },
-            );
-        }
         let mut store = values.lock().unwrap_or_else(PoisonError::into_inner);
         for signal in out.signals {
             match signal {
@@ -1093,29 +1104,10 @@ impl MaskTree {
 }
 
 fn add_items() -> Vec<MenuItem> {
-    ["circle", "ellipse", "gradient", "path", "parametric"]
+    ADD_KINDS
         .into_iter()
         .map(|k| MenuItem::command(&format!("mask.add.{k}")))
         .collect()
-}
-
-/// The tree's context menu: commands on the selected member.
-fn context_items() -> Vec<MenuItem> {
-    let mut items: Vec<MenuItem> = [
-        "mask.member.rename",
-        "mask.member.invert",
-        "mask.member.opacity",
-        "mask.member.delete",
-    ]
-    .into_iter()
-    .map(MenuItem::command)
-    .collect();
-    items.push(MenuItem::Separator);
-    items.push(MenuItem::Submenu {
-        label: "Add".into(),
-        items: add_items(),
-    });
-    items
 }
 
 /// Refuses, before the view moves anything, a drop the mask network

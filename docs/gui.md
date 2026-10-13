@@ -521,10 +521,13 @@ selected module's mask network as a tree, on egui-pop's `TreeView`
   A shape selected on the viewport, by a click or `mask.select`, is
   selected in the tree.
 - **Edits.** F2 renames a member in place: a label in the store
-  (`label/<node>`), the node keeping its name, one undo step. Invert
-  and Opacity (the row of buttons, the context menu) toggle the
-  member's inversion and its opacity (none or full) in its group, one
-  undo step each; for the root, the group's own. Delete (with the tree
+  (`label/<node>`), the node keeping its name, one undo step; the field
+  starts from the name, not from the row's decorations. Invert and
+  Opacity (the row of buttons) toggle the selected member's inversion
+  and its opacity (none or full) in its group, one undo step each; for
+  the root, the group's own. A row's context menu (`helios.masks.row`,
+  a right click) runs the same commands on that row's member, whatever
+  is selected, and adds members (Add). Delete (with the tree
   focused) takes the selected member out of its group. A member dragged
   before, after or into a group is rewired there, its opacity and
   inversion with it; a drop the network cannot take (beside the root,

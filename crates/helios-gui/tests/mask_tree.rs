@@ -421,3 +421,58 @@ fn delete_takes_a_member_out_of_the_mask() {
     );
     assert_eq!(wired(&h, "parametric"), ["source"]);
 }
+
+/// Right-clicks at `at`.
+fn right_click(h: &mut Harness<'_, Shell>, at: Pos2) {
+    h.hover_at(at);
+    h.step();
+    for pressed in [true, false] {
+        h.input_mut().events.push(Event::PointerButton {
+            pos: at,
+            button: PointerButton::Secondary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        });
+    }
+    for _ in 0..3 {
+        h.step();
+    }
+}
+
+#[test]
+fn a_row_s_menu_acts_on_that_row_whatever_is_selected() {
+    let mut h = harness();
+    click_row(&mut h, "spot");
+    assert_eq!(cursor(&h).as_deref(), Some("spot"));
+    // The oval's menu inverts the oval, the spot staying selected.
+    let at = row(&h, "oval").center();
+    right_click(&mut h, at);
+    h.get_by_label("Masks: invert the selected member (or `member`), or back")
+        .click();
+    for _ in 0..3 {
+        h.step();
+    }
+    assert!(
+        rows(&h).contains(&"  ◎ oval · inverted".to_string()),
+        "{:?}",
+        rows(&h)
+    );
+    assert!(rows(&h).contains(&"  ○ spot".to_string()));
+    assert_eq!(cursor(&h).as_deref(), Some("spot"));
+    // Its rename starts on the oval, from its name.
+    let at = row(&h, "oval · inverted").center();
+    right_click(&mut h, at);
+    h.get_by_label(
+        "Masks: name the selected member (or `member`) `label`; without it, rename in the Masks panel",
+    )
+    .click();
+    for _ in 0..3 {
+        h.step();
+    }
+    assert_eq!(
+        h.state().mask_tree().state().renaming().map(String::as_str),
+        Some("oval")
+    );
+    let field = h.get(by().label_contains("Rename"));
+    assert_eq!(field.value().as_deref(), Some("oval"));
+}

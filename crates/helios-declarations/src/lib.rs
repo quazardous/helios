@@ -17,9 +17,10 @@ use egui_pop::model::ids::MenuId;
 use helios_i18n::Declarations;
 
 /// Menus Helios opens itself, besides the menu bar.
-const MENUS: [MenuId; 2] = [
+const MENUS: [MenuId; 3] = [
     MenuId::from_static("helios.system"),
     MenuId::from_static("helios.param"),
+    helios_gui::mask_tree::ROW_MENU,
 ];
 
 /// Helios's declarations, from a headless desktop shell and the node's

@@ -10,6 +10,9 @@ category-vault = Coffre
 
 category-workspace = Espace de travail
 
+menu-helios-masks-row-add =
+    .label = Ajouter
+
 menu-helios-system-profiles =
     .label = Profils
 

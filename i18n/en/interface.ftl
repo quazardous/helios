@@ -11,6 +11,9 @@ category-vault = Vault
 
 category-workspace = Workspace
 
+menu-helios-masks-row-add =
+    .label = Add
+
 menu-helios-system-profiles =
     .label = Profiles
 
