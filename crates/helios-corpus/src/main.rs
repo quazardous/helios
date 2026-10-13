@@ -9,8 +9,9 @@
 //! - `--out`: where to write `junit.xml`, `summary.md`, `observed.toml`
 //!   (what each file gave, as manifest tables) and `thumbs/<id>.ppm`;
 //! - `--bless`: accept the thumbnails as they are now: rewrites
-//!   `tests/raw-corpus.thumbs.toml` (and copies it to `--out`); the other
-//!   checks still fail the run.
+//!   `tests/raw-corpus.thumbs.toml` (and copies it to `--out`) and the
+//!   blessed images of `tests/raw-corpus-thumbs/`; the other checks still
+//!   fail the run.
 //!
 //! Exits 0 when every file passes, 1 when one fails, 2 on a usage or I/O
 //! error.
@@ -19,7 +20,8 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use helios_corpus::{
-    Manifest, junit, observed_toml, read_thumbs, repo_root, run, summary, write_thumbs,
+    Manifest, THUMB_IMAGES, junit, observed_toml, read_thumbs, repo_root, run, summary,
+    write_thumbs,
 };
 
 const USAGE: &str = "usage: helios-corpus [--dir DIR] [--out DIR] [--bless]";
@@ -61,9 +63,29 @@ fn main_() -> Result<ExitCode, String> {
                 thumbs.insert(o.id.clone(), t.clone());
             }
             o.failures.retain(|f| !f.starts_with("thumbnail:"));
+            o.notes.retain(|n| !n.starts_with("thumbnail"));
         }
         thumbs.retain(|id, _| manifest.checked().any(|e| &e.id == id));
         write_thumbs(&thumbs_path, &thumbs)?;
+        let images = root.join(THUMB_IMAGES);
+        std::fs::create_dir_all(&images).map_err(|e| format!("{}: {e}", images.display()))?;
+        for o in &outcomes {
+            if let Some(t) = &o.thumb {
+                let path = images.join(format!("{}.ppm", o.id));
+                std::fs::write(&path, t.ppm()).map_err(|e| format!("{}: {e}", path.display()))?;
+            }
+        }
+        // the images of files no longer checked go
+        for entry in std::fs::read_dir(&images)
+            .map_err(|e| e.to_string())?
+            .flatten()
+        {
+            let name = entry.file_name().to_string_lossy().to_string();
+            let id = name.strip_suffix(".ppm").unwrap_or(&name);
+            if !thumbs.contains_key(id) {
+                let _ = std::fs::remove_file(entry.path());
+            }
+        }
         println!(
             "blessed {} thumbnails in {}",
             thumbs.len(),
@@ -94,6 +116,11 @@ fn main_() -> Result<ExitCode, String> {
         }
     }
 
+    for o in &outcomes {
+        for n in &o.notes {
+            println!("NOTE {}: {n}", o.id);
+        }
+    }
     for o in &failed {
         for f in &o.failures {
             println!("FAIL {}: {f}", o.id);

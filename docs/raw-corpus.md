@@ -41,9 +41,15 @@ for other raws, what rawler reports. Levels and matrices compare to 1e-4
 A thumbnail is demosaiced too: the average of each filter colour over
 blocks of whole CFA periods, at most 64 pixels on the long edge, black to
 white mapped to 0..1, a square-root curve, 8 bits. Its 64-bit BLAKE3 hash is
-compared with `../tests/raw-corpus.thumbs.toml`, which only `--bless`
-rewrites. Any decoder change that moves a pixel enough to change a block
-average shows there.
+compared with `../tests/raw-corpus.thumbs.toml` first: the same hash, the
+same pixels, nothing else to compute. When the hash differs, its pixels
+are compared with the blessed thumbnail of `../tests/raw-corpus-thumbs/`
+by the comparison the parity jobs share (`helios_photo::compare`, Delta E
+2000, the values read back through the curve as linear Rec.2020: a proxy
+for camera RGB): within a mean of 0.5, a 99.99th percentile of 2.3 and a
+max of 5 it passes with a note to bless (a rounding change), beyond it
+fails (a wrong pattern, crop or level). Only `--bless` rewrites the hashes
+and the blessed thumbnails.
 
 **On the bench box.** The volume `raw-corpus` (declared in
 `tools/bench/Benchfile`) holds the files, about 590 MB; fill or refill it
@@ -59,7 +65,8 @@ cargo xtask bench-remote raw-corpus bless=yes       # accept the thumbnails
 Its `/out` holds `junit.xml`, `summary.md`, `observed.toml` (what each file
 gave, as `[file.check]` tables to paste into the manifest), `thumbs/<id>.ppm`
 to look at, and, with `bless=yes`, the new `raw-corpus.thumbs.toml` to
-commit.
+commit with the thumbnails of `thumbs/`, copied to
+`tests/raw-corpus-thumbs/`.
 
 **Locally.** The same checks run in `cargo test`, against the directory in
 `HELIOS_RAW_CORPUS`; without it they are skipped, saying so, and `cargo test`
@@ -359,6 +366,8 @@ time.
 - `../tests/raw-corpus.toml`: the manifest (59 `[[file]]` entries, all CC0,
   with sha256 from raw.pixls.us, and a `[file.check]` table per `core` file).
 - `../tests/raw-corpus.thumbs.toml`: the thumbnail hashes, by file id.
+- `../tests/raw-corpus-thumbs/`: the blessed thumbnails, `<id>.ppm`, compared
+  when a hash differs.
 - `../tools/bench/fill-corpus.sh`: downloads the `core` files.
 - `../crates/helios-corpus`: the checks, their report, and the local test.
 

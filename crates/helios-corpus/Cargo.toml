@@ -8,6 +8,7 @@ repository.workspace = true
 
 [dependencies]
 helios-load.workspace = true
+helios-photo.workspace = true
 blake3.workspace = true
 serde.workspace = true
 toml = "1"

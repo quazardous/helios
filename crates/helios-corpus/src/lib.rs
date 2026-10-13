@@ -23,9 +23,14 @@
 //! does); for any other raw, what rawler reports.
 //!
 //! A small thumbnail is also demosaiced (block averages of each filter
-//! colour, at most [`THUMB_EDGE`] pixels on the long edge, 8 bits) and its
-//! hash compared with `tests/raw-corpus.thumbs.toml`, which only
-//! `--bless` rewrites.
+//! colour, at most [`THUMB_EDGE`] pixels on the long edge, 8 bits) and
+//! compared with the blessed one: its hash with
+//! `tests/raw-corpus.thumbs.toml` first (identical pixels, the fast path),
+//! then, when the hash differs, its pixels with the blessed image in
+//! `tests/raw-corpus-thumbs/` by the comparison the parity jobs share
+//! ([`helios_photo::compare`]), within [`THUMB_THRESHOLDS`]. A thumbnail
+//! that changed within them passes with a note, to bless. Only `--bless`
+//! rewrites the hashes and the images.
 //!
 //! The files themselves are never in the repository: `tools/bench/fill-corpus.sh`
 //! downloads them, into the bench box's `raw-corpus` volume or a local
@@ -38,6 +43,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 
+use helios_photo::compare::{Pixels, Thresholds, difference};
 use rawler::decoders::RawDecodeParams;
 use rawler::imgop::xyz::Illuminant;
 use rawler::rawimage::{RawImage, RawPhotometricInterpretation};
@@ -46,6 +52,21 @@ use serde::{Deserialize, Serialize};
 
 /// The thumbnail's long edge, at most, in pixels.
 pub const THUMB_EDGE: usize = 64;
+
+/// How far a thumbnail may move from the blessed one, in Delta E 2000, its
+/// 8-bit values read back through the square-root curve as linear
+/// Rec.2020 (they are camera RGB: a proxy, enough to tell a rounding
+/// change from a wrong pattern, crop or level). A thumbnail has fewer than
+/// 10 000 pixels: its 99.99th percentile is its max.
+pub const THUMB_THRESHOLDS: Thresholds = Thresholds {
+    mean: 0.5,
+    p9999: 2.3,
+    max: 5.0,
+    ..Thresholds::NONE
+};
+
+/// The blessed thumbnails, `<id>.ppm`, from the repository's root.
+pub const THUMB_IMAGES: &str = "tests/raw-corpus-thumbs";
 
 /// Relative tolerance on the levels and the matrix (they are rationals and
 /// `f32` in rawler: compared as decimals written in the manifest).
@@ -165,12 +186,92 @@ impl Thumb {
         out.extend_from_slice(&self.rgb);
         out
     }
+
+    /// Reads back what [`Thumb::ppm`] wrote.
+    pub fn from_ppm(data: &[u8]) -> Result<Thumb, String> {
+        let mut parts = data.splitn(4, |b| *b == b'\n');
+        let (Some(b"P6"), Some(size), Some(b"255"), Some(rgb)) =
+            (parts.next(), parts.next(), parts.next(), parts.next())
+        else {
+            return Err("not a PPM as the corpus writes them".into());
+        };
+        let size = String::from_utf8_lossy(size);
+        let mut wh = size.split(' ').map(str::parse::<usize>);
+        let (Some(Ok(width)), Some(Ok(height)), None) = (wh.next(), wh.next(), wh.next()) else {
+            return Err(format!("PPM: bad size `{size}`"));
+        };
+        if rgb.len() != width * height * 3 {
+            return Err(format!("PPM: {} bytes for {width} x {height}", rgb.len()));
+        }
+        Ok(Thumb {
+            width,
+            height,
+            rgb: rgb.to_vec(),
+        })
+    }
+
+    /// Its values back through the square-root curve: linear, 0..1.
+    fn linear(&self) -> Vec<f32> {
+        self.rgb
+            .iter()
+            .map(|v| (f32::from(*v) / 255.0).powi(2))
+            .collect()
+    }
+}
+
+/// A thumbnail against the blessed one: `Ok(None)` when its hash is the
+/// expected one, `Ok(Some(note))` when its pixels changed within
+/// [`THUMB_THRESHOLDS`], `Err` with why otherwise.
+pub fn judge_thumb(
+    expected: Option<&String>,
+    thumb: &Thumb,
+    blessed: Option<&Thumb>,
+) -> Result<Option<String>, String> {
+    let hash = thumb.hash();
+    let Some(expected) = expected else {
+        return Err(format!("thumbnail: no expectation (got {hash:?})"));
+    };
+    if *expected == hash {
+        return Ok(None);
+    }
+    let changed = format!("thumbnail: expected {expected:?}, got {hash:?}");
+    let Some(blessed) = blessed else {
+        return Err(changed);
+    };
+    if blessed.hash() != *expected {
+        return Err(format!(
+            "{changed} (the blessed image does not match its hash: bless again)"
+        ));
+    }
+    let (a, b) = (blessed.linear(), thumb.linear());
+    let d = difference(
+        &Pixels::new(&a, 3, blessed.width, blessed.height)?,
+        &Pixels::new(&b, 3, thumb.width, thumb.height)?,
+    )
+    .map_err(|e| format!("{changed}: {e}"))?;
+    let beyond = d.beyond(&THUMB_THRESHOLDS);
+    if beyond.is_empty() {
+        Ok(Some(format!(
+            "thumbnail changed within tolerance (Delta E mean {:.3}, p99.99 {:.3}, max {:.3}): bless to record it",
+            d.mean, d.p9999, d.max
+        )))
+    } else {
+        Err(format!("{changed}, Delta E {}", beyond.join(", ")))
+    }
+}
+
+/// The blessed thumbnail of a file, if there is one.
+pub fn read_thumb_image(dir: &Path, id: &str) -> Option<Thumb> {
+    let data = std::fs::read(dir.join(format!("{id}.ppm"))).ok()?;
+    Thumb::from_ppm(&data).ok()
 }
 
 /// The result for one file.
 pub struct Outcome {
     pub id: String,
     pub failures: Vec<String>,
+    /// What passed but should be looked at (a thumbnail to bless).
+    pub notes: Vec<String>,
     pub observed: Observed,
     pub thumb: Option<Thumb>,
     pub seconds: f64,
@@ -395,6 +496,7 @@ pub fn check_file(dir: &Path, entry: &Entry, thumbs: &Thumbs) -> Outcome {
     let start = Instant::now();
     let path = dir.join(entry.local_name());
     let mut failures = Vec::new();
+    let mut notes = Vec::new();
     let mut observed = Observed::default();
     let mut thumb = None;
     if entry.licence != "CC0-1.0" {
@@ -472,13 +574,12 @@ pub fn check_file(dir: &Path, entry: &Entry, thumbs: &Thumbs) -> Outcome {
                     (Some(w), Some(g)) if g == w || (w != "mosaic" && g.contains(w.as_str())) => {}
                     (w, g) => f.push(format!("helios: expected {w:?}, got {g:?}")),
                 }
-                compare(
-                    f,
-                    "thumbnail",
-                    thumbs.get(&entry.id),
-                    obs.thumb.as_ref(),
-                    PartialEq::eq,
-                );
+                let blessed = read_thumb_image(&repo_root().join(THUMB_IMAGES), &entry.id);
+                match judge_thumb(thumbs.get(&entry.id), &t, blessed.as_ref()) {
+                    Ok(None) => {}
+                    Ok(Some(note)) => notes.push(note),
+                    Err(e) => f.push(e),
+                }
                 observed = obs;
                 thumb = Some(t);
             }
@@ -492,6 +593,7 @@ pub fn check_file(dir: &Path, entry: &Entry, thumbs: &Thumbs) -> Outcome {
     Outcome {
         id: entry.id.clone(),
         failures,
+        notes,
         observed,
         thumb,
         seconds: start.elapsed().as_secs_f64(),
@@ -554,8 +656,10 @@ pub fn summary(outcomes: &[Outcome]) -> String {
         failed.len()
     );
     for o in outcomes {
-        let result = if o.failures.is_empty() {
+        let result = if o.failures.is_empty() && o.notes.is_empty() {
             "ok".to_string()
+        } else if o.failures.is_empty() {
+            format!("ok; {}", o.notes.join("; ").replace('|', "\\|"))
         } else {
             format!("FAIL: {}", o.failures.join("; ").replace('|', "\\|"))
         };

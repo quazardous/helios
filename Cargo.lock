@@ -1894,6 +1894,7 @@ version = "0.0.1"
 dependencies = [
  "blake3",
  "helios-load",
+ "helios-photo",
  "rawler",
  "serde",
  "toml 1.1.8+spec-1.1.0",
