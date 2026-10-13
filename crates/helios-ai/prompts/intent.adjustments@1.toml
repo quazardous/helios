@@ -1,0 +1,52 @@
+# A photographer's intention, in words, as a list of adjustments: the first
+# step from an intention to a workshop.
+id = "intent.adjustments"
+version = 1
+capability = "structured"
+description = "A photographer's intention in words, as targeted adjustments"
+tuned_for = ["qwen3:8b"]
+temperature = 0.0
+seed = 1
+system = "You translate a photographer's words into photo editing adjustments. You answer with JSON only."
+template = """
+The photographer says: "{{intention}}"
+List the adjustments this asks for. Each has a target (one of "global",
+"sky", "subject", "skin", "background", "highlights", "shadows"), a property
+(one of "exposure", "contrast", "saturation", "warmth", "tint", "clarity",
+"sharpness", "noise"), a direction ("more" or "less") and a strength from
+0.1 (a touch) to 1 (a lot).
+Reply with JSON only:
+{"adjustments": [{"target": "...", "property": "...", "direction": "...", "strength": 0.5}]}.
+"""
+
+[input]
+type = "object"
+required = ["intention"]
+additionalProperties = false
+
+[input.properties.intention]
+type = "string"
+minLength = 1
+maxLength = 2000
+
+[output]
+type = "object"
+required = ["adjustments"]
+
+[output.properties.adjustments]
+type = "array"
+minItems = 1
+maxItems = 12
+
+[output.properties.adjustments.items]
+type = "object"
+required = ["target", "property", "direction", "strength"]
+
+[output.properties.adjustments.items.properties]
+target = { enum = ["global", "sky", "subject", "skin", "background", "highlights", "shadows"] }
+property = { enum = ["exposure", "contrast", "saturation", "warmth", "tint", "clarity", "sharpness", "noise"] }
+direction = { enum = ["more", "less"] }
+strength = { type = "number", minimum = 0.1, maximum = 1.0 }
+
+[example]
+intention = "too contrasty, and the blue sky is too saturated"

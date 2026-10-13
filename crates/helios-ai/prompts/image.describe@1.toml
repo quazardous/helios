@@ -1,0 +1,48 @@
+# A caption and keywords for one photograph: catalogue text, search.
+id = "image.describe"
+version = 1
+capability = "vision"
+description = "A short caption and keywords for one photograph"
+tuned_for = ["qwen2.5vl:7b", "gemma3:12b"]
+images = 1
+temperature = 0.0
+seed = 1
+system = "You describe photographs for a photographer's catalogue. You answer with JSON only."
+template = """
+Describe this photograph for a catalogue, in {{language}}.
+Give a caption of one sentence (what and where, no opinion) and up to
+{{keywords}} keywords (subjects, place, light, season), most important first.
+Reply with JSON only: {"caption": "...", "keywords": ["...", "..."]}.
+"""
+
+[input]
+type = "object"
+required = ["language", "keywords"]
+additionalProperties = false
+
+[input.properties.language]
+type = "string"
+minLength = 2
+
+[input.properties.keywords]
+type = "integer"
+minimum = 1
+maximum = 30
+
+[output]
+type = "object"
+required = ["caption", "keywords"]
+
+[output.properties.caption]
+type = "string"
+minLength = 1
+maxLength = 300
+
+[output.properties.keywords]
+type = "array"
+maxItems = 30
+items = { type = "string", minLength = 1 }
+
+[example]
+language = "English"
+keywords = 8

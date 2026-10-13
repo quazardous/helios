@@ -1,0 +1,22 @@
+[package]
+name = "helios-ai"
+description = "Helios AI models: providers and their capabilities, the routing map, prompts as versioned assets, the local runtime and the call log"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+helios-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+blake3.workspace = true
+toml = "1"
+# MIT OR Apache-2.0: an HTTP client (rustls), and base64 for images.
+ureq = { version = "3", features = ["json"] }
+base64 = "0.22"
+# MIT OR Apache-2.0: images downscaled and re-encoded before a call.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+
+[lints]
+workspace = true

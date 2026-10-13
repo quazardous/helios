@@ -1866,6 +1866,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
+name = "helios-ai"
+version = "0.0.1"
+dependencies = [
+ "base64 0.22.1",
+ "blake3",
+ "helios-core",
+ "image",
+ "serde",
+ "serde_json",
+ "toml 1.1.8+spec-1.1.0",
+ "ureq",
+]
+
+[[package]]
 name = "helios-compute"
 version = "0.0.1"
 dependencies = [

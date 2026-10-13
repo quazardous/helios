@@ -12,6 +12,7 @@ license = "GPL-3.0-or-later"
 repository = "https://github.com/quazardous/helios"
 
 [workspace.dependencies]
+helios-ai = { path = "crates/helios-ai" }
 helios-core = { path = "crates/helios-core" }
 helios-testkit = { path = "crates/helios-testkit" }
 helios-inspect = { path = "crates/helios-inspect" }

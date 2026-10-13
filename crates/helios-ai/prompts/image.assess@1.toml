@@ -1,0 +1,53 @@
+# The technical quality of one photograph: culling, picking the best of a
+# burst or a stack.
+id = "image.assess"
+version = 1
+capability = "vision"
+description = "Technical quality of one photograph: focus, exposure, composition, defects"
+tuned_for = ["qwen2.5vl:7b"]
+images = 1
+temperature = 0.0
+seed = 1
+system = "You assess the technical quality of photographs for a photographer culling a shoot. You answer with JSON only."
+template = """
+Assess this photograph's technical quality, not its subject or taste.
+Score from 1 (unusable) to 5 (excellent): focus (is the subject sharp),
+exposure (are highlights and shadows kept), composition (framing, horizon).
+List the defects you see, among: "blur", "motion_blur", "missed_focus",
+"overexposed", "underexposed", "tilted_horizon", "closed_eyes", "noise".
+Reply with JSON only:
+{"focus": 1-5, "exposure": 1-5, "composition": 1-5, "defects": ["..."], "note": "one short sentence"}.
+"""
+
+[input]
+type = "object"
+additionalProperties = false
+
+[output]
+type = "object"
+required = ["focus", "exposure", "composition", "defects"]
+
+[output.properties.focus]
+type = "integer"
+minimum = 1
+maximum = 5
+
+[output.properties.exposure]
+type = "integer"
+minimum = 1
+maximum = 5
+
+[output.properties.composition]
+type = "integer"
+minimum = 1
+maximum = 5
+
+[output.properties.defects]
+type = "array"
+items = { enum = ["blur", "motion_blur", "missed_focus", "overexposed", "underexposed", "tilted_horizon", "closed_eyes", "noise"] }
+
+[output.properties.note]
+type = "string"
+maxLength = 300
+
+[example]
