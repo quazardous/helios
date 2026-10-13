@@ -162,6 +162,26 @@ mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", c
 outputs = { gui = { path = "helios-gui", kind = "file" } }
 timeout = "1h"
 
+# how long the desktop takes to quit: helios-gui in release, in a headless
+# labwc through wbox, the raw corpus as its library, closed `runs=` times
+# (Ctrl+Q and the compositor's close in turn); the steps it marks, when its
+# window went and when it exited, in /out/quit-timing.md and .jsonl.
+# `budget=<ms>` fails the job when a window outlives its close request by
+# more (tools/bench/quit-timing.py)
+[jobs.quit-timing]
+checkouts = ["helios", "vkdt", "egui-pop"]
+cores = 5
+memory = "6g"
+cwd = "/work/${src:-helios}"
+command = """mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && \
+cargo build --locked --release -p helios-gui -p helios-node && \
+mkdir -p "$XDG_RUNTIME_DIR" "$HOME" && chmod 700 "$XDG_RUNTIME_DIR" && \
+"$WBOX_PYTHON" -I tools/bench/quit-timing.py --gui /target/release/helios-gui --helios /target/release/helios \
+  --corpus /corpus --out /out --runs ${runs:-6} --budget-ms ${budget:-0}"""
+env = { CARGO_NET_OFFLINE = "true", WLR_RENDERER = "pixman" }
+mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", raw-corpus = "/corpus", sccache = "/sccache" }
+timeout = "1h"
+
 [jobs.lint]
 checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 5

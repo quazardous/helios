@@ -15,6 +15,7 @@ pub mod params;
 pub mod persist;
 pub mod platform;
 mod plugins;
+pub mod quit;
 pub mod scopes;
 pub mod shell;
 pub mod snapshot;

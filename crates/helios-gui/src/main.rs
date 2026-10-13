@@ -20,6 +20,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use egui_pop::model::layout::Layout;
 use egui_pop::platform::instance::{self, Instance, Launch, Single};
 use helios_gui::platform::{self, Open};
+use helios_gui::quit;
 use helios_gui::{Shell, headless, helios_panels};
 
 /// Where a workspace's own files are kept (the profile it uses): in the
@@ -310,13 +311,22 @@ fn image_graph(
 }
 
 struct App {
-    shell: Shell,
+    // Fields drop in this order; the marks time the quit's steps.
     persist: Option<Persist>,
+    _persist_dropped: quit::MarkOnDrop,
+    shell: Shell,
+    _shell_dropped: quit::MarkOnDrop,
     /// The template the workspace was made from: an image opened goes
     /// through its network.
     template: Option<helios_template::Bundle>,
     /// Set when an import ended: the library is filled again.
     refill: Arc<AtomicBool>,
+}
+
+impl Drop for App {
+    fn drop(&mut self) {
+        quit::mark("application dropping");
+    }
 }
 
 impl App {
@@ -350,6 +360,9 @@ impl App {
 
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        if ui.ctx().input(|i| i.viewport().close_requested()) {
+            quit::requested();
+        }
         self.shell.ui(ui);
         // The GPU path is installed by now: the image's own surface
         // follows the Wide-gamut preview setting.
@@ -371,6 +384,7 @@ impl eframe::App for App {
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_or(0.0, |d| d.as_secs_f64());
             persist.frame(&mut self.shell, now);
+            quit::mark("vault written (last frame)");
             // While a gesture goes on, come back to save it in time.
             if self.shell.values.lock().is_ok_and(|v| v.uncommitted()) {
                 ui.ctx()
@@ -386,11 +400,13 @@ impl eframe::App for App {
     }
 
     fn on_exit(&mut self) {
+        quit::mark("on_exit");
         // egui-pop's exit: the workspace saved (`save_workspace`), then
         // the `app.exit` step saves the interface's settings and keys.
         if let Err(e) = self.shell.exit() {
             warn(&format!("cannot save the interface's settings: {e}"));
         }
+        quit::mark("interface settings, keys and layout saved");
     }
 }
 
@@ -407,6 +423,7 @@ fn save_workspace(dir: &Path, app: &egui_pop::api::AppHandle) {
     if let Err(e) = saved {
         warn(&format!("cannot save {}: {e}", file.display()));
     }
+    quit::mark("workspace profile saved");
 }
 
 /// Fills the library from the vault and shows the image asked for (its
@@ -569,7 +586,7 @@ fn main() -> Result<(), String> {
     options.wgpu_options.wgpu_setup = helios_gui::shell::wgpu_setup(&gpu);
     // egui-pop opens the window where it was last (repaired) and builds
     // the application on its context.
-    builder
+    let ran = builder
         .run_native("helios-gui", options, move |mut shell, cc| {
             if let Some(rs) = cc.wgpu_render_state.as_ref() {
                 shell.attach_gpu(rs);
@@ -600,11 +617,15 @@ fn main() -> Result<(), String> {
                 shell.notes.push(format!("library commands: {e}"));
             }
             Box::new(App {
-                shell,
                 persist,
+                _persist_dropped: quit::MarkOnDrop("vault link dropped"),
+                shell,
+                _shell_dropped: quit::MarkOnDrop("shell dropped"),
                 template,
                 refill,
             })
         })
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string());
+    quit::mark("window closed (eframe returned)");
+    ran
 }
