@@ -857,7 +857,7 @@ impl Shell {
     }
 
     /// Where thumbnails are sent, by image id, from any thread.
-    pub fn library_thumbnails(&self) -> std::sync::mpsc::Sender<(String, helios_core::Image)> {
+    pub fn library_thumbnails(&self) -> crate::library::ThumbnailSink {
         self.library.borrow().thumbnails()
     }
 

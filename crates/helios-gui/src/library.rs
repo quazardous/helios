@@ -6,7 +6,7 @@
 //! ([`Shell::set_library`](crate::Shell::set_library)) and their stacks
 //! ([`Library::set_stacks`]), sends their thumbnails as they are read (from
 //! any thread, through [`Library::thumbnails`]: the embedded previews of
-//! raws), and applies what the user changes, collected with
+//! raws, each burst of them waking an idle window once), and applies what the user changes, collected with
 //! [`Shell::take_library_changes`](crate::Shell::take_library_changes) as
 //! vault field commands. The shown values change at once; the host puts
 //! back what the vault holds ([`Library::show_field`]) when a write fails
@@ -29,7 +29,9 @@
 //! names, tags and days the library holds.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{Receiver, SendError, Sender, channel};
+use std::sync::{Arc, OnceLock};
 
 use egui::{Color32, ColorImage, TextureHandle, Ui};
 use egui_pop::api::AppHandle;
@@ -52,6 +54,42 @@ pub const LIBRARY: &str = "helios.library";
 
 /// The labels, in the order darktable gives them F1 to F5.
 pub const LABELS: [&str; 5] = ["red", "yellow", "green", "blue", "purple"];
+
+/// Where thumbnails are sent, by image id, from any thread: the first one
+/// after a frame wakes the window, so previews read while it is idle show
+/// without waiting for an input, and a burst of them costs one repaint.
+#[derive(Clone)]
+pub struct ThumbnailSink {
+    sender: Sender<(String, Image)>,
+    wake: Arc<Wake>,
+}
+
+/// What a sink needs to wake the window.
+#[derive(Default)]
+struct Wake {
+    /// The window's context, known once the library is first drawn: until
+    /// then, its first frame takes whatever was sent.
+    ctx: OnceLock<egui::Context>,
+    /// A thumbnail was sent since the window last took them: a repaint is
+    /// already on its way.
+    pending: AtomicBool,
+}
+
+impl ThumbnailSink {
+    /// Sends a thumbnail; an error once the library is gone.
+    ///
+    /// # Errors
+    /// The thumbnail back when the library no longer exists.
+    pub fn send(&self, thumb: (String, Image)) -> Result<(), SendError<(String, Image)>> {
+        self.sender.send(thumb)?;
+        if !self.wake.pending.swap(true, Ordering::SeqCst)
+            && let Some(ctx) = self.wake.ctx.get()
+        {
+            ctx.request_repaint();
+        }
+        Ok(())
+    }
+}
 
 /// The stack an image is in, as the library shows it.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -298,7 +336,7 @@ pub struct Library {
     expansions: Vec<(String, bool)>,
     /// An image opened (Enter, a double click), for the host.
     activated: Option<String>,
-    sender: Sender<(String, Image)>,
+    sink: ThumbnailSink,
     receiver: Receiver<(String, Image)>,
     textures: HashMap<String, TextureHandle>,
 }
@@ -332,7 +370,10 @@ impl Default for Library {
             changes: Vec::new(),
             expansions: Vec::new(),
             activated: None,
-            sender,
+            sink: ThumbnailSink {
+                sender,
+                wake: Arc::default(),
+            },
             receiver,
             textures: HashMap::new(),
         }
@@ -615,8 +656,13 @@ impl Library {
     }
 
     /// Where thumbnails are sent, by image id, from any thread.
-    pub fn thumbnails(&self) -> Sender<(String, Image)> {
-        self.sender.clone()
+    pub fn thumbnails(&self) -> ThumbnailSink {
+        self.sink.clone()
+    }
+
+    /// Whether the thumbnail of this image has been received.
+    pub fn has_thumbnail(&self, id: &str) -> bool {
+        self.textures.contains_key(id)
     }
 
     pub fn take_changes(&mut self) -> Vec<Change> {
@@ -953,6 +999,13 @@ impl Library {
     }
 
     fn receive(&mut self, ui: &Ui) {
+        let wake = &self.sink.wake;
+        if wake.ctx.get().is_none() {
+            let _ = wake.ctx.set(ui.ctx().clone());
+        }
+        // Cleared before the queue is drained: a thumbnail sent after the
+        // drain sets it again and wakes the window.
+        wake.pending.store(false, Ordering::SeqCst);
         let mut any = false;
         while let Ok((id, image)) = self.receiver.try_recv() {
             let texture = ui.ctx().load_texture(

@@ -538,6 +538,75 @@ fn the_library_rates_and_labels_what_is_selected_and_hands_the_changes_over() {
 }
 
 #[test]
+fn previews_read_while_the_window_is_idle_show_by_the_next_frame() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let entries = ["a", "b", "c"]
+        .iter()
+        .map(|id| helios_gui::library::Entry {
+            id: id.to_string(),
+            name: format!("{id}.raf"),
+            ..Default::default()
+        })
+        .collect();
+    let mut shell = Shell::new(helios_panels(), None);
+    shell.set_library(entries);
+    let sink = shell.library_thumbnails();
+    let mut h = headless::harness(shell, vec2(1024.0, 700.0));
+    h.state_mut()
+        .run("helios.filmstrip.focus", json!(null), Origin::User)
+        .unwrap();
+    // The window draws the library, then goes idle.
+    h.run();
+    let wakes = Arc::new(AtomicUsize::new(0));
+    let counted = wakes.clone();
+    h.ctx.set_request_repaint_callback(move |info| {
+        if info.delay.is_zero() {
+            counted.fetch_add(1, Ordering::SeqCst);
+        }
+    });
+    // A burst of previews from the reader's thread, with no input at all.
+    let send = |ids: &'static [&'static str]| {
+        let sink = sink.clone();
+        std::thread::spawn(move || {
+            for id in ids {
+                let image = helios_core::Image::from_fn(
+                    helios_core::Region::sized(64, 48),
+                    4,
+                    |_, _, _| 0.2,
+                );
+                sink.send(((*id).into(), image)).unwrap();
+            }
+        })
+        .join()
+        .unwrap();
+    };
+    send(&["a", "b", "c"]);
+    // The window was woken, with no input event.
+    assert_eq!(wakes.load(Ordering::SeqCst), 1);
+    assert!(!h.state().library().has_thumbnail("a"));
+    // The frame that wake asks for shows them all.
+    h.step();
+    for id in ["a", "b", "c"] {
+        assert!(h.state().library().has_thumbnail(id), "{id}");
+    }
+    // One repaint asked for the burst, not one per preview.
+    let asked = h
+        .ctx
+        .repaint_causes()
+        .into_iter()
+        .filter(|c| c.file.ends_with("library.rs"))
+        .count();
+    assert_eq!(asked, 1, "{:?}", h.ctx.repaint_causes());
+    // Once that frame has taken them and the window is idle again, the next
+    // preview wakes it again.
+    h.run();
+    let before = wakes.load(Ordering::SeqCst);
+    send(&["a"]);
+    assert_eq!(wakes.load(Ordering::SeqCst), before + 1);
+}
+
+#[test]
 fn the_shell_runs_the_value_commands_with_their_origin() {
     use helios_values::Descriptor;
     let mut shell = Shell::new(helios_panels(), None);
