@@ -317,7 +317,7 @@ impl Params {
                             _ => None,
                         };
                         if let Some(n) = note {
-                            request(ui.ctx(), Request::Notify(Level::Info, n));
+                            request(ui.ctx(), Request::Notify(Level::Info, n.into()));
                         }
                     }
                 } else {
@@ -325,7 +325,7 @@ impl Params {
                         ui.ctx(),
                         Request::Notify(
                             Level::Warning,
-                            format!("{}: `{typed}` is not a number", d.label),
+                            format!("{}: `{typed}` is not a number", d.label).into(),
                         ),
                     );
                 }

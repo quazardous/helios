@@ -7,6 +7,7 @@ use std::sync::Arc;
 use crate::error::Error;
 use crate::image::{Image, Region};
 use crate::manifest::{Manifest, ParamHint};
+use crate::message::Message;
 use crate::network::{Composite, Expansion, Network};
 use crate::params::{Params, Value};
 
@@ -177,6 +178,18 @@ impl Failure {
             Failure::Timeout => "timeout",
             Failure::DeviceLost => "device lost",
             Failure::Other => "other",
+        }
+    }
+
+    /// The failure for people, by key.
+    pub fn message(self) -> Message {
+        match self {
+            Failure::Compile => Message::new("engine-failure-compile", "compile"),
+            Failure::Dispatch => Message::new("engine-failure-dispatch", "dispatch"),
+            Failure::OutOfMemory => Message::new("engine-failure-out-of-memory", "out of memory"),
+            Failure::Timeout => Message::new("engine-failure-timeout", "timeout"),
+            Failure::DeviceLost => Message::new("engine-failure-device-lost", "device lost"),
+            Failure::Other => Message::new("engine-failure-other", "other"),
         }
     }
 }

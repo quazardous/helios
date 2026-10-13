@@ -1075,17 +1075,17 @@ impl MaskTree {
                         group: Some(group),
                         index: Some(index),
                     }),
-                    Err(e) => request(ui.ctx(), Request::Notify(Level::Warning, e)),
+                    Err(e) => request(ui.ctx(), Request::Notify(Level::Warning, e.into())),
                 },
                 Signal::Vetoed { reason, .. } => {
-                    request(ui.ctx(), Request::Notify(Level::Warning, reason));
+                    request(ui.ctx(), Request::Notify(Level::Warning, reason.into()));
                 }
                 _ => {}
             }
         }
         for c in commands {
             if let Err(e) = viewport.borrow_mut().mask(c, Origin::User, &mut store) {
-                request(ui.ctx(), Request::Notify(Level::Warning, e));
+                request(ui.ctx(), Request::Notify(Level::Warning, e.into()));
             }
         }
     }

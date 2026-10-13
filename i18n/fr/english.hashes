@@ -112,6 +112,15 @@ command-workbench-quit.title fda91000eb874652
 command-workbench-run.title e0ffb620171da04e
 command-workbench-systemMenu.title f5046dbb28364688
 command-workspace-open.title 0e1f5d4978032923
+engine-failure-compile bdbfcdcb7849b864
+engine-failure-device-lost 874c27f010c56b3f
+engine-failure-dispatch 2187384ef2fd1c2b
+engine-failure-other 04d0dfc84f733c75
+engine-failure-out-of-memory 08a2d2f41533ae53
+engine-failure-timeout e67f323685d7d71e
+engine-gpu-fell-back 0da2d994751a1bde
+engine-gpu-lost 4b3b2ca3f755506a
+engine-gpu-lost-recovered 9d95ae8ade99141c
 menu-helios-system-profiles.label 493fa9da88311dbf
 menu-helios-system-recent.label 570a956d04ae773e
 menu-helios-system-themes.label 399519de8e880133

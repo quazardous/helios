@@ -294,6 +294,12 @@ fn a_kernel_that_fails_runs_its_step_on_the_cpu() {
         assert_eq!(fell[0]["name"], "g0");
         assert_eq!(fell[0]["module"], "gain");
         assert_eq!(fell[0]["failure"], serde_json::to_value(failure).unwrap());
+        assert_eq!(fell[0]["message"]["key"], "engine-gpu-fell-back");
+        assert!(
+            fell[0]["message"]["english"]
+                .as_str()
+                .is_some_and(|m| m.starts_with("gain ran on the CPU"))
+        );
         assert!(e.fallback_reason().unwrap().contains("injected"));
         assert!(e.gpu_off().is_none());
     }
@@ -385,7 +391,8 @@ fn a_lost_device_that_cannot_be_rebuilt_leaves_the_cpu_for_the_session() {
     );
     let lost = events(&e, "engine.gpu_lost");
     assert_eq!(lost[0]["recovered"], false);
-    assert_eq!(lost[0]["message"], off.as_str());
+    assert_eq!(lost[0]["message"]["english"], off.as_str());
+    assert_eq!(lost[0]["message"]["key"], "engine-gpu-lost");
     // Later renders do not try the device again.
     let runs = fake.runs.load(Ordering::SeqCst);
     let (h, last_h) = chain(8, 2);

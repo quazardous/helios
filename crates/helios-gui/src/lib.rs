@@ -5,6 +5,7 @@
 pub mod dialogs;
 pub mod engine_source;
 pub mod host;
+pub mod i18n;
 pub mod library;
 pub mod mask_tree;
 pub mod masks;

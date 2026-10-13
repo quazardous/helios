@@ -14,7 +14,7 @@
 //! palette, a menu, a script and an agent reach the same actions.
 
 use std::cell::RefCell;
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
@@ -35,7 +35,7 @@ use egui_pop::model::keymap::{DocBinding, KeymapDoc, Layer};
 use egui_pop::model::layout::Layout;
 use egui_pop::model::menus::{Item, MenuItem as PopItem, Shown, show_items};
 use egui_pop::model::panels::{Area, PanelSpec};
-use helios_core::Bus;
+use helios_core::{Bus, Message};
 use helios_shell::commands::{CommandSpec, Origin, Registry, Run};
 use image::RgbaImage;
 use serde_json::{Value, json};
@@ -181,6 +181,8 @@ struct Parts {
     /// The mask network the Masks panel shows, which its drop guard reads.
     mask_network: Rc<RefCell<crate::mask_tree::Network>>,
     workspace: Workspace,
+    /// The catalogues of the application's translation plugin.
+    i18n: egui_pop::i18n::I18n,
 }
 
 /// A shell whose egui-pop application is still to build: in a test
@@ -320,6 +322,12 @@ pub struct Shell {
     still: bool,
     /// The workspace open, whose layout egui-pop keeps.
     workspace: Workspace,
+    /// The catalogues the shell's text is shown through.
+    i18n: egui_pop::i18n::I18n,
+    /// The viewport engine's events read up to here, and the modules whose
+    /// GPU fallback was already said.
+    engine_seen: u64,
+    fell_back: BTreeSet<String>,
 }
 
 impl Shell {
@@ -380,6 +388,18 @@ impl Shell {
         helios_values::register(&mut lock(&registry), wiring.values.clone())
             .expect("param commands are declared once");
         Shell::declare_menus(&wiring);
+        let i18n_plugin = egui_pop::i18n::I18nPlugin::new()
+            .catalogues(helios_i18n::CATALOGUES)
+            .env(helios_i18n::ENV)
+            // A shell without the user's settings (tests, pictures,
+            // tools) speaks English; the desktop follows the language
+            // setting, the system's by default.
+            .language(if ui_settings.is_some() {
+                egui_pop::i18n::plugin::SYSTEM
+            } else {
+                "en"
+            });
+        let i18n = i18n_plugin.i18n();
         let Wiring {
             queue,
             dialogs,
@@ -421,19 +441,7 @@ impl Shell {
                 specs: panels.clone(),
                 contents: contents.clone(),
             })
-            .plugin(
-                egui_pop::i18n::I18nPlugin::new()
-                    .catalogues(helios_i18n::CATALOGUES)
-                    .env(helios_i18n::ENV)
-                    // A shell without the user's settings (tests, pictures,
-                    // tools) speaks English; the desktop follows the
-                    // language setting, the system's by default.
-                    .language(if ui_settings.is_some() {
-                        egui_pop::i18n::plugin::SYSTEM
-                    } else {
-                        "en"
-                    }),
-            );
+            .plugin(i18n_plugin);
         if let Some(dir) = ui_settings {
             builder = builder.persist(dir);
         }
@@ -452,6 +460,7 @@ impl Shell {
                 values,
                 mask_network,
                 workspace,
+                i18n,
             },
         }
     }
@@ -471,6 +480,7 @@ impl Shell {
             values,
             mask_network,
             workspace,
+            i18n,
         } = parts;
         if let Some(d) = app.handle().service(&DIALOGS) {
             let _ = dialogs.set((*d).clone());
@@ -518,6 +528,9 @@ impl Shell {
             values,
             workspace,
             still: false,
+            i18n,
+            engine_seen: 0,
+            fell_back: BTreeSet::new(),
         };
         for d in shell.app.handle().diagnostics() {
             shell.notes.push(format!("{}: {}", d.code, d.message));
@@ -1961,10 +1974,16 @@ impl Shell {
 
     // --- Dialogs, menus and notices ---
 
-    /// Shows a notice: the status bar always, a toast unless it is plain
-    /// information. Kept in `notes` too.
-    pub fn notify(&mut self, level: Level, text: impl Into<String>) {
-        let text = text.into();
+    /// A message in the shell's language, else its English.
+    pub fn text(&self, m: impl Into<Message>) -> String {
+        helios_i18n::message(&self.i18n, &m.into())
+    }
+
+    /// Shows a notice, in the shell's language: the status bar always, a
+    /// toast unless it is plain information. Kept in `notes` too.
+    pub fn notify(&mut self, level: Level, text: impl Into<Message>) {
+        let message = text.into();
+        let text = self.text(message.clone());
         self.notes.push(text.clone());
         let toast = match level {
             Level::Info => None,
@@ -1977,17 +1996,49 @@ impl Shell {
         self.notices.push(Notice {
             level,
             text,
+            key: message.key,
             action: None,
             at: self.now,
         });
     }
 
-    fn note(&mut self, text: impl Into<String>) {
+    fn note(&mut self, text: impl Into<Message>) {
         self.notify(Level::Info, text);
     }
 
-    fn warn(&mut self, text: impl Into<String>) {
+    fn warn(&mut self, text: impl Into<Message>) {
         self.notify(Level::Warning, text);
+    }
+
+    /// What the viewport's engine says a user should know: a step whose
+    /// GPU version failed (once per module), a GPU lost. Shown as toasts.
+    fn engine_notices(&mut self) {
+        let engine = self.viewport.borrow().engine().clone();
+        for e in engine.bus().since(self.engine_seen) {
+            self.engine_seen = e.seq;
+            let message = || serde_json::from_value::<Message>(e.payload["message"].clone()).ok();
+            match e.kind {
+                "engine.gpu_fell_back" => {
+                    let module = e.payload["module"].as_str().unwrap_or_default().to_string();
+                    if self.fell_back.insert(module)
+                        && let Some(m) = message()
+                    {
+                        self.notify(Level::Warning, m);
+                    }
+                }
+                "engine.gpu_lost" => {
+                    if let Some(m) = message() {
+                        let level = if e.payload["recovered"] == true {
+                            Level::Warning
+                        } else {
+                            Level::Error
+                        };
+                        self.notify(level, m);
+                    }
+                }
+                _ => {}
+            }
+        }
     }
 
     fn open_dialog(&mut self, dialog: impl Into<dialogs::Dialog>) {
@@ -2578,6 +2629,7 @@ impl Shell {
         self.viewport.borrow_mut().sync(&mut lock(&self.values));
         self.app.show(ui);
         self.workbench_refusals();
+        self.engine_notices();
         self.menus_ui(&ctx);
 
         let named = ctx.data(|d| {

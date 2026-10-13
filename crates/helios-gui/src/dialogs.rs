@@ -34,7 +34,11 @@ pub enum Level {
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Notice {
     pub level: Level,
+    /// In the interface's language.
     pub text: String,
+    /// Its catalogue key; empty for text that has none.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub key: String,
     /// A command offered with it (`(label, command id)`).
     pub action: Option<(String, String)>,
     /// When it was shown, in the GUI's seconds.
@@ -130,7 +134,7 @@ pub enum Request {
         at: egui::Pos2,
         items: Vec<MenuItem>,
     },
-    Notify(Level, String),
+    Notify(Level, helios_core::Message),
 }
 
 fn requests_id() -> Id {

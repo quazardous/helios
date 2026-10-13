@@ -56,6 +56,7 @@ use crate::error::Error;
 use crate::graph::{Graph, Kind, NodeId};
 use crate::image::{ContentHash, Image, Region};
 use crate::manifest::{Family, ModuleKind, Role};
+use crate::message::Message;
 use crate::module::{Accelerator, AcceleratorError, DeviceImage, Extent, Failure};
 use crate::module::{Context, ModuleRef};
 use crate::network::{Expansion, Network, Wire};
@@ -150,6 +151,28 @@ pub struct GpuFellBack {
     pub module: String,
     pub failure: Failure,
     pub reason: String,
+    /// What a user should read.
+    pub message: Message,
+}
+
+impl GpuFellBack {
+    /// The event, with what a user should read.
+    pub fn new(node: NodeId, name: &str, module: &str, failure: Failure, reason: &str) -> Self {
+        GpuFellBack {
+            node,
+            name: name.into(),
+            module: module.into(),
+            failure,
+            reason: reason.into(),
+            message: Message::new(
+                "engine-gpu-fell-back",
+                "{ $module } ran on the CPU: its GPU version failed ({ $failure }: { $reason }).",
+            )
+            .with("module", module)
+            .with("failure", failure.message())
+            .with("reason", reason),
+        }
+    }
 }
 
 impl Event for GpuFellBack {
@@ -166,7 +189,7 @@ pub struct GpuLost {
     /// Rebuilt: the render is replayed on the new device.
     pub recovered: bool,
     /// What a user should read.
-    pub message: String,
+    pub message: Message,
 }
 
 impl Event for GpuLost {
@@ -980,22 +1003,22 @@ impl Engine {
         };
         *rebuilt = true;
         let message = match &recovered {
-            Ok(()) => format!(
-                "The GPU ({}) failed ({}: {reason}); it was restarted and the render replayed.",
-                accelerator.id(),
-                failure.as_str()
+            Ok(()) => Message::new(
+                "engine-gpu-lost-recovered",
+                "The GPU ({ $gpu }) failed ({ $failure }: { $reason }); it was restarted and the render replayed.",
             ),
-            Err(why) => {
-                let message = format!(
-                    "The GPU ({}) failed ({}: {reason}) and could not be restarted ({why}); \
-                     the rest of this session renders on the CPU.",
-                    accelerator.id(),
-                    failure.as_str()
-                );
-                *self.gpu_off.lock().expect("engine gpu lock") = Some(message.clone());
-                message
-            }
-        };
+            Err(why) => Message::new(
+                "engine-gpu-lost",
+                "The GPU ({ $gpu }) failed ({ $failure }: { $reason }) and could not be restarted ({ $why }); the rest of this session renders on the CPU.",
+            )
+            .with("why", why),
+        }
+        .with("gpu", accelerator.id())
+        .with("failure", failure.message())
+        .with("reason", reason);
+        if recovered.is_err() {
+            *self.gpu_off.lock().expect("engine gpu lock") = Some(message.english.clone());
+        }
         self.bus.publish(
             SOURCE,
             Some(cause),
@@ -1772,13 +1795,7 @@ impl Engine {
         self.bus.publish(
             SOURCE,
             Some(cause),
-            &GpuFellBack {
-                node: step.node,
-                name: step.name.clone(),
-                module,
-                failure: e.failure,
-                reason: e.reason,
-            },
+            &GpuFellBack::new(step.node, &step.name, &module, e.failure, &e.reason),
         );
     }
 

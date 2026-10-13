@@ -87,6 +87,10 @@ failures are typed (`Failure`), and the engine answers each kind:
   engine renders on the CPU for the rest of its life
   (`engine.gpu_lost`, with a message for the user; `Engine::gpu_off`).
 
+Both events carry their `message` by key (`engine-gpu-fell-back`,
+`engine-gpu-lost`, `helios_core::Message`); the desktop shows them as
+toasts in its language, a fallback once per module.
+
 `helios_gpu::Gpu::inject` provokes each failure on a real device, so the
 tests cover them all without a broken driver.
 

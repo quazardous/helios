@@ -612,6 +612,12 @@ impl Viewport {
     }
 
     /// The size of the image shown, in pixels.
+    /// The engine the viewport renders with; its bus says what it did
+    /// (a GPU fallback, a GPU lost).
+    pub fn engine(&self) -> &Arc<Engine> {
+        &self.engine
+    }
+
     pub fn image_size(&self) -> Option<[u32; 2]> {
         self.after.size()
     }
