@@ -598,6 +598,18 @@ fn main() -> Result<(), String> {
         }
     };
     start::mark("instance check");
+    // The window draws with the process's one device, which the engine
+    // computes on (see `helios_gui::shell::wgpu_setup`): opened on a
+    // thread while the settings, the vault and the shell are read, as
+    // nothing else uses the GPU before the window.
+    let gpu_opening = std::thread::Builder::new()
+        .name("helios-gpu-open".into())
+        .spawn(|| {
+            let gpu = helios_gpu::shared::gpu();
+            start::mark("GPU device opened (its thread)");
+            gpu
+        })
+        .map_err(|e| format!("no thread to open the GPU: {e}"))?;
     if args.last().is_some_and(|a| a == "--image") {
         return Err("--image takes a FILE".into());
     }
@@ -680,10 +692,11 @@ fn main() -> Result<(), String> {
         .on_exit(move |app| save_workspace(&dir, app))
         .desktop(instance);
     start::mark("shell declared (commands, themes, translations)");
-    // The window draws with the process's one device, which the engine
-    // computes on (see `helios_gui::shell::wgpu_setup`).
-    let gpu = helios_gpu::shared::gpu().map_err(|e| format!("no GPU to draw with: {e}"))?;
-    start::mark("GPU device opened");
+    let gpu = gpu_opening
+        .join()
+        .map_err(|_| "the GPU's opening stopped (a panic)".to_string())?
+        .map_err(|e| format!("no GPU to draw with: {e}"))?;
+    start::mark("GPU device ready");
     let title = format!("{name} — Helios");
     let mut options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
