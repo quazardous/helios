@@ -208,8 +208,11 @@ fn camera(
         if wb[3].is_finite() { wb[3] } else { wb[1] },
     ];
     CameraInfo {
-        maker: raw.clean_make.clone(),
-        model: raw.clean_model.clone(),
+        // rawler passes the EXIF strings through for a camera it does not
+        // know (a DNG from an unlisted body), padding included: trimmed, as
+        // darktable and rawspeed do, so names compare.
+        maker: raw.clean_make.trim().to_string(),
+        model: raw.clean_model.trim().to_string(),
         iso,
         exposure_bias: exif
             .and_then(|e| e.exposure_bias)
