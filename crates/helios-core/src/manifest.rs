@@ -169,6 +169,14 @@ pub struct ParamHint {
     /// A short label; the parameter's name otherwise.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
+    /// Shown on a logarithmic bar: equal ratios take equal lengths (a
+    /// radius, an ISO). Needs a soft range above zero.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub logarithmic: bool,
+    /// The module offers a picker for this parameter (a value sampled
+    /// from the image): a button at the slider's end asks for it.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub picker: bool,
 }
 
 impl ParamHint {
@@ -203,6 +211,18 @@ impl ParamHint {
 
     pub fn label(mut self, label: &str) -> Self {
         self.label = Some(label.into());
+        self
+    }
+
+    /// Shown on a logarithmic bar.
+    pub fn logarithmic(mut self) -> Self {
+        self.logarithmic = true;
+        self
+    }
+
+    /// The module offers a picker for this parameter.
+    pub fn picker(mut self) -> Self {
+        self.picker = true;
         self
     }
 }

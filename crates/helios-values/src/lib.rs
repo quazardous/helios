@@ -115,6 +115,12 @@ pub struct Descriptor {
     /// never undone and never commits (nothing to save).
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub transient: bool,
+    /// A slider for it is logarithmic: equal ratios take equal lengths.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub logarithmic: bool,
+    /// Its module offers a picker for it (a button at the slider's end).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub picker: bool,
     /// The module whose parameter this is (a node's value), so an
     /// interface finds its translations (`param-<module>-<name>`); `None`
     /// for every other value.
@@ -150,6 +156,8 @@ impl Descriptor {
             capacity: None,
             path: None,
             transient: false,
+            logarithmic: false,
+            picker: false,
             module: None,
         }
     }
@@ -272,6 +280,8 @@ impl Descriptor {
             if let Some(l) = &h.label {
                 d.label.clone_from(l);
             }
+            d.logarithmic = h.logarithmic;
+            d.picker = h.picker;
         }
         d
     }

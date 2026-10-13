@@ -72,6 +72,25 @@ fn descriptors_come_from_the_manifest_and_its_hints() {
     );
 }
 
+/// A module's hints say when a slider is logarithmic and when it offers
+/// a picker; neither is serialized when off.
+#[test]
+fn hints_carry_the_logarithmic_bar_and_the_picker() {
+    use helios_core::manifest::{ParamHint, ParamSpec};
+
+    let spec = ParamSpec::float("radius", "The radius", 0.0, 100.0, 4.0);
+    let hint = ParamHint::new("radius")
+        .soft(0.5, 64.0)
+        .logarithmic()
+        .picker();
+    let d = Descriptor::from_spec(&spec, Some(&hint));
+    assert!(d.logarithmic && d.picker);
+    let plain = Descriptor::from_spec(&spec, None);
+    assert!(!plain.logarithmic && !plain.picker);
+    let json = serde_json::to_value(&plain).unwrap();
+    assert!(json.get("logarithmic").is_none() && json.get("picker").is_none());
+}
+
 #[test]
 fn writes_are_held_to_the_soft_range_unless_forced_and_say_so() {
     let (_, _, mut store, _) = exposure();
