@@ -699,10 +699,11 @@ impl Viewport {
             );
             (view_of(&store), compare_of(&store))
         };
+        let drawn = self.masks.drawn();
         let out = egui_pop::viewport::Viewport::new("helios.viewport")
             .source(&self.after)
             .before(&self.before)
-            .overlays(self.masks.overlays())
+            .overlays(&drawn)
             .compare(compare)
             .readout(true)
             .label("Image")

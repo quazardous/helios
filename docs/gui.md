@@ -448,11 +448,13 @@ node: `view/masks/mask`, the network's first by default) and edits them
 
 - **What shows.** Each shape's edge and the end of its feather (dashed),
   from `helios_module_masks::outline`, mapped to the screen by the
-  viewport: the selected shape full, the others faint. The selected
-  shape's handles are egui-pop's handle kit (24-point targets): the
-  centre (move), a radius (size), a rotation, the feather; a path's
-  corners, and the Bézier handles of its selected point when they are
-  off their corner. A gradient's rotation and feather handles sit at
+  viewport, all as egui-pop's overlays: the selected shape emphasized
+  (`selected()`), the others faint (`faint()`), the feathers dashed.
+  The selected shape's handles are egui-pop's handle kit (24-point
+  targets): the centre (move), a radius (size), a rotation, the
+  feather; a path's corners, and the Bézier handles of its selected
+  point when they are off their corner (`HandleKind::Control`, their
+  lines to the corner under the overlays). A gradient's rotation and feather handles sit at
   least 80 points along its line, clear of its anchor.
 - **A drag** writes the parameters the handle moves through the value
   store, as one gesture: one undo step, held against agents meanwhile;

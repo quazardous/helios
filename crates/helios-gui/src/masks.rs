@@ -4,9 +4,12 @@
 //! - **What is drawn** comes from `helios_module_masks::outline` for each
 //!   shape member of the mask edited (a `mask_combine` node): its edge and
 //!   the end of its feather, in image pixels, mapped to the screen by the
-//!   viewport. The selected shape's edge and handles are egui-pop's
-//!   overlay (its handle kit, 24-point targets); the other shapes and
-//!   every feather are drawn faint in the viewport's `after_paint` hook.
+//!   viewport. Every one is egui-pop's overlay: the selected shape's
+//!   edge with its handles (the handle kit, 24-point targets; a path's
+//!   Bézier handles as controls), the other shapes faint, each feather
+//!   dashed. A path point's control lines are painted under the
+//!   overlays (the viewport's `under_overlays` hook), the path being
+//!   drawn above them (`after_paint`).
 //! - **A drag** is one gesture of the value store: its Begin opens it,
 //!   each Update writes the parameters the handle moves (from the values
 //!   at the gesture's start), End closes it (one undo step), Cancel
@@ -25,7 +28,7 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
-use egui::{Color32, Painter, Pos2, Stroke};
+use egui::{Painter, Pos2, Stroke};
 use egui_pop::viewport::hooks::HandleMove;
 use egui_pop::viewport::overlay::{self, HIT_RADIUS, Handle, HandleKind, Overlay, Shape};
 use egui_pop::viewport::tokens::ViewportTokens;
@@ -243,8 +246,8 @@ pub fn kind_of(name: &str) -> HandleKind {
         "radius" | "radius_x" | "radius_y" => HandleKind::Size,
         "rotation" => HandleKind::Rotate,
         "feather" => HandleKind::Feather,
-        // A path's corners and their Bézier handles: the kit has no kind
-        // for a curve's control point.
+        "before" | "after" => HandleKind::Control,
+        // A path's corners.
         _ => HandleKind::Point,
     }
 }
@@ -331,16 +334,48 @@ pub fn shown(member: &Member, point: Option<usize>, m: Option<&Mapping>) -> Vec<
 
 /// The overlay of the selected shape: its edge and its handles.
 pub fn overlay_of(member: &Member, point: Option<usize>, m: Option<&Mapping>) -> Overlay {
-    Overlay {
-        id: member.node.clone(),
-        shape: Shape::Path {
-            points: member.outline.edge.clone(),
-            closed: member.outline.closed,
-        },
-        handles: shown(member, point, m),
-        label: None,
-        style: overlay::Style::default(),
+    Overlay::new(&member.node, edge_of(&member.outline))
+        .handles(shown(member, point, m))
+        .selected()
+}
+
+fn edge_of(o: &Outline) -> Shape {
+    Shape::Path {
+        points: o.edge.clone(),
+        closed: o.closed,
     }
+}
+
+/// What is drawn of a member besides the selected shape's overlay: its
+/// edge faint when it is not the one selected, its feather dashed (faint
+/// too then), none with handles.
+pub fn guides_of(member: &Member, selected: bool) -> Vec<Overlay> {
+    let o = &member.outline;
+    let style = |g: Overlay| if selected { g } else { g.faint() };
+    let mut out = Vec::new();
+    if !selected {
+        out.push(style(Overlay::guide(&member.node, edge_of(o))));
+    }
+    let feather = format!("{}/feather", member.node);
+    if o.closed {
+        if !o.feather.is_empty() {
+            let shape = Shape::Path {
+                points: o.feather.clone(),
+                closed: true,
+            };
+            out.push(style(Overlay::guide(&feather, shape).dashed()));
+        }
+    } else {
+        // A gradient's band: one side's two points, then the other's.
+        for side in o.feather.chunks(2) {
+            let shape = Shape::Path {
+                points: side.to_vec(),
+                closed: false,
+            };
+            out.push(style(Overlay::guide(&feather, shape).dashed()));
+        }
+    }
+    out
 }
 
 /// The parameters a handle at `to` writes, from the shape's parameters
@@ -545,11 +580,9 @@ struct Snap {
     constraints: BTreeMap<(String, u32), Constraint>,
 }
 
-/// What the `after_paint` hook draws, set before each frame.
+/// What the paint hooks draw, set before each frame.
 #[derive(Default)]
 struct Faint {
-    /// Each member's outline, and whether it is the one selected.
-    shapes: Vec<(Outline, bool)>,
     /// A selected path point's Bézier handles: corner, handle.
     controls: Vec<([f64; 2], [f64; 2])>,
     draft: Vec<[f64; 2]>,
@@ -592,6 +625,8 @@ pub struct Masks {
     members: Vec<Member>,
     /// The selected shape's overlay this frame.
     overlays: Vec<Overlay>,
+    /// The other shapes and the feathers this frame, no handles.
+    guides: Vec<Overlay>,
 }
 
 /// A request to the mask editor, from a command.
@@ -664,6 +699,18 @@ impl Masks {
         &self.overlays
     }
 
+    /// Everything the viewport draws: the guides (the other shapes, the
+    /// feathers), then the selected shape's overlay above them.
+    pub fn drawn(&self) -> Vec<Overlay> {
+        self.guides.iter().chain(&self.overlays).cloned().collect()
+    }
+
+    /// The guides drawn last frame: the other shapes faint, the
+    /// feathers dashed.
+    pub fn guides(&self) -> &[Overlay] {
+        &self.guides
+    }
+
     /// The members drawn last frame.
     pub fn members(&self) -> &[Member] {
         &self.members
@@ -708,8 +755,12 @@ impl Masks {
             }
         }));
         let faint = self.faint.clone();
+        hooks.under_overlays = Some(Box::new(move |painter: &Painter, m: &Mapping| {
+            paint_controls(painter, m, &faint.borrow());
+        }));
+        let faint = self.faint.clone();
         hooks.after_paint = Some(Box::new(move |painter: &Painter, m: &Mapping| {
-            paint_faint(painter, m, &faint.borrow());
+            paint_draft(painter, m, &faint.borrow());
         }));
         let double = self.double.clone();
         hooks.on_double_click = Some(Box::new(
@@ -759,10 +810,11 @@ impl Masks {
         let mut snap = self.snap.borrow_mut();
         snap.constraints.clear();
         self.overlays.clear();
+        self.guides.clear();
         let mut edge = None;
         for member in &self.members {
             let on = member.node == selected;
-            faint.shapes.push((member.outline.clone(), on));
+            self.guides.extend(guides_of(member, on));
             if !on {
                 continue;
             }
@@ -1091,52 +1143,25 @@ fn dashed(painter: &Painter, pts: &[Pos2], closed: bool, stroke: Stroke) {
     painter.extend(egui::Shape::dashed_line(&pts, stroke, 6.0, 4.0));
 }
 
-fn faded(c: Color32, a: f32) -> Color32 {
-    c.gamma_multiply(a)
-}
-
-fn paint_faint(painter: &Painter, m: &Mapping, f: &Faint) {
+/// A path point's control lines, from its corner to each Bézier handle:
+/// under the overlays, so the handles are drawn over them.
+fn paint_controls(painter: &Painter, m: &Mapping, f: &Faint) {
     let t = ViewportTokens::of(painter.ctx());
     let s = |p: &[f64; 2]| m.image_to_screen(*p);
     // Widths in whole pixels of the window drawn in, so lines stay crisp
     // at every scale (egui-pop's `scale::snap`).
     let w = |points: f32| egui_pop::core::scale::snap(points, m.ppp);
-    for (o, selected) in &f.shapes {
-        let (edge, closed, feather) = (&o.edge, &o.closed, &o.feather);
-        let alpha = if *selected { 0.9 } else { 0.45 };
-        if !*selected {
-            let pts: Vec<Pos2> = edge.iter().map(s).collect();
-            // Over a dark line, as egui-pop draws its shapes, so it reads
-            // on any image.
-            for stroke in [
-                Stroke::new(w(2.5), faded(t.handle_outline, alpha)),
-                Stroke::new(w(1.0), faded(t.guide, alpha)),
-            ] {
-                if *closed {
-                    painter.add(egui::Shape::closed_line(pts.clone(), stroke));
-                } else {
-                    painter.add(egui::Shape::line(pts.clone(), stroke));
-                }
-            }
-        }
-        if feather.is_empty() {
-            continue;
-        }
-        let stroke = Stroke::new(w(1.0), faded(t.guide, alpha));
-        if *closed {
-            let pts: Vec<Pos2> = feather.iter().map(s).collect();
-            dashed(painter, &pts, true, stroke);
-        } else {
-            // A gradient's band: one side's two points, then the other's.
-            for side in feather.chunks(2) {
-                let pts: Vec<Pos2> = side.iter().map(s).collect();
-                dashed(painter, &pts, false, stroke);
-            }
-        }
-    }
     for (corner, handle) in &f.controls {
         painter.line_segment([s(corner), s(handle)], Stroke::new(w(1.0), t.guide));
     }
+}
+
+/// The path being drawn: its corners so far, and a dashed line on to the
+/// pointer.
+fn paint_draft(painter: &Painter, m: &Mapping, f: &Faint) {
+    let t = ViewportTokens::of(painter.ctx());
+    let s = |p: &[f64; 2]| m.image_to_screen(*p);
+    let w = |points: f32| egui_pop::core::scale::snap(points, m.ppp);
     if !f.draft.is_empty() {
         let mut pts: Vec<Pos2> = f.draft.iter().map(s).collect();
         let stroke = Stroke::new(w(1.5), t.guide);

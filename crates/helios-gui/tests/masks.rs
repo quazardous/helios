@@ -520,6 +520,20 @@ fn the_shapes_not_selected_are_drawn_faint_with_no_handles() {
     let v = h.state().viewport();
     assert_eq!(v.masks().members().len(), 2);
     assert_eq!(v.masks().overlays().len(), 1, "the selected shape's only");
+    // egui-pop draws them: the selected shape emphasized, the path faint
+    // as a guide (no handles), the circle's feather dashed.
+    assert_eq!(
+        v.masks().overlays()[0].style.emphasis,
+        egui_pop::viewport::overlay::Emphasis::Selected
+    );
+    let path = v.masks().guides().iter().find(|g| g.id == "path").unwrap();
+    assert_eq!(
+        path.style.emphasis,
+        egui_pop::viewport::overlay::Emphasis::Faint
+    );
+    assert!(path.handles.is_empty());
+    let feather = v.masks().guides().iter().find(|g| g.id == "circle/feather");
+    assert!(feather.is_some_and(|g| g.style.dashed && g.handles.is_empty()));
     let m = v.state().mapping().unwrap();
     drop(v);
     // Every tile on screen first: a picture runs the harness until the
@@ -548,4 +562,14 @@ fn the_shapes_not_selected_are_drawn_faint_with_no_handles() {
     let on = m.image_to_screen([300.0, 100.0]);
     let off = on + vec2(0.0, 8.0);
     assert!((px(on) - px(off)).abs() > 30, "{} vs {}", px(on), px(off));
+}
+
+#[test]
+fn a_path_s_bezier_handles_are_controls() {
+    use egui_pop::viewport::overlay::HandleKind;
+    use helios_gui::masks::kind_of;
+    assert_eq!(kind_of("corner.0"), HandleKind::Point);
+    assert_eq!(kind_of("before.0"), HandleKind::Control);
+    assert_eq!(kind_of("after.2"), HandleKind::Control);
+    assert_eq!(kind_of("centre"), HandleKind::Move);
 }
