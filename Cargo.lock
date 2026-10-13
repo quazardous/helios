@@ -2158,6 +2158,7 @@ dependencies = [
  "helios-display",
  "helios-export",
  "helios-inspect",
+ "helios-library",
  "helios-load",
  "helios-module-blur",
  "helios-module-colorin",

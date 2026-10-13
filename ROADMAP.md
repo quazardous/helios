@@ -374,6 +374,18 @@ driver, not a rewrite.
   somewhere instead of only listed.
   Near-duplicates (RAW+JPEG pair, burst, re-encode) have different hashes and
   are relations, also data.
+  (2026-10-13, implemented; open to revision) Import is a library
+  operation run as a job: a folder or a mounted card, referenced or copied
+  into a library folder laid out by capture date (the one place Helios
+  writes files of its own), renamed by a pattern, sidecars along; exact
+  duplicates (same content) are skipped by default, kept or listed for an
+  answer, never deleted. Each image gets near-duplicate signals (a
+  perceptual hash of its preview, capture time, exposure, frame number,
+  sharpness). Bursts and brackets become **stacks** (members, a top,
+  expanded or collapsed) only when a person accepts a `stacks.suggest`
+  decision, whose default resolver is rule-based and whose resolver name
+  is open to AI models. See docs/library.md. Not decided: RAW+JPEG pairs
+  as stacks or as one image with two files; MTP sources.
 
 **Sync model.** (2026-10-10) Take git's *model* rather than git itself:
 content-addressed objects, a DAG of versions, refs, offline replicas,

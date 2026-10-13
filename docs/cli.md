@@ -175,6 +175,27 @@ The other control verbs (render, set-param, pause, fault injection,
 decisions) stay in debug builds. With `--socket` and `--control`, the batch
 drives a running node through either endpoint.
 
+## Import and stacks
+
+```bash
+helios import --vault library.db [--reference | --copy [--into DIR]] [--rename PATTERN]
+              [--duplicates skip|keep|ask] [--no-signals] FOLDERS-CARDS-OR-FILES...
+helios stacks --vault library.db list | create IMAGE... [--top IMAGE] | dissolve STACK
+              | expand STACK | collapse STACK | top STACK IMAGE
+              | suggest [IMAGE...] [--resolver NAME] [--window S] [--distance N]
+              | accept DECISION [--groups N,N...] | decline DECISION | decisions
+```
+
+`import` brings a folder, a file or a mounted card into the vault,
+referenced in place or copied into the library folder (renamed by a
+pattern, sidecars along), finds exact duplicates by content and handles
+them by policy, and measures each image's near-duplicate signals. One JSON
+line per file, then `{"report": ...}`; exit 1 when a file failed.
+
+`stacks` lists, makes and dissolves stacks, and asks for stack
+suggestions, which are recorded as decisions and applied only once
+accepted. Its answers are JSON. See [library.md](library.md) for both.
+
 ## Doctor
 
 ```sh
