@@ -1197,11 +1197,16 @@ impl MaskTree {
         }
         // Whose mask this is: the panel follows the selection, and falls
         // back to the first masked module when the selected one has none.
+        let ctx = ui.ctx().clone();
+        let tr = |m: Message| crate::i18n::text(&ctx, m);
         if let Some(module) = &net.masked {
-            ui.weak(crate::i18n::text(
-                ui.ctx(),
-                Message::new("gui-masks-of", "Mask of { $module }").with("module", module),
-            ));
+            ui.weak(tr(
+                Message::new("gui-masks-of", "Mask of { $module }").with("module", module)
+            ))
+            .on_hover_text(tr(Message::new(
+                "gui-masks-tree-hint",
+                "F2 renames the selected row. Drag a row to reorder it or into a group. Right-click a row for its menu: it never deletes anything.",
+            )));
         }
         // An empty mask changes nothing on the image: say why, rather
         // than leave an empty tree that looks broken. Above the tree,
@@ -1231,17 +1236,21 @@ impl MaskTree {
                     .as_ref()
                     .map_or((false, true), |c| (c.invert, c.opacity > 0.0));
                 if ui
-                    .selectable_label(inverted, "Invert")
-                    .on_hover_text(
-                        "Invert the selected member (its group's inversion for the module's mask)",
-                    )
+                    .selectable_label(inverted, tr(Message::new("gui-masks-invert", "Invert")))
+                    .on_hover_text(tr(Message::new(
+                        "gui-masks-invert-hint",
+                        "Invert the selected member: it then covers everything except what it covered (for the module's mask, the whole mask)",
+                    )))
                     .clicked()
                 {
                     commands.push(Command::MemberInvert { member: None });
                 }
                 if ui
-                    .selectable_label(visible, "Opacity")
-                    .on_hover_text("Turn the selected member's opacity off, or back to full")
+                    .selectable_label(visible, tr(Message::new("gui-masks-opacity", "Opacity")))
+                    .on_hover_text(tr(Message::new(
+                        "gui-masks-opacity-hint",
+                        "Turn the selected member's opacity off, or back to full (its row's eye does the same)",
+                    )))
                     .clicked()
                 {
                     commands.push(Command::MemberOpacity {
@@ -1251,16 +1260,25 @@ impl MaskTree {
                 }
                 let deletable = current.as_ref().is_some_and(|c| c.group.is_some());
                 if ui
-                    .add_enabled(deletable, egui::Button::new("Delete"))
-                    .on_hover_text("Take the selected member out of the mask (Delete)")
+                    .add_enabled(
+                        deletable,
+                        egui::Button::new(tr(Message::new("gui-masks-take-out", "Take out"))),
+                    )
+                    .on_hover_text(tr(Message::new(
+                        "gui-masks-take-out-hint",
+                        "Take the selected member out of the mask (Delete, the tree focused). Not an undo step yet.",
+                    )))
                     .clicked()
                 {
                     commands.push(Command::MemberDelete { member: None });
                 }
             });
             let add = ui
-                .button("Add…")
-                .on_hover_text("Add a shape or a parametric member to the selected group");
+                .button(tr(Message::new("gui-masks-add", "Add…")))
+                .on_hover_text(tr(Message::new(
+                    "gui-masks-add-hint",
+                    "Add a shape or a parametric member to the selected group. With the image focused: C a circle, E an ellipse, G a gradient, P a path.",
+                )));
             if add.clicked() {
                 request(
                     ui.ctx(),
@@ -1290,7 +1308,6 @@ impl MaskTree {
         {
             self.state.rename(&key);
         }
-        let ctx = ui.ctx().clone();
         // What the rows' toggles ask, run with the panel's commands.
         let mut toggles = Vec::new();
         let mut view = TreeView::new(TREE)

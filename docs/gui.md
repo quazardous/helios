@@ -760,8 +760,12 @@ selected module's mask network as a tree, on egui-pop's `TreeView`
   opacity off or back to full; its lock (`lock/<node>`, one undo step)
   keeps a member from moving, from leaving the mask and, for a shape,
   from being edited (no handles on the viewport, `mask.handle.move`
-  refused, no path point added, removed or smoothed), and keeps a group's members where they are. Delete (with the tree
-  focused) takes the selected member out of its group. A member dragged
+  refused, no path point added, removed or smoothed), and keeps a group's members where they are. Take out (a button)
+  or Delete (with the tree focused) takes the selected member out of
+  its group; a right click only opens the row's menu, never deletes.
+  The buttons and the line naming the mask say their keys and gestures
+  when hovered (F2, Delete, drag and drop, `C`, `E`, `G`, `P` on the
+  image), in the interface's language. A member dragged
   before, after or into a group is rewired there, its opacity and
   inversion with it; a drop the network cannot take (beside the root,
   into a shape, into a full group or into itself, a locked member or

@@ -141,6 +141,10 @@ gui-library-sync = Sync zoom and pan
 
 gui-library-tags = Tags
 
+gui-masks-add = Add…
+
+gui-masks-add-hint = Add a shape or a parametric member to the selected group. With the image focused: C a circle, E an ellipse, G a gradient, P a path.
+
 gui-masks-empty = The mask is empty: { $module } applies everywhere. Add a shape or a parametric member to limit it.
 
 gui-masks-group-full = the group `{ $group }` holds { $count } members already
@@ -150,6 +154,10 @@ gui-masks-group-locked = the group `{ $group }` is locked: its members stay
 gui-masks-hide = Hide { $name }: its opacity off
 
 gui-masks-into-itself = a group cannot go into itself
+
+gui-masks-invert = Invert
+
+gui-masks-invert-hint = Invert the selected member: it then covers everything except what it covered (for the module's mask, the whole mask)
 
 gui-masks-lock = Lock { $name } against moves and edits
 
@@ -185,9 +193,19 @@ gui-masks-of = Mask of { $module }
 
 gui-masks-one-at-a-time = members move one at a time
 
+gui-masks-opacity = Opacity
+
+gui-masks-opacity-hint = Turn the selected member's opacity off, or back to full (its row's eye does the same)
+
 gui-masks-root-stays = the module's mask stays the root
 
 gui-masks-show = Show { $name }: its opacity full
+
+gui-masks-take-out = Take out
+
+gui-masks-take-out-hint = Take the selected member out of the mask (Delete, the tree focused). Not an undo step yet.
+
+gui-masks-tree-hint = F2 renames the selected row. Drag a row to reorder it or into a group. Right-click a row for its menu: it never deletes anything.
 
 gui-masks-unlock = Unlock { $name }
 
