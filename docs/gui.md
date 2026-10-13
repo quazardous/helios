@@ -388,10 +388,13 @@ overall estimate and how many jobs go on or failed.
 Helios's work reports through `helios_core::jobs` as `job.*` events on
 the shell's bus, which egui-pop reads as its journal (see
 [jobs.md](jobs.md)): an export (its render, encode and write steps, the
-file written in its log), the GPU calibration (each device's reference
-modules, its speeds in the log). Cancel runs `job.cancel` in the desktop,
-which stops the job the way it gave when it started: an export queued
-never runs, an export rendering writes nothing. A long export or batch
+file written in its log), the library import (`library.import`: each
+file as an item, a log line per file). Cancel runs `job.cancel` in the
+desktop, which stops the job the way it gave when it started: an export
+queued never runs, an export rendering writes nothing, an import stops
+before its next file and removes a copy under way. The GPU calibration
+reports as a job too (each device's reference modules, its speeds in the
+log), once the desktop opens a compute manager, which it does not yet. A long export or batch
 that ends while no Helios window has the focus is said on the desktop
 (see "Platform services").
 
