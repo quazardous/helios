@@ -37,8 +37,8 @@ Provider kinds:
 
 A provider entry may narrow its capabilities (`capabilities = [...]`): an
 OpenAI-compatible server running a text-only model does not do vision.
-Model-level capabilities are inferred where the runtime says so (Ollama's
-model families, an embedding model's name) and listed by
+Model-level capabilities come from the runtime when it says (Ollama's
+`/api/show`), else from the model's name, and are listed by
 `helios_ai_models_list`.
 
 The decision resolvers that existed before (`helios-resolve`'s `Http`, with
@@ -67,10 +67,11 @@ so and why. `helios_ai_local_bench` fills the map from measurements when
 asked to (`apply`); `helios_ai_routing_set` sets one route by hand.
 
 Decision nodes go through `helios-resolve`'s `Routed`: a decision naming a
-resolver of the network uses it as before; one naming a capability
-(`"resolver": "segmentation"`), or naming none when the network has no
-default, goes through the routing map (`vision` for a decision, and
-`segmentation` for a mask).
+resolver of the network uses it as before; once `Routed` is given the AI
+service, one naming a capability (`"resolver": "segmentation"`), or naming
+none when the network has no default, goes through the routing map
+(`vision` for a decision, and `segmentation` for a mask). A network opts
+in with `"resolver": "routing"`.
 
 ## Prompts as versioned assets
 
@@ -245,9 +246,11 @@ output through the control socket first.
 
 - A provider for llama.cpp's own runtime management (it is reached as an
   OpenAI-compatible server, but not installed or pulled by Helios).
-- Model-level capabilities from Ollama's `/api/show` (inferred from the
-  model's families and name today).
 - Providers and routing in a profile, for a user's several machines.
+- Calls made by a bench are logged and published one by one, but run
+  inside the bench's own job rather than as a job each.
+- The desktop's own decision resolution does not use the routing map yet;
+  a network opts in with `"resolver": "routing"`.
 - A keyring on Windows.
 - Segmentation by a runtime (no local runtime serves a segmentation model
   over a standard API yet): a `command` provider wraps one.

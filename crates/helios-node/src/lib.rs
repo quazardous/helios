@@ -36,7 +36,10 @@
 //! model is called. Resolvers a decision names by its question's
 //! `resolver` parameter (an AI object mask member) are listed by name:
 //! `"resolvers": { "local": { "command": ["segment", "--json"] } }`.
-//! Nothing is configured by default: no model, no network.
+//! `"resolver": "routing"` asks the provider and model this machine's AI
+//! routing map names (set up through the `helios_ai_*` MCP tools, see
+//! `docs/ai-models.md`). Nothing is configured by default: no model, no
+//! network.
 
 pub mod batch;
 pub mod darktable;
@@ -109,6 +112,10 @@ pub enum ResolverDesc {
     /// A program and its arguments, speaking JSON (see `helios-resolve`).
     Command(Vec<String>),
     Http(HttpDesc),
+    /// This machine's AI routing map (`"resolver": "routing"`): the
+    /// provider and model routed for `vision`, `segmentation` for a mask,
+    /// or the capability a decision names (see `docs/ai-models.md`).
+    Routing,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -154,6 +161,10 @@ impl ResolverDesc {
                     http = http.key_from(var);
                 }
                 Arc::new(Cached::new(http))
+            }
+            ResolverDesc::Routing => {
+                let ai = helios_ai::Ai::open(helios_ai::store::Paths::default_for_user())?;
+                Arc::new(Cached::new(Routed::new().through(Arc::new(ai))))
             }
         })
     }

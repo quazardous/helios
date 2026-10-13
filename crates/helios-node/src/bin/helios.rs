@@ -31,6 +31,7 @@
 //!                   | accept DECISION [--groups N,N...] | decline DECISION | decisions
 //!
 //!     helios doctor display
+//!     helios doctor ai
 //!
 //! `batch` applies a network to many images, each exported to a file in
 //! `--out` (named by `--name`, `{stem}.{ext}` by default; a name already
@@ -50,6 +51,11 @@
 //! draws there with the Wide-gamut preview setting on, and why. It asks
 //! the compositor only; the running desktop's debug bridge says what its
 //! window actually resolved.
+//!
+//! `doctor ai` reports the AI models of this machine as JSON: each
+//! provider (local or remote, reachable, where its key is), the routing
+//! map with why a capability or a prompt is unavailable, and the local
+//! runtime's health (see `docs/ai-models.md`).
 //!
 //! `import-darktable` keeps a folder's darktable edits in a vault: every
 //! image file, and a version per sidecar, duplicates (`IMG_0001_01.CR2.xmp`)
@@ -108,7 +114,8 @@ const USAGE: &str = "usage:
                 | expand STACK | collapse STACK | top STACK IMAGE
                 | suggest [IMAGE...] [--resolver NAME] [--window S] [--distance N]
                 | accept DECISION [--groups N,N...] | decline DECISION | decisions
-  helios doctor display";
+  helios doctor display
+  helios doctor ai";
 
 fn usage(error: &str) -> ExitCode {
     eprintln!("helios: {error}\n{USAGE}");
@@ -780,7 +787,8 @@ fn sandbox(args: &[String]) -> ExitCode {
     }
 }
 
-/// `helios doctor display`: what the display offers, as JSON.
+/// `helios doctor display`: what the display offers, as JSON; `helios
+/// doctor ai`: the AI report.
 fn doctor(args: &[String]) -> ExitCode {
     match args {
         [what] if what == "display" => {
@@ -797,7 +805,22 @@ fn doctor(args: &[String]) -> ExitCode {
             );
             ExitCode::SUCCESS
         }
-        _ => usage("doctor takes `display`"),
+        [what] if what == "ai" => {
+            match helios_ai::Ai::open(helios_ai::store::Paths::default_for_user()) {
+                Ok(ai) => {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&ai.doctor()).expect("JSON values serialize")
+                    );
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("helios: the AI service: {e}");
+                    ExitCode::from(1)
+                }
+            }
+        }
+        _ => usage("doctor takes `display` or `ai`"),
     }
 }
 

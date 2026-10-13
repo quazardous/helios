@@ -7,7 +7,9 @@
 //!
 //! The sockets default to `$HELIOS_SOCKET` and `$HELIOS_CONTROL_SOCKET`.
 //! Started without any, it waits for `helios_sandbox_start`.
-//! Tools are listed by `tools/list`; see `helios_node::mcp`.
+//! Tools are listed by `tools/list`; see `helios_node::mcp`. The
+//! `helios_ai_*` tools need no node: they set up and tune the AI models of
+//! this machine (`docs/ai-models.md`).
 
 use std::io::{BufRead, Write};
 use std::path::PathBuf;
@@ -62,6 +64,7 @@ fn main() -> ExitCode {
         inspect,
         control,
         node_bin,
+        ai: None,
     };
     let stdin = std::io::stdin();
     let mut stdout = std::io::stdout();

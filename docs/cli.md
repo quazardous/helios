@@ -215,3 +215,17 @@ driver declares; `srgb`, the window's surface), its `encoding` and the
 running desktop's debug bridge (`helios.display` collector, its `route`)
 says what its window actually negotiated. See
 [Wide gamut](wide-gamut.md).
+
+```sh
+helios doctor ai
+```
+
+Reports the AI models of this machine, as JSON: each provider (its kind,
+URL, capabilities, whether it is remote, whether it answers, where its
+key is, never the key), the routing map with, for each capability and
+each prompt, whether it is available and why not (nothing routed, a
+provider that does not answer, a model not pulled, a model without that
+capability, a key not found), the local runtime (installed, running, its
+version and models), the privacy settings and where the AI files are. An
+agent sets all of this up through the `helios_ai_*` MCP tools. See
+[AI models](ai-models.md).

@@ -17,6 +17,7 @@ helios-xmp.workspace = true
 helios-testkit.workspace = true
 helios-decision.workspace = true
 helios-resolve.workspace = true
+helios-ai.workspace = true
 helios-vault.workspace = true
 helios-vault-sqlite.workspace = true
 helios-library.workspace = true
