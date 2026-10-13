@@ -24,8 +24,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use egui_pop::model::layout::Layout;
 use egui_pop::platform::instance::{self, Instance, Launch, Single};
 use helios_gui::platform::{self, Open};
-use helios_gui::quit;
 use helios_gui::{Shell, headless, helios_panels};
+use helios_gui::{quit, start};
 
 /// Where a workspace's own files are kept (the profile it uses): in the
 /// user's configuration, not in the workspace. Its layout is egui-pop's
@@ -315,6 +315,8 @@ struct App {
     shown: Option<Shown>,
     /// Set when an import ended: the library is filled again.
     refill: Arc<AtomicBool>,
+    /// The start's last marks: the first frame, the first input answered.
+    frames: start::Frames,
 }
 
 impl Drop for App {
@@ -457,6 +459,15 @@ impl eframe::App for App {
                     ));
             }
         }
+        if !self.frames.done() {
+            let ctx = ui.ctx().clone();
+            let saw_input = ctx.input(start::saw_input);
+            self.frames.end(saw_input, || ctx.request_repaint());
+        }
+    }
+
+    fn raw_input_hook(&mut self, _ctx: &egui::Context, _raw_input: &mut egui::RawInput) {
+        self.frames.begin();
     }
 
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
@@ -559,6 +570,7 @@ fn node_links(args: &[String]) -> Result<Vec<helios_gui::relay::NodeLink>, Strin
 }
 
 fn main() -> Result<(), String> {
+    start::begin();
     let args: Vec<String> = std::env::args().skip(1).collect();
     if let [flag, target, out] = args.as_slice()
         && flag == "--snapshot"
@@ -584,6 +596,7 @@ fn main() -> Result<(), String> {
             }
         }
     };
+    start::mark("instance check");
     if args.last().is_some_and(|a| a == "--image") {
         return Err("--image takes a FILE".into());
     }
@@ -632,6 +645,7 @@ fn main() -> Result<(), String> {
         .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
         .and_then(|v| v["profile"].as_str().map(String::from))
         .unwrap_or_else(|| "default".into());
+    start::mark("workspace and settings read");
     let bus = std::sync::Arc::new(helios_core::Bus::new());
     let persist = match vault_file {
         Some(path) => Some(Persist::new(
@@ -640,6 +654,7 @@ fn main() -> Result<(), String> {
         )),
         None => None,
     };
+    start::mark("vault opened (and migrated)");
     // Held here, the vault outlives the window: it closes once the
     // window is gone (see `helios_gui::quit`).
     let vault = persist.as_ref().map(|p| p.vault().clone());
@@ -652,18 +667,22 @@ fn main() -> Result<(), String> {
             helios_template::workspace::blank()
         }
     };
+    start::mark("workspace read");
     let shown = image_file.clone().map(Shown::File);
     let image = image_file
         .map(|path| image_graph(&path, &bundle).map(|g| (path, g)))
         .transpose()?;
+    start::mark("image decoded");
     let earlier = earlier_layout(&workspace, &ui_settings);
     let builder = Shell::builder(helios_panels(), Some(ui_settings))
         .workspace(&workspace)
         .on_exit(move |app| save_workspace(&dir, app))
         .desktop(instance);
+    start::mark("shell declared (commands, themes, translations)");
     // The window draws with the process's one device, which the engine
     // computes on (see `helios_gui::shell::wgpu_setup`).
     let gpu = helios_gpu::shared::gpu().map_err(|e| format!("no GPU to draw with: {e}"))?;
+    start::mark("GPU device opened");
     let title = format!("{name} — Helios");
     let mut options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
@@ -680,17 +699,24 @@ fn main() -> Result<(), String> {
         ..Default::default()
     };
     options.wgpu_options.wgpu_setup = helios_gui::shell::wgpu_setup(&gpu);
+    options.window_builder = Some(Box::new(|viewport| {
+        start::mark("window being created");
+        viewport
+    }));
     // egui-pop opens the window where it was last (repaired) and builds
     // the application on its context.
     let ran = builder
         .run_native("helios-gui", options, move |mut shell, cc| {
+            start::mark("window open, application built (plugins, fonts)");
             if let Some(rs) = cc.wgpu_render_state.as_ref() {
                 shell.attach_gpu(rs);
             }
+            start::mark("GPU attached to the viewport");
             shell.set_title(&name);
             if let Err(e) = shell.use_profile(&profile) {
                 shell.notes.push(format!("profile {profile}: {e}"));
             }
+            start::mark("profile applied");
             // The workspace's layout wins over the profile's: egui-pop's
             // document is loaded again (or an earlier Helios's, once).
             if let Some(saved) = earlier {
@@ -698,26 +724,31 @@ fn main() -> Result<(), String> {
             } else if let Err(e) = shell.load_layout() {
                 shell.notes.push(format!("layout: {e}"));
             }
+            start::mark("workspace layout restored");
             for link in nodes {
                 if let Err(e) = shell.follow_node(link) {
                     shell.notes.push(e);
                 }
             }
+            start::mark("node relays started");
             // The workspace's state, edited from here: its keys in the
             // workspace's keymap layer, its library settings.
             if let Err(e) = shell.open_workspace(&config, &workspace) {
                 shell.notes.push(format!("workspace: {e}"));
             }
+            start::mark("workspace opened (keys, library settings)");
             let mut persist = persist;
             if let Err(e) = open(&mut shell, persist.as_mut(), image) {
                 shell.notify(helios_gui::dialogs::Level::Error, e);
             }
+            start::mark("library filled, image opened");
             let refill = Arc::new(AtomicBool::new(false));
             if let Some(p) = &persist
                 && let Err(e) = library_commands(&mut shell, p, &refill, &cc.egui_ctx)
             {
                 shell.notes.push(format!("library commands: {e}"));
             }
+            start::mark("application ready");
             Box::new(App {
                 persist,
                 _persist_dropped: quit::MarkOnDrop("vault link dropped"),
@@ -725,6 +756,7 @@ fn main() -> Result<(), String> {
                 _shell_dropped: quit::MarkOnDrop("shell dropped"),
                 shown,
                 refill,
+                frames: start::Frames::default(),
             })
         })
         .map_err(|e| e.to_string());

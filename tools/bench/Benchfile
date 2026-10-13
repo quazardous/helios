@@ -183,6 +183,27 @@ env = { CARGO_NET_OFFLINE = "true", WLR_RENDERER = "pixman" }
 mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", raw-corpus = "/corpus", sccache = "/sccache" }
 timeout = "1h"
 
+# how long the desktop takes to start: helios-gui in release, in a headless
+# labwc through wbox, launched `runs=` times in turn bare (a workspace, as
+# the launcher starts it), on the raw corpus's vault, and on its first raw
+# (`kinds=`); the steps it marks, its first frame presented and its first
+# input answered, in /out/start-timing.md and .jsonl. `budget=<ms>` and
+# `interactive=<ms>` fail the job when a run is slower to its first frame
+# or to interactive; `kinds=` joins kinds with `+` (tools/bench/start-timing.py)
+[jobs.start-timing]
+checkouts = ["helios", "vkdt", "egui-pop"]
+cores = 5
+memory = "6g"
+cwd = "/work/${src:-helios}"
+command = """mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && \
+cargo build --locked --release -p helios-gui -p helios-node && \
+mkdir -p "$XDG_RUNTIME_DIR" "$HOME" && chmod 700 "$XDG_RUNTIME_DIR" && \
+"$WBOX_PYTHON" -I tools/bench/start-timing.py --gui /target/release/helios-gui --helios /target/release/helios \
+  --corpus /corpus --out /out --runs ${runs:-6} --kinds ${kinds:-launcher+library+image} --budget-ms ${budget:-0} --interactive-ms ${interactive:-0}"""
+env = { CARGO_NET_OFFLINE = "true", WLR_RENDERER = "pixman" }
+mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", raw-corpus = "/corpus", sccache = "/sccache" }
+timeout = "1h"
+
 # pictures of the Masks panel: helios-gui in release, in a headless labwc
 # through wbox at 1920x1080, on the raw corpus's first image, driven
 # through the command palette in each theme (`themes=`, comma separated):

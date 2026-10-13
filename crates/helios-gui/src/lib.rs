@@ -25,6 +25,7 @@ pub mod scopes;
 pub mod shell;
 pub mod snapshot;
 pub mod stack_review;
+pub mod start;
 pub mod templates;
 pub mod theme;
 pub mod viewport;
