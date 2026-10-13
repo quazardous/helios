@@ -113,6 +113,8 @@ gui-job-export-done = Export finished
 
 gui-job-export-failed = Export failed
 
+gui-layout-not-saved = The layout was not saved: { $error }
+
 gui-library-auto-advance = Auto-advance
 
 gui-library-compare-hint = Select two to four images to compare them

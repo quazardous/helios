@@ -369,6 +369,9 @@ pub struct Shell {
     still: bool,
     /// The workspace open, whose layout egui-pop keeps.
     workspace: Workspace,
+    /// The layout as last saved to the workspace's document: saved again
+    /// once it changes, so a kill keeps it.
+    layout_saved: Option<Layout>,
     /// The catalogues the shell's text is shown through.
     i18n: egui_pop::i18n::I18n,
     /// What later launches and links asked to open (`platform`).
@@ -618,6 +621,7 @@ impl Shell {
             mask_tree: Rc::default(),
             values,
             workspace,
+            layout_saved: None,
             still: false,
             i18n,
             engine_seen: 0,
@@ -3483,6 +3487,7 @@ impl Shell {
             self.warn(n);
         }
         self.workbench_refusals();
+        self.save_layout_on_change(&ctx);
         self.engine_notices();
         self.job_notices();
         self.menus_ui(&ctx);
@@ -3503,6 +3508,29 @@ impl Shell {
             ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::default()));
             ctx.request_repaint();
         }
+    }
+
+    /// Saves the workspace's layout once it changed (egui-pop's
+    /// `layout.save` step), when no button is held (a splitter dragged
+    /// is saved where it is let go): a kill loses no arrangement.
+    fn save_layout_on_change(&mut self, ctx: &Egui) {
+        if self.workspace.get().is_none() || ctx.input(|i| i.pointer.any_down()) {
+            return;
+        }
+        let layout = self.layout();
+        if self.layout_saved.as_ref() == Some(&layout) {
+            return;
+        }
+        if let Err(e) = step_result(self.app.save_layout()) {
+            self.warn(
+                Message::new(
+                    "gui-layout-not-saved",
+                    "The layout was not saved: { $error }",
+                )
+                .with("error", e),
+            );
+        }
+        self.layout_saved = Some(layout);
     }
 
     /// What the workbench refused this frame (a tab dropped where its

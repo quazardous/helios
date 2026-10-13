@@ -74,8 +74,9 @@ quit.
 
 **Survival scenarios** gate a release (`cargo xtask release` runs them
 first, CI runs them by name): `cargo survival` runs the desktop's (quit
-and reopen; `kill -9` in the middle of a drag) and the node's (`kill -9`
-after changes answered through control; `kill -9` during an export). After
+and reopen; `kill -9` in the middle of a drag; `kill -9` after a panel
+moved, its workspace's layout kept) and the node's (`kill -9` after
+changes answered through control; `kill -9` during an export). After
 each, the history, its end, the ratings, the labels and the metadata must
 equal the last saved step.
 
@@ -215,7 +216,8 @@ equal the last saved step.
   (item, node), whole-row writes, one statement each; the interface panics
   on storage errors rather than continuing on unkept rows.
 - GUI layout, workspace profile pointer: written in `on_exit` only; a kill
-  loses the session's layout changes. Recent workspaces: written at start.
+  loses the session's layout changes (fixed for the layout: saved as it
+  changes). Recent workspaces: written at start.
 - The interface's settings (window place, focus mode, the user's keys),
   kept by egui-pop: two versioned documents (`settings`, `keymap`) under
   `~/.config/helios/ui/`, written whole in `on_exit` only.
@@ -292,7 +294,8 @@ equal the last saved step.
    the `Report` as a document, and write the sidecar rating as a field
    command (only if the vault has none, never overwriting a user rating
    with a sidecar's).
-7. **Save the GUI layout on change** (not done) (debounced), not only in `on_exit`.
+7. **Save the GUI layout on change** (done: once it changed and no
+   button is held, egui-pop's `layout.save` step), not only in `on_exit`.
 
 ### Tests to write
 

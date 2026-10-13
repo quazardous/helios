@@ -3,7 +3,8 @@
 //! it through the value store as widgets do, and either quits or is killed
 //! with SIGKILL in the middle of a drag. After each, the history, its end
 //! (the head version), the ratings, the labels and the metadata must be
-//! what the last saved step left, and reopening shows exactly that.
+//! what the last saved step left, and reopening shows exactly that. A
+//! workspace's layout, changed then killed, is kept too.
 //!
 //! The child says what it saved on stdout from the `edit.saved` events of
 //! the bus: the parent reads those lines, it never sleeps. These scenarios
@@ -26,6 +27,8 @@ use helios_vault_sqlite::SqliteStore;
 use serde_json::{Value, json};
 
 const CHILD: &str = "HELIOS_GUI_SURVIVAL_CHILD";
+/// How long the child may stay silent: only a hang reaches it.
+const CHILD_DEADLINE: std::time::Duration = std::time::Duration::from_mins(1);
 const EV: &str = "node/exposure/exposure";
 
 fn network() -> (Graph, NodeId) {
@@ -91,6 +94,21 @@ fn survival_child() {
     };
     let dir = PathBuf::from(dir);
     let scenario = std::env::var("HELIOS_GUI_SURVIVAL_SCENARIO").unwrap();
+    if scenario == "layout" {
+        // A panel moved to a window of its own, then killed.
+        let mut h = workspace_window(&dir);
+        h.state_mut()
+            .run("helios.log.detach", json!(null), Origin::User)
+            .unwrap();
+        h.run();
+        // On a line of its own: the test harness may have started one
+        // ("test survival_child ... ").
+        writeln!(std::io::stdout(), "\nready").unwrap();
+        std::io::stdout().flush().unwrap();
+        let mut line = String::new();
+        let _ = std::io::stdin().read_line(&mut line);
+        return;
+    }
     let (mut shell, mut persist, _) = open(&dir.join("vault.db"), &dir.join("photo.png"));
     let events = persist.bus().subscribe();
     let mut out = std::io::stdout();
@@ -147,6 +165,24 @@ fn survival_child() {
     // Quits: everything dropped, nothing more to save.
 }
 
+/// A window on the scenario's workspace (`photos`), its interface
+/// settings beside it, its saved layout loaded.
+fn workspace_window(dir: &Path) -> egui_kittest::Harness<'static, Shell> {
+    let mut h = helios_gui::headless::harness(workspace_shell(dir), egui::vec2(800.0, 500.0));
+    h.run();
+    h
+}
+
+/// The scenario's workspace as a desktop opens it: its saved layout
+/// loaded.
+fn workspace_shell(dir: &Path) -> Shell {
+    let mut shell = Shell::builder(helios_panels(), Some(dir.join("ui")))
+        .workspace(&dir.join("photos"))
+        .build();
+    shell.load_layout().unwrap();
+    shell
+}
+
 /// A scenario's directory: a vault holding the photo, titled and labelled
 /// red by another writer before the desktop starts.
 fn place(name: &str) -> (PathBuf, ImageId) {
@@ -194,8 +230,27 @@ fn run_child(dir: &Path, scenario: &str, kill: bool) -> Vec<(u64, String)> {
         .unwrap();
     let mut saved = Vec::new();
     let mut ready = false;
-    for line in BufReader::new(child.stdout.take().unwrap()).lines() {
-        let line = line.unwrap();
+    // The child's lines, read on a thread of their own: a child that
+    // stops talking fails the scenario at the deadline, never hangs it.
+    let stdout = child.stdout.take().unwrap();
+    let (tx, lines) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        for line in BufReader::new(stdout).lines() {
+            if tx.send(line).is_err() {
+                break;
+            }
+        }
+    });
+    loop {
+        let line = match lines.recv_timeout(CHILD_DEADLINE) {
+            Ok(line) => line.unwrap(),
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("the child said nothing for {CHILD_DEADLINE:?}: killed");
+            }
+        };
         if let Some(rest) = line.strip_prefix("saved ") {
             let (step, version) = rest.split_once(' ').unwrap();
             saved.push((step.parse().unwrap(), version.to_string()));
@@ -312,5 +367,22 @@ fn survival_killed_in_the_middle_of_a_drag_keeps_the_last_saved_step() {
     drop(vault);
     let (shell, _persist, _) = open(&dir.join("vault.db"), &dir.join("photo.png"));
     assert!((shown(&shell) - 1.7).abs() < 1e-9, "{}", shown(&shell));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn survival_killed_after_moving_a_panel_keeps_the_layout() {
+    let (dir, _) = place("layout");
+    run_child(&dir, "layout", true);
+    // Reopened, before any frame: the layout document as the kill left
+    // it.
+    let shell = workspace_shell(&dir);
+    let detached: Vec<String> = shell
+        .layout()
+        .auxiliary
+        .iter()
+        .map(|a| a.panel.to_string())
+        .collect();
+    assert_eq!(detached, ["helios.log"]);
     let _ = std::fs::remove_dir_all(&dir);
 }
