@@ -507,7 +507,7 @@ impl Shell {
             })
             // The jobs centre, its status bar item and each job's log
             // console as a terminal.
-            .plugin(crate::jobs::plugin(jobs.clone()))
+            .plugin(crate::jobs::plugin(jobs.clone(), relays.clone()))
             .plugin(egui_pop::editors::JobConsolesPlugin)
             .plugin(crate::display::Display)
             .plugin(crate::platform::Platform::new(opens.clone()))

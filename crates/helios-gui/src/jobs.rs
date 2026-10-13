@@ -13,8 +13,9 @@
 //!   over the job's `job.log` lines).
 //! - Cancel runs `job.cancel` in the desktop's process ([`plugin`]):
 //!   [`Jobs::cancel`], which stops the job the way it gave when it
-//!   started. Pause, resume and retry are refused: no Helios job offers
-//!   them yet.
+//!   started; a node's job (`node:<name>/<id>`) is cancelled on its node,
+//!   `job.cancel` sent to the node's control endpoint by its relay. Pause,
+//!   resume and retry are refused: no Helios job offers them yet.
 //! - A long export or batch that ends while no Helios window has the
 //!   focus says so on the desktop ([`Ended`], then
 //!   `platform::job_finished`).
@@ -36,10 +37,18 @@ use serde_json::json;
 use crate::platform::{Job, JobEnd};
 
 /// egui-pop's jobs plugin over Helios's jobs: the job commands run in
-/// this process, a cancel through `jobs`.
-pub fn plugin(jobs: Jobs) -> JobsPlugin {
+/// this process, a cancel through `jobs`, or, for a node's job, on that
+/// node through its relay in `relays`.
+pub fn plugin(jobs: Jobs, relays: Relays) -> JobsPlugin {
     JobsPlugin::default().run_locally(move |_, request, id| match request {
-        Request::Cancel => jobs.cancel(id).map(|()| json!({ "cancelling": id })),
+        Request::Cancel => match crate::relay::split_node_job(id) {
+            Some((node, own)) => relays
+                .borrow()
+                .get(node)
+                .ok_or_else(|| format!("node `{node}` is not followed any more"))?
+                .cancel(own),
+            None => jobs.cancel(id).map(|()| json!({ "cancelling": id })),
+        },
         Request::Pause | Request::Resume | Request::Retry => {
             Err(format!("job `{id}` cannot be paused, resumed or retried"))
         }

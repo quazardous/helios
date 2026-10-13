@@ -432,7 +432,7 @@ that ends while no Helios window has the focus is said on the desktop
 A running node's jobs show there too: `helios-gui --node
 NAME=INSPECT[,CONTROL]` follows it (see [jobs.md](jobs.md), "A node's
 jobs on the desktop"), its batch as a parent with its exports as
-children, ids `node:<name>/<id>`.
+children, ids `node:<name>/<id>`; their Cancel goes to the node.
 
 ## Platform services
 

@@ -132,6 +132,9 @@ thread of its own, off the UI thread:
   id, and its parent's, as `node:<name>/<id>`: the jobs centre shows a
   node's batch as a parent with its exports as children. The bus's
   waker asks the window for one frame per burst of events.
+- **Cancel.** Cancel on a `node:` job goes to the node's control
+  endpoint (the debug one or the batch one) as `job.cancel`; a node
+  given no control endpoint refuses it, and the jobs centre says why.
 - **A dropped link.** No line from the node (not even its heartbeat,
   every second) for five seconds, or the connection closed: the node's
   running jobs are marked lost (paused, "lost: node NAME is out of

@@ -10,13 +10,14 @@
 #![cfg(unix)]
 
 use std::path::PathBuf;
-use std::sync::Arc;
-use std::sync::mpsc::Receiver;
+use std::sync::mpsc::{Receiver, channel};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use egui::vec2;
+use egui_pop::api::jobs as centre_jobs;
 use egui_pop::api::jobs::JOBS;
-use egui_pop::model::jobs::JobState;
+use egui_pop::model::jobs::{JobState, Request};
 use helios_core::jobs::{Jobs, Progress, Start};
 use helios_core::{Bus, Envelope};
 use helios_gui::relay::{self, NodeLink, Timing};
@@ -315,5 +316,50 @@ fn a_node_lost_for_too_long_has_its_jobs_forgotten() {
     assert!(
         centre.job("node:box/export-1").is_none(),
         "with its children"
+    );
+}
+
+#[test]
+fn cancel_from_the_centre_stops_it_on_the_node() {
+    let node = Node::start("cancel");
+    let mut h = harness();
+    let app = h.state().app().handle().clone();
+    let events = h.state().jobs().bus().subscribe();
+    h.state_mut()
+        .follow_node_with(node.link("box"), FAST)
+        .unwrap();
+    let batch = Arc::new(
+        node.jobs
+            .start(Start::new("batch-1", "Batch of 2 images", "batch").total(2)),
+    );
+    let (asked, cancelled) = channel();
+    let asked = Mutex::new(asked);
+    batch.on_cancel(move || {
+        let _ = asked.lock().unwrap().send(());
+    });
+    wait_for(&events, "job.started", "node:box/batch-1");
+    h.run();
+
+    // The jobs centre's Cancel: `job.cancel` sent to the node.
+    centre_jobs::ask(&app, "node:box/batch-1", Request::Cancel);
+    h.run();
+    cancelled
+        .recv_timeout(LONG)
+        .expect("the node's job was asked to stop");
+    wait_for(&events, "job.cancelling", "node:box/batch-1");
+    batch.cancelled();
+    wait_for(&events, "job.cancelled", "node:box/batch-1");
+    h.run();
+    let centre = app.service(&JOBS).unwrap();
+    let job = centre.job("node:box/batch-1").unwrap();
+    assert_eq!(job.state, JobState::Cancelled);
+    assert_eq!(job.request_error, None);
+
+    // A job the node no longer runs: refused there, and said so.
+    centre_jobs::ask(&app, "node:box/export-9", Request::Cancel);
+    h.run();
+    assert!(
+        node.jobs.cancellable().is_empty(),
+        "nothing else was cancelled"
     );
 }
