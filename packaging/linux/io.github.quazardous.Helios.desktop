@@ -10,4 +10,7 @@ Categories=Graphics;2DGraphics;Photography;RasterGraphics;
 MimeType=image/x-canon-cr2;image/x-canon-cr3;image/x-nikon-nef;image/x-sony-arw;image/x-fuji-raf;image/x-adobe-dng;image/x-panasonic-rw2;image/x-olympus-orf;image/jpeg;image/png;image/tiff;x-scheme-handler/helios;
 Keywords=raw;photo;darktable;vkdt;
 StartupWMClass=helios-gui
-StartupNotify=true
+# No startup notification: the window does not hand the launch's
+# activation token back (eframe does not pass it on), so GNOME would keep
+# a busy cursor until its own timeout, long after the window is up.
+StartupNotify=false
