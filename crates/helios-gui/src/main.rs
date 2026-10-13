@@ -279,58 +279,30 @@ fn library_commands(
     Ok(())
 }
 
-/// A picture (or a raw file's embedded preview) through the network of
-/// the template the workspace was made from, else through an exposure
-/// node: the network and the node the viewport shows.
+/// A picture (or a raw file's embedded preview) through the
+/// workspace's network (its template's, as edited; an exposure through a
+/// mask for a workspace not made from one): the network and the node the
+/// viewport shows.
 fn image_graph(
     path: &Path,
-    template: Option<&helios_template::Bundle>,
+    bundle: &helios_template::Bundle,
 ) -> Result<(helios_core::Graph, helios_core::NodeId), String> {
     let image = match helios_load::Kind::of(path) {
         helios_load::Kind::Picture => helios_load::load(path)?.image,
         helios_load::Kind::Raw => helios_load::preview(path)?
             .ok_or_else(|| format!("{}: no preview to show", path.display()))?,
     };
-    if let Some(t) = template {
-        let built = t.build_with(&helios_gui::templates::modules(), &image, None)?;
-        return Ok((built.graph, built.view.0));
-    }
-    let mut g = helios_core::Graph::new();
-    let src = g.add_source("source", image);
-    let exp = g
-        .add_module(
-            "exposure",
-            helios_core::ModuleRef::new(helios_module_exposure::Exposure),
-            &helios_core::Params::new(),
-        )
-        .map_err(|e| e.to_string())?;
-    g.connect(src, "image", exp, "input")
-        .map_err(|e| e.to_string())?;
-    // The exposure through a mask the viewport draws in: with no shape
-    // yet the mask is 1 everywhere, so the exposure applies fully.
-    let mask = g
-        .add_module(
-            "mask",
-            helios_core::ModuleRef::new(helios_module_masks::MaskCombine),
-            &helios_core::Params::new(),
-        )
-        .map_err(|e| e.to_string())?;
-    let blend = g
-        .add_module(
-            "blend",
-            helios_core::ModuleRef::new(helios_module_masks::MaskBlend),
-            &helios_core::Params::new(),
-        )
-        .map_err(|e| e.to_string())?;
-    for (from, out, port) in [
-        (src, "image", "input"),
-        (exp, "output", "processed"),
-        (mask, "mask", "mask"),
-    ] {
-        g.connect(from, out, blend, port)
-            .map_err(|e| e.to_string())?;
-    }
-    Ok((g, blend))
+    let built = bundle.build_with(&helios_gui::templates::modules(), &image, None)?;
+    Ok((built.graph, built.view.0))
+}
+
+/// What the viewport shows, to open again when the workspace's network
+/// changes.
+enum Shown {
+    /// An image of the library, by id.
+    Library(String),
+    /// A file opened on its own.
+    File(PathBuf),
 }
 
 struct App {
@@ -339,9 +311,8 @@ struct App {
     _persist_dropped: quit::MarkOnDrop,
     shell: Shell,
     _shell_dropped: quit::MarkOnDrop,
-    /// The template the workspace was made from: an image opened goes
-    /// through its network.
-    template: Option<helios_template::Bundle>,
+    /// What the viewport shows.
+    shown: Option<Shown>,
     /// Set when an import ended: the library is filled again.
     refill: Arc<AtomicBool>,
 }
@@ -356,6 +327,7 @@ impl App {
     /// Opens an image the library activated (Enter, a double click) in
     /// the viewport, from its first copy still present.
     fn open_from_library(&mut self, id: &str) -> Result<(), String> {
+        let bundle = self.bundle();
         let persist = self.persist.as_mut().ok_or("no vault open")?;
         let image = helios_vault::ImageId::from_hex(id)?;
         let path = persist
@@ -365,19 +337,40 @@ impl App {
             .find(|l| l.present)
             .map(|l| l.path)
             .ok_or_else(|| format!("no copy of image {id} is present"))?;
-        let (graph, node) = image_graph(&path, self.template.as_ref())?;
-        persist
-            .open_image(&mut self.shell, image, graph, node, "output")
-            .map(|_| ())
+        let (graph, node) = image_graph(&path, &bundle)?;
+        persist.open_image(&mut self.shell, image, graph, node, "output")?;
+        self.shown = Some(Shown::Library(id.to_string()));
+        Ok(())
+    }
+
+    /// The workspace's network and the rest of its state.
+    fn bundle(&self) -> helios_template::Bundle {
+        self.shell
+            .workspace_bundle()
+            .unwrap_or_else(helios_template::workspace::blank)
+    }
+
+    /// Opens what the viewport shows again, through the workspace's
+    /// network as it is now.
+    fn reopen(&mut self) -> Result<(), String> {
+        match self.shown.take() {
+            Some(Shown::Library(id)) => self.open_from_library(&id),
+            Some(Shown::File(path)) => self.open(Open::Image(path)),
+            None => Ok(()),
+        }
     }
 
     /// Opens what a later launch or a link asked for: an image in the
     /// viewport, a workspace in a window of its own (none for the one
     /// this window shows).
-    fn open(&mut self, open: Open) {
-        let done = match open {
-            Open::Image(path) => image_graph(&path, self.template.as_ref())
-                .and_then(|g| show_image(&mut self.shell, self.persist.as_mut(), path, g)),
+    fn open(&mut self, open: Open) -> Result<(), String> {
+        match open {
+            Open::Image(path) => {
+                let graph = image_graph(&path, &self.bundle())?;
+                show_image(&mut self.shell, self.persist.as_mut(), path.clone(), graph)?;
+                self.shown = Some(Shown::File(path));
+                Ok(())
+            }
             Open::Workspace(dir) => {
                 let dir = dir.canonicalize().unwrap_or(dir);
                 if self.shell.workspace() == Some(helios_gui::host::workspace_key(&dir)) {
@@ -392,9 +385,6 @@ impl App {
                         .map(|_| ())
                 }
             }
-        };
-        if let Err(e) = done {
-            self.shell.notify(helios_gui::dialogs::Level::Error, e);
         }
     }
 }
@@ -420,7 +410,16 @@ impl eframe::App for App {
             self.shell.follow_image_surface(ui.ctx(), rs, frame);
         }
         for open in self.shell.take_opens() {
-            self.open(open);
+            if let Err(e) = self.open(open) {
+                self.shell.notify(helios_gui::dialogs::Level::Error, e);
+            }
+        }
+        // The workspace's network changed (a reset, an import, an undo):
+        // the image goes through it again.
+        if self.shell.take_network_changed()
+            && let Err(e) = self.reopen()
+        {
+            self.shell.notify(helios_gui::dialogs::Level::Error, e);
         }
         // Imports from the workspace's source, and duplicates the user
         // chose to keep, imported again.
@@ -644,20 +643,18 @@ fn main() -> Result<(), String> {
     // Held here, the vault outlives the window: it closes once the
     // window is gone (see `helios_gui::quit`).
     let vault = persist.as_ref().map(|p| p.vault().clone());
-    // The template the workspace was made from, if it was.
-    let template = match helios_gui::templates::workspace_template(
-        &helios_gui::shell::config_dir(),
-        &workspace,
-    ) {
-        Some(Ok(t)) => Some(t),
-        Some(Err(e)) => {
-            warn(&format!("the workspace's template: {e}"));
-            None
+    // The workspace as it stands: its template's network, as edited.
+    let config = helios_gui::shell::config_dir();
+    let bundle = match helios_template::workspace::Files::new(&config, &workspace).load() {
+        Ok(state) => state.bundle,
+        Err(e) => {
+            warn(&format!("the workspace: {e}"));
+            helios_template::workspace::blank()
         }
-        None => None,
     };
+    let shown = image_file.clone().map(Shown::File);
     let image = image_file
-        .map(|path| image_graph(&path, template.as_ref()).map(|g| (path, g)))
+        .map(|path| image_graph(&path, &bundle).map(|g| (path, g)))
         .transpose()?;
     let earlier = earlier_layout(&workspace, &ui_settings);
     let builder = Shell::builder(helios_panels(), Some(ui_settings))
@@ -694,11 +691,6 @@ fn main() -> Result<(), String> {
             if let Err(e) = shell.use_profile(&profile) {
                 shell.notes.push(format!("profile {profile}: {e}"));
             }
-            // The template's keys, in the workspace's keymap layer.
-            if let Some(t) = &template {
-                shell.apply_template_tools(&t.template.meta.name, &t.template.tools);
-                shell.apply_template_library(t.template.library.as_ref());
-            }
             // The workspace's layout wins over the profile's: egui-pop's
             // document is loaded again (or an earlier Helios's, once).
             if let Some(saved) = earlier {
@@ -710,6 +702,11 @@ fn main() -> Result<(), String> {
                 if let Err(e) = shell.follow_node(link) {
                     shell.notes.push(e);
                 }
+            }
+            // The workspace's state, edited from here: its keys in the
+            // workspace's keymap layer, its library settings.
+            if let Err(e) = shell.open_workspace(&config, &workspace) {
+                shell.notes.push(format!("workspace: {e}"));
             }
             let mut persist = persist;
             if let Err(e) = open(&mut shell, persist.as_mut(), image) {
@@ -726,7 +723,7 @@ fn main() -> Result<(), String> {
                 _persist_dropped: quit::MarkOnDrop("vault link dropped"),
                 shell,
                 _shell_dropped: quit::MarkOnDrop("shell dropped"),
-                template,
+                shown,
                 refill,
             })
         })

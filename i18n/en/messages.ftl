@@ -393,6 +393,68 @@ gui-vault-unreadable = Cannot read the vault: { $error }
 
 gui-window-frame-error = window frame: { $error }
 
+gui-workspace-description = description
+
+gui-workspace-edit-title = Edit the workspace
+
+gui-workspace-edit-verb = Save
+
+gui-workspace-icon = icon
+
+gui-workspace-import-next = Review
+
+gui-workspace-import-none = no part chosen
+
+gui-workspace-import-parts = Parts to add from { $source }
+
+gui-workspace-import-review = Add from { $source }: { $changes } changes, { $conflicts } to decide
+
+gui-workspace-import-title = Add from a workspace or a template
+
+gui-workspace-import-verb = Add
+
+gui-workspace-library-advance = culling advances after each mark
+
+gui-workspace-library-duplicates = exact duplicates
+
+gui-workspace-library-placement = placement
+
+gui-workspace-library-rename = rename copies as
+
+gui-workspace-library-source = import source
+
+gui-workspace-library-stacks = suggest stacks after an import
+
+gui-workspace-library-title = The workspace's library
+
+gui-workspace-name = name
+
+gui-workspace-not-saved = The workspace was not saved: { $error }
+
+gui-workspace-template-ask = ask on create: { $name }
+
+gui-workspace-template-description-fr = description in French
+
+gui-workspace-template-id = template id
+
+gui-workspace-template-keys = with its keys
+
+gui-workspace-template-library = with its library settings
+
+gui-workspace-template-name-fr = name in French
+
+gui-workspace-template-overwrite = replace a template of that id
+
+gui-workspace-template-saved = template { $name } saved in { $path }
+
+gui-workspace-template-stripped = Never kept: { $what }
+
+gui-workspace-template-title = Save as template
+
+gui-workspace-template-toolbox = with its tools
+
+gui-workspace-template-version = version
+
 node-batch-only = the batch endpoint only answers load-source, export, cancel, job.cancel, batch_start and batch_end
 
 node-edit-not-saved = done, but the edit was not saved: { $error }

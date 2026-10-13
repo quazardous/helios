@@ -308,6 +308,68 @@ gui-size-kib = { $size } Kio
 
 gui-size-mib = { $size } Mio
 
+gui-workspace-description = description
+
+gui-workspace-edit-title = Modifier l’espace de travail
+
+gui-workspace-edit-verb = Enregistrer
+
+gui-workspace-icon = icône
+
+gui-workspace-import-next = Examiner
+
+gui-workspace-import-none = aucune partie choisie
+
+gui-workspace-import-parts = Parties à ajouter depuis { $source }
+
+gui-workspace-import-review = Ajouter depuis { $source } : { $changes } changements, { $conflicts } à trancher
+
+gui-workspace-import-title = Ajouter depuis un espace de travail ou un modèle
+
+gui-workspace-import-verb = Ajouter
+
+gui-workspace-library-advance = le tri avance après chaque marque
+
+gui-workspace-library-duplicates = doublons exacts
+
+gui-workspace-library-placement = emplacement
+
+gui-workspace-library-rename = renommer les copies en
+
+gui-workspace-library-source = source d’import
+
+gui-workspace-library-stacks = proposer des piles après un import
+
+gui-workspace-library-title = La photothèque de l’espace de travail
+
+gui-workspace-name = nom
+
+gui-workspace-not-saved = L’espace de travail n’a pas été enregistré : { $error }
+
+gui-workspace-template-ask = demander à la création : { $name }
+
+gui-workspace-template-description-fr = description en français
+
+gui-workspace-template-id = identifiant du modèle
+
+gui-workspace-template-keys = avec ses raccourcis
+
+gui-workspace-template-library = avec ses réglages de photothèque
+
+gui-workspace-template-name-fr = nom en français
+
+gui-workspace-template-overwrite = remplacer un modèle de cet identifiant
+
+gui-workspace-template-saved = modèle { $name } enregistré dans { $path }
+
+gui-workspace-template-stripped = Jamais gardé : { $what }
+
+gui-workspace-template-title = Enregistrer comme modèle
+
+gui-workspace-template-toolbox = avec ses outils
+
+gui-workspace-template-version = version
+
 node-batch-only = le point d’accès des lots ne répond qu’à load-source, export, cancel, job.cancel, batch_start et batch_end
 
 node-edit-not-saved = fait, mais la retouche n’a pas été enregistrée : { $error }

@@ -4,8 +4,11 @@ Status: **design note, format in code** (2026-10-13). The format, its
 schema, validation, the headless build check and composite files live in
 `crates/helios-template`; two built-in templates ("Portrait retouch" and
 "Import, cull, de-duplicate") ship as data under `templates/`, and the
-desktop's "New workspace from template" creates a workspace from them. What is marked "not decided" waits
-for the owner.
+desktop's "New workspace from template" creates a workspace from them or
+from the user's own. A workspace is then edited, saved back as a
+template, reset to its template, and given parts of another (see
+"Editing a workspace"). What is marked "not decided" waits for the
+owner.
 
 ## What a template is
 
@@ -52,6 +55,7 @@ template's own, bumped by its author.
   "name": "Portrait retouch",
   "scenario": "Retouch a portrait: brighten the subject through a mask …",
   "preview": "preview.png",
+  "icon": "portrait",
   "tags": ["portrait", "masks"]
 }
 ```
@@ -158,6 +162,26 @@ What the workspace sets for the library (optional):
   renaming without a copy.
 - `auto_advance` starts culling with auto-advance on.
 
+### `parameters`
+
+What is asked when a workspace is created from the template ("ask on
+create", optional): each parameter names where its answer goes in
+`template.json`, as a JSON pointer, and what it may be (`text`, `path`,
+or `choice` with its `choices`). Without an answer the template's own
+value stays.
+
+```json
+"parameters": [
+  { "id": "import_source", "name": "Import source",
+    "at": "/library/import/source", "kind": "choice",
+    "choices": ["card", "folder"] }
+]
+```
+
+Its name is translated under `<slug>-parameter-<id>`. Validation refuses
+a pointer to nothing, to something other than text, or to what
+identifies the template (`/id`, `/version`, `/format`).
+
 ### `layout`
 
 `layout.json` is egui-pop's layout document (`kind: layout`, its own
@@ -226,12 +250,12 @@ Masks panel.
 ## Sharing like plugins
 
 A template travels as its bundle, never as code: it references modules
-and commands by name, and composites by id and version. Installing one
-(not built yet: only the built-in templates are listed today) copies
-the bundle under the user's templates
-(`<config>/templates/<name>.helios-template/`); its bundled composites
-join the catalogue there, its Fluent files are added with the plugin
-ownership rule. A template naming a module or command this Helios lacks
+and commands by name, and composites by id and version. The user's
+templates live under `<config>/templates/<id>.helios-template/` ("Save
+as template" writes there; installing a shared one is copying its
+bundle there, not built yet as a command); "New workspace from template"
+lists them after the built-in ones, its bundled composites join the
+catalogue, its Fluent files are added with the plugin ownership rule. A template naming a module or command this Helios lacks
 is refused with what is missing (a plugin to install), as a profile's
 plugin references are listed before an import. Not decided: a registry
 of shared templates, and signing.
@@ -270,6 +294,94 @@ templates with their scenario, asks for the workspace's directory, then:
 - opens the workspace in its window; there the template's keys go into
   the workspace keymap layer, and an image opened is the template's
   source, shown at its view.
+
+The template's parameters are asked in the same form (`parameter.<id>`);
+an answer of the wrong kind refuses the creation before anything is
+written.
+
+## Editing a workspace
+
+A workspace made from a template is then the user's: it is edited, and
+what it becomes is kept (decided 2026-10-13: the workspace is saved
+continuously; "Save as template…" is an explicit extraction; importing
+is copying, with no provenance). `helios_template::workspace` holds the
+model; the desktop and agents drive it.
+
+**Its files.** Under `<config>/workspaces/<key>/`:
+`template.helios-template/` is the template it was made from, as it was
+(what a reset goes back to); `workspace.helios-template/` is the
+workspace as it stands, written as a bundle once it is edited (network,
+tools, library, a copy of its layout); `workspace.json` holds its
+profile, the template it came from, and its own name, description and
+icon. Its live layout is egui-pop's document, saved as it changes. A
+workspace not made from a template starts from the blank network (an
+exposure through a mask).
+
+**On the desktop.** The state is one value of the value store
+(`workspace/state`), so each edit, reset or import is one step of
+Edit > Undo, written to the files at once (a kill loses none: `cargo
+survival`). The File menu has:
+
+- **Edit the workspace** (`workspace.edit`): its name, description and
+  icon in a form; agents pass `changes` (network, tools, library,
+  layout, written as in a template), checked against the catalogue
+  before they apply. Keys and tools set this way go into the
+  workspace's keymap layer, over the defaults and under the user's own.
+- **The workspace's library** (`workspace.library`): the import source
+  (or none), placement, renaming, duplicates, suggested stacks and
+  culling's auto-advance, in a form.
+- **Add from a workspace or a template…** (`workspace.importParts`):
+  the source picked (a built-in or user template, a recent workspace),
+  its parts chosen, then a review: the number of changes, and a side
+  (ours or theirs) for each conflict, the workspace's by default.
+- **Save as template…** (`workspace.saveAsTemplate`): the review form.
+- **Reset to template** (`workspace.reset`): the template's network,
+  tools, library and layout, built; the workspace's name stays.
+
+When the network changes (a reset, an import, an undo of either), the
+image shown is opened again through it.
+
+**Save as template.** A review says what goes in (the network and the
+layout always; the keys, tools and library unless left out), what is
+stripped, and what becomes a parameter; the template is then validated
+and written, versioned (the same id at the same version is refused
+unless replaced on purpose), with its English text and the translations
+given (French in the form):
+
+- images and each image's edit history are never in a workspace's
+  files (they stay in the vault): the review says so;
+- in node parameters, an absolute path, a secret (a parameter named
+  like a password, a token or a key) and embedded data (text longer
+  than 256 characters: a mask, an image) are taken out;
+- the absolute paths and the import source become parameters asked on
+  create, each one unless unticked;
+- an absolute path anywhere else refuses the review until it is taken
+  out; the old template's other messages (its presets') move to the new
+  id.
+
+**Parts.** A workspace or template is made of named parts, each copied
+on its own (`workspace.parts` lists them):
+
+| Part | Copied as | Conflict |
+|---|---|---|
+| network | an opened composite (`import.<source>`, at a version the workspace has not used) under one free node name, its inputs wired to the workspace's first image; its nodes renamed `<name>.<node>`; presets and panel hints left behind | `view`: which output the viewport shows |
+| layout | each panel shown, where the source shows it | `panel:<id>`: a panel shown on both sides stays or moves |
+| keys | each binding added | `key:<keys>` (`@<when>` under a condition): a chord bound to two commands |
+| toolbox | the tools missing, in order | none |
+| library | the source's settings when the workspace has none | `library`: set differently on both sides |
+
+An import is refused while a conflict has no side picked; its dry run
+lists the changes and the conflicts. Nothing records where a part came
+from: imported twice, it is two copies. Not decided (later, on egui-pop's
+context stack): delegating part of a network to a sub-workspace.
+
+**Agents.** The desktop's commands take their arguments whole, with
+`dry_run`. The node's MCP server answers the same on a workspace's files
+(`helios_workspace_parts`, `_state`, `_edit`, `_reset`,
+`_import_parts`, `_save_as_template`, each with `dry_run`, and
+`_undo`, which takes back the last step these tools made). A desktop
+showing that workspace reads the files when it opens it; it does not
+follow them while open.
 
 ## The AI's `template.design` decision (later)
 

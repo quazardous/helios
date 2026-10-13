@@ -51,6 +51,9 @@ use crate::viewport::ZoomTo;
 use crate::workbench::Contents;
 
 pub use crate::workbench::Content;
+pub use workspace_edit::STATE as WORKSPACE_STATE;
+
+mod workspace_edit;
 
 /// The screen's own scale (physical pixels per point, the interface zoom
 /// left out) from which it is `hidpi` for profile variants.
@@ -111,9 +114,12 @@ enum Action {
     About,
     Keybindings,
     OpenWorkspace(Option<PathBuf>),
-    /// A workspace from a template (its id), in a directory; what is
+    /// A workspace from a template (its id), in a directory, the
+    /// template's parameters answered (`parameter.<id>`); what is
     /// missing is asked.
-    NewWorkspace(Option<String>, Option<PathBuf>),
+    NewWorkspace(Option<String>, Option<PathBuf>, Value),
+    /// A command of the workspace's edits, its arguments, as whom.
+    WorkspaceEdit(String, Value, Origin),
     Answer(Answer, Origin),
     AssumeYes(bool),
     Dock(String),
@@ -372,6 +378,8 @@ pub struct Shell {
     /// The layout as last saved to the workspace's document: saved again
     /// once it changes, so a kill keeps it.
     layout_saved: Option<Layout>,
+    /// The workspace's state, as edited (`workspace_edit`).
+    edit: Option<workspace_edit::Edited>,
     /// The catalogues the shell's text is shown through.
     i18n: egui_pop::i18n::I18n,
     /// What later launches and links asked to open (`platform`).
@@ -622,6 +630,7 @@ impl Shell {
             values,
             workspace,
             layout_saved: None,
+            edit: None,
             still: false,
             i18n,
             engine_seen: 0,
@@ -1540,9 +1549,19 @@ impl Shell {
                 Ok(Action::NewWorkspace(
                     text("template"),
                     text("path").map(PathBuf::from),
+                    a.clone(),
                 ))
             }),
         );
+        for (id, title) in workspace_edit::COMMANDS {
+            let id = *id;
+            add(
+                CommandSpec::new(id, title, "Workspace"),
+                Box::new(move |a, origin| {
+                    Ok(Action::WorkspaceEdit(id.into(), a.clone(), origin.clone()))
+                }),
+            );
+        }
         add(
             CommandSpec::new("workbench.palette", "Show all commands", "View"),
             Box::new(|_, _| Ok(Action::Palette)),
@@ -2385,6 +2404,42 @@ impl Shell {
                 "workspace.open",
                 &title("workspace.open"),
             ),
+            // The workspace's own edits.
+            command(
+                MENU_FILE,
+                "2_edit",
+                0,
+                "workspace.edit",
+                &title("workspace.edit"),
+            ),
+            command(
+                MENU_FILE,
+                "2_edit",
+                1,
+                "workspace.library",
+                &title("workspace.library"),
+            ),
+            command(
+                MENU_FILE,
+                "2_edit",
+                2,
+                "workspace.importParts",
+                &title("workspace.importParts"),
+            ),
+            command(
+                MENU_FILE,
+                "2_edit",
+                3,
+                "workspace.saveAsTemplate",
+                &title("workspace.saveAsTemplate"),
+            ),
+            command(
+                MENU_FILE,
+                "2_edit",
+                4,
+                "workspace.reset",
+                &title("workspace.reset"),
+            ),
             command(
                 MENU_HELP,
                 "4_about",
@@ -2879,16 +2934,24 @@ impl Shell {
         json!({ "queued": args })
     }
 
-    /// A workspace from a template: the templates to pick from (with
-    /// their scenario) without one, the directory to ask for without
-    /// one, else the workspace created and opened in its window.
+    /// A workspace from a template: the templates to pick from (the
+    /// built-in ones and the user's, with their scenario) without one, the
+    /// directory and the template's parameters to ask for without one,
+    /// else the workspace created and opened in its window.
     fn new_workspace(
         &mut self,
         ctx: &Egui,
         template: Option<String>,
         path: Option<PathBuf>,
+        args: &Value,
     ) -> Result<Value, String> {
-        let templates = crate::templates::builtin();
+        let templates = crate::templates::all(&config_dir());
+        // The user's templates speak through their own text too (added
+        // once: a second time is refused, and nothing changes).
+        let _ = crate::templates::add_texts(
+            &self.i18n,
+            &templates[crate::templates::builtin().len()..],
+        );
         let name = |s: &Self, b: &helios_template::Bundle| {
             s.text(Message::new(&b.name_key(), &b.template.meta.name))
         };
@@ -2925,6 +2988,7 @@ impl Shell {
             })?;
         let Some(path) = path else {
             let ids: Vec<&str> = templates.iter().map(|b| b.template.id.as_str()).collect();
+            let asked = self.parameter_fields(bundle);
             self.form(crate::dialogs::Form {
                 title: self.text(
                     Message::new(
@@ -2952,14 +3016,29 @@ impl Shell {
                         ),
                         value: helios_core::Value::Text(String::new()),
                     },
-                ],
+                ]
+                .into_iter()
+                .chain(asked)
+                .collect(),
                 verb: self.text(Message::new("gui-new-workspace-verb", "Create")),
                 command: "workspace.new".into(),
             });
             return Ok(Value::Null);
         };
         let catalogue = crate::templates::catalogue(&self.panels, self.specs());
-        let created = crate::templates::create_workspace(bundle, &catalogue, &path, &config_dir())?;
+        let answers: BTreeMap<String, Value> = args
+            .as_object()
+            .into_iter()
+            .flatten()
+            .filter_map(|(k, v)| {
+                let id = k.strip_prefix("parameter.")?;
+                v.as_str()
+                    .filter(|t| !t.is_empty())
+                    .map(|t| (id.to_string(), json!(t)))
+            })
+            .collect();
+        let created =
+            crate::templates::create_answered(bundle, &answers, &catalogue, &path, &config_dir())?;
         self.note(
             Message::new(
                 "gui-new-workspace-created",
@@ -2969,6 +3048,47 @@ impl Shell {
             .with("template", name(self, bundle)),
         );
         self.apply(ctx, Action::OpenWorkspace(Some(created.workspace)))
+    }
+
+    /// The fields a template's parameters are asked in, each at the
+    /// template's own value (`parameter.<id>`).
+    fn parameter_fields(&self, bundle: &helios_template::Bundle) -> Vec<crate::dialogs::Field> {
+        let json = serde_json::to_value(&bundle.template).unwrap_or_default();
+        bundle
+            .template
+            .parameters
+            .iter()
+            .map(|q| {
+                let label = self.text(Message::new(&bundle.parameter_key(&q.id), &q.name));
+                let value = json
+                    .pointer(&q.at)
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string();
+                let (descriptor, value) = match q.kind {
+                    helios_template::ParameterKind::Choice => {
+                        let choices: Vec<&str> = q.choices.iter().map(String::as_str).collect();
+                        (
+                            helios_values::Descriptor::choice(&label, &choices, &value),
+                            helios_core::Value::Choice(value),
+                        )
+                    }
+                    helios_template::ParameterKind::Path => (
+                        helios_values::Descriptor::path(&label, helios_values::PathKind::File, &[]),
+                        helios_core::Value::Text(value),
+                    ),
+                    helios_template::ParameterKind::Text => (
+                        helios_values::Descriptor::text(&label, &value),
+                        helios_core::Value::Text(value),
+                    ),
+                };
+                crate::dialogs::Field {
+                    key: format!("parameter.{}", q.id),
+                    descriptor,
+                    value,
+                }
+            })
+            .collect()
     }
 
     fn apply(&mut self, ctx: &Egui, action: Action) -> Result<Value, String> {
@@ -3058,8 +3178,11 @@ impl Shell {
                     .map_err(|e| format!("cannot open {}: {e}", path.display()))?;
                 self.note(Message::new("gui-opening", "opening { $path }").with("path", &path));
             }
-            Action::NewWorkspace(template, path) => {
-                return self.new_workspace(ctx, template, path);
+            Action::NewWorkspace(template, path, args) => {
+                return self.new_workspace(ctx, template, path, &args);
+            }
+            Action::WorkspaceEdit(id, args, origin) => {
+                return self.workspace_command(&id, &args, &origin);
             }
             Action::Theme(name) => {
                 let overrides = self.theme_overrides.clone();
@@ -3442,6 +3565,8 @@ impl Shell {
         self.viewport.borrow_mut().set_wanted(wanted);
         self.app.logic(&ctx);
         self.apply_queue(&ctx);
+        // An undo or a redo of the workspace's state, put in place.
+        self.sync_workspace();
         // The theme asked for is installed here, before anything is drawn.
         self.app.logic(&ctx);
         let spec = self.app.handle().theme().spec();
@@ -3772,11 +3897,7 @@ pub fn remember_workspace(path: &std::path::Path) -> Result<(), String> {
 
 /// The user's configuration directory for Helios.
 pub fn config_dir() -> PathBuf {
-    std::env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("helios")
+    helios_template::workspace::config_dir()
 }
 
 /// Headless rendering, for tests, agents and machines without a display.

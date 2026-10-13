@@ -9,79 +9,34 @@
 //! `workspace.json`; its layout is written as the workspace's layout
 //! document, which egui-pop loads when the workspace opens.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use egui_pop::i18n::I18n;
 use egui_pop::model::panels::PanelSpec;
 use helios_core::ModuleRef;
 use helios_shell::commands::CommandSpec;
-use helios_template::{Built, Bundle, Catalogue, parse_composite};
+use helios_template::{Built, Bundle, Catalogue};
 use serde_json::{Value as Json, json};
 
-use crate::host::workspace_key;
-
-/// The built-in templates, each as its bundle's files.
-const BUILTIN: &[&[(&str, &str)]] = &[
-    &[
-        (
-            "template.json",
-            include_str!("../../../templates/portrait-retouch.helios-template/template.json"),
-        ),
-        (
-            "layout.json",
-            include_str!("../../../templates/portrait-retouch.helios-template/layout.json"),
-        ),
-        (
-            "i18n/en/template.ftl",
-            include_str!(
-                "../../../templates/portrait-retouch.helios-template/i18n/en/template.ftl"
-            ),
-        ),
-        (
-            "i18n/fr/template.ftl",
-            include_str!(
-                "../../../templates/portrait-retouch.helios-template/i18n/fr/template.ftl"
-            ),
-        ),
-    ],
-    &[
-        (
-            "template.json",
-            include_str!("../../../templates/import-cull-dedupe.helios-template/template.json"),
-        ),
-        (
-            "layout.json",
-            include_str!("../../../templates/import-cull-dedupe.helios-template/layout.json"),
-        ),
-        (
-            "i18n/en/template.ftl",
-            include_str!(
-                "../../../templates/import-cull-dedupe.helios-template/i18n/en/template.ftl"
-            ),
-        ),
-        (
-            "i18n/fr/template.ftl",
-            include_str!(
-                "../../../templates/import-cull-dedupe.helios-template/i18n/fr/template.ftl"
-            ),
-        ),
-    ],
-];
-
-/// The composite files Helios ships.
-const COMPOSITES: &[&str] = &[include_str!(
-    "../../../templates/composites/helios.masked-adjustment@1.helios-composite.json"
-)];
-
 /// Where a workspace keeps the template it was made from.
-pub const TEMPLATE_DIR: &str = "template.helios-template";
+pub const TEMPLATE_DIR: &str = helios_template::workspace::ORIGIN_DIR;
 
 /// The built-in templates.
 pub fn builtin() -> Vec<Bundle> {
-    BUILTIN
-        .iter()
-        .map(|files| Bundle::from_files(files).expect("the built-in templates read"))
-        .collect()
+    helios_template::shipped::templates()
+}
+
+/// The templates to create a workspace from: the built-in ones, then the
+/// user's (`<config>/templates`) that read.
+pub fn all(config: &Path) -> Vec<Bundle> {
+    let mut all = builtin();
+    all.extend(
+        helios_template::workspace::user_templates(config)
+            .into_iter()
+            .filter_map(Result::ok),
+    );
+    all
 }
 
 /// A built-in template by id.
@@ -107,8 +62,8 @@ pub fn modules() -> Catalogue {
         .module(ModuleRef::new(m::MaskGradient))
         .module(ModuleRef::new(m::MaskPath))
         .module(ModuleRef::new(m::MaskBrush));
-    for text in COMPOSITES {
-        c.add_composite(parse_composite(text).expect("the shipped composites read"));
+    for file in helios_template::shipped::composites() {
+        c.add_composite(file);
     }
     c
 }
@@ -142,17 +97,13 @@ pub fn add_texts(i18n: &I18n, bundles: &[Bundle]) -> Result<(), String> {
 
 /// A workspace's own files: `<config>/workspaces/<key>`.
 pub fn workspace_dir(config: &Path, workspace: &Path) -> PathBuf {
-    config.join("workspaces").join(workspace_key(workspace))
+    helios_template::workspace::Files::new(config, workspace).own
 }
 
 /// The layout document egui-pop keeps for a workspace, under the
 /// interface's settings (`<config>/ui`).
 pub fn layout_file(config: &Path, workspace: &Path) -> PathBuf {
-    config
-        .join("ui")
-        .join("workspaces")
-        .join(workspace_key(workspace))
-        .join("layout.json")
+    helios_template::workspace::Files::new(config, workspace).layout
 }
 
 /// A workspace created from a template.
@@ -173,32 +124,19 @@ pub fn create_workspace(
     workspace: &Path,
     config: &Path,
 ) -> Result<Created, String> {
-    let report = template.validate(catalogue);
-    if !report.is_ok() {
-        return Err(format!(
-            "template {}: {}",
-            template.template.id,
-            report.problems.join("; ")
-        ));
-    }
-    let mut copy = template.clone();
-    copy.bundle_composites(catalogue)?;
-    let built = copy.build(catalogue)?;
-    std::fs::create_dir_all(workspace).map_err(|e| format!("{}: {e}", workspace.display()))?;
-    let workspace = workspace
-        .canonicalize()
-        .map_err(|e| format!("{}: {e}", workspace.display()))?;
-    let own = workspace_dir(config, &workspace);
-    copy.save(&own.join(TEMPLATE_DIR))?;
-    let pointer = own.join("workspace.json");
-    let mut json = read_json(&pointer);
-    if json.get("profile").is_none() {
-        json["profile"] = json!("default");
-    }
-    json["template"] = json!({ "id": copy.template.id, "version": copy.template.version });
-    write(&pointer, &json.to_string())?;
-    write(&layout_file(config, &workspace), &built.layout.to_json())?;
-    Ok(Created { workspace, built })
+    create_answered(template, &BTreeMap::new(), catalogue, workspace, config)
+}
+
+/// As [`create_workspace`], the template's parameters answered (by id).
+pub fn create_answered(
+    template: &Bundle,
+    answers: &BTreeMap<String, Json>,
+    catalogue: &Catalogue,
+    workspace: &Path,
+    config: &Path,
+) -> Result<Created, String> {
+    helios_template::workspace::create(template, answers, catalogue, workspace, config)
+        .map(|(workspace, built)| Created { workspace, built })
 }
 
 /// The template a workspace was made from, if it was.
@@ -215,11 +153,4 @@ pub fn read_json(path: &Path) -> Json {
         .and_then(|t| serde_json::from_str::<Json>(&t).ok())
         .filter(Json::is_object)
         .unwrap_or_else(|| json!({}))
-}
-
-fn write(path: &Path, text: &str) -> Result<(), String> {
-    path.parent()
-        .map_or(Ok(()), std::fs::create_dir_all)
-        .and_then(|()| std::fs::write(path, text))
-        .map_err(|e| format!("{}: {e}", path.display()))
 }

@@ -390,8 +390,32 @@ command-workbench-run =
 command-workbench-systemMenu =
     .title = Afficher le menu de Helios
 
+command-workspace-edit =
+    .title = Modifier l’espace de travail : son nom, sa description et son icône (`name`, `description`, `icon`) ou ses parties (`changes`), en une étape d’annulation ; demandé s’il manque
+
+command-workspace-importParts =
+    .title = Ajouter des parties depuis un espace de travail ou un modèle (`source`, `parts`, `picks`, `dry_run`), en une étape d’annulation ; demandé s’il manque
+
+command-workspace-importParts-apply =
+    .title = Ajouter les parties examinées, le côté de chaque conflit choisi
+
+command-workspace-importParts-review =
+    .title = Examiner les parties à ajouter : ce qui change, et le côté à garder pour chaque conflit
+
+command-workspace-library =
+    .title = Les réglages de photothèque de l’espace de travail : source d’import, emplacement, renommage, doublons, piles et avance automatique, en une étape d’annulation ; demandés s’ils manquent
+
 command-workspace-new =
     .title = Nouvel espace de travail depuis un modèle (`template`, `path`)
 
 command-workspace-open =
     .title = Ouvrir un espace de travail dans une nouvelle fenêtre (`path`)
+
+command-workspace-parts =
+    .title = Lister les parties de l’espace de travail, ou d’un espace de travail ou d’un modèle (`source`)
+
+command-workspace-reset =
+    .title = Remettre l’espace de travail à son modèle, en une étape d’annulation (`dry_run` dit si cela change quelque chose)
+
+command-workspace-saveAsTemplate =
+    .title = Enregistrer l’espace de travail comme modèle, après revue de ce qui y entre, de ce qui est retiré et de ce qui est demandé à la création (`id`, `name`, `description`, `icon`, `dry_run`) ; demandé s’il manque

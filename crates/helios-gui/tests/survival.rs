@@ -95,10 +95,18 @@ fn survival_child() {
     let dir = PathBuf::from(dir);
     let scenario = std::env::var("HELIOS_GUI_SURVIVAL_SCENARIO").unwrap();
     if scenario == "layout" {
-        // A panel moved to a window of its own, then killed.
+        // A panel moved to a window of its own, the workspace described
+        // and its culling set, then killed.
         let mut h = workspace_window(&dir);
         h.state_mut()
             .run("helios.log.detach", json!(null), Origin::User)
+            .unwrap();
+        h.run();
+        h.state_mut()
+            .edit_workspace(
+                &json!({ "description": "Harbour", "library": { "auto_advance": true } }),
+                &Origin::User,
+            )
             .unwrap();
         h.run();
         // On a line of its own: the test harness may have started one
@@ -166,7 +174,8 @@ fn survival_child() {
 }
 
 /// A window on the scenario's workspace (`photos`), its interface
-/// settings beside it, its saved layout loaded.
+/// settings and its own files beside it, its saved layout loaded, its
+/// state opened for editing.
 fn workspace_window(dir: &Path) -> egui_kittest::Harness<'static, Shell> {
     let mut h = helios_gui::headless::harness(workspace_shell(dir), egui::vec2(800.0, 500.0));
     h.run();
@@ -174,12 +183,13 @@ fn workspace_window(dir: &Path) -> egui_kittest::Harness<'static, Shell> {
 }
 
 /// The scenario's workspace as a desktop opens it: its saved layout
-/// loaded.
+/// loaded, its state read from its files.
 fn workspace_shell(dir: &Path) -> Shell {
     let mut shell = Shell::builder(helios_panels(), Some(dir.join("ui")))
         .workspace(&dir.join("photos"))
         .build();
     shell.load_layout().unwrap();
+    shell.open_workspace(dir, &dir.join("photos")).unwrap();
     shell
 }
 
@@ -371,11 +381,11 @@ fn survival_killed_in_the_middle_of_a_drag_keeps_the_last_saved_step() {
 }
 
 #[test]
-fn survival_killed_after_moving_a_panel_keeps_the_layout() {
+fn survival_killed_after_moving_a_panel_and_editing_the_workspace_keeps_both() {
     let (dir, _) = place("layout");
     run_child(&dir, "layout", true);
-    // Reopened, before any frame: the layout document as the kill left
-    // it.
+    // Reopened, before any frame: the layout document and the
+    // workspace's files as the kill left them.
     let shell = workspace_shell(&dir);
     let detached: Vec<String> = shell
         .layout()
@@ -384,5 +394,8 @@ fn survival_killed_after_moving_a_panel_keeps_the_layout() {
         .map(|a| a.panel.to_string())
         .collect();
     assert_eq!(detached, ["helios.log"]);
+    let state = shell.workspace_state().unwrap();
+    assert_eq!(state.meta.description, "Harbour");
+    assert!(shell.library().auto_advance);
     let _ = std::fs::remove_dir_all(&dir);
 }

@@ -95,16 +95,7 @@ impl Workspace {
 /// A workspace directory's key: its path, every character but letters,
 /// digits, `.` and `-` turned to `_`, so it names one folder.
 pub fn workspace_key(path: &std::path::Path) -> String {
-    path.to_string_lossy()
-        .chars()
-        .map(|c| {
-            if c.is_alphanumeric() || c == '.' || c == '-' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect()
+    helios_template::workspace::key(path)
 }
 
 /// The bus kinds egui-pop's events go under, by egui-pop's name.
