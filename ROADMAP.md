@@ -4,7 +4,7 @@ Vision, settled concepts, phases and open questions for Helios. This is a
 living document: decisions are dated, and an idea stays "not decided" until
 it says otherwise.
 
-Last updated: 2026-10-12.
+Last updated: 2026-10-13.
 
 ---
 
@@ -204,6 +204,23 @@ bring a second Vulkan device, which vkdt creates itself; a port keeps one
 device, the engine's cache and tiling, and the CPU reference. **No vkdt
 fork** (2026-10-11, decided): small fixes go upstream as pull requests,
 and the question comes back only if a needed change is refused.
+**Modules that expand into a network** (2026-10-13, done): more than
+half of vkdt's modules are several kernels, and a macro is a network a
+user packaged; both are one mechanism, a composite node the engine
+expands when it plans a render, each inner kernel a step of its own (its
+region propagated through the inner wiring, its content key, its GPU
+variant, cache and tiles, union planning as for any node). Design in
+[docs/module-contract.md](docs/module-contract.md), "Composites". First
+port: vkdt's `contrast` (a guided filter, its blurs a cascade at lower
+resolutions), tiled equal to untiled, its one-input kernels on the GPU,
+and against `vkdt-cli` within darktable's thresholds away from the
+border (Delta E 2000 inside a 16 to 32 pixel border of a 256x192 chart:
+max 0.04 to 1.23, mean 0.02 to 0.12). Not decided: proposing upstream a
+clamp of the guided filter's variance, which goes below zero next to
+edges after the Catmull-Rom upsampling and makes the model singular
+where it crosses `-eps` (a spot of 10 Delta E with the default edge
+threshold, in vkdt as in the port); and an accelerator running kernels
+of two inputs or more (`guided3`, `combine` run on the CPU today).
 
 What darktable already offers to build on:
 
@@ -451,7 +468,11 @@ hash) is part of Helios; deploying a NAS is not.
   **retouches** (an applied workshop).
 - In AVS terms, a workshop is a **macro**: a network of modules packaged as
   one, exposing only chosen parameters (see
-  [docs/module-contract.md](docs/module-contract.md)).
+  [docs/module-contract.md](docs/module-contract.md)). The engine runs
+  macros (2026-10-13): a macro is a composite, expanded at planning like
+  a multi-kernel module, and shares its content with the flat network it
+  packages. Not decided: how a macro is saved with an edit and offered
+  in the GUI (folded, opened, promoted from a stack).
 - A workshop: the AI translates an artistic intention ("too contrasty with the
   blue sky") into a mini workspace: the real darktable modules, pre-calibrated
   for the photo, with only the useful sliders (restricted ranges, tested at

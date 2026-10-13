@@ -98,7 +98,8 @@ creates (`qvk`), which matters for sharing GPU memory with Helios.
 2. **Sub-graph modules** are the biggest structural difference: more than
    half of vkdt's modules are several kernels. Helios should let a module
    declare a sub-network of nodes (its own or kernel-level), which is also
-   what macros need.
+   what macros need. Done 2026-10-13: composites (module-contract.md,
+   "Composites"), first used by the port of vkdt's `contrast`.
 3. **Output size changes** (`modify_roi_out`) must enter the contract before
    geometry modules (crop, lens, resize) can be ported from either side.
 4. **GPU sharing**: running vkdt itself (bridge) means using its Vulkan

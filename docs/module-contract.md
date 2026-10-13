@@ -109,8 +109,10 @@ Each line is a reason why darktable modules cannot be tested alone today.
   an empty image (`Image::is_absent`) at its place and the render goes on.
   This is how a module takes a variable number of members (a mask group
   has a fixed maximum of optional inputs, see [masks.md](masks.md)).
-- **Composition**: a module may be a macro, a subgraph of other modules
-  with a chosen subset of their parameters exposed.
+- **Composition**: a module may stand for a network of other modules: a
+  macro (a saved sub-network with a chosen subset of its parameters
+  exposed) or a multi-kernel module (one that declares its kernels in
+  code). See "Composites" below.
 - **Context inputs**: the metadata fields it reads, by name, typed by a
   domain (for the photo domain: EXIF bias, camera matrix, ...).
 - **Computation needs**: neighbourhood it reads around each output pixel
@@ -162,6 +164,75 @@ process(plan, inputs, output_region) -> outputs     pure, no IO, no globals
   away from a shape costs one fill. `process` must give exactly that
   constant there, bit for bit: a tiled render, some tiles filled, still
   equals one render.
+
+## Composites: a node standing for a network
+
+(2026-10-13.) More than half of vkdt's modules are several GPU kernels
+(local contrast pyramids, guided filters, demosaic), and a macro is a
+network a user packaged as one node. Both are one mechanism in the core
+(`helios_core::network`): a **composite** declares its surface like a
+module (a manifest: parameters, ports, context) and, given its
+parameters, the **network** it is.
+
+```text
+expand(params, context, expansion) -> network     pure, cheap, no pixels
+```
+
+- A `Network` holds inner nodes (each an ordinary module, or a composite
+  again), their parameters, and their wiring: an inner input reads one of
+  the composite's inputs or an output of a node added before it (so there
+  is no cycle), and each output of the composite is one inner output.
+- `Expansion` gives the render's scale and the extent of the image the
+  node works on, for sizes stated as fractions of the image (vkdt's radii).
+- Inner nodes get the composite's context, restricted to what each
+  declares; the composite declares the union of what its kernels read.
+- `ModuleRef::composite` puts a composite in a graph like a module.
+  `ModuleRef::reads` walks the inner wiring back from the outputs, so the
+  testkit's contract tests (tiles, scales, adversarial inputs) run on a
+  composite as on any module (`helios_testkit::assert_contract_of`).
+
+**How the engine plans it.** A composite is expanded when a render is
+planned, never before, and has no step of its own: each inner node is a
+planning unit, with its own region (propagated through the inner wiring
+from what the composite's consumers read), its own content key, its own
+GPU variant and cache entries. An inner node read by several inner
+consumers is computed once over the union of their reads; an inner node
+no output reads is never planned. An inner step's key is that of the same
+module with the same parameters and inputs anywhere, so a macro and the
+flat network it packages share their content. A composite declaring
+`Needs::full_resolution` is expanded at full resolution and each output
+reduced, as a module is; an inner node needing full resolution makes its
+composite declare it (a macro does so by itself). The engine's status
+lists inner steps under the composite's node, named by their path
+(`contrast/guided2`).
+
+**Kernels.** A multi-kernel module's kernels are modules (`Module`), each
+with its manifest, its CPU code and, if it has one, its GPU variant. A
+kernel may change the resolution: a blur halving it reads input region
+`2r` for output region `r`, and a resampling back reads `r / 2^n`; regions
+are absolute pixel coordinates at each kernel's own resolution, so any
+tile of the composite plans the same pixels as one render. Everything that
+changes a kernel's output is in its parameters, never in its Rust value,
+since the key is built from the manifest's name, version and parameters.
+
+**Macros.** `Macro::new(manifest, network)` packages a network;
+`expose(name, inner, param)` turns an inner parameter into one of the
+macro's, its saved value the default; exposing one name on several inner
+nodes links them. The other parameters keep their saved values.
+
+**First port: vkdt's `contrast`** (`helios-module-vkdt`). It builds the
+network vkdt's `create_nodes` does: `guided1`, a blur, `guided2`, a blur,
+`guided3`, then `combine`; each blur chosen as `dt_api_blur` does (a small
+blur, a separable pass, a cascade of 5x5 blurs at half, quarter...
+resolution and a Catmull-Rom resampling back). The kernels reading one
+image have a WGSL variant; `guided3` and `combine` read two and run on the
+CPU, since an accelerator runs one input today. Checked against
+`vkdt-cli` (`helios-parity`, on half-float input, as vkdt's contrast
+reads it): see the ROADMAP entry of 2026-10-13 for the numbers.
+
+Open: how a macro is saved with an edit (a network description inside
+the node's), how a surface shows a composite folded or opened, and an
+accelerator running kernels of two inputs or more.
 
 ## Full-extent analysis (design note, proposed, not decided)
 
