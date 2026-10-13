@@ -32,6 +32,7 @@ Jobs of the Benchfile:
 | `gpu` | the GPU backend's tests on the box's NVIDIA GPU; the adapter used in `out/adapter.txt` | 4 cores, 4 GB, the GPU alone |
 | `bench-masks` | `cargo xtask bench masks`, `masks.jsonl` in `out/` | 8 cores, 6 GB, the machine alone |
 | `test-times` | `cargo xtask test-times --profile ci`, its history kept per branch | 8 cores, 6 GB, the machine alone |
+| `mask-parity` | darktable's drawn masks against darktable-cli, built from a pinned upstream commit (see [masks.md](masks.md), "Parity with darktable"); JUnit, a summary and the masks in `out/` | 8 cores, 8 GB |
 | `raw-corpus` | the raw corpus checks (`helios-corpus`) on the `raw-corpus` volume; JUnit, a summary, the observed values and thumbnails in `out/`; `bless=yes` accepts new thumbnails | 4 cores, 4 GB |
 
 The timing jobs hold the whole machine (`exclusive = ["machine"]`): nothing
@@ -41,12 +42,16 @@ tests use Mesa's lavapipe (software Vulkan), as in CI.
 
 The `raw-corpus` volume holds the decoder regression corpus, the CC0 raws
 listed in `tests/raw-corpus.toml`, mounted read-only by the `raw-corpus`
-job. `provision raw-corpus branch=<branch>` fills it (with network, through
-`tools/bench/fill-corpus.sh`) after the manifest changes; see
-[raw-corpus.md](raw-corpus.md).
+and `mask-parity` jobs. `provision raw-corpus branch=<branch>` fills it
+(with network, through `tools/bench/fill-corpus.sh`) after the manifest
+changes; see [raw-corpus.md](raw-corpus.md).
 
 Each job gets its own checkout of the branch at `/work/helios` and vkdt's
-module files at `/work/vkdt` (for the manifest round-trip test). Jobs run
+module files at `/work/vkdt` (for the manifest round-trip test), and
+darktable at the pinned commits the mask parity builds (`/work/darktable`,
+`/work/darktable-flexi`, with `/work/rawspeed`, `/work/whereami` and
+`/work/libraw`, its submodules); the darktable-cli builds are kept in the
+`darktable-build` storage, one per checkout, until the pin moves. Jobs run
 without network: before each job, `cargo fetch --locked` downloads the
 crates into a registry cache shared by all branches. The target directory
 is a cache too, one per branch, used by one job at a time: a second job on

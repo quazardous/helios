@@ -2126,6 +2126,7 @@ dependencies = [
  "helios-module-rawprepare",
  "helios-module-vkdt",
  "helios-module-whitebalance",
+ "helios-node",
  "helios-photo",
  "helios-xmp",
  "serde_json",

@@ -13,6 +13,7 @@
 //! the PATH; [`Darktable::find`] says when there is none, so tests can
 //! skip and say why.
 
+pub mod masks;
 pub mod vkdt;
 
 use std::fmt::Write as _;
@@ -261,6 +262,15 @@ impl Darktable {
         let src = dir.join(name);
         std::fs::copy(raw, &src).map_err(|e| format!("{}: {e}", raw.display()))?;
         self.run(&src, &sidecar(items, Input::Camera, layouts)?, dir)
+    }
+
+    /// Renders a raw file with a sidecar's text, as is.
+    pub fn render_raw_sidecar(&self, raw: &Path, xmp: &str, dir: &Path) -> Result<Image, String> {
+        std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        let name = raw.file_name().ok_or("a raw path without a name")?;
+        let src = dir.join(name);
+        std::fs::copy(raw, &src).map_err(|e| format!("{}: {e}", raw.display()))?;
+        self.run(&src, xmp, dir)
     }
 
     fn run(&self, src: &Path, sidecar: &str, dir: &Path) -> Result<Image, String> {

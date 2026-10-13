@@ -8,13 +8,14 @@ repository.workspace = true
 
 [dependencies]
 helios-core.workspace = true
+helios-load.workspace = true
+helios-node = { path = "../helios-node" }
 helios-photo.workspace = true
 helios-xmp.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]
 helios-module-exposure = { path = "../../modules/exposure" }
-helios-load.workspace = true
 helios-module-rawprepare = { path = "../../modules/rawprepare" }
 helios-module-whitebalance = { path = "../../modules/whitebalance" }
 helios-module-highlights = { path = "../../modules/highlights" }

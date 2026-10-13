@@ -20,7 +20,7 @@
 # Helios's space on the box: the per-branch target caches, the registry and
 # the image fit in 40g (applied on upload, within the box's envelope)
 [project]
-disk = "40g"
+disk = "50g"
 
 [image]
 from = "registry.fedoraproject.org/fedora:44"
@@ -45,6 +45,12 @@ run = [
       https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-0.9.148/cargo-nextest-0.9.148-x86_64-unknown-linux-gnu.tar.gz \
  && echo "223ba936714cc861a9cdedad5a8eb664dfdd69d6fbdf6cea6aa8184f523290dc  /tmp/nextest.tar.gz" | sha256sum -c - \
  && tar -xzf /tmp/nextest.tar.gz -C /usr/local/bin && rm /tmp/nextest.tar.gz""",
+  # darktable's build dependencies (Fedora's own list), for the
+  # darktable-cli the mask-parity job builds
+  """dnf -y install dnf-plugins-core \
+ && dnf -y builddep darktable \
+ && dnf -y install cmake ninja-build \
+ && dnf clean all""",
   # wbox drives a headless labwc (no job uses it yet; debug shells may)
   """python3 -m venv /opt/wbox \
  && /opt/wbox/bin/pip install --quiet \
@@ -71,6 +77,31 @@ ref = "afc34256fb22bcaf6dcf6503d19d5f9a6f477af5"
 repo = "https://github.com/quazardous/egui-pop.git"
 ref = "${egui_pop:-main}"
 
+# darktable for the drawn-mask parity (docs/masks.md, "Parity with
+# darktable"): upstream at the base of the flexi masks pull request
+# (darktable-org/darktable#22553), and the pull request's head, both
+# pinned. Its submodules are checkouts of their own at the commits both
+# pin (darktable's tests submodule, 2 GB of images, is left out).
+[checkout.darktable]
+repo = "https://github.com/darktable-org/darktable.git"
+ref = "ca5a02038b93e41dc96231ad80837fe5c54f4fbd"
+
+[checkout.darktable-flexi]
+repo = "https://github.com/darktable-org/darktable.git"
+ref = "5a6425e7887039adc2a8982123290d9415c483bb"
+
+[checkout.rawspeed]
+repo = "https://github.com/darktable-org/rawspeed.git"
+ref = "c835b05aecfacb7343f7c424abd620aa12116c3f"
+
+[checkout.whereami]
+repo = "https://github.com/gpakosz/whereami.git"
+ref = "e07bc35ecd92ee4c3ac71cf0fb6b01132bfa50de"
+
+[checkout.libraw]
+repo = "https://github.com/LibRaw/LibRaw.git"
+ref = "f74ddd995c5447458f132a5377ca0f4b394dff6e"
+
 # the job's env applies here too: CARGO_NET_OFFLINE is lifted for the fetch
 [fetch]
 run = ["for d in /work/helios /work/egui-pop /work/${src:-helios}; do (cd $d && CARGO_NET_OFFLINE=false cargo fetch --locked) || exit 1; done"]
@@ -82,6 +113,7 @@ run = ["for d in /work/helios /work/egui-pop /work/${src:-helios}; do (cd $d && 
 target = { about = "Helios's cargo target directories, one per branch", lock = true }
 egui-pop-target = { about = "egui-pop's cargo target directories, one per egui-pop branch", lock = true }
 registry = "the cargo registry, shared by every job"
+darktable-build = { about = "darktable-cli builds for the mask parity, one per pinned checkout", lock = true }
 cargo-git = "the cargo git dependencies, shared by every job"
 
 # Every job builds from a copy at a fixed path (/tmp/w/<repo>): the target
@@ -249,6 +281,25 @@ cargo run -q --locked -p helios-corpus -- --dir /corpus --out /out $flag"""
 env = { CARGO_NET_OFFLINE = "true" }
 mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", raw-corpus = "/corpus" }
 timeout = "30m"
+
+# ---------------------------------------------------------------- mask parity
+# Drawn masks against darktable (docs/masks.md, "Parity with darktable"):
+# builds darktable-cli from the pinned checkout once (kept in the
+# darktable-build storage until the pin changes), then renders each fixture
+# of tests/masks/ on its raw of the corpus with darktable-cli and with
+# Helios, and compares the masks in Delta E. JUnit, a summary, the numbers
+# and both masks as images in /out.
+[jobs.mask-parity]
+cores = 8
+memory = "8g"
+cwd = "/work/${src:-helios}"
+command = """mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && \
+DT_JOBS=6 tools/bench/build-darktable.sh /work/darktable /work/rawspeed /work/whereami /work/libraw /dt/classic/build /dt/classic/prefix > /out/darktable-build.log 2>&1 || { tail -50 /out/darktable-build.log; exit 1; }; \
+cargo build -q --release --locked -p helios-parity --bin mask-parity \
+ && HELIOS_DARKTABLE_CLI=/dt/classic/prefix/bin/darktable-cli /target/release/mask-parity --corpus /corpus --out /out"""
+env = { CARGO_NET_OFFLINE = "true" }
+mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", raw-corpus = "/corpus", "darktable-build/classic" = "/dt/classic" }
+timeout = "2h"
 
 # ---------------------------------------------------------------- timings
 # alone on the machine, so the numbers compare from one run to the next
