@@ -284,8 +284,10 @@ timeout = "30m"
 
 # ---------------------------------------------------------------- mask parity
 # Drawn masks against darktable (docs/masks.md, "Parity with darktable"):
-# builds darktable-cli from the pinned checkout once (kept in the
-# darktable-build storage until the pin changes), then renders each fixture
+# builds darktable-cli from both pinned checkouts once (kept in the
+# darktable-build storage until a pin changes), harvests the fixtures'
+# masks with the flexi build (/out/harvest.json, darktable's own decoding,
+# kept as tests/masks/harvest.json), then renders each fixture
 # of tests/masks/ on its raw of the corpus with darktable-cli and with
 # Helios, and compares the masks in Delta E. JUnit, a summary, the numbers
 # and both masks as images in /out.
@@ -294,11 +296,14 @@ cores = 8
 memory = "8g"
 cwd = "/work/${src:-helios}"
 command = """mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && \
-DT_JOBS=6 tools/bench/build-darktable.sh /work/darktable /work/rawspeed /work/whereami /work/libraw /dt/classic/build /dt/classic/prefix > /out/darktable-build.log 2>&1 || { tail -50 /out/darktable-build.log; exit 1; }; \
+for dt in classic:/work/darktable flexi:/work/darktable-flexi; do \
+  DT_JOBS=6 tools/bench/build-darktable.sh ${dt#*:} /work/rawspeed /work/whereami /work/libraw /dt/${dt%%:*}/build /dt/${dt%%:*}/prefix > /out/darktable-${dt%%:*}-build.log 2>&1 || { tail -50 /out/darktable-${dt%%:*}-build.log; exit 1; }; \
+done; \
+/dt/flexi/prefix/bin/darktable --configdir /tmp/dt-harvest --harvest-masks-xmp tests/masks /out/harvest.json > /out/harvest.log 2>&1 || echo "harvest failed: see harvest.log"; \
 cargo build -q --release --locked -p helios-parity --bin mask-parity \
- && HELIOS_DARKTABLE_CLI=/dt/classic/prefix/bin/darktable-cli /target/release/mask-parity --corpus /corpus --out /out"""
+ && HELIOS_DARKTABLE_CLI=/dt/classic/prefix/bin/darktable-cli /target/release/mask-parity --corpus /corpus --out /out --darktable-flexi /dt/flexi/prefix/bin/darktable-cli"""
 env = { CARGO_NET_OFFLINE = "true" }
-mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", raw-corpus = "/corpus", "darktable-build/classic" = "/dt/classic" }
+mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", raw-corpus = "/corpus", "darktable-build/classic" = "/dt/classic", "darktable-build/flexi" = "/dt/flexi" }
 timeout = "2h"
 
 # ---------------------------------------------------------------- timings

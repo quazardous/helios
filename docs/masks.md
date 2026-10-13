@@ -184,8 +184,8 @@ form's points are its C structs, hex or `gz` encoded like history params)
 and maps each form onto a member, given a `Frame`: the size of the image
 darktable's pipe starts from (the raw's full photosite grid, which the
 loader gives as `Loaded::sensor`) and where Helios's image starts in it
-(the loader's crop). It reads masks versions 4 to 6 (darktable's current
-is 6).
+(the loader's crop). It reads masks versions 4 to 7 (darktable's current
+is 6, 7 the flexi masks': see "Flexi masks" below).
 
 | darktable form | Helios | carried over | refused (the mask would differ) |
 |---|---|---|---|
@@ -248,6 +248,68 @@ darktable distorts a shape through the modules before it (lens, crop,
 rotation), which Helios does not do yet (a raw's own crop is the
 `Frame`'s origin). How close the result is, is measured against
 darktable-cli (see "Parity with darktable" below).
+
+## Flexi masks (masks version 7)
+
+darktable's flexi masks are a pull request, not a release:
+darktable-org/darktable#22553, read and tested here at its head commit
+**`5a6425e7887039adc2a8982123290d9415c483bb`** (2026-10-13), whose base on
+upstream master is `ca5a02038b93e41dc96231ad80837fe5c54f4fbd` (the classic
+build of the parity job). Its data model is the pull request's
+`dev-doc/masks_data_model.md`.
+
+What `helios_xmp::drawn` reads of it:
+
+- **Masks version 7.** Group points grow from 16 to 240 bytes: the v6
+  fields, a refinement (scope, details, feathering radius and guide, blur,
+  contrast, brightness), a name, the group's opacity and a preset note.
+  Shapes keep their structs. A version above 7 is refused
+  (`xmp-mask-version`), so a format change shows as a failing test.
+- **Groups and markers.** A flexi group's first point is its marker
+  (`GROUP_MARKER`, bit 18): the operator (none: maximum; `FLEXI_SCREEN`,
+  `FLEXI_MINIMUM`, `FLEXI_PRODUCT`, `FLEXI_SUM`, `FLEXI_DIFFERENCE`,
+  `FLEXI_EXCLUSION`), `OP_INVERT`, `OP_BYPASS`, the group's opacity and
+  its group-scope refinement. Members carry their inversion, opacity,
+  `HIDDEN`, `DISABLE` and element-scope refinement.
+- **Blend params version 15**, the same layout as 14; `mask_mode` gains
+  `DEVELOP_MASK_FLEXI` (bit 4), `mask_id` then naming the root group.
+
+`network_flexi` builds the tree as `_group_get_mask_roi_flexi` folds it:
+visible members (not hidden, not disabled), each through its element
+refinement, fold in list order with the group's operator into chained
+`mask_combine`s (8 ports each, the chain carrying what came before in its
+first port); then the group refinement, inversion and opacity (on the
+fold's last node, or a closing `mask_levels` after a refinement). A group
+that contributes nothing (bypassed, or no visible member) is left out of
+its parent, as darktable skips it; at the root it is 1 everywhere. A
+refinement's blur, contrast and brightness are carried over; its
+feathering and details threshold are refused, as at module level.
+Parametric and raster members (types `1 << 9`, `1 << 10`) are refused
+for now (`xmp-mask-unsupported`), as is a flexi group in a classic mask
+or the reverse.
+
+**Checked against the pull request's build.** The parity job builds the
+pinned head too (`darktable-flexi` checkout) and:
+
+- renders the two flexi fixtures (`flexi-screen`, `flexi-nested`: masks
+  version 7, blend params 15) with it;
+- renders every classic fixture with it again (`<fixture>@flexi`): the
+  pull request migrates classic masks to flexi ones as it reads them,
+  which must not move the mask;
+- harvests the fixtures' masks with it (`darktable --harvest-masks-xmp`,
+  darktable's own decoding, in `/out/harvest.json`), kept as
+  `tests/masks/harvest.json`; the test
+  `helios_reads_the_fixtures_as_darktable_does` checks every field Helios
+  reads against it, and fails on a new harvest format or masks version.
+
+**Re-pinning** when the pull request moves or merges: set the
+`darktable-flexi` checkout's `ref` in `tools/bench/Benchfile` to the new
+head (or, once merged, both `darktable` and `darktable-flexi` to the merge
+commit on master, and drop the flexi one if the classic build then reads
+version 7), check the submodule pins of `rawspeed`, `whereami` and
+`libraw` there against the new commit's, upload the Benchfile, run
+`mask-parity`, commit the new `/out/harvest.json` as
+`tests/masks/harvest.json`, and update the commit named above.
 
 ## Parity with darktable
 

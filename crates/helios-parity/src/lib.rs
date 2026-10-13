@@ -201,6 +201,12 @@ impl Darktable {
     pub fn find() -> Result<Darktable, String> {
         let cli = std::env::var_os("HELIOS_DARKTABLE_CLI")
             .map_or_else(|| PathBuf::from("darktable-cli"), PathBuf::from);
+        Darktable::at(&cli)
+    }
+
+    /// The darktable-cli at `cli`, or why it does not run.
+    pub fn at(cli: &Path) -> Result<Darktable, String> {
+        let cli = cli.to_path_buf();
         let out = Command::new(&cli)
             .arg("--version")
             .output()

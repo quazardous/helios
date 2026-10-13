@@ -23,8 +23,10 @@ use crate::{Input, Item, sidecar};
 /// mask is 1, so a mask reads back as `masked / unmasked - 1`.
 pub const EXPOSURE: f64 = 1.0;
 
-/// darktable's masks version the fixtures are written in.
+/// darktable's masks version the classic fixtures are written in, and the
+/// flexi masks' (pull request darktable-org/darktable#22553).
 pub const MASKS_VERSION: u32 = 6;
+pub const FLEXI_MASKS_VERSION: u32 = 7;
 
 /// A form of the masks history: its id, type bits, name and points.
 #[derive(Clone, Debug)]
@@ -209,6 +211,83 @@ pub fn group(id: i32, members: &[Member]) -> Form {
     }
 }
 
+/// A flexi member: a form, its inversion, opacity, whether it is hidden,
+/// and its element-scope blur (0: none).
+pub struct FlexiMember {
+    pub form: i32,
+    pub invert: bool,
+    pub opacity: f32,
+    pub hidden: bool,
+    pub blur: f32,
+}
+
+/// A flexi member at full opacity.
+pub fn flexi_member(form: i32) -> FlexiMember {
+    FlexiMember {
+        form,
+        invert: false,
+        opacity: 1.0,
+        hidden: false,
+        blur: 0.0,
+    }
+}
+
+/// One masks version 7 group point (240 bytes): the 16 bytes of version 6,
+/// the refinement (scope, details, feathering radius and guide, blur,
+/// contrast, brightness), a name (128 bytes, empty), the group's opacity
+/// and a preset note (64 bytes, empty).
+fn group_point(
+    formid: i32,
+    parent: i32,
+    st: i32,
+    opacity: f32,
+    blur: f32,
+    scope: i32,
+    group_opacity: f32,
+) -> Vec<[u8; 4]> {
+    let mut out = vec![i(formid), i(parent), i(st), f(opacity)];
+    let refinement = if blur > 0.0 { scope } else { 0 };
+    out.extend([
+        i(refinement),
+        f(0.0),
+        f(0.0),
+        i(0x05),
+        f(blur),
+        f(0.0),
+        f(0.0),
+    ]);
+    out.extend(std::iter::repeat_n([0u8; 4], 32));
+    out.push(f(group_opacity));
+    out.extend(std::iter::repeat_n([0u8; 4], 16));
+    out
+}
+
+/// A flexi group (masks version 7): its marker (its id plus 500, the
+/// operator's state bit, inversion, opacity), then its members.
+pub fn flexi_group(
+    id: i32,
+    operator: i32,
+    invert: bool,
+    opacity: f32,
+    members: &[FlexiMember],
+) -> Form {
+    let marker_state = state::GROUP_MARKER | operator | if invert { state::OP_INVERT } else { 0 };
+    let mut fields = group_point(id + 500, id, marker_state, 1.0, 0.0, 0, opacity);
+    for m in members {
+        let st = USE
+            | if m.invert { state::INVERSE } else { 0 }
+            | if m.hidden { state::HIDDEN } else { 0 };
+        fields.extend(group_point(m.form, id, st, m.opacity, m.blur, 1, 1.0));
+    }
+    Form {
+        id,
+        kind: kind::GROUP,
+        name: "group",
+        count: members.len() as u32 + 1,
+        fields,
+    }
+}
+
 /// One parity case: a raw of the corpus and an exposure masked by `forms`'
 /// group `mask`, blending with `blend`.
 pub struct Fixture {
@@ -217,6 +296,9 @@ pub struct Fixture {
     pub raw: &'static str,
     pub forms: Vec<Form>,
     pub blend: Blend,
+    /// A flexi mask: masks version 7, blend params version 15, rendered by
+    /// the flexi masks' darktable only.
+    pub flexi: bool,
 }
 
 /// The raws the fixtures use: a crop that starts away from the sensor's
@@ -224,7 +306,8 @@ pub struct Fixture {
 pub const CANON: &str = "canon-eos-350d-cr2-raw-3-2.CR2";
 pub const NIKON: &str = "nikon-d70-nef-12bit-12bit-compressed-lossy-type-1-3-2.NEF";
 
-/// The module's group id.
+/// The module's group id (each fixture's own: [`fixtures`] adds its
+/// rank, so that every form id is unique across the fixtures).
 const ROOT: i32 = 1000;
 
 fn single(name: &'static str, raw: &'static str, form: Form) -> Fixture {
@@ -234,10 +317,113 @@ fn single(name: &'static str, raw: &'static str, form: Form) -> Fixture {
         raw,
         forms: vec![form, group(ROOT, &[member(id, state::UNION)])],
         blend: Blend::drawn(ROOT),
+        flexi: false,
     }
 }
 
-/// The fixtures: one per shape kind, two groups.
+/// The flexi fixtures: a screen of two shapes at a group opacity, and a
+/// nested tree (a hidden member, an element blur, an inverted minimum
+/// group at 70 %).
+fn flexi_fixtures() -> Vec<Fixture> {
+    let flexi_blend = |root: i32| {
+        let mut b = Blend::drawn(root);
+        b.mask_mode = blend::mode::ENABLED | blend::mode::FLEXI;
+        b
+    };
+    vec![
+        Fixture {
+            name: "flexi-screen",
+            raw: NIKON,
+            forms: vec![
+                circle(31, 0.4, 0.5, 0.15, 0.06),
+                ellipse(32, 0.6, 0.45, 0.2, 0.1, -20.0, 0.05),
+                flexi_group(
+                    ROOT,
+                    state::FLEXI_SCREEN,
+                    false,
+                    0.9,
+                    &[
+                        flexi_member(31),
+                        FlexiMember {
+                            opacity: 0.7,
+                            ..flexi_member(32)
+                        },
+                    ],
+                ),
+            ],
+            blend: flexi_blend(ROOT),
+            flexi: true,
+        },
+        Fixture {
+            name: "flexi-nested",
+            raw: CANON,
+            forms: vec![
+                brush(
+                    41,
+                    &[
+                        ([0.15, 0.7], 0.03),
+                        ([0.45, 0.6], 0.04),
+                        ([0.8, 0.75], 0.03),
+                    ],
+                    0.7,
+                    1.0,
+                ),
+                circle(42, 0.5, 0.4, 0.2, 0.05),
+                gradient(43, 0.5, 0.35, 10.0, 0.05),
+                circle(44, 0.2, 0.2, 0.1, 0.02),
+                flexi_group(
+                    45,
+                    state::FLEXI_MINIMUM,
+                    true,
+                    0.7,
+                    &[flexi_member(42), flexi_member(43)],
+                ),
+                flexi_group(
+                    ROOT,
+                    0,
+                    false,
+                    1.0,
+                    &[
+                        FlexiMember {
+                            blur: 3.0,
+                            ..flexi_member(41)
+                        },
+                        flexi_member(45),
+                        FlexiMember {
+                            hidden: true,
+                            ..flexi_member(44)
+                        },
+                    ],
+                ),
+            ],
+            blend: flexi_blend(ROOT),
+            flexi: true,
+        },
+    ]
+}
+
+/// Gives the root group of the fixture of rank `k` its own id.
+fn own_root(mut fixture: Fixture, k: i32) -> Fixture {
+    let root = ROOT + k;
+    for form in &mut fixture.forms {
+        if form.id != ROOT {
+            continue;
+        }
+        form.id = root;
+        let stride = form.fields.len() / form.count as usize;
+        for point in form.fields.chunks_mut(stride) {
+            // formid of a marker (its own id), parentid of every point.
+            if point[0] == i(ROOT + 500) {
+                point[0] = i(root + 500);
+            }
+            point[1] = i(root);
+        }
+    }
+    fixture.blend.mask_id = root;
+    fixture
+}
+
+/// The fixtures: one per shape kind and two groups (classic), two flexi.
 pub fn fixtures() -> Vec<Fixture> {
     let mut inverted_path = single(
         "path",
@@ -276,6 +462,7 @@ pub fn fixtures() -> Vec<Fixture> {
             ),
         ],
         blend: Blend::drawn(ROOT),
+        flexi: false,
     };
     // The module's opacity and blur.
     mixed.blend.opacity = 80.0;
@@ -319,9 +506,15 @@ pub fn fixtures() -> Vec<Fixture> {
                 ),
             ],
             blend: Blend::drawn(ROOT),
+            flexi: false,
         },
         mixed,
     ]
+    .into_iter()
+    .chain(flexi_fixtures())
+    .enumerate()
+    .map(|(k, f)| own_root(f, k as i32))
+    .collect()
 }
 
 fn hex(bytes: &[u8]) -> String {
@@ -372,8 +565,13 @@ impl Fixture {
             .and_then(|n| n.parse().ok())
             .ok_or("no exposure number")?;
         let end = start + xml[start..].find("/>").ok_or("no item end")?;
+        let (blend_version, masks_version) = if self.flexi {
+            (15, FLEXI_MASKS_VERSION)
+        } else {
+            (14, MASKS_VERSION)
+        };
         let blend = format!(
-            r#" darktable:blendop_version="14" darktable:blendop_params="{}""#,
+            r#" darktable:blendop_version="{blend_version}" darktable:blendop_params="{}""#,
             hex(&self.blend.write())
         );
         let mut forms = String::new();
@@ -381,7 +579,7 @@ impl Fixture {
             let points: Vec<u8> = form.fields.iter().flatten().copied().collect();
             let _ = write!(
                 forms,
-                "\n     <rdf:li darktable:mask_num=\"{num}\" darktable:mask_id=\"{}\" darktable:mask_type=\"{}\" darktable:mask_name=\"{} {}\" darktable:mask_version=\"{MASKS_VERSION}\" darktable:mask_points=\"{}\" darktable:mask_nb=\"{}\" darktable:mask_src=\"0000000000000000\"/>",
+                "\n     <rdf:li darktable:mask_num=\"{num}\" darktable:mask_id=\"{}\" darktable:mask_type=\"{}\" darktable:mask_name=\"{} {}\" darktable:mask_version=\"{masks_version}\" darktable:mask_points=\"{}\" darktable:mask_nb=\"{}\" darktable:mask_src=\"0000000000000000\"/>",
                 form.id,
                 form.kind,
                 form.name,

@@ -10,10 +10,13 @@
 //! demosaic) stay out of it; how far they are is reported apart.
 //!
 //! ```text
-//! mask-parity --corpus DIR --out DIR [--fixtures DIR] [--only NAME]
+//! mask-parity --corpus DIR --out DIR [--fixtures DIR] [--only NAME] [--darktable-flexi CLI]
 //! ```
 //!
-//! darktable-cli comes from `HELIOS_DARKTABLE_CLI`, else the PATH. Writes
+//! darktable-cli comes from `HELIOS_DARKTABLE_CLI`, else the PATH. With
+//! `--darktable-flexi`, the flexi masks' darktable-cli renders the flexi
+//! fixtures, and the classic ones again (`<fixture>@flexi`: darktable
+//! migrates them to flexi masks as it reads them). Writes
 //! `junit.xml`, `summary.md`, `results.json` and the masks of both, a
 //! quarter of their size, as PGM (`masks/<fixture>.{helios,darktable}.pgm`).
 
@@ -39,6 +42,7 @@ struct Args {
     out: PathBuf,
     fixtures: PathBuf,
     only: Option<String>,
+    flexi: Option<PathBuf>,
 }
 
 fn args() -> Result<Args, String> {
@@ -46,6 +50,7 @@ fn args() -> Result<Args, String> {
     let mut out = None;
     let mut fixtures = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/masks"));
     let mut only = None;
+    let mut flexi = None;
     let mut it = std::env::args().skip(1);
     while let Some(a) = it.next() {
         let mut value = || it.next().ok_or(format!("{a}: a value expected"));
@@ -54,6 +59,7 @@ fn args() -> Result<Args, String> {
             "--out" => out = Some(PathBuf::from(value()?)),
             "--fixtures" => fixtures = PathBuf::from(value()?),
             "--only" => only = Some(value()?),
+            "--darktable-flexi" => flexi = Some(PathBuf::from(value()?)),
             other => return Err(format!("unknown argument `{other}`")),
         }
     }
@@ -62,6 +68,7 @@ fn args() -> Result<Args, String> {
         out: out.ok_or("--out DIR expected")?,
         fixtures,
         only,
+        flexi,
     })
 }
 
@@ -195,6 +202,7 @@ fn run(
     dt: &Darktable,
     args: &Args,
     fixture: &Fixture,
+    label: &str,
     bases: &mut Vec<(String, Image)>,
 ) -> Result<Outcome, String> {
     let start = Instant::now();
@@ -208,8 +216,11 @@ fn run(
     let work = args.out.join("work");
     if !bases.iter().any(|(r, _)| r == fixture.raw) {
         let unmasked = masks::unmasked_sidecar(&Layouts::built_in())?;
-        let base =
-            dt.render_raw_sidecar(&raw, &unmasked, &work.join(format!("base-{}", fixture.raw)))?;
+        let base = dt.render_raw_sidecar(
+            &raw,
+            &unmasked,
+            &work.join(format!("base-{label}-{}", fixture.raw)),
+        )?;
         bases.push((fixture.raw.to_string(), base));
     }
     let theirs_base = &bases
@@ -217,7 +228,7 @@ fn run(
         .find(|(r, _)| r == fixture.raw)
         .expect("rendered")
         .1;
-    let theirs = dt.render_raw_sidecar(&raw, &xmp, &work.join(fixture.name))?;
+    let theirs = dt.render_raw_sidecar(&raw, &xmp, &work.join(label))?;
     let (ours_base, ours_mask, ours) = helios(&raw, &xmp)?;
 
     // Where darktable's image sits on Helios's: their crops may differ.
@@ -264,13 +275,10 @@ fn run(
     let p999 = *diffs.select_nth_unstable_by(rank, f64::total_cmp).1;
     let dir = args.out.join("masks");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    write_pgm(&mask, &dir.join(format!("{}.helios.pgm", fixture.name)))?;
-    write_pgm(
-        &theirs_mask,
-        &dir.join(format!("{}.darktable.pgm", fixture.name)),
-    )?;
+    write_pgm(&mask, &dir.join(format!("{label}.helios.pgm")))?;
+    write_pgm(&theirs_mask, &dir.join(format!("{label}.darktable.pgm")))?;
     Ok(Outcome {
-        name: fixture.name.into(),
+        name: label.into(),
         raw: fixture.raw.into(),
         mask: mask_diff,
         mask_mean: mean,
@@ -309,13 +317,44 @@ fn main() -> ExitCode {
         eprintln!("mask-parity: {}: {e}", args.out.display());
         return ExitCode::from(2);
     }
+    let flexi = match args.flexi.as_deref().map(Darktable::at).transpose() {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("mask-parity: {e}");
+            return ExitCode::from(2);
+        }
+    };
+    if let Some(f) = &flexi {
+        eprintln!("and the flexi masks' {}", f.version);
+    }
     let mut bases = Vec::new();
-    let mut results: Vec<(String, Result<Outcome, String>)> = Vec::new();
+    let mut flexi_bases = Vec::new();
+    let mut runs: Vec<(String, Fixture, bool)> = Vec::new();
     for fixture in masks::fixtures() {
         if args.only.as_deref().is_some_and(|o| o != fixture.name) {
             continue;
         }
-        let r = run(&dt, &args, &fixture, &mut bases);
+        if !fixture.flexi && flexi.is_some() {
+            runs.push((
+                format!("{}@flexi", fixture.name),
+                masks::fixtures()
+                    .into_iter()
+                    .find(|f| f.name == fixture.name)
+                    .expect("the same"),
+                true,
+            ));
+        }
+        let on_flexi = fixture.flexi;
+        runs.push((fixture.name.to_string(), fixture, on_flexi));
+    }
+    runs.sort_by_key(|(_, _, on_flexi)| *on_flexi);
+    let mut results: Vec<(String, Result<Outcome, String>)> = Vec::new();
+    for (label, fixture, on_flexi) in &runs {
+        let r = match (on_flexi, &flexi) {
+            (false, _) => run(&dt, &args, fixture, label, &mut bases),
+            (true, Some(f)) => run(f, &args, fixture, label, &mut flexi_bases),
+            (true, None) => Err("a flexi fixture: needs --darktable-flexi".into()),
+        };
         match &r {
             Ok(o) => eprintln!(
                 "{}: mask ΔE mean {:.3} p99.9 {:.3} max {:.2}; mask |Δ| mean {:.4} p99.9 {:.4}; chain ΔE mean {:.3} p99.9 {:.3}; shift {:?}; {:.1} s",
@@ -330,9 +369,9 @@ fn main() -> ExitCode {
                 o.shift,
                 o.seconds
             ),
-            Err(e) => eprintln!("{}: {e}", fixture.name),
+            Err(e) => eprintln!("{label}: {e}"),
         }
-        results.push((fixture.name.to_string(), r));
+        results.push((label.clone(), r));
     }
     let _ = std::fs::remove_dir_all(args.out.join("work"));
 
