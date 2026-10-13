@@ -22,6 +22,7 @@ pub mod error;
 pub mod graph;
 pub mod image;
 pub mod manifest;
+pub mod message;
 pub mod module;
 pub mod network;
 pub mod params;
@@ -38,6 +39,7 @@ pub use manifest::{
     Family, Manifest, ModuleKind, Needs, ParamHint, ParamKind, ParamSpec, PixelFormat, PortKind,
     PortSpec, Role,
 };
+pub use message::{Arg, Message};
 pub use module::{
     Accelerator, AcceleratorError, Context, DeviceImage, Extent, Failure, GpuJob, GpuKernel,
     Memory, Module, ModuleRef,

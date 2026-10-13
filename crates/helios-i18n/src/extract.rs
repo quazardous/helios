@@ -59,6 +59,50 @@ pub struct Declarations {
     /// keys left out: `interface.ftl`.
     #[serde(default)]
     pub interface: BTreeMap<String, String>,
+    /// The messages the code builds (`Message::new("key", "English")`),
+    /// by key with their English Fluent pattern: `messages.ftl`.
+    #[serde(default)]
+    pub messages: BTreeMap<String, String>,
+}
+
+/// The calls whose literal key and English the extractor reads from
+/// Helios's sources: `Message::new("key", "English { $arg }")`.
+pub const PATTERNS: &[extract::Pattern] = &[extract::Pattern {
+    callee: "Message::new",
+    key: 0,
+    english: Some(1),
+}];
+
+/// The messages Helios's code builds: every `Message::new` with a literal
+/// key and English in the `src` of each crate and module under `root`
+/// (`crates/*/src`, `modules/*/src`), by key. Refused when one key is
+/// given two English texts. Tests build their messages through a
+/// variable key, so they never reach the catalogue.
+pub fn code_messages(root: &std::path::Path) -> Result<BTreeMap<String, String>, String> {
+    let mut found = Vec::new();
+    for area in ["crates", "modules"] {
+        let Ok(dirs) = std::fs::read_dir(root.join(area)) else {
+            continue;
+        };
+        let mut dirs: Vec<_> = dirs.filter_map(|e| e.ok().map(|e| e.path())).collect();
+        dirs.sort();
+        for dir in dirs {
+            let src = dir.join("src");
+            if src.is_dir() {
+                found.extend(
+                    extract::scan_dir(&src, PATTERNS)
+                        .map_err(|e| format!("{}: {e}", src.display()))?,
+                );
+            }
+        }
+    }
+    Ok(extract::messages(&found)?
+        .into_iter()
+        .filter_map(|(k, e)| match e {
+            English::Pattern(p) => Some((k, p)),
+            _ => None,
+        })
+        .collect())
 }
 
 impl Declarations {
@@ -103,14 +147,46 @@ impl Declarations {
                 })
                 .collect(),
             interface: BTreeMap::new(),
+            messages: BTreeMap::new(),
         }
     }
 
-    /// Every message key with its English text.
+    /// Every message key derived from a declaration, with its English
+    /// text (the code's messages, which are patterns, left out).
     pub fn english(&self) -> BTreeMap<MessageId, String> {
         self.areas()
             .into_values()
             .flat_map(std::iter::IntoIterator::into_iter)
+            .collect()
+    }
+
+    /// Every key with its English, as the extractor finds them: the
+    /// declarations' texts, the interface's, and the code's patterns.
+    pub fn found(&self) -> Vec<Found> {
+        let plain = self
+            .english()
+            .into_iter()
+            .map(|(id, text)| (id.key(), English::Plain(text)))
+            .chain(
+                self.interface
+                    .iter()
+                    .map(|(k, t)| (k.clone(), English::Plain(t.clone()))),
+            );
+        let patterns = self
+            .messages
+            .iter()
+            .map(|(k, p)| (k.clone(), English::Pattern(p.clone())));
+        plain
+            .chain(patterns)
+            .filter(|(_, e)| match e {
+                English::Plain(t) | English::Pattern(t) => !t.trim().is_empty(),
+                English::None => false,
+            })
+            .map(|(key, english)| Found {
+                key,
+                english,
+                origin: String::new(),
+            })
             .collect()
     }
 
@@ -142,7 +218,8 @@ impl Declarations {
     }
 
     /// The English catalogue: one Fluent file per area (`commands.ftl`,
-    /// `panels.ftl`, `modules.ftl`, `interface.ftl`), messages sorted by
+    /// `panels.ftl`, `modules.ftl`, `interface.ftl`, and `messages.ftl`
+    /// for the messages the code builds), messages sorted by
     /// id, so the same declarations always give the same bytes. Refused
     /// when two stable ids give the same message key with two texts;
     /// empty texts are left out (Fluent has no empty value).
@@ -189,6 +266,20 @@ impl Declarations {
             let messages = extract::messages(&found)?;
             files.insert(file, extract::english(&messages, HEADER));
         }
+        if !self.messages.is_empty() {
+            let found: Vec<Found> = self
+                .messages
+                .iter()
+                .map(|(key, pattern)| Found {
+                    key: key.clone(),
+                    english: English::Pattern(pattern.clone()),
+                    origin: "messages.ftl".into(),
+                })
+                .collect();
+            all.extend(found.iter().cloned());
+            let messages = extract::messages(&found)?;
+            files.insert("messages.ftl", extract::english(&messages, HEADER));
+        }
         // Across files too: one key, one text.
         extract::messages(&all)?;
         Ok(files)
@@ -196,7 +287,7 @@ impl Declarations {
 }
 
 const HEADER: &str = "\
-# Generated from Helios's declarations by `cargo xtask i18n extract`:
+# Generated from Helios's declarations and code by `cargo xtask i18n extract`:
 # do not edit. Translations live in i18n/<locale>/ under the same names.
 ";
 

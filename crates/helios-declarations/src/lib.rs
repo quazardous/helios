@@ -1,7 +1,8 @@
 //! Everything Helios declares with English text: the desktop's commands
 //! (the shell's registry, values commands included) and panels, every
 //! module's parameters, and the rest of what the desktop declares to
-//! egui-pop (categories, submenus, settings, plugins). The English
+//! egui-pop (categories, submenus, settings, plugins), and the messages
+//! its code builds (`Message::new`, read from the sources). The English
 //! catalogue (`i18n/en`) is generated from it, so no list of the ids built
 //! at run time is kept by hand.
 //!
@@ -65,5 +66,9 @@ pub fn collect() -> Declarations {
             d.interface.entry(f.key).or_insert(text);
         }
     }
+    // The messages the code builds, read from the sources.
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    d.messages = helios_i18n::extract::code_messages(&root)
+        .unwrap_or_else(|e| panic!("the code's messages: {e}"));
     d
 }

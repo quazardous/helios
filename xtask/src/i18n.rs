@@ -93,26 +93,7 @@ fn extract_english(root: &Path, dir: &Path) -> Result<usize, String> {
         std::fs::write(en.join(name), text).map_err(|e| format!("i18n/en/{name}: {e}"))?;
     }
     // What each translation lacks, and keeps that English dropped.
-    let english: Vec<extract::Found> = declarations
-        .english()
-        .into_iter()
-        .map(|(id, text)| extract::Found {
-            key: id.key(),
-            english: extract::English::Plain(text),
-            origin: String::new(),
-        })
-        .chain(
-            declarations
-                .interface
-                .iter()
-                .map(|(key, text)| extract::Found {
-                    key: key.clone(),
-                    english: extract::English::Plain(text.clone()),
-                    origin: String::new(),
-                }),
-        )
-        .filter(|f| !matches!(&f.english, extract::English::Plain(t) if t.trim().is_empty()))
-        .collect();
+    let english = declarations.found();
     let messages = extract::messages(&english)?;
     let catalogs = Catalogs::read(dir).map_err(|e| format!("i18n/: {e}"))?;
     for l in extract::report(&catalogs, &messages) {

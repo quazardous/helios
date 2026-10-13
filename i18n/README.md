@@ -1,20 +1,29 @@
 # Translations
 
 One directory per locale, one Fluent file per area: `commands.ftl`,
-`panels.ftl`, `modules.ftl`, and `interface.ftl` for the rest of what the
-desktop declares (command categories, menus, settings). They are built
+`panels.ftl`, `modules.ftl`, `interface.ftl` for the rest of what the
+desktop declares (command categories, menus, settings), and
+`messages.ftl` for the messages the code builds (a GPU that fell back, an
+export that failed, a toast). They are built
 into the desktop (`helios-i18n`) and read by egui-pop's translation
 plugin, which also brings egui-pop's own strings (its menus, palette,
 settings window and dialogs) in English and French.
 
 - `en/` is **generated** from Helios's declarations (commands, panels,
-  module parameters) by `cargo xtask i18n extract`; never edit it. A test
-  fails when it is out of date.
+  module parameters) and its code's messages by `cargo xtask i18n extract`;
+  never edit it. A test fails when it is out of date.
 - Message ids are derived from stable ids, never from English labels:
   `command-<id>` (`.title`), `panel-<id>` (`.title`),
   `param-<module>-<name>` (`.label`, `.description`) and
   `param-<module>-<name>-choice-<value>`, every character other than an
   ASCII letter or digit written `-`. Rewording English keeps the key.
+- A message the code builds is written `Message::new("key", "English
+  { $arg }")` (`helios_core::Message`), with literals: the extractor reads
+  its key and English from the sources (`crates/*/src`, `modules/*/src`).
+  Its key names its area (`engine-…`, `export-…`, `xmp-…`, `gui-…`); its
+  English uses arguments only, translations may use all of Fluent
+  (plurals, `NUMBER`). The message carries its English, so whoever cannot
+  translate it still reads it.
 - A locale may translate only some keys: the rest falls back to its parent
   (`fr-CA` to `fr`), then to English.
 - `<locale>/english.hashes` records the English each key was translated
