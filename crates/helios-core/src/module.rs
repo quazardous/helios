@@ -7,6 +7,7 @@ use std::sync::Arc;
 use crate::error::Error;
 use crate::image::{Image, Region};
 use crate::manifest::{Manifest, ParamHint};
+use crate::network::{Composite, Expansion, Network};
 use crate::params::{Params, Value};
 
 /// Context inputs: metadata of the image being processed (for the photo
@@ -353,6 +354,50 @@ impl ModuleRef {
         Self(Arc::new(Adapter { module, manifest }))
     }
 
+    /// A node that stands for a network (a macro, a multi-kernel module):
+    /// the engine expands it into its inner nodes when it plans a render.
+    pub fn composite<C: Composite>(composite: C) -> Self {
+        let manifest = composite.manifest();
+        Self(Arc::new(CompositeAdapter {
+            composite,
+            manifest,
+        }))
+    }
+
+    /// Whether it stands for a network.
+    pub fn is_composite(&self) -> bool {
+        self.0.is_composite()
+    }
+
+    /// The network a composite is with these parameters (checked and
+    /// completed with defaults) at `at`, checked; `None` for a module that
+    /// computes itself.
+    pub fn expand(
+        &self,
+        params: &Params,
+        context: &Context,
+        at: &Expansion,
+    ) -> Result<Option<Network>, Error> {
+        if !self.is_composite() {
+            return Ok(None);
+        }
+        let context = context.restricted_to(&self.manifest().context);
+        let network = self
+            .0
+            .expand(params, &context, at)
+            .map_err(|reason| self.module_error(reason))?;
+        network.check(&self.manifest().name)?;
+        if network.inputs().len() != self.manifest().inputs.len()
+            || network.outputs().len() != self.manifest().outputs.len()
+        {
+            return Err(Error::Contract {
+                module: self.manifest().name.clone(),
+                reason: "its network's ports are not its own".into(),
+            });
+        }
+        Ok(Some(network))
+    }
+
     pub fn manifest(&self) -> &Manifest {
         self.0.manifest()
     }
@@ -391,8 +436,30 @@ impl ModuleRef {
         scale: f64,
         output: Region,
     ) -> Result<Region, Error> {
+        self.reads_in(params, context, &Expansion::new(scale, None), output)
+    }
+
+    /// [`ModuleRef::reads`] for an image of a known extent (`at`), which a
+    /// composite whose sizes are fractions of the image needs. A
+    /// composite reads the bounds of what its inner network reads of its
+    /// inputs.
+    pub fn reads_in(
+        &self,
+        params: &Params,
+        context: &Context,
+        at: &Expansion,
+        output: Region,
+    ) -> Result<Region, Error> {
         let params = self.manifest().resolve(params)?;
-        let plan = self.prepare(&params, context, scale)?;
+        if let Some(network) = self.expand(&params, context, at)? {
+            let reads = network.reads(context, at, output)?;
+            return Ok(reads
+                .into_iter()
+                .flatten()
+                .reduce(|a, b| a.bounds(&b))
+                .unwrap_or(output));
+        }
+        let plan = self.prepare(&params, context, at.scale)?;
         Ok(self.input_region(&plan, output))
     }
 
@@ -554,6 +621,66 @@ trait Erased: Send + Sync {
     fn gpu_uniforms(&self, plan: &Plan) -> Vec<f32>;
     fn process(&self, plan: &Plan, inputs: &[&Image], output: Region)
     -> Result<Vec<Image>, String>;
+    fn is_composite(&self) -> bool {
+        false
+    }
+    fn expand(&self, _: &Params, _: &Context, _: &Expansion) -> Result<Network, String> {
+        Err("not a composite".into())
+    }
+}
+
+/// A composite behind the uniform interface: it never prepares or
+/// processes, the engine expands it.
+struct CompositeAdapter<C: Composite> {
+    composite: C,
+    manifest: Manifest,
+}
+
+impl<C: Composite> Erased for CompositeAdapter<C> {
+    fn manifest(&self) -> &Manifest {
+        &self.manifest
+    }
+
+    fn param_hints(&self) -> Vec<ParamHint> {
+        self.composite.param_hints()
+    }
+
+    fn prepare(&self, _: &Params, _: &Context, _: f64) -> Result<Plan, String> {
+        Ok(Arc::new(()))
+    }
+
+    fn input_region(&self, _: &Plan, output: Region) -> Region {
+        output
+    }
+
+    fn extent(&self, _: &Plan) -> Option<Extent> {
+        None
+    }
+
+    fn gpu_kernel(&self) -> Option<GpuKernel> {
+        None
+    }
+
+    fn gpu_uniforms(&self, _: &Plan) -> Vec<f32> {
+        Vec::new()
+    }
+
+    fn process(&self, _: &Plan, _: &[&Image], _: Region) -> Result<Vec<Image>, String> {
+        Err("a composite is expanded into its network, never processed".into())
+    }
+
+    fn is_composite(&self) -> bool {
+        true
+    }
+
+    fn expand(
+        &self,
+        params: &Params,
+        context: &Context,
+        at: &Expansion,
+    ) -> Result<Network, String> {
+        self.composite.expand(params, context, at)
+    }
 }
 
 struct Adapter<M: Module> {

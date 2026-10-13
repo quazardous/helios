@@ -56,8 +56,10 @@ use crate::error::Error;
 use crate::graph::{Graph, Kind, NodeId};
 use crate::image::{ContentHash, Image, Region};
 use crate::manifest::{Family, ModuleKind, Role};
-use crate::module::ModuleRef;
 use crate::module::{Accelerator, AcceleratorError, DeviceImage, Extent, Failure};
+use crate::module::{Context, ModuleRef};
+use crate::network::{Expansion, Network, Wire};
+use crate::params::Params;
 use crate::status::{Load, NodeState, NodeStatus, NodeType};
 
 /// The source name the engine publishes events under.
@@ -309,8 +311,87 @@ enum Work {
     Reduce { input: Arc<Step>, scale: f64 },
 }
 
-/// A node at a scale (its bits): what planning plans once per render.
-type Unit = (NodeId, u64);
+/// A node at a scale (its bits): what planning plans once per render. An
+/// inner node of a composite is a unit of its own, `inner` numbering it
+/// within the plan (0 for a node of the graph).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+struct Unit {
+    node: NodeId,
+    inner: u32,
+    scale: u64,
+}
+
+impl Unit {
+    fn of(node: NodeId, scale: u64) -> Self {
+        Self {
+            node,
+            inner: 0,
+            scale,
+        }
+    }
+}
+
+/// An inner node of a composite, as planning knows it.
+struct InnerUnit {
+    /// The composite's unit.
+    parent: Unit,
+    network: Arc<Network>,
+    index: usize,
+    /// The path of names from the graph's node, `/`-separated.
+    name: String,
+    context: Context,
+}
+
+/// What a unit stands for, before it is shaped.
+enum Desc {
+    Source(Image, ContentHash),
+    Module {
+        name: String,
+        module: ModuleRef,
+        params: Params,
+        context: Context,
+        answered: bool,
+        /// For each input port: the unit and output port feeding it.
+        inputs: Vec<Option<(Unit, usize)>>,
+    },
+}
+
+/// Inner slots past this one are a composite's reduced outputs (a
+/// composite needing full resolution, in a render at a scale below 1).
+const REDUCED_SLOT: usize = usize::MAX / 2;
+
+/// One render's planning: each unit shaped once.
+struct Planning<'g> {
+    graph: &'g Graph,
+    shapes: HashMap<Unit, Shape>,
+    /// Units with steps, producers first (composites have none).
+    order: Vec<Unit>,
+    /// Inner units by composite unit and slot.
+    inner_ids: HashMap<(Unit, usize), u32>,
+    inners: HashMap<u32, InnerUnit>,
+}
+
+impl Planning<'_> {
+    /// The unit of slot `slot` of the composite `parent`.
+    fn intern(&mut self, parent: Unit, slot: usize) -> Unit {
+        let next = self.inner_ids.len() as u32 + 1;
+        let inner = *self.inner_ids.entry((parent, slot)).or_insert(next);
+        Unit {
+            node: parent.node,
+            inner,
+            scale: parent.scale,
+        }
+    }
+
+    /// The unit and port that really produce output `port` of `unit`
+    /// (shaped): a composite's output is one of its inner nodes'.
+    fn resolve(&self, unit: Unit, port: usize) -> (Unit, usize) {
+        match &self.shapes[&unit].kind {
+            ShapeKind::Composite { exits, .. } => exits[port],
+            _ => (unit, port),
+        }
+    }
+}
 
 /// A unit as planning knows it before regions: its lineage and what it reads.
 struct Shape {
@@ -321,6 +402,12 @@ struct Shape {
 
 enum ShapeKind {
     Source(Image, f64),
+    /// A node standing for a network: no step of its own, its outputs are
+    /// its inner nodes' (resolved) and its inputs feed them.
+    Composite {
+        exits: Vec<(Unit, usize)>,
+        inputs: Vec<Option<(Unit, usize)>>,
+    },
     Pending {
         inputs: Vec<(Unit, usize)>,
     },
@@ -536,11 +623,15 @@ pub struct Engine {
     last_fallback: Mutex<Option<String>>,
 }
 
-type TrackKey = (u64, NodeId, Region);
+/// A step's graph, node, name (an inner node's path) and region.
+type TrackKey = (u64, NodeId, String, Region);
 
 /// A planned render: the step asked for (it reads every other).
 struct Planned {
     root: Arc<Step>,
+    /// The root's output port asked for (a composite's output is one of
+    /// its inner nodes').
+    port: usize,
     /// Every step, producers first.
     steps: Vec<Arc<Step>>,
 }
@@ -627,7 +718,7 @@ impl Engine {
     fn track<R>(&self, step: &Step, f: impl FnOnce(&mut Track) -> R) -> R {
         let mut tracks = self.tracks.lock().expect("engine tracks lock");
         f(tracks
-            .entry((step.graph, step.node, step.region))
+            .entry((step.graph, step.node, step.name.clone(), step.region))
             .or_default())
     }
 
@@ -641,7 +732,7 @@ impl Engine {
         node: NodeId,
         region: Region,
     ) -> Result<Vec<NodeStatus>, Error> {
-        let step = self.plan(graph, node, region, 1.0)?.root;
+        let step = self.plan(graph, node, 0, region, 1.0)?.root;
         let mut out = Vec::new();
         self.collect_status(graph, &step, &mut out)?;
         Ok(out)
@@ -657,7 +748,7 @@ impl Engine {
         // steps are walked once.
         if out
             .iter()
-            .any(|s| s.node == step.node && s.region == step.region)
+            .any(|s| s.node == step.node && s.name == step.name && s.region == step.region)
         {
             return Ok(());
         }
@@ -839,12 +930,12 @@ impl Engine {
         // on the CPU.
         let mut replays = 0;
         loop {
-            let planned = self.plan(graph, node, region, scale)?;
+            let planned = self.plan(graph, node, index, region, scale)?;
             let pins = self.pin(&planned);
             let evictions = self.cache.lock().expect("engine cache lock").evictions;
             let result = self
                 .execute(&planned.root, cause, &pins)
-                .and_then(|content| finish(&planned.root, &content, index));
+                .and_then(|content| finish(&planned.root, &content, planned.port));
             // Whatever happened, the render's pins go, and the cache settles
             // within its budget.
             let settled = {
@@ -1109,23 +1200,32 @@ impl Engine {
         region: Region,
         scale: f64,
     ) -> Result<ContentHash, Error> {
-        Ok(self.plan(graph, node, region, scale)?.root.key)
+        Ok(self.plan(graph, node, 0, region, scale)?.root.key)
     }
 
-    /// Plans a render of `id` over `region` at `scale`: each node it reads
-    /// once, consumers before producers to gather the regions each node is
-    /// read over, then the steps, producers first.
+    /// Plans a render of output `port` (by index) of `id` over `region` at
+    /// `scale`: each node it reads once (a composite's inner nodes each
+    /// once too), consumers before producers to gather the regions each
+    /// node is read over, then the steps, producers first.
     fn plan(
         &self,
         graph: &Graph,
         id: NodeId,
+        port: usize,
         region: Region,
         scale: f64,
     ) -> Result<Planned, Error> {
-        let root: Unit = (id, scale.to_bits());
-        let mut shapes = HashMap::new();
-        let mut order = Vec::new();
-        self.shape(graph, root, &mut shapes, &mut order)?;
+        let mut p = Planning {
+            graph,
+            shapes: HashMap::new(),
+            order: Vec::new(),
+            inner_ids: HashMap::new(),
+            inners: HashMap::new(),
+        };
+        let top = Unit::of(id, scale.to_bits());
+        self.shape(&mut p, top)?;
+        let (root, port) = p.resolve(top, port);
+        let Planning { shapes, order, .. } = p;
 
         // The regions each unit is read over, then their unions.
         let mut asked: HashMap<Unit, Vec<Region>> = HashMap::from([(root, vec![region])]);
@@ -1138,7 +1238,7 @@ impl Engine {
             let shape: &Shape = &shapes[unit];
             for r in &merged {
                 match &shape.kind {
-                    ShapeKind::Source(..) => {}
+                    ShapeKind::Source(..) | ShapeKind::Composite { .. } => {}
                     ShapeKind::Reduce { input, scale } => {
                         asked
                             .entry(*input)
@@ -1190,6 +1290,7 @@ impl Engine {
             for r in merged {
                 let work = match &shape.kind {
                     ShapeKind::Source(image, scale) => Work::Source(image.clone(), *scale),
+                    ShapeKind::Composite { .. } => unreachable!("a composite has no step"),
                     ShapeKind::Reduce { input, scale } => Work::Reduce {
                         input: reading(input, r.full_resolution(*scale)),
                         scale: *scale,
@@ -1236,7 +1337,7 @@ impl Engine {
                     key: ContentHash(*h.finalize().as_bytes()),
                     lineage: shape.lineage,
                     graph: graph.id(),
-                    node: unit.0,
+                    node: unit.node,
                     name: shape.name.clone(),
                     region: r,
                     work,
@@ -1253,59 +1354,149 @@ impl Engine {
             .filter_map(|u| steps.remove(u))
             .flatten()
             .collect();
-        Ok(Planned { root, steps })
+        Ok(Planned { root, port, steps })
     }
 
-    /// Plans `unit` and everything it reads, each once (`shapes`), adding
-    /// them to `order` producers first: their lineages and what they read.
-    fn shape(
-        &self,
-        graph: &Graph,
-        unit: Unit,
-        shapes: &mut HashMap<Unit, Shape>,
-        order: &mut Vec<Unit>,
-    ) -> Result<(), Error> {
-        if shapes.contains_key(&unit) {
+    /// What `unit` stands for: a node of the graph, or an inner node of a
+    /// composite with its inputs wired to the composite's inputs and its
+    /// siblings.
+    fn describe(p: &mut Planning, unit: Unit) -> Result<Desc, Error> {
+        if unit.inner == 0 {
+            let node = p.graph.node(unit.node)?;
+            return Ok(match &node.kind {
+                Kind::Source { image, hash } => Desc::Source(image.clone(), *hash),
+                Kind::Module {
+                    module,
+                    params,
+                    context,
+                    answered,
+                } => Desc::Module {
+                    name: node.name.clone(),
+                    module: module.clone(),
+                    params: params.clone(),
+                    context: context.clone(),
+                    answered: *answered,
+                    inputs: node
+                        .inputs
+                        .iter()
+                        .map(|c| c.map(|(src, port)| (Unit::of(src, unit.scale), port)))
+                        .collect(),
+                },
+            });
+        }
+        let inner = &p.inners[&unit.inner];
+        let (parent, network, index) = (inner.parent, inner.network.clone(), inner.index);
+        let (name, context) = (inner.name.clone(), inner.context.clone());
+        let ShapeKind::Composite {
+            inputs: outer_inputs,
+            ..
+        } = &p.shapes[&parent].kind
+        else {
+            unreachable!("an inner unit's parent is a composite");
+        };
+        let outer_inputs = outer_inputs.clone();
+        let node = &network.nodes()[index];
+        let inputs = node
+            .inputs
+            .iter()
+            .map(|wire| match wire {
+                None => None,
+                Some(Wire::Input(i)) => outer_inputs[*i],
+                Some(Wire::Node(n, port)) => Some((p.intern(parent, n.0), *port)),
+            })
+            .collect();
+        Ok(Desc::Module {
+            name,
+            module: node.module.clone(),
+            params: node.params.clone(),
+            context,
+            answered: true,
+            inputs,
+        })
+    }
+
+    /// Shapes the unit feeding an input and gives the unit and port that
+    /// really produce it.
+    fn input(&self, p: &mut Planning, input: (Unit, usize)) -> Result<(Unit, usize), Error> {
+        self.shape(p, input.0)?;
+        Ok(p.resolve(input.0, input.1))
+    }
+
+    /// Plans `unit` and everything it reads, each once (`p.shapes`),
+    /// adding those with steps to `p.order` producers first: their
+    /// lineages and what they read. A composite is expanded into its inner
+    /// nodes here, each a unit of its own.
+    fn shape(&self, p: &mut Planning, unit: Unit) -> Result<(), Error> {
+        if p.shapes.contains_key(&unit) {
             return Ok(());
         }
-        let (id, bits) = unit;
-        let scale = f64::from_bits(bits);
-        let node = graph.node(id)?;
+        let scale = f64::from_bits(unit.scale);
+        let desc = Self::describe(p, unit)?;
         let mut h = blake3::Hasher::new();
         h.update(&scale.to_le_bytes());
-        let kind = match &node.kind {
-            Kind::Source { image, hash } => {
+        let (name, kind) = match desc {
+            Desc::Source(image, hash) => {
                 h.update(b"helios.step.source.v1");
                 h.update(&hash.0);
-                ShapeKind::Source(image.clone(), scale)
+                (
+                    p.graph.name(unit.node)?.to_string(),
+                    ShapeKind::Source(image, scale),
+                )
             }
-            Kind::Module {
-                answered: false, ..
+            Desc::Module {
+                name,
+                answered: false,
+                inputs,
+                ..
             } => {
                 h.update(b"helios.step.pending.v1");
-                let mut inputs = Vec::with_capacity(node.inputs.len());
-                for (src, port) in node.inputs.iter().flatten() {
-                    let input = (*src, bits);
-                    self.shape(graph, input, shapes, order)?;
-                    h.update(&shapes[&input].lineage.0);
-                    inputs.push((input, *port));
+                let mut resolved = Vec::with_capacity(inputs.len());
+                for input in inputs.into_iter().flatten() {
+                    let input = self.input(p, input)?;
+                    h.update(&p.shapes[&input.0].lineage.0);
+                    resolved.push(input);
                 }
-                ShapeKind::Pending { inputs }
+                (name, ShapeKind::Pending { inputs: resolved })
             }
-            Kind::Module { module, .. }
+            Desc::Module { name, module, .. }
                 if scale < 1.0 && module.manifest().needs.full_resolution =>
             {
+                if unit.inner != 0 {
+                    return Err(Error::Contract {
+                        module: name,
+                        reason: "an inner node needs full resolution: its composite must \
+                                 declare it"
+                            .into(),
+                    });
+                }
                 // Computed at full resolution, then reduced.
-                let full = (id, 1.0f64.to_bits());
-                self.shape(graph, full, shapes, order)?;
+                let full = Unit::of(unit.node, 1.0f64.to_bits());
+                self.shape(p, full)?;
+                if let ShapeKind::Composite { exits, .. } = &p.shapes[&full].kind {
+                    let exits = exits.clone();
+                    Self::reduce_composite(p, unit, name, exits);
+                    return Ok(());
+                }
                 h.update(b"helios.step.reduce.v1");
-                h.update(&shapes[&full].lineage.0);
-                ShapeKind::Reduce { input: full, scale }
+                h.update(&p.shapes[&full].lineage.0);
+                (name, ShapeKind::Reduce { input: full, scale })
             }
-            Kind::Module {
+            Desc::Module {
+                name,
                 module,
                 params,
                 context,
+                inputs,
+                ..
+            } if module.is_composite() => {
+                return self.shape_composite(p, unit, name, &module, &params, &context, inputs);
+            }
+            Desc::Module {
+                name,
+                module,
+                params,
+                context,
+                inputs,
                 ..
             } => {
                 let manifest = module.manifest();
@@ -1313,7 +1504,7 @@ impl Engine {
                 h.update(manifest.name.as_bytes());
                 h.update(&manifest.version.to_le_bytes());
                 h.update(&params.canonical_bytes());
-                let plan = module.prepare(params, context, scale)?;
+                let plan = module.prepare(&params, &context, scale)?;
                 h.update(&context.restricted_to(&manifest.context).canonical_bytes());
                 let accelerated = match self.active() {
                     Some(a) if module.acceleratable() => {
@@ -1323,11 +1514,11 @@ impl Engine {
                     }
                     _ => false,
                 };
-                let mut inputs = Vec::with_capacity(node.inputs.len());
+                let mut resolved = Vec::with_capacity(inputs.len());
                 let mut absent = Vec::new();
-                for (i, connection) in node.inputs.iter().enumerate() {
+                for (i, connection) in inputs.into_iter().enumerate() {
                     let spec = &manifest.inputs[i];
-                    let Some((src, port)) = *connection else {
+                    let Some(input) = connection else {
                         if spec.optional {
                             h.update(b"helios.step.absent.v1");
                             h.update(&(i as u64).to_le_bytes());
@@ -1335,36 +1526,173 @@ impl Engine {
                             continue;
                         }
                         return Err(Error::Unconnected {
-                            node: node.name.clone(),
+                            node: name,
                             port: spec.name.clone(),
                         });
                     };
-                    let input = (src, bits);
-                    self.shape(graph, input, shapes, order)?;
-                    h.update(&shapes[&input].lineage.0);
+                    let (src, port) = self.input(p, input)?;
+                    h.update(&p.shapes[&src].lineage.0);
                     h.update(&(port as u64).to_le_bytes());
-                    inputs.push((input, port));
+                    resolved.push((src, port));
                 }
                 let extent = module.extent(&plan);
-                ShapeKind::Module {
-                    module: module.clone(),
-                    plan,
-                    inputs,
-                    absent,
-                    accelerated,
-                    extent,
-                }
+                (
+                    name,
+                    ShapeKind::Module {
+                        module,
+                        plan,
+                        inputs: resolved,
+                        absent,
+                        accelerated,
+                        extent,
+                    },
+                )
             }
         };
-        shapes.insert(
+        p.shapes.insert(
             unit,
             Shape {
                 lineage: ContentHash(*h.finalize().as_bytes()),
-                name: node.name.clone(),
+                name,
                 kind,
             },
         );
-        order.push(unit);
+        p.order.push(unit);
+        Ok(())
+    }
+
+    /// A composite needing full resolution, in a render at a scale below
+    /// 1: each output of its full-resolution expansion (`exits`), reduced
+    /// on its own.
+    fn reduce_composite(p: &mut Planning, unit: Unit, name: String, exits: Vec<(Unit, usize)>) {
+        let scale = f64::from_bits(unit.scale);
+        let mut h = blake3::Hasher::new();
+        h.update(&scale.to_le_bytes());
+        h.update(b"helios.step.composite.v1");
+        let mut reduced = Vec::with_capacity(exits.len());
+        for (k, (input, port)) in exits.into_iter().enumerate() {
+            let r = p.intern(unit, REDUCED_SLOT + k);
+            let mut hr = blake3::Hasher::new();
+            hr.update(&scale.to_le_bytes());
+            hr.update(b"helios.step.reduce.v1");
+            hr.update(&p.shapes[&input].lineage.0);
+            let lineage = ContentHash(*hr.finalize().as_bytes());
+            h.update(&lineage.0);
+            h.update(&(port as u64).to_le_bytes());
+            p.shapes.insert(
+                r,
+                Shape {
+                    lineage,
+                    name: name.clone(),
+                    kind: ShapeKind::Reduce { input, scale },
+                },
+            );
+            p.order.push(r);
+            reduced.push((r, port));
+        }
+        p.shapes.insert(
+            unit,
+            Shape {
+                lineage: ContentHash(*h.finalize().as_bytes()),
+                name,
+                kind: ShapeKind::Composite {
+                    exits: reduced,
+                    inputs: Vec::new(),
+                },
+            },
+        );
+    }
+
+    /// Expands a composite: its inputs shaped, its network asked for at
+    /// the render's scale and its image's extent, then its outputs' inner
+    /// nodes shaped (and through them, everything they read). Inner nodes
+    /// no output reads are never planned.
+    #[allow(clippy::too_many_arguments)]
+    fn shape_composite(
+        &self,
+        p: &mut Planning,
+        unit: Unit,
+        name: String,
+        module: &ModuleRef,
+        params: &Params,
+        context: &Context,
+        inputs: Vec<Option<(Unit, usize)>>,
+    ) -> Result<(), Error> {
+        let manifest = module.manifest();
+        let mut resolved = Vec::with_capacity(inputs.len());
+        for (i, connection) in inputs.into_iter().enumerate() {
+            match connection {
+                Some(input) => resolved.push(Some(self.input(p, input)?)),
+                None if manifest.inputs[i].optional => resolved.push(None),
+                None => {
+                    return Err(Error::Unconnected {
+                        node: name,
+                        port: manifest.inputs[i].name.clone(),
+                    });
+                }
+            }
+        }
+        let scale = f64::from_bits(unit.scale);
+        let at = Expansion::new(scale, p.graph.extent(unit.node)?);
+        let network = Arc::new(
+            module
+                .expand(params, context, &at)?
+                .expect("checked by the caller: a composite"),
+        );
+        // The context its inner nodes get: what it declares.
+        let context = context.restricted_to(&manifest.context);
+        p.shapes.insert(
+            unit,
+            Shape {
+                lineage: ContentHash([0; 32]),
+                name: name.clone(),
+                kind: ShapeKind::Composite {
+                    exits: Vec::new(),
+                    inputs: resolved.clone(),
+                },
+            },
+        );
+        for (index, node) in network.nodes().iter().enumerate() {
+            let inner = p.intern(unit, index);
+            p.inners.insert(
+                inner.inner,
+                InnerUnit {
+                    parent: unit,
+                    network: network.clone(),
+                    index,
+                    name: format!("{name}/{}", node.name),
+                    context: context.clone(),
+                },
+            );
+        }
+        let mut h = blake3::Hasher::new();
+        h.update(&scale.to_le_bytes());
+        h.update(b"helios.step.composite.v1");
+        let mut exits = Vec::with_capacity(network.exits().len());
+        for (k, exit) in network.exits().iter().enumerate() {
+            let exit = match exit.expect("checked by expand") {
+                Wire::Input(i) => resolved[i].ok_or_else(|| Error::Contract {
+                    module: manifest.name.clone(),
+                    reason: format!(
+                        "output `{}` passes an unconnected input through",
+                        manifest.outputs[k].name
+                    ),
+                })?,
+                Wire::Node(n, port) => {
+                    let inner = p.intern(unit, n.0);
+                    self.input(p, (inner, port))?
+                }
+            };
+            h.update(&p.shapes[&exit.0].lineage.0);
+            h.update(&(exit.1 as u64).to_le_bytes());
+            exits.push(exit);
+        }
+        let shape = p.shapes.get_mut(&unit).expect("inserted above");
+        shape.lineage = ContentHash(*h.finalize().as_bytes());
+        shape.kind = ShapeKind::Composite {
+            exits,
+            inputs: resolved,
+        };
         Ok(())
     }
 

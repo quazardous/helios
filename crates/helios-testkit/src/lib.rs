@@ -8,8 +8,8 @@
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use helios_core::{
-    Bus, Context, Engine, Error, Graph, Image, Manifest, Module, ModuleRef, NodeId, ParamKind,
-    Params, Region, Value,
+    Bus, Context, Engine, Error, Expansion, Graph, Image, Manifest, Module, ModuleRef, NodeId,
+    ParamKind, Params, Region, Value,
 };
 
 /// Held by a test for as long as it has a GPU device of its own open: the
@@ -96,7 +96,14 @@ pub fn check_contract<M: Module>(module: M) -> Result<(), Vec<String>> {
 /// [`check_contract`] for a module that reads context fields (a camera's
 /// description): every render is made with `context`.
 pub fn check_contract_in<M: Module>(module: M, context: &Context) -> Result<(), Vec<String>> {
-    let module = ModuleRef::new(module);
+    check_contract_of(&ModuleRef::new(module), context)
+}
+
+/// [`check_contract_in`] for a module behind its uniform interface: a
+/// composite (a multi-kernel module, a macro) is checked through the
+/// network it expands into.
+pub fn check_contract_of(module: &ModuleRef, context: &Context) -> Result<(), Vec<String>> {
+    let module = module.clone();
     let manifest = module.manifest().clone();
     let mut failures = check_manifest(&manifest);
     for (label, params) in parameter_sets(&manifest) {
@@ -104,7 +111,7 @@ pub fn check_contract_in<M: Module>(module: M, context: &Context) -> Result<(), 
         // sigmoid target at its maximum.
         if label.starts_with("every float")
             && matches!(
-                module.reads(&params, context, 1.0, CONTRACT_REGION),
+                module.reads_in(&params, context, &contract_expansion(), CONTRACT_REGION),
                 Err(Error::Module { .. })
             )
         {
@@ -133,8 +140,13 @@ pub fn assert_contract<M: Module>(module: M) {
 
 /// [`check_contract_in`], panicking with the list of failures.
 pub fn assert_contract_in<M: Module>(module: M, context: &Context) {
-    let name = module.manifest().name;
-    if let Err(failures) = check_contract_in(module, context) {
+    assert_contract_of(&ModuleRef::new(module), context);
+}
+
+/// [`check_contract_of`], panicking with the list of failures.
+pub fn assert_contract_of(module: &ModuleRef, context: &Context) {
+    let name = module.manifest().name.clone();
+    if let Err(failures) = check_contract_of(module, context) {
         panic!(
             "module `{name}` fails its contract:\n- {}",
             failures.join("\n- ")
@@ -218,7 +230,7 @@ fn holds_nan(fill: Fill) -> bool {
 fn contract_region(module: &ModuleRef, params: &Params, context: &Context) -> (Region, u32) {
     let r = CONTRACT_REGION;
     let (rx, ry) = module
-        .reads(params, context, 1.0, r)
+        .reads_in(params, context, &contract_expansion(), r)
         .map_or((0, 0), |need| {
             (
                 (r.x - need.x).max(need.right() - r.right()).max(0),
@@ -232,6 +244,12 @@ fn contract_region(module: &ModuleRef, params: &Params, context: &Context) -> (R
     let region = Region::sized(side(r.width, rx), side(r.height, ry));
     let tile = CONTRACT_TILE.max(region.width.max(region.height).div_ceil(4));
     (region, tile)
+}
+
+/// What a composite is expanded for while its region is chosen: an image
+/// of the contract region's size and margin.
+fn contract_expansion() -> Expansion {
+    Expansion::new(1.0, Some(CONTRACT_REGION.grow(16)))
 }
 
 fn network(

@@ -9,6 +9,7 @@
 //! - [`params`] and [`manifest`]: named, typed parameters and what a module declares.
 //! - [`module`]: the contract a module implements.
 //! - [`graph`]: a network of nodes.
+//! - [`network`]: a node standing for a network (macros, multi-kernel modules).
 //! - [`engine`]: evaluates a network, never computing the same content twice.
 //! - [`bus`]: typed events for orchestration, with a journal.
 //! - [`scheduler`]: named, cancellable background jobs; waiting until idle.
@@ -22,6 +23,7 @@ pub mod graph;
 pub mod image;
 pub mod manifest;
 pub mod module;
+pub mod network;
 pub mod params;
 pub mod scheduler;
 pub mod status;
@@ -40,6 +42,7 @@ pub use module::{
     Accelerator, AcceleratorError, Context, DeviceImage, Extent, Failure, GpuJob, GpuKernel,
     Memory, Module, ModuleRef,
 };
+pub use network::{Composite, Expansion, Inner, InnerNode, Macro, Network, Wire};
 pub use params::{Params, Value};
 pub use scheduler::{CancelToken, JobId, JobSpec, JobState, Priority, Scheduler};
 pub use status::{Load, NodeState, NodeStatus, NodeType};
