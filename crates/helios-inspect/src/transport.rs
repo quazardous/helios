@@ -112,12 +112,50 @@ pub fn write_token(path: &std::path::Path, token: &str) -> io::Result<()> {
     options.open(path)?.write_all(token.as_bytes())
 }
 
+/// One client's connection, as a handler sees it: a request may answer
+/// with more than one line ([`Connection::send`], a stream), and may ask
+/// to be told when the client goes ([`Connection::on_close`]).
+pub struct Connection<'a> {
+    out: &'a mut dyn Write,
+    closers: Vec<Box<dyn FnOnce() + Send>>,
+}
+
+impl Connection<'_> {
+    /// Sends one line now; fails once the client has gone.
+    pub fn send(&mut self, value: &Value) -> io::Result<()> {
+        writeln!(self.out, "{value}")?;
+        self.out.flush()
+    }
+
+    /// Runs `f` once the connection closes: the client hung up, or its
+    /// process died.
+    pub fn on_close(&mut self, f: impl FnOnce() + Send + 'static) {
+        self.closers.push(Box::new(f));
+    }
+}
+
 /// Serves JSON lines: each line parsed as an `R` and answered by `handler`.
 /// TCP needs `token`, which every connection presents first.
 pub fn serve_at<R, H>(listen: &Listen, token: Option<&str>, handler: H) -> io::Result<Bound>
 where
     R: DeserializeOwned,
     H: Fn(R) -> Value + Send + Sync + 'static,
+{
+    serve_connections_at(listen, token, move |request: R, _: &mut Connection<'_>| {
+        Some(handler(request))
+    })
+}
+
+/// As [`serve_at`], the handler seeing the connection: it answers with
+/// the line it returns, or sends its own lines and returns `None`.
+pub fn serve_connections_at<R, H>(
+    listen: &Listen,
+    token: Option<&str>,
+    handler: H,
+) -> io::Result<Bound>
+where
+    R: DeserializeOwned,
+    H: Fn(R, &mut Connection<'_>) -> Option<Value> + Send + Sync + 'static,
 {
     let handler = Arc::new(handler);
     match listen {
@@ -175,11 +213,12 @@ where
     }
 }
 
-/// One connection: an optional authentication line, then requests.
+/// One connection: an optional authentication line, then requests; what
+/// the handler asked to run at the end runs once the client has gone.
 fn converse<R, H>(reader: impl Read, mut writer: impl Write, token: Option<&str>, handler: &H)
 where
     R: DeserializeOwned,
-    H: Fn(R) -> Value,
+    H: Fn(R, &mut Connection<'_>) -> Option<Value>,
 {
     let mut lines = BufReader::new(reader).lines();
     if let Some(token) = token {
@@ -200,18 +239,27 @@ where
             return;
         }
     }
+    let mut connection = Connection {
+        out: &mut writer,
+        closers: Vec::new(),
+    };
     for line in lines {
-        let Ok(line) = line else { return };
+        let Ok(line) = line else { break };
         if line.trim().is_empty() {
             continue;
         }
         let response = match serde_json::from_str::<R>(&line) {
-            Ok(request) => handler(request),
-            Err(e) => json!({ "ok": false, "error": format!("bad request: {e}") }),
+            Ok(request) => handler(request, &mut connection),
+            Err(e) => Some(json!({ "ok": false, "error": format!("bad request: {e}") })),
         };
-        if writeln!(writer, "{response}").is_err() {
-            return;
+        if let Some(response) = response
+            && connection.send(&response).is_err()
+        {
+            break;
         }
+    }
+    for close in connection.closers.drain(..) {
+        close();
     }
 }
 
@@ -245,6 +293,157 @@ pub fn request_at<R: Serialize>(address: &Address, request: &R) -> io::Result<Va
             let mut answer = String::new();
             reader.read_line(&mut answer)?;
             serde_json::from_str(&answer).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+        }
+    }
+}
+
+/// A connection kept open: requests in turn on it, or a stream read line
+/// by line ([`crate::subscribe`]). A server that ties something to the
+/// connection (a batch held by its client) sees it close when this is
+/// dropped, or when the process dies.
+pub struct Client {
+    reader: BufReader<Stream>,
+    writer: Stream,
+}
+
+impl Client {
+    /// Connects, presenting the session token over TCP.
+    pub fn connect(address: &Address) -> io::Result<Client> {
+        let stream = match address {
+            #[cfg(unix)]
+            Address::Unix(path) => Stream::Unix(std::os::unix::net::UnixStream::connect(path)?),
+            #[cfg(not(unix))]
+            Address::Unix(_) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::Unsupported,
+                    "Unix sockets are not available here",
+                ));
+            }
+            Address::Tcp { addr, .. } => Stream::Tcp(TcpStream::connect(addr)?),
+        };
+        let mut client = Client {
+            reader: BufReader::new(stream.try_clone()?),
+            writer: stream,
+        };
+        if let Address::Tcp { token, .. } = address {
+            client.send(&json!({ "auth": token }))?;
+            let auth = client.read()?;
+            if auth["ok"] != true {
+                return Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    auth["error"]
+                        .as_str()
+                        .unwrap_or("authentication failed")
+                        .to_string(),
+                ));
+            }
+        }
+        Ok(client)
+    }
+
+    /// Sends one request and reads its answer.
+    pub fn request<R: Serialize>(&mut self, request: &R) -> io::Result<Value> {
+        self.send(request)?;
+        self.read()
+    }
+
+    /// Sends one line.
+    pub fn send<R: Serialize>(&mut self, request: &R) -> io::Result<()> {
+        let line = serde_json::to_string(request).expect("requests always serialize");
+        writeln!(self.writer, "{line}")?;
+        self.writer.flush()
+    }
+
+    /// Reads the next line; the server closing the connection is an
+    /// `UnexpectedEof` error, a read timeout a `WouldBlock` or `TimedOut`.
+    pub fn read(&mut self) -> io::Result<Value> {
+        let mut line = String::new();
+        if self.reader.read_line(&mut line)? == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "the connection closed",
+            ));
+        }
+        serde_json::from_str(&line).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+    }
+
+    /// How long [`Client::read`] waits for a line (`None`: for ever).
+    pub fn set_read_timeout(&self, timeout: Option<std::time::Duration>) -> io::Result<()> {
+        self.writer.set_read_timeout(timeout)
+    }
+
+    /// Closes the connection from another thread: a read blocked on it
+    /// returns.
+    pub fn closer(&self) -> io::Result<Closer> {
+        Ok(Closer(self.writer.try_clone()?))
+    }
+}
+
+/// Closes a [`Client`]'s connection from elsewhere.
+pub struct Closer(Stream);
+
+impl Closer {
+    pub fn close(&self) {
+        self.0.shutdown();
+    }
+}
+
+enum Stream {
+    #[cfg(unix)]
+    Unix(std::os::unix::net::UnixStream),
+    Tcp(TcpStream),
+}
+
+impl Stream {
+    fn try_clone(&self) -> io::Result<Stream> {
+        Ok(match self {
+            #[cfg(unix)]
+            Stream::Unix(s) => Stream::Unix(s.try_clone()?),
+            Stream::Tcp(s) => Stream::Tcp(s.try_clone()?),
+        })
+    }
+
+    fn set_read_timeout(&self, timeout: Option<std::time::Duration>) -> io::Result<()> {
+        match self {
+            #[cfg(unix)]
+            Stream::Unix(s) => s.set_read_timeout(timeout),
+            Stream::Tcp(s) => s.set_read_timeout(timeout),
+        }
+    }
+
+    fn shutdown(&self) {
+        let _ = match self {
+            #[cfg(unix)]
+            Stream::Unix(s) => s.shutdown(std::net::Shutdown::Both),
+            Stream::Tcp(s) => s.shutdown(std::net::Shutdown::Both),
+        };
+    }
+}
+
+impl Read for Stream {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        match self {
+            #[cfg(unix)]
+            Stream::Unix(s) => s.read(buf),
+            Stream::Tcp(s) => s.read(buf),
+        }
+    }
+}
+
+impl Write for Stream {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        match self {
+            #[cfg(unix)]
+            Stream::Unix(s) => s.write(buf),
+            Stream::Tcp(s) => s.write(buf),
+        }
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        match self {
+            #[cfg(unix)]
+            Stream::Unix(s) => s.flush(),
+            Stream::Tcp(s) => s.flush(),
         }
     }
 }

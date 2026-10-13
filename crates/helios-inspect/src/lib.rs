@@ -14,7 +14,10 @@
 //!   kind after `since`, waiting for it if needed; on timeout the error
 //!   carries the last events seen, so the caller learns what happened instead;
 //! - `wait_idle` (`timeout_ms`): returns once the scheduler has nothing queued
-//!   or running; on timeout the error carries what is still queued or running.
+//!   or running; on timeout the error carries what is still queued or running;
+//! - `subscribe` (`prefix`, `since`): turns the connection into a stream of
+//!   the bus events whose kind starts with `prefix`, pushed as they are
+//!   published (see [`Inspector::stream`]).
 //!
 //! Responses: `{"ok": true, ...}` or `{"ok": false, "error": "...", ...}`.
 
@@ -25,6 +28,8 @@ use std::sync::Arc;
 use std::sync::mpsc::RecvTimeoutError;
 use std::time::{Duration, Instant};
 
+use transport::Connection;
+
 use helios_core::{Bus, Describe, Envelope, Scheduler};
 
 pub mod transport;
@@ -32,7 +37,10 @@ pub mod transport;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-pub use transport::{Address, Bound, Listen, new_token, request_at, serve_at, write_token};
+pub use transport::{
+    Address, Bound, Client, Closer, Listen, new_token, request_at, serve_at, serve_connections_at,
+    write_token,
+};
 
 /// A request, as sent on the wire.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -53,7 +61,18 @@ pub enum Request {
     WaitIdle {
         timeout_ms: u64,
     },
+    /// The events whose kind starts with `prefix`, after `since` (from
+    /// now when not given), pushed for as long as the connection stays.
+    Subscribe {
+        #[serde(default)]
+        prefix: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        since: Option<u64>,
+    },
 }
+
+/// How often a quiet stream says it is still there.
+pub const HEARTBEAT: Duration = Duration::from_secs(1);
 
 /// How many recent events a failed wait reports.
 const RECENT: usize = 10;
@@ -64,6 +83,9 @@ pub struct Inspector {
     bus: Arc<Bus>,
     entities: BTreeMap<String, Arc<dyn Describe + Send + Sync>>,
     scheduler: Option<Arc<Scheduler>>,
+    /// Names this process among others served at the same address: a
+    /// node restarted has another, and its sequence numbers start over.
+    instance: String,
 }
 
 impl Inspector {
@@ -72,7 +94,13 @@ impl Inspector {
             bus,
             entities: BTreeMap::new(),
             scheduler: None,
+            instance: new_token()[..16].to_string(),
         }
+    }
+
+    /// What names this process among others at the same address.
+    pub fn instance(&self) -> &str {
+        &self.instance
     }
 
     /// The scheduler `wait_idle` waits on.
@@ -127,6 +155,90 @@ impl Inspector {
                     "scheduler": s.describe(),
                 }),
             },
+            Request::Subscribe { .. } => json!({
+                "ok": false,
+                "error": "subscribe needs a connection of its own: send it on the socket",
+            }),
+        }
+    }
+
+    /// Answers one request on a connection: `subscribe` streams there
+    /// ([`Inspector::stream`]), the others are answered by
+    /// [`Inspector::answer`].
+    pub fn serve_request(
+        &self,
+        request: &Request,
+        connection: &mut Connection<'_>,
+    ) -> Option<Value> {
+        match request {
+            Request::Subscribe { prefix, since } => {
+                self.stream(prefix, *since, HEARTBEAT, &mut |line: &Value| {
+                    connection.send(line)
+                });
+                None
+            }
+            other => Some(self.answer(other)),
+        }
+    }
+
+    /// Streams the events whose kind starts with `prefix` to `send`, until
+    /// it fails (the client has gone).
+    ///
+    /// First a line saying what the stream is: `{"ok": true, "subscribed":
+    /// prefix, "instance", "last_seq", "gap"}`, `gap` true when the journal
+    /// no longer holds every event after `since` (the subscriber missed
+    /// some, and should read the state again). Then, in order, each event
+    /// after `since` (`{"event": ...}`), the journaled ones first, then the
+    /// new ones as they are published; and `{"heartbeat": last_seq}` after
+    /// `heartbeat` without one, so a client sees a dead link and the
+    /// server a gone client.
+    pub fn stream(
+        &self,
+        prefix: &str,
+        since: Option<u64>,
+        heartbeat: Duration,
+        send: &mut dyn FnMut(&Value) -> io::Result<()>,
+    ) {
+        // Subscribe before reading the journal, so an event published in
+        // between is seen by one or the other, and sent once.
+        let rx = self.bus.subscribe();
+        let last_seq = self.bus.last_seq();
+        let since = since.unwrap_or(last_seq).min(last_seq);
+        let journal = self.bus.since(since);
+        let gap = since < last_seq && journal.first().is_none_or(|e| e.seq > since + 1);
+        let ack = json!({
+            "ok": true,
+            "subscribed": prefix,
+            "instance": self.instance,
+            "last_seq": last_seq,
+            "gap": gap,
+        });
+        if send(&ack).is_err() {
+            return;
+        }
+        let mut sent = since;
+        for e in journal {
+            sent = e.seq;
+            if e.kind.starts_with(prefix) && send(&json!({ "event": e })).is_err() {
+                return;
+            }
+        }
+        loop {
+            match rx.recv_timeout(heartbeat) {
+                Ok(e) if e.seq <= sent => {}
+                Ok(e) => {
+                    sent = e.seq;
+                    if e.kind.starts_with(prefix) && send(&json!({ "event": e })).is_err() {
+                        return;
+                    }
+                }
+                Err(RecvTimeoutError::Timeout) => {
+                    if send(&json!({ "heartbeat": self.bus.last_seq() })).is_err() {
+                        return;
+                    }
+                }
+                Err(RecvTimeoutError::Disconnected) => return,
+            }
         }
     }
 
@@ -163,7 +275,7 @@ impl Inspector {
 /// background for the life of the process.
 #[cfg(unix)]
 pub fn serve(inspector: Inspector, path: &Path) -> io::Result<PathBuf> {
-    serve_lines(path, move |request: Request| inspector.answer(&request))
+    serve_inspector(inspector, &Listen::Unix(path.to_path_buf()), None).map(|_| path.to_path_buf())
 }
 
 /// Serves the inspector on any transport (see [`transport`]).
@@ -172,9 +284,34 @@ pub fn serve_inspector(
     listen: &Listen,
     token: Option<&str>,
 ) -> io::Result<Bound> {
-    serve_at(listen, token, move |request: Request| {
-        inspector.answer(&request)
+    serve_connections_at(listen, token, move |request: Request, connection| {
+        inspector.serve_request(&request, connection)
     })
+}
+
+/// Subscribes to the events of the endpoint at `address` whose kind
+/// starts with `prefix`, after `since` (from now when not given): the
+/// stream's first line (see [`Inspector::stream`]), and the connection to
+/// read the events from, one [`Client::read`] each.
+pub fn subscribe(
+    address: &Address,
+    prefix: &str,
+    since: Option<u64>,
+) -> io::Result<(Value, Client)> {
+    let mut client = Client::connect(address)?;
+    let ack = client.request(&Request::Subscribe {
+        prefix: prefix.to_string(),
+        since,
+    })?;
+    if ack["ok"] != true {
+        return Err(io::Error::other(
+            ack["error"]
+                .as_str()
+                .unwrap_or("subscribe refused")
+                .to_string(),
+        ));
+    }
+    Ok((ack, client))
 }
 
 /// Serves JSON lines on a Unix socket at `path`: each line is parsed as an
