@@ -66,7 +66,9 @@ fn fill_library(shell: &mut Shell, persist: &Persist) -> Result<(), String> {
             };
             match image {
                 Ok(Some(image)) => {
-                    if sink.send((id, image)).is_err() {
+                    // Scaled here: the window only converts a small one.
+                    let small = helios_gui::library::small(&image);
+                    if sink.send((id, small)).is_err() {
                         return;
                     }
                 }

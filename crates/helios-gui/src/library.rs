@@ -190,16 +190,16 @@ impl Default for Library {
     }
 }
 
-/// An image in the working space (linear Rec.2020) as an sRGB picture no
-/// larger than [`THUMB`].
-pub fn thumbnail(image: &Image) -> ColorImage {
-    use helios_photo::color;
+/// An image scaled to no larger than [`THUMB`]: what a thread reading
+/// thumbnails sends, so the interface thread never scales a full-size
+/// preview (scaling a small one again costs a copy).
+pub fn small(image: &Image) -> Image {
     let r = image.region();
     let scale = (f64::from(THUMB) / f64::from(r.width.max(r.height).max(1))).min(1.0);
     let w = ((f64::from(r.width) * scale).round() as u32).max(1);
     let h = ((f64::from(r.height) * scale).round() as u32).max(1);
     let at = |v: i64| (v as f64 * scale).floor() as i64;
-    let small = image.sample_at(
+    image.sample_at(
         Region {
             x: at(r.x),
             y: at(r.y),
@@ -207,7 +207,15 @@ pub fn thumbnail(image: &Image) -> ColorImage {
             height: h,
         },
         scale,
-    );
+    )
+}
+
+/// An image in the working space (linear Rec.2020) as an sRGB picture no
+/// larger than [`THUMB`].
+pub fn thumbnail(image: &Image) -> ColorImage {
+    use helios_photo::color;
+    let small = small(image);
+    let (w, h) = (small.region().width, small.region().height);
     let to_srgb = color::mul(
         &color::inverse(&color::SRGB_TO_XYZ).expect("invertible primaries"),
         &color::REC2020_TO_XYZ,
