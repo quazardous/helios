@@ -275,6 +275,99 @@ fn an_answer_given_on_other_inputs_is_flagged_not_redone() {
     assert!(render(&e, &other).is_ok());
 }
 
+/// A judgment with a question: what to judge, set like a parameter.
+struct GainOf;
+
+impl Module for GainOf {
+    type Plan = f32;
+
+    fn manifest(&self) -> Manifest {
+        let mut m = HowBright.manifest();
+        m.name = "gain_of".into();
+        m.params.push(ParamSpec {
+            name: "subject".into(),
+            description: "what to judge".into(),
+            kind: ParamKind::Text {
+                capacity: 32,
+                default: "sky".into(),
+            },
+        });
+        m
+    }
+
+    fn question(&self) -> Vec<String> {
+        vec!["subject".into()]
+    }
+
+    fn prepare(&self, params: &Params, c: &Context) -> Result<f32, String> {
+        HowBright.prepare(params, c)
+    }
+
+    fn process(&self, gain: &f32, inputs: &[&Image], output: Region) -> Result<Vec<Image>, String> {
+        HowBright.process(gain, inputs, output)
+    }
+}
+
+fn questioned() -> Graph {
+    let mut g = Graph::new();
+    let src = g.add_source("src", Image::from_fn(REGION, 1, |x, _, _| x as f32));
+    let sky = g
+        .add_module("sky", ModuleRef::new(GainOf), &Params::new())
+        .unwrap();
+    g.connect(src, graph::SOURCE_PORT, sky, "input").unwrap();
+    g
+}
+
+#[test]
+fn an_answer_holds_for_its_question_and_replays_with_it() {
+    let e = Engine::new(Arc::new(Bus::new()));
+    let text = |t: &str| Value::Text(t.into());
+    let mut g = questioned();
+    let mut book = Book::new();
+    book.declare("sky", Mode::FullAi);
+    book.pose(&mut g, "sky", "subject", text("face")).unwrap();
+    book.model_answer(&mut g, "sky", gain(2.0), model(), vec![], 1)
+        .unwrap();
+    assert_eq!(
+        book.answer("sky").unwrap().values.get("subject"),
+        Some(&text("face")),
+        "the answer is recorded with its question"
+    );
+
+    // Replayed into a fresh graph: the question first, then the answer.
+    let stored = book.to_json();
+    let mut fresh = questioned();
+    let loaded = Book::from_json(stored).unwrap();
+    assert_eq!(loaded.replay(&mut fresh), Ok(1));
+    let sky = fresh.find("sky").unwrap();
+    assert_eq!(
+        fresh.question(sky).unwrap().get("subject"),
+        Some(&text("face"))
+    );
+    assert_eq!(render(&e, &fresh).unwrap(), [0.0, 2.0, 4.0, 6.0]);
+
+    // The question changed on the graph (a surface): pending again.
+    let id = g.find("sky").unwrap();
+    g.set_param(id, "subject", text("skin")).unwrap();
+    assert_eq!(book.follow(&g), ["sky"]);
+    assert_eq!(book.status("sky").unwrap(), Status::Pending);
+    assert_eq!(
+        book.question("sky").unwrap().get("subject"),
+        Some(&text("skin"))
+    );
+    assert_eq!(
+        book.history("sky").len(),
+        1,
+        "the answer stays in the history"
+    );
+    assert!(book.follow(&g).is_empty());
+    // The same question through the book changes nothing.
+    book.model_answer(&mut g, "sky", gain(1.0), model(), vec![], 2)
+        .unwrap();
+    book.pose(&mut g, "sky", "subject", text("skin")).unwrap();
+    assert_eq!(book.status("sky").unwrap(), Status::Answered);
+}
+
 #[test]
 fn a_project_or_a_run_overrides_the_node_mode() {
     let mut config = Config::new(Schema::core());

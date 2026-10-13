@@ -14,7 +14,13 @@
 //!   version;
 //! - **replay** ([`Book::replay`]): a loaded network renders from the
 //!   recorded answers, offline and deterministically. No model is called
-//!   here: resolvers that call models come on top and hand their answers in.
+//!   here: resolvers that call models come on top and hand their answers in;
+//! - the **question** of a node whose module has one (an object to find, a
+//!   prompt: see `helios_core::Module::question`): kept with its record,
+//!   recorded with each answer, replayed before it. An answer holds for the
+//!   question it was given to: another question set on the graph
+//!   ([`Book::follow`]) or through the book ([`Book::pose`]) makes the node
+//!   pending again.
 //!
 //! Not yet: a pending decision as a waiting item in the workflow journal
 //! (it needs the journal's waits and signals).
@@ -144,6 +150,21 @@ struct Record {
     /// Whether the last answer is in force (false after asking again).
     current: bool,
     proposal: Option<Proposal>,
+    /// The question in force (empty for a node without one).
+    #[serde(default, skip_serializing_if = "is_empty")]
+    question: Params,
+}
+
+fn is_empty(p: &Params) -> bool {
+    p.iter().next().is_none()
+}
+
+/// Whether an answer was given to this question: every value of the
+/// question it names is the same.
+fn answers(values: &Params, question: &Params) -> bool {
+    question
+        .iter()
+        .all(|(name, v)| values.get(name).is_none_or(|a| a == v))
 }
 
 /// A decision was answered.
@@ -243,6 +264,7 @@ impl Book {
             answers: Vec::new(),
             current: false,
             proposal: None,
+            question: Params::new(),
         });
         record.mode = mode;
         if !record.current && record.proposal.is_none() {
@@ -295,8 +317,14 @@ impl Book {
         self.nodes.get(node)?.proposal.as_ref()
     }
 
+    /// The question of a node, as the book keeps it.
+    pub fn question(&self, node: &str) -> Option<&Params> {
+        self.nodes.get(node).map(|r| &r.question)
+    }
+
     /// Records an answer, applies it to the graph, announces it. The graph
-    /// checks the values first: a refused answer records nothing.
+    /// checks the values first: a refused answer records nothing. The
+    /// answer is recorded with the question it answers.
     fn settle(
         &mut self,
         graph: &mut Graph,
@@ -308,8 +336,14 @@ impl Book {
     ) -> Result<u32, String> {
         let id = node_id(graph, node)?;
         self.record(node)?;
+        let question = graph.question(id).map_err(|e| e.to_string())?;
+        let values = values
+            .iter()
+            .fold(question.clone(), |q, (k, v)| q.with(k, v.clone()));
         graph.answer(id, &values).map_err(|e| e.to_string())?;
+        let question = graph.question(id).map_err(|e| e.to_string())?;
         let record = self.record_mut(node)?;
+        record.question = question;
         let version = record.answers.last().map_or(1, |a| a.version + 1);
         record.answers.push(Answer {
             version,
@@ -454,13 +488,87 @@ impl Book {
         Ok(())
     }
 
+    /// Sets one value of a node's question, on the graph and in the book.
+    /// Another value than the one in force withdraws the answer: the node
+    /// is pending again, and the answer stays in the history.
+    pub fn pose(
+        &mut self,
+        graph: &mut Graph,
+        node: &str,
+        name: &str,
+        value: helios_core::Value,
+    ) -> Result<(), String> {
+        let id = node_id(graph, node)?;
+        self.record(node)?;
+        graph
+            .set_param(id, name, value)
+            .map_err(|e| e.to_string())?;
+        self.follow(graph);
+        Ok(())
+    }
+
+    /// Takes in the questions as the graph holds them, set there
+    /// directly (a parameter edited by a surface): a node whose answer was
+    /// given to another question is pending again, and announced so.
+    /// Returns the nodes made pending.
+    pub fn follow(&mut self, graph: &Graph) -> Vec<String> {
+        let mut withdrawn = Vec::new();
+        for (node, record) in &mut self.nodes {
+            let Some(id) = graph.find(node) else { continue };
+            let Ok(question) = graph.question(id) else {
+                continue;
+            };
+            if question == record.question {
+                continue;
+            }
+            let stale = record.current
+                && record
+                    .answers
+                    .last()
+                    .is_some_and(|a| !answers(&a.values, &question));
+            record.question = question;
+            if stale {
+                record.current = false;
+                record.proposal = None;
+                withdrawn.push(node.clone());
+            } else if record
+                .proposal
+                .as_ref()
+                .is_some_and(|p| p.options.iter().any(|o| !answers(o, &record.question)))
+            {
+                record.proposal = None;
+                withdrawn.push(node.clone());
+            }
+        }
+        for node in &withdrawn {
+            let mode = self.nodes[node].mode;
+            self.publish(&Waiting {
+                node: node.clone(),
+                mode,
+            });
+        }
+        withdrawn
+    }
+
     /// Applies every answer in force to a graph: a loaded edit renders from
-    /// its recorded answers, with no model and no human involved.
+    /// its recorded answers, with no model and no human involved. A node's
+    /// question is set first; an answer given to another question is not
+    /// applied (the node stays pending).
     pub fn replay(&self, graph: &mut Graph) -> Result<usize, String> {
         let mut applied = 0;
         for (node, record) in &self.nodes {
             let id = node_id(graph, node)?;
-            match record.current.then(|| record.answers.last()).flatten() {
+            for (name, value) in record.question.iter() {
+                graph
+                    .set_param(id, name, value.clone())
+                    .map_err(|e| format!("replaying `{node}`: {e}"))?;
+            }
+            match record
+                .current
+                .then(|| record.answers.last())
+                .flatten()
+                .filter(|a| answers(&a.values, &record.question))
+            {
                 Some(answer) => {
                     graph
                         .answer(id, &answer.values)

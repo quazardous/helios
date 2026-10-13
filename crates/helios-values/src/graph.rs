@@ -12,19 +12,34 @@ pub fn node_path(node: &str, param: &str) -> String {
 
 /// Declares the parameters of a module node at their current values, with
 /// descriptors from its manifest and hints. A decision node is answered,
-/// not edited: it declares nothing. Returns how many paths were declared.
+/// not edited: it declares its question only (what it is asked, see
+/// `helios_core::Module::question`), whose change makes it pending again.
+/// Returns how many paths were declared.
 pub fn bind_node(store: &mut Store, graph: &Graph, id: NodeId) -> Result<usize, String> {
     let e = |e: helios_core::Error| e.to_string();
     let Some(manifest) = graph.manifest(id).map_err(e)? else {
         return Ok(0);
     };
-    if manifest.kind == ModuleKind::Decision {
-        return Ok(0);
-    }
+    let question = if manifest.kind == ModuleKind::Decision {
+        let q = graph.question(id).map_err(e)?;
+        if q.iter().next().is_none() {
+            return Ok(0);
+        }
+        Some(q)
+    } else {
+        None
+    };
     let name = graph.name(id).map_err(e)?.to_string();
     let params = graph.params(id).map_err(e)?.unwrap_or_default();
     let hints = graph.param_hints(id).map_err(e)?;
+    let mut declared = 0;
     for spec in &manifest.params {
+        if question
+            .as_ref()
+            .is_some_and(|q| q.get(&spec.name).is_none())
+        {
+            continue;
+        }
         let hint = hints.iter().find(|h| h.name == spec.name);
         let value = params
             .get(&spec.name)
@@ -33,8 +48,9 @@ pub fn bind_node(store: &mut Store, graph: &Graph, id: NodeId) -> Result<usize, 
         let mut descriptor = Descriptor::from_spec(spec, hint);
         descriptor.module = Some(manifest.name.clone());
         store.declare_with(&node_path(&name, &spec.name), descriptor, value);
+        declared += 1;
     }
-    Ok(manifest.params.len())
+    Ok(declared)
 }
 
 /// Brings the graph's parameters up to the store's; returns how many were

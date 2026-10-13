@@ -145,16 +145,35 @@ impl Graph {
 
     /// Changes one parameter of a module node. A decision node is not
     /// edited: it is answered ([`Graph::answer`]), so that every change to
-    /// it is a recorded decision.
+    /// it is a recorded decision. Only its question (see
+    /// [`Module::question`]) is set here, and a question set to another
+    /// value withdraws the answer: it is pending again.
+    ///
+    /// [`Module::question`]: crate::Module::question
     pub fn set_param(&mut self, id: NodeId, name: &str, value: Value) -> Result<(), Error> {
         let node = self.node_mut(id)?;
         match &mut node.kind {
-            Kind::Module { module, .. } if module.manifest().kind == ModuleKind::Decision => {
-                Err(Error::Param {
-                    module: node.name.clone(),
-                    param: name.into(),
-                    reason: "a decision node is answered, not edited".into(),
-                })
+            Kind::Module {
+                module,
+                params,
+                answered,
+                ..
+            } if module.manifest().kind == ModuleKind::Decision => {
+                if !module.question().iter().any(|q| q == name) {
+                    return Err(Error::Param {
+                        module: node.name.clone(),
+                        param: name.into(),
+                        reason: "a decision node is answered, not edited".into(),
+                    });
+                }
+                let mut changed = params.clone();
+                changed.set(name, value);
+                let changed = module.manifest().resolve(&changed)?;
+                if changed != *params {
+                    *params = changed;
+                    *answered = false;
+                }
+                Ok(())
             }
             Kind::Module { module, params, .. } => {
                 let mut changed = params.clone();
@@ -171,7 +190,11 @@ impl Graph {
     }
 
     /// Records the answer of a decision node: its parameters, checked and
-    /// completed like any parameters. Renders use it from now on.
+    /// completed like any parameters. Renders use it from now on. The
+    /// question's values the answer does not name are kept (see
+    /// [`Module::question`]).
+    ///
+    /// [`Module::question`]: crate::Module::question
     pub fn answer(&mut self, id: NodeId, values: &Params) -> Result<(), Error> {
         let node = self.node_mut(id)?;
         match &mut node.kind {
@@ -181,7 +204,8 @@ impl Graph {
                 answered,
                 ..
             } if module.manifest().kind == ModuleKind::Decision => {
-                *params = module.manifest().resolve(values)?;
+                let values = with_question(module, params, values);
+                *params = module.manifest().resolve(&values)?;
                 *answered = true;
                 Ok(())
             }
@@ -196,14 +220,44 @@ impl Graph {
     pub fn check_answer(&self, id: NodeId, values: &Params) -> Result<(), Error> {
         let node = self.node(id)?;
         match &node.kind {
-            Kind::Module { module, .. } if module.manifest().kind == ModuleKind::Decision => {
-                module.manifest().resolve(values).map(|_| ())
+            Kind::Module { module, params, .. }
+                if module.manifest().kind == ModuleKind::Decision =>
+            {
+                let values = with_question(module, params, values);
+                module.manifest().resolve(&values).map(|_| ())
             }
             _ => Err(Error::Contract {
                 module: node.name.clone(),
                 reason: "only a decision node is answered".into(),
             }),
         }
+    }
+
+    /// A decision node's question as it stands: the values of the
+    /// parameters its module names as its question (none for another
+    /// node).
+    pub fn question(&self, id: NodeId) -> Result<Params, Error> {
+        Ok(match &self.node(id)?.kind {
+            Kind::Module { module, params, .. } => {
+                module
+                    .question()
+                    .iter()
+                    .fold(Params::new(), |q, name| match params.get(name) {
+                        Some(v) => q.with(name, v.clone()),
+                        None => q,
+                    })
+            }
+            Kind::Source { .. } => Params::new(),
+        })
+    }
+
+    /// Whether a node renders: false for a decision waiting for its
+    /// answer, true for any other node.
+    pub fn is_answered(&self, id: NodeId) -> Result<bool, Error> {
+        Ok(match &self.node(id)?.kind {
+            Kind::Module { answered, .. } => *answered,
+            Kind::Source { .. } => true,
+        })
     }
 
     /// Takes a decision node's answer back: it is pending again.
@@ -538,4 +592,18 @@ impl Describe for Graph {
             .collect();
         serde_json::json!({ "nodes": nodes, "layout": self.layout() })
     }
+}
+
+/// An answer completed with the question it answers: the question's
+/// values it does not name are the node's.
+fn with_question(module: &ModuleRef, params: &Params, values: &Params) -> Params {
+    let mut out = values.clone();
+    for name in module.question() {
+        if out.get(&name).is_none()
+            && let Some(v) = params.get(&name)
+        {
+            out.set(&name, v.clone());
+        }
+    }
+    out
 }

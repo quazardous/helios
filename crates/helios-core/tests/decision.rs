@@ -138,3 +138,79 @@ fn the_same_answer_renders_the_same_content_once() {
     e.render(&g, second, "output", r).unwrap();
     assert_eq!(e.counters().computed, computed);
 }
+
+/// A judgment with a question: what to judge, set like a parameter; the
+/// answer is the gain.
+struct GainOf;
+
+impl Module for GainOf {
+    type Plan = f32;
+
+    fn manifest(&self) -> Manifest {
+        let mut m = HowBright.manifest();
+        m.name = "gain_of".into();
+        m.params.push(ParamSpec {
+            name: "subject".into(),
+            description: "what to judge".into(),
+            kind: ParamKind::Text {
+                capacity: 32,
+                default: "sky".into(),
+            },
+        });
+        m
+    }
+
+    fn question(&self) -> Vec<String> {
+        vec!["subject".into()]
+    }
+
+    fn prepare(&self, params: &Params, c: &Context) -> Result<f32, String> {
+        HowBright.prepare(params, c)
+    }
+
+    fn process(&self, gain: &f32, inputs: &[&Image], output: Region) -> Result<Vec<Image>, String> {
+        HowBright.process(gain, inputs, output)
+    }
+}
+
+#[test]
+fn a_question_is_set_and_withdraws_the_answer_given_to_another() {
+    let mut g = Graph::new();
+    let src = g.add_source(
+        "src",
+        Image::from_fn(Region::sized(4, 2), 1, |x, _, _| x as f32),
+    );
+    let d = g
+        .add_module("d", ModuleRef::new(GainOf), &Params::new())
+        .unwrap();
+    g.connect(src, graph::SOURCE_PORT, d, "input").unwrap();
+    let text = |t: &str| Value::Text(t.into());
+
+    // The question is set while pending; the answer still is not.
+    g.set_param(d, "subject", text("face")).unwrap();
+    assert!(g.set_param(d, "gain", Value::Float(2.0)).is_err());
+    assert_eq!(
+        g.question(d).unwrap(),
+        Params::new().with("subject", text("face"))
+    );
+
+    // An answer keeps the question it does not name.
+    g.answer(d, &gain(2.0)).unwrap();
+    assert!(g.is_answered(d).unwrap());
+    assert_eq!(
+        g.params(d).unwrap().unwrap().get("subject"),
+        Some(&text("face"))
+    );
+
+    // The same question again changes nothing; another withdraws.
+    g.set_param(d, "subject", text("face")).unwrap();
+    assert!(g.is_answered(d).unwrap());
+    g.set_param(d, "subject", text("sky")).unwrap();
+    assert!(!g.is_answered(d).unwrap());
+    let e = Engine::new(Arc::new(Bus::new()));
+    assert!(matches!(
+        e.render(&g, d, "output", Region::sized(4, 2)),
+        Err(Error::Pending { .. })
+    ));
+    assert!(g.question(src).unwrap().iter().next().is_none());
+}

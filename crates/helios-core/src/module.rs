@@ -306,6 +306,17 @@ pub trait Module: Send + Sync + 'static {
         Vec::new()
     }
 
+    /// A decision's question: the parameters that say what is asked (an
+    /// object to find, a prompt), as opposed to its answer. They are set
+    /// like any parameter, and setting one to another value withdraws the
+    /// answer, which was given to another question (see
+    /// [`Graph::set_param`]). None by default; only a decision has one.
+    ///
+    /// [`Graph::set_param`]: crate::Graph::set_param
+    fn question(&self) -> Vec<String> {
+        Vec::new()
+    }
+
     /// Turns parameters (already checked against the manifest and completed
     /// with defaults) and declared context fields into a plan. Cheap, no pixels.
     fn prepare(&self, params: &Params, context: &Context) -> Result<Self::Plan, String>;
@@ -417,6 +428,11 @@ impl ModuleRef {
 
     pub fn param_hints(&self) -> Vec<ParamHint> {
         self.0.param_hints()
+    }
+
+    /// A decision's question (see [`Module::question`]).
+    pub fn question(&self) -> Vec<String> {
+        self.0.question()
     }
 
     pub(crate) fn prepare(
@@ -627,6 +643,9 @@ pub(crate) type Plan = Arc<dyn Any + Send + Sync>;
 trait Erased: Send + Sync {
     fn manifest(&self) -> &Manifest;
     fn param_hints(&self) -> Vec<ParamHint>;
+    fn question(&self) -> Vec<String> {
+        Vec::new()
+    }
     fn prepare(&self, params: &Params, context: &Context, scale: f64) -> Result<Plan, String>;
     fn input_region(&self, plan: &Plan, output: Region) -> Region;
     fn extent(&self, plan: &Plan) -> Option<Extent>;
@@ -715,6 +734,10 @@ impl<M: Module> Erased for Adapter<M> {
 
     fn param_hints(&self) -> Vec<ParamHint> {
         self.module.param_hints()
+    }
+
+    fn question(&self) -> Vec<String> {
+        self.module.question()
     }
 
     fn prepare(&self, params: &Params, context: &Context, scale: f64) -> Result<Plan, String> {
