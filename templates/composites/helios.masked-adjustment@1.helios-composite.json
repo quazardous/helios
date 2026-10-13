@@ -1,0 +1,35 @@
+{
+  "format": 1,
+  "id": "helios.masked-adjustment",
+  "version": 1,
+  "name": "Masked adjustment",
+  "description": "Mixes an adjustment into the image through a mask group, feathered along the image's edges",
+  "inputs": [
+    { "name": "input", "channels": 4, "layout": "rgba" },
+    { "name": "processed", "channels": 4, "layout": "rgba" }
+  ],
+  "outputs": [
+    { "name": "output", "channels": 4, "layout": "rgba" }
+  ],
+  "nodes": [
+    { "name": "mask", "module": "mask_combine" },
+    { "name": "feather", "module": "mask_feather" },
+    { "name": "blend", "module": "mask_blend" }
+  ],
+  "connections": [
+    { "from": "mask", "port": "mask", "to": "feather", "input": "mask" },
+    { "from": "@", "port": "input", "to": "feather", "input": "guide" },
+    { "from": "@", "port": "input", "to": "blend", "input": "input" },
+    { "from": "@", "port": "processed", "to": "blend", "input": "processed" },
+    { "from": "feather", "port": "mask", "to": "blend", "input": "mask" }
+  ],
+  "exits": [
+    { "from": "blend", "port": "output", "output": "output" }
+  ],
+  "exposed": [
+    { "name": "operator", "node": "mask", "param": "operator" },
+    { "name": "feather", "node": "feather", "param": "radius" },
+    { "name": "opacity", "node": "blend", "param": "opacity" }
+  ],
+  "panel": { "panel": "helios.masks", "area": "start_side" }
+}
