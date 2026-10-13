@@ -10,6 +10,9 @@ panel-helios-graph =
 panel-helios-log =
     .title = Log
 
+panel-helios-masks =
+    .title = Masks
+
 panel-helios-modules =
     .title = Modules
 

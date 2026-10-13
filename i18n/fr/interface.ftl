@@ -31,5 +31,8 @@ plugin-helios-history =
 plugin-helios-lists =
     .title = Listes de Helios
 
+plugin-helios-masks =
+    .title = Arbre des masques de Helios
+
 plugin-helios-workbench =
     .title = Zones de Helios

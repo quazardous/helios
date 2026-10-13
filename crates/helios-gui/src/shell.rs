@@ -85,6 +85,8 @@ enum Action {
     Compare,
     /// A drawn-mask command, as whom.
     Mask(crate::masks::Command, Origin),
+    /// Rename the Masks panel's selected node in place.
+    RenameInTree,
     Copy(String),
     SystemMenu,
     /// A command, its arguments, as whom.
@@ -176,6 +178,8 @@ struct Parts {
     resolved_view: Arc<Mutex<Value>>,
     dialogs: Arc<OnceLock<Dialogs>>,
     values: Arc<Mutex<helios_values::Store>>,
+    /// The mask network the Masks panel shows, which its drop guard reads.
+    mask_network: Rc<RefCell<crate::mask_tree::Network>>,
 }
 
 /// A shell whose egui-pop application is still to build: in a test
@@ -286,6 +290,8 @@ pub struct Shell {
     /// What installing it found.
     gpu_info: Option<egui_pop::viewport::gpu::GpuInfo>,
     params: Rc<RefCell<crate::params::Params>>,
+    /// The Masks panel: the selected module's mask network as a tree.
+    mask_tree: Rc<RefCell<crate::mask_tree::MaskTree>>,
     /// Every value widgets and agents edit (`param.*` commands).
     pub values: Arc<Mutex<helios_values::Store>>,
     /// Headless runs: no cursor blink and no animation, so a frame settles
@@ -329,6 +335,7 @@ impl Shell {
         let contents = Contents::default();
         let themes = crate::theme::themes();
         let declarations = Rc::new(RefCell::new(Declarations::default()));
+        let mask_network = Rc::<RefCell<crate::mask_tree::Network>>::default();
         let lists = Rc::new(RefCell::new(ListSource {
             profiles_dir: config_dir().join("profiles"),
         }));
@@ -371,6 +378,12 @@ impl Shell {
             .plugin(plugins::History {
                 values: values.clone(),
             })
+            // egui-pop's data views (the Masks panel's tree), and what
+            // Helios refuses of them.
+            .plugin(egui_pop::views::ViewsPlugin)
+            .plugin(crate::mask_tree::Guard {
+                shown: mask_network.clone(),
+            })
             // The window's frame: Helios's own on the desktop, the
             // system's elsewhere (tests, pictures, tools) until asked.
             .plugin(if ui_settings.is_some() {
@@ -412,6 +425,7 @@ impl Shell {
                 resolved_view,
                 dialogs,
                 values,
+                mask_network,
             },
         }
     }
@@ -429,6 +443,7 @@ impl Shell {
             resolved_view,
             dialogs,
             values,
+            mask_network,
         } = parts;
         if let Some(d) = app.handle().service(&DIALOGS) {
             let _ = dialogs.set((*d).clone());
@@ -472,6 +487,7 @@ impl Shell {
             gpu: None,
             gpu_info: None,
             params: Rc::default(),
+            mask_tree: Rc::new(RefCell::new(crate::mask_tree::MaskTree::new(mask_network))),
             values,
             still: false,
         };
@@ -512,6 +528,20 @@ impl Shell {
             let (viewport, values) = (shell.viewport.clone(), shell.values.clone());
             shell.set_content("helios.viewport", move |ui| {
                 viewport.borrow_mut().ui(ui, &values);
+            });
+        }
+        if has(&shell, crate::mask_tree::PANEL) {
+            shell
+                .mask_tree
+                .borrow_mut()
+                .set_app(shell.app.handle().clone());
+            let (tree, viewport, values) = (
+                shell.mask_tree.clone(),
+                shell.viewport.clone(),
+                shell.values.clone(),
+            );
+            shell.set_content(crate::mask_tree::PANEL, move |ui| {
+                tree.borrow_mut().ui(ui, &viewport, &values);
             });
         }
         if has(&shell, "helios.scopes") {
@@ -687,6 +717,11 @@ impl Shell {
     /// The viewport: its egui-pop state, its readout, its scene.
     pub fn viewport(&self) -> std::cell::Ref<'_, crate::viewport::Viewport> {
         self.viewport.borrow()
+    }
+
+    /// The Masks panel: its tree's state, the network it shows.
+    pub fn mask_tree(&self) -> std::cell::Ref<'_, crate::mask_tree::MaskTree> {
+        self.mask_tree.borrow()
     }
 
     /// The viewport, to set its hooks.
@@ -1386,6 +1421,7 @@ impl Shell {
             Box::new(|_, _| Ok(Action::Compare)),
         );
         Shell::declare_mask_commands(&mut add);
+        Shell::declare_member_commands(&mut add);
         add(
             CommandSpec::new("scopes.stops", "Scopes: in stops (log)", "View"),
             Box::new(|_, _| Ok(Action::ScopeStops(true))),
@@ -1559,6 +1595,10 @@ impl Shell {
                 "path",
                 "Masks: draw a path (click its points; with `corners`, made at once)",
             ),
+            (
+                "parametric",
+                "Masks: add a parametric member, reading the masked module's input",
+            ),
         ] {
             add(
                 CommandSpec::new(&format!("mask.add.{kind}"), title, "Masks"),
@@ -1650,6 +1690,97 @@ impl Shell {
                     },
                     origin.clone(),
                 ))
+            }),
+        );
+    }
+
+    /// The commands on the members of a mask (`mask.member.*`): what the
+    /// Masks panel does, for the palette, its context menu and agents.
+    fn declare_member_commands(add: &mut impl FnMut(CommandSpec, ActionOf)) {
+        use crate::masks::Command;
+        let text =
+            |args: &Value, key: &str| args.get(key).and_then(Value::as_str).map(String::from);
+        add(
+            CommandSpec::new(
+                "mask.member.move",
+                "Masks: move a member (`member`, the selected one by default) to `index` of `group` (its own, last, by default); rewires the network, no undo step",
+                "Masks",
+            ),
+            Box::new(move |a, origin| {
+                Ok(Action::Mask(
+                    Command::MemberMove {
+                        member: text(a, "member"),
+                        group: text(a, "group"),
+                        index: a
+                            .get("index")
+                            .and_then(Value::as_u64)
+                            .and_then(|n| usize::try_from(n).ok()),
+                    },
+                    origin.clone(),
+                ))
+            }),
+        );
+        add(
+            CommandSpec::new(
+                "mask.member.delete",
+                "Masks: take the selected member (or `member`) out of the mask; rewires the network, no undo step",
+                "Masks",
+            ),
+            Box::new(move |a, origin| {
+                Ok(Action::Mask(
+                    Command::MemberDelete {
+                        member: text(a, "member"),
+                    },
+                    origin.clone(),
+                ))
+            }),
+        );
+        add(
+            CommandSpec::new(
+                "mask.member.invert",
+                "Masks: invert the selected member (or `member`), or back",
+                "Masks",
+            ),
+            Box::new(move |a, origin| {
+                Ok(Action::Mask(
+                    Command::MemberInvert {
+                        member: text(a, "member"),
+                    },
+                    origin.clone(),
+                ))
+            }),
+        );
+        add(
+            CommandSpec::new(
+                "mask.member.opacity",
+                "Masks: set the selected member's (or `member`'s) `opacity`, 0 to 1; without it, off or back to full",
+                "Masks",
+            ),
+            Box::new(move |a, origin| {
+                Ok(Action::Mask(
+                    Command::MemberOpacity {
+                        member: text(a, "member"),
+                        opacity: a.get("opacity").and_then(Value::as_f64),
+                    },
+                    origin.clone(),
+                ))
+            }),
+        );
+        add(
+            CommandSpec::new(
+                "mask.member.rename",
+                "Masks: name the selected member (or `member`) `label`; without it, rename in the Masks panel",
+                "Masks",
+            ),
+            Box::new(move |a, origin| match text(a, "label") {
+                Some(label) => Ok(Action::Mask(
+                    Command::MemberRename {
+                        member: text(a, "member"),
+                        label,
+                    },
+                    origin.clone(),
+                )),
+                None => Ok(Action::RenameInTree),
             }),
         );
     }
@@ -2174,6 +2305,9 @@ impl Shell {
             Action::Mask(command, origin) => {
                 let mut store = lock(&self.values);
                 return self.viewport.borrow_mut().mask(command, origin, &mut store);
+            }
+            Action::RenameInTree => {
+                self.mask_tree.borrow_mut().start_rename()?;
             }
             Action::Compare => {
                 use crate::viewport::COMPARE;

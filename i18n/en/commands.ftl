@@ -70,6 +70,23 @@ command-helios-log-toggle =
     .description = Opens Log where it was, or closes it.
     .title = Show or hide Log
 
+command-helios-masks-detach =
+    .title = Move Masks to a new window
+
+command-helios-masks-dock =
+    .title = Dock Masks back in its area
+
+command-helios-masks-focus =
+    .description = Shows Masks and gives it the keyboard.
+    .title = Focus Masks
+
+command-helios-masks-moveTo =
+    .title = Move Masks to an area (`area`)
+
+command-helios-masks-toggle =
+    .description = Opens Masks where it was, or closes it.
+    .title = Show or hide Masks
+
 command-helios-modules-detach =
     .title = Move Modules to a new window
 
@@ -181,6 +198,9 @@ command-mask-add-ellipse =
 command-mask-add-gradient =
     .title = Masks: add a gradient across the view's centre
 
+command-mask-add-parametric =
+    .title = Masks: add a parametric member, reading the masked module's input
+
 command-mask-add-path =
     .title = Masks: draw a path (click its points; with `corners`, made at once)
 
@@ -189,6 +209,21 @@ command-mask-cancel =
 
 command-mask-handle-move =
     .title = Masks: move a shape's handle (`handle`: centre, radius, feather, corner.2...) to `x`, `y`, one undo step
+
+command-mask-member-delete =
+    .title = Masks: take the selected member (or `member`) out of the mask; rewires the network, no undo step
+
+command-mask-member-invert =
+    .title = Masks: invert the selected member (or `member`), or back
+
+command-mask-member-move =
+    .title = Masks: move a member (`member`, the selected one by default) to `index` of `group` (its own, last, by default); rewires the network, no undo step
+
+command-mask-member-opacity =
+    .title = Masks: set the selected member's (or `member`'s) `opacity`, 0 to 1; without it, off or back to full
+
+command-mask-member-rename =
+    .title = Masks: name the selected member (or `member`) `label`; without it, rename in the Masks panel
 
 command-mask-path-close =
     .title = Masks: close the path being drawn

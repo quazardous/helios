@@ -477,8 +477,8 @@ node: `view/masks/mask`, the network's first by default) and edits them
 
 Not yet: creating a shape is not an undo step and is not saved with the
 image's edit (both change the network, which the value store does not
-hold), shapes cannot be deleted or reordered from the viewport, and the
-`--image` network has one mask (on its exposure).
+hold), shapes are deleted and reordered from the Masks panel only, and
+the `--image` network has one mask (on its exposure).
 
 ![A circle and a path edited on the viewport](gui/masks-wbox.png)
 
@@ -486,6 +486,61 @@ The picture is a run of `helios-gui --image` in wbox, driven by its
 keys and pointer: the exposure raised, `C` for a circle, `P` and five
 clicks for a path, a double click adding a point to it, then the
 circle's radius and feather dragged.
+
+### The Masks panel
+
+The Masks panel (`helios.masks`, in the start side bar) shows the
+selected module's mask network as a tree, on egui-pop's `TreeView`
+(2026-10-13, `helios-gui/src/mask_tree.rs`):
+
+- **What shows.** The module's mask (the group its `mask_blend` reads)
+  is the root; each group (`mask_combine`) is a branch with its
+  operator, each member a leaf with its icon (circle, ellipse,
+  gradient, path, parametric, luminance, raster), its refinements
+  (blur, feather, levels between it and its group), and its inversion
+  and opacity in its group when they are not the default. Members are
+  listed in port order, the order they fold in. The selected module
+  is `view/graph/selection`: a masked module shows its mask, a mask's
+  node the mask it is in.
+- **Live.** The tree is read from the graph and the value store every
+  frame, and what changed reaches the view through its `TreeHandle`:
+  a shape drawn on the viewport, an agent's write, an undo, a member
+  moved show at once, the open branches and the selection kept.
+- **Selection, both ways.** Selecting a shape in the tree selects it on
+  the viewport (its handles, the Parameters panel), its group becoming
+  the mask the viewport edits; selecting a group makes it that mask.
+  A shape selected on the viewport, by a click or `mask.select`, is
+  selected in the tree.
+- **Edits.** F2 renames a member in place: a label in the store
+  (`label/<node>`), the node keeping its name, one undo step. Invert
+  and Opacity (the row of buttons, the context menu) toggle the
+  member's inversion and its opacity (none or full) in its group, one
+  undo step each; for the root, the group's own. Delete (with the tree
+  focused) takes the selected member out of its group. A member dragged
+  before, after or into a group is rewired there, its opacity and
+  inversion with it; a drop the network cannot take (beside the root,
+  into a shape, into a full group or into itself) is vetoed before the
+  view moves anything, and the reason is shown. Add… adds a shape or a
+  parametric member (which reads the masked module's input) to the
+  selected group.
+- **Agents** do the same through `mask.member.move`, `mask.member.delete`,
+  `mask.member.invert`, `mask.member.opacity`, `mask.member.rename` and
+  `mask.add.parametric`.
+
+Not yet: moving, deleting and adding members change the network, which
+the value store does not hold: they are not undo steps and are not saved
+with the image's edit; an undo across them may give a group's opacities
+and inversions to the members now on those ports. A deleted member stays
+in the network, unconnected (the graph cannot remove a node yet), and
+the Parameters panel still lists it. Labels are not saved with the edit
+either. A drawn shape's own opacity and inversion (its parameters) are
+not shown in the tree, only its group's for it.
+
+![The Masks panel beside the image](gui/mask-tree-wbox.png)
+
+The picture is a run of `helios-gui --image` in wbox: `C`, `E` and `G`
+on the image, then in the Masks panel the ellipse inverted, the circle's
+opacity turned off and the gradient selected.
 
 The picture is a run of `helios-gui --image` in wbox (a headless nested
 compositor). Beside the same run of the viewport it replaced, the image's

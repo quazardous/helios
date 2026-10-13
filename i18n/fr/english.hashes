@@ -32,6 +32,13 @@ command-helios-log-focus.title e7c1c0459d413da5
 command-helios-log-moveTo.title 3f2cb5cb5af205ff
 command-helios-log-toggle.description 958bae98c0199f06
 command-helios-log-toggle.title e01d59e288e08d1d
+command-helios-masks-detach.title 0614dafe2a1a3ff5
+command-helios-masks-dock.title 3aa4cae03567914a
+command-helios-masks-focus.description 12615019516fcb54
+command-helios-masks-focus.title 34e5f818c55aa170
+command-helios-masks-moveTo.title 15df534d313d9a72
+command-helios-masks-toggle.description baf933956634fee7
+command-helios-masks-toggle.title 03fd474b97a04b88
 command-helios-modules-detach.title 26075229e0c921cd
 command-helios-modules-dock.title eefb369093a716d6
 command-helios-modules-focus.description 954adb6a21ba01c4
@@ -77,9 +84,15 @@ command-helios-viewport-toggle.title 5499a6f5a26ee5dc
 command-mask-add-circle.title 853e800a379c3a26
 command-mask-add-ellipse.title 369f2cd0736ffec6
 command-mask-add-gradient.title a0410f60ded15dd6
+command-mask-add-parametric.title 98a0f0d2892c6048
 command-mask-add-path.title 783872ff7bffbf60
 command-mask-cancel.title 567fb47b601c0c5e
 command-mask-handle-move.title 902f9df0115deb93
+command-mask-member-delete.title 99ca7824e9b03357
+command-mask-member-invert.title 2f1e4681e72c28fc
+command-mask-member-move.title 9e329d3b22f0e06b
+command-mask-member-opacity.title eae2ade4d86d9eea
+command-mask-member-rename.title a1e9c7c64d3f8504
 command-mask-path-close.title f0e547ab2261baa9
 command-mask-point-add.title 401692401e7affdf
 command-mask-point-remove.title 0fc3db962d8bf4b5
@@ -145,6 +158,7 @@ menu-helios-system-themes.label 399519de8e880133
 panel-helios-filmstrip.title aa303106450875c3
 panel-helios-graph.title 2aaea6126d76b34f
 panel-helios-log.title a80c03551590b8a9
+panel-helios-masks.title 6849246780dae374
 panel-helios-modules.title a5f990b57e7ada38
 panel-helios-params.title fff7588f4a1a3651
 panel-helios-queue.title 8dd348ad2ba6981e
@@ -276,4 +290,5 @@ plugin-helios-commands.title 28daeae8a505789f
 plugin-helios-frame.title 56244fc898eadb9c
 plugin-helios-history.title 930c24429cb329d7
 plugin-helios-lists.title 70a8f95b6cc02a1c
+plugin-helios-masks.title 5d84af341672577c
 plugin-helios-workbench.title 43f0563e9981a775

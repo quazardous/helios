@@ -1,10 +1,11 @@
 # Masks
 
-Status: **third step** (2026-10-12): groups, refinement, parametric,
-raster and drawn shape members (circle, ellipse, gradient, path), and a
-stress network with its bench. How darktable's flexi masks map onto a
-Helios network, and what porting them taught about the core. The modules
-live in `modules/masks` (crate `helios-module-masks`).
+Status: **fourth step** (2026-10-13): groups, refinement, parametric,
+raster and drawn shape members (circle, ellipse, gradient, path), a
+stress network with its bench, and the Masks panel's tree. How
+darktable's flexi masks map onto a Helios network, and what porting them
+taught about the core. The modules live in `modules/masks` (crate
+`helios-module-masks`).
 
 ## Why masks are a crash test
 
@@ -157,7 +158,11 @@ Not ported: brushes, darktable's per-point path feather (one feather per
 path here), the gradient's curvature, and clone shapes (retouch). The
 viewport draws and edits the shapes (see [gui.md](gui.md), "Drawn
 masks"); what its handles read and write is listed in the module's
-documentation (`helios_module_masks::shape`).
+documentation (`helios_module_masks::shape`). The Masks panel shows a
+module's mask network as a tree and moves, inverts, fades, renames and
+deletes its members (see [gui.md](gui.md), "The Masks panel"); moving a
+member is rewiring the group's ports (finding 3), its opacity and
+inversion moved with it (finding 2).
 
 ## From darktable's drawn masks
 

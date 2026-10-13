@@ -69,6 +69,23 @@ command-helios-log-toggle =
     .title = Afficher ou masquer Journal
     .description = Ouvre le journal là où il était, ou le ferme.
 
+command-helios-masks-detach =
+    .title = Déplacer Masques dans une nouvelle fenêtre
+
+command-helios-masks-dock =
+    .title = Remettre Masques dans sa zone
+
+command-helios-masks-focus =
+    .title = Aller à Masques
+    .description = Affiche les masques et leur donne le clavier.
+
+command-helios-masks-moveTo =
+    .title = Déplacer Masques vers une zone (`area`)
+
+command-helios-masks-toggle =
+    .title = Afficher ou masquer Masques
+    .description = Ouvre les masques là où ils étaient, ou les ferme.
+
 command-helios-modules-detach =
     .title = Déplacer Modules dans une nouvelle fenêtre
 
@@ -180,6 +197,9 @@ command-mask-add-ellipse =
 command-mask-add-gradient =
     .title = Masques : ajouter un dégradé passant par le centre de la vue
 
+command-mask-add-parametric =
+    .title = Masques : ajouter un membre paramétrique, qui lit l’entrée du module masqué
+
 command-mask-add-path =
     .title = Masques : tracer un chemin (cliquer ses points ; avec `corners`, créé d’un coup)
 
@@ -188,6 +208,21 @@ command-mask-cancel =
 
 command-mask-handle-move =
     .title = Masques : déplacer une poignée d’une forme (`handle` : centre, rayon, adoucissement, corner.2...) en `x`, `y`, une seule étape d’annulation
+
+command-mask-member-delete =
+    .title = Masques : retirer le membre sélectionné (ou `member`) du masque ; recâble le réseau, sans étape d’annulation
+
+command-mask-member-invert =
+    .title = Masques : inverser le membre sélectionné (ou `member`), ou le rétablir
+
+command-mask-member-move =
+    .title = Masques : déplacer un membre (`member`, le sélectionné par défaut) à l’`index` de `group` (son groupe, en dernier, par défaut) ; recâble le réseau, sans étape d’annulation
+
+command-mask-member-opacity =
+    .title = Masques : régler l’opacité (`opacity`, de 0 à 1) du membre sélectionné (ou `member`) ; sans elle, l’éteindre ou la remettre à fond
+
+command-mask-member-rename =
+    .title = Masques : nommer le membre sélectionné (ou `member`) `label` ; sans lui, le renommer dans le panneau Masques
 
 command-mask-path-close =
     .title = Masques : fermer le chemin en cours de tracé

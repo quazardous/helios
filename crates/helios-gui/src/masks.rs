@@ -158,6 +158,7 @@ pub fn module_of(kind: &str) -> Option<&'static str> {
 
 fn module_ref(module: &str) -> Option<ModuleRef> {
     Some(match module {
+        "mask_parametric" => ModuleRef::new(helios_module_masks::MaskParametric),
         "mask_circle" => ModuleRef::new(MaskCircle),
         "mask_ellipse" => ModuleRef::new(MaskEllipse),
         "mask_gradient" => ModuleRef::new(MaskGradient),
@@ -194,7 +195,7 @@ pub struct Member {
 
 /// A node's parameters as the store holds them (the graph's for those it
 /// does not).
-fn params_of(graph: &Graph, store: &Store, id: NodeId) -> Params {
+pub(crate) fn params_of(graph: &Graph, store: &Store, id: NodeId) -> Params {
     let name = graph.name(id).unwrap_or_default().to_string();
     let mut p = graph.params(id).ok().flatten().unwrap_or_default();
     if let Ok(Some(m)) = graph.manifest(id) {
@@ -630,6 +631,32 @@ pub enum Command {
         shape: Option<String>,
         handle: String,
         to: [f64; 2],
+    },
+    /// Move a member of the mask (the selected one by default) to
+    /// `index` of `group` (its own group, last, by default): rewiring,
+    /// not an undo step.
+    MemberMove {
+        member: Option<String>,
+        group: Option<String>,
+        index: Option<usize>,
+    },
+    /// Take a member (the selected one by default) out of the mask:
+    /// rewiring, not an undo step.
+    MemberDelete { member: Option<String> },
+    /// Invert a member (the selected one by default), or back; one undo
+    /// step.
+    MemberInvert { member: Option<String> },
+    /// Set a member's opacity (the selected one by default), or toggle
+    /// it between none and full; one undo step.
+    MemberOpacity {
+        member: Option<String>,
+        opacity: Option<f64>,
+    },
+    /// Name a member (the selected one by default; empty: its node's
+    /// name); one undo step.
+    MemberRename {
+        member: Option<String>,
+        label: String,
     },
 }
 
@@ -1150,8 +1177,22 @@ pub fn add_node(
     module: &str,
     params: &Params,
 ) -> Result<(NodeId, String), String> {
+    add_member(graph, mask, module, params, None)
+}
+
+/// Adds a member node to a mask, a shape or a parametric member reading
+/// `input` (the image the masked module reads): a free port of its
+/// `mask_combine` takes it. Returns the new node's id and name.
+pub fn add_member(
+    graph: &mut Graph,
+    mask: &str,
+    module: &str,
+    params: &Params,
+    input: Option<(NodeId, String)>,
+) -> Result<(NodeId, String), String> {
     let e = |e: helios_core::Error| e.to_string();
-    let module_ref = module_ref(module).ok_or_else(|| format!("`{module}` is not a shape"))?;
+    let module_ref =
+        module_ref(module).ok_or_else(|| format!("`{module}` is not a member a mask adds"))?;
     let combine = graph
         .find(mask)
         .ok_or_else(|| format!("no mask `{mask}` in the image's network"))?;
@@ -1171,10 +1212,10 @@ pub fn add_node(
             )
         })?;
     let port = manifest.inputs[free].name.clone();
-    let kind = KINDS
-        .iter()
-        .find(|(_, m)| *m == module)
-        .map_or("shape", |(k, _)| *k);
+    let kind = KINDS.iter().find(|(_, m)| *m == module).map_or(
+        module.strip_prefix("mask_").unwrap_or("member"),
+        |(k, _)| *k,
+    );
     // One more name than there are nodes: one of them is free.
     let name = (1..=graph.ids().count() + 1)
         .map(|n| {
@@ -1186,7 +1227,17 @@ pub fn add_node(
         })
         .find(|n| graph.find(n).is_none())
         .expect("a free name");
+    let reads = match module_ref.manifest().inputs.first() {
+        Some(p) => Some((
+            p.name.clone(),
+            input.ok_or_else(|| format!("`{module}` needs an image to read"))?,
+        )),
+        None => None,
+    };
     let id = graph.add_module(&name, module_ref, params).map_err(e)?;
+    if let Some((reads, (src, out))) = reads {
+        graph.connect(src, &out, id, &reads).map_err(e)?;
+    }
     graph.connect(id, "mask", combine, &port).map_err(e)?;
     Ok((id, name))
 }

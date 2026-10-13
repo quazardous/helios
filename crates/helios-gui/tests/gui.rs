@@ -72,13 +72,28 @@ fn a_layout_saved_before_egui_pop_s_workbench_migrates() {
     let open = shell.layout();
     for (a, node) in &layout.areas {
         let now = open.areas.iter().find(|(x, _)| x == a).unwrap();
-        assert_eq!(&now.1, node, "{a:?}");
+        // A panel declared since (Masks) joins its default area beside
+        // what was saved.
+        let node = match a {
+            Area::StartSide => Node::Split {
+                vertical: false,
+                ratio: 0.7,
+                a: Box::new(node.clone()),
+                b: Box::new(tabs(&["helios.masks"], 0)),
+            },
+            _ => node.clone(),
+        };
+        assert_eq!(now.1, node, "{a:?}");
     }
     assert_eq!(open.auxiliary, layout.auxiliary);
-    assert!(
-        !shell.notes.iter().any(|n| n.contains("helios.")),
-        "{:?}",
-        shell.notes
+    assert_eq!(
+        shell
+            .notes
+            .iter()
+            .filter(|n| n.contains("helios."))
+            .collect::<Vec<_>>(),
+        ["new panel `helios.masks` placed in its default area"],
+        "only the panel declared since is placed"
     );
     // Written back as egui-pop's document, it reads the same.
     let again = Layout::from_json(&open.to_json()).unwrap();

@@ -279,7 +279,8 @@ impl Viewport {
         })
     }
 
-    /// Adds a shape to the mask edited, wired into a free port of its
+    /// Adds a member to the mask edited (a shape, or a parametric member
+    /// reading the masked module's input), wired into a free port of its
     /// `mask_combine`, its parameters bound to the store; selects it.
     fn add_shape(
         &mut self,
@@ -290,11 +291,122 @@ impl Viewport {
         let e = self.edited.as_mut().ok_or("no image is open")?;
         let mask = crate::masks::current_mask(&e.graph, store)
             .ok_or("the image's network has no mask to draw in (a mask_combine node)")?;
-        let (id, name) = crate::masks::add_node(&mut e.graph, &mask, module, params)?;
+        let net = crate::mask_tree::network(&e.graph, store, Some(&mask));
+        let input = crate::mask_tree::blend_input(&e.graph, &net);
+        let (id, name) = crate::masks::add_member(&mut e.graph, &mask, module, params, input)?;
         helios_values::bind_node(store, &e.graph, id)?;
         self.reshow();
-        crate::masks::select(store, &name);
+        if crate::masks::KINDS.iter().any(|(_, m)| *m == module) {
+            crate::masks::select(store, &name);
+        } else {
+            write(store, crate::masks::SHAPE, Value::Text(String::new()), None);
+            write(
+                store,
+                crate::params::SELECTION,
+                Value::Text(name.clone()),
+                None,
+            );
+        }
         Ok(name)
+    }
+
+    /// The graph brought up to the store, and the mask network a member
+    /// belongs to (the selected one's without one).
+    fn mask_network(
+        &mut self,
+        store: &mut Store,
+        member: Option<&str>,
+    ) -> Result<crate::mask_tree::Network, String> {
+        let e = self.edited.as_mut().ok_or("no image is open")?;
+        helios_values::sync(store, &mut e.graph)?;
+        Ok(crate::mask_tree::network(&e.graph, store, member))
+    }
+
+    /// After the network was rewired: the groups' values declared again
+    /// as the graph holds them (no undo step), the image rendered again.
+    fn rewired(&mut self, store: &mut Store, groups: &[NodeId]) -> Result<(), String> {
+        let e = self.edited.as_ref().ok_or("no image is open")?;
+        for g in groups {
+            helios_values::bind_node(store, &e.graph, *g)?;
+        }
+        self.reshow();
+        Ok(())
+    }
+
+    /// Runs a command on a member of the mask (the `Member*` commands of
+    /// [`crate::masks::Command`]).
+    fn member(
+        &mut self,
+        command: crate::masks::Command,
+        origin: &Origin,
+        store: &mut Store,
+    ) -> Result<serde_json::Value, String> {
+        use crate::mask_tree as tree;
+        use crate::masks::Command;
+        use serde_json::json;
+        let named = match &command {
+            Command::MemberMove { member, .. }
+            | Command::MemberDelete { member }
+            | Command::MemberInvert { member }
+            | Command::MemberOpacity { member, .. }
+            | Command::MemberRename { member, .. } => member.clone(),
+            _ => return Err("not a member command".into()),
+        };
+        let net = self.mask_network(store, named.as_deref())?;
+        let member = tree::member_or_selected(&net, store, named.as_deref())?;
+        let shape = match store.get(crate::masks::SHAPE).map(|e| &e.value) {
+            Some(Value::Text(t)) => t.clone(),
+            _ => String::new(),
+        };
+        match command {
+            Command::MemberMove { group, index, .. } => {
+                let item = net.item(&member)?;
+                let group = group
+                    .or_else(|| item.group.clone())
+                    .ok_or("the module's mask stays the root")?;
+                let e = self.edited.as_mut().ok_or("no image is open")?;
+                let groups = tree::move_member(
+                    &mut e.graph,
+                    &net,
+                    &member,
+                    &group,
+                    index.unwrap_or(usize::MAX),
+                )?;
+                self.rewired(store, &groups)?;
+                if shape == member {
+                    write(store, crate::masks::MASK, Value::Text(group.clone()), None);
+                }
+                Ok(json!({ "member": member, "group": group }))
+            }
+            Command::MemberDelete { .. } => {
+                let parent = net
+                    .item(&member)?
+                    .group
+                    .clone()
+                    .ok_or("the module's mask cannot be deleted from its tree")?;
+                let e = self.edited.as_mut().ok_or("no image is open")?;
+                let group = tree::remove_member(&mut e.graph, &net, &member)?;
+                self.rewired(store, &[group])?;
+                let selection = tree::selected(&net, store);
+                if selection.is_some_and(|s| net.is_within(&s, &member)) {
+                    tree::select(store, &net, &parent);
+                }
+                Ok(json!({ "member": member }))
+            }
+            Command::MemberInvert { .. } => {
+                let on = tree::toggle_invert(store, &net, &member, origin)?;
+                Ok(json!({ "member": member, "inverted": on }))
+            }
+            Command::MemberOpacity { opacity, .. } => {
+                let to = tree::set_opacity(store, &net, &member, opacity, origin)?;
+                Ok(json!({ "member": member, "opacity": to }))
+            }
+            Command::MemberRename { label, .. } => {
+                tree::rename(store, &net, &member, &label, origin)?;
+                Ok(json!({ "member": member, "label": label.trim() }))
+            }
+            _ => unreachable!("matched above"),
+        }
     }
 
     /// Writes some of a node's parameters as one undo step.
@@ -379,6 +491,10 @@ impl Viewport {
                     write(store, masks::POINT, Value::Int(p), None);
                 }
                 Ok(json!({}))
+            }
+            Command::Add { kind, params, .. } if kind == "parametric" => {
+                let name = self.add_shape(store, "mask_parametric", &params)?;
+                Ok(json!({ "member": name }))
             }
             Command::Add {
                 kind,
@@ -477,6 +593,7 @@ impl Viewport {
                 Self::write_step(store, &label, &origin, &m.node, writes)?;
                 Ok(json!({}))
             }
+            member => self.member(member, &origin, store),
         }
     }
 

@@ -144,6 +144,11 @@ step, shapes created by `mask.*` commands and keys (see docs/gui.md).
 Not decided: whether creating or deleting a shape (a change of the
 network, not of a value) becomes an undo step, and how a network edited
 so is saved with the image's edit.
+The Masks panel (2026-10-13): the selected module's mask network as a
+tree on egui-pop's `TreeView`, live through its handle, its selection
+two-way with the viewport's; rename, invert and opacity are undo steps
+of the store, moving and deleting members rewire the network (no undo
+step yet, same open question).
 The desktop runs on egui-pop's workbench (2026-10-12): its window frame,
 per-window scale and interface zoom, panels in areas with auxiliary
 windows and arrangements (Helios's image-first layout a template), the

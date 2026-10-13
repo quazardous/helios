@@ -6,6 +6,7 @@ pub mod dialogs;
 pub mod engine_source;
 pub mod host;
 pub mod library;
+pub mod mask_tree;
 pub mod masks;
 pub mod params;
 pub mod persist;
@@ -35,6 +36,7 @@ pub fn helios_panels() -> Vec<PanelSpec> {
         ("helios.graph", "Graph", Center, &[Center][..]),
         ("helios.vault", "Vault", StartSide, &sides[..]),
         ("helios.modules", "Modules", StartSide, &sides[..]),
+        ("helios.masks", "Masks", StartSide, &sides[..]),
         ("helios.params", "Parameters", EndSide, &sides[..]),
         ("helios.scopes", "Scopes", EndSide, &sides[..]),
         ("helios.filmstrip", "Filmstrip", Bottom, &sides[..]),
