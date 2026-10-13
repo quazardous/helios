@@ -169,7 +169,7 @@ impl Shell {
     }
 
     fn workspace_catalogue(&self) -> helios_template::Catalogue {
-        crate::templates::catalogue(&self.panels, self.specs())
+        crate::templates::catalogue(&self.template_panels(), self.specs())
     }
 
     /// Applies the state the value store holds when it is not the one

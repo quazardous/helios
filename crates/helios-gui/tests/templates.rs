@@ -28,7 +28,7 @@ fn panel(id: &str) -> PanelId {
 
 fn desktop() -> helios_template::Catalogue {
     let shell = Shell::new(helios_panels(), None);
-    templates::catalogue(shell.panels(), shell.specs())
+    templates::catalogue(&shell.template_panels(), shell.specs())
 }
 
 #[test]
@@ -198,6 +198,39 @@ fn a_template_that_does_not_check_creates_nothing() {
     assert!(e.contains("unknown module `mystery`"), "{e}");
     assert!(!dir.exists());
     assert!(!config.exists());
+}
+
+#[test]
+fn a_template_may_place_a_panel_an_egui_pop_plugin_declares() {
+    let shell = Shell::new(helios_panels(), None);
+    let ids: Vec<String> = shell
+        .template_panels()
+        .iter()
+        .map(|p| p.id.as_str().to_string())
+        .collect();
+    assert!(ids.iter().any(|i| i == "egui_pop.jobs"), "{ids:?}");
+    assert!(ids.iter().any(|i| i == "helios.vault"), "{ids:?}");
+    // Helios's own catalogue still refuses a panel nobody declares.
+    let mut b = templates::find("helios.import-cull-dedupe").unwrap();
+    let report = b.validate(&desktop());
+    assert!(report.is_ok(), "{:?}", report.problems);
+    let text = json!({
+        "kind": "layout",
+        "version": 2,
+        "areas": [["center", { "kind": "tabs", "panels": ["nobody.panel"], "active": 0 }]],
+        "auxiliary": [],
+        "hidden": []
+    });
+    b.layout = Layout::from_json(&text.to_string()).unwrap();
+    let report = b.validate(&desktop());
+    assert!(
+        report
+            .problems
+            .iter()
+            .any(|p| p.contains("unknown panel `nobody.panel`")),
+        "{:?}",
+        report.problems
+    );
 }
 
 #[test]

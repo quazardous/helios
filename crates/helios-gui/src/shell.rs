@@ -847,6 +847,18 @@ impl Shell {
         &self.panels
     }
 
+    /// The panels a workspace template may name: Helios's, and those
+    /// egui-pop's plugins declare (the jobs centre, `egui_pop.jobs`).
+    pub fn template_panels(&self) -> Vec<PanelSpec> {
+        let mut all = self.panels.clone();
+        for (spec, owner) in self.app.handle().declared_panels() {
+            if owner != OwnerId::FRAMEWORK && !all.iter().any(|p| p.id == spec.id) {
+                all.push(spec);
+            }
+        }
+        all
+    }
+
     /// The last command runs, Helios's and the interface's, oldest first.
     pub fn history(&self) -> Vec<Run> {
         self.app
@@ -3025,7 +3037,7 @@ impl Shell {
             });
             return Ok(Value::Null);
         };
-        let catalogue = crate::templates::catalogue(&self.panels, self.specs());
+        let catalogue = crate::templates::catalogue(&self.template_panels(), self.specs());
         let answers: BTreeMap<String, Value> = args
             .as_object()
             .into_iter()

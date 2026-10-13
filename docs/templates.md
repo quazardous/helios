@@ -187,8 +187,9 @@ identifies the template (`/id`, `/version`, `/format`).
 `layout.json` is egui-pop's layout document (`kind: layout`, its own
 schema version, migrated by egui-pop): which panel sits in which area, as
 tabs and splits, which ones are closed. A template's layout names panels
-by id; validation refuses a panel this Helios does not declare, or one
-placed in an area it may not live in.
+by id: Helios's panels, and those egui-pop's plugins declare (the jobs
+centre, `egui_pop.jobs`); validation refuses a panel neither declares,
+or one placed in an area it may not live in.
 
 ## Composites as files
 

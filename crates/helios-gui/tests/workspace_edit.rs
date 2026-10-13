@@ -25,7 +25,7 @@ fn temp(name: &str) -> PathBuf {
 
 fn desktop() -> helios_template::Catalogue {
     let shell = Shell::new(helios_panels(), None);
-    templates::catalogue(shell.panels(), shell.specs())
+    templates::catalogue(&shell.template_panels(), shell.specs())
 }
 
 /// A workspace made from a built-in template under `root`, and a window
