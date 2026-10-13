@@ -586,7 +586,7 @@ selected module's mask network as a tree, on egui-pop's `TreeView`
 - **What shows.** The module's mask (the group its `mask_blend` reads)
   is the root; each group (`mask_combine`) is a branch with its
   operator, each member a leaf with its icon beside it (circle, ellipse,
-  gradient, path, parametric, luminance, raster), its refinements
+  gradient, path, brush, parametric, luminance, raster, AI object), its refinements
   (blur, feather, levels between it and its group), and its inversion
   and opacity in its group when they are not the default. Members are
   listed in port order, the order they fold in. Each row ends with an

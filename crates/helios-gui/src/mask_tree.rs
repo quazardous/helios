@@ -261,6 +261,8 @@ impl Item {
             "mask_ellipse" => "◎",
             "mask_gradient" => "◑",
             "mask_path" => "⬟",
+            // A brush stroke: drawn, as with a pencil.
+            "mask_brush" => "✏",
             "mask_parametric" => "☰",
             "mask_from_luma" => "☆",
             "mask_raster" => "🖼",

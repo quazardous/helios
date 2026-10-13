@@ -225,6 +225,21 @@ fn an_ai_object_member_shows_with_its_icon_and_its_question() {
 }
 
 #[test]
+fn a_brush_member_shows_with_its_icon() {
+    use helios_module_masks::MaskBrush;
+    let (mut g, blend) = graph();
+    let stroke = module(&mut g, "stroke", ModuleRef::new(MaskBrush), &Params::new());
+    g.connect(stroke, "mask", g.find("mask").unwrap(), "in3")
+        .unwrap();
+    let mut shell = Shell::new(helios_panels(), None);
+    shell.set_view_source(g, blend, "output").unwrap();
+    let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+    h.step();
+    run(&mut h, "helios.masks.focus", json!(null));
+    assert_eq!(rows(&h).last().unwrap(), "  ✏ stroke");
+}
+
+#[test]
 fn the_tree_shows_the_module_s_mask_with_icons_and_operators() {
     let h = harness();
     assert_eq!(
