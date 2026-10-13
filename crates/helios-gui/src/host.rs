@@ -26,7 +26,11 @@
 //!   vault saves as a version (`persist`). The interface settings keep
 //!   their own undo, in the settings window;
 //! - **the waker**: a thread follows the bus and asks for a frame when an
-//!   event comes from elsewhere (a render done, a node's status).
+//!   event comes from elsewhere (a render done, a node's status);
+//! - **the layout's document**: each workspace keeps its own
+//!   (`workspaces/<workspace>/layout`, beside the interface's settings),
+//!   named by the [`Workspace`] the shell switches; egui-pop loads and
+//!   saves it.
 
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -60,6 +64,49 @@ impl Later {
     }
 }
 
+/// The workspace whose layout egui-pop loads and saves: its key (see
+/// [`workspace_key`]), none for the interface's one layout.
+#[derive(Clone, Debug, Default)]
+pub struct Workspace(Arc<Mutex<Option<String>>>);
+
+impl Workspace {
+    /// The workspace's key, if one is open.
+    pub fn get(&self) -> Option<String> {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    /// Opens a workspace (its key), or none.
+    pub fn set(&self, key: Option<String>) {
+        *self.0.lock().unwrap_or_else(PoisonError::into_inner) = key;
+    }
+
+    /// The document the layout is kept in.
+    pub fn layout_document(&self) -> String {
+        match self.get() {
+            Some(key) => format!("workspaces/{key}/layout"),
+            None => host::LAYOUT_DOCUMENT.into(),
+        }
+    }
+}
+
+/// A workspace directory's key: its path, every character but letters,
+/// digits, `.` and `-` turned to `_`, so it names one folder.
+pub fn workspace_key(path: &std::path::Path) -> String {
+    path.to_string_lossy()
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '.' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
 /// The bus kinds egui-pop's events go under, by egui-pop's name.
 const KINDS: &[(&str, &str)] = &[
     ("command.dispatched", "gui.command.dispatched"),
@@ -86,6 +133,7 @@ pub struct HeliosHost {
     waker: Arc<Mutex<Waker>>,
     /// Helios's values, whose steps undo and redo walk.
     values: Option<Arc<Mutex<helios_values::Store>>>,
+    workspace: Workspace,
 }
 
 impl HeliosHost {
@@ -115,6 +163,7 @@ impl HeliosHost {
             store,
             waker,
             values: None,
+            workspace: Workspace::default(),
         }
     }
 
@@ -128,6 +177,12 @@ impl HeliosHost {
         self.values
             .as_ref()
             .map(|v| v.lock().unwrap_or_else(PoisonError::into_inner))
+    }
+
+    /// The workspace whose layout egui-pop keeps (shared: the shell
+    /// switches it).
+    pub fn workspace(&self) -> Workspace {
+        self.workspace.clone()
     }
 
     /// Where queuing handlers take their resolver.
@@ -241,6 +296,10 @@ impl Host for HeliosHost {
 
     fn set_waker(&mut self, waker: Waker) {
         *self.waker.lock().unwrap_or_else(PoisonError::into_inner) = waker;
+    }
+
+    fn layout_document(&self) -> Option<String> {
+        Some(self.workspace.layout_document())
     }
 
     fn can_undo(&self) -> bool {

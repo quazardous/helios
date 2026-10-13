@@ -52,8 +52,14 @@ plugin may veto. Each panel has `<panel>.focus` and `<panel>.toggle`
 `primary_side_bar`, `secondary_side_bar`, `bottom_panel` still read),
 `<panel>.detach` and `<panel>.dock`.
 
-The workspace's layout is egui-pop's layout document; one saved by
-Helios before (no version, the older area names) is migrated when read.
+The workspace's layout is egui-pop's layout document, one per workspace:
+Helios's host names it (`Host::layout_document`:
+`workspaces/<workspace>/layout` under `~/.config/helios/ui/`), egui-pop
+loads it as the window opens and saves it as it closes, and
+`Shell::switch_workspace` saves the layout left and loads the next
+workspace's (`App::load_layout`). One saved by Helios before (no
+version, the older area names, beside the workspace's profile) is
+migrated when read.
 **Arrangements** (egui-pop's) are named layouts saved, switched and
 reset (`workbench.arrangement.*`), kept with the interface's settings;
 Helios offers its own as templates: `Image`, the image-first layout
@@ -266,8 +272,8 @@ Helios declares into it:
   mode, the user's keys) under `~/.config/helios/ui/`. egui-pop opens
   the window (`run_native_with`: its place from the last run, repaired;
   the desktop's focus mode read) and closes it: Helios's `on_exit` saves
-  the workspace's layout and profile, then egui-pop's `app.exit` step
-  saves the interface's settings, keys and layout;
+  the workspace's profile, then egui-pop's `app.exit` step saves the
+  interface's settings, keys and the workspace's layout;
 - **the window's frame** (egui-pop's `FramePlugin`, 2026-10-12): the
   title bar (the menu button, Helios's logo and name in the frame's
   `CAPTION_START` zone, the window's title, the minimize, maximize

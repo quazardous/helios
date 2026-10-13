@@ -15,7 +15,7 @@
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, VecDeque};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
@@ -41,7 +41,7 @@ use image::RgbaImage;
 use serde_json::{Value, json};
 
 use crate::dialogs::{Answer, Level, MenuItem, Notice};
-use crate::host::{HeliosHost, Later, to_helios, to_pop};
+use crate::host::{HeliosHost, Later, Workspace, to_helios, to_pop, workspace_key};
 use crate::plugins::{
     self, Declarations, ListSource, SYSTEM, SYSTEM_PROFILES, SYSTEM_RECENT, SYSTEM_THEMES,
     menu_title,
@@ -180,6 +180,7 @@ struct Parts {
     values: Arc<Mutex<helios_values::Store>>,
     /// The mask network the Masks panel shows, which its drop guard reads.
     mask_network: Rc<RefCell<crate::mask_tree::Network>>,
+    workspace: Workspace,
 }
 
 /// A shell whose egui-pop application is still to build: in a test
@@ -190,6 +191,15 @@ pub struct ShellBuilder {
 }
 
 impl ShellBuilder {
+    /// Opens a workspace directory: its layout is the one egui-pop loads
+    /// as the application starts and saves as it closes, under the
+    /// interface's settings (`workspaces/<key>/layout`).
+    #[must_use]
+    pub fn workspace(self, dir: &Path) -> Self {
+        self.parts.workspace.set(Some(workspace_key(dir)));
+        self
+    }
+
     /// Runs `f` when the application closes, before the `app.exit` step
     /// (which saves the interface's settings).
     #[must_use]
@@ -222,6 +232,17 @@ impl ShellBuilder {
         self.app.run_native_with(title, options, move |app, cc| {
             Ok(make(Shell::assemble(parts, app), cc))
         })
+    }
+}
+
+/// What a step of egui-pop's gave: its result, or why it was vetoed;
+/// nothing when it did not run.
+fn step_result(o: Option<egui_pop::api::steps::Outcome>) -> Result<Value, String> {
+    use egui_pop::api::steps::Outcome;
+    match o {
+        None => Ok(Value::Null),
+        Some(Outcome::Done(r)) => r,
+        Some(Outcome::Vetoed { by, reason }) => Err(format!("stopped by `{by}`: {reason}")),
     }
 }
 
@@ -297,6 +318,8 @@ pub struct Shell {
     /// Headless runs: no cursor blink and no animation, so a frame settles
     /// and a test's `run` ends.
     still: bool,
+    /// The workspace open, whose layout egui-pop keeps.
+    workspace: Workspace,
 }
 
 impl Shell {
@@ -332,6 +355,7 @@ impl Shell {
         let host =
             HeliosHost::new(registry.clone(), bus, Arc::default()).with_values(values.clone());
         let later = host.later();
+        let workspace = host.workspace();
         let contents = Contents::default();
         let themes = crate::theme::themes();
         let declarations = Rc::new(RefCell::new(Declarations::default()));
@@ -427,6 +451,7 @@ impl Shell {
                 dialogs,
                 values,
                 mask_network,
+                workspace,
             },
         }
     }
@@ -445,6 +470,7 @@ impl Shell {
             dialogs,
             values,
             mask_network,
+            workspace,
         } = parts;
         if let Some(d) = app.handle().service(&DIALOGS) {
             let _ = dialogs.set((*d).clone());
@@ -490,6 +516,7 @@ impl Shell {
             params: Rc::default(),
             mask_tree: Rc::new(RefCell::new(crate::mask_tree::MaskTree::new(mask_network))),
             values,
+            workspace,
             still: false,
         };
         for d in shell.app.handle().diagnostics() {
@@ -927,6 +954,32 @@ impl Shell {
                 Err(e) => self.warn(format!("profile {}: layout: {e}", p.name)),
             }
         }
+    }
+
+    /// The open workspace's key (see `host::workspace_key`), if any.
+    pub fn workspace(&self) -> Option<String> {
+        self.workspace.get()
+    }
+
+    /// Switches to a workspace directory: the layout as it stands is
+    /// saved to the workspace left, then the one `dir` saved is loaded
+    /// (egui-pop's `layout.save` and `layout.load` steps). A workspace
+    /// with no layout saved yet keeps the layout as it is.
+    pub fn switch_workspace(&mut self, dir: &Path) -> Result<(), String> {
+        step_result(self.app.save_layout())?;
+        self.workspace.set(Some(workspace_key(dir)));
+        self.load_layout()
+    }
+
+    /// Loads the open workspace's layout again (egui-pop's `layout.load`
+    /// step), repaired to today's panels; the repairs are noted. With no
+    /// layout saved yet the layout stays as it is.
+    pub fn load_layout(&mut self) -> Result<(), String> {
+        let loaded = step_result(self.app.load_layout())?;
+        let repaired = loaded["repaired"].as_array().into_iter().flatten();
+        self.notes
+            .extend(repaired.filter_map(|n| n.as_str().map(String::from)));
+        Ok(())
     }
 
     /// Arranges the panels as a layout says, repaired to today's panels

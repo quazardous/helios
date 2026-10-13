@@ -14,35 +14,24 @@ use std::path::{Path, PathBuf};
 use egui_pop::model::layout::Layout;
 use helios_gui::{Shell, headless, helios_panels};
 
-/// Where a workspace's layout is kept: in the user's configuration, not
-/// in the workspace.
-fn layout_file(workspace: &Path) -> Option<PathBuf> {
-    let config = std::env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))?;
-    let key: String = workspace
-        .to_string_lossy()
-        .chars()
-        .map(|c| {
-            if c.is_alphanumeric() || c == '.' || c == '-' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect();
-    Some(
-        config
-            .join("helios/workspaces")
-            .join(key)
-            .join("layout.json"),
-    )
+/// Where a workspace's own files are kept (the profile it uses): in the
+/// user's configuration, not in the workspace. Its layout is egui-pop's
+/// document (`workspaces/<key>/layout` under the interface's settings).
+fn workspace_dir(workspace: &Path) -> PathBuf {
+    helios_gui::shell::config_dir()
+        .join("workspaces")
+        .join(helios_gui::host::workspace_key(workspace))
 }
 
-/// A workspace's saved layout: egui-pop's layout document, which also
-/// reads (and migrates) the layouts Helios saved before.
-fn load(file: Option<&Path>) -> Option<Layout> {
-    let text = std::fs::read_to_string(file?).ok()?;
+/// A layout an earlier Helios saved beside the workspace's profile, read
+/// once when egui-pop has none for the workspace yet.
+fn earlier_layout(workspace: &Path, ui_settings: &Path) -> Option<Layout> {
+    let key = helios_gui::host::workspace_key(workspace);
+    let current = ui_settings.join(format!("workspaces/{key}/layout.json"));
+    if current.exists() {
+        return None;
+    }
+    let text = std::fs::read_to_string(workspace_dir(workspace).join("layout.json")).ok()?;
     Layout::from_json(&text).ok()
 }
 
@@ -151,21 +140,16 @@ impl eframe::App for App {
     }
 }
 
-/// Saves the workspace's layout and, beside it, the profile it uses,
-/// as the application closes (egui-pop's `on_exit`).
-fn save_workspace(file: &Path, app: &egui_pop::api::AppHandle) {
+/// Saves the profile the workspace uses as the application closes
+/// (egui-pop's `on_exit`); egui-pop's `app.exit` step saves its layout.
+fn save_workspace(dir: &Path, app: &egui_pop::api::AppHandle) {
     let profile = app.context().get("heliosProfile").to_string();
     let pointer = serde_json::json!({ "profile": profile });
-    let saved = file
-        .parent()
-        .map_or(Ok(()), std::fs::create_dir_all)
-        .and_then(|()| std::fs::write(file.with_file_name("workspace.json"), pointer.to_string()))
-        .and_then(|()| std::fs::write(file, app.layout().to_json()));
+    let file = dir.join("workspace.json");
+    let saved =
+        std::fs::create_dir_all(dir).and_then(|()| std::fs::write(&file, pointer.to_string()));
     if let Err(e) = saved {
-        eprintln!(
-            "helios-gui: cannot save the layout to {}: {e}",
-            file.display()
-        );
+        eprintln!("helios-gui: cannot save {}: {e}", file.display());
     }
 }
 
@@ -240,7 +224,7 @@ fn main() -> Result<(), String> {
     if let Err(e) = helios_gui::shell::remember_workspace(&workspace) {
         eprintln!("helios-gui: cannot remember the workspace: {e}");
     }
-    let file = layout_file(&workspace);
+    let dir = workspace_dir(&workspace);
     // The interface's settings (window place, focus mode, the user's
     // keys) are the user's, beside Helios's other settings.
     let ui_settings = helios_gui::shell::config_dir().join("ui");
@@ -248,11 +232,10 @@ fn main() -> Result<(), String> {
         || workspace.display().to_string(),
         |n| n.to_string_lossy().into(),
     );
-    // The workspace's profile, else the Default one; a saved layout wins
-    // over the profile's.
-    let profile = file
-        .as_ref()
-        .and_then(|f| std::fs::read_to_string(f.with_file_name("workspace.json")).ok())
+    // The workspace's profile, else the Default one; the workspace's
+    // saved layout wins over the profile's.
+    let profile = std::fs::read_to_string(dir.join("workspace.json"))
+        .ok()
         .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
         .and_then(|v| v["profile"].as_str().map(String::from))
         .unwrap_or_else(|| "default".into());
@@ -267,10 +250,10 @@ fn main() -> Result<(), String> {
     let image = image_file
         .map(|path| image_graph(&path).map(|g| (path, g)))
         .transpose()?;
-    let mut builder = Shell::builder(helios_panels(), Some(ui_settings));
-    if let Some(file) = file.clone() {
-        builder = builder.on_exit(move |app| save_workspace(&file, app));
-    }
+    let earlier = earlier_layout(&workspace, &ui_settings);
+    let builder = Shell::builder(helios_panels(), Some(ui_settings))
+        .workspace(&workspace)
+        .on_exit(move |app| save_workspace(&dir, app));
     // The window draws with the process's one device, which the engine
     // computes on (see `helios_gui::shell::wgpu_setup`).
     let gpu = helios_gpu::shared::gpu().map_err(|e| format!("no GPU to draw with: {e}"))?;
@@ -298,8 +281,12 @@ fn main() -> Result<(), String> {
             if let Err(e) = shell.use_profile(&profile) {
                 shell.notes.push(format!("profile {profile}: {e}"));
             }
-            if let Some(saved) = load(file.as_deref()) {
+            // The workspace's layout wins over the profile's: egui-pop's
+            // document is loaded again (or an earlier Helios's, once).
+            if let Some(saved) = earlier {
                 shell.set_layout(saved);
+            } else if let Err(e) = shell.load_layout() {
+                shell.notes.push(format!("layout: {e}"));
             }
             let mut persist = persist;
             if let Err(e) = open(&mut shell, persist.as_mut(), image) {
