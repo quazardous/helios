@@ -194,6 +194,22 @@ param-sigmoid-white-target =
     .description = blanc de l’affichage, en %
     .label = cible du blanc
 
+param-vkdt-contrast-detail =
+    .description = le renforcement du détail
+    .label = détail
+
+param-vkdt-contrast-edges =
+    .description = le seuil de contours du filtre guidé
+    .label = contours
+
+param-vkdt-contrast-radius =
+    .description = le rayon du filtre guidé, une fraction de la largeur de l’image
+    .label = rayon
+
+param-vkdt-contrast-thrs =
+    .description = le seuil du renforcement du détail
+    .label = seuil
+
 param-vkdt-exposure-exposure =
     .description = la correction d’exposition, en diaphs
     .label = exposition

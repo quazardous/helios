@@ -442,3 +442,118 @@ fn a_module_without_inputs_runs_on_the_gpu_where_its_output_is() {
     let n = engine.counters();
     assert_eq!((n.accelerated, n.uploads, n.fallbacks), (1, 1, 0), "{n:?}");
 }
+
+#[test]
+fn vkdt_guided_kernels_on_the_gpu_match_their_cpu_reference() {
+    use helios_module_vkdt::guided::{Blur, BlurPass, BlurSmall, Guided1, Guided2, Resample};
+    let _gpu = helios_testkit::gpu_lock();
+    let Some(gpu) = gpu() else { return };
+    let rgba = helios_testkit::noise(Region::new(-8, -6, 60, 44), 4, 3);
+    let two = helios_testkit::noise(Region::new(-8, -6, 60, 44), 2, 4);
+    // Regions off the origin, so the kernels' positions are absolute.
+    let region = Region::new(-3, 2, 37, 23);
+    let half = Region::new(-2, 1, 18, 11);
+    let cases: Vec<(&str, ModuleRef, Params, &helios_core::Image, Region)> = vec![
+        (
+            "guided1",
+            ModuleRef::new(Guided1),
+            Params::new(),
+            &rgba,
+            region,
+        ),
+        (
+            "guided2",
+            ModuleRef::new(Guided2),
+            Params::new().with("edges", Value::Float(0.5)),
+            &two,
+            region,
+        ),
+        ("blur", ModuleRef::new(Blur), Params::new(), &two, region),
+        (
+            "blur down",
+            ModuleRef::new(Blur),
+            Params::new().with("down", Value::Bool(true)),
+            &two,
+            half,
+        ),
+        (
+            "blurs",
+            ModuleRef::new(BlurSmall),
+            Params::new().with("sigma", Value::Float(0.7)),
+            &two,
+            region,
+        ),
+        (
+            "blurh",
+            ModuleRef::new(BlurPass),
+            Params::new().with("radius", Value::Float(4.5)),
+            &two,
+            region,
+        ),
+        (
+            "blurv",
+            ModuleRef::new(BlurPass),
+            Params::new()
+                .with("radius", Value::Float(2.4))
+                .with("vertical", Value::Bool(true)),
+            &two,
+            region,
+        ),
+        (
+            "resample",
+            ModuleRef::new(Resample),
+            Params::new().with("levels", Value::Int(2)),
+            &two,
+            Region::new(-21, 5, 40, 30),
+        ),
+    ];
+    for (name, module, params, input, region) in cases {
+        let c = check(&gpu, &module, &params, &Context::new(), input, region).unwrap();
+        assert!(c.max_abs < 1e-4, "{name}: {c:?}");
+    }
+}
+
+/// vkdt's contrast, a multi-kernel module, with an accelerator: its
+/// kernels with a GPU variant run on the GPU (the image staying there from
+/// one to the next), the two reading two images on the CPU, and the result
+/// matches the CPU render.
+#[test]
+fn a_multi_kernel_module_runs_its_kernels_on_the_gpu() {
+    use std::sync::Arc;
+
+    use helios_core::{Bus, Engine, Graph};
+    let _gpu = helios_testkit::gpu_lock();
+    let Some(gpu) = gpu() else { return };
+    let input = helios_testkit::noise(Region::sized(128, 96), 4, 11);
+    for radius in [0.01, 0.03] {
+        let params = Params::new()
+            .with("radius", Value::Float(radius))
+            .with("edges", Value::Float(0.5))
+            .with("detail", Value::Float(2.0));
+        let mut g = Graph::new();
+        let src = g.add_source("src", input.clone());
+        let n = g
+            .add_module(
+                "contrast",
+                ModuleRef::composite(helios_module_vkdt::VkdtContrast),
+                &params,
+            )
+            .unwrap();
+        g.connect(src, helios_core::graph::SOURCE_PORT, n, "input")
+            .unwrap();
+        let region = Region::new(10, 8, 100, 70);
+        let cpu = Engine::new(Arc::new(Bus::new()))
+            .render(&g, n, "output", region)
+            .unwrap();
+        let engine = Engine::new(Arc::new(Bus::new())).with_accelerator(gpu.clone());
+        let out = engine.render(&g, n, "output", region).unwrap();
+        let c = helios_gpu::compare(&out, &cpu).unwrap();
+        assert!(c.max_abs < 1e-3, "radius {radius}: {c:?}");
+        let k = engine.counters();
+        // guided1, guided2 and the blurs; guided3 and combine on the CPU.
+        assert!(
+            k.accelerated >= 4 && k.fallbacks == 0,
+            "radius {radius}: {k:?}"
+        );
+    }
+}

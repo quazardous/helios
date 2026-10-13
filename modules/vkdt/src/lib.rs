@@ -9,9 +9,19 @@
 //!   boosts the difference to the centre by `amount` where it is under
 //!   `thrs`. It reads two pixels around each output pixel.
 //!
+//! - `vkdt_contrast`: local contrast from a guided filter, the first
+//!   multi-kernel module: a composite whose network is vkdt's own (a guided
+//!   filter's kernels, its blurs a cascade at lower resolutions, then
+//!   `combine`), each kernel a module of [`guided`] with its GPU variant.
+//!
 //! vkdt samples its textures with mirrored repeat at the image's edges;
 //! here the framework replicates edge pixels, so the outer two pixels of
 //! `vkdt_usm` may differ from vkdt's.
+
+pub mod contrast;
+pub mod guided;
+
+pub use contrast::VkdtContrast;
 
 use helios_core::{
     Context, Family, GpuKernel, Image, Manifest, Module, ModuleKind, Needs, ParamSpec, Params,

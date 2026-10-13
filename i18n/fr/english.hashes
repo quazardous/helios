@@ -249,6 +249,14 @@ param-sigmoid-skew.description e5eb6bfd385723dd
 param-sigmoid-skew.label ef69c32c12d3577f
 param-sigmoid-white-target.description 99592c2fa52705ca
 param-sigmoid-white-target.label b644e5a48e8eafa4
+param-vkdt-contrast-detail.description 1617174ca62d17ba
+param-vkdt-contrast-detail.label 37515eb7066db1b2
+param-vkdt-contrast-edges.description 3e7da6b627ea6c44
+param-vkdt-contrast-edges.label 038b121452b9eabd
+param-vkdt-contrast-radius.description b3a4d2a0cb411968
+param-vkdt-contrast-radius.label ef601b7d7553ac03
+param-vkdt-contrast-thrs.description 01eff23808ea86a3
+param-vkdt-contrast-thrs.label e5ca9860dbf8e704
 param-vkdt-exposure-exposure.description d00ef9c3a0f17392
 param-vkdt-exposure-exposure.label f30ba140f0818436
 param-vkdt-usm-amount.description 64bb85d55333be94

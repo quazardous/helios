@@ -47,6 +47,30 @@ pub fn read_pfm_top_first(path: &Path) -> Result<Image, String> {
     ))
 }
 
+/// `image` with every value rounded to the nearest half float (to
+/// nearest, ties to even), as vkdt stores an `f16` buffer. Values stay
+/// within half floats' range here: below the smallest normal half float
+/// they are flushed to zero.
+pub fn to_f16(image: &Image) -> Image {
+    let round = |v: f32| {
+        if !v.is_finite() {
+            return v;
+        }
+        if v.abs() < 6.103_515_6e-5 {
+            return 0.0;
+        }
+        // Keep 10 of the 23 mantissa bits.
+        let bits = v.to_bits();
+        let rounded = bits + 0x0FFF + ((bits >> 13) & 1);
+        f32::from_bits(rounded & !0x1FFF)
+    };
+    Image::new(
+        image.region(),
+        image.channels(),
+        image.data().iter().map(|v| round(*v)).collect(),
+    )
+}
+
 impl Vkdt {
     /// vkdt-cli, or why there is none.
     pub fn find() -> Result<Vkdt, String> {
@@ -68,13 +92,48 @@ impl Vkdt {
         params: &[(&str, String)],
         dir: &Path,
     ) -> Result<Image, String> {
+        self.render_as(input, module, params, dir, false)
+    }
+
+    /// [`Vkdt::render`] for a module whose input is half floats (vkdt's
+    /// `contrast` reads `rgba:f16`): vkdt's `format` module converts the
+    /// image first. Give it an image already rounded to half floats
+    /// ([`to_f16`]) to compare with Helios on the same pixels.
+    pub fn render_f16(
+        &self,
+        input: &Image,
+        module: &str,
+        params: &[(&str, String)],
+        dir: &Path,
+    ) -> Result<Image, String> {
+        self.render_as(input, module, params, dir, true)
+    }
+
+    fn render_as(
+        &self,
+        input: &Image,
+        module: &str,
+        params: &[(&str, String)],
+        dir: &Path,
+        f16: bool,
+    ) -> Result<Image, String> {
         std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
         let src = dir.join("input.pfm");
         write_pfm_top_first(input, &src)?;
         let out = dir.join("output");
+        let feed = if f16 {
+            // channels 2 is rgba, format 1 is f16.
+            "module:format:f16\n\
+             connect:i-pfm:main:output:format:f16:input\n\
+             param:format:f16:channels:2\n\
+             param:format:f16:format:1\n"
+                .to_string()
+                + &format!("connect:format:f16:output:{module}:01:input\n")
+        } else {
+            format!("connect:i-pfm:main:output:{module}:01:input\n")
+        };
         let mut cfg = format!(
-            "module:i-pfm:main\nmodule:{module}:01\nmodule:display:main\n\
-             connect:i-pfm:main:output:{module}:01:input\n\
+            "module:i-pfm:main\nmodule:{module}:01\nmodule:display:main\n{feed}\
              connect:{module}:01:output:display:main:input\n\
              param:i-pfm:main:filename:{}\n",
             src.display()

@@ -195,6 +195,22 @@ param-sigmoid-white-target =
     .description = display white, in %
     .label = white_target
 
+param-vkdt-contrast-detail =
+    .description = the amount of detail enhancement
+    .label = detail
+
+param-vkdt-contrast-edges =
+    .description = the guided filter's edge threshold
+    .label = edges
+
+param-vkdt-contrast-radius =
+    .description = the guided filter's radius, a fraction of the image's width
+    .label = radius
+
+param-vkdt-contrast-thrs =
+    .description = the threshold for detail enhancement
+    .label = thrs
+
 param-vkdt-exposure-exposure =
     .description = the exposure correction value in stops
     .label = exposure
