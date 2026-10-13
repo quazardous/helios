@@ -103,6 +103,15 @@ impl<S: Store> Persist<S> {
                     .map_or_else(|| id[..12].to_string(), |n| n.to_string_lossy().into()),
                 ..Entry::default()
             };
+            // The file's size and date, for the library's details.
+            if let Some(meta) = path.as_ref().and_then(|p| std::fs::metadata(p).ok()) {
+                entry.bytes = Some(meta.len());
+                entry.modified = meta
+                    .modified()
+                    .ok()
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .and_then(|d| i64::try_from(d.as_secs()).ok());
+            }
             for field in SHOWN {
                 entry.show(field, row.fields.get(field));
             }

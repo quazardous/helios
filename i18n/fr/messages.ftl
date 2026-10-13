@@ -54,6 +54,8 @@ export-png-bits = le PNG a 8 ou 16 bits, pas { $bits }
 
 export-write-failed = impossible d’écrire { $path } : { $error }
 
+gui-library-file = { $size } · modifié le { $day }
+
 gui-param-default = { $path } · par défaut { $value }
 
 gui-param-held = { $label } : maintenu à { $value }
@@ -63,6 +65,14 @@ gui-param-hint = Glisser ou flèches pour changer, la molette une fois le focus 
 gui-param-not-a-number = { $label } : « { $typed } » n’est pas un nombre
 
 gui-param-past-range = { $label } : au-delà de sa plage habituelle
+
+gui-size-bytes = { $size } o
+
+gui-size-gib = { $size } Gio
+
+gui-size-kib = { $size } Kio
+
+gui-size-mib = { $size } Mio
 
 xmp-not-applied = { $count ->
     [one] { $count } élément d’historique sur { $items } non appliqué, conservé pour plus tard : { $groups }

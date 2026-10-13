@@ -139,11 +139,16 @@ export-no-format 386fb46cc3dafa93
 export-not-a-file 95c780d0920978d5
 export-png-bits 7417c9b85a17189f
 export-write-failed 34d8ef0da0f905fa
+gui-library-file f5342066f92b83c2
 gui-param-default d476a7a117218209
 gui-param-held b6d3dd43597a853a
 gui-param-hint 1c8cfa3f0db88d5c
 gui-param-not-a-number 0ccb3b001ae28018
 gui-param-past-range 34a7fc44204d4fc6
+gui-size-bytes f7153bf939a9449c
+gui-size-gib 05df2d85b96c6970
+gui-size-kib 053b6d255ce6ae14
+gui-size-mib c606f1325b47a11e
 menu-helios-system-profiles.label 493fa9da88311dbf
 menu-helios-system-recent.label 570a956d04ae773e
 menu-helios-system-themes.label 399519de8e880133

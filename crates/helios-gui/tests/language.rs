@@ -35,6 +35,39 @@ fn the_desktop_switches_to_french_and_back() {
     assert_eq!(graph(&h), "Graph");
 }
 
+/// The library's file details (size, day modified) follow the language.
+#[test]
+fn file_sizes_and_dates_follow_the_language() {
+    use helios_gui::library::{Entry, file_details};
+
+    let mut h = headless::harness(Shell::new(helios_panels(), None), vec2(1280.0, 800.0));
+    h.run();
+    let entry = Entry {
+        name: "a.cr2".into(),
+        bytes: Some(25 * 1024 * 1024 + 300 * 1024),
+        // 2026-10-12, at noon UTC.
+        modified: Some(1_791_806_400),
+        ..Entry::default()
+    };
+    assert_eq!(
+        file_details(&h.ctx, &entry).as_deref(),
+        Some("25.3 MiB · modified Oct 12, 2026")
+    );
+    let app = h.state().app().handle().clone();
+    egui_pop::i18n::plugin::set_language(&app, "fr").unwrap();
+    h.run();
+    h.run();
+    assert_eq!(
+        file_details(&h.ctx, &entry).as_deref(),
+        Some("25,3 Mio · modifié le 12 oct. 2026")
+    );
+    let small = Entry {
+        bytes: Some(512),
+        ..Entry::default()
+    };
+    assert_eq!(file_details(&h.ctx, &small).as_deref(), Some("512 o"));
+}
+
 /// French on: a step whose GPU version failed is told in a French toast,
 /// once per module, its failure translated too.
 #[test]

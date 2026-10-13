@@ -55,6 +55,8 @@ export-png-bits = PNG has 8 or 16 bits, not { $bits }
 
 export-write-failed = cannot write { $path }: { $error }
 
+gui-library-file = { $size } · modified { $day }
+
 gui-param-default = { $path } · default { $value }
 
 gui-param-held = { $label }: held to { $value }
@@ -64,6 +66,14 @@ gui-param-hint = Drag or arrows to change, the wheel once focused or with Alt (S
 gui-param-not-a-number = { $label }: `{ $typed }` is not a number
 
 gui-param-past-range = { $label }: past its usual range
+
+gui-size-bytes = { $size } B
+
+gui-size-gib = { $size } GiB
+
+gui-size-kib = { $size } KiB
+
+gui-size-mib = { $size } MiB
 
 xmp-not-applied = { $count } of { $items } history items not applied, kept for later: { $groups }
 

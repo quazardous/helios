@@ -18,7 +18,7 @@ use std::collections::HashMap;
 use std::sync::mpsc::{Receiver, Sender, channel};
 
 use egui::{Color32, ColorImage, TextureHandle, Ui};
-use helios_core::{Image, Region};
+use helios_core::{Image, Message, Region};
 pub use helios_vault::fields::Op;
 use helios_vault::fields::{LABELS as LABELS_FIELD, RATING, REJECTED};
 use serde_json::Value;
@@ -38,6 +38,55 @@ pub struct Entry {
     /// Rejected; the stars stay beside it.
     pub rejected: bool,
     pub labels: Vec<String>,
+    /// The file's size in bytes, when it is on disk.
+    pub bytes: Option<u64>,
+    /// When the file was last modified, in seconds since 1970 (UTC).
+    pub modified: Option<i64>,
+}
+
+/// A file size as the interface's language writes it: `12.3 MiB`,
+/// `12,3 Mio` in French.
+pub fn size_text(ctx: &egui::Context, bytes: u64) -> String {
+    let locale = crate::i18n::locale(ctx);
+    let b = bytes as f64;
+    let (unit, value) = if bytes < 1024 {
+        (Message::new("gui-size-bytes", "{ $size } B"), b)
+    } else if b < 1024.0 * 1024.0 {
+        (Message::new("gui-size-kib", "{ $size } KiB"), b / 1024.0)
+    } else if b < 1024.0 * 1024.0 * 1024.0 {
+        (
+            Message::new("gui-size-mib", "{ $size } MiB"),
+            b / (1024.0 * 1024.0),
+        )
+    } else {
+        (
+            Message::new("gui-size-gib", "{ $size } GiB"),
+            b / (1024.0 * 1024.0 * 1024.0),
+        )
+    };
+    let size = crate::i18n::number(&locale, value, 1);
+    crate::i18n::text(ctx, unit.with("size", size))
+}
+
+/// What the library says of an image's file beside its name: its size and
+/// the day it was last modified, in the interface's language.
+pub fn file_details(ctx: &egui::Context, entry: &Entry) -> Option<String> {
+    use egui_pop::i18n::format::{Date, DateStyle, date};
+    let locale = crate::i18n::locale(ctx);
+    let size = entry.bytes.map(|b| size_text(ctx, b));
+    let day = entry
+        .modified
+        .map(|s| date(&locale, &Date::from_unix(s), DateStyle::Medium));
+    match (size, day) {
+        (Some(size), Some(day)) => Some(crate::i18n::text(
+            ctx,
+            Message::new("gui-library-file", "{ $size } · modified { $day }")
+                .with("size", size)
+                .with("day", day),
+        )),
+        (Some(one), None) | (None, Some(one)) => Some(one),
+        (None, None) => None,
+    }
 }
 
 impl Entry {
@@ -352,7 +401,11 @@ impl Library {
             let c = egui::pos2(rect.max.x - 8.0 - k as f32 * 10.0, line.y);
             painter.circle_filled(c, 4.0, color);
         }
-        response.on_hover_text(&entry.name)
+        let hover = match file_details(ui.ctx(), &entry) {
+            Some(details) => format!("{}\n{details}", entry.name),
+            None => entry.name.clone(),
+        };
+        response.on_hover_text(hover)
     }
 
     /// The grid: as many columns as fit.
