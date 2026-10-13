@@ -21,6 +21,7 @@ use egui_pop::model::commands::CommandSpec;
 use egui_pop::model::ids::{BlockId, CommandId, MenuId, PluginId};
 use egui_pop::model::keymap::Layer;
 use egui_pop::model::menus::MenuItem;
+use helios_core::Message;
 use helios_shell::commands::{CommandSpec as HeliosSpec, Registry};
 use serde_json::json;
 
@@ -196,6 +197,8 @@ impl Plugin for Lists {
 /// with the reason, rather than undoing under the user's hand.
 pub struct History {
     pub values: Arc<Mutex<helios_values::Store>>,
+    /// The catalogues a refusal is said through.
+    pub i18n: egui_pop::i18n::I18n,
 }
 
 impl Plugin for History {
@@ -209,11 +212,15 @@ impl Plugin for History {
 
     fn connect(&mut self, ctx: &mut Ctx<'_>) -> Result<(), PluginError> {
         for step in [STEP_UNDO, STEP_REDO] {
-            let values = self.values.clone();
+            let (values, i18n) = (self.values.clone(), self.i18n.clone());
             ctx.before(step, move |_, _| {
                 let v = values.lock().unwrap_or_else(PoisonError::into_inner);
                 match v.open_gesture() {
-                    Some(g) => Before::Veto(format!("{g} is in progress")),
+                    Some(g) => Before::Veto(helios_i18n::message(
+                        &i18n,
+                        &Message::new("gui-gesture-in-progress", "{ $gesture } is in progress")
+                            .with("gesture", g.to_string()),
+                    )),
                     None => Before::Go,
                 }
             });

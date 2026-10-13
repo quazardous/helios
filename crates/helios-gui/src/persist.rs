@@ -23,7 +23,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::mpsc::Receiver;
 
-use helios_core::{Bus, Envelope, Graph, NodeId, Params};
+use helios_core::{Bus, Envelope, Graph, Message, NodeId, Params};
 use helios_vault::fields::{Command, LABELS, Query, RATING, REJECTED};
 use helios_vault::{EditSession, ImageId, Store, Vault, Version, edit};
 use serde_json::Value;
@@ -140,7 +140,11 @@ impl<S: Store> Persist<S> {
             for skipped in edit::apply_to_graph(&mut graph, &head.edit)? {
                 shell.notify(
                     Level::Warning,
-                    format!("Part of the saved edit does not fit this network: {skipped}"),
+                    Message::new(
+                        "gui-edit-does-not-fit",
+                        "Part of the saved edit does not fit this network: { $part }",
+                    )
+                    .with("part", skipped),
                 );
             }
         }
@@ -237,7 +241,11 @@ impl<S: Store> Persist<S> {
             e.session.save(&self.vault, current, &label, at)
         };
         if let Err(err) = saved {
-            shell.notify(Level::Error, format!("The edit was not saved: {err}"));
+            shell.notify(
+                Level::Error,
+                Message::new("gui-edit-not-saved", "The edit was not saved: { $error }")
+                    .with("error", err),
+            );
         }
     }
 
@@ -250,12 +258,20 @@ impl<S: Store> Persist<S> {
         if let Err(e) = commands.and_then(|c| self.vault.apply(&c, WHO, None, now)) {
             shell.notify(
                 Level::Warning,
-                format!("Not saved, the library shows what the vault holds: {e}"),
+                Message::new(
+                    "gui-library-not-saved",
+                    "Not saved, the library shows what the vault holds: { $error }",
+                )
+                .with("error", e),
             );
         }
         // Kept or not, show what the vault holds now.
         if let Err(e) = self.show_stored(shell, &touched) {
-            shell.notify(Level::Error, format!("Cannot read the vault: {e}"));
+            shell.notify(
+                Level::Error,
+                Message::new("gui-vault-unreadable", "Cannot read the vault: { $error }")
+                    .with("error", e),
+            );
         }
     }
 

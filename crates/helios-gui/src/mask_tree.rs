@@ -32,7 +32,7 @@ use egui_pop::api::{AppHandle, Ctx, Plugin, PluginError};
 use egui_pop::model::ids::PluginId;
 use egui_pop::views::steps::TREE_DROP;
 use egui_pop::views::tree::{Node, Position, Signal, Sink, TreeSource, TreeState, TreeView};
-use helios_core::{Graph, NodeId, Value};
+use helios_core::{Graph, Message, NodeId, Value};
 use helios_shell::commands::Origin;
 use helios_values::{Change, Descriptor, Set, Store, node_path};
 use serde_json::Value as Json;
@@ -494,36 +494,48 @@ pub fn select(store: &mut Store, net: &Network, key: &str) {
 }
 
 /// Where a drop puts a member: its group and its index there, or why the
-/// network cannot take it.
+/// network cannot take it, by key.
 pub fn drop_place(
     net: &Network,
     keys: &[String],
     target: &str,
     position: Position,
-) -> Result<(String, usize), String> {
+) -> Result<(String, usize), Message> {
     let [key] = keys else {
-        return Err("members move one at a time".into());
+        return Err(Message::new(
+            "gui-masks-one-at-a-time",
+            "members move one at a time",
+        ));
     };
     let item = net.item(key)?;
     if item.group.is_none() {
-        return Err("the module's mask stays the root".into());
+        return Err(Message::new(
+            "gui-masks-root-stays",
+            "the module's mask stays the root",
+        ));
     }
     let t = net.item(target)?;
     let group = match position {
         Position::Inside if t.is_group() => target.to_string(),
         Position::Inside => {
-            return Err(format!(
-                "`{}` is not a group: only a group takes members",
-                t.name()
-            ));
+            return Err(Message::new(
+                "gui-masks-not-a-group",
+                "`{ $name }` is not a group: only a group takes members",
+            )
+            .with("name", t.name()));
         }
-        _ => t
-            .group
-            .clone()
-            .ok_or("nothing goes beside the module's mask: drop inside it")?,
+        _ => t.group.clone().ok_or_else(|| {
+            Message::new(
+                "gui-masks-nothing-beside-root",
+                "nothing goes beside the module's mask: drop inside it",
+            )
+        })?,
     };
     if net.is_within(&group, key) {
-        return Err("a group cannot go into itself".into());
+        return Err(Message::new(
+            "gui-masks-into-itself",
+            "a group cannot go into itself",
+        ));
     }
     let others: Vec<&String> = net
         .children
@@ -533,10 +545,12 @@ pub fn drop_place(
     if item.group.as_deref() != Some(group.as_str())
         && others.len() >= helios_module_masks::MAX_MEMBERS
     {
-        return Err(format!(
-            "the group `{group}` holds {} members already",
-            helios_module_masks::MAX_MEMBERS
-        ));
+        return Err(Message::new(
+            "gui-masks-group-full",
+            "the group `{ $group }` holds { $count } members already",
+        )
+        .with("group", &group)
+        .with("count", helios_module_masks::MAX_MEMBERS));
     }
     let index = match position {
         Position::Inside => others.len(),
@@ -1075,7 +1089,7 @@ impl MaskTree {
                         group: Some(group),
                         index: Some(index),
                     }),
-                    Err(e) => request(ui.ctx(), Request::Notify(Level::Warning, e.into())),
+                    Err(e) => request(ui.ctx(), Request::Notify(Level::Warning, e)),
                 },
                 Signal::Vetoed { reason, .. } => {
                     request(ui.ctx(), Request::Notify(Level::Warning, reason.into()));
@@ -1121,6 +1135,8 @@ fn context_items() -> Vec<MenuItem> {
 /// cannot take (the root moved, a member into a shape, a full group).
 pub struct Guard {
     pub shown: Rc<RefCell<Network>>,
+    /// The catalogues a refusal is said through.
+    pub i18n: egui_pop::i18n::I18n,
 }
 
 pub const GUARD: PluginId = PluginId::from_static("helios.masks");
@@ -1135,7 +1151,7 @@ impl Plugin for Guard {
     }
 
     fn connect(&mut self, ctx: &mut Ctx<'_>) -> Result<(), PluginError> {
-        let shown = self.shown.clone();
+        let (shown, i18n) = (self.shown.clone(), self.i18n.clone());
         ctx.before(TREE_DROP, move |_, args: &Json| {
             if args["tree"] != TREE {
                 return Before::Go;
@@ -1147,11 +1163,13 @@ impl Plugin for Guard {
                     serde_json::from_value(args["position"].clone()).map_err(|e| e.to_string())?,
                 ))
             };
-            match parse().and_then(|(keys, target, position)| {
-                drop_place(&shown.borrow(), &keys, &target, position)
-            }) {
+            match parse()
+                .map_err(Message::plain)
+                .and_then(|(keys, target, position)| {
+                    drop_place(&shown.borrow(), &keys, &target, position)
+                }) {
                 Ok(_) => Before::Go,
-                Err(reason) => Before::Veto(reason),
+                Err(reason) => Before::Veto(helios_i18n::message(&i18n, &reason)),
             }
         });
         Ok(())

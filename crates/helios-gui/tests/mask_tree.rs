@@ -357,7 +357,9 @@ fn a_drop_the_network_cannot_take_is_vetoed() {
         "dot",
         egui_pop::views::tree::Position::Inside,
     );
-    assert!(full.unwrap_err().contains("only a group takes members"));
+    let refused = full.unwrap_err();
+    assert_eq!(refused.key, "gui-masks-not-a-group");
+    assert!(refused.english.contains("only a group takes members"));
 }
 
 #[test]

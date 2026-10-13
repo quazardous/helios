@@ -55,7 +55,41 @@ export-png-bits = PNG has 8 or 16 bits, not { $bits }
 
 export-write-failed = cannot write { $path }: { $error }
 
+gui-confirmed-by-policy = { $verb }: confirmed by policy
+
+gui-copied = copied { $text }
+
+gui-edit-does-not-fit = Part of the saved edit does not fit this network: { $part }
+
+gui-edit-not-saved = The edit was not saved: { $error }
+
+gui-gesture-in-progress = { $gesture } is in progress
+
 gui-library-file = { $size } · modified { $day }
+
+gui-library-not-saved = Not saved, the library shows what the vault holds: { $error }
+
+gui-masks-group-full = the group `{ $group }` holds { $count } members already
+
+gui-masks-into-itself = a group cannot go into itself
+
+gui-masks-not-a-group = `{ $name }` is not a group: only a group takes members
+
+gui-masks-nothing-beside-root = nothing goes beside the module's mask: drop inside it
+
+gui-masks-one-at-a-time = members move one at a time
+
+gui-masks-root-stays = the module's mask stays the root
+
+gui-no-dialogs = no dialogs to show this in
+
+gui-open-workspace-directory = directory
+
+gui-open-workspace-title = Open a workspace
+
+gui-open-workspace-verb = Open
+
+gui-opening = opening { $path }
 
 gui-param-default = { $path } · default { $value }
 
@@ -67,6 +101,34 @@ gui-param-not-a-number = { $label }: `{ $typed }` is not a number
 
 gui-param-past-range = { $label }: past its usual range
 
+gui-policy-ask = confirmations are asked again
+
+gui-policy-yes = confirmations are answered yes by policy
+
+gui-profile-applied = profile { $name } applied
+
+gui-profile-exported = profile exported to { $path }
+
+gui-profile-import-changes = profile { $name }: { $count } changes; profile.import.apply to apply them
+
+gui-profile-keys-changed = profile { $name }: { $count } key bindings changed
+
+gui-profile-keys-conflict = profile { $name }: keys in conflict: { $keys }
+
+gui-profile-keys-error = profile { $name }: keys: { $error }
+
+gui-profile-keys-skipped = profile { $name }: keys skipped: { $keys }
+
+gui-profile-layout-error = profile { $name }: layout: { $error }
+
+gui-profile-variants = profile { $name }: { $count } values from variants: { $variants }
+
+gui-recording-saved = recording saved to { $path }
+
+gui-recording-stopped = recording stopped: { $error }
+
+gui-scene-saved = viewport.scene saved to { $path }
+
 gui-size-bytes = { $size } B
 
 gui-size-gib = { $size } GiB
@@ -74,6 +136,20 @@ gui-size-gib = { $size } GiB
 gui-size-kib = { $size } KiB
 
 gui-size-mib = { $size } MiB
+
+gui-snapshot-failed = snapshot failed: { $error }
+
+gui-snapshot-saved = { $target } pictured to { $path }
+
+gui-theme-exported = theme exported to { $path }
+
+gui-theme-problem = theme { $name }: { $problem }
+
+gui-theme-unknown = theme { $name }: no theme `{ $name }`: { $default } is used instead
+
+gui-vault-unreadable = Cannot read the vault: { $error }
+
+gui-window-frame-error = window frame: { $error }
 
 xmp-not-applied = { $count } of { $items } history items not applied, kept for later: { $groups }
 

@@ -422,12 +422,14 @@ impl Shell {
             })
             .plugin(plugins::History {
                 values: values.clone(),
+                i18n: i18n.clone(),
             })
             // egui-pop's data views (the Masks panel's tree), and what
             // Helios refuses of them.
             .plugin(egui_pop::views::ViewsPlugin)
             .plugin(crate::mask_tree::Guard {
                 shown: mask_network.clone(),
+                i18n: i18n.clone(),
             })
             // The window's frame: Helios's own on the desktop, the
             // system's elsewhere (tests, pictures, tools) until asked.
@@ -801,10 +803,14 @@ impl Shell {
         // egui-pop base egui-pop itself would pick.
         let known = self.themes.get(name).is_some();
         if !known {
-            self.warn(format!(
-                "theme {name}: no theme `{name}`: {} is used instead",
-                crate::theme::DEFAULT
-            ));
+            self.warn(
+                Message::new(
+                    "gui-theme-unknown",
+                    "theme { $name }: no theme `{ $name }`: { $default } is used instead",
+                )
+                .with("name", name)
+                .with("default", crate::theme::DEFAULT),
+            );
         }
         let resolved = if known { name } else { crate::theme::DEFAULT };
         self.theme = crate::theme::resolve(&self.themes, resolved, &self.theme_overrides);
@@ -819,7 +825,11 @@ impl Shell {
             .map(ToString::to_string)
             .collect();
         for p in problems {
-            self.warn(format!("theme {name}: {p}"));
+            self.warn(
+                Message::new("gui-theme-problem", "theme { $name }: { $problem }")
+                    .with("name", name)
+                    .with("problem", p),
+            );
         }
     }
 
@@ -891,12 +901,15 @@ impl Shell {
                     format!("{:?} {}{removed} from {}", f.part, f.key, f.selector)
                 })
                 .collect();
-            self.note(format!(
-                "profile {}: {} values from variants: {}",
-                p.name,
-                from.len(),
-                from.join(", ")
-            ));
+            self.note(
+                Message::new(
+                    "gui-profile-variants",
+                    "profile { $name }: { $count } values from variants: { $variants }",
+                )
+                .with("name", &p.name)
+                .with("count", from.len())
+                .with("variants", from.join(", ")),
+            );
         }
         *lock(&self.resolved_view) = json!({
             "profile": p.name,
@@ -946,25 +959,57 @@ impl Shell {
                 Ok(diff) => {
                     let changed = diff.added.len() + diff.removed.len() + diff.changed.len();
                     if changed > 0 {
-                        self.note(format!(
-                            "profile {}: {changed} key bindings changed",
-                            p.name
-                        ));
+                        self.note(
+                            Message::new(
+                                "gui-profile-keys-changed",
+                                "profile { $name }: { $count } key bindings changed",
+                            )
+                            .with("name", &p.name)
+                            .with("count", changed),
+                        );
                     }
                     for s in diff.skipped {
-                        self.warn(format!("profile {}: keys skipped: {s}", p.name));
+                        self.warn(
+                            Message::new(
+                                "gui-profile-keys-skipped",
+                                "profile { $name }: keys skipped: { $keys }",
+                            )
+                            .with("name", &p.name)
+                            .with("keys", s),
+                        );
                     }
                     for c in diff.conflicts {
-                        self.warn(format!("profile {}: keys in conflict: {c}", p.name));
+                        self.warn(
+                            Message::new(
+                                "gui-profile-keys-conflict",
+                                "profile { $name }: keys in conflict: { $keys }",
+                            )
+                            .with("name", &p.name)
+                            .with("keys", c),
+                        );
                     }
                 }
-                Err(e) => self.warn(format!("profile {}: keys: {e}", p.name)),
+                Err(e) => self.warn(
+                    Message::new(
+                        "gui-profile-keys-error",
+                        "profile { $name }: keys: { $error }",
+                    )
+                    .with("name", &p.name)
+                    .with("error", e),
+                ),
             }
         }
         if let Some(layout) = &p.layout {
             match Layout::from_json(&layout.to_string()) {
                 Ok(l) => self.set_layout(l),
-                Err(e) => self.warn(format!("profile {}: layout: {e}", p.name)),
+                Err(e) => self.warn(
+                    Message::new(
+                        "gui-profile-layout-error",
+                        "profile { $name }: layout: { $error }",
+                    )
+                    .with("name", &p.name)
+                    .with("error", e),
+                ),
             }
         }
     }
@@ -1074,7 +1119,10 @@ impl Shell {
         .untracked();
         let done = lock(&self.app.handle().store()).set(set).map(|_| ());
         if let Err(e) = done {
-            self.warn(format!("window frame: {e}"));
+            self.warn(
+                Message::new("gui-window-frame-error", "window frame: { $error }")
+                    .with("error", e.to_string()),
+            );
         }
     }
 
@@ -2046,7 +2094,7 @@ impl Shell {
             Some(d) => {
                 d.open(dialog);
             }
-            None => self.warn("no dialogs to show this in"),
+            None => self.warn(Message::new("gui-no-dialogs", "no dialogs to show this in")),
         }
     }
 
@@ -2054,8 +2102,11 @@ impl Shell {
     /// and says so.
     pub fn confirm(&mut self, c: crate::dialogs::Confirm) {
         if self.assume_yes {
-            let text = format!("{}: confirmed by policy", c.verb);
-            self.notify(Level::Warning, text);
+            self.notify(
+                Level::Warning,
+                Message::new("gui-confirmed-by-policy", "{ $verb }: confirmed by policy")
+                    .with("verb", &c.verb),
+            );
             let _ = self.run(&c.command, c.args, Origin::Script("policy".into()));
             return;
         }
@@ -2303,17 +2354,17 @@ impl Shell {
                 w.open(Some(SHORTCUTS));
             }
             Action::OpenWorkspace(None) => self.form(crate::dialogs::Form {
-                title: "Open a workspace".into(),
+                title: self.text(Message::new("gui-open-workspace-title", "Open a workspace")),
                 fields: vec![crate::dialogs::Field {
                     key: "path".into(),
                     descriptor: helios_values::Descriptor::path(
-                        "directory",
+                        &self.text(Message::new("gui-open-workspace-directory", "directory")),
                         helios_values::PathKind::Dir,
                         &[],
                     ),
                     value: helios_core::Value::Text(String::new()),
                 }],
-                verb: "Open".into(),
+                verb: self.text(Message::new("gui-open-workspace-verb", "Open")),
                 command: "workspace.open".into(),
             }),
             Action::OpenWorkspace(Some(path)) => {
@@ -2321,7 +2372,7 @@ impl Shell {
                 std::env::current_exe()
                     .and_then(|exe| std::process::Command::new(exe).arg(&path).spawn())
                     .map_err(|e| format!("cannot open {}: {e}", path.display()))?;
-                self.note(format!("opening {}", path.display()));
+                self.note(Message::new("gui-opening", "opening { $path }").with("path", &path));
             }
             Action::Theme(name) => {
                 let overrides = self.theme_overrides.clone();
@@ -2336,7 +2387,10 @@ impl Shell {
                     .map_or(Ok(()), std::fs::create_dir_all)
                     .and_then(|()| std::fs::write(&path, text))
                     .map_err(|e| format!("cannot export the theme to {}: {e}", path.display()))?;
-                self.note(format!("theme exported to {}", path.display()));
+                self.note(
+                    Message::new("gui-theme-exported", "theme exported to { $path }")
+                        .with("path", &path),
+                );
             }
             Action::ProfileExport(path, parts, this_machine) => {
                 let parts = if parts.is_empty() {
@@ -2363,17 +2417,24 @@ impl Shell {
                             .map_err(|e| format!("{}: {e}", path.display()))
                     })
                     .map_err(|e| format!("profile not exported: {e}"))?;
-                self.note(format!("profile exported to {}", path.display()));
+                self.note(
+                    Message::new("gui-profile-exported", "profile exported to { $path }")
+                        .with("path", &path),
+                );
             }
             Action::ProfileImport(path) => {
                 let incoming =
                     Self::read_profile(&path).map_err(|e| format!("profile not imported: {e}"))?;
                 let changes = helios_profile::diff(&self.profile(), &incoming);
                 let count: usize = changes.iter().map(|d| d.changes.len()).sum();
-                self.note(format!(
-                    "profile {}: {count} changes; profile.import.apply to apply them",
-                    incoming.name
-                ));
+                self.note(
+                    Message::new(
+                        "gui-profile-import-changes",
+                        "profile { $name }: { $count } changes; profile.import.apply to apply them",
+                    )
+                    .with("name", &incoming.name)
+                    .with("count", count),
+                );
                 for d in &changes {
                     for c in &d.changes {
                         self.note(format!("{:?} {c}", d.part));
@@ -2388,7 +2449,10 @@ impl Shell {
                     .ok_or("no profile read to apply: profile.import first")?;
                 let name = p.name.clone();
                 self.apply_profile(&p);
-                self.note(format!("profile {name} applied"));
+                self.note(
+                    Message::new("gui-profile-applied", "profile { $name } applied")
+                        .with("name", &name),
+                );
             }
             Action::ProfileUse(name) => self
                 .use_profile(&name)
@@ -2436,7 +2500,7 @@ impl Shell {
             }
             Action::Copy(text) => {
                 ctx.copy_text(text.clone());
-                self.note(format!("copied {text}"));
+                self.note(Message::new("gui-copied", "copied { $text }").with("text", &text));
             }
             // The workbench's steps: the panel's rules, then any plugin,
             // may refuse.
@@ -2447,9 +2511,9 @@ impl Shell {
             Action::AssumeYes(on) => {
                 self.assume_yes = on;
                 self.note(if on {
-                    "confirmations are answered yes by policy"
+                    Message::new("gui-policy-yes", "confirmations are answered yes by policy")
                 } else {
-                    "confirmations are asked again"
+                    Message::new("gui-policy-ask", "confirmations are asked again")
                 });
             }
             Action::Detach(p) => {
@@ -2468,7 +2532,10 @@ impl Shell {
                     .ok_or_else(|| "the viewport shows nothing yet".to_string())
                     .and_then(|scene| snapshot::save_scene(&scene, &path))
                     .map_err(|e| format!("viewport.scene: {e}"))?;
-                self.note(format!("viewport.scene saved to {}", path.display()));
+                self.note(
+                    Message::new("gui-scene-saved", "viewport.scene saved to { $path }")
+                        .with("path", &path),
+                );
             }
             Action::Snapshot { target, path } => {
                 self.shots.push_back(Shot::Save { target, path });
@@ -2480,7 +2547,10 @@ impl Shell {
             Action::RecordStop => {
                 if let Some((_, rec)) = self.recording.take() {
                     let p = rec.finish().map_err(|e| format!("recording failed: {e}"))?;
-                    self.note(format!("recording saved to {}", p.display()));
+                    self.note(
+                        Message::new("gui-recording-saved", "recording saved to { $path }")
+                            .with("path", &p),
+                    );
                 }
             }
         }
@@ -2532,8 +2602,15 @@ impl Shell {
                     .map(|r| snapshot::crop(&full, r, self.pixels_per_point))
                     .and_then(|img| snapshot::save(&img, &path))
                     .map_or_else(
-                        |e| format!("snapshot failed: {e}"),
-                        |()| format!("{target} pictured to {}", path.display()),
+                        |e| {
+                            Message::new("gui-snapshot-failed", "snapshot failed: { $error }")
+                                .with("error", e)
+                        },
+                        |()| {
+                            Message::new("gui-snapshot-saved", "{ $target } pictured to { $path }")
+                                .with("target", &target)
+                                .with("path", &path)
+                        },
                     );
                 self.note(note);
             }
@@ -2547,7 +2624,10 @@ impl Shell {
                         .map(|r| snapshot::crop(&full, r, self.pixels_per_point))
                         .and_then(|img| rec.push(&img));
                     if let Err(e) = pushed {
-                        self.warn(format!("recording stopped: {e}"));
+                        self.warn(
+                            Message::new("gui-recording-stopped", "recording stopped: { $error }")
+                                .with("error", e),
+                        );
                         self.recording = None;
                     }
                 }
@@ -2661,7 +2741,9 @@ impl Shell {
             if e.name == "workbench.refused"
                 && let Some(why) = e.data["reason"].as_str()
             {
-                self.note(why.to_string());
+                // Already in the language: Helios's own refusals are said
+                // through its catalogues, egui-pop's through its own.
+                self.note(Message::plain(why));
             }
         }
     }

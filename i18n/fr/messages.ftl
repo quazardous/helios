@@ -54,6 +54,82 @@ export-png-bits = le PNG a 8 ou 16 bits, pas { $bits }
 
 export-write-failed = impossible d’écrire { $path } : { $error }
 
+gui-confirmed-by-policy = { $verb } : confirmé par la règle
+
+gui-copied = copié { $text }
+
+gui-edit-does-not-fit = Une partie de la retouche enregistrée ne correspond pas à ce réseau : { $part }
+
+gui-edit-not-saved = La retouche n’a pas été enregistrée : { $error }
+
+gui-gesture-in-progress = { $gesture } est en cours
+
+gui-library-not-saved = Non enregistré, la bibliothèque montre ce que contient le coffre : { $error }
+
+gui-masks-group-full = le groupe « { $group } » contient déjà { $count } membres
+
+gui-masks-into-itself = un groupe ne peut pas aller en lui-même
+
+gui-masks-not-a-group = « { $name } » n’est pas un groupe : seul un groupe accueille des membres
+
+gui-masks-nothing-beside-root = rien ne va à côté du masque du module : déposez dedans
+
+gui-masks-one-at-a-time = les membres se déplacent un par un
+
+gui-masks-root-stays = le masque du module reste la racine
+
+gui-no-dialogs = aucune boîte de dialogue pour montrer ceci
+
+gui-open-workspace-directory = dossier
+
+gui-open-workspace-title = Ouvrir un espace de travail
+
+gui-open-workspace-verb = Ouvrir
+
+gui-opening = ouverture de { $path }
+
+gui-policy-ask = les confirmations sont de nouveau demandées
+
+gui-policy-yes = les confirmations sont acceptées par la règle
+
+gui-profile-applied = profil { $name } appliqué
+
+gui-profile-exported = profil exporté vers { $path }
+
+gui-profile-import-changes = profil { $name } : { $count } changements ; profile.import.apply pour les appliquer
+
+gui-profile-keys-changed = profil { $name } : { $count } raccourcis changés
+
+gui-profile-keys-conflict = profil { $name } : raccourcis en conflit : { $keys }
+
+gui-profile-keys-error = profil { $name } : raccourcis : { $error }
+
+gui-profile-keys-skipped = profil { $name } : raccourcis ignorés : { $keys }
+
+gui-profile-layout-error = profil { $name } : disposition : { $error }
+
+gui-profile-variants = profil { $name } : { $count } valeurs venant de variantes : { $variants }
+
+gui-recording-saved = enregistrement sauvé dans { $path }
+
+gui-recording-stopped = enregistrement arrêté : { $error }
+
+gui-scene-saved = viewport.scene sauvé dans { $path }
+
+gui-snapshot-failed = capture échouée : { $error }
+
+gui-snapshot-saved = { $target } capturé dans { $path }
+
+gui-theme-exported = thème exporté vers { $path }
+
+gui-theme-problem = thème { $name } : { $problem }
+
+gui-theme-unknown = thème { $name } : pas de thème « { $name } » : { $default } est utilisé à la place
+
+gui-vault-unreadable = Impossible de lire le coffre : { $error }
+
+gui-window-frame-error = cadre de la fenêtre : { $error }
+
 gui-library-file = { $size } · modifié le { $day }
 
 gui-param-default = { $path } · par défaut { $value }
