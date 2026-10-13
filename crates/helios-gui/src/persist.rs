@@ -66,6 +66,69 @@ struct Editing {
     flushed_at: Option<f64>,
 }
 
+/// The library as the vault holds it: its entries, and where each image
+/// can be read (its first present copy), for thumbnails.
+pub struct LibraryRows {
+    entries: Vec<Entry>,
+    files: Vec<(String, PathBuf)>,
+}
+
+impl LibraryRows {
+    /// How many images the library holds.
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+}
+
+/// Reads the library from the vault: a query, then each image's copies and
+/// its file's size and date. Nothing of the window: a thread of its own can
+/// read it while the window opens ([`Persist::show_library`] shows it).
+pub fn read_library<S: Store>(vault: &Vault<S>) -> Result<LibraryRows, String> {
+    let cursor = vault.open_cursor(Query::default())?;
+    let rows = vault.fetch(cursor.id, 0, cursor.count, &SHOWN);
+    vault.close_cursor(cursor.id);
+    let mut entries = Vec::new();
+    let mut files = Vec::new();
+    for row in rows? {
+        let path = vault
+            .locations(&row.id)?
+            .into_iter()
+            .find(|l| l.present)
+            .map(|l| l.path);
+        let id = row.id.hex();
+        let mut entry = Entry {
+            id: id.clone(),
+            name: path
+                .as_ref()
+                .and_then(|p| p.file_name())
+                .map_or_else(|| id[..12].to_string(), |n| n.to_string_lossy().into()),
+            ..Entry::default()
+        };
+        // The file's size and date, for the library's details.
+        if let Some(meta) = path.as_ref().and_then(|p| std::fs::metadata(p).ok()) {
+            entry.bytes = Some(meta.len());
+            entry.modified = meta
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .and_then(|d| i64::try_from(d.as_secs()).ok());
+            entry.day = entry.modified.and_then(crate::library::day_text);
+        }
+        for field in SHOWN {
+            entry.show(field, row.fields.get(field));
+        }
+        entries.push(entry);
+        if let Some(path) = path {
+            files.push((id, path));
+        }
+    }
+    Ok(LibraryRows { entries, files })
+}
+
 impl<S: Store> Persist<S> {
     /// A vault on `store`, announcing its changes on `bus`.
     pub fn new(store: S, bus: Arc<Bus>) -> Self {
@@ -89,49 +152,22 @@ impl<S: Store> Persist<S> {
     /// Fills the library with the vault's images; returns where each one
     /// can be read (its first present copy), for thumbnails.
     pub fn fill_library(&self, shell: &mut Shell) -> Result<Vec<(String, PathBuf)>, String> {
-        let cursor = self.vault.open_cursor(Query::default())?;
-        let rows = self.vault.fetch(cursor.id, 0, cursor.count, &SHOWN);
-        self.vault.close_cursor(cursor.id);
-        let mut entries = Vec::new();
-        let mut files = Vec::new();
-        for row in rows? {
-            let path = self
-                .vault
-                .locations(&row.id)?
-                .into_iter()
-                .find(|l| l.present)
-                .map(|l| l.path);
-            let id = row.id.hex();
-            let mut entry = Entry {
-                id: id.clone(),
-                name: path
-                    .as_ref()
-                    .and_then(|p| p.file_name())
-                    .map_or_else(|| id[..12].to_string(), |n| n.to_string_lossy().into()),
-                ..Entry::default()
-            };
-            // The file's size and date, for the library's details.
-            if let Some(meta) = path.as_ref().and_then(|p| std::fs::metadata(p).ok()) {
-                entry.bytes = Some(meta.len());
-                entry.modified = meta
-                    .modified()
-                    .ok()
-                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                    .and_then(|d| i64::try_from(d.as_secs()).ok());
-                entry.day = entry.modified.and_then(crate::library::day_text);
-            }
-            for field in SHOWN {
-                entry.show(field, row.fields.get(field));
-            }
-            entries.push(entry);
-            if let Some(path) = path {
-                files.push((id, path));
-            }
-        }
-        shell.set_library(entries);
+        let rows = read_library(&self.vault)?;
+        self.show_library(shell, rows)
+    }
+
+    /// Shows the library [`read_library`] read (on another thread, say),
+    /// with the vault's stacks and the proposals waiting; returns where
+    /// each image can be read, for thumbnails.
+    pub fn show_library(
+        &self,
+        shell: &mut Shell,
+        rows: LibraryRows,
+    ) -> Result<Vec<(String, PathBuf)>, String> {
+        shell.set_library(rows.entries);
         self.show_stacks(shell)?;
         self.show_decisions(shell)?;
-        Ok(files)
+        Ok(rows.files)
     }
 
     /// Shows the vault's stacks in the library.

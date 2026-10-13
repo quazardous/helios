@@ -137,6 +137,10 @@ gui-library-none = No images
 
 gui-library-not-saved = Not saved, the library shows what the vault holds: { $error }
 
+gui-library-read = { $count } images in the library
+
+gui-library-reading = Reading the library…
+
 gui-library-search = Search images
 
 gui-library-sync = Sync zoom and pan

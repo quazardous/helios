@@ -488,3 +488,23 @@ fn mask_labels_and_locks_are_saved_with_the_edit() {
     drop((shell, persist));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_library_read_on_another_thread_shows_as_one_filled_in_place() {
+    let dir = scratch("read-elsewhere");
+    let path = vault_file(&dir);
+    let (filled, _) = open(&path, &Options::default());
+    let mut shell = Shell::new(helios_panels(), None);
+    let persist = Persist::new(SqliteStore::open(&path).unwrap(), Arc::new(Bus::new()));
+    let vault = persist.vault().clone();
+    // Read as the desktop reads it while its window opens.
+    let rows = std::thread::spawn(move || helios_gui::persist::read_library(&vault))
+        .join()
+        .unwrap()
+        .unwrap();
+    assert_eq!(rows.len(), 2);
+    persist.show_library(&mut shell, rows).unwrap();
+    assert_eq!(shell.library().entries, filled.library().entries);
+    drop((filled, shell, persist));
+    let _ = std::fs::remove_dir_all(&dir);
+}

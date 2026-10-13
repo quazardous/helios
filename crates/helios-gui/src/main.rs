@@ -24,6 +24,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use egui_pop::core::focus_mode::SystemFocus;
 use egui_pop::model::layout::Layout;
 use egui_pop::platform::instance::{self, Instance, Launch, Single};
+use helios_core::Message;
 use helios_gui::platform::{self, Open};
 use helios_gui::{Shell, headless, helios_panels};
 use helios_gui::{quit, start};
@@ -58,10 +59,45 @@ fn warn(text: &str) {
     log::warn!(target: "helios", "{text}");
 }
 
+/// The library being read on a thread of its own as the window opens.
+type LibraryReading = std::sync::mpsc::Receiver<Result<helios_gui::persist::LibraryRows, String>>;
+
+/// Starts reading the library from `vault` on a thread of its own.
+fn read_library(
+    vault: Arc<helios_vault::Vault<helios_vault_sqlite::SqliteStore>>,
+) -> LibraryReading {
+    let (tx, reading) = std::sync::mpsc::channel();
+    let sender = tx.clone();
+    let spawned = std::thread::Builder::new()
+        .name("helios-library-read".into())
+        .spawn(move || {
+            let rows = helios_gui::persist::read_library(&vault);
+            if let Ok(rows) = &rows {
+                start::mark(&format!("library read ({} images, its thread)", rows.len()));
+            }
+            let _ = sender.send(rows);
+        });
+    if let Err(e) = spawned {
+        let _ = tx.send(Err(format!("no thread to read the library: {e}")));
+    }
+    reading
+}
+
 /// Fills the library from the vault, and reads the thumbnails behind it,
 /// one image at a time, from the first copy still present.
 fn fill_library(shell: &mut Shell, persist: &Persist) -> Result<(), String> {
-    let files = persist.fill_library(shell)?;
+    let rows = helios_gui::persist::read_library(persist.vault())?;
+    show_library(shell, persist, rows)
+}
+
+/// Shows the library read (on a thread of its own at the start), and reads
+/// the thumbnails behind it.
+fn show_library(
+    shell: &mut Shell,
+    persist: &Persist,
+    rows: helios_gui::persist::LibraryRows,
+) -> Result<(), String> {
+    let files = persist.show_library(shell, rows)?;
     // Quick open opens them from there.
     shell.set_image_files(files.iter().cloned());
     let sink = shell.library_thumbnails();
@@ -318,6 +354,8 @@ struct App {
     refill: Arc<AtomicBool>,
     /// The start's last marks: the first frame, the first input answered.
     frames: start::Frames,
+    /// The library being read, shown once it is.
+    library_reading: Option<LibraryReading>,
 }
 
 impl Drop for App {
@@ -361,6 +399,45 @@ impl App {
             Some(Shown::File(path)) => self.open(Open::Image(path)),
             None => Ok(()),
         }
+    }
+
+    /// Shows the library once it is read; whether it is still being read.
+    fn show_library_read(&mut self) -> bool {
+        use std::sync::mpsc::TryRecvError;
+        let Some(reading) = &self.library_reading else {
+            return false;
+        };
+        let read = match reading.try_recv() {
+            Ok(read) => read,
+            Err(TryRecvError::Empty) => return true,
+            Err(TryRecvError::Disconnected) => {
+                Err("the library's reading stopped (a panic)".to_string())
+            }
+        };
+        self.library_reading = None;
+        let shown = read.and_then(|rows| {
+            let count = rows.len();
+            match &self.persist {
+                Some(persist) => show_library(&mut self.shell, persist, rows).map(|()| count),
+                None => Ok(count),
+            }
+        });
+        match shown {
+            Ok(count) => {
+                start::mark("library shown");
+                // The status bar said it was being read.
+                self.shell.notify(
+                    helios_gui::dialogs::Level::Info,
+                    Message::new("gui-library-read", "{ $count } images in the library")
+                        .with("count", count),
+                );
+            }
+            Err(e) => self.shell.notify(
+                helios_gui::dialogs::Level::Error,
+                format!("cannot fill the library: {e}"),
+            ),
+        }
+        false
     }
 
     /// Opens what a later launch or a link asked for: an image in the
@@ -424,6 +501,11 @@ impl eframe::App for App {
             && let Err(e) = self.reopen()
         {
             self.shell.notify(helios_gui::dialogs::Level::Error, e);
+        }
+        if self.show_library_read() {
+            // Back soon: the library is still being read.
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(30));
         }
         // Imports from the workspace's source, and duplicates the user
         // chose to keep, imported again.
@@ -501,22 +583,6 @@ fn save_workspace(dir: &Path, app: &egui_pop::api::AppHandle) {
         warn(&format!("cannot save {}: {e}", file.display()));
     }
     quit::mark("workspace profile saved");
-}
-
-/// Fills the library from the vault and shows the image asked for (its
-/// edit loaded from the vault, and saved there, when there is one).
-fn open(
-    shell: &mut Shell,
-    persist: Option<&mut Persist>,
-    image: Option<(PathBuf, (helios_core::Graph, helios_core::NodeId))>,
-) -> Result<(), String> {
-    if let Some(persist) = &persist {
-        fill_library(shell, persist)?;
-    }
-    match image {
-        Some((path, graph)) => show_image(shell, persist, path, graph),
-        None => Ok(()),
-    }
 }
 
 /// Shows an image: imported into the vault and opened with its saved edit
@@ -707,6 +773,8 @@ fn main() -> Result<(), String> {
     // Held here, the vault outlives the window: it closes once the
     // window is gone (see `helios_gui::quit`).
     let vault = persist.as_ref().map(|p| p.vault().clone());
+    // The library is read while the window opens.
+    let library_reading = vault.clone().map(read_library);
     // The workspace as it stands: its template's network, as edited.
     let config = helios_gui::shell::config_dir();
     let bundle = match helios_template::workspace::Files::new(&config, &workspace).load() {
@@ -788,11 +856,19 @@ fn main() -> Result<(), String> {
                 shell.notes.push(format!("workspace: {e}"));
             }
             start::mark("workspace opened (keys, library settings)");
+            if library_reading.is_some() {
+                shell.notify(
+                    helios_gui::dialogs::Level::Info,
+                    Message::new("gui-library-reading", "Reading the library…"),
+                );
+            }
             let mut persist = persist;
-            if let Err(e) = open(&mut shell, persist.as_mut(), image) {
+            if let Some((path, graph)) = image
+                && let Err(e) = show_image(&mut shell, persist.as_mut(), path, graph)
+            {
                 shell.notify(helios_gui::dialogs::Level::Error, e);
             }
-            start::mark("library filled, image opened");
+            start::mark("image opened");
             let refill = Arc::new(AtomicBool::new(false));
             if let Some(p) = &persist
                 && let Err(e) = library_commands(&mut shell, p, &refill, &cc.egui_ctx)
@@ -808,6 +884,7 @@ fn main() -> Result<(), String> {
                 shown,
                 refill,
                 frames: start::Frames::default(),
+                library_reading,
             })
         })
         .map_err(|e| e.to_string());
