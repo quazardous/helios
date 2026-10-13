@@ -483,6 +483,19 @@ hash) is part of Helios; deploying a NAS is not.
   progress. Images can belong to several. darktable today: one config
   directory = one library and one set of preferences.
 
+- (2026-10-13, decided) **A context stack** holds where the user is
+  (places: a sub-workspace, a group, a mask sub-tree) and the modes that
+  apply everywhere (a work orientation such as culling or retouch, a
+  compare, "an agent is driving"). The kernel owns it; the display reads
+  it and asks for transitions. It is written at each transition, so a
+  workspace reopens exactly as it was left. egui-pop provides the
+  contract and the projection, Helios the owner. See
+  [docs/design/context-stack.md](docs/design/context-stack.md).
+- (2026-10-13, decided) Importing from another workspace or template
+  **copies** the parts (no link kept); **delegating** part of a network
+  to a sub-workspace is a link, entered and left through the context
+  stack.
+
 ### 2.5 Workshops and AI
 
 - (2026-10-11, decided) **AI junctions in the network**: any processing

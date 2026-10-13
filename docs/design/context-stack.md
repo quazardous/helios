@@ -307,20 +307,28 @@ Versions are unaffected: an undo is still a new version.
 - **Restore depending on plugins**: a mode from a disabled plugin is
   dropped on restore and comes back only if the user sets it again.
 
-## Open questions for the owner
+## Decisions (2026-10-13)
 
-1. May `helios-core` depend on `egui-pop-model` (no egui, MIT or Apache)
-   to share the pure machine, or does Helios keep its own, as
-   `helios-shell` keeps its own `when`?
-2. The stack's home: a vault document (transactions, node access) or a
-   file in the workspace's configuration directory, next to its layout?
-3. Should the desktop serve an inspect and control endpoint, so MCP
-   reaches it as it reaches a node?
-4. In which control scope does `context.request` belong: every build
-   (like batch) or debug only?
-5. Opening a workspace already open in another process: focus that
-   process, or allow two owners guarded by `rev`?
-6. What does an orientation mean on a headless node: does "review" on a
-   node change what it does, or is it only a label read by clients?
-7. Should a desktop following a node be able to adopt the node's stack
-   (drive its orientation), or only show it?
+The owner accepted the proposed answers:
+
+1. `helios-core` may depend on `egui-pop-model` (no egui, MIT or Apache)
+   and shares the pure machine.
+2. The stack lives in the vault, one document per workspace, written
+   inside each transition (survival).
+3. The desktop will serve an inspect and control endpoint, so MCP
+   reaches it as it reaches a node (its own piece of work).
+4. `context.request` is available in every build, like the other agent
+   tools.
+5. A workspace already open in another process: that process is
+   focused (single instance), not a second owner.
+6. On a headless node, an orientation changes the routing and defaults
+   of jobs (for example "review" sends exports to proofs); small at
+   first.
+7. A desktop following a node only shows the node's stack; it does not
+   drive it, for now.
+
+egui-pop's side of the same decision is its ADR 0012 (accepted): modes
+are global to the stack, a layout change made in a mode belongs to the
+mode, pushed modes come back after a restart unless transient, a held
+request is refused with a reason, all windows show the same stack, and
+each frame has its own keymap layer.
