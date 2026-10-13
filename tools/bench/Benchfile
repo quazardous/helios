@@ -33,6 +33,12 @@ run = [
       tar xz which python3 wayland-devel libxkbcommon-devel \
       mesa-vulkan-drivers vulkan-loader vulkan-tools labwc sccache \
  && dnf clean all""",
+  # what wbox's headless labwc needs to start and to shoot: Xwayland
+  # (Fedora's labwc stops without it), the capture and input tools, and
+  # fixed fonts so screenshots are reproducible
+  """dnf -y install --setopt=install_weak_deps=False mesa-dri-drivers grim wlr-randr xdotool wlrctl \
+      xorg-x11-server-Xwayland setxkbmap google-noto-sans-fonts dejavu-sans-fonts fontconfig \
+ && dnf clean all""",
   # every download is pinned and checked: rustup-init 1.29.1 (its published
   # sha256), cargo-nextest 0.9.148, wbox-mcp at a commit
   # the toolchain of rust-toolchain.toml, outside CARGO_HOME (a cache)
@@ -53,14 +59,14 @@ run = [
  && dnf -y builddep darktable \
  && dnf -y install cmake ninja-build \
  && dnf clean all""",
-  # wbox drives a headless labwc (no job uses it yet; debug shells may)
+  # wbox drives a headless labwc (egui-pop-screenshots)
   """python3 -m venv /opt/wbox \
  && /opt/wbox/bin/pip install --quiet \
       "git+https://github.com/quazardous/wbox-mcp.git@a2f3eab914e7d1db142f98887a3be623a6821402\"""",
 ]
 # CARGO_HOME is the registry cache; the toolchain lives in /opt. Line
 # tables only and no incremental state keep the per-branch target small.
-env = { RUSTUP_HOME = "/opt/rustup", CARGO_HOME = "/cargo", PATH = "/opt/cargo/bin:/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin", CARGO_TARGET_DIR = "/target", CARGO_INCREMENTAL = "0", RUSTC_WRAPPER = "sccache", SCCACHE_DIR = "/sccache", SCCACHE_CACHE_SIZE = "12G", CARGO_PROFILE_DEV_DEBUG = "line-tables-only", CARGO_PROFILE_TEST_DEBUG = "line-tables-only", RUST_BACKTRACE = "1", VKDT_SRC = "/work/vkdt", WBOX_PYTHON = "/opt/wbox/bin/python3", WLR_RENDERER = "pixman", HOME = "/tmp/home", XDG_RUNTIME_DIR = "/tmp/xdg" }
+env = { RUSTUP_HOME = "/opt/rustup", CARGO_HOME = "/cargo", PATH = "/opt/cargo/bin:/opt/wbox/bin:/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin", CARGO_TARGET_DIR = "/target", CARGO_INCREMENTAL = "0", RUSTC_WRAPPER = "sccache", SCCACHE_DIR = "/sccache", SCCACHE_CACHE_SIZE = "12G", CARGO_PROFILE_DEV_DEBUG = "line-tables-only", CARGO_PROFILE_TEST_DEBUG = "line-tables-only", RUST_BACKTRACE = "1", VKDT_SRC = "/work/vkdt", WBOX_PYTHON = "/opt/wbox/bin/python3", WLR_RENDERER = "pixman", HOME = "/tmp/home", XDG_RUNTIME_DIR = "/tmp/xdg" }
 
 [checkout.helios]
 repo = "https://github.com/quazardous/helios.git"
@@ -309,6 +315,23 @@ timeout = "1h"
 # egui-pop's translation catalogues regenerated (UPDATE_CATALOGUES=1: the
 # English one from the code, new translations stamped): the locales of
 # crates/egui-pop-i18n land in /out/locales, to review and commit
+# egui-pop's documentation screenshots (`cargo xtask screenshots`, all of
+# them or `page=<name>`) through wbox, in a headless labwc rendering on
+# the CPU (pixman: byte-identical PNGs from run to run); the PNGs as the
+# output `screenshots`
+[jobs.egui-pop-screenshots]
+checkouts = ["egui-pop"]
+cores = 5
+memory = "4g"
+cwd = "/work/${src:-egui-pop}"
+command = """mkdir -p /tmp/w/egui-pop && cp -r --preserve=mode . /tmp/w/egui-pop/ && cd /tmp/w/egui-pop && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/egui-pop ] || { rm -rf /target/* && echo /tmp/w/egui-pop > /target/.built-at; }; } && \
+mkdir -p "$XDG_RUNTIME_DIR" "$HOME" && chmod 700 "$XDG_RUNTIME_DIR" && \
+cargo xtask screenshots ${page:-} && mkdir -p /out/screenshots && cp -r docs/screenshots/. /out/screenshots/"""
+env = { CARGO_NET_OFFLINE = "true", WLR_RENDERER = "pixman" }
+mounts = { "egui-pop-target/${egui_pop:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
+outputs = { screenshots = { path = "screenshots/", kind = "images" } }
+timeout = "1h"
+
 [jobs.egui-pop-catalogues]
 checkouts = ["egui-pop"]
 cores = 5
