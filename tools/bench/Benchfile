@@ -206,6 +206,21 @@ env = { CARGO_NET_OFFLINE = "true" }
 mounts = { "egui-pop-target/${egui_pop:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git" }
 timeout = "1h"
 
+# egui-pop's translation catalogues regenerated (UPDATE_CATALOGUES=1: the
+# English one from the code, new translations stamped): the locales of
+# crates/egui-pop-i18n land in /out/locales, to review and commit
+[jobs.egui-pop-catalogues]
+cores = 8
+memory = "9g"
+cwd = "/work/${src:-egui-pop}"
+command = """mkdir -p /tmp/w/egui-pop && cp -r --preserve=mode . /tmp/w/egui-pop/ && cd /tmp/w/egui-pop && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/egui-pop ] || { rm -rf /target/* && echo /tmp/w/egui-pop > /target/.built-at; }; } && \
+UPDATE_CATALOGUES=1 cargo test --locked -p egui-pop-i18n --test catalogues; rc=$?; \
+cp -r crates/egui-pop-i18n/locales /out/ ; \
+exit $rc"""
+env = { CARGO_NET_OFFLINE = "true" }
+mounts = { "egui-pop-target/${egui_pop:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git" }
+timeout = "1h"
+
 # ---------------------------------------------------------------- raw corpus
 # The decoder and camera-name regression corpus (docs/raw-corpus.md): the
 # "core" raws of tests/raw-corpus.toml, CC0 files from raw.pixls.us checked
