@@ -1153,6 +1153,7 @@ fn main() -> ExitCode {
         .with("config", config.clone())
         .with("scheduler", node.scheduler.clone())
         .with("modules", Arc::new(Modules))
+        .with_jobs()
         .with_scheduler(node.scheduler.clone());
     // A TCP endpoint needs a session token, written where only this user reads it.
     let tcp = [Some(&args.socket), args.control.as_ref()]

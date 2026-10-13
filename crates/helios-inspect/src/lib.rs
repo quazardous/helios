@@ -15,6 +15,8 @@
 //!   carries the last events seen, so the caller learns what happened instead;
 //! - `wait_idle` (`timeout_ms`): returns once the scheduler has nothing queued
 //!   or running; on timeout the error carries what is still queued or running;
+//! - `describe jobs`, when the process shows them ([`Inspector::with_jobs`]):
+//!   its running jobs and the last ones ended, to catch up from;
 //! - `subscribe` (`prefix`, `since`): turns the connection into a stream of
 //!   the bus events whose kind starts with `prefix`, pushed as they are
 //!   published (see [`Inspector::stream`]).
@@ -32,6 +34,7 @@ use transport::Connection;
 
 use helios_core::{Bus, Describe, Envelope, Scheduler};
 
+pub mod jobs;
 pub mod transport;
 
 use serde::de::DeserializeOwned;
@@ -96,6 +99,14 @@ impl Inspector {
             scheduler: None,
             instance: new_token()[..16].to_string(),
         }
+    }
+
+    /// Shows the jobs running now and the last ones ended, folded from
+    /// the bus, as `jobs` ([`jobs::JobsView`]): what a client that lost
+    /// the event stream reads to catch up.
+    pub fn with_jobs(self) -> Self {
+        let view = jobs::JobsView::follow(&self.bus, &self.instance);
+        self.with("jobs", Arc::new(view))
     }
 
     /// What names this process among others at the same address.

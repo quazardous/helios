@@ -237,3 +237,53 @@ fn a_batch_job_is_cancelled_by_its_id() {
         "{unknown}"
     );
 }
+
+/// A node's jobs, followed from its inspect endpoint: pushed as they
+/// happen (`subscribe`), and read whole (`describe jobs`) to catch up.
+#[test]
+fn a_node_s_jobs_are_pushed_and_described() {
+    use helios_inspect::control::ControlRequest;
+    use helios_inspect::{Address, Request};
+
+    let node = Node::start("subscribe");
+    let inspect = Address::Unix(node.dir.join("node.sock"));
+    let (ack, mut stream) = helios_inspect::subscribe(&inspect, "job.", None).unwrap();
+    assert_eq!(ack["ok"], true, "{ack}");
+    let control =
+        |r: &ControlRequest| helios_inspect::request(&node.dir.join("batch.sock"), r).unwrap();
+    let started = control(&ControlRequest::BatchStart {
+        title: "Batch 3 images".into(),
+        total: 3,
+    });
+    let id = started["id"].as_str().unwrap().to_string();
+    let next = |stream: &mut helios_inspect::Client| loop {
+        let line = stream.read().unwrap();
+        if line.get("heartbeat").is_none() {
+            return line["event"].clone();
+        }
+    };
+    let first = next(&mut stream);
+    assert_eq!(first["kind"], "job.started", "{first}");
+    assert_eq!(first["payload"]["id"], id.as_str());
+    assert_eq!(first["payload"]["total"], 3);
+
+    let jobs = helios_inspect::request_at(
+        &inspect,
+        &Request::Describe {
+            entity: "jobs".into(),
+        },
+    )
+    .unwrap();
+    let jobs = &jobs["describe"];
+    assert_eq!(jobs["instance"], ack["instance"], "{jobs}");
+    assert_eq!(jobs["running"][0]["started"]["id"], id.as_str(), "{jobs}");
+
+    control(&ControlRequest::BatchEnd {
+        id: id.clone(),
+        failed: 0,
+        cancelled: false,
+    });
+    let ended = next(&mut stream);
+    assert_eq!(ended["kind"], "job.finished", "{ended}");
+    assert_eq!(ended["payload"]["id"], id.as_str());
+}
