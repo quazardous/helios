@@ -27,6 +27,7 @@ Jobs of the Benchfile:
 | `build` | `cargo build --workspace --all-targets` | 8 cores, 6 GB |
 | `lint` | fast compile feedback: `cargo clippy --workspace --all-targets -- -D warnings`, `cargo xtask check`, then `cargo xtask i18n check` (its report in `out/i18n.txt`) | 8 cores, 6 GB |
 | `test` | `cargo nextest run --workspace --profile ci`, its JUnit report and a summary of the slowest tests in `out/` | 6 cores, 6 GB |
+| `test-affected` | the tests a change touches since `base=` (`origin/main` by default) and the critical set: see "Running what a change touches"; the selection in `out/affected.json`, the JUnit report and the slowest tests in `out/` | 6 cores, 6 GB |
 | `survival` | `cargo survival`: quit, `kill -9` and reopen | 4 cores, 4 GB |
 | `check-commits` | `cargo xtask check-commits <base>` (`base=`, `origin/main` by default) | 8 cores, 6 GB |
 | `gpu` | the GPU backend's tests on the box's NVIDIA GPU; the adapter used in `out/adapter.txt` | 4 cores, 4 GB, the GPU alone |
@@ -120,6 +121,106 @@ only from `main`, once the change is merged:
 ```bash
 ssh -i ~/.ssh/bench-helios bench-helios@<host> config benchfile < tools/bench/Benchfile
 ```
+
+## Running what a change touches
+
+A branch rarely needs the whole suite: `cargo xtask affected` says what a
+change can break, and the box runs that.
+
+```bash
+cargo xtask affected                    # since origin/main: JSON on stdout, a summary on stderr
+cargo xtask affected main --filter      # the nextest filter alone
+cargo xtask affected --critical         # the critical set's filter alone
+cargo nextest run --workspace -E "$(cargo xtask affected --filter)"
+cargo xtask bench-remote test-affected base=origin/main
+cargo xtask bench-remote --affected     # every job the selection names, in turn
+```
+
+How the selection is made:
+
+1. **The changed files**: everything since the merge base of the base
+   and `HEAD`, uncommitted and untracked files included.
+2. **Their crates**: each file belongs to the workspace crate whose
+   directory holds it (`cargo metadata`, nothing built). Data outside the
+   crates goes to the crates that read it: `i18n/` to the translation
+   crates, `tests/masks/` to the parity harness, the raw corpus manifest
+   and its thumbnails to `helios-corpus`, `packaging/` to the desktop
+   (its icon), the example plugins to the plugin broker and the
+   catalogues. Files no test reads (`docs/`, `changelog.d/`, the README
+   and other top-level texts, the linters' settings, `proto/`, the
+   research scripts of `tools/`) select no crate.
+3. **Their dependents**: every crate that depends on a changed one,
+   directly or not, by any kind of dependency (normal, dev, build).
+4. **The critical set**, always: a smoke render (the engine renders a
+   chain, an image exports to every format), a load and save round trip
+   (an edit saved step by step and reopened at its head, a vault reopened
+   with its images and history) and survival (the desktop and the node
+   quit, killed with `kill -9`, reopened). It is a nextest filter, kept in
+   `xtask/src/affected.rs` (`CRITICAL`) with a unit test checking each of
+   its tests still exists.
+5. **The image-data jobs**, by what they read: `raw-corpus` when the
+   loader (`helios-load`), the camera description it hands out
+   (`helios-photo`), the corpus checks, the manifest, the blessed
+   thumbnails or the fill script change; `mask-parity` when the masks
+   module, the XMP import (`helios-xmp`), the parity harness, the
+   fixtures or the darktable build script change. These follow direct
+   changes only: a change to `helios-core` tests every crate, but does
+   not run the corpus.
+
+**Everything runs** (the full `test` and `survival` jobs, both data jobs,
+`all()` as the filter) when the workspace manifest, `Cargo.lock`, the
+toolchain, xtask, CI (`.github/`), the nextest or cargo configuration, or
+the Benchfile changes, and when a path matches no rule: a new top-level
+file is never skipped by accident.
+
+The box jobs a selection names come in its `box_jobs`: `lint` always,
+`test-affected` (or `test` and `survival` for everything), then the data
+jobs. `bench-remote --affected` runs them one after the other on the
+current branch (or with `--push`), passes `base=` to `test-affected`, and
+prints a table of their results; it exits with the first failure, else
+75 when the box could not serve a job.
+
+What does not change:
+
+- **The full suite runs on `main`** after every merge (CI's gate): a
+  selection is a shortcut for a branch, not the last word.
+- **`check-commits`** walks each commit of a series with the fast tests,
+  as before; it does not use the selection.
+
+### Reproducibility
+
+What a run depends on, so two runs can be compared:
+
+- **The build profile.** Tests build in the dev profile, with the
+  optimization levels `Cargo.toml` sets per package (the decoders, the
+  engine, the raw chain, the parity harness); the box adds no incremental
+  state and line tables only. The `mask-parity` binary builds in release.
+  Rust neither reorders nor fuses floating-point operations at any
+  optimization level, so the profile changes speed, not results.
+- **No fast-math on Helios's side.** No `RUSTFLAGS`, no
+  `-C target-cpu=native`, no fast or algebraic float intrinsics in the
+  code a parity job runs: its numbers must not depend on the machine.
+  darktable, the reference, builds with its own release flags (which
+  include `-ffast-math`) at pinned commits, on the box's image: its
+  output moves only when a pin or the image's compiler does, and the
+  thresholds absorb what fast-math changes in its last bits.
+- **The data packs.** The raw corpus is a volume of CC0 files checked
+  against the sha256 of `tests/raw-corpus.toml`; the mask fixtures and
+  darktable's harvested masks are in `tests/masks/`; vkdt and darktable
+  are checkouts at pinned commits. A refilled volume or a moved pin is a
+  new baseline: say so in the commit.
+- **The comparison.** `raw-corpus` and `mask-parity` judge images with
+  one function (`helios_photo::compare`): identical decoded pixels pass
+  at once; otherwise the mean, the 99.9th and 99.99th percentiles and the
+  max of the Delta E 2000 are held to the job's thresholds together.
+- **Known non-deterministic tests.** None are known to fail at random.
+  Some depend on time and stay within generous bounds: the platform and
+  exit tests of `helios-gui` poll with short sleeps, the survival
+  scenarios kill a child process at a moment it reports, and the GPU
+  tests run on whatever adapter the machine has (lavapipe on the box but
+  for the `gpu` jobs), so their timings, not their results, vary. A test
+  seen failing once without a cause is a bug to file, not a retry to add:
+  the `ci` profile retries nothing.
 
 ## Exit 75: the box could not serve
 
