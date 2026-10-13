@@ -29,7 +29,7 @@ Jobs of the Benchfile:
 | `test` | `cargo nextest run --workspace --profile ci`, its JUnit report and a summary of the slowest tests in `out/` | 6 cores, 6 GB |
 | `test-affected` | the tests a change touches since `base=` (`origin/main` by default) and the critical set: see "Running what a change touches"; the selection in `out/affected.json`, the JUnit report and the slowest tests in `out/` | 6 cores, 6 GB |
 | `survival` | `cargo survival`: quit, `kill -9` and reopen | 4 cores, 4 GB |
-| `check-commits` | `cargo xtask check-commits <base>` (`base=`, `origin/main` by default) | 8 cores, 6 GB |
+| `check-commits` | `cargo xtask check-commits <base>` (`base=`, `origin/main` by default): each commit but the head builds, passes clippy and the tests it touches; `full=yes` runs every fast test on each; the per-commit report in `out/check-commits.md` | 8 cores, 6 GB |
 | `gpu` | the GPU backend's tests on the box's NVIDIA GPU; the adapter used in `out/adapter.txt` | 4 cores, 4 GB, the GPU alone |
 | `bench-masks` | `cargo xtask bench masks`, `masks.jsonl` in `out/` | 8 cores, 6 GB, the machine alone |
 | `test-times` | `cargo xtask test-times --profile ci`, its history kept per branch | 8 cores, 6 GB, the machine alone |
@@ -75,6 +75,7 @@ cargo xtask bench-remote test                    # the current branch, as GitHub
 cargo xtask bench-remote build branch=main
 cargo xtask bench-remote test --push             # this working tree, uncommitted changes included
 cargo xtask bench-remote check-commits base=main
+cargo xtask bench-remote check-commits base=main full=yes
 ```
 
 `bench-remote` asks the box whether it can serve (`box`), runs the job and
@@ -180,12 +181,37 @@ current branch (or with `--push`), passes `base=` to `test-affected`, and
 prints a table of their results; it exits with the first failure, else
 75 when the box could not serve a job.
 
-What does not change:
+The full suite still runs on `main` after every merge (CI's gate): a
+selection is a shortcut for a branch, not the last word.
 
-- **The full suite runs on `main`** after every merge (CI's gate): a
-  selection is a shortcut for a branch, not the last word.
-- **`check-commits`** walks each commit of a series with the fast tests,
-  as before; it does not use the selection.
+### Each commit of a series
+
+`cargo xtask check-commits` (and the `check-commits` job) uses the same
+selection commit by commit, so a series stays bisectable without paying
+the whole suite on each commit. Every commit of the range but its head
+(the full gate runs on the head) is checked out in turn and goes
+through:
+
+1. `cargo build --workspace --all-targets`;
+2. `cargo clippy --workspace --all-targets -- -D warnings`;
+3. nextest on the commit's own selection: its diff against its first
+   parent, mapped on its own workspace (`cargo metadata` at that
+   commit), gives the crates it touches and their dependents; their
+   fast tests run (nextest without the parity tests, the headless GUI
+   tests and the masks stress test), plus the critical set. A commit
+   that only touches files no test reads runs the critical set alone.
+   A commit that changes a path that runs everything (`Cargo.lock`,
+   xtask, CI, the Benchfile, a path no rule knows), or a root commit,
+   runs every fast test and the critical set;
+4. `cargo xtask check`.
+
+`--full` (`full=yes` on the box) runs every fast test on every commit
+instead, as before the selection existed. The walk stops at the first
+broken commit. The report, printed at the end, appended to
+`GITHUB_STEP_SUMMARY` in CI and written to `out/check-commits.md` on the
+box, has one line per commit: what it ran and why (the crates it
+changed and how many dependents, or the paths that asked for
+everything), its result and its time.
 
 ### Reproducibility
 

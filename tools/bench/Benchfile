@@ -197,14 +197,18 @@ env = { CARGO_NET_OFFLINE = "true" }
 mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
 timeout = "30m"
 
-# every commit of base..HEAD but the head builds and passes the fast tests
-# (base=<commit or branch>, origin/main by default)
+# every commit of base..HEAD but the head builds, passes clippy and the
+# tests it touches (base=<commit or branch>, origin/main by default;
+# full=yes: every fast test on every commit); the per-commit report in
+# /out/check-commits.md
 [jobs.check-commits]
 checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 5
 memory = "6g"
 cwd = "/work/${src:-helios}"
-command = """mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && cargo xtask check-commits ${base:-origin/main}"""
+command = """mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && \
+flag=; [ "${full:-no}" = yes ] && flag=--full; \
+GITHUB_STEP_SUMMARY=/out/check-commits.md cargo xtask check-commits $flag ${base:-origin/main}"""
 env = { CARGO_NET_OFFLINE = "true" }
 mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
 timeout = "2h"
