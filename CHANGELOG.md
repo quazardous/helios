@@ -24,6 +24,43 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-10-13
+
+### Added
+
+- The GPU calibration reports as a job once the compute manager is given
+  the jobs (`Manager::report_to`): each device's reference modules as items,
+  its speeds as log lines, a device that failed as a failed item, and a
+  cancel that stops it between two modules.
+- The desktop has egui-pop's jobs centre: the Jobs panel and the status
+  bar's jobs item with its popover list every background job of the
+  desktop's process (an export, a calibration) with its overall percentage,
+  "n of m", the current item, the time left, a log console per job and
+  Cancel. Helios's status line is now a block of egui-pop's status bar. A
+  long export or batch that ends while no Helios window has the focus is
+  said on the desktop from the job's end.
+- `helios_core::jobs`: background work reports how it goes as `job.*`
+  events on the bus (started, progress with done and total, the current
+  item and step, log lines, an item failed, finished, failed, cancelled),
+  the shape egui-pop's jobs centre folds; a job is cancelled by its id
+  (`Jobs::cancel`). `Scheduler::canceller` cancels jobs without holding the
+  scheduler.
+- An export reports as a job (`job.*` events on its bus): started when
+  queued, its render, encode and write steps, a log line with the file
+  written, and its end; `helios_export::submit_reported` takes the jobs
+  whose `cancel` stops it, queued or running, writing nothing.
+
+### Changed
+
+- The Parameters panel's sliders are egui-pop's slider family, built from
+  each parameter's descriptor: Ctrl drags and steps ten times finer and
+  Shift ten times coarser, Page Up and Page Down take coarse steps, Home and
+  End go to the soft range's ends, Escape gives a drag up without a trace,
+  and Enter types a value or an expression of the current one (`x * 2`).
+  A logarithmic bar and a picker button follow the module's hints. Every
+  finished change runs the `slider.change` step, so a plugin can veto or
+  snap it; a drag is still one undo step and steps in a row one group.
+
 ## [0.1.1] - 2026-10-13
 
 ### Fixed
