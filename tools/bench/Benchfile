@@ -120,7 +120,7 @@ run = ["for d in /work/helios /work/egui-pop /work/${src:-helios}; do [ -d $d ] 
 # other's parameter; all of it regenerates (tmp, the default).
 [storage]
 target = { about = "Helios's cargo target directories, one per branch, a new one starting from main's", lock = true, seed = "main" }
-egui-pop-target = { about = "egui-pop's cargo target directories, one per egui-pop branch, a new one starting from main's", lock = true, seed = "main" }
+egui-pop-target = { about = "egui-pop's cargo target directories, one per egui-pop branch, a new one starting from main's; on the hard disk, where a gate's 25 to 35 GB fit beside Helios's own targets", lock = true, seed = "main", media = "hdd" }
 registry = "the cargo registry, shared by every job"
 darktable-build = { about = "darktable-cli builds for the mask parity, one per pinned checkout", lock = true, media = "hdd" }
 cargo-git = "the cargo git dependencies, shared by every job"
