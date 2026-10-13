@@ -14,6 +14,7 @@
 //! - [`bus`]: typed events for orchestration, with a journal.
 //! - [`scheduler`]: named, cancellable background jobs; waiting until idle.
 //! - [`job`]: long library operations reported on the bus (`job.*`).
+//! - [`jobs`]: how background work goes, as `job.*` events people follow.
 //! - [`describe`]: every entity reports its state as structured data.
 
 pub mod bus;
@@ -23,6 +24,7 @@ pub mod error;
 pub mod graph;
 pub mod image;
 pub mod job;
+pub mod jobs;
 pub mod manifest;
 pub mod message;
 pub mod module;

@@ -289,6 +289,24 @@ struct Shared {
 }
 
 impl Shared {
+    fn cancel(&self, id: JobId) -> bool {
+        let mut state = self.state.lock().expect("scheduler lock");
+        if let Some(i) = state.queue.iter().position(|p| p.info.id == id) {
+            let pending = state.queue.remove(i).expect("position is valid");
+            let info = JobInfo {
+                state: JobState::Cancelled,
+                ..pending.info
+            };
+            self.ended(&mut state, info, pending.cause);
+            return true;
+        }
+        if let Some((_, token)) = state.running.get(&id) {
+            token.cancel();
+            return true;
+        }
+        false
+    }
+
     fn ended(&self, state: &mut State, info: JobInfo, cause: u64) {
         self.bus.publish(
             SOURCE,
@@ -314,6 +332,24 @@ impl Shared {
             );
         }
         self.changed.notify_all();
+    }
+}
+
+/// Cancels a scheduler's jobs without holding the scheduler (see
+/// [`Scheduler::canceller`]); does nothing once it is gone.
+#[derive(Clone)]
+pub struct Canceller(std::sync::Weak<Shared>);
+
+impl std::fmt::Debug for Canceller {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Canceller")
+    }
+}
+
+impl Canceller {
+    /// [`Scheduler::cancel`]; false once the scheduler is gone.
+    pub fn cancel(&self, id: JobId) -> bool {
+        self.0.upgrade().is_some_and(|s| s.cancel(id))
     }
 }
 
@@ -452,21 +488,13 @@ impl Scheduler {
     /// Cancels a job: a queued job never starts, a running job sees its
     /// token cancelled. Returns false if the job is unknown or already ended.
     pub fn cancel(&self, id: JobId) -> bool {
-        let mut state = self.shared.state.lock().expect("scheduler lock");
-        if let Some(i) = state.queue.iter().position(|p| p.info.id == id) {
-            let pending = state.queue.remove(i).expect("position is valid");
-            let info = JobInfo {
-                state: JobState::Cancelled,
-                ..pending.info
-            };
-            self.shared.ended(&mut state, info, pending.cause);
-            return true;
-        }
-        if let Some((_, token)) = state.running.get(&id) {
-            token.cancel();
-            return true;
-        }
-        false
+        self.shared.cancel(id)
+    }
+
+    /// What cancels jobs later, from anywhere ([`Scheduler::cancel`]):
+    /// what a job's report keeps for the `job.cancel` command.
+    pub fn canceller(&self) -> Canceller {
+        Canceller(Arc::downgrade(&self.shared))
     }
 
     /// Stops starting jobs (running ones finish); queued jobs wait for `resume`.
