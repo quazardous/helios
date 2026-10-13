@@ -15,7 +15,8 @@
 //!   target's primaries, clamped to its range, through its transfer (in
 //!   egui-pop's shader on the GPU path). sRGB clips what lies outside the
 //!   sRGB gamut; a wider target (Rec.2020 with gamma 2.2, extended sRGB)
-//!   keeps it.
+//!   keeps it. What the window wants follows the Wide-gamut preview
+//!   setting ([`crate::display`]).
 //! - **The view** (zoom, centre, fit) and the comparison live in the value
 //!   store at `view/viewport/*`, so keys, the palette and agents move them
 //!   like any value. The viewport's View signals drive them: a drag is one
@@ -248,6 +249,8 @@ pub struct Viewport {
     readout: Option<Readout>,
     /// Editing the drawn masks: drags, hooks, what was drawn.
     masks: crate::masks::Masks,
+    /// What the viewport's window wants to be drawn in.
+    wanted: DisplayTarget,
     pub stats: Arc<Stats>,
 }
 
@@ -282,6 +285,7 @@ impl Default for Viewport {
             gesture: None,
             readout: None,
             masks: crate::masks::Masks::default(),
+            wanted: DisplayTarget::srgb(),
             stats,
         }
     }
@@ -748,8 +752,25 @@ impl Viewport {
         write_view(&mut store, &view, None);
     }
 
+    /// What the viewport's window should be drawn in (sRGB, or a wider
+    /// target for a wide-gamut preview); asked of egui-pop when drawn.
+    pub fn set_wanted(&mut self, wanted: DisplayTarget) {
+        self.wanted = wanted;
+    }
+
+    /// What the viewport's window wants to be drawn in.
+    pub fn wanted(&self) -> DisplayTarget {
+        self.wanted
+    }
+
     /// Draws the viewport; reads and writes the view in `store`.
     pub fn ui(&mut self, ui: &mut Ui, store: &Mutex<Store>) {
+        // Asked of the window the viewport is in (the main one, or its
+        // own once detached); egui-pop resolves it against the surface.
+        let ctx = ui.ctx().clone();
+        if egui_pop::viewport::display::wanted(&ctx) != self.wanted {
+            egui_pop::viewport::display::want(&ctx, ctx.viewport_id(), self.wanted);
+        }
         let (mut view, compare) = {
             let store = store.lock().unwrap_or_else(PoisonError::into_inner);
             let pointer = ui.input(|i| i.pointer.hover_pos());

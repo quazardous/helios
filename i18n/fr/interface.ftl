@@ -22,6 +22,9 @@ menu-helios-system-themes =
 plugin-helios-commands =
     .title = Helios
 
+plugin-helios-display =
+    .title = Affichage
+
 plugin-helios-frame =
     .title = Cadre de Helios
 
@@ -36,3 +39,7 @@ plugin-helios-masks =
 
 plugin-helios-workbench =
     .title = Zones de Helios
+
+setting-display-wide-gamut-preview =
+    .description = Affiche l’image en Rec.2020 là où la fenêtre peut la porter (Wayland avec la gestion des couleurs), pour que les couleurs hors du sRGB ne soient pas écrêtées. Ailleurs, l’image reste en sRGB.
+    .label = Aperçu en gamut étendu

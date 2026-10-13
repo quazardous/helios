@@ -3,6 +3,7 @@
 //! framework's own pictures and recordings of it.
 
 pub mod dialogs;
+pub mod display;
 pub mod engine_source;
 pub mod host;
 pub mod i18n;

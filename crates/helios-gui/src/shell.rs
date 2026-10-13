@@ -439,6 +439,7 @@ impl Shell {
                 FramePlugin::system()
             })
             .plugin(plugins::Frame)
+            .plugin(crate::display::Display)
             .plugin(crate::workbench::Panels {
                 specs: panels.clone(),
                 contents: contents.clone(),
@@ -2682,6 +2683,8 @@ impl Shell {
             }
         }
         self.set_context(&ctx);
+        let wanted = crate::display::wanted(crate::display::wide_gamut(self.app.handle()));
+        self.viewport.borrow_mut().set_wanted(wanted);
         self.app.logic(&ctx);
         self.apply_queue(&ctx);
         // The theme asked for is installed here, before anything is drawn.

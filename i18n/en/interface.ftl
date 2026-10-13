@@ -23,6 +23,9 @@ menu-helios-system-themes =
 plugin-helios-commands =
     .title = Helios
 
+plugin-helios-display =
+    .title = Display
+
 plugin-helios-frame =
     .title = Helios frame
 
@@ -37,3 +40,7 @@ plugin-helios-masks =
 
 plugin-helios-workbench =
     .title = Helios areas
+
+setting-display-wide-gamut-preview =
+    .description = Shows the image in Rec.2020 where the window can carry it (Wayland with colour management), so colours outside sRGB are not clipped. Elsewhere the image stays sRGB.
+    .label = Wide-gamut preview
