@@ -1,6 +1,6 @@
 [package]
 name = "helios-library"
-description = "Helios library operations: import from folders and cards (copied or referenced, renamed, duplicates found by content), near-duplicate signals"
+description = "Helios library operations: import from folders and cards (copied or referenced, renamed, duplicates found by content), near-duplicate signals, and stack suggestions as decisions"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,6 +8,7 @@ repository.workspace = true
 
 [dependencies]
 helios-core.workspace = true
+helios-decision.workspace = true
 helios-load.workspace = true
 helios-vault.workspace = true
 helios-xmp.workspace = true

@@ -1,6 +1,6 @@
 //! Library operations end to end on fixture files: import with
 //! duplicates, copies renamed with their sidecars, the job's events, the
-//! perceptual signals.
+//! perceptual signals, and stack suggestions accepted and dissolved.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -9,6 +9,7 @@ use helios_core::Bus;
 use helios_library::import::{self, Duplicates, Options, Placement};
 use helios_library::rename::Pattern;
 use helios_library::signals::{self, Signals, distance};
+use helios_library::stacks::{self, Resolvers, Status};
 use helios_vault::{ImageId, MemoryStore, Vault};
 use serde_json::Value;
 
@@ -320,4 +321,111 @@ fn near_identical_pictures_hash_alike_and_another_scene_does_not() {
     );
     assert_eq!(s[0].hashed.as_deref(), Some("picture"));
     assert!(s.iter().all(|s| s.sharpness.is_some_and(|v| v > 0.0)));
+}
+
+/// An image of its own in the vault (a small file), with these signals.
+fn image_with(vault: &Vault<MemoryStore>, dir: &Path, n: u32, signals: &Signals) -> ImageId {
+    let file = dir.join(format!("{n}.raw"));
+    std::fs::write(&file, format!("frame {n}")).unwrap();
+    let id = vault.import_file(&file, 1).unwrap();
+    let doc = serde_json::to_value(signals).unwrap();
+    vault.set_signals(&id, Some(&doc)).unwrap();
+    id
+}
+
+fn shot(taken: f64, hash: u64, sharpness: f64, bias: f64) -> Signals {
+    Signals {
+        phash: Some(format!("{hash:016x}")),
+        taken: Some(taken),
+        taken_from: Some("exif".into()),
+        exposure_time: Some(0.01),
+        aperture: Some(4.0),
+        iso: Some(100.0),
+        exposure_bias: Some(bias),
+        sharpness: Some(sharpness),
+        ..Signals::default()
+    }
+}
+
+#[test]
+fn a_burst_and_a_bracket_are_suggested_accepted_and_dissolved() {
+    let p = Place::new("stacks");
+    let vault = vault();
+    let bus = Bus::new();
+    let base: u64 = 0xF0F0_F0F0_0F0F_0F0F;
+    // A burst: three frames half a second apart, a bit or two apart, the
+    // middle one sharpest.
+    let burst = [
+        image_with(&vault, &p.0, 1, &shot(0.0, base, 1.0, 0.0)),
+        image_with(&vault, &p.0, 2, &shot(0.5, base ^ 0b1, 3.0, 0.0)),
+        image_with(&vault, &p.0, 3, &shot(1.0, base ^ 0b11, 2.0, 0.0)),
+    ];
+    // Alone, a minute later.
+    let alone = image_with(&vault, &p.0, 4, &shot(60.0, base, 5.0, 0.0));
+    // A bracket: -1, 0, +1 EV, hashes further apart than a burst allows
+    // but within the bracket's threshold.
+    let wide = 0x0000_0000_0000_0FFF_u64; // 12 bits
+    let bracket = [
+        image_with(&vault, &p.0, 5, &shot(120.0, base, 1.0, -1.0)),
+        image_with(&vault, &p.0, 6, &shot(120.3, base ^ wide, 4.0, 0.0)),
+        image_with(&vault, &p.0, 7, &shot(120.6, base, 2.0, 1.0)),
+    ];
+    // Right after the bracket, another scene entirely.
+    let other = image_with(&vault, &p.0, 8, &shot(121.0, !base, 9.0, 0.0));
+
+    let resolvers = Resolvers::default();
+    let d = stacks::suggest(&vault, Some(&bus), &resolvers, "rules", &[], 50).unwrap();
+    assert_eq!(d.status, Status::Proposed);
+    assert_eq!(d.proposal.model.name, "rules");
+    let groups = &d.proposal.groups;
+    assert_eq!(groups.len(), 2, "{groups:?}");
+    let hex = |ids: &[ImageId]| ids.iter().map(ImageId::hex).collect::<Vec<_>>();
+    assert_eq!(groups[0].members, hex(&burst[..]));
+    assert_eq!(groups[0].kind, "burst");
+    assert_eq!(groups[0].best, burst[1].hex());
+    assert_eq!(groups[1].members, hex(&bracket[..]));
+    assert_eq!(groups[1].kind, "bracket");
+    assert_eq!(groups[1].best, bracket[1].hex());
+    for loner in [alone, other] {
+        assert!(groups.iter().all(|g| !g.members.contains(&loner.hex())));
+    }
+    // Nothing applied yet.
+    assert!(vault.stacks().unwrap().is_empty());
+    assert!(stacks::suggest(&vault, None, &resolvers, "a-model", &[], 50).is_err());
+
+    // Only the burst is taken: a correction of the proposal.
+    let answered = stacks::accept(&vault, Some(&bus), &d.id, Some(&[0][..]), "user", 60).unwrap();
+    assert_eq!(answered.status, Status::Accepted);
+    let answer = answered.answer.as_ref().unwrap();
+    assert_eq!(answer.groups, [0]);
+    let recorded = serde_json::to_value(answer).unwrap();
+    assert_eq!(recorded["by"], "corrected");
+    assert_eq!(recorded["model"]["name"], "rules");
+    let made = vault.stacks().unwrap();
+    assert_eq!(made.len(), 1);
+    assert_eq!(made[0].top, burst[1].hex());
+    assert_eq!(made[0].who, format!("decision:{}", d.id));
+    assert!(stacks::accept(&vault, None, &d.id, None, "user", 61).is_err());
+    assert_eq!(stacks::decisions(&vault).unwrap(), [answered]);
+    assert!(
+        bus.since(0)
+            .iter()
+            .filter(|e| e.kind == "library.decision")
+            .count()
+            >= 2
+    );
+
+    // Asked again, the stacked burst is left out; declining makes nothing.
+    let again = stacks::suggest(&vault, None, &resolvers, "rules", &[], 70).unwrap();
+    assert_eq!(again.proposal.groups.len(), 1);
+    assert_eq!(again.left_out.len(), 3);
+    let declined = stacks::decline(&vault, None, &again.id, "user", 71).unwrap();
+    assert_eq!(declined.status, Status::Declined);
+    assert_eq!(vault.stacks().unwrap().len(), 1);
+
+    // Dissolving keeps every image.
+    let gone = vault.dissolve_stack(&made[0].id).unwrap();
+    assert_eq!(gone.members, hex(&burst[..]));
+    assert!(vault.stacks().unwrap().is_empty());
+    assert_eq!(vault.images().unwrap().len(), 8);
 }
