@@ -8,6 +8,12 @@
 //! otherwise, with the reason (egui-pop's `display::resolve`). Only the
 //! image asks for it: egui's interface stays sRGB.
 //!
+//! On Wayland the image gets a surface of its own while the setting is
+//! on ([`ImageSurfaceSwitch`]): egui-pop's `image_surface`, below the
+//! transparent main window, tagged through the compositor's colour
+//! management or presented in a colour space the driver declares; the
+//! viewport then draws for that surface's target.
+//!
 //! The debug bridge's `helios.display` collector says what the display
 //! offers (`helios_display::probe`: the session, the compositor's colour
 //! management) and what the window resolved (wanted, surface, drawn and
@@ -21,6 +27,7 @@ use egui_pop::core::debug::FnCollector;
 use egui_pop::model::ids::{PluginId, SettingId};
 use egui_pop::model::values::Descriptor;
 use egui_pop::viewport::display::{self as pop_display, DisplayTarget};
+use egui_pop::viewport::image_surface;
 use serde_json::{Value as Json, json};
 
 use crate::viewport::rec2020_gamma22;
@@ -59,6 +66,99 @@ pub fn wanted(wide_gamut: bool) -> DisplayTarget {
     } else {
         DisplayTarget::srgb()
     }
+}
+
+/// The image's own surface (egui-pop's `image_surface`, Wayland) as it
+/// follows the Wide-gamut preview setting: installed after the GPU path
+/// the first frame the setting is on, taken down when it goes off, and
+/// back up when it comes on again.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ImageSurfaceSwitch {
+    installed: bool,
+    up: bool,
+}
+
+/// What a frame does with the image surface ([`ImageSurfaceSwitch::step`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SurfaceStep {
+    /// Nothing changes.
+    Keep,
+    /// Install it ([`install_image_surface`]): the setting is on and the
+    /// GPU path installed, for the first time.
+    Install,
+    /// The setting came back on: the installed surface serves again (the
+    /// viewport wishes Rec.2020 again and egui-pop negotiates).
+    Up,
+    /// The setting went off: take it down ([`take_down_image_surface`]).
+    Down,
+}
+
+impl ImageSurfaceSwitch {
+    /// What this frame does, with the setting `wide_gamut` and the
+    /// viewport's GPU path installed or not (the CPU path has no image
+    /// surface).
+    pub fn step(&mut self, wide_gamut: bool, gpu: bool) -> SurfaceStep {
+        let wanted = wide_gamut && gpu;
+        match (wanted, self.installed, self.up) {
+            (true, false, _) => {
+                self.installed = true;
+                self.up = true;
+                SurfaceStep::Install
+            }
+            (true, true, false) => {
+                self.up = true;
+                SurfaceStep::Up
+            }
+            (false, true, true) => {
+                self.up = false;
+                SurfaceStep::Down
+            }
+            _ => SurfaceStep::Keep,
+        }
+    }
+
+    /// Whether the image surface was installed.
+    pub fn installed(&self) -> bool {
+        self.installed
+    }
+
+    /// Whether it serves now (installed, the setting on).
+    pub fn up(&self) -> bool {
+        self.up
+    }
+}
+
+/// Installs the image's own surface for the main window: after egui-pop's
+/// `gpu::install`, on the same render state, with the window's handles
+/// (eframe's frame). Returns what the platform offers; why there is none
+/// in `unavailable` (X11, no colour management, another system).
+pub fn install_image_surface(
+    ctx: &egui::Context,
+    rs: &eframe::egui_wgpu::RenderState,
+    window: &(
+         impl image_surface::raw_window_handle::HasWindowHandle
+         + image_surface::raw_window_handle::HasDisplayHandle
+     ),
+) -> image_surface::Offer {
+    image_surface::install(
+        ctx,
+        rs,
+        window,
+        image_surface::Options {
+            transparent_window: TRANSPARENT_WINDOW,
+        },
+    )
+}
+
+/// Takes the image surface down: the main window's image goes back to
+/// the window's surface at once. The viewport wishes sRGB from then on,
+/// so egui-pop negotiates no surface and drops the subsurfaces it made.
+pub fn take_down_image_surface(ctx: &egui::Context) {
+    pop_display::set_image_surface(
+        ctx,
+        egui::ViewportId::ROOT,
+        pop_display::ImageSurface::default(),
+    );
 }
 
 /// What the display offers, asked once per process (one connection to
@@ -150,5 +250,162 @@ mod tests {
     fn off_wants_srgb_and_on_wants_rec2020() {
         assert_eq!(wanted(false), DisplayTarget::srgb());
         assert_eq!(wanted(true), rec2020_gamma22());
+    }
+
+    // --- The image surface, with fake compositors ---
+
+    use egui::ViewportId;
+    use egui_pop::viewport::display::{ColorSpace, DisplayTransform, Primaries, SurfaceFormat};
+    use egui_pop::viewport::image_surface::{Offer, Route};
+    use egui_pop_wayland::{Capabilities, Feature, NamedPrimaries as P, NamedTransfer as T};
+
+    use crate::viewport::{HeliosDisplay, display_stage};
+
+    /// A compositor's announcements and what a Mesa driver offers a
+    /// subsurface on it (8 and 10 bits and half floats, in sRGB and
+    /// `wsi`).
+    fn compositor(primaries: &[P], transfers: &[T], wsi: &[ColorSpace]) -> Offer {
+        let mut pairs = Vec::new();
+        for f in [
+            SurfaceFormat::Rgba8Unorm,
+            SurfaceFormat::Rgb10a2Unorm,
+            SurfaceFormat::Rgba16Float,
+        ] {
+            pairs.push((f, ColorSpace::Srgb));
+            pairs.extend(wsi.iter().map(|&s| (f, s)));
+        }
+        Offer {
+            unavailable: None,
+            colour: Some(Capabilities {
+                version: 1,
+                features: vec![Feature::Parametric],
+                primaries: primaries.to_vec(),
+                transfers: transfers.to_vec(),
+                intents: vec![0],
+            }),
+            wsi: pairs,
+            may_tag: true,
+        }
+    }
+
+    /// A `KWin`-like compositor: no sRGB transfer announced, so the image surface is tagged.
+    fn kwin() -> Offer {
+        compositor(
+            &[P::Srgb, P::Bt2020, P::DisplayP3],
+            &[T::Gamma22, T::St2084Pq],
+            &[ColorSpace::ExtendedSrgbLinear],
+        )
+    }
+
+    /// GNOME: sRGB with the sRGB transfer announced, so the driver holds
+    /// the surface's colour and declares Display P3.
+    fn gnome() -> Offer {
+        compositor(
+            &[P::Srgb, P::Bt2020, P::DisplayP3],
+            &[T::Gamma22, T::Srgb, T::St2084Pq],
+            &[ColorSpace::DisplayP3],
+        )
+    }
+
+    /// What egui-pop's viewport does each frame once the image surface is
+    /// installed: what the window wishes, negotiated against the offer,
+    /// and the image surface's target recorded.
+    fn negotiated(ctx: &egui::Context, offer: &Offer) -> Route {
+        let n = image_surface::negotiate(&pop_display::wanted(ctx), offer);
+        pop_display::set_image_surface(
+            ctx,
+            ViewportId::ROOT,
+            pop_display::ImageSurface {
+                target: n.route.target(),
+                why: n.why,
+            },
+        );
+        n.route
+    }
+
+    fn is_srgb(t: &DisplayTarget) -> bool {
+        t.primaries == Primaries::Srgb && !t.transfer.is_hdr() && t.headroom <= 1.0
+    }
+
+    #[test]
+    fn the_switch_installs_once_after_the_gpu_path() {
+        let mut s = ImageSurfaceSwitch::default();
+        // On, but the viewport draws on the CPU for now.
+        assert_eq!(s.step(true, false), SurfaceStep::Keep);
+        assert!(!s.installed());
+        assert_eq!(s.step(true, true), SurfaceStep::Install);
+        assert_eq!(s.step(true, true), SurfaceStep::Keep);
+        assert_eq!(s.step(false, true), SurfaceStep::Down);
+        assert_eq!(s.step(false, true), SurfaceStep::Keep);
+        assert!(s.installed() && !s.up());
+        assert_eq!(s.step(true, true), SurfaceStep::Up);
+        assert!(s.up());
+    }
+
+    #[test]
+    fn with_the_setting_off_the_target_stays_srgb_and_no_surface_is_installed() {
+        let ctx = egui::Context::default();
+        let mut s = ImageSurfaceSwitch::default();
+        for gpu in [false, true, true] {
+            assert_eq!(s.step(false, gpu), SurfaceStep::Keep);
+        }
+        assert!(!s.installed());
+        pop_display::want(&ctx, ViewportId::ROOT, wanted(false));
+        assert!(image_surface::offer(&ctx).is_none());
+        assert!(pop_display::image_surface_of(&ctx, ViewportId::ROOT).is_none());
+        assert!(is_srgb(&pop_display::target(&ctx)));
+        // An sRGB wish stays on the window even where the compositor
+        // would tag a surface.
+        assert_eq!(
+            image_surface::negotiate(&wanted(false), &kwin()).route,
+            Route::Window
+        );
+    }
+
+    #[test]
+    fn with_the_setting_on_the_target_follows_the_route() {
+        for (offer, route, primaries) in [
+            (kwin(), "tagged", Primaries::Bt2020),
+            (gnome(), "wsi", Primaries::DisplayP3),
+        ] {
+            let ctx = egui::Context::default();
+            pop_display::want(&ctx, ViewportId::ROOT, wanted(true));
+            let r = negotiated(&ctx, &offer);
+            assert_eq!(r.name(), route, "{r:?}");
+            let t = pop_display::target(&ctx);
+            assert_eq!(Some(t), r.target());
+            assert_eq!(t.primaries, primaries);
+            assert!(t.is_supported(), "{t:?}");
+            // Helios's transform encodes for that target, not sRGB.
+            assert_eq!(HeliosDisplay.stage(&t), display_stage(&t));
+
+            // The setting goes off: the image is back on the window.
+            take_down_image_surface(&ctx);
+            pop_display::want(&ctx, ViewportId::ROOT, wanted(false));
+            assert!(is_srgb(&pop_display::target(&ctx)));
+            assert_eq!(negotiated(&ctx, &offer), Route::Window);
+            assert!(is_srgb(&pop_display::target(&ctx)));
+        }
+    }
+
+    #[test]
+    fn without_colour_management_the_image_stays_srgb_and_says_why() {
+        let mut no_cm = kwin();
+        no_cm.colour = None;
+        no_cm.wsi.retain(|(_, s)| *s == ColorSpace::Srgb);
+        for (offer, why) in [
+            (no_cm, "colour management"),
+            (
+                Offer::unavailable("not a Wayland window (X11 or another system)"),
+                "not a Wayland window",
+            ),
+        ] {
+            let ctx = egui::Context::default();
+            pop_display::want(&ctx, ViewportId::ROOT, wanted(true));
+            assert_eq!(negotiated(&ctx, &offer), Route::Window);
+            assert!(is_srgb(&pop_display::target(&ctx)));
+            let image = pop_display::image_surface_of(&ctx, ViewportId::ROOT).unwrap();
+            assert!(image.why.unwrap().contains(why));
+        }
     }
 }

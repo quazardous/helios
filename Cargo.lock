@@ -1980,6 +1980,7 @@ dependencies = [
  "egui",
  "egui-pop",
  "egui-pop-test",
+ "egui-pop-wayland",
  "egui_kittest",
  "helios-core",
  "helios-display",

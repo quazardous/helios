@@ -156,8 +156,14 @@ impl App {
 }
 
 impl eframe::App for App {
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         self.shell.ui(ui);
+        // The GPU path is installed by now: the image's own surface
+        // follows the Wide-gamut preview setting.
+        let frame: &eframe::Frame = frame;
+        if let Some(rs) = frame.wgpu_render_state() {
+            self.shell.follow_image_surface(ui.ctx(), rs, frame);
+        }
         for open in self.shell.take_opens() {
             self.open(open);
         }

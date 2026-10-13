@@ -321,6 +321,9 @@ pub struct Shell {
     gpu: Option<eframe::egui_wgpu::RenderState>,
     /// What installing it found.
     gpu_info: Option<egui_pop::viewport::gpu::GpuInfo>,
+    /// The image's own surface (Wayland), following the Wide-gamut
+    /// preview setting.
+    image_surface: crate::display::ImageSurfaceSwitch,
     params: Rc<RefCell<crate::params::Params>>,
     /// The Masks panel: the selected module's mask network as a tree.
     mask_tree: Rc<RefCell<crate::mask_tree::MaskTree>>,
@@ -533,6 +536,7 @@ impl Shell {
             viewport: Rc::default(),
             gpu: None,
             gpu_info: None,
+            image_surface: crate::display::ImageSurfaceSwitch::default(),
             params: Rc::default(),
             mask_tree: Rc::default(),
             values,
@@ -779,6 +783,34 @@ impl Shell {
     /// The viewport's GPU path, once installed: `None` draws on the CPU.
     pub fn viewport_gpu(&self) -> Option<egui_pop::viewport::gpu::GpuInfo> {
         self.gpu_info
+    }
+
+    /// Follows the Wide-gamut preview setting with the image's own surface
+    /// on Wayland: installed once the viewport's GPU path is (on `rs`, the
+    /// main window's render state, with `window`'s handles: eframe's
+    /// frame) the first frame the setting is on, taken down when it goes
+    /// off. Called after [`Shell::ui`]; viewports follow on the next frame.
+    pub fn follow_image_surface(
+        &mut self,
+        ctx: &Egui,
+        rs: &eframe::egui_wgpu::RenderState,
+        window: &(
+             impl egui_pop::viewport::image_surface::raw_window_handle::HasWindowHandle
+             + egui_pop::viewport::image_surface::raw_window_handle::HasDisplayHandle
+         ),
+    ) {
+        use crate::display::SurfaceStep;
+        let on = crate::display::wide_gamut(self.app.handle());
+        match self.image_surface.step(on, self.gpu_info.is_some()) {
+            SurfaceStep::Install => {
+                let offer = crate::display::install_image_surface(ctx, rs, window);
+                if let Some(why) = offer.unavailable {
+                    log::info!(target: "helios", "no image surface, the image stays sRGB: {why}");
+                }
+            }
+            SurfaceStep::Down => crate::display::take_down_image_surface(ctx),
+            SurfaceStep::Keep | SurfaceStep::Up => {}
+        }
     }
 
     /// What the viewport's render threads did.
