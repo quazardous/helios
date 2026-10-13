@@ -49,14 +49,25 @@ sidecar whose new name is taken is left out and listed, never written
 over. To keep the darktable edits as versions, run `helios
 import-darktable` on the library folder afterwards.
 
-**One job.** An import publishes `job.started` (its kind,
-`library.import`, its title and the number of files), one `job.progress`
-per file (`done` of `total`, the file at hand in `current`), then
-`job.finished` with its report, or `job.failed` when it cannot start (a
-missing source, no library folder for a copy). A file that fails does not
-stop the others. The CLI prints one JSON line per file (`path`, `id`,
-`status`, and `duplicate`, `to`, `sidecars`, `signals`, `error` when they
-apply), then `{"report": ...}`; it exits with 1 when a file failed.
+**One job.** An import reports as a job (see [jobs.md](jobs.md)), so the
+desktop shows it in the jobs centre: `job.started` (kind `import`, id
+`import-<n>`, its title and the number of files), one `job.progress` per
+file (`done` of `total`, the file at hand as its `item`, the files failed
+and skipped so far), a `job.log` line per file brought in, a
+`job.item_failed` per file that failed, then `job.finished`, or
+`job.failed` when it cannot start (a missing source, no library folder for
+a copy). A file that fails does not stop the others.
+
+**Cancel.** The jobs centre's Cancel (`job.cancel` with the job's id), or
+Ctrl-C for `helios import`, stops the import before its next file. A copy
+under way stops too, and its hidden `.helios-part` is removed: no
+half-written file is left. The files done stay imported; the job ends
+`job.cancelled` and the report says `"cancelled": true`.
+
+The CLI prints one JSON line per file (`path`, `id`, `status`, and
+`duplicate`, `to`, `sidecars`, `signals`, `error` when they apply; a file
+stopped by a cancel says `cancelled`), then `{"report": ...}`; it exits
+with 1 when a file failed, 130 when interrupted.
 
 ## Exact duplicates
 
@@ -168,7 +179,7 @@ palette or by an agent:
 
 | Command | Arguments |
 |---------|-----------|
-| `library.import` | `path`; `copy`, `into`, `rename`, `duplicates` as on the command line. Runs in the background as a job; the library is filled again when it ends |
+| `library.import` | `path`; `copy`, `into`, `rename`, `duplicates` as on the command line. Runs in the background as a job, in the jobs centre and cancelled from it; the library is filled again when it ends |
 | `library.stacks.suggest` | `images` (ids; every image when absent), `resolver` |
 | `library.stacks.accept` | `decision`, `groups` (all when absent) |
 | `library.stacks.decline` | `decision` |

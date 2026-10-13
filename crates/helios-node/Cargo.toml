@@ -36,7 +36,8 @@ serde.workspace = true
 serde_json.workspace = true
 
 [target.'cfg(unix)'.dependencies]
-# MIT OR Apache-2.0: a safe flag set on Ctrl-C, for `helios batch`.
+# MIT OR Apache-2.0: a safe flag set on Ctrl-C, for `helios batch` and
+# `helios import`.
 signal-hook = "0.4"
 
 [dev-dependencies]

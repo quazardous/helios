@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use helios_core::Bus;
+use helios_core::jobs::Jobs;
 use helios_library::import::{self, Duplicates, Options, Placement};
 use helios_library::rename::Pattern;
 use helios_library::signals::{self, Signals, distance};
@@ -61,8 +62,9 @@ fn run(
     sources: &[PathBuf],
     options: &Options,
 ) -> (import::Report, Vec<Value>) {
+    let jobs = Jobs::new(bus.unwrap_or_default());
     let mut lines = Vec::new();
-    let report = import::import(vault, bus, sources, options, 1000, &mut |l: &Value| {
+    let report = import::import(vault, &jobs, sources, options, 1000, &mut |l: &Value| {
         lines.push(l.clone());
     })
     .unwrap();
@@ -239,7 +241,7 @@ fn a_card_is_copied_renamed_with_its_sidecars_as_a_job() {
     let kinds: Vec<&str> = events
         .iter()
         .map(|e| e.kind)
-        .filter(|k| k.starts_with("job."))
+        .filter(|k| k.starts_with("job.") && *k != "job.log")
         .collect();
     assert_eq!(
         kinds,
@@ -256,7 +258,7 @@ fn a_card_is_copied_renamed_with_its_sidecars_as_a_job() {
         .find(|e| e.kind == "job.started")
         .unwrap()
         .payload;
-    assert_eq!(started["kind"], "library.import");
+    assert_eq!(started["kind"], "import");
     assert_eq!(started["total"], 2);
     let progress: Vec<&Value> = events
         .iter()
@@ -264,19 +266,22 @@ fn a_card_is_copied_renamed_with_its_sidecars_as_a_job() {
         .map(|e| &e.payload)
         .collect();
     assert_eq!(progress[0]["done"], 0);
-    assert_eq!(progress[0]["current"], "IMG_0001.png");
+    assert_eq!(progress[0]["item"], "IMG_0001.png");
     assert_eq!(progress[2]["done"], 2);
-    let finished = &events
+    let log: Vec<&str> = events
         .iter()
-        .find(|e| e.kind == "job.finished")
-        .unwrap()
-        .payload;
-    assert_eq!(finished["summary"]["copied"], 2);
+        .filter(|e| e.kind == "job.log")
+        .filter_map(|e| e.payload["text"].as_str())
+        .collect();
+    assert!(
+        log.iter().any(|l| l.ends_with("IMG_0001.png: added")),
+        "{log:?}"
+    );
 
     // Renaming in place is refused: a referenced file stays as it is.
     let refused = import::import(
         &vault,
-        Some(bus.clone()),
+        &Jobs::new(bus.clone()),
         &[card],
         &Options {
             rename: options.rename.clone(),
@@ -428,4 +433,91 @@ fn a_burst_and_a_bracket_are_suggested_accepted_and_dissolved() {
     assert_eq!(gone.members, hex(&burst[..]));
     assert!(vault.stacks().unwrap().is_empty());
     assert_eq!(vault.images().unwrap().len(), 8);
+}
+
+/// An import is a job egui-pop's jobs model follows: its progress, then
+/// cancelled from it after its first file, with the files done imported
+/// and no half-written copy left.
+#[test]
+fn an_import_shows_in_the_jobs_model_and_is_cancelled_midway() {
+    use egui_pop_model::jobs::{Incoming, JobState, Jobs as Model};
+
+    let p = Place::new("cancel");
+    let roll = p.join("roll");
+    for (name, kind, gain) in [("a.png", 0, 1.0), ("b.png", 1, 1.25), ("c.png", 0, 1.5)] {
+        picture(&roll.join(name), kind, gain, 0);
+    }
+    let library = p.join("library");
+    let bus = Arc::new(Bus::new());
+    let jobs = Jobs::new(bus.clone());
+    let options = Options {
+        placement: Placement::Copy {
+            into: Some(library.clone()),
+        },
+        ..Options::default()
+    };
+    let vault = vault();
+    let mut lines = Vec::new();
+    let report = import::import(
+        &vault,
+        &jobs,
+        std::slice::from_ref(&roll),
+        &options,
+        1000,
+        &mut |l: &Value| {
+            lines.push(l.clone());
+            if lines.len() == 1 {
+                // The jobs centre's Cancel, once the first file is in.
+                let started = bus
+                    .since(0)
+                    .into_iter()
+                    .find(|e| e.kind == "job.started")
+                    .expect("the import started");
+                jobs.cancel(started.payload["id"].as_str().unwrap())
+                    .unwrap();
+            }
+        },
+    )
+    .unwrap();
+    assert!(report.cancelled, "{report:?}");
+    assert_eq!((report.files, report.added, report.copied), (1, 1, 1));
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert_eq!(vault.images().unwrap().len(), 1);
+
+    // Copies only of what was imported, and no part left anywhere.
+    let mut copies = Vec::new();
+    let mut dirs = vec![library.clone()];
+    while let Some(dir) = dirs.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                dirs.push(path);
+            } else {
+                copies.push(path.file_name().unwrap().to_string_lossy().into_owned());
+            }
+        }
+    }
+    assert_eq!(copies, ["a.png"], "no half-written copy");
+
+    let mut model = Model::new();
+    for e in bus.since(0) {
+        model.apply(
+            &Incoming::new(e.seq, e.kind, &e.payload).source(&e.source),
+            0.0,
+        );
+    }
+    let all = model.all();
+    assert_eq!(all.len(), 1);
+    let job = all[0];
+    assert_eq!(job.kind, "import");
+    assert!(job.title.starts_with("Import "), "{}", job.title);
+    assert_eq!(job.state, JobState::Cancelled);
+    assert!(
+        model
+            .log(&job.id)
+            .iter()
+            .any(|l| l.contains("cancelled after 1 of 3")),
+        "{:?}",
+        model.log(&job.id)
+    );
 }

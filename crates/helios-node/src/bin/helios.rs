@@ -68,7 +68,8 @@
 //! library folder and renamed by a pattern, their sidecars along; exact
 //! duplicates skipped, kept or listed for an answer; near-duplicate
 //! signals measured. One JSON line per file, then the report; exit 1
-//! when a file failed. `stacks` lists, makes and dissolves stacks, and
+//! when a file failed, 130 when interrupted (Ctrl-C stops it before its
+//! next file, a copy under way removed). `stacks` lists, makes and dissolves stacks, and
 //! asks for stack suggestions (`helios_library::stacks`), which apply
 //! only once accepted. IMAGE is an image's id or a file the vault knows.
 //!
@@ -572,7 +573,7 @@ fn import_options(
 
 /// `helios import`: see `helios_library::import`.
 fn import(args: &[String]) -> ExitCode {
-    let (vault, sources, options) = match import_options(args) {
+    let (vault, sources, mut options) = match import_options(args) {
         Ok(p) => p,
         Err(e) => return usage(&e),
     };
@@ -583,15 +584,28 @@ fn import(args: &[String]) -> ExitCode {
             return ExitCode::from(1);
         }
     };
+    // Ctrl-C stops the import before its next file, a copy under way
+    // removed; the files done stay imported.
+    let interrupted = Arc::new(AtomicBool::new(false));
+    #[cfg(unix)]
+    for signal in [signal_hook::consts::SIGINT, signal_hook::consts::SIGTERM] {
+        if let Err(e) = signal_hook::flag::register(signal, interrupted.clone()) {
+            eprintln!("helios: cannot watch for interrupts: {e}");
+        }
+    }
+    options.cancel = Some(interrupted);
+    let jobs = helios_core::jobs::Jobs::new(Arc::default());
     let mut out = std::io::stdout();
     let mut emit = |line: &serde_json::Value| {
         let _ = writeln!(out, "{line}");
         let _ = out.flush();
     };
-    match helios_library::import::import(&vault, None, &sources, &options, now(), &mut emit) {
+    match helios_library::import::import(&vault, &jobs, &sources, &options, now(), &mut emit) {
         Ok(report) => {
             emit(&serde_json::json!({ "report": report }));
-            if report.failed == 0 {
+            if report.cancelled {
+                ExitCode::from(130)
+            } else if report.failed == 0 {
                 ExitCode::SUCCESS
             } else {
                 ExitCode::from(1)

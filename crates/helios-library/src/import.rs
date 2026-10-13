@@ -21,18 +21,24 @@
 //!   it again with skip or keep). Nothing is ever deleted.
 //! - **Signals.** Each image's near-duplicate [`Signals`] are measured and
 //!   kept with it.
-//! - **A job.** `job.started`, a `job.progress` per file (done, total, the
-//!   file), then `job.finished` with the [`Report`] (or `job.failed` when
-//!   the source cannot be listed); one JSON line per file goes to `emit`.
+//! - **A job.** It reports through [`helios_core::jobs`] (kind `import`):
+//!   `job.started`, a `job.progress` per file (done, total, the file as
+//!   its item), a log line per file that was not skipped, then
+//!   `job.finished` (or `job.failed` when the source cannot be listed);
+//!   one JSON line per file goes to `emit`.
+//! - **Cancel.** [`Jobs::cancel`] with the job's id, or the caller's
+//!   [`Options::cancel`] flag, stops the import before its next file; a
+//!   copy under way stops too and its hidden part is removed. The files
+//!   done stay imported; the job says `job.cancelled`.
 
 use std::collections::{BTreeMap, HashMap};
 use std::fs::{File, OpenOptions};
 use std::io::{ErrorKind, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
-use helios_core::Bus;
-use helios_core::job::Job;
+use helios_core::jobs::{Jobs, Progress, Start};
 use helios_vault::{IMAGE_EXTENSIONS, ImageId, Store, Vault};
 use helios_xmp::files::Matched;
 use serde::Serialize;
@@ -42,7 +48,10 @@ use crate::rename::{Naming, Pattern};
 use crate::signals::{self, Signals};
 
 /// The kind of an import's job.
-pub const KIND: &str = "library.import";
+pub const KIND: &str = "import";
+
+/// The imports' job ids in this process: `import-1`, `import-2`...
+static NEXT: AtomicU64 = AtomicU64::new(1);
 
 /// Where the library folder is kept (`library/settings`, key `root`).
 const SETTINGS: &str = "settings";
@@ -92,6 +101,9 @@ pub struct Options {
     pub duplicates: Duplicates,
     /// Measure and keep near-duplicate signals.
     pub signals: bool,
+    /// Set by the caller to stop the import (an interrupt): seen before
+    /// each file and during a copy, as a cancel of its job is.
+    pub cancel: Option<Arc<AtomicBool>>,
 }
 
 impl Default for Options {
@@ -101,6 +113,7 @@ impl Default for Options {
             rename: None,
             duplicates: Duplicates::Skip,
             signals: true,
+            cancel: None,
         }
     }
 }
@@ -133,6 +146,8 @@ pub struct Report {
     pub skipped: u64,
     pub asked: u64,
     pub failed: u64,
+    /// Whether it was cancelled before its last file.
+    pub cancelled: bool,
     /// Files copied into the library folder.
     pub copied: u64,
     /// Sidecars copied with them.
@@ -232,8 +247,14 @@ fn holds(path: &Path, id: &ImageId) -> Result<bool, String> {
 }
 
 /// Writes `src` to `part`, hashing what it writes: an error message when
-/// what was written is not the image `id`.
-fn write_hashed(src: &Path, part: &Path, id: &ImageId) -> std::io::Result<Option<String>> {
+/// what was written is not the image `id`. Stopped (an `Interrupted`
+/// error) between two chunks once `stopped` says so.
+fn write_hashed(
+    src: &Path,
+    part: &Path,
+    id: &ImageId,
+    stopped: &dyn Fn() -> bool,
+) -> std::io::Result<Option<String>> {
     let mut from = File::open(src)?;
     let mut to = OpenOptions::new()
         .write(true)
@@ -243,6 +264,9 @@ fn write_hashed(src: &Path, part: &Path, id: &ImageId) -> std::io::Result<Option
     let mut hasher = blake3::Hasher::new();
     let mut buffer = vec![0u8; 1 << 20];
     loop {
+        if stopped() {
+            return Err(std::io::Error::new(ErrorKind::Interrupted, "cancelled"));
+        }
         let n = from.read(&mut buffer)?;
         if n == 0 {
             break;
@@ -262,15 +286,21 @@ fn write_hashed(src: &Path, part: &Path, id: &ImageId) -> std::io::Result<Option
 
 /// Copies `src` to `dest`, hashing what it writes: the copy takes its
 /// name only when it holds `id`, and never replaces a file. False when
-/// `dest` was taken meanwhile (the copy is dropped).
-fn copy_verified(src: &Path, dest: &Path, id: &ImageId) -> Result<bool, String> {
+/// `dest` was taken meanwhile (the copy is dropped). Stopped by
+/// `stopped`, the part written is removed.
+fn copy_verified(
+    src: &Path,
+    dest: &Path,
+    id: &ImageId,
+    stopped: &dyn Fn() -> bool,
+) -> Result<bool, String> {
     let dir = dest.parent().ok_or("a copy needs a folder")?;
     let name = dest
         .file_name()
         .and_then(|n| n.to_str())
         .ok_or("a copy needs a name")?;
     let part = dir.join(format!(".{name}.helios-part"));
-    let written = write_hashed(src, &part, id);
+    let written = write_hashed(src, &part, id, stopped);
     let fail = |e: String| {
         let _ = std::fs::remove_file(&part);
         Err(e)
@@ -305,6 +335,7 @@ fn place(
     name: &str,
     ext: &str,
     id: &ImageId,
+    stopped: &dyn Fn() -> bool,
 ) -> Result<(PathBuf, bool), String> {
     std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let dot = if ext.is_empty() { "" } else { "." };
@@ -321,7 +352,7 @@ fn place(
             }
             continue;
         }
-        if copy_verified(src, &dest, id)? {
+        if copy_verified(src, &dest, id, stopped)? {
             return Ok((dest, true));
         }
         if holds(&dest, id)? {
@@ -385,9 +416,20 @@ struct Run<'a, S: Store> {
     /// Copies made so far, for `{seq}`.
     placed: u64,
     report: Report,
+    /// Asked to stop: by the job's cancel or the caller's flag.
+    stop: Arc<AtomicBool>,
 }
 
 impl<S: Store> Run<'_, S> {
+    fn stopped(&self) -> bool {
+        self.stop.load(Ordering::SeqCst)
+            || self
+                .options
+                .cancel
+                .as_ref()
+                .is_some_and(|c| c.load(Ordering::SeqCst))
+    }
+
     fn sidecars(&mut self, path: &Path) -> Result<Vec<helios_xmp::files::SidecarFile>, String> {
         let dir = path.parent().unwrap_or(Path::new(".")).to_path_buf();
         let name = path
@@ -474,7 +516,8 @@ impl<S: Store> Run<'_, S> {
                 }),
                 None => stem.to_string(),
             };
-            let (dest, copied) = place(path, &folder, &name, ext, &id)?;
+            let stopped = || self.stopped();
+            let (dest, copied) = place(path, &folder, &name, ext, &id, &stopped)?;
             self.placed += 1;
             if copied {
                 self.report.copied += 1;
@@ -503,13 +546,15 @@ impl<S: Store> Run<'_, S> {
 }
 
 /// Imports the image files of `sources` (folders, cards or files) into
-/// `vault`, as a job announced on `bus`; one JSON line per file goes to
+/// `vault`, as a job reported to `jobs`; one JSON line per file goes to
 /// `emit` (`path`, `id`, `status`, and `duplicate`, `to`, `sidecars`,
 /// `signals` or `error` when they apply). A file that fails is reported
 /// and the others go on; the import fails only when it cannot start.
+/// Cancelled, it stops before its next file (a copy under way is
+/// dropped, its part removed) and its report says `cancelled`.
 pub fn import<S: Store>(
     vault: &Vault<S>,
-    bus: Option<Arc<Bus>>,
+    jobs: &Jobs,
     sources: &[PathBuf],
     options: &Options,
     now: u64,
@@ -523,15 +568,22 @@ pub fn import<S: Store>(
             .collect::<Vec<_>>()
             .join(", ")
     );
+    let id = format!("import-{}", NEXT.fetch_add(1, Ordering::Relaxed));
     let prepared = prepare(vault, sources, options);
     let (root, files) = match prepared {
         Ok(p) => p,
         Err(e) => {
-            Job::start(bus, KIND, &title, None).fail(&e);
+            jobs.start(Start::new(&id, &title, KIND)).failed(&e);
             return Err(e);
         }
     };
-    let job = Job::start(bus, KIND, &title, Some(files.len() as u64));
+    let total = files.len() as u64;
+    let job = jobs.start(Start::new(&id, &title, KIND).total(total));
+    let stop = Arc::new(AtomicBool::new(false));
+    {
+        let stop = stop.clone();
+        job.on_cancel(move || stop.store(true, Ordering::SeqCst));
+    }
     let mut run = Run {
         vault,
         options,
@@ -541,19 +593,69 @@ pub fn import<S: Store>(
         folders: BTreeMap::new(),
         placed: 0,
         report: Report::default(),
+        stop,
     };
     for (done, path) in files.iter().enumerate() {
-        let name = path.file_name().map(|n| n.to_string_lossy().into_owned());
-        job.progress(done as u64, name.as_deref());
-        let (mut line, status) = run
-            .file(path)
-            .unwrap_or_else(|e| (json!({ "path": path, "error": e }), Status::Failed));
+        if run.stopped() {
+            break;
+        }
+        let name = path.file_name().map_or_else(
+            || path.display().to_string(),
+            |n| n.to_string_lossy().into(),
+        );
+        job.progress(
+            Progress::new()
+                .counts(done as u64, total)
+                .item(&name)
+                .failed(run.report.failed)
+                .skipped(run.report.skipped + run.report.asked),
+        );
+        let outcome = run.file(path);
+        if run.stopped() && outcome.is_err() {
+            // Stopped during this file: it is not imported, its copy
+            // removed.
+            emit(&json!({ "path": path, "status": "cancelled" }));
+            break;
+        }
+        let (mut line, status) =
+            outcome.unwrap_or_else(|e| (json!({ "path": path, "error": e }), Status::Failed));
         line["status"] = json!(status);
         run.report.count(status);
+        match status {
+            Status::Failed => job.item_failed(&name, line["error"].as_str().unwrap_or("failed")),
+            Status::Added | Status::Located | Status::Unchanged => {
+                let said = line["status"].as_str().unwrap_or_default();
+                job.log(format!("{}: {said}", path.display()));
+            }
+            Status::Skipped | Status::Asked => {}
+        }
         emit(&line);
     }
-    job.progress(files.len() as u64, None);
-    job.finish(json!(run.report));
+    if run.stopped() && run.report.files < total {
+        run.report.cancelled = true;
+        job.log(format!(
+            "cancelled after {} of {total} files",
+            run.report.files
+        ));
+        job.cancelled();
+        return Ok(run.report);
+    }
+    job.progress(
+        Progress::new()
+            .counts(total, total)
+            .failed(run.report.failed)
+            .skipped(run.report.skipped + run.report.asked),
+    );
+    job.log(format!(
+        "{} added, {} located, {} unchanged, {} skipped, {} asked, {} failed",
+        run.report.added,
+        run.report.located,
+        run.report.unchanged,
+        run.report.skipped,
+        run.report.asked,
+        run.report.failed
+    ));
+    job.finished();
     Ok(run.report)
 }
 
@@ -594,4 +696,41 @@ fn prepare<S: Store>(
         files.extend(files_of(&source)?);
     }
     Ok((root, files))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_copy_stopped_midway_leaves_no_part() {
+        let dir = std::env::temp_dir().join(format!("helios-import-stop-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let src = dir.join("big.raw");
+        // Three chunks: stopped after the first.
+        std::fs::write(&src, vec![7u8; 3 << 20]).unwrap();
+        let id = hash_file(&src).unwrap();
+        let dest = dir.join("copy.raw");
+        let asked = std::cell::Cell::new(0);
+        let stopped = || {
+            asked.set(asked.get() + 1);
+            asked.get() > 1
+        };
+        assert!(copy_verified(&src, &dest, &id, &stopped).is_err());
+        assert!(asked.get() > 1, "stopped while copying");
+        let left: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(
+            left,
+            [std::ffi::OsString::from("big.raw")],
+            "no part, no copy"
+        );
+        // Not stopped, the copy is whole.
+        assert!(copy_verified(&src, &dest, &id, &|| false).unwrap());
+        assert_eq!(hash_file(&dest).unwrap(), id);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

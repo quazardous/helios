@@ -2115,6 +2115,7 @@ name = "helios-library"
 version = "0.2.1"
 dependencies = [
  "blake3",
+ "egui-pop-model",
  "helios-core",
  "helios-decision",
  "helios-load",

@@ -190,7 +190,9 @@ helios stacks --vault library.db list | create IMAGE... [--top IMAGE] | dissolve
 referenced in place or copied into the library folder (renamed by a
 pattern, sidecars along), finds exact duplicates by content and handles
 them by policy, and measures each image's near-duplicate signals. One JSON
-line per file, then `{"report": ...}`; exit 1 when a file failed.
+line per file, then `{"report": ...}`; exit 1 when a file failed, 130
+when interrupted (Ctrl-C stops it before its next file and leaves no
+half-written copy).
 
 `stacks` lists, makes and dissolves stacks, and asks for stack
 suggestions, which are recorded as decisions and applied only once

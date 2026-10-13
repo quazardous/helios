@@ -106,8 +106,8 @@ fn seconds() -> u64 {
 }
 
 /// The library operations as commands (see `helios_library`): an import
-/// runs as a job announced on the bus (`job.*`), the library filled again
-/// when it ends; stack suggestions are recorded, and applied once
+/// runs as a job on the shell's jobs (`job.*`, in the jobs centre, where
+/// it is cancelled), the library filled again when it ends; stack suggestions are recorded, and applied once
 /// accepted. No panel of their own yet.
 fn library_commands(
     shell: &mut Shell,
@@ -121,7 +121,7 @@ fn library_commands(
     use serde_json::{Value, json};
 
     let text = |args: &Value, key: &str| args.get(key).and_then(Value::as_str).map(String::from);
-    let (vault, bus) = (persist.vault().clone(), persist.bus().clone());
+    let (vault, jobs) = (persist.vault().clone(), shell.jobs());
     let (done, ctx) = (refill.clone(), ctx.clone());
     shell.register(
         CommandSpec::new(
@@ -145,13 +145,13 @@ fn library_commands(
             if let Some(policy) = text(args, "duplicates") {
                 options.duplicates = Duplicates::parse(&policy)?;
             }
-            let (vault, bus, done, ctx) = (vault.clone(), bus.clone(), done.clone(), ctx.clone());
+            let (vault, jobs, done, ctx) = (vault.clone(), jobs.clone(), done.clone(), ctx.clone());
             std::thread::spawn(move || {
                 let sources = [std::path::PathBuf::from(path)];
                 // The job's events say how it went; the lines are for the CLI.
                 let ended = helios_library::import::import(
                     vault.as_ref(),
-                    Some(bus),
+                    &jobs,
                     &sources,
                     &options,
                     seconds(),
