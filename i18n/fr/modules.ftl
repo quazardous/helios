@@ -210,6 +210,38 @@ param-mask-levels-opacity =
     .description = multiplie le masque, en dernier
     .label = opacité
 
+param-mask-object-area =
+    .description = la région de l’image que couvre le masque : x, y, largeur, hauteur en pixels de l’image
+    .label = zone
+
+param-mask-object-confidence =
+    .description = l’assurance du modèle, de 0 à 1
+    .label = confiance
+
+param-mask-object-kind =
+    .description = ce qu’il faut trouver : le sujet principal, le ciel, une personne, ou ce que nomme l’invite
+    .label = objet
+
+param-mask-object-kind-choice-person = personne
+
+param-mask-object-kind-choice-prompt = invite
+
+param-mask-object-kind-choice-sky = ciel
+
+param-mask-object-kind-choice-subject = sujet
+
+param-mask-object-mask =
+    .description = le masque trouvé : un PNG en niveaux de gris sur 8 bits, en base64
+    .label = masque
+
+param-mask-object-prompt =
+    .description = ce qu’il faut trouver, en mots, quand l’objet est une invite
+    .label = invite
+
+param-mask-object-resolver =
+    .description = qui le trouve : le nom d’un résolveur, vide pour celui par défaut
+    .label = résolveur
+
 param-mask-parametric-blue =
     .description = plage du bleu : bas, haut, adoucissement en dessous, adoucissement au-dessus
     .label = bleu

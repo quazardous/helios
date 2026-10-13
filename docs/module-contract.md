@@ -359,7 +359,10 @@ How it is built:
   render through it fails with a transient `Pending` error (nothing read,
   computed or cached), and its status says `pending`. It is answered
   through `Graph::answer`, never edited with `set_param`, so every change to
-  it goes through the book below;
+  it goes through the book below. Only its **question** is set like a
+  parameter (`Module::question`: what it is asked, such as the object an
+  AI mask member finds); a new question withdraws the answer, which was
+  given to another, and the book records each answer with its question;
 - `helios-decision` holds the **book** of an edit: each node's mode, every
   answer with its version, who decided, the model and its version, and the
   content keys of the inputs it saw. A model answer is the answer in full AI

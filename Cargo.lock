@@ -2076,10 +2076,12 @@ dependencies = [
 name = "helios-module-masks"
 version = "0.0.1"
 dependencies = [
+ "base64 0.22.1",
  "helios-core",
  "helios-gpu",
  "helios-module-exposure",
  "helios-testkit",
+ "png",
 ]
 
 [[package]]

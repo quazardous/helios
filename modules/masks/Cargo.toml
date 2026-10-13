@@ -8,6 +8,9 @@ repository.workspace = true
 
 [dependencies]
 helios-core.workspace = true
+# MIT OR Apache-2.0: an AI object member's mask is a PNG, base64 encoded.
+base64 = "0.22"
+png = "0.18"
 
 [dev-dependencies]
 helios-gpu.workspace = true

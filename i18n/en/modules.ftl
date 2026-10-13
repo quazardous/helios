@@ -211,6 +211,38 @@ param-mask-levels-opacity =
     .description = multiplies the mask, last
     .label = opacity
 
+param-mask-object-area =
+    .description = the region of the image the mask covers: x, y, width, height in image pixels
+    .label = area
+
+param-mask-object-confidence =
+    .description = how sure the model is, from 0 to 1
+    .label = confidence
+
+param-mask-object-kind =
+    .description = what to find: the main subject, the sky, a person, or what the prompt names
+    .label = kind
+
+param-mask-object-kind-choice-person = person
+
+param-mask-object-kind-choice-prompt = prompt
+
+param-mask-object-kind-choice-sky = sky
+
+param-mask-object-kind-choice-subject = subject
+
+param-mask-object-mask =
+    .description = the mask found: an 8-bit grayscale PNG, base64
+    .label = mask
+
+param-mask-object-prompt =
+    .description = what to find, in words, when the kind is prompt
+    .label = prompt
+
+param-mask-object-resolver =
+    .description = who finds it: a resolver's name, empty for the default one
+    .label = resolver
+
 param-mask-parametric-blue =
     .description = blue range: low, high, feather below, feather above
     .label = blue

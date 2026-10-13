@@ -30,12 +30,16 @@
 //!   [`shape`]).
 //! - [`MaskBrush`]: a drawn brush stroke (darktable's brush), radius,
 //!   hardness and density along a curve; CPU only.
+//! - [`MaskObject`]: an AI object member, a decision: a model finds the
+//!   subject, the sky, a person or what a prompt names, and its mask is
+//!   recorded as the answer, upsampled to the render (see [`object`]).
 //! - [`stress`]: a large chained mask network, for stress tests and the
 //!   masks bench.
 
 mod blend;
 mod combine;
 mod luma;
+pub mod object;
 mod parametric;
 mod raster;
 mod refine;
@@ -45,6 +49,7 @@ pub mod stress;
 pub use blend::MaskBlend;
 pub use combine::{MAX_MEMBERS, MaskCombine, Operator, fold};
 pub use luma::{MaskFromLuma, luminance};
+pub use object::{MaskObject, ObjectPlan};
 pub use parametric::{Channel, MaskParametric, ParametricPlan, Range, jzczhz};
 pub use raster::{MaskRaster, RasterPlan};
 pub use refine::{MaskBlur, MaskFeather, MaskLevels, tone_curve};
