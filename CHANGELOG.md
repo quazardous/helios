@@ -24,6 +24,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-10-13
+
+### Added
+
+- The library is a culling tool: a fast thumbnail grid and filmstrip,
+  Lightroom's culling keys (0 to 5, P, X, U, 6 to 9) with optional
+  auto-advance, picks, rejects, colour labels and tags saved in the vault, a
+  search with filter chips, and a Compare panel for two to four images.
+- A Duplicates panel lists the exact duplicates an import found and what
+  its policy did with each. With the `ask` policy, each file now waits for
+  your answer there: keep it as one more copy, or skip it.
+- A second built-in workspace template, "Import, cull, de-duplicate": the
+  library grid with Compare and the loupe, the stack review and the
+  duplicates beside it, a card copied and renamed on import with its
+  duplicates asked about, stacks proposed after each import, and the
+  culling keys with auto-advance.
+- Stacks show collapsed in the library, expanded with S or their chevron.
+  A Stacks panel reviews the suggested stacks: each burst or bracket with
+  its proposed top image, to accept all, accept only the ones you check, or
+  decline.
+
+### Fixed
+
+- A value typed in a parameter's slider is now kept when you click
+  elsewhere, instead of being dropped, and the keyboard goes where you
+  clicked. In French, the space between a value and its unit is a narrow
+  no-break space, as French typography writes it.
+
 ## [0.3.0] - 2026-10-13
 
 ### Added
