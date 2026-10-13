@@ -408,8 +408,13 @@ fn current(h: &mut egui_kittest::Harness<'static, Shell>) -> serde_json::Value {
 }
 
 fn click(h: &mut egui_kittest::Harness<'static, Shell>, label: &str) {
-    h.get_by_label(label).click();
-    h.run();
+    // By its accessibility action: the dialog grows with the picker and
+    // is placed again, so a pointer aimed at last frame's place may land
+    // on the next entry.
+    h.get_by_label(label).click_accesskit();
+    for _ in 0..3 {
+        h.run();
+    }
 }
 
 fn path_form(key: &str, descriptor: Descriptor, value: &std::path::Path) -> Form {
@@ -469,11 +474,19 @@ fn a_file_field_lists_accepted_files_and_closing_the_picker_keeps_the_form() {
     let mut h = harness(shell);
     click(&mut h, "Browse…");
     assert!(h.query_by_label("photo.jpg").is_none(), "not accepted");
-    click(&mut h, "Close the picker");
+    // The picker's Cancel, above the form's.
+    h.query_all_by_label("Cancel")
+        .next()
+        .unwrap()
+        .click_accesskit();
+    h.run();
     let form = current(&mut h);
     assert_eq!(form["kind"], json!("form"), "the form stays");
+    assert!(h.query_by_label("Choose this folder").is_none());
     click(&mut h, "Browse…");
+    // A click highlights a file, Open chooses it.
     click(&mut h, "photo.xmp");
+    click(&mut h, "Open");
     let form = current(&mut h);
     assert_eq!(
         form["values"]["sidecar"],

@@ -318,12 +318,14 @@ recorded.
 
   A **path field** (a descriptor made with `Descriptor::path`: a
   directory, or a file with its accepted extensions) is a text field and
-  a Browse… button opening egui-pop's in-app picker: the folder, Up, its
-  subfolders (and the accepted files); Choose this folder, or a file,
-  fills the field; Close the picker goes back to the form. "Open a
-  workspace" is such a form. Not yet: the system's chooser (egui-pop's
-  would block the window while it is open), the recent workspaces offered
-  first, the picker walked by keys.
+  a Browse… button opening egui-pop's in-app picker inside the form: the
+  folder, Up, home and the recent places, a filter field (or a typed
+  path, Tab completing it), its subfolders (and the accepted files). A
+  click on a folder opens it, on a file highlights it; Choose this folder,
+  or Open (a double click), fills the field; Cancel goes back to the
+  form. "Open a workspace" is such a form. Not yet: the system's chooser
+  (egui-pop's now runs off the interface thread; Helios builds egui-pop
+  without it), the recent workspaces offered first.
 
 - **Picker**: a list to choose from, egui-pop's choice; its command runs
   with the value chosen. A filter field above the list narrows it as one

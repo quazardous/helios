@@ -2,8 +2,6 @@
 
 category-developer = Développement
 
-category-help = Aide
-
 category-masks = Masques
 
 category-preferences = Préférences
