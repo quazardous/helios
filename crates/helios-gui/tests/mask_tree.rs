@@ -200,6 +200,31 @@ fn drag(h: &mut Harness<'_, Shell>, from: Pos2, to: Pos2) {
 }
 
 #[test]
+fn an_ai_object_member_shows_with_its_icon_and_its_question() {
+    use helios_module_masks::{MaskObject, object};
+    let (mut g, blend) = graph();
+    let sky = module(&mut g, "sky", ModuleRef::new(MaskObject), &Params::new());
+    g.connect(g.find("source").unwrap(), "image", sky, "input")
+        .unwrap();
+    g.connect(sky, "mask", g.find("mask").unwrap(), "in3")
+        .unwrap();
+    let answer = object::answer(2, 1, &[255, 0], Region::sized(W, H), 0.8).unwrap();
+    g.answer(sky, &answer).unwrap();
+    let mut shell = Shell::new(helios_panels(), None);
+    shell.set_view_source(g, blend, "output").unwrap();
+    let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+    h.step();
+    run(&mut h, "helios.masks.focus", json!(null));
+    assert_eq!(rows(&h).last().unwrap(), "  ✨ sky");
+    // Its question is in the Parameters panel's values; its answer is not.
+    let store = h.state().values.lock().unwrap();
+    for p in ["kind", "prompt", "resolver"] {
+        assert!(store.get(&format!("node/sky/{p}")).is_some(), "{p}");
+    }
+    assert!(store.get("node/sky/mask").is_none());
+}
+
+#[test]
 fn the_tree_shows_the_module_s_mask_with_icons_and_operators() {
     let h = harness();
     assert_eq!(

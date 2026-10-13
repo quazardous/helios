@@ -5,7 +5,7 @@
 //!   store every frame ([`network`]): the module's mask (the group a
 //!   `mask_blend` reads) is the root, each `mask_combine` a branch with
 //!   its operator, each member a leaf (a drawn shape, a parametric,
-//!   luminance or raster member) with its icon, its refinements (blur,
+//!   luminance, raster or AI object member) with its icon, its refinements (blur,
 //!   feather, levels between it and its group), its inversion and its
 //!   opacity. Members are listed in port order: the order they fold in.
 //! - **Live.** What changed since the last frame reaches the view through
@@ -149,6 +149,8 @@ impl Item {
             "mask_parametric" => "☰",
             "mask_from_luma" => "☆",
             "mask_raster" => "🖼",
+            // An AI object member: a model found it.
+            "mask_object" => "✨",
             _ => "⛶",
         }
     }
