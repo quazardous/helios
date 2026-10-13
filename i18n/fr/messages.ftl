@@ -318,3 +318,27 @@ gui-library-search = Rechercher des images
 gui-library-sync = Synchroniser le zoom et le déplacement
 
 gui-library-tags = Mots-clés
+
+gui-stacks-accept-all = Tout accepter
+
+gui-stacks-accept-checked = Accepter les piles cochées
+
+gui-stacks-bracket = Bracketing de { $count }
+
+gui-stacks-burst = Rafale de { $count }
+
+gui-stacks-decline = Refuser
+
+gui-stacks-left-out = { $count } images laissées de côté
+
+gui-stacks-none = Aucune suggestion de piles en attente
+
+gui-stacks-proposal = { $groups } piles proposées par { $resolver }
+
+gui-stacks-show = Montrer
+
+gui-stacks-suggest = Suggérer des piles
+
+gui-stacks-suggest-hint = Sur les images sélectionnées (deux ou plus), sinon sur toutes les images
+
+gui-stacks-top = Proposée au-dessus : la plus nette

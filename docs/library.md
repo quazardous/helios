@@ -227,6 +227,19 @@ own keys (arrows, Shift and Ctrl with them, Space, Ctrl+A, Enter, + and
 -) work as egui-pop describes; Enter or a double click opens the image
 in the viewport.
 
+**Stacks.** A stack shows collapsed in the grid and the filmstrip: its
+top image with a count and a chevron; the chevron, S or
+`vault.stack.toggle` expands it (its members follow the top image), and
+the vault keeps it so. The **Stacks** panel (closed by default) lists the
+`stacks.suggest` proposals waiting: each group (a burst or a bracket, why
+on hover) with its images, the one proposed on top starred, and a box to
+take it. **Accept all** records `accepted`, **Accept the checked**
+`corrected` (only the groups checked become stacks), **Decline** a human
+answer with no stacks. **Suggest stacks** asks the `rules` resolver over
+the images selected (two or more), else over every image; **Show**
+selects a group's images, to look at them in the grid or the Compare
+panel.
+
 **Search.** The search field's rating, labels, flags and tags become a
 vault query (several labels: any of them; several tags: all of them);
 its words (in the name or a tag) and dates (the file's day) are matched
@@ -241,4 +254,3 @@ on what the library holds. A filter shows stacks flattened.
 - Burst identifiers from maker notes; capture times of pictures (JPEG,
   TIFF) from their EXIF, which fall back to the file's date.
 - Cancelling an import halfway (the job runs to its end).
-- Showing stacks collapsed in the library grid.

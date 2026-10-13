@@ -27,6 +27,9 @@ panel-helios-queue =
 panel-helios-scopes =
     .title = Mesures
 
+panel-helios-stacks =
+    .title = Piles
+
 panel-helios-vault =
     .title = Coffre
 

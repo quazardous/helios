@@ -316,6 +316,8 @@ pub struct Shell {
     resolved_view: Arc<Mutex<Value>>,
     scopes: Rc<RefCell<crate::scopes::Scopes>>,
     library: Rc<RefCell<crate::library::Library>>,
+    /// The Stacks panel's proposals.
+    stack_review: Rc<RefCell<crate::stack_review::Review>>,
     /// egui-pop's dialogs, once the application is built (`dialog.current`).
     dialogs: Arc<OnceLock<Dialogs>>,
     /// Confirmations are answered yes by policy (a script's `--yes`).
@@ -561,6 +563,7 @@ impl Shell {
             resolved_view,
             scopes: Rc::default(),
             library: Rc::default(),
+            stack_review: Rc::default(),
             dialogs,
             assume_yes: false,
             menu: None,
@@ -650,6 +653,15 @@ impl Shell {
             .library
             .borrow_mut()
             .set_app(shell.app.handle().clone());
+        if has(&shell, crate::stack_review::PANEL) {
+            let (review, library) = (shell.stack_review.clone(), shell.library.clone());
+            shell.set_content(crate::stack_review::PANEL, move |ui| {
+                let show = review.borrow_mut().ui(ui, &library.borrow());
+                if let Some(ids) = show {
+                    library.borrow_mut().select_ids(&ids);
+                }
+            });
+        }
         for (panel, view) in [
             ("helios.vault", 0),
             ("helios.filmstrip", 1),
@@ -797,6 +809,16 @@ impl Shell {
     /// The library's state, to show what the vault holds.
     pub fn library_mut(&self) -> std::cell::RefMut<'_, crate::library::Library> {
         self.library.borrow_mut()
+    }
+
+    /// The Stacks panel's proposals, to read.
+    pub fn stack_review(&self) -> std::cell::Ref<'_, crate::stack_review::Review> {
+        self.stack_review.borrow()
+    }
+
+    /// The Stacks panel's proposals, to show the vault's and answer them.
+    pub fn stack_review_mut(&self) -> std::cell::RefMut<'_, crate::stack_review::Review> {
+        self.stack_review.borrow_mut()
     }
 
     /// Shows a node's output in the viewport; the parameters of the

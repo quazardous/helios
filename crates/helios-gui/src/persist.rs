@@ -13,6 +13,9 @@
 //!   on `vault.stack_changed`;
 //! - runs the vault query of the library's search filter, and keeps a
 //!   stack expanded or collapsed as the user left it;
+//! - answers the Stacks panel: a new `stacks.suggest` proposal, a
+//!   proposal accepted (all of it or corrected) or declined, as the user,
+//!   and shows the proposals waiting again on `library.decision`;
 //! - saves the edit of the image shown ([`Persist::open_image`]), with
 //!   the labels and locks of its mask nodes (its `marks`), as a
 //!   version each time the value store commits a step: a write outside a
@@ -127,6 +130,7 @@ impl<S: Store> Persist<S> {
         }
         shell.set_library(entries);
         self.show_stacks(shell)?;
+        self.show_decisions(shell)?;
         Ok(files)
     }
 
@@ -135,6 +139,62 @@ impl<S: Store> Persist<S> {
         let stacks = self.vault.stacks()?;
         shell.library_mut().set_stacks(&stacks);
         Ok(())
+    }
+
+    /// Shows the `stacks.suggest` proposals waiting in the Stacks panel.
+    pub fn show_decisions(&self, shell: &mut Shell) -> Result<(), String> {
+        let decisions = helios_library::stacks::decisions(self.vault.as_ref())?;
+        shell.stack_review_mut().set_decisions(decisions);
+        Ok(())
+    }
+
+    /// Runs what the Stacks panel asked: a proposal, an answer.
+    fn answer_stacks(&self, shell: &mut Shell, now: u64) {
+        use crate::stack_review::Request;
+        use helios_library::stacks;
+        let requests = shell.stack_review_mut().take_requests();
+        if requests.is_empty() {
+            return;
+        }
+        let bus = Some(self.bus.as_ref());
+        for r in requests {
+            let done = match r {
+                Request::Suggest { images } => images
+                    .iter()
+                    .map(|h| ImageId::from_hex(h))
+                    .collect::<Result<Vec<_>, _>>()
+                    .and_then(|ids| {
+                        let resolvers = stacks::Resolvers::default();
+                        stacks::suggest(
+                            self.vault.as_ref(),
+                            bus,
+                            &resolvers,
+                            stacks::RULES,
+                            &ids,
+                            now,
+                        )
+                    })
+                    .map(|_| ()),
+                Request::Accept { decision, groups } => stacks::accept(
+                    self.vault.as_ref(),
+                    bus,
+                    &decision,
+                    groups.as_deref(),
+                    WHO,
+                    now,
+                )
+                .map(|_| ()),
+                Request::Decline { decision } => {
+                    stacks::decline(self.vault.as_ref(), bus, &decision, WHO, now).map(|_| ())
+                }
+            };
+            if let Err(e) = done {
+                shell.notify(Level::Warning, e);
+            }
+        }
+        if let Err(e) = self.show_decisions(shell) {
+            shell.notify(Level::Error, e);
+        }
     }
 
     /// The images the vault holds for a query, in its order.
@@ -207,6 +267,7 @@ impl<S: Store> Persist<S> {
             self.write(shell, changes, at);
         }
         self.save_edit(shell, now);
+        self.answer_stacks(shell, at);
         let expansions = shell.library_mut().take_expansions();
         for (stack, expanded) in expansions {
             if let Err(e) = self.vault.set_stack_expanded(&stack, expanded) {
@@ -225,9 +286,12 @@ impl<S: Store> Persist<S> {
             }
         }
         let mut stacks_changed = false;
+        let mut decided = false;
         while let Ok(event) = self.events.try_recv() {
             if event.kind == "vault.stack_changed" {
                 stacks_changed = true;
+            } else if event.kind == "library.decision" {
+                decided = true;
             } else if event.kind == "vault.field_changed" {
                 let p = &event.payload;
                 if let (Some(image), Some(field)) = (p["image"].as_str(), p["field"].as_str()) {
@@ -237,6 +301,9 @@ impl<S: Store> Persist<S> {
             }
         }
         if stacks_changed && let Err(e) = self.show_stacks(shell) {
+            shell.notify(Level::Error, e);
+        }
+        if decided && let Err(e) = self.show_decisions(shell) {
             shell.notify(Level::Error, e);
         }
     }

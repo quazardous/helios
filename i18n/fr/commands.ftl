@@ -99,6 +99,15 @@ command-helios-scopes-dock =
 command-helios-scopes-moveTo =
     .title = Déplacer Mesures vers une zone (`area`)
 
+command-helios-stacks-detach =
+    .title = Déplacer Piles dans une nouvelle fenêtre
+
+command-helios-stacks-dock =
+    .title = Remettre Piles dans sa zone
+
+command-helios-stacks-moveTo =
+    .title = Déplacer Piles vers une zone (`area`)
+
 command-helios-vault-detach =
     .title = Déplacer Coffre dans une nouvelle fenêtre
 

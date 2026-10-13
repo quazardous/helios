@@ -100,6 +100,15 @@ command-helios-scopes-dock =
 command-helios-scopes-moveTo =
     .title = Move Scopes to an area (`area`)
 
+command-helios-stacks-detach =
+    .title = Move Stacks to a new window
+
+command-helios-stacks-dock =
+    .title = Dock Stacks back in its area
+
+command-helios-stacks-moveTo =
+    .title = Move Stacks to an area (`area`)
+
 command-helios-vault-detach =
     .title = Move Vault to a new window
 

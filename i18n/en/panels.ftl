@@ -28,6 +28,9 @@ panel-helios-queue =
 panel-helios-scopes =
     .title = Scopes
 
+panel-helios-stacks =
+    .title = Stacks
+
 panel-helios-vault =
     .title = Vault
 

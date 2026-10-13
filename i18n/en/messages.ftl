@@ -229,6 +229,30 @@ gui-snapshot-failed = snapshot failed: { $error }
 
 gui-snapshot-saved = { $target } pictured to { $path }
 
+gui-stacks-accept-all = Accept all
+
+gui-stacks-accept-checked = Accept the checked
+
+gui-stacks-bracket = Bracket of { $count }
+
+gui-stacks-burst = Burst of { $count }
+
+gui-stacks-decline = Decline
+
+gui-stacks-left-out = { $count } images left out
+
+gui-stacks-none = No stack suggestion waiting
+
+gui-stacks-proposal = { $groups } stacks proposed by { $resolver }
+
+gui-stacks-show = Show
+
+gui-stacks-suggest = Suggest stacks
+
+gui-stacks-suggest-hint = Over the images selected (two or more), else over every image
+
+gui-stacks-top = Proposed on top: the sharpest
+
 gui-template-keys-error = template { $name }: keys: { $error }
 
 gui-theme-exported = theme exported to { $path }
