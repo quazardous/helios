@@ -587,6 +587,30 @@ and the colour (`helios-gui/src/viewport.rs`).
 
 ![The image viewport, the readout under the pointer](gui/viewport-wbox.png)
 
+### Scopes and the histogram
+
+The Scopes panel measures the pipeline's output, not the screen: a
+preview of what the viewport shows (its node's output, the whole image,
+its longest side at most 256 pixels, in the working space), rendered on
+a thread of its own from the viewport's engine and cache each time the
+graph changes (`helios_gui::preview`). The navigator draws the same
+preview.
+
+- **The histogram** is egui-pop's (`egui_pop::viewport::histogram`,
+  2026-10-13): the red, green and blue counts on a log scale, in stops
+  (`scopes.stops`, 16 stops wide) or linear (`scopes.linear`), and its
+  clipping markers lit by the share of pixels at or below black and at
+  or above white.
+- **Dragging the histogram** moves the exposure (darktable's gesture):
+  the `exposure` of the selected node when it is an exposure, else of
+  the network's first. The exposure moves by as many stops as the
+  histogram did, the pointer's way; the drag is one gesture (one undo
+  step, other origins kept off), egui-pop's `histogram.drag` step runs
+  at its release (a plugin may veto or change it), and Escape gives it
+  up without a trace. Focused, the arrows step it.
+- **The waveform and the RGB parade** stay Helios's own pictures
+  (egui-pop has none).
+
 ### Drawn masks
 
 The viewport draws the shapes of the mask being edited (a `mask_combine`

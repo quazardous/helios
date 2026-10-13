@@ -192,6 +192,12 @@ gui-recording-stopped = enregistrement arrêté : { $error }
 
 gui-scene-saved = viewport.scene sauvé dans { $path }
 
+gui-scopes-blue = Bleu
+
+gui-scopes-green = Vert
+
+gui-scopes-red = Rouge
+
 gui-snapshot-failed = capture échouée : { $error }
 
 gui-snapshot-saved = { $target } capturé dans { $path }

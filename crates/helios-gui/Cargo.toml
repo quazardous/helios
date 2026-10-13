@@ -8,12 +8,13 @@ repository.workspace = true
 
 [dependencies]
 helios-shell.workspace = true
-# The image viewport (`egui_pop::viewport`), translations
-# (`egui_pop::i18n`) and the platform services (`egui_pop::platform`:
-# the single instance, notifications, logs and crash reports) too; the
-# editors (`egui_pop::editors`, MIT: syntect, vt100) for the jobs
-# centre's log consoles.
-egui-pop = { workspace = true, features = ["viewport", "i18n", "views", "editors", "platform-instance", "platform-notify", "platform-logs", "platform-crash"] }
+# The image viewport (`egui_pop::viewport`) and its tools' steps
+# (`egui_pop::imaging`: the histogram, curves, colour wheels and the
+# navigator), translations (`egui_pop::i18n`) and the platform services
+# (`egui_pop::platform`: the single instance, notifications, logs and
+# crash reports) too; the editors (`egui_pop::editors`, MIT: syntect,
+# vt100) for the jobs centre's log consoles.
+egui-pop = { workspace = true, features = ["viewport", "imaging", "i18n", "views", "editors", "platform-instance", "platform-notify", "platform-logs", "platform-crash"] }
 helios-i18n.workspace = true
 helios-profile.workspace = true
 helios-scopes.workspace = true

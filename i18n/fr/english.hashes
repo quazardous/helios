@@ -13,12 +13,17 @@ batch-several-sources 9e966f5d4cf4a738
 batch-vault-needs-sidecar 31b3ffb415090a18
 category-developer 3bef768f6a95f10d
 category-masks 6849246780dae374
+category-node-graph d36686706dbe1885
 category-preferences 0f02ef52eedd2e4d
 category-vault 3414f176735e33d7
 category-workspace d29e383b2905127c
 command-dialog-answer.title eafe9e4e2e36ad73
 command-dialog-assumeYes.title 6f49391f70e668f3
 command-dialog-current.title 6ccc78624dd76c64
+command-graph-edit.description b63d754457ea4f8f
+command-graph-read.description d4172960d73723e3
+command-graph-select.description d3abf79d4e949b6d
+command-graph-view.description 8da7b338fb66a8b7
 command-gui-record-start.title f3ddcd32ecfa4d0a
 command-gui-record-stop.title 8d3aad9304f56ea8
 command-gui-snapshot.title b408436c6f1ff343
@@ -220,6 +225,9 @@ gui-quick-open-workspace 83fb01ff0702e457
 gui-recording-saved a76310c7e51efad9
 gui-recording-stopped 2162a30bfb25f825
 gui-scene-saved 60fcaa10812571b8
+gui-scopes-blue 4993860c16de56cd
+gui-scopes-green e75b76ee627e2c3a
+gui-scopes-red ec567f4422597e6a
 gui-size-bytes f7153bf939a9449c
 gui-size-gib 05df2d85b96c6970
 gui-size-kib 053b6d255ce6ae14
@@ -452,6 +460,7 @@ param-whitebalance-mode.description 9bfa0a6049a88c92
 param-whitebalance-mode.label fb7fa70993198320
 param-whitebalance-red.description 722fa3ef16bb771a
 param-whitebalance-red.label c52ebe3823cca04a
+plugin-egui-pop-imaging.title 219716cbb2031449
 plugin-helios-commands.title 28daeae8a505789f
 plugin-helios-display.title 48ac8940d45b8005
 plugin-helios-frame.title 56244fc898eadb9c

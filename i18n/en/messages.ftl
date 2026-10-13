@@ -265,6 +265,12 @@ gui-recording-stopped = recording stopped: { $error }
 
 gui-scene-saved = viewport.scene saved to { $path }
 
+gui-scopes-blue = Blue
+
+gui-scopes-green = Green
+
+gui-scopes-red = Red
+
 gui-size-bytes = { $size } B
 
 gui-size-gib = { $size } GiB

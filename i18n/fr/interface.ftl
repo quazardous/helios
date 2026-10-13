@@ -4,11 +4,25 @@ category-developer = Développement
 
 category-masks = Masques
 
+category-node-graph = Graphe de nœuds
+
 category-preferences = Préférences
 
 category-vault = Coffre
 
 category-workspace = Espace de travail
+
+command-graph-edit =
+    .description = Demande une modification à un éditeur de nœuds, faite à sa prochaine image comme celle de l’utilisateur (une connexion vérifiée par type, puis son étape graph.*) : `edit` vaut `connect` (`from`, `to`), `disconnect` (`edges`), `move` (`moves`), `delete` (`nodes`, `edges`) ou `add` (`nodes`).
+
+command-graph-read =
+    .description = Le graphe qu’un éditeur de nœuds a dessiné en dernier : nœuds (place, ports, groupe, paramètres), liens, groupes, les sortes qu’il peut ajouter, la sélection, le niveau et la partie visible.
+
+command-graph-select =
+    .description = Sélectionne des nœuds d’un éditeur de nœuds (`nodes`, leurs ids) à sa prochaine image.
+
+command-graph-view =
+    .description = Ajuste le graphe d’un éditeur de nœuds (`fit` : true), zoome à un niveau (`level` : overview, ports ou detail) ou cible un nœud (`focus`), à sa prochaine image.
 
 menu-helios-masks-row-add =
     .label = Ajouter
@@ -21,6 +35,9 @@ menu-helios-system-recent =
 
 menu-helios-system-themes =
     .label = Thèmes
+
+plugin-egui-pop-imaging =
+    .title = Outils d’image
 
 plugin-helios-commands =
     .title = Helios

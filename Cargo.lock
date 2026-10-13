@@ -1059,6 +1059,7 @@ dependencies = [
  "egui-pop-core",
  "egui-pop-editors",
  "egui-pop-i18n",
+ "egui-pop-imaging",
  "egui-pop-model",
  "egui-pop-platform",
  "egui-pop-tokens",
@@ -1131,6 +1132,18 @@ dependencies = [
  "serde_json",
  "sys-locale",
  "unic-langid",
+]
+
+[[package]]
+name = "egui-pop-imaging"
+version = "0.1.0"
+source = "git+https://github.com/quazardous/egui-pop?rev=db91a27#db91a277a48daee0f2cdc8f95b837a8f2177315c"
+dependencies = [
+ "egui",
+ "egui-pop-api",
+ "egui-pop-model",
+ "egui-pop-viewport",
+ "serde_json",
 ]
 
 [[package]]

@@ -348,6 +348,9 @@ pub struct Shell {
     /// The GUI's clock, in seconds, as of this frame.
     now: f64,
     viewport: Rc<RefCell<crate::viewport::Viewport>>,
+    /// A small render of what the viewport shows, for the scopes and the
+    /// navigator.
+    preview: Rc<crate::preview::Preview>,
     /// The render state the viewport's GPU path waits to be installed on.
     gpu: Option<eframe::egui_wgpu::RenderState>,
     /// What installing it found.
@@ -483,6 +486,9 @@ impl Shell {
             .plugin(egui_pop::views::ViewsPlugin)
             // The photo library's steps and commands (the library panels).
             .plugin(egui_pop::views::library::LibraryPlugin)
+            // The image tools' steps: the histogram's drag, curves, colour
+            // wheels, the navigator.
+            .plugin(egui_pop::imaging::ImagingPlugin)
             // The window's frame: Helios's own on the desktop, the
             // system's elsewhere (tests, pictures, tools) until asked.
             .plugin(if ui_settings.is_some() {
@@ -551,6 +557,10 @@ impl Shell {
         if let Some(d) = app.handle().service(&DIALOGS) {
             let _ = dialogs.set((*d).clone());
         }
+        let viewport: Rc<RefCell<crate::viewport::Viewport>> = Rc::default();
+        let preview = Rc::new(crate::preview::Preview::new(
+            viewport.borrow().engine().clone(),
+        ));
         let mut shell = Shell {
             app,
             registry,
@@ -591,7 +601,8 @@ impl Shell {
             menu: None,
             notices: Vec::new(),
             now: 0.0,
-            viewport: Rc::default(),
+            viewport,
+            preview,
             gpu: None,
             gpu_info: None,
             image_surface: crate::display::ImageSurfaceSwitch::default(),
@@ -668,8 +679,17 @@ impl Shell {
             });
         }
         if has(&shell, "helios.scopes") {
-            let scopes = shell.scopes.clone();
-            shell.set_content("helios.scopes", move |ui| scopes.borrow_mut().ui(ui));
+            let (scopes, preview, values, app) = (
+                shell.scopes.clone(),
+                shell.preview.clone(),
+                shell.values.clone(),
+                shell.app.handle().clone(),
+            );
+            shell.set_content("helios.scopes", move |ui| {
+                let mut scopes = scopes.borrow_mut();
+                scopes.follow(&preview);
+                scopes.ui_with(ui, Some((&app, &*values)));
+            });
         }
         shell
             .library
@@ -953,6 +973,17 @@ impl Shell {
     /// The viewport, to set its hooks.
     pub fn viewport_mut(&self) -> std::cell::RefMut<'_, crate::viewport::Viewport> {
         self.viewport.borrow_mut()
+    }
+
+    /// The preview of what the viewport shows (the pipeline's output,
+    /// small), which the scopes measure and the navigator draws.
+    pub fn preview(&self) -> &crate::preview::Preview {
+        &self.preview
+    }
+
+    /// The image the scopes measure now.
+    pub fn scope_image(&self) -> Option<helios_core::Image> {
+        self.scopes.borrow().image.clone()
     }
 
     /// The float data the viewport shows, before the display transform.
@@ -3387,6 +3418,7 @@ impl Shell {
                 .with("count", asked),
             );
         }
+        self.preview.follow(self.viewport.borrow().shown(), &ctx);
         self.app.show(ui);
         if self.library.borrow_mut().take_import_asked() {
             let _ = self.run("library.importSource", Value::Null, Origin::User);

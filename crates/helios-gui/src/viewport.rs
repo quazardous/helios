@@ -696,6 +696,11 @@ impl Viewport {
         &self.engine
     }
 
+    /// What "after" shows: the graph, its node and port, the extent.
+    pub fn shown(&self) -> Option<Shown> {
+        self.after.shown()
+    }
+
     pub fn image_size(&self) -> Option<[u32; 2]> {
         self.after.size()
     }
