@@ -10,8 +10,8 @@ repository.workspace = true
 helios-shell.workspace = true
 # The image viewport (`egui_pop::viewport`), translations
 # (`egui_pop::i18n`) and the platform services (`egui_pop::platform`:
-# the single instance, notifications) too.
-egui-pop = { workspace = true, features = ["viewport", "i18n", "views", "platform-instance", "platform-notify"] }
+# the single instance, notifications, logs and crash reports) too.
+egui-pop = { workspace = true, features = ["viewport", "i18n", "views", "platform-instance", "platform-notify", "platform-logs", "platform-crash"] }
 helios-i18n.workspace = true
 helios-profile.workspace = true
 helios-scopes.workspace = true

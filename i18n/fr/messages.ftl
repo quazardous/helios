@@ -54,6 +54,10 @@ export-png-bits = le PNG a 8 ou 16 bits, pas { $bits }
 
 export-write-failed = impossible d’écrire { $path } : { $error }
 
+gui-about-crashes = Rapports de plantage : { $path }
+
+gui-about-logs = Fichier journal : { $path }
+
 gui-confirmed-by-policy = { $verb } : confirmé par la règle
 
 gui-copied = copié { $text }

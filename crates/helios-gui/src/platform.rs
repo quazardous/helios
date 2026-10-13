@@ -9,6 +9,12 @@
 //! - **Notifications**: a long export or batch that ends while no Helios
 //!   window has the focus says so on the desktop ([`job_finished`]), unless
 //!   the `notifications.jobs` setting is off.
+//! - **Logs and crash reports** go to the user's state directory
+//!   ([`log_dir`], [`crash_dir`]): egui-pop's log file, rotated, at the
+//!   `developer.log_level` setting, and its crash reports, written by a
+//!   panic hook and offered on the next start, never sent. The About
+//!   dialog says where ([`about`]); so does the debug bridge's `logs`
+//!   collector.
 //!
 //! The [`Platform`] plugin is part of every shell: its hooks on the
 //! instance's steps do nothing where no instance runs (tests, pictures,
@@ -22,7 +28,10 @@ use std::sync::{Arc, Mutex, PoisonError};
 use egui_pop::api::{AppBuilder, AppHandle, Ctx, Plugin, PluginError};
 use egui_pop::model::ids::{PluginId, SettingId};
 use egui_pop::model::values::Descriptor;
+use egui_pop::platform::crash::{CRASHES, CrashPlugin};
+use egui_pop::platform::dirs;
 use egui_pop::platform::instance::{Instance, InstancePlugin, STEP_DEEPLINK, STEP_SECOND_LAUNCH};
+use egui_pop::platform::logs::{LOGS, Logs, LogsPlugin};
 use egui_pop::platform::notify::{self, Desktop, Notification, NotifyPlugin};
 use helios_core::Message;
 use serde_json::{Value as Json, json};
@@ -39,6 +48,57 @@ pub const SCHEME: &str = "helios";
 pub const NEW_INSTANCE: &str = "--new-instance";
 
 pub const PLUGIN: PluginId = PluginId::from_static("helios.platform");
+
+/// Helios's directory in the user's state directory
+/// (`~/.local/state/helios` on Linux), and its log file's name
+/// (`helios.log`).
+pub const STATE_NAME: &str = "helios";
+
+/// Where the log files go, from the environment `env` gives: `logs` in
+/// Helios's state directory (`$XDG_STATE_HOME/helios/logs`, else
+/// `~/.local/state/helios/logs`; `%LOCALAPPDATA%\helios\logs` on
+/// Windows), `~/Library/Logs/helios` on macOS.
+pub fn log_dir_with(env: impl Fn(&str) -> Option<String>) -> Option<PathBuf> {
+    if cfg!(target_os = "macos") {
+        let home = env("HOME").map(PathBuf::from)?;
+        return Some(home.join("Library/Logs").join(STATE_NAME));
+    }
+    dirs::state_dir_with(STATE_NAME, env).map(|d| d.join("logs"))
+}
+
+/// Where crash reports go: `crashes` in Helios's state directory.
+pub fn crash_dir_with(env: impl Fn(&str) -> Option<String>) -> Option<PathBuf> {
+    dirs::state_dir_with(STATE_NAME, env).map(|d| d.join("crashes"))
+}
+
+/// [`log_dir_with`] from this process's environment.
+pub fn log_dir() -> Option<PathBuf> {
+    log_dir_with(|name| std::env::var(name).ok())
+}
+
+/// [`crash_dir_with`] from this process's environment.
+pub fn crash_dir() -> Option<PathBuf> {
+    crash_dir_with(|name| std::env::var(name).ok())
+}
+
+/// Where the logs and crash reports of the running application are, as
+/// the About dialog says it: one line each, in the interface's language.
+pub fn about(app: &AppHandle, text: impl Fn(Message) -> String) -> Vec<String> {
+    let mut lines = Vec::new();
+    if let Some(logs) = app.service(&LOGS) {
+        lines.push(text(
+            Message::new("gui-about-logs", "Log file: { $path }")
+                .with("path", logs.path().display().to_string()),
+        ));
+    }
+    if let Some(crashes) = app.service(&CRASHES) {
+        lines.push(text(
+            Message::new("gui-about-crashes", "Crash reports: { $path }")
+                .with("path", crashes.dir().display().to_string()),
+        ));
+    }
+    lines
+}
 
 /// Whether a long job's end is said on the desktop, at
 /// `settings/notifications.jobs` (on by default).
@@ -373,10 +433,21 @@ impl Plugin for Platform {
 }
 
 /// egui-pop's platform services for the desktop window: the single
-/// instance (its launches handed to [`Platform`]) and the desktop's
-/// notifications, tied to Helios's desktop file.
+/// instance (its launches handed to [`Platform`]), the desktop's
+/// notifications, tied to Helios's desktop file, the log file and crash
+/// reports in the user's state directory.
 pub fn desktop(app: AppBuilder, instance: Instance) -> AppBuilder {
-    app.plugin(InstancePlugin::new(instance).scheme(SCHEME))
+    let mut logs = LogsPlugin::new(STATE_NAME);
+    if let Some(dir) = log_dir() {
+        logs = logs.logs(Logs::new(dir, STATE_NAME));
+    }
+    let mut crashes = CrashPlugin::new("Helios", env!("CARGO_PKG_VERSION"));
+    if let Some(dir) = crash_dir() {
+        crashes = crashes.dir(dir);
+    }
+    app.plugin(logs)
+        .plugin(crashes)
+        .plugin(InstancePlugin::new(instance).scheme(SCHEME))
         .plugin(NotifyPlugin::new("Helios").backend(Desktop::new("Helios").app_id(APP_ID)))
 }
 
@@ -416,6 +487,31 @@ mod tests {
                 Open::Workspace(dir),
             ]
         );
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    #[test]
+    fn logs_and_crash_reports_go_to_the_state_directory() {
+        const HOME: &[(&str, &str)] = &[("HOME", "/home/me")];
+        const RELATIVE: &[(&str, &str)] = &[("XDG_STATE_HOME", "state"), ("HOME", "/home/me")];
+        let env = |vars: &'static [(&'static str, &'static str)]| {
+            move |name: &str| {
+                vars.iter()
+                    .find(|(k, _)| *k == name)
+                    .map(|(_, v)| (*v).to_string())
+            }
+        };
+        let xdg = env(&[("XDG_STATE_HOME", "/state"), ("HOME", "/home/me")]);
+        assert_eq!(log_dir_with(xdg), Some("/state/helios/logs".into()));
+        assert_eq!(crash_dir_with(xdg), Some("/state/helios/crashes".into()));
+        // Without XDG_STATE_HOME, or a relative one: the home's.
+        for vars in [HOME, RELATIVE] {
+            assert_eq!(
+                log_dir_with(env(vars)),
+                Some("/home/me/.local/state/helios/logs".into())
+            );
+        }
+        assert_eq!(log_dir_with(env(&[])), None);
     }
 
     #[cfg(unix)]

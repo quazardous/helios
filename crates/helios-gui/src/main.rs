@@ -43,6 +43,13 @@ fn earlier_layout(workspace: &Path, ui_settings: &Path) -> Option<Layout> {
 
 type Persist = helios_gui::persist::Persist<helios_vault_sqlite::SqliteStore>;
 
+/// A problem worth knowing: on the terminal, and in the log file once the
+/// window's logs are set up.
+fn warn(text: &str) {
+    eprintln!("helios-gui: {text}");
+    log::warn!(target: "helios", "{text}");
+}
+
 /// Fills the library from the vault, and reads the thumbnails behind it,
 /// one image at a time, from the first copy still present.
 fn fill_library(shell: &mut Shell, persist: &Persist) -> Result<(), String> {
@@ -61,7 +68,7 @@ fn fill_library(shell: &mut Shell, persist: &Persist) -> Result<(), String> {
                     }
                 }
                 Ok(None) => {}
-                Err(e) => eprintln!("helios-gui: no thumbnail for {}: {e}", path.display()),
+                Err(e) => warn(&format!("no thumbnail for {}: {e}", path.display())),
             }
         }
     });
@@ -173,7 +180,7 @@ impl eframe::App for App {
         // egui-pop's exit: the workspace saved (`save_workspace`), then
         // the `app.exit` step saves the interface's settings and keys.
         if let Err(e) = self.shell.exit() {
-            eprintln!("helios-gui: cannot save the interface's settings: {e}");
+            warn(&format!("cannot save the interface's settings: {e}"));
         }
     }
 }
@@ -187,7 +194,7 @@ fn save_workspace(dir: &Path, app: &egui_pop::api::AppHandle) {
     let saved =
         std::fs::create_dir_all(dir).and_then(|()| std::fs::write(&file, pointer.to_string()));
     if let Err(e) = saved {
-        eprintln!("helios-gui: cannot save {}: {e}", file.display());
+        warn(&format!("cannot save {}: {e}", file.display()));
     }
 }
 

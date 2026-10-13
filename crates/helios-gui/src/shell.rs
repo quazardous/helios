@@ -2393,12 +2393,23 @@ impl Shell {
                 frame::request(self.app.handle(), ctx, FrameRequest::SystemMenu(at));
             }
             Action::Run(id, args, origin) => return self.run(&id, args, origin),
-            Action::About => self.open_dialog(dialogs::Info::new(
-                &format!("Helios {}", env!("CARGO_PKG_VERSION")),
-                "A node-based photo developer.\n\
-                 Free software under the GNU General Public License, version 3 or later.\n\
-                 Source: https://github.com/quazardous/helios",
-            )),
+            Action::About => {
+                let mut text = String::from(
+                    "A node-based photo developer.\n\
+                     Free software under the GNU General Public License, version 3 or later.\n\
+                     Source: https://github.com/quazardous/helios",
+                );
+                // Where the logs and crash reports are, on the desktop.
+                let files = crate::platform::about(self.app.handle(), |m| self.text(m));
+                if !files.is_empty() {
+                    text.push_str("\n\n");
+                    text.push_str(&files.join("\n"));
+                }
+                self.open_dialog(dialogs::Info::new(
+                    &format!("Helios {}", env!("CARGO_PKG_VERSION")),
+                    &text,
+                ));
+            }
             Action::Keybindings => {
                 let w = self
                     .app
