@@ -24,6 +24,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-10-13
+
+### Added
+
+- `helios batch` shows on the node it drives as one batch job with an
+  export job per image under it, and cancelling the batch there (`helios
+  control job-cancel`) stops it: the exports in flight are cancelled, the
+  others are not started, and no file is left half-written.
+- An import now shows in the jobs centre with its progress, the file at hand
+  and a log line per file, and can be cancelled from there (or with Ctrl-C
+  for `helios import`): it stops before the next file, keeps the files
+  already imported and leaves no half-written copy.
+- A node's exports are jobs people follow on its bus, and `helios control
+  job-cancel ID` (the `job.cancel` command, also an agent tool) cancels one
+  by its id, queued or running, without writing a file.
+
 ## [0.2.1] - 2026-10-13
 
 ### Fixed
