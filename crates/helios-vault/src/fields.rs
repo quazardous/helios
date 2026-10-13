@@ -16,6 +16,8 @@ pub enum FieldKind {
     },
     /// A set of names taken from a fixed list.
     Labels(&'static [&'static str]),
+    /// A set of free names (tags): any non-empty text, kept trimmed.
+    Tags,
     Text,
     /// True or false.
     Bool,
@@ -31,6 +33,10 @@ pub struct FieldSpec {
 pub const RATING: &str = "rating";
 pub const REJECTED: &str = "rejected";
 pub const LABELS: &str = "labels";
+/// Picked while culling; a field of its own beside `rejected`, so a pick
+/// and a reject never share a rating's value.
+pub const PICKED: &str = "picked";
+pub const TAGS: &str = "tags";
 
 /// The fields of an image, declared once.
 pub const FIELDS: &[FieldSpec] = &[
@@ -50,6 +56,16 @@ pub const FIELDS: &[FieldSpec] = &[
         name: LABELS,
         kind: FieldKind::Labels(&["red", "yellow", "green", "blue", "purple"]),
         about: "color labels",
+    },
+    FieldSpec {
+        name: PICKED,
+        kind: FieldKind::Bool,
+        about: "picked while culling",
+    },
+    FieldSpec {
+        name: TAGS,
+        kind: FieldKind::Tags,
+        about: "tags (keywords)",
     },
     FieldSpec {
         name: "title",
@@ -95,6 +111,20 @@ pub fn normalize(name: &str, value: &Value) -> Result<Value, String> {
             labels.sort_unstable();
             labels.dedup();
             Ok(Value::from(labels))
+        }
+        (FieldKind::Tags, Value::Array(items)) => {
+            let mut tags = Vec::new();
+            for item in items {
+                let tag = item
+                    .as_str()
+                    .map(str::trim)
+                    .filter(|t| !t.is_empty())
+                    .ok_or_else(|| format!("`{name}`: {item} is not a tag"))?;
+                tags.push(tag.to_string());
+            }
+            tags.sort_unstable();
+            tags.dedup();
+            Ok(Value::from(tags))
         }
         (FieldKind::Text, Value::String(s)) => Ok(Value::from(s.clone())),
         (FieldKind::Bool, Value::Bool(b)) => Ok(Value::from(*b)),
@@ -164,22 +194,32 @@ impl Command {
             Op::Set(None) => Ok(Op::Set(None)),
             Op::Set(Some(v)) => Ok(Op::Set(Some(normalize(&self.field, v)?))),
             Op::SetIfAbsent(v) => Ok(Op::SetIfAbsent(normalize(&self.field, v)?)),
-            Op::Add(item) | Op::Remove(item) => {
-                let FieldKind::Labels(allowed) = spec.kind else {
-                    return Err(format!(
-                        "`{}` is not a set: it takes no add or remove",
-                        self.field
-                    ));
-                };
-                if !allowed.contains(&item.as_str()) {
-                    return Err(format!(
-                        "`{}`: `{item}` is not one of {}",
-                        self.field,
-                        allowed.join(", ")
-                    ));
+            Op::Add(item) | Op::Remove(item) => match spec.kind {
+                FieldKind::Labels(allowed) => {
+                    if !allowed.contains(&item.as_str()) {
+                        return Err(format!(
+                            "`{}`: `{item}` is not one of {}",
+                            self.field,
+                            allowed.join(", ")
+                        ));
+                    }
+                    Ok(self.op.clone())
                 }
-                Ok(self.op.clone())
-            }
+                FieldKind::Tags => {
+                    let tag = item.trim();
+                    if tag.is_empty() {
+                        return Err(format!("`{}`: an empty tag", self.field));
+                    }
+                    Ok(match &self.op {
+                        Op::Add(_) => Op::Add(tag.into()),
+                        _ => Op::Remove(tag.into()),
+                    })
+                }
+                _ => Err(format!(
+                    "`{}` is not a set: it takes no add or remove",
+                    self.field
+                )),
+            },
         }
     }
 }
@@ -247,5 +287,37 @@ pub struct Query {
     pub min_rating: Option<i64>,
     /// Carrying this color label.
     pub label: Option<String>,
+    /// Carrying one of these color labels (none given: any image).
+    pub labels: Vec<String>,
+    /// Flagged one of these ways: `pick`, `reject`, `none` (neither
+    /// picked nor rejected); none given: any image.
+    pub flags: Vec<String>,
+    /// Carrying every one of these tags.
+    pub tags: Vec<String>,
     pub order: Order,
+}
+
+/// The flags a query takes.
+pub const FLAGS: [&str; 3] = ["pick", "reject", "none"];
+
+impl Query {
+    /// Checks the flags named.
+    pub fn check(&self) -> Result<(), String> {
+        match self.flags.iter().find(|f| !FLAGS.contains(&f.as_str())) {
+            Some(f) => Err(format!("`{f}` is not a flag ({})", FLAGS.join(", "))),
+            None => Ok(()),
+        }
+    }
+
+    /// An image's flag from its `picked` and `rejected` fields: a reject
+    /// wins over a pick.
+    pub fn flag_of(picked: bool, rejected: bool) -> &'static str {
+        if rejected {
+            "reject"
+        } else if picked {
+            "pick"
+        } else {
+            "none"
+        }
+    }
 }

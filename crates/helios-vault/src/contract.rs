@@ -13,7 +13,7 @@ use std::sync::Arc;
 use helios_core::{Bus, ContentHash};
 use serde_json::json;
 
-use crate::fields::{Command, LABELS, Op, Order, Query, RATING, REJECTED};
+use crate::fields::{Command, LABELS, Op, Order, PICKED, Query, RATING, REJECTED, TAGS};
 use crate::{Image, ImageId, Location, Store, Vault};
 
 /// Runs every scenario against fresh stores made by `make`.
@@ -24,6 +24,8 @@ pub fn check<S: Store>(make: impl Fn() -> S) {
     repair_relinks_by_content_reading_as_little_as_possible(make(), &scratch("repair"));
     fields_round_trip_and_come_in_one_batch(make());
     queries_filter_and_order(make());
+    queries_filter_by_labels_flags_and_tags(make());
+    tags_are_a_free_set(make());
     commands_skip_unchanged_values_coalesce_and_audit(make());
     cursors_cost_one_query_and_report_deltas(make());
     versions_are_content_addressed_and_heads_follow_forks_and_merges(make());
@@ -700,6 +702,96 @@ fn queries_filter_and_order<S: Store>(s: S) {
         s.select(&by_rating).unwrap(),
         vec![ids[1], ids[0], ids[2], ids[3]],
         "unrated counts as 0, then by id"
+    );
+}
+
+fn queries_filter_by_labels_flags_and_tags<S: Store>(s: S) {
+    let mut s = with_images(s, 5);
+    let ids: Vec<ImageId> = (1..=5).map(|i| image(i).id).collect();
+    s.set_field(&ids[0], PICKED, Some(&json!(true))).unwrap();
+    s.set_field(&ids[1], REJECTED, Some(&json!(true))).unwrap();
+    // Picked, then rejected: the reject wins.
+    s.set_field(&ids[2], PICKED, Some(&json!(true))).unwrap();
+    s.set_field(&ids[2], REJECTED, Some(&json!(true))).unwrap();
+    s.set_field(&ids[0], LABELS, Some(&json!(["red"]))).unwrap();
+    s.set_field(&ids[3], LABELS, Some(&json!(["blue", "green"])))
+        .unwrap();
+    s.set_field(&ids[0], TAGS, Some(&json!(["beach", "sea"])))
+        .unwrap();
+    s.set_field(&ids[4], TAGS, Some(&json!(["sea"]))).unwrap();
+    let q = |f: &dyn Fn(&mut Query)| {
+        let mut q = Query::default();
+        f(&mut q);
+        s.select(&q).unwrap()
+    };
+    assert_eq!(q(&|q| q.flags = vec!["pick".into()]), vec![ids[0]]);
+    assert_eq!(
+        q(&|q| q.flags = vec!["reject".into()]),
+        vec![ids[1], ids[2]]
+    );
+    assert_eq!(
+        q(&|q| q.flags = vec!["none".into(), "pick".into()]),
+        vec![ids[0], ids[3], ids[4]]
+    );
+    assert_eq!(
+        q(&|q| q.labels = vec!["red".into(), "green".into()]),
+        vec![ids[0], ids[3]],
+        "any of the labels"
+    );
+    assert_eq!(q(&|q| q.tags = vec!["sea".into()]), vec![ids[0], ids[4]]);
+    assert_eq!(
+        q(&|q| q.tags = vec!["sea".into(), "beach".into()]),
+        vec![ids[0]],
+        "every tag"
+    );
+    assert_eq!(
+        q(&|q| {
+            q.tags = vec!["sea".into()];
+            q.flags = vec!["none".into()];
+        }),
+        vec![ids[4]]
+    );
+    let bad = Query {
+        flags: vec!["maybe".into()],
+        ..Query::default()
+    };
+    assert!(s.select(&bad).unwrap_err().contains("not a flag"));
+}
+
+fn tags_are_a_free_set<S: Store>(s: S) {
+    let v = Vault::new(with_images(s, 1));
+    let a = image(1).id;
+    v.apply(
+        &[
+            Command::add(a, TAGS, " sea "),
+            Command::add(a, TAGS, "Beach trip"),
+            Command::add(a, TAGS, "sea"),
+        ],
+        "user",
+        None,
+        1,
+    )
+    .unwrap();
+    assert_eq!(
+        v.fields_of(&[a], &[TAGS]).unwrap()[0].get(TAGS),
+        Some(&json!(["Beach trip", "sea"])),
+        "trimmed, sorted, once each"
+    );
+    v.apply(&[Command::remove(a, TAGS, "sea")], "user", None, 2)
+        .unwrap();
+    assert_eq!(
+        v.fields_of(&[a], &[TAGS]).unwrap()[0].get(TAGS),
+        Some(&json!(["Beach trip"]))
+    );
+    assert!(
+        v.apply(&[Command::add(a, TAGS, "  ")], "user", None, 3)
+            .unwrap_err()
+            .contains("empty tag")
+    );
+    assert!(
+        v.apply(&[Command::add(a, PICKED, "x")], "user", None, 4)
+            .unwrap_err()
+            .contains("not a set")
     );
 }
 

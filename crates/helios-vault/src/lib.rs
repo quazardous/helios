@@ -251,19 +251,36 @@ impl Store for MemoryStore {
                 .and_then(serde_json::Value::as_i64)
                 .unwrap_or(0)
         };
+        query.check()?;
+        let has = |id: &ImageId, field: &str, item: &str| {
+            self.fields
+                .get(&(*id, field.to_string()))
+                .and_then(|v| v.as_array())
+                .is_some_and(|items| items.iter().any(|i| i.as_str() == Some(item)))
+        };
+        let yes = |id: &ImageId, field: &str| {
+            self.fields
+                .get(&(*id, field.to_string()))
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false)
+        };
         let mut ids: Vec<ImageId> = self
             .images
             .keys()
             .filter(|id| query.min_rating.is_none_or(|min| rating(id) >= min))
             .filter(|id| {
-                query.label.as_ref().is_none_or(|label| {
-                    self.fields
-                        .get(&(**id, fields::LABELS.to_string()))
-                        .and_then(|v| v.as_array())
-                        .is_some_and(|labels| {
-                            labels.iter().any(|l| l.as_str() == Some(label.as_str()))
-                        })
-                })
+                query
+                    .label
+                    .as_ref()
+                    .is_none_or(|label| has(id, fields::LABELS, label))
+            })
+            .filter(|id| {
+                query.labels.is_empty() || query.labels.iter().any(|l| has(id, fields::LABELS, l))
+            })
+            .filter(|id| query.tags.iter().all(|t| has(id, fields::TAGS, t)))
+            .filter(|id| {
+                let flag = Query::flag_of(yes(id, fields::PICKED), yes(id, fields::REJECTED));
+                query.flags.is_empty() || query.flags.iter().any(|f| f == flag)
             })
             .copied()
             .collect();
