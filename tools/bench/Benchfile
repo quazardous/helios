@@ -105,7 +105,8 @@ ref = "f74ddd995c5447458f132a5377ca0f4b394dff6e"
 
 # the job's env applies here too: CARGO_NET_OFFLINE is lifted for the fetch
 [fetch]
-run = ["for d in /work/helios /work/egui-pop /work/${src:-helios}; do (cd $d && CARGO_NET_OFFLINE=false cargo fetch --locked) || exit 1; done"]
+# a job fetches only its own checkouts: skip the ones it does not have
+run = ["for d in /work/helios /work/egui-pop /work/${src:-helios}; do [ -d $d ] || continue; (cd $d && CARGO_NET_OFFLINE=false cargo fetch --locked) || exit 1; done"]
 
 # Helios's own directories on the box. Build trees are keyed by the branch
 # they build (Helios's `branch`, egui-pop's `egui_pop`), so neither needs the
