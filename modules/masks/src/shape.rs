@@ -1,6 +1,6 @@
-//! Drawn shape members: a circle, an ellipse, a linear gradient and a path
-//! (a polygon or Bézier curves), darktable's drawn masks
-//! (`src/develop/masks/{circle,ellipse,gradient,path}.c`).
+//! Drawn shape members: a circle, an ellipse, a linear gradient, a path
+//! (a polygon or Bézier curves) and a brush stroke, darktable's drawn masks
+//! (`src/develop/masks/{circle,ellipse,gradient,path,brush}.c`).
 //!
 //! **Image coordinates.** A shape's parameters are full-resolution pixels
 //! of the image the network reads: pixel `(i, j)` covers `[i, i + 1) x [j,
@@ -20,7 +20,7 @@
 //! opacity, inverted), and declares it as its [`Extent`]: the engine fills
 //! tiles away from it without running it.
 //!
-//! **GPU.** Each has a WGSL kernel computing the same profile in `f32`;
+//! **GPU.** Each but the brush has a WGSL kernel computing the same profile in `f32`;
 //! the CPU code computes in `f64`. They agree within
 //! [`GPU_TOLERANCE`].
 //!
@@ -37,6 +37,7 @@
 //! | `mask_ellipse` | `x`, `y`; `radius_x`, `radius_y`, `rotation`; `feather`; `proportional` |
 //! | `mask_gradient` | `x`, `y` (a point of the line); `rotation`; `feather`; `profile` |
 //! | `mask_path` | `points` (the whole list, see [`path_values`]); `feather` |
+//! | `mask_brush` | none: a stroke is drawn, not edited (its centre line) |
 //! | every shape | `opacity`, `invert` |
 
 use helios_core::{
@@ -62,6 +63,14 @@ const MAX_PIECES: usize = 31;
 
 /// Coordinates and lengths in image pixels stay within this.
 const FAR: f64 = 1.0e6;
+
+#[path = "brush.rs"]
+mod brush;
+
+pub use brush::{
+    BRUSH_POINT_VALUES, BrushPlan, BrushPoint, Knot, MAX_BRUSH_POINTS, MaskBrush, brush_points,
+    brush_values, stroke,
+};
 
 const SHAPES_WGSL: &str = include_str!("shapes.wgsl");
 const PATH_WGSL: &str = include_str!("path.wgsl");
@@ -1198,6 +1207,15 @@ pub fn outline(module: &str, params: &Params) -> Result<Outline, String> {
                 feather: Vec::new(),
                 closed: true,
                 handles,
+            })
+        }
+        "mask_brush" => {
+            let p = MaskBrush.prepare(&resolve(&MaskBrush.manifest()), &cx)?;
+            Ok(Outline {
+                edge: p.knots.iter().map(|k| k.at).collect(),
+                feather: Vec::new(),
+                closed: false,
+                handles: Vec::new(),
             })
         }
         other => Err(format!("`{other}` is not a drawn shape")),

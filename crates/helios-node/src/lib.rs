@@ -263,6 +263,20 @@ pub fn registry() -> BTreeMap<&'static str, ModuleRef> {
             "mask_raster",
             ModuleRef::new(helios_module_masks::MaskRaster),
         ),
+        (
+            "mask_circle",
+            ModuleRef::new(helios_module_masks::MaskCircle),
+        ),
+        (
+            "mask_ellipse",
+            ModuleRef::new(helios_module_masks::MaskEllipse),
+        ),
+        (
+            "mask_gradient",
+            ModuleRef::new(helios_module_masks::MaskGradient),
+        ),
+        ("mask_path", ModuleRef::new(helios_module_masks::MaskPath)),
+        ("mask_brush", ModuleRef::new(helios_module_masks::MaskBrush)),
     ])
 }
 

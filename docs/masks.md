@@ -47,12 +47,13 @@ Values are not clamped on every port: operators clamp where darktable does
 | `mask_ellipse` | → `mask` | a drawn ellipse: centre, half-axes, rotation, feather (equidistant or proportional) |
 | `mask_gradient` | → `mask` | a drawn linear gradient: a point of its line, rotation, transition width, linear or sigmoid |
 | `mask_path` | → `mask` | a drawn closed path: up to 64 points with Bézier handles (a polygon when handles sit on their corners), feather |
+| `mask_brush` | → `mask` | a brush stroke: up to 256 points with Bézier handles, each with its radius, hardness and density |
 
 ## From darktable's tree to a sub-network
 
 - **Member** → a node with a one-channel output (`mask_from_luma`,
   `mask_parametric`, `mask_raster`, `mask_circle`, `mask_ellipse`,
-  `mask_gradient`, `mask_path` today; AI masks later), connected
+  `mask_gradient`, `mask_path`, `mask_brush` today; AI masks later), connected
   to a port of its group. Its opacity and inversion are the group's
   `opacity[i]` and `invert[i]` for that port: inversion first, then
   opacity, as darktable does.
@@ -101,7 +102,7 @@ gives 0.33; the tests check both. A group with no connected member gives 1
 
 ## Drawn shapes
 
-The four shape members read no image: each is a source of one channel,
+The shape members read no image: each is a source of one channel,
 `(invert ? 1 − v : v) · opacity` where `v` is the shape's value, like
 every member. Their parameters are ordinary module parameters, so they
 live in the value store (`node/<node>/<param>`): edits are undoable,
@@ -145,7 +146,18 @@ announced on the bus and saved with the network like any other value.
   bit; the tests check it for every shape at scales 1, 0.5, 0.37 and 0.25
   with tiles of 7, 32 and 64 pixels, and the group operators over shapes,
   tiled.
-- **GPU.** Each shape has a WGSL kernel (`shapes.wgsl`: circle, ellipse,
+- **Brushes.** A stroke runs through its points along cubic Bézier
+  segments; along each the radius follows a smoothstep from one point's
+  to the next, the hardness and the density change linearly (darktable's
+  interpolation). A pixel at distance `d` from the stroke takes the
+  density up to `hardness · radius`, then falls linearly to 0 at the
+  radius; both ends are round. darktable paints the same profile along
+  rays from the centre line to the border, pixel by pixel; Helios
+  measures the distance to the stroke, so where the density changes
+  along it a pixel may take a little more of a denser neighbour (within
+  1 % on the tests). Brushes run on the CPU only (a stroke holds more
+  points than a GPU uniform buffer).
+- **GPU.** Each shape but the brush has a WGSL kernel (`shapes.wgsl`: circle, ellipse,
   gradient; `path.wgsl`), run over the engine's two-dimensional grid as a
   module without inputs (it reads a one-pixel placeholder and learns its
   output's origin from the shape binding). The path kernel reads the
@@ -154,7 +166,7 @@ announced on the bus and saved with the network like any other value.
   (`f64`) agree within 2·10⁻³ (`shape::GPU_TOLERANCE`), tested at several
   scales and regions.
 
-Not ported: brushes, darktable's per-point path feather (one feather per
+Not ported: darktable's per-point path feather (one feather per
 path here), the gradient's curvature, and clone shapes (retouch). The
 viewport draws and edits the shapes (see [gui.md](gui.md), "Drawn
 masks"); what its handles read and write is listed in the module's

@@ -44,6 +44,42 @@ param-mask-blur-radius =
     .description = écart type, en pixels de pleine résolution
     .label = rayon
 
+param-mask-brush-invert =
+    .description = inverse la forme, avant son opacité
+    .label = inverser
+
+param-mask-brush-opacity =
+    .description = multiplie la forme, après son inversion
+    .label = opacité
+
+param-mask-brush-points =
+    .description = jusqu’à 256 points, 9 valeurs chacun : le coin, la poignée avant, la poignée après (x, y chacune, en pixels de l’image), le rayon (en pixels de l’image), la dureté et la densité (de 0 à 1)
+    .label = points
+
+param-mask-circle-feather =
+    .description = largeur du fondu au-delà du rayon, en pixels de l’image
+    .label = fondu
+
+param-mask-circle-invert =
+    .description = inverse la forme, avant son opacité
+    .label = inverser
+
+param-mask-circle-opacity =
+    .description = multiplie la forme, après son inversion
+    .label = opacité
+
+param-mask-circle-radius =
+    .description = où le fondu commence, en pixels de l’image
+    .label = rayon
+
+param-mask-circle-x =
+    .description = centre, en pixels de l’image depuis la gauche
+    .label = x
+
+param-mask-circle-y =
+    .description = centre, en pixels de l’image depuis le haut
+    .label = y
+
 param-mask-combine-group-invert =
     .description = inverse le masque combiné
     .label = inverser le groupe
@@ -78,6 +114,42 @@ param-mask-combine-operator-choice-screen = superposition
 
 param-mask-combine-operator-choice-sum = somme
 
+param-mask-ellipse-feather =
+    .description = largeur du fondu au-delà du bord, en pixels de l’image (le long du grand axe si proportionnel)
+    .label = fondu
+
+param-mask-ellipse-invert =
+    .description = inverse la forme, avant son opacité
+    .label = inverser
+
+param-mask-ellipse-opacity =
+    .description = multiplie la forme, après son inversion
+    .label = opacité
+
+param-mask-ellipse-proportional =
+    .description = le fondu suit chaque demi-axe au lieu de garder une seule largeur
+    .label = proportionnel
+
+param-mask-ellipse-radius-x =
+    .description = demi-axe le long de l’axe x tourné, en pixels de l’image
+    .label = rayon_x
+
+param-mask-ellipse-radius-y =
+    .description = demi-axe le long de l’axe y tourné, en pixels de l’image
+    .label = rayon_y
+
+param-mask-ellipse-rotation =
+    .description = degrés de l’axe x vers l’axe y (sens horaire à l’écran)
+    .label = rotation
+
+param-mask-ellipse-x =
+    .description = centre, en pixels de l’image depuis la gauche
+    .label = x
+
+param-mask-ellipse-y =
+    .description = centre, en pixels de l’image depuis le haut
+    .label = y
+
 param-mask-feather-radius =
     .description = rayon de la fenêtre, en pixels de pleine résolution
     .label = rayon
@@ -89,6 +161,38 @@ param-mask-from-luma-high =
 param-mask-from-luma-low =
     .description = luminance où le masque commence
     .label = bas
+
+param-mask-gradient-feather =
+    .description = largeur de la transition, en pixels de l’image
+    .label = fondu
+
+param-mask-gradient-invert =
+    .description = inverse la forme, avant son opacité
+    .label = inverser
+
+param-mask-gradient-opacity =
+    .description = multiplie la forme, après son inversion
+    .label = opacité
+
+param-mask-gradient-profile =
+    .description = la transition : linéaire, ou sigmoïde (une fonction d’erreur)
+    .label = profil
+
+param-mask-gradient-profile-choice-linear = linéaire
+
+param-mask-gradient-profile-choice-sigmoid = sigmoïde
+
+param-mask-gradient-rotation =
+    .description = degrés : 0 est plein au-dessus de la ligne, 90 plein à sa gauche
+    .label = rotation
+
+param-mask-gradient-x =
+    .description = un point de la ligne, en pixels de l’image depuis la gauche
+    .label = x
+
+param-mask-gradient-y =
+    .description = un point de la ligne, en pixels de l’image depuis le haut
+    .label = y
 
 param-mask-levels-brightness =
     .description = décale le masque vers le haut ou le bas
@@ -165,6 +269,22 @@ param-mask-parametric-red =
 param-mask-parametric-red-invert =
     .description = inverse la sélection de ce canal
     .label = inverser le rouge
+
+param-mask-path-feather =
+    .description = largeur du fondu hors du chemin, en pixels de l’image
+    .label = fondu
+
+param-mask-path-invert =
+    .description = inverse la forme, avant son opacité
+    .label = inverser
+
+param-mask-path-opacity =
+    .description = multiplie la forme, après son inversion
+    .label = opacité
+
+param-mask-path-points =
+    .description = jusqu’à 64 points, 6 valeurs chacun : le coin, la poignée avant, la poignée après (x, y chacune, en pixels de l’image) ; moins de 3 points ne dessinent rien
+    .label = points
 
 param-mask-raster-invert =
     .description = inverse le masque réutilisé, avant son opacité

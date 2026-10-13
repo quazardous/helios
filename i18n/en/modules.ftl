@@ -45,6 +45,42 @@ param-mask-blur-radius =
     .description = standard deviation, in full-resolution pixels
     .label = radius
 
+param-mask-brush-invert =
+    .description = invert the shape, before its opacity
+    .label = invert
+
+param-mask-brush-opacity =
+    .description = multiplies the shape, after its inversion
+    .label = opacity
+
+param-mask-brush-points =
+    .description = up to 256 points, 9 values each: the corner, the handle before it, the handle after it (x, y each, image pixels), the radius (image pixels), the hardness and the density (0 to 1)
+    .label = points
+
+param-mask-circle-feather =
+    .description = falloff width past the radius, image pixels
+    .label = feather
+
+param-mask-circle-invert =
+    .description = invert the shape, before its opacity
+    .label = invert
+
+param-mask-circle-opacity =
+    .description = multiplies the shape, after its inversion
+    .label = opacity
+
+param-mask-circle-radius =
+    .description = where the falloff starts, image pixels
+    .label = radius
+
+param-mask-circle-x =
+    .description = centre, image pixels from the left
+    .label = x
+
+param-mask-circle-y =
+    .description = centre, image pixels from the top
+    .label = y
+
 param-mask-combine-group-invert =
     .description = invert the folded mask
     .label = group_invert
@@ -79,6 +115,42 @@ param-mask-combine-operator-choice-screen = screen
 
 param-mask-combine-operator-choice-sum = sum
 
+param-mask-ellipse-feather =
+    .description = falloff width past the edge, image pixels (along the longer axis when proportional)
+    .label = feather
+
+param-mask-ellipse-invert =
+    .description = invert the shape, before its opacity
+    .label = invert
+
+param-mask-ellipse-opacity =
+    .description = multiplies the shape, after its inversion
+    .label = opacity
+
+param-mask-ellipse-proportional =
+    .description = the falloff scales with each half-axis instead of keeping one width
+    .label = proportional
+
+param-mask-ellipse-radius-x =
+    .description = half-axis along the rotated x axis, image pixels
+    .label = radius_x
+
+param-mask-ellipse-radius-y =
+    .description = half-axis along the rotated y axis, image pixels
+    .label = radius_y
+
+param-mask-ellipse-rotation =
+    .description = degrees from the x axis toward the y axis (clockwise on screen)
+    .label = rotation
+
+param-mask-ellipse-x =
+    .description = centre, image pixels from the left
+    .label = x
+
+param-mask-ellipse-y =
+    .description = centre, image pixels from the top
+    .label = y
+
 param-mask-feather-radius =
     .description = window radius, in full-resolution pixels
     .label = radius
@@ -90,6 +162,38 @@ param-mask-from-luma-high =
 param-mask-from-luma-low =
     .description = luminance where the mask starts
     .label = low
+
+param-mask-gradient-feather =
+    .description = width of the transition, image pixels
+    .label = feather
+
+param-mask-gradient-invert =
+    .description = invert the shape, before its opacity
+    .label = invert
+
+param-mask-gradient-opacity =
+    .description = multiplies the shape, after its inversion
+    .label = opacity
+
+param-mask-gradient-profile =
+    .description = the transition: linear, or sigmoid (an error function)
+    .label = profile
+
+param-mask-gradient-profile-choice-linear = linear
+
+param-mask-gradient-profile-choice-sigmoid = sigmoid
+
+param-mask-gradient-rotation =
+    .description = degrees: 0 is full above the line, 90 full left of it
+    .label = rotation
+
+param-mask-gradient-x =
+    .description = a point of the line, image pixels from the left
+    .label = x
+
+param-mask-gradient-y =
+    .description = a point of the line, image pixels from the top
+    .label = y
 
 param-mask-levels-brightness =
     .description = shifts the mask up or down
@@ -166,6 +270,22 @@ param-mask-parametric-red =
 param-mask-parametric-red-invert =
     .description = invert this channel's selection
     .label = red_invert
+
+param-mask-path-feather =
+    .description = falloff width outside the path, image pixels
+    .label = feather
+
+param-mask-path-invert =
+    .description = invert the shape, before its opacity
+    .label = invert
+
+param-mask-path-opacity =
+    .description = multiplies the shape, after its inversion
+    .label = opacity
+
+param-mask-path-points =
+    .description = up to 64 points, 6 values each: the corner, the handle before it, the handle after it (x, y each, image pixels); fewer than 3 points draw nothing
+    .label = points
 
 param-mask-raster-invert =
     .description = invert the reused mask, before its opacity

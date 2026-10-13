@@ -28,6 +28,8 @@
 //!   anti-aliased at the render's scale, with a GPU variant; each declares
 //!   its extent, so tiles away from it are filled without running it (see
 //!   [`shape`]).
+//! - [`MaskBrush`]: a drawn brush stroke (darktable's brush), radius,
+//!   hardness and density along a curve; CPU only.
 //! - [`stress`]: a large chained mask network, for stress tests and the
 //!   masks bench.
 
@@ -46,7 +48,9 @@ pub use luma::{MaskFromLuma, luminance};
 pub use parametric::{Channel, MaskParametric, ParametricPlan, Range, jzczhz};
 pub use raster::{MaskRaster, RasterPlan};
 pub use refine::{MaskBlur, MaskFeather, MaskLevels, tone_curve};
-pub use shape::{MaskCircle, MaskEllipse, MaskGradient, MaskPath, PathPoint, outline};
+pub use shape::{
+    BrushPoint, MaskBrush, MaskCircle, MaskEllipse, MaskGradient, MaskPath, PathPoint, outline,
+};
 
 use helios_core::{Params, PortSpec, Value};
 
