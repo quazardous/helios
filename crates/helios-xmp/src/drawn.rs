@@ -35,6 +35,10 @@ pub mod kind {
     pub const BRUSH: u32 = 1 << 6;
     pub const NON_CLONE: u32 = 1 << 7;
     pub const OBJECT: u32 = 1 << 8;
+    /// The flexi masks' parametric member (masks version 7).
+    pub const PARAMETRIC: u32 = 1 << 9;
+    /// The flexi masks' raster member (masks version 7).
+    pub const RASTER: u32 = 1 << 10;
 }
 
 /// A member's state in its group (`dt_masks_state_t`), as bits.
@@ -45,11 +49,35 @@ pub mod state {
     pub const DIFFERENCE: i32 = 1 << 5;
     pub const EXCLUSION: i32 = 1 << 6;
     pub const SUM: i32 = 1 << 7;
+    /// Flexi (masks version 7): a member hidden by solo, or disabled.
+    pub const HIDDEN: i32 = 1 << 8;
+    pub const DISABLE: i32 = 1 << 17;
+    /// Flexi: on a group's marker, its operator (none: maximum).
+    pub const FLEXI_SCREEN: i32 = 1 << 9;
+    pub const FLEXI_MINIMUM: i32 = 1 << 12;
+    pub const FLEXI_PRODUCT: i32 = 1 << 15;
+    pub const FLEXI_SUM: i32 = 1 << 19;
+    pub const FLEXI_DIFFERENCE: i32 = 1 << 20;
+    pub const FLEXI_EXCLUSION: i32 = 1 << 21;
+    /// Flexi: on a group's marker, bypass (the group contributes nothing)
+    /// and inversion of the folded mask.
+    pub const OP_BYPASS: i32 = 1 << 14;
+    pub const OP_INVERT: i32 = 1 << 16;
+    /// Flexi: this point is its group's marker (its settings), not a member.
+    pub const GROUP_MARKER: i32 = 1 << 18;
 }
 
-/// The versions of darktable's masks this reads (`DEVELOP_MASKS_VERSION`
-/// is 6; 4 and 5 have the same structs, with defaults for what came later).
-pub const VERSIONS: std::ops::RangeInclusive<u32> = 4..=6;
+/// The versions of darktable's masks this reads: 6 is darktable's current
+/// (4 and 5 have the same structs, with defaults for what came later), 7
+/// the flexi masks' (pull request darktable-org/darktable#22553, pinned in
+/// `docs/masks.md`), whose group points grow from 16 to 240 bytes. A later
+/// version is refused, so that a format change shows.
+pub const VERSIONS: std::ops::RangeInclusive<u32> = 4..=7;
+
+/// The bytes of a group point at masks `version`.
+fn group_stride(version: u32) -> usize {
+    if version >= 7 { 240 } else { 16 }
+}
 
 /// The most points a Helios path holds (`helios_module_masks::shape`).
 const MAX_PATH_POINTS: usize = 64;
@@ -157,7 +185,7 @@ impl Problem {
             }
             Problem::Version { version } => Message::new(
                 "xmp-mask-version",
-                "masks version { $version } not supported (reads 4 to 6)",
+                "masks version { $version } not supported (reads 4 to 7)",
             )
             .with("version", *version),
             Problem::Size { bytes, expected } => Message::new(
@@ -250,21 +278,52 @@ impl Fold {
     }
 }
 
+/// A mask refinement of the flexi masks (`dt_masks_refinement_t`): on a
+/// member (element scope) or on a group's marker (group scope).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize)]
+pub struct Refinement {
+    /// 0 off, 1 element scope, 2 group scope.
+    pub scope: i32,
+    pub details: f32,
+    pub feathering_radius: f32,
+    pub blur_radius: f32,
+    pub contrast: f32,
+    pub brightness: f32,
+}
+
 /// A member of a group: the form it refers to, how it folds into the
-/// members before it, its inversion and opacity.
+/// members before it (classic groups), its inversion and opacity.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct GroupMember {
     pub form: i64,
     pub fold: Fold,
     pub invert: bool,
     pub opacity: f64,
+    /// Flexi: hidden or disabled, so not folded.
+    pub hidden: bool,
+    /// Masks version 7: the member's own refinement.
+    pub refinement: Refinement,
 }
 
-/// A group of forms (darktable's classic group).
+/// A flexi group's settings, held by its marker.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct Marker {
+    /// The Helios `mask_combine` operator.
+    pub operator: &'static str,
+    pub invert: bool,
+    /// Bypassed: the group contributes nothing.
+    pub bypass: bool,
+    pub opacity: f64,
+    pub refinement: Refinement,
+}
+
+/// A group of forms: darktable's classic group, or a flexi group when its
+/// points start with a marker.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Group {
     pub form: i64,
     pub name: String,
+    pub marker: Option<Marker>,
     pub members: Vec<GroupMember>,
 }
 
@@ -394,8 +453,16 @@ pub fn map(form: &Form, frame: &Frame) -> Mapped {
         return skip(Problem::Unsupported {
             form: "AI object".into(),
         });
+    } else if k & kind::PARAMETRIC != 0 {
+        return skip(Problem::Unsupported {
+            form: "parametric".into(),
+        });
+    } else if k & kind::RASTER != 0 {
+        return skip(Problem::Unsupported {
+            form: "raster".into(),
+        });
     } else if k & kind::GROUP != 0 {
-        (16, "")
+        (group_stride(form.version), "")
     } else if k & kind::CIRCLE != 0 {
         (16, "mask_circle")
     } else if k & kind::ELLIPSE != 0 {
@@ -544,20 +611,65 @@ pub fn map(form: &Form, frame: &Frame) -> Mapped {
 }
 
 fn group(form: &Form, p: &Points) -> Group {
-    let members = (0..form.count as usize)
-        .map(|i| {
-            let s = p.i(i, 2);
-            GroupMember {
-                form: i64::from(p.i(i, 0)),
-                fold: Fold::of(s),
-                invert: s & state::INVERSE != 0,
-                opacity: f64::from(p.f(i, 3)),
-            }
-        })
-        .collect();
+    let v7 = form.version >= 7;
+    // A version 7 point's refinement: enabled, details, feathering radius
+    // and guide, blur, contrast, brightness.
+    let refinement = |i: usize| {
+        if !v7 {
+            return Refinement::default();
+        }
+        Refinement {
+            scope: p.i(i, 4),
+            details: p.f(i, 5),
+            feathering_radius: p.f(i, 6),
+            blur_radius: p.f(i, 8),
+            contrast: p.f(i, 9),
+            brightness: p.f(i, 10),
+        }
+    };
+    let mut marker = None;
+    let mut members = Vec::with_capacity(form.count as usize);
+    for i in 0..form.count as usize {
+        let s = p.i(i, 2);
+        if v7 && s & state::GROUP_MARKER != 0 {
+            // group_opacity, after the name (128 bytes from offset 44).
+            let operator = if s & state::FLEXI_SCREEN != 0 {
+                "screen"
+            } else if s & state::FLEXI_MINIMUM != 0 {
+                "minimum"
+            } else if s & state::FLEXI_PRODUCT != 0 {
+                "product"
+            } else if s & state::FLEXI_SUM != 0 {
+                "sum"
+            } else if s & state::FLEXI_DIFFERENCE != 0 {
+                "difference"
+            } else if s & state::FLEXI_EXCLUSION != 0 {
+                "exclusion"
+            } else {
+                "maximum"
+            };
+            marker = Some(Marker {
+                operator,
+                invert: s & state::OP_INVERT != 0,
+                bypass: s & state::OP_BYPASS != 0,
+                opacity: f64::from(p.f(i, 43)),
+                refinement: refinement(i),
+            });
+            continue;
+        }
+        members.push(GroupMember {
+            form: i64::from(p.i(i, 0)),
+            fold: Fold::of(s),
+            invert: s & state::INVERSE != 0,
+            opacity: f64::from(p.f(i, 3)),
+            hidden: v7 && s & (state::HIDDEN | state::DISABLE) != 0,
+            refinement: refinement(i),
+        });
+    }
     Group {
         form: form.id,
         name: form.name.clone(),
+        marker,
         members,
     }
 }
@@ -654,15 +766,47 @@ pub fn network(
     frame: &Frame,
     prefix: &str,
 ) -> Result<MaskNet, Problem> {
+    build(forms, root, frame, prefix, false)
+}
+
+/// [`network`] for a flexi mask (the blend's `DEVELOP_MASK_FLEXI`): each
+/// group folds its visible members with its marker's operator, then its
+/// refinement, inversion and opacity (`_group_get_mask_roi_flexi`). A
+/// group that contributes nothing (bypassed, or no visible member) is left
+/// out of its parent; at the root it is darktable's "no active mask
+/// element", 1 everywhere.
+pub fn network_flexi(
+    forms: &[&Form],
+    root: i64,
+    frame: &Frame,
+    prefix: &str,
+) -> Result<MaskNet, Problem> {
+    build(forms, root, frame, prefix, true)
+}
+
+fn build(
+    forms: &[&Form],
+    root: i64,
+    frame: &Frame,
+    prefix: &str,
+    flexi: bool,
+) -> Result<MaskNet, Problem> {
     let mut b = Builder {
         forms,
         frame,
         prefix,
+        flexi,
         net: MaskNet::default(),
         built: Vec::new(),
     };
-    let mask = b.form(root, 0)?;
-    b.net.mask = mask;
+    b.net.mask = match b.form(root, 0)? {
+        Some(mask) => mask,
+        None => b.net.add(
+            format!("{prefix} group {root}.empty"),
+            "mask_combine",
+            Params::new(),
+        ),
+    };
     Ok(b.net)
 }
 
@@ -670,14 +814,16 @@ struct Builder<'a> {
     forms: &'a [&'a Form],
     frame: &'a Frame,
     prefix: &'a str,
+    flexi: bool,
     net: MaskNet,
-    /// Forms already built: their node.
-    built: Vec<(i64, String)>,
+    /// Forms already built: their node (`None`: nothing to fold).
+    built: Vec<(i64, Option<String>)>,
 }
 
 impl Builder<'_> {
-    /// The node giving form `id`'s mask.
-    fn form(&mut self, id: i64, depth: usize) -> Result<String, Problem> {
+    /// The node giving form `id`'s mask, `None` for a flexi group that
+    /// contributes nothing.
+    fn form(&mut self, id: i64, depth: usize) -> Result<Option<String>, Problem> {
         if depth > MAX_NESTING {
             return Err(Problem::TooDeep);
         }
@@ -695,13 +841,14 @@ impl Builder<'_> {
                 if let Some(lost) = member.losses.into_iter().next() {
                     return Err(lost);
                 }
-                self.net.add(
+                Some(self.net.add(
                     format!("{} shape {id}", self.prefix),
                     member.module,
                     member.params,
-                )
+                ))
             }
-            Mapped::Group(group) => self.group(&group, depth)?,
+            Mapped::Group(group) if self.flexi => self.flexi_group(&group, depth)?,
+            Mapped::Group(group) => Some(self.group(&group, depth)?),
         };
         self.built.push((id, name.clone()));
         Ok(name)
@@ -715,9 +862,15 @@ impl Builder<'_> {
         if group.members.is_empty() {
             return Err(Problem::EmptyGroup { id: group.form });
         }
+        if group.marker.is_some() {
+            return Err(Problem::Lost {
+                what: "a flexi group in a classic mask".into(),
+            });
+        }
         let mut members = Vec::with_capacity(group.members.len());
-        for m in &group.members {
-            let from = self.form(m.form, depth + 1)?;
+        for (k, m) in group.members.iter().enumerate() {
+            let from = self.form(m.form, depth + 1)?.ok_or(Problem::TooDeep)?;
+            let from = self.refine(from, &m.refinement, 1, &format!("{}.{k}", group.form))?;
             members.push((
                 m.fold,
                 Port {
@@ -817,6 +970,160 @@ impl Builder<'_> {
             });
         }
         Ok(acc.expect("a group with members"))
+    }
+
+    /// `from` through `r` when it has the `scope`: blur, then contrast and
+    /// brightness, as darktable's `dt_develop_blend_refine_form_mask`.
+    /// Feathering and the details threshold would give another mask.
+    fn refine(
+        &mut self,
+        from: String,
+        r: &Refinement,
+        scope: i32,
+        key: &str,
+    ) -> Result<String, Problem> {
+        if r.scope != scope {
+            return Ok(from);
+        }
+        if r.feathering_radius > 0.1 {
+            return Err(Problem::Lost {
+                what: "a refinement's feathering".into(),
+            });
+        }
+        if r.details != 0.0 {
+            return Err(Problem::Lost {
+                what: "a refinement's details threshold".into(),
+            });
+        }
+        let mut net = MaskNet {
+            mask: from,
+            ..MaskNet::default()
+        };
+        if r.blur_radius > 0.1 {
+            net.then(
+                format!("{} refine {key} blur", self.prefix),
+                "mask_blur",
+                Params::new().with("radius", Value::Float(f64::from(r.blur_radius))),
+            );
+        }
+        if r.contrast.abs() >= 0.01 || r.brightness.abs() >= 0.01 {
+            net.then(
+                format!("{} refine {key} levels", self.prefix),
+                "mask_levels",
+                Params::new()
+                    .with("contrast", Value::Float(f64::from(r.contrast)))
+                    .with("brightness", Value::Float(f64::from(r.brightness))),
+            );
+        }
+        self.net.nodes.extend(net.nodes);
+        self.net.links.extend(net.links);
+        Ok(net.mask)
+    }
+
+    /// A flexi group: its visible members folded with its marker's
+    /// operator, in chained `mask_combine`s of up to 8 ports (each carrying
+    /// what came before in its first port, exact for every operator), then
+    /// its refinement, inversion and opacity. `None` when it contributes
+    /// nothing.
+    fn flexi_group(&mut self, group: &Group, depth: usize) -> Result<Option<String>, Problem> {
+        let marker = group.marker.as_ref().ok_or(Problem::Lost {
+            what: "a classic group in a flexi mask".into(),
+        })?;
+        if marker.bypass {
+            return Ok(None);
+        }
+        let id = group.form;
+        let mut ports = Vec::new();
+        for (k, m) in group.members.iter().enumerate() {
+            if m.hidden {
+                continue;
+            }
+            let Some(from) = self.form(m.form, depth + 1)? else {
+                continue;
+            };
+            let from = self.refine(from, &m.refinement, 1, &format!("{id}.{k}"))?;
+            ports.push(Port {
+                from,
+                invert: m.invert,
+                opacity: m.opacity,
+            });
+        }
+        if ports.is_empty() {
+            return Ok(None);
+        }
+        let mut part = 0;
+        let mut last: Option<String> = None;
+        let mut rest = ports.into_iter().peekable();
+        while rest.peek().is_some() {
+            let mut chunk: Vec<Port> = last
+                .take()
+                .map(|from| Port {
+                    from,
+                    invert: false,
+                    opacity: 1.0,
+                })
+                .into_iter()
+                .collect();
+            while chunk.len() < MAX_MEMBERS {
+                match rest.next() {
+                    Some(p) => chunk.push(p),
+                    None => break,
+                }
+            }
+            let name = self.net.add(
+                format!("{} group {id}.{part}", self.prefix),
+                "mask_combine",
+                Params::new()
+                    .with("operator", Value::Choice(marker.operator.into()))
+                    .with(
+                        "opacity",
+                        Value::List(chunk.iter().map(|p| p.opacity).collect()),
+                    )
+                    .with(
+                        "invert",
+                        Value::Ints(chunk.iter().map(|p| i64::from(p.invert)).collect()),
+                    ),
+            );
+            for (i, p) in chunk.iter().enumerate() {
+                self.net.link(&p.from, "mask", &name, &format!("in{i}"));
+            }
+            part += 1;
+            last = Some(name);
+        }
+        let folded = last.expect("a member");
+        let refined = self.refine(folded.clone(), &marker.refinement, 2, &id.to_string())?;
+        if marker.invert || marker.opacity != 1.0 {
+            if refined == folded {
+                // No refinement: the fold's last node inverts and scales.
+                let node = self
+                    .net
+                    .nodes
+                    .iter_mut()
+                    .find(|n| n.name == folded)
+                    .expect("the fold's node");
+                node.params.set("group_invert", Value::Bool(marker.invert));
+                node.params.set(
+                    "group_opacity",
+                    Value::Float(marker.opacity.clamp(0.0, 1.0)),
+                );
+            } else {
+                let mut net = MaskNet {
+                    mask: refined.clone(),
+                    ..MaskNet::default()
+                };
+                net.then(
+                    format!("{} group {id} close", self.prefix),
+                    "mask_levels",
+                    Params::new()
+                        .with("invert", Value::Bool(marker.invert))
+                        .with("opacity", Value::Float(marker.opacity.clamp(0.0, 1.0))),
+                );
+                self.net.nodes.extend(net.nodes);
+                self.net.links.extend(net.links);
+                return Ok(Some(net.mask));
+            }
+        }
+        Ok(Some(refined))
     }
 }
 
@@ -1061,11 +1368,11 @@ mod tests {
             panic!("skipped")
         };
         assert!(matches!(problem, Problem::Size { .. }), "{problem:?}");
-        form.version = 7;
+        form.version = 8;
         let Mapped::Skipped { problem, .. } = map(&form, &FRAME) else {
             panic!("skipped")
         };
-        assert_eq!(problem, Problem::Version { version: 7 });
+        assert_eq!(problem, Problem::Version { version: 8 });
         assert_eq!(problem.describe().key, "xmp-mask-version");
     }
 
@@ -1230,5 +1537,160 @@ mod tests {
             net(&[group_li(9, &[(9, state::UNION, 1.0)])], 9).unwrap_err(),
             Problem::TooDeep
         );
+    }
+
+    /// A masks version 7 group point (240 bytes).
+    fn v7_point(
+        formid: i32,
+        parent: i32,
+        st: i32,
+        opacity: f32,
+        scope: i32,
+        blur: f32,
+        group_opacity: f32,
+    ) -> Vec<[u8; 4]> {
+        let mut out = vec![i(formid), i(parent), i(st), f(opacity)];
+        out.extend([i(scope), f(0.0), f(0.0), i(5), f(blur), f(0.0), f(0.0)]);
+        out.extend(std::iter::repeat_n([0u8; 4], 32));
+        out.push(f(group_opacity));
+        out.extend(std::iter::repeat_n([0u8; 4], 16));
+        assert_eq!(out.len() * 4, 240);
+        out
+    }
+
+    /// A flexi group: its marker (operator, invert, bypass bits in
+    /// `marker`), then `(form, state, opacity, blur)` members.
+    fn flexi_li(
+        id: i64,
+        marker: i32,
+        group_opacity: f32,
+        members: &[(i64, i32, f32, f32)],
+    ) -> String {
+        let id32 = id as i32;
+        let mut fields = v7_point(
+            id32 + 500,
+            id32,
+            state::GROUP_MARKER | marker,
+            1.0,
+            0,
+            0.0,
+            group_opacity,
+        );
+        for (form, st, o, blur) in members {
+            let scope = i32::from(*blur > 0.0);
+            fields.extend(v7_point(*form as i32, id32, *st, *o, scope, *blur, 1.0));
+        }
+        li(1, id, kind::GROUP, members.len() as u32 + 1, &hex(&fields)).replace(
+            r#"darktable:mask_version="6""#,
+            r#"darktable:mask_version="7""#,
+        )
+    }
+
+    fn flexi_net(items: &[String], root: i64) -> Result<MaskNet, Problem> {
+        let forms = read(&sidecar(items)).unwrap();
+        let refs: Vec<&Form> = forms.iter().collect();
+        network_flexi(&refs, root, &FRAME, "m")
+    }
+
+    #[test]
+    fn a_version_7_group_reads_its_marker_and_members() {
+        let forms = read(&sidecar(&[flexi_li(
+            9,
+            state::FLEXI_SCREEN | state::OP_INVERT,
+            0.8,
+            &[
+                (1, 0, 1.0, 0.0),
+                (2, state::INVERSE | state::HIDDEN, 0.5, 2.0),
+            ],
+        )]))
+        .unwrap();
+        let Mapped::Group(g) = map(&forms[0], &FRAME) else {
+            panic!("a group")
+        };
+        let marker = g.marker.unwrap();
+        assert_eq!(marker.operator, "screen");
+        assert!(marker.invert && !marker.bypass);
+        assert!((marker.opacity - 0.8).abs() < 1e-6);
+        assert_eq!(g.members.len(), 2);
+        assert!(g.members[1].hidden && g.members[1].invert);
+        assert_eq!(g.members[1].refinement.scope, 1);
+        assert!((g.members[1].refinement.blur_radius - 2.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_flexi_tree_folds_visible_members_and_skips_empty_groups() {
+        let n = flexi_net(
+            &[
+                circle(1),
+                circle(2),
+                circle(3),
+                // A nested group whose only member is hidden: left out.
+                flexi_li(8, 0, 1.0, &[(3, state::HIDDEN, 1.0, 0.0)]),
+                flexi_li(
+                    9,
+                    state::FLEXI_MINIMUM | state::OP_INVERT,
+                    0.6,
+                    &[
+                        (1, 0, 1.0, 2.0),
+                        (8, 0, 1.0, 0.0),
+                        (2, state::INVERSE, 0.5, 0.0),
+                    ],
+                ),
+            ],
+            9,
+        )
+        .unwrap();
+        assert_eq!(n.mask, "m group 9.0");
+        let g = node(&n, "m group 9.0");
+        assert_eq!(
+            g.params.get("operator"),
+            Some(&Value::Choice("minimum".into()))
+        );
+        assert_eq!(g.params.get("group_invert"), Some(&Value::Bool(true)));
+        assert_eq!(
+            g.params.get("group_opacity"),
+            Some(&Value::Float(f64::from(0.6f32)))
+        );
+        assert_eq!(g.params.get("invert"), Some(&Value::Ints(vec![0, 1])));
+        // The first member through its own blur.
+        assert_eq!(
+            inputs(&n, "m group 9.0"),
+            [
+                ("in0".into(), "m refine 9.0 blur".into()),
+                ("in1".into(), "m shape 2".into())
+            ]
+        );
+        assert_eq!(
+            inputs(&n, "m refine 9.0 blur"),
+            [("mask".into(), "m shape 1".into())]
+        );
+        assert!(n.nodes.iter().all(|m| !m.name.contains("shape 3")));
+    }
+
+    #[test]
+    fn a_bypassed_flexi_root_is_one_everywhere_and_a_classic_group_is_refused() {
+        let n = flexi_net(
+            &[
+                circle(1),
+                flexi_li(9, state::OP_BYPASS, 1.0, &[(1, 0, 1.0, 0.0)]),
+            ],
+            9,
+        )
+        .unwrap();
+        assert_eq!(n.nodes.len(), 1);
+        assert_eq!(n.nodes[0].module, "mask_combine");
+        assert!(n.links.is_empty());
+        let classic = flexi_net(&[circle(1), group_li(9, &[(1, state::UNION, 1.0)])], 9);
+        assert!(matches!(classic, Err(Problem::Lost { .. })), "{classic:?}");
+    }
+
+    #[test]
+    fn a_later_masks_version_is_refused() {
+        let mut form = read(&sidecar(&[circle(1)])).unwrap().remove(0);
+        form.version = 8;
+        let Mapped::Skipped { problem, .. } = map(&form, &FRAME) else {
+            panic!("skipped")
+        };
+        assert_eq!(problem, Problem::Version { version: 8 });
     }
 }

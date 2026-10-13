@@ -68,8 +68,6 @@ pub enum BlendIssue {
     Details,
     /// The guided-filter feathering of the mask refinement.
     Feathering,
-    /// A flexi mask tree.
-    Flexi,
 }
 
 impl BlendIssue {
@@ -89,7 +87,6 @@ impl BlendIssue {
                 Message::new("xmp-blend-details", "the mask's details threshold")
             }
             BlendIssue::Feathering => Message::new("xmp-blend-feathering", "the mask's feathering"),
-            BlendIssue::Flexi => Message::new("xmp-blend-flexi", "a flexi mask"),
         }
     }
 }
@@ -442,16 +439,13 @@ fn check_blend(item: &HistoryItem) -> Result<Option<Blend>, Reason> {
     if b.blend_cst != blend::RGB_SCENE {
         return issue(BlendIssue::Space { space: b.blend_cst });
     }
-    if mode & blend::mode::FLEXI != 0 {
-        return issue(BlendIssue::Flexi);
-    }
     if mode & blend::mode::RASTER != 0 {
         return issue(BlendIssue::Raster);
     }
     if mode & blend::mode::CONDITIONAL != 0 {
         return issue(BlendIssue::Parametric);
     }
-    if mode & blend::mode::MASK != 0 {
+    if mode & (blend::mode::MASK | blend::mode::FLEXI) != 0 {
         if b.details != 0.0 {
             return issue(BlendIssue::Details);
         }
@@ -483,7 +477,8 @@ fn mask_net(
         net.mask = format!("{name} mask");
         net
     };
-    if b.mask_mode & blend::mode::MASK == 0 {
+    let flexi = b.mask_mode & blend::mode::FLEXI != 0;
+    if b.mask_mode & blend::mode::MASK == 0 && !flexi {
         return Ok(NodeMask {
             net: constant(1.0),
             opacity: b.opacity(),
@@ -492,8 +487,12 @@ fn mask_net(
     let root = i64::from(b.mask_id);
     let mut net = if root > 0 && forms.iter().any(|f| f.id == root) {
         let frame = frame.ok_or(Reason::MaskWithoutImage)?;
-        let mut net =
-            drawn::network(forms, root, frame, name).map_err(|problem| Reason::Mask { problem })?;
+        let mut net = if flexi {
+            drawn::network_flexi(forms, root, frame, name)
+        } else {
+            drawn::network(forms, root, frame, name)
+        }
+        .map_err(|problem| Reason::Mask { problem })?;
         if b.inverted() {
             net.invert(format!("{name} mask invert"));
         }
@@ -739,7 +738,7 @@ pub fn import_with(sidecar: &Sidecar, layouts: &Layouts, frame: Option<&Frame>) 
         let applied = apply(item, layouts, &mut out.report).and_then(|(mapped, blend)| {
             let mask = match blend {
                 Some(b) => {
-                    if b.mask_mode & blend::mode::MASK != 0
+                    if b.mask_mode & (blend::mode::MASK | blend::mode::FLEXI) != 0
                         && let Some(e) = &sidecar.masks_unreadable
                     {
                         return Err(Reason::Unreadable { error: e.clone() });

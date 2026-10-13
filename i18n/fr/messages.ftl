@@ -172,8 +172,6 @@ xmp-blend-details = le seuil de détails du masque
 
 xmp-blend-feathering = l’adoucissement du masque
 
-xmp-blend-flexi = un masque flexi
-
 xmp-blend-mode = le mode de fusion { $mode }
 
 xmp-blend-parametric = un masque paramétrique
@@ -198,7 +196,7 @@ xmp-mask-unknown-type = un type de forme inconnu ({ $kind })
 
 xmp-mask-unsupported = une forme { $form }, que Helios ne dessine pas encore
 
-xmp-mask-version = version de masques { $version } non prise en charge (lit 4 à 6)
+xmp-mask-version = version de masques { $version } non prise en charge (lit 4 à 7)
 
 xmp-not-applied = { $count ->
     [one] { $count } élément d’historique sur { $items } non appliqué, conservé pour plus tard : { $groups }

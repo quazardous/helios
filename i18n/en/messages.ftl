@@ -173,8 +173,6 @@ xmp-blend-details = the mask's details threshold
 
 xmp-blend-feathering = the mask's feathering
 
-xmp-blend-flexi = a flexi mask
-
 xmp-blend-mode = blend mode { $mode }
 
 xmp-blend-parametric = a parametric mask
@@ -199,7 +197,7 @@ xmp-mask-unknown-type = an unknown shape type ({ $kind })
 
 xmp-mask-unsupported = a { $form } shape, which Helios does not draw yet
 
-xmp-mask-version = masks version { $version } not supported (reads 4 to 6)
+xmp-mask-version = masks version { $version } not supported (reads 4 to 7)
 
 xmp-not-applied = { $count } of { $items } history items not applied, kept for later: { $groups }
 
