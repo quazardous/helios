@@ -3541,6 +3541,7 @@ impl Shell {
         ctx.data_mut(|d| d.insert_temp(Id::new(crate::params::ESCAPE), escape));
         if let Some(rs) = self.gpu.take() {
             self.gpu_info = Some(egui_pop::viewport::gpu::install(&ctx, &rs));
+            crate::start::mark_in_first_frame("viewport GPU path installed");
         }
         self.follow_scale(&ctx);
         self.now = ctx.input(|i| i.time);
@@ -3580,6 +3581,7 @@ impl Shell {
             self.installed = Some(spec);
         }
         self.set_context(&ctx);
+        crate::start::mark_in_first_frame("commands run, theme installed");
 
         self.rects.clear();
         self.rect_windows.clear();
@@ -3604,6 +3606,7 @@ impl Shell {
         }
         self.preview.follow(self.viewport.borrow().shown(), &ctx);
         self.app.show(ui);
+        crate::start::mark_in_first_frame("panels drawn");
         if self.library.borrow_mut().take_import_asked() {
             let _ = self.run("library.importSource", Value::Null, Origin::User);
         }
