@@ -256,7 +256,7 @@ cwd = "/work/${src:-helios}"
 command = """mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && cargo survival --locked"""
 env = { CARGO_NET_OFFLINE = "true" }
 mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
-timeout = "30m"
+timeout = "15m"
 
 # a release prepared from main's fragments (`cargo xtask release`: the
 # survival scenarios first, then the CHANGELOG section, the version bump

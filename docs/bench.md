@@ -252,6 +252,40 @@ What a run depends on, so two runs can be compared:
   seen failing once without a cause is a bug to file, not a retry to add:
   the `ci` profile retries nothing.
 
+## Rules for agents (a shared box)
+
+Several agents share one box, one queue and one disk quota. A job that hangs
+or hoards blocks everyone for the length of its timeout. These rules come
+from incidents on the box; every agent prompt points here.
+
+**Before queuing**
+- Run the narrowest job first: `test-affected` (or one test) before `test`,
+  `survival` or `check-commits`. A full run is the last step, not the first.
+- A new test has a deadline on every wait (a child process, a window, a
+  file, a socket reply) and fails fast. Tests run under nextest, which stops
+  a test after 120 s; `cargo survival` runs under nextest too.
+- After a job hangs or times out (exit 124), find why before queuing it
+  again: the same run will block the box for the same time.
+- One job of yours per branch at a time; never push to a branch while a job
+  of yours on it is queued.
+
+**Waiting**
+- Wait with one blocking `ssh … wait <id>` per job. Never poll in a loop,
+  and never `until ! pgrep -f "<pattern>"`: the waiter's own command line
+  holds the pattern, so it never ends (the same for `pkill -f`).
+- Pipe `bench-remote` only under `set -o pipefail`; a `| grep` turns its
+  exit 75 into 0.
+- Name logs after the branch: the scratchpad is shared.
+
+**Space**
+- Never delete box storage you did not create. After a branch with its own
+  Benchfile merges, `config benchfile rm <branch>`: each live label keeps
+  its image for 14 days.
+- egui-pop's targets live on the hard disk (a gate needs 25 to 35 GB);
+  Helios's targets, sccache and the images on the SSD (60 GB quota).
+- Exit 75 with "needs about N GB": wait for space; do not free it by
+  deleting others' storage.
+
 ## Exit 75: the box could not serve
 
 The box is a shared machine: it can be off, in maintenance, or without its

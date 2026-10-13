@@ -19,3 +19,6 @@
   AI-assisted project. Keep one purpose per commit, every commit building
   and passing its tests, with a changelog fragment for user-visible changes.
   The darktable fork keeps its own rules (see its `AGENTS.md`).
+- The bench box is shared by several agents: follow "Rules for agents" in
+  `docs/bench.md` (narrowest job first, deadlines in tests, one blocking
+  wait per job, never `pgrep`/`pkill` waiters).

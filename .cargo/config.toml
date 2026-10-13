@@ -1,5 +1,7 @@
 [alias]
 xtask = "run --quiet --package xtask --"
 # The survival scenarios alone (quit, kill -9 and reopen; see
-# docs/persistence.md): they gate a release.
-survival = "test -p helios-gui -p helios-node --test survival"
+# docs/persistence.md): they gate a release. Under nextest, so a hung
+# scenario is stopped after 120 s (.config/nextest.toml) instead of
+# holding the bench box until the job's timeout.
+survival = "nextest run -p helios-gui -p helios-node --test survival"
