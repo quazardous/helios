@@ -24,6 +24,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-10-13
+
+### Added
+
+- A process's inspect endpoint pushes its events as they happen
+  (`subscribe` with a kind prefix), and a client that reconnects picks up
+  from the last event it saw, told when some were missed.
+- Cancel in the jobs centre stops a node's job on that node: a batch run
+  by `helios batch` can be stopped from the desktop.
+- A node shows the jobs it runs now and the last ones that ended
+  (`describe jobs`), so a client that lost touch catches up.
+- The desktop follows a running node's jobs (`helios-gui --node
+  NAME=INSPECT`): a node's batch shows in the jobs centre with its exports
+  under it. When the node goes out of reach its jobs show as lost, then
+  catch up once it is back, or leave the list after a minute.
+
+### Fixed
+
+- The batch endpoint's refusal now lists every request it answers, in
+  English and French.
+- A batch whose `helios batch` process dies no longer shows as running on
+  its node for ever: the node ends it as abandoned when the process's
+  connection closes, or after ten minutes with nothing asked for it.
+
 ## [0.5.1] - 2026-10-13
 
 ### Fixed
