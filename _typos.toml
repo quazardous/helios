@@ -5,6 +5,8 @@
 extend-exclude = [
     # Translations other than English are not English.
     "i18n/fr/",
+    # A plugin's own translations, beside its manifest.
+    "plugins/*/*/i18n/fr/",
     # Hashes of the English text, in hex.
     "i18n/*/english.hashes",
 ]
@@ -25,3 +27,5 @@ hilights = "hilights"
 monochrom = "monochrom"
 efficency = "efficency"
 compres = "compres"
+# French, in the tests that read translated text.
+sur = "sur"
