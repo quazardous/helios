@@ -6,6 +6,7 @@
 
 use egui::{Event, Key, Modifiers, PointerButton, Pos2, vec2};
 use egui_kittest::Harness;
+use egui_kittest::kittest::Queryable;
 use egui_pop::viewport::overlay::Overlay;
 use egui_pop_test::{at_scales, double_click_at};
 use helios_core::{Graph, Image, ModuleRef, Params, Region, Value};
@@ -311,6 +312,62 @@ fn shift_snaps_the_angle_and_ctrl_moves_finely() {
     let zoom = mapping(&h).zoom / f64::from(h.state().pixels_per_point());
     let moved = f(&h, "node/ellipse/x") - x0;
     assert!((moved - 10.0 / zoom).abs() < 0.5, "{moved}");
+}
+
+/// Hovers `at` and lets the status line follow (it says what the frame
+/// before found under the pointer).
+fn hover(h: &mut Harness<'_, Shell>, at: Pos2) {
+    h.hover_at(at);
+    for _ in 0..3 {
+        h.step();
+    }
+}
+
+#[test]
+fn a_hovered_handle_says_its_gestures_in_the_status_line() {
+    let mut h = harness_at(1.0);
+    run(&mut h, "mask.add.ellipse", json!(null));
+    // A radius turns the ellipse: Shift snaps the angle; the wheel
+    // adjusts it; a double click resets nothing.
+    let radius = "Shift: snap the angle to 15° steps · Ctrl: fine moves · wheel: adjust";
+    let at = handle(&h, "radius_x");
+    hover(&mut h, at);
+    assert_eq!(h.state().status_text().as_deref(), Some(radius));
+    h.get_by_label(radius);
+    // The feather: reset by a double click.
+    let at = handle(&h, "feather");
+    hover(&mut h, at);
+    assert_eq!(
+        h.state().status_text().as_deref(),
+        Some("Ctrl: fine moves · double-click: reset · wheel: adjust")
+    );
+    // The centre moves along the axes with Shift.
+    let at = handle(&h, "centre");
+    hover(&mut h, at);
+    assert_eq!(
+        h.state().status_text().as_deref(),
+        Some("Shift: along the axes and diagonals · Ctrl: fine moves")
+    );
+    // Away from the handles, the hint goes.
+    let away = h
+        .state()
+        .target_rect("viewport.display")
+        .unwrap()
+        .left_top()
+        + vec2(5.0, 5.0);
+    hover(&mut h, away);
+    assert!(h.state().viewport().masks().hovered().is_none());
+    assert_ne!(h.state().status_text().as_deref(), Some(radius));
+    assert!(h.query_by_label(radius).is_none());
+    // In the interface's language.
+    let app = h.state().app().handle().clone();
+    egui_pop::i18n::plugin::set_language(&app, "fr").unwrap();
+    let at = handle(&h, "radius_x");
+    hover(&mut h, at);
+    assert_eq!(
+        h.state().status_text().as_deref(),
+        Some("Maj : aligner l’angle par pas de 15° · Ctrl : déplacement fin · molette : ajuster")
+    );
 }
 
 #[test]

@@ -33,7 +33,7 @@ use egui_pop::viewport::hooks::HandleMove;
 use egui_pop::viewport::overlay::{self, HIT_RADIUS, Handle, HandleKind, Overlay, Shape};
 use egui_pop::viewport::tokens::ViewportTokens;
 use egui_pop::viewport::{Mapping, Phase, Signal, Verdict};
-use helios_core::{Graph, ModuleRef, NodeId, Params, Value};
+use helios_core::{Graph, Message, ModuleRef, NodeId, Params, Value};
 use helios_module_masks::shape::{Outline, PathPoint, path_points, path_values};
 use helios_module_masks::{MaskCircle, MaskEllipse, MaskGradient, MaskPath};
 use helios_shell::commands::Origin;
@@ -597,6 +597,71 @@ struct Double {
     taken: Option<[f64; 2]>,
 }
 
+/// What Shift does to a handle's drag.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ShiftSnap {
+    /// Turns it around a point to [`ANGLE_STEP`] steps.
+    Angle,
+    /// Holds its move to the axes and diagonals.
+    Axes,
+}
+
+/// The gestures a handle takes, said in the status line while it is
+/// hovered: Ctrl moves any handle finely; the rest depend on the handle.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Gestures {
+    pub shift: Option<ShiftSnap>,
+    /// A double click resets it (a rotation, a feather, a path corner).
+    pub reset: bool,
+    /// The wheel adjusts it (a size, a feather, a rotation).
+    pub wheel: bool,
+}
+
+impl Gestures {
+    /// The gestures of the handle `name` (`radius`, `corner.2`...).
+    pub fn of(name: &str, shift: Option<ShiftSnap>) -> Gestures {
+        Gestures {
+            shift,
+            reset: name.starts_with("corner.") || matches!(name, "rotation" | "feather"),
+            wheel: matches!(
+                name,
+                "radius" | "radius_x" | "radius_y" | "feather" | "rotation"
+            ),
+        }
+    }
+
+    /// The status line's hint: each gesture, in the language of `ctx`.
+    pub fn hint(&self, ctx: &egui::Context) -> String {
+        let mut parts = Vec::new();
+        match self.shift {
+            Some(ShiftSnap::Angle) => parts.push(Message::new(
+                "gui-masks-gesture-shift-angle",
+                "Shift: snap the angle to 15° steps",
+            )),
+            Some(ShiftSnap::Axes) => parts.push(Message::new(
+                "gui-masks-gesture-shift-axes",
+                "Shift: along the axes and diagonals",
+            )),
+            None => {}
+        }
+        parts.push(Message::new("gui-masks-gesture-ctrl", "Ctrl: fine moves"));
+        if self.reset {
+            parts.push(Message::new(
+                "gui-masks-gesture-reset",
+                "double-click: reset",
+            ));
+        }
+        if self.wheel {
+            parts.push(Message::new("gui-masks-gesture-wheel", "wheel: adjust"));
+        }
+        parts
+            .into_iter()
+            .map(|m| crate::i18n::text(ctx, m))
+            .collect::<Vec<_>>()
+            .join(" · ")
+    }
+}
+
 /// A drag under way.
 struct Drag {
     gesture: GestureId,
@@ -627,6 +692,8 @@ pub struct Masks {
     overlays: Vec<Overlay>,
     /// The other shapes and the feathers this frame, no handles.
     guides: Vec<Overlay>,
+    /// The gestures of the handle under the pointer this frame.
+    hovered: Option<Gestures>,
 }
 
 /// A request to the mask editor, from a command.
@@ -727,6 +794,18 @@ impl Masks {
         &self.members
     }
 
+    /// The gestures of the handle under the pointer last frame, if one
+    /// is.
+    pub fn hovered(&self) -> Option<Gestures> {
+        self.hovered
+    }
+
+    /// What the status line says while a handle is hovered: its
+    /// gestures, in the language of `ctx`.
+    pub fn hint(&self, ctx: &egui::Context) -> Option<String> {
+        self.hovered.map(|g| g.hint(ctx))
+    }
+
     /// Installs the hooks on the viewport's state, once.
     pub fn hook(&mut self, hooks: &mut egui_pop::viewport::Hooks) {
         if self.hooked {
@@ -794,7 +873,8 @@ impl Masks {
     }
 
     /// Before the viewport is drawn: the selected mask's members, the
-    /// overlay of the selected shape, what the hooks need.
+    /// overlay of the selected shape, what the hooks need, and the
+    /// gestures of the handle under `pointer`.
     pub fn prepare(
         &mut self,
         graph: Option<&Graph>,
@@ -870,6 +950,20 @@ impl Masks {
             }
             self.overlays.push(o);
         }
+        self.hovered = match (pointer, mapping) {
+            (Some(pos), Some(m)) => overlay::hit(&self.overlays, m, pos).and_then(|(i, h)| {
+                let o = &self.overlays[i];
+                let member = self.members.iter().find(|mb| mb.node == o.id)?;
+                let name = &member.outline.handles.get(h.index as usize)?.name;
+                let shift = match snap.constraints.get(&(o.id.clone(), h.index)) {
+                    Some(Constraint::Angle(_)) => Some(ShiftSnap::Angle),
+                    Some(Constraint::Line) => Some(ShiftSnap::Axes),
+                    _ => None,
+                };
+                Some(Gestures::of(name, shift))
+            }),
+            _ => None,
+        };
         *self.faint.borrow_mut() = faint;
         let mut d = self.double.borrow_mut();
         d.edge = if tool(store) == "path" { None } else { edge };

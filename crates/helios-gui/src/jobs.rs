@@ -162,12 +162,16 @@ impl Forgotten {
 }
 
 /// What Helios says in the status bar, beside egui-pop's items (the jobs
-/// item): keys pending, a recording, the last note. The shell sets it each
-/// frame; the status bar block draws it.
+/// item): keys pending, a recording, the last note, or while a mask
+/// handle is hovered its gestures. The shell sets it each frame; the
+/// status bar block draws it.
 #[derive(Clone, Debug, Default)]
 pub struct StatusLine {
     pub recording: bool,
     pub note: Option<String>,
+    /// The gestures of the mask handle under the pointer, said in place
+    /// of the note.
+    pub hint: Option<String>,
 }
 
 /// The status line, shared between the shell and its block.
@@ -189,7 +193,9 @@ pub fn status_block(status: Status) -> impl FnMut(&mut egui::Ui, &AppHandle) + '
                 ui.colored_label(ui.visuals().error_fg_color, "● REC");
                 ui.separator();
             }
-            if let Some(note) = &line.note {
+            if let Some(hint) = &line.hint {
+                ui.label(hint);
+            } else if let Some(note) = &line.note {
                 ui.label(note);
             }
         });

@@ -80,6 +80,16 @@ gui-library-not-saved = Non enregistré, la bibliothèque montre ce que contient
 
 gui-masks-beside-refinement = rien ne va à côté d’un affinage : déposez sur un membre ou dans un groupe
 
+gui-masks-gesture-ctrl = Ctrl : déplacement fin
+
+gui-masks-gesture-reset = double-clic : réinitialiser
+
+gui-masks-gesture-shift-angle = Maj : aligner l’angle par pas de 15°
+
+gui-masks-gesture-shift-axes = Maj : le long des axes et des diagonales
+
+gui-masks-gesture-wheel = molette : ajuster
+
 gui-masks-group-full = le groupe « { $group } » contient déjà { $count } membres
 
 gui-masks-group-locked = le groupe « { $group } » est verrouillé : ses membres restent

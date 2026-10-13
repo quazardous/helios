@@ -687,6 +687,10 @@ node: `view/masks/mask`, the network's first by default) and edits them
   wheel over a handle adjusts it (a size or feather, a rotation), one
   undo step while it turns. Elsewhere the viewport's grammar holds: the
   wheel zooms, a double click fits.
+- **Hints.** While a handle is hovered, the status line says the
+  gestures it takes, in the interface's language: what Shift snaps (an
+  angle to 15° steps, or a move to the axes and diagonals), Ctrl's fine
+  moves, and when they apply the double click's reset and the wheel.
 - **Creating.** `mask.add.circle`, `mask.add.ellipse` and
   `mask.add.gradient` (`C`, `E`, `G` with the image focused) place a shape
   at the view's centre, sized to it; `mask.add.path` (`P`) starts the

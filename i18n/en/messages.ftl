@@ -149,6 +149,16 @@ gui-masks-beside-refinement = nothing goes beside a refinement: drop on a member
 
 gui-masks-empty = The mask is empty: { $module } applies everywhere. Add a shape or a parametric member to limit it.
 
+gui-masks-gesture-ctrl = Ctrl: fine moves
+
+gui-masks-gesture-reset = double-click: reset
+
+gui-masks-gesture-shift-angle = Shift: snap the angle to 15° steps
+
+gui-masks-gesture-shift-axes = Shift: along the axes and diagonals
+
+gui-masks-gesture-wheel = wheel: adjust
+
 gui-masks-group-full = the group `{ $group }` holds { $count } members already
 
 gui-masks-group-locked = the group `{ $group }` is locked: its members stay

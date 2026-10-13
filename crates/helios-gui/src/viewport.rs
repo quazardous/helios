@@ -797,12 +797,18 @@ impl Viewport {
             let store = store.lock().unwrap_or_else(PoisonError::into_inner);
             let pointer = ui.input(|i| i.pointer.hover_pos());
             self.masks.hook(self.state.hooks_mut());
+            let hovered = self.masks.hovered();
             self.masks.prepare(
                 self.edited.as_ref().map(|e| &e.graph),
                 &store,
                 self.state.mapping().as_ref(),
                 pointer,
             );
+            // The status line says a hovered handle's gestures: drawn
+            // before the viewport, it shows them at the next frame.
+            if self.masks.hovered() != hovered {
+                ctx.request_repaint();
+            }
             (view_of(&store), compare_of(&store))
         };
         let drawn = self.masks.drawn();

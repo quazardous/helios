@@ -3459,7 +3459,7 @@ impl Shell {
         });
         self.rects.insert("window".into(), ctx.content_rect());
 
-        self.status_bar();
+        self.status_bar(&ctx);
         self.viewport.borrow_mut().sync(&mut lock(&self.values));
         // Duplicates an import asks about: said once, answered in the
         // Duplicates panel.
@@ -3570,10 +3570,18 @@ impl Shell {
 
     /// Helios's status line, which its block draws in egui-pop's status
     /// bar (beside the jobs item).
-    fn status_bar(&self) {
+    fn status_bar(&self, ctx: &egui::Context) {
         let mut line = self.status.borrow_mut();
         line.recording = self.recording.is_some();
         line.note = self.notes.last().cloned();
+        line.hint = self.viewport.borrow().masks().hint(ctx);
+    }
+
+    /// What the status line says now: the hovered mask handle's
+    /// gestures, else the last note.
+    pub fn status_text(&self) -> Option<String> {
+        let line = self.status.borrow();
+        line.hint.clone().or_else(|| line.note.clone())
     }
 
     /// Where background work in this process reports: `job.*` events on

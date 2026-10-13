@@ -168,6 +168,11 @@ gui-job-export-failed f5ce199f9e1502ae
 gui-library-file f5342066f92b83c2
 gui-library-not-saved f4c82ef926e77b5e
 gui-masks-beside-refinement 129a0c6bb2a976a6
+gui-masks-gesture-ctrl d2f205f34f9ed262
+gui-masks-gesture-reset 509ca1272727ce20
+gui-masks-gesture-shift-angle 2e7b5377423207d5
+gui-masks-gesture-shift-axes ed9b3a2a68c23d0f
+gui-masks-gesture-wheel 171531eb51cd2b8d
 gui-masks-group-full 2c68b91eff216a00
 gui-masks-group-locked f0ab1d4f18c4a0d0
 gui-masks-hide 03abd3631c09e3ca
