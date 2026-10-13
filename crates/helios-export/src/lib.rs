@@ -327,6 +327,37 @@ pub fn submit_reported(
     format: Format,
     render: impl FnOnce() -> Result<Image, String> + Send + 'static,
 ) -> Result<JobId, Message> {
+    Ok(submit_job(scheduler, jobs, None, path, format, render))
+}
+
+/// [`submit_reported`] as a child of the job `parent` (a batch), with a
+/// weight of 1 there: egui-pop's jobs model folds it under its parent.
+pub fn submit_child(
+    scheduler: &Scheduler,
+    jobs: &Jobs,
+    parent: &str,
+    path: &Path,
+    format: Format,
+    render: impl FnOnce() -> Result<Image, String> + Send + 'static,
+) -> Result<JobId, Message> {
+    Ok(submit_job(
+        scheduler,
+        jobs,
+        Some(parent),
+        path,
+        format,
+        render,
+    ))
+}
+
+fn submit_job(
+    scheduler: &Scheduler,
+    jobs: &Jobs,
+    parent: Option<&str>,
+    path: &Path,
+    format: Format,
+    render: impl FnOnce() -> Result<Image, String> + Send + 'static,
+) -> JobId {
     let dest = destination(path);
     scheduler.ensure_resource(&dest, 1);
     let spec = JobSpec::new(&format!("export {}", path.display()))
@@ -345,6 +376,9 @@ pub fn submit_reported(
     .total(1);
     for (id, title, weight) in STEPS {
         start = start.step(id, title, weight);
+    }
+    if let Some(parent) = parent {
+        start = start.parent(parent, 1.0);
     }
     let report = Arc::new(jobs.start(start));
     let mut unstarted = Unstarted(Some(report.clone()));
@@ -401,5 +435,5 @@ pub fn submit_reported(
         outcome.map(|_| ())
     });
     let _ = id.set(job);
-    Ok(job)
+    job
 }

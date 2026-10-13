@@ -278,3 +278,36 @@ fn an_export_reports_its_job_and_is_cancelled_by_its_id() {
     assert_eq!(kinds.last(), Some(&"job.cancelled"));
     let _ = std::fs::remove_dir_all(&d);
 }
+
+/// An export asked for as part of a batch says its parent, so the jobs
+/// model folds it under the batch.
+#[test]
+fn an_export_in_a_batch_names_its_parent() {
+    use helios_core::jobs::Jobs;
+
+    let d = dir("child");
+    let s = setup(d.join("a.png"));
+    let jobs = Jobs::new(s.bus.clone());
+    let image = ramp(Region::sized(8, 4), 4);
+    helios_export::submit_child(
+        &s.scheduler,
+        &jobs,
+        "batch-1",
+        &d.join("a.png"),
+        Format::Png { bits: 8 },
+        move || Ok(image),
+    )
+    .unwrap();
+    assert!(s.scheduler.wait_until_idle(LONG));
+    let started = s
+        .bus
+        .since(0)
+        .into_iter()
+        .find(|e| e.kind == "job.started")
+        .unwrap()
+        .payload;
+    assert_eq!(started["parent"], "batch-1");
+    assert_eq!(started["weight"], 1.0);
+    assert!(d.join("a.png").exists());
+    let _ = std::fs::remove_dir_all(&d);
+}
