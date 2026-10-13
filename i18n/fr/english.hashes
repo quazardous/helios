@@ -120,6 +120,8 @@ command-workbench-about.title 3733d924b38b057a
 command-workbench-fullscreen.title ae3886b1f1272280
 command-workbench-keybindings.title 0d070a1def8c650f
 command-workbench-palette.title 6ddb5508d068cafb
+command-workbench-quickOpen-go.title 7ef4c0db7ce7af09
+command-workbench-quickOpen.title 09a6e1a16e27094c
 command-workbench-quit.title fda91000eb874652
 command-workbench-run.title e0ffb620171da04e
 command-workbench-systemMenu.title f5046dbb28364688
@@ -208,6 +210,11 @@ gui-profile-keys-error 81148fc1d6828ea9
 gui-profile-keys-skipped f1cc88962bdc0e37
 gui-profile-layout-error 0920390b6dde7b73
 gui-profile-variants c6c2d7f979583206
+gui-quick-open-image 629f69163a374538
+gui-quick-open-module 94e6d2cc1b97242f
+gui-quick-open-source 0a91c26e765f385e
+gui-quick-open-title 09a6e1a16e27094c
+gui-quick-open-workspace 83fb01ff0702e457
 gui-recording-saved a76310c7e51efad9
 gui-recording-stopped 2162a30bfb25f825
 gui-scene-saved 60fcaa10812571b8

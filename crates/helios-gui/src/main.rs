@@ -57,6 +57,8 @@ fn warn(text: &str) {
 /// one image at a time, from the first copy still present.
 fn fill_library(shell: &mut Shell, persist: &Persist) -> Result<(), String> {
     let files = persist.fill_library(shell)?;
+    // Quick open opens them from there.
+    shell.set_image_files(files.iter().cloned());
     let sink = shell.library_thumbnails();
     std::thread::spawn(move || {
         for (id, path) in files {

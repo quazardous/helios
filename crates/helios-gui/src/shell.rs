@@ -61,6 +61,10 @@ const HIDPI: f32 = 1.5;
 /// running until then (see `host::Later`).
 enum Action {
     Palette,
+    /// Quick open's list of modules, images and workspaces.
+    QuickOpen,
+    /// Goes to what quick open offers.
+    QuickOpenGo(crate::quick_open::Item),
     Theme(String),
     ThemeExport(PathBuf),
     /// Where, which parts, only this machine's view.
@@ -327,6 +331,8 @@ pub struct Shell {
     import_source: Option<helios_template::ImportDesc>,
     /// Imports asked for (`library.import`'s arguments), for the host.
     imports: Vec<Value>,
+    /// The library's images on disk, by id, for quick open.
+    image_files: BTreeMap<String, PathBuf>,
     /// egui-pop's dialogs, once the application is built (`dialog.current`).
     dialogs: Arc<OnceLock<Dialogs>>,
     /// Confirmations are answered yes by policy (a script's `--yes`).
@@ -576,6 +582,7 @@ impl Shell {
             duplicates: Rc::default(),
             import_source: None,
             imports: Vec::new(),
+            image_files: BTreeMap::new(),
             dialogs,
             assume_yes: false,
             menu: None,
@@ -806,6 +813,12 @@ impl Shell {
     /// selection follows its image when it is still there.
     pub fn set_library(&mut self, entries: Vec<crate::library::Entry>) {
         self.library.borrow_mut().set_entries(entries);
+    }
+
+    /// Where the library's images are on disk, by id: quick open opens
+    /// them from there.
+    pub fn set_image_files(&mut self, files: impl IntoIterator<Item = (String, PathBuf)>) {
+        self.image_files = files.into_iter().collect();
     }
 
     /// Where thumbnails are sent, by image id, from any thread.
@@ -1473,6 +1486,28 @@ impl Shell {
             CommandSpec::new("workbench.palette", "Show all commands", "View"),
             Box::new(|_, _| Ok(Action::Palette)),
         );
+        add(
+            CommandSpec::new(
+                crate::quick_open::COMMAND,
+                "Go to a module, an image or a workspace",
+                "View",
+            ),
+            Box::new(|_, _| Ok(Action::QuickOpen)),
+        );
+        add(
+            CommandSpec::new(
+                crate::quick_open::GO,
+                "Go to what quick open offers (`item`: module:<node>, image:<id> or workspace:<path>)",
+                "View",
+            ),
+            Box::new(|a, _| {
+                let item = a
+                    .get("item")
+                    .and_then(Value::as_str)
+                    .ok_or("`item` is missing")?;
+                crate::quick_open::Item::parse(item).map(Action::QuickOpenGo)
+            }),
+        );
         let string = |args: &Value, key: &str| -> Result<String, String> {
             args.get(key)
                 .and_then(Value::as_str)
@@ -1893,6 +1928,13 @@ impl Shell {
         // egui-pop's palette is the palette; Helios's name for it stays
         // for scripts.
         d.hidden.insert("workbench.palette".into());
+        // Quick open, everywhere; what it runs needs its item.
+        d.keys.push((
+            "Ctrl+P".into(),
+            crate::quick_open::COMMAND.into(),
+            String::new(),
+        ));
+        d.hidden.insert(crate::quick_open::GO.into());
         for name in crate::theme::choosable(w.themes) {
             d.checked
                 .insert(format!("theme.{name}"), format!("heliosTheme == '{name}'"));
@@ -2424,6 +2466,92 @@ impl Shell {
         self.open_dialog(Choose::with_options(&p.title, options, command).value_key(&p.arg));
     }
 
+    /// Quick open: the network's modules, the library's images and the
+    /// recent workspaces in one filtered list (see `quick_open`).
+    fn quick_open(&mut self) {
+        let modules = self
+            .viewport
+            .borrow()
+            .graph()
+            .map(|g| {
+                g.ids()
+                    .filter_map(|id| {
+                        let name = g.name(id).ok()?.to_string();
+                        let module = g.manifest(id).ok()?.map(|m| m.name);
+                        Some((name, module))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let images = self
+            .library
+            .borrow()
+            .entries
+            .iter()
+            .map(|e| (e.id.clone(), e.name.clone()))
+            .collect();
+        let sources = crate::quick_open::Sources {
+            modules,
+            images,
+            workspaces: recent_workspaces(),
+        };
+        let choices = crate::quick_open::choices(&sources, |m| self.text(m));
+        let title = self.text(Message::new(
+            "gui-quick-open-title",
+            "Go to a module, an image or a workspace",
+        ));
+        self.pick(crate::dialogs::Picker {
+            title,
+            choices,
+            command: crate::quick_open::GO.into(),
+            arg: "item".into(),
+        });
+    }
+
+    /// Goes to what quick open offered: a module selected (the Parameters
+    /// panel brought forward), an image opened in the viewport, a
+    /// workspace opened in its window.
+    fn quick_open_go(&mut self, item: crate::quick_open::Item) -> Result<Value, String> {
+        use crate::quick_open::Item;
+        match item {
+            Item::Module(node) => {
+                let known = self
+                    .viewport
+                    .borrow()
+                    .graph()
+                    .is_some_and(|g| g.find(&node).is_some());
+                if !known {
+                    return Err(format!("no module `{node}` in the network shown"));
+                }
+                lock(&self.values)
+                    .set(helios_values::Set::new(
+                        crate::params::SELECTION,
+                        helios_values::Change::To(helios_core::Value::Text(node.clone())),
+                        Origin::User,
+                    ))
+                    .map_err(|e| e.to_string())?;
+                if self.panels.iter().any(|p| p.id.as_str() == "helios.params") {
+                    self.run("helios.params.focus", Value::Null, Origin::User)?;
+                }
+                Ok(json!({ "module": node }))
+            }
+            Item::Image(id) => {
+                let path = self
+                    .image_files
+                    .get(&id)
+                    .cloned()
+                    .ok_or_else(|| format!("image `{id}` has no file at hand"))?;
+                self.opens.push(crate::platform::Open::Image(path.clone()));
+                Ok(json!({ "image": id, "path": path }))
+            }
+            Item::Workspace(dir) => {
+                let ctx = self.app.handle().egui();
+                self.apply(&ctx, Action::OpenWorkspace(Some(dir.clone())))?;
+                Ok(json!({ "workspace": dir }))
+            }
+        }
+    }
+
     /// Opens a menu of commands at a position.
     pub fn open_menu(&mut self, at: egui::Pos2, items: Vec<MenuItem>) {
         egui_pop::api::menus::close_popup(self.app.handle());
@@ -2767,6 +2895,8 @@ impl Shell {
                     Origin::User,
                 );
             }
+            Action::QuickOpen => self.quick_open(),
+            Action::QuickOpenGo(item) => return self.quick_open_go(item),
             Action::Fullscreen => {
                 let on = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
                 ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!on));

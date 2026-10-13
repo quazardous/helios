@@ -370,6 +370,25 @@ are lists filled when the menu opens (egui-pop's list providers).
 
 ![The system menu](gui/system-helios-dark.png)
 
+**The palette and quick open (2026-10-13).** egui-pop's command palette
+(`Ctrl+Shift+P`, `F1`) holds every command of Helios's registry with its
+title, its category and its keys, as each is declared; only commands
+that need an argument the palette cannot ask for well are left out
+(`workbench.quickOpen.go`). Quick open (`workbench.quickOpen`, `Ctrl+P`)
+is its companion for what is gone to by name, in the shell's picker
+(egui-pop's choice dialog, filtered as one types):
+
+- **modules**: the nodes of the network shown; choosing one selects it
+  (`view/graph/selection`) and brings the Parameters panel forward;
+- **images**: the library's, by file name; choosing one opens it in the
+  viewport, as a launch or a `helios:` link would;
+- **workspaces**: the recent ones; choosing one opens it in a window of
+  its own.
+
+Each entry runs `workbench.quickOpen.go` with its item
+(`module:<node>`, `image:<id>`, `workspace:<path>`), which agents run
+too.
+
 The pictures are written by `HELIOS_DOC_PICTURES=$PWD/docs/gui cargo test
 -p helios-gui --test dialogs pictures` (and `--test params pictures`), from
 the repository's root: headless, never on the desktop.

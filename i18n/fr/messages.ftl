@@ -176,6 +176,16 @@ gui-profile-layout-error = profil { $name } : disposition : { $error }
 
 gui-profile-variants = profil { $name } : { $count } valeurs venant de variantes : { $variants }
 
+gui-quick-open-image = image
+
+gui-quick-open-module = module { $module }
+
+gui-quick-open-source = source
+
+gui-quick-open-title = Aller à un module, une image ou un espace de travail
+
+gui-quick-open-workspace = espace de travail { $path }
+
 gui-recording-saved = enregistrement sauvé dans { $path }
 
 gui-recording-stopped = enregistrement arrêté : { $error }

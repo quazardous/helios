@@ -357,6 +357,12 @@ command-workbench-keybindings =
 command-workbench-palette =
     .title = Afficher toutes les commandes
 
+command-workbench-quickOpen =
+    .title = Aller à un module, une image ou un espace de travail
+
+command-workbench-quickOpen-go =
+    .title = Aller à ce que propose l’ouverture rapide (`item` : module:<nœud>, image:<id> ou workspace:<chemin>)
+
 command-workbench-quit =
     .title = Quitter Helios
 
