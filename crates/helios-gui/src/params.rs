@@ -62,14 +62,7 @@ pub struct Params {
     steps: Option<(String, GestureId, f64)>,
     /// The application, for the parameters' context menu.
     app: Option<egui_pop::api::AppHandle>,
-    /// Each slider's id as last drawn, to guard its typed entry (see
-    /// [`Params::guard_typing`]).
-    ids: BTreeMap<String, egui::Id>,
 }
-
-/// Where the shell notes, each frame, whether Escape was pressed, before
-/// the key dispatcher may take it.
-pub const ESCAPE: &str = "helios.params.escape";
 
 /// The journal event a parameter's picker button publishes (`path`): a
 /// picker tool answers it by sampling the image.
@@ -371,7 +364,6 @@ impl Params {
         // Room is kept on the right for the marks.
         let width = (ui.available_width() - 28.0).clamp(120.0, 320.0);
         let height = ui.spacing().interact_size.y;
-        self.guard_typing(ui, path);
         let app = self.app.clone();
         let out = ui
             .allocate_ui(egui::vec2(width, height), |ui| {
@@ -393,7 +385,6 @@ impl Params {
                 slider.show(ui)
             })
             .inner;
-        self.ids.insert(path.into(), out.response.id);
         if out.quad_clicked()
             && let Some(app) = &self.app
         {
@@ -420,40 +411,6 @@ impl Params {
                 ),
             ),
         ))
-    }
-
-    /// Keeps a slider's typed entry as the user left it, before egui-pop
-    /// draws it. Escape closes it with its text dropped: the key
-    /// dispatcher takes Escape before egui-pop's entry reads it, and the
-    /// entry, its field let go, would commit what was typed (the shell
-    /// notes Escape first, [`ESCAPE`]). The entry keeps the keyboard
-    /// unless the user moved it (a press, Tab, Enter): a frame where the
-    /// panel is redrawn for another writer's change must not commit it.
-    fn guard_typing(&self, ui: &Ui, path: &str) {
-        let Some(id) = self.ids.get(path).copied() else {
-            return;
-        };
-        let typing = egui_pop::core::slider::typing_id(id);
-        if ui.data(|d| d.get_temp::<String>(typing)).is_none() {
-            return;
-        }
-        let edit = typing.with("edit");
-        let escape = ui
-            .data(|d| d.get_temp::<bool>(egui::Id::new(ESCAPE)))
-            .unwrap_or(false);
-        if escape {
-            ui.data_mut(|d| d.remove::<String>(typing));
-            ui.memory_mut(|m| m.surrender_focus(edit));
-            return;
-        }
-        let moved = ui.input(|i| {
-            i.pointer.any_pressed()
-                || i.key_pressed(egui::Key::Tab)
-                || i.key_pressed(egui::Key::Enter)
-        });
-        if !moved && !ui.memory(|m| m.has_focus(edit)) {
-            ui.memory_mut(|m| m.request_focus(edit));
-        }
     }
 
     /// Writes what a slider changed this frame to the store, as the user.

@@ -3535,10 +3535,6 @@ impl Shell {
     /// Draws the shell for one frame.
     pub fn ui(&mut self, ui: &mut Ui) {
         let ctx = ui.ctx().clone();
-        // Escape, as pressed, before the key dispatcher may take it: a
-        // slider's typed entry cancels on it.
-        let escape = ctx.input(|i| i.key_pressed(egui::Key::Escape));
-        ctx.data_mut(|d| d.insert_temp(Id::new(crate::params::ESCAPE), escape));
         if let Some(rs) = self.gpu.take() {
             self.gpu_info = Some(egui_pop::viewport::gpu::install(&ctx, &rs));
         }
