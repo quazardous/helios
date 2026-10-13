@@ -1,4 +1,6 @@
-# Helios decoder and camera-name regression corpus: manifest draft.
+# Helios decoder and camera-name regression corpus: the manifest.
+# tools/bench/fill-corpus.sh downloads the "core" files; crates/helios-corpus
+# checks them against the expectations below (see docs/raw-corpus.md).
 # Source: raw.pixls.us (repository JSON: https://raw.pixls.us/json/getrepository.php?set=all),
 # fetched 2026-10-12. Every entry is CC0 per the per-file licence column of that JSON.
 # sha256 and size_mb are the values published by raw.pixls.us (size rounded, in MB as shown);
@@ -17,7 +19,7 @@ rawler_version = "0.8.0"
 licence_default = "CC0-1.0"
 fetch_url_pattern = "https://raw.pixls.us/getfile.php/{pixls_id}/nice/{filename}"
 mirror = "https://raw.pixls.us/data.lfs.git"
-tiers = { core = "always fetched in CI cache", heavy = "fetched for the full run only (rawler bump, release)" }
+tiers = { core = "in the box volume and checked by the raw-corpus job", pending = "catalogued, not fetched yet: switch to core and provision again to add it" }
 
 [[file]]
 id = "canon-eos-d30-crw-note-camera-is-canon-d30-not-30d"
@@ -42,6 +44,16 @@ exif_model = "Canon EOS D30"
 rawler_name = "Canon / EOS D30"
 rawspeed_name = "Canon / EOS D30"
 
+[file.check]
+camera = "Canon / EOS D30"
+sensor = "2224x1456"
+crop = "2176x1450+48+6"
+cfa = "RGGB"
+black = [128.0, 128.0, 128.0, 129.0]
+white = 4095.0
+matrix = [0.99, -0.2771, -0.1324, -0.7072, 1.4229, 0.314, -0.279, 0.3344, 0.8861]
+helios = "mosaic"
+
 [[file]]
 id = "canon-eos-350d-cr2-raw-3-2"
 maker = "Canon"
@@ -64,6 +76,16 @@ exif_model = "Canon EOS 350D DIGITAL"
 rawler_name = "Canon / EOS 350D"
 rawspeed_name = "Canon / EOS 350D"
 
+[file.check]
+camera = "Canon / EOS 350D"
+sensor = "3516x2328"
+crop = "3456x2304+52+19"
+cfa = "GBRG"
+black = [257.0, 257.0, 257.0, 257.0]
+white = 4095.0
+matrix = [0.6019, -0.0617, -0.0966, -0.8645, 1.5882, 0.2975, -0.153, 0.1719, 0.7642]
+helios = "mosaic"
+
 [[file]]
 id = "canon-eos-kiss-digital-n-cr2-raw-3-2"
 maker = "Canon"
@@ -85,6 +107,16 @@ exif_make = "Canon"
 exif_model = "Canon EOS Kiss Digital N"
 rawler_name = "Canon / EOS Kiss Digital N"
 rawspeed_name = "Canon / EOS 350D (alias EOS Kiss Digital N)"
+
+[file.check]
+camera = "Canon / EOS Kiss Digital N"
+sensor = "3516x2328"
+crop = "3456x2304+52+19"
+cfa = "GBRG"
+black = [257.0, 257.0, 257.0, 257.0]
+white = 4095.0
+matrix = [0.6019, -0.0617, -0.0966, -0.8645, 1.5882, 0.2975, -0.153, 0.1719, 0.7642]
+helios = "mosaic"
 
 [[file]]
 id = "canon-eos-5d-mark-iv-cr2-sraw"
@@ -109,6 +141,16 @@ exif_model = "Canon EOS 5D Mark IV"
 rawler_name = "Canon / EOS 5D Mark IV"
 rawspeed_name = "Canon / EOS 5D Mark IV"
 
+[file.check]
+camera = "Canon / EOS 5D Mark IV"
+sensor = "3360x2240x3"
+crop = "3360x2240+0+0"
+cfa = "linear"
+black = [511.0, 511.0, 511.0, 511.0]
+white = 56032.0
+matrix = [0.6446, -0.0366, -0.0864, -0.4436, 1.2204, 0.2513, -0.0952, 0.2496, 0.6348]
+helios = "not a mosaic (linear or monochrome raws are not supported yet)"
+
 [[file]]
 id = "canon-eos-r6-cr3-craw-1-6x-crop"
 maker = "Canon"
@@ -131,6 +173,16 @@ exif_make = "to read on fetch"
 exif_model = "to read on fetch"
 rawler_name = "Canon / EOS R6 (predicted, no exiv2 dump published)"
 rawspeed_name = "Canon / EOS R6 (predicted)"
+
+[file.check]
+camera = "Canon / EOS R6"
+sensor = "3584x2386"
+crop = "3408x2272+156+108"
+cfa = "RGGB"
+black = [512.0, 512.0, 512.0, 512.0]
+white = 14008.0
+matrix = [0.8293, -0.1611, -0.1132, -0.4759, 1.2711, 0.2275, -0.1013, 0.2415, 0.5509]
+helios = "mosaic"
 
 [[file]]
 id = "canon-eos-r6-cr3-raw-1-6x-crop"
@@ -155,6 +207,16 @@ exif_model = "to read on fetch"
 rawler_name = "Canon / EOS R6 (predicted, no exiv2 dump published)"
 rawspeed_name = "Canon / EOS R6 (predicted)"
 
+[file.check]
+camera = "Canon / EOS R6"
+sensor = "3584x2386"
+crop = "3408x2272+156+108"
+cfa = "RGGB"
+black = [512.0, 512.0, 512.0, 512.0]
+white = 14008.0
+matrix = [0.8293, -0.1611, -0.1132, -0.4759, 1.2711, 0.2275, -0.1013, 0.2415, 0.5509]
+helios = "mosaic"
+
 [[file]]
 id = "canon-eos-r5-cr3-craw-1-6crop-dualpixel"
 maker = "Canon"
@@ -165,7 +227,7 @@ format = "CR3"
 decoder = "cr3"
 why = "CR3 dual-pixel C-RAW: extra image track must be ignored."
 expect = "decode"
-tier = "core"
+tier = "pending"
 pixls_id = 4695
 filename = "Canon - EOS R5 - 3:2.CR3"
 url = "https://raw.pixls.us/getfile.php/4695/nice/Canon%20-%20EOS%20R5%20-%203:2.CR3"
@@ -201,6 +263,16 @@ exif_model = "Canon EOS R6 Mark III"
 rawler_name = "Canon / EOS R6 Mark III"
 rawspeed_name = "Canon / EOS R6 Mark III"
 
+[file.check]
+camera = "Canon / EOS R6 Mark III"
+sensor = "4512x2994"
+crop = "4320x2880+180+108"
+cfa = "RGGB"
+black = [512.0, 512.0, 512.0, 512.0]
+white = 13995.0
+matrix = [0.8309, -0.1786, -0.1095, -0.4851, 1.2736, 0.2353, -0.0956, 0.1911, 0.5534]
+helios = "mosaic"
+
 [[file]]
 id = "nikon-d1x-nef-please-upload-the-full-set"
 maker = "Nikon"
@@ -211,7 +283,7 @@ format = "NEF"
 decoder = "nef"
 why = "D1X: non-square pixels (stretched aspect, 3.04:1 raw) and early compressed NEF; tiny file."
 expect = "decode"
-tier = "core"
+tier = "pending"
 pixls_id = 1785
 filename = "Nikon - D1X - 12bit 12bit compressed (3.0422960725076).NEF"
 url = "https://raw.pixls.us/getfile.php/1785/nice/Nikon%20-%20D1X%20-%2012bit%2012bit%20compressed%20(3.0422960725076).NEF"
@@ -246,6 +318,16 @@ exif_model = "NIKON D70"
 rawler_name = "Nikon / D70"
 rawspeed_name = "Nikon / D70"
 
+[file.check]
+camera = "Nikon / D70"
+sensor = "3040x2014"
+crop = "3008x2000+15+7"
+cfa = "RGGB"
+black = [0.0, 0.0, 0.0, 0.0]
+white = 4095.0
+matrix = [0.7732, -0.2421, -0.0789, -0.8238, 1.5883, 0.2498, -0.0859, 0.0783, 0.733]
+helios = "mosaic"
+
 [[file]]
 id = "nikon-d100-nef-provided-by-georg-m-ller"
 maker = "Nikon"
@@ -256,7 +338,7 @@ format = "NEF"
 decoder = "nef"
 why = "Special-cased in rawler (D100 width hack, 12-bit with control bytes)."
 expect = "decode"
-tier = "core"
+tier = "pending"
 pixls_id = 2996
 filename = "Nikon - D100 - 12bit 12bit compressed (Uncompressed) (3:2).NEF"
 url = "https://raw.pixls.us/getfile.php/2996/nice/Nikon%20-%20D100%20-%2012bit%2012bit%20compressed%20(Uncompressed)%20(3:2).NEF"
@@ -292,6 +374,16 @@ exif_model = "NIKON D300"
 rawler_name = "Nikon / D300"
 rawspeed_name = "Nikon / D300"
 
+[file.check]
+camera = "Nikon / D300"
+sensor = "4352x2868"
+crop = "4288x2848+15+10"
+cfa = "GRBG"
+black = [0.0, 0.0, 0.0, 0.0]
+white = 3808.0
+matrix = [0.903, -0.1992, -0.0716, -0.8465, 1.6302, 0.2256, -0.2689, 0.3217, 0.8069]
+helios = "mosaic"
+
 [[file]]
 id = "nikon-1-j1-nef-please-keep-unique-huffmantable-problem"
 maker = "Nikon"
@@ -314,6 +406,16 @@ exif_make = "NIKON CORPORATION"
 exif_model = "NIKON 1 J1"
 rawler_name = "Nikon / 1 J1"
 rawspeed_name = "Nikon / 1 J1"
+
+[file.check]
+camera = "Nikon / 1 J1"
+sensor = "3904x2606"
+crop = "3872x2592+12+6"
+cfa = "RGGB"
+black = [0.0, 0.0, 0.0, 0.0]
+white = 4095.0
+matrix = [0.8994, -0.2667, -0.0865, -0.4594, 1.2324, 0.2552, -0.0699, 0.1786, 0.626]
+helios = "mosaic"
 
 [[file]]
 id = "nikon-d6-nef-small"
@@ -338,6 +440,16 @@ exif_model = "NIKON D6"
 rawler_name = "Nikon / D6"
 rawspeed_name = "Nikon / D6"
 
+[file.check]
+camera = "Nikon / D6"
+sensor = "4188x2796"
+crop = "4176x2784+6+6"
+cfa = "RGGB"
+black = [252.0, 252.0, 252.0, 252.0]
+white = 3880.0
+matrix = [0.9028, -0.3423, -0.1035, -0.6321, 1.4265, 0.2217, -0.1013, 0.1683, 0.6928]
+helios = "mosaic"
+
 [[file]]
 id = "nikon-z-6-2-nef-12bit-12bit-compressed-lossless-3-2"
 maker = "Nikon"
@@ -359,6 +471,16 @@ exif_make = "NIKON CORPORATION"
 exif_model = "NIKON Z 6_2"
 rawler_name = "Nikon / Z 6 2"
 rawspeed_name = "Nikon / Z 6_2"
+
+[file.check]
+camera = "Nikon / Z 6 2"
+sensor = "6064x4040"
+crop = "6048x4024+8+8"
+cfa = "RGGB"
+black = [252.0, 252.0, 252.0, 252.0]
+white = 3880.0
+matrix = [0.9943, -0.3269, -0.0839, -0.5323, 1.3269, 0.2259, -0.1198, 0.2083, 0.7557]
+helios = "mosaic"
 
 [[file]]
 id = "nikon-z50-2-nef-1x1-lossless"
@@ -382,6 +504,16 @@ exif_make = "NIKON CORPORATION"
 exif_model = "NIKON Z50_2"
 rawler_name = "Nikon / Z 50 II"
 rawspeed_name = "Nikon / Z50_2"
+
+[file.check]
+camera = "Nikon / Z 50 II"
+sensor = "3728x3728"
+crop = "3712x3712+8+8"
+cfa = "RGGB"
+black = [1008.0, 1008.0, 1008.0, 1008.0]
+white = 15892.0
+matrix = [1.164, -0.4829, -0.1079, -0.5107, 1.3006, 0.2325, -0.0972, 0.1711, 0.738]
+helios = "mosaic"
 
 [[file]]
 id = "nikon-z50-2-nef-dx-he"
@@ -407,6 +539,9 @@ exif_model = "NIKON Z50_2"
 rawler_name = "Nikon / Z 50 II"
 rawspeed_name = "Nikon / Z50_2"
 
+[file.check]
+error = "NEF compression Some(HighEfficency) is not supported"
+
 [[file]]
 id = "sony-dslr-a100-arw-compressed-3-2"
 maker = "Sony"
@@ -429,6 +564,16 @@ exif_model = "DSLR-A100"
 rawler_name = "Sony / DSLR-A100"
 rawspeed_name = "Sony / DSLR-A100"
 
+[file.check]
+camera = "Sony / DSLR-A100"
+sensor = "3880x2608"
+crop = "3880x2600+0+4"
+cfa = "RGGB"
+black = [0.0, 0.0, 0.0, 0.0]
+white = 4095.0
+matrix = [0.9437, -0.2812, -0.0774, -0.8405, 1.6215, 0.2291, -0.0709, 0.0596, 0.7181]
+helios = "mosaic"
+
 [[file]]
 id = "sony-nex-5-arw-12bit-12bit-compressed-3-2"
 maker = "Sony"
@@ -450,6 +595,16 @@ exif_make = "SONY"
 exif_model = "NEX-5"
 rawler_name = "Sony / NEX-5"
 rawspeed_name = "Sony / NEX-5"
+
+[file.check]
+camera = "Sony / NEX-5"
+sensor = "4608x3072"
+crop = "4592x3056+8+8"
+cfa = "RGGB"
+black = [512.0, 512.0, 512.0, 512.0]
+white = 15360.0
+matrix = [0.6549, -0.155, -0.0436, -0.488, 1.2435, 0.2753, -0.0854, 0.1868, 0.6976]
+helios = "mosaic"
 
 [[file]]
 id = "sony-ilce-7sm3-arw-full-frame"
@@ -474,6 +629,16 @@ exif_model = "ILCE-7SM3"
 rawler_name = "Sony / ILCE-7SM3"
 rawspeed_name = "Sony / ILCE-7SM3"
 
+[file.check]
+camera = "Sony / ILCE-7SM3"
+sensor = "4288x2848"
+crop = "4240x2832+12+8"
+cfa = "RGGB"
+black = [512.0, 512.0, 512.0, 512.0]
+white = 15360.0
+matrix = [0.6912, -0.2127, -0.0469, -0.447, 1.2175, 0.2587, -0.0398, 0.1478, 0.6492]
+helios = "mosaic"
+
 [[file]]
 id = "sony-ilce-1m2-arw-lossless-compressed-small-size-aps-c-mode-sony-alpha"
 maker = "Sony"
@@ -497,6 +662,16 @@ exif_model = "ILCE-1M2"
 rawler_name = "Sony / ILCE-1M2"
 rawspeed_name = "Sony / ILCE-1M2"
 
+[file.check]
+camera = "Sony / ILCE-1M2"
+sensor = "4608x3072x3"
+crop = "4320x2880+8+8"
+cfa = "linear"
+black = [1024.0, 1024.0, 1024.0, 1024.0]
+white = 15360.0
+matrix = [1.0058, -0.4074, -0.0932, -0.4777, 1.2731, 0.2274, -0.0544, 0.1282, 0.6102]
+helios = "not a mosaic (linear or monochrome raws are not supported yet)"
+
 [[file]]
 id = "sony-ilce-7rm5-arw-ljpeg-w-2x2-mcu"
 maker = "Sony"
@@ -507,7 +682,7 @@ format = "ARW"
 decoder = "arw"
 why = "Known edge case: lossless ARW with 2x2 MCU tiles."
 expect = "decode"
-tier = "heavy"
+tier = "pending"
 pixls_id = 6237
 filename = "Sony - ILCE-7RM5 - 14bit (4:3).ARW"
 url = "https://raw.pixls.us/getfile.php/6237/nice/Sony%20-%20ILCE-7RM5%20-%2014bit%20(4:3).ARW"
@@ -543,6 +718,9 @@ exif_model = "Lunar"
 rawler_name = "(not in rawler camera data)"
 rawspeed_name = "(not in cameras.xml: darktable passes EXIF through)"
 
+[file.check]
+error = "Couldn't find a decoder for make \"HASSELBLAD\", model 'Lunar'"
+
 [[file]]
 id = "fujifilm-finepix-s2pro-raf-3-2"
 maker = "Fujifilm"
@@ -552,7 +730,7 @@ format = "RAF"
 decoder = "raf"
 why = "SuperCCD RAF (45-degree rotated layout); EXIF model \"FinePixS2Pro\" without a space."
 expect = "decode"
-tier = "core"
+tier = "pending"
 pixls_id = 3562
 filename = "Fujifilm - FinePix S2Pro - 3:2.RAF"
 url = "https://raw.pixls.us/getfile.php/3562/nice/Fujifilm%20-%20FinePix%20S2Pro%20-%203:2.RAF"
@@ -587,6 +765,16 @@ exif_model = "X-Pro1"
 rawler_name = "Fujifilm / X-Pro1"
 rawspeed_name = "Fujifilm / X-Pro1"
 
+[file.check]
+camera = "Fujifilm / X-Pro1"
+sensor = "5120x3288"
+crop = "4896x3264+28+12"
+cfa = "GBGGRG/GRGGBG/BGBRGR/GRGGBG/GBGGRG/RGRBGB"
+black = [255.0, 255.0, 255.0, 255.0]
+white = 4094.0
+matrix = [1.0413, -0.3996, -0.0993, -0.3721, 1.164, 0.2361, -0.0733, 0.154, 0.6011]
+helios = "mosaic"
+
 [[file]]
 id = "fujifilm-x-s10-raf-lossless-compressed"
 maker = "Fujifilm"
@@ -609,6 +797,16 @@ exif_make = "FUJIFILM"
 exif_model = "X-S10"
 rawler_name = "Fujifilm / X-S10"
 rawspeed_name = "Fujifilm / X-S10"
+
+[file.check]
+camera = "Fujifilm / X-S10"
+sensor = "6384x4182"
+crop = "6240x4160+6+13"
+cfa = "GGBGGR/BRGRBG/GGBGGR/GGRGGB/RBGBRG/GGRGGB"
+black = [1022.0, 1022.0, 1022.0, 1022.0]
+white = 16382.0
+matrix = [1.3426, -0.6334, -0.1177, -0.4244, 1.2136, 0.2371, -0.058, 0.1303, 0.598]
+helios = "mosaic"
 
 [[file]]
 id = "fujifilm-x-s10-raf-lossy-compressed"
@@ -633,6 +831,16 @@ exif_model = "X-S10"
 rawler_name = "Fujifilm / X-S10"
 rawspeed_name = "Fujifilm / X-S10"
 
+[file.check]
+camera = "Fujifilm / X-S10"
+sensor = "6384x4182"
+crop = "6240x4160+6+13"
+cfa = "GGBGGR/BRGRBG/GGBGGR/GGRGGB/RBGBRG/GGRGGB"
+black = [1022.0, 1022.0, 1022.0, 1022.0]
+white = 16382.0
+matrix = [1.3426, -0.6334, -0.1177, -0.4244, 1.2136, 0.2371, -0.058, 0.1303, 0.598]
+helios = "mosaic"
+
 [[file]]
 id = "fujifilm-x-a10-raf-12bit-12bit-uncompressed-3-2"
 maker = "Fujifilm"
@@ -655,6 +863,16 @@ exif_model = "X-A10"
 rawler_name = "Fujifilm / X-A10"
 rawspeed_name = "Fujifilm / X-A10"
 
+[file.check]
+camera = "Fujifilm / X-A10"
+sensor = "4912x3278"
+crop = "4896x3264+8+7"
+cfa = "GBRG"
+black = [256.0, 256.0, 256.0, 256.0]
+white = 4096.0
+matrix = [1.154, -0.4999, -0.0991, -0.2949, 1.0963, 0.2278, -0.0382, 0.1049, 0.5605]
+helios = "mosaic"
+
 [[file]]
 id = "fujifilm-gfx-100-raf-14-bit-lossless-compressed-metz-70mz-5"
 maker = "Fujifilm"
@@ -665,7 +883,7 @@ format = "RAF"
 decoder = "raf"
 why = "Known-troublesome: darktable 5.0 rendered GFX 100 purple (odd crop + CFA reset). Heavy file."
 expect = "decode"
-tier = "heavy"
+tier = "pending"
 pixls_id = 3775
 filename = "Fujifilm - GFX 100 - 14bit 14bit compressed (4:3).RAF"
 url = "https://raw.pixls.us/getfile.php/3775/nice/Fujifilm%20-%20GFX%20100%20-%2014bit%2014bit%20compressed%20(4:3).RAF"
@@ -701,6 +919,16 @@ exif_model = "X100S"
 rawler_name = "Fujifilm / X100S"
 rawspeed_name = "Fujifilm / X100S"
 
+[file.check]
+camera = "Fujifilm / X100S"
+sensor = "4936x3296"
+crop = "4896x3264+20+16"
+cfa = "GGBGGR/GGRGGB/RBGBRG/GGRGGB/GGBGGR/BRGRBG"
+black = [1024.0, 1024.0, 1024.0, 1024.0]
+white = 16383.0
+matrix = [1.0592, -0.4262, -0.1008, -0.3514, 1.1355, 0.2465, -0.087, 0.2025, 0.6386]
+helios = "mosaic"
+
 [[file]]
 id = "olympus-e-410-orf-16bit-4-3"
 maker = "Olympus"
@@ -723,6 +951,16 @@ exif_model = "E-410           "
 rawler_name = "Olympus / E-410"
 rawspeed_name = "Olympus / E-410"
 
+[file.check]
+camera = "Olympus / E-410"
+sensor = "3720x2800"
+crop = "3648x2736+52+44"
+cfa = "RGGB"
+black = [73.0, 73.0, 73.0, 73.0]
+white = 3500.0
+matrix = [0.8856, -0.2582, -0.1026, -0.7761, 1.5767, 0.2081, -0.2009, 0.2576, 0.7469]
+helios = "mosaic"
+
 [[file]]
 id = "olympus-e-510-orf-16bit-4-3"
 maker = "Olympus"
@@ -732,7 +970,7 @@ format = "ORF"
 decoder = "orf"
 why = "Known-troublesome: darktable 5.4 broke E-410/E-510 ORF."
 expect = "decode"
-tier = "core"
+tier = "pending"
 pixls_id = 5449
 filename = "Olympus - E-510 - 16bit (4:3).ORF"
 url = "https://raw.pixls.us/getfile.php/5449/nice/Olympus%20-%20E-510%20-%2016bit%20(4:3).ORF"
@@ -768,6 +1006,16 @@ exif_model = "E-M1MarkII      "
 rawler_name = "Olympus / E-M1MarkII"
 rawspeed_name = "Olympus / E-M1MarkII"
 
+[file.check]
+camera = "Olympus / E-M1MarkII"
+sensor = "5240x3912"
+crop = "5184x3888+12+12"
+cfa = "RGGB"
+black = [255.0, 255.0, 255.0, 255.0]
+white = 4000.0
+matrix = [0.9383, -0.317, -0.0763, -0.2457, 1.0702, 0.202, -0.0384, 0.1236, 0.5552]
+helios = "mosaic"
+
 [[file]]
 id = "om-system-om-1-mark-ii-orf-20-mp-12-bit-raw"
 maker = "OM System"
@@ -791,6 +1039,16 @@ exif_model = "OM-1MarkII      "
 rawler_name = "OM Digital Solutions / OM-1 Mark II"
 rawspeed_name = "OM System / OM-1 Mark II"
 
+[file.check]
+camera = "OM Digital Solutions / OM-1 Mark II"
+sensor = "5220x3912"
+crop = "5184x3888+12+12"
+cfa = "RGGB"
+black = [255.0, 254.0, 254.0, 255.0]
+white = 4095.0
+matrix = [0.909, -0.3591, -0.0756, -0.3252, 1.1396, 0.2109, -0.0318, 0.1059, 0.5606]
+helios = "mosaic"
+
 [[file]]
 id = "panasonic-dmc-lx1-dng-unique-ljpeg-problem-tile-component-width-17"
 maker = "Panasonic"
@@ -801,7 +1059,7 @@ format = "DNG"
 decoder = "dng"
 why = "Known edge case: tile width not a multiple of LJPEG components."
 expect = "decode"
-tier = "core"
+tier = "pending"
 pixls_id = 2640
 filename = "Panasonic - DMC-LX1 - 16bit (16:9).dng"
 url = "https://raw.pixls.us/getfile.php/2640/nice/Panasonic%20-%20DMC-LX1%20-%2016bit%20(16:9).dng"
@@ -836,6 +1094,16 @@ exif_model = "DMC-GF1"
 rawler_name = "Panasonic / DMC-GF1"
 rawspeed_name = "Panasonic / DMC-GF1"
 
+[file.check]
+camera = "Panasonic / DMC-GF1"
+sensor = "4060x2264"
+crop = "4000x2248+8+4"
+cfa = "GBRG"
+black = [15.0, 15.0, 15.0, 15.0]
+white = 3986.0
+matrix = [0.7888, -0.1902, -0.1011, -0.8106, 1.6085, 0.2099, -0.2353, 0.2866, 0.733]
+helios = "mosaic"
+
 [[file]]
 id = "panasonic-dc-s5m2-rw2-12bit-3-2"
 maker = "Panasonic"
@@ -845,7 +1113,7 @@ format = "RW2"
 decoder = "rw2"
 why = "Panasonic v8 compression (newest RW2 decoder)."
 expect = "decode"
-tier = "heavy"
+tier = "pending"
 pixls_id = 7792
 filename = "Panasonic - DC-S5M2 - 12bit (3:2).RW2"
 url = "https://raw.pixls.us/getfile.php/7792/nice/Panasonic%20-%20DC-S5M2%20-%2012bit%20(3:2).RW2"
@@ -880,6 +1148,16 @@ exif_model = "DC-FZ10002"
 rawler_name = "Panasonic / DC-FZ1000M2"
 rawspeed_name = "Panasonic / DC-FZ10002"
 
+[file.check]
+camera = "Panasonic / DC-FZ1000M2"
+sensor = "5488x3664"
+crop = "5472x3648+8+8"
+cfa = "GBRG"
+black = [143.0, 143.0, 143.0, 143.0]
+white = 4095.0
+matrix = [0.9803, -0.4185, -0.0992, -0.4066, 1.2578, 0.1628, -0.0838, 0.1824, 0.5288]
+helios = "mosaic"
+
 [[file]]
 id = "leica-d-lux-typ-109-rwl-1-1"
 maker = "Leica"
@@ -902,6 +1180,16 @@ exif_model = "D-LUX (Typ 109)"
 rawler_name = "Leica / D-LUX (Typ 109)"
 rawspeed_name = "Leica / D-LUX (Typ 109)"
 
+[file.check]
+camera = "Leica / D-LUX (Typ 109)"
+sensor = "3248x3104"
+crop = "3088x3088+8+8"
+cfa = "BGGR"
+black = [143.0, 143.0, 143.0, 143.0]
+white = 4095.0
+matrix = [0.8844, -0.3538, -0.0768, -0.3709, 1.1762, 0.22, -0.0698, 0.1792, 0.522]
+helios = "mosaic"
+
 [[file]]
 id = "pentax-k10d-pef-please-upload-full-set-dng-pef"
 maker = "Pentax"
@@ -912,7 +1200,7 @@ format = "PEF"
 decoder = "pef"
 why = "Old PEF with Pentax Huffman compression."
 expect = "decode"
-tier = "core"
+tier = "pending"
 pixls_id = 2239
 filename = "Pentax - K10D - 12bit 12bit compressed (3:2).PEF"
 url = "https://raw.pixls.us/getfile.php/2239/nice/Pentax%20-%20K10D%20-%2012bit%2012bit%20compressed%20(3:2).PEF"
@@ -947,6 +1235,16 @@ exif_model = "PENTAX K-r         "
 rawler_name = "Pentax / K-r"
 rawspeed_name = "Pentax / K-r"
 
+[file.check]
+camera = "Pentax / K-r"
+sensor = "4352x2868"
+crop = "4288x2848+10+10"
+cfa = "BGGR"
+black = [64.0, 63.0, 63.0, 64.0]
+white = 3964.0
+matrix = [0.9895, -0.3077, -0.085, -0.5304, 1.3035, 0.2521, -0.0883, 0.1768, 0.6936]
+helios = "mosaic"
+
 [[file]]
 id = "pentax-k-r-dng-12bit-3-2"
 maker = "Pentax"
@@ -969,6 +1267,16 @@ exif_model = "PENTAX K-r         "
 rawler_name = "Pentax / K-r"
 rawspeed_name = "Pentax / K-r"
 
+[file.check]
+camera = "Pentax / K-r"
+sensor = "4352x2868"
+crop = "4288x2848+10+10"
+cfa = "BGGR"
+black = [64.0, 63.0, 63.0, 64.0]
+white = 4030.0
+matrix = [1.074783, -0.314407, -0.156021, -0.585693, 1.444366, 0.14595, -0.173065, 0.238724, 0.736877]
+helios = "mosaic"
+
 [[file]]
 id = "pentax-k-3-mark-iii-monochrome-pef-pentax-k3-iii-monochrome-pef"
 maker = "Pentax"
@@ -979,7 +1287,7 @@ format = "PEF"
 decoder = "pef"
 why = "Monochrome sensor in a PEF (no CFA)."
 expect = "decode"
-tier = "heavy"
+tier = "pending"
 pixls_id = 7082
 filename = "Pentax - K-3 Mark III Monochrome - 14bit (3:2).PEF"
 url = "https://raw.pixls.us/getfile.php/7082/nice/Pentax%20-%20K-3%20Mark%20III%20Monochrome%20-%2014bit%20(3:2).PEF"
@@ -1014,6 +1322,16 @@ exif_model = "GR                                                             "
 rawler_name = "(EXIF passthrough) RICOH IMAGING COMPANY, LTD. / GR"
 rawspeed_name = "Ricoh / GR"
 
+[file.check]
+camera = "RICOH IMAGING COMPANY, LTD. / GR"
+sensor = "4960x3280"
+crop = "4928x3264+8+8"
+cfa = "RGGB"
+black = [0.0, 0.0, 0.0, 0.0]
+white = 4095.0
+matrix = [0.5329, -0.1459, -0.039, -0.5407, 1.293, 0.2768, -0.1119, 0.1772, 0.6046]
+helios = "mosaic"
+
 [[file]]
 id = "leica-m8-dng-8bit-8bit-uncompressed-3-2"
 maker = "Leica"
@@ -1035,6 +1353,16 @@ exif_make = "Leica Camera AG"
 exif_model = "M8 Digital Camera"
 rawler_name = "Leica / M8"
 rawspeed_name = "Leica / M8"
+
+[file.check]
+camera = "Leica / M8"
+sensor = "3920x2638"
+crop = "3916x2634+2+2"
+cfa = "RGGB"
+black = [0.0, 0.0, 0.0, 0.0]
+white = 16383.0
+matrix = [0.7675, -0.2195, -0.0305, -0.586, 1.4118, 0.1857, -0.2425, 0.4007, 0.6578]
+helios = "mosaic"
 
 [[file]]
 id = "leica-m-monochrom-typ-246-dng-12bit-3-2"
@@ -1058,6 +1386,16 @@ exif_model = "LEICA M MONOCHROM (Typ 246)"
 rawler_name = "Leica / M Monochrom (Typ 246)"
 rawspeed_name = "Leica / M Monochrom (Typ 246)"
 
+[file.check]
+camera = "Leica / M Monochrom (Typ 246)"
+sensor = "5984x4000"
+crop = "5976x3992+4+4"
+cfa = "linear"
+black = [0.0, 0.0, 0.0, 0.0]
+white = 3750.0
+matrix = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+helios = "not a mosaic (linear or monochrome raws are not supported yet)"
+
 [[file]]
 id = "hasselblad-h3d-3fr-with-39-mp-back-and-150mm-hc-attached"
 maker = "Hasselblad"
@@ -1068,7 +1406,7 @@ format = "3FR"
 decoder = "tfr"
 why = "3FR format; naming: rawler \"H4D-H3D\", rawspeed \"H3D\"."
 expect = "decode"
-tier = "heavy"
+tier = "pending"
 pixls_id = 2851
 filename = "Hasselblad - H3D - 16bit (4:3).3FR"
 url = "https://raw.pixls.us/getfile.php/2851/nice/Hasselblad%20-%20H3D%20-%2016bit%20(4:3).3FR"
@@ -1090,7 +1428,7 @@ format = "FFF"
 decoder = "tfr"
 why = "FFF (Phocus-exported) format. Heavy file."
 expect = "decode"
-tier = "heavy"
+tier = "pending"
 pixls_id = 1640
 filename = "Hasselblad - H5D-40 - 16bit (4:3).fff"
 url = "https://raw.pixls.us/getfile.php/1640/nice/Hasselblad%20-%20H5D-40%20-%2016bit%20(4:3).fff"
@@ -1112,7 +1450,7 @@ format = "IIQ"
 decoder = "iiq"
 why = "IIQ S (lossy-ish small IIQ); naming: rawler \"H 25\", rawspeed \"H25\"."
 expect = "decode"
-tier = "core"
+tier = "pending"
 pixls_id = 4220
 filename = "Phase One - H 25 - IIQ S (4:3).IIQ"
 url = "https://raw.pixls.us/getfile.php/4220/nice/Phase%20One%20-%20H%2025%20-%20IIQ%20S%20(4:3).IIQ"
@@ -1135,7 +1473,7 @@ format = "MOS"
 decoder = "mos"
 why = "Leaf MOS lossless compressed."
 expect = "decode"
-tier = "core"
+tier = "pending"
 pixls_id = 3196
 filename = "Leaf - Aptus 22 - 16bit (4:3).mos"
 url = "https://raw.pixls.us/getfile.php/3196/nice/Leaf%20-%20Aptus%2022%20-%2016bit%20(4:3).mos"
@@ -1158,7 +1496,7 @@ format = "SRW"
 decoder = "srw"
 why = "SRW compressed (Samsung v2/v3 compression)."
 expect = "decode"
-tier = "core"
+tier = "pending"
 pixls_id = 3668
 filename = "Samsung - NX500 - 12bit 12bit normal compression (3:2).SRW"
 url = "https://raw.pixls.us/getfile.php/3668/nice/Samsung%20-%20NX500%20-%2012bit%2012bit%20normal%20compression%20(3:2).SRW"
@@ -1181,7 +1519,7 @@ decoder = "x3f"
 why = "Foveon X3F: rawler 0.8 has an X3F parser but no Sigma camera definitions; expected-failure case."
 expect = "unsupported"
 expect_note = "X3F: rawler 0.8 has no Sigma camera definitions, check_supported fails"
-tier = "core"
+tier = "pending"
 pixls_id = 1116
 filename = "Sigma - DP1 - 3:2.X3F"
 url = "https://raw.pixls.us/getfile.php/1116/nice/Sigma%20-%20DP1%20-%203:2.X3F"
@@ -1204,7 +1542,7 @@ format = "DNG"
 decoder = "dng"
 why = "Tiny cinema-mode DNG from the Sigma fp (non-CFA-standard sizes)."
 expect = "decode"
-tier = "core"
+tier = "pending"
 pixls_id = 7278
 filename = "Sigma - fp - 12bit (16:9).DNG"
 url = "https://raw.pixls.us/getfile.php/7278/nice/Sigma%20-%20fp%20-%2012bit%20(16:9).DNG"
@@ -1226,7 +1564,7 @@ format = "KDC"
 decoder = "kdc"
 why = "KDC format; naming: raw.pixls.us lists the raw EXIF model, both libraries normalise to \"P712\"."
 expect = "decode"
-tier = "core"
+tier = "pending"
 pixls_id = 2345
 filename = "Kodak - KODAK P712 ZOOM DIGITAL CAMERA - NAN.KDC"
 url = "https://raw.pixls.us/getfile.php/2345/nice/Kodak%20-%20KODAK%20P712%20ZOOM%20DIGITAL%20CAMERA%20-%20NAN.KDC"
@@ -1248,7 +1586,7 @@ format = "MRW"
 decoder = "mrw"
 why = "Old MRW format; canonical name of the Dynax/Maxxum/Alpha 7D family."
 expect = "decode"
-tier = "core"
+tier = "pending"
 pixls_id = 1826
 filename = "Minolta - Dynax 7D - 3:2.MRW"
 url = "https://raw.pixls.us/getfile.php/1826/nice/Minolta%20-%20Dynax%207D%20-%203:2.MRW"
@@ -1270,7 +1608,7 @@ format = "MRW"
 decoder = "mrw"
 why = "Same body as Dynax 7D: rawspeed canonical \"Dynax 7D\" + alias, rawler \"ALPHA-7\"."
 expect = "decode"
-tier = "core"
+tier = "pending"
 pixls_id = 3919
 filename = "Minolta - ALPHA-7 DIGITAL - 3:2.MRW"
 url = "https://raw.pixls.us/getfile.php/3919/nice/Minolta%20-%20ALPHA-7%20DIGITAL%20-%203:2.MRW"
@@ -1306,6 +1644,16 @@ exif_model = "iPhone 12 Pro"
 rawler_name = "(EXIF passthrough) Apple / iPhone 12 Pro"
 rawspeed_name = "(not in cameras.xml: darktable passes EXIF through)"
 
+[file.check]
+camera = "Apple / iPhone 12 Pro"
+sensor = "4032x3024x3"
+crop = "4032x3024+0+0"
+cfa = "linear"
+black = [0.0, 0.0, 0.0, 0.0]
+white = 65535.0
+matrix = [0.914543, -0.322228, -0.126225, -0.428868, 1.309541, 0.094676, -0.106292, 0.235045, 0.430733]
+helios = "not a mosaic (linear or monochrome raws are not supported yet)"
+
 [[file]]
 id = "google-pixel-7-pro-dng-16bit-4-3"
 maker = "Google"
@@ -1327,6 +1675,16 @@ exif_make = "Google"
 exif_model = "Pixel 7 Pro"
 rawler_name = "(EXIF passthrough) Google / Pixel 7 Pro"
 rawspeed_name = "(not in cameras.xml: darktable passes EXIF through)"
+
+[file.check]
+camera = "Google / Pixel 7 Pro"
+sensor = "3882x2924"
+crop = "3866x2908+8+8"
+cfa = "BGGR"
+black = [1024.109375, 1024.3125, 1024.308594, 1024.132813]
+white = 16368.0
+matrix = [2.7546, -1.3066, -0.4238, -0.824, 1.5947, 0.0354, 0.0473, -0.1734, 0.8987]
+helios = "mosaic"
 
 [[file]]
 id = "adobe-dng-converter-canon-eos-5d-mark-iii-dng-pls-keep-unique-compres"
@@ -1351,3 +1709,12 @@ exif_model = "Canon EOS 5D Mark III"
 rawler_name = "Canon / EOS 5D Mark III"
 rawspeed_name = "Canon / EOS 5D Mark III"
 
+[file.check]
+camera = "Canon / EOS 5D Mark III"
+sensor = "5760x3840x3"
+crop = "5760x3840+0+0"
+cfa = "linear"
+black = [0.0, 0.0, 0.0, 0.0]
+white = 255.0
+matrix = [0.6722, -0.0635, -0.0963, -0.4287, 1.246, 0.2028, -0.0908, 0.2162, 0.5668]
+helios = "not a mosaic (linear or monochrome raws are not supported yet)"

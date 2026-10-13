@@ -20,3 +20,8 @@ acent = "acent"
 # colorcorrection's parameter and vkdt's highlights module.
 ccorrect = "ccorrect"
 hilights = "hilights"
+# The raw corpus (tests/raw-corpus.toml): Leica's camera name, rawler's
+# error message as it spells it, and an id cut from raw.pixls.us's file name.
+monochrom = "monochrom"
+efficency = "efficency"
+compres = "compres"

@@ -1866,6 +1866,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "helios-corpus"
+version = "0.0.1"
+dependencies = [
+ "blake3",
+ "helios-load",
+ "rawler",
+ "serde",
+ "toml 1.1.8+spec-1.1.0",
+]
+
+[[package]]
 name = "helios-decision"
 version = "0.0.1"
 dependencies = [

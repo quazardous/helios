@@ -1,12 +1,100 @@
-# Raw corpus: decoder and camera-name regression set (draft)
+# Raw corpus: decoder and camera-name regression set
 
 Companion to `../tests/raw-corpus.toml` (59 files, 21 maker labels, 19 container
-formats). Answers pitfalls 18 (decoder regressions on upstream bumps) and 20
+formats, 38 of them in the corpus today). Answers pitfalls 18 (decoder regressions on upstream bumps) and 20
 (camera identity normalisation) of `docs/darktable-pitfalls/library-files.md`.
 (The brief said items 7 and 8, but in that file those cover XMP sync and
 startup scans. The corpus items are 18 and 20, and "Top 5" point 4.)
 
-Data gathered 2026-10-12 from metadata only. No raw file was downloaded.
+The selection was made on 2026-10-12 from metadata only; the files of the
+`core` tier were downloaded and the checks recorded on 2026-10-13 (section 0).
+
+## 0. Running the checks
+
+The raw files are never committed. `tools/bench/fill-corpus.sh <dir>`
+downloads the `core` files of the manifest into a directory, as
+`<id>.<ext>`, and checks each sha256. It is idempotent: a file already there
+with the right hash is kept, a wrong or partial one is fetched again, and a
+file the manifest no longer lists is removed. It reads each file's licence
+again from raw.pixls.us before fetching it and skips (and fails on) anything
+that is not CC0. It fails too when the directory passes 3 GB.
+
+The checks live in the `helios-corpus` crate. For every `core` file they
+assert the `[file.check]` table that follows its entry in the manifest:
+
+| field | what |
+|---|---|
+| `expect` | `decode`, or `unsupported`: the decoder must then fail with an error containing `error`. A panic fails either way. |
+| `camera` | `"Make / Model"`, the normalised names Helios's loader keeps (rawler's clean names, trimmed) |
+| `sensor` | full sensor `WxH` (`WxHxC` with `C` components per photosite) |
+| `crop` | `WxH+X+Y`: the crop, else the active area |
+| `cfa` | the filter pattern seen from the crop's corner, as Helios shifts it; `linear` or `monochrome` without one |
+| `black`, `white` | the 2 x 2 photosites at the crop's corner, and the white level |
+| `matrix` | XYZ to camera, D65 when the camera has it |
+| `helios` | `mosaic` when Helios's loader accepts the file, else a part of its error |
+
+For a mosaic, `cfa`, `black`, `white` and `matrix` are what the loader hands
+the modules (black measured on the masked photosites, as darktable does);
+for other raws, what rawler reports. Levels and matrices compare to 1e-4
+(relative).
+
+A thumbnail is demosaiced too: the average of each filter colour over
+blocks of whole CFA periods, at most 64 pixels on the long edge, black to
+white mapped to 0..1, a square-root curve, 8 bits. Its 64-bit BLAKE3 hash is
+compared with `../tests/raw-corpus.thumbs.toml`, which only `--bless`
+rewrites. Any decoder change that moves a pixel enough to change a block
+average shows there.
+
+**On the bench box.** The volume `raw-corpus` (declared in
+`tools/bench/Benchfile`) holds the files, about 590 MB; fill or refill it
+after a manifest change with `provision raw-corpus branch=<branch>` (a new
+version, switched to only on success). The job mounts it read-only:
+
+```bash
+cargo xtask bench-remote raw-corpus                 # the current branch
+cargo xtask bench-remote raw-corpus --push          # the working tree
+cargo xtask bench-remote raw-corpus bless=yes       # accept the thumbnails
+```
+
+Its `/out` holds `junit.xml`, `summary.md`, `observed.toml` (what each file
+gave, as `[file.check]` tables to paste into the manifest), `thumbs/<id>.ppm`
+to look at, and, with `bless=yes`, the new `raw-corpus.thumbs.toml` to
+commit.
+
+**Locally.** The same checks run in `cargo test`, against the directory in
+`HELIOS_RAW_CORPUS`; without it they are skipped, saying so, and `cargo test`
+stays offline:
+
+```bash
+tools/bench/fill-corpus.sh ~/raw-corpus
+HELIOS_RAW_CORPUS=~/raw-corpus cargo test -p helios-corpus
+cargo run -p helios-corpus -- --dir ~/raw-corpus --out /tmp/corpus [--bless]
+```
+
+**Adding a file.** Switch its `tier` from `pending` to `core`, refill, run
+the checks: they fail with "no expectation" and the observed values. Check
+those values against another reader (exiftool, darktable), paste its table
+from `observed.toml`, bless its thumbnail.
+
+**What the first run found** (rawler 0.8.0):
+
+- Helios kept rawler's passthrough names untrimmed: the Ricoh GR DNG came
+  out as `GR` followed by 62 spaces. The loader now trims them.
+- Four `decode` files are not mosaics, and Helios's loader refuses them with
+  "not a mosaic": the 5D Mark IV sRAW (3 components), the iPhone 12 Pro
+  ProRAW and the Adobe lossy DNG (LinearRaw), the Leica M Monochrom (Typ 246)
+  (rawler reports it as LinearRaw, not BlackIsZero), and the ILCE-1M2
+  lossless small size, which rawler also decodes as a 3-component linear
+  image, not a mosaic.
+- Every name rawler reported matched the manifest's predictions
+  (`rawler_name`), and the K-r PEF and DNG give the same camera name; their
+  white levels differ (3964 in the PEF, 4030 in the DNG) and so do their
+  matrices.
+- The two `unsupported` files fail cleanly: the Z50_2 High Efficiency NEF
+  ("NEF compression Some(HighEfficency) is not supported") and the
+  HASSELBLAD Lunar ARW ("Couldn't find a decoder"). No file panicked.
+- The levels, crops and matrices of the DNGs were checked against exiftool;
+  the other files' values are rawler's, recorded as the baseline.
 
 ## 1. Licence
 
@@ -92,32 +180,36 @@ These rules guided the choices:
   Each of these must fail cleanly with an error. A panic or a wrong image
   counts as a failure.
 - **Smallest equivalent file.** Sizes run from 2.85 MB to 100.5 MB.
-  - **Core tier** (53 files, about 729 MB): runs on every rawler bump.
-  - **Heavy tier** (6 files over 30 MB, about 328 MB): runs on releases.
-    The files are GFX 100, H3D, H5D-40, ILCE-7RM5, DC-S5M2 and K-3 III Mono.
+  - **`core` tier** (38 files, 591 MB): in the corpus, checked by every run.
+    Canon (7), Nikon (7), Sony (5 with the Lunar), Fujifilm (5, X-Trans
+    included), Olympus/OM (3), Panasonic and Leica's RWL (3), Pentax (2),
+    Leica DNG (2), Ricoh (1), phones (2), Adobe DNG (1).
+  - **`pending` tier** (21 files, about 493 MB): catalogued, not fetched yet.
+    It holds the heavy files (GFX 100, H3D, H5D-40, ILCE-7RM5, DC-S5M2, K-3
+    III Mono), the rarer makes (Phase One, Leaf, Samsung, Sigma, Kodak,
+    Minolta) and a few second samples (D1X, D100, R5, E-510, LX1, K10D,
+    S2Pro). The whole manifest would make a 1.1 GB volume.
 - **Not covered:** raw.pixls.us has **no JPEG XL DNG** (DNG 1.7, newer ProRAW
   and Pixel files). rawler 0.8 has a jxl-oxide path for compression 52546
   that this corpus cannot test, so it needs a separate source.
   Nikon HE\* and Z8/Z9 HE are covered only by the one HE expected-failure.
   No Phase One IIQ L sample was small enough. H 25 IIQ S covers IIQ.
 
-### Test assertions per file (suggested)
+### Test assertions per file
 
-For each file, the corpus test should assert:
+Section 0 lists what the checks assert today. Still to add, from the first
+plan:
 
 - The decoder name and rawler version.
-- Width, height and cpp.
-- The CFA pattern after Helios shifts it to the crop.
-- The crop and active area.
-- Black and white levels, and WB coefficients.
-- Orientation.
-- `make`/`model` as reported by rawler, and the canonical id after the
-  mapping table.
-- A hash of the decoded mosaic.
+- WB coefficients and orientation.
+- The canonical id after the camera identity table (section 4), which does
+  not exist yet: today `camera` is rawler's clean name.
+- A hash of the full mosaic (the thumbnail hash covers the decode at a
+  coarser grain).
 
-Store the expected values next to the manifest and regenerate them only
-deliberately when rawler is bumped. This follows the
-`.analyze.yaml` + `.digest.txt` pattern described in section 3.
+The expected values live next to the manifest and change only deliberately
+when rawler is bumped. This follows the `.analyze.yaml` + `.digest.txt`
+pattern described in section 3.
 
 ## 3. rawler's own corpus (do not duplicate)
 
@@ -205,7 +297,8 @@ c835b05, 2026-07-28), joining on the exact EXIF make/model:
     reports the canonical body name with the regional name as alias.
   - **24 differ outright** (some differ in make, some in model).
 
-The full list is in `meta/name_diffs.txt`. Examples:
+The full list was kept with the selection's working data, not in the
+repository (see "Files" below). Examples:
 
 | EXIF make / model | rawler reports | rawspeed canonical (alias) |
 |---|---|---|
@@ -261,16 +354,15 @@ manifest, `rawler_name` and `rawspeed_name` are predictions from the catalog
 data. The corpus test must assert the names rawler really reports at decode
 time.
 
-## Files in this folder
+## Files
 
-- `../tests/raw-corpus.toml`: the manifest (59 `[[file]]` entries, all CC0, with sha256
-  from raw.pixls.us).
-- `meta/repo_all.json`: the raw.pixls.us repository JSON.
-  `meta/all.tsv` is the same data flattened.
-- `meta/select.tsv` lists the selection rules, and `meta/chosen.tsv` holds
-  the resolved rows.
-- `meta/exif/*.txt` holds the raw.pixls.us exiv2 dumps (text) for the
-  selected files. `meta/exifnames.tsv` has the exact EXIF strings.
-- `meta/name_diffs.txt` holds the rawler vs rawspeed name divergences.
-- `scripts/`: the parse, resolve, compare-names and generate scripts
-  (Python, standard library only).
+- `../tests/raw-corpus.toml`: the manifest (59 `[[file]]` entries, all CC0,
+  with sha256 from raw.pixls.us, and a `[file.check]` table per `core` file).
+- `../tests/raw-corpus.thumbs.toml`: the thumbnail hashes, by file id.
+- `../tools/bench/fill-corpus.sh`: downloads the `core` files.
+- `../crates/helios-corpus`: the checks, their report, and the local test.
+
+The selection's working data (the raw.pixls.us repository JSON, its exiv2
+dumps, the name comparison) was not kept in the repository: section 4 holds
+its results, and the repository JSON can be fetched again from the URL in
+section 1.

@@ -177,6 +177,35 @@ env = { CARGO_NET_OFFLINE = "true" }
 mounts = { "egui-pop-target/${egui_pop:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git" }
 timeout = "1h"
 
+# ---------------------------------------------------------------- raw corpus
+# The decoder and camera-name regression corpus (docs/raw-corpus.md): the
+# "core" raws of tests/raw-corpus.toml, CC0 files from raw.pixls.us checked
+# against their sha256, in a volume of their own (under 3 GB). Fill it, or
+# refill it after the manifest changes, with
+# `provision raw-corpus branch=<branch>`: each provision builds a new
+# version and switches to it only on success.
+[volumes.raw-corpus]
+about = "the raw regression corpus: CC0 raws from raw.pixls.us"
+readers = []
+cwd = "/work/helios"
+provision = "tools/bench/fill-corpus.sh /volume"
+timeout = "30m"
+
+# every corpus raw decodes, names its camera and keeps its sensor
+# description and thumbnail; JUnit, a summary, what each file gave and the
+# thumbnails in /out. `bless=yes` accepts the thumbnails as they are now:
+# the new tests/raw-corpus.thumbs.toml lands in /out, to commit.
+[jobs.raw-corpus]
+cores = 4
+memory = "4g"
+cwd = "/work/${src:-helios}"
+command = """mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && \
+flag=; [ "${bless:-no}" = yes ] && flag=--bless; \
+cargo run -q --locked -p helios-corpus -- --dir /corpus --out /out $flag"""
+env = { CARGO_NET_OFFLINE = "true" }
+mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", raw-corpus = "/corpus" }
+timeout = "30m"
+
 # ---------------------------------------------------------------- timings
 # alone on the machine, so the numbers compare from one run to the next
 

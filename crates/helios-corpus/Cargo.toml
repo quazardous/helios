@@ -1,0 +1,18 @@
+[package]
+name = "helios-corpus"
+description = "Helios's raw corpus checks: every raw of tests/raw-corpus.toml decodes, names its camera as expected and keeps its sensor description and thumbnail"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+helios-load.workspace = true
+blake3.workspace = true
+serde.workspace = true
+toml = "1"
+# LGPL-2.1, compatible with GPL-3.0-or-later; the same as helios-load's.
+rawler = { version = "0.8", default-features = false }
+
+[lints]
+workspace = true
