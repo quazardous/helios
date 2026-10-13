@@ -10,9 +10,12 @@
 //!   the edit as it was opened ("before"), sharing one engine and its
 //!   cache. An edit (a value of the store moved) shows the new graph and
 //!   the viewport renders again.
-//! - **The display transform** is a matrix from the working space (linear
-//!   Rec.2020) to the display's primaries (sRGB for now), clipped and
-//!   encoded by egui-pop: in its shader on the GPU path.
+//! - **The display transform** ([`HeliosDisplay`]) takes the working
+//!   space (linear Rec.2020) to the encoding egui-pop draws for: the
+//!   target's primaries, clamped to its range, through its transfer (in
+//!   egui-pop's shader on the GPU path). sRGB clips what lies outside the
+//!   sRGB gamut; a wider target (Rec.2020 with gamma 2.2, extended sRGB)
+//!   keeps it.
 //! - **The view** (zoom, centre, fit) and the comparison live in the value
 //!   store at `view/viewport/*`, so keys, the palette and agents move them
 //!   like any value. The viewport's View signals drive them: a drag is one
@@ -28,7 +31,9 @@
 use std::sync::{Arc, Mutex, PoisonError};
 
 use egui::Ui;
-use egui_pop::viewport::display::{DisplayTarget, DisplayTransform, Matrix};
+use egui_pop::viewport::display::{
+    DisplayTarget, DisplayTransform, Primaries, Stage, SurfaceFormat, Transfer,
+};
 use egui_pop::viewport::source::{Readout, TileSource};
 use egui_pop::viewport::tiles::{exact_scale, scaled_size};
 use egui_pop::viewport::view::{MAX_ZOOM, MIN_ZOOM};
@@ -78,29 +83,81 @@ pub fn declare(store: &mut Store) {
     );
 }
 
-/// Working space (linear Rec.2020) to the display's primaries (sRGB for
-/// now; a monitor profile later), by rows.
+/// Working space (linear Rec.2020) to sRGB primaries, by rows.
 pub fn display_matrix() -> [[f32; 3]; 3] {
+    working_to(Primaries::Srgb)
+}
+
+/// Working space (linear Rec.2020) to `primaries`, by rows: Helios's
+/// own matrices for sRGB and Rec.2020, egui-pop's (from the
+/// chromaticities) for the others.
+pub fn working_to(primaries: Primaries) -> [[f32; 3]; 3] {
     use helios_photo::color;
+    let to_xyz = match primaries {
+        Primaries::Srgb => color::SRGB_TO_XYZ,
+        Primaries::Bt2020 => color::REC2020_TO_XYZ,
+        other => other.to_xyz(),
+    };
     let m = color::mul(
-        &color::inverse(&color::SRGB_TO_XYZ).expect("invertible primaries"),
+        &color::inverse(&to_xyz).expect("invertible primaries"),
         &color::REC2020_TO_XYZ,
     );
     m.map(|row| [row[0] as f32, row[1] as f32, row[2] as f32])
 }
 
-/// Helios's display transform: the working space to the display's
-/// primaries, then egui-pop's clamp and encoding for the window's target.
-pub fn display_transform() -> Matrix {
-    Matrix(display_matrix())
+/// The arithmetic of the display transform for a target taken as it is
+/// (no fallback): the working space to the target's primaries, clamped
+/// to the target's range (`[0, 1]` for SDR, negatives and headroom kept
+/// by the extended transfers), encoded with its transfer.
+pub fn display_stage(target: &DisplayTarget) -> Stage {
+    Stage {
+        matrix: working_to(target.primaries),
+        clamp: target.range(),
+        transfer: target.transfer,
+        white_nits: target.sdr_white_nits,
+    }
+}
+
+/// Helios's display transform: egui-pop gives it the target the window
+/// draws for, and it encodes for that target, so a target wider than sRGB
+/// is no longer clipped to sRGB. A target egui-pop cannot draw falls back
+/// to sRGB there ([`DisplayTarget::effective`]).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct HeliosDisplay;
+
+impl DisplayTransform for HeliosDisplay {
+    fn stage(&self, target: &DisplayTarget) -> Stage {
+        display_stage(&target.effective())
+    }
+}
+
+/// Helios's display transform, for egui-pop's viewport.
+pub fn display_transform() -> HeliosDisplay {
+    HeliosDisplay
+}
+
+/// Rec.2020 primaries with a 2.2 power, SDR, on 10 bits: the encoding a
+/// wide-gamut preview asks the compositor for (what Wayland's
+/// colour-management protocol names `bt2020` and `gamma22`).
+pub fn rec2020_gamma22() -> DisplayTarget {
+    DisplayTarget {
+        primaries: Primaries::Bt2020,
+        transfer: Transfer::Gamma22,
+        surface_format: SurfaceFormat::Rgb10a2Unorm,
+        ..DisplayTarget::srgb()
+    }
+}
+
+/// The display transform on the CPU for a target as it is: encoded
+/// floats (0..1 for SDR, beyond for the extended transfers).
+pub fn display_for(target: &DisplayTarget, rgb: [f32; 3]) -> [f32; 3] {
+    display_stage(target).encode(rgb)
 }
 
 /// The display transform on the CPU, for an sRGB display: for tests and
 /// for pictures of the scene.
 pub fn display(rgb: [f32; 3]) -> [u8; 3] {
-    display_transform()
-        .stage(&DisplayTarget::srgb())
-        .encode_8bit(rgb)
+    display_stage(&DisplayTarget::srgb()).encode_8bit(rgb)
 }
 
 fn float(store: &Store, path: &str) -> f64 {
@@ -202,7 +259,7 @@ impl Default for Viewport {
         );
         let engine = Arc::new(Engine::with_budget(Arc::new(Bus::new()), budget));
         let mut state = ViewportState::new();
-        state.set_display_transform(Arc::new(display_transform()));
+        state.set_display_transform(Arc::new(HeliosDisplay));
         let stats = Arc::<Stats>::default();
         let after = EngineSource::new(
             "helios-viewport",
@@ -768,5 +825,93 @@ impl Viewport {
                 _ => {}
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use egui_pop::viewport::display::{ColorSpace, TargetSource};
+    use helios_photo::color;
+
+    use super::*;
+
+    /// A green of the working space outside the sRGB gamut (inside
+    /// Rec.2020's).
+    const WIDE_GREEN: [f32; 3] = [0.1, 0.6, 0.05];
+
+    /// An encoded colour back to the working space: the transfer
+    /// undone, then the target's primaries back to linear Rec.2020.
+    fn back(target: &DisplayTarget, encoded: [f32; 3]) -> [f32; 3] {
+        let linear =
+            encoded.map(|v| f64::from(target.transfer.decode_at(v, target.sdr_white_nits)));
+        let m = working_to(target.primaries).map(|row| row.map(f64::from));
+        let inv = color::inverse(&m).expect("invertible");
+        color::apply(&inv, linear).map(|v| v as f32)
+    }
+
+    fn distance(a: [f32; 3], b: [f32; 3]) -> f32 {
+        (0..3).map(|i| (a[i] - b[i]).abs()).fold(0.0, f32::max)
+    }
+
+    #[test]
+    fn a_wide_green_is_clipped_in_srgb() {
+        let srgb = DisplayTarget::srgb();
+        let m = display_stage(&srgb).matrix;
+        // Outside sRGB: a negative red before the clamp.
+        let red = m[0][0] * WIDE_GREEN[0] + m[0][1] * WIDE_GREEN[1] + m[0][2] * WIDE_GREEN[2];
+        assert!(red < -0.1, "{red}");
+        let shown = display_for(&srgb, WIDE_GREEN);
+        assert!(shown[0].abs() < f32::EPSILON, "red clipped to 0: {shown:?}");
+        assert!(
+            distance(back(&srgb, shown), WIDE_GREEN) > 0.05,
+            "sRGB cannot give the colour back"
+        );
+    }
+
+    #[test]
+    fn a_wide_green_is_kept_in_rec2020_gamma_2_2() {
+        let wide = rec2020_gamma22();
+        let shown = display_for(&wide, WIDE_GREEN);
+        for (v, w) in shown.iter().zip(WIDE_GREEN) {
+            assert!((v - w.powf(1.0 / 2.2)).abs() < 1e-5, "{shown:?}");
+        }
+        assert!(distance(back(&wide, shown), WIDE_GREEN) < 1e-4);
+        // The Rec.2020 primaries themselves stay pure.
+        assert!(distance(display_for(&wide, [0.0, 1.0, 0.0]), [0.0, 1.0, 0.0]) < 1e-4);
+    }
+
+    #[test]
+    fn extended_srgb_keeps_the_colour_as_negatives() {
+        let ext = DisplayTarget::for_color_space(
+            ColorSpace::ExtendedSrgb,
+            SurfaceFormat::Rgba16Float,
+            4.0,
+            TargetSource::Wsi,
+        );
+        assert!(ext.is_supported());
+        let shown = display_for(&ext, WIDE_GREEN);
+        assert!(shown[0] < 0.0, "{shown:?}");
+        assert!(distance(back(&ext, shown), WIDE_GREEN) < 1e-4);
+        // egui-pop's viewport hands this target to the transform as is.
+        assert_eq!(HeliosDisplay.stage(&ext), display_stage(&ext));
+    }
+
+    #[test]
+    fn srgb_white_and_black_are_unchanged() {
+        assert_eq!(display([1.0, 1.0, 1.0]), [255, 255, 255]);
+        assert_eq!(display([0.0, 0.0, 0.0]), [0, 0, 0]);
+        assert_eq!(display([0.5, 0.5, 0.5]), [188, 188, 188]);
+    }
+
+    #[test]
+    fn a_target_egui_pop_cannot_draw_falls_back_to_srgb() {
+        // No surface colour space is Rec.2020 with a 2.2 power: egui-pop
+        // draws sRGB instead, and so does the transform.
+        let wide = rec2020_gamma22();
+        assert!(!wide.is_supported());
+        assert_eq!(
+            HeliosDisplay.stage(&wide),
+            display_stage(&DisplayTarget::srgb())
+        );
     }
 }
