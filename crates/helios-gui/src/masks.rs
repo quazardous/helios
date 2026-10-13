@@ -825,8 +825,10 @@ impl Masks {
                 continue;
             }
             let mut o = overlay_of(member, point, mapping);
-            // A locked shape is shown, not edited.
-            if crate::mask_tree::is_locked(store, &member.node) {
+            // A locked shape is shown, not edited: no handles, and no
+            // point added on its edge.
+            let locked = crate::mask_tree::is_locked(store, &member.node);
+            if locked {
                 o.handles.clear();
             }
             let centre = centre_of(&member.params);
@@ -858,7 +860,7 @@ impl Masks {
                     faint.controls.push((member.outline.handles[i].at, h.at));
                 }
             }
-            if member.module == "mask_path" {
+            if member.module == "mask_path" && !locked {
                 edge = Some(member.outline.edge.clone());
             }
             self.overlays.push(o);

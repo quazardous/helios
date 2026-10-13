@@ -1,7 +1,8 @@
 //! Drawn masks on the viewport: shapes created by commands, keys and
 //! clicks, their handles dragged as one undo step, cancelled by Escape,
-//! snapped by Shift and Ctrl, path points added and removed, and the
-//! handles where `outline()` says at every zoom and scale.
+//! snapped by Shift and Ctrl, path points added and removed (not on a
+//! locked path), and the handles where `outline()` says at every zoom and
+//! scale.
 
 use egui::{Event, Key, Modifiers, PointerButton, Pos2, vec2};
 use egui_kittest::Harness;
@@ -357,6 +358,41 @@ fn path_points_are_added_on_the_edge_and_removed_with_delete() {
     }
     assert_eq!(path_len(&h, "path"), 3);
     assert_eq!(steps(&h), Vec::<String>::new());
+}
+
+#[test]
+fn a_locked_path_keeps_its_points() {
+    let mut h = harness_at(1.0);
+    run(
+        &mut h,
+        "mask.add.path",
+        json!({ "corners": [[300, 200], [800, 200], [800, 650], [300, 650]] }),
+    );
+    run(
+        &mut h,
+        "mask.member.lock",
+        json!({ "member": "path", "locked": true }),
+    );
+    assert_eq!(steps(&h), ["lock path"]);
+    // A double click on its edge adds no point.
+    let m = mapping(&h);
+    double_click_at(&mut h, m.image_to_screen([550.0, 200.0]));
+    h.step();
+    assert_eq!(path_len(&h, "path"), 4);
+    // Nor do commands add, remove or smooth one.
+    run(&mut h, "mask.point.add", json!({ "x": 550, "y": 200 }));
+    run(&mut h, "mask.point.remove", json!({ "point": 0 }));
+    run(&mut h, "mask.point.smooth", json!({ "point": 0 }));
+    assert_eq!(path_len(&h, "path"), 4);
+    assert_eq!(steps(&h), ["lock path"]);
+    // Unlocked, it takes points again.
+    run(
+        &mut h,
+        "mask.member.lock",
+        json!({ "member": "path", "locked": false }),
+    );
+    run(&mut h, "mask.point.add", json!({ "x": 550, "y": 200 }));
+    assert_eq!(path_len(&h, "path"), 5);
 }
 
 #[test]

@@ -196,6 +196,14 @@ pub fn compare_of(store: &Store) -> Compare {
     }
 }
 
+/// Refuses to edit a locked shape: its handles, its path's points.
+fn unlocked(store: &Store, node: &str) -> Result<(), String> {
+    if crate::mask_tree::is_locked(store, node) {
+        return Err(format!("`{node}` is locked"));
+    }
+    Ok(())
+}
+
 fn write(store: &mut Store, path: &str, value: Value, gesture: Option<GestureId>) {
     let mut set = Set::new(path, Change::To(value), Origin::User);
     set.gesture = gesture;
@@ -606,6 +614,7 @@ impl Viewport {
             }
             Command::PointAdd { at } => {
                 let m = self.path(store)?;
+                unlocked(store, &m.node)?;
                 let (points, n) = masks::inserted(&m.params, at)?;
                 let label = format!("add a point to {}", m.node);
                 Self::write_step(
@@ -620,6 +629,7 @@ impl Viewport {
             }
             Command::PointRemove { point } => {
                 let m = self.path(store)?;
+                unlocked(store, &m.node)?;
                 let n = point
                     .or_else(|| masks::point(store))
                     .ok_or("no path point is selected")?;
@@ -637,6 +647,7 @@ impl Viewport {
             }
             Command::PointSmooth { point, smooth } => {
                 let m = self.path(store)?;
+                unlocked(store, &m.node)?;
                 let n = point
                     .or_else(|| masks::point(store))
                     .ok_or("no path point is selected")?;
@@ -654,9 +665,7 @@ impl Viewport {
             }
             Command::Move { shape, handle, to } => {
                 let m = self.shape(store, shape.as_deref())?;
-                if crate::mask_tree::is_locked(store, &m.node) {
-                    return Err(format!("`{}` is locked", m.node));
-                }
+                unlocked(store, &m.node)?;
                 let writes = masks::drag_writes(&m.module, &handle, &m.params, to)?;
                 let label = format!("drag {} {}", m.node, handle.split('.').next().unwrap_or(""));
                 Self::write_step(store, &label, &origin, &m.node, writes)?;

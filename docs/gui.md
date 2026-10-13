@@ -612,7 +612,7 @@ selected module's mask network as a tree, on egui-pop's `TreeView`
   opacity off or back to full; its lock (`lock/<node>`, one undo step)
   keeps a member from moving, from leaving the mask and, for a shape,
   from being edited (no handles on the viewport, `mask.handle.move`
-  refused), and keeps a group's members where they are. Delete (with the tree
+  refused, no path point added, removed or smoothed), and keeps a group's members where they are. Delete (with the tree
   focused) takes the selected member out of its group. A member dragged
   before, after or into a group is rewired there, its opacity and
   inversion with it; a drop the network cannot take (beside the root,
@@ -632,8 +632,7 @@ with the image's edit; an undo across them may give a group's opacities
 and inversions to the members now on those ports. A deleted member stays
 in the network, unconnected (the graph cannot remove a node yet), and
 the Parameters panel still lists it. Labels and locks are not saved with
-the edit either; a lock does not reach a path's points (adding or
-removing one). A drawn shape's own opacity and inversion (its parameters) are
+the edit either. A drawn shape's own opacity and inversion (its parameters) are
 not shown in the tree, only its group's for it.
 
 ![The Masks panel beside the image](gui/mask-tree-wbox.png)
