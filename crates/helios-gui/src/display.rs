@@ -25,6 +25,17 @@ use serde_json::{Value as Json, json};
 
 use crate::viewport::rec2020_gamma22;
 
+/// The main window is built transparent (`ViewportBuilder::with_transparent`):
+/// the image's own surface on Wayland (egui-pop's `image_surface`) sits
+/// below the window and shows through a hole the viewport punches in the
+/// interface. Everything else stays opaque ([`CLEAR_COLOR`]).
+pub const TRANSPARENT_WINDOW: bool = true;
+
+/// What the window is cleared to before the interface is drawn: eframe's
+/// own dark grey, opaque, so the transparent window looks exactly as the
+/// opaque one did (eframe's default is translucent).
+pub const CLEAR_COLOR: egui::Color32 = egui::Color32::from_rgb(12, 12, 12);
+
 pub const PLUGIN: PluginId = PluginId::from_static("helios.display");
 
 /// The Wide-gamut preview setting, at `settings/display.wide-gamut-preview`.
@@ -126,6 +137,13 @@ mod tests {
         assert!(s["resolution"]["drawn"].as_str().unwrap().contains("sRGB"));
         assert!(s["resolution"]["reason"].is_string());
         assert_eq!(s["expected"]["encoding"], "sRGB");
+    }
+
+    #[test]
+    fn the_transparent_window_is_cleared_opaque() {
+        const { assert!(TRANSPARENT_WINDOW) };
+        assert_eq!(CLEAR_COLOR.a(), 255);
+        assert!((CLEAR_COLOR.to_normalized_gamma_f32()[3] - 1.0).abs() < f32::EPSILON);
     }
 
     #[test]

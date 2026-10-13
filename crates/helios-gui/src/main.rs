@@ -176,6 +176,10 @@ impl eframe::App for App {
         }
     }
 
+    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
+        helios_gui::display::CLEAR_COLOR.to_normalized_gamma_f32()
+    }
+
     fn on_exit(&mut self) {
         // egui-pop's exit: the workspace saved (`save_workspace`), then
         // the `app.exit` step saves the interface's settings and keys.
@@ -337,7 +341,10 @@ fn main() -> Result<(), String> {
             .with_min_inner_size([640.0, 400.0])
             // egui-pop's frame is Helios's by default (its `window.frame`
             // setting gives the system's back, and the window follows).
-            .with_decorations(false),
+            .with_decorations(false)
+            // The image's own surface on Wayland shows through the
+            // interface; the interface itself stays opaque (`clear_color`).
+            .with_transparent(helios_gui::display::TRANSPARENT_WINDOW),
         ..Default::default()
     };
     options.wgpu_options.wgpu_setup = helios_gui::shell::wgpu_setup(&gpu);
