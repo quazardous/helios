@@ -24,6 +24,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-10-13
+
+### Changed
+
+- The Masks panel names the module whose mask it shows, and an empty mask
+  now says that the module applies everywhere until a shape or a parametric
+  member limits it, instead of showing a lone row.
+- The Masks panel's buttons are translated and their hints give the keys
+  and gestures that do the same (F2, Delete, drag and drop, C, E, G and P on
+  the image); the delete button is now called Take out, as in the row's
+  menu, and warns that it is not an undo step yet.
+- Taking a group that holds members out of a mask now asks first, since its
+  members go with it and taking out cannot be undone yet. Shapes and empty
+  groups are still taken out at once.
+
+### Fixed
+
+- The Masks panel now shows a blur, feather or levels applied to a module's
+  whole mask on the mask's own row: everything that shapes the result is
+  listed.
+
 ## [0.6.0] - 2026-10-13
 
 ### Added
