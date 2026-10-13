@@ -16,12 +16,13 @@ const FORBIDDEN: &[&str] = &[
 ];
 
 /// Where the shell draws them: its menus' popups, the auxiliary windows
-/// of its areas and its frame. Dialogs, toasts, the palette and the
+/// of its areas and its frame (the `Frame` plugin, whose title bar keeps
+/// egui-pop's menu button). Dialogs, toasts, the palette and the
 /// settings window are egui-pop's.
 const SHELL: &[&str] = &[
     "crates/helios-gui/src/shell.rs",
     "crates/helios-gui/src/workbench.rs",
-    "crates/helios-gui/src/frame.rs",
+    "crates/helios-gui/src/plugins.rs",
 ];
 
 fn sources(dir: &Path, out: &mut Vec<PathBuf>) {

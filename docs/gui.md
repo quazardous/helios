@@ -269,7 +269,8 @@ Helios declares into it:
   the workspace's layout and profile, then egui-pop's `app.exit` step
   saves the interface's settings, keys and layout;
 - **the window's frame** (egui-pop's `FramePlugin`, 2026-10-12): the
-  title bar (a menu button, the window's title, the minimize, maximize
+  title bar (the menu button, Helios's logo and name in the frame's
+  `CAPTION_START` zone, the window's title, the minimize, maximize
   and close buttons) and resize edges never thinner than 6 physical
   pixels, drawn by Helios on the desktop; the `window.frame` setting
   gives the system's frame back. Its buttons are egui-pop's

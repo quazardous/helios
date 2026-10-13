@@ -12,12 +12,13 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use egui_pop::api::app::{STEP_REDO, STEP_UNDO};
-use egui_pop::api::frame::{FramePlugin, STEP_SYSTEM_MENU};
+use egui_pop::api::frame::{self, FramePlugin, STEP_SYSTEM_MENU};
 use egui_pop::api::menus::{ListItem, popup_at};
 use egui_pop::api::steps::Before;
-use egui_pop::api::{Ctx, Plugin, PluginError};
+use egui_pop::api::zones::{self, Block};
+use egui_pop::api::{AppHandle, Ctx, Plugin, PluginError};
 use egui_pop::model::commands::CommandSpec;
-use egui_pop::model::ids::{CommandId, MenuId, PluginId};
+use egui_pop::model::ids::{BlockId, CommandId, MenuId, PluginId};
 use egui_pop::model::keymap::Layer;
 use egui_pop::model::menus::MenuItem;
 use helios_shell::commands::{CommandSpec as HeliosSpec, Registry};
@@ -222,11 +223,51 @@ impl Plugin for History {
 }
 
 /// The window's frame is egui-pop's (`FramePlugin`): its title bar, its
-/// edges and the steps of its buttons. Its system menu (the bar's menu
-/// button, a right click on the caption, `Alt+Space`) is Helios's,
-/// opened as a popup where the frame asks: the `frame.system_menu` step
-/// is replaced.
+/// edges and the steps of its buttons. The start of the bar is Helios's:
+/// the menu button, the logo and the application's name, in place of the
+/// frame's own menu block. Its system menu (the bar's menu button, a
+/// right click on the caption, `Alt+Space`) is Helios's, opened as a
+/// popup where the frame asks: the `frame.system_menu` step is replaced.
 pub struct Frame;
+
+/// The block at the start of the title bar: the menu button, the logo,
+/// the application's name.
+pub const BLOCK_LOGO: BlockId = BlockId::from_static("helios.frame.logo");
+
+/// The logo, decoded once per context.
+fn logo(ctx: &egui::Context) -> egui::TextureHandle {
+    let id = egui::Id::new("helios.logo");
+    if let Some(t) = ctx.data(|d| d.get_temp::<egui::TextureHandle>(id)) {
+        return t;
+    }
+    let png = include_bytes!("../../../packaging/linux/icons/io.github.quazardous.Helios-64.png");
+    let rgba = image::load_from_memory(png)
+        .expect("the bundled logo decodes")
+        .into_rgba8();
+    let size = [rgba.width() as usize, rgba.height() as usize];
+    let picture = egui::ColorImage::from_rgba_unmultiplied(size, rgba.as_raw());
+    let t = ctx.load_texture("helios.logo", picture, egui::TextureOptions::LINEAR);
+    ctx.data_mut(|d| d.insert_temp(id, t.clone()));
+    t
+}
+
+/// Draws the start of the title bar.
+fn caption_start(ui: &mut egui::Ui, app: &AppHandle) {
+    frame::menu_button(ui, app);
+    let side = crate::theme::Tokens::of(ui.ctx()).size.icon_toolbar;
+    let logo = logo(ui.ctx());
+    let image =
+        ui.add(egui::Image::new((logo.id(), egui::vec2(side, side))).sense(egui::Sense::hover()));
+    crate::name_rect(ui.ctx(), "helios.logo", image.rect);
+    let name = app.name();
+    if !name.is_empty() {
+        ui.add(
+            egui::Label::new(egui::RichText::new(name).strong())
+                .selectable(false)
+                .sense(egui::Sense::hover()),
+        );
+    }
+}
 
 impl Plugin for Frame {
     fn id(&self) -> PluginId {
@@ -242,6 +283,10 @@ impl Plugin for Frame {
     }
 
     fn connect(&mut self, ctx: &mut Ctx<'_>) -> Result<(), PluginError> {
+        ctx.block(
+            zones::CAPTION_START,
+            Block::replace(frame::BLOCK_MENU, BLOCK_LOGO, caption_start),
+        );
         ctx.replace(STEP_SYSTEM_MENU, |app, args| {
             let x = args["x"].as_f64().unwrap_or(0.0) as f32;
             let y = args["y"].as_f64().unwrap_or(0.0) as f32;

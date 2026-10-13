@@ -364,6 +364,7 @@ impl Shell {
             ..
         } = wiring;
         let mut builder = App::builder()
+            .name("Helios")
             .host(host)
             .themes(themes.clone())
             .theme(crate::theme::ThemeSpec::new(crate::theme::DEFAULT))

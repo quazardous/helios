@@ -35,6 +35,17 @@ fn the_frame_s_menu_button_opens_the_system_menu_and_alt_space_too() {
     // egui-pop's frame draws the title bar; its menu button opens
     // Helios's system menu.
     let logo = h.get_by_label("Window menu").rect();
+    // Helios's logo and name follow the menu button at the start of the bar.
+    let picture = h.state().target_rect("helios.logo").unwrap();
+    assert!(
+        picture.left() >= logo.right() - 1.0,
+        "{picture:?} after {logo:?}"
+    );
+    let name = h.get_by_label("Helios").rect();
+    assert!(
+        name.left() >= picture.right() - 1.0,
+        "{name:?} after {picture:?}"
+    );
     h.hover_at(logo.center());
     h.run();
     h.event(egui::Event::PointerButton {
