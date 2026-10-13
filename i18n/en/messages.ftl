@@ -99,6 +99,12 @@ gui-edit-not-saved = The edit was not saved: { $error }
 
 gui-gesture-in-progress = { $gesture } is in progress
 
+gui-import-form-title = Import a card or a folder
+
+gui-import-path = card or folder
+
+gui-import-verb = Import
+
 gui-job-batch-done = Batch finished
 
 gui-job-batch-failed = Batch failed
@@ -118,6 +124,8 @@ gui-library-empty = No images: import a folder into the vault
 gui-library-file = { $size } · modified { $day }
 
 gui-library-images = Images
+
+gui-library-import = Import…
 
 gui-library-keep-best = Keep the best: pick it, reject the others
 

@@ -266,10 +266,12 @@ pub struct Library {
     pub selected: Option<usize>,
     /// Culling: after a mark, the cursor moves to the next image.
     pub auto_advance: bool,
-    /// The comparison's zoom and pan follow each other.
-    pub synced: bool,
     /// Marks a plugin refused, to say.
     pub notes: Vec<String>,
+    /// The workspace has an import source: the Vault panel offers it.
+    pub import_offered: bool,
+    /// The user asked to import from it.
+    import_asked: bool,
     /// Each entry's place, by id.
     index: HashMap<String, usize>,
     /// What the views show, in order: the filter's matches, a stack's
@@ -287,7 +289,7 @@ pub struct Library {
     tags: TagInputState,
     /// Every tag the library's images carry, for completion.
     known_tags: Vec<String>,
-    compare: CompareState,
+    compare: Comparison,
     /// The image marked best in the comparison.
     best: Option<String>,
     app: Option<AppHandle>,
@@ -308,8 +310,9 @@ impl Default for Library {
             entries: Vec::new(),
             selected: None,
             auto_advance: false,
-            synced: true,
             notes: Vec::new(),
+            import_offered: false,
+            import_asked: false,
             index: HashMap::new(),
             order: Vec::new(),
             revision: 0,
@@ -320,7 +323,10 @@ impl Default for Library {
             query: None,
             tags: TagInputState::default(),
             known_tags: Vec::new(),
-            compare: CompareState::new(),
+            compare: Comparison {
+                state: CompareState::new(),
+                synced: true,
+            },
             best: None,
             app: None,
             changes: Vec::new(),
@@ -375,6 +381,12 @@ pub fn thumbnail(image: &Image) -> ColorImage {
         })
         .collect();
     ColorImage::new([w as usize, h as usize], pixels)
+}
+
+/// The comparison's zoom and pan, and whether they follow each other.
+struct Comparison {
+    state: CompareState,
+    synced: bool,
 }
 
 /// The images the views show.
@@ -615,6 +627,12 @@ impl Library {
     /// (stack id, expanded).
     pub fn take_expansions(&mut self) -> Vec<(String, bool)> {
         std::mem::take(&mut self.expansions)
+    }
+
+    /// Whether the user asked to import from the workspace's source,
+    /// once.
+    pub fn take_import_asked(&mut self) -> bool {
+        std::mem::take(&mut self.import_asked)
     }
 
     /// The image the user opened (Enter, a double click), once.
@@ -964,8 +982,16 @@ impl Library {
                 .with("shown", self.order.len())
                 .with("total", self.entries.len()),
         );
+        let import = self
+            .import_offered
+            .then(|| crate::i18n::text(&ctx, Message::new("gui-library-import", "Import…")));
         let mut asked = None;
         ui.horizontal(|ui| {
+            if let Some(import) = import
+                && ui.button(import).clicked()
+            {
+                self.import_asked = true;
+            }
             let mut field = SearchField::new(LIBRARY).label(search).width(220.0);
             if let Some(app) = &self.app {
                 field = field.app(app);
@@ -1044,6 +1070,16 @@ impl Library {
     pub fn grid(&mut self, ui: &mut Ui) {
         self.receive(ui);
         if self.entries.is_empty() {
+            if self.import_offered
+                && ui
+                    .button(crate::i18n::text(
+                        ui.ctx(),
+                        Message::new("gui-library-import", "Import…"),
+                    ))
+                    .clicked()
+            {
+                self.import_asked = true;
+            }
             ui.weak(crate::i18n::text(
                 ui.ctx(),
                 Message::new(
@@ -1081,6 +1117,16 @@ impl Library {
     pub fn filmstrip(&mut self, ui: &mut Ui) {
         self.receive(ui);
         if self.entries.is_empty() {
+            if self.import_offered
+                && ui
+                    .button(crate::i18n::text(
+                        ui.ctx(),
+                        Message::new("gui-library-import", "Import…"),
+                    ))
+                    .clicked()
+            {
+                self.import_asked = true;
+            }
             ui.weak(crate::i18n::text(
                 ui.ctx(),
                 Message::new("gui-library-none", "No images"),
@@ -1137,7 +1183,7 @@ impl Library {
         let best = self.best.clone().filter(|b| keys.contains(b));
         let mut keep = false;
         ui.horizontal(|ui| {
-            ui.checkbox(&mut self.synced, sync);
+            ui.checkbox(&mut self.compare.synced, sync);
             keep = ui
                 .add_enabled(best.is_some(), egui::Button::new(keep_text))
                 .clicked();
@@ -1154,9 +1200,9 @@ impl Library {
                 textures: &self.textures,
             };
             CompareView::new("helios.compare")
-                .synced(self.synced)
+                .synced(self.compare.synced)
                 .best(best.clone())
-                .show(ui, &mut self.compare, &panes, &thumbs)
+                .show(ui, &mut self.compare.state, &panes, &thumbs)
         };
         crate::name_rect(ui.ctx(), "helios.library.compare", out.response.rect);
         if let Some(k) = out.best {

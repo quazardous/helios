@@ -30,7 +30,61 @@ pub struct Template {
     pub network: NetworkDesc,
     #[serde(default)]
     pub tools: Tools,
+    /// What it sets for the library: an import source, how culling goes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub library: Option<LibraryDesc>,
 }
+
+/// The library a template works with: where it imports from, and how
+/// culling goes.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LibraryDesc {
+    /// The import source the workspace offers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub import: Option<ImportDesc>,
+    /// Culling moves to the next image after each mark.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub auto_advance: bool,
+}
+
+/// An import source, written as `library.import`'s arguments are.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ImportDesc {
+    /// What is imported: `card` (a mounted card, read from its `DCIM`) or
+    /// `folder` (a folder and its subfolders).
+    pub source: String,
+    /// `reference` (files stay where they are) or `copy` (into the
+    /// library folder).
+    #[serde(default = "reference")]
+    pub placement: String,
+    /// A copy's new name, as `helios import --rename` takes it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rename: Option<String>,
+    /// What to do with an exact duplicate: `skip`, `keep` or `ask`.
+    #[serde(default = "skip")]
+    pub duplicates: String,
+    /// After each import, propose stacks (a `stacks.suggest` decision to
+    /// review: nothing is applied until accepted).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub suggest_stacks: bool,
+}
+
+fn reference() -> String {
+    "reference".into()
+}
+
+fn skip() -> String {
+    "skip".into()
+}
+
+/// The import sources a template may name.
+pub const IMPORT_SOURCES: [&str; 2] = ["card", "folder"];
+/// How imported files may be placed.
+pub const PLACEMENTS: [&str; 2] = ["reference", "copy"];
+/// What an import may do with a duplicate.
+pub const DUPLICATES: [&str; 3] = ["skip", "keep", "ask"];
 
 /// What people pick a template by.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]

@@ -199,3 +199,91 @@ fn a_template_that_does_not_check_creates_nothing() {
     assert!(!dir.exists());
     assert!(!config.exists());
 }
+
+#[test]
+fn a_workspace_from_import_cull_dedupe_is_laid_out_and_set_for_culling() {
+    let root = temp("intake");
+    let (config, dir) = (root.join("config"), root.join("shoot"));
+    let intake = templates::find("helios.import-cull-dedupe").unwrap();
+    let created = templates::create_workspace(&intake, &desktop(), &dir, &config).unwrap();
+    let kept = templates::workspace_template(&config, &created.workspace)
+        .unwrap()
+        .unwrap();
+    assert_eq!(kept.template, intake.template);
+    let mut shell = Shell::builder(helios_panels(), Some(config.join("ui")))
+        .workspace(&created.workspace)
+        .build();
+    shell.load_layout().unwrap();
+    shell.apply_template_tools(&kept.template.meta.name, &kept.template.tools);
+    shell.apply_template_library(kept.template.library.as_ref());
+    assert!(shell.library().auto_advance);
+    assert!(shell.suggests_stacks());
+    let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+    h.run();
+    // The grid central, the stacks and duplicates beside, the filmstrip
+    // under, the editing panels away.
+    let shown = h.state().layout();
+    assert_eq!(shown.area_of(&panel("helios.vault")), Some(Area::Center));
+    assert_eq!(shown.area_of(&panel("helios.compare")), Some(Area::Center));
+    assert_eq!(shown.area_of(&panel("helios.stacks")), Some(Area::EndSide));
+    assert_eq!(
+        shown.area_of(&panel("helios.duplicates")),
+        Some(Area::EndSide)
+    );
+    assert_eq!(
+        shown.area_of(&panel("helios.filmstrip")),
+        Some(Area::Bottom)
+    );
+    assert!(shown.hidden.contains(&panel("helios.masks")));
+    // The loupe takes the culling keys, in the workspace's layer.
+    let keys = h.state().app().handle().export_keymap(Layer::Workspace);
+    assert!(
+        keys.bindings.iter().any(|b| {
+            b.command.as_deref() == Some("vault.flag.reject") && b.when.contains("helios.viewport")
+        }),
+        "{:?}",
+        keys.bindings
+    );
+    // Importing from its source: a card, copied and renamed, duplicates
+    // asked about; without a path, the path is asked.
+    h.state_mut()
+        .run("library.importSource", json!(null), Origin::User)
+        .unwrap();
+    h.run();
+    let form = h
+        .state_mut()
+        .run("dialog.current", json!(null), Origin::User)
+        .unwrap();
+    assert_eq!(form["command"], json!("library.importSource"), "{form}");
+    assert_eq!(form["fields"][0]["key"], json!("path"));
+    h.state_mut()
+        .run(
+            "library.importSource",
+            json!({ "path": "/media/card" }),
+            Origin::User,
+        )
+        .unwrap();
+    h.run();
+    assert_eq!(
+        h.state_mut().take_imports(),
+        [json!({
+            "path": "/media/card",
+            "copy": true,
+            "rename": "{date}-{seq}",
+            "duplicates": "ask"
+        })]
+    );
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn the_intake_template_speaks_french() {
+    let i = I18n::with_egui_pop("fr");
+    i.add_catalogues(helios_i18n::CATALOGUES).unwrap();
+    templates::add_texts(&i, &templates::builtin()).unwrap();
+    let intake = templates::find("helios.import-cull-dedupe").unwrap();
+    assert_eq!(
+        i.t(&intake.name_key(), &[]),
+        "Importer, trier, dédoublonner"
+    );
+}

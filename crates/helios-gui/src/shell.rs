@@ -80,6 +80,9 @@ enum Action {
     AutoAdvance(Option<bool>),
     /// Expand or collapse the stack under the library's cursor.
     ToggleStack,
+    /// Import from the workspace's import source: this card or folder, or
+    /// asked.
+    ImportSource(Option<PathBuf>),
     Fullscreen,
     Minimize,
     Maximize,
@@ -320,6 +323,10 @@ pub struct Shell {
     stack_review: Rc<RefCell<crate::stack_review::Review>>,
     /// The duplicates imports found (the Duplicates panel).
     duplicates: Rc<RefCell<crate::duplicates::Duplicates>>,
+    /// Where the workspace imports from, and how (its template's).
+    import_source: Option<helios_template::ImportDesc>,
+    /// Imports asked for (`library.import`'s arguments), for the host.
+    imports: Vec<Value>,
     /// egui-pop's dialogs, once the application is built (`dialog.current`).
     dialogs: Arc<OnceLock<Dialogs>>,
     /// Confirmations are answered yes by policy (a script's `--yes`).
@@ -567,6 +574,8 @@ impl Shell {
             library: Rc::default(),
             stack_review: Rc::default(),
             duplicates: Rc::default(),
+            import_source: None,
+            imports: Vec::new(),
             dialogs,
             assume_yes: false,
             menu: None,
@@ -1697,6 +1706,21 @@ impl Shell {
             Box::new(|_, _| Ok(Action::ToggleStack)),
         );
         add(
+            CommandSpec::new(
+                "library.importSource",
+                "Import from the workspace's import source (`path`: the card or folder; asked when absent)",
+                "Vault",
+            ),
+            Box::new(|a, _| {
+                Ok(Action::ImportSource(
+                    a.get("path")
+                        .and_then(Value::as_str)
+                        .filter(|s| !s.is_empty())
+                        .map(PathBuf::from),
+                ))
+            }),
+        );
+        add(
             CommandSpec::new("vault.next", "Select the next image", "Vault"),
             Box::new(|_, _| Ok(Action::Step(1))),
         );
@@ -2573,6 +2597,75 @@ impl Shell {
         }
     }
 
+    /// What a template sets for the library: its import source (the
+    /// Vault panel then offers to import from it) and culling's
+    /// auto-advance.
+    pub fn apply_template_library(&mut self, library: Option<&helios_template::LibraryDesc>) {
+        let Some(l) = library else {
+            return;
+        };
+        self.import_source.clone_from(&l.import);
+        let mut lib = self.library.borrow_mut();
+        lib.auto_advance = l.auto_advance;
+        lib.import_offered = l.import.is_some();
+    }
+
+    /// The workspace's import source, as its template set it.
+    pub fn import_source(&self) -> Option<&helios_template::ImportDesc> {
+        self.import_source.as_ref()
+    }
+
+    /// Whether the workspace proposes stacks after each import.
+    pub fn suggests_stacks(&self) -> bool {
+        self.import_source
+            .as_ref()
+            .is_some_and(|i| i.suggest_stacks)
+    }
+
+    /// The imports asked for since the last call (`library.import`'s
+    /// arguments), for the host to run.
+    pub fn take_imports(&mut self) -> Vec<Value> {
+        std::mem::take(&mut self.imports)
+    }
+
+    /// Imports a card or folder as the workspace's source says (folder,
+    /// referenced, duplicates skipped without one); the path is asked
+    /// when absent.
+    fn import_from_source(&mut self, path: Option<PathBuf>) -> Value {
+        let Some(path) = path else {
+            self.form(crate::dialogs::Form {
+                title: self.text(Message::new(
+                    "gui-import-form-title",
+                    "Import a card or a folder",
+                )),
+                fields: vec![crate::dialogs::Field {
+                    key: "path".into(),
+                    descriptor: helios_values::Descriptor::path(
+                        &self.text(Message::new("gui-import-path", "card or folder")),
+                        helios_values::PathKind::Dir,
+                        &[],
+                    ),
+                    value: helios_core::Value::Text(String::new()),
+                }],
+                verb: self.text(Message::new("gui-import-verb", "Import")),
+                command: "library.importSource".into(),
+            });
+            return Value::Null;
+        };
+        let mut args = json!({ "path": path });
+        if let Some(source) = &self.import_source {
+            if source.placement == "copy" {
+                args["copy"] = json!(true);
+                if let Some(rename) = &source.rename {
+                    args["rename"] = json!(rename);
+                }
+            }
+            args["duplicates"] = json!(source.duplicates);
+        }
+        self.imports.push(args.clone());
+        json!({ "queued": args })
+    }
+
     /// A workspace from a template: the templates to pick from (with
     /// their scenario) without one, the directory to ask for without
     /// one, else the workspace created and opened in its window.
@@ -2863,6 +2956,7 @@ impl Shell {
                 let mut library = self.library.borrow_mut();
                 library.auto_advance = on.unwrap_or(!library.auto_advance);
             }
+            Action::ImportSource(path) => return Ok(self.import_from_source(path)),
             Action::ToggleStack => self
                 .library
                 .borrow_mut()
@@ -3119,6 +3213,9 @@ impl Shell {
             );
         }
         self.app.show(ui);
+        if self.library.borrow_mut().take_import_asked() {
+            let _ = self.run("library.importSource", Value::Null, Origin::User);
+        }
         let refused = std::mem::take(&mut self.library.borrow_mut().notes);
         for n in refused {
             self.warn(n);

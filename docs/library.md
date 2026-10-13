@@ -249,6 +249,15 @@ or **Skip** (or all of them at once), and a note says so when the import
 asks: keeping imports that file again with `keep`, placed and renamed as
 its import said; skipping leaves it untouched. Nothing is deleted.
 
+**The intake template.** The built-in workspace template **Import, cull,
+de-duplicate** (see [templates.md](templates.md)) sets all of it up for
+the first step of a shoot: the grid central with Compare and the image
+(the loupe) as its tabs, the Stacks and Duplicates panels beside it, the
+filmstrip under; a card copied into the library and renamed
+(`{date}-{seq}`), its duplicates asked about, stacks proposed after each
+import; auto-advance on; the culling keys also while the image has the
+focus (there they replace the mask tools' keys).
+
 **Search.** The search field's rating, labels, flags and tags become a
 vault query (several labels: any of them; several tags: all of them);
 its words (in the name or a tag) and dates (the file's day) are matched

@@ -21,24 +21,52 @@ use serde_json::{Value as Json, json};
 use crate::host::workspace_key;
 
 /// The built-in templates, each as its bundle's files.
-const BUILTIN: &[&[(&str, &str)]] = &[&[
-    (
-        "template.json",
-        include_str!("../../../templates/portrait-retouch.helios-template/template.json"),
-    ),
-    (
-        "layout.json",
-        include_str!("../../../templates/portrait-retouch.helios-template/layout.json"),
-    ),
-    (
-        "i18n/en/template.ftl",
-        include_str!("../../../templates/portrait-retouch.helios-template/i18n/en/template.ftl"),
-    ),
-    (
-        "i18n/fr/template.ftl",
-        include_str!("../../../templates/portrait-retouch.helios-template/i18n/fr/template.ftl"),
-    ),
-]];
+const BUILTIN: &[&[(&str, &str)]] = &[
+    &[
+        (
+            "template.json",
+            include_str!("../../../templates/portrait-retouch.helios-template/template.json"),
+        ),
+        (
+            "layout.json",
+            include_str!("../../../templates/portrait-retouch.helios-template/layout.json"),
+        ),
+        (
+            "i18n/en/template.ftl",
+            include_str!(
+                "../../../templates/portrait-retouch.helios-template/i18n/en/template.ftl"
+            ),
+        ),
+        (
+            "i18n/fr/template.ftl",
+            include_str!(
+                "../../../templates/portrait-retouch.helios-template/i18n/fr/template.ftl"
+            ),
+        ),
+    ],
+    &[
+        (
+            "template.json",
+            include_str!("../../../templates/import-cull-dedupe.helios-template/template.json"),
+        ),
+        (
+            "layout.json",
+            include_str!("../../../templates/import-cull-dedupe.helios-template/layout.json"),
+        ),
+        (
+            "i18n/en/template.ftl",
+            include_str!(
+                "../../../templates/import-cull-dedupe.helios-template/i18n/en/template.ftl"
+            ),
+        ),
+        (
+            "i18n/fr/template.ftl",
+            include_str!(
+                "../../../templates/import-cull-dedupe.helios-template/i18n/fr/template.ftl"
+            ),
+        ),
+    ],
+];
 
 /// The composite files Helios ships.
 const COMPOSITES: &[&str] = &[include_str!(

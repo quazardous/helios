@@ -2,9 +2,9 @@
 
 Status: **design note, format in code** (2026-10-13). The format, its
 schema, validation, the headless build check and composite files live in
-`crates/helios-template`; one built-in template ("Portrait retouch") ships
-as data under `templates/`, and the desktop's "New workspace from
-template" creates a workspace from it. What is marked "not decided" waits
+`crates/helios-template`; two built-in templates ("Portrait retouch" and
+"Import, cull, de-duplicate") ship as data under `templates/`, and the
+desktop's "New workspace from template" creates a workspace from them. What is marked "not decided" waits
 for the owner.
 
 ## What a template is
@@ -128,6 +128,35 @@ one of them; `keymap` adds bindings, written like a profile's, loaded
 into egui-pop's **workspace** keymap layer (over the defaults, under the
 user's own keys) when the workspace opens. Not decided: the toolbox's
 widget (today the workspace keeps the list and the keys only).
+
+### `library`
+
+What the workspace sets for the library (optional):
+
+```json
+"library": {
+  "import": {
+    "source": "card",
+    "placement": "copy",
+    "rename": "{date}-{seq}",
+    "duplicates": "ask",
+    "suggest_stacks": true
+  },
+  "auto_advance": true
+}
+```
+
+- `import` is the workspace's import source, written as `library.import`
+  takes its arguments (see [library.md](library.md)): `source` is `card`
+  (a mounted card, read from its `DCIM`) or `folder`; `placement`
+  `reference` (the default) or `copy`; `rename` a copy's pattern;
+  `duplicates` `skip` (the default), `keep` or `ask`; `suggest_stacks`
+  proposes stacks after each import (a `stacks.suggest` decision to
+  review, nothing applied until accepted). The Vault panel then offers
+  **Import…**, and `library.importSource` asks for the card or folder and
+  imports it so. Validation refuses a word it does not know, and a
+  renaming without a copy.
+- `auto_advance` starts culling with auto-advance on.
 
 ### `layout`
 

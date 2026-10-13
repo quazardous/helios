@@ -372,3 +372,11 @@ gui-duplicates-skipped = Ignoré, selon la règle de l’import
 gui-duplicates-waiting = { $count } doublons attendent une réponse
 
 gui-duplicates-waiting-note = { $count } doublons attendent une réponse dans le panneau Doublons
+
+gui-import-form-title = Importer une carte ou un dossier
+
+gui-import-path = carte ou dossier
+
+gui-import-verb = Importer
+
+gui-library-import = Importer…

@@ -95,3 +95,118 @@ fn portrait_retouch_speaks_english_and_french() {
     assert!(en.contains(&format!("= {}\n", bundle.template.meta.name)));
     assert!(en.contains(&format!("= {}\n", bundle.template.meta.scenario)));
 }
+
+fn intake() -> Bundle {
+    Bundle::load(&root().join("import-cull-dedupe.helios-template")).unwrap()
+}
+
+#[test]
+fn import_cull_dedupe_is_valid_and_builds_a_culling_layout() {
+    let bundle = intake();
+    assert_eq!(bundle.template.id, "helios.import-cull-dedupe");
+    let report = bundle.validate(&catalogue());
+    assert!(report.is_ok(), "{:?}", report.problems);
+    let json = serde_json::to_value(&bundle.template).unwrap();
+    assert_eq!(
+        schema::check(&schema::template(), &json),
+        Vec::<String>::new()
+    );
+    let built = bundle.build(&catalogue()).unwrap();
+    let area = |p: &str| built.layout.area_of(&PanelId::new(p).unwrap());
+    // The grid central, with the comparison and the loupe as its tabs;
+    // the stacks to review and the duplicates beside; the filmstrip under.
+    for p in ["helios.vault", "helios.compare", "helios.viewport"] {
+        assert_eq!(area(p), Some(Area::Center), "{p}");
+    }
+    assert_eq!(area("helios.stacks"), Some(Area::EndSide));
+    assert_eq!(area("helios.duplicates"), Some(Area::EndSide));
+    assert_eq!(area("helios.filmstrip"), Some(Area::Bottom));
+    // A light preview pipe for the loupe.
+    assert_eq!(built.view.0, built.nodes["exposure"]);
+    // A card copied, renamed, its duplicates asked about, stacks proposed
+    // after each import; culling moves on after each mark.
+    let library = bundle.template.library.as_ref().unwrap();
+    assert!(library.auto_advance);
+    let import = library.import.as_ref().unwrap();
+    assert_eq!(
+        (
+            import.source.as_str(),
+            import.placement.as_str(),
+            import.duplicates.as_str()
+        ),
+        ("card", "copy", "ask")
+    );
+    assert_eq!(import.rename.as_deref(), Some("{date}-{seq}"));
+    assert!(import.suggest_stacks);
+    // The culling tools; the loupe takes the culling keys too.
+    let tools = &bundle.template.tools;
+    assert_eq!(tools.default.as_deref(), Some("vault.flag.pick"));
+    for (keys, command) in [
+        ("P", "vault.flag.pick"),
+        ("X", "vault.flag.reject"),
+        ("3", "vault.rate.3"),
+    ] {
+        assert!(
+            tools
+                .keymap
+                .iter()
+                .any(|b| b.keys == keys && b.command == command),
+            "{keys}"
+        );
+    }
+}
+
+#[test]
+fn import_cull_dedupe_speaks_english_and_french() {
+    let bundle = intake();
+    for locale in ["en", "fr"] {
+        let text = bundle
+            .texts
+            .iter()
+            .find(|t| t.locale == locale)
+            .unwrap_or_else(|| panic!("no {locale} text"));
+        for key in [bundle.name_key(), bundle.scenario_key()] {
+            assert!(
+                text.source.contains(&format!("{key} = ")),
+                "{locale}: {key}"
+            );
+        }
+    }
+    let en = &bundle
+        .texts
+        .iter()
+        .find(|t| t.locale == "en")
+        .unwrap()
+        .source;
+    assert!(en.contains(&format!("= {}\n", bundle.template.meta.name)));
+    assert!(en.contains(&format!("= {}\n", bundle.template.meta.scenario)));
+}
+
+#[test]
+fn an_import_source_names_known_words() {
+    let mut bundle = intake();
+    {
+        let import = bundle
+            .template
+            .library
+            .as_mut()
+            .unwrap()
+            .import
+            .as_mut()
+            .unwrap();
+        import.source = "phone".into();
+        import.placement = "reference".into();
+        import.duplicates = "maybe".into();
+    }
+    let problems = bundle.validate(&catalogue()).problems;
+    for expected in [
+        "library.import.source: `phone`",
+        "library.import.duplicates: `maybe`",
+        "library.import.rename: only a copy is renamed",
+    ] {
+        assert!(
+            problems.iter().any(|p| p.starts_with(expected)),
+            "{expected}: {problems:?}"
+        );
+    }
+}

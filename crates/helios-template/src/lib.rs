@@ -21,4 +21,4 @@ pub mod schema;
 pub use build::{Built, SOURCE_PORT, placeholder};
 pub use bundle::{Bundle, Report, Text, Update, parse_composite, parse_template};
 pub use catalogue::Catalogue;
-pub use format::{CompositeFile, CompositeRef, FORMAT, Template};
+pub use format::{CompositeFile, CompositeRef, FORMAT, ImportDesc, LibraryDesc, Template};

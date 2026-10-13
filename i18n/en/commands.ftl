@@ -136,6 +136,9 @@ command-helios-viewport-dock =
 command-helios-viewport-moveTo =
     .title = Move Image to an area (`area`)
 
+command-library-importSource =
+    .title = Import from the workspace's import source (`path`: the card or folder; asked when absent)
+
 command-mask-add-circle =
     .title = Masks: add a circle at the view's centre
 

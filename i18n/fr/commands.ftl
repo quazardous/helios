@@ -135,6 +135,9 @@ command-helios-viewport-dock =
 command-helios-viewport-moveTo =
     .title = Déplacer Image vers une zone (`area`)
 
+command-library-importSource =
+    .title = Importer depuis la source d’import de l’espace de travail (`path` : la carte ou le dossier ; demandé en son absence)
+
 command-mask-add-circle =
     .title = Masques : ajouter un cercle au centre de la vue
 

@@ -416,8 +416,10 @@ impl eframe::App for App {
         for open in self.shell.take_opens() {
             self.open(open);
         }
-        // Duplicates the user chose to keep, imported again.
-        let imports = self.shell.duplicates_mut().take_imports();
+        // Imports from the workspace's source, and duplicates the user
+        // chose to keep, imported again.
+        let mut imports = self.shell.take_imports();
+        imports.extend(self.shell.duplicates_mut().take_imports());
         for args in imports {
             let _ = self
                 .shell
@@ -431,9 +433,14 @@ impl eframe::App for App {
         }
         if self.refill.swap(false, Ordering::Relaxed)
             && let Some(persist) = &self.persist
-            && let Err(e) = fill_library(&mut self.shell, persist)
         {
-            warn(&format!("cannot fill the library: {e}"));
+            if let Err(e) = fill_library(&mut self.shell, persist) {
+                warn(&format!("cannot fill the library: {e}"));
+            }
+            // The workspace proposes stacks after each import, to review.
+            if self.shell.suggests_stacks() {
+                self.shell.stack_review_mut().suggest(Vec::new());
+            }
         }
         if let Some(persist) = &mut self.persist {
             persist.frame(&mut self.shell, seconds_f64());
@@ -653,6 +660,7 @@ fn main() -> Result<(), String> {
             // The template's keys, in the workspace's keymap layer.
             if let Some(t) = &template {
                 shell.apply_template_tools(&t.template.meta.name, &t.template.tools);
+                shell.apply_template_library(t.template.library.as_ref());
             }
             // The workspace's layout wins over the profile's: egui-pop's
             // document is loaded again (or an earlier Helios's, once).

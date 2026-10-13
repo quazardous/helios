@@ -1,0 +1,53 @@
+{
+  "format": 1,
+  "id": "helios.import-cull-dedupe",
+  "version": 1,
+  "meta": {
+    "name": "Import, cull, de-duplicate",
+    "scenario": "The first step of every shoot: copy a card into the library, answer for its exact duplicates, review the suggested stacks of bursts and brackets, then cull fast with ratings, picks and labels.",
+    "tags": ["import", "culling", "duplicates", "stacks"]
+  },
+  "network": {
+    "sources": ["source"],
+    "nodes": [{ "name": "exposure", "module": "exposure" }],
+    "connections": [
+      { "from": "source", "port": "image", "to": "exposure", "input": "input" }
+    ],
+    "view": { "node": "exposure", "port": "output" }
+  },
+  "tools": {
+    "toolbox": [
+      "library.importSource",
+      "vault.flag.pick",
+      "vault.flag.reject",
+      "vault.flag.none",
+      "vault.stack.toggle",
+      "vault.autoAdvance"
+    ],
+    "default": "vault.flag.pick",
+    "keymap": [
+      { "keys": "Mod+I", "command": "library.importSource" },
+      { "keys": "0", "command": "vault.rate.0", "when": "focusedPanel == 'helios.viewport'" },
+      { "keys": "1", "command": "vault.rate.1", "when": "focusedPanel == 'helios.viewport'" },
+      { "keys": "2", "command": "vault.rate.2", "when": "focusedPanel == 'helios.viewport'" },
+      { "keys": "3", "command": "vault.rate.3", "when": "focusedPanel == 'helios.viewport'" },
+      { "keys": "4", "command": "vault.rate.4", "when": "focusedPanel == 'helios.viewport'" },
+      { "keys": "5", "command": "vault.rate.5", "when": "focusedPanel == 'helios.viewport'" },
+      { "keys": "P", "command": "vault.flag.pick", "when": "focusedPanel == 'helios.viewport'" },
+      { "keys": "X", "command": "vault.flag.reject", "when": "focusedPanel == 'helios.viewport'" },
+      { "keys": "U", "command": "vault.flag.none", "when": "focusedPanel == 'helios.viewport'" },
+      { "keys": "Right", "command": "vault.next", "when": "focusedPanel == 'helios.viewport'" },
+      { "keys": "Left", "command": "vault.previous", "when": "focusedPanel == 'helios.viewport'" }
+    ]
+  },
+  "library": {
+    "import": {
+      "source": "card",
+      "placement": "copy",
+      "rename": "{date}-{seq}",
+      "duplicates": "ask",
+      "suggest_stacks": true
+    },
+    "auto_advance": true
+  }
+}

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/quazardous/helios/templates/schema/template.schema.json",
   "title": "Helios workspace template",
-  "description": "template.json of a .helios-template bundle: what the template is (meta), its starting network and its tools. Its layout is layout.json, egui-pop's layout document. See docs/templates.md.",
+  "description": "template.json of a .helios-template bundle: what the template is (meta), its starting network, its tools and the library it works with. Its layout is layout.json, egui-pop's layout document. See docs/templates.md.",
   "type": "object",
   "additionalProperties": false,
   "required": ["format", "id", "version", "meta", "network"],
@@ -24,7 +24,8 @@
     },
     "meta": { "$ref": "#/$defs/meta" },
     "network": { "$ref": "#/$defs/network" },
-    "tools": { "$ref": "#/$defs/tools" }
+    "tools": { "$ref": "#/$defs/tools" },
+    "library": { "$ref": "#/$defs/library" }
   },
   "$defs": {
     "meta": {
@@ -172,6 +173,46 @@
           "description": "Bindings added to the workspace's keymap layer.",
           "type": "array",
           "items": { "$ref": "#/$defs/binding" }
+        }
+      }
+    },
+    "library": {
+      "description": "The library the workspace works with: an import source, how culling goes.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "import": { "$ref": "#/$defs/import" },
+        "auto_advance": {
+          "description": "Culling moves to the next image after each mark.",
+          "type": "boolean"
+        }
+      }
+    },
+    "import": {
+      "description": "An import source, as library.import takes it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source"],
+      "properties": {
+        "source": {
+          "description": "A mounted card (read from its DCIM) or a folder and its subfolders.",
+          "enum": ["card", "folder"]
+        },
+        "placement": {
+          "description": "Files referenced where they are, or copied into the library folder.",
+          "enum": ["reference", "copy"]
+        },
+        "rename": {
+          "description": "A copy's new name, as helios import --rename takes it: {date}-{seq}.",
+          "type": "string"
+        },
+        "duplicates": {
+          "description": "What to do with an exact duplicate.",
+          "enum": ["skip", "keep", "ask"]
+        },
+        "suggest_stacks": {
+          "description": "After each import, propose stacks to review (nothing applied until accepted).",
+          "type": "boolean"
         }
       }
     },

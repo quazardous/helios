@@ -408,6 +408,9 @@ impl Bundle {
                 ));
             }
         }
+        if let Some(import) = t.library.as_ref().and_then(|l| l.import.as_ref()) {
+            check_import(import, p);
+        }
         for (area, node) in &self.layout.areas {
             for panel in node.panels() {
                 check_panel(&catalogue, panel.as_str(), Some(*area), "layout", p);
@@ -525,4 +528,32 @@ fn file_name(p: &Path) -> String {
         .and_then(|n| n.to_str())
         .unwrap_or_default()
         .to_string()
+}
+
+/// An import source's words: the source, the placement, the duplicates'
+/// policy, a renaming only for copies.
+fn check_import(import: &crate::format::ImportDesc, p: &mut Vec<String>) {
+    use crate::format::{DUPLICATES, IMPORT_SOURCES, PLACEMENTS};
+    for (field, value, known) in [
+        ("source", &import.source, &IMPORT_SOURCES[..]),
+        ("placement", &import.placement, &PLACEMENTS[..]),
+        ("duplicates", &import.duplicates, &DUPLICATES[..]),
+    ] {
+        if !known.contains(&value.as_str()) {
+            p.push(format!(
+                "library.import.{field}: `{value}` is not one of {}",
+                known.join(", ")
+            ));
+        }
+    }
+    if let Some(rename) = &import.rename {
+        if import.placement != "copy" {
+            p.push("library.import.rename: only a copy is renamed".into());
+        }
+        if rename.trim().is_empty() || rename.contains(['/', '\\']) {
+            p.push(format!(
+                "library.import.rename: `{rename}` is not a file name pattern"
+            ));
+        }
+    }
 }
