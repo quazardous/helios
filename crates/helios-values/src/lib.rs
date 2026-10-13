@@ -31,7 +31,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::sync::Arc;
 
-use helios_core::{Bus, Event, ParamHint, ParamKind, ParamSpec, Value};
+use helios_core::{Bus, Event, ParamHint, ParamKind, ParamSpec, ParamWidget, Value};
 use helios_shell::commands::Origin;
 use serde::Serialize;
 
@@ -121,6 +121,9 @@ pub struct Descriptor {
     /// Its module offers a picker for it (a button at the slider's end).
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub picker: bool,
+    /// A list drawn by an image tool (a curve, a colour wheel).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub widget: Option<ParamWidget>,
     /// The module whose parameter this is (a node's value), so an
     /// interface finds its translations (`param-<module>-<name>`); `None`
     /// for every other value.
@@ -158,6 +161,7 @@ impl Descriptor {
             transient: false,
             logarithmic: false,
             picker: false,
+            widget: None,
             module: None,
         }
     }
@@ -282,6 +286,7 @@ impl Descriptor {
             }
             d.logarithmic = h.logarithmic;
             d.picker = h.picker;
+            d.widget = h.widget;
         }
         d
     }

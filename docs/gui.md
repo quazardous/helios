@@ -547,6 +547,28 @@ menu resets, copies the path or copies the value.
 
 ![The Parameters panel, the exposure moved by an agent](gui/params-helios-dark.png)
 
+**Curves and colour wheels (2026-10-13).** A list of floats whose hint
+names an image tool (`ParamHint::widget`, carried by the descriptor) is
+drawn by egui-pop's tool rather than folded into a summary:
+
+- `ParamWidget::Curve`: egui-pop's curve editor over the points
+  (`x0, y0, x1, y1, …` in 0..1; the list's count is twice the most
+  points). A press on the curve adds a point and drags it, a double
+  click or a right click on a point deletes it, a double click elsewhere
+  goes back to the parameter's default; Page Up and Page Down select,
+  the arrows move the selected point.
+- `ParamWidget::Wheel`: egui-pop's offset wheel and its luminance slider
+  over three values: the hue in turns, the chroma, the luminance
+  (-1..1). A drag moves the puck relatively, a double click resets.
+
+Each finished change runs egui-pop's step (`curve.change`,
+`wheel.change`, named by the parameter's path; a plugin may veto or
+redirect it), then is written as the user through the parameter's
+descriptor (its range and count hold it): a drag as one gesture and one
+undo step, keys in a row as one, Escape giving a drag up without a
+trace. No module Helios ships declares one yet: the tools wait for a
+tone curve and colour grading module.
+
 ## Image viewport
 
 The image panel is egui-pop's viewport (`egui_pop::viewport`, decided

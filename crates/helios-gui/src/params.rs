@@ -30,7 +30,10 @@ use egui::{Sense, Ui};
 use egui_pop::api::sliders;
 use egui_pop::core::icon::{Icon, Tone};
 use egui_pop::core::slider::{Cause, Slider, SliderOutput};
-use helios_core::{Message, Value};
+use egui_pop::viewport::change::{Cause as ToolCause, Change as ToolChange};
+use egui_pop::viewport::curve::CurveEditor;
+use egui_pop::viewport::wheel::{ColorWheel, WheelValue};
+use helios_core::{Message, ParamWidget, Value};
 use helios_shell::commands::Origin;
 use helios_values::{Change, Descriptor, Entry, GestureId, Set, Store, Type};
 use serde_json::json;
@@ -295,6 +298,16 @@ impl Params {
                         }
                         r
                     }
+                    (Type::Floats, Value::List(l))
+                        if d.widget == Some(ParamWidget::Curve) && l.len() >= 4 =>
+                    {
+                        self.curve(ui, store, path, &entry, l)
+                    }
+                    (Type::Floats, Value::List(l))
+                        if d.widget == Some(ParamWidget::Wheel) && l.len() >= 3 =>
+                    {
+                        self.wheel(ui, store, path, &entry, l)
+                    }
                     (_, v @ (Value::List(_) | Value::Ints(_))) => {
                         let (r, open) = list_row(ui, path, d, &label, v);
                         open_list = open;
@@ -541,6 +554,140 @@ impl Params {
         }
     }
 
+    /// A curve (`ParamWidget::Curve`): egui-pop's curve editor over the
+    /// list's points, each finished change through the `curve.change`
+    /// step, written as the user (a drag as one undo step).
+    fn curve(
+        &mut self,
+        ui: &mut Ui,
+        store: &Mutex<Store>,
+        path: &str,
+        entry: &Entry,
+        list: &[f64],
+    ) -> egui::Response {
+        let d = &entry.descriptor;
+        let label = label(ui.ctx(), path, d);
+        let mut points = curve_points(list);
+        let defaults = match &d.default {
+            Value::List(l) if l.len() >= 4 => curve_points(l),
+            _ => egui_pop::viewport::curve::identity(),
+        };
+        let side = (ui.available_width() - 28.0).clamp(120.0, 320.0);
+        let app = self.app.clone();
+        let out = ui
+            .vertical(|ui| {
+                ui.label(&label);
+                let mut editor = CurveEditor::new(&mut points, &label)
+                    .default_points(defaults)
+                    .size(egui::vec2(side, side));
+                if let Some(n) = d.count {
+                    editor = editor.max_points(n as usize / 2);
+                }
+                if let Some(app) = &app {
+                    editor = editor.on_change(egui_pop::imaging::curve(app, path));
+                }
+                editor.show(ui)
+            })
+            .inner;
+        self.apply_tool(store, path, d, &out.changes, &out.response, |p| {
+            Value::List(
+                p.iter()
+                    .flat_map(|[x, y]| [f64::from(*x), f64::from(*y)])
+                    .collect(),
+            )
+        });
+        out.response
+    }
+
+    /// A colour wheel (`ParamWidget::Wheel`): egui-pop's offset wheel and
+    /// its luminance slider over the list's hue (in turns), chroma and
+    /// luminance, each finished change through the `wheel.change` step,
+    /// written as the user (a drag as one undo step).
+    fn wheel(
+        &mut self,
+        ui: &mut Ui,
+        store: &Mutex<Store>,
+        path: &str,
+        entry: &Entry,
+        list: &[f64],
+    ) -> egui::Response {
+        let d = &entry.descriptor;
+        let label = label(ui.ctx(), path, d);
+        let mut value = wheel_value(list);
+        let default = match &d.default {
+            Value::List(l) if l.len() >= 3 => wheel_value(l),
+            _ => WheelValue::default(),
+        };
+        let side = (ui.available_width() - 28.0).clamp(96.0, 200.0);
+        let app = self.app.clone();
+        let out = ui
+            .vertical(|ui| {
+                ui.label(&label);
+                let mut wheel = ColorWheel::offset(&mut value, &label)
+                    .default(default)
+                    .size(side);
+                if let Some(app) = &app {
+                    wheel = wheel.on_change(egui_pop::imaging::wheel(app, path));
+                }
+                wheel.show(ui)
+            })
+            .inner;
+        self.apply_tool(store, path, d, &out.changes, &out.response, |w| {
+            Value::List(vec![
+                f64::from(w.hue) / 360.0,
+                f64::from(w.chroma),
+                f64::from(w.luminance),
+            ])
+        });
+        out.response
+    }
+
+    /// Writes what an image tool changed this frame, as the user: a drag's
+    /// frames as one gesture ended by its release (one undo step, other
+    /// origins kept off meanwhile), keys in a row as one group, any other
+    /// finished change as a step of its own. A drag given up (Escape, a
+    /// veto at its release) leaves no trace.
+    fn apply_tool<T>(
+        &mut self,
+        store: &Mutex<Store>,
+        path: &str,
+        d: &Descriptor,
+        changes: &[ToolChange<T>],
+        response: &egui::Response,
+        value: impl Fn(&T) -> Value,
+    ) {
+        let now = response.ctx.input(|i| i.time);
+        let mut s = store.lock().expect("value store lock");
+        let held = |g: &Option<(String, GestureId)>| {
+            g.as_ref().filter(|(p, _)| p == path).map(|(_, g)| *g)
+        };
+        for c in changes {
+            let v = value(&c.to);
+            if !c.done {
+                let g = held(&self.gesture).unwrap_or_else(|| {
+                    let g = s.begin_gesture(Origin::User, &format!("drag {}", d.label));
+                    self.gesture = Some((path.into(), g));
+                    g
+                });
+                write(&mut s, path, Change::To(v), Some(g), false);
+            } else if let Some(g) = held(&self.gesture) {
+                self.gesture = None;
+                write(&mut s, path, Change::To(v), Some(g), false);
+                s.end(g);
+            } else if matches!(c.cause, ToolCause::Key | ToolCause::Access) {
+                self.step(&mut s, path, Change::To(v), &d.label, now);
+            } else {
+                write(&mut s, path, Change::To(v), None, false);
+            }
+        }
+        if response.drag_stopped()
+            && let Some(g) = held(&self.gesture)
+        {
+            self.gesture = None;
+            s.cancel(g);
+        }
+    }
+
     /// The Parameters panel: the selected node's values, or every node's,
     /// grouped by node in the manifest's order.
     pub fn panel_ui(&mut self, ui: &mut Ui, store: &Mutex<Store>, selection: Option<&str>) {
@@ -577,6 +724,23 @@ impl Params {
                     self.param_ui(ui, store, path);
                 }
             });
+    }
+}
+
+/// A curve's points from its list (`x0, y0, x1, y1, …`).
+pub fn curve_points(list: &[f64]) -> Vec<[f32; 2]> {
+    list.chunks_exact(2)
+        .map(|p| [p[0] as f32, p[1] as f32])
+        .collect()
+}
+
+/// A wheel's value from its list (hue in turns, chroma, luminance).
+pub fn wheel_value(list: &[f64]) -> WheelValue {
+    let at = |i: usize| list.get(i).copied().unwrap_or(0.0) as f32;
+    WheelValue {
+        hue: (at(0) * 360.0).rem_euclid(360.0),
+        chroma: at(1),
+        luminance: at(2),
     }
 }
 

@@ -1,6 +1,7 @@
 //! egui-pop's image tools in the desktop, driven by raw input events:
 //! the histogram reads the pipeline's output and its drag moves the
-//! exposure as one undo step.
+//! exposure, the navigator moves the viewport, a curve and a colour wheel
+//! edit their parameters; each edit is one undo step.
 
 use std::time::Duration;
 
@@ -52,7 +53,11 @@ fn settle(h: &mut Harness<'_, Shell>) {
 }
 
 fn harness_on(panel: &str) -> Harness<'static, Shell> {
-    let mut h = headless::harness(shell(), vec2(1280.0, 800.0));
+    harness_with(shell(), panel)
+}
+
+fn harness_with(shell: Shell, panel: &str) -> Harness<'static, Shell> {
+    let mut h = headless::harness(shell, vec2(1280.0, 800.0));
     h.step();
     h.state_mut()
         .run(&format!("{panel}.focus"), json!(null), Origin::User)
@@ -186,4 +191,91 @@ fn the_navigator_moves_the_viewport() {
         .unwrap();
     settle(&mut h);
     assert!(f(&h, FIT) > 0.5);
+}
+
+/// A curve and a colour wheel declared from module parameters' kinds and
+/// hints, beside the exposure, the Parameters panel shown.
+fn tools_harness() -> Harness<'static, Shell> {
+    use helios_core::{ParamHint, ParamKind, ParamSpec, ParamWidget};
+    use helios_values::Descriptor;
+    let shell = shell();
+    {
+        let mut store = shell.values.lock().unwrap();
+        let curve = ParamSpec {
+            name: "curve".into(),
+            description: "the tone curve".into(),
+            kind: ParamKind::Floats {
+                count: 16,
+                min: 0.0,
+                max: 1.0,
+                default: vec![0.0, 0.0, 1.0, 1.0],
+            },
+        };
+        let hint = ParamHint::new("curve").widget(ParamWidget::Curve);
+        store.declare(CURVE, Descriptor::from_spec(&curve, Some(&hint)));
+        let lift = ParamSpec {
+            name: "lift".into(),
+            description: "the shadows' colour".into(),
+            kind: ParamKind::Floats {
+                count: 3,
+                min: -1.0,
+                max: 1.0,
+                default: vec![0.0, 0.0, 0.0],
+            },
+        };
+        let hint = ParamHint::new("lift").widget(ParamWidget::Wheel);
+        store.declare(LIFT, Descriptor::from_spec(&lift, Some(&hint)));
+        store
+            .set(Set::new(
+                helios_gui::params::SELECTION,
+                Change::To(Value::Text("grade".into())),
+                Origin::User,
+            ))
+            .unwrap();
+    }
+    harness_with(shell, "helios.params")
+}
+
+const CURVE: &str = "node/grade/curve";
+const LIFT: &str = "node/grade/lift";
+
+fn list(h: &Harness<'_, Shell>, path: &str) -> Vec<f64> {
+    match &h.state().values.lock().unwrap().get(path).unwrap().value {
+        Value::List(l) => l.clone(),
+        v => panic!("{path}: {v:?}"),
+    }
+}
+
+#[test]
+fn a_curve_edit_is_one_undo_step_and_changes_the_parameter() {
+    let mut h = tools_harness();
+    let r = rect(&h, &format!("param:{CURVE}"));
+    let before = steps(&h);
+    // A press on the identity line adds a point there; the drag lifts it.
+    let at = r.center();
+    drag(&mut h, at, at - vec2(0.0, r.height() / 5.0));
+    let points = list(&h, CURVE);
+    assert_eq!(points.len(), 6, "a point added: {points:?}");
+    let (x, y) = (points[2], points[3]);
+    assert!((x - 0.5).abs() < 0.1, "{points:?}");
+    assert!(y > x + 0.1, "lifted: {points:?}");
+    assert_eq!(steps(&h), before + 1, "one undo step");
+    h.state_mut()
+        .run("param.undo", json!(null), Origin::User)
+        .unwrap();
+    h.step();
+    assert_eq!(list(&h, CURVE), vec![0.0, 0.0, 1.0, 1.0]);
+}
+
+#[test]
+fn a_wheel_drag_is_one_undo_step_and_moves_the_colour() {
+    let mut h = tools_harness();
+    let r = rect(&h, &format!("param:{LIFT}"));
+    let before = steps(&h);
+    let at = r.center();
+    drag(&mut h, at, at + vec2(r.width() / 4.0, 0.0));
+    let lift = list(&h, LIFT);
+    assert_eq!(lift.len(), 3);
+    assert!(lift[1] > 0.1, "some chroma: {lift:?}");
+    assert_eq!(steps(&h), before + 1, "one undo step");
 }

@@ -177,6 +177,24 @@ pub struct ParamHint {
     /// from the image): a button at the slider's end asks for it.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub picker: bool,
+    /// Drawn by an image tool rather than its kind's widget: a curve or a
+    /// colour wheel (see [`ParamWidget`]).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub widget: Option<ParamWidget>,
+}
+
+/// An image tool a list of floats is edited with, instead of its values
+/// one by one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ParamWidget {
+    /// A curve: points `x0, y0, x1, y1, …` in 0..1, sorted by `x`, two
+    /// at least (the list's count is twice the most points).
+    Curve,
+    /// A colour wheel: hue in turns (0..1, 0 to the right,
+    /// counter-clockwise), chroma (0 at the centre, 1 at the rim) and a
+    /// luminance offset (-1..1); three values.
+    Wheel,
 }
 
 impl ParamHint {
@@ -223,6 +241,12 @@ impl ParamHint {
     /// The module offers a picker for this parameter.
     pub fn picker(mut self) -> Self {
         self.picker = true;
+        self
+    }
+
+    /// Drawn by an image tool: a curve or a colour wheel.
+    pub fn widget(mut self, widget: ParamWidget) -> Self {
+        self.widget = Some(widget);
         self
     }
 }
