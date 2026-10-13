@@ -115,6 +115,11 @@ pub struct Descriptor {
     /// never undone and never commits (nothing to save).
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub transient: bool,
+    /// The module whose parameter this is (a node's value), so an
+    /// interface finds its translations (`param-<module>-<name>`); `None`
+    /// for every other value.
+    #[serde(skip)]
+    pub module: Option<String>,
 }
 
 /// Decimals enough to show one step.
@@ -145,6 +150,7 @@ impl Descriptor {
             capacity: None,
             path: None,
             transient: false,
+            module: None,
         }
     }
 

@@ -92,8 +92,31 @@ fn values_are_written_in_the_interface_language() {
     egui_pop::i18n::plugin::set_language(&app, "fr").unwrap();
     h.run();
     h.run();
-    assert_eq!(read(&h, "exposure").as_deref(), Some("+0,70 EV"));
-    assert_eq!(read(&h, "black").as_deref(), Some("0,00\u{202f}%"));
+    assert_eq!(read(&h, "exposition").as_deref(), Some("+0,70 EV"));
+    assert_eq!(read(&h, "noir").as_deref(), Some("0,00\u{202f}%"));
+}
+
+/// The labels are the modules' translations (`param-<module>-<name>`),
+/// back to English when the language changes again.
+#[test]
+fn labels_are_translated() {
+    use egui::accesskit::Role;
+
+    let mut h = harness();
+    let app = h.state().app().handle().clone();
+    egui_pop::i18n::plugin::set_language(&app, "fr").unwrap();
+    h.run();
+    h.run();
+    for label in ["exposition", "noir"] {
+        h.get_by_role_and_label(Role::Slider, label);
+    }
+    h.get_by_label("compenser la correction");
+    assert!(h.query_by_label("compensate_bias").is_none());
+    egui_pop::i18n::plugin::set_language(&app, "en").unwrap();
+    h.run();
+    h.run();
+    h.get_by_role_and_label(Role::Slider, "exposure");
+    h.get_by_label("compensate_bias");
 }
 
 #[test]

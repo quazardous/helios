@@ -98,6 +98,46 @@ pub fn shown_in(locale: &str, d: &Descriptor, v: &Value) -> String {
     }
 }
 
+/// A node parameter's text in the language of `ctx`: the message `key`
+/// (derived from its module and name), else its English.
+fn translated(ctx: &egui::Context, key: Option<helios_i18n::MessageId>, english: &str) -> String {
+    key.and_then(|k| crate::i18n::of(ctx)?.get(&k.key(), &[]))
+        .unwrap_or_else(|| english.to_string())
+}
+
+/// The parameter's name: the last part of its path.
+fn param_name(path: &str) -> &str {
+    path.rsplit('/').next().unwrap_or(path)
+}
+
+/// A parameter's label in the language of `ctx` (`param-<module>-<name>`'s
+/// `.label`), else the descriptor's English.
+pub fn label(ctx: &egui::Context, path: &str, d: &Descriptor) -> String {
+    let key = d
+        .module
+        .as_deref()
+        .map(|m| helios_i18n::ids::param_label(m, param_name(path)));
+    translated(ctx, key, &d.label)
+}
+
+/// A parameter's description in the language of `ctx`, else its English.
+pub fn description(ctx: &egui::Context, path: &str, d: &Descriptor) -> String {
+    let key = d
+        .module
+        .as_deref()
+        .map(|m| helios_i18n::ids::param_description(m, param_name(path)));
+    translated(ctx, key, &d.description)
+}
+
+/// One value of a choice parameter in the language of `ctx`, else as it is.
+pub fn choice(ctx: &egui::Context, path: &str, d: &Descriptor, value: &str) -> String {
+    let key = d
+        .module
+        .as_deref()
+        .map(|m| helios_i18n::ids::param_choice(m, param_name(path), value));
+    translated(ctx, key, value)
+}
+
 fn write(
     store: &mut Store,
     path: &str,
@@ -178,6 +218,7 @@ impl Params {
                 .request_repaint_after(std::time::Duration::from_secs_f64(MOVED_SECONDS));
         }
         let d = &entry.descriptor;
+        let label = label(ui.ctx(), path, d);
         ui.push_id(path, |ui| {
             ui.horizontal(|ui| {
                 // Changed from its default: a dot that resets.
@@ -201,7 +242,7 @@ impl Params {
                     (Type::Float | Type::Int, _) => self.slider(ui, store, path, &entry),
                     (Type::Bool, Value::Bool(b)) => {
                         let mut on = *b;
-                        let r = ui.checkbox(&mut on, &d.label);
+                        let r = ui.checkbox(&mut on, &label);
                         if r.changed() {
                             let mut s = store.lock().expect("value store lock");
                             write(&mut s, path, Change::To(Value::Bool(on)), None, false);
@@ -210,15 +251,20 @@ impl Params {
                     }
                     (Type::Choice, Value::Choice(c)) => {
                         let mut picked = c.clone();
+                        let ctx = ui.ctx().clone();
                         let r = egui::ComboBox::from_id_salt(path)
-                            .selected_text(&picked)
+                            .selected_text(choice(&ctx, path, d, &picked))
                             .show_ui(ui, |ui| {
                                 for o in &d.choices {
-                                    ui.selectable_value(&mut picked, o.clone(), o);
+                                    ui.selectable_value(
+                                        &mut picked,
+                                        o.clone(),
+                                        choice(&ctx, path, d, o),
+                                    );
                                 }
                             })
                             .response;
-                        ui.label(&d.label);
+                        ui.label(&label);
                         if picked != *c {
                             let mut s = store.lock().expect("value store lock");
                             write(&mut s, path, Change::To(Value::Choice(picked)), None, false);
@@ -227,7 +273,7 @@ impl Params {
                     }
                     (Type::Text, Value::Text(t)) => {
                         let mut text = t.clone();
-                        ui.label(&d.label);
+                        ui.label(&label);
                         let r = ui.text_edit_singleline(&mut text);
                         if r.lost_focus() && text != *t {
                             let mut s = store.lock().expect("value store lock");
@@ -236,7 +282,7 @@ impl Params {
                         r
                     }
                     (_, v) => {
-                        ui.label(&d.label);
+                        ui.label(&label);
                         ui.weak(shown_in(&crate::i18n::locale(ui.ctx()), d, v))
                     }
                 };
@@ -271,6 +317,7 @@ impl Params {
         entry: &Entry,
     ) -> egui::Response {
         let d = &entry.descriptor;
+        let shown_label = label(ui.ctx(), path, d);
         let v = entry.value.as_f64().unwrap_or(0.0);
         let (lo, hi) = d.soft.or(d.hard).unwrap_or((0.0, 1.0));
         // Room is kept on the right for the marks.
@@ -323,7 +370,7 @@ impl Params {
                         let note = match (force, a.clamped) {
                             (_, helios_values::Clamped::Hard) => Some(
                                 Message::new("gui-param-held", "{ $label }: held to { $value }")
-                                    .with("label", &d.label)
+                                    .with("label", &shown_label)
                                     .with(
                                         "value",
                                         shown_in(&crate::i18n::locale(ui.ctx()), d, &a.value),
@@ -334,7 +381,7 @@ impl Params {
                                     "gui-param-past-range",
                                     "{ $label }: past its usual range",
                                 )
-                                .with("label", &d.label),
+                                .with("label", &shown_label),
                             ),
                             _ => None,
                         };
@@ -351,7 +398,7 @@ impl Params {
                                 "gui-param-not-a-number",
                                 "{ $label }: `{ $typed }` is not a number",
                             )
-                            .with("label", &d.label)
+                            .with("label", &shown_label)
                             .with("typed", typed),
                         ),
                     );
@@ -498,7 +545,7 @@ impl Params {
         painter.text(
             rect.left_center() + egui::vec2(6.0, 0.0),
             egui::Align2::LEFT_CENTER,
-            &d.label,
+            &shown_label,
             font.clone(),
             text,
         );
@@ -511,7 +558,7 @@ impl Params {
             font,
             if outside { visuals.warn_fg_color } else { text },
         );
-        let label = d.label.clone();
+        let label = shown_label.clone();
         let enabled = ui.is_enabled();
         response.widget_info(|| {
             let mut info = WidgetInfo::slider(enabled, v * d.display_scale, &label);
@@ -521,9 +568,10 @@ impl Params {
             info
         });
         let ctx = ui.ctx().clone();
+        let about = description(&ctx, path, d);
         response.on_hover_text(format!(
             "{}\n{}\n{}",
-            if d.description.is_empty() { &d.label } else { &d.description },
+            if about.is_empty() { &shown_label } else { &about },
             crate::i18n::text(
                 &ctx,
                 Message::new("gui-param-default", "{ $path } · default { $value }")

@@ -30,11 +30,9 @@ pub fn bind_node(store: &mut Store, graph: &Graph, id: NodeId) -> Result<usize, 
             .get(&spec.name)
             .cloned()
             .unwrap_or_else(|| spec.kind.default_value());
-        store.declare_with(
-            &node_path(&name, &spec.name),
-            Descriptor::from_spec(spec, hint),
-            value,
-        );
+        let mut descriptor = Descriptor::from_spec(spec, hint);
+        descriptor.module = Some(manifest.name.clone());
+        store.declare_with(&node_path(&name, &spec.name), descriptor, value);
     }
     Ok(manifest.params.len())
 }
