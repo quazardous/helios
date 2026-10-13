@@ -319,6 +319,21 @@ env = { CARGO_NET_OFFLINE = "true" }
 mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git" }
 timeout = "1h"
 
+# egui-pop's frame times under background load (its docs/threading.md):
+# the gallery's `threading` example, headless, one JSON line per scenario
+# in /out/threading.jsonl
+[jobs.egui-pop-threading]
+cores = 8
+memory = "6g"
+timing = true
+cwd = "/work/${src:-egui-pop}"
+command = """mkdir -p /tmp/w/egui-pop && cp -r --preserve=mode . /tmp/w/egui-pop/ && cd /tmp/w/egui-pop && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/egui-pop ] || { rm -rf /target/* && echo /tmp/w/egui-pop > /target/.built-at; }; } && \
+cargo build --release --locked -p egui-pop-gallery --features trace --example threading && \
+THREADING_OUT=/out/threading.jsonl /target/release/examples/threading ${scenarios:-} | tee /out/threading.txt; exit ${PIPESTATUS[0]}"""
+env = { CARGO_NET_OFFLINE = "true" }
+mounts = { "egui-pop-target/${egui_pop:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git" }
+timeout = "1h"
+
 # the per-branch history (in the target cache) says which tests got slower
 [jobs.test-times]
 cores = 8
