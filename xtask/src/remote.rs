@@ -12,6 +12,13 @@
 //! 4. `fetch <id>`, extracted to `target/bench-remote/<id>/` (the job's
 //!    `log`, `status`, `request` and `out/`), then a summary.
 //!
+//! With `--affected` instead of a job, the jobs come from `cargo xtask
+//! affected` (its `box_jobs`, computed here against `base=`, `origin/main`
+//! by default): each one runs in turn as above, `base=` passed to
+//! `test-affected` alone, and a table of their results ends the run. The
+//! exit code is the first failure's, else 75 when a job could not be
+//! served, else 0.
+//!
 //! Exit 75 (`EX_TEMPFAIL`) means the box could not serve the job: off,
 //! unreachable (ssh exits 255), in maintenance, its GPU gone, or restarted
 //! under the job. It prints "bench box unavailable: <reason>" and is never
@@ -30,7 +37,7 @@ use std::time::{Duration, Instant};
 
 use crate::test_times::target_dir;
 
-pub const USAGE: &str = "bench-remote <job> [key=value...] [--push]";
+pub const USAGE: &str = "bench-remote <job> [key=value...] [--push] | bench-remote --affected [base=REF] [key=value...] [--push]";
 
 /// The exit code of a job the box could not serve.
 pub const EX_TEMPFAIL: u8 = 75;
@@ -59,6 +66,8 @@ pub struct Request {
     pub job: String,
     pub params: Vec<(String, String)>,
     pub push: bool,
+    /// The jobs come from `cargo xtask affected`: `job` is empty.
+    pub affected: bool,
 }
 
 impl Request {
@@ -97,9 +106,12 @@ pub fn parse_args(args: &[&str]) -> Option<Request> {
     let mut job = None;
     let mut params: Vec<(String, String)> = Vec::new();
     let mut push = false;
+    let mut affected = false;
     for a in args {
         if *a == "--push" {
             push = true;
+        } else if *a == "--affected" {
+            affected = true;
         } else if let Some((k, v)) = a.split_once('=') {
             if !valid_name(k) || !valid_value(v) || params.iter().any(|(p, _)| p == k) {
                 return None;
@@ -115,10 +127,16 @@ pub fn parse_args(args: &[&str]) -> Option<Request> {
     if push && params.iter().any(|(k, _)| k == "src") {
         return None;
     }
+    let job = match (job, affected) {
+        (Some(job), false) => job,
+        (None, true) => String::new(),
+        _ => return None,
+    };
     Some(Request {
-        job: job?,
+        job,
         params,
         push,
+        affected,
     })
 }
 
@@ -270,9 +288,9 @@ impl Bench {
     }
 }
 
-fn unavailable(reason: &str) -> ExitCode {
+fn unavailable(reason: &str) -> u8 {
     eprintln!("bench box unavailable: {reason}");
-    ExitCode::from(EX_TEMPFAIL)
+    EX_TEMPFAIL
 }
 
 /// Runs a box command, its output streamed to ours and kept.
@@ -531,13 +549,77 @@ fn conditions_warning(json: &str) -> Option<String> {
 
 pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
     let mut req = parse_args(args)?;
-    Some(match remote(root, &mut req) {
-        Ok(code) => code,
+    let result = if req.affected {
+        affected(root, &req)
+    } else {
+        remote(root, &mut req)
+    };
+    Some(match result {
+        Ok(code) => ExitCode::from(code),
         Err(e) => crate::fail(&[e]),
     })
 }
 
-fn remote(root: &Path, req: &mut Request) -> Result<ExitCode, String> {
+/// The requests `--affected` makes of the jobs a selection names: the
+/// request's parameters for each, `base=` for `test-affected` alone.
+pub fn affected_requests(req: &Request, jobs: &[String]) -> Vec<Request> {
+    jobs.iter()
+        .map(|job| Request {
+            job: job.clone(),
+            params: req
+                .params
+                .iter()
+                .filter(|(k, _)| k != "base" || job == "test-affected")
+                .cloned()
+                .collect(),
+            push: req.push,
+            affected: false,
+        })
+        .collect()
+}
+
+/// The exit code of a series of jobs: the first failure's, else 75 when
+/// one could not be served, else 0.
+pub fn combined(codes: &[u8]) -> u8 {
+    codes
+        .iter()
+        .copied()
+        .find(|c| *c != 0 && *c != EX_TEMPFAIL)
+        .or_else(|| codes.iter().copied().find(|c| *c == EX_TEMPFAIL))
+        .unwrap_or(0)
+}
+
+fn affected(root: &Path, req: &Request) -> Result<u8, String> {
+    let base = req
+        .param("base")
+        .unwrap_or(crate::affected::DEFAULT_BASE)
+        .to_string();
+    let (selection, files) = crate::affected::compute(root, &base)?;
+    eprint!("{}", selection.summary(&base, files));
+    let mut req = req.clone();
+    if req.param("base").is_none() {
+        req.params.push(("base".into(), base));
+    }
+    let mut results = Vec::new();
+    for mut job in affected_requests(&req, &selection.box_jobs()) {
+        println!("\nbench-remote: --affected: {}", job.job);
+        let code = remote(root, &mut job)?;
+        results.push((job.job, code));
+    }
+    println!("\nbench-remote: --affected results");
+    for (job, code) in &results {
+        let result = match *code {
+            0 => "ok".to_string(),
+            EX_TEMPFAIL => "unavailable (75)".to_string(),
+            c => format!("exit {c}"),
+        };
+        println!("  {job:<14} {result}");
+    }
+    let codes: Vec<u8> = results.iter().map(|(_, c)| *c).collect();
+    Ok(combined(&codes))
+}
+
+fn remote(root: &Path, req: &mut Request) -> Result<u8, String> {
     let b = Bench::configure(root)?;
     if let Err(why) = check_box(&b) {
         return Ok(unavailable(&why));
@@ -567,7 +649,7 @@ fn remote(root: &Path, req: &mut Request) -> Result<ExitCode, String> {
             Outcome::Unavailable => unavailable(&unavailable_reason(&lines)),
             Outcome::Lost => unavailable(&format!("unreachable ({})", b.destination)),
             // refused (above the envelope, unknown job...): the box said why
-            Outcome::Exit(c) => ExitCode::from(c.max(1)),
+            Outcome::Exit(c) => c.max(1),
         });
     };
     let mut attempts = 0;
@@ -609,7 +691,7 @@ fn remote(root: &Path, req: &mut Request) -> Result<ExitCode, String> {
         }
         Outcome::Exit(c) => {
             summary(req, &id, c, took, dir.as_deref());
-            ExitCode::from(c)
+            c
         }
         Outcome::Lost => unreachable!("handled above"),
     })
@@ -650,7 +732,36 @@ mod tests {
                 .map(|(k, v)| ((*k).into(), (*v).into()))
                 .collect(),
             push,
+            affected: false,
         }
+    }
+
+    #[test]
+    fn affected_takes_no_job_and_passes_the_base_to_its_test_job() {
+        let r = parse_args(&["--affected", "base=main", "--push"]).expect("parses");
+        assert!(r.affected && r.push && r.job.is_empty());
+        assert_eq!(parse_args(&["--affected", "test"]), None, "no job with it");
+        let jobs: Vec<String> = ["lint", "test-affected", "raw-corpus"]
+            .iter()
+            .map(|j| (*j).to_string())
+            .collect();
+        let reqs = affected_requests(&req("", &[("branch", "x"), ("base", "main")], false), &jobs);
+        assert_eq!(
+            reqs,
+            vec![
+                req("lint", &[("branch", "x")], false),
+                req("test-affected", &[("branch", "x"), ("base", "main")], false),
+                req("raw-corpus", &[("branch", "x")], false),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_series_exits_with_its_first_failure() {
+        assert_eq!(combined(&[0, 0]), 0);
+        assert_eq!(combined(&[0, 75, 0]), 75);
+        assert_eq!(combined(&[75, 101, 1]), 101);
+        assert_eq!(combined(&[]), 0);
     }
 
     #[test]

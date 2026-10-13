@@ -166,6 +166,25 @@ env = { CARGO_NET_OFFLINE = "true" }
 mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git" }
 timeout = "1h"
 
+# the tests a change touches (base=<commit or branch>, origin/main by
+# default): `cargo xtask affected` maps the files changed since the merge
+# base to the crates and their dependents, plus the critical set (smoke
+# render, load and save round trip, survival); its selection in
+# /out/affected.json, the JUnit report and the slowest tests in /out
+[jobs.test-affected]
+cores = 6
+memory = "6g"
+cwd = "/work/${src:-helios}"
+command = """mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && \
+cargo xtask affected ${base:-origin/main} > /out/affected.json && filter=$(cargo xtask affected ${base:-origin/main} --filter) || exit 1; \
+cargo nextest run --workspace --locked --profile ci -E "$filter"; rc=$?; \
+cp target/nextest/ci/junit.xml /out/ \
+ && cargo xtask test-times --from-junit /out/junit.xml --summary > /out/summary.md; \
+exit $rc"""
+env = { CARGO_NET_OFFLINE = "true" }
+mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git" }
+timeout = "1h"
+
 # quit, kill -9 and reopen: the scenarios that gate a release
 [jobs.survival]
 checkouts = ["helios", "vkdt", "egui-pop"]
