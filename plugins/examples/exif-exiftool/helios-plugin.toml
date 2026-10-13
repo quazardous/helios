@@ -1,5 +1,7 @@
 id = "io.github.quazardous.helios.exif-exiftool"
 name = "ExifTool metadata"
+title = "ExifTool metadata"
+description = "Reads the metadata of images with exiftool"
 version = "0.1.0"
 license = "GPL-3.0-or-later"
 command = ["python3", "exif_exiftool.py"]

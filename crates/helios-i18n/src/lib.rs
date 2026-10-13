@@ -11,6 +11,7 @@
 //! - [`extract`]: the English catalogue (`i18n/en`) generated from those
 //!   declarations and from the messages the code builds
 //!   (`cargo xtask i18n extract`);
+//! - [`plugins`]: an external plugin's own catalogues, held to its keys;
 //! - [`message`]: a [`Message`] (a key, its arguments, its English) in the
 //!   catalogues' language.
 //!
@@ -21,6 +22,7 @@
 
 pub mod extract;
 pub mod ids;
+pub mod plugins;
 
 pub use egui_pop_i18n::{Catalogue, FluentValue, I18n};
 pub use extract::Declarations;

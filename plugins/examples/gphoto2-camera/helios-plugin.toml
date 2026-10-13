@@ -1,5 +1,7 @@
 id = "io.github.quazardous.helios.gphoto2-camera"
 name = "gphoto2 cameras"
+title = "gphoto2 cameras"
+description = "Lists, drives and downloads from the cameras gphoto2 knows"
 version = "0.1.0"
 license = "GPL-3.0-or-later"
 # The built binary, placed next to this manifest when the plugin is

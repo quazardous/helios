@@ -4,6 +4,8 @@
 //! ```toml
 //! id = "org.example.exif"
 //! name = "ExifTool metadata"
+//! title = "ExifTool metadata"
+//! description = "Reads the metadata of images with exiftool"
 //! version = "0.1.0"
 //! license = "GPL-3.0-or-later"
 //! command = ["python3", "exif_exiftool.py"]
@@ -23,6 +25,13 @@
 //! name = "images.read"
 //! reason = "Reads the metadata of the images Helios asks about"
 //! ```
+//!
+//! `title` and `description` are what an interface shows of the plugin, in
+//! English; the plugin translates them, and its commands' titles, in its
+//! own catalogues beside the manifest (`i18n/<locale>/*.ftl`, keys
+//! `plugin-<id>.title`, `plugin-<id>.description`,
+//! `command-<command id>.title`), which an interface loads with
+//! `helios_i18n::plugins`.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -223,6 +232,12 @@ pub struct Manifest {
     pub id: String,
     #[serde(default)]
     pub name: String,
+    /// What an interface calls the plugin, in English; `name` when absent.
+    #[serde(default)]
+    pub title: String,
+    /// What it does, in a sentence, in English.
+    #[serde(default)]
+    pub description: String,
     pub version: String,
     pub license: String,
     /// The program and its arguments, run in the plugin's directory. A
@@ -366,6 +381,15 @@ impl Manifest {
             }
         }
         p
+    }
+
+    /// What an interface calls the plugin, in English: its title, else its
+    /// name, else its id.
+    pub fn title(&self) -> &str {
+        [&self.title, &self.name, &self.id]
+            .into_iter()
+            .find(|t| !t.trim().is_empty())
+            .map_or("", String::as_str)
     }
 
     pub fn declares(&self, capability: &str) -> bool {

@@ -71,7 +71,14 @@ contribution points):
   backends;
 - **activation events**: code loads when first needed;
 - **capabilities**: network, file scopes, other processes, secrets, GPU,
-  AI models, each with its reason.
+  AI models, each with its reason;
+- **text**: a title and a description in English, translated with the
+  commands' titles in the plugin's own catalogues beside the manifest
+  (`i18n/<locale>/*.ftl`, keys `plugin-<id>.title`, `.description`,
+  `command-<command id>.title`, and `<id>-…` for its own messages).
+  `helios_i18n::plugins` loads them through egui-pop's prefix-owned
+  catalogues: a key that is neither the plugin's nor one of its declared
+  commands' is refused, so a plugin never rewrites another's text.
 
 ## Packaging and trust
 

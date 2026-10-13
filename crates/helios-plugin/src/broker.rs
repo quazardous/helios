@@ -277,6 +277,8 @@ impl Broker {
                 json!({
                     "id": id,
                     "name": m.name,
+                    "title": m.title(),
+                    "description": m.description,
                     "version": m.version,
                     "license": m.license,
                     "scope": slot.scope,
