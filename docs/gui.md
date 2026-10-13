@@ -724,7 +724,10 @@ selected module's mask network as a tree, on egui-pop's `TreeView`
   operator, each member a leaf with its icon beside it (circle, ellipse,
   gradient, path, brush, parametric, luminance, raster, AI object), its refinements
   (blur, feather, levels between it and its group), and its inversion
-  and opacity in its group when they are not the default. Members are
+  and opacity in its group when they are not the default. The root's
+  row lists the refinements between it and the blend, so every node the
+  engine renders for the mask shows (a test compares the panel's tree
+  with the network rendered). Members are
   listed in port order, the order they fold in. Each row ends with an
   eye and a lock, which act on that row without selecting it. The selected module
   is `view/graph/selection`: a masked module shows its mask, a mask's

@@ -494,9 +494,15 @@ pub fn network(graph: &Graph, store: &Store, prefer: Option<&str>) -> Network {
         )
         .find_map(|id| root_of(graph, &consumers, id));
     let mut net = Network::default();
+    // The refinements between the module's mask and its blend: they change
+    // the result, so its row lists them as a member's lists its own.
+    let mut root_refinements = Vec::new();
     let root = match found {
         Some((root, blend)) => {
             net.blend = Some(name_of(graph, blend));
+            if let Some((head, _)) = input_of(graph, blend, "mask") {
+                root_refinements = subject(graph, head).1;
+            }
             root
         }
         // A mask no blend reads yet: the one the viewport edits.
@@ -515,7 +521,7 @@ pub fn network(graph: &Graph, store: &Store, prefer: Option<&str>) -> Network {
             group: None,
             port: 0,
             head: root_name.clone(),
-            refinements: Vec::new(),
+            refinements: root_refinements,
             operator: params
                 .get("operator")
                 .and_then(Value::as_choice)

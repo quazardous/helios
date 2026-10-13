@@ -639,3 +639,99 @@ fn a_row_s_eye_and_lock_act_on_that_row() {
     drag(&mut h, oval.center(), spot.center_top() + vec2(0.0, 3.0));
     assert_eq!(wired(&h, "mask"), ["inner", "oval", "spot"]);
 }
+
+/// The network of [`graph`] with refinements: a blur between the module's
+/// mask and its blend, a feather between the spot and its group.
+fn refined() -> (Graph, NodeId) {
+    use helios_module_masks::{MaskBlur, MaskFeather};
+    let (mut g, blend) = graph();
+    let (mask, spot) = (g.find("mask").unwrap(), g.find("spot").unwrap());
+    let blur = module(&mut g, "soft", ModuleRef::new(MaskBlur), &Params::new());
+    g.disconnect(blend, "mask").unwrap();
+    g.connect(mask, "mask", blur, "mask").unwrap();
+    g.connect(blur, "mask", blend, "mask").unwrap();
+    let feather = module(&mut g, "edge", ModuleRef::new(MaskFeather), &Params::new());
+    g.disconnect(mask, "in1").unwrap();
+    g.connect(spot, "mask", feather, "mask").unwrap();
+    g.connect(feather, "mask", mask, "in1").unwrap();
+    (g, blend)
+}
+
+fn harness_of((g, blend): (Graph, NodeId)) -> Harness<'static, Shell> {
+    let mut shell = Shell::new(helios_panels(), None);
+    shell.set_view_source(g, blend, "output").unwrap();
+    let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+    h.step();
+    run(&mut h, "helios.masks.focus", json!(null));
+    h
+}
+
+/// The mask nodes the engine renders for the blend's mask: everything
+/// upstream of its `mask` port that is a mask module, by name and module.
+fn rendered_mask(h: &Harness<'_, Shell>) -> Vec<(String, String)> {
+    let shown = h.state().viewport().shown().unwrap();
+    let g = &shown.graph;
+    let module = |id: NodeId| g.manifest(id).unwrap().map(|m| m.name).unwrap_or_default();
+    let blend = g.find("blend").unwrap();
+    let mut todo = vec![g.input_nodes(blend).unwrap()[2].unwrap()];
+    let mut out = Vec::new();
+    while let Some(id) = todo.pop() {
+        let m = module(id);
+        if !m.starts_with("mask_") || out.iter().any(|(n, _)| n == g.name(id).unwrap()) {
+            continue;
+        }
+        out.push((g.name(id).unwrap().to_string(), m));
+        todo.extend(g.input_nodes(id).unwrap().into_iter().flatten());
+    }
+    out.sort();
+    out
+}
+
+#[test]
+fn the_panel_lists_every_mask_node_the_pipeline_renders() {
+    let mut h = harness_of(refined());
+    let check = |h: &Harness<'_, Shell>| {
+        let net = h.state().mask_tree().network();
+        let rendered = rendered_mask(h);
+        let refinements = ["mask_blur", "mask_feather", "mask_levels"];
+        // Groups and members: one row each, the same nodes.
+        let mut listed: Vec<String> = net.items.keys().cloned().collect();
+        listed.sort();
+        let members: Vec<String> = rendered
+            .iter()
+            .filter(|(_, m)| !refinements.contains(&m.as_str()))
+            .map(|(n, _)| n.clone())
+            .collect();
+        assert_eq!(listed, members);
+        assert_eq!(rows(h).len(), net.items.len(), "{:?}", rows(h));
+        // Refinements: on the row of what they refine, the root's too.
+        let mut shown: Vec<String> = net
+            .items
+            .values()
+            .flat_map(|i| i.refinements.clone())
+            .collect();
+        shown.sort();
+        let mut wanted: Vec<String> = rendered
+            .iter()
+            .filter(|(_, m)| refinements.contains(&m.as_str()))
+            .map(|(_, m)| m.clone())
+            .collect();
+        wanted.sort();
+        assert_eq!(shown, wanted);
+    };
+    check(&h);
+    assert_eq!(rows(&h)[0], "▣ mask — maximum · blur");
+    assert!(rows(&h).contains(&"  ○ spot · feather".to_string()));
+    // Still equal after the network changes: a member moved, one taken
+    // out, one added.
+    run(
+        &mut h,
+        "mask.member.move",
+        json!({ "member": "oval", "group": "inner" }),
+    );
+    check(&h);
+    run(&mut h, "mask.member.delete", json!({ "member": "spot" }));
+    check(&h);
+    run(&mut h, "mask.add.parametric", json!(null));
+    check(&h);
+}
