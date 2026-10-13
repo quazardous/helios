@@ -2232,6 +2232,7 @@ dependencies = [
 name = "helios-node"
 version = "0.2.1"
 dependencies = [
+ "egui-pop-model",
  "helios-ai",
  "helios-config",
  "helios-core",

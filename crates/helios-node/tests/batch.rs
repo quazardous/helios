@@ -1,6 +1,8 @@
 //! `helios batch` end to end: a network over many files, each line of its
 //! report, names that collide, a file that fails mid-batch, a sidecar
-//! applied, darktable's test raws, and an interrupt that leaves no file.
+//! applied, darktable's test raws, an interrupt that leaves no file, and
+//! the batch as a job on its node (its exports as children, cancelled by
+//! `job.cancel`).
 
 #![cfg(unix)]
 
@@ -738,6 +740,124 @@ fn a_node_cancels_an_export_on_job_cancel() {
     assert!(ends.contains(&json!("job.cancelling")), "{ends:?}");
     assert_eq!(ends.last(), Some(&json!("job.cancelled")), "{ends:?}");
     assert!(!out.exists(), "a cancelled export writes nothing");
+}
+
+/// A batch is a job on the node it drives, its exports its children:
+/// egui-pop's jobs model shows one batch with an export per image.
+#[cfg(debug_assertions)]
+#[test]
+fn a_batch_shows_as_a_parent_with_its_exports_as_children() {
+    use egui_pop_model::jobs::{Incoming, JobState, Jobs as Model};
+
+    let p = Place::new("parent");
+    let node = Sandbox::start(p.join("node"), NETWORK);
+    let images: Vec<PathBuf> = (0..3).map(|i| p.join(&format!("in{i}.png"))).collect();
+    for i in &images {
+        picture(i, 8, 8);
+    }
+    let out = Command::new(env!("CARGO_BIN_EXE_helios"))
+        .args([
+            "batch",
+            "--socket",
+            &node.inspect,
+            "--control",
+            &node.control,
+        ])
+        .args(["--out", &p.s("out"), "--format", "png"])
+        .args(&images)
+        .output()
+        .unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let mut model = Model::new();
+    for e in job_events(&node) {
+        model.apply(
+            &Incoming::new(
+                e["seq"].as_u64().unwrap(),
+                e["kind"].as_str().unwrap(),
+                &e["payload"],
+            ),
+            0.0,
+        );
+    }
+    let roots = model.roots();
+    assert_eq!(roots.len(), 1, "{:?}", model.all());
+    let batch = roots[0];
+    assert_eq!(batch.kind, "batch");
+    assert_eq!(batch.title, "Batch of 3 images");
+    assert_eq!(batch.state, JobState::Done);
+    let children = model.children(&batch.id);
+    assert_eq!(children.len(), 3);
+    assert!(
+        children
+            .iter()
+            .all(|c| c.kind == "export" && c.state == JobState::Done)
+    );
+    assert_eq!(batch.fraction, Some(1.0));
+}
+
+/// A batch cancelled on its node (`job.cancel` with the batch's id, as
+/// the jobs centre asks): its exports are cancelled, the next ones never
+/// asked, no file written, and `helios batch` says it was interrupted.
+#[cfg(debug_assertions)]
+#[test]
+fn a_batch_cancelled_on_its_node_stops_and_leaves_no_file() {
+    let p = Place::new("node-cancel");
+    let node = Sandbox::start(p.join("node"), NETWORK);
+    let images: Vec<PathBuf> = (0..4).map(|i| p.join(&format!("in{i}.png"))).collect();
+    for i in &images {
+        picture(i, 8, 8);
+    }
+    // Paused: the exports wait in the queue until the cancel.
+    node.control(&["pause"]);
+    let child = Command::new(env!("CARGO_BIN_EXE_helios"))
+        .args([
+            "batch",
+            "--socket",
+            &node.inspect,
+            "--control",
+            &node.control,
+        ])
+        .args(["--out", &p.s("out"), "--jobs", "2"])
+        .args(&images)
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let first = node.inspect(&["wait-event", "scheduler.job_queued"]);
+    let since = first["event"]["seq"].as_u64().unwrap().to_string();
+    let second = node.inspect(&["wait-event", "scheduler.job_queued", "--since", &since]);
+    assert_eq!(second["ok"], true, "two exports in flight: {second}");
+    let batch = job_events(&node)
+        .into_iter()
+        .find(|e| e["kind"] == "job.started" && e["payload"]["kind"] == "batch")
+        .expect("the batch's job");
+    let id = batch["payload"]["id"].as_str().unwrap().to_string();
+    assert_eq!(node.control(&["job-cancel", &id])["ok"], true);
+    node.control(&["resume"]);
+    let out = child.wait_with_output().unwrap();
+    assert_eq!(out.status.code(), Some(130));
+    let lines: Vec<Value> = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert_eq!(lines.len(), 4, "{lines:?}");
+    assert!(lines.iter().all(|l| l["error"] == "cancelled"), "{lines:?}");
+    assert_eq!(node.inspect(&["wait-idle"])["ok"], true);
+    assert!(
+        files(&p.join("out")).is_empty(),
+        "{:?}",
+        files(&p.join("out"))
+    );
+    let ends: Vec<Value> = job_events(&node)
+        .into_iter()
+        .filter(|e| e["payload"]["id"] == id.as_str())
+        .map(|e| e["kind"].clone())
+        .collect();
+    assert_eq!(ends.last(), Some(&json!("job.cancelled")), "{ends:?}");
 }
 
 /// darktable's public test raws (`HELIOS_TEST_IMAGES`, else a darktable

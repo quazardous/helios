@@ -167,6 +167,12 @@ there); its `image` comes from its `xmpMM:DerivedFrom`, else from its
 name. Importing again adds nothing new. A sidecar that cannot be read
 does not stop the others: it gets an `error`, and the exit code is 1.
 
+On the node, the batch is a job people follow (kind `batch`, its exports
+as its children, see [jobs.md](jobs.md)): `helios control job-cancel
+batch-N` on that node cancels the exports in flight and the ones not
+asked for yet, which are reported `cancelled`, and the batch exits with
+130.
+
 A failed image (a file that does not load, an export that fails) says why
 in `error`, and the others go on; the exit code is then 1. Ctrl-C cancels the
 exports in flight (an interrupted export leaves no file, not even a part of

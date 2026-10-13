@@ -98,7 +98,18 @@ whose images are jobs of their own.
 `helios_core::jobs` is the only way a job reports: the older
 `helios_core::job`, whose events named a job by a number, is gone.
 
-Not yet: `helios batch` runs as a client of a node and does not report a
-batch job of its own (each of its exports reports on the node's bus);
-the desktop does not follow a node's bus, so work run in a node shows in
-the jobs centre only once the desktop relays it.
+- **A node's exports and batches** (`helios-node`): each export as a job
+  on the node's bus (`export-<n>`); `helios batch` starts a batch job on
+  the node it drives (`batch_start`, kind `batch`, its total the number of
+  images), each export a child of it (weight 1), and ends it
+  (`batch_end`): finished, failed when an image failed, or cancelled.
+  `job.cancel` with an id (`helios control job-cancel ID`, the
+  `helios_job_cancel` tool) cancels an export, or a batch with its
+  exports, queued or running; the batch's next exports are refused and
+  `helios batch` exits as interrupted.
+
+Not yet: the desktop does not follow a node's bus, so work run in a node
+(a batch, its exports) shows in the jobs centre only once the desktop
+relays the node's `job.*` events and sends its Cancel there as
+`job.cancel`. A batch whose `helios batch` dies without ending it stays
+running on its node until the node stops.

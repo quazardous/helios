@@ -183,6 +183,9 @@ struct Node {
     inspect: Address,
     control: Address,
     sandbox: Option<PathBuf>,
+    /// The batch's job on the node, the parent of its exports; none with
+    /// a node that does not know batch jobs.
+    batch: Option<String>,
 }
 
 impl Drop for Node {
@@ -257,6 +260,7 @@ fn own_node(
                 inspect: Address::Unix(state.inspect),
                 control: Address::Unix(state.control),
                 sandbox: Some(dir),
+                batch: None,
             },
             first_export,
         )),
@@ -380,7 +384,7 @@ pub fn run(
             .with("error", e.to_string())
     })?;
     let out = std::path::absolute(&options.out).map_err(|e| Message::plain(e.to_string()))?;
-    let (node, first_export) = match (&options.attach, &options.network) {
+    let (mut node, first_export) = match (&options.attach, &options.network) {
         (Some((inspect, control)), network) => {
             let first = match network {
                 Some(path) => sandbox_network(path)?.1,
@@ -390,6 +394,7 @@ pub fn run(
                 inspect: inspect.clone(),
                 control: control.clone(),
                 sandbox: None,
+                batch: None,
             };
             (node, first)
         }
@@ -448,13 +453,24 @@ pub fn run(
         vault: vault.as_ref(),
         listings: Listings::default(),
     };
-    let mut failed = false;
+    // The batch is a job people follow on the node's bus, its exports
+    // its children: cancelled there (`job.cancel`), the node cancels the
+    // exports and refuses the next ones.
+    node.batch = node
+        .control(&ControlRequest::BatchStart {
+            title: format!("Batch of {} images", images.len()),
+            total: images.len() as u64,
+        })
+        .ok()
+        .and_then(|answer| answer["id"].as_str().map(String::from));
+    let mut failed = 0u64;
     let mut cursor = 0;
     let mut running: BTreeMap<u64, Pending> = BTreeMap::new();
     let mut next = 0;
     let mut cancelled = false;
+    let mut cancelled_on_node = false;
     while next < images.len() || !running.is_empty() {
-        if interrupted.load(Ordering::SeqCst) && !cancelled {
+        if (interrupted.load(Ordering::SeqCst) || cancelled_on_node) && !cancelled {
             cancelled = true;
             for job in running.keys() {
                 let _ = node.control(&ControlRequest::Cancel { job: *job });
@@ -471,7 +487,11 @@ pub fn run(
             }
             next = images.len();
         }
-        while !cancelled && running.len() < options.jobs.max(1) && next < images.len() {
+        while !cancelled
+            && !cancelled_on_node
+            && running.len() < options.jobs.max(1)
+            && next < images.len()
+        {
             let pending = Pending {
                 image: images[next].clone(),
                 output: outputs[next].clone(),
@@ -496,7 +516,12 @@ pub fn run(
                 }
                 Err(refused) => {
                     let (pending, error) = *refused;
-                    failed = true;
+                    if error.key == cancelled_message().key {
+                        // The batch was cancelled on the node.
+                        cancelled_on_node = true;
+                    } else {
+                        failed += 1;
+                    }
                     emit(&line(&pending, Some(&error)));
                 }
             }
@@ -530,7 +555,7 @@ pub fn run(
             Some("done") => emit(&line(&pending, None)),
             Some("cancelled") => emit(&line(&pending, Some(&cancelled_message()))),
             _ => {
-                failed = true;
+                failed += 1;
                 // The job's message by key, else its English.
                 let error = serde_json::from_value::<Message>(event["payload"]["message"].clone())
                     .unwrap_or_else(|_| match event["payload"]["error"].as_str() {
@@ -541,9 +566,21 @@ pub fn run(
             }
         }
     }
+    if let Some(id) = node.batch.clone() {
+        let ended = node.control(&ControlRequest::BatchEnd {
+            id,
+            failed,
+            cancelled,
+        });
+        // Cancelled on the node once every export was asked for: its
+        // exports said so, and so does the batch.
+        if ended.is_ok_and(|answer| answer["cancelled"] == true) {
+            cancelled = true;
+        }
+    }
     Ok(if cancelled {
         Outcome::Interrupted
-    } else if failed {
+    } else if failed > 0 {
         Outcome::Failed
     } else {
         Outcome::Done
@@ -656,7 +693,7 @@ fn submit(
         format: options.format,
         quality: Some(options.quality),
         params,
-        batch: None,
+        batch: node.batch.clone(),
     });
     match asked {
         Ok(answer) => {

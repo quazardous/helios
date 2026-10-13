@@ -468,8 +468,9 @@ impl Node {
     }
 
     /// Ends a batch job: cancelled when it was (here or by `job.cancel`),
-    /// failed when some of its images failed, else finished.
-    fn batch_end(&self, id: &str, failed: u64, cancelled: bool) -> Result<(), Message> {
+    /// failed when some of its images failed, else finished. Whether it
+    /// was cancelled.
+    fn batch_end(&self, id: &str, failed: u64, cancelled: bool) -> Result<bool, Message> {
         let batch = self
             .batches
             .lock()
@@ -477,14 +478,15 @@ impl Node {
             .remove(id)
             .ok_or_else(|| Message::plain(format!("no running batch `{id}`")))?;
         let report = &batch.report;
-        if cancelled || batch.stopped.load(Ordering::SeqCst) {
+        let cancelled = cancelled || batch.stopped.load(Ordering::SeqCst);
+        if cancelled {
             report.cancelled();
         } else if failed > 0 {
             report.failed(&format!("{failed} of {} images failed", batch.total));
         } else {
             report.finished();
         }
-        Ok(())
+        Ok(cancelled)
     }
 
     /// Gives a source the image of a file: read and decoded with no lock
@@ -763,7 +765,9 @@ mod control {
                 id,
                 failed,
                 cancelled,
-            } => node.batch_end(id, *failed, *cancelled).map(|()| json!({})),
+            } => node
+                .batch_end(id, *failed, *cancelled)
+                .map(|cancelled| json!({ "cancelled": cancelled })),
             ControlRequest::Cancel { job } => {
                 if node.scheduler.cancel(JobId(*job)) {
                     Ok(json!({}))
