@@ -482,6 +482,7 @@ fn typing_in_a_field_fires_no_shortcut_and_an_agent_does_not_take_the_focus() {
         h.input_mut().events.push(Event::Text(t.into()));
         h.step();
     }
+    assert_eq!(f(&h, EV), 0.0, "nothing committed by typing");
     // An agent writes another parameter meanwhile.
     let other = {
         let store = h.state().values.lock().unwrap();
@@ -506,6 +507,7 @@ fn typing_in_a_field_fires_no_shortcut_and_an_agent_does_not_take_the_focus() {
         "the focus moved"
     );
     assert_eq!(text(&h, SHAPE), "", "a typed letter ran a command");
+    assert_eq!(f(&h, EV), 0.0, "nothing committed while typing");
     // Escape lets go of the field; the value is untouched.
     h.key_press(Key::Escape);
     settle(&mut h);
@@ -549,11 +551,12 @@ fn a_click_elsewhere_ends_typing_and_takes_the_focus() {
     h.input_mut().events.push(Event::Text("2".into()));
     settle(&mut h);
     assert!(h.ctx.egui_wants_keyboard_input());
-    // A click on the image: the field lets go, its text is dropped.
+    // A click on the image: the field lets go, what was typed is kept
+    // (`+0.00` then `2`).
     let corner = rect(&h, "viewport.display").left_top() + vec2(30.0, 30.0);
     click(&mut h, corner);
     settle(&mut h);
-    assert_eq!(f(&h, EV), 0.0);
+    assert!((f(&h, EV) - 0.002).abs() < 1e-9, "{}", f(&h, EV));
     h.key_press(Key::C);
     settle(&mut h);
     assert_eq!(

@@ -92,8 +92,8 @@ fn values_are_written_in_the_interface_language() {
     egui_pop::i18n::plugin::set_language(&app, "fr").unwrap();
     h.run();
     h.run();
-    assert_eq!(read(&h, "exposition").as_deref(), Some("+0,70 EV"));
-    assert_eq!(read(&h, "noir").as_deref(), Some("0,00 %"));
+    assert_eq!(read(&h, "exposition").as_deref(), Some("+0,70\u{202f}EV"));
+    assert_eq!(read(&h, "noir").as_deref(), Some("0,00\u{202f}%"));
     // A negative exposure: its minus sign, no plus, the comma.
     h.state_mut()
         .run(
@@ -103,7 +103,7 @@ fn values_are_written_in_the_interface_language() {
         )
         .unwrap();
     h.run();
-    assert_eq!(read(&h, "exposition").as_deref(), Some("-1,25 EV"));
+    assert_eq!(read(&h, "exposition").as_deref(), Some("-1,25\u{202f}EV"));
 }
 
 /// The labels are the modules' translations (`param-<module>-<name>`),

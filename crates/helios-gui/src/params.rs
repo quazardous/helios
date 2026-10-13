@@ -57,12 +57,16 @@ pub struct Params {
     /// Steps in a row on one path (keys, the wheel): one group, and when
     /// its last step was.
     steps: Option<(String, GestureId, f64)>,
-    /// Each slider's id and bar as last drawn, to close its typed entry
-    /// on a press elsewhere (see [`Params::close_typing`]).
-    bars: BTreeMap<String, (egui::Id, egui::Rect)>,
     /// The application, for the parameters' context menu.
     app: Option<egui_pop::api::AppHandle>,
+    /// Each slider's id as last drawn, to guard its typed entry (see
+    /// [`Params::guard_typing`]).
+    ids: BTreeMap<String, egui::Id>,
 }
+
+/// Where the shell notes, each frame, whether Escape was pressed, before
+/// the key dispatcher may take it.
+pub const ESCAPE: &str = "helios.params.escape";
 
 /// The journal event a parameter's picker button publishes (`path`): a
 /// picker tool answers it by sampling the image.
@@ -354,7 +358,7 @@ impl Params {
         // Room is kept on the right for the marks.
         let width = (ui.available_width() - 28.0).clamp(120.0, 320.0);
         let height = ui.spacing().interact_size.y;
-        self.close_typing(ui, path);
+        self.guard_typing(ui, path);
         let app = self.app.clone();
         let out = ui
             .allocate_ui(egui::vec2(width, height), |ui| {
@@ -376,8 +380,7 @@ impl Params {
                 slider.show(ui)
             })
             .inner;
-        self.bars
-            .insert(path.into(), (out.response.id, out.response.rect));
+        self.ids.insert(path.into(), out.response.id);
         if out.quad_clicked()
             && let Some(app) = &self.app
         {
@@ -406,26 +409,37 @@ impl Params {
         ))
     }
 
-    /// Closes a slider's typed entry, its text dropped, on a press outside
-    /// its bar or on Escape, and lets go of the keyboard: the entry would
-    /// otherwise take the focus back on every frame it is drawn
-    /// (egui-pop's typed entry asks for it each frame), and a click on the
-    /// image would leave the keys in the field.
-    fn close_typing(&self, ui: &Ui, path: &str) {
-        let Some((id, bar)) = self.bars.get(path).copied() else {
+    /// Keeps a slider's typed entry as the user left it, before egui-pop
+    /// draws it. Escape closes it with its text dropped: the key
+    /// dispatcher takes Escape before egui-pop's entry reads it, and the
+    /// entry, its field let go, would commit what was typed (the shell
+    /// notes Escape first, [`ESCAPE`]). The entry keeps the keyboard
+    /// unless the user moved it (a press, Tab, Enter): a frame where the
+    /// panel is redrawn for another writer's change must not commit it.
+    fn guard_typing(&self, ui: &Ui, path: &str) {
+        let Some(id) = self.ids.get(path).copied() else {
             return;
         };
         let typing = egui_pop::core::slider::typing_id(id);
         if ui.data(|d| d.get_temp::<String>(typing)).is_none() {
             return;
         }
-        let away = ui.input(|i| {
-            i.pointer.any_pressed() && i.pointer.interact_pos().is_some_and(|p| !bar.contains(p))
-        });
-        let escape = ui.input(|i| i.key_pressed(egui::Key::Escape));
-        if away || escape {
+        let edit = typing.with("edit");
+        let escape = ui
+            .data(|d| d.get_temp::<bool>(egui::Id::new(ESCAPE)))
+            .unwrap_or(false);
+        if escape {
             ui.data_mut(|d| d.remove::<String>(typing));
-            ui.memory_mut(|m| m.surrender_focus(typing.with("edit")));
+            ui.memory_mut(|m| m.surrender_focus(edit));
+            return;
+        }
+        let moved = ui.input(|i| {
+            i.pointer.any_pressed()
+                || i.key_pressed(egui::Key::Tab)
+                || i.key_pressed(egui::Key::Enter)
+        });
+        if !moved && !ui.memory(|m| m.has_focus(edit)) {
+            ui.memory_mut(|m| m.request_focus(edit));
         }
     }
 
