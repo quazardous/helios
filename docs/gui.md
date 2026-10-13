@@ -66,8 +66,8 @@ Helios offers its own as templates: `Image`, the image-first layout
 for small screens and culling (the image, the filmstrip under it,
 every other panel closed).
 
-**Palettes (2026-10-13).** The Masks panel and the Scopes may float
-over the image as egui-pop's palettes (`PanelSpec::floatable`,
+**Palettes (2026-10-13).** The Masks panel, the Scopes and the
+Navigator may float over the image as egui-pop's palettes (`PanelSpec::floatable`,
 `helios_gui::FLOATABLE`): from their tab's menu (Float) or
 `<panel>.float` (`pos`, else cascaded from the top left), never modal.
 A palette is dragged by its header band (Pin, Roll up, Close), snaps to
@@ -610,6 +610,25 @@ preview.
   up without a trace. Focused, the arrows step it.
 - **The waveform and the RGB parade** stay Helios's own pictures
   (egui-pop has none).
+
+### The navigator
+
+The Navigator panel (`helios.navigator`, closed until asked for, in the
+start side bar or floating as a palette) is egui-pop's zoom control and
+navigator over the viewport's own state (2026-10-13,
+`helios-gui/src/navigator.rs`): the whole image drawn from the preview,
+a frame around the part in view and a veil over the rest; zoom out, the
+zoom, zoom in, fit and 100 % above it.
+
+- A drag of the frame pans (Ctrl finer, Shift coarser; Escape puts the
+  view back), a click elsewhere centres the view there, the wheel zooms,
+  a double click fits; focused, the arrows pan, `+` and `-` zoom, `0`
+  fits.
+- Each change goes through egui-pop's `zoom.change` step once finished
+  (a plugin may veto or redirect it) and the viewport's `before_view`
+  hook, then into `view/viewport/*`, where the viewport reads it: a
+  drag is one gesture holding the view against other origins, and none
+  of it is an undo step.
 
 ### Drawn masks
 

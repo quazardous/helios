@@ -84,6 +84,18 @@ command-helios-modules-dock =
 command-helios-modules-moveTo =
     .title = Déplacer Modules vers une zone (`area`)
 
+command-helios-navigator-detach =
+    .title = Déplacer Navigateur dans une nouvelle fenêtre
+
+command-helios-navigator-dock =
+    .title = Remettre Navigateur dans sa zone
+
+command-helios-navigator-float =
+    .title = Faire flotter Navigateur au-dessus de l’interface (`pos` : [x, y])
+
+command-helios-navigator-moveTo =
+    .title = Déplacer Navigateur vers une zone (`area`)
+
 command-helios-params-detach =
     .title = Déplacer Paramètres dans une nouvelle fenêtre
 

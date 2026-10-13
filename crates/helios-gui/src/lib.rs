@@ -12,6 +12,7 @@ pub mod jobs;
 pub mod library;
 pub mod mask_tree;
 pub mod masks;
+pub mod navigator;
 pub mod params;
 pub mod persist;
 pub mod platform;
@@ -38,14 +39,14 @@ use egui_pop::model::panels::{Area, PanelSpec};
 /// The panels that may float over the image as palettes (egui-pop's
 /// `PanelSpec::floatable`): docked by default, floated from their tab's
 /// menu or `<panel>.float`, hidden and shown again with Tab.
-pub const FLOATABLE: [&str; 2] = ["helios.masks", "helios.scopes"];
+pub const FLOATABLE: [&str; 3] = ["helios.masks", "helios.scopes", "helios.navigator"];
 
 /// The panels Helios declares today, with the areas each may be moved to
 /// (egui-pop's placement rules); each shows a placeholder until its
 /// widget lands. Every panel may be detached into a window of its own;
 /// the [`FLOATABLE`] ones may float too.
-/// The culling panels (Compare, Stacks, Duplicates) start closed: a template's layout, or the
-/// user, opens them.
+/// The culling panels (Compare, Stacks, Duplicates) and the Navigator
+/// start closed: a template's layout, or the user, opens them.
 pub fn helios_panels() -> Vec<PanelSpec> {
     use Area::{Bottom, Center, EndSide, StartSide};
     let sides = [StartSide, EndSide, Bottom];
@@ -56,6 +57,13 @@ pub fn helios_panels() -> Vec<PanelSpec> {
         ("helios.vault", "Vault", StartSide, &anywhere[..], true),
         ("helios.modules", "Modules", StartSide, &sides[..], true),
         ("helios.masks", "Masks", StartSide, &sides[..], true),
+        (
+            "helios.navigator",
+            "Navigator",
+            StartSide,
+            &sides[..],
+            false,
+        ),
         ("helios.params", "Parameters", EndSide, &sides[..], true),
         ("helios.scopes", "Scopes", EndSide, &sides[..], true),
         ("helios.filmstrip", "Filmstrip", Bottom, &sides[..], true),

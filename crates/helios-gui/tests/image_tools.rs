@@ -151,3 +151,39 @@ fn a_drag_on_the_histogram_moves_the_exposure_as_one_undo_step() {
     h.step();
     assert!((f(&h, EV) - ev).abs() < 1e-9);
 }
+
+#[test]
+fn the_navigator_moves_the_viewport() {
+    use helios_gui::viewport::{CENTER_X, FIT};
+    let mut h = harness_on("helios.navigator");
+    for zoom in ["viewport.zoom.100", "viewport.zoom.in"] {
+        h.state_mut().run(zoom, json!(null), Origin::User).unwrap();
+        settle(&mut h);
+    }
+    assert!(f(&h, FIT) < 0.5, "zoomed in");
+    let (x, before) = (f(&h, CENTER_X), steps(&h));
+    // A click near the image's left edge in the navigator centres the
+    // view there.
+    let map = rect(&h, "helios.navigator.map");
+    let at = map.left_center() + vec2(8.0, 0.0);
+    h.hover_at(at);
+    h.step();
+    button(&mut h, at, true);
+    h.step();
+    button(&mut h, at, false);
+    h.step();
+    h.step();
+    let moved = f(&h, CENTER_X);
+    assert!(moved < x - 20.0, "{x} -> {moved}");
+    // The viewport follows: what it shows moved left.
+    let shown = h.state().viewport().state().mapping().unwrap().center[0];
+    assert!((shown - moved).abs() < 1.0, "{shown} {moved}");
+    // Where one looks is not an edit.
+    assert_eq!(steps(&h), before);
+    // The zoom control's fit fits.
+    h.state_mut()
+        .run("viewport.zoom.fit", json!(null), Origin::User)
+        .unwrap();
+    settle(&mut h);
+    assert!(f(&h, FIT) > 0.5);
+}

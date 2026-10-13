@@ -678,6 +678,18 @@ impl Shell {
                 tree.borrow_mut().ui(ui, &viewport, &values);
             });
         }
+        if has(&shell, crate::navigator::PANEL) {
+            let mut panel = crate::navigator::NavigatorPanel::default();
+            let (viewport, preview, values, app) = (
+                shell.viewport.clone(),
+                shell.preview.clone(),
+                shell.values.clone(),
+                shell.app.handle().clone(),
+            );
+            shell.set_content(crate::navigator::PANEL, move |ui| {
+                panel.ui(ui, &viewport, &preview, &values, &app);
+            });
+        }
         if has(&shell, "helios.scopes") {
             let (scopes, preview, values, app) = (
                 shell.scopes.clone(),

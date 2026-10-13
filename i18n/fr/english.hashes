@@ -43,6 +43,10 @@ command-helios-masks-moveTo.title 15df534d313d9a72
 command-helios-modules-detach.title 26075229e0c921cd
 command-helios-modules-dock.title eefb369093a716d6
 command-helios-modules-moveTo.title 892f9b16aeef79da
+command-helios-navigator-detach.title 64af24478022050d
+command-helios-navigator-dock.title b2d7941d02c9043a
+command-helios-navigator-float.title b5794967e658ae7c
+command-helios-navigator-moveTo.title bc9c52c1f015001a
 command-helios-params-detach.title 4579517228e58726
 command-helios-params-dock.title 50068f5da28e77e3
 command-helios-params-moveTo.title 048ae812819f4cb9
@@ -258,6 +262,7 @@ panel-helios-graph.title 2aaea6126d76b34f
 panel-helios-log.title a80c03551590b8a9
 panel-helios-masks.title 6849246780dae374
 panel-helios-modules.title a5f990b57e7ada38
+panel-helios-navigator.title 8a16ed40ed2d7514
 panel-helios-params.title fff7588f4a1a3651
 panel-helios-queue.title 8dd348ad2ba6981e
 panel-helios-scopes.title c702166978f59fae

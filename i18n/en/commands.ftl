@@ -85,6 +85,18 @@ command-helios-modules-dock =
 command-helios-modules-moveTo =
     .title = Move Modules to an area (`area`)
 
+command-helios-navigator-detach =
+    .title = Move Navigator to a new window
+
+command-helios-navigator-dock =
+    .title = Dock Navigator back in its area
+
+command-helios-navigator-float =
+    .title = Float Navigator over the interface (`pos`: [x, y])
+
+command-helios-navigator-moveTo =
+    .title = Move Navigator to an area (`area`)
+
 command-helios-params-detach =
     .title = Move Parameters to a new window
 

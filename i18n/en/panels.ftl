@@ -22,6 +22,9 @@ panel-helios-masks =
 panel-helios-modules =
     .title = Modules
 
+panel-helios-navigator =
+    .title = Navigator
+
 panel-helios-params =
     .title = Parameters
 
