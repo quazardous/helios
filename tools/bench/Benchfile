@@ -125,6 +125,7 @@ cargo-git = "the cargo git dependencies, shared by every job"
 # ---------------------------------------------------------------- correctness
 
 [jobs.build]
+checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 8
 memory = "6g"
 cwd = "/work/${src:-helios}"
@@ -137,6 +138,7 @@ timeout = "1h"
 # checks (changelog fragments...), the translation catalogues' coverage
 # in /out/i18n.txt
 [jobs.lint]
+checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 8
 memory = "6g"
 cwd = "/work/${src:-helios}"
@@ -150,6 +152,7 @@ timeout = "1h"
 # the CI profile (no retry, no fail-fast), its JUnit report and a Markdown
 # summary of the slowest tests in /out
 [jobs.test]
+checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 6
 memory = "6g"
 cwd = "/work/${src:-helios}"
@@ -163,6 +166,7 @@ timeout = "1h"
 
 # quit, kill -9 and reopen: the scenarios that gate a release
 [jobs.survival]
+checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 4
 memory = "4g"
 cwd = "/work/${src:-helios}"
@@ -174,6 +178,7 @@ timeout = "30m"
 # every commit of base..HEAD but the head builds and passes the fast tests
 # (base=<commit or branch>, origin/main by default)
 [jobs.check-commits]
+checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 8
 memory = "6g"
 cwd = "/work/${src:-helios}"
@@ -184,6 +189,7 @@ timeout = "2h"
 
 # the GPU backend's tests on the box's NVIDIA GPU, not lavapipe
 [jobs.gpu]
+checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 4
 memory = "4g"
 resources = ["gpu"]
@@ -198,6 +204,7 @@ timeout = "30m"
 
 # the same tests on the Intel iGPU (Mesa ANV), the second real backend
 [jobs.gpu-intel]
+checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 4
 memory = "4g"
 resources = ["render"]
@@ -212,6 +219,7 @@ timeout = "30m"
 
 # egui-pop's gate: fmt, clippy, the workspace tests with the doctests, docs
 [jobs.egui-pop-gate]
+checkouts = ["egui-pop"]
 cores = 8
 memory = "9g"
 cwd = "/work/${src:-egui-pop}"
@@ -227,6 +235,7 @@ timeout = "1h"
 # as in CI): every PNG of crates/egui-pop-gallery/tests/snapshots lands in
 # /out/snapshots, to review and commit
 [jobs.egui-pop-snapshots]
+checkouts = ["egui-pop"]
 cores = 8
 memory = "9g"
 cwd = "/work/${src:-egui-pop}"
@@ -242,6 +251,7 @@ timeout = "1h"
 # English one from the code, new translations stamped): the locales of
 # crates/egui-pop-i18n land in /out/locales, to review and commit
 [jobs.egui-pop-catalogues]
+checkouts = ["egui-pop"]
 cores = 8
 memory = "9g"
 cwd = "/work/${src:-egui-pop}"
@@ -272,6 +282,7 @@ timeout = "30m"
 # thumbnails in /out. `bless=yes` accepts the thumbnails as they are now:
 # the new tests/raw-corpus.thumbs.toml lands in /out, to commit.
 [jobs.raw-corpus]
+checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 4
 memory = "4g"
 cwd = "/work/${src:-helios}"
@@ -310,6 +321,7 @@ timeout = "2h"
 # alone on the machine, so the numbers compare from one run to the next
 
 [jobs.bench-masks]
+checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 8
 memory = "6g"
 exclusive = ["machine"]
@@ -321,6 +333,7 @@ timeout = "1h"
 
 # the per-branch history (in the target cache) says which tests got slower
 [jobs.test-times]
+checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 8
 memory = "6g"
 exclusive = ["machine"]
