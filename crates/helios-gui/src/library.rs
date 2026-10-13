@@ -40,7 +40,8 @@ pub struct Entry {
     pub labels: Vec<String>,
     /// The file's size in bytes, when it is on disk.
     pub bytes: Option<u64>,
-    /// When the file was last modified, in seconds since 1970 (UTC).
+    /// When the file was last modified, in seconds since 1970 (UTC); shown
+    /// in the system's time zone.
     pub modified: Option<i64>,
 }
 
@@ -68,15 +69,39 @@ pub fn size_text(ctx: &egui::Context, bytes: u64) -> String {
     crate::i18n::text(ctx, unit.with("size", size))
 }
 
+/// A moment (seconds since 1970) as the calendar day and time it was in
+/// time zone `tz`, its offset at that moment (summer time included).
+pub fn day_in<Tz: chrono::TimeZone>(tz: &Tz, seconds: i64) -> egui_pop::i18n::format::Date {
+    use chrono::Offset;
+    let offset = chrono::DateTime::from_timestamp(seconds, 0).map_or(0, |utc| {
+        i64::from(
+            tz.offset_from_utc_datetime(&utc.naive_utc())
+                .fix()
+                .local_minus_utc(),
+        )
+    });
+    egui_pop::i18n::format::Date::from_unix(seconds + offset)
+}
+
 /// What the library says of an image's file beside its name: its size and
-/// the day it was last modified, in the interface's language.
+/// the day it was last modified, in the interface's language and the
+/// system's time zone.
 pub fn file_details(ctx: &egui::Context, entry: &Entry) -> Option<String> {
-    use egui_pop::i18n::format::{Date, DateStyle, date};
+    file_details_in(ctx, entry, &chrono::Local)
+}
+
+/// [`file_details`] with the day as it was in time zone `tz`.
+pub fn file_details_in<Tz: chrono::TimeZone>(
+    ctx: &egui::Context,
+    entry: &Entry,
+    tz: &Tz,
+) -> Option<String> {
+    use egui_pop::i18n::format::{DateStyle, date};
     let locale = crate::i18n::locale(ctx);
     let size = entry.bytes.map(|b| size_text(ctx, b));
     let day = entry
         .modified
-        .map(|s| date(&locale, &Date::from_unix(s), DateStyle::Medium));
+        .map(|s| date(&locale, &day_in(tz, s), DateStyle::Medium));
     match (size, day) {
         (Some(size), Some(day)) => Some(crate::i18n::text(
             ctx,

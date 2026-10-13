@@ -38,7 +38,9 @@ fn the_desktop_switches_to_french_and_back() {
 /// The library's file details (size, day modified) follow the language.
 #[test]
 fn file_sizes_and_dates_follow_the_language() {
-    use helios_gui::library::{Entry, file_details};
+    use helios_gui::library::{Entry, file_details_in};
+
+    let utc = chrono::Utc;
 
     let mut h = headless::harness(Shell::new(helios_panels(), None), vec2(1280.0, 800.0));
     h.run();
@@ -50,7 +52,7 @@ fn file_sizes_and_dates_follow_the_language() {
         ..Entry::default()
     };
     assert_eq!(
-        file_details(&h.ctx, &entry).as_deref(),
+        file_details_in(&h.ctx, &entry, &utc).as_deref(),
         Some("25.3 MiB · modified Oct 12, 2026")
     );
     let app = h.state().app().handle().clone();
@@ -58,14 +60,51 @@ fn file_sizes_and_dates_follow_the_language() {
     h.run();
     h.run();
     assert_eq!(
-        file_details(&h.ctx, &entry).as_deref(),
+        file_details_in(&h.ctx, &entry, &utc).as_deref(),
         Some("25,3 Mio · modifié le 12 oct. 2026")
     );
     let small = Entry {
         bytes: Some(512),
         ..Entry::default()
     };
-    assert_eq!(file_details(&h.ctx, &small).as_deref(), Some("512 o"));
+    assert_eq!(
+        file_details_in(&h.ctx, &small, &utc).as_deref(),
+        Some("512 o")
+    );
+}
+
+/// The day a file was modified is the one of the time zone shown: late
+/// on the 12th in UTC is already the 13th in Paris, and the evening
+/// before in Honolulu.
+#[test]
+fn file_dates_are_in_the_time_zone() {
+    use chrono::FixedOffset;
+    use helios_gui::library::{Entry, file_details_in};
+
+    let h = headless::harness(Shell::new(helios_panels(), None), vec2(1280.0, 800.0));
+    let entry = Entry {
+        // 2026-10-12, 23:30 UTC.
+        modified: Some(1_791_847_800),
+        ..Entry::default()
+    };
+    let day = |tz: &FixedOffset| file_details_in(&h.ctx, &entry, tz);
+    let paris = FixedOffset::east_opt(2 * 3600).unwrap();
+    let honolulu = FixedOffset::west_opt(10 * 3600).unwrap();
+    assert_eq!(
+        day(&FixedOffset::east_opt(0).unwrap()).as_deref(),
+        Some("Oct 12, 2026")
+    );
+    assert_eq!(day(&paris).as_deref(), Some("Oct 13, 2026"));
+    assert_eq!(day(&honolulu).as_deref(), Some("Oct 12, 2026"));
+    let early = Entry {
+        // 2026-10-13, 00:30 UTC.
+        modified: Some(1_791_851_400),
+        ..Entry::default()
+    };
+    assert_eq!(
+        file_details_in(&h.ctx, &early, &honolulu).as_deref(),
+        Some("Oct 12, 2026")
+    );
 }
 
 /// French on: a step whose GPU version failed is told in a French toast,

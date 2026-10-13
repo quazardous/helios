@@ -1929,6 +1929,7 @@ dependencies = [
 name = "helios-gui"
 version = "0.0.1"
 dependencies = [
+ "chrono",
  "eframe",
  "egui",
  "egui-pop",

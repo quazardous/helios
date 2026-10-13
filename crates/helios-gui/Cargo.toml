@@ -26,6 +26,9 @@ helios-vault-sqlite.workspace = true
 helios-module-exposure = { path = "../../modules/exposure" }
 # The drawn mask shapes the viewport edits (their outlines and handles).
 helios-module-masks = { path = "../../modules/masks" }
+# MIT OR Apache-2.0: the system's time zone, for the days the library
+# shows (already in the tree through rawler).
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 serde.workspace = true
 serde_json.workspace = true
 # MIT OR Apache-2.0 (egui, eframe, egui_kittest).
