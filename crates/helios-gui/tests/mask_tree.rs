@@ -856,3 +856,181 @@ fn taking_out_a_group_that_holds_members_is_asked_first() {
     }
     assert_eq!(wired(&h, "mask"), ["spot", "oval"]);
 }
+
+fn float(h: &Harness<'_, Shell>, path: &str) -> f64 {
+    h.state()
+        .values
+        .lock()
+        .unwrap()
+        .get(path)
+        .unwrap()
+        .value
+        .as_f64()
+        .unwrap()
+}
+
+#[test]
+fn a_right_click_never_takes_anything_out() {
+    let mut h = harness();
+    let radius = float(&h, "node/spot/radius");
+    // On a row: its menu opens, nothing goes.
+    for label in ["spot", "inner — minimum", "dot"] {
+        let at = row(&h, label).center();
+        right_click(&mut h, at);
+        h.key_press(Key::Escape);
+        for _ in 0..3 {
+            h.step();
+        }
+    }
+    // On a shape's edge on the viewport, selected or not.
+    run(
+        &mut h,
+        "mask.select",
+        json!({ "mask": "mask", "shape": "spot" }),
+    );
+    let m = h.state().viewport().state().mapping().unwrap();
+    for at in [[300.0, 140.0], [450.0, 160.0]] {
+        right_click(&mut h, m.image_to_screen(at));
+        h.key_press(Key::Escape);
+        for _ in 0..3 {
+            h.step();
+        }
+    }
+    assert_eq!(wired(&h, "mask"), ["inner", "spot", "oval"]);
+    assert_eq!(wired(&h, "inner"), ["dot"]);
+    assert_eq!(rows(&h).len(), 5, "{:?}", rows(&h));
+    assert_eq!(float(&h, "node/spot/radius"), radius);
+    assert!(steps(&h).is_empty(), "{:?}", steps(&h));
+}
+
+#[test]
+fn adding_members_keeps_every_element_of_the_mask() {
+    let mut h = harness();
+    run(&mut h, "mask.select", json!({ "mask": "mask" }));
+    // Two parametric members and a shape join the drawn ones: nothing is
+    // discarded, nothing asked.
+    run(&mut h, "mask.add.parametric", json!(null));
+    run(&mut h, "mask.select", json!({ "mask": "mask" }));
+    run(&mut h, "mask.add.parametric", json!(null));
+    run(&mut h, "mask.select", json!({ "mask": "mask" }));
+    run(&mut h, "mask.add.circle", json!(null));
+    assert_eq!(
+        wired(&h, "mask"),
+        [
+            "inner",
+            "spot",
+            "oval",
+            "parametric",
+            "parametric2",
+            "circle"
+        ]
+    );
+    assert_eq!(wired(&h, "inner"), ["dot"]);
+    assert_eq!(float(&h, "node/spot/radius"), 60.0);
+    assert_eq!(dialog(&mut h), json!(null));
+}
+
+/// Steps frames until the viewport's tiles are all on screen and more
+/// than `after` were rendered, waiting for the render threads.
+fn rendered_after(h: &mut Harness<'_, Shell>, after: u64) {
+    use helios_gui::engine_source::Stats;
+    for _ in 0..40 {
+        h.step();
+        let stats = h.state().viewport_stats();
+        assert!(
+            stats.wait_idle(std::time::Duration::from_mins(1)),
+            "the render thread never answered: {stats:?}"
+        );
+        h.step();
+        if h.state().viewport().state().tiles_complete() && Stats::get(&stats.tiles) > after {
+            return;
+        }
+    }
+    panic!("the viewport never rendered again");
+}
+
+/// The red of the viewport's picture at an image pixel.
+fn red_at(h: &mut Harness<'_, Shell>, at: [f64; 2]) -> u8 {
+    let shot = headless::snapshot(h, "viewport.display").unwrap();
+    let r = h.state().target_rect("viewport.display").unwrap();
+    let p = h
+        .state()
+        .viewport()
+        .state()
+        .mapping()
+        .unwrap()
+        .image_to_screen(at);
+    let ppp = h.state().pixels_per_point();
+    shot.get_pixel(
+        ((p.x - r.min.x) * ppp) as u32,
+        ((p.y - r.min.y) * ppp) as u32,
+    )
+    .0[0]
+}
+
+#[test]
+fn a_structure_change_renders_at_once() {
+    use helios_gui::engine_source::Stats;
+    let mut h = harness();
+    let tiles = |h: &Harness<'_, Shell>| Stats::get(&h.state().viewport_stats().tiles);
+    rendered_after(&mut h, 0);
+    // Inside the spot, the exposure applies.
+    let lit = red_at(&mut h, [300.0, 200.0]);
+    // The spot moved into the inner group (the minimum with the dot,
+    // which it does not meet): no value nudged, the image follows.
+    let before = tiles(&h);
+    run(
+        &mut h,
+        "mask.member.move",
+        json!({ "member": "spot", "group": "inner" }),
+    );
+    rendered_after(&mut h, before);
+    let moved = red_at(&mut h, [300.0, 200.0]);
+    assert!(moved + 20 < lit, "{lit} then {moved}");
+    // The oval taken out: its area goes back to the module's input.
+    let lit = red_at(&mut h, [450.0, 200.0]);
+    let before = tiles(&h);
+    run(&mut h, "mask.member.delete", json!({ "member": "oval" }));
+    rendered_after(&mut h, before);
+    let out = red_at(&mut h, [450.0, 200.0]);
+    assert!(out + 20 < lit, "{lit} then {out}");
+    assert!(steps(&h).is_empty(), "{:?}", steps(&h));
+}
+
+#[test]
+fn the_panel_follows_a_new_network_and_undo() {
+    let mut h = harness();
+    click_row(&mut h, "dot");
+    assert_eq!(text(&h, MASK), "inner");
+    // Another network replaces this one (another image, an edit opened
+    // at another step): the panel shows it, nothing of the old one stays
+    // selected or drawn.
+    let (g, blend) = empty();
+    h.state_mut().set_view_source(g, blend, "output").unwrap();
+    for _ in 0..3 {
+        h.step();
+    }
+    assert_eq!(rows(&h), ["▣ mask — maximum"]);
+    assert_eq!(cursor(&h), None);
+    assert!(h.state().viewport().masks().overlays().is_empty());
+    assert!(in_panel(&h, "Mask of exposure"));
+    // Back to the first one: its tree again, the dot selected as it was.
+    let (g, blend) = graph();
+    h.state_mut().set_view_source(g, blend, "output").unwrap();
+    for _ in 0..3 {
+        h.step();
+    }
+    assert_eq!(rows(&h).len(), 5, "{:?}", rows(&h));
+    assert_eq!(cursor(&h).as_deref(), Some("dot"));
+    // An undo of a selected member's edit keeps the panel on it.
+    run(
+        &mut h,
+        "mask.member.opacity",
+        json!({ "member": "dot", "opacity": 0.5 }),
+    );
+    assert!(rows(&h).contains(&"    ○ dot · 50 %".to_string()));
+    run(&mut h, "param.undo", json!(null));
+    assert!(rows(&h).contains(&"    ○ dot".to_string()));
+    assert_eq!(cursor(&h).as_deref(), Some("dot"));
+    assert_eq!(text(&h, SHAPE), "dot");
+}
