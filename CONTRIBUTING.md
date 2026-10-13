@@ -184,3 +184,11 @@ writes the new section at the top of CHANGELOG.md,
 bumps the version and removes the fragments. It does not commit or tag:
 review the diff, run `cargo check` to refresh Cargo.lock, then commit
 "Release X.Y.Z" and tag `vX.Y.Z`.
+
+A merge to main is a release (decided 2026-10-13): each branch merged
+with user-facing fragments is released right after it lands, so the
+version a build reports says what it contains. The bench box prepares
+it (`cargo xtask bench-remote release branch=main`: survival, the
+CHANGELOG section, the bump and Cargo.lock, as `out/release.patch`);
+apply the patch on main, commit "Release X.Y.Z", tag `vX.Y.Z` and push
+both.
