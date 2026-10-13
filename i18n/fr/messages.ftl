@@ -64,6 +64,14 @@ gui-edit-not-saved = La retouche n’a pas été enregistrée : { $error }
 
 gui-gesture-in-progress = { $gesture } est en cours
 
+gui-job-batch-done = Lot terminé
+
+gui-job-batch-failed = Échec du lot
+
+gui-job-export-done = Export terminé
+
+gui-job-export-failed = Échec de l’export
+
 gui-library-not-saved = Non enregistré, la bibliothèque montre ce que contient le coffre : { $error }
 
 gui-masks-group-full = le groupe « { $group } » contient déjà { $count } membres

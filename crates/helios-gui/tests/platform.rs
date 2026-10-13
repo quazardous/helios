@@ -1,12 +1,19 @@
 //! The desktop's platform services: a second launch, another process,
-//! hands its files and links to the running Helios.
+//! hands its files and links to the running Helios; a long job's end is
+//! said on the desktop only while no window has the focus.
 
 use std::process::Command;
 use std::time::{Duration, Instant};
 
 use egui_pop::api::App;
+use egui_pop::model::commands::Origin;
+use egui_pop::model::values::{Change, Set, Value};
 use egui_pop::platform::instance::{self, InstancePlugin, Launch, Single};
-use helios_gui::platform::{Open, Opens, Platform, SCHEME};
+use egui_pop::platform::notify::{NotifyPlugin, Simulated};
+use helios_gui::platform::{
+    Job, JobEnd, LONG_JOB_SECONDS, Open, Opens, Platform, SCHEME, SETTING_JOBS, job_finished,
+    jobs_enabled, should_notify, window_focused,
+};
 
 const CHILD: &str = "HELIOS_GUI_PLATFORM_CHILD";
 
@@ -77,7 +84,10 @@ fn a_second_launch_hands_over() {
         .into_iter()
         .map(|t| t.step.as_str().to_string())
         .collect();
-    assert!(steps.iter().any(|s| s == "instance.second_launch"), "{steps:?}");
+    assert!(
+        steps.iter().any(|s| s == "instance.second_launch"),
+        "{steps:?}"
+    );
     assert!(steps.iter().any(|s| s == "deeplink.open"), "{steps:?}");
 }
 
@@ -100,4 +110,107 @@ fn a_link_that_opens_nothing_opens_nothing() {
     app.logic(&ctx);
     app.logic(&ctx);
     assert!(opens.take().is_empty());
+}
+
+fn notifying(desktop: &Simulated) -> (egui::Context, App) {
+    let ctx = egui::Context::default();
+    let app = App::builder()
+        .plugin(NotifyPlugin::new("Helios").backend(desktop.clone()))
+        .plugin(Platform::new(Opens::default()))
+        .build(&ctx)
+        .unwrap();
+    (ctx, app)
+}
+
+fn export(seconds: f64) -> JobEnd {
+    JobEnd {
+        job: Job::Export,
+        outcome: Ok("12 images".into()),
+        seconds,
+    }
+}
+
+#[test]
+fn a_long_job_is_notified_only_while_unfocused_and_wanted() {
+    assert!(should_notify(true, false, LONG_JOB_SECONDS));
+    assert!(!should_notify(true, true, 60.0));
+    assert!(!should_notify(false, false, 60.0));
+    assert!(!should_notify(true, false, 1.0));
+
+    let desktop = Simulated::default();
+    let (ctx, mut app) = notifying(&desktop);
+    let english = |m: helios_core::Message| m.english;
+    assert!(jobs_enabled(app.handle()));
+    assert!(!job_finished(app.handle(), &export(60.0), true, english));
+    assert!(!job_finished(app.handle(), &export(2.0), false, english));
+    assert!(job_finished(app.handle(), &export(60.0), false, english));
+    let failed = JobEnd {
+        job: Job::Batch,
+        outcome: Err("disk full".into()),
+        seconds: 30.0,
+    };
+    assert!(job_finished(app.handle(), &failed, false, english));
+    // Shown at the next passes, from the notifications' thread.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while desktop.shown().len() < 2 && Instant::now() < deadline {
+        app.logic(&ctx);
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let shown: Vec<(String, String)> = desktop
+        .shown()
+        .into_iter()
+        .map(|(_, n)| (n.title, n.body))
+        .collect();
+    assert_eq!(
+        shown,
+        vec![
+            ("Export finished".to_string(), "12 images".to_string()),
+            ("Batch failed".to_string(), "disk full".to_string()),
+        ]
+    );
+
+    // The setting off: nothing more.
+    app.handle()
+        .store()
+        .lock()
+        .unwrap()
+        .set(Set::new(
+            &format!("settings/{SETTING_JOBS}"),
+            Change::To(Value::Bool(false)),
+            Origin::User,
+        ))
+        .unwrap();
+    assert!(!jobs_enabled(app.handle()));
+    assert!(!job_finished(app.handle(), &export(60.0), false, english));
+}
+
+#[test]
+fn the_focus_is_any_helios_window_s() {
+    let focused = |states: &[Option<bool>]| {
+        let ctx = egui::Context::default();
+        let mut input = egui::RawInput::default();
+        for (i, s) in states.iter().enumerate() {
+            let id = if i == 0 {
+                egui::ViewportId::ROOT
+            } else {
+                egui::ViewportId::from_hash_of(i)
+            };
+            input.viewports.insert(
+                id,
+                egui::ViewportInfo {
+                    focused: *s,
+                    ..Default::default()
+                },
+            );
+        }
+        let mut got = None;
+        let mut out = ctx.run_ui(input, |ui| got = Some(window_focused(ui.ctx())));
+        out.textures_delta.clear();
+        got.unwrap()
+    };
+    assert!(!focused(&[Some(false)]));
+    assert!(focused(&[Some(true)]));
+    assert!(focused(&[Some(false), Some(true)]));
+    // Nothing known: taken as focused, nothing said.
+    assert!(focused(&[None]));
 }

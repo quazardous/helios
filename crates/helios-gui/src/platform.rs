@@ -6,6 +6,9 @@
 //!   in the viewport, a workspace in a window of its own (one process per
 //!   workspace, started with [`NEW_INSTANCE`]). `helios://` links take the
 //!   same path ([`link`]).
+//! - **Notifications**: a long export or batch that ends while no Helios
+//!   window has the focus says so on the desktop ([`job_finished`]), unless
+//!   the `notifications.jobs` setting is off.
 //!
 //! The [`Platform`] plugin is part of every shell: its hooks on the
 //! instance's steps do nothing where no instance runs (tests, pictures,
@@ -16,9 +19,12 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
-use egui_pop::api::{AppBuilder, Ctx, Plugin, PluginError};
-use egui_pop::model::ids::PluginId;
+use egui_pop::api::{AppBuilder, AppHandle, Ctx, Plugin, PluginError};
+use egui_pop::model::ids::{PluginId, SettingId};
+use egui_pop::model::values::Descriptor;
 use egui_pop::platform::instance::{Instance, InstancePlugin, STEP_DEEPLINK, STEP_SECOND_LAUNCH};
+use egui_pop::platform::notify::{self, Desktop, Notification, NotifyPlugin};
+use helios_core::Message;
 use serde_json::{Value as Json, json};
 
 /// Helios's id on the desktop: its desktop file's name
@@ -33,6 +39,93 @@ pub const SCHEME: &str = "helios";
 pub const NEW_INSTANCE: &str = "--new-instance";
 
 pub const PLUGIN: PluginId = PluginId::from_static("helios.platform");
+
+/// Whether a long job's end is said on the desktop, at
+/// `settings/notifications.jobs` (on by default).
+pub const SETTING_JOBS: SettingId = SettingId::from_static("notifications.jobs");
+
+/// A job is long, and its end worth a notification, from this many
+/// seconds.
+pub const LONG_JOB_SECONDS: f64 = 10.0;
+
+/// A job whose end may be notified.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Job {
+    Export,
+    Batch,
+}
+
+/// How a job ended: what it did (`Ok`, a summary in the interface's
+/// language) or why it failed, and how long it took.
+#[derive(Clone, Debug, PartialEq)]
+pub struct JobEnd {
+    pub job: Job,
+    pub outcome: Result<String, String>,
+    pub seconds: f64,
+}
+
+/// Whether a job's end shows on the desktop: the setting on, no Helios
+/// window with the focus, and a long job (a short one ends under the
+/// user's eyes).
+pub fn should_notify(enabled: bool, focused: bool, seconds: f64) -> bool {
+    enabled && !focused && seconds >= LONG_JOB_SECONDS
+}
+
+/// Whether the `notifications.jobs` setting is on.
+pub fn jobs_enabled(app: &AppHandle) -> bool {
+    app.store()
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .get(&format!("settings/{SETTING_JOBS}"))
+        .and_then(|e| e.value.as_bool())
+        .unwrap_or(true)
+}
+
+/// Whether a Helios window (the main one or a detached panel's) has the
+/// focus; when no window says, it is taken as focused.
+pub fn window_focused(ctx: &egui::Context) -> bool {
+    ctx.input(|i| {
+        let known: Vec<bool> = i.raw.viewports.values().filter_map(|v| v.focused).collect();
+        known.is_empty() || known.contains(&true)
+    })
+}
+
+/// The notification for a job's end, its text through `text` (the
+/// interface's language).
+pub fn notification(end: &JobEnd, text: impl Fn(Message) -> String) -> Notification {
+    let title = match (end.job, end.outcome.is_ok()) {
+        (Job::Export, true) => Message::new("gui-job-export-done", "Export finished"),
+        (Job::Export, false) => Message::new("gui-job-export-failed", "Export failed"),
+        (Job::Batch, true) => Message::new("gui-job-batch-done", "Batch finished"),
+        (Job::Batch, false) => Message::new("gui-job-batch-failed", "Batch failed"),
+    };
+    let (body, level) = match &end.outcome {
+        Ok(summary) => (summary.as_str(), notify::Level::Success),
+        Err(why) => (why.as_str(), notify::Level::Error),
+    };
+    Notification::new(&text(title), body)
+        .level(level)
+        .icon(APP_ID)
+}
+
+/// Says a job's end on the desktop when [`should_notify`] says so
+/// (`focused`: [`window_focused`]); whether it was posted. Without the
+/// notifications plugin (tests, pictures) nothing is posted.
+pub fn job_finished(
+    app: &AppHandle,
+    end: &JobEnd,
+    focused: bool,
+    text: impl Fn(Message) -> String,
+) -> bool {
+    if !should_notify(jobs_enabled(app), focused, end.seconds) {
+        return false;
+    }
+    let Some(notifier) = app.service(&notify::NOTIFIER) else {
+        return false;
+    };
+    notifier.post(notification(end, text));
+    true
+}
 
 /// Something a launch or a link asks to open.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -239,6 +332,12 @@ impl Plugin for Platform {
     }
 
     fn connect(&mut self, ctx: &mut Ctx<'_>) -> Result<(), PluginError> {
+        ctx.setting(
+            SETTING_JOBS,
+            Descriptor::bool("Notify when a long job ends", true).description(
+                "Shows a desktop notification when a long export or batch finishes or fails while no Helios window has the focus.",
+            ),
+        )?;
         // Without a single instance (tests, pictures, tools) there are
         // no launches to follow.
         if !self.opens.listening() {
@@ -274,9 +373,11 @@ impl Plugin for Platform {
 }
 
 /// egui-pop's platform services for the desktop window: the single
-/// instance (its launches handed to [`Platform`]).
+/// instance (its launches handed to [`Platform`]) and the desktop's
+/// notifications, tied to Helios's desktop file.
 pub fn desktop(app: AppBuilder, instance: Instance) -> AppBuilder {
     app.plugin(InstancePlugin::new(instance).scheme(SCHEME))
+        .plugin(NotifyPlugin::new("Helios").backend(Desktop::new("Helios").app_id(APP_ID)))
 }
 
 #[cfg(test)]

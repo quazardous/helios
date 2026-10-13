@@ -145,6 +145,10 @@ gui-copied 2f397b47ced4b53e
 gui-edit-does-not-fit b270477011039ced
 gui-edit-not-saved 988fbabe3acbb2ab
 gui-gesture-in-progress c25ee937ebc97642
+gui-job-batch-done ccc1a6756b4cc887
+gui-job-batch-failed ca77875dcfbaac86
+gui-job-export-done 5fdda5b0fb93ec0f
+gui-job-export-failed f5ce199f9e1502ae
 gui-library-file f5342066f92b83c2
 gui-library-not-saved f4c82ef926e77b5e
 gui-masks-group-full 2c68b91eff216a00
@@ -407,6 +411,8 @@ plugin-helios-platform.title 2ab53894da44fd90
 plugin-helios-workbench.title 43f0563e9981a775
 setting-display-wide-gamut-preview.description f0e0b6e09b6c09be
 setting-display-wide-gamut-preview.label 449f4dab4606e33d
+setting-notifications-jobs.description 7d029c60dd555a79
+setting-notifications-jobs.label fffc31760e483d40
 xmp-blend-details 3ff204129cc50b2b
 xmp-blend-feathering 3cf16b474607e663
 xmp-blend-mode 0f1844d54690c308

@@ -47,3 +47,7 @@ plugin-helios-workbench =
 setting-display-wide-gamut-preview =
     .description = Shows the image in Rec.2020 where the window can carry it (Wayland with colour management), so colours outside sRGB are not clipped. Elsewhere the image stays sRGB.
     .label = Wide-gamut preview
+
+setting-notifications-jobs =
+    .description = Shows a desktop notification when a long export or batch finishes or fails while no Helios window has the focus.
+    .label = Notify when a long job ends

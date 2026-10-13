@@ -65,6 +65,14 @@ gui-edit-not-saved = The edit was not saved: { $error }
 
 gui-gesture-in-progress = { $gesture } is in progress
 
+gui-job-batch-done = Batch finished
+
+gui-job-batch-failed = Batch failed
+
+gui-job-export-done = Export finished
+
+gui-job-export-failed = Export failed
+
 gui-library-file = { $size } · modified { $day }
 
 gui-library-not-saved = Not saved, the library shows what the vault holds: { $error }

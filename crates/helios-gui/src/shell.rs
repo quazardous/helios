@@ -616,6 +616,15 @@ impl Shell {
         shell
     }
 
+    /// A long export or batch ended: said on the desktop when no Helios
+    /// window has the focus and the `notifications.jobs` setting is on
+    /// (see `platform::job_finished`); whether it was.
+    pub fn job_finished(&self, end: &crate::platform::JobEnd) -> bool {
+        let app = self.app.handle();
+        let focused = crate::platform::window_focused(&app.egui());
+        crate::platform::job_finished(app, end, focused, |m| self.text(m))
+    }
+
     /// What later launches and `helios:` links asked to open since the
     /// last call (the window opens them).
     pub fn take_opens(&self) -> Vec<crate::platform::Open> {
