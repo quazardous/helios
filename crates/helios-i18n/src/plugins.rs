@@ -124,6 +124,9 @@ pub fn add(
 ) -> Result<usize, String> {
     // Its own title message (`plugin-<id>`), which egui-pop's ownership
     // rule (`<area>-<owner>-…`) does not cover, and its commands' titles.
+    // Workaround: egui-pop dba812e (main) makes `owned_by` accept
+    // `plugin-<id>` itself; once the egui-pop pin includes it, the title
+    // goes through `add_owned` and only the commands' titles stay here.
     let mut declared: Vec<String> = commands.iter().map(|c| ids::command(c)).collect();
     declared.push(title(id).id);
     let mut parts = Vec::new();
