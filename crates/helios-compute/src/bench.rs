@@ -46,10 +46,32 @@ pub fn calibrate(
     accelerator: Option<Arc<dyn Accelerator>>,
     side: u32,
 ) -> Result<BTreeMap<String, f64>, String> {
+    calibrate_with(accelerator, side, &mut |_| true)
+}
+
+/// How many reference modules a calibration runs (one per family).
+pub fn families() -> usize {
+    references().len()
+}
+
+/// Why a calibration stopped when asked to.
+pub const CANCELLED: &str = "calibration cancelled";
+
+/// [`calibrate`], `each(family)` told before each reference module runs
+/// (a job's progress); when it answers false, the calibration stops
+/// ([`CANCELLED`]).
+pub fn calibrate_with(
+    accelerator: Option<Arc<dyn Accelerator>>,
+    side: u32,
+    each: &mut dyn FnMut(&str) -> bool,
+) -> Result<BTreeMap<String, f64>, String> {
     let input = tile(side);
     let region = input.region();
     let mut speeds = BTreeMap::new();
     for (family, module, params) in references() {
+        if !each(family) {
+            return Err(CANCELLED.into());
+        }
         let mut g = Graph::new();
         let src = g.add_source("src", input.clone());
         let name = module.manifest().name.clone();

@@ -493,6 +493,36 @@ fn settings_survive_a_round_trip() {
     );
 }
 
+/// A calibration is a job people follow: each device's families as
+/// items, its speeds as log lines, and its end.
+#[test]
+fn a_benchmark_reports_as_a_job() {
+    let d = dir("bench-job");
+    let mut m = Manager::open(&d, Box::new(machine()))
+        .unwrap()
+        .with_bench_tile(64);
+    let bus = Arc::new(Bus::new());
+    m.report_to(helios_core::jobs::Jobs::new(bus.clone()));
+    m.benchmark(Some(CPU)).unwrap();
+    let events = bus.since(0);
+    let kinds: Vec<&str> = events.iter().map(|e| e.kind).collect();
+    assert_eq!(kinds.first(), Some(&"job.started"));
+    assert_eq!(kinds.last(), Some(&"job.finished"));
+    assert_eq!(events[0].payload["kind"], "calibration");
+    assert_eq!(events[0].payload["total"], 2, "two families on one device");
+    assert!(
+        events
+            .iter()
+            .any(|e| e.kind == "job.progress" && e.payload["item"].as_str().is_some()),
+        "{kinds:?}"
+    );
+    let log = events.iter().find(|e| e.kind == "job.log").unwrap();
+    assert!(
+        log.payload["text"].as_str().unwrap().contains("MP/s"),
+        "{log:?}"
+    );
+}
+
 #[test]
 fn a_benchmark_measures_each_family_and_keeps_it() {
     let d = dir("bench");

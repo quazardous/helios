@@ -23,8 +23,10 @@ pub mod settings;
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
+use helios_core::jobs::{Jobs, Progress, Start};
 use helios_core::{
     Accelerator, Bus, Context, Engine, Error, Graph, Image, ModuleRef, NodeId, Params, Region,
 };
@@ -211,6 +213,9 @@ pub struct Budget {
 /// A GPU opened, or why it did not open.
 type Opened = Result<OpenedGpu, String>;
 
+/// The calibrations' job ids in this process.
+static CALIBRATIONS: AtomicU64 = AtomicU64::new(1);
+
 /// The compute units of this machine, their devices and settings.
 pub struct Manager {
     dir: PathBuf,
@@ -223,6 +228,8 @@ pub struct Manager {
     opened: Mutex<HashMap<String, Opened>>,
     /// The side of the benchmark's tile.
     bench_tile: u32,
+    /// Where a calibration reports as a job people follow.
+    jobs: Option<Jobs>,
 }
 
 impl Manager {
@@ -239,6 +246,7 @@ impl Manager {
             remotes: BTreeMap::new(),
             opened: Mutex::default(),
             bench_tile: bench::TILE,
+            jobs: None,
         };
         manager.rescan()?;
         Ok(manager)
@@ -265,6 +273,13 @@ impl Manager {
             }
         }
         if new { self.save() } else { Ok(()) }
+    }
+
+    /// Calibrations report to `jobs` (`job.*` events, kind
+    /// `calibration`): each device's families as items, its speeds as log
+    /// lines, and `Jobs::cancel` stops it between two reference modules.
+    pub fn report_to(&mut self, jobs: Jobs) {
+        self.jobs = Some(jobs);
     }
 
     /// Benchmarks over a tile of another side: a smaller one is quicker
@@ -636,15 +651,59 @@ impl Manager {
         let at = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_secs());
+        let total = (ids.len() * bench::families()) as u64;
+        let stop = Arc::new(AtomicBool::new(false));
+        let report = self.jobs.as_ref().map(|jobs| {
+            let n = CALIBRATIONS.fetch_add(1, Ordering::Relaxed);
+            let r = jobs.start(
+                Start::new(
+                    &format!("calibration-{n}"),
+                    "Calibrate the compute devices",
+                    "calibration",
+                )
+                .total(total),
+            );
+            let stop = stop.clone();
+            r.on_cancel(move || stop.store(true, Ordering::SeqCst));
+            r
+        });
+        let mut done = 0;
         let mut reports = Vec::new();
         for id in ids {
             let device = self.present(&id).expect("present").clone();
-            let speeds = if device.kind.is_gpu() {
-                self.opened(&id)
-                    .and_then(|o| bench::calibrate(Some(o.accelerator), self.bench_tile))
-            } else {
-                bench::calibrate(None, self.bench_tile)
+            let mut each = |family: &str| {
+                if let Some(r) = &report {
+                    r.progress(
+                        Progress::new()
+                            .counts(done, total)
+                            .item(&format!("{}: {family}", device.name)),
+                    );
+                }
+                done += 1;
+                !stop.load(Ordering::SeqCst)
             };
+            let speeds = if device.kind.is_gpu() {
+                self.opened(&id).and_then(|o| {
+                    bench::calibrate_with(Some(o.accelerator), self.bench_tile, &mut each)
+                })
+            } else {
+                bench::calibrate_with(None, self.bench_tile, &mut each)
+            };
+            if let Some(r) = &report {
+                match &speeds {
+                    Ok(speeds) => r.log(format!(
+                        "{}: {}",
+                        device.name,
+                        speeds
+                            .iter()
+                            .map(|(family, mps)| format!("{family} {mps:.1} MP/s"))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )),
+                    Err(why) if why != bench::CANCELLED => r.item_failed(&device.name, why),
+                    Err(_) => {}
+                }
+            }
             if let Ok(speeds) = &speeds {
                 let s = self.settings.devices.get_mut(&id).expect("present");
                 s.calibration = Some(Calibration {
@@ -657,6 +716,17 @@ impl Manager {
                 name: device.name,
                 speeds,
             });
+            if stop.load(Ordering::SeqCst) {
+                break;
+            }
+        }
+        if let Some(r) = &report {
+            if stop.load(Ordering::SeqCst) {
+                r.cancelled();
+            } else {
+                r.progress(Progress::new().counts(total, total));
+                r.finished();
+            }
         }
         self.save()?;
         Ok(reports)
