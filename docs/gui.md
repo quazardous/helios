@@ -492,9 +492,9 @@ the `--image` network has one mask (on its exposure).
 ![A circle and a path edited on the viewport](gui/masks-wbox.png)
 
 The picture is a run of `helios-gui --image` in wbox, driven by its
-keys and pointer: the exposure raised, `C` for a circle, `P` and five
-clicks for a path, a double click adding a point to it, then the
-circle's radius and feather dragged.
+keys and pointer: `C` for a circle, then `P`, five clicks and Enter for
+a path. The path, selected, shows its edge and its handles; the circle
+is drawn faint, its feather dashed.
 
 ### The Masks panel
 
@@ -559,8 +559,9 @@ not shown in the tree, only its group's for it.
 ![The Masks panel beside the image](gui/mask-tree-wbox.png)
 
 The picture is a run of `helios-gui --image` in wbox: `C`, `E` and `G`
-on the image, then in the Masks panel the ellipse inverted, the circle's
-opacity turned off and the gradient selected.
+on the image, then in the Masks panel the ellipse inverted (Invert) and
+locked (its row's lock), the circle hidden (its row's eye) and the
+gradient selected.
 
 The picture is a run of `helios-gui --image` in wbox (a headless nested
 compositor). Beside the same run of the viewport it replaced, the image's
