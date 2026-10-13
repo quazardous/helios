@@ -21,7 +21,8 @@
 # the image: several egui-pop branches at ~10 GB each run at once (applied
 # on upload, within the box's envelope)
 [project]
-disk = "60g"
+# the SSD for builds and caches; the spinning disk for big, cold data
+disk = { ssd = "60g", hdd = "98g" }
 
 [image]
 from = "registry.fedoraproject.org/fedora:44"
@@ -115,7 +116,7 @@ run = ["for d in /work/helios /work/egui-pop /work/${src:-helios}; do [ -d $d ] 
 target = { about = "Helios's cargo target directories, one per branch, a new one starting from main's", lock = true, seed = "main" }
 egui-pop-target = { about = "egui-pop's cargo target directories, one per egui-pop branch, a new one starting from main's", lock = true, seed = "main" }
 registry = "the cargo registry, shared by every job"
-darktable-build = { about = "darktable-cli builds for the mask parity, one per pinned checkout", lock = true }
+darktable-build = { about = "darktable-cli builds for the mask parity, one per pinned checkout", lock = true, media = "hdd" }
 cargo-git = "the cargo git dependencies, shared by every job"
 sccache = "sccache's compile cache, shared by every job and branch: a branch reuses what another compiled"
 
@@ -315,6 +316,7 @@ timeout = "1h"
 # version and switches to it only on success.
 [volumes.raw-corpus]
 about = "the raw regression corpus: CC0 raws from raw.pixls.us"
+media = "hdd"
 readers = []
 cwd = "/work/helios"
 provision = "tools/bench/fill-corpus.sh /volume"
