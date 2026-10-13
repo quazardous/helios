@@ -471,7 +471,11 @@ these rules with raw input events (wheel notches and touchpad streams,
 drags across panels, double clicks, key repeats, focus). A dot on the left marks a value changed
 from its default (click: reset); a diamond on the right, a value just
 moved by someone else (the tooltip says who); an amber dot, a value held
-by another origin's gesture. Each widget is found by its path
+by another origin's gesture. A list of numbers folds into a summary
+(`12 points` for a path's or a brush's points, else `32 values`) that a
+click opens below its row, a point a line: a long list never pushes the
+next rows (a path's feather, a group's opacity) out of view. Each widget
+is found by its path
 (`param:<path>`), is a slider to assistive technology, and its context
 menu resets, copies the path or copies the value.
 

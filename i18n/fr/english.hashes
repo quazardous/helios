@@ -185,6 +185,10 @@ gui-param-held b6d3dd43597a853a
 gui-param-hint 1c8cfa3f0db88d5c
 gui-param-not-a-number 0ccb3b001ae28018
 gui-param-past-range 34a7fc44204d4fc6
+gui-params-hide-values 1dba4d3073dbc59a
+gui-params-points af7dd98bce97344d
+gui-params-show-values 1ca86a61fcd25ceb
+gui-params-values 0e265cf773d72c36
 gui-policy-ask 91e427951fd5eb3b
 gui-policy-yes f89fd83bb7b8bfc6
 gui-profile-applied 5e5069fbe39e5b74

@@ -145,6 +145,14 @@ gui-param-not-a-number = { $label }: `{ $typed }` is not a number
 
 gui-param-past-range = { $label }: past its usual range
 
+gui-params-hide-values = Hide the values
+
+gui-params-points = { $count } points
+
+gui-params-show-values = Show the values
+
+gui-params-values = { $count } values
+
 gui-policy-ask = confirmations are asked again
 
 gui-policy-yes = confirmations are answered yes by policy

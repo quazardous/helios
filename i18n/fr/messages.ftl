@@ -132,6 +132,14 @@ gui-open-workspace-verb = Ouvrir
 
 gui-opening = ouverture de { $path }
 
+gui-params-hide-values = Masquer les valeurs
+
+gui-params-points = { $count } points
+
+gui-params-show-values = Afficher les valeurs
+
+gui-params-values = { $count } valeurs
+
 gui-policy-ask = les confirmations sont de nouveau demandées
 
 gui-policy-yes = les confirmations sont acceptées par la règle

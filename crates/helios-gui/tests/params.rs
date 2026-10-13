@@ -286,3 +286,40 @@ fn a_parameter_s_context_menu_runs_its_commands_on_its_path() {
     assert_eq!(run.id, "param.reset");
     assert_eq!(run.args, json!({ "path": EV }));
 }
+
+#[test]
+fn a_path_s_points_fold_into_a_summary_that_opens() {
+    let mut g = Graph::new();
+    let path = g
+        .add_module(
+            "path",
+            ModuleRef::new(helios_module_masks::MaskPath),
+            &Params::new(),
+        )
+        .unwrap();
+    let shell = Shell::new(helios_panels(), None);
+    helios_values::bind_node(&mut shell.values.lock().unwrap(), &g, path).unwrap();
+    let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+    h.state_mut()
+        .run("helios.params.focus", json!(null), Origin::User)
+        .unwrap();
+    h.run();
+    // Folded, the four points of the default square are a summary, and
+    // the rows stay within the panel.
+    let panel = h.state().target_rect("helios.params").unwrap();
+    for p in ["node/path/points", "node/path/feather"] {
+        let row = h.state().target_rect(&format!("param:{p}")).unwrap();
+        assert!(
+            row.right() <= panel.right() + 1.0,
+            "{p}: {row:?} in {panel:?}"
+        );
+    }
+    // A click opens it: a point a line, numbered.
+    h.get_by_label("4 points").click();
+    h.run();
+    h.get_by_label_contains("4: ");
+    // And another closes it.
+    h.get_by_label("4 points").click();
+    h.run();
+    assert!(h.query_by_label_contains("4: ").is_none());
+}

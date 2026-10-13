@@ -9,8 +9,10 @@
 //!   to the hard one, and says so. The wheel scrolls the panel: a slider
 //!   takes it only with the focus or while Alt is held. Steps in a row (a
 //!   held arrow, a turned wheel) are one undo step.
-//! - A bool is a toggle, a choice a list (the arrows step it), a list of
-//!   numbers a row each, a text a field.
+//! - A bool is a toggle, a choice a list (the arrows step it), a text a
+//!   field. A list of numbers folds into a summary (`12 points` for a
+//!   path's points, else `32 values`) that opens below its row, a point
+//!   a line, so a long list never pushes the next rows out of view.
 //! - Marks: changed from its default (a dot that resets), held by someone
 //!   else's gesture, just moved by another origin (who, in the tooltip),
 //!   outside the soft range.
@@ -22,6 +24,7 @@ use std::collections::BTreeMap;
 use std::sync::Mutex;
 
 use egui::{Key, Modifiers, Sense, Ui, WidgetInfo, WidgetType};
+use egui_pop::core::icon::{Icon, Tone};
 use helios_core::{Message, Value};
 use helios_shell::commands::Origin;
 use helios_values::{Change, Descriptor, Entry, GestureId, Set, Store, Type};
@@ -219,6 +222,8 @@ impl Params {
         }
         let d = &entry.descriptor;
         let label = label(ui.ctx(), path, d);
+        // A list shown open: its values under its row, so many per line.
+        let mut open_list = None;
         ui.push_id(path, |ui| {
             ui.horizontal(|ui| {
                 // Changed from its default: a dot that resets.
@@ -281,6 +286,11 @@ impl Params {
                         }
                         r
                     }
+                    (_, v @ (Value::List(_) | Value::Ints(_))) => {
+                        let (r, open) = list_row(ui, path, d, &label, v);
+                        open_list = open;
+                        r
+                    }
                     (_, v) => {
                         ui.label(&label);
                         ui.weak(shown_in(&crate::i18n::locale(ui.ctx()), d, v))
@@ -305,6 +315,9 @@ impl Params {
                     r.on_hover_text(format!("Moved by {}", origin_name(by)));
                 }
             });
+            if let Some(per_line) = open_list {
+                list_values(ui, d, &entry.value, per_line);
+            }
         });
     }
 
@@ -625,6 +638,97 @@ impl Params {
                 }
             });
     }
+}
+
+/// How many values a line of an open list holds, when they are not
+/// points.
+const VALUES_PER_LINE: usize = 8;
+
+/// What a list's summary counts, and how many values a line of it holds
+/// open: a path's or a brush's points (their values each), else values.
+fn list_items(d: &Descriptor, path: &str, len: usize) -> (Message, usize) {
+    use helios_module_masks::shape::{BRUSH_POINT_VALUES, PATH_POINT_VALUES};
+    let per_point = match (d.module.as_deref(), param_name(path)) {
+        (Some("mask_path"), "points") => Some(PATH_POINT_VALUES),
+        (Some("mask_brush"), "points") => Some(BRUSH_POINT_VALUES),
+        _ => None,
+    };
+    match per_point {
+        Some(n) => (
+            Message::new("gui-params-points", "{ $count } points").with("count", len / n),
+            n,
+        ),
+        None => (
+            Message::new("gui-params-values", "{ $count } values").with("count", len),
+            VALUES_PER_LINE,
+        ),
+    }
+}
+
+/// A list's row: its label, then a summary (`12 points`) that a click on
+/// it or on the chevron before it opens or closes. A list folded keeps
+/// its row as narrow as the others. Returns the summary's response and,
+/// open, how many values a line holds.
+fn list_row(
+    ui: &mut Ui,
+    path: &str,
+    d: &Descriptor,
+    label: &str,
+    v: &Value,
+) -> (egui::Response, Option<usize>) {
+    let len = match v {
+        Value::List(l) => l.len(),
+        Value::Ints(l) => l.len(),
+        _ => 0,
+    };
+    let (summary, per_line) = list_items(d, path, len);
+    let ctx = ui.ctx().clone();
+    let summary = crate::i18n::text(&ctx, summary);
+    let id = egui::Id::new(("helios.params.open", path));
+    let open = ctx.data(|m| m.get_temp::<bool>(id)).unwrap_or(false);
+    let (icon, hint) = if open {
+        (
+            Icon::ChevronDown,
+            Message::new("gui-params-hide-values", "Hide the values"),
+        )
+    } else {
+        (
+            Icon::ChevronRight,
+            Message::new("gui-params-show-values", "Show the values"),
+        )
+    };
+    let hint = crate::i18n::text(&ctx, hint);
+    let chevron = ui
+        .add(icon.tone(Tone::Muted).label(&hint).sense_click())
+        .on_hover_text(&hint);
+    ui.label(label);
+    let r = ui
+        .add(egui::Label::new(egui::RichText::new(&summary).weak()).sense(Sense::click()))
+        .on_hover_text(&hint);
+    if chevron.clicked() || r.clicked() {
+        ctx.data_mut(|m| m.insert_temp(id, !open));
+    }
+    (r, open.then_some(per_line))
+}
+
+/// An open list's values under its row: `per_line` values a line (a
+/// point), numbered from 1, wrapped to the panel's width.
+fn list_values(ui: &mut Ui, d: &Descriptor, v: &Value, per_line: usize) {
+    let locale = crate::i18n::locale(ui.ctx());
+    let (values, fraction): (Vec<f64>, usize) = match v {
+        Value::List(l) => (l.clone(), d.precision as usize),
+        Value::Ints(l) => (l.iter().map(|&x| x as f64).collect(), 0),
+        _ => return,
+    };
+    ui.indent("values", |ui| {
+        for (i, line) in values.chunks(per_line.max(1)).enumerate() {
+            let line: Vec<String> = line
+                .iter()
+                .map(|x| crate::i18n::fixed(&locale, *x, fraction))
+                .collect();
+            ui.add(egui::Label::new(format!("{}: {}", i + 1, line.join("  "))).wrap());
+        }
+    });
 }
 
 /// A mark after a widget, painted (not every font has the glyphs): a
