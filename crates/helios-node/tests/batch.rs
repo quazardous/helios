@@ -162,6 +162,8 @@ fn a_file_that_fails_mid_batch_says_why_and_the_others_go_on() {
         failed["error"].as_str().unwrap().contains("broken.png"),
         "{failed}"
     );
+    // The node's refusal comes by key, for a client to translate.
+    assert_eq!(failed["message"]["key"], "node-load-refused", "{failed}");
     assert!(line_of(&lines, &c)["error"].is_null());
     assert_eq!(files(&p.join("out")), ["a-small.jpg", "c-small.jpg"]);
 }

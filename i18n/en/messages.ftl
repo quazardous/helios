@@ -151,6 +151,24 @@ gui-vault-unreadable = Cannot read the vault: { $error }
 
 gui-window-frame-error = window frame: { $error }
 
+node-batch-only = the batch endpoint only answers load-source, export and cancel
+
+node-edit-not-saved = done, but the edit was not saved: { $error }
+
+node-job-unknown = job { $job } is unknown or already ended
+
+node-load-refused = cannot load the image: { $error }
+
+node-no-extent = `{ $name }` has no extent: give a region
+
+node-no-node = no node named `{ $name }`
+
+node-param-refused = cannot set { $node }.{ $param }: { $error }
+
+node-path-not-absolute = { $path }: give an absolute path, the node does not know where you are
+
+node-source-refused = `{ $name }` cannot take the image: { $error }
+
 xmp-not-applied = { $count } of { $items } history items not applied, kept for later: { $groups }
 
 xmp-not-applied-group = { $labels } ({ $reason })

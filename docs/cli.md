@@ -31,6 +31,11 @@ started with `--control` and `HELIOS_DEBUG_CONTROL` is set (a sandbox does
 both). `load-source`, `export` and `cancel` are also answered by the batch
 endpoint, which every build serves (see below).
 
+A refusal answers `{"ok": false, "error": ...}` in English; when the node
+says it by key (a file it cannot load, a node it does not have, a job
+already ended), a `message` comes beside it (`{"key", "args", "english"}`),
+as on a batch's lines.
+
 ## Batch
 
 ```bash

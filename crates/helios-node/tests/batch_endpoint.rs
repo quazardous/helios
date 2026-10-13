@@ -97,9 +97,20 @@ fn the_batch_endpoint_answers_only_what_a_batch_needs() {
             answer["error"].as_str().unwrap().contains("only answers"),
             "{answer}"
         );
+        assert_eq!(answer["message"]["key"], "node-batch-only", "{answer}");
     }
     let pic = node.dir.join("in.png");
     picture(&pic);
+    // A file that is not a picture: refused by key, its English naming it.
+    let junk = node.dir.join("junk.png");
+    std::fs::write(&junk, b"not a picture").unwrap();
+    let refused = node.batch(&["load-source", "src", junk.to_str().unwrap()]);
+    assert_eq!(refused["ok"], false, "{refused}");
+    assert_eq!(refused["message"]["key"], "node-load-refused", "{refused}");
+    assert!(
+        refused["error"].as_str().unwrap().contains("junk.png"),
+        "{refused}"
+    );
     let loaded = node.batch(&["load-source", "src", pic.to_str().unwrap()]);
     assert_eq!(loaded["ok"], true, "{loaded}");
     let out = node.dir.join("out.png");

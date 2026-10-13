@@ -200,9 +200,12 @@ impl Node {
         if answer["ok"] == true {
             Ok(answer)
         } else {
-            Err(match answer["error"].as_str() {
-                Some(e) => Message::plain(e),
-                None => Message::new("batch-node-refused", "the node refused"),
+            // The node's message when it has a key, else its English.
+            let keyed = serde_json::from_value::<Message>(answer["message"].clone()).ok();
+            Err(match (keyed, answer["error"].as_str()) {
+                (Some(m), _) => m,
+                (None, Some(e)) => Message::plain(e),
+                (None, None) => Message::new("batch-node-refused", "the node refused"),
             })
         }
     }

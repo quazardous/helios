@@ -172,10 +172,9 @@ fn faults_trigger_error_paths_once() {
     let (code, refused) = s.control(&["set-param", "exp", "exposure", "99"]);
     assert_eq!(code, 1);
     assert!(refused["error"].as_str().unwrap().contains("outside"));
-    assert_eq!(
-        s.control(&["fault", "nope", "compute"]).1["error"],
-        "no node named `nope`"
-    );
+    let unknown = s.control(&["fault", "nope", "compute"]).1;
+    assert_eq!(unknown["error"], "no node named `nope`");
+    assert_eq!(unknown["message"]["key"], "node-no-node");
 }
 
 #[test]

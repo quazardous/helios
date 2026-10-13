@@ -45,7 +45,7 @@ use std::process::ExitCode;
 use std::sync::{Arc, Mutex, RwLock};
 
 use helios_config::{Config, Layer, Schema};
-use helios_core::{Bus, Describe, Engine, Event, Graph, JobId, NodeId, Region, Scheduler};
+use helios_core::{Bus, Describe, Engine, Event, Graph, JobId, Message, NodeId, Region, Scheduler};
 use helios_decision::Book;
 use helios_inspect::{Inspector, Listen, new_token, serve_inspector, write_token};
 use helios_node::ExportDesc;
@@ -238,11 +238,10 @@ impl Node {
 }
 
 impl Node {
-    fn id(&self, name: &str) -> Result<NodeId, String> {
-        self.names
-            .get(name)
-            .copied()
-            .ok_or_else(|| format!("no node named `{name}`"))
+    fn id(&self, name: &str) -> Result<NodeId, Message> {
+        self.names.get(name).copied().ok_or_else(|| {
+            Message::new("node-no-node", "no node named `{ $name }`").with("name", name)
+        })
     }
 
     /// Renders a node's port over a region as a scheduler job.
@@ -325,29 +324,33 @@ impl Node {
         path: &Path,
         format: helios_export::Format,
         params: &BTreeMap<String, helios_core::Params>,
-    ) -> Result<(JobId, Region), String> {
-        if !path.is_absolute() {
-            return Err(format!(
-                "{}: give an absolute path, the node does not know where you are",
-                path.display()
-            ));
-        }
+    ) -> Result<(JobId, Region), Message> {
+        absolute(path)?;
         let id = self.id(name)?;
         let mut graph = self.graph.0.read().expect("graph lock").clone();
         for (node, values) in params {
             let target = self.id(node)?;
             for (param, value) in values.iter() {
-                graph
-                    .set_param(target, param, value.clone())
-                    .map_err(|e| e.to_string())?;
+                graph.set_param(target, param, value.clone()).map_err(|e| {
+                    Message::new(
+                        "node-param-refused",
+                        "cannot set { $node }.{ $param }: { $error }",
+                    )
+                    .with("node", node)
+                    .with("param", param)
+                    .with("error", e.to_string())
+                })?;
             }
         }
         let region = match region {
             Some(r) => r,
             None => graph
                 .extent(id)
-                .map_err(|e| e.to_string())?
-                .ok_or_else(|| format!("`{name}` has no extent: give a region"))?,
+                .map_err(|e| Message::plain(e.to_string()))?
+                .ok_or_else(|| {
+                    Message::new("node-no-extent", "`{ $name }` has no extent: give a region")
+                        .with("name", name)
+                })?,
         };
         let (engine, port) = (self.engine.clone(), port.to_string());
         let job = helios_export::submit_with(
@@ -370,18 +373,37 @@ impl Node {
 
     /// Gives a source the image of a file: read and decoded with no lock
     /// held, then swapped in under the graph's write lock.
-    fn load_source(&self, name: &str, path: &Path) -> Result<helios_node::SourceLoaded, String> {
-        if !path.is_absolute() {
-            return Err(format!(
-                "{}: give an absolute path, the node does not know where you are",
-                path.display()
-            ));
-        }
+    fn load_source(&self, name: &str, path: &Path) -> Result<helios_node::SourceLoaded, Message> {
+        absolute(path)?;
         let id = self.id(name)?;
-        let loaded = helios_load::load(path)?;
+        // The loader's English names the file and says what is wrong.
+        let loaded = helios_load::load(path).map_err(|e| {
+            Message::new("node-load-refused", "cannot load the image: { $error }").with("error", e)
+        })?;
         let mut graph = self.graph.0.write().expect("graph lock");
         let mut cameras = self.cameras.lock().expect("cameras lock");
-        helios_node::load_source(&mut graph, &mut cameras, id, loaded)
+        helios_node::load_source(&mut graph, &mut cameras, id, loaded).map_err(|e| {
+            Message::new(
+                "node-source-refused",
+                "`{ $name }` cannot take the image: { $error }",
+            )
+            .with("name", name)
+            .with("error", e)
+        })
+    }
+}
+
+/// A path the node is given must be absolute: it does not share the
+/// caller's directory.
+fn absolute(path: &Path) -> Result<(), Message> {
+    if path.is_absolute() {
+        Ok(())
+    } else {
+        Err(Message::new(
+            "node-path-not-absolute",
+            "{ $path }: give an absolute path, the node does not know where you are",
+        )
+        .with("path", path))
     }
 }
 
@@ -478,7 +500,7 @@ mod control {
 
     use std::sync::Arc;
 
-    use helios_core::{Event, JobId};
+    use helios_core::{Event, JobId, Message};
     use helios_export::Format;
     use helios_inspect::control::{ControlRequest, FileFormat};
     use serde::Serialize;
@@ -531,12 +553,28 @@ mod control {
         }
     }
 
+    /// A refusal: its English in `error`, and the message itself in
+    /// `message` when it has a key, for a client to show translated.
+    fn refused(seq: Option<u64>, error: &Message) -> Value {
+        let mut answer = json!({ "ok": false, "error": error.english });
+        if let Some(seq) = seq {
+            answer["seq"] = json!(seq);
+        }
+        if error.is_keyed() {
+            answer["message"] = json!(error);
+        }
+        answer
+    }
+
     pub fn answer(node: &Arc<Node>, scope: Scope, request: ControlRequest) -> Value {
         if !scope.allows(&request) {
-            return json!({
-                "ok": false,
-                "error": "the batch endpoint only answers load-source, export and cancel",
-            });
+            return refused(
+                None,
+                &Message::new(
+                    "node-batch-only",
+                    "the batch endpoint only answers load-source, export and cancel",
+                ),
+            );
         }
         let seq = node
             .bus
@@ -548,14 +586,15 @@ mod control {
             }
             answer
         };
-        let result: Result<Value, String> = match &request {
+        let result: Result<Value, Message> = match &request {
             ControlRequest::Render {
                 node: name,
                 port,
                 region,
             } => node
                 .submit_render(name, port, *region, Some(seq))
-                .map(|job| json!({ "job": job.0 })),
+                .map(|job| json!({ "job": job.0 }))
+                .map_err(Message::plain),
             ControlRequest::SetParam {
                 node: name,
                 param,
@@ -565,7 +604,7 @@ mod control {
                 graph
                     .set_param(id, param, value.clone())
                     .map(|()| json!({}))
-                    .map_err(|e| e.to_string())
+                    .map_err(|e| Message::plain(e.to_string()))
             }),
             ControlRequest::LoadSource { node: name, path } => node
                 .load_source(name, path)
@@ -593,7 +632,11 @@ mod control {
                 if node.scheduler.cancel(JobId(*job)) {
                     Ok(json!({}))
                 } else {
-                    Err(format!("job {job} is unknown or already ended"))
+                    Err(Message::new(
+                        "node-job-unknown",
+                        "job { $job } is unknown or already ended",
+                    )
+                    .with("job", job.to_string()))
                 }
             }
             ControlRequest::Pause => {
@@ -615,7 +658,8 @@ mod control {
             }
             ControlRequest::DecisionResolve => node
                 .resolve_decisions()
-                .map(|report| json!({ "report": report })),
+                .map(|report| json!({ "report": report }))
+                .map_err(Message::plain),
             ControlRequest::DecisionAccept {
                 node: name,
                 option,
@@ -625,6 +669,7 @@ mod control {
                 let mut graph = node.graph.0.write().expect("graph lock");
                 book.accept(&mut graph, name, who, *option, now())
                     .map(|version| json!({ "version": version }))
+                    .map_err(Message::plain)
             }
             ControlRequest::DecisionDecide {
                 node: name,
@@ -637,15 +682,19 @@ mod control {
                     Some(region) => helios_decision::input_keys(&node.engine, &graph, name, region),
                     None => Ok(Vec::new()),
                 };
-                inputs.and_then(|inputs| {
-                    book.decide(&mut graph, name, who, values.clone(), inputs, now())
-                        .map(|version| json!({ "version": version }))
-                })
+                inputs
+                    .and_then(|inputs| {
+                        book.decide(&mut graph, name, who, values.clone(), inputs, now())
+                            .map(|version| json!({ "version": version }))
+                    })
+                    .map_err(Message::plain)
             }
             ControlRequest::DecisionReask { node: name } => {
                 let mut book = node.book.lock().expect("book lock");
                 let mut graph = node.graph.0.write().expect("graph lock");
-                book.reask(&mut graph, name).map(|()| json!({}))
+                book.reask(&mut graph, name)
+                    .map(|()| json!({}))
+                    .map_err(Message::plain)
             }
         };
         // A change to the edit is saved before it is answered.
@@ -673,13 +722,17 @@ mod control {
                     }
                     Ok(extra)
                 }
-                Err(e) => Err(format!("done, but the edit was not saved: {e}")),
+                Err(e) => Err(Message::new(
+                    "node-edit-not-saved",
+                    "done, but the edit was not saved: { $error }",
+                )
+                .with("error", e)),
             },
             (result, _) => result,
         };
         match result {
             Ok(extra) => done(extra),
-            Err(error) => json!({ "ok": false, "seq": seq, "error": error }),
+            Err(error) => refused(Some(seq), &error),
         }
     }
 }

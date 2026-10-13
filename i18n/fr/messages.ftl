@@ -150,6 +150,24 @@ gui-size-kib = { $size } Kio
 
 gui-size-mib = { $size } Mio
 
+node-batch-only = le point d’accès des lots ne répond qu’à load-source, export et cancel
+
+node-edit-not-saved = fait, mais la retouche n’a pas été enregistrée : { $error }
+
+node-job-unknown = la tâche { $job } est inconnue ou déjà terminée
+
+node-load-refused = impossible de charger l’image : { $error }
+
+node-no-extent = `{ $name }` n’a pas d’étendue : donnez une région
+
+node-no-node = aucun nœud nommé `{ $name }`
+
+node-param-refused = impossible de régler { $node }.{ $param } : { $error }
+
+node-path-not-absolute = { $path } : donnez un chemin absolu, le nœud ne sait pas où vous êtes
+
+node-source-refused = `{ $name }` ne peut pas prendre l’image : { $error }
+
 xmp-not-applied = { $count ->
     [one] { $count } élément d’historique sur { $items } non appliqué, conservé pour plus tard : { $groups }
    *[other] { $count } éléments d’historique sur { $items } non appliqués, conservés pour plus tard : { $groups }

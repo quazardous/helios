@@ -190,6 +190,15 @@ gui-window-frame-error 72035247381882d2
 menu-helios-system-profiles.label 493fa9da88311dbf
 menu-helios-system-recent.label 570a956d04ae773e
 menu-helios-system-themes.label 399519de8e880133
+node-batch-only abed566024accc4f
+node-edit-not-saved 6371e83fc812ed88
+node-job-unknown 39f3e78315b7e6c2
+node-load-refused 3c406345cb7a783e
+node-no-extent 5a0f925ebc9af4d3
+node-no-node bd2c302c4f23d0e6
+node-param-refused 77c55143a4f80e4b
+node-path-not-absolute f47d3a231464438a
+node-source-refused 5df66eacf25e8942
 panel-helios-filmstrip.title aa303106450875c3
 panel-helios-graph.title 2aaea6126d76b34f
 panel-helios-log.title a80c03551590b8a9
