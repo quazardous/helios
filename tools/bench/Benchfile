@@ -129,7 +129,7 @@ sccache = "sccache's compile cache, shared by every job and branch: a branch reu
 
 [jobs.build]
 checkouts = ["helios", "vkdt", "egui-pop"]
-cores = 8
+cores = 5
 memory = "6g"
 cwd = "/work/${src:-helios}"
 command = """mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && cargo build --workspace --all-targets --locked"""
@@ -142,7 +142,7 @@ timeout = "1h"
 # in /out/i18n.txt
 [jobs.lint]
 checkouts = ["helios", "vkdt", "egui-pop"]
-cores = 8
+cores = 5
 memory = "6g"
 cwd = "/work/${src:-helios}"
 command = """mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && cargo clippy --workspace --all-targets --locked -- -D warnings \
@@ -156,7 +156,7 @@ timeout = "1h"
 # summary of the slowest tests in /out
 [jobs.test]
 checkouts = ["helios", "vkdt", "egui-pop"]
-cores = 6
+cores = 5
 memory = "6g"
 cwd = "/work/${src:-helios}"
 command = """mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && cargo nextest run --workspace --locked --profile ci; rc=$?; \
@@ -173,7 +173,7 @@ timeout = "1h"
 # render, load and save round trip, survival); its selection in
 # /out/affected.json, the JUnit report and the slowest tests in /out
 [jobs.test-affected]
-cores = 6
+cores = 5
 memory = "6g"
 cwd = "/work/${src:-helios}"
 command = """mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && \
@@ -201,7 +201,7 @@ timeout = "30m"
 # (base=<commit or branch>, origin/main by default)
 [jobs.check-commits]
 checkouts = ["helios", "vkdt", "egui-pop"]
-cores = 8
+cores = 5
 memory = "6g"
 cwd = "/work/${src:-helios}"
 command = """mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && cargo xtask check-commits ${base:-origin/main}"""
@@ -242,8 +242,8 @@ timeout = "30m"
 # egui-pop's gate: fmt, clippy, the workspace tests with the doctests, docs
 [jobs.egui-pop-gate]
 checkouts = ["egui-pop"]
-cores = 8
-memory = "9g"
+cores = 5
+memory = "7g"
 cwd = "/work/${src:-egui-pop}"
 command = """mkdir -p /tmp/w/egui-pop && cp -r --preserve=mode . /tmp/w/egui-pop/ && cd /tmp/w/egui-pop && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/egui-pop ] || { rm -rf /target/* && echo /tmp/w/egui-pop > /target/.built-at; }; } && cargo fmt --all --check \
  && cargo clippy --workspace --all-targets --locked -- -D warnings \
@@ -258,8 +258,8 @@ timeout = "1h"
 # /out/snapshots, to review and commit
 [jobs.egui-pop-snapshots]
 checkouts = ["egui-pop"]
-cores = 8
-memory = "9g"
+cores = 5
+memory = "7g"
 cwd = "/work/${src:-egui-pop}"
 command = """mkdir -p /tmp/w/egui-pop && cp -r --preserve=mode . /tmp/w/egui-pop/ && cd /tmp/w/egui-pop && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/egui-pop ] || { rm -rf /target/* && echo /tmp/w/egui-pop > /target/.built-at; }; } && \
 UPDATE_SNAPSHOTS=1 cargo test --locked -p egui-pop-gallery --test gallery; rc=$?; \
@@ -274,8 +274,8 @@ timeout = "1h"
 # crates/egui-pop-i18n land in /out/locales, to review and commit
 [jobs.egui-pop-catalogues]
 checkouts = ["egui-pop"]
-cores = 8
-memory = "9g"
+cores = 5
+memory = "7g"
 cwd = "/work/${src:-egui-pop}"
 command = """mkdir -p /tmp/w/egui-pop && cp -r --preserve=mode . /tmp/w/egui-pop/ && cd /tmp/w/egui-pop && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/egui-pop ] || { rm -rf /target/* && echo /tmp/w/egui-pop > /target/.built-at; }; } && \
 UPDATE_CATALOGUES=1 cargo test --locked -p egui-pop-i18n --test catalogues; rc=$?; \
