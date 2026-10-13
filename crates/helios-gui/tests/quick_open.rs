@@ -4,7 +4,6 @@
 use std::path::PathBuf;
 
 use egui::{Key, Modifiers, vec2};
-use egui_kittest::kittest::Queryable;
 use egui_pop::model::ids::CommandId;
 use helios_core::{Graph, Image, ModuleRef, Params, Region, Value};
 use helios_gui::library::Entry;
@@ -60,8 +59,8 @@ fn the_palette_runs_a_helios_command() {
     h.key_press_modifiers(Modifiers::CTRL | Modifiers::SHIFT, Key::P);
     h.run();
     assert!(h.state().palette_open());
-    h.get_by_role(egui::accesskit::Role::TextInput)
-        .type_text("before and after side");
+    // Typed into the focused field (the Vault has a search field too).
+    h.event(egui::Event::Text("before and after side".into()));
     h.run();
     h.key_press(Key::Enter);
     h.run();

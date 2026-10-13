@@ -1122,17 +1122,11 @@ impl Library {
     /// thumbnail grid with the culling keys.
     pub fn grid(&mut self, ui: &mut Ui) {
         self.receive(ui);
+        // The search field (with the import button) and the marks bar
+        // stay in place while the library is empty.
+        self.toolbar(ui);
+        self.marks_bar(ui);
         if self.entries.is_empty() {
-            if self.import_offered
-                && ui
-                    .button(crate::i18n::text(
-                        ui.ctx(),
-                        Message::new("gui-library-import", "Import…"),
-                    ))
-                    .clicked()
-            {
-                self.import_asked = true;
-            }
             ui.weak(crate::i18n::text(
                 ui.ctx(),
                 Message::new(
@@ -1142,8 +1136,6 @@ impl Library {
             ));
             return;
         }
-        self.toolbar(ui);
-        self.marks_bar(ui);
         let label = crate::i18n::text(ui.ctx(), Message::new("gui-library-images", "Images"));
         let keymap = CullKeymap::lightroom().auto_advance(self.auto_advance);
         let out = {

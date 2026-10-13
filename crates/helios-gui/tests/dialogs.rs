@@ -159,8 +159,8 @@ fn a_picker_runs_its_command_with_the_value_chosen() {
     let mut h = harness(shell);
     // The filter has the focus: typing narrows the list, Enter takes the
     // first shown.
-    h.get_by_role(egui::accesskit::Role::TextInput)
-        .type_text("end");
+    // Typed into the focused field (the Vault has a search field too).
+    h.event(egui::Event::Text("end".into()));
     h.run();
     assert!(h.query_by_label("center").is_none());
     h.key_press(Key::Enter);

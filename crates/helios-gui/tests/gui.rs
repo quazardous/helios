@@ -171,8 +171,8 @@ fn keys_open_the_palette_which_runs_a_command() {
     h.key_press_modifiers(Modifiers::CTRL | Modifiers::SHIFT, Key::P);
     h.run();
     assert!(h.state().palette_open());
-    h.get_by_role(egui::accesskit::Role::TextInput)
-        .type_text("hide queue");
+    // Typed into the focused field (the Vault has a search field too).
+    h.event(egui::Event::Text("hide queue".into()));
     h.run();
     h.key_press(Key::Enter);
     h.run();
