@@ -1,0 +1,524 @@
+//! A workspace made from a template, then edited: saved back as a
+//! template (what goes in, what is stripped, what is asked on create),
+//! reset to its template as one step, parts of another imported as a
+//! copy with their conflicts, and the agents' tools with their dry runs.
+
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+
+use egui_pop_model::ids::PanelId;
+use egui_pop_model::panels::Area;
+use helios_core::ModuleRef;
+use helios_template::workspace::{self, Extract, Files, Part, Side, State, Translation, tools};
+use helios_template::{Bundle, Catalogue, shipped};
+use serde_json::{Value as Json, json};
+
+fn catalogue() -> Catalogue {
+    use helios_module_masks as m;
+    let mut c = Catalogue::new()
+        .module(ModuleRef::new(helios_module_exposure::Exposure))
+        .module(ModuleRef::new(m::MaskCombine))
+        .module(ModuleRef::new(m::MaskFeather))
+        .module(ModuleRef::new(m::MaskBlend))
+        .module(ModuleRef::new(m::MaskObject));
+    for f in shipped::composites() {
+        c.add_composite(f);
+    }
+    c
+}
+
+fn temp(name: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("helios-workspace-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+fn builtin(id: &str) -> Bundle {
+    shipped::templates()
+        .into_iter()
+        .find(|b| b.template.id == id)
+        .unwrap()
+}
+
+/// A workspace made from a built-in template under `root`: its
+/// directory and its files.
+fn made(root: &Path, template: &str, name: &str) -> (PathBuf, Files) {
+    let config = root.join("config");
+    let (dir, _) = workspace::create(
+        &builtin(template),
+        &BTreeMap::new(),
+        &catalogue(),
+        &root.join(name),
+        &config,
+    )
+    .unwrap();
+    let files = Files::new(&config, &dir);
+    (dir, files)
+}
+
+/// Every file of a directory, with its text.
+fn texts(dir: &Path) -> Vec<(PathBuf, String)> {
+    let mut out = Vec::new();
+    for e in std::fs::read_dir(dir).unwrap() {
+        let p = e.unwrap().path();
+        if p.is_dir() {
+            out.extend(texts(&p));
+        } else {
+            out.push((p.clone(), std::fs::read_to_string(&p).unwrap_or_default()));
+        }
+    }
+    out
+}
+
+fn panel(id: &str) -> PanelId {
+    PanelId::new(id).unwrap()
+}
+
+#[test]
+fn a_workspace_reads_as_its_template_until_edited_and_keeps_its_edits() {
+    let root = temp("state");
+    let (_, files) = made(&root, "helios.portrait-retouch", "portrait");
+    let state = files.load().unwrap();
+    assert_eq!(state.meta.name, "portrait");
+    assert_eq!(
+        state.bundle.template,
+        builtin("helios.portrait-retouch").template
+    );
+    // Edited: a name, a tool, a key; written, read back the same.
+    let edited = state
+        .edited(&json!({
+            "name": "Faces",
+            "description": "Headshots for the club",
+            "icon": "portrait",
+            "tools": {
+                "toolbox": ["mask.add.ellipse", "mask.add.brush"],
+                "keymap": [{ "keys": "B", "command": "mask.add.brush" }]
+            }
+        }))
+        .unwrap();
+    assert!(edited.problems(&catalogue()).is_empty());
+    files.save(&edited, true).unwrap();
+    let read = files.load().unwrap();
+    assert_eq!(read, edited);
+    assert_eq!(read.meta.icon.as_deref(), Some("portrait"));
+    // As one value and back (the desktop's undoable value).
+    assert_eq!(State::from_json(&read.to_json()).unwrap(), read);
+    // What a workspace does not know is refused.
+    assert!(state.edited(&json!({ "colour": 1 })).is_err());
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn saved_as_a_template_then_created_again_gives_an_equivalent_workspace() {
+    let root = temp("again");
+    let config = root.join("config");
+    let (_, files) = made(&root, "helios.portrait-retouch", "portrait");
+    let state = files
+        .load()
+        .unwrap()
+        .edited(&json!({
+            "tools": {
+                "toolbox": ["mask.add.ellipse", "mask.add.path"],
+                "default": "mask.add.path",
+                "keymap": [{ "keys": "Shift+P", "command": "mask.add.path" }]
+            },
+            "library": { "auto_advance": true }
+        }))
+        .unwrap();
+    files.save(&state, true).unwrap();
+    let x = Extract {
+        id: "user.faces".into(),
+        version: 1,
+        name: "Faces".into(),
+        description: "Brighten faces through a drawn mask".into(),
+        icon: Some("portrait".into()),
+        translations: BTreeMap::from([(
+            "fr".to_string(),
+            Translation {
+                name: "Visages".into(),
+                description: "Éclaircir les visages à travers un masque dessiné".into(),
+            },
+        )]),
+        ..Extract::default()
+    };
+    let review = workspace::review(&files.load().unwrap(), &x, &catalogue());
+    assert!(review.problems.is_empty(), "{:?}", review.problems);
+    let dir = workspace::save_template(&review, &config, false).unwrap();
+    assert_eq!(dir, workspace::template_dir(&config, "user.faces"));
+    // Versioned: the same version again is refused, a newer one taken.
+    assert!(workspace::save_template(&review, &config, false).is_err());
+    // Validated, with its text in English and French, and its presets'
+    // text carried under the new id.
+    let saved = Bundle::load(&dir).unwrap();
+    assert!(saved.validate(&catalogue()).is_ok());
+    let fr = saved.texts.iter().find(|t| t.locale == "fr").unwrap();
+    assert!(
+        fr.source.contains("user-faces-name = Visages"),
+        "{}",
+        fr.source
+    );
+    assert!(
+        fr.source.contains("user-faces-preset-soft = Doux"),
+        "{}",
+        fr.source
+    );
+    assert_eq!(saved.template.meta.icon.as_deref(), Some("portrait"));
+    // Listed among the user's templates, and found by its id.
+    assert_eq!(workspace::user_templates(&config).len(), 1);
+    let again = workspace::source(&config, "user.faces").unwrap();
+    let (_, built) = workspace::create(
+        &again,
+        &BTreeMap::new(),
+        &catalogue(),
+        &root.join("faces"),
+        &config,
+    )
+    .unwrap();
+    assert!(built.nodes.contains_key("retouch.blend"));
+    let second = Files::new(&config, &root.join("faces").canonicalize().unwrap())
+        .load()
+        .unwrap();
+    let first = files.load().unwrap();
+    assert_eq!(
+        second.bundle.template.network,
+        first.bundle.template.network
+    );
+    assert_eq!(second.bundle.template.tools, first.bundle.template.tools);
+    assert_eq!(
+        second.bundle.template.library,
+        first.bundle.template.library
+    );
+    assert_eq!(second.bundle.layout, first.bundle.layout);
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn a_template_never_keeps_absolute_paths_data_or_history() {
+    let root = temp("strip");
+    let config = root.join("config");
+    let (_, files) = made(&root, "helios.import-cull-dedupe", "shoot");
+    let mut network = files.load().unwrap().bundle.template.network;
+    network.nodes.push(
+        serde_json::from_value(json!({
+            "name": "object",
+            "module": "mask_object",
+            "params": {
+                "prompt": { "text": "/home/someone/pictures/reference.jpg" },
+                "mask": { "text": "iVBORw0KGgo".repeat(40) }
+            }
+        }))
+        .unwrap(),
+    );
+    network.connections.push(
+        serde_json::from_value(
+            json!({ "from": "source", "port": "image", "to": "object", "input": "input" }),
+        )
+        .unwrap(),
+    );
+    let state = files
+        .load()
+        .unwrap()
+        .edited(&json!({ "network": network }))
+        .unwrap();
+    assert!(
+        state.problems(&catalogue()).is_empty(),
+        "{:?}",
+        state.problems(&catalogue())
+    );
+    files.save(&state, true).unwrap();
+    let x = Extract {
+        id: "user.intake".into(),
+        version: 1,
+        name: "Intake".into(),
+        description: "Import and cull".into(),
+        ..Extract::default()
+    };
+    let review = workspace::review(&state, &x, &catalogue());
+    assert!(review.problems.is_empty(), "{:?}", review.problems);
+    let what: Vec<&str> = review.stripped.iter().map(|s| s.what.as_str()).collect();
+    assert_eq!(what, ["images", "history", "data", "path"]);
+    // The path and the import source are asked on create.
+    let asked: Vec<&str> = review
+        .bundle
+        .template
+        .parameters
+        .iter()
+        .map(|p| p.id.as_str())
+        .collect();
+    assert_eq!(asked, ["object_prompt", "import_source"]);
+    let dir = workspace::save_template(&review, &config, false).unwrap();
+    for (path, text) in texts(&dir) {
+        assert!(!text.contains("/home/"), "{}: {text}", path.display());
+        assert!(!text.contains("iVBORw0KGgo"), "{}", path.display());
+    }
+    // Created again, the answers go where each parameter points.
+    let saved = Bundle::load(&dir).unwrap();
+    let answers = BTreeMap::from([
+        (
+            "object_prompt".to_string(),
+            json!("/media/new/reference.jpg"),
+        ),
+        ("import_source".to_string(), json!("folder")),
+    ]);
+    let (made_dir, _) =
+        workspace::create(&saved, &answers, &catalogue(), &root.join("next"), &config).unwrap();
+    let next = Files::new(&config, &made_dir).load().unwrap();
+    let t = serde_json::to_value(&next.bundle.template).unwrap();
+    assert_eq!(t.pointer("/library/import/source"), Some(&json!("folder")));
+    assert!(t.to_string().contains("/media/new/reference.jpg"));
+    // A wrong answer is refused before anything is written.
+    let wrong = BTreeMap::from([("import_source".to_string(), json!("cloud"))]);
+    assert!(workspace::create(&saved, &wrong, &catalogue(), &root.join("nope"), &config).is_err());
+    assert!(!root.join("nope").exists());
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn a_review_says_what_it_cannot_write() {
+    let root = temp("refused");
+    let (_, files) = made(&root, "helios.portrait-retouch", "portrait");
+    let state = files.load().unwrap();
+    let x = Extract {
+        id: "helios.portrait-retouch".into(),
+        version: 1,
+        name: String::new(),
+        description: "x".into(),
+        without: vec![Part::Network],
+        ask: Some(vec!["nothing".into()]),
+        ..Extract::default()
+    };
+    let review = workspace::review(&state, &x, &catalogue());
+    let problems = review.problems.join("\n");
+    for expected in [
+        "always go in",
+        "built-in template",
+        "`nothing` is not a value",
+        "name: empty",
+    ] {
+        assert!(problems.contains(expected), "{expected}: {problems}");
+    }
+    assert!(workspace::save_template(&review, &root.join("config"), false).is_err());
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn a_reset_is_one_step_back_to_the_template_and_is_undone() {
+    let root = temp("reset");
+    let config = root.join("config");
+    let (dir, files) = made(&root, "helios.portrait-retouch", "portrait");
+    let args = |extra: Json| {
+        let mut a = json!({ "workspace": dir });
+        for (k, v) in extra.as_object().unwrap() {
+            a[k] = v.clone();
+        }
+        a
+    };
+    tools::edit(
+        &config,
+        &args(json!({ "changes": { "name": "Faces", "tools": { "toolbox": ["mask.add.path"] } } })),
+        &catalogue(),
+    )
+    .unwrap();
+    let edited = files.load().unwrap();
+    assert_eq!(edited.bundle.template.tools.toolbox, ["mask.add.path"]);
+    // A dry run says what it would do and writes nothing.
+    let dry = tools::reset(&config, &args(json!({ "dry_run": true })), &catalogue()).unwrap();
+    assert_eq!(dry["changed"], json!(true));
+    assert_eq!(files.load().unwrap(), edited);
+    tools::reset(&config, &args(json!({})), &catalogue()).unwrap();
+    let reset = files.load().unwrap();
+    assert_eq!(
+        reset.bundle.template,
+        builtin("helios.portrait-retouch").template
+    );
+    // The workspace's own name stays.
+    assert_eq!(reset.meta.name, "Faces");
+    // One step: undone, the edit is back.
+    assert_eq!(
+        tools::undo(&config, &args(json!({}))).unwrap()["undone"],
+        json!("reset to template")
+    );
+    assert_eq!(files.load().unwrap(), edited);
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn parts_are_imported_as_a_copy_and_conflicts_are_picked() {
+    let root = temp("import");
+    let (_, files) = made(&root, "helios.portrait-retouch", "portrait");
+    let mut layout = files.load().unwrap().bundle.layout;
+    layout.place(&panel("helios.vault"), Area::Bottom);
+    let target = files
+        .load()
+        .unwrap()
+        .edited(&json!({
+            "layout": serde_json::from_str::<Json>(&layout.to_json()).unwrap(),
+            "tools": {
+                "toolbox": ["mask.add.path"],
+                "keymap": [{ "keys": "Mod+I", "command": "mask.add.path" }]
+            }
+        }))
+        .unwrap();
+    let source = builtin("helios.import-cull-dedupe");
+    let none = BTreeMap::new();
+    let dry = workspace::import(&target, &source, &Part::ALL, &none, &catalogue()).unwrap();
+    let mut unresolved: Vec<&str> = dry.unresolved().iter().map(|c| c.id.as_str()).collect();
+    unresolved.sort_unstable();
+    assert_eq!(unresolved, ["key:Mod+I", "panel:helios.vault", "view"]);
+    // The network comes as one opened composite, its nodes renamed.
+    assert_eq!(dry.renamed["exposure"], "import_cull_dedupe.exposure");
+    let picks = BTreeMap::from([
+        ("view".to_string(), Side::Ours),
+        ("key:Mod+I".to_string(), Side::Theirs),
+        ("panel:helios.vault".to_string(), Side::Theirs),
+    ]);
+    let merged = workspace::import(&target, &source, &Part::ALL, &picks, &catalogue()).unwrap();
+    assert!(merged.unresolved().is_empty());
+    let s = &merged.state;
+    assert!(
+        s.problems(&catalogue()).is_empty(),
+        "{:?}",
+        s.problems(&catalogue())
+    );
+    let t = &s.bundle.template;
+    let names: Vec<&str> = t.network.nodes.iter().map(|n| n.name.as_str()).collect();
+    assert_eq!(names, ["exposure", "retouch", "import_cull_dedupe"]);
+    assert_eq!(t.network.view.node, "retouch");
+    assert!(
+        t.tools
+            .keymap
+            .iter()
+            .any(|b| b.keys == "Mod+I" && b.command == "library.importSource")
+    );
+    assert!(t.tools.toolbox.contains(&"vault.flag.pick".to_string()));
+    assert!(t.library.is_some());
+    assert_eq!(
+        s.bundle.layout.area_of(&panel("helios.vault")),
+        Some(Area::Center)
+    );
+    assert_eq!(
+        s.bundle.layout.area_of(&panel("helios.stacks")),
+        Some(Area::EndSide)
+    );
+    let built = s.bundle.build(&catalogue()).unwrap();
+    assert!(built.nodes.contains_key("import_cull_dedupe.exposure"));
+    // Nothing says where the parts came from: imported again, they are
+    // new names and a new composite version.
+    let twice = workspace::import(s, &source, &[Part::Network], &picks, &catalogue()).unwrap();
+    let last = twice.state.bundle.template.network.nodes.last().unwrap();
+    assert_eq!(last.name, "import_cull_dedupe_2");
+    assert_eq!(last.composite.as_ref().unwrap().version, 2);
+    assert!(
+        !serde_json::to_string(&twice.state.to_json())
+            .unwrap()
+            .contains("helios.import-cull-dedupe\"")
+    );
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn agents_dry_run_then_apply_through_the_tools() {
+    let root = temp("tools");
+    let config = root.join("config");
+    let (dir, files) = made(&root, "helios.portrait-retouch", "portrait");
+    let before = files.load().unwrap();
+    // The parts of a template, by id.
+    let parts = tools::parts_of(
+        &config,
+        &json!({ "workspace": dir, "source": "helios.import-cull-dedupe" }),
+    )
+    .unwrap();
+    let names: Vec<&str> = parts["parts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p["part"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["network", "layout", "keys", "toolbox", "library"]);
+    // An import's dry run: its diff and conflicts, nothing written.
+    let dry = tools::import_parts(
+        &config,
+        &json!({ "workspace": dir, "source": "helios.import-cull-dedupe", "dry_run": true }),
+        &catalogue(),
+    )
+    .unwrap();
+    assert_eq!(dry["unresolved"], json!(["view"]));
+    assert_eq!(files.load().unwrap(), before);
+    // Applied with a conflict left: refused.
+    let refused = tools::import_parts(
+        &config,
+        &json!({ "workspace": dir, "source": "helios.import-cull-dedupe", "parts": ["network"] }),
+        &catalogue(),
+    );
+    assert!(refused.unwrap_err().contains("view"));
+    tools::import_parts(
+        &config,
+        &json!({
+            "workspace": dir,
+            "source": "helios.import-cull-dedupe",
+            "parts": ["network", "library"],
+            "picks": { "view": "theirs" }
+        }),
+        &catalogue(),
+    )
+    .unwrap();
+    let after = files.load().unwrap();
+    assert_eq!(
+        after.bundle.template.network.view.node,
+        "import_cull_dedupe"
+    );
+    assert!(after.bundle.template.library.is_some());
+    // Save as template: the dry run reviews, writes nothing.
+    let review = tools::save_as_template(
+        &config,
+        &json!({
+            "workspace": dir,
+            "id": "user.mixed",
+            "name": "Mixed",
+            "description": "Retouch and import",
+            "dry_run": true
+        }),
+        &catalogue(),
+    )
+    .unwrap();
+    assert_eq!(review["ok"], json!(true), "{review}");
+    assert_eq!(review["parameters"][0]["id"], json!("import_source"));
+    assert!(!workspace::template_dir(&config, "user.mixed").exists());
+    let written = tools::save_as_template(
+        &config,
+        &json!({
+            "workspace": dir,
+            "id": "user.mixed",
+            "name": "Mixed",
+            "description": "Retouch and import",
+            "ask": []
+        }),
+        &catalogue(),
+    )
+    .unwrap();
+    assert!(
+        workspace::template_dir(&config, "user.mixed").is_dir(),
+        "{written}"
+    );
+    assert!(written["parameters"].as_array().unwrap().is_empty());
+    // An edit's dry run checks it: a module this Helios lacks.
+    let mut network = after.bundle.template.network.clone();
+    network.nodes[0].module = Some("mystery".into());
+    let dry = tools::edit(
+        &config,
+        &json!({ "workspace": dir, "changes": { "network": network }, "dry_run": true }),
+        &catalogue(),
+    )
+    .unwrap();
+    assert!(dry["problems"].to_string().contains("mystery"), "{dry}");
+    assert!(
+        tools::edit(
+            &config,
+            &json!({ "workspace": dir, "changes": { "network": network } }),
+            &catalogue(),
+        )
+        .is_err()
+    );
+    std::fs::remove_dir_all(&root).unwrap();
+}

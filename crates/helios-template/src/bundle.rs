@@ -230,6 +230,11 @@ impl Bundle {
         format!("{}-scenario", slug(&self.template.id))
     }
 
+    /// The message key of a parameter's translated name.
+    pub fn parameter_key(&self, id: &str) -> String {
+        format!("{}-parameter-{}", slug(&self.template.id), slug(id))
+    }
+
     /// `base` with the bundled composites a catalogue lacks.
     pub fn catalogue(&self, base: &Catalogue) -> Catalogue {
         let mut c = base.clone();
@@ -411,6 +416,7 @@ impl Bundle {
         if let Some(import) = t.library.as_ref().and_then(|l| l.import.as_ref()) {
             check_import(import, p);
         }
+        check_parameters(t, p);
         for (area, node) in &self.layout.areas {
             for panel in node.panels() {
                 check_panel(&catalogue, panel.as_str(), Some(*area), "layout", p);
@@ -537,6 +543,42 @@ fn file_name(p: &Path) -> String {
         .and_then(|n| n.to_str())
         .unwrap_or_default()
         .to_string()
+}
+
+/// What a template asks on create: each parameter named once, pointing
+/// at a value the template has (never at what identifies it), a choice
+/// with its words.
+fn check_parameters(t: &Template, p: &mut Vec<String>) {
+    let json = serde_json::to_value(t).unwrap_or_default();
+    let mut ids = BTreeSet::new();
+    for (i, q) in t.parameters.iter().enumerate() {
+        let at = format!("parameters[{i}] ({})", q.id);
+        if !valid_name(&q.id) || !ids.insert(q.id.as_str()) {
+            p.push(format!("{at}: not a name, or not the only one"));
+        }
+        if q.name.trim().is_empty() {
+            p.push(format!("{at}: no name"));
+        }
+        let fixed = ["/format", "/id", "/version", "/parameters"];
+        if !q.at.starts_with('/') || fixed.iter().any(|f| q.at.starts_with(f)) {
+            p.push(format!("{at}: `{}` is not a value of the template", q.at));
+        } else {
+            match json.pointer(&q.at) {
+                Some(Json::String(v)) => {
+                    if q.kind == crate::format::ParameterKind::Choice && !q.choices.contains(v) {
+                        p.push(format!("{at}: `{v}` is not one of its choices"));
+                    }
+                }
+                Some(_) => p.push(format!("{at}: `{}` is not a text value", q.at)),
+                None => p.push(format!("{at}: the template has nothing at `{}`", q.at)),
+            }
+        }
+        if (q.kind == crate::format::ParameterKind::Choice) == q.choices.is_empty() {
+            p.push(format!(
+                "{at}: only a choice has choices, and it needs some"
+            ));
+        }
+    }
 }
 
 /// An import source's words: the source, the placement, the duplicates'

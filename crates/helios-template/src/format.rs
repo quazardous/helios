@@ -33,6 +33,77 @@ pub struct Template {
     /// What it sets for the library: an import source, how culling goes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub library: Option<LibraryDesc>,
+    /// What is asked when a workspace is created from it ("ask on
+    /// create"): the import source, a file a parameter names.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub parameters: Vec<Parameter>,
+}
+
+/// A value asked for when a workspace is created from a template: where
+/// the answer goes in `template.json`, and what it may be. Without an
+/// answer the template's own value stays.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Parameter {
+    /// Stable, written as a node's name: `import_source`.
+    pub id: String,
+    /// In English; translations under `<slug>-parameter-<id>`.
+    pub name: String,
+    /// Where the answer goes, as a JSON pointer into `template.json`
+    /// (`/library/import/source`).
+    pub at: String,
+    pub kind: ParameterKind,
+    /// The words a `choice` may be.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub choices: Vec<String>,
+}
+
+/// What a parameter's answer is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ParameterKind {
+    /// Free text.
+    Text,
+    /// A file or a directory on the machine the workspace is made on.
+    Path,
+    /// One of `choices`.
+    Choice,
+}
+
+impl Template {
+    /// The template with answers to its parameters (by id) put where each
+    /// one points; a parameter not answered keeps the template's value.
+    /// An answer of the wrong kind, or to no parameter, is refused.
+    pub fn answered(
+        &self,
+        answers: &BTreeMap<String, serde_json::Value>,
+    ) -> Result<Template, String> {
+        if answers.is_empty() {
+            return Ok(self.clone());
+        }
+        let mut json = serde_json::to_value(self).map_err(|e| format!("template: {e}"))?;
+        for (id, answer) in answers {
+            let q = self
+                .parameters
+                .iter()
+                .find(|q| q.id == *id)
+                .ok_or_else(|| format!("the template asks no `{id}`"))?;
+            let text = answer
+                .as_str()
+                .ok_or_else(|| format!("`{id}`: an answer is text"))?;
+            if q.kind == ParameterKind::Choice && !q.choices.iter().any(|c| c == text) {
+                return Err(format!(
+                    "`{id}`: `{text}` is not one of {}",
+                    q.choices.join(", ")
+                ));
+            }
+            let slot = json
+                .pointer_mut(&q.at)
+                .ok_or_else(|| format!("`{id}`: the template has nothing at `{}`", q.at))?;
+            *slot = serde_json::Value::String(text.to_string());
+        }
+        serde_json::from_value(json).map_err(|e| format!("template: {e}"))
+    }
 }
 
 /// The library a template works with: where it imports from, and how
@@ -98,6 +169,10 @@ pub struct Meta {
     /// A picture of it, a file of the bundle.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preview: Option<String>,
+    /// A short generic icon name (`portrait`, `import`), shown beside its
+    /// name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
 }

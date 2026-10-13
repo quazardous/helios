@@ -10,15 +10,24 @@
 //! - [`Bundle`]: the `.helios-template` directory, read and written,
 //!   validated against a catalogue ([`Bundle::validate`]) and built
 //!   without a window ([`Bundle::build`]): its network as a graph, its
-//!   layout with the composites' panel hints.
+//!   layout with the composites' panel hints;
+//! - [`shipped`]: the built-in templates and composite files;
+//! - [`workspace`]: a workspace made from a template, as it is edited:
+//!   its own files, its parts, saved back as a template, reset to its
+//!   template, and parts of another imported as a copy.
 
 pub mod build;
 pub mod bundle;
 pub mod catalogue;
 pub mod format;
 pub mod schema;
+pub mod shipped;
+pub mod workspace;
 
 pub use build::{Built, SOURCE_PORT, placeholder};
 pub use bundle::{Bundle, Report, Text, Update, parse_composite, parse_template};
 pub use catalogue::Catalogue;
-pub use format::{CompositeFile, CompositeRef, FORMAT, ImportDesc, LibraryDesc, Template};
+pub use format::{
+    CompositeFile, CompositeRef, FORMAT, ImportDesc, LibraryDesc, Parameter, ParameterKind,
+    Template,
+};

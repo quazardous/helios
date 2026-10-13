@@ -25,7 +25,12 @@
     "meta": { "$ref": "#/$defs/meta" },
     "network": { "$ref": "#/$defs/network" },
     "tools": { "$ref": "#/$defs/tools" },
-    "library": { "$ref": "#/$defs/library" }
+    "library": { "$ref": "#/$defs/library" },
+    "parameters": {
+      "description": "What is asked when a workspace is created from the template (ask on create).",
+      "type": "array",
+      "items": { "$ref": "#/$defs/parameter" }
+    }
   },
   "$defs": {
     "meta": {
@@ -43,6 +48,10 @@
         },
         "preview": {
           "description": "A picture of it: a file of the bundle.",
+          "type": "string"
+        },
+        "icon": {
+          "description": "A short generic icon name (portrait, import), shown beside its name.",
           "type": "string"
         },
         "tags": { "type": "array", "items": { "type": "string" } }
@@ -214,6 +223,25 @@
           "description": "After each import, propose stacks to review (nothing applied until accepted).",
           "type": "boolean"
         }
+      }
+    },
+    "parameter": {
+      "description": "A value asked for when a workspace is created; without an answer the template's own value stays.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "at", "kind"],
+      "properties": {
+        "id": { "$ref": "#/$defs/name" },
+        "name": {
+          "description": "In English; translations under <slug of id>-parameter-<id>.",
+          "type": "string"
+        },
+        "at": {
+          "description": "Where the answer goes, as a JSON pointer into template.json: /library/import/source.",
+          "type": "string"
+        },
+        "kind": { "enum": ["text", "path", "choice"] },
+        "choices": { "type": "array", "items": { "type": "string" } }
       }
     },
     "binding": {
