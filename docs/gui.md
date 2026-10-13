@@ -374,6 +374,83 @@ The pictures are written by `HELIOS_DOC_PICTURES=$PWD/docs/gui cargo test
 -p helios-gui --test dialogs pictures` (and `--test params pictures`), from
 the repository's root: headless, never on the desktop.
 
+## Platform services
+
+**On egui-pop's platform services (2026-10-13).** The desktop window adds
+egui-pop's `platform` plugins (`helios_gui::platform::desktop`); tests,
+pictures and tools build the shell without them. Helios's own part is
+the `helios.platform` plugin, in every shell.
+
+**One instance.** Helios runs once per user. `helios-gui` first asks
+egui-pop's single instance (a local socket named after
+`io.github.quazardous.Helios` and the user) whether Helios runs: if so it
+hands over its arguments, its working directory and its activation token,
+and exits. The running window comes to the front and opens what it was
+given:
+
+- a file (a path relative to the launch's directory, a `file://` URI, or
+  `--image FILE`) shows in the viewport, imported into the vault when the
+  window has one;
+- a directory opens as a workspace, in a window of its own: one process
+  per workspace, started with `--new-instance` so it does not hand itself
+  back; the workspace already shown only comes to the front;
+- a link: `helios://open?path=<absolute path>` (an image, or a workspace
+  for a directory) and `helios://workspace?path=<absolute path>`, the
+  path percent-encoded. A link with a relative path or another verb opens
+  nothing (it is logged).
+
+`--vault` in a later launch is ignored: the running window keeps its
+vault. `helios-gui --new-instance` opens a window of its own, which does
+not listen; later launches still go to the first window. The desktop file
+(`packaging/linux`) passes URLs (`Exec=helios-gui %U`) and registers the
+scheme (`MimeType=...;x-scheme-handler/helios;`); `install.sh` refreshes
+the desktop database. On Wayland the window asks for attention rather
+than taking the focus (egui does not hand the activation token on).
+
+**Notifications.** A long export or batch (ten seconds or more) that
+ends, finished or failed, while no Helios window has the focus (the main
+one or a detached panel's) is said on the desktop: `Shell::job_finished`,
+through egui-pop's notifications, tied to the desktop file by its id.
+Its title (export or batch, finished or failed) is translated; its body is
+the job's summary or error. The `notifications.jobs` setting ("Notify
+when a long job ends", on by default) turns it off; egui-pop's
+`notifications.desktop` setting still decides between the desktop and a
+toast.
+
+**Logs and crash reports** go to the user's state directory:
+
+| | Logs | Crash reports |
+|---|---|---|
+| Linux | `$XDG_STATE_HOME/helios/logs/helios.log` (`~/.local/state/...`) | `$XDG_STATE_HOME/helios/crashes` |
+| macOS | `~/Library/Logs/helios` | `~/Library/Application Support/helios/crashes` |
+| Windows | `%LOCALAPPDATA%\helios\logs` | `%LOCALAPPDATA%\helios\crashes` |
+
+The log file rotates at 5 MiB (three older files kept), at the
+`developer.log_level` setting (`info` by default); egui-pop and the
+window's own warnings write to it. A panic writes a crash report (the
+version, the system, the backtrace, the last log lines and journal
+events); the next start offers it in a toast. Nothing is sent. Help >
+About Helios says where both are; the debug bridge's `logs` collector
+gives the file, its level and its last lines, and the `logs.reveal`
+command opens the folder.
+
+**Not wired yet:**
+
+- no export or batch runs in the window yet, so nothing calls
+  `Shell::job_finished` today;
+- the tray icon (egui-pop's `TrayPlugin`): off by default would need a
+  setting read before the application is built, a tray menu and hiding
+  to the tray on close, more than a few lines;
+- global shortcuts (egui-pop's `SystemKeysPlugin`): the plugin starts a
+  desktop backend (an X11 grab, the Wayland portal) as soon as it is
+  added, so off by default needs the same setting read at start; no
+  Helios command has a system-wide key yet;
+- the window's app id (`helios-gui`) differs from the desktop file's
+  name, which the Wayland global shortcuts portal and some notification
+  servers match on;
+- Helios's other crates write to the terminal (`eprintln!`), not to the
+  log file.
+
 ## Parameters
 
 Parameter widgets are generated from value descriptors and bound to the
