@@ -101,6 +101,20 @@ env = { CARGO_NET_OFFLINE = "true" }
 mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git" }
 timeout = "1h"
 
+# fast compile and lint feedback: clippy on every target, the repository
+# checks (changelog fragments...), the translation catalogues' coverage
+# in /out/i18n.txt
+[jobs.lint]
+cores = 8
+memory = "6g"
+cwd = "/work/${src:-helios}"
+command = """mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && cargo clippy --workspace --all-targets --locked -- -D warnings \
+ && cargo xtask check \
+ && cargo xtask i18n check | tee /out/i18n.txt; exit ${PIPESTATUS[0]}"""
+env = { CARGO_NET_OFFLINE = "true" }
+mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git" }
+timeout = "1h"
+
 # the CI profile (no retry, no fail-fast), its JUnit report and a Markdown
 # summary of the slowest tests in /out
 [jobs.test]

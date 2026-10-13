@@ -25,6 +25,7 @@ Jobs of the Benchfile:
 | Job | What it runs | Requests |
 |-----|--------------|----------|
 | `build` | `cargo build --workspace --all-targets` | 8 cores, 6 GB |
+| `lint` | fast compile feedback: `cargo clippy --workspace --all-targets -- -D warnings`, `cargo xtask check`, then `cargo xtask i18n check` (its report in `out/i18n.txt`) | 8 cores, 6 GB |
 | `test` | `cargo nextest run --workspace --profile ci`, its JUnit report and a summary of the slowest tests in `out/` | 6 cores, 6 GB |
 | `survival` | `cargo survival`: quit, `kill -9` and reopen | 4 cores, 4 GB |
 | `check-commits` | `cargo xtask check-commits <base>` (`base=`, `origin/main` by default) | 8 cores, 6 GB |
