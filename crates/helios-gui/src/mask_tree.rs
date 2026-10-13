@@ -1266,8 +1266,9 @@ impl MaskTree {
             });
         if let Some(app) = &self.app {
             // A declared menu, which egui-pop's menus draw (as the
-            // Parameters panel's), not one of the panel's own.
-            view = TreeView::context_menu(view.app(app), app, ROW_MENU);
+            // Parameters panel's), not one of the panel's own: the
+            // normalized UI's test allows this call by name.
+            view = view.app(app).context_menu(app, ROW_MENU);
         }
         let out = view.show(ui, &mut self.state, &net);
         commands.extend(toggles);
