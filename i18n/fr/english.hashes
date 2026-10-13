@@ -167,7 +167,10 @@ gui-job-export-done 5fdda5b0fb93ec0f
 gui-job-export-failed f5ce199f9e1502ae
 gui-library-file f5342066f92b83c2
 gui-library-not-saved f4c82ef926e77b5e
+gui-masks-add 69d8839a97ff0076
+gui-masks-add-hint 07fe685ae4f68f99
 gui-masks-beside-refinement 129a0c6bb2a976a6
+gui-masks-empty 6e37ec7063c43927
 gui-masks-gesture-ctrl d2f205f34f9ed262
 gui-masks-gesture-reset 509ca1272727ce20
 gui-masks-gesture-shift-angle 2e7b5377423207d5
@@ -177,6 +180,8 @@ gui-masks-group-full 2c68b91eff216a00
 gui-masks-group-locked f0ab1d4f18c4a0d0
 gui-masks-hide 03abd3631c09e3ca
 gui-masks-into-itself 305dc650ad3093a9
+gui-masks-invert 2243c5bfeb864849
+gui-masks-invert-hint 2ff448d38401def7
 gui-masks-lock daabf9e3e9615c44
 gui-masks-locked 95c739d95735fbe0
 gui-masks-menu-add-circle 26f7a4ed203097d1
@@ -189,8 +194,10 @@ gui-masks-menu-invert 2243c5bfeb864849
 gui-masks-menu-lock 87068d129ef33d29
 gui-masks-menu-opacity daa85d00cd6b2f31
 gui-masks-menu-rename d18d5eae53db6fcd
+gui-masks-none 2cfcda60e04154f0
 gui-masks-not-a-group eba03cc34e0ccbe4
 gui-masks-nothing-beside-root 49719c5af23e3929
+gui-masks-of 9f89f6f25f914d4a
 gui-masks-one-at-a-time 2964a289a93bafbc
 gui-masks-op-difference ecad90e05e7610d0
 gui-masks-op-exclusion 574ded37bc60ee41
@@ -199,6 +206,8 @@ gui-masks-op-minimum 6c6cb011faf4edae
 gui-masks-op-product f7f0c4130e761d65
 gui-masks-op-screen 8edb503254da730c
 gui-masks-op-sum c33425a34f6f6c62
+gui-masks-opacity c0ab3b06e69d65dc
+gui-masks-opacity-hint 2313bce007881442
 gui-masks-operator-hint bff544dcf33a4223
 gui-masks-refine-blur 8985b4a5a487087e
 gui-masks-refine-feather 81c6f1c9d4c2abde
@@ -209,6 +218,12 @@ gui-masks-row-hidden f145af5da614d3b1
 gui-masks-row-inverted 071a09fe37c77bae
 gui-masks-row-opacity 20c6545a62ad4f32
 gui-masks-show f610532bac2c2c0b
+gui-masks-take-out ce808e3b627e81ac
+gui-masks-take-out-group 5d54872b2cb7bd0c
+gui-masks-take-out-group-detail b3d58505ae16d70c
+gui-masks-take-out-hint c59e5ebe3de98e2c
+gui-masks-take-out-verb ce808e3b627e81ac
+gui-masks-tree-hint f297ce6a2372d366
 gui-masks-unlock 52d38f3a80ff723a
 gui-new-workspace-created 6ffa8013c877eae5
 gui-new-workspace-directory 790976655fc2525e

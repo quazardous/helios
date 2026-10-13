@@ -78,7 +78,13 @@ gui-job-export-failed = Échec de l’export
 
 gui-library-not-saved = Non enregistré, la bibliothèque montre ce que contient le coffre : { $error }
 
+gui-masks-add = Ajouter…
+
+gui-masks-add-hint = Ajouter une forme ou un membre paramétrique au groupe sélectionné. L’image ayant le focus : C un cercle, E une ellipse, G un dégradé, P un chemin.
+
 gui-masks-beside-refinement = rien ne va à côté d’un affinage : déposez sur un membre ou dans un groupe
+
+gui-masks-empty = Le masque est vide : { $module } s’applique partout. Ajoutez une forme ou un membre paramétrique pour le limiter.
 
 gui-masks-gesture-ctrl = Ctrl : déplacement fin
 
@@ -97,6 +103,10 @@ gui-masks-group-locked = le groupe « { $group } » est verrouillé : ses membre
 gui-masks-hide = Masquer { $name } : son opacité éteinte
 
 gui-masks-into-itself = un groupe ne peut pas aller en lui-même
+
+gui-masks-invert = Inverser
+
+gui-masks-invert-hint = Inverser le membre sélectionné : il couvre alors tout sauf ce qu’il couvrait (pour le masque du module, tout le masque)
 
 gui-masks-lock = Verrouiller { $name } contre les déplacements et les modifications
 
@@ -122,9 +132,13 @@ gui-masks-menu-opacity = Opacité éteinte ou à fond
 
 gui-masks-menu-rename = Renommer…
 
+gui-masks-none = Aucun masque : le module sélectionné n’est pas masqué
+
 gui-masks-not-a-group = « { $name } » n’est pas un groupe : seul un groupe accueille des membres
 
 gui-masks-nothing-beside-root = rien ne va à côté du masque du module : déposez dedans
+
+gui-masks-of = Masque de { $module }
 
 gui-masks-one-at-a-time = les membres se déplacent un par un
 
@@ -141,6 +155,10 @@ gui-masks-op-product = multiplier
 gui-masks-op-screen = union douce
 
 gui-masks-op-sum = ajouter
+
+gui-masks-opacity = Opacité
+
+gui-masks-opacity-hint = Éteindre l’opacité du membre sélectionné, ou la remettre à fond (l’œil de sa ligne fait de même)
 
 gui-masks-operator-hint = { $effect } : comment les membres se combinent, dans l’ordre des ports (l’opérateur { $operator })
 
@@ -161,6 +179,18 @@ gui-masks-row-inverted = inversé
 gui-masks-row-opacity = opacité { $percent } %
 
 gui-masks-show = Afficher { $name } : son opacité à fond
+
+gui-masks-take-out = Retirer
+
+gui-masks-take-out-group = Retirer le groupe { $name } du masque ?
+
+gui-masks-take-out-group-detail = Ses membres partent avec lui, et le retrait n’est pas encore une étape d’annulation.
+
+gui-masks-take-out-hint = Retirer le membre sélectionné du masque (Suppr, l’arbre ayant le focus). Pas encore une étape d’annulation.
+
+gui-masks-take-out-verb = Retirer
+
+gui-masks-tree-hint = F2 renomme la ligne sélectionnée. Glissez une ligne pour la réordonner ou la mettre dans un groupe. Clic droit sur une ligne pour son menu : il ne supprime jamais rien.
 
 gui-masks-unlock = Déverrouiller { $name }
 
