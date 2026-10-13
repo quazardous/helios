@@ -29,6 +29,7 @@ use std::sync::{Mutex, PoisonError};
 use egui::Ui;
 use egui_pop::api::steps::Before;
 use egui_pop::api::{AppHandle, Ctx, Plugin, PluginError};
+use egui_pop::core::icon::Source;
 use egui_pop::model::ids::PluginId;
 use egui_pop::views::steps::TREE_DROP;
 use egui_pop::views::tree::{Node, Position, Signal, Sink, TreeSource, TreeState, TreeView};
@@ -113,10 +114,11 @@ impl Item {
         }
     }
 
-    /// The row's text: the icon, the name, a group's operator, then what
-    /// changes the member (refinements, inversion, opacity).
+    /// The row's label: the name, a group's operator, then what changes
+    /// the member (refinements, inversion, opacity). The icon is drawn
+    /// apart ([`Item::icon`]).
     pub fn text(&self) -> String {
-        let mut s = format!("{} {}", self.icon(), self.name());
+        let mut s = self.name().to_string();
         if let Some(op) = &self.operator {
             s.push_str(" — ");
             s.push_str(op);
@@ -134,12 +136,15 @@ impl Item {
         s
     }
 
+    /// Its node in the view: the decorated label, the plain name a
+    /// rename starts from.
     fn tree_node(&self) -> Node<String> {
-        if self.is_group() {
+        let node = if self.is_group() {
             Node::branch(self.node.clone(), self.text())
         } else {
             Node::leaf(self.node.clone(), self.text())
-        }
+        };
+        node.with_name(self.name())
     }
 }
 
@@ -842,9 +847,8 @@ pub struct MaskTree {
     known: BTreeSet<String>,
     /// The selection the store asked for last.
     desired: Option<String>,
-    /// A rename asked for by a command, and the one starting this pass.
+    /// A rename asked for by a command, started at the next pass.
     rename: Option<String>,
-    starting: Option<String>,
     app: Option<AppHandle>,
 }
 
@@ -856,7 +860,6 @@ impl MaskTree {
             known: BTreeSet::new(),
             desired: None,
             rename: None,
-            starting: None,
             app: None,
         }
     }
@@ -1010,13 +1013,8 @@ impl MaskTree {
                 );
             }
         });
-        // A rename starts from the name, not from the row's decorations
-        // (the view's text field starts from its label): the row shows the
-        // name alone for the pass that starts it, then its decorations
-        // again.
         let id = egui::Id::new(("egui_pop_views::tree", TREE));
         let focused = ui.memory(|m| m.has_focus(id));
-        let f2 = focused && ui.input(|i| i.key_pressed(egui::Key::F2));
         // Delete in the tree takes the selected member out. Not a key
         // binding: egui-pop's keymap counts two bindings of one key as a
         // conflict even when their clauses never hold together, and the
@@ -1028,29 +1026,21 @@ impl MaskTree {
         {
             commands.push(Command::MemberDelete { member: None });
         }
-        let asked = self.rename.take();
-        if (f2 || asked.is_some()) && self.state.renaming().is_none() {
-            let key = asked.or_else(|| current.as_ref().map(|c| c.node.clone()));
-            if let Some(item) = key.and_then(|k| net.items.get(&k)) {
-                let mut node = item.tree_node();
-                node.label = item.name().to_string();
-                self.state.handle().update(node);
-                if !f2 {
-                    self.starting = Some(item.node.clone());
-                }
-            }
+        // A rename asked for by a command starts from the node's name.
+        if let Some(key) = self.rename.take()
+            && self.state.renaming().is_none()
+        {
+            self.state.rename(&key);
         }
         let mut view = TreeView::new(TREE)
             .label("Masks")
             .drag_drop(true)
-            .rename(true);
+            .rename(true)
+            .icon(|n| net.items.get(&n.key).map(|i| Source::glyph(i.icon())));
         if let Some(app) = &self.app {
             view = view.app(app);
         }
         let out = view.show(ui, &mut self.state, &net);
-        if let Some(key) = self.starting.take() {
-            self.state.rename(&key);
-        }
         let secondary = ui.input(|i| {
             i.pointer
                 .secondary_clicked()

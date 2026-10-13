@@ -98,18 +98,20 @@ fn text(h: &Harness<'_, Shell>, path: &str) -> String {
     }
 }
 
-/// The rows of the tree as the view shows them, indented by depth.
+/// The rows of the tree as the view shows them, indented by depth: the
+/// icon, then the label.
 fn rows(h: &Harness<'_, Shell>) -> Vec<String> {
     let t = h.state().mask_tree();
-    let model = t.state().model();
+    let (model, net) = (t.state().model(), t.network());
     model
         .rows_now()
         .iter()
         .filter_map(|r| {
             let k = r.key()?;
             Some(format!(
-                "{}{}",
+                "{}{} {}",
                 "  ".repeat(r.depth()),
+                net.items.get(k)?.icon(),
                 model.node(k)?.label
             ))
         })
@@ -142,8 +144,19 @@ fn steps(h: &Harness<'_, Shell>) -> Vec<String> {
     store.undo_steps().iter().map(|s| s.label.clone()).collect()
 }
 
+/// A row of the tree, by its label (the Parameters panel may show the
+/// same name).
 fn row(h: &Harness<'_, Shell>, label: &str) -> egui::Rect {
-    h.get_by_label(label).rect()
+    let panel = h.state().target_rect(mask_tree::PANEL).unwrap();
+    let rows: Vec<egui::Rect> = h
+        .query_all_by_label(label)
+        .map(|n| n.rect())
+        .filter(|r| panel.contains(r.center()))
+        .collect();
+    match rows[..] {
+        [r] => r,
+        _ => panic!("{} rows labelled `{label}`", rows.len()),
+    }
 }
 
 fn button(h: &mut Harness<'_, Shell>, pos: Pos2, pressed: bool) {
@@ -251,13 +264,13 @@ fn selection_is_two_way_between_the_tree_and_the_viewport() {
     let mut h = harness();
     // A click on a row selects the shape on the viewport: the mask it
     // edits is the shape's group, its handles are the shape's.
-    click_row(&mut h, "○ dot");
+    click_row(&mut h, "dot");
     assert_eq!(text(&h, SHAPE), "dot");
     assert_eq!(text(&h, MASK), "inner");
     assert_eq!(text(&h, "view/graph/selection"), "dot");
     assert_eq!(h.state().viewport().masks().overlays()[0].id, "dot");
     // A group selected: the viewport edits it, no shape.
-    click_row(&mut h, "▣ mask — maximum");
+    click_row(&mut h, "mask — maximum");
     assert_eq!(text(&h, MASK), "mask");
     assert_eq!(text(&h, SHAPE), "");
     // The viewport selects (its click, an agent): the tree follows.
@@ -273,7 +286,12 @@ fn selection_is_two_way_between_the_tree_and_the_viewport() {
 #[test]
 fn f2_renames_in_place_as_one_undo_step() {
     let mut h = harness();
-    click_row(&mut h, "○ spot");
+    run(
+        &mut h,
+        "mask.member.opacity",
+        json!({ "member": "spot", "opacity": 0.5 }),
+    );
+    click_row(&mut h, "spot · 50 %");
     h.key_press(Key::F2);
     for _ in 0..3 {
         h.step();
@@ -290,12 +308,17 @@ fn f2_renames_in_place_as_one_undo_step() {
         h.step();
     }
     assert_eq!(text(&h, &label_path("spot")), "Sun");
-    assert!(rows(&h).contains(&"  ○ Sun".to_string()), "{:?}", rows(&h));
-    assert_eq!(steps(&h), ["rename spot to Sun"]);
+    // Its decorations come back around the new name.
+    assert!(
+        rows(&h).contains(&"  ○ Sun · 50 %".to_string()),
+        "{:?}",
+        rows(&h)
+    );
+    assert_eq!(steps(&h), ["opacity of spot", "rename spot to Sun"]);
     // The node keeps its name: the viewport and the store still find it.
     assert_eq!(text(&h, SHAPE), "spot");
     run(&mut h, "param.undo", json!(null));
-    assert!(rows(&h).contains(&"  ○ spot".to_string()));
+    assert!(rows(&h).contains(&"  ○ spot · 50 %".to_string()));
     // Agents name members too.
     run(
         &mut h,
@@ -316,7 +339,7 @@ fn a_drop_reorders_members_and_their_values_follow() {
     assert_eq!(wired(&h, "mask"), ["inner", "spot", "oval"]);
     // The oval dropped before the spot: wired before it, its opacity
     // with it.
-    let (from, to) = (row(&h, "◎ oval · 25 %"), row(&h, "○ spot"));
+    let (from, to) = (row(&h, "oval · 25 %"), row(&h, "spot"));
     drag(&mut h, from.center(), to.center_top() + vec2(0.0, 3.0));
     assert_eq!(wired(&h, "mask"), ["inner", "oval", "spot"]);
     assert_eq!(&floats(&h, "node/mask/opacity")[..3], [1.0, 0.25, 1.0]);
@@ -326,7 +349,7 @@ fn a_drop_reorders_members_and_their_values_follow() {
         "the tree shows the network's order"
     );
     // Into another group: the spot joins the inner group.
-    let (from, inner) = (row(&h, "○ spot"), row(&h, "▣ inner — minimum"));
+    let (from, inner) = (row(&h, "spot"), row(&h, "inner — minimum"));
     drag(&mut h, from.center(), inner.center());
     assert_eq!(wired(&h, "inner"), ["dot", "spot"]);
     assert_eq!(wired(&h, "mask"), ["inner", "oval"]);
@@ -340,7 +363,7 @@ fn a_drop_the_network_cannot_take_is_vetoed() {
     let mut h = harness();
     let before = rows(&h);
     // Nothing goes beside the module's mask.
-    let (oval, root) = (row(&h, "◎ oval"), row(&h, "▣ mask — maximum"));
+    let (oval, root) = (row(&h, "oval"), row(&h, "mask — maximum"));
     drag(&mut h, oval.center(), root.center_top() + vec2(0.0, 2.0));
     assert_eq!(rows(&h), before);
     assert_eq!(wired(&h, "mask"), ["inner", "spot", "oval"]);
@@ -365,7 +388,7 @@ fn a_drop_the_network_cannot_take_is_vetoed() {
 #[test]
 fn delete_takes_a_member_out_of_the_mask() {
     let mut h = harness();
-    click_row(&mut h, "○ spot");
+    click_row(&mut h, "spot");
     assert_eq!(text(&h, SHAPE), "spot");
     h.key_press(Key::Delete);
     for _ in 0..3 {
