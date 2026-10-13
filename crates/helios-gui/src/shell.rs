@@ -182,6 +182,7 @@ struct Parts {
     workspace: Workspace,
     /// The catalogues of the application's translation plugin.
     i18n: egui_pop::i18n::I18n,
+    opens: crate::platform::Opens,
 }
 
 /// A shell whose egui-pop application is still to build: in a test
@@ -206,6 +207,15 @@ impl ShellBuilder {
     #[must_use]
     pub fn on_exit(mut self, f: impl FnMut(&AppHandle) + 'static) -> Self {
         self.app = self.app.on_exit(f);
+        self
+    }
+
+    /// The desktop's platform services (see `platform::desktop`): the
+    /// single instance this launch is.
+    #[must_use]
+    pub fn desktop(mut self, instance: egui_pop::platform::instance::Instance) -> Self {
+        self.parts.opens.listen();
+        self.app = crate::platform::desktop(self.app, instance);
         self
     }
 
@@ -323,6 +333,8 @@ pub struct Shell {
     workspace: Workspace,
     /// The catalogues the shell's text is shown through.
     i18n: egui_pop::i18n::I18n,
+    /// What later launches and links asked to open (`platform`).
+    opens: crate::platform::Opens,
     /// The viewport engine's events read up to here, and the modules whose
     /// GPU fallback was already said.
     engine_seen: u64,
@@ -398,6 +410,7 @@ impl Shell {
                 "en"
             });
         let i18n = i18n_plugin.i18n();
+        let opens = crate::platform::Opens::default();
         let Wiring {
             queue,
             dialogs,
@@ -433,6 +446,7 @@ impl Shell {
             })
             .plugin(plugins::Frame)
             .plugin(crate::display::Display)
+            .plugin(crate::platform::Platform::new(opens.clone()))
             .plugin(crate::workbench::Panels {
                 specs: panels.clone(),
                 contents: contents.clone(),
@@ -456,6 +470,7 @@ impl Shell {
                 values,
                 workspace,
                 i18n,
+                opens,
             },
         }
     }
@@ -475,6 +490,7 @@ impl Shell {
             values,
             workspace,
             i18n,
+            opens,
         } = parts;
         if let Some(d) = app.handle().service(&DIALOGS) {
             let _ = dialogs.set((*d).clone());
@@ -525,6 +541,7 @@ impl Shell {
             i18n,
             engine_seen: 0,
             fell_back: BTreeSet::new(),
+            opens,
         };
         for d in shell.app.handle().diagnostics() {
             shell.notes.push(format!("{}: {}", d.code, d.message));
@@ -597,6 +614,12 @@ impl Shell {
             }
         }
         shell
+    }
+
+    /// What later launches and `helios:` links asked to open since the
+    /// last call (the window opens them).
+    pub fn take_opens(&self) -> Vec<crate::platform::Open> {
+        self.opens.take()
     }
 
     /// The egui-pop application (its handle: services, menus, history).
@@ -2390,9 +2413,15 @@ impl Shell {
                 command: "workspace.open".into(),
             }),
             Action::OpenWorkspace(Some(path)) => {
-                // One window per workspace: another process opens it.
+                // One window per workspace: another process opens it,
+                // which does not hand it back to this one.
                 std::env::current_exe()
-                    .and_then(|exe| std::process::Command::new(exe).arg(&path).spawn())
+                    .and_then(|exe| {
+                        std::process::Command::new(exe)
+                            .arg(crate::platform::NEW_INSTANCE)
+                            .arg(&path)
+                            .spawn()
+                    })
                     .map_err(|e| format!("cannot open {}: {e}", path.display()))?;
                 self.note(Message::new("gui-opening", "opening { $path }").with("path", &path));
             }

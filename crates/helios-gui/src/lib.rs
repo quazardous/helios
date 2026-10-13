@@ -12,6 +12,7 @@ pub mod mask_tree;
 pub mod masks;
 pub mod params;
 pub mod persist;
+pub mod platform;
 mod plugins;
 pub mod scopes;
 pub mod shell;

@@ -8,10 +8,16 @@
 //! and each edit step is saved there as a version.
 //! `--snapshot <target> <file.png>` draws it offscreen instead and saves a
 //! picture of the target.
+//!
+//! Helios runs once per user: a later launch hands its files, workspaces
+//! and `helios://` links to the running one and exits; `--new-instance`
+//! opens a window of its own (see `helios_gui::platform`).
 
 use std::path::{Path, PathBuf};
 
 use egui_pop::model::layout::Layout;
+use egui_pop::platform::instance::{self, Instance, Launch, Single};
+use helios_gui::platform::{self, Open};
 use helios_gui::{Shell, headless, helios_panels};
 
 /// Where a workspace's own files are kept (the profile it uses): in the
@@ -113,9 +119,41 @@ struct App {
     persist: Option<Persist>,
 }
 
+impl App {
+    /// Opens what a later launch or a link asked for: an image in the
+    /// viewport, a workspace in a window of its own (none for the one
+    /// this window shows).
+    fn open(&mut self, open: Open) {
+        let done = match open {
+            Open::Image(path) => image_graph(&path)
+                .and_then(|g| show_image(&mut self.shell, self.persist.as_mut(), path, g)),
+            Open::Workspace(dir) => {
+                let dir = dir.canonicalize().unwrap_or(dir);
+                if self.shell.workspace() == Some(helios_gui::host::workspace_key(&dir)) {
+                    Ok(())
+                } else {
+                    self.shell
+                        .run(
+                            "workspace.open",
+                            serde_json::json!({ "path": dir }),
+                            helios_shell::commands::Origin::User,
+                        )
+                        .map(|_| ())
+                }
+            }
+        };
+        if let Err(e) = done {
+            self.shell.notify(helios_gui::dialogs::Level::Error, e);
+        }
+    }
+}
+
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.shell.ui(ui);
+        for open in self.shell.take_opens() {
+            self.open(open);
+        }
         if let Some(persist) = &mut self.persist {
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -163,9 +201,20 @@ fn open(
     if let Some(persist) = &persist {
         fill_library(shell, persist)?;
     }
-    let Some((path, (graph, node))) = image else {
-        return Ok(());
-    };
+    match image {
+        Some((path, graph)) => show_image(shell, persist, path, graph),
+        None => Ok(()),
+    }
+}
+
+/// Shows an image: imported into the vault and opened with its saved edit
+/// when there is one, else on its own.
+fn show_image(
+    shell: &mut Shell,
+    persist: Option<&mut Persist>,
+    path: PathBuf,
+    (graph, node): (helios_core::Graph, helios_core::NodeId),
+) -> Result<(), String> {
     match persist {
         Some(persist) => {
             let now = std::time::SystemTime::now()
@@ -190,15 +239,33 @@ fn main() -> Result<(), String> {
         let image = headless::snapshot(&mut harness, target)?;
         return helios_gui::snapshot::save(&image, Path::new(out));
     }
-    let image_file = args
-        .iter()
-        .position(|a| a == "--image")
-        .map(|i| {
-            args.get(i + 1)
-                .map(PathBuf::from)
-                .ok_or("--image takes a FILE")
-        })
-        .transpose()?;
+    // One Helios per user: a later launch hands over and exits.
+    let instance = if args.iter().any(|a| a == platform::NEW_INSTANCE) {
+        Instance::detached(Launch::current())
+    } else {
+        match instance::single(platform::APP_ID) {
+            Ok(Single::Handed) => {
+                eprintln!("helios-gui: handed over to the running Helios");
+                return Ok(());
+            }
+            Ok(Single::First(first)) => first,
+            Err(e) => {
+                eprintln!("helios-gui: no single instance ({e}), running on its own");
+                Instance::detached(Launch::current())
+            }
+        }
+    };
+    if args.last().is_some_and(|a| a == "--image") {
+        return Err("--image takes a FILE".into());
+    }
+    let cwd = std::env::current_dir().ok();
+    let asked = platform::opens(&args, cwd.as_deref());
+    // The last image named, the first workspace (else the current
+    // directory).
+    let image_file = asked.iter().rev().find_map(|o| match o {
+        Open::Image(p) => Some(p.clone()),
+        Open::Workspace(_) => None,
+    });
     let vault_file = args
         .iter()
         .position(|a| a == "--vault")
@@ -208,17 +275,13 @@ fn main() -> Result<(), String> {
                 .ok_or("--vault takes a FILE")
         })
         .transpose()?;
-    let workspace = args
+    let workspace = asked
         .iter()
-        .enumerate()
-        .find(|(i, a)| {
-            !a.starts_with('-')
-                && (*i == 0 || !["--vault", "--image"].contains(&args[i - 1].as_str()))
+        .find_map(|o| match o {
+            Open::Workspace(p) => Some(p.clone()),
+            Open::Image(_) => None,
         })
-        .map(|(_, a)| a)
-        .map(PathBuf::from)
-        .filter(|p| p.is_dir())
-        .or_else(|| std::env::current_dir().ok())
+        .or(cwd)
         .and_then(|p| p.canonicalize().ok())
         .ok_or("no workspace directory")?;
     if let Err(e) = helios_gui::shell::remember_workspace(&workspace) {
@@ -253,7 +316,8 @@ fn main() -> Result<(), String> {
     let earlier = earlier_layout(&workspace, &ui_settings);
     let builder = Shell::builder(helios_panels(), Some(ui_settings))
         .workspace(&workspace)
-        .on_exit(move |app| save_workspace(&dir, app));
+        .on_exit(move |app| save_workspace(&dir, app))
+        .desktop(instance);
     // The window draws with the process's one device, which the engine
     // computes on (see `helios_gui::shell::wgpu_setup`).
     let gpu = helios_gpu::shared::gpu().map_err(|e| format!("no GPU to draw with: {e}"))?;

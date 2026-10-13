@@ -38,6 +38,9 @@ plugin-helios-history =
 plugin-helios-lists =
     .title = Helios lists
 
+plugin-helios-platform =
+    .title = Helios platform
+
 plugin-helios-workbench =
     .title = Helios areas
 
