@@ -69,6 +69,9 @@ command-helios-masks-detach =
 command-helios-masks-dock =
     .title = Remettre Masques dans sa zone
 
+command-helios-masks-float =
+    .title = Faire flotter Masques au-dessus de l’interface (`pos` : [x, y])
+
 command-helios-masks-moveTo =
     .title = Déplacer Masques vers une zone (`area`)
 
@@ -104,6 +107,9 @@ command-helios-scopes-detach =
 
 command-helios-scopes-dock =
     .title = Remettre Mesures dans sa zone
+
+command-helios-scopes-float =
+    .title = Faire flotter Mesures au-dessus de l’interface (`pos` : [x, y])
 
 command-helios-scopes-moveTo =
     .title = Déplacer Mesures vers une zone (`area`)

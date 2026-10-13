@@ -33,7 +33,7 @@ fn portrait() -> Bundle {
 }
 
 #[test]
-fn portrait_retouch_is_valid_and_builds_with_masks_docked() {
+fn portrait_retouch_is_valid_and_builds_with_masks_docked_and_the_scopes_floating() {
     let bundle = portrait();
     assert_eq!(bundle.template.id, "helios.portrait-retouch");
     let report = bundle.validate(&catalogue());
@@ -49,6 +49,9 @@ fn portrait_retouch_is_valid_and_builds_with_masks_docked() {
     assert_eq!(area("helios.viewport"), Some(Area::Center));
     assert_eq!(area("helios.masks"), Some(Area::StartSide));
     assert_eq!(area("helios.params"), Some(Area::EndSide));
+    // The scopes float over the image, as a palette.
+    let scopes = PanelId::new("helios.scopes").unwrap();
+    assert!(built.layout.floating_of(&scopes).is_some());
     // The masks opened, so the Masks panel and the viewport edit them.
     for inner in ["retouch.mask", "retouch.feather", "retouch.blend"] {
         assert!(built.nodes.contains_key(inner), "{inner}");

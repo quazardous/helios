@@ -92,6 +92,9 @@ enum Action {
     Maximize,
     Close,
     Detach(String),
+    /// A floatable panel floats over the interface, at a place or
+    /// cascaded.
+    Float(String, Option<[f32; 2]>),
     MoveTo(String, Area),
     Zoom(crate::viewport::ZoomTo),
     /// Before and after side by side, or not.
@@ -1571,6 +1574,26 @@ impl Shell {
                 ),
                 Box::new(move |_, _| Ok(Action::Detach(detach.clone()))),
             );
+            if p.floatable {
+                let float = id.clone();
+                add(
+                    CommandSpec::new(
+                        &format!("{id}.float"),
+                        &format!("Float {} over the interface (`pos`: [x, y])", p.title),
+                        "View",
+                    ),
+                    Box::new(move |a, _| {
+                        let pos = match a.get("pos") {
+                            None | Some(Value::Null) => None,
+                            Some(v) => Some(
+                                serde_json::from_value::<[f32; 2]>(v.clone())
+                                    .map_err(|e| format!("`pos`: {e}"))?,
+                            ),
+                        };
+                        Ok(Action::Float(float.clone(), pos))
+                    }),
+                );
+            }
             add(
                 CommandSpec::new(
                     &format!("{id}.dock"),
@@ -3136,11 +3159,33 @@ impl Shell {
             Action::Detach(p) => {
                 return workbench_outcome(self.app.handle().detach_panel(&panel_id(&p)?));
             }
+            Action::Float(p, pos) => {
+                let id = panel_id(&p)?;
+                let h = self.app.handle();
+                let pos = pos.unwrap_or_else(|| {
+                    egui_pop::model::layout::Floating::cascade(h.layout().floating.len())
+                });
+                return workbench_outcome(
+                    h.change_workbench(egui_pop::api::workbench::Change::Float(id, pos)),
+                );
+            }
             Action::Dock(p) => {
                 let id = panel_id(&p)?;
                 let h = self.app.handle();
-                if h.layout().auxiliary.iter().any(|a| a.panel == id) {
+                let layout = h.layout();
+                if layout.auxiliary.iter().any(|a| a.panel == id) {
                     return workbench_outcome(h.attach_panel(&id));
+                }
+                // A palette docks in its own area.
+                if layout.floating_of(&id).is_some() {
+                    let area = self
+                        .panels
+                        .iter()
+                        .find(|s| s.id == id)
+                        .map_or(Area::EndSide, |s| s.area);
+                    return workbench_outcome(
+                        h.change_workbench(egui_pop::api::workbench::Change::Dock(id, area)),
+                    );
                 }
             }
             Action::Snapshot { target, path } if target == "viewport.scene" => {

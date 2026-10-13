@@ -422,6 +422,15 @@ impl Bundle {
         for h in &self.layout.hidden {
             check_panel(&catalogue, h.as_str(), None, "layout.hidden", p);
         }
+        for f in &self.layout.floating {
+            check_panel(&catalogue, f.panel.as_str(), None, "layout.floating", p);
+            let specs = catalogue.panel_specs();
+            if let Some(spec) = specs.iter().find(|s| s.id == f.panel)
+                && !spec.floatable
+            {
+                p.push(format!("layout.floating: `{}` does not float", f.panel));
+            }
+        }
         let own = format!("{}-", slug(&t.id));
         for text in &self.texts {
             for key in keys(&text.source) {

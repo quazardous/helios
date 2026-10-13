@@ -66,6 +66,18 @@ Helios offers its own as templates: `Image`, the image-first layout
 for small screens and culling (the image, the filmstrip under it,
 every other panel closed).
 
+**Palettes (2026-10-13).** The Masks panel and the Scopes may float
+over the image as egui-pop's palettes (`PanelSpec::floatable`,
+`helios_gui::FLOATABLE`): from their tab's menu (Float) or
+`<panel>.float` (`pos`, else cascaded from the top left), never modal.
+A palette is dragged by its header band (Pin, Roll up, Close), snaps to
+the workbench's edges and to the other palettes, and docks back when
+dropped on an area or by `<panel>.dock`. Tab (egui-pop's
+`palettes.toggle`) hides and shows them while no field has the
+keyboard. The Portrait retouch template opens with the Scopes floating
+over the image, beside the Masks panel. Where they float is kept with
+the workspace's layout.
+
 ## Settings pages
 
 Settings pages are generated, never laid out by hand: a setting named

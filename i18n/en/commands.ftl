@@ -70,6 +70,9 @@ command-helios-masks-detach =
 command-helios-masks-dock =
     .title = Dock Masks back in its area
 
+command-helios-masks-float =
+    .title = Float Masks over the interface (`pos`: [x, y])
+
 command-helios-masks-moveTo =
     .title = Move Masks to an area (`area`)
 
@@ -105,6 +108,9 @@ command-helios-scopes-detach =
 
 command-helios-scopes-dock =
     .title = Dock Scopes back in its area
+
+command-helios-scopes-float =
+    .title = Float Scopes over the interface (`pos`: [x, y])
 
 command-helios-scopes-moveTo =
     .title = Move Scopes to an area (`area`)

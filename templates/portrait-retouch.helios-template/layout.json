@@ -12,8 +12,8 @@
     "helios.graph",
     "helios.vault",
     "helios.modules",
-    "helios.scopes",
     "helios.queue",
     "helios.log"
-  ]
+  ],
+  "floating": [{ "panel": "helios.scopes", "pos": [292.0, 16.0] }]
 }
