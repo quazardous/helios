@@ -62,6 +62,23 @@ fn request() -> Request {
         }],
         brief: Some("bright and airy".into()),
         mode: Mode::FullAi,
+        question: Params::new(),
+        region: Region::sized(8, 6),
+    }
+}
+
+/// An AI object mask's request: its question, a mask to answer.
+fn mask_request() -> Request {
+    let manifest = helios_module_masks::MaskObject.manifest();
+    Request {
+        module: manifest.name,
+        description: manifest.description,
+        answer: manifest.params,
+        question: Params::new()
+            .with("kind", Value::Choice("sky".into()))
+            .with("prompt", Value::Text(String::new()))
+            .with("resolver", Value::Text(String::new())),
+        ..request()
     }
 }
 
@@ -134,4 +151,41 @@ fn an_error_status_is_reported_with_its_body() {
         .resolve(&request())
         .unwrap_err();
     assert!(err.contains("401") && err.contains("bad key"), "{err}");
+}
+
+#[test]
+fn a_helios_endpoint_answers_a_mask_inline() {
+    let mask = helios_module_masks::object::encode_mask(2, 1, &[255, 0]).unwrap();
+    let reply = serde_json::json!({
+        "options": [{"mask": {"png_base64": mask}}],
+        "confidence": 0.8,
+        "rationale": "a clear sky",
+        "model": {"name": "segmenter", "version": "1"}
+    });
+    let (url, got) = server(200, reply.to_string());
+    let r = Http::new(Api::Helios, &url, "segmenter")
+        .resolve(&mask_request())
+        .unwrap();
+    let answer = &r.options[0];
+    assert_eq!(
+        answer.get("mask"),
+        Some(&Value::Text(mask)),
+        "the mask is kept as the node reads it"
+    );
+    assert_eq!(answer.get("area"), Some(&Value::Ints(vec![0, 0, 8, 6])));
+    assert_eq!(answer.float("confidence"), 0.8);
+    let sent = got.recv_timeout(Duration::from_secs(5)).unwrap();
+    let (_, body) = sent.split_once("\r\n\r\n").unwrap();
+    let body: serde_json::Value = serde_json::from_str(body).unwrap();
+    assert_eq!(body["question"]["kind"], "sky");
+    assert_eq!(body["region"]["width"], 8);
+    assert!(body["inputs"][0]["png_base64"].is_string());
+}
+
+#[test]
+fn a_chat_endpoint_is_not_asked_for_a_mask() {
+    let err = Http::new(Api::OpenAi, "http://127.0.0.1:9/none", "m")
+        .resolve(&mask_request())
+        .unwrap_err();
+    assert!(err.contains("cannot answer a mask"), "{err}");
 }

@@ -30,8 +30,13 @@
 //! ```
 //!
 //! or `"resolver": { "http": { "api": "openai", "url": "https://…/chat/completions",
-//! "model": "…", "key_env": "OPENAI_API_KEY" } }` (`api` may be `anthropic`).
-//! The key is read from that environment variable when a model is called.
+//! "model": "…", "key_env": "OPENAI_API_KEY" } }` (`api` may be `anthropic`,
+//! or `helios` for an endpoint speaking the command's JSON, which can
+//! answer masks). The key is read from that environment variable when a
+//! model is called. Resolvers a decision names by its question's
+//! `resolver` parameter (an AI object mask member) are listed by name:
+//! `"resolvers": { "local": { "command": ["segment", "--json"] } }`.
+//! Nothing is configured by default: no model, no network.
 
 pub mod batch;
 pub mod darktable;
@@ -49,7 +54,7 @@ use helios_export::Format;
 use helios_photo::CameraInfo;
 use helios_resolve::command::Command;
 use helios_resolve::http::{Api, Http};
-use helios_resolve::{Cached, Resolver};
+use helios_resolve::{Cached, Resolver, Routed};
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -72,6 +77,29 @@ pub struct Description {
     pub brief: Option<String>,
     #[serde(default)]
     pub resolver: Option<ResolverDesc>,
+    /// Resolvers a decision may name (its question's `resolver`).
+    #[serde(default)]
+    pub resolvers: BTreeMap<String, ResolverDesc>,
+}
+
+/// The resolver of a network: its default one, and the named ones behind
+/// a [`Routed`] when there are any. `None` when it names none.
+pub fn build_resolvers(
+    default: Option<&ResolverDesc>,
+    named: &BTreeMap<String, ResolverDesc>,
+) -> Result<Option<Arc<dyn Resolver>>, String> {
+    let default = default.map(ResolverDesc::build).transpose()?;
+    if named.is_empty() {
+        return Ok(default);
+    }
+    let mut routed = Routed::new();
+    if let Some(d) = default {
+        routed = routed.default_to(d);
+    }
+    for (name, desc) in named {
+        routed = routed.named(name, desc.build().map_err(|e| format!("`{name}`: {e}"))?);
+    }
+    Ok(Some(Arc::new(routed)))
 }
 
 /// The model that answers decisions.
@@ -97,6 +125,7 @@ pub struct HttpDesc {
 pub enum HttpApi {
     OpenAi,
     Anthropic,
+    Helios,
 }
 
 impl ResolverDesc {
@@ -118,6 +147,7 @@ impl ResolverDesc {
                 let api = match h.api {
                     HttpApi::OpenAi => Api::OpenAi,
                     HttpApi::Anthropic => Api::Anthropic,
+                    HttpApi::Helios => Api::Helios,
                 };
                 let mut http = Http::new(api, &h.url, &h.model);
                 if let Some(var) = &h.key_env {
@@ -294,6 +324,7 @@ pub struct Loaded {
     pub decisions: BTreeMap<String, Mode>,
     pub brief: Option<String>,
     pub resolver: Option<ResolverDesc>,
+    pub resolvers: BTreeMap<String, ResolverDesc>,
     /// The first source: decisions look at its region.
     pub frame: Option<NodeId>,
     /// The file of the first source, when it is read from one: the image
@@ -479,6 +510,7 @@ pub fn load_in(mut desc: Description, base: &Path) -> Result<Loaded, String> {
         decisions,
         brief: desc.brief,
         resolver: desc.resolver,
+        resolvers: desc.resolvers,
         frame,
         frame_file,
         cameras: BTreeMap::new(),

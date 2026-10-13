@@ -9,6 +9,13 @@
 //!
 //! The key is read from an environment variable named in the settings,
 //! never from a settings file, and never written anywhere by Helios.
+//!
+//! A chat model answers in words, not images: a mask (the AI object
+//! member) goes to an endpoint speaking Helios's own JSON instead
+//! ([`Api::Helios`]): the command resolver's request with its inputs
+//! inline (`png_base64`) is posted as it is, and the reply is the
+//! command's answer, its mask inline too (see [`crate::command`]). A
+//! segmentation model behind a small local server fits there.
 
 use std::time::Duration;
 
@@ -18,7 +25,7 @@ use helios_core::{ParamKind, ParamSpec};
 use helios_export::{Format, encode};
 use serde_json::{Value, json};
 
-use crate::command::resolution_json;
+use crate::command::{request_inline, resolution_json};
 use crate::{Request, Resolution, Resolver};
 
 /// Which protocol the endpoint speaks.
@@ -28,6 +35,8 @@ pub enum Api {
     OpenAi,
     /// `POST …/v1/messages`, an `x-api-key`.
     Anthropic,
+    /// The command resolver's JSON, posted as it is; a bearer key if any.
+    Helios,
 }
 
 pub struct Http {
@@ -127,8 +136,52 @@ fn json_in(text: &str) -> Result<Value, String> {
     serde_json::from_str(&text[start..=end]).map_err(|e| format!("the model's JSON: {e}"))
 }
 
+impl Http {
+    /// Posts `body`, returns the reply's JSON.
+    fn post(&self, body: &Value) -> Result<Value, String> {
+        let agent: ureq::Agent = ureq::Agent::config_builder()
+            .timeout_global(Some(self.timeout))
+            .http_status_as_error(false)
+            .build()
+            .into();
+        let mut call = agent.post(&self.url);
+        match (self.api, self.key()?) {
+            (Api::OpenAi | Api::Helios, Some(key)) => {
+                call = call.header("Authorization", format!("Bearer {key}"));
+            }
+            (Api::Anthropic, Some(key)) => call = call.header("x-api-key", key),
+            (_, None) => {}
+        }
+        if self.api == Api::Anthropic {
+            call = call.header("anthropic-version", "2023-06-01");
+        }
+        let mut response = call
+            .send_json(body)
+            .map_err(|e| format!("{}: {e}", self.url))?;
+        let status = response.status().as_u16();
+        let reply = response
+            .body_mut()
+            .read_to_string()
+            .map_err(|e| format!("{}: {e}", self.url))?;
+        if !(200..300).contains(&status) {
+            return Err(format!("{} answered {status}: {}", self.url, reply.trim()));
+        }
+        serde_json::from_str(&reply).map_err(|e| format!("{}: {e}", self.url))
+    }
+}
+
 impl Resolver for Http {
     fn resolve(&self, request: &Request) -> Result<Resolution, String> {
+        if self.api == Api::Helios {
+            let reply = self.post(&request_inline(request)?)?;
+            return resolution_json(request, &reply);
+        }
+        if request.wants_mask() {
+            return Err(format!(
+                "{} is a chat endpoint, which cannot answer a mask: use a command or a `helios` endpoint",
+                self.url
+            ));
+        }
         let images = request
             .inputs
             .iter()
@@ -150,7 +203,7 @@ impl Resolver for Http {
                     "response_format": {"type": "json_object"}
                 })
             }
-            Api::Anthropic => {
+            Api::Anthropic | Api::Helios => {
                 let mut content: Vec<Value> = images
                     .iter()
                     .map(|b64| {
@@ -166,38 +219,10 @@ impl Resolver for Http {
                 })
             }
         };
-        let agent: ureq::Agent = ureq::Agent::config_builder()
-            .timeout_global(Some(self.timeout))
-            .http_status_as_error(false)
-            .build()
-            .into();
-        let mut call = agent.post(&self.url);
-        match (self.api, self.key()?) {
-            (Api::OpenAi, Some(key)) => {
-                call = call.header("Authorization", format!("Bearer {key}"));
-            }
-            (Api::Anthropic, Some(key)) => call = call.header("x-api-key", key),
-            (_, None) => {}
-        }
-        if self.api == Api::Anthropic {
-            call = call.header("anthropic-version", "2023-06-01");
-        }
-        let mut response = call
-            .send_json(&body)
-            .map_err(|e| format!("{}: {e}", self.url))?;
-        let status = response.status().as_u16();
-        let reply = response
-            .body_mut()
-            .read_to_string()
-            .map_err(|e| format!("{}: {e}", self.url))?;
-        if !(200..300).contains(&status) {
-            return Err(format!("{} answered {status}: {}", self.url, reply.trim()));
-        }
-        let reply: Value =
-            serde_json::from_str(&reply).map_err(|e| format!("{}: {e}", self.url))?;
+        let reply = self.post(&body)?;
         let said = match self.api {
             Api::OpenAi => reply.pointer("/choices/0/message/content"),
-            Api::Anthropic => reply.pointer("/content/0/text"),
+            Api::Anthropic | Api::Helios => reply.pointer("/content/0/text"),
         }
         .and_then(Value::as_str)
         .ok_or("the reply holds no message text")?;

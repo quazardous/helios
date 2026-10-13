@@ -19,18 +19,38 @@
 //! [`command::Command`] (an external program speaking JSON, which covers
 //! local models and any API through the user's own script), and
 //! [`http::Http`] (an OpenAI-compatible or Anthropic vision endpoint, its
-//! key read from the environment).
+//! key read from the environment, or an endpoint speaking the command's
+//! JSON). [`Routed`] picks one by the name a decision's question gives
+//! (its `resolver` parameter). None is configured by default: Helios ships
+//! no model and calls no network on its own.
+//!
+//! **A decision with a question** (see `helios_core::Module::question`)
+//! sends it with the request ([`Request::question`]): an AI object mask's
+//! kind or prompt. The question is part of what identifies the request, so
+//! the cache never answers one question with another's answer.
+//!
+//! **Mask answers.** A decision whose answer declares a text parameter
+//! named `mask` (`helios_module_masks::MaskObject`) is answered with an
+//! image: a resolver gives the mask as a PNG, which [`mask_answer`] checks
+//! and turns into the node's answer (an 8-bit grayscale PNG, base64, over
+//! the request's region), with the model's confidence. A mask the node
+//! cannot read is refused, and the decision keeps waiting.
+//!
+//! Every failure is a keyed message ([`Report::failed`]): `resolve-refused`
+//! (the model gave no answer), `resolve-failed` (the call failed, or its
+//! answer was refused), `resolve-not-asked` (the request could not be
+//! built).
 
 pub mod command;
 pub mod http;
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use helios_core::{
-    Engine, Graph, Image, JobSpec, ParamKind, ParamSpec, Params, Region, Scheduler, Value,
+    Engine, Graph, Image, JobSpec, Message, ParamKind, ParamSpec, Params, Region, Scheduler, Value,
 };
 use helios_decision::{Book, Mode, Model, Status, input_keys};
 use serde::{Deserialize, Serialize};
@@ -60,20 +80,78 @@ pub struct Request {
     /// What the project wants, in words (a workshop's brief).
     pub brief: Option<String>,
     pub mode: Mode,
+    /// The node's question (an object to find, a prompt; empty for a
+    /// decision without one).
+    pub question: Params,
+    /// The region of the image the decision is about, in full-resolution
+    /// pixels: what the inputs show, at the request's scale.
+    pub region: Region,
 }
 
 impl Request {
-    /// What identifies the question: the same module, inputs and brief
-    /// get the same answer.
+    /// What identifies the question: the same module, inputs, brief and
+    /// question get the same answer.
     pub fn key(&self) -> String {
         let keys: Vec<&str> = self.inputs.iter().map(|i| i.key.as_str()).collect();
         format!(
-            "{}|{}|{}",
+            "{}|{}|{}|{}|{}",
             self.module,
             keys.join(","),
-            self.brief.as_deref().unwrap_or("")
+            self.brief.as_deref().unwrap_or(""),
+            plain_json(&self.question),
+            self.region,
         )
     }
+
+    /// Whether the answer is a mask image (see [`mask_answer`]).
+    pub fn wants_mask(&self) -> bool {
+        self.answer
+            .iter()
+            .any(|p| p.name == MASK && matches!(p.kind, ParamKind::Text { .. }))
+    }
+
+    /// The question's text value `name`, empty when it has none.
+    pub fn asked(&self, name: &str) -> &str {
+        match self.question.get(name) {
+            Some(Value::Text(t) | Value::Choice(t)) => t,
+            _ => "",
+        }
+    }
+}
+
+/// The answer parameter holding a mask image.
+pub const MASK: &str = "mask";
+
+/// A parameter value as plain JSON (a number, a boolean, a string, an
+/// array), as external programs read it.
+pub fn value_json(v: &Value) -> serde_json::Value {
+    match v {
+        Value::Float(x) => serde_json::json!(x),
+        Value::Int(x) => serde_json::json!(x),
+        Value::Bool(x) => serde_json::json!(x),
+        Value::Choice(t) | Value::Text(t) => serde_json::json!(t),
+        Value::List(l) => serde_json::json!(l),
+        Value::Ints(l) => serde_json::json!(l),
+    }
+}
+
+/// Parameters as a plain JSON object.
+pub fn plain_json(params: &Params) -> serde_json::Value {
+    serde_json::Value::Object(
+        params
+            .iter()
+            .map(|(k, v)| (k.to_string(), value_json(v)))
+            .collect(),
+    )
+}
+
+/// A mask a resolver found, as the decision's answer: `png` (any PNG, its
+/// luminance read, at most `helios_module_masks::object::MAX_SIDE` a side)
+/// covering the request's region, and the model's confidence. Refused,
+/// with why, when the PNG cannot be read.
+pub fn mask_answer(request: &Request, png: &[u8], confidence: f64) -> Result<Params, String> {
+    let (width, height, values) = helios_module_masks::object::decode_png(png)?;
+    helios_module_masks::object::answer(width, height, &values, request.region, confidence)
 }
 
 /// A model's answer.
@@ -135,6 +213,46 @@ impl Resolver for Scripted {
             .get(&request.module)
             .cloned()
             .ok_or_else(|| format!("no scripted answer for `{}`", request.module))
+    }
+}
+
+/// Picks a resolver by the name a decision's question gives (its
+/// `resolver` parameter), the default one when it names none.
+#[derive(Default)]
+pub struct Routed {
+    default: Option<Arc<dyn Resolver>>,
+    named: BTreeMap<String, Arc<dyn Resolver>>,
+}
+
+impl Routed {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// The resolver for requests that name none.
+    pub fn default_to(mut self, resolver: Arc<dyn Resolver>) -> Self {
+        self.default = Some(resolver);
+        self
+    }
+
+    /// The resolver for requests naming `name`.
+    pub fn named(mut self, name: &str, resolver: Arc<dyn Resolver>) -> Self {
+        self.named.insert(name.into(), resolver);
+        self
+    }
+}
+
+impl Resolver for Routed {
+    fn resolve(&self, request: &Request) -> Result<Resolution, String> {
+        let name = request.asked("resolver");
+        let resolver = if name.is_empty() {
+            self.default.as_ref().ok_or("no resolver is configured")?
+        } else {
+            self.named
+                .get(name)
+                .ok_or_else(|| format!("no resolver named `{name}`"))?
+        };
+        resolver.resolve(request)
     }
 }
 
@@ -232,8 +350,9 @@ pub struct Settings {
 pub struct Report {
     pub answered: Vec<String>,
     pub proposed: Vec<String>,
-    /// Calls that failed or were refused, with why; those stay waiting.
-    pub failed: Vec<(String, String)>,
+    /// Calls that failed or were refused, with why (a keyed message);
+    /// those stay as they were, waiting, nothing recorded.
+    pub failed: Vec<(String, Message)>,
 }
 
 /// The request for a waiting decision.
@@ -252,6 +371,7 @@ fn request(
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("`{node}` is not a module"))?;
     let keys = input_keys(engine, graph, node, settings.region)?;
+    let question = graph.question(id).map_err(|e| e.to_string())?;
     let ports = graph.input_ports(id).map_err(|e| e.to_string())?;
     let mut inputs = Vec::new();
     for ((src, port), key) in ports.into_iter().flatten().zip(keys) {
@@ -268,7 +388,16 @@ fn request(
         inputs,
         brief: settings.brief.clone(),
         mode,
+        question,
+        region: settings.region,
     })
+}
+
+/// A request that could not be built, as a keyed message.
+fn not_asked(node: &str, reason: String) -> Message {
+    Message::new("resolve-not-asked", "{ $node } was not asked: { $reason }")
+        .with("node", node)
+        .with("reason", reason)
 }
 
 /// Phase one: the requests for every decision waiting on a model
@@ -280,7 +409,7 @@ pub fn ask(
     graph: &Graph,
     engine: &Engine,
     settings: &Settings,
-) -> (Vec<Request>, Vec<(String, String)>) {
+) -> (Vec<Request>, Vec<(String, Message)>) {
     let mut requests = Vec::new();
     let mut failed = Vec::new();
     for (node, status) in book.waiting() {
@@ -291,13 +420,13 @@ pub fn ask(
             Ok(Mode::Human) => continue,
             Ok(m) => m,
             Err(e) => {
-                failed.push((node.to_string(), e));
+                failed.push((node.to_string(), not_asked(node, e)));
                 continue;
             }
         };
         match request(engine, graph, node, mode, settings) {
             Ok(r) => requests.push(r),
-            Err(e) => failed.push((node.to_string(), e)),
+            Err(e) => failed.push((node.to_string(), not_asked(node, e))),
         }
     }
     (requests, failed)
@@ -349,7 +478,10 @@ pub fn call(
 }
 
 /// Phase three: records what came back: full-AI answers in force,
-/// AI-assisted ones as proposals; a failed call leaves its decision waiting.
+/// AI-assisted ones as proposals. A failed or refused call leaves its
+/// decision as it was (waiting, nothing recorded) and says why by key. An
+/// answer to another question than the node's now is not recorded either:
+/// the question changed while the model thought.
 pub fn record(
     book: &mut Book,
     graph: &mut Graph,
@@ -357,26 +489,40 @@ pub fn record(
     now: u64,
     report: &mut Report,
 ) {
+    book.follow(graph);
     for (req, result) in called {
         let keys: Vec<String> = req.inputs.iter().map(|i| i.key.clone()).collect();
-        let recorded = result.and_then(|r| match req.mode {
-            Mode::FullAi => {
-                let best = r
-                    .options
-                    .first()
-                    .cloned()
-                    .ok_or("the model gave no option")?;
-                book.model_answer(graph, &req.node, best, r.model, keys, now)
-                    .map(|_| true)
+        let node = req.node.clone();
+        let failed = |reason: String| {
+            Message::new("resolve-failed", "{ $node }: { $reason }")
+                .with("node", node.as_str())
+                .with("reason", reason)
+        };
+        let recorded = match result {
+            Err(e) => Err(failed(e)),
+            Ok(r) if r.options.is_empty() => Err(Message::new(
+                "resolve-refused",
+                "{ $node }: the model gave no answer ({ $reason })",
+            )
+            .with("node", node.as_str())
+            .with("reason", r.rationale)),
+            Ok(_) if book.question(&node).is_some_and(|q| *q != req.question) => {
+                Err(failed("the question changed meanwhile".into()))
             }
-            _ => book
-                .propose(graph, &req.node, r.options, r.model, keys, now)
-                .map(|()| false),
-        });
+            Ok(r) => match req.mode {
+                Mode::FullAi => book
+                    .model_answer(graph, &node, r.options[0].clone(), r.model, keys, now)
+                    .map(|_| true),
+                _ => book
+                    .propose(graph, &node, r.options, r.model, keys, now)
+                    .map(|()| false),
+            }
+            .map_err(failed),
+        };
         match recorded {
             Ok(true) => report.answered.push(req.node),
             Ok(false) => report.proposed.push(req.node),
-            Err(e) => report.failed.push((req.node, e)),
+            Err(m) => report.failed.push((req.node, m)),
         }
     }
 }
@@ -391,6 +537,7 @@ pub fn resolve_waiting(
     resolver: Arc<dyn Resolver>,
     settings: &Settings,
 ) -> Result<Report, String> {
+    book.follow(graph);
     let (requests, failed) = ask(book, graph, engine, settings);
     let mut report = Report {
         failed,

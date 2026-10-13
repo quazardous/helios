@@ -192,6 +192,12 @@ node-path-not-absolute = { $path } : donnez un chemin absolu, le nœud ne sait p
 
 node-source-refused = `{ $name }` ne peut pas prendre l’image : { $error }
 
+resolve-failed = { $node } : { $reason }
+
+resolve-not-asked = { $node } n’a pas été demandé : { $reason }
+
+resolve-refused = { $node } : le modèle n’a pas répondu ({ $reason })
+
 xmp-blend-details = le seuil de détails du masque
 
 xmp-blend-feathering = l’adoucissement du masque

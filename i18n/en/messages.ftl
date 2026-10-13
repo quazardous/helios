@@ -193,6 +193,12 @@ node-path-not-absolute = { $path }: give an absolute path, the node does not kno
 
 node-source-refused = `{ $name }` cannot take the image: { $error }
 
+resolve-failed = { $node }: { $reason }
+
+resolve-not-asked = { $node } was not asked: { $reason }
+
+resolve-refused = { $node }: the model gave no answer ({ $reason })
+
 xmp-blend-details = the mask's details threshold
 
 xmp-blend-feathering = the mask's feathering

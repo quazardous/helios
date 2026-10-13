@@ -193,7 +193,7 @@ fn a_failed_call_leaves_the_decision_waiting_and_says_why() {
     .unwrap();
     assert_eq!(report.failed.len(), 1);
     assert!(
-        report.failed[0].1.contains("no scripted answer"),
+        report.failed[0].1.english.contains("no scripted answer"),
         "{report:?}"
     );
     assert_eq!(s.book.status("d0").unwrap(), Status::Pending);
@@ -329,7 +329,10 @@ fn an_answer_outside_its_declarations_is_refused() {
     )
     .unwrap();
     assert!(
-        report.failed[0].1.contains("no parameter `brightness`"),
+        report.failed[0]
+            .1
+            .english
+            .contains("no parameter `brightness`"),
         "{report:?}"
     );
 }

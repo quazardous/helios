@@ -2,8 +2,9 @@
 
 Status: **fifth step** (2026-10-13): groups, refinement, parametric,
 raster and drawn shape members (circle, ellipse, gradient, path, brush),
-a stress network with its bench, the Masks panel's tree, and darktable's
-classic drawn masks imported from sidecars, checked against darktable-cli. How
+AI object members answered through resolvers, a stress network with its
+bench, the Masks panel's tree, and darktable's classic drawn masks
+imported from sidecars, checked against darktable-cli. How
 darktable's flexi masks map onto a Helios network, and what porting them
 taught about the core. The modules live in `modules/masks` (crate
 `helios-module-masks`).
@@ -49,12 +50,13 @@ Values are not clamped on every port: operators clamp where darktable does
 | `mask_gradient` | → `mask` | a drawn linear gradient: a point of its line, rotation, transition width, linear or sigmoid |
 | `mask_path` | → `mask` | a drawn closed path: up to 64 points with Bézier handles (a polygon when handles sit on their corners), feather |
 | `mask_brush` | → `mask` | a brush stroke: up to 256 points with Bézier handles, each with its radius, hardness and density |
+| `mask_object` | `input` (RGBA) → `mask` | an AI object: a decision a resolver answers with a mask of the subject, the sky, a person or what a prompt names (see "AI object members") |
 
 ## From darktable's tree to a sub-network
 
 - **Member** → a node with a one-channel output (`mask_from_luma`,
   `mask_parametric`, `mask_raster`, `mask_circle`, `mask_ellipse`,
-  `mask_gradient`, `mask_path`, `mask_brush` today; AI masks later), connected
+  `mask_gradient`, `mask_path`, `mask_brush`, `mask_object`), connected
   to a port of its group. Its opacity and inversion are the group's
   `opacity[i]` and `invert[i]` for that port: inversion first, then
   opacity, as darktable does.
@@ -195,7 +197,7 @@ is 6, 7 the flexi masks': see "Flexi masks" below).
 | path | `mask_path` | corners and both handles of up to 64 points, the feather | feathers differing by point (more than 1 %), more than 64 points |
 | brush | `mask_brush` | corners, both handles, size, hardness and density of up to 256 points | a point whose two sizes differ, more than 256 points |
 | group | `mask_combine` chain | members in order, each one's inversion, opacity and operator | |
-| clone, AI object, unknown type or version | | | always |
+| clone, AI object (see "AI object members"), unknown type or version | | | always |
 
 **A group** folds from 0, member by member, each with its own operator
 (darktable's `_group_get_mask_roi`): union → `maximum`, intersection →
@@ -406,7 +408,7 @@ pixel for a brush) and Helios averages each pixel.
 
 Not ported yet:
 
-- curved gradients, per-point path feathers and AI object members;
+- curved gradients and per-point path feathers;
 - the details threshold (it needs darktable's Scharr detail mask, an
   analysis of the raw);
 - the parametric mask's display-referred spaces: darktable's Lab and RGB
@@ -415,6 +417,66 @@ Not ported yet:
 - the preview bypass of a refinement;
 - the raster mask of a module disabled in the history (darktable keeps the
   last one computed; here the source is either connected or not).
+
+## AI object members
+
+darktable finds objects with a segmentation model it runs itself. Helios
+asks a **resolver** instead, through a decision node (see
+[module-contract.md](module-contract.md), "Decision nodes"): the member
+`mask_object` is a module of the decision kind, so its mask is an answer
+recorded in the edit's decision book, with who gave it (the model and its
+version, or a human), and an edit replays it offline without asking
+again.
+
+- **The question** is what to find, `kind` (`subject`, `sky`, `person`,
+  or `prompt` for the free text in `prompt`), and who to ask, `resolver`
+  (a resolver's name, empty for the default one). They are the member's
+  question (`Module::question`): set like any parameter, shown in the
+  Parameters panel, recorded with each answer. Another question makes the
+  member pending again (the book's `follow` or `pose`); its earlier
+  answers stay in the history.
+- **The request** is a resolver's ordinary request: the member's input
+  (the image the masked module reads) rendered at a proxy scale (its long
+  side near 1024 pixels), the region of the image it shows, and the
+  question. The question is part of the request's key, so the cache
+  (`Cached`) answers the same question about the same pixels without
+  asking again, and never answers one question with another's mask.
+- **The answer** is a mask at proxy resolution (at most 1024 pixels a
+  side), 0 to 255, laid over the request's region, with a confidence.
+  The node keeps it as an 8-bit grayscale PNG, base64 (`mask`), the
+  region in image pixels (`area`) and the confidence (`confidence`), and
+  upsamples it bilinearly at each output pixel's centre in image
+  coordinates: every scale, crop and tile sees the same mask (the tests
+  check tiles against the whole at three scales), and it is 0 outside its
+  area.
+- **Resolvers.** Scripted and cached resolvers work out of the box. A
+  command resolver (any program: a local model) reads the request as JSON
+  on its standard input, the proxy as PNG files, and answers
+  `{"options": [{"mask": {"png": "mask.png"}}], "confidence": 0.9, …}`,
+  the PNG written in the request's `out` directory (or inline:
+  `{"png_base64": …}`); an HTTP resolver with `api: helios` posts the
+  same JSON with the images inline and reads the same answer. Any PNG is
+  read, its luminance taken. A chat endpoint (OpenAI, Anthropic) cannot
+  answer a mask and says so. A network names its resolvers in its
+  description (`resolver`, and `resolvers` by name for members that name
+  one); none is configured by default: Helios ships no model and calls no
+  network on its own. The protocol's details are in `helios-resolve`
+  (`command` and `http`).
+- **Refusals and failures.** An answer with no option (the model found
+  nothing: `rationale` says why) is `resolve-refused`; a failed call, a
+  mask that is not a PNG or too large, or an answer to a question changed
+  meanwhile is `resolve-failed`. Either way nothing is recorded: the
+  member stays as it was, pending, its last mask kept in the history.
+- **In a group** it is a member like any other: a port of a
+  `mask_combine`, with its inversion and opacity there. Pending, it holds
+  up the module's mask, as any decision holds up what reads it.
+- **In the Masks panel** it shows with its own icon (✨); its question is
+  in the Parameters panel, its answer is not (it is not edited by hand).
+
+Not yet: asking from the desktop (it has no resolver nor decision book
+yet: a member arrives answered, from an edit or a node), and darktable's
+AI object forms in sidecars, still refused on import (`xmp-mask-unsupported`):
+their mask is darktable's model's, which Helios cannot reproduce.
 
 ## Stress network and bench
 

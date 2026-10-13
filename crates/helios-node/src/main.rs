@@ -431,8 +431,9 @@ impl Node {
                 .map_or(0, |d| d.as_secs()),
         };
         let (requests, failed) = {
-            let book = self.book.lock().expect("book lock");
+            let mut book = self.book.lock().expect("book lock");
             let graph = self.graph.0.read().expect("graph lock");
+            book.follow(&graph);
             helios_resolve::ask(&book, &graph, &self.engine, &settings)
         };
         let called = helios_resolve::call(&self.scheduler, resolver, requests, settings.timeout)?;
@@ -955,12 +956,7 @@ fn main() -> ExitCode {
     for (name, mode) in &loaded.decisions {
         book.declare(name, *mode);
     }
-    let resolver = match loaded
-        .resolver
-        .as_ref()
-        .map(helios_node::ResolverDesc::build)
-        .transpose()
-    {
+    let resolver = match helios_node::build_resolvers(loaded.resolver.as_ref(), &loaded.resolvers) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("helios-node: resolver: {e}");
