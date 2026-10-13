@@ -1,0 +1,189 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/quazardous/helios/templates/schema/template.schema.json",
+  "title": "Helios workspace template",
+  "description": "template.json of a .helios-template bundle: what the template is (meta), its starting network and its tools. Its layout is layout.json, egui-pop's layout document. See docs/templates.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "id", "version", "meta", "network"],
+  "properties": {
+    "format": {
+      "description": "The format the file is written in; 1 today. A Helios refuses a newer one.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "id": {
+      "description": "Stable, never translated: lowercase words of letters and digits joined by '.' or '-' (helios.portrait-retouch).",
+      "type": "string",
+      "pattern": "^[a-z0-9]+([.-][a-z0-9]+)*$"
+    },
+    "version": {
+      "description": "The template's own version, bumped by its author.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "meta": { "$ref": "#/$defs/meta" },
+    "network": { "$ref": "#/$defs/network" },
+    "tools": { "$ref": "#/$defs/tools" }
+  },
+  "$defs": {
+    "meta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "scenario"],
+      "properties": {
+        "name": {
+          "description": "The English name; translations in the bundle's i18n/<locale>/*.ftl under <slug of id>-name.",
+          "type": "string"
+        },
+        "scenario": {
+          "description": "The scenario it is made for, in English; translations under <slug of id>-scenario.",
+          "type": "string"
+        },
+        "preview": {
+          "description": "A picture of it: a file of the bundle.",
+          "type": "string"
+        },
+        "tags": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "name": {
+      "description": "A node's name: a lowercase letter, then lowercase letters, digits and '_'.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$"
+    },
+    "network": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sources", "nodes", "view"],
+      "properties": {
+        "sources": {
+          "description": "The images the workspace is given, by node name; each one's output port is 'image'.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/name" }
+        },
+        "nodes": { "type": "array", "items": { "$ref": "#/$defs/node" } },
+        "connections": { "type": "array", "items": { "$ref": "#/$defs/connection" } },
+        "view": { "$ref": "#/$defs/endpoint" },
+        "presets": { "type": "array", "items": { "$ref": "#/$defs/preset" } }
+      }
+    },
+    "node": {
+      "description": "A module (by its manifest's name) or a composite (by id and version), never both.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": { "$ref": "#/$defs/name" },
+        "module": { "type": "string" },
+        "composite": { "$ref": "#/$defs/composite_ref" },
+        "params": { "$ref": "#/$defs/params" },
+        "open": {
+          "description": "A composite opened: its inner nodes put in the graph as <name>.<inner>, which panels edit.",
+          "type": "boolean"
+        },
+        "panel": { "$ref": "#/$defs/panel_hint" }
+      },
+      "oneOf": [
+        { "required": ["module"] },
+        { "required": ["composite"] }
+      ]
+    },
+    "composite_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version"],
+      "properties": {
+        "id": { "type": "string" },
+        "version": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "connection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from", "port", "to", "input"],
+      "properties": {
+        "from": { "type": "string" },
+        "port": { "type": "string" },
+        "to": { "type": "string" },
+        "input": { "type": "string" }
+      }
+    },
+    "endpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["node", "port"],
+      "properties": {
+        "node": { "type": "string" },
+        "port": { "type": "string" }
+      }
+    },
+    "preset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "values"],
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "description": "In English.", "type": "string" },
+        "values": {
+          "description": "Parameter values by node name: a module's parameters, a composite's exposed ones.",
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/params" }
+        }
+      }
+    },
+    "params": {
+      "description": "Parameter values by name, each tagged by its kind.",
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/value" }
+    },
+    "value": {
+      "oneOf": [
+        { "type": "object", "additionalProperties": false, "required": ["float"], "properties": { "float": { "type": "number" } } },
+        { "type": "object", "additionalProperties": false, "required": ["int"], "properties": { "int": { "type": "integer" } } },
+        { "type": "object", "additionalProperties": false, "required": ["bool"], "properties": { "bool": { "type": "boolean" } } },
+        { "type": "object", "additionalProperties": false, "required": ["choice"], "properties": { "choice": { "type": "string" } } },
+        { "type": "object", "additionalProperties": false, "required": ["list"], "properties": { "list": { "type": "array", "items": { "type": "number" } } } },
+        { "type": "object", "additionalProperties": false, "required": ["ints"], "properties": { "ints": { "type": "array", "items": { "type": "integer" } } } },
+        { "type": "object", "additionalProperties": false, "required": ["text"], "properties": { "text": { "type": "string" } } }
+      ]
+    },
+    "panel_hint": {
+      "description": "Which panel edits a composite and where it docks.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["panel", "area"],
+      "properties": {
+        "panel": { "type": "string" },
+        "area": { "enum": ["center", "start_side", "end_side", "bottom"] }
+      }
+    },
+    "tools": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "toolbox": {
+          "description": "Command ids, in the order shown.",
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "default": { "description": "One of the toolbox's commands.", "type": "string" },
+        "keymap": {
+          "description": "Bindings added to the workspace's keymap layer.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/binding" }
+        }
+      }
+    },
+    "binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["keys", "command"],
+      "properties": {
+        "keys": { "description": "As a profile writes them: Mod+Shift+P.", "type": "string" },
+        "command": { "type": "string" },
+        "when": { "type": "string" }
+      }
+    }
+  }
+}

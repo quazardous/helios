@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/quazardous/helios/templates/schema/composite.schema.json",
+  "title": "Helios composite",
+  "description": "A composite saved as a file of its own (<id>@<version>.helios-composite.json): a sub-network packaged as one node, the inner parameters it exposes and the panel that edits it. See docs/templates.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "id", "version", "name", "inputs", "outputs", "nodes", "exits"],
+  "properties": {
+    "format": { "type": "integer", "minimum": 1 },
+    "id": {
+      "description": "Stable: lowercase words of letters and digits joined by '.' or '-'.",
+      "type": "string",
+      "pattern": "^[a-z0-9]+([.-][a-z0-9]+)*$"
+    },
+    "version": {
+      "description": "Templates pin it; a newer one is offered, never taken silently.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "name": { "description": "In English.", "type": "string" },
+    "description": { "type": "string" },
+    "inputs": { "type": "array", "items": { "$ref": "#/$defs/port" } },
+    "outputs": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/port" } },
+    "nodes": {
+      "description": "In order: a node reads the composite's inputs (from '@') and nodes before it.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/node" }
+    },
+    "connections": { "type": "array", "items": { "$ref": "#/$defs/connection" } },
+    "exits": { "type": "array", "items": { "$ref": "#/$defs/exit" } },
+    "exposed": { "type": "array", "items": { "$ref": "#/$defs/exposed" } },
+    "panel": { "$ref": "#/$defs/panel_hint" }
+  },
+  "$defs": {
+    "port": {
+      "description": "An image port.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "channels"],
+      "properties": {
+        "name": { "type": "string" },
+        "channels": { "type": "integer", "minimum": 1 },
+        "layout": { "description": "What the channels mean: rgba, y.", "type": "string" },
+        "optional": { "type": "boolean" }
+      }
+    },
+    "node": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+        "module": { "type": "string" },
+        "composite": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "version"],
+          "properties": {
+            "id": { "type": "string" },
+            "version": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "params": {
+          "description": "Parameter values by name, tagged by kind, as in template.json.",
+          "type": "object"
+        }
+      },
+      "oneOf": [
+        { "required": ["module"] },
+        { "required": ["composite"] }
+      ]
+    },
+    "connection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from", "port", "to", "input"],
+      "properties": {
+        "from": { "description": "An inner node, or '@' for the composite's own inputs.", "type": "string" },
+        "port": { "type": "string" },
+        "to": { "type": "string" },
+        "input": { "type": "string" }
+      }
+    },
+    "exit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from", "port", "output"],
+      "properties": {
+        "from": { "type": "string" },
+        "port": { "type": "string" },
+        "output": { "type": "string" }
+      }
+    },
+    "exposed": {
+      "description": "An inner parameter made the composite's own; one name on several inner nodes links them.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "node", "param"],
+      "properties": {
+        "name": { "type": "string" },
+        "node": { "type": "string" },
+        "param": { "type": "string" }
+      }
+    },
+    "panel_hint": {
+      "description": "Which panel edits it and where that panel docks; a template's node may override it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["panel", "area"],
+      "properties": {
+        "panel": { "type": "string" },
+        "area": { "enum": ["center", "start_side", "end_side", "bottom"] }
+      }
+    }
+  }
+}

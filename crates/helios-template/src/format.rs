@@ -1,0 +1,321 @@
+//! The files' shapes: `template.json` ([`Template`]) and a composite file
+//! ([`CompositeFile`]). Every struct refuses fields it does not know, as
+//! the schemas do (`templates/schema/`).
+
+use std::collections::BTreeMap;
+
+use egui_pop_model::panels::Area;
+use helios_core::Params;
+use serde::{Deserialize, Serialize};
+
+/// The format this Helios writes and the newest it reads.
+pub const FORMAT: u32 = 1;
+
+/// The name a composite's own ports go by in its connections (`"from":
+/// "@"`): never a node's name.
+pub const PORTS: &str = "@";
+
+/// `template.json`: what a template is, its network and its tools. Its
+/// layout is a file of its own (`layout.json`, egui-pop's document).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Template {
+    /// The format it is written in ([`FORMAT`]).
+    pub format: u32,
+    /// Stable, never translated: `helios.portrait-retouch`.
+    pub id: String,
+    /// The template's own version, bumped by its author.
+    pub version: u32,
+    pub meta: Meta,
+    pub network: NetworkDesc,
+    #[serde(default)]
+    pub tools: Tools,
+}
+
+/// What people pick a template by.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Meta {
+    /// The English name; translations under `<slug>-name`.
+    pub name: String,
+    /// The scenario it is made for, in English; translations under
+    /// `<slug>-scenario`.
+    pub scenario: String,
+    /// A picture of it, a file of the bundle.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preview: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
+}
+
+/// The starting graph.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NetworkDesc {
+    /// The images the workspace is given, by node name; each one's output
+    /// port is `image`.
+    pub sources: Vec<String>,
+    pub nodes: Vec<NodeDesc>,
+    #[serde(default)]
+    pub connections: Vec<Connection>,
+    /// The output the viewport shows.
+    pub view: Endpoint,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub presets: Vec<Preset>,
+}
+
+/// A node of a template's network: a module or a composite.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NodeDesc {
+    pub name: String,
+    /// A module, by its manifest's name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub module: Option<String>,
+    /// A composite, by id and version.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub composite: Option<CompositeRef>,
+    /// Checked against the manifest, completed with defaults.
+    #[serde(default, skip_serializing_if = "is_empty")]
+    pub params: Params,
+    /// A composite opened: its inner nodes in the graph as ordinary
+    /// nodes (`<name>.<inner>`), which panels can edit.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub open: bool,
+    /// Overrides the composite's panel hint.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub panel: Option<PanelHint>,
+}
+
+fn is_empty(p: &Params) -> bool {
+    p.iter().next().is_none()
+}
+
+/// A composite pinned to a version.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CompositeRef {
+    pub id: String,
+    pub version: u32,
+}
+
+impl std::fmt::Display for CompositeRef {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}@{}", self.id, self.version)
+    }
+}
+
+/// An output port wired to an input port, by names.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Connection {
+    /// A node, a source, or in a composite file [`PORTS`] for the
+    /// composite's own inputs.
+    pub from: String,
+    pub port: String,
+    pub to: String,
+    pub input: String,
+}
+
+/// A node's output port.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Endpoint {
+    pub node: String,
+    pub port: String,
+}
+
+/// Named parameter values, by node name: a module's parameters, a
+/// composite's exposed ones.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Preset {
+    pub id: String,
+    /// In English.
+    pub name: String,
+    pub values: BTreeMap<String, Params>,
+}
+
+/// The tools a workspace starts with.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Tools {
+    /// Command ids, in the order shown.
+    #[serde(default)]
+    pub toolbox: Vec<String>,
+    /// One of the toolbox's commands.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default: Option<String>,
+    /// Bindings added to the workspace's keymap layer.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub keymap: Vec<Binding>,
+}
+
+/// A key binding, keys written as a profile writes them (`Mod+Shift+P`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Binding {
+    pub keys: String,
+    pub command: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub when: String,
+}
+
+/// Which panel edits a composite and where it docks.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PanelHint {
+    pub panel: String,
+    pub area: Area,
+}
+
+/// A composite saved as a file of its own: a sub-network, the
+/// parameters it exposes and its panel hint.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CompositeFile {
+    pub format: u32,
+    pub id: String,
+    pub version: u32,
+    /// In English.
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    pub inputs: Vec<Port>,
+    pub outputs: Vec<Port>,
+    /// In order: a node reads the composite's inputs and nodes before it.
+    pub nodes: Vec<InnerDesc>,
+    #[serde(default)]
+    pub connections: Vec<Connection>,
+    pub exits: Vec<Exit>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exposed: Vec<Exposed>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub panel: Option<PanelHint>,
+}
+
+impl CompositeFile {
+    /// What a template names it by.
+    pub fn reference(&self) -> CompositeRef {
+        CompositeRef {
+            id: self.id.clone(),
+            version: self.version,
+        }
+    }
+
+    /// Its file name: `<id>@<version>.helios-composite.json`.
+    pub fn file_name(&self) -> String {
+        format!("{}{COMPOSITE_EXTENSION}", self.reference())
+    }
+}
+
+/// A composite file's name ends so.
+pub const COMPOSITE_EXTENSION: &str = ".helios-composite.json";
+
+/// An image port of a composite.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Port {
+    pub name: String,
+    pub channels: u32,
+    /// What the channels mean (`rgba`, `y`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layout: Option<String>,
+    /// An input that may stay unconnected.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub optional: bool,
+}
+
+impl Port {
+    pub fn spec(&self) -> helios_core::PortSpec {
+        let mut spec = helios_core::PortSpec::image(&self.name, self.channels);
+        spec.layout.clone_from(&self.layout);
+        spec.optional = self.optional;
+        spec
+    }
+}
+
+/// An inner node of a composite: a module or a composite.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InnerDesc {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub module: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub composite: Option<CompositeRef>,
+    #[serde(default, skip_serializing_if = "is_empty")]
+    pub params: Params,
+}
+
+/// An inner output made one of the composite's outputs.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Exit {
+    pub from: String,
+    pub port: String,
+    pub output: String,
+}
+
+/// An inner parameter made the composite's own.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Exposed {
+    pub name: String,
+    pub node: String,
+    pub param: String,
+}
+
+/// Whether `id` is a template's or a composite's id: lowercase words of
+/// letters and digits, joined by `.` or `-`.
+pub fn valid_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.split(['.', '-']).all(|w| {
+            !w.is_empty()
+                && w.chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+        })
+}
+
+/// Whether `name` is a node's name: a lowercase letter, then lowercase
+/// letters, digits and `_`.
+pub fn valid_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    chars.next().is_some_and(|c| c.is_ascii_lowercase())
+        && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+}
+
+/// The message keys a template's text goes under: its id with every
+/// character other than an ASCII letter or digit written `-`, as a
+/// plugin's.
+pub fn slug(id: &str) -> String {
+    id.chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ids_and_names() {
+        assert!(valid_id("helios.portrait-retouch"));
+        assert!(valid_id("a1"));
+        for bad in ["", "Helios", "a..b", "a-", ".a", "a b", "a_b"] {
+            assert!(!valid_id(bad), "{bad}");
+        }
+        assert!(valid_name("retouch"));
+        assert!(valid_name("in_0"));
+        for bad in ["", "0a", "a.b", "A", "@", "a-b"] {
+            assert!(!valid_name(bad), "{bad}");
+        }
+        assert_eq!(slug("helios.portrait-retouch"), "helios-portrait-retouch");
+    }
+
+    #[test]
+    fn unknown_fields_are_refused() {
+        let e = serde_json::from_str::<Tools>(r#"{ "toolbox": [], "colour": 1 }"#).unwrap_err();
+        assert!(e.to_string().contains("colour"), "{e}");
+    }
+}
