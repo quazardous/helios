@@ -264,6 +264,32 @@ fn write_version(cargo_toml: &str, old: Version, new: Version) -> String {
     cargo_toml.replacen(&from, &to, 1)
 }
 
+/// The Helios versions an in-tree plugin works with: the release's own
+/// compatible range (before 1.0 a minor bump breaks, so `>=0.Y.0, <0.Y+1.0`).
+fn plugin_range(v: Version) -> String {
+    if v.0 == 0 {
+        format!(">=0.{}.0, <0.{}.0", v.1, v.1 + 1)
+    } else {
+        format!(">={}.0.0, <{}.0.0", v.0, v.0 + 1)
+    }
+}
+
+/// A plugin manifest whose `helios = "..."` line follows the new release.
+fn write_plugin_range(manifest: &str, new: Version) -> String {
+    manifest
+        .lines()
+        .map(|line| {
+            if line.trim_start().starts_with("helios = \"") {
+                format!("helios = \"{}\"", plugin_range(new))
+            } else {
+                line.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        + if manifest.ends_with('\n') { "\n" } else { "" }
+}
+
 fn render_section(version: Version, date: &str, fragments: &[Fragment]) -> String {
     let mut out = format!("## [{}.{}.{}] - {date}\n", version.0, version.1, version.2);
     for kind in Kind::ALL.into_iter().filter(|k| *k != Kind::Internal) {
@@ -460,6 +486,16 @@ fn main() -> ExitCode {
                     for f in files {
                         std::fs::remove_file(f).expect("remove a fragment");
                     }
+                    // the in-tree plugins follow the release, or the next
+                    // build refuses them as made for another Helios
+                    let examples = root.join("plugins/examples");
+                    for entry in std::fs::read_dir(&examples).into_iter().flatten().flatten() {
+                        let manifest = entry.path().join("helios-plugin.toml");
+                        if let Ok(text) = std::fs::read_to_string(&manifest) {
+                            std::fs::write(&manifest, write_plugin_range(&text, new))
+                                .expect("write a plugin manifest");
+                        }
+                    }
                     let v = format!("{}.{}.{}", new.0, new.1, new.2);
                     println!(
                         "Prepared {v}. Run `cargo check` to refresh Cargo.lock, review the diff, then commit \"Release {v}\" and tag v{v}."
@@ -527,6 +563,17 @@ fn main() -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn in_tree_plugins_follow_the_release() {
+        assert_eq!(plugin_range((0, 2, 0)), ">=0.2.0, <0.3.0");
+        assert_eq!(plugin_range((1, 4, 2)), ">=1.0.0, <2.0.0");
+        let manifest = "id = \"x\"\n\n[requires]\nhelios = \">=0.0.1, <0.1.0\"\n";
+        assert_eq!(
+            write_plugin_range(manifest, (0, 1, 0)),
+            "id = \"x\"\n\n[requires]\nhelios = \">=0.1.0, <0.2.0\"\n"
+        );
+    }
 
     #[test]
     fn fragments_parse_and_explain_errors() {
