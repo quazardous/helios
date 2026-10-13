@@ -189,4 +189,4 @@ intents; `null` when it has none); `error` when the compositor could not
 be asked; and `viewport`, the encoding the image is drawn in there with
 the Wide-gamut preview setting on, and why. It asks the compositor only:
 the running desktop's debug bridge (`helios.display` collector) says what
-its window actually resolved.
+its window actually resolved. See [Wide gamut](wide-gamut.md).

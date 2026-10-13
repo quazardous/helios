@@ -10,6 +10,8 @@ telling the compositor how the pixels are encoded, and letting it map them
 to the monitor. The compositor does the monitor conversion, never Helios
 (see `docs/darktable-pitfalls/colour.md`, pitfalls 1, 2, 12).
 
+What is wired since, and what works where: [wide-gamut.md](wide-gamut.md).
+
 Sources were read on the date above. "Unverified" marks what was inferred
 and not checked in code or on a machine. Compositor and Mesa details come
 from their main branches on that date unless a release is named.
