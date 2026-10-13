@@ -103,38 +103,67 @@ fn color_management() -> Result<Option<ColorManagement>, String> {
     Ok(None)
 }
 
-/// What the desktop's viewport draws on a display, and why.
+impl ColorManagement {
+    /// Whether the compositor announces the `srgb` primaries with the
+    /// `srgb` transfer function: a Vulkan driver (Mesa 25.1 and later)
+    /// then holds the colour of every surface it presents to, so the
+    /// image surface is not tagged by Helios but presented in a colour
+    /// space the driver declares (GNOME, Hyprland).
+    pub fn driver_holds_srgb_surfaces(&self) -> bool {
+        self.primaries.iter().any(|p| p == "srgb")
+            && self.transfer_functions.iter().any(|t| t == "srgb")
+    }
+}
+
+/// Where the desktop's image goes on a display, and why.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Drawn {
+    /// `tagged` (a surface of the image's own, tagged by Helios through
+    /// the compositor), `wsi` (one presented in a colour space the GPU
+    /// driver declares) or `srgb` (the window's surface).
+    pub route: &'static str,
     /// The encoding the image is drawn in.
     pub encoding: String,
     pub reason: String,
 }
 
-/// What the desktop's viewport draws on this display today, with the
-/// Wide-gamut preview setting on. The window's surface is the one eframe
-/// configures, 8-bit sRGB, so the image is sRGB everywhere; the reason
-/// says what stands in the way here. The running desktop reports what
-/// it actually resolved through its debug bridge.
+/// Where the desktop's image goes on this display with the Wide-gamut
+/// preview setting on, predicted from the compositor's announcements
+/// alone (the GPU driver's colour spaces are known only to the running
+/// desktop, which reports what it negotiated through its debug bridge).
 pub fn drawn(offer: &Offer) -> Drawn {
-    let reason = match (offer.session, &offer.color_management) {
-        (Session::None, _) => "no display session (or not Linux): sRGB".to_string(),
-        (Session::X11, _) => "X11 has no colour management protocol: sRGB".to_string(),
-        (Session::Wayland, None) => match &offer.error {
-            Some(e) => format!("the compositor could not be asked ({e}): sRGB"),
-            None => "the compositor does not offer wp_color_management_v1: sRGB".to_string(),
-        },
-        (Session::Wayland, Some(cm)) if !cm.offers_rec2020_gamma22() => {
-            "the compositor's colour management offers no Rec.2020 with gamma 2.2: sRGB".to_string()
-        }
-        (Session::Wayland, Some(_)) => "the compositor offers Rec.2020 with gamma 2.2, but the \
-             window's surface is 8-bit sRGB (eframe) and egui-pop has no surface colour space \
-             for Rec.2020 with gamma 2.2 yet: sRGB"
-            .to_string(),
-    };
-    Drawn {
+    let srgb = |reason: String| Drawn {
+        route: "srgb",
         encoding: "sRGB".into(),
         reason,
+    };
+    match (offer.session, &offer.color_management) {
+        (Session::None, _) => srgb("no display session (or not Linux): sRGB".into()),
+        (Session::X11, _) => srgb("X11 has no colour management protocol: sRGB".into()),
+        (Session::Wayland, None) => srgb(match &offer.error {
+            Some(e) => format!("the compositor could not be asked ({e}): sRGB"),
+            None => "the compositor does not offer wp_color_management_v1: sRGB".into(),
+        }),
+        (Session::Wayland, Some(cm)) if cm.driver_holds_srgb_surfaces() => Drawn {
+            route: "wsi",
+            encoding: "a colour space the GPU driver declares (Display P3 with Mesa)".into(),
+            reason: "the compositor announces sRGB with the sRGB transfer, so the GPU driver \
+                     holds the image surface's colour: the image is presented in a colour space \
+                     it declares, or sRGB if it declares none wider"
+                .into(),
+        },
+        (Session::Wayland, Some(cm)) if cm.offers_rec2020_gamma22() => Drawn {
+            route: "tagged",
+            encoding: "BT.2020 primaries, gamma 2.2 transfer, SDR".into(),
+            reason: "the compositor takes Rec.2020 with a 2.2 power: the image surface is \
+                     tagged with it"
+                .into(),
+        },
+        (Session::Wayland, Some(_)) => srgb(
+            "the compositor's colour management offers no Rec.2020 with gamma 2.2: sRGB, \
+             unless the GPU driver declares a wider colour space for the image surface"
+                .into(),
+        ),
     }
 }
 
@@ -278,16 +307,12 @@ mod tests {
     }
 
     #[test]
-    fn the_viewport_draws_srgb_and_says_why() {
+    fn without_colour_management_the_image_stays_srgb_and_says_why() {
         for (o, why) in [
             (offer(None), "does not offer"),
             (
                 offer(Some(ColorManagement::default())),
                 "offers no Rec.2020",
-            ),
-            (
-                offer(Some(kwin_like())),
-                "egui-pop has no surface colour space",
             ),
             (
                 Offer {
@@ -299,9 +324,24 @@ mod tests {
             ),
         ] {
             let d = drawn(&o);
-            assert_eq!(d.encoding, "sRGB");
+            assert_eq!((d.route, d.encoding.as_str()), ("srgb", "sRGB"));
             assert!(d.reason.contains(why), "{}", d.reason);
         }
+    }
+
+    #[test]
+    fn the_route_follows_the_compositor() {
+        // KWin, sway, Weston: no sRGB transfer, the image surface tagged.
+        let d = drawn(&offer(Some(kwin_like())));
+        assert_eq!(d.route, "tagged");
+        assert!(d.encoding.contains("BT.2020"), "{}", d.encoding);
+        // GNOME, Hyprland: sRGB with the sRGB transfer, the driver's.
+        let mut gnome_like = kwin_like();
+        gnome_like.transfer_functions.push(transfer_name(9));
+        assert!(gnome_like.driver_holds_srgb_surfaces());
+        let d = drawn(&offer(Some(gnome_like)));
+        assert_eq!(d.route, "wsi");
+        assert!(d.reason.contains("driver"), "{}", d.reason);
     }
 
     #[test]

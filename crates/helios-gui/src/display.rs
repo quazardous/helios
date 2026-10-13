@@ -185,8 +185,60 @@ pub fn snapshot(ctx: &egui::Context, wide_gamut: bool) -> Json {
             "faithful": r.faithful(),
             "reason": r.reason(),
         },
+        "route": route(ctx, wide_gamut),
         "expected": helios_display::drawn(offer),
     })
+}
+
+/// Where the main window's image goes, as the debug bridge and the
+/// doctor say it.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct ImageRoute {
+    /// `tagged` (an image surface Helios tags through the compositor),
+    /// `wsi` (an image surface in a colour space the GPU driver declares)
+    /// or `srgb` (the window's surface).
+    pub route: &'static str,
+    /// The encoding the image is drawn in.
+    pub encoding: String,
+    /// Why not wider, or why less than wanted.
+    pub reason: Option<String>,
+}
+
+/// Where the main window's image goes now, with the Wide-gamut preview
+/// setting `wide_gamut`: what egui-pop's image surface negotiated for the
+/// main window, and why.
+pub fn route(ctx: &egui::Context, wide_gamut: bool) -> ImageRoute {
+    let srgb = |reason: String| ImageRoute {
+        route: "srgb",
+        encoding: DisplayTarget::srgb().describe(),
+        reason: Some(reason),
+    };
+    if !wide_gamut {
+        return srgb("the Wide-gamut preview setting is off".into());
+    }
+    let image = pop_display::image_surface_of(ctx, egui::ViewportId::ROOT);
+    if let Some(t) = image.as_ref().and_then(|i| i.target) {
+        return ImageRoute {
+            route: if t.source == pop_display::TargetSource::Tagged {
+                "tagged"
+            } else {
+                "wsi"
+            },
+            encoding: t.describe(),
+            reason: image.and_then(|i| i.why),
+        };
+    }
+    let why = image
+        .and_then(|i| i.why)
+        .or_else(|| image_surface::offer(ctx).and_then(|o| o.unavailable));
+    srgb(why.unwrap_or_else(|| {
+        match image_surface::offer(ctx) {
+            None => "no image surface: the viewport draws on the CPU, or the GPU path is not \
+                 installed yet"
+                .into(),
+            Some(_) => "the viewport has not drawn the image in the main window yet".into(),
+        }
+    }))
 }
 
 fn collector(app: AppHandle) -> FnCollector {
@@ -236,7 +288,8 @@ mod tests {
         assert_eq!(s["resolution"]["faithful"], false);
         assert!(s["resolution"]["drawn"].as_str().unwrap().contains("sRGB"));
         assert!(s["resolution"]["reason"].is_string());
-        assert_eq!(s["expected"]["encoding"], "sRGB");
+        assert!(s["expected"]["route"].is_string());
+        assert_eq!(s["route"]["route"], "srgb");
     }
 
     #[test]
@@ -354,6 +407,9 @@ mod tests {
         assert!(image_surface::offer(&ctx).is_none());
         assert!(pop_display::image_surface_of(&ctx, ViewportId::ROOT).is_none());
         assert!(is_srgb(&pop_display::target(&ctx)));
+        let r = route(&ctx, false);
+        assert_eq!(r.route, "srgb");
+        assert!(r.reason.unwrap().contains("setting is off"));
         // An sRGB wish stays on the window even where the compositor
         // would tag a surface.
         assert_eq!(
@@ -364,20 +420,25 @@ mod tests {
 
     #[test]
     fn with_the_setting_on_the_target_follows_the_route() {
-        for (offer, route, primaries) in [
+        for (offer, name, primaries) in [
             (kwin(), "tagged", Primaries::Bt2020),
             (gnome(), "wsi", Primaries::DisplayP3),
         ] {
             let ctx = egui::Context::default();
             pop_display::want(&ctx, ViewportId::ROOT, wanted(true));
             let r = negotiated(&ctx, &offer);
-            assert_eq!(r.name(), route, "{r:?}");
+            assert_eq!(r.name(), name, "{r:?}");
             let t = pop_display::target(&ctx);
             assert_eq!(Some(t), r.target());
             assert_eq!(t.primaries, primaries);
             assert!(t.is_supported(), "{t:?}");
             // Helios's transform encodes for that target, not sRGB.
             assert_eq!(HeliosDisplay.stage(&t), display_stage(&t));
+            // The debug bridge and the doctor say it.
+            let shown = route(&ctx, true);
+            assert_eq!(shown.route, name);
+            assert_eq!(shown.encoding, t.describe());
+            assert_eq!(snapshot(&ctx, true)["route"]["route"], name);
 
             // The setting goes off: the image is back on the window.
             take_down_image_surface(&ctx);
@@ -385,6 +446,7 @@ mod tests {
             assert!(is_srgb(&pop_display::target(&ctx)));
             assert_eq!(negotiated(&ctx, &offer), Route::Window);
             assert!(is_srgb(&pop_display::target(&ctx)));
+            assert_eq!(route(&ctx, false).route, "srgb");
         }
     }
 
@@ -406,6 +468,9 @@ mod tests {
             assert!(is_srgb(&pop_display::target(&ctx)));
             let image = pop_display::image_surface_of(&ctx, ViewportId::ROOT).unwrap();
             assert!(image.why.unwrap().contains(why));
+            let shown = route(&ctx, true);
+            assert_eq!(shown.route, "srgb");
+            assert!(shown.reason.unwrap().contains(why));
         }
     }
 }

@@ -186,7 +186,11 @@ Says what the display offers the desktop, as JSON: the `session`
 management (`wp_color_management_v1`) announces (`color_management`:
 its version, features, named primaries and transfer functions, rendering
 intents; `null` when it has none); `error` when the compositor could not
-be asked; and `viewport`, the encoding the image is drawn in there with
-the Wide-gamut preview setting on, and why. It asks the compositor only:
-the running desktop's debug bridge (`helios.display` collector) says what
-its window actually resolved. See [Wide gamut](wide-gamut.md).
+be asked; and `viewport`, where the image goes there with the Wide-gamut
+preview setting on: its `route` (`tagged`, a surface of its own that
+Helios tags through the compositor; `wsi`, one in a colour space the GPU
+driver declares; `srgb`, the window's surface), its `encoding` and the
+`reason`. It asks the compositor only, so the route is a prediction: the
+running desktop's debug bridge (`helios.display` collector, its `route`)
+says what its window actually negotiated. See
+[Wide gamut](wide-gamut.md).
