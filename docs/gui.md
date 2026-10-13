@@ -531,8 +531,9 @@ selected module's mask network as a tree, on egui-pop's `TreeView`
   focused) takes the selected member out of its group. A member dragged
   before, after or into a group is rewired there, its opacity and
   inversion with it; a drop the network cannot take (beside the root,
-  into a shape, into a full group or into itself) is vetoed before the
-  view moves anything, and the reason is shown. Add… adds a shape or a
+  into a shape, into a full group or into itself) is refused by the
+  tree (`TreeView::can_drop`): the target is marked while dragging, and
+  dropped there nothing moves and the reason is shown. Add… adds a shape or a
   parametric member (which reads the masked module's input) to the
   selected group.
 - **Agents** do the same through `mask.member.move`, `mask.member.delete`,

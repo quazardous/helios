@@ -179,8 +179,6 @@ struct Parts {
     resolved_view: Arc<Mutex<Value>>,
     dialogs: Arc<OnceLock<Dialogs>>,
     values: Arc<Mutex<helios_values::Store>>,
-    /// The mask network the Masks panel shows, which its drop guard reads.
-    mask_network: Rc<RefCell<crate::mask_tree::Network>>,
     workspace: Workspace,
     /// The catalogues of the application's translation plugin.
     i18n: egui_pop::i18n::I18n,
@@ -368,7 +366,6 @@ impl Shell {
         let contents = Contents::default();
         let themes = crate::theme::themes();
         let declarations = Rc::new(RefCell::new(Declarations::default()));
-        let mask_network = Rc::<RefCell<crate::mask_tree::Network>>::default();
         let lists = Rc::new(RefCell::new(ListSource {
             profiles_dir: config_dir().join("profiles"),
         }));
@@ -425,13 +422,8 @@ impl Shell {
                 values: values.clone(),
                 i18n: i18n.clone(),
             })
-            // egui-pop's data views (the Masks panel's tree), and what
-            // Helios refuses of them.
+            // egui-pop's data views (the Masks panel's tree).
             .plugin(egui_pop::views::ViewsPlugin)
-            .plugin(crate::mask_tree::Guard {
-                shown: mask_network.clone(),
-                i18n: i18n.clone(),
-            })
             // The window's frame: Helios's own on the desktop, the
             // system's elsewhere (tests, pictures, tools) until asked.
             .plugin(if ui_settings.is_some() {
@@ -462,7 +454,6 @@ impl Shell {
                 resolved_view,
                 dialogs,
                 values,
-                mask_network,
                 workspace,
                 i18n,
             },
@@ -482,7 +473,6 @@ impl Shell {
             resolved_view,
             dialogs,
             values,
-            mask_network,
             workspace,
             i18n,
         } = parts;
@@ -528,7 +518,7 @@ impl Shell {
             gpu: None,
             gpu_info: None,
             params: Rc::default(),
-            mask_tree: Rc::new(RefCell::new(crate::mask_tree::MaskTree::new(mask_network))),
+            mask_tree: Rc::default(),
             values,
             workspace,
             still: false,

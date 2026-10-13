@@ -18,20 +18,18 @@
 //!   opacity the group's values, each one undo step. Moving a member
 //!   (drag and drop) or deleting one rewires the network, which the store
 //!   does not hold: not an undo step, and a drop the network cannot take
-//!   is vetoed before the view moves anything ([`Guard`]).
+//!   ([`drop_place`]) is refused while dragging and vetoed before the
+//!   view moves anything (`TreeView::can_drop`).
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt::Write as _;
-use std::rc::Rc;
 use std::sync::{Mutex, PoisonError};
 
 use egui::Ui;
-use egui_pop::api::steps::Before;
-use egui_pop::api::{AppHandle, Ctx, Plugin, PluginError};
+use egui_pop::api::AppHandle;
 use egui_pop::core::icon::Source;
-use egui_pop::model::ids::{MenuId, PluginId};
-use egui_pop::views::steps::TREE_DROP;
+use egui_pop::model::ids::MenuId;
 use egui_pop::views::tree::{Node, Position, Signal, Sink, TreeSource, TreeState, TreeView};
 use helios_core::{Graph, Message, NodeId, Value};
 use helios_shell::commands::Origin;
@@ -865,10 +863,10 @@ fn shows(state: &TreeState<String>, parent: Option<&String>, nodes: &[Node<Strin
 }
 
 /// The Masks panel's state between frames: the view's, and the network
-/// it showed last (which the drop guard reads).
+/// it showed last.
 pub struct MaskTree {
     state: TreeState<String>,
-    shown: Rc<RefCell<Network>>,
+    shown: Network,
     /// Groups seen so far: a group opens the first time it shows.
     known: BTreeSet<String>,
     /// The selection the store asked for last.
@@ -878,11 +876,17 @@ pub struct MaskTree {
     app: Option<AppHandle>,
 }
 
+impl Default for MaskTree {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MaskTree {
-    pub fn new(shown: Rc<RefCell<Network>>) -> Self {
+    pub fn new() -> Self {
         Self {
             state: TreeState::new(),
-            shown,
+            shown: Network::default(),
             known: BTreeSet::new(),
             desired: None,
             rename: None,
@@ -912,7 +916,7 @@ impl MaskTree {
 
     /// The network shown last.
     pub fn network(&self) -> Network {
-        self.shown.borrow().clone()
+        self.shown.clone()
     }
 
     /// Brings the view up to the network: branches whose members or
@@ -976,7 +980,7 @@ impl MaskTree {
             self.follow_selection(&net, &store);
             net
         };
-        self.shown.replace(net.clone());
+        self.shown = net.clone();
         if net.root.is_none() {
             ui.weak("No mask: the selected module is not masked");
             return;
@@ -1053,11 +1057,19 @@ impl MaskTree {
         {
             self.state.rename(&key);
         }
+        let ctx = ui.ctx().clone();
         let mut view = TreeView::new(TREE)
             .label("Masks")
             .drag_drop(true)
             .rename(true)
-            .icon(|n| net.items.get(&n.key).map(|i| Source::glyph(i.icon())));
+            .icon(|n| net.items.get(&n.key).map(|i| Source::glyph(i.icon())))
+            // What the network cannot take is refused while dragging (the
+            // target marked), and its drop vetoed with the reason.
+            .can_drop(|keys, target, position| {
+                drop_place(&net, keys, target, position)
+                    .map(|_| ())
+                    .map_err(|m| crate::i18n::text(&ctx, m))
+            });
         if let Some(app) = &self.app {
             // A declared menu, which egui-pop's menus draw (as the
             // Parameters panel's), not one of the panel's own.
@@ -1108,49 +1120,4 @@ fn add_items() -> Vec<MenuItem> {
         .into_iter()
         .map(|k| MenuItem::command(&format!("mask.add.{k}")))
         .collect()
-}
-
-/// Refuses, before the view moves anything, a drop the mask network
-/// cannot take (the root moved, a member into a shape, a full group).
-pub struct Guard {
-    pub shown: Rc<RefCell<Network>>,
-    /// The catalogues a refusal is said through.
-    pub i18n: egui_pop::i18n::I18n,
-}
-
-pub const GUARD: PluginId = PluginId::from_static("helios.masks");
-
-impl Plugin for Guard {
-    fn id(&self) -> PluginId {
-        GUARD
-    }
-
-    fn title(&self) -> String {
-        "Helios masks tree".into()
-    }
-
-    fn connect(&mut self, ctx: &mut Ctx<'_>) -> Result<(), PluginError> {
-        let (shown, i18n) = (self.shown.clone(), self.i18n.clone());
-        ctx.before(TREE_DROP, move |_, args: &Json| {
-            if args["tree"] != TREE {
-                return Before::Go;
-            }
-            let parse = || -> Result<(Vec<String>, String, Position), String> {
-                Ok((
-                    serde_json::from_value(args["keys"].clone()).map_err(|e| e.to_string())?,
-                    serde_json::from_value(args["target"].clone()).map_err(|e| e.to_string())?,
-                    serde_json::from_value(args["position"].clone()).map_err(|e| e.to_string())?,
-                ))
-            };
-            match parse()
-                .map_err(Message::plain)
-                .and_then(|(keys, target, position)| {
-                    drop_place(&shown.borrow(), &keys, &target, position)
-                }) {
-                Ok(_) => Before::Go,
-                Err(reason) => Before::Veto(helios_i18n::message(&i18n, &reason)),
-            }
-        });
-        Ok(())
-    }
 }
