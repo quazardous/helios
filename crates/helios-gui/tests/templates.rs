@@ -267,6 +267,8 @@ fn a_workspace_from_import_cull_dedupe_is_laid_out_and_set_for_culling() {
         shown.area_of(&panel("helios.filmstrip")),
         Some(Area::Bottom)
     );
+    // egui-pop's jobs centre beside the filmstrip, for the import.
+    assert_eq!(shown.area_of(&panel("egui_pop.jobs")), Some(Area::Bottom));
     assert!(shown.hidden.contains(&panel("helios.masks")));
     // The loupe takes the culling keys, in the workspace's layer.
     let keys = h.state().app().handle().export_keymap(Layer::Workspace);
