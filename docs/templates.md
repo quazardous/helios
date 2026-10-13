@@ -1,0 +1,265 @@
+# Workspace templates
+
+Status: **design note, format in code** (2026-10-13). The format, its
+schema, validation, the headless build check and composite files live in
+`crates/helios-template`; one built-in template ("Portrait retouch") ships
+as data under `templates/`, and the desktop's "New workspace from
+template" creates a workspace from it. What is marked "not decided" waits
+for the owner.
+
+## What a template is
+
+A **workspace template** is a ready-to-use combination of tools, network
+and panel layout, optimised for one known scenario ("retouch a portrait",
+"cull a wedding", "scan negatives"). Picking one creates a workspace that
+opens with the right network wired, the right panels docked and the right
+tools at hand, so the photographer starts working instead of arranging.
+
+Two readers matter from day one:
+
+- **people**, who pick a template by its scenario, share it like a plugin,
+  and tweak the workspace it made;
+- **an AI**, which will later design a template on demand (the
+  `template.design` decision, below). So the format is data checked by a
+  schema, built and checked without a window, and every reference in it
+  (a module, a composite, a panel, a command) is checked against what
+  this Helios knows.
+
+## The `.helios-template` bundle
+
+A template is a directory, `<name>.helios-template/`, shared and installed
+as a whole, like an external plugin:
+
+```text
+portrait-retouch.helios-template/
+  template.json                 meta, network, tools (schema-checked)
+  layout.json                   egui-pop's layout document
+  i18n/<locale>/template.ftl    its text, one Fluent file per language
+  composites/                   the composites it uses, bundled (optional)
+    helios.masked-adjustment@1.helios-composite.json
+  preview.png                   what it looks like (optional)
+```
+
+`template.json` carries a `format` number (1 today). A Helios reading a
+format newer than its own refuses the template and says so, never guesses;
+an older format is migrated when one exists. Its `version` is the
+template's own, bumped by its author.
+
+### `meta`
+
+```json
+"meta": {
+  "name": "Portrait retouch",
+  "scenario": "Retouch a portrait: brighten the subject through a mask …",
+  "preview": "preview.png",
+  "tags": ["portrait", "masks"]
+}
+```
+
+`name` and `scenario` are the English text. Translations live in the
+bundle's Fluent files under keys derived from the template's id, the
+same ownership rule as a plugin's catalogues
+(`helios_i18n::plugins`): a template may only define messages starting
+with its id's slug, so it never rewrites Helios's text.
+
+```text
+helios-portrait-retouch-name = Retouche de portrait
+helios-portrait-retouch-scenario = Retoucher un portrait : …
+```
+
+### `network`
+
+The starting graph, written like a node's network description
+(`helios-node`), with composites referenced by id and version:
+
+```json
+"network": {
+  "sources": ["source"],
+  "nodes": [
+    { "name": "exposure", "module": "exposure",
+      "params": { "exposure": { "float": 0.5 } } },
+    { "name": "retouch",
+      "composite": { "id": "helios.masked-adjustment", "version": 1 },
+      "open": true }
+  ],
+  "connections": [
+    { "from": "source", "port": "image", "to": "exposure", "input": "input" },
+    { "from": "source", "port": "image", "to": "retouch", "input": "input" },
+    { "from": "exposure", "port": "output", "to": "retouch", "input": "processed" }
+  ],
+  "view": { "node": "retouch", "port": "output" },
+  "presets": [
+    { "id": "soft", "name": "Soft",
+      "values": { "exposure": { "exposure": { "float": 0.3 } } } }
+  ]
+}
+```
+
+- `sources` are the images the workspace is given (the image opened in
+  it); their output port is `image`.
+- A node is a `module` (by its manifest name) or a `composite` (by id and
+  version), never both. A composite is placed folded (one node, the
+  engine expands it when it renders) or, with `open`, opened: its inner
+  nodes are put in the graph as ordinary nodes named
+  `<instance>.<inner>`, so the panels that edit nodes (the Masks panel,
+  the viewport's shapes, Parameters) reach them. Not decided: how a
+  surface folds an opened composite back, and whether the graph keeps
+  which nodes came from which composite.
+- `params` are checked against the module's (or the composite's)
+  manifest, completed with defaults.
+- `view` is the output the viewport shows.
+- `presets` are named sets of parameter values by node name (for a
+  composite, its exposed parameters). Building with a preset puts its
+  values over the nodes' own.
+
+### `tools`
+
+```json
+"tools": {
+  "toolbox": ["mask.add.circle", "mask.add.ellipse", "mask.add.path"],
+  "default": "mask.add.path",
+  "keymap": [{ "keys": "Shift+C", "command": "mask.add.circle" }]
+}
+```
+
+The toolbox is a list of command ids (Helios's commands, so a key, the
+palette, an agent and the toolbox reach the same actions); `default` is
+one of them; `keymap` adds bindings, written like a profile's, loaded
+into egui-pop's **workspace** keymap layer (over the defaults, under the
+user's own keys) when the workspace opens. Not decided: the toolbox's
+widget (today the workspace keeps the list and the keys only).
+
+### `layout`
+
+`layout.json` is egui-pop's layout document (`kind: layout`, its own
+schema version, migrated by egui-pop): which panel sits in which area, as
+tabs and splits, which ones are closed. A template's layout names panels
+by id; validation refuses a panel this Helios does not declare, or one
+placed in an area it may not live in.
+
+## Composites as files
+
+A composite (a macro, see [module-contract.md](module-contract.md),
+"Composites") is saved as its own versioned file,
+`<id>@<version>.helios-composite.json`:
+
+```json
+{
+  "format": 1,
+  "id": "helios.masked-adjustment",
+  "version": 1,
+  "name": "Masked adjustment",
+  "description": "Mixes an adjustment into the image through a mask group",
+  "inputs": [
+    { "name": "input", "channels": 4, "layout": "rgba" },
+    { "name": "processed", "channels": 4, "layout": "rgba" }
+  ],
+  "outputs": [{ "name": "output", "channels": 4, "layout": "rgba" }],
+  "nodes": [
+    { "name": "mask", "module": "mask_combine" },
+    { "name": "feather", "module": "mask_feather" },
+    { "name": "blend", "module": "mask_blend" }
+  ],
+  "connections": [
+    { "from": "mask", "port": "mask", "to": "feather", "input": "mask" },
+    { "from": "@", "port": "input", "to": "feather", "input": "guide" },
+    …
+  ],
+  "exits": [{ "from": "blend", "port": "output", "output": "output" }],
+  "exposed": [{ "name": "opacity", "node": "blend", "param": "opacity" }],
+  "panel": { "panel": "helios.masks", "area": "start_side" }
+}
+```
+
+- The sub-network is inner nodes in order (a node reads only the
+  composite's inputs, written `@`, and nodes before it: no cycle by
+  construction), their wiring and the exits.
+- `exposed` turns inner parameters into the composite's own (one name on
+  several inner nodes links them), each with its inner value as default.
+- An inner node may itself be a composite, by id and version.
+- **Version pinning.** A template keeps the composite version it was made
+  with. When the catalogue holds a newer one, validation reports it as an
+  update on offer; nothing changes until someone asks (the desktop, an
+  agent or the author upgrades the pin, and the template's own version is
+  bumped). A template whose pinned version is missing is refused, never
+  built with another version.
+- **Panel hints.** A composite may say which panel edits it and where that
+  panel docks (`panel`): building a template docks that panel when its
+  layout does not show it. A template's node may override the hint (its
+  own `panel`), for instance to dock the Masks panel at the end side.
+
+The first composite file is `helios.masked-adjustment` (version 1): a
+mask group (`mask_combine`), feathered along the image's edges
+(`mask_feather`) and blended (`mask_blend`), exposing the group's
+operator, the feather's radius and the blend's opacity. Its hint is the
+Masks panel.
+
+## Sharing like plugins
+
+A template travels as its bundle, never as code: it references modules
+and commands by name, and composites by id and version. Installing one
+(not built yet: only the built-in templates are listed today) copies
+the bundle under the user's templates
+(`<config>/templates/<name>.helios-template/`); its bundled composites
+join the catalogue there, its Fluent files are added with the plugin
+ownership rule. A template naming a module or command this Helios lacks
+is refused with what is missing (a plugin to install), as a profile's
+plugin references are listed before an import. Not decided: a registry
+of shared templates, and signing.
+
+## Validation and the headless build
+
+`helios_template` checks a template in two steps, both without a
+window:
+
+1. **Validation** (`Bundle::validate`): the format, ids and names, every
+   module, composite (and version), panel and command against the
+   catalogue Helios gives, the tools (the default tool in the toolbox),
+   the presets' nodes, the layout's panels and areas. The result lists
+   every problem with where it is (`network.nodes[1] (retouch)`), and the
+   composite updates on offer.
+2. **Build** (`Bundle::build`): the network as a `helios_core::Graph`
+   (sources filled with a placeholder image, composites folded or
+   opened, every required input connected, the view found) and the layout
+   with the composites' panel hints applied. A test renders the result.
+
+The JSON schemas (`templates/schema/template.schema.json` and
+`composite.schema.json`, `helios_template::schema`) describe the files;
+serde refuses unknown fields as the schemas do, and a test keeps them in
+step with the types.
+
+## Creating a workspace from a template
+
+The desktop's **New workspace from template** (`workspace.new`) lists the
+templates with their scenario, asks for the workspace's directory, then:
+
+- copies the bundle into the workspace's own files
+  (`<config>/workspaces/<key>/template.helios-template/`, its composites
+  bundled) and records it in `workspace.json`;
+- writes the built layout as the workspace's layout document, so egui-pop
+  loads it when the workspace opens;
+- opens the workspace in its window; there the template's keys go into
+  the workspace keymap layer, and an image opened is the template's
+  source, shown at its view.
+
+## The AI's `template.design` decision (later)
+
+An AI designs a template as a **decision node** answers a question (see
+[module-contract.md](module-contract.md), "Decision nodes"): the question
+is the scenario in words ("retouch skin on headshots, quick"); the answer
+is a `template.json` and a `layout.json`. What it is given:
+
+- the JSON schemas, so its answer has the right shape;
+- the **catalogue**: every module's manifest (parameters, ranges, ports),
+  every composite file (with its exposed parameters and panel hint), the
+  panels and the commands, as `helios_template::Catalogue` describes
+  them;
+- examples: the built-in templates.
+
+Its answer goes through the same validation and headless build as a
+template written by hand; a refused answer is sent back with the
+problems, a bounded number of times. The accepted template is recorded
+like any decision's answer (asking again makes a new one), and a human
+may confirm it first (the AI-assisted mode). Not decided: whether the AI
+may also write new composite files, and how a designed template is named
+and shared.

@@ -478,6 +478,16 @@ hash) is part of Helios; deploying a NAS is not.
   a multi-kernel module, and shares its content with the flat network it
   packages. Not decided: how a macro is saved with an edit and offered
   in the GUI (folded, opened, promoted from a stack).
+- (2026-10-13) **Workspace templates**: a ready-to-use combination of
+  tools, network and panel layout for one known scenario, shared as a
+  `.helios-template` bundle like a plugin, schema-checked and built
+  headless so an AI can later design one on demand (a `template.design`
+  decision). Composites are saved as their own versioned files; a
+  template pins a composite's version and a newer one is offered, never
+  taken silently. First built-in: "Portrait retouch". Design in
+  [docs/templates.md](docs/templates.md). Not decided: the toolbox's
+  widget, folding an opened composite back, a registry of shared
+  templates, and whether the AI may write composite files.
 - A workshop: the AI translates an artistic intention ("too contrasty with the
   blue sky") into a mini workspace: the real darktable modules, pre-calibrated
   for the photo, with only the useful sliders (restricted ranges, tested at
