@@ -386,6 +386,17 @@ driver, not a rewrite.
   decision, whose default resolver is rule-based and whose resolver name
   is open to AI models. See docs/library.md. Not decided: RAW+JPEG pairs
   as stacks or as one image with two files; MTP sources.
+  (2026-10-13, implemented) Culling runs on egui-pop's library widgets:
+  the grid and filmstrip, Lightroom's culling keys as commands (with
+  auto-advance), picks, rejects, labels and tags as vault fields written
+  through egui-pop's library steps, the search filter as a vault query,
+  a comparison of two to four images; stacks collapsed in the grid, the
+  `stacks.suggest` proposals reviewed in a Stacks panel (accepted,
+  corrected or declined), and the `ask` duplicates answered file by file
+  in a Duplicates panel. The built-in template "Import, cull,
+  de-duplicate" sets it up, its import source part of the template
+  format. Not decided: whether stacks are proposed after every import by
+  default (the template does, as a setting of its own).
 
 **Sync model.** (2026-10-10) Take git's *model* rather than git itself:
 content-addressed objects, a DAG of versions, refs, offline replicas,
