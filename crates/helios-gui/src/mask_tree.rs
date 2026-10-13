@@ -29,7 +29,6 @@
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
-use std::fmt::Write as _;
 use std::sync::{Mutex, PoisonError};
 
 use egui::Ui;
@@ -310,11 +309,22 @@ impl Item {
             s.push_str(" — ");
             s.push_str(&tr(kind));
         }
+        // The member's place in its group (the root: its own), in words:
+        // what the group's per-port lists hold for it.
         if self.invert {
-            s.push_str(" · inverted");
+            s.push_str(" · ");
+            s.push_str(&tr(Message::new("gui-masks-row-inverted", "inverted")));
         }
-        if self.opacity < 1.0 {
-            let _ = write!(s, " · {:.0} %", self.opacity * 100.0);
+        if self.opacity <= 0.0 {
+            s.push_str(" · ");
+            s.push_str(&tr(Message::new("gui-masks-row-hidden", "hidden")));
+        } else if self.opacity < 1.0 {
+            s.push_str(" · ");
+            s.push_str(&tr(Message::new(
+                "gui-masks-row-opacity",
+                "opacity { $percent } %",
+            )
+            .with("percent", format!("{:.0}", self.opacity * 100.0))));
         }
         s
     }

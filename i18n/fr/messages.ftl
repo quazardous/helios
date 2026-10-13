@@ -144,6 +144,12 @@ gui-masks-refinement-stays = « { $name } » reste avec ce qu’il affine
 
 gui-masks-root-stays = le masque du module reste la racine
 
+gui-masks-row-hidden = masqué
+
+gui-masks-row-inverted = inversé
+
+gui-masks-row-opacity = opacité { $percent } %
+
 gui-masks-show = Afficher { $name } : son opacité à fond
 
 gui-masks-unlock = Déverrouiller { $name }

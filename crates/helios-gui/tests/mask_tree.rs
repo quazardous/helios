@@ -300,6 +300,55 @@ fn group_operators_are_named_by_their_effect_with_a_preview() {
 }
 
 #[test]
+fn a_member_s_opacity_and_inversion_read_on_its_row() {
+    let mut h = harness();
+    // The group's per-port values, said on each member's row.
+    run(
+        &mut h,
+        "mask.member.opacity",
+        json!({ "member": "spot", "opacity": 0.3 }),
+    );
+    run(&mut h, "mask.member.invert", json!({ "member": "spot" }));
+    run(
+        &mut h,
+        "mask.member.opacity",
+        json!({ "member": "oval", "opacity": 0.0 }),
+    );
+    // The root's own, on its row.
+    run(
+        &mut h,
+        "mask.member.opacity",
+        json!({ "member": "mask", "opacity": 0.5 }),
+    );
+    assert_eq!(
+        rows(&h),
+        [
+            "▣ mask — union · opacity 50 %",
+            "  ▣ inner — intersection",
+            "    ○ dot",
+            "  ○ spot · inverted · opacity 30 %",
+            "  ◎ oval · hidden",
+        ]
+    );
+    // In the interface's language.
+    let app = h.state().app().handle().clone();
+    egui_pop::i18n::plugin::set_language(&app, "fr").unwrap();
+    for _ in 0..4 {
+        h.step();
+    }
+    assert_eq!(
+        rows(&h),
+        [
+            "▣ mask — union · opacité 50 %",
+            "  ▣ inner — intersection",
+            "    ○ dot",
+            "  ○ spot · inversé · opacité 30 %",
+            "  ◎ oval · masqué",
+        ]
+    );
+}
+
+#[test]
 fn a_viewport_edit_an_agent_and_undo_show_in_the_tree() {
     let mut h = harness();
     // A shape added on the viewport (its key, the image focused) joins
@@ -330,7 +379,7 @@ fn a_viewport_edit_an_agent_and_undo_show_in_the_tree() {
     for _ in 0..3 {
         h.step();
     }
-    assert!(rows(&h).contains(&"  ○ spot · 50 %".to_string()));
+    assert!(rows(&h).contains(&"  ○ spot · opacity 50 %".to_string()));
     assert!(rows(&h).contains(&"  ◎ oval · inverted".to_string()));
     assert_eq!(steps(&h), ["opacity of spot", "invert oval"]);
     // Undo takes them back, and the tree follows.
@@ -372,7 +421,7 @@ fn f2_renames_in_place_as_one_undo_step() {
         "mask.member.opacity",
         json!({ "member": "spot", "opacity": 0.5 }),
     );
-    click_row(&mut h, "spot · 50 %");
+    click_row(&mut h, "spot · opacity 50 %");
     h.key_press(Key::F2);
     for _ in 0..3 {
         h.step();
@@ -391,7 +440,7 @@ fn f2_renames_in_place_as_one_undo_step() {
     assert_eq!(text(&h, &label_path("spot")), "Sun");
     // Its decorations come back around the new name.
     assert!(
-        rows(&h).contains(&"  ○ Sun · 50 %".to_string()),
+        rows(&h).contains(&"  ○ Sun · opacity 50 %".to_string()),
         "{:?}",
         rows(&h)
     );
@@ -399,7 +448,7 @@ fn f2_renames_in_place_as_one_undo_step() {
     // The node keeps its name: the viewport and the store still find it.
     assert_eq!(text(&h, SHAPE), "spot");
     run(&mut h, "param.undo", json!(null));
-    assert!(rows(&h).contains(&"  ○ spot · 50 %".to_string()));
+    assert!(rows(&h).contains(&"  ○ spot · opacity 50 %".to_string()));
     // Agents name members too.
     run(
         &mut h,
@@ -420,13 +469,13 @@ fn a_drop_reorders_members_and_their_values_follow() {
     assert_eq!(wired(&h, "mask"), ["inner", "spot", "oval"]);
     // The oval dropped before the spot: wired before it, its opacity
     // with it.
-    let (from, to) = (row(&h, "oval · 25 %"), row(&h, "spot"));
+    let (from, to) = (row(&h, "oval · opacity 25 %"), row(&h, "spot"));
     drag(&mut h, from.center(), to.center_top() + vec2(0.0, 3.0));
     assert_eq!(wired(&h, "mask"), ["inner", "oval", "spot"]);
     assert_eq!(&floats(&h, "node/mask/opacity")[..3], [1.0, 0.25, 1.0]);
     assert_eq!(
         &rows(&h)[3..],
-        ["  ◎ oval · 25 %", "  ○ spot"],
+        ["  ◎ oval · opacity 25 %", "  ○ spot"],
         "the tree shows the network's order"
     );
     // Into another group: the spot joins the inner group.
@@ -573,14 +622,14 @@ fn a_row_s_menu_acts_on_that_row_whatever_is_selected() {
         h.step();
     }
     assert!(
-        rows(&h).contains(&"  ◎ oval · 0 %".to_string()),
+        rows(&h).contains(&"  ◎ oval · hidden".to_string()),
         "{:?}",
         rows(&h)
     );
     assert!(rows(&h).contains(&"  ○ spot".to_string()));
     assert_eq!(cursor(&h).as_deref(), Some("spot"));
     // Its rename starts on the oval, from its name.
-    let at = row(&h, "oval · 0 %").center();
+    let at = row(&h, "oval · hidden").center();
     right_click(&mut h, at);
     h.get_by_label("Rename…").click();
     for _ in 0..3 {
@@ -604,7 +653,7 @@ fn a_row_s_eye_and_lock_act_on_that_row() {
         h.step();
     }
     assert!(
-        rows(&h).contains(&"  ○ spot · 0 %".to_string()),
+        rows(&h).contains(&"  ○ spot · hidden".to_string()),
         "{:?}",
         rows(&h)
     );
@@ -848,9 +897,9 @@ fn a_member_wired_to_two_ports_shows_once_per_port() {
     );
     assert_eq!(&floats(&h, "node/mask/opacity")[..4], [1.0, 1.0, 1.0, 0.5]);
     assert_eq!(rows(&h)[3], "  ○ spot");
-    assert_eq!(rows(&h)[5], "  ○ spot · 50 %");
+    assert_eq!(rows(&h)[5], "  ○ spot · opacity 50 %");
     // Either row selects the spot on the viewport, and stays selected.
-    click_row(&mut h, "spot · 50 %");
+    click_row(&mut h, "spot · opacity 50 %");
     assert_eq!(text(&h, SHAPE), "spot");
     assert_eq!(cursor(&h).as_deref(), Some("spot@mask#3"));
 }
@@ -1147,7 +1196,7 @@ fn the_panel_follows_a_new_network_and_undo() {
         "mask.member.opacity",
         json!({ "member": "dot", "opacity": 0.5 }),
     );
-    assert!(rows(&h).contains(&"    ○ dot · 50 %".to_string()));
+    assert!(rows(&h).contains(&"    ○ dot · opacity 50 %".to_string()));
     run(&mut h, "param.undo", json!(null));
     assert!(rows(&h).contains(&"    ○ dot".to_string()));
     assert_eq!(cursor(&h).as_deref(), Some("dot"));

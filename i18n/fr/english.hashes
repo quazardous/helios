@@ -200,6 +200,9 @@ gui-masks-refine-feather 81c6f1c9d4c2abde
 gui-masks-refine-levels ea0b5385660a49f8
 gui-masks-refinement-stays e14959a658e0b2cb
 gui-masks-root-stays 2fd89ec847b9ade1
+gui-masks-row-hidden f145af5da614d3b1
+gui-masks-row-inverted 071a09fe37c77bae
+gui-masks-row-opacity 20c6545a62ad4f32
 gui-masks-show f610532bac2c2c0b
 gui-masks-unlock 52d38f3a80ff723a
 gui-new-workspace-created 6ffa8013c877eae5

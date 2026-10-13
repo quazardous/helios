@@ -225,6 +225,12 @@ gui-masks-refinement-stays = `{ $name }` stays with what it refines
 
 gui-masks-root-stays = the module's mask stays the root
 
+gui-masks-row-hidden = hidden
+
+gui-masks-row-inverted = inverted
+
+gui-masks-row-opacity = opacity { $percent } %
+
 gui-masks-show = Show { $name }: its opacity full
 
 gui-masks-take-out = Take out

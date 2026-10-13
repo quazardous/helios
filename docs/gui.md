@@ -727,7 +727,9 @@ selected module's mask network as a tree, on egui-pop's `TreeView`
   previewed before its row's eye: two soft discs folded by the
   operator, drawn in the theme's accent; each member a row with its icon beside it (circle, ellipse,
   gradient, path, brush, parametric, luminance, raster, AI object), and
-  its inversion and opacity in its group when they are not the default.
+  its inversion and opacity in its group when they are not the default,
+  read from the group's per-port lists and said in words on its row
+  ("inverted", "opacity 30 %", "hidden"; the root's own on its row).
   The refinements (blur, feather, levels) are rows of their own under
   what they refine: a member's between it and its group, the root's
   between it and the blend, after its members. So every node the engine
