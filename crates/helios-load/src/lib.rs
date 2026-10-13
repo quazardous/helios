@@ -13,7 +13,10 @@
 //!   converted to the linear Rec.2020 working space, four channels (alpha
 //!   last, 1 when the file has none);
 //! - **embedded previews** of raw files ([`preview`]), for culling without
-//!   decoding the mosaic, converted to the working space like a picture.
+//!   decoding the mosaic, converted to the working space like a picture;
+//! - **how a raw was shot** ([`Shot`]): its capture time, exposure and
+//!   frame number from its EXIF, read with its preview ([`look`]) for an
+//!   import's near-duplicate signals.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -110,6 +113,91 @@ pub fn preview(path: &Path) -> Result<Option<Image>, String> {
     .into_iter()
     .find_map(|r| r.ok().flatten());
     Ok(found.map(|img| working(&img)))
+}
+
+/// How a raw file was shot, as its EXIF says.
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+pub struct Shot {
+    pub maker: String,
+    pub model: String,
+    /// When it was taken, as the camera wrote it (`YYYY:MM:DD HH:MM:SS`,
+    /// the camera's local time).
+    pub taken: Option<String>,
+    /// The fraction of a second after `taken`, as digits (`25` is 0.25 s).
+    pub subsec: Option<String>,
+    /// Seconds.
+    pub exposure_time: Option<f64>,
+    /// f-number.
+    pub aperture: Option<f64>,
+    pub iso: Option<f64>,
+    /// EV.
+    pub exposure_bias: Option<f64>,
+    /// The camera's frame counter, when it writes one.
+    pub frame: Option<u32>,
+    pub serial: Option<String>,
+}
+
+/// What [`look`] found in a file.
+pub struct Look {
+    /// The embedded preview of a raw file, a picture itself: in the
+    /// working space; `None` for a raw without a preview.
+    pub preview: Option<Image>,
+    /// How a raw was shot; `None` for a picture.
+    pub shot: Option<Shot>,
+}
+
+/// A file's preview and how it was shot, from one read: what an import
+/// measures without decoding a mosaic.
+pub fn look(path: &Path) -> Result<Look, String> {
+    if Kind::of(path) == Kind::Picture {
+        return Ok(Look {
+            preview: Some(load(path)?.image),
+            shot: None,
+        });
+    }
+    let (_, bytes) = read(path)?;
+    let named = |e: String| format!("{}: {e}", path.display());
+    let source = RawSource::new_from_shared_vec(bytes);
+    let decoder = rawler::get_decoder(&source).map_err(|e| named(e.to_string()))?;
+    let params = RawDecodeParams::default();
+    let preview = [
+        decoder.preview_image(&source, &params),
+        decoder.thumbnail_image(&source, &params),
+        decoder.full_image(&source, &params),
+    ]
+    .into_iter()
+    .find_map(|r| r.ok().flatten())
+    .map(|img| working(&img));
+    let shot = decoder.raw_metadata(&source, &params).ok().map(|m| {
+        let exif = &m.exif;
+        let unsigned = |r: Option<rawler::formats::tiff::Rational>| {
+            r.filter(|r| r.d != 0)
+                .map(|r| ratio(f64::from(r.n), f64::from(r.d)))
+        };
+        Shot {
+            maker: m.make.trim().to_string(),
+            model: m.model.trim().to_string(),
+            taken: exif
+                .date_time_original
+                .clone()
+                .or_else(|| exif.create_date.clone()),
+            subsec: exif.sub_sec_time_original.clone(),
+            exposure_time: unsigned(exif.exposure_time),
+            aperture: unsigned(exif.fnumber),
+            iso: exif
+                .iso_speed
+                .or(exif.recommended_exposure_index)
+                .map(f64::from)
+                .or(exif.iso_speed_ratings.map(f64::from)),
+            exposure_bias: exif
+                .exposure_bias
+                .filter(|r| r.d != 0)
+                .map(|r| ratio(f64::from(r.n), f64::from(r.d))),
+            frame: exif.image_number,
+            serial: exif.serial_number.clone(),
+        }
+    });
+    Ok(Look { preview, shot })
 }
 
 /// sRGB-encoded to the linear working space.
