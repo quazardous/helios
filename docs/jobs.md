@@ -107,9 +107,15 @@ whose images are jobs of their own.
   `helios_job_cancel` tool) cancels an export, or a batch with its
   exports, queued or running; the batch's next exports are refused and
   `helios batch` exits as interrupted.
+  A batch whose client goes without ending it does not stay running:
+  `helios batch` asks for it on a connection it holds open (`hold`), and
+  the node fails the batch ("abandoned: its client went away") when
+  that connection closes; any batch also fails once no export was asked
+  for it, and none of its exports ran, for its idle timeout
+  (`idle_timeout_s`, ten minutes by default). Its exports already asked
+  for go on.
 
 Not yet: the desktop does not follow a node's bus, so work run in a node
 (a batch, its exports) shows in the jobs centre only once the desktop
 relays the node's `job.*` events and sends its Cancel there as
-`job.cancel`. A batch whose `helios batch` dies without ending it stays
-running on its node until the node stops.
+`job.cancel`.

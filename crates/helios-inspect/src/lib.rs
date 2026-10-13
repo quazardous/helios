@@ -30,8 +30,6 @@ use std::sync::Arc;
 use std::sync::mpsc::RecvTimeoutError;
 use std::time::{Duration, Instant};
 
-use transport::Connection;
-
 use helios_core::{Bus, Describe, Envelope, Scheduler};
 
 pub mod jobs;
@@ -41,8 +39,8 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 pub use transport::{
-    Address, Bound, Client, Closer, Listen, new_token, request_at, serve_at, serve_connections_at,
-    write_token,
+    Address, Bound, Client, Closer, Connection, Listen, new_token, request_at, serve_at,
+    serve_connections_at, write_token,
 };
 
 /// A request, as sent on the wire.
@@ -425,9 +423,19 @@ pub mod control {
         /// Starts a batch job, the parent of the exports asked for with its
         /// id as `batch`: answers its id (`batch-1`). Cancelling it
         /// cancels its exports and refuses new ones.
+        ///
+        /// A batch whose client goes without ending it does not stay
+        /// running: it fails once no export was asked for it, and none of
+        /// its exports ran, for `idle_timeout_s` seconds (600 when not
+        /// given); with `hold`, also as soon as the connection that asked
+        /// for it closes (the client keeps it open while the batch runs).
         BatchStart {
             title: String,
             total: u64,
+            #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+            hold: bool,
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            idle_timeout_s: Option<u64>,
         },
         /// Ends a batch job: cancelled when it was, or said so here;
         /// failed when some of its images failed; else finished.

@@ -49,11 +49,15 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
+use std::time::{Duration, Instant};
 
 use helios_config::{Config, Layer, Schema};
 use helios_core::jobs::{Jobs, Report as JobReport, Start};
-use helios_core::{Bus, Describe, Engine, Event, Graph, JobId, Message, NodeId, Region, Scheduler};
+use helios_core::{
+    Bus, Describe, Engine, Event, Graph, JobId, JobState, Message, NodeId, Region, Scheduler,
+};
 use helios_decision::Book;
+use helios_inspect::control::ControlRequest;
 use helios_inspect::{Inspector, Listen, new_token, serve_inspector, write_token};
 use helios_node::ExportDesc;
 use helios_photo::CameraInfo;
@@ -244,7 +248,16 @@ struct Batch {
     /// Its exports' scheduler jobs; locked while one is added, so a cancel
     /// never misses it.
     children: Arc<Mutex<Vec<JobId>>>,
+    /// When an export was last asked for it, or one of its exports seen
+    /// running.
+    touched: Mutex<Instant>,
+    /// How long it may go untouched before it is taken as orphaned.
+    idle_timeout: Duration,
 }
+
+/// How long a batch may go without an export asked for it, and none of
+/// its exports running, before it ends as orphaned.
+const BATCH_IDLE_TIMEOUT: Duration = Duration::from_mins(10);
 
 /// The batches' job ids in this node: `batch-1`, `batch-2`...
 static NEXT_BATCH: AtomicU64 = AtomicU64::new(1);
@@ -409,6 +422,7 @@ impl Node {
                     let b = batches
                         .get(batch)
                         .ok_or_else(|| Message::plain(format!("no running batch `{batch}`")))?;
+                    *b.touched.lock().expect("touched lock") = Instant::now();
                     (b.stopped.clone(), b.children.clone())
                 };
                 // Held until the export is listed: a cancel of the batch
@@ -438,7 +452,7 @@ impl Node {
 
     /// Starts a batch job: its id. Cancelled (`job.cancel`), it cancels
     /// its exports, queued or running, and refuses new ones.
-    fn batch_start(&self, title: &str, total: u64) -> String {
+    fn batch_start(&self, title: &str, total: u64, idle_timeout: Duration) -> String {
         let id = format!("batch-{}", NEXT_BATCH.fetch_add(1, Ordering::Relaxed));
         let report = self
             .jobs
@@ -462,6 +476,8 @@ impl Node {
                 total,
                 stopped,
                 children,
+                touched: Mutex::new(Instant::now()),
+                idle_timeout,
             },
         );
         id
@@ -487,6 +503,51 @@ impl Node {
             report.finished();
         }
         Ok(cancelled)
+    }
+
+    /// Ends a batch its client left without ending it: failed, saying
+    /// why; the exports already asked for go on, new ones are refused.
+    /// Nothing when it already ended.
+    fn abandon_batch(&self, id: &str, why: &str) {
+        let Some(batch) = self.batches.lock().expect("batches lock").remove(id) else {
+            return;
+        };
+        batch.stopped.store(true, Ordering::SeqCst);
+        batch.report.failed(&format!("abandoned: {why}"));
+    }
+
+    /// Ends the batches untouched for longer than their idle timeout at
+    /// `now`: no export asked for, none running.
+    fn end_idle_batches(&self, now: Instant) {
+        let idle: Vec<(String, Duration)> = {
+            let batches = self.batches.lock().expect("batches lock");
+            batches
+                .iter()
+                .filter_map(|(id, b)| {
+                    let busy = b.children.lock().expect("children lock").iter().any(|j| {
+                        matches!(
+                            self.scheduler.job(*j),
+                            Some(JobState::Queued | JobState::Running)
+                        )
+                    });
+                    let mut touched = b.touched.lock().expect("touched lock");
+                    if busy {
+                        *touched = now;
+                    }
+                    (now.saturating_duration_since(*touched) >= b.idle_timeout)
+                        .then(|| (id.clone(), b.idle_timeout))
+                })
+                .collect()
+        };
+        for (id, timeout) in idle {
+            self.abandon_batch(
+                &id,
+                &format!(
+                    "nothing asked for it in {} s, its client is gone",
+                    timeout.as_secs()
+                ),
+            );
+        }
     }
 
     /// Gives a source the image of a file: read and decoded with no lock
@@ -619,6 +680,7 @@ mod control {
     //! batch's own job.
 
     use std::sync::Arc;
+    use std::time::Duration;
 
     use helios_core::{Event, JobId, Message};
     use helios_export::Format;
@@ -758,9 +820,18 @@ mod control {
                 .cancel(id)
                 .map(|()| json!({ "cancelling": id }))
                 .map_err(Message::plain),
-            ControlRequest::BatchStart { title, total } => {
-                Ok(json!({ "id": node.batch_start(title, *total) }))
-            }
+            ControlRequest::BatchStart {
+                title,
+                total,
+                idle_timeout_s,
+                ..
+            } => Ok(json!({
+                "id": node.batch_start(
+                    title,
+                    *total,
+                    idle_timeout_s.map_or(super::BATCH_IDLE_TIMEOUT, Duration::from_secs),
+                )
+            })),
             ControlRequest::BatchEnd {
                 id,
                 failed,
@@ -877,6 +948,25 @@ mod control {
     }
 }
 
+/// Answers a control endpoint's requests; a batch started with `hold`
+/// is abandoned when the connection that asked for it closes before
+/// the batch ends (its client died).
+fn control_handler(
+    node: Arc<Node>,
+    scope: control::Scope,
+) -> impl Fn(ControlRequest, &mut helios_inspect::Connection<'_>) -> Option<Value> + Send + Sync + 'static
+{
+    move |request: ControlRequest, connection: &mut helios_inspect::Connection<'_>| {
+        let hold = matches!(request, ControlRequest::BatchStart { hold: true, .. });
+        let answer = control::answer(&node, scope, request);
+        if hold && let Some(id) = answer["id"].as_str() {
+            let (node, id) = (node.clone(), id.to_string());
+            connection.on_close(move || node.abandon_batch(&id, "its client went away"));
+        }
+        Some(answer)
+    }
+}
+
 /// Serves the batch endpoint: `load-source`, `export` and `cancel` only,
 /// in every build. A Unix socket only, readable and writable by this user
 /// alone: whoever reaches it can read and write the user's files through
@@ -885,10 +975,11 @@ fn serve_batch_control(node: &Arc<Node>, listen: &Listen) -> Result<String, Stri
     let Listen::Unix(path) = listen else {
         return Err("--batch-control takes a Unix socket path, not a TCP address".into());
     };
-    let node = node.clone();
-    let bound = helios_inspect::serve_at(listen, None, move |request| {
-        control::answer(&node, control::Scope::Batch, request)
-    })
+    let bound = helios_inspect::serve_connections_at(
+        listen,
+        None,
+        control_handler(node.clone(), control::Scope::Batch),
+    )
     .map_err(|e| format!("cannot serve the batch endpoint on {}: {e}", path.display()))?;
     #[cfg(unix)]
     {
@@ -908,10 +999,11 @@ fn serve_control(node: &Arc<Node>, listen: &Listen, token: Option<&str>) -> Resu
                 "the control endpoint is served only when HELIOS_DEBUG_CONTROL is set".into(),
             );
         }
-        let node = node.clone();
-        helios_inspect::serve_at(listen, token, move |request| {
-            control::answer(&node, control::Scope::Debug, request)
-        })
+        helios_inspect::serve_connections_at(
+            listen,
+            token,
+            control_handler(node.clone(), control::Scope::Debug),
+        )
         .map(|bound| bound.address)
         .map_err(|e| format!("cannot serve control on {listen:?}: {e}"))
     }
@@ -1146,6 +1238,19 @@ fn main() -> ExitCode {
         jobs: Jobs::new(bus.clone()),
         batches: Mutex::new(BTreeMap::new()),
     });
+    // A batch whose client went without ending it ends on its own.
+    {
+        let node = node.clone();
+        std::thread::Builder::new()
+            .name("helios-node-batches".into())
+            .spawn(move || {
+                loop {
+                    std::thread::sleep(Duration::from_millis(250));
+                    node.end_idle_batches(Instant::now());
+                }
+            })
+            .expect("a thread for the batches' watch");
+    }
     let inspector = Inspector::new(bus.clone())
         .with("graph", node.graph.clone())
         .with("engine", node.engine.clone())

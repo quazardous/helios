@@ -186,6 +186,10 @@ struct Node {
     /// The batch's job on the node, the parent of its exports; none with
     /// a node that does not know batch jobs.
     batch: Option<String>,
+    /// The connection the batch job was asked on, kept open while the
+    /// batch runs: should this process die, the node sees it close and
+    /// ends the batch.
+    held: Option<helios_inspect::Client>,
 }
 
 impl Drop for Node {
@@ -261,6 +265,7 @@ fn own_node(
                 control: Address::Unix(state.control),
                 sandbox: Some(dir),
                 batch: None,
+                held: None,
             },
             first_export,
         )),
@@ -395,6 +400,7 @@ pub fn run(
                 control: control.clone(),
                 sandbox: None,
                 batch: None,
+                held: None,
             };
             (node, first)
         }
@@ -456,13 +462,23 @@ pub fn run(
     // The batch is a job people follow on the node's bus, its exports
     // its children: cancelled there (`job.cancel`), the node cancels the
     // exports and refuses the next ones.
-    node.batch = node
-        .control(&ControlRequest::BatchStart {
-            title: format!("Batch of {} images", images.len()),
-            total: images.len() as u64,
+    // Asked on a connection held until the batch ends: should this
+    // process die, the node ends the batch instead of leaving it running.
+    let mut held = helios_inspect::Client::connect(&node.control).ok();
+    node.batch = held
+        .as_mut()
+        .and_then(|c| {
+            c.request(&ControlRequest::BatchStart {
+                title: format!("Batch of {} images", images.len()),
+                total: images.len() as u64,
+                hold: true,
+                idle_timeout_s: None,
+            })
+            .ok()
         })
-        .ok()
+        .filter(|answer| answer["ok"] == true)
         .and_then(|answer| answer["id"].as_str().map(String::from));
+    node.held = held;
     let mut failed = 0u64;
     let mut cursor = 0;
     let mut running: BTreeMap<u64, Pending> = BTreeMap::new();

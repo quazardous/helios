@@ -175,6 +175,8 @@ fn a_batch_job_is_cancelled_by_its_id() {
     let started = control(&ControlRequest::BatchStart {
         title: "Batch 2 images".into(),
         total: 2,
+        hold: false,
+        idle_timeout_s: None,
     });
     assert_eq!(started["ok"], true, "{started}");
     let id = started["id"].as_str().unwrap().to_string();
@@ -254,15 +256,11 @@ fn a_node_s_jobs_are_pushed_and_described() {
     let started = control(&ControlRequest::BatchStart {
         title: "Batch 3 images".into(),
         total: 3,
+        hold: false,
+        idle_timeout_s: None,
     });
     let id = started["id"].as_str().unwrap().to_string();
-    let next = |stream: &mut helios_inspect::Client| loop {
-        let line = stream.read().unwrap();
-        if line.get("heartbeat").is_none() {
-            return line["event"].clone();
-        }
-    };
-    let first = next(&mut stream);
+    let first = next_job(&mut stream);
     assert_eq!(first["kind"], "job.started", "{first}");
     assert_eq!(first["payload"]["id"], id.as_str());
     assert_eq!(first["payload"]["total"], 3);
@@ -283,7 +281,90 @@ fn a_node_s_jobs_are_pushed_and_described() {
         failed: 0,
         cancelled: false,
     });
-    let ended = next(&mut stream);
+    let ended = next_job(&mut stream);
     assert_eq!(ended["kind"], "job.finished", "{ended}");
     assert_eq!(ended["payload"]["id"], id.as_str());
+}
+
+/// The next `job.*` event of a subscription, heartbeats skipped.
+fn next_job(stream: &mut helios_inspect::Client) -> Value {
+    loop {
+        let line = stream.read().unwrap();
+        if line.get("heartbeat").is_none() {
+            return line["event"].clone();
+        }
+    }
+}
+
+/// A batch whose client dies without ending it does not stay running:
+/// it ends when the connection it was held on closes, or, asked on no
+/// held connection, once nothing was asked for it for its idle timeout.
+#[test]
+fn an_orphaned_batch_ends() {
+    use helios_inspect::control::ControlRequest;
+    use helios_inspect::{Address, Client};
+
+    let node = Node::start("orphan");
+    let inspect = Address::Unix(node.dir.join("node.sock"));
+    let batch = Address::Unix(node.dir.join("batch.sock"));
+    let (_, mut stream) = helios_inspect::subscribe(&inspect, "job.", None).unwrap();
+
+    // Held: the client's connection drops, the batch ends.
+    let mut client = Client::connect(&batch).unwrap();
+    let held = client
+        .request(&ControlRequest::BatchStart {
+            title: "Batch 5 images".into(),
+            total: 5,
+            hold: true,
+            idle_timeout_s: None,
+        })
+        .unwrap();
+    let id = held["id"].as_str().unwrap().to_string();
+    assert_eq!(next_job(&mut stream)["kind"], "job.started");
+    drop(client);
+    let ended = next_job(&mut stream);
+    assert_eq!(ended["kind"], "job.failed", "{ended}");
+    assert_eq!(ended["payload"]["id"], id.as_str());
+    assert!(
+        ended["payload"]["error"]
+            .as_str()
+            .unwrap()
+            .contains("client went away"),
+        "{ended}"
+    );
+
+    // Not held: it ends after its idle timeout.
+    let asked = helios_inspect::request_at(
+        &batch,
+        &ControlRequest::BatchStart {
+            title: "Batch 2 images".into(),
+            total: 2,
+            hold: false,
+            idle_timeout_s: Some(1),
+        },
+    )
+    .unwrap();
+    let id = asked["id"].as_str().unwrap().to_string();
+    assert_eq!(next_job(&mut stream)["kind"], "job.started");
+    let ended = next_job(&mut stream);
+    assert_eq!(ended["kind"], "job.failed", "{ended}");
+    assert_eq!(ended["payload"]["id"], id.as_str());
+    assert!(
+        ended["payload"]["error"]
+            .as_str()
+            .unwrap()
+            .contains("nothing asked for it in 1 s"),
+        "{ended}"
+    );
+    // Ended: its client's late end is refused, never a second end.
+    let late = helios_inspect::request_at(
+        &batch,
+        &ControlRequest::BatchEnd {
+            id,
+            failed: 0,
+            cancelled: false,
+        },
+    )
+    .unwrap();
+    assert_eq!(late["ok"], false, "{late}");
 }
