@@ -143,8 +143,20 @@ impl Files {
     /// else the blank network; the layout egui-pop saved when there is
     /// one; its own name, description and icon.
     pub fn load(&self) -> Result<State, String> {
+        let mut state = self.load_on_disk()?;
+        if let Some(layout) = self.saved_layout() {
+            state.bundle.layout = layout;
+        }
+        Ok(state)
+    }
+
+    /// The workspace as its own files hold it: as [`Files::load`], the
+    /// layout being the copy written with its state rather than
+    /// egui-pop's live document. What a desktop compares with what it
+    /// last wrote, to see a change made outside it.
+    pub fn load_on_disk(&self) -> Result<State, String> {
         let state = self.own.join(STATE_DIR);
-        let mut bundle = if state.is_dir() {
+        let bundle = if state.is_dir() {
             Bundle::load(&state)?
         } else {
             match self.origin() {
@@ -152,9 +164,6 @@ impl Files {
                 None => blank(),
             }
         };
-        if let Some(layout) = self.saved_layout() {
-            bundle.layout = layout;
-        }
         let pointer = self.pointer();
         let text = |k: &str| pointer[k].as_str().map(String::from);
         Ok(State {
@@ -197,7 +206,11 @@ impl Files {
         let dir = self.own.join(UNDO_DIR);
         let mut steps = undo_steps(&dir);
         let n = steps.last().map_or(1, |(n, _)| n + 1);
-        let record = json!({ "label": label, "state": before.to_json() });
+        let record = json!({
+            "label": label,
+            "state": before.to_json(),
+            "after": comparable(next),
+        });
         write(&dir.join(format!("{n:08}.json")), &record.to_string())?;
         steps.push((n, dir.join(format!("{n:08}.json"))));
         while steps.len() > UNDO_KEPT {
@@ -208,7 +221,9 @@ impl Files {
     }
 
     /// Undoes the last step an agent made on the files: the state before
-    /// it is written back. Returns that step's label.
+    /// it is written back. Returns that step's label. Refused when the
+    /// workspace changed since that step (a desktop edited it, or another
+    /// writer): writing the state before it back would drop that change.
     pub fn undo(&self) -> Result<String, String> {
         let dir = self.own.join(UNDO_DIR);
         let (_, last) = undo_steps(&dir)
@@ -217,10 +232,154 @@ impl Files {
         let text =
             std::fs::read_to_string(&last).map_err(|e| format!("{}: {e}", last.display()))?;
         let record: Json = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+        let label = record["label"].as_str().unwrap_or_default().to_string();
+        if let Some(after) = record.get("after")
+            && *after != comparable(&self.load()?)
+        {
+            return Err(format!(
+                "the workspace changed since the step `{label}` was made: undoing it would drop that change"
+            ));
+        }
         let state = State::from_json(&record["state"])?;
         self.save(&state, true)?;
         std::fs::remove_file(&last).map_err(|e| format!("{}: {e}", last.display()))?;
-        Ok(record["label"].as_str().unwrap_or_default().to_string())
+        Ok(label)
+    }
+
+    /// The desktop that holds the workspace open, as it said when it
+    /// opened it; `None` when none said so (or the file is unreadable).
+    /// It may have gone since without a word (killed): a holder that
+    /// cannot be reached holds nothing.
+    pub fn holder(&self) -> Option<Holder> {
+        let text = std::fs::read_to_string(self.own.join(HOLDER)).ok()?;
+        serde_json::from_str(&text).ok()
+    }
+
+    /// Says that `holder` holds the workspace open.
+    pub fn hold(&self, holder: &Holder) -> Result<(), String> {
+        write(
+            &self.own.join(HOLDER),
+            &serde_json::to_string(holder).expect("a holder serializes"),
+        )
+    }
+
+    /// Says that the desktop of process `pid` no longer holds the
+    /// workspace, unless another one took it since.
+    pub fn release(&self, pid: u32) {
+        if self.holder().is_some_and(|h| h.pid == pid) {
+            let _ = std::fs::remove_file(self.own.join(HOLDER));
+        }
+    }
+}
+
+/// Where a desktop says it holds a workspace open, among the
+/// workspace's own files: the agents' tools go through it then, rather
+/// than writing the files under it.
+pub const HOLDER: &str = "desktop.json";
+
+/// A desktop holding a workspace open: its process, and the endpoint its
+/// workspace requests go to (a Unix socket's path, or `tcp://HOST:PORT`
+/// with the session token).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Holder {
+    pub pid: u32,
+    pub address: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token: Option<String>,
+}
+
+/// A state as compared to tell whether a workspace changed: its layout
+/// left out, which egui-pop saves on its own as the user moves panels.
+fn comparable(state: &State) -> Json {
+    let mut json = state.to_json();
+    if let Some(o) = json.as_object_mut() {
+        o.remove("layout");
+    }
+    json
+}
+
+/// The parts a desktop merges by when the files of the workspace it has
+/// open change outside it ([`merge`]), each with where it lies in
+/// [`State::to_json`].
+const MERGED: &[(&str, &[&str])] = &[
+    ("name", &["/meta/name"]),
+    ("description", &["/meta/description"]),
+    ("icon", &["/meta/icon"]),
+    ("network", &["/template/network", "/composites"]),
+    ("tools", &["/template/tools"]),
+    ("library", &["/template/library"]),
+    ("layout", &["/layout"]),
+    (
+        "template",
+        &[
+            "/template/format",
+            "/template/id",
+            "/template/version",
+            "/template/meta",
+            "/template/parameters",
+            "/texts",
+        ],
+    ),
+];
+
+/// What [`merge`] made.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Reloaded {
+    pub state: State,
+    /// The parts taken from the files.
+    pub taken: Vec<&'static str>,
+    /// Among them, the parts the desktop had changed too: the files'
+    /// version won.
+    pub both: Vec<&'static str>,
+}
+
+/// A workspace's files changed under a desktop that has it open: `base`
+/// is what the desktop last wrote or read there, `ours` what it shows,
+/// `theirs` what the files hold now. Part by part ([`MERGED`]): a part
+/// only the files changed is taken from them, a part only the desktop
+/// changed is kept, and a part both changed differently is taken from
+/// the files (listed in [`Reloaded::both`]; the desktop keeps its own
+/// version one undo step back).
+pub fn merge(base: &State, ours: &State, theirs: &State) -> Result<Reloaded, String> {
+    let (b, o, t) = (base.to_json(), ours.to_json(), theirs.to_json());
+    let mut out = o.clone();
+    let (mut taken, mut both) = (Vec::new(), Vec::new());
+    for (part, pointers) in MERGED {
+        let at = |j: &Json| -> Vec<Option<Json>> {
+            pointers.iter().map(|p| j.pointer(p).cloned()).collect()
+        };
+        let (pb, po, pt) = (at(&b), at(&o), at(&t));
+        if pt == po || pt == pb {
+            continue;
+        }
+        if po != pb {
+            both.push(*part);
+        }
+        taken.push(*part);
+        for (pointer, value) in pointers.iter().zip(pt) {
+            put(&mut out, pointer, value);
+        }
+    }
+    Ok(Reloaded {
+        state: State::from_json(&out)?,
+        taken,
+        both,
+    })
+}
+
+/// Sets (or, with `None`, removes) the value at a JSON pointer whose
+/// parent is an object.
+fn put(json: &mut Json, pointer: &str, value: Option<Json>) {
+    let (parent, key) = pointer.rsplit_once('/').unwrap_or(("", pointer));
+    if let Some(Json::Object(o)) = json.pointer_mut(parent) {
+        match value {
+            Some(v) => {
+                o.insert(key.to_string(), v);
+            }
+            None => {
+                o.remove(key);
+            }
+        }
     }
 }
 
