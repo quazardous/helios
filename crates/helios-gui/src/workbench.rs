@@ -31,6 +31,14 @@ pub const PANELS: PluginId = PluginId::from_static("helios.workbench");
 /// other panel closed (small screens, culling).
 pub const IMAGE_FIRST: &str = "Image";
 
+/// The library's arrangement: the vault's grid in the centre, the stacks
+/// and duplicates beside it, every other panel closed.
+pub const LIBRARY: &str = helios_template::contexts::LIBRARY_ARRANGEMENT;
+
+/// The workspace's arrangement: its network in the centre, the modules
+/// and parameters beside it, every other panel closed.
+pub const NETWORK: &str = helios_template::contexts::NETWORK_ARRANGEMENT;
+
 /// Helios's panels, declared to egui-pop's workbench.
 pub(crate) struct Panels {
     pub specs: Vec<PanelSpec>,
@@ -60,6 +68,8 @@ impl Plugin for Panels {
             })?;
         }
         ctx.arrangement(IMAGE_FIRST, image_first(&self.specs));
+        ctx.arrangement(LIBRARY, library(&self.specs));
+        ctx.arrangement(NETWORK, network(&self.specs));
         Ok(())
     }
 }
@@ -90,6 +100,43 @@ pub fn image_first(specs: &[PanelSpec]) -> Layout {
             .collect(),
         ..Layout::default()
     }
+}
+
+/// A layout showing these panels where they go, every other one closed.
+fn only(specs: &[PanelSpec], shown: &[(Area, &str)]) -> Layout {
+    let id = |s: &str| PanelId::new(s).expect("Helios's panel ids are valid");
+    Layout {
+        areas: shown.iter().map(|(a, p)| (*a, Node::tab(id(p)))).collect(),
+        hidden: specs
+            .iter()
+            .filter(|s| !shown.iter().any(|(_, p)| *p == s.id.as_str()))
+            .map(|s| s.id.clone())
+            .collect(),
+        ..Layout::default()
+    }
+}
+
+/// The library layout of these panels (see [`LIBRARY`]).
+pub fn library(specs: &[PanelSpec]) -> Layout {
+    only(
+        specs,
+        &[
+            (Area::Center, "helios.vault"),
+            (Area::EndSide, "helios.stacks"),
+        ],
+    )
+}
+
+/// The workspace's network layout of these panels (see [`NETWORK`]).
+pub fn network(specs: &[PanelSpec]) -> Layout {
+    only(
+        specs,
+        &[
+            (Area::Center, "helios.graph"),
+            (Area::StartSide, "helios.modules"),
+            (Area::EndSide, "helios.params"),
+        ],
+    )
 }
 
 /// An area by its name: egui-pop's (`center`, `start_side`, `end_side`,

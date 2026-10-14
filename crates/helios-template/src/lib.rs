@@ -15,10 +15,13 @@
 //! - [`workspace`]: a workspace made from a template, as it is edited:
 //!   its own files, its parts, saved back as a template, reset to its
 //!   template, and parts of another imported as a copy.
+//! - [`contexts`]: Helios's places and modes on egui-pop's context
+//!   stack, shared by the desktop and the MCP server.
 
 pub mod build;
 pub mod bundle;
 pub mod catalogue;
+pub mod contexts;
 pub mod format;
 pub mod schema;
 pub mod shipped;

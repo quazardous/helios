@@ -25,6 +25,24 @@ command-graph-select =
 command-graph-view =
     .description = Fits a node editor's graph (`fit`: true), zooms to a level (`level`: overview, ports or detail) or focuses a node (`focus`), at its next frame.
 
+frame-helios-compare =
+    .title = Compare
+
+frame-helios-culling =
+    .title = Culling
+
+frame-helios-darkroom =
+    .title = Darkroom
+
+frame-helios-library =
+    .title = Library
+
+frame-helios-mask-editing =
+    .title = Mask editing
+
+frame-helios-workspace =
+    .title = Network
+
 menu-helios-masks-row-add =
     .label = Add
 
@@ -42,6 +60,9 @@ plugin-egui-pop-imaging =
 
 plugin-helios-commands =
     .title = Helios
+
+plugin-helios-contexts =
+    .title = Helios places and modes
 
 plugin-helios-display =
     .title = Display

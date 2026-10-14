@@ -64,7 +64,43 @@ migrated when read.
 reset (`workbench.arrangement.*`), kept with the interface's settings;
 Helios offers its own as templates: `Image`, the image-first layout
 for small screens and culling (the image, the filmstrip under it,
-every other panel closed).
+every other panel closed); `Library` (the vault's grid in the centre,
+the stacks beside it) and `Network` (the workspace's network in the
+centre, the modules and parameters beside it). The current arrangement
+is the place's or the mode's the user is in (see "Places and modes").
+
+### Places and modes (2026-10-14)
+
+Where the user is and how the window behaves are egui-pop's context
+stack (its ADR 0012, `docs/contexts.md` there), with Helios's frames
+declared once in `helios_template::contexts` for the desktop and the
+MCP server alike (`helios_gui::contexts` on the desktop).
+
+| Frame | Kind | What | Projection |
+|---|---|---|---|
+| `helios.library` | place | the vault's images to browse, rate and cull (`view.library`) | the `Library` arrangement |
+| `helios.darkroom` | place, payload `{"image": id}` or `{"file": path}` | an image edited: entered when one opens, under the place the user was in (the library, the root) | the workspace's own layout, and what the user picks there |
+| `helios.workspace` | place, payload the workspace's key | the workspace's network, edited (`view.network`) | the `Network` arrangement |
+| `helios.culling` | mode of `orientation`, set | culling (`view.culling`): the vault's keys (0 to 5, P, X, U, R, 6 to 9, S, Left, Right) wherever the focus is, the mask keys off | the `Image` arrangement |
+| `helios.mask-editing` | mode of `tool`, pushed, transient | drawing a mask's path | the Masks panel shown |
+| `helios.compare` | mode of `compare`, pushed | before and after side by side | the image shown |
+
+The root is the workspace the window shows. The status bar shows the
+breadcrumb and the mode chips once the user is in a place or a mode is
+on; egui-pop's `nav.back` (Alt+Left, and Escape while a mode is
+pushed) and `nav.up` go back, a chip turns its mode off. Compare and
+mask editing are short pushed modes: they show the panel they need
+rather than switch arrangement, so toggling them never moves the
+user's panels. Their state also lives in the value store (the
+viewport's `view/viewport/compare`, the mask tool): each frame,
+`contexts::Follow` keeps the two together, the side that changed
+leading (the viewport's command pushes the mode; Escape, a chip or an
+agent leaving the mode turns the flag or the tool off).
+
+**Agents.** On the desktop, egui-pop's `context.*` commands
+(`context.read`, `context.request` with `if_rev` and `dry_run`,
+`context.go`, `context.set_mode`, `context.hold`, `context.release`)
+and the debug bridge's `contexts` collector.
 
 **Palettes (2026-10-13).** The Masks panel, the Scopes and the
 Navigator may float over the image as egui-pop's palettes (`PanelSpec::floatable`,

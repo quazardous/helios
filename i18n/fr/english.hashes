@@ -119,6 +119,9 @@ command-vault-rate-4.title f95f56a53ef11e41
 command-vault-rate-5.title ae8185ae2fb6b4c8
 command-vault-rate.title fd805adcc664569a
 command-vault-reject.title cb419c21cee9d849
+command-view-culling.title 6565827e00999411
+command-view-library.title f8ecfd5316229aaf
+command-view-network.title 302d61539ec3f628
 command-viewport-compare.title 27a11d0c9daaf86f
 command-viewport-zoom-100.title be6c10eb69bafd7c
 command-viewport-zoom-fit.title 6042270d43060d0e
@@ -162,6 +165,12 @@ export-no-format 386fb46cc3dafa93
 export-not-a-file 95c780d0920978d5
 export-png-bits 7417c9b85a17189f
 export-write-failed 34d8ef0da0f905fa
+frame-helios-compare.title 0b2cb0ac030421c2
+frame-helios-culling.title 16eea5882fa67c2b
+frame-helios-darkroom.title 85327dfe18519848
+frame-helios-library.title 6d7e88ea6aaf5346
+frame-helios-mask-editing.title 9d40fb207fdf75d9
+frame-helios-workspace.title e7a125cdd87cf1f5
 gui-about-crashes 1da3aeb451edcc70
 gui-about-logs 32905031a5b47d8e
 gui-confirmed-by-policy 3cbe35a902970f08
@@ -543,6 +552,7 @@ param-whitebalance-red.description 722fa3ef16bb771a
 param-whitebalance-red.label c52ebe3823cca04a
 plugin-egui-pop-imaging.title 219716cbb2031449
 plugin-helios-commands.title 28daeae8a505789f
+plugin-helios-contexts.title 5819f33f9af005c6
 plugin-helios-display.title 48ac8940d45b8005
 plugin-helios-frame.title 56244fc898eadb9c
 plugin-helios-history.title 930c24429cb329d7

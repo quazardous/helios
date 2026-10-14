@@ -23,6 +23,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use egui_pop::model::layout::Layout;
 use egui_pop::platform::instance::{self, Instance, Launch, Single};
+use helios_gui::contexts::{self, Opened};
 use helios_gui::platform::{self, Open};
 use helios_gui::quit;
 use helios_gui::{Shell, headless, helios_panels};
@@ -340,6 +341,11 @@ impl App {
         let (graph, node) = image_graph(&path, &bundle)?;
         persist.open_image(&mut self.shell, image, graph, node, "output")?;
         self.shown = Some(Shown::Library(id.to_string()));
+        contexts::open(
+            self.shell.app().handle(),
+            &Opened::Image(id.to_string()),
+            &egui_pop::model::commands::Origin::User,
+        );
         Ok(())
     }
 
@@ -368,6 +374,11 @@ impl App {
             Open::Image(path) => {
                 let graph = image_graph(&path, &self.bundle())?;
                 show_image(&mut self.shell, self.persist.as_mut(), path.clone(), graph)?;
+                contexts::open(
+                    self.shell.app().handle(),
+                    &Opened::File(path.clone()),
+                    &egui_pop::model::commands::Origin::User,
+                );
                 self.shown = Some(Shown::File(path));
                 Ok(())
             }
@@ -718,14 +729,23 @@ fn main() -> Result<(), String> {
             {
                 shell.notes.push(format!("library commands: {e}"));
             }
-            Box::new(App {
+            let app = App {
                 persist,
                 _persist_dropped: quit::MarkOnDrop("vault link dropped"),
                 shell,
                 _shell_dropped: quit::MarkOnDrop("shell dropped"),
                 shown,
                 refill,
-            })
+            };
+            // The image named on the command line: the darkroom on it.
+            if let Some(Shown::File(path)) = &app.shown {
+                contexts::open(
+                    app.shell.app().handle(),
+                    &Opened::File(path.clone()),
+                    &egui_pop::model::commands::Origin::User,
+                );
+            }
+            Box::new(app)
         })
         .map_err(|e| e.to_string());
     quit::mark("window closed (eframe returned)");

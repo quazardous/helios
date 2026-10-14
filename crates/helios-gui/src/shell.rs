@@ -102,6 +102,11 @@ enum Action {
     Zoom(crate::viewport::ZoomTo),
     /// Before and after side by side, or not.
     Compare,
+    /// Goes to a place of the context stack at the workspace's top: the
+    /// library, or the workspace's network.
+    Place(crate::contexts::FrameId),
+    /// Culling on, off, or toggled.
+    Culling(Option<bool>),
     /// A drawn-mask command, as whom.
     Mask(crate::masks::Command, Origin),
     /// Rename a node of the Masks panel (its selected one by default) in
@@ -398,6 +403,8 @@ pub struct Shell {
     relays: crate::jobs::Relays,
     /// The lost nodes' jobs to take out of the jobs centre.
     forgotten: crate::jobs::Forgotten,
+    /// The image's compare and mask tool, kept with their modes.
+    follow: crate::contexts::Follow,
 }
 
 impl Shell {
@@ -526,6 +533,10 @@ impl Shell {
                 specs: panels.clone(),
                 contents: contents.clone(),
             })
+            // Places and modes (egui-pop's context stack), kept beside
+            // the workspace's layout.
+            .plugin(egui_pop::api::contexts::ContextsPlugin::default())
+            .plugin(crate::contexts::Frames)
             .plugin(i18n_plugin);
         if let Some(dir) = ui_settings {
             builder = builder.persist(dir);
@@ -641,6 +652,7 @@ impl Shell {
             ended: crate::jobs::Ended::default(),
             relays,
             forgotten: crate::jobs::Forgotten::default(),
+            follow: crate::contexts::Follow::default(),
         };
         for d in shell.app.handle().diagnostics() {
             shell.notes.push(format!("{}: {}", d.code, d.message));
@@ -1826,6 +1838,30 @@ impl Shell {
         }
         add(
             CommandSpec::new(
+                "view.library",
+                "Go to the library: the vault's images to browse, rate and cull",
+                "View",
+            ),
+            Box::new(|_, _| Ok(Action::Place(crate::contexts::LIBRARY))),
+        );
+        add(
+            CommandSpec::new(
+                "view.network",
+                "Go to the workspace's network, to edit it",
+                "View",
+            ),
+            Box::new(|_, _| Ok(Action::Place(crate::contexts::WORKSPACE))),
+        );
+        add(
+            CommandSpec::new(
+                "view.culling",
+                "Culling: flag, rate and label from anywhere, the image first (`on`; toggled when absent)",
+                "View",
+            ),
+            Box::new(|a, _| Ok(Action::Culling(a.get("on").and_then(Value::as_bool)))),
+        );
+        add(
+            CommandSpec::new(
                 "vault.autoAdvance",
                 "Culling: move to the next image after each mark (`on`; toggled when absent)",
                 "Vault",
@@ -1979,9 +2015,18 @@ impl Shell {
         // Culling keys as in Lightroom: P, X, U flag, 6 to 9 label, S
         // opens a stack.
         let library = "focusedPanel == 'helios.vault' || focusedPanel == 'helios.filmstrip' || focusedPanel == 'helios.compare'";
+        // While culling (a mode of the context stack), the same keys work
+        // wherever the focus is, the image's included.
+        let culling = format!(
+            "mode.{} == '{}'",
+            crate::contexts::ORIENTATION,
+            crate::contexts::CULLING
+        );
         for n in 0..=5 {
-            d.keys
-                .push((n.to_string(), format!("vault.rate.{n}"), library.into()));
+            for when in [library, culling.as_str()] {
+                d.keys
+                    .push((n.to_string(), format!("vault.rate.{n}"), when.into()));
+            }
         }
         for (k, command) in [
             ("R", "vault.reject"),
@@ -1996,12 +2041,19 @@ impl Shell {
             ("9", "vault.label.blue"),
             ("S", "vault.stack.toggle"),
         ] {
-            d.keys.push((k.into(), command.into(), library.into()));
+            for when in [library, culling.as_str()] {
+                d.keys.push((k.into(), command.into(), when.into()));
+            }
         }
         // Drawing masks, while the image has the focus. Escape and Enter
         // bind only while a path is drawn: otherwise Escape is the
         // viewport's (it cancels a drag).
-        let image = "focusedPanel == 'helios.viewport'";
+        // Not while culling: its keys are the vault's there.
+        let image = format!(
+            "focusedPanel == 'helios.viewport' && {}",
+            culling.replace("==", "!=")
+        );
+        let image = image.as_str();
         for (k, command, when) in [
             ("C", "mask.add.circle", image.to_string()),
             ("E", "mask.add.ellipse", image.to_string()),
@@ -2012,10 +2064,13 @@ impl Shell {
                 "mask.path.close",
                 format!("{image} && maskTool == 'path'"),
             ),
+            // While a path is drawn, mask editing is a pushed mode:
+            // Escape pops it (egui-pop's `nav.back`), which stops the
+            // path; this binding serves a path drawn without the stack.
             (
                 "Escape",
                 "mask.cancel",
-                format!("{image} && maskTool == 'path'"),
+                format!("{image} && maskTool == 'path' && !modePushed"),
             ),
             (
                 "Delete",
@@ -3294,6 +3349,26 @@ impl Shell {
                 let mut library = self.library.borrow_mut();
                 library.auto_advance = on.unwrap_or(!library.auto_advance);
             }
+            Action::Place(frame) => {
+                let payload = if frame == crate::contexts::WORKSPACE {
+                    Value::from(self.workspace().ok_or("no workspace is open")?)
+                } else {
+                    Value::Null
+                };
+                return crate::contexts::go(
+                    self.app.handle(),
+                    frame,
+                    payload,
+                    &egui_pop::model::commands::Origin::User,
+                );
+            }
+            Action::Culling(on) => {
+                return crate::contexts::culling(
+                    self.app.handle(),
+                    on,
+                    &egui_pop::model::commands::Origin::User,
+                );
+            }
             Action::ImportSource(path) => return Ok(self.import_from_source(path)),
             Action::ToggleStack => self
                 .library
@@ -3565,6 +3640,8 @@ impl Shell {
         self.viewport.borrow_mut().set_wanted(wanted);
         self.app.logic(&ctx);
         self.apply_queue(&ctx);
+        self.follow
+            .frame(self.app.handle(), &mut lock(&self.values));
         // An undo or a redo of the workspace's state, put in place.
         self.sync_workspace();
         // The theme asked for is installed here, before anything is drawn.

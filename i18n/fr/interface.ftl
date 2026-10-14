@@ -24,6 +24,24 @@ command-graph-select =
 command-graph-view =
     .description = Ajuste le graphe d’un éditeur de nœuds (`fit` : true), zoome à un niveau (`level` : overview, ports ou detail) ou cible un nœud (`focus`), à sa prochaine image.
 
+frame-helios-compare =
+    .title = Comparaison
+
+frame-helios-culling =
+    .title = Tri
+
+frame-helios-darkroom =
+    .title = Chambre noire
+
+frame-helios-library =
+    .title = Bibliothèque
+
+frame-helios-mask-editing =
+    .title = Édition de masque
+
+frame-helios-workspace =
+    .title = Réseau
+
 menu-helios-masks-row-add =
     .label = Ajouter
 
@@ -41,6 +59,9 @@ plugin-egui-pop-imaging =
 
 plugin-helios-commands =
     .title = Helios
+
+plugin-helios-contexts =
+    .title = Lieux et modes d’Helios
 
 plugin-helios-display =
     .title = Affichage
