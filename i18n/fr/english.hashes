@@ -316,6 +316,9 @@ gui-workspace-library-stacks 6760c8455f27e6aa
 gui-workspace-library-title 598be87159883762
 gui-workspace-name 23e46144529fec9c
 gui-workspace-not-saved f925174995d7c238
+gui-workspace-reload-failed 26bff0cb4b88693d
+gui-workspace-reloaded c664ffdee16cb231
+gui-workspace-reloaded-both b056d3d1831934f6
 gui-workspace-template-ask a5a282fc2d83eec2
 gui-workspace-template-description-fr d90dc5a8f219c406
 gui-workspace-template-id 09a0e956e63e3e02

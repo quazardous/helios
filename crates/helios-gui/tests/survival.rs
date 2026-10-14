@@ -4,7 +4,9 @@
 //! with SIGKILL in the middle of a drag. After each, the history, its end
 //! (the head version), the ratings, the labels and the metadata must be
 //! what the last saved step left, and reopening shows exactly that. A
-//! workspace's layout, changed then killed, is kept too.
+//! workspace's layout, changed then killed, is kept too; so is an
+//! agent's edit made through the desktop (the node's MCP tools), with the
+//! desktop's own step after it.
 //!
 //! The child says what it saved on stdout from the `edit.saved` events of
 //! the bus: the parent reads those lines, it never sleeps. These scenarios
@@ -94,6 +96,24 @@ fn survival_child() {
     };
     let dir = PathBuf::from(dir);
     let scenario = std::env::var("HELIOS_GUI_SURVIVAL_SCENARIO").unwrap();
+    if scenario == "agent" {
+        // The workspace held open: an agent's edit answered, then a step
+        // of the desktop's own, then killed.
+        let mut h = workspace_window(&dir);
+        writeln!(std::io::stdout(), "\nlistening").unwrap();
+        std::io::stdout().flush().unwrap();
+        assert!(h.state().wait_workspace_request(CHILD_DEADLINE));
+        h.run();
+        h.state_mut()
+            .edit_workspace(&json!({ "name": "Harbour" }), &Origin::User)
+            .unwrap();
+        h.run();
+        writeln!(std::io::stdout(), "\nready").unwrap();
+        std::io::stdout().flush().unwrap();
+        let mut line = String::new();
+        let _ = std::io::stdin().read_line(&mut line);
+        return;
+    }
     if scenario == "layout" {
         // A panel moved to a window of its own, the workspace described
         // and its culling set, then killed.
@@ -224,6 +244,16 @@ fn place(name: &str) -> (PathBuf, ImageId) {
 /// Runs the child on a scenario; returns what it said it saved (step,
 /// version), and kills it once it is ready when `kill` is set.
 fn run_child(dir: &Path, scenario: &str, kill: bool) -> Vec<(u64, String)> {
+    run_child_with(dir, scenario, kill, &mut |_| {})
+}
+
+/// [`run_child`], `on_line` seeing each line the child says.
+fn run_child_with(
+    dir: &Path,
+    scenario: &str,
+    kill: bool,
+    on_line: &mut dyn FnMut(&str),
+) -> Vec<(u64, String)> {
     let mut child = Command::new(std::env::current_exe().unwrap())
         .args([
             "survival_child",
@@ -261,6 +291,7 @@ fn run_child(dir: &Path, scenario: &str, kill: bool) -> Vec<(u64, String)> {
                 panic!("the child said nothing for {CHILD_DEADLINE:?}: killed");
             }
         };
+        on_line(&line);
         if let Some(rest) = line.strip_prefix("saved ") {
             let (step, version) = rest.split_once(' ').unwrap();
             saved.push((step.parse().unwrap(), version.to_string()));
@@ -397,5 +428,50 @@ fn survival_killed_after_moving_a_panel_and_editing_the_workspace_keeps_both() {
     let state = shell.workspace_state().unwrap();
     assert_eq!(state.meta.description, "Harbour");
     assert!(shell.library().auto_advance);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn survival_killed_after_an_agent_s_edit_through_the_desktop_keeps_it() {
+    let (dir, _) = place("agent");
+    let workspace = dir.join("photos");
+    let mut agent = None;
+    let mut on_line = |line: &str| {
+        if line == "listening" {
+            let arguments = json!({
+                "workspace": workspace, "config": dir,
+                "changes": { "description": "From the agent" },
+            });
+            agent = Some(std::thread::spawn(move || {
+                let mut sockets = helios_node::mcp::Sockets {
+                    inspect: None,
+                    control: None,
+                    node_bin: PathBuf::from("helios-node"),
+                    ai: None,
+                };
+                helios_node::mcp::handle(
+                    &mut sockets,
+                    &json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                        "params": { "name": "helios_workspace_edit", "arguments": arguments } }),
+                )
+                .unwrap()
+            }));
+        }
+    };
+    run_child_with(&dir, "agent", true, &mut on_line);
+    let answer = agent.expect("the child listened").join().unwrap();
+    let text = answer["result"]["content"][0]["text"].as_str().unwrap();
+    assert_eq!(answer["result"]["isError"], false, "{text}");
+    assert!(
+        text.contains("\"desktop\""),
+        "answered by the desktop: {text}"
+    );
+    // Reopened: the agent's edit and the desktop's step after it.
+    let shell = workspace_shell(&dir);
+    let state = shell.workspace_state().unwrap();
+    assert_eq!(
+        (state.meta.name.as_str(), state.meta.description.as_str()),
+        ("Harbour", "From the agent")
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }

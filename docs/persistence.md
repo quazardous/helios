@@ -75,7 +75,9 @@ quit.
 **Survival scenarios** gate a release (`cargo xtask release` runs them
 first, CI runs them by name): `cargo survival` runs the desktop's (quit
 and reopen; `kill -9` in the middle of a drag; `kill -9` after a panel
-moved, its workspace's layout kept) and the node's (`kill -9` after
+moved, its workspace's layout kept; `kill -9` after an agent's edit
+made through the desktop and a step of the desktop's own after it, both
+kept) and the node's (`kill -9` after
 changes answered through control; `kill -9` during an export). After
 each, the history, its end, the ratings, the labels and the metadata must
 equal the last saved step.
@@ -261,6 +263,12 @@ equal the last saved step.
    (written once).
 7. **Version heads** are safe by construction: an edit never overwrites,
    it adds a version with parents; concurrent edits become two heads.
+8. **A workspace's files written under an open desktop** (fixed: the
+   agents' tools go through the desktop that holds it; a change made
+   outside is taken in as an undo step, checked again before each of the
+   desktop's writes; see templates.md, "Editing a workspace"). The
+   desktop kept the workspace's state in memory and wrote it whole at its
+   next step, over an agent's edit made to the files meanwhile.
 
 ### Where each step must be persisted
 

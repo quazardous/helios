@@ -447,6 +447,12 @@ gui-workspace-name = name
 
 gui-workspace-not-saved = The workspace was not saved: { $error }
 
+gui-workspace-reload-failed = The workspace's files changed outside Helios and could not be read: { $error }
+
+gui-workspace-reloaded = The workspace's files changed outside Helios: { $parts } reloaded
+
+gui-workspace-reloaded-both = The workspace's files changed outside Helios while you changed it too: { $both } taken from the files (Edit > Undo gives yours back)
+
 gui-workspace-template-ask = ask on create: { $name }
 
 gui-workspace-template-description-fr = description in French

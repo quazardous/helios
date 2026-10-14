@@ -53,6 +53,7 @@ pub use crate::workbench::Content;
 pub use workspace_edit::STATE as WORKSPACE_STATE;
 
 mod workspace_edit;
+mod workspace_live;
 
 /// The screen's own scale (physical pixels per point, the interface zoom
 /// left out) from which it is `hidpi` for profile variants.
@@ -820,6 +821,8 @@ impl Shell {
     /// the interface's settings, the user's keys and the layout.
     pub fn exit(&mut self) -> Result<(), String> {
         use egui_pop::api::steps::Outcome;
+        // Agents write the workspace's files again from now on.
+        self.release_workspace();
         match self.app.exit() {
             Outcome::Done(r) => r.map(|_| ()),
             Outcome::Vetoed { by, reason } => Err(format!("exit stopped by `{by}`: {reason}")),
@@ -3497,6 +3500,8 @@ impl Shell {
         self.viewport.borrow_mut().set_wanted(wanted);
         self.app.logic(&ctx);
         self.apply_queue(&ctx);
+        // The workspace's files changed outside, and agents' requests.
+        self.follow_workspace(&ctx);
         // An undo or a redo of the workspace's state, put in place.
         self.sync_workspace();
         // The theme asked for is installed here, before anything is drawn.
