@@ -14,7 +14,8 @@
 //! Each is mapped to an arrangement, or, for the short pushed modes, to
 //! the panels it shows, so toggling them never moves the user's panels.
 //! The stack of a workspace is egui-pop's `context` document beside its
-//! layout, `<config>/ui/workspaces/<key>/context.json`.
+//! layout, `<config>/ui/workspaces/<key>/context.json`; [`tools`] reads
+//! it and applies transitions to it for agents.
 
 use std::path::{Path, PathBuf};
 
@@ -129,9 +130,149 @@ impl Opened {
     }
 }
 
+/// A workspace's stack, egui-pop's `context` document:
+/// `<config>/ui/workspaces/<key>/context.json`.
+pub fn document(config: &Path, workspace: &Path) -> PathBuf {
+    config
+        .join("ui")
+        .join("workspaces")
+        .join(crate::workspace::key(workspace))
+        .join("context.json")
+}
+
+/// The tools agents reach the stack with through MCP, on a workspace's
+/// `context` document: what a desktop opening the workspace comes back
+/// to. Each transition goes through egui-pop's pure machine against
+/// Helios's frames, with `if_rev` and `dry_run`.
+pub mod tools {
+    use std::path::{Path, PathBuf};
+
+    use egui_pop_model::context::{self, ContextDoc, Envelope, Request};
+    use serde_json::{Value as Json, json};
+
+    fn workspace(args: &Json) -> Result<PathBuf, String> {
+        let dir = args["workspace"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .map(PathBuf::from)
+            .ok_or("`workspace` is missing")?;
+        if dir.is_absolute() {
+            Ok(dir)
+        } else {
+            Err("`workspace` is an absolute path".into())
+        }
+    }
+
+    fn load(path: &Path) -> Result<ContextDoc, String> {
+        match std::fs::read_to_string(path) {
+            Ok(text) => context::schema()
+                .load::<ContextDoc>(&text)
+                .map(|l| l.value)
+                .map_err(|e| format!("{}: {e}", path.display())),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(ContextDoc::default()),
+            Err(e) => Err(format!("{}: {e}", path.display())),
+        }
+    }
+
+    fn save(path: &Path, doc: &ContextDoc) -> Result<(), String> {
+        let text = context::schema().save(doc).map_err(|e| e.to_string())?;
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+        }
+        // Written whole, then moved over the old one.
+        let tmp = path.with_extension("json.tmp");
+        std::fs::write(&tmp, text).map_err(|e| e.to_string())?;
+        std::fs::rename(&tmp, path).map_err(|e| e.to_string())
+    }
+
+    /// `{workspace}`: the stack (places, modes, revision) and the frames
+    /// it may hold.
+    pub fn read(config: &Path, args: &Json) -> Result<Json, String> {
+        let dir = workspace(args)?;
+        let path = super::document(config, &dir);
+        let doc = load(&path)?;
+        let frames: Vec<_> = super::frames();
+        Ok(json!({
+            "state": doc.state,
+            "rev": doc.state.rev,
+            "place": doc.state.place(),
+            "frames": frames,
+            "document": path,
+        }))
+    }
+
+    /// `{workspace, request, if_rev?, dry_run}`: a transition (`request`
+    /// as egui-pop's `context.request` takes it: `op` enter, leave, jump,
+    /// go, `set_mode`, `push_mode`, `pop_mode`, `clear_mode` or back), checked
+    /// against `if_rev`, written unless `dry_run`. A refusal is an error
+    /// saying why.
+    pub fn request(config: &Path, args: &Json) -> Result<Json, String> {
+        let dir = workspace(args)?;
+        let request: Request = serde_json::from_value(args["request"].clone())
+            .map_err(|e| format!("`request`: {e}"))?;
+        envelope(config, &dir, request, args)
+    }
+
+    /// `{workspace, places, dry_run}`: goes to a place path (`places`:
+    /// each `frame` with its `payload`).
+    pub fn go(config: &Path, args: &Json) -> Result<Json, String> {
+        let dir = workspace(args)?;
+        let places =
+            serde_json::from_value(args["places"].clone()).map_err(|e| format!("`places`: {e}"))?;
+        envelope(config, &dir, Request::Go { places }, args)
+    }
+
+    /// `{workspace, mode?, push?, group?, dry_run}`: sets a mode, pushes
+    /// it (`push`), or turns a group off (`group`, no `mode`).
+    pub fn set_mode(config: &Path, args: &Json) -> Result<Json, String> {
+        let dir = workspace(args)?;
+        let request = match args["mode"].as_str().filter(|m| !m.is_empty()) {
+            Some(m) => {
+                let mode = egui_pop_model::ids::FrameId::new(m).map_err(|e| e.to_string())?;
+                if args["push"].as_bool() == Some(true) {
+                    Request::push(mode)
+                } else {
+                    Request::set(mode)
+                }
+            }
+            None => Request::ClearMode {
+                group: serde_json::from_value(args["group"].clone())
+                    .map_err(|e| format!("`group` (or `mode`): {e}"))?,
+            },
+        };
+        envelope(config, &dir, request, args)
+    }
+
+    fn envelope(config: &Path, dir: &Path, request: Request, args: &Json) -> Result<Json, String> {
+        let path = super::document(config, dir);
+        let mut doc = load(&path)?;
+        let registry = super::registry(&crate::workspace::key(dir));
+        let env = Envelope {
+            request,
+            if_rev: args["if_rev"].as_u64(),
+            dry_run: args["dry_run"].as_bool().unwrap_or(false),
+        };
+        let t = context::apply(&doc.state, &registry, &[], &env)
+            .map_err(|r| format!("refused ({:?}, by {}): {}", r.kind, r.by, r.reason))?;
+        if !env.dry_run {
+            doc.state = t.state.clone();
+            save(&path, &doc)?;
+        }
+        Ok(json!({
+            "dry_run": env.dry_run,
+            "rev": t.state.rev,
+            "state": t.state,
+            "entered": t.entered,
+            "left": t.left,
+            "redirected": t.redirected,
+        }))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn the_frames_are_declared_once_with_their_groups() {
@@ -140,6 +281,60 @@ mod tests {
         let groups = r.groups();
         assert_eq!(groups.len(), 3);
         assert!(r.get(&MASK_EDITING).unwrap().transient);
+    }
+
+    #[test]
+    fn an_agent_moves_a_workspace_stack_with_dry_runs() {
+        let root = std::env::temp_dir().join(format!("helios-contexts-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let config = root.join("config");
+        let ws = root.join("shoot");
+        let key = crate::workspace::key(&ws);
+        let args = |extra: serde_json::Value| {
+            let mut a = json!({ "workspace": ws });
+            for (k, v) in extra.as_object().unwrap() {
+                a[k] = v.clone();
+            }
+            a
+        };
+        let read = tools::read(&config, &args(json!({}))).unwrap();
+        assert_eq!(read["place"], "root");
+        assert_eq!(read["frames"].as_array().unwrap().len(), 6);
+        // A dry run answers, writes nothing.
+        let places = json!([{ "frame": "helios.library" }, { "frame": "helios.darkroom", "payload": { "image": "ab12" } }]);
+        let dry = tools::go(&config, &args(json!({ "places": places, "dry_run": true }))).unwrap();
+        assert_eq!(dry["dry_run"], true);
+        assert_eq!(dry["state"]["places"][1]["payload"]["image"], "ab12");
+        assert!(!document(&config, &ws).exists());
+        let done = tools::go(&config, &args(json!({ "places": places }))).unwrap();
+        assert_eq!(done["rev"], 1);
+        // A mode, then a stale revision refused.
+        let set = tools::set_mode(
+            &config,
+            &args(json!({ "mode": "helios.culling", "if_rev": 1 })),
+        )
+        .unwrap();
+        assert_eq!(set["rev"], 2);
+        let stale = tools::set_mode(
+            &config,
+            &args(json!({ "group": "orientation", "if_rev": 1 })),
+        );
+        assert!(stale.unwrap_err().contains("Stale"));
+        // Another workspace's network is refused by its guard.
+        let other = tools::request(
+            &config,
+            &args(
+                json!({ "request": { "op": "enter", "frame": "helios.workspace", "payload": "elsewhere" } }),
+            ),
+        );
+        assert!(other.unwrap_err().contains(&key));
+        let read = tools::read(&config, &args(json!({}))).unwrap();
+        assert_eq!(read["place"], "helios.darkroom");
+        assert_eq!(read["state"]["modes"][0]["frame"], "helios.culling");
+        // Written as the desktop reads it.
+        let text = std::fs::read_to_string(document(&config, &ws)).unwrap();
+        assert!(text.contains("\"kind\": \"context\"") || text.contains("\"kind\":\"context\""));
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

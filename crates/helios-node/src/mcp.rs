@@ -20,6 +20,14 @@
 //! `helios_workspace_undo`. A desktop showing that workspace reads the
 //! files when it opens it.
 //!
+//! The `helios_context_*` tools are egui-pop's `context.*` commands for a
+//! workspace: they read its places and modes (the library, the darkroom
+//! on an image, its network; culling, mask editing, compare) and move
+//! them, through the same machine and frames as the desktop
+//! (`helios_template::contexts`), each with `if_rev` and a dry run. They
+//! work on the stack the workspace keeps beside its layout: what a
+//! desktop comes back to when it opens the workspace.
+//!
 //! Transport: JSON-RPC 2.0, one message per line on stdin and stdout.
 
 use std::path::PathBuf;
@@ -196,6 +204,10 @@ fn strings() -> Value {
 
 fn optional_object() -> Value {
     json!({ "type": ["object", "null"] })
+}
+
+fn objects() -> Value {
+    json!({ "type": "array", "items": { "type": "object" } })
 }
 
 fn object() -> Value {
@@ -446,6 +458,85 @@ pub const TOOLS: &[Tool] = &[
         cmd: "workspace.undo",
         description: "Undoes the last step these tools made on a workspace",
         params: &[WORKSPACE, CONFIG],
+    },
+    Tool {
+        name: "helios_context_read",
+        endpoint: Endpoint::Workspace,
+        cmd: "context.read",
+        description: "A workspace's places and modes, as a desktop opening it comes back to: the place path (the library, the darkroom on an image, its network), the modes on (culling, mask editing, compare), the revision, and every frame it may hold",
+        params: &[WORKSPACE, CONFIG],
+    },
+    Tool {
+        name: "helios_context_request",
+        endpoint: Endpoint::Workspace,
+        cmd: "context.request",
+        description: "Any transition of a workspace's places and modes, as egui-pop's context.request takes it: `request` with `op` enter (`frame`, `payload`), leave, jump (`depth`), go (`places`), set_mode or push_mode (`mode`), pop_mode, clear_mode (`group`) or back; refused when the stack is no longer at `if_rev`; a dry run answers without writing",
+        params: &[
+            WORKSPACE,
+            Param {
+                name: "request",
+                schema: object,
+                description: "The transition: {\"op\": \"enter\", \"frame\": \"helios.library\"}, {\"op\": \"back\"}...",
+                default: None,
+            },
+            optional(
+                "if_rev",
+                optional_integer,
+                "Refused unless the stack is still at this revision",
+            ),
+            DRY_RUN,
+            CONFIG,
+        ],
+    },
+    Tool {
+        name: "helios_context_go",
+        endpoint: Endpoint::Workspace,
+        cmd: "context.go",
+        description: "Goes to a place path of a workspace: `places`, each a `frame` (helios.library, helios.darkroom, helios.workspace) with its `payload` (the darkroom's {\"image\": id} or {\"file\": path}, the workspace's key)",
+        params: &[
+            WORKSPACE,
+            Param {
+                name: "places",
+                schema: objects,
+                description: "The path from the root: [{\"frame\": \"helios.library\"}, {\"frame\": \"helios.darkroom\", \"payload\": {\"image\": \"…\"}}]",
+                default: None,
+            },
+            optional(
+                "if_rev",
+                optional_integer,
+                "Refused unless the stack is still at this revision",
+            ),
+            DRY_RUN,
+            CONFIG,
+        ],
+    },
+    Tool {
+        name: "helios_context_set_mode",
+        endpoint: Endpoint::Workspace,
+        cmd: "context.set_mode",
+        description: "Sets a mode of a workspace (`mode`: helios.culling, helios.compare...), pushes it for a moment (`push`), or turns a group off (`group`: orientation, tool, compare; no `mode`)",
+        params: &[
+            WORKSPACE,
+            optional("mode", optional_string, "The mode to turn on"),
+            Param {
+                name: "push",
+                schema: boolean,
+                description: "Pushed (popped by back) rather than set",
+                default: Some(no),
+            },
+            optional(
+                "group",
+                optional_string,
+                "The group to turn off, without `mode`",
+            ),
+            optional(
+                "if_rev",
+                optional_integer,
+                "Refused unless the stack is still at this revision",
+            ),
+            DRY_RUN,
+            CONFIG,
+        ],
     },
     Tool {
         name: "helios_sandbox_start",
@@ -1195,7 +1286,8 @@ pub fn workspace_catalogue() -> helios_template::Catalogue {
     c
 }
 
-/// A `helios_workspace_*` tool, on the workspace's files.
+/// A `helios_workspace_*` or `helios_context_*` tool, on the workspace's
+/// files.
 fn workspace_call(request: &Value) -> Result<Value, String> {
     use helios_template::workspace::{config_dir, tools};
     let config = request["config"]
@@ -1215,6 +1307,10 @@ fn workspace_call(request: &Value) -> Result<Value, String> {
         "workspace.import_parts" => tools::import_parts(&config, &args, &catalogue),
         "workspace.save_as_template" => tools::save_as_template(&config, &args, &catalogue),
         "workspace.undo" => tools::undo(&config, &args),
+        "context.read" => helios_template::contexts::tools::read(&config, &args),
+        "context.request" => helios_template::contexts::tools::request(&config, &args),
+        "context.go" => helios_template::contexts::tools::go(&config, &args),
+        "context.set_mode" => helios_template::contexts::tools::set_mode(&config, &args),
         other => Err(format!("no workspace tool `{other}`")),
     }
 }
@@ -1449,6 +1545,77 @@ mod tests {
             result["isError"] == true,
             serde_json::from_str(text).unwrap_or(json!(text)),
         )
+    }
+
+    #[test]
+    fn an_agent_moves_a_workspace_s_places_and_modes_through_mcp() {
+        let root = std::env::temp_dir().join(format!("helios-mcp-context-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let (config, ws) = (root.join("config"), root.join("shoot"));
+        let mut s = Sockets {
+            inspect: None,
+            control: None,
+            node_bin: PathBuf::from("helios-node"),
+            ai: None,
+        };
+        let args = |extra: Value| {
+            let mut a = json!({ "workspace": ws, "config": config });
+            for (k, v) in extra.as_object().unwrap() {
+                a[k] = v.clone();
+            }
+            a
+        };
+        let (failed, read) = tool(&mut s, "helios_context_read", args(json!({})));
+        assert!(!failed, "{read}");
+        assert_eq!(read["place"], "root");
+        // The library, then the darkroom on an image: a dry run first.
+        let places = json!([{ "frame": "helios.library" },
+            { "frame": "helios.darkroom", "payload": { "image": "ab12" } }]);
+        let (failed, dry) = tool(
+            &mut s,
+            "helios_context_go",
+            args(json!({ "places": places, "dry_run": true })),
+        );
+        assert!(!failed && dry["dry_run"] == true, "{dry}");
+        let (_, read) = tool(&mut s, "helios_context_read", args(json!({})));
+        assert_eq!(read["rev"], 0, "a dry run writes nothing");
+        let (failed, went) = tool(
+            &mut s,
+            "helios_context_go",
+            args(json!({ "places": places })),
+        );
+        assert!(!failed, "{went}");
+        // Culling set, compare pushed, then back pops compare.
+        let (failed, _) = tool(
+            &mut s,
+            "helios_context_set_mode",
+            args(json!({ "mode": "helios.culling", "if_rev": 1 })),
+        );
+        assert!(!failed);
+        let (failed, _) = tool(
+            &mut s,
+            "helios_context_set_mode",
+            args(json!({ "mode": "helios.compare", "push": true })),
+        );
+        assert!(!failed);
+        let (failed, back) = tool(
+            &mut s,
+            "helios_context_request",
+            args(json!({ "request": { "op": "back" } })),
+        );
+        assert!(!failed, "{back}");
+        assert_eq!(back["left"], json!(["helios.compare"]));
+        // A stale revision is refused, and says so.
+        let (failed, stale) = tool(
+            &mut s,
+            "helios_context_request",
+            args(json!({ "request": { "op": "leave" }, "if_rev": 1 })),
+        );
+        assert!(failed, "{stale}");
+        let (_, read) = tool(&mut s, "helios_context_read", args(json!({})));
+        assert_eq!(read["place"], "helios.darkroom");
+        assert_eq!(read["state"]["modes"][0]["frame"], "helios.culling");
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
