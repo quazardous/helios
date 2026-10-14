@@ -94,18 +94,17 @@ def process_start(pid: int) -> float | None:
     """When a process started, on the wall clock (to the kernel's tick)."""
     try:
         stat = Path(f"/proc/{pid}/stat").read_text()
-        boot = next(
-            int(line.split()[1])
-            for line in Path("/proc/stat").read_text().splitlines()
-            if line.startswith("btime ")
-        )
-    except (OSError, StopIteration, ValueError):
+        uptime = float(Path("/proc/uptime").read_text().split()[0])
+        now = time.time()
+    except (OSError, IndexError, ValueError):
         return None
-    # The fields after the command's closing parenthesis; starttime is
-    # the 22nd field of the line, the 20th after it.
+    # The fields after the command's closing parenthesis; starttime (in
+    # ticks since boot) is the 22nd field of the line, the 20th after it.
+    # Lined up through the uptime rather than the boot time, which
+    # /proc/stat gives in whole seconds only.
     fields = stat.rsplit(")", 1)[1].split()
     ticks = int(fields[19])
-    return boot + ticks / os.sysconf("SC_CLK_TCK")
+    return now - (uptime - ticks / os.sysconf("SC_CLK_TCK"))
 
 
 def launch_args(args, kind: str, raw: Path) -> list[str]:
