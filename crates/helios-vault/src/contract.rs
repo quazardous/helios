@@ -48,13 +48,15 @@ fn an_edit_is_saved_step_by_step_and_reopened_at_its_head<S: Store>(s: S) {
         json!({ "modules": [{ "name": "exp", "module": "exposure",
         "params": { "exposure": { "float": ev } } }] })
     };
-    let (mut session, head) = EditSession::open(&v, a, "user").unwrap();
+    let (mut session, head) = EditSession::open(&v, a).unwrap();
     assert!(head.is_none(), "never edited");
-    let first = session.save(&v, edit(1.0), "set exposure", 1).unwrap();
+    let first = session
+        .save(&v, edit(1.0), "set exposure", "user", 1)
+        .unwrap();
     assert!(first.is_some());
     assert!(
         session
-            .save(&v, edit(1.0), "set exposure", 2)
+            .save(&v, edit(1.0), "set exposure", "user", 2)
             .unwrap()
             .is_none(),
         "a step that changed nothing is not saved"
@@ -62,11 +64,11 @@ fn an_edit_is_saved_step_by_step_and_reopened_at_its_head<S: Store>(s: S) {
     // A drag saved while it goes, then at its end with the same values:
     // the end is saved too, so the history names the finished gesture.
     session
-        .save_in_progress(&v, edit(1.5), "drag exposure", 3)
+        .save_in_progress(&v, edit(1.5), "drag exposure", "user", 3)
         .unwrap()
         .unwrap();
     let end = session
-        .save(&v, edit(1.5), "drag exposure", 4)
+        .save(&v, edit(1.5), "drag exposure", "user", 4)
         .unwrap()
         .unwrap();
     assert_eq!(session.steps(), 3);
@@ -90,7 +92,7 @@ fn an_edit_is_saved_step_by_step_and_reopened_at_its_head<S: Store>(s: S) {
         ]
     );
     // Reopened: the head is the last step, its history the chain.
-    let (mut again, head) = EditSession::open(&v, a, "user").unwrap();
+    let (mut again, head) = EditSession::open(&v, a).unwrap();
     let head = head.unwrap();
     assert_eq!(head.id, end.id);
     assert_eq!(head.edit, edit(1.5));
@@ -99,11 +101,15 @@ fn an_edit_is_saved_step_by_step_and_reopened_at_its_head<S: Store>(s: S) {
     assert_eq!(v.heads(&a).unwrap().len(), 1, "one line of history");
     // Two sessions continuing the same head make two heads; the newest
     // is the one opened next.
-    let (mut other, _) = EditSession::open(&v, a, "agent").unwrap();
-    other.save(&v, edit(2.0), "set exposure", 10).unwrap();
-    again.save(&v, edit(0.5), "set exposure", 11).unwrap();
+    let (mut other, _) = EditSession::open(&v, a).unwrap();
+    other
+        .save(&v, edit(2.0), "set exposure", "agent", 10)
+        .unwrap();
+    again
+        .save(&v, edit(0.5), "set exposure", "user", 11)
+        .unwrap();
     assert_eq!(v.heads(&a).unwrap().len(), 2, "neither overwrote the other");
-    let (_, newest) = EditSession::open(&v, a, "user").unwrap();
+    let (_, newest) = EditSession::open(&v, a).unwrap();
     assert_eq!(newest.unwrap().edit, edit(0.5));
 }
 

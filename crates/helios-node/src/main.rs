@@ -177,7 +177,7 @@ fn open_edit(
         .map_err(|e| format!("{}: {e}", vault_file.display()))?;
     let vault = helios_vault::Vault::new(store).with_bus(bus.clone());
     let image = vault.import_file(file, unix_now())?;
-    let (session, head) = helios_vault::EditSession::open(&vault, image, "control")?;
+    let (session, head) = helios_vault::EditSession::open(&vault, image)?;
     let marks = head
         .as_ref()
         .map_or(Value::Null, |h| h.edit["marks"].clone());
@@ -263,11 +263,11 @@ const BATCH_IDLE_TIMEOUT: Duration = Duration::from_mins(10);
 static NEXT_BATCH: AtomicU64 = AtomicU64::new(1);
 
 impl Node {
-    /// Saves the edit as it is now as a version continuing the last one;
-    /// its id, or `None` when the node keeps no edit or nothing changed.
-    /// The session is locked first, so two changes answered at once are
-    /// saved in the order they were made.
-    fn save_edit(&self, label: &str) -> Result<Option<String>, String> {
+    /// Saves the edit as it is now as a version continuing the last one,
+    /// made by `origin`; its id, or `None` when the node keeps no edit or
+    /// nothing changed. The session is locked first, so two changes
+    /// answered at once are saved in the order they were made.
+    fn save_edit(&self, label: &str, origin: &str) -> Result<Option<String>, String> {
         let Some(edit) = &self.edit else {
             return Ok(None);
         };
@@ -281,7 +281,7 @@ impl Node {
             value["marks"] = edit.marks.clone();
         }
         session
-            .save(&edit.vault, value, label, unix_now())
+            .save(&edit.vault, value, label, origin, unix_now())
             .map(|saved| saved.map(|v| v.id.hex()))
     }
 }
@@ -752,6 +752,9 @@ mod control {
         answer
     }
 
+    /// The origin of an edit saved for a control client.
+    const CONTROL: &str = "control";
+
     pub fn answer(node: &Arc<Node>, scope: Scope, request: ControlRequest) -> Value {
         if !scope.allows(&request) {
             return refused(
@@ -908,25 +911,27 @@ mod control {
                     .map_err(Message::plain)
             }
         };
-        // A change to the edit is saved before it is answered.
+        // A change to the edit is saved before it is answered, under who
+        // made it: the request's `who` when it names one, else the
+        // control client.
         let label = match &request {
             ControlRequest::SetParam {
                 node: name, param, ..
-            } => Some(format!("set {name}.{param}")),
-            ControlRequest::DecisionResolve => Some("decisions resolved".into()),
-            ControlRequest::DecisionAccept { node: name, .. } => {
-                Some(format!("decision {name} accepted"))
-            }
-            ControlRequest::DecisionDecide { node: name, .. } => {
-                Some(format!("decision {name} decided"))
-            }
+            } => Some((format!("set {name}.{param}"), CONTROL)),
+            ControlRequest::DecisionResolve => Some(("decisions resolved".into(), CONTROL)),
+            ControlRequest::DecisionAccept {
+                node: name, who, ..
+            } => Some((format!("decision {name} accepted"), who.as_str())),
+            ControlRequest::DecisionDecide {
+                node: name, who, ..
+            } => Some((format!("decision {name} decided"), who.as_str())),
             ControlRequest::DecisionReask { node: name } => {
-                Some(format!("decision {name} asked again"))
+                Some((format!("decision {name} asked again"), CONTROL))
             }
             _ => None,
         };
         let result = match (result, label) {
-            (Ok(mut extra), Some(label)) => match node.save_edit(&label) {
+            (Ok(mut extra), Some((label, origin))) => match node.save_edit(&label, origin) {
                 Ok(saved) => {
                     if let (Some(id), Some(map)) = (saved, extra.as_object_mut()) {
                         map.insert("saved".into(), json!(id));

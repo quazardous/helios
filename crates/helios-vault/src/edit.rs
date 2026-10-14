@@ -151,7 +151,6 @@ impl Event for EditSaved {
 #[derive(Clone, Debug)]
 pub struct EditSession {
     image: ImageId,
-    origin: String,
     head: Option<VersionId>,
     /// The edit of `head`, to skip saving the same edit twice.
     saved: Option<Value>,
@@ -161,13 +160,12 @@ pub struct EditSession {
 }
 
 impl EditSession {
-    /// Opens an image's edit as `origin` (`user`, `control`…): the
-    /// session continues the image's newest head, returned with it (none
-    /// for an image never edited).
+    /// Opens an image's edit: the session continues the image's newest
+    /// head, returned with it (none for an image never edited). Each save
+    /// names who made its step.
     pub fn open<S: Store>(
         vault: &Vault<S>,
         image: ImageId,
-        origin: &str,
     ) -> Result<(Self, Option<Version>), String> {
         if vault.image(&image)?.is_none() {
             return Err(format!("no image {}", image.hex()));
@@ -187,7 +185,6 @@ impl EditSession {
         Ok((
             Self {
                 image,
-                origin: origin.into(),
                 head: head.as_ref().map(|v| v.id),
                 saved: head.as_ref().map(|v| v.edit.clone()),
                 in_progress: false,
@@ -211,19 +208,21 @@ impl EditSession {
         self.steps
     }
 
-    /// Saves a committed step: a version continuing the head, unless the
-    /// edit is the head's already (a step that changed nothing). A step
-    /// ending a gesture already saved in progress is saved even when equal,
-    /// so the history names the finished gesture.
+    /// Saves a committed step made by `origin` (`user`, `agent:<id>`,
+    /// `control`…): a version continuing the head, unless the edit is the
+    /// head's already (a step that changed nothing). A step ending a
+    /// gesture already saved in progress is saved even when equal, so the
+    /// history names the finished gesture.
     pub fn save<S: Store>(
         &mut self,
         vault: &Vault<S>,
         edit: Value,
         label: &str,
+        origin: &str,
         now: u64,
     ) -> Result<Option<Version>, String> {
         let force = self.in_progress;
-        self.write(vault, edit, label, now, force, false)
+        self.write(vault, edit, label, origin, now, force, false)
     }
 
     /// Saves a gesture still in progress (a drag), so a crash during a
@@ -234,23 +233,30 @@ impl EditSession {
         vault: &Vault<S>,
         edit: Value,
         label: &str,
+        origin: &str,
         now: u64,
     ) -> Result<Option<Version>, String> {
         self.write(
             vault,
             edit,
             &format!("{label} (in progress)"),
+            origin,
             now,
             false,
             true,
         )
     }
 
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the save's parts, each named by its caller"
+    )]
     fn write<S: Store>(
         &mut self,
         vault: &Vault<S>,
         edit: Value,
         label: &str,
+        origin: &str,
         now: u64,
         force: bool,
         in_progress: bool,
@@ -262,7 +268,7 @@ impl EditSession {
             self.image,
             self.head.into_iter().collect(),
             edit,
-            &self.origin,
+            origin,
             now,
         )
         .labelled(label);
@@ -280,7 +286,7 @@ impl EditSession {
                     version: version.id.hex(),
                     step: self.steps,
                     label: label.into(),
-                    origin: self.origin.clone(),
+                    origin: origin.into(),
                     in_progress,
                 },
             );

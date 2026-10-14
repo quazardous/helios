@@ -23,7 +23,8 @@
 //!   it ends), an undo, a redo. While a gesture goes on, what it changed
 //!   is saved every [`FLUSH_SECONDS`] as a version labelled "in progress",
 //!   so a crash in the middle of a long drag loses at most that much of
-//!   it. Each save is announced on the bus as `edit.saved`.
+//!   it. Each version names who made its step (the user, an agent, a script), and
+//!   each save is announced on the bus as `edit.saved`.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -44,6 +45,19 @@ const SHOWN: [&str; 5] = [RATING, REJECTED, PICKED, LABELS, TAGS];
 
 /// Who the vault's audit trail names for what the desktop writes.
 pub const WHO: &str = "user";
+
+/// Who made a change, as the vault records it: `user`, `agent:<id>`,
+/// `script:<id>`, `midi`, `remote:<id>`.
+pub fn who(origin: &helios_shell::commands::Origin) -> String {
+    use helios_shell::commands::Origin;
+    match origin {
+        Origin::User => WHO.into(),
+        Origin::Agent(id) => format!("agent:{id}"),
+        Origin::Script(id) => format!("script:{id}"),
+        Origin::Midi => "midi".into(),
+        Origin::Remote(id) => format!("remote:{id}"),
+    }
+}
 
 /// How often a gesture still going (a drag) is saved, in seconds.
 pub const FLUSH_SECONDS: f64 = 1.0;
@@ -216,7 +230,7 @@ impl<S: Store> Persist<S> {
         node: NodeId,
         port: &str,
     ) -> Result<Option<Version>, String> {
-        let (session, head) = EditSession::open(&self.vault, image, WHO)?;
+        let (session, head) = EditSession::open(&self.vault, image)?;
         if let Some(head) = &head {
             for skipped in edit::apply_to_graph(&mut graph, &head.edit)? {
                 shell.notify(
@@ -315,7 +329,7 @@ impl<S: Store> Persist<S> {
             return;
         };
         let at = now.max(0.0) as u64;
-        let (committed, label, gesture, current) = {
+        let (committed, label, origin, gesture, current) = {
             let store = shell.values.lock().expect("value store lock");
             let mut modules: BTreeMap<String, (String, Params)> = BTreeMap::new();
             for (path, entry) in store.list("node/") {
@@ -339,15 +353,20 @@ impl<S: Store> Persist<S> {
             if !marks.is_empty() {
                 current["marks"] = Value::Object(marks);
             }
+            let gesture = store
+                .open_gesture()
+                .zip(store.open_gesture_origin())
+                .map(|(label, origin)| (label.to_string(), who(origin)));
             (
                 store.committed(),
                 store.last_committed().to_string(),
-                store.open_gesture().map(String::from),
+                store.last_origin().map_or_else(|| WHO.to_string(), who),
+                gesture,
                 current,
             )
         };
         let saved = if committed == e.committed {
-            let Some(gesture) = gesture else {
+            let Some((gesture, by)) = gesture else {
                 e.flushed_at = None;
                 return;
             };
@@ -357,11 +376,11 @@ impl<S: Store> Persist<S> {
             }
             e.flushed_at = Some(now);
             e.session
-                .save_in_progress(&self.vault, current, &gesture, at)
+                .save_in_progress(&self.vault, current, &gesture, &by, at)
         } else {
             e.committed = committed;
             e.flushed_at = None;
-            e.session.save(&self.vault, current, &label, at)
+            e.session.save(&self.vault, current, &label, &origin, at)
         };
         if let Err(err) = saved {
             shell.notify(

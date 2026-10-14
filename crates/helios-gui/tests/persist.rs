@@ -529,3 +529,73 @@ fn opening_another_image_leaves_the_undo_steps_of_the_first_behind() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+fn set_by(shell: &Shell, ev: f64, origin: helios_shell::commands::Origin) {
+    shell
+        .values
+        .lock()
+        .unwrap()
+        .set(helios_values::Set::new(
+            EV,
+            helios_values::Change::To(helios_core::Value::Float(ev)),
+            origin,
+        ))
+        .unwrap();
+}
+
+#[test]
+fn each_version_names_who_made_its_step() {
+    use helios_shell::commands::Origin;
+    let dir = scratch("origin");
+    let path = vault_file(&dir);
+    let mut shell = Shell::new(helios_panels(), None);
+    let mut persist = Persist::new(SqliteStore::open(&path).unwrap(), Arc::new(Bus::new()));
+    open_exposure(&mut shell, &mut persist, 1);
+    let start = shown(&shell);
+    // An agent's write, then the user's undo of it.
+    set_by(&shell, start + 1.0, Origin::Agent("retouch".into()));
+    persist.frame(&mut shell, 10.0);
+    shell.values.lock().unwrap().undo(&Origin::User).unwrap();
+    persist.frame(&mut shell, 11.0);
+    // A script's drag, saved while it goes and at its end.
+    let drag = shell
+        .values
+        .lock()
+        .unwrap()
+        .begin_gesture(Origin::Script("ramp".into()), "drag exposure");
+    set(&shell, start + 0.5, Some(drag));
+    persist.frame(&mut shell, 12.0);
+    persist.frame(&mut shell, 13.5);
+    shell.values.lock().unwrap().end(drag);
+    persist.frame(&mut shell, 14.0);
+    let vault = persist.vault().clone();
+    let head = vault.heads(&id(1)).unwrap().remove(0);
+    let history: Vec<(String, String)> = vault
+        .history(&head.id)
+        .unwrap()
+        .into_iter()
+        .map(|v| (v.label.unwrap_or_default(), v.origin))
+        .collect();
+    assert_eq!(
+        history,
+        [
+            (format!("set {EV}"), "agent:retouch".to_string()),
+            (format!("undo set {EV}"), "user".to_string()),
+            ("drag exposure (in progress)".into(), "script:ramp".into()),
+            ("drag exposure".into(), "script:ramp".into()),
+        ]
+    );
+    // And the bus says the same.
+    let origins: Vec<String> = persist
+        .bus()
+        .since(0)
+        .into_iter()
+        .filter(|e| e.kind == "edit.saved")
+        .map(|e| e.payload["origin"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(
+        origins,
+        ["agent:retouch", "user", "script:ramp", "script:ramp"]
+    );
+    drop((shell, persist, vault));
+    let _ = std::fs::remove_dir_all(&dir);
+}
