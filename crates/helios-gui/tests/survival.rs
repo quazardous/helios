@@ -4,7 +4,8 @@
 //! with SIGKILL in the middle of a drag. After each, the history, its end
 //! (the head version), the ratings, the labels and the metadata must be
 //! what the last saved step left, and reopening shows exactly that. A
-//! workspace's layout, changed then killed, is kept too.
+//! workspace's layout, changed then killed, is kept too, and so are its
+//! places and modes (the darkroom on an image, culling, compare).
 //!
 //! The child says what it saved on stdout from the `edit.saved` events of
 //! the bus: the parent reads those lines, it never sleeps. These scenarios
@@ -111,6 +112,30 @@ fn survival_child() {
         h.run();
         // On a line of its own: the test harness may have started one
         // ("test survival_child ... ").
+        writeln!(std::io::stdout(), "\nready").unwrap();
+        std::io::stdout().flush().unwrap();
+        let mut line = String::new();
+        let _ = std::io::stdin().read_line(&mut line);
+        return;
+    }
+    if scenario == "context" {
+        // The darkroom on the photo, from the library, culling set and
+        // compare pushed, then killed.
+        let mut h = workspace_window(&dir);
+        for (command, args) in [
+            ("view.library", json!(null)),
+            ("view.culling", json!({ "on": true })),
+            ("viewport.compare", json!(null)),
+        ] {
+            h.state_mut().run(command, args, Origin::User).unwrap();
+            h.run();
+        }
+        helios_gui::contexts::open(
+            h.state().app().handle(),
+            &helios_gui::contexts::Opened::File(dir.join("photo.png")),
+            &egui_pop::model::commands::Origin::User,
+        );
+        h.run();
         writeln!(std::io::stdout(), "\nready").unwrap();
         std::io::stdout().flush().unwrap();
         let mut line = String::new();
@@ -397,5 +422,24 @@ fn survival_killed_after_moving_a_panel_and_editing_the_workspace_keeps_both() {
     let state = shell.workspace_state().unwrap();
     assert_eq!(state.meta.description, "Harbour");
     assert!(shell.library().auto_advance);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn survival_killed_in_the_darkroom_comes_back_to_its_places_and_modes() {
+    let (dir, _) = place("context");
+    run_child(&dir, "context", true);
+    // Reopened, before any frame: the stack the kill left, checked
+    // against what still exists.
+    let shell = workspace_shell(&dir);
+    let cx = shell.app().handle().context();
+    assert_eq!(cx.get("place"), "helios.darkroom");
+    assert_eq!(cx.get("placeDepth"), "2");
+    assert_eq!(cx.get("mode.orientation"), "helios.culling");
+    assert_eq!(cx.get("mode.compare"), "helios.compare");
+    assert_eq!(
+        helios_gui::contexts::darkroom(shell.app().handle()),
+        Some(helios_gui::contexts::Opened::File(dir.join("photo.png")))
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }

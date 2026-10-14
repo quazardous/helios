@@ -1,7 +1,8 @@
 //! Places and modes (egui-pop's context stack) on the desktop: the
 //! library, the darkroom on an image and the workspace's network, each
 //! with its arrangement; culling, compare and mask editing; the image's
-//! own states kept with their modes.
+//! own states kept with their modes; the stack beside the workspace's
+//! layout, back when it opens again, cut where its image is gone.
 
 use std::path::{Path, PathBuf};
 
@@ -165,5 +166,70 @@ fn compare_and_mask_editing_follow_the_image_and_the_stack() {
     h.run();
     assert_eq!(tool(&h), "none");
     assert_eq!(key(&h, "mode.tool"), "");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn the_workspace_comes_back_where_it_was_left_or_falls_back() {
+    let dir = temp("restore");
+    let photo = dir.join("photo.png");
+    std::fs::write(&photo, b"not read").unwrap();
+    {
+        let mut h = window(&dir);
+        run(&mut h, "view.library", json!(null));
+        contexts::open(
+            h.state().app().handle(),
+            &Opened::File(photo.clone()),
+            &PopOrigin::User,
+        );
+        run(&mut h, "view.culling", json!({ "on": true }));
+        run(&mut h, "viewport.compare", json!(null));
+        h.run();
+        assert_eq!(key(&h, "mode.compare"), "helios.compare");
+        // Written beside the workspace's layout, inside each transition.
+        let key = helios_gui::host::workspace_key(&dir.join("photos"));
+        assert!(
+            dir.join("ui/workspaces")
+                .join(key)
+                .join("context.json")
+                .exists()
+        );
+    }
+    // Opened again: the same places and modes, compare's flag with them.
+    let mut h = window(&dir);
+    assert_eq!(key(&h, "place"), "helios.darkroom");
+    assert_eq!(key(&h, "mode.orientation"), "helios.culling");
+    assert_eq!(key(&h, "mode.compare"), "helios.compare");
+    h.run();
+    assert!(
+        h.state()
+            .values
+            .lock()
+            .unwrap()
+            .get(helios_gui::viewport::COMPARE)
+            .and_then(|e| e.value.as_bool())
+            .unwrap_or(false)
+    );
+    drop(h);
+    // The image is gone since: the darkroom is cut, the library and the
+    // modes stay, and a toast says why.
+    std::fs::remove_file(&photo).unwrap();
+    let h = window(&dir);
+    assert_eq!(key(&h, "place"), "helios.library");
+    assert_eq!(key(&h, "mode.orientation"), "helios.culling");
+    let toasts = h
+        .state()
+        .app()
+        .handle()
+        .service(&egui_pop::api::toasts::TOASTS)
+        .unwrap();
+    assert!(
+        toasts
+            .shown()
+            .iter()
+            .any(|t| t.toast.text.contains("is gone")),
+        "{:?}",
+        toasts.shown()
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }

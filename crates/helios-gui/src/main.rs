@@ -349,6 +349,28 @@ impl App {
         Ok(())
     }
 
+    /// The darkroom the workspace was left in, its image opened again;
+    /// left, with a word, when the image cannot be.
+    fn restore_darkroom(&mut self) {
+        let Some(opened) = contexts::darkroom(self.shell.app().handle()) else {
+            return;
+        };
+        let opening = match &opened {
+            Opened::Image(id) => self.open_from_library(id),
+            Opened::File(path) => self.open(Open::Image(path.clone())),
+        };
+        if let Err(e) = opening {
+            contexts::leave_darkroom(
+                self.shell.app().handle(),
+                &egui_pop::model::commands::Origin::User,
+            );
+            self.shell.notify(
+                helios_gui::dialogs::Level::Warning,
+                format!("the image left open could not be opened again: {e}"),
+            );
+        }
+    }
+
     /// The workspace's network and the rest of its state.
     fn bundle(&self) -> helios_template::Bundle {
         self.shell
@@ -668,10 +690,20 @@ fn main() -> Result<(), String> {
         .map(|path| image_graph(&path, &bundle).map(|g| (path, g)))
         .transpose()?;
     let earlier = earlier_layout(&workspace, &ui_settings);
-    let builder = Shell::builder(helios_panels(), Some(ui_settings))
+    let mut builder = Shell::builder(helios_panels(), Some(ui_settings))
         .workspace(&workspace)
         .on_exit(move |app| save_workspace(&dir, app))
         .desktop(instance);
+    // A darkroom left on an image the vault no longer has is not
+    // restored.
+    if let Some(vault) = vault.clone() {
+        builder = builder.images(Arc::new(move |id: &str| {
+            helios_vault::ImageId::from_hex(id)
+                .ok()
+                .and_then(|image| vault.locations(&image).ok())
+                .is_some_and(|l| l.iter().any(|l| l.present))
+        }));
+    }
     // The window draws with the process's one device, which the engine
     // computes on (see `helios_gui::shell::wgpu_setup`).
     let gpu = helios_gpu::shared::gpu().map_err(|e| format!("no GPU to draw with: {e}"))?;
@@ -729,7 +761,7 @@ fn main() -> Result<(), String> {
             {
                 shell.notes.push(format!("library commands: {e}"));
             }
-            let app = App {
+            let mut app = App {
                 persist,
                 _persist_dropped: quit::MarkOnDrop("vault link dropped"),
                 shell,
@@ -737,13 +769,15 @@ fn main() -> Result<(), String> {
                 shown,
                 refill,
             };
-            // The image named on the command line: the darkroom on it.
-            if let Some(Shown::File(path)) = &app.shown {
-                contexts::open(
+            // Back where the workspace was left: the image named on the
+            // command line wins over the darkroom restored.
+            match &app.shown {
+                Some(Shown::File(path)) => contexts::open(
                     app.shell.app().handle(),
                     &Opened::File(path.clone()),
                     &egui_pop::model::commands::Origin::User,
-                );
+                ),
+                _ => app.restore_darkroom(),
             }
             Box::new(app)
         })

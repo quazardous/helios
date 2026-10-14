@@ -2,15 +2,25 @@
 //! where the user is (the library, the darkroom on an image, the
 //! workspace's network) and how the window behaves (culling, mask
 //! editing, compare), each with its arrangement or its panels, its keys,
-//! a breadcrumb and mode chips in the status bar. The frames themselves
-//! are `helios_template::contexts`'s, shared with the MCP server.
+//! a breadcrumb and mode chips in the status bar, and the session that
+//! comes back when the workspace opens again. The frames themselves are
+//! `helios_template::contexts`'s, shared with the MCP server.
+//!
+//! egui-pop keeps the stack (`LocalContexts`) beside the workspace's
+//! layout (`workspaces/<key>/context`), written inside each transition,
+//! so a kill keeps the last one. At start the saved stack is checked
+//! against today's frames and what still exists ([`stack`]): a darkroom
+//! whose image is gone, or another workspace's network, is cut, and a
+//! toast says so.
 //!
 //! The image's own states follow the stack ([`Follow`]): the value
 //! store's before-and-after flag and mask tool push and pop their modes,
 //! and a mode left from the stack (Escape, its chip, an agent) turns them
 //! off.
 
-use egui_pop::api::contexts::{self, Entry, Envelope, Request, State};
+use std::sync::{Arc, Mutex, PoisonError};
+
+use egui_pop::api::contexts::{self, ContextsPlugin, Entry, Envelope, Request, State};
 use egui_pop::api::zones::{self, Block};
 use egui_pop::api::{AppHandle, Ctx, Plugin, PluginError};
 use egui_pop::model::commands::Origin;
@@ -19,6 +29,7 @@ use egui_pop::model::ids::{BlockId, PluginId};
 use helios_values::{Change, Set, Store};
 use serde_json::Value as Json;
 
+use crate::host::Workspace;
 pub use helios_template::contexts::{
     COMPARE, COMPARING, CULLING, DARKROOM, LIBRARY, MASK_EDITING, ORIENTATION, Opened, TOOL,
     WORKSPACE,
@@ -28,6 +39,45 @@ pub const PLUGIN: PluginId = PluginId::from_static("helios.contexts");
 
 /// The breadcrumb and the mode chips, in the status bar.
 pub const BLOCK: BlockId = BlockId::from_static("helios.contexts.where");
+
+/// Whether an image of the vault is still there, by id (a copy present).
+pub type ImageCheck = Arc<dyn Fn(&str) -> bool + Send + Sync>;
+
+/// The check of the vault the desktop opens, given once it has one
+/// (`ShellBuilder::images`).
+pub type Images = Arc<Mutex<Option<ImageCheck>>>;
+
+/// egui-pop's context stack, checking at start what the saved one names:
+/// the workspace's network must be this window's, the darkroom's file or
+/// image must still be there (`images`, when the desktop has a vault).
+pub fn stack(workspace: Workspace, images: Images) -> ContextsPlugin {
+    ContextsPlugin::default().valid(move |frame, payload| {
+        if *frame == WORKSPACE {
+            return match (workspace.get(), payload.as_str()) {
+                (Some(k), Some(p)) if k == p => None,
+                _ => Some("it is another workspace's network".into()),
+            };
+        }
+        if *frame == DARKROOM {
+            return match Opened::of(payload) {
+                Some(Opened::File(p)) if p.exists() => None,
+                Some(Opened::File(p)) => Some(format!("{} is gone", p.display())),
+                Some(Opened::Image(id)) => {
+                    let check = images
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .clone();
+                    match check {
+                        Some(there) if !there(&id) => Some(format!("image {id} is gone")),
+                        _ => None,
+                    }
+                }
+                None => Some("it names no image".into()),
+            };
+        }
+        None
+    })
+}
 
 /// Helios's frames, declared to the stack, and where the status bar says
 /// where the user is.
