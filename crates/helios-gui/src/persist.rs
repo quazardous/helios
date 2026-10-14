@@ -23,7 +23,9 @@
 //!   saved once when it ends), an undo, a redo. While a gesture goes on, what it changed
 //!   is saved every [`FLUSH_SECONDS`] as a version labelled "in progress",
 //!   so a crash in the middle of a long drag loses at most that much of
-//!   it. Each version names who made its step (the user, an agent, a script), and
+//!   it; a drag saved that way and then cancelled saves the values it put
+//!   back, so the given-up values never stay the latest edit. Each
+//!   version names who made its step (the user, an agent, a script), and
 //!   each save is announced on the bus as `edit.saved`.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -78,6 +80,8 @@ struct Editing {
     committed: u64,
     /// When the gesture going on was last saved (or started).
     flushed_at: Option<f64>,
+    /// The gesture going on, by label, and who makes it.
+    gesture: Option<(String, String)>,
 }
 
 /// The library as the vault holds it: its entries, and where each image
@@ -299,6 +303,7 @@ impl<S: Store> Persist<S> {
             modules,
             committed,
             flushed_at: None,
+            gesture: None,
         });
         Ok(head)
     }
@@ -410,20 +415,37 @@ impl<S: Store> Persist<S> {
             )
         };
         let saved = if committed == e.committed {
-            let Some((gesture, by)) = gesture else {
+            if let Some((gesture, by)) = gesture {
+                e.gesture = Some((gesture.clone(), by.clone()));
+                let since = *e.flushed_at.get_or_insert(now);
+                if now - since < FLUSH_SECONDS {
+                    return;
+                }
+                e.flushed_at = Some(now);
+                e.session
+                    .save_in_progress(&self.vault, current, &gesture, &by, at)
+            } else {
                 e.flushed_at = None;
-                return;
-            };
-            let since = *e.flushed_at.get_or_insert(now);
-            if now - since < FLUSH_SECONDS {
-                return;
+                // A gesture ended with no step: cancelled. If it was
+                // saved in progress, the values it put back are saved.
+                let Some((gesture, by)) = e.gesture.take() else {
+                    return;
+                };
+                if !e.session.in_progress() {
+                    return;
+                }
+                e.session.save(
+                    &self.vault,
+                    current,
+                    &format!("{gesture} (cancelled)"),
+                    &by,
+                    at,
+                )
             }
-            e.flushed_at = Some(now);
-            e.session
-                .save_in_progress(&self.vault, current, &gesture, &by, at)
         } else {
             e.committed = committed;
             e.flushed_at = None;
+            e.gesture = None;
             e.session.save(&self.vault, current, &label, &origin, at)
         };
         if let Err(err) = saved {
