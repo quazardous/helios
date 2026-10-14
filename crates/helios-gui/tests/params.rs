@@ -474,3 +474,46 @@ fn a_path_s_points_fold_into_a_summary_that_opens() {
     h.run();
     assert!(h.query_by_label_contains("4: ").is_none());
 }
+
+/// A choice's list opens on a click and stays open to be picked from:
+/// the parameter's context menu must not close it.
+#[test]
+fn a_choice_s_list_opens_and_picks() {
+    use egui::accesskit::Role;
+    use egui_kittest::kittest::by;
+
+    let mut g = Graph::new();
+    let ramp = g
+        .add_module(
+            "ramp",
+            ModuleRef::new(helios_module_masks::MaskGradient),
+            &Params::new(),
+        )
+        .unwrap();
+    let shell = Shell::new(helios_panels(), None);
+    helios_values::bind_node(&mut shell.values.lock().unwrap(), &g, ramp).unwrap();
+    let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+    h.state_mut()
+        .run("helios.params.focus", json!(null), Origin::User)
+        .unwrap();
+    h.run();
+    let at = h.get(by().role(Role::ComboBox)).rect().center();
+    h.hover_at(at);
+    h.run();
+    press(&h, at, true);
+    press(&h, at, false);
+    h.run();
+    assert!(egui::Popup::is_any_open(&h.ctx), "the list is open");
+    h.get_by_label("sigmoid").click();
+    h.run();
+    let profile = h
+        .state()
+        .values
+        .lock()
+        .unwrap()
+        .get("node/ramp/profile")
+        .unwrap()
+        .value
+        .clone();
+    assert_eq!(profile, Value::Choice("sigmoid".into()));
+}
