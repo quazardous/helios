@@ -411,6 +411,10 @@ which egui-pop saves as it changes, the desktop's change is what it has
 not saved yet. The same check runs before each of the desktop's own
 writes, so a save never writes over a change it has not seen.
 
+**The network in a graph editor** (later): editing the workspace's
+network on the desktop, rather than through `changes` or a template,
+waits on the node graph view (see gui.md, "Graph view").
+
 ## The AI's `template.design` decision (later)
 
 An AI designs a template as a **decision node** answers a question (see
