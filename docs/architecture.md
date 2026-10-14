@@ -120,8 +120,15 @@ in the past tense, emitted by the owner after a change.
 - **Typed.** The core defines the envelope; each layer and domain defines
   its own event types (vault, scheduler, graph, photo...), instead of one
   global list that grows forever.
-- **Envelope**: sequence number, time, source (layer, module, node, job,
-  image), the id of the command that caused it, the event itself.
+- **Envelope**: sequence number (`seq`), time, source (layer, module,
+  node, job, image), the sequence number of the event that caused it
+  (`cause`), the event's kind and its payload. The bus stamps the time
+  when it publishes, in two forms that are plain integers on the wire:
+  `mono_us`, microseconds since that bus was created on a monotonic clock
+  (it follows `seq` and measures latency, `Bus::age`, but means nothing
+  outside its bus), and `wall_ms`, Unix time in milliseconds (for logs
+  and for relays between processes; the wall clock can jump, so it orders
+  nothing). Readers that do not know the two fields ignore them.
 - **Recorded.** The bus keeps a recent journal, readable through the
   inspect endpoint (`events --since <seq>`); tests wait on events instead
   of sleeping (see [testing strategy](testing-strategy.md)).
