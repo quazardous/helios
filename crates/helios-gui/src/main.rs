@@ -403,6 +403,16 @@ fn opening_notice(path: &Path) -> Message {
     Message::new("gui-image-opening", "Opening { $name }…").with("name", file_name(path))
 }
 
+/// What the status bar says when the image a workspace was left on
+/// cannot be opened again.
+fn not_reopened(error: &str) -> Message {
+    Message::new(
+        "gui-image-not-reopened",
+        "The image left open could not be opened again: { $error }",
+    )
+    .with("error", error)
+}
+
 /// What the status bar says once it is open.
 fn opened_notice(path: &Path) -> Message {
     Message::new("gui-image-opened", "{ $name } is open").with("name", file_name(path))
@@ -473,6 +483,26 @@ impl App {
             &egui_pop::model::commands::Origin::User,
         );
         Ok(())
+    }
+
+    /// The darkroom the workspace was left in, its image opened again;
+    /// left, with a word, when the image cannot be.
+    fn restore_darkroom(&mut self) {
+        let Some(opened) = contexts::darkroom(self.shell.app().handle()) else {
+            return;
+        };
+        let opening = match &opened {
+            Opened::Image(id) => self.open_from_library(id),
+            Opened::File(path) => self.open(Open::Image(path.clone())),
+        };
+        if let Err(e) = opening {
+            contexts::leave_darkroom(
+                self.shell.app().handle(),
+                &egui_pop::model::commands::Origin::User,
+            );
+            self.shell
+                .notify(helios_gui::dialogs::Level::Warning, not_reopened(&e));
+        }
     }
 
     /// The workspace's network and the rest of its state.
@@ -568,7 +598,18 @@ impl App {
                     );
                     self.shown = Some(Shown::File(path));
                 }
-                Err(e) => self.shell.notify(helios_gui::dialogs::Level::Error, e),
+                Err(e) => {
+                    // The darkroom restored on it is left: back where the
+                    // user came from.
+                    let handle = self.shell.app().handle();
+                    if contexts::darkroom(handle) == Some(Opened::File(path)) {
+                        contexts::leave_darkroom(handle, &egui_pop::model::commands::Origin::User);
+                        self.shell
+                            .notify(helios_gui::dialogs::Level::Warning, not_reopened(&e));
+                    } else {
+                        self.shell.notify(helios_gui::dialogs::Level::Error, e);
+                    }
+                }
             }
         }
         !self.preparing.is_empty()
@@ -903,11 +944,21 @@ fn main() -> Result<(), String> {
     // The image asked for is made ready while the window opens.
     let preparing = image_file.map(|path| prepare(path, bundle, vault.clone()));
     let earlier = earlier_layout(&workspace, &ui_settings);
-    let builder = Shell::builder(helios_panels(), Some(ui_settings))
+    let mut builder = Shell::builder(helios_panels(), Some(ui_settings))
         .workspace(&workspace)
         .on_exit(move |app| save_workspace(&dir, app))
         .desktop(instance)
         .system_focus(focus_mode(&focus_reading));
+    // A darkroom left on an image the vault no longer has is not
+    // restored.
+    if let Some(vault) = vault.clone() {
+        builder = builder.images(Arc::new(move |id: &str| {
+            helios_vault::ImageId::from_hex(id)
+                .ok()
+                .and_then(|image| vault.locations(&image).ok())
+                .is_some_and(|l| l.iter().any(|l| l.present))
+        }));
+    }
     start::mark("shell declared (commands, themes, translations)");
     let gpu = gpu_opening
         .join()
@@ -983,8 +1034,7 @@ fn main() -> Result<(), String> {
             {
                 shell.notes.push(format!("library commands: {e}"));
             }
-            start::mark("application ready");
-            Box::new(App {
+            let mut app = App {
                 persist,
                 _persist_dropped: quit::MarkOnDrop("vault link dropped"),
                 shell,
@@ -994,7 +1044,15 @@ fn main() -> Result<(), String> {
                 frames: start::Frames::default(),
                 library_reading,
                 preparing: preparing.into_iter().collect(),
-            })
+            };
+            // Back where the workspace was left: the image named on the
+            // command line (being made ready, the darkroom on it once it
+            // is) wins over the darkroom restored.
+            if app.preparing.is_empty() {
+                app.restore_darkroom();
+            }
+            start::mark("application ready");
+            Box::new(app)
         })
         .map_err(|e| e.to_string());
     quit::mark("window closed (eframe returned)");

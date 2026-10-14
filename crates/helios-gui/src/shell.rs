@@ -216,6 +216,8 @@ struct Parts {
     jobs: helios_core::jobs::Jobs,
     status: crate::jobs::Status,
     relays: crate::jobs::Relays,
+    /// What checks a restored darkroom's image is still there.
+    images: crate::contexts::Images,
 }
 
 /// A shell whose egui-pop application is still to build: in a test
@@ -232,6 +234,18 @@ impl ShellBuilder {
     #[must_use]
     pub fn workspace(self, dir: &Path) -> Self {
         self.parts.workspace.set(Some(workspace_key(dir)));
+        self
+    }
+
+    /// Says whether an image of the vault is still there, by id: a
+    /// darkroom restored on an image that is gone is left at start.
+    #[must_use]
+    pub fn images(self, check: crate::contexts::ImageCheck) -> Self {
+        *self
+            .parts
+            .images
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(check);
         self
     }
 
@@ -454,6 +468,7 @@ impl Shell {
             HeliosHost::new(registry.clone(), bus, Arc::default()).with_values(values.clone());
         let later = host.later();
         let workspace = host.workspace();
+        let images = crate::contexts::Images::default();
         let contents = Contents::default();
         let themes = crate::theme::themes();
         let declarations = Rc::new(RefCell::new(Declarations::default()));
@@ -543,7 +558,7 @@ impl Shell {
             })
             // Places and modes (egui-pop's context stack), kept beside
             // the workspace's layout.
-            .plugin(egui_pop::api::contexts::ContextsPlugin::default())
+            .plugin(crate::contexts::stack(workspace.clone(), images.clone()))
             .plugin(crate::contexts::Frames(workspace.clone()))
             .plugin(i18n_plugin);
         if let Some(dir) = ui_settings {
@@ -568,6 +583,7 @@ impl Shell {
                 jobs,
                 status,
                 relays,
+                images,
             },
         }
     }
@@ -591,6 +607,7 @@ impl Shell {
             jobs,
             status,
             relays,
+            images: _,
         } = parts;
         if let Some(d) = app.handle().service(&DIALOGS) {
             let _ = dialogs.set((*d).clone());
@@ -1321,7 +1338,10 @@ impl Shell {
     pub fn switch_workspace(&mut self, dir: &Path) -> Result<(), String> {
         step_result(self.app.save_layout())?;
         self.workspace.set(Some(workspace_key(dir)));
-        self.load_layout()
+        self.load_layout()?;
+        // Its places and modes, kept beside its layout.
+        egui_pop::api::contexts::reload(self.app.handle());
+        Ok(())
     }
 
     /// Loads the open workspace's layout again (egui-pop's `layout.load`

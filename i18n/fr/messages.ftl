@@ -560,6 +560,8 @@ gui-import-verb = Importer
 
 gui-library-import = Importer…
 
+gui-image-not-reopened = L’image laissée ouverte n’a pas pu être rouverte : { $error }
+
 gui-image-opened = { $name } est ouverte
 
 gui-image-opening = Ouverture de { $name }…

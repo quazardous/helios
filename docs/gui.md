@@ -97,6 +97,18 @@ viewport's `view/viewport/compare`, the mask tool): each frame,
 leading (the viewport's command pushes the mode; Escape, a chip or an
 agent leaving the mode turns the flag or the tool off).
 
+**Coming back.** The stack is egui-pop's `context` document beside the
+workspace's layout (`workspaces/<key>/context`, its view state in
+`.../view`), written inside each transition, so a quit or a `kill -9`
+keeps the last one (a survival scenario covers it). When the
+workspace opens again, the places and modes come back as they were,
+the darkroom's image is opened again, compare is on again; mask
+editing, transient, is not. What no longer exists is cut, with a
+toast: a darkroom whose file is gone or whose image the vault no
+longer has (the places above it go with it), another workspace's
+network; the modes stay. An image named on the command line wins over
+the darkroom restored.
+
 **Agents.** On the desktop, egui-pop's `context.*` commands
 (`context.read`, `context.request` with `if_rev` and `dry_run`,
 `context.go`, `context.set_mode`, `context.hold`, `context.release`)

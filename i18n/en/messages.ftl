@@ -107,6 +107,8 @@ gui-edit-not-saved = The edit was not saved: { $error }
 
 gui-gesture-in-progress = { $gesture } is in progress
 
+gui-image-not-reopened = The image left open could not be opened again: { $error }
+
 gui-image-opened = { $name } is open
 
 gui-image-opening = Opening { $name }…
