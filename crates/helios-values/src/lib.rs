@@ -788,6 +788,14 @@ impl Store {
         self.last_committed = label;
     }
 
+    /// Forgets the undo and redo steps (another image opened: its values
+    /// share the paths of the one before, which an undo must not reach).
+    /// Values, gestures and the committed count stay.
+    pub fn clear_history(&mut self) {
+        self.undo.clear();
+        self.redo.clear();
+    }
+
     /// How many steps were committed: a write outside a gesture, the end
     /// of a gesture or a group that changed something, an undo, a redo.
     /// A host that keeps the edit saves it when this moves.
