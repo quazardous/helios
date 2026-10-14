@@ -140,6 +140,32 @@ in the past tense, emitted by the owner after a change.
   invalidate a cache, start a job through the scheduler); they do not take
   orders from the bus.
 
+#### Which bus carries what
+
+A node (`helios-node`) runs one bus for everything in its process: the
+engine, the scheduler and its jobs, the vault, decisions and its own
+`node.*` events, served by its inspect endpoint and read through it by
+the MCP server, scripts and the desktop's relays. The AI service keeps a
+bus of its own for its jobs (`ai.jobs.events`).
+
+The desktop (`helios-gui`) runs three separate buses, as built today
+(2026-10-14). A new service goes on the bus of the part it reports to;
+events never cross from one desktop bus to another.
+
+| Bus | Created by | Published on it | Read by |
+|-----|------------|-----------------|---------|
+| Shell bus | `Shell::builder` | egui-pop's events through `HeliosHost` (`gui.command.*`, `gui.dialog.answered`, `gui.toast.shown`, `gui.edit.*`, and any other name as `gui.event` with `name` and `data`: egui-pop's context stack's `context.*` once Helios's egui-pop pin includes it, the parameter picker); `job.*` from `helios_core::jobs::Jobs` (`Shell::jobs`: an import, an export, the GPU calibration); the jobs relay of each connected node (source `relay`: the node's `job.*` with ids `node:<name>/<id>`, `node.link`, `node.jobs_forgotten`) | egui-pop, which reads it back as its journal (`since`, `last_seq`): the jobs centre and its consoles, `Forgotten`, every plugin reading `events_since`; the host's waker thread, which asks for a frame on an event not of kind `gui.*` |
+| Vault bus | `main.rs`, handed to `Persist` when a vault is open | the vault (`vault.field_changed`, `vault.stack_changed`, `vault.version_added`, `edit.saved`); the stack commands (`library.decision`) | `Persist`, each frame: it refreshes the library's fields and stacks |
+| Viewport engine bus | `Viewport::default` | the viewport's engine (`engine.render_requested`, `engine.step_computed`, `engine.gpu_fell_back`, `engine.gpu_lost`, `engine.cache_settled`) | the shell's `engine_notices`, which turns a GPU fallback or loss into a toast |
+
+So: something the interface or the jobs centre must see (a job, a
+context change, a link going up or down) goes on the shell bus, through
+`Shell::jobs` or egui-pop's `AppHandle::publish`; a change of catalog
+data goes through the vault, on the vault bus; what the image's engine
+says stays on the viewport engine's bus. A node's events reach the
+desktop only through a relay, which republishes them on the shell bus
+as new envelopes (new `seq`, `mono_us` and `wall_ms`).
+
 ### Queries: pure reads
 
 Reading state never changes it (design rule 6). Every entity answers
