@@ -125,18 +125,6 @@ fn show_library(
     Ok(())
 }
 
-/// Who ran a command, as the vault records it.
-fn who(origin: &helios_shell::commands::Origin) -> String {
-    use helios_shell::commands::Origin;
-    match origin {
-        Origin::User => "user".into(),
-        Origin::Agent(id) => format!("agent:{id}"),
-        Origin::Script(id) => format!("script:{id}"),
-        Origin::Midi => "midi".into(),
-        Origin::Remote(id) => format!("remote:{id}"),
-    }
-}
-
 /// The time in seconds since the epoch, as the vault's link counts it.
 fn seconds_f64() -> f64 {
     std::time::SystemTime::now()
@@ -266,7 +254,7 @@ fn library_commands(
                         .map(|n| n as usize)
                         .collect()
                 });
-            let who = who(origin);
+            let who = helios_gui::persist::who(origin);
             stacks::accept(
                 vault.as_ref(),
                 Some(bus.as_ref()),
@@ -287,7 +275,7 @@ fn library_commands(
         ),
         move |args, origin| {
             let id = text(args, "decision").ok_or("`decision` is missing")?;
-            let who = who(origin);
+            let who = helios_gui::persist::who(origin);
             stacks::decline(vault.as_ref(), Some(bus.as_ref()), &id, &who, seconds())
                 .map(|d| stacks::to_json(&d))
         },

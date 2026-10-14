@@ -199,6 +199,16 @@ fn survival_a_node_killed_keeps_every_change_it_answered() {
     let (labels, head) = history(&vault, image);
     assert_eq!(labels, ["set exp.exposure", "decision bright decided"]);
     assert_eq!(head.id.hex(), decided["saved"].as_str().unwrap());
+    // Each version names who made it: the control client set the
+    // parameter, the user (as the request says) decided.
+    let origins: Vec<String> = vault
+        .history(&head.id)
+        .unwrap()
+        .into_iter()
+        .map(|v| v.origin)
+        .collect();
+    assert_eq!(origins, ["control", "user"]);
+    assert_eq!(saved[1]["origin"], "user");
     assert!((exposure(&head.edit, "exp") - 1.5).abs() < 1e-9);
     assert_eq!(
         head.edit["decisions"]["nodes"]["bright"]["answers"][0]["values"]["exposure"]["float"], 2.0,
