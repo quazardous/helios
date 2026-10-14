@@ -266,6 +266,10 @@ from incidents on the box; every agent prompt points here.
   a test after 120 s; `cargo survival` runs under nextest too.
 - After a job hangs or times out (exit 124), find why before queuing it
   again: the same run will block the box for the same time.
+- A job of yours that hangs or is no longer wanted: stop it with
+  `ssh … cancel <id>` (or `cancel --branch <branch>` for all of a branch's
+  jobs) rather than letting it run to its timeout; its log and `out/` are
+  kept. A timeout now stops the container too.
 - One job of yours per branch at a time; never push to a branch while a job
   of yours on it is queued.
 
