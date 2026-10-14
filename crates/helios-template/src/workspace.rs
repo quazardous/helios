@@ -1115,8 +1115,12 @@ pub fn import(
                 .tools
                 .keymap
                 .iter_mut()
-                .find(|o| o.keys == b.keys && o.when == b.when)
-            {
+                // A removal (`-<command>`, no keys) meets only itself.
+                .find(|o| {
+                    o.keys == b.keys
+                        && o.when == b.when
+                        && (!b.keys.is_empty() || o.command == b.command)
+                }) {
                 Some(o) if o.command == b.command => {}
                 Some(o) => {
                     let pick = conflict(

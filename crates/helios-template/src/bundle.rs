@@ -403,10 +403,13 @@ impl Bundle {
             p.push(format!("tools.default: `{d}` is not in the toolbox"));
         }
         for (i, b) in tools.keymap.iter().enumerate() {
-            if b.keys.trim().is_empty() {
+            // `-<command>` with no keys takes the command's keys below
+            // away, as a profile writes it.
+            let removal = b.command.strip_prefix('-');
+            if b.keys.trim().is_empty() && removal.is_none() {
                 p.push(format!("tools.keymap[{i}]: no keys"));
             }
-            if !catalogue.knows_command(&b.command) {
+            if !catalogue.knows_command(removal.unwrap_or(&b.command)) {
                 p.push(format!(
                     "tools.keymap[{i}]: unknown command `{}`",
                     b.command

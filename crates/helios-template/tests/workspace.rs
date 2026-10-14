@@ -623,3 +623,45 @@ fn a_desktop_says_it_holds_a_workspace_and_lets_it_go() {
     assert_eq!(files.holder(), None);
     std::fs::remove_dir_all(&root).unwrap();
 }
+
+#[test]
+fn a_key_taken_away_is_kept_as_a_removal_and_imported_as_one() {
+    let root = temp("removal");
+    let (_, files) = made(&root, "helios.portrait-retouch", "portrait");
+    let state = files.load().unwrap();
+    let keymap = json!([
+        { "keys": "", "command": "-mask.add.circle" },
+        { "keys": "", "command": "-mask.add.path" },
+        { "keys": "B", "command": "mask.add.circle" },
+    ]);
+    let edited = state
+        .edited(&json!({ "tools": { "keymap": keymap } }))
+        .unwrap();
+    assert_eq!(edited.problems(&catalogue()), Vec::<String>::new());
+    // Keys missing elsewhere are still refused.
+    let bad = state
+        .edited(&json!({ "tools": { "keymap": [
+            { "keys": "", "command": "mask.add.circle" },
+        ] } }))
+        .unwrap();
+    assert_eq!(bad.problems(&catalogue()), ["tools.keymap[0]: no keys"],);
+    // Imported into a workspace holding one of them: the other is added,
+    // no conflict between two removals.
+    let mut ours = state.clone();
+    ours.bundle.template.tools.keymap = vec![helios_template::format::Binding {
+        keys: String::new(),
+        command: "-mask.add.circle".into(),
+        when: String::new(),
+    }];
+    let merged = workspace::import(
+        &ours,
+        &edited.bundle,
+        &[Part::Keys],
+        &BTreeMap::new(),
+        &catalogue(),
+    )
+    .unwrap();
+    assert!(merged.unresolved().is_empty());
+    assert_eq!(merged.state.bundle.template.tools.keymap.len(), 3);
+    std::fs::remove_dir_all(&root).unwrap();
+}
