@@ -24,6 +24,46 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-10-14
+
+### Added
+
+- Hovering a mask handle on the image now says its gestures in the status
+  line: what Shift snaps, Ctrl for fine moves, and when they apply a
+  double click to reset and the wheel to adjust.
+- In the Masks panel, a blur, feather or levels refinement is now a row of
+  its own under what it refines: select it to edit its parameters. A
+  member wired to two ports of a group shows once per port.
+- A template can now ask for values when a workspace is created from it
+  (the import source, a file it refers to), and carry an icon shown beside
+  its name.
+- A workspace can now be edited after it was created, and the result is
+  kept: its name, description and icon, its library settings, its keys and
+  tools. The File menu saves it as a template (after a review of what goes
+  in and what is left out), resets it to its template, and adds parts of
+  another workspace or template, each as one step that Undo takes back.
+- Agents can now work on a workspace through MCP: list its parts, edit
+  it, reset it to its template, add parts of another workspace or
+  template, and save it as a template, each with a dry run first and an
+  undo after.
+
+### Changed
+
+- A mask member's row now says its inversion and opacity in its group in
+  words ("inverted", "opacity 30 %", "hidden"), in the interface's
+  language, rather than a bare percentage.
+- The Masks panel names a group's operator by its effect (union,
+  intersection, subtract from the first, exclude, multiply...) rather
+  than its formula, with a small preview of what it does to two shapes.
+
+### Fixed
+
+- A workspace's panel arrangement is saved as soon as it changes, not only
+  when Helios closes: a crash or a forced quit no longer loses where the
+  panels were.
+- The Masks panel's buttons, hints and messages are now translated into
+  French: some had been left in English.
+
 ## [0.7.0] - 2026-10-13
 
 ### Changed
