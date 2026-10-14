@@ -236,6 +236,8 @@ impl Params {
         let label = label(ui.ctx(), path, d);
         // A list shown open: its values under its row, so many per line.
         let mut open_list = None;
+        // Where the context menu opens, when not on the widget itself.
+        let mut menu_on: Option<egui::Response> = None;
         ui.push_id(path, |ui| {
             ui.horizontal(|ui| {
                 // Changed from its default: a dot that resets.
@@ -281,7 +283,10 @@ impl Params {
                                 }
                             })
                             .response;
-                        ui.label(&label);
+                        // The list's own response keeps its popup: a
+                        // context menu on it shares the popup's id and
+                        // closes the list on the click that opens it.
+                        menu_on = Some(ui.label(&label));
                         if picked != *c {
                             let mut s = store.lock().expect("value store lock");
                             write(&mut s, path, Change::To(Value::Choice(picked)), None, false);
@@ -321,7 +326,7 @@ impl Params {
                 crate::name_rect(ui.ctx(), &format!("param:{path}"), response.rect);
                 if let Some(app) = &self.app {
                     egui_pop::api::menus::context_menu_with(
-                        &response,
+                        menu_on.as_ref().unwrap_or(&response),
                         app,
                         &crate::plugins::PARAM,
                         json!({ "path": path }),
