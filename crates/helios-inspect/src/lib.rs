@@ -39,8 +39,8 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 pub use transport::{
-    Address, Bound, Client, Closer, Connection, Listen, new_token, request_at, serve_at,
-    serve_connections_at, write_token,
+    Address, Bound, Client, Closer, Connection, Listen, new_token, request_at, request_within,
+    serve_at, serve_connections_at, write_token,
 };
 
 /// A request, as sent on the wire.

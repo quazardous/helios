@@ -13,6 +13,7 @@ use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::thread;
+use std::time::Duration;
 
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -265,11 +266,31 @@ where
 
 /// Sends one request and reads the response.
 pub fn request_at<R: Serialize>(address: &Address, request: &R) -> io::Result<Value> {
+    request_timed(address, request, None)
+}
+
+/// As [`request_at`], giving up (`TimedOut` or `WouldBlock`) when the
+/// server takes longer than `timeout` to read the request or to answer.
+pub fn request_within<R: Serialize>(
+    address: &Address,
+    request: &R,
+    timeout: Duration,
+) -> io::Result<Value> {
+    request_timed(address, request, Some(timeout))
+}
+
+fn request_timed<R: Serialize>(
+    address: &Address,
+    request: &R,
+    timeout: Option<Duration>,
+) -> io::Result<Value> {
     let line = serde_json::to_string(request).expect("requests always serialize");
     match address {
         #[cfg(unix)]
         Address::Unix(path) => {
             let mut stream = std::os::unix::net::UnixStream::connect(path)?;
+            stream.set_read_timeout(timeout)?;
+            stream.set_write_timeout(timeout)?;
             writeln!(stream, "{line}")?;
             read_answer(stream)
         }
@@ -279,7 +300,12 @@ pub fn request_at<R: Serialize>(address: &Address, request: &R) -> io::Result<Va
             "Unix sockets are not available here",
         )),
         Address::Tcp { addr, token } => {
-            let mut stream = TcpStream::connect(addr)?;
+            let mut stream = match timeout {
+                Some(t) => TcpStream::connect_timeout(addr, t)?,
+                None => TcpStream::connect(addr)?,
+            };
+            stream.set_read_timeout(timeout)?;
+            stream.set_write_timeout(timeout)?;
             writeln!(stream, "{}", json!({ "auth": token }))?;
             let mut reader = BufReader::new(stream.try_clone()?);
             let mut first = String::new();
