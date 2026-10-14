@@ -669,17 +669,33 @@ impl Shell {
                 .params
                 .borrow_mut()
                 .set_app(shell.app.handle().clone());
-            let (params, values) = (shell.params.clone(), shell.values.clone());
+            let (params, viewport, values) = (
+                shell.params.clone(),
+                shell.viewport.clone(),
+                shell.values.clone(),
+            );
             shell.set_content("helios.params", move |ui| {
-                let selection = lock(&values)
-                    .get(crate::params::SELECTION)
-                    .and_then(|e| match &e.value {
-                        helios_core::Value::Text(t) if !t.is_empty() => Some(t.clone()),
-                        _ => None,
-                    });
+                let (selection, members) = {
+                    let store = lock(&values);
+                    let selection =
+                        store
+                            .get(crate::params::SELECTION)
+                            .and_then(|e| match &e.value {
+                                helios_core::Value::Text(t) if !t.is_empty() => Some(t.clone()),
+                                _ => None,
+                            });
+                    // Which member each of a mask group's per-port values
+                    // is for: the viewport's network says.
+                    let members = viewport
+                        .borrow()
+                        .graph()
+                        .map(|g| crate::mask_tree::members_by_port(g, &store))
+                        .unwrap_or_default();
+                    (selection, members)
+                };
                 params
                     .borrow_mut()
-                    .panel_ui(ui, &values, selection.as_deref());
+                    .panel_ui(ui, &values, selection.as_deref(), &members);
             });
         }
         if has(&shell, "helios.viewport") {

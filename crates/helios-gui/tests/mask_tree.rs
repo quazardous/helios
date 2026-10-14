@@ -348,6 +348,106 @@ fn a_member_s_opacity_and_inversion_read_on_its_row() {
     );
 }
 
+/// A label shown in the Parameters panel.
+fn in_params(h: &Harness<'_, Shell>, label: &str) -> bool {
+    let panel = h.state().target_rect("helios.params").unwrap();
+    h.query_all_by_label(label)
+        .any(|n| panel.contains(n.rect().center()))
+}
+
+fn set(h: &mut Harness<'_, Shell>, path: &str, value: Value) {
+    h.state()
+        .values
+        .lock()
+        .unwrap()
+        .set(helios_values::Set::new(
+            path,
+            helios_values::Change::To(value),
+            Origin::User,
+        ))
+        .unwrap();
+    for _ in 0..3 {
+        h.step();
+    }
+}
+
+#[test]
+fn a_group_s_parameters_say_its_operator_and_its_members() {
+    use egui::accesskit::Role;
+
+    let mut h = harness();
+    run(&mut h, "helios.params.focus", json!(null));
+    // The spot at 30 %, the oval hidden and inverted.
+    let mut opacity = vec![1.0; 8];
+    (opacity[1], opacity[2]) = (0.3, 0.0);
+    set(&mut h, "node/mask/opacity", Value::List(opacity));
+    let mut invert = vec![0; 8];
+    invert[2] = 1;
+    set(&mut h, "node/mask/invert", Value::Ints(invert));
+    click_row(&mut h, "mask — union");
+    assert_eq!(text(&h, "view/graph/selection"), "mask");
+    // A line per wired port, the member and its value in words; no
+    // bare count of values.
+    for line in [
+        "inner: opacity 100 %",
+        "spot: opacity 30 %",
+        "oval: hidden",
+        "inner: not inverted",
+        "spot: not inverted",
+        "oval: inverted",
+    ] {
+        assert!(in_params(&h, line), "{line}");
+    }
+    assert!(!in_params(&h, "8 values"));
+    // The operator by its effect, with its preview.
+    let params = h.state().target_rect("helios.params").unwrap();
+    let combo = h
+        .query_all(by().role(Role::ComboBox))
+        .find(|n| params.contains(n.rect().center()))
+        .expect("the operator's list");
+    assert_eq!(combo.value().as_deref(), Some("union"));
+    assert!(in_params(
+        &h,
+        "union: how the members fold, in port order (the operator maximum)"
+    ));
+    // Picked by its effect, the operator changes.
+    let at = combo.rect().center();
+    click(&mut h, at);
+    // Each choice has its preview beside it.
+    assert!(
+        h.query_by_label("exclude: how the members fold, in port order (the operator exclusion)")
+            .is_some()
+    );
+    h.get_by_label("intersection").click();
+    for _ in 0..3 {
+        h.step();
+    }
+    assert_eq!(text(&h, "node/mask/operator"), "minimum");
+    assert_eq!(rows(&h)[0], "▣ mask — intersection");
+}
+
+#[test]
+fn a_group_s_member_lines_follow_its_label_and_the_language() {
+    let mut h = harness();
+    run(&mut h, "helios.params.focus", json!(null));
+    run(
+        &mut h,
+        "mask.member.rename",
+        json!({ "member": "spot", "label": "Sun" }),
+    );
+    click_row(&mut h, "mask — union");
+    assert!(in_params(&h, "Sun: opacity 100 %"));
+    assert!(!in_params(&h, "spot: opacity 100 %"));
+    // In French: the words and the operator's effect.
+    let app = h.state().app().handle().clone();
+    egui_pop::i18n::plugin::set_language(&app, "fr").unwrap();
+    for _ in 0..3 {
+        h.step();
+    }
+    assert!(in_params(&h, "Sun : opacité 100 %"), "French line");
+    assert!(in_params(&h, "Sun : non inversé"), "French inversion");
+}
+
 #[test]
 fn a_viewport_edit_an_agent_and_undo_show_in_the_tree() {
     let mut h = harness();

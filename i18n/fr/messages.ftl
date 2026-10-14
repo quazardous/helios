@@ -178,6 +178,8 @@ gui-masks-row-hidden = masqué
 
 gui-masks-row-inverted = inversé
 
+gui-masks-row-not-inverted = non inversé
+
 gui-masks-row-opacity = opacité { $percent } %
 
 gui-masks-show = Afficher { $name } : son opacité à fond
@@ -222,7 +224,13 @@ gui-opening = ouverture de { $path }
 
 gui-params-hide-values = Masquer les valeurs
 
+gui-params-no-members = aucun membre pour l’instant
+
 gui-params-points = { $count } points
+
+gui-params-port-hint = Port { $port } du groupe ; le panneau Masques le modifie sur la ligne de { $member }
+
+gui-params-port-member = { $member } : { $value }
 
 gui-params-show-values = Afficher les valeurs
 

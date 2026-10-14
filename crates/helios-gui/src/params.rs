@@ -16,6 +16,10 @@
 //!   field. A list of numbers folds into a summary (`12 points` for a
 //!   path's points, else `32 values`) that opens below its row, a point
 //!   a line, so a long list never pushes the next rows out of view.
+//! - A mask group's operator is named by its effect (union, intersection,
+//!   …), each with the Masks panel's preview; its per-port lists
+//!   (opacity, invert) read a line per wired port, the member's name and
+//!   its value in words ("spot: opacity 30 %").
 //! - Marks: changed from its default (a dot that resets), held by someone
 //!   else's gesture, just moved by another origin (who, in the tooltip),
 //!   outside the soft range.
@@ -49,6 +53,20 @@ const MOVED_SECONDS: f64 = 2.0;
 
 /// Steps further apart than this, in seconds, are undo steps of their own.
 const STEPS_GAP: f64 = 0.5;
+
+/// Each mask group's members by port, by the group's node name: what its
+/// per-port lists are about (see [`crate::mask_tree::members_by_port`]).
+pub type Members = BTreeMap<String, Vec<Option<String>>>;
+
+/// The mask group parameter a path names (`operator`, `opacity`,
+/// `invert`) and its group's node, when it is one.
+fn group_param<'a>(d: &Descriptor, path: &'a str) -> Option<(&'a str, &'a str)> {
+    if d.module.as_deref() != Some("mask_combine") {
+        return None;
+    }
+    let (node, name) = path.strip_prefix("node/")?.rsplit_once('/')?;
+    Some((node, name))
+}
 
 /// What the widgets remember between frames: never values.
 #[derive(Default)]
@@ -220,6 +238,12 @@ impl Params {
 
     /// One parameter's row: its widget and marks.
     pub fn param_ui(&mut self, ui: &mut Ui, store: &Mutex<Store>, path: &str) {
+        self.param_ui_with(ui, store, path, &Members::new());
+    }
+
+    /// One parameter's row, a mask group's per-port lists read with the
+    /// members wired to its ports.
+    fn param_ui_with(&mut self, ui: &mut Ui, store: &Mutex<Store>, path: &str, members: &Members) {
         let now = ui.input(|i| i.time);
         let s = store.lock().expect("value store lock");
         let Some(entry) = s.get(path).cloned() else {
@@ -238,6 +262,13 @@ impl Params {
         let mut open_list = None;
         // Where the context menu opens, when not on the widget itself.
         let mut menu_on: Option<egui::Response> = None;
+        let group = group_param(d, path);
+        // A group's per-port list: a line per wired port, under its row.
+        let ports = group
+            .filter(|(_, name)| matches!(*name, "opacity" | "invert"))
+            .and_then(|(node, _)| members.get(node))
+            .map(|m| port_lines(ui.ctx(), &entry.value, m));
+        let operator = group.is_some_and(|(_, name)| name == "operator");
         ui.push_id(path, |ui| {
             ui.horizontal(|ui| {
                 // Changed from its default: a dot that resets.
@@ -258,6 +289,12 @@ impl Params {
                     crate::name_rect(ui.ctx(), &format!("param:{path}:changed"), dot);
                 }
                 let response = match (d.ty, &entry.value) {
+                    (Type::Choice, Value::Choice(c)) if operator => {
+                        let (r, l) = operator_choice(ui, store, path, d, c, &label);
+                        menu_on = Some(l);
+                        r
+                    }
+                    (_, Value::List(_) | Value::Ints(_)) if ports.is_some() => ui.label(&label),
                     (Type::Float | Type::Int, _) => self.slider(ui, store, path, &entry),
                     (Type::Bool, Value::Bool(b)) => {
                         let mut on = *b;
@@ -344,6 +381,13 @@ impl Params {
             });
             if let Some(per_line) = open_list {
                 list_values(ui, d, &entry.value, per_line);
+            }
+            if let Some(lines) = &ports {
+                ui.indent("ports", |ui| {
+                    for (line, hint) in lines {
+                        ui.add(egui::Label::new(line).wrap()).on_hover_text(hint);
+                    }
+                });
             }
         });
     }
@@ -695,7 +739,15 @@ impl Params {
 
     /// The Parameters panel: the selected node's values, or every node's,
     /// grouped by node in the manifest's order.
-    pub fn panel_ui(&mut self, ui: &mut Ui, store: &Mutex<Store>, selection: Option<&str>) {
+    /// A mask group's per-port lists say which member each value is for,
+    /// from `members`.
+    pub fn panel_ui(
+        &mut self,
+        ui: &mut Ui,
+        store: &Mutex<Store>,
+        selection: Option<&str>,
+        members: &Members,
+    ) {
         self.end_steps(store, ui.input(|i| i.time));
         let paths: Vec<(String, String)> = {
             let s = store.lock().expect("value store lock");
@@ -726,10 +778,87 @@ impl Params {
                         ui.strong(node);
                         current = Some(node);
                     }
-                    self.param_ui(ui, store, path);
+                    self.param_ui_with(ui, store, path, members);
                 }
             });
     }
+}
+
+/// A mask group's operator: a list of the operators by their effect
+/// (union, intersection, …), each after the Masks panel's preview of it,
+/// the chosen one's preview before the list. Returns the list's response
+/// and its label's, where the context menu goes.
+fn operator_choice(
+    ui: &mut Ui,
+    store: &Mutex<Store>,
+    path: &str,
+    d: &Descriptor,
+    current: &str,
+    label: &str,
+) -> (egui::Response, egui::Response) {
+    use crate::mask_tree::{operator_effect, operator_glyph, operator_hint};
+    let ctx = ui.ctx().clone();
+    let effect = |o: &str| crate::i18n::text(&ctx, operator_effect(o));
+    let mut picked = current.to_string();
+    operator_glyph(ui, current, &operator_hint(&ctx, current));
+    let r = egui::ComboBox::from_id_salt(path)
+        .selected_text(effect(current))
+        .show_ui(ui, |ui| {
+            for o in &d.choices {
+                ui.horizontal(|ui| {
+                    operator_glyph(ui, o, &operator_hint(&ctx, o));
+                    ui.selectable_value(&mut picked, o.clone(), effect(o));
+                });
+            }
+        })
+        .response
+        .on_hover_text(operator_hint(&ctx, current));
+    let l = ui.label(label);
+    if picked != current {
+        let mut s = store.lock().expect("value store lock");
+        write(&mut s, path, Change::To(Value::Choice(picked)), None, false);
+    }
+    (r, l)
+}
+
+/// A mask group's per-port list (opacities or inversions) as lines, one
+/// per wired port: the member's name and its value in words, as the
+/// Masks panel's rows say them, with the port in the line's hint.
+fn port_lines(ctx: &egui::Context, v: &Value, members: &[Option<String>]) -> Vec<(String, String)> {
+    use crate::mask_tree::{inverted_words, opacity_words};
+    let words = |port: usize| match v {
+        Value::List(l) => opacity_words(l.get(port).copied().unwrap_or(1.0)),
+        Value::Ints(l) => inverted_words(l.get(port).is_some_and(|x| *x != 0)),
+        _ => Message::plain(""),
+    };
+    let lines: Vec<(String, String)> = members
+        .iter()
+        .enumerate()
+        .filter_map(|(port, m)| {
+            let member = m.as_deref()?;
+            let line = crate::i18n::text(
+                ctx,
+                Message::new("gui-params-port-member", "{ $member }: { $value }")
+                    .with("member", member)
+                    .with("value", crate::i18n::text(ctx, words(port))),
+            );
+            let hint = crate::i18n::text(
+                ctx,
+                Message::new(
+                    "gui-params-port-hint",
+                    "Port { $port } of the group; the Masks panel edits it on { $member }'s row",
+                )
+                .with("port", port + 1)
+                .with("member", member),
+            );
+            Some((line, hint))
+        })
+        .collect();
+    if lines.is_empty() {
+        let none = crate::i18n::text(ctx, Message::new("gui-params-no-members", "no members yet"));
+        return vec![(none.clone(), none)];
+    }
+    lines
 }
 
 /// A curve's points from its list (`x0, y0, x1, y1, …`).

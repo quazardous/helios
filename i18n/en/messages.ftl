@@ -241,6 +241,8 @@ gui-masks-row-hidden = hidden
 
 gui-masks-row-inverted = inverted
 
+gui-masks-row-not-inverted = not inverted
+
 gui-masks-row-opacity = opacity { $percent } %
 
 gui-masks-show = Show { $name }: its opacity full
@@ -295,7 +297,13 @@ gui-param-picker = Pick { $label } from the image
 
 gui-params-hide-values = Hide the values
 
+gui-params-no-members = no members yet
+
 gui-params-points = { $count } points
+
+gui-params-port-hint = Port { $port } of the group; the Masks panel edits it on { $member }'s row
+
+gui-params-port-member = { $member }: { $value }
 
 gui-params-show-values = Show the values
 

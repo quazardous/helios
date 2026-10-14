@@ -313,18 +313,11 @@ impl Item {
         // what the group's per-port lists hold for it.
         if self.invert {
             s.push_str(" · ");
-            s.push_str(&tr(Message::new("gui-masks-row-inverted", "inverted")));
+            s.push_str(&tr(inverted_words(true)));
         }
-        if self.opacity <= 0.0 {
+        if self.opacity < 1.0 {
             s.push_str(" · ");
-            s.push_str(&tr(Message::new("gui-masks-row-hidden", "hidden")));
-        } else if self.opacity < 1.0 {
-            s.push_str(" · ");
-            s.push_str(&tr(Message::new(
-                "gui-masks-row-opacity",
-                "opacity { $percent } %",
-            )
-            .with("percent", format!("{:.0}", self.opacity * 100.0))));
+            s.push_str(&tr(opacity_words(self.opacity)));
         }
         s
     }
@@ -355,6 +348,63 @@ pub fn operator_effect(operator: &str) -> Message {
         "exclusion" => Message::new("gui-masks-op-exclusion", "exclude"),
         other => Message::plain(other),
     }
+}
+
+/// A member's inversion in its group, in words ("inverted", or "not
+/// inverted", which a row leaves unsaid).
+pub fn inverted_words(invert: bool) -> Message {
+    if invert {
+        Message::new("gui-masks-row-inverted", "inverted")
+    } else {
+        Message::new("gui-masks-row-not-inverted", "not inverted")
+    }
+}
+
+/// A member's opacity in its group, in words: "hidden" at none, else
+/// "opacity 30 %".
+pub fn opacity_words(opacity: f64) -> Message {
+    if opacity <= 0.0 {
+        Message::new("gui-masks-row-hidden", "hidden")
+    } else {
+        Message::new("gui-masks-row-opacity", "opacity { $percent } %")
+            .with("percent", format!("{:.0}", opacity * 100.0))
+    }
+}
+
+/// A group operator's hover and accessible label: its effect, then the
+/// operator's own name.
+pub fn operator_hint(ctx: &egui::Context, operator: &str) -> String {
+    crate::i18n::text(
+        ctx,
+        Message::new(
+            "gui-masks-operator-hint",
+            "{ $effect }: how the members fold, in port order (the operator { $operator })",
+        )
+        .with("effect", crate::i18n::text(ctx, operator_effect(operator)))
+        .with("operator", operator),
+    )
+}
+
+/// Each mask group's members by port, by the group's node name: the name
+/// the Masks panel gives each (its label, else its node's name), past its
+/// refinements; `None` for a port nothing is wired to.
+pub fn members_by_port(graph: &Graph, store: &Store) -> BTreeMap<String, Vec<Option<String>>> {
+    graph
+        .ids()
+        .filter(|&id| module_of(graph, id).as_deref() == Some("mask_combine"))
+        .filter_map(|id| {
+            let ports = graph.input_nodes(id).ok()?;
+            let names = ports
+                .into_iter()
+                .map(|head| {
+                    let (node, _) = subject(graph, head?);
+                    let name = name_of(graph, node);
+                    Some(label_of(store, &name).unwrap_or(name))
+                })
+                .collect();
+            Some((name_of(graph, id), names))
+        })
+        .collect()
 }
 
 /// What a refinement module does, as its row says it.
@@ -1685,23 +1735,14 @@ fn row_toggles(ui: &mut Ui, item: &Item, commands: &mut Vec<Command>) {
         });
     }
     if let Some(op) = item.operator.as_deref().filter(|_| item.is_group()) {
-        let hint = crate::i18n::text(
-            &ctx,
-            Message::new(
-                "gui-masks-operator-hint",
-                "{ $effect }: how the members fold, in port order (the operator { $operator })",
-            )
-            .with("effect", crate::i18n::text(&ctx, operator_effect(op)))
-            .with("operator", op),
-        );
-        operator_glyph(ui, op, &hint);
+        operator_glyph(ui, op, &operator_hint(&ctx, op));
     }
 }
 
 /// A group's operator, drawn: two soft discs folded by it a cell at a
 /// time, the accent's strength the result, their outlines muted. The
 /// picture is the operator's own result on two members, not a symbol.
-fn operator_glyph(ui: &mut Ui, operator: &str, hint: &str) -> egui::Response {
+pub fn operator_glyph(ui: &mut Ui, operator: &str, hint: &str) -> egui::Response {
     const W: usize = 20;
     const H: usize = 14;
     const R: f32 = 5.5;

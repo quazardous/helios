@@ -545,7 +545,12 @@ moved by someone else (the tooltip says who); an amber dot, a value held
 by another origin's gesture. A list of numbers folds into a summary
 (`12 points` for a path's or a brush's points, else `32 values`) that a
 click opens below its row, a point a line: a long list never pushes the
-next rows (a path's feather, a group's opacity) out of view. Each widget
+next rows (a path's feather) out of view. A mask group's parameters
+speak as the Masks panel does (2026-10-14): its operator is a list of
+effects (union, soft union, intersection, …), each after the panel's
+preview of it; its per-port opacities and inversions read one line per
+wired port, the member's name and its value in words ("spot: opacity
+30 %", "oval: inverted"), the port in the line's hint. Each widget
 is found by its path
 (`param:<path>`), is a slider to assistive technology, and its context
 menu resets, copies the path or copies the value.
