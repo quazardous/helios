@@ -376,12 +376,39 @@ from: imported twice, it is two copies. Not decided (later, on egui-pop's
 context stack): delegating part of a network to a sub-workspace.
 
 **Agents.** The desktop's commands take their arguments whole, with
-`dry_run`. The node's MCP server answers the same on a workspace's files
+`dry_run`. The node's MCP server has the same as tools
 (`helios_workspace_parts`, `_state`, `_edit`, `_reset`,
 `_import_parts`, `_save_as_template`, each with `dry_run`, and
-`_undo`, which takes back the last step these tools made). A desktop
-showing that workspace reads the files when it opens it; it does not
-follow them while open.
+`_undo`); each answer says where it was made (`via`):
+
+- **Through the desktop** (`via: desktop`), when a desktop holds the
+  workspace open. The desktop says so in the workspace's files
+  (`desktop.json`: its process and its endpoint, JSON lines as a node's
+  inspect endpoint, on a Unix socket in the user's runtime directory or
+  loopback TCP with a session token), and lets it go when it closes. The
+  request is run at the desktop's next frame: an edit, a reset or an
+  import is one step of its Edit > Undo, shown at once and written by
+  the desktop, so its next save keeps it; a dry run answers from what
+  it shows. `_undo` takes back the desktop's last step only when it is
+  an agent's step on the workspace, never the user's. A desktop that
+  has not answered in 20 s (a minimized window that draws no frame)
+  drops the request and the agent is told.
+- **On the files** (`via: files`), when no desktop holds it, or the one
+  that said so is gone (killed: nothing listens at its endpoint). Each
+  step is kept to be undone by `_undo`, which refuses once the files
+  changed since that step (a desktop edited the workspace in between).
+
+**Changed outside the desktop.** A desktop watches its workspace's files
+and compares them with what it last wrote there. A change made outside
+(another tool, a desktop that did not say it held it) is taken in as one
+undo step, part by part (name, description, icon, network, tools,
+library, layout and the rest of the template): a part only the files
+changed is taken; a part only the desktop changed is kept; a part both
+changed is taken from the files, the desktop's own one Edit > Undo
+back, and a warning names it (decided 2026-10-14). For the layout,
+which egui-pop saves as it changes, the desktop's change is what it has
+not saved yet. The same check runs before each of the desktop's own
+writes, so a save never writes over a change it has not seen.
 
 ## The AI's `template.design` decision (later)
 

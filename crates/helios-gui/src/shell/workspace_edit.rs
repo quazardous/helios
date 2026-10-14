@@ -68,8 +68,8 @@ pub(super) const COMMANDS: &[(&str, &str)] = &[
 
 /// The workspace open, as the shell edits it.
 pub(super) struct Edited {
-    files: Files,
-    config: PathBuf,
+    pub(super) files: Files,
+    pub(super) config: PathBuf,
     /// The state's text as last applied.
     applied: String,
     /// The template it was made from, if it was.
@@ -77,6 +77,19 @@ pub(super) struct Edited {
     /// Its network changed since it was last taken: the image is opened
     /// again through it.
     network_changed: bool,
+    /// What its files held when the desktop last wrote or read them
+    /// (`State::to_json`, read as `Files::load_on_disk` reads it): a
+    /// difference is a change made outside the desktop.
+    pub(super) disk: Value,
+    /// Its endpoint for agents and the watcher of its files.
+    pub(super) live: Option<super::workspace_live::Live>,
+}
+
+impl Edited {
+    /// What the files held when the desktop last wrote or read them.
+    pub(super) fn disk_state(&self) -> Result<State, String> {
+        State::from_json(&self.disk)
+    }
 }
 
 fn descriptor() -> helios_values::Descriptor {
@@ -108,6 +121,7 @@ impl Shell {
         // The layout egui-pop loaded, as shown.
         state.bundle.layout = self.own_layout();
         let origin = files.origin().transpose()?;
+        let disk = files.load_on_disk()?.to_json();
         let text = state.to_json().to_string();
         lock(&self.values).declare_with(
             STATE,
@@ -115,12 +129,22 @@ impl Shell {
             helios_core::Value::Text(text.clone()),
         );
         self.apply_workspace(None, &state);
+        // The workspace held before (a test opening another) is let go.
+        self.release_workspace();
+        let (live, problem) = super::workspace_live::Live::start(&files);
+        if let Some(e) = problem {
+            self.notes.push(format!(
+                "the workspace is not reachable by agents through this window: {e}"
+            ));
+        }
         self.edit = Some(Edited {
             files,
             config: config.into(),
             applied: text,
             origin,
             network_changed: false,
+            disk,
+            live: Some(live),
         });
         Ok(())
     }
@@ -140,7 +164,11 @@ impl Shell {
     /// The layout shown, Helios's panels only: egui-pop's own (the jobs
     /// centre) belong to the application, not to a workspace.
     fn own_layout(&self) -> Layout {
-        let mut layout = self.layout();
+        self.own_panels(self.layout())
+    }
+
+    /// A layout with Helios's panels only.
+    pub(super) fn own_panels(&self, mut layout: Layout) -> Layout {
         let known = |p: &PanelId| self.panels.iter().any(|s| s.id == *p);
         let foreign: Vec<PanelId> = layout
             .placed()
@@ -168,7 +196,7 @@ impl Shell {
             .is_some_and(|e| std::mem::take(&mut e.network_changed))
     }
 
-    fn workspace_catalogue(&self) -> helios_template::Catalogue {
+    pub(super) fn workspace_catalogue(&self) -> helios_template::Catalogue {
         crate::templates::catalogue(&self.panels, self.specs())
     }
 
@@ -192,15 +220,12 @@ impl Shell {
                 return self.warn(e);
             }
         };
-        let saved = edit.files.save(&next, false);
-        if let Err(e) = saved {
-            self.warn(
-                Message::new(
-                    "gui-workspace-not-saved",
-                    "The workspace was not saved: { $error }",
-                )
-                .with("error", e),
-            );
+        // Files changed outside since the desktop last wrote them are not
+        // written over: taken in first, as a step of their own, which
+        // writes the result.
+        let outside = self.changed_outside();
+        if outside.is_none() {
+            self.write_workspace(&next);
         }
         self.apply_workspace(Some(&before), &next);
         let network = before.bundle.template.network != next.bundle.template.network
@@ -208,6 +233,27 @@ impl Shell {
         if let Some(edit) = &mut self.edit {
             edit.applied = text;
             edit.network_changed |= network;
+        }
+        if let Some(theirs) = outside {
+            self.reload_workspace(theirs);
+        }
+    }
+
+    /// Writes a state to the workspace's files (its layout being
+    /// egui-pop's to save), remembered as what the files hold.
+    pub(super) fn write_workspace(&mut self, state: &State) {
+        let Some(edit) = &mut self.edit else {
+            return;
+        };
+        match edit.files.save(state, false) {
+            Ok(()) => edit.disk = state.to_json(),
+            Err(e) => self.warn(
+                Message::new(
+                    "gui-workspace-not-saved",
+                    "The workspace was not saved: { $error }",
+                )
+                .with("error", e),
+            ),
         }
     }
 
@@ -238,8 +284,20 @@ impl Shell {
     /// One undoable step on the workspace: `make` turns the state as it
     /// stands (the layout shown included) into the next one, which is
     /// written to the value store as one step labelled `label`, then
-    /// applied.
+    /// applied. A change made to its files outside the desktop is taken
+    /// in first, as a step of its own.
     fn workspace_step(
+        &mut self,
+        label: &str,
+        origin: &Origin,
+        make: impl FnOnce(&State) -> Result<State, String>,
+    ) -> Result<State, String> {
+        self.check_workspace_files();
+        self.workspace_step_as_is(label, origin, make)
+    }
+
+    /// [`Shell::workspace_step`], the files not looked at first.
+    pub(super) fn workspace_step_as_is(
         &mut self,
         label: &str,
         origin: &Origin,

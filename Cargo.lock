@@ -2082,6 +2082,7 @@ dependencies = [
  "helios-load",
  "helios-module-exposure",
  "helios-module-masks",
+ "helios-node",
  "helios-photo",
  "helios-profile",
  "helios-scopes",

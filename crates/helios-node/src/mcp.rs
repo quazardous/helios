@@ -13,12 +13,17 @@
 //! `cmd` are the dotted names (`ai.providers.list`); the tool names use
 //! underscores, which every MCP client accepts.
 //!
-//! The `helios_workspace_*` tools are answered by the server itself too,
-//! on a workspace's files (`helios_template::workspace::tools`): its
-//! parts listed, edited, reset to its template, parts of another added as
-//! a copy, saved as a template, each with a dry run, each step undone by
-//! `helios_workspace_undo`. A desktop showing that workspace reads the
-//! files when it opens it.
+//! The `helios_workspace_*` tools are answered by the server itself too:
+//! a workspace's parts listed, edited, reset to its template, parts of
+//! another added as a copy, saved as a template, each with a dry run,
+//! each step undone by `helios_workspace_undo`. When a desktop holds the
+//! workspace open (it says so among the workspace's files,
+//! `workspace::HOLDER`), the request goes to it: the edit is one step of
+//! its Edit > Undo, seen at once, and its next save keeps it. Otherwise
+//! they work on the workspace's files (`helios_template::workspace::tools`),
+//! which a desktop opening the workspace later reads, and one that has
+//! it open without having said so takes in as an undo step. Each answer
+//! says which (`via`: `desktop` or `files`).
 //!
 //! Transport: JSON-RPC 2.0, one message per line on stdin and stdout.
 
@@ -1195,19 +1200,70 @@ pub fn workspace_catalogue() -> helios_template::Catalogue {
     c
 }
 
-/// A `helios_workspace_*` tool, on the workspace's files.
+/// How long a workspace request waits for the desktop holding it: its
+/// own deadline (it answers when it has not run the request by then)
+/// and a margin.
+const DESKTOP_DEADLINE: std::time::Duration = std::time::Duration::from_secs(25);
+
+/// A workspace request sent to the desktop that holds the workspace
+/// open; `None` when none does (none said so, or the one that did is
+/// gone or let it go), and the files are worked on instead.
+fn through_desktop(config: &std::path::Path, request: &Value) -> Option<Result<Value, String>> {
+    let dir = PathBuf::from(request["workspace"].as_str()?);
+    let files = helios_template::workspace::Files::new(config, &dir);
+    let holder = files.holder()?;
+    let address = Address::parse(&holder.address, holder.token.clone()).ok()?;
+    let mut wire = request.clone();
+    if let Some(o) = wire.as_object_mut() {
+        o.remove("config");
+    }
+    match helios_inspect::request_within(&address, &wire, DESKTOP_DEADLINE) {
+        Ok(answer) if answer["ok"] == true => Some(Ok(answer["answer"].clone())),
+        // Gone, or another process now on its TCP port.
+        Ok(answer)
+            if answer["gone"] == true
+                || answer["error"]
+                    .as_str()
+                    .is_some_and(|e| e.starts_with("authentication failed")) =>
+        {
+            None
+        }
+        Ok(answer) => Some(Err(answer["error"]
+            .as_str()
+            .map_or_else(|| answer.to_string(), String::from))),
+        // Nothing listens there: the desktop went without a word (killed).
+        Err(e)
+            if matches!(
+                e.kind(),
+                std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::NotFound
+            ) =>
+        {
+            None
+        }
+        Err(e) => Some(Err(format!(
+            "the desktop holding this workspace ({}) did not answer: {e}",
+            holder.address
+        ))),
+    }
+}
+
+/// A `helios_workspace_*` tool: through the desktop holding the
+/// workspace, else on its files.
 fn workspace_call(request: &Value) -> Result<Value, String> {
     use helios_template::workspace::{config_dir, tools};
     let config = request["config"]
         .as_str()
         .map_or_else(config_dir, PathBuf::from);
+    if let Some(answer) = through_desktop(&config, request) {
+        return answer;
+    }
     let mut args = request.clone();
     if let Some(o) = args.as_object_mut() {
         o.remove("cmd");
         o.remove("config");
     }
     let catalogue = workspace_catalogue();
-    match request["cmd"].as_str().unwrap_or_default() {
+    let mut answer = match request["cmd"].as_str().unwrap_or_default() {
         "workspace.parts" => tools::parts_of(&config, &args),
         "workspace.state" => tools::state(&config, &args),
         "workspace.edit" => tools::edit(&config, &args, &catalogue),
@@ -1216,7 +1272,11 @@ fn workspace_call(request: &Value) -> Result<Value, String> {
         "workspace.save_as_template" => tools::save_as_template(&config, &args, &catalogue),
         "workspace.undo" => tools::undo(&config, &args),
         other => Err(format!("no workspace tool `{other}`")),
+    }?;
+    if let Some(o) = answer.as_object_mut() {
+        o.insert("via".into(), json!("files"));
     }
+    Ok(answer)
 }
 
 /// Answers one JSON-RPC message; `None` for notifications.

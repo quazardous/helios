@@ -55,6 +55,8 @@ egui-pop-test.workspace = true
 egui-pop-wayland.workspace = true
 # An export run as the desktop's job (the jobs centre's tests).
 helios-export.workspace = true
+# The node's MCP server, whose workspace tools go through the desktop.
+helios-node = { path = "../helios-node" }
 
 [lints]
 workspace = true

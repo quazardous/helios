@@ -346,6 +346,12 @@ gui-workspace-name = nom
 
 gui-workspace-not-saved = L’espace de travail n’a pas été enregistré : { $error }
 
+gui-workspace-reload-failed = Les fichiers de l’espace de travail ont changé hors de Helios et n’ont pas pu être lus : { $error }
+
+gui-workspace-reloaded = Les fichiers de l’espace de travail ont changé hors de Helios : { $parts } rechargé(s)
+
+gui-workspace-reloaded-both = Les fichiers de l’espace de travail ont changé hors de Helios pendant que vous le modifiiez aussi : { $both } repris des fichiers (Édition > Annuler rend votre version)
+
 gui-workspace-template-ask = demander à la création : { $name }
 
 gui-workspace-template-description-fr = description en français
