@@ -4,7 +4,7 @@ Vision, settled concepts, phases and open questions for Helios. This is a
 living document: decisions are dated, and an idea stays "not decided" until
 it says otherwise.
 
-Last updated: 2026-10-13.
+Last updated: 2026-10-27.
 
 ---
 
@@ -143,8 +143,9 @@ the selected one's handles on egui-pop's overlay kit, a drag one undo
 step, shapes created by `mask.*` commands and keys (see docs/gui.md).
 Decided (2026-10-13): a change of the network (creating or deleting a
 shape, adding, moving or taking out a member, rewiring) is an undo step,
-one per structural edit, restoring the values it moved. Not decided yet:
-how a network edited so is saved with the image's edit.
+one per structural edit, restoring the values it moved. Decided
+(2026-10-14): each version of an image's edit keeps the whole network,
+and an image keeps its own once edited.
 The Masks panel (2026-10-13): the selected module's mask network as a
 tree on egui-pop's `TreeView`, live through its handle, its selection
 two-way with the viewport's; rename, invert and opacity are undo steps
@@ -192,6 +193,21 @@ redirect it (before hooks), replace it (run hooks with a sane default) or
 extend it (after hooks). Each hook is optional and traced in the debug
 bridge; egui-pop never hides a step the application may need to own (first
 case: undo and redo, answered by Helios's version history).
+Undo and history (2026-10-14, decided; egui-pop's ADR 0014 and
+docs/design/undo.md): histories belong to the kernel, behind egui-pop's
+`History` contract; the interface routes the keys to them and shows them.
+One history per scope: the image's edit (durable, built on its versions,
+its undo and redo lists rebuilt on reopen), the library (ratings, labels,
+tags, stacks, imports: for the session only, rebuilt from the audit trail
+later) and the workspace; a component that edits something of its own
+(the theme editor, the settings window, the code editor) keeps a local
+scope. Ctrl+Z goes to a focused text input, then a focused local scope,
+then the newest step among the scopes active in the window. A gesture is
+one step, an agent's request one group, and each version names who made
+it. Each scope keeps 500 steps in memory, a number the host can change.
+No "compress history" for now. The history panel hides the redo states a
+new step dropped, with a toggle that shows them as "replaced". Undoing a
+copy-import removes the catalogue entries it added, never the files.
 Hard requirement (2026-10-11, decided): GPU acceleration on Linux, Windows
 and macOS, as close to Vulkan as possible, so the viewport can show buffers
 the engine computed on the GPU without copying them back. wgpu is
