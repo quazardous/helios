@@ -342,6 +342,89 @@ enum Shown {
     File(PathBuf),
 }
 
+/// An image made ready on a thread of its own: decoded through the
+/// workspace's network and, with a vault, imported there.
+struct Prepared {
+    path: PathBuf,
+    image: Option<helios_vault::ImageId>,
+    graph: helios_core::Graph,
+    node: helios_core::NodeId,
+}
+
+/// An image being made ready off the window's thread: the window opens it
+/// in the first frame after it is (decoding a raw's preview takes long
+/// enough to hold the window up).
+struct Preparing {
+    path: PathBuf,
+    ready: std::sync::mpsc::Receiver<Result<Prepared, String>>,
+}
+
+/// Starts making `path` ready: decoded through `bundle`'s network, and
+/// imported into `vault` when there is one.
+fn prepare(
+    path: PathBuf,
+    bundle: helios_template::Bundle,
+    vault: Option<Arc<helios_vault::Vault<helios_vault_sqlite::SqliteStore>>>,
+) -> Preparing {
+    let (tx, ready) = std::sync::mpsc::channel();
+    let file = path.clone();
+    let sender = tx.clone();
+    let spawned = std::thread::Builder::new()
+        .name("helios-image-open".into())
+        .spawn(move || {
+            let prepared = image_graph(&file, &bundle).and_then(|(graph, node)| {
+                let image = vault.map(|v| v.import_file(&file, seconds())).transpose()?;
+                Ok(Prepared {
+                    path: file,
+                    image,
+                    graph,
+                    node,
+                })
+            });
+            let _ = sender.send(prepared);
+        });
+    if let Err(e) = spawned {
+        let _ = tx.send(Err(format!("no thread to open the image: {e}")));
+    }
+    Preparing { path, ready }
+}
+
+/// A file's name, as notices show it.
+fn file_name(path: &Path) -> String {
+    path.file_name().map_or_else(
+        || path.display().to_string(),
+        |n| n.to_string_lossy().into(),
+    )
+}
+
+/// What the status bar says while an image is made ready.
+fn opening_notice(path: &Path) -> Message {
+    Message::new("gui-image-opening", "Opening { $name }…").with("name", file_name(path))
+}
+
+/// What the status bar says once it is open.
+fn opened_notice(path: &Path) -> Message {
+    Message::new("gui-image-opened", "{ $name } is open").with("name", file_name(path))
+}
+
+/// Shows an image made ready: opened with its saved edit (and saved
+/// there) when it is in the vault, else on its own.
+fn show_prepared(
+    shell: &mut Shell,
+    persist: Option<&mut Persist>,
+    prepared: Prepared,
+) -> Result<(), String> {
+    let Prepared {
+        image, graph, node, ..
+    } = prepared;
+    match (persist, image) {
+        (Some(persist), Some(image)) => persist
+            .open_image(shell, image, graph, node, "output")
+            .map(|_| ()),
+        _ => shell.set_view_source(graph, node, "output"),
+    }
+}
+
 struct App {
     // Fields drop in this order; the marks time the quit's steps.
     persist: Option<Persist>,
@@ -356,6 +439,8 @@ struct App {
     frames: start::Frames,
     /// The library being read, shown once it is.
     library_reading: Option<LibraryReading>,
+    /// Images being made ready, opened in the viewport as each is.
+    preparing: Vec<Preparing>,
 }
 
 impl Drop for App {
@@ -440,15 +525,54 @@ impl App {
         false
     }
 
+    /// Opens the images made ready since the last frame; whether some are
+    /// still being made ready.
+    fn open_prepared(&mut self) -> bool {
+        use std::sync::mpsc::TryRecvError;
+        let mut i = 0;
+        while i < self.preparing.len() {
+            let done = match self.preparing[i].ready.try_recv() {
+                Ok(Ok(prepared)) => {
+                    let path = prepared.path.clone();
+                    show_prepared(&mut self.shell, self.persist.as_mut(), prepared)
+                        .map_err(|e| format!("{}: {e}", path.display()))
+                }
+                Ok(Err(e)) => Err(e),
+                Err(TryRecvError::Empty) => {
+                    i += 1;
+                    continue;
+                }
+                Err(TryRecvError::Disconnected) => Err(format!(
+                    "{}: its opening stopped (a panic)",
+                    self.preparing[i].path.display()
+                )),
+            };
+            let path = self.preparing.remove(i).path;
+            match done {
+                Ok(()) => {
+                    start::mark("image opened");
+                    // The status bar said it was being opened.
+                    self.shell
+                        .notify(helios_gui::dialogs::Level::Info, opened_notice(&path));
+                    self.shown = Some(Shown::File(path));
+                }
+                Err(e) => self.shell.notify(helios_gui::dialogs::Level::Error, e),
+            }
+        }
+        !self.preparing.is_empty()
+    }
+
     /// Opens what a later launch or a link asked for: an image in the
     /// viewport, a workspace in a window of its own (none for the one
     /// this window shows).
     fn open(&mut self, open: Open) -> Result<(), String> {
         match open {
             Open::Image(path) => {
-                let graph = image_graph(&path, &self.bundle())?;
-                show_image(&mut self.shell, self.persist.as_mut(), path.clone(), graph)?;
-                self.shown = Some(Shown::File(path));
+                // Made ready off the window's thread, opened once it is.
+                self.shell
+                    .notify(helios_gui::dialogs::Level::Info, opening_notice(&path));
+                let vault = self.persist.as_ref().map(|p| p.vault().clone());
+                self.preparing.push(prepare(path, self.bundle(), vault));
                 Ok(())
             }
             Open::Workspace(dir) => {
@@ -502,8 +626,9 @@ impl eframe::App for App {
         {
             self.shell.notify(helios_gui::dialogs::Level::Error, e);
         }
-        if self.show_library_read() {
-            // Back soon: the library is still being read.
+        let reading = self.show_library_read();
+        if self.open_prepared() || reading {
+            // Back soon for what is still being read or made ready.
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_millis(30));
         }
@@ -583,28 +708,6 @@ fn save_workspace(dir: &Path, app: &egui_pop::api::AppHandle) {
         warn(&format!("cannot save {}: {e}", file.display()));
     }
     quit::mark("workspace profile saved");
-}
-
-/// Shows an image: imported into the vault and opened with its saved edit
-/// when there is one, else on its own.
-fn show_image(
-    shell: &mut Shell,
-    persist: Option<&mut Persist>,
-    path: PathBuf,
-    (graph, node): (helios_core::Graph, helios_core::NodeId),
-) -> Result<(), String> {
-    match persist {
-        Some(persist) => {
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map_or(0, |d| d.as_secs());
-            let image = persist.vault().import_file(&path, now)?;
-            persist
-                .open_image(shell, image, graph, node, "output")
-                .map(|_| ())
-        }
-        None => shell.set_view_source(graph, node, "output"),
-    }
 }
 
 /// How long the window waits for the window manager's focus mode: past
@@ -785,11 +888,8 @@ fn main() -> Result<(), String> {
         }
     };
     start::mark("workspace read");
-    let shown = image_file.clone().map(Shown::File);
-    let image = image_file
-        .map(|path| image_graph(&path, &bundle).map(|g| (path, g)))
-        .transpose()?;
-    start::mark("image decoded");
+    // The image asked for is made ready while the window opens.
+    let preparing = image_file.map(|path| prepare(path, bundle, vault.clone()));
     let earlier = earlier_layout(&workspace, &ui_settings);
     let builder = Shell::builder(helios_panels(), Some(ui_settings))
         .workspace(&workspace)
@@ -862,13 +962,9 @@ fn main() -> Result<(), String> {
                     Message::new("gui-library-reading", "Reading the library…"),
                 );
             }
-            let mut persist = persist;
-            if let Some((path, graph)) = image
-                && let Err(e) = show_image(&mut shell, persist.as_mut(), path, graph)
-            {
-                shell.notify(helios_gui::dialogs::Level::Error, e);
+            if let Some(p) = &preparing {
+                shell.notify(helios_gui::dialogs::Level::Info, opening_notice(&p.path));
             }
-            start::mark("image opened");
             let refill = Arc::new(AtomicBool::new(false));
             if let Some(p) = &persist
                 && let Err(e) = library_commands(&mut shell, p, &refill, &cc.egui_ctx)
@@ -881,10 +977,11 @@ fn main() -> Result<(), String> {
                 _persist_dropped: quit::MarkOnDrop("vault link dropped"),
                 shell,
                 _shell_dropped: quit::MarkOnDrop("shell dropped"),
-                shown,
+                shown: None,
                 refill,
                 frames: start::Frames::default(),
                 library_reading,
+                preparing: preparing.into_iter().collect(),
             })
         })
         .map_err(|e| e.to_string());

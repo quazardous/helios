@@ -99,6 +99,10 @@ gui-edit-not-saved = The edit was not saved: { $error }
 
 gui-gesture-in-progress = { $gesture } is in progress
 
+gui-image-opened = { $name } is open
+
+gui-image-opening = Opening { $name }…
+
 gui-import-form-title = Import a card or a folder
 
 gui-import-path = card or folder
