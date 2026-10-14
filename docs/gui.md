@@ -278,7 +278,11 @@ Helios declares into it:
   commands first, a command's arguments asked for), the **dialogs**, the
   **toasts**, the **settings window** (`Ctrl+,`) with its **shortcuts
   editor** (a command's keys changed by pressing them, conflicts said,
-  each change taken back by its reset) and the **window's place** (size,
+  each change taken back by its reset; changed for every workspace, the
+  user's keys, or for this workspace alone, its own keys, kept in its
+  files as one undo step; each key followed by where it comes from:
+  `template`, `workspace` or `user`, nothing for a default) and the
+  **window's place** (size,
   position, maximized, full screen with `F11` and a way out at the top
   edge), kept between runs with the interface's other settings (focus
   mode, the user's keys) under `~/.config/helios/ui/`. egui-pop opens

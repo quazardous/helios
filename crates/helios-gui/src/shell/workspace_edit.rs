@@ -12,11 +12,12 @@
 //! whole for agents and scripts (`dry_run` says what would happen), and
 //! ask for what is missing in the shell's dialogs.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use egui_pop::api::dialogs;
 use egui_pop::model::ids::{CommandId, PanelId};
+use egui_pop::model::keymap::{Action, Layer};
 use egui_pop::model::layout::Layout;
 use helios_core::Message;
 use helios_shell::commands::Origin;
@@ -80,6 +81,9 @@ pub(super) struct Edited {
     pub(super) disk: Value,
     /// Its endpoint for agents and the watcher of its files.
     pub(super) live: Option<super::workspace_live::Live>,
+    /// egui-pop's workspace keymap layer as the workspace's keys last
+    /// loaded it: a difference is a change made in the shortcuts editor.
+    keys_loaded: Vec<(String, String, String)>,
 }
 
 impl Edited {
@@ -142,8 +146,101 @@ impl Shell {
             network_changed: false,
             disk,
             live: Some(live),
+            keys_loaded: Vec::new(),
         });
+        self.offer_workspace_keys();
+        self.keys_loaded();
         Ok(())
+    }
+
+    /// The shortcuts editor offers to change keys for this workspace,
+    /// and names where each key comes from: `template` for a key its
+    /// template set, egui-pop's `workspace` and `user` for the others.
+    fn offer_workspace_keys(&mut self) {
+        use helios_profile::{System, local_keys};
+        let h = self.app.handle().clone();
+        h.offer_workspace_keys(true);
+        let from_template: BTreeSet<(String, String)> = self
+            .edit
+            .as_ref()
+            .and_then(|e| e.origin.as_ref())
+            .map(|o| &o.template.tools.keymap)
+            .into_iter()
+            .flatten()
+            .map(|b| (local_keys(&b.keys, System::current()), b.command.clone()))
+            .collect();
+        let label = self.text(Message::new("gui-keys-from-template", "template"));
+        h.name_key_sources(move |b| {
+            let Action::Run(command) = &b.action else {
+                return None;
+            };
+            (b.layer == Layer::Workspace
+                && from_template.contains(&(b.keys.to_string(), command.to_string())))
+            .then(|| label.clone())
+        });
+    }
+
+    /// egui-pop's workspace layer, as compared: keys, command, clause.
+    fn layer_keys(&self) -> Vec<(String, String, String)> {
+        self.app
+            .handle()
+            .export_keymap(Layer::Workspace)
+            .bindings
+            .into_iter()
+            .filter_map(|b| Some((b.keys, b.command?, b.when)))
+            .collect()
+    }
+
+    /// Remembers egui-pop's workspace layer as the workspace's keys
+    /// loaded it.
+    fn keys_loaded(&mut self) {
+        let keys = self.layer_keys();
+        if let Some(edit) = &mut self.edit {
+            edit.keys_loaded = keys;
+        }
+    }
+
+    /// Once per frame: keys changed for the workspace in the shortcuts
+    /// editor become the workspace's own, one undo step written to its
+    /// files (`tools.keymap`, a removal written `-<command>`).
+    pub(super) fn follow_workspace_keys(&mut self) {
+        use helios_profile::{System, local_keys};
+        let Some(edit) = &self.edit else {
+            return;
+        };
+        let now = self.layer_keys();
+        if now == edit.keys_loaded {
+            return;
+        }
+        let made = self.workspace_step("change the workspace's keys", &Origin::User, |state| {
+            let mut next = state.clone();
+            let before = &state.bundle.template.tools.keymap;
+            next.bundle.template.tools.keymap = now
+                .iter()
+                .map(|(keys, command, when)| {
+                    // A key unchanged keeps how the template wrote it
+                    // (`Mod+…`).
+                    before
+                        .iter()
+                        .find(|b| {
+                            local_keys(&b.keys, System::current()) == *keys
+                                && b.command == *command
+                                && b.when == *when
+                        })
+                        .cloned()
+                        .unwrap_or_else(|| helios_template::format::Binding {
+                            keys: keys.clone(),
+                            command: command.clone(),
+                            when: when.clone(),
+                        })
+                })
+                .collect();
+            Ok(next)
+        });
+        if let Err(e) = made {
+            self.warn(e);
+        }
+        self.keys_loaded();
     }
 
     /// The open workspace as it stands, the layout shown included.
@@ -225,6 +322,9 @@ impl Shell {
             self.write_workspace(&next);
         }
         self.apply_workspace(Some(&before), &next);
+        if before.bundle.template.tools != next.bundle.template.tools {
+            self.keys_loaded();
+        }
         let network = before.bundle.template.network != next.bundle.template.network
             || before.bundle.composites != next.bundle.composites;
         if let Some(edit) = &mut self.edit {

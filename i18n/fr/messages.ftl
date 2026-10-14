@@ -76,6 +76,8 @@ gui-job-export-done = Export terminé
 
 gui-job-export-failed = Échec de l’export
 
+gui-keys-from-template = modèle
+
 gui-layout-not-saved = La disposition n’a pas été enregistrée : { $error }
 
 gui-library-not-saved = Non enregistré, la bibliothèque montre ce que contient le coffre : { $error }

@@ -3502,6 +3502,8 @@ impl Shell {
         self.apply_queue(&ctx);
         // The workspace's files changed outside, and agents' requests.
         self.follow_workspace(&ctx);
+        // Keys changed for the workspace in the shortcuts editor.
+        self.follow_workspace_keys();
         // An undo or a redo of the workspace's state, put in place.
         self.sync_workspace();
         // The theme asked for is installed here, before anything is drawn.

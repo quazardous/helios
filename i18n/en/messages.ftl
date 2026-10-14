@@ -117,6 +117,8 @@ gui-job-export-done = Export finished
 
 gui-job-export-failed = Export failed
 
+gui-keys-from-template = template
+
 gui-layout-not-saved = The layout was not saved: { $error }
 
 gui-library-auto-advance = Auto-advance

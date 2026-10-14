@@ -328,6 +328,13 @@ survival`). The File menu has:
   layout, written as in a template), checked against the catalogue
   before they apply. Keys and tools set this way go into the
   workspace's keymap layer, over the defaults and under the user's own.
+- **Keyboard shortcuts** (the settings window): keys change for every
+  workspace (the user's, by default) or for this workspace. The
+  workspace's are its own `tools.keymap`, one undo step written to its
+  files; a key of the template taken away is kept as a removal
+  (`{"keys": "", "command": "-mask.add.circle"}`, as a profile writes
+  it). Each key says where it comes from: `template` (the template the
+  workspace was made from set it), `workspace` or `user`.
 - **The workspace's library** (`workspace.library`): the import source
   (or none), placement, renaming, duplicates, suggested stacks and
   culling's auto-advance, in a form.

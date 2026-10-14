@@ -175,6 +175,7 @@ gui-job-batch-done ccc1a6756b4cc887
 gui-job-batch-failed ca77875dcfbaac86
 gui-job-export-done 5fdda5b0fb93ec0f
 gui-job-export-failed f5ce199f9e1502ae
+gui-keys-from-template e70109422c5ad48b
 gui-layout-not-saved 942738e1ab7b193d
 gui-library-file f5342066f92b83c2
 gui-library-not-saved f4c82ef926e77b5e
