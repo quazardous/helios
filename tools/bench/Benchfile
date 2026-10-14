@@ -327,13 +327,15 @@ timeout = "30m"
 [jobs.egui-pop-gate]
 checkouts = ["egui-pop"]
 cores = 5
-memory = "7g"
+memory = "8g"
 cwd = "/work/${src:-egui-pop}"
 command = """mkdir -p /tmp/w/egui-pop && cp -r --preserve=mode . /tmp/w/egui-pop/ && cd /tmp/w/egui-pop && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/egui-pop ] || { rm -rf /target/* && echo /tmp/w/egui-pop > /target/.built-at; }; } && cargo fmt --all --check \
  && cargo clippy --workspace --all-targets --locked -- -D warnings \
  && cargo test --workspace --locked \
  && RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps --locked"""
-env = { CARGO_NET_OFFLINE = "true" }
+# parallelism capped: the gate peaked at 10 GB with five rustc and linker
+# processes and every test thread rendering at once
+env = { CARGO_NET_OFFLINE = "true", CARGO_BUILD_JOBS = "3", RUST_TEST_THREADS = "3" }
 mounts = { "egui-pop-target/${egui_pop:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
 timeout = "1h"
 
