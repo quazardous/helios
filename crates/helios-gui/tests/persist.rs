@@ -508,3 +508,43 @@ fn a_library_read_on_another_thread_shows_as_one_filled_in_place() {
     drop((filled, shell, persist));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Opens image `n` of the vault through the exposure network.
+fn open_exposure(shell: &mut Shell, persist: &mut Persist<SqliteStore>, n: u8) {
+    let (graph, exp) = network();
+    persist
+        .open_image(shell, id(n), graph, exp, "output")
+        .unwrap();
+}
+
+#[test]
+fn opening_another_image_leaves_the_undo_steps_of_the_first_behind() {
+    use helios_shell::commands::Origin;
+    let dir = scratch("switch");
+    let path = vault_file(&dir);
+    let mut shell = Shell::new(helios_panels(), None);
+    let mut persist = Persist::new(SqliteStore::open(&path).unwrap(), Arc::new(Bus::new()));
+    open_exposure(&mut shell, &mut persist, 1);
+    let start = shown(&shell);
+    set(&shell, start + 1.0, None);
+    persist.frame(&mut shell, 10.0);
+    set(&shell, start + 2.0, None);
+    persist.frame(&mut shell, 11.0);
+    // The second image goes through the same network: the same paths.
+    open_exposure(&mut shell, &mut persist, 2);
+    assert!((shown(&shell) - start).abs() < 1e-9);
+    {
+        let mut store = shell.values.lock().unwrap();
+        assert!(store.undo_steps().is_empty(), "the first image's steps");
+        assert_eq!(store.undo(&Origin::User).unwrap(), None, "nothing to undo");
+    }
+    assert!(
+        (shown(&shell) - start).abs() < 1e-9,
+        "the first image's value written into the second: {}",
+        shown(&shell)
+    );
+    persist.frame(&mut shell, 12.0);
+    assert!(persist.vault().versions(&id(2)).unwrap().is_empty());
+    drop((shell, persist));
+    let _ = std::fs::remove_dir_all(&dir);
+}

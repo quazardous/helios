@@ -1099,6 +1099,9 @@ impl Shell {
     ) -> Result<(), String> {
         {
             let mut store = lock(&self.values);
+            // Another image: its values take the paths of the one before,
+            // so that one's steps must not be undone into them.
+            store.clear_history();
             for id in graph.ids() {
                 helios_values::bind_node(&mut store, &graph, id)?;
             }
