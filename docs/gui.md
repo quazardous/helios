@@ -112,7 +112,16 @@ the darkroom restored.
 **Agents.** On the desktop, egui-pop's `context.*` commands
 (`context.read`, `context.request` with `if_rev` and `dry_run`,
 `context.go`, `context.set_mode`, `context.hold`, `context.release`)
-and the debug bridge's `contexts` collector.
+and the debug bridge's `contexts` collector. Through MCP,
+`helios_context_read`, `helios_context_request`, `helios_context_go`
+and `helios_context_set_mode` read and move a workspace's stack (each
+with `if_rev` and a dry run). Like the workspace tools, they go to the
+desktop holding the workspace open, whose window moves at once
+(through the same `context.request` step as the user's moves, as an
+agent); without one they work on the stored stack, what a desktop
+opening the workspace comes back to. Holds last only while the agent
+holding them is connected, which these one-call tools are not, so they
+are not offered.
 
 **Palettes (2026-10-13).** The Masks panel, the Scopes and the
 Navigator may float over the image as egui-pop's palettes (`PanelSpec::floatable`,

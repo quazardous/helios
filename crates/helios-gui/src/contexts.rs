@@ -176,6 +176,48 @@ pub fn go(app: &AppHandle, frame: FrameId, payload: Json, origin: &Origin) -> Re
     }
 }
 
+/// An agent's `context.*` tool (the node's MCP tools, the same `cmd` and
+/// arguments as on the workspace's files), answered by this desktop: the
+/// window moves at once, through the same `context.request` step as the
+/// user's moves, and the answer has the same fields as on the files.
+pub fn agent_tool(app: &AppHandle, request: &Json, agent: &str) -> Result<Json, String> {
+    use helios_template::contexts::tools;
+    let cmd = request["cmd"].as_str().unwrap_or_default();
+    if cmd == "context.read" {
+        let state = state(app);
+        return Ok(serde_json::json!({
+            "rev": state.rev,
+            "place": state.place(),
+            "state": state,
+            "frames": helios_template::contexts::frames(),
+        }));
+    }
+    let env = tools::envelope_of(cmd, request)?;
+    let frames = app
+        .service(&contexts::CONTEXTS)
+        .ok_or("this desktop keeps no context stack")?
+        .frames();
+    // What the machine says it leads to, or why it is refused, before
+    // the owner is asked (the owner's holds may refuse it still).
+    let t = egui_pop::model::context::apply(&state(app), &frames, &[], &env)
+        .map_err(|r| format!("refused ({:?}, by {}): {}", r.kind, r.by, r.reason))?;
+    if env.dry_run {
+        return Ok(tools::answer(&t, true));
+    }
+    match contexts::request(app, env, &Origin::Agent(agent.into())) {
+        egui_pop::api::steps::Outcome::Done(Ok(_)) => {}
+        egui_pop::api::steps::Outcome::Done(Err(e)) => return Err(format!("refused: {e}")),
+        egui_pop::api::steps::Outcome::Vetoed { by, reason } => {
+            return Err(format!("vetoed by {by}: {reason}"));
+        }
+    }
+    let mut answer = tools::answer(&t, false);
+    let now = state(app);
+    answer["rev"] = now.rev.into();
+    answer["state"] = serde_json::to_value(&now).map_err(|e| e.to_string())?;
+    Ok(answer)
+}
+
 /// Culling on (`Some(true)`), off, or toggled.
 pub fn culling(app: &AppHandle, on: Option<bool>, origin: &Origin) -> Result<Json, String> {
     let now = state(app).mode_of(ORIENTATION.as_str()) == Some(&CULLING);

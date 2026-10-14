@@ -16,7 +16,8 @@
 //!   its own files, its parts, saved back as a template, reset to its
 //!   template, and parts of another imported as a copy.
 //! - [`contexts`]: Helios's places and modes on egui-pop's context
-//!   stack, shared by the desktop and the MCP server.
+//!   stack, shared by the desktop and the MCP server, and the tools
+//!   agents move a workspace's stack with.
 
 pub mod build;
 pub mod bundle;

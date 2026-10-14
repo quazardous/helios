@@ -506,6 +506,9 @@ impl Shell {
             }
             "workspace.save_as_template" => self.save_workspace_as_template(request),
             "workspace.undo" => self.agent_undo(&origin),
+            cmd if cmd.starts_with("context.") => {
+                crate::contexts::agent_tool(self.app.handle(), request, AGENT)
+            }
             other => Err(format!("no workspace tool `{other}`")),
         }
     }

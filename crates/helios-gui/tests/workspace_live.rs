@@ -382,3 +382,72 @@ fn files_changed_outside_are_seen_and_reloaded_as_one_step_part_by_part() {
     drop(h);
     std::fs::remove_dir_all(&root).unwrap();
 }
+
+#[test]
+fn an_agent_moves_the_places_and_modes_of_the_desktop_holding_the_workspace() {
+    let root = temp("context");
+    let (mut h, config, dir, _) = window(&root);
+    let (failed, read) = through(
+        &mut h,
+        "helios_context_read",
+        args(&dir, &config, &json!({})),
+    );
+    assert!(!failed, "{read}");
+    assert_eq!(
+        (&read["via"], &read["place"]),
+        (&json!("desktop"), &json!("root"))
+    );
+    let rev = read["rev"].as_u64().unwrap();
+    // A dry run says where it leads; the window stays where it is.
+    let places = json!([{ "frame": "helios.library" }]);
+    let (failed, dry) = through(
+        &mut h,
+        "helios_context_go",
+        args(&dir, &config, &json!({ "places": places, "dry_run": true })),
+    );
+    assert!(!failed, "{dry}");
+    assert_eq!(dry["state"]["places"][0]["frame"], "helios.library");
+    assert_eq!(h.state().app().handle().context().get("place"), "root");
+    // Done: the window is in the library, culling on, at once.
+    let (failed, done) = through(
+        &mut h,
+        "helios_context_go",
+        args(&dir, &config, &json!({ "places": places, "if_rev": rev })),
+    );
+    assert!(!failed, "{done}");
+    let (failed, _) = through(
+        &mut h,
+        "helios_context_set_mode",
+        args(&dir, &config, &json!({ "mode": "helios.culling" })),
+    );
+    assert!(!failed);
+    let cx = h.state().app().handle().context();
+    assert_eq!(cx.get("place"), "helios.library");
+    assert_eq!(cx.get("mode.orientation"), "helios.culling");
+    // A stale revision and another workspace's network are refused.
+    let (failed, stale) = through(
+        &mut h,
+        "helios_context_set_mode",
+        args(
+            &dir,
+            &config,
+            &json!({ "group": "orientation", "if_rev": rev }),
+        ),
+    );
+    assert!(failed, "{stale}");
+    let (failed, other) = through(
+        &mut h,
+        "helios_context_request",
+        args(
+            &dir,
+            &config,
+            &json!({ "request": { "op": "enter", "frame": "helios.workspace", "payload": "elsewhere" } }),
+        ),
+    );
+    assert!(failed, "{other}");
+    assert_eq!(
+        h.state().app().handle().context().get("mode.orientation"),
+        "helios.culling"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
