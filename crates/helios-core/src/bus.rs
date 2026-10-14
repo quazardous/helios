@@ -2,13 +2,14 @@
 //!
 //! Events are small facts in the past tense, published by the owner of what
 //! changed. Each layer defines its own event types; the bus wraps them in an
-//! [`Envelope`] (sequence number, source, cause) and keeps a journal of the
+//! [`Envelope`] (sequence number, time, source, cause) and keeps a journal of the
 //! most recent ones, so a test or an agent can read what happened since a
 //! given point instead of sleeping.
 
 use std::collections::VecDeque;
 use std::sync::Mutex;
 use std::sync::mpsc::{Receiver, Sender, channel};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 
@@ -24,6 +25,14 @@ pub trait Event: Serialize {
 pub struct Envelope {
     /// Strictly increasing, from 1.
     pub seq: u64,
+    /// When it was published, in microseconds since the bus was created,
+    /// from a monotonic clock: never goes back, follows `seq`, and measures
+    /// latency. Only comparable between events of the same bus.
+    pub mono_us: u64,
+    /// When it was published, in milliseconds since the Unix epoch, from
+    /// the wall clock: for logs and for relays between processes. It can
+    /// jump (the clock is set), so it orders nothing.
+    pub wall_ms: u64,
     /// Who published it (a layer, a node...).
     pub source: String,
     /// The sequence number of the event that caused it, if any.
@@ -41,6 +50,8 @@ pub struct Bus {
 
 struct Inner {
     next: u64,
+    /// The zero of every envelope's `mono_us`.
+    start: Instant,
     capacity: usize,
     journal: VecDeque<Envelope>,
     subscribers: Vec<Sender<Envelope>>,
@@ -61,6 +72,7 @@ impl Bus {
         Self {
             inner: Mutex::new(Inner {
                 next: 1,
+                start: Instant::now(),
                 capacity,
                 journal: VecDeque::new(),
                 subscribers: Vec::new(),
@@ -86,8 +98,13 @@ impl Bus {
         let mut inner = self.inner.lock().expect("bus lock");
         let seq = inner.next;
         inner.next += 1;
+        // Stamped under the lock, so `mono_us` follows `seq`.
         let envelope = Envelope {
             seq,
+            mono_us: micros(inner.start.elapsed()),
+            wall_ms: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX)),
             source: source.to_string(),
             cause,
             kind,
@@ -122,10 +139,20 @@ impl Bus {
             .collect()
     }
 
+    /// How long ago `envelope`, published on this bus, was published.
+    pub fn age(&self, envelope: &Envelope) -> Duration {
+        let now = micros(self.inner.lock().expect("bus lock").start.elapsed());
+        Duration::from_micros(now.saturating_sub(envelope.mono_us))
+    }
+
     /// The sequence number of the last event published (0 if none).
     pub fn last_seq(&self) -> u64 {
         self.inner.lock().expect("bus lock").next - 1
     }
+}
+
+fn micros(d: Duration) -> u64 {
+    u64::try_from(d.as_micros()).unwrap_or(u64::MAX)
 }
 
 impl Describe for Bus {
@@ -170,5 +197,56 @@ mod tests {
         assert_eq!(journal[0].cause, Some(1));
         assert_eq!(journal[0].payload["n"], 2);
         assert_eq!(rx.try_iter().count(), 3, "a subscriber gets every event");
+    }
+
+    #[test]
+    fn events_are_stamped_when_published() {
+        let bus = Bus::new();
+        let before = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis();
+        for n in 0..50 {
+            bus.publish("a", None, &Ping { n });
+        }
+        let after = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis();
+        let journal = bus.since(0);
+        assert!(
+            journal.windows(2).all(|w| w[0].mono_us <= w[1].mono_us),
+            "the monotonic time follows the sequence"
+        );
+        for e in &journal {
+            let wall = u128::from(e.wall_ms);
+            assert!(
+                (before..=after).contains(&wall),
+                "{wall} outside {before}..={after}"
+            );
+        }
+        let last = journal.last().unwrap();
+        let age = bus.age(last);
+        assert!(age < Duration::from_mins(1), "{age:?}");
+        assert!(bus.age(&journal[0]) >= age, "older events are older");
+    }
+
+    #[test]
+    fn the_time_is_on_the_wire() {
+        let bus = Bus::new();
+        bus.publish("a", Some(7), &Ping { n: 1 });
+        let wire = serde_json::to_value(&bus.since(0)[0]).unwrap();
+        // The fields readers already use keep their names and types.
+        assert_eq!(wire["seq"], 1);
+        assert_eq!(wire["source"], "a");
+        assert_eq!(wire["cause"], 7);
+        assert_eq!(wire["kind"], "test.ping");
+        assert_eq!(wire["payload"]["n"], 1);
+        // The time is two plain integers, readable in any language.
+        assert!(wire["mono_us"].is_u64(), "{wire}");
+        assert!(
+            wire["wall_ms"].as_u64().unwrap() > 1_600_000_000_000,
+            "{wire}"
+        );
     }
 }
