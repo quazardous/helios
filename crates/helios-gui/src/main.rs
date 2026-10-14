@@ -25,6 +25,7 @@ use egui_pop::core::focus_mode::SystemFocus;
 use egui_pop::model::layout::Layout;
 use egui_pop::platform::instance::{self, Instance, Launch, Single};
 use helios_core::Message;
+use helios_gui::contexts::{self, Opened};
 use helios_gui::platform::{self, Open};
 use helios_gui::{Shell, headless, helios_panels};
 use helios_gui::{quit, start};
@@ -466,6 +467,11 @@ impl App {
         let (graph, node) = image_graph(&path, &bundle)?;
         persist.open_image(&mut self.shell, image, graph, node, "output")?;
         self.shown = Some(Shown::Library(id.to_string()));
+        contexts::open(
+            self.shell.app().handle(),
+            &Opened::Image(id.to_string()),
+            &egui_pop::model::commands::Origin::User,
+        );
         Ok(())
     }
 
@@ -554,6 +560,12 @@ impl App {
                     // The status bar said it was being opened.
                     self.shell
                         .notify(helios_gui::dialogs::Level::Info, opened_notice(&path));
+                    // The darkroom on it, under the place the user was in.
+                    contexts::open(
+                        self.shell.app().handle(),
+                        &Opened::File(path.clone()),
+                        &egui_pop::model::commands::Origin::User,
+                    );
                     self.shown = Some(Shown::File(path));
                 }
                 Err(e) => self.shell.notify(helios_gui::dialogs::Level::Error, e),

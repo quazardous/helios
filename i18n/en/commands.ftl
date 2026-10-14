@@ -340,6 +340,15 @@ command-vault-reject =
 command-vault-stack-toggle =
     .title = Expand or collapse the stack of the selected image
 
+command-view-culling =
+    .title = Culling: flag, rate and label from anywhere, the image first (`on`; toggled when absent)
+
+command-view-library =
+    .title = Go to the library: the vault's images to browse, rate and cull
+
+command-view-network =
+    .title = Go to the workspace's network, to edit it
+
 command-viewport-compare =
     .title = Image: before and after side by side
 

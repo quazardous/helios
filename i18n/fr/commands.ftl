@@ -339,6 +339,15 @@ command-vault-reject =
 command-vault-stack-toggle =
     .title = Déplier ou replier la pile de l’image sélectionnée
 
+command-view-culling =
+    .title = Tri : marquer, noter et étiqueter de partout, l’image d’abord (`on` ; basculé en son absence)
+
+command-view-library =
+    .title = Aller à la bibliothèque : les images du coffre, à parcourir, noter et trier
+
+command-view-network =
+    .title = Aller au réseau de l’espace de travail, pour le modifier
+
 command-viewport-compare =
     .title = Image : avant et après côte à côte
 

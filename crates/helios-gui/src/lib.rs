@@ -3,6 +3,7 @@
 //! framework's own pictures and recordings of it.
 
 pub mod caption;
+pub mod contexts;
 pub mod dialogs;
 pub mod display;
 pub mod duplicates;
