@@ -522,3 +522,104 @@ fn agents_dry_run_then_apply_through_the_tools() {
     );
     std::fs::remove_dir_all(&root).unwrap();
 }
+
+#[test]
+fn what_a_workspace_writes_reads_back_the_same_from_its_files() {
+    // A desktop tells a change made outside it by comparing the files
+    // with what it wrote: a round trip that moved anything would read
+    // as a change.
+    let root = temp("roundtrip");
+    for bundle in shipped::templates() {
+        let id = bundle.template.id.clone();
+        let (_, files) = made(&root, &id, &id.replace('.', "-"));
+        let state = files.load_on_disk().unwrap();
+        let edited = state
+            .edited(&json!({ "name": "Edited", "description": "Kept" }))
+            .unwrap();
+        files.save(&edited, false).unwrap();
+        assert_eq!(
+            files.load_on_disk().unwrap().to_json(),
+            edited.to_json(),
+            "{id}"
+        );
+    }
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn files_changed_under_a_desktop_merge_part_by_part() {
+    let root = temp("merge");
+    let (_, files) = made(&root, "helios.portrait-retouch", "portrait");
+    let base = files.load_on_disk().unwrap();
+    let edit = |s: &State, changes: Json| s.edited(&changes).unwrap();
+    // The desktop moved a panel; the files got a new description and
+    // toolbox: both kept.
+    let mut ours = base.clone();
+    assert!(ours.bundle.layout.remove(&panel("helios.masks")));
+    let theirs = edit(
+        &base,
+        json!({ "description": "Agent", "tools": { "toolbox": ["mask.add.path"] } }),
+    );
+    let m = workspace::merge(&base, &ours, &theirs).unwrap();
+    assert_eq!(m.taken, ["description", "tools"]);
+    assert!(m.both.is_empty());
+    assert_eq!(m.state.meta.description, "Agent");
+    assert_eq!(m.state.bundle.template.tools.toolbox, ["mask.add.path"]);
+    assert_eq!(m.state.bundle.layout, ours.bundle.layout);
+    // Both renamed it: the files' name wins, and is said.
+    let ours = edit(&base, json!({ "name": "Mine" }));
+    let theirs = edit(&base, json!({ "name": "Theirs" }));
+    let m = workspace::merge(&base, &ours, &theirs).unwrap();
+    assert_eq!((m.taken.clone(), m.both), (vec!["name"], vec!["name"]));
+    assert_eq!(m.state.meta.name, "Theirs");
+    // The same change on both sides, or none on theirs: nothing taken.
+    let m = workspace::merge(&base, &ours, &ours).unwrap();
+    assert!(m.taken.is_empty());
+    let m = workspace::merge(&base, &ours, &base).unwrap();
+    assert!(m.taken.is_empty());
+    assert_eq!(m.state, ours);
+    // An icon taken away in the files is taken away.
+    let with_icon = edit(&base, json!({ "icon": "portrait" }));
+    let without = edit(&with_icon, json!({ "icon": null }));
+    let m = workspace::merge(&with_icon, &with_icon, &without).unwrap();
+    assert_eq!(m.state.meta.icon, None);
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn an_agent_s_undo_on_the_files_is_refused_once_they_changed_since() {
+    let root = temp("undo-changed");
+    let config = root.join("config");
+    let (dir, files) = made(&root, "helios.portrait-retouch", "portrait");
+    let args = json!({ "workspace": dir, "changes": { "name": "Agent's" } });
+    tools::edit(&config, &args, &catalogue()).unwrap();
+    // A desktop renamed it after the agent's step.
+    let now = files.load().unwrap();
+    files
+        .save(&now.edited(&json!({ "name": "User's" })).unwrap(), false)
+        .unwrap();
+    let refused = tools::undo(&config, &json!({ "workspace": dir })).unwrap_err();
+    assert!(refused.contains("changed since"), "{refused}");
+    assert_eq!(files.load().unwrap().meta.name, "User's");
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn a_desktop_says_it_holds_a_workspace_and_lets_it_go() {
+    let root = temp("holder");
+    let (_, files) = made(&root, "helios.portrait-retouch", "portrait");
+    assert_eq!(files.holder(), None);
+    let holder = workspace::Holder {
+        pid: 7,
+        address: "/run/user/1/helios-desktop-7.sock".into(),
+        token: None,
+    };
+    files.hold(&holder).unwrap();
+    assert_eq!(files.holder(), Some(holder));
+    // Another process's release leaves it held.
+    files.release(8);
+    assert!(files.holder().is_some());
+    files.release(7);
+    assert_eq!(files.holder(), None);
+    std::fs::remove_dir_all(&root).unwrap();
+}
