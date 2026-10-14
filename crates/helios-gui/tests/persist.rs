@@ -599,3 +599,51 @@ fn each_version_names_who_made_its_step() {
     drop((shell, persist, vault));
     let _ = std::fs::remove_dir_all(&dir);
 }
+#[test]
+fn a_long_drag_cancelled_saves_the_values_it_put_back() {
+    use helios_shell::commands::Origin;
+    let dir = scratch("cancel");
+    let path = vault_file(&dir);
+    let mut shell = Shell::new(helios_panels(), None);
+    let mut persist = Persist::new(SqliteStore::open(&path).unwrap(), Arc::new(Bus::new()));
+    open_exposure(&mut shell, &mut persist, 1);
+    let start = shown(&shell);
+    set(&shell, start + 0.5, None);
+    persist.frame(&mut shell, 10.0);
+    // A drag held for more than a second: saved in progress.
+    let drag = shell
+        .values
+        .lock()
+        .unwrap()
+        .begin_gesture(Origin::User, "drag exposure");
+    set(&shell, start + 1.5, Some(drag));
+    persist.frame(&mut shell, 10.2);
+    persist.frame(&mut shell, 11.5);
+    assert_eq!(saved(persist.bus()).len(), 2, "the drag in progress");
+    // Escape: the value goes back, and that is what the vault keeps.
+    shell.values.lock().unwrap().cancel(drag);
+    assert!((shown(&shell) - (start + 0.5)).abs() < 1e-9);
+    persist.frame(&mut shell, 11.6);
+    persist.frame(&mut shell, 12.0);
+    assert_eq!(
+        saved(persist.bus()),
+        [
+            (1, format!("set {EV}")),
+            (2, "drag exposure (in progress)".into()),
+            (3, "drag exposure (cancelled)".into()),
+        ]
+    );
+    drop((shell, persist));
+
+    // Quit at that moment, reopen: the drag is not the latest edit.
+    let mut shell = Shell::new(helios_panels(), None);
+    let mut persist = Persist::new(SqliteStore::open(&path).unwrap(), Arc::new(Bus::new()));
+    open_exposure(&mut shell, &mut persist, 1);
+    assert!(
+        (shown(&shell) - (start + 0.5)).abs() < 1e-9,
+        "the cancelled drag came back: {}",
+        shown(&shell)
+    );
+    drop((shell, persist));
+    let _ = std::fs::remove_dir_all(&dir);
+}

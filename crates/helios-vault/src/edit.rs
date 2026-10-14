@@ -212,7 +212,7 @@ impl EditSession {
     /// `control`…): a version continuing the head, unless the edit is the
     /// head's already (a step that changed nothing). A step ending a
     /// gesture already saved in progress is saved even when equal, so the
-    /// history names the finished gesture.
+    /// history names the finished gesture (or its cancel).
     pub fn save<S: Store>(
         &mut self,
         vault: &Vault<S>,
@@ -223,6 +223,12 @@ impl EditSession {
     ) -> Result<Option<Version>, String> {
         let force = self.in_progress;
         self.write(vault, edit, label, origin, now, force, false)
+    }
+
+    /// Whether the head is a save made during a gesture that neither
+    /// ended nor was cancelled since.
+    pub fn in_progress(&self) -> bool {
+        self.in_progress
     }
 
     /// Saves a gesture still in progress (a drag), so a crash during a
