@@ -24,6 +24,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.1] - 2026-10-18
+
+### Fixed
+
+- Launching Helios from the desktop no longer keeps a busy cursor for
+  several seconds after its window is up.
+- The window manager's focus setting is read while the desktop starts, and
+  a desktop slow to answer no longer holds the window up: past a quarter
+  of a second the window opens with click to focus.
+- The desktop opens its GPU device while it reads its settings and the
+  vault, instead of after, so its window comes up sooner.
+- An image named at launch, or handed over by a later launch, is decoded
+  in the background: the window opens at once and says "Opening…" in the
+  status bar until the image shows. An image that cannot be read is now
+  said in the window rather than stopping the launch.
+- The library is read from the vault while the window opens, instead of
+  before it: a large library no longer holds the window up, and the status
+  bar says when it is being read and how many images it holds.
+
 ## [0.9.0] - 2026-10-18
 
 ### Changed
