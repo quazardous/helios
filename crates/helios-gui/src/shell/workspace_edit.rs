@@ -36,10 +36,7 @@ pub(super) const COMMANDS: &[(&str, &str)] = &[
         "workspace.edit",
         "Edit the workspace (`name`, `description`, `icon`, `changes`)",
     ),
-    (
-        "workspace.library",
-        "Library settings of the workspace",
-    ),
+    ("workspace.library", "Library settings of the workspace"),
     (
         "workspace.reset",
         "Reset the workspace to its template (`dry_run`)",
