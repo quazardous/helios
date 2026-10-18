@@ -44,7 +44,6 @@ use crate::dialogs::{Answer, Level, MenuItem, Notice};
 use crate::host::{HeliosHost, Later, Workspace, to_helios, to_pop, workspace_key};
 use crate::plugins::{
     self, Declarations, ListSource, SYSTEM, SYSTEM_PROFILES, SYSTEM_RECENT, SYSTEM_THEMES,
-    menu_title,
 };
 use crate::snapshot::{self, Recorder};
 use crate::viewport::ZoomTo;
@@ -2333,140 +2332,40 @@ impl Shell {
     fn declare_menus(w: &Wiring<'_>) {
         use crate::mask_tree::{ROW_MENU, ROW_MENU_ADD};
         use egui_pop::api::app::{MENU_FILE, MENU_HELP};
-        let command = |menu: MenuId, group: &str, order: i32, id: &str, title: &str| {
+        // No label: egui-pop shows the command's title in the interface's
+        // language, without its argument hint.
+        let command = |menu: MenuId, group: &str, order: i32, id: &str| {
             PopItem::command(
                 menu,
                 group,
                 order,
                 CommandId::new(id).expect("Helios's command ids are valid"),
             )
-            .label(&menu_title(title))
         };
-        let specs: BTreeMap<String, String> = lock(w.registry)
-            .specs()
-            .map(|s| (s.id.clone(), s.title.clone()))
-            .collect();
-        let title = |id: &str| specs.get(id).cloned().unwrap_or_else(|| id.to_string());
         let mut items = vec![
-            command(
-                SYSTEM,
-                "1_workspace",
-                0,
-                "workspace.open",
-                &title("workspace.open"),
-            ),
+            command(SYSTEM, "1_workspace", 0, "workspace.open"),
             PopItem::submenu(SYSTEM, "1_workspace", 1, SYSTEM_RECENT, "Recent workspaces"),
             PopItem::submenu(SYSTEM, "2_preferences", 0, SYSTEM_PROFILES, "Profiles"),
             PopItem::submenu(SYSTEM, "2_preferences", 1, SYSTEM_THEMES, "Themes"),
-            command(
-                SYSTEM,
-                "2_preferences",
-                2,
-                "workbench.keybindings",
-                &title("workbench.keybindings"),
-            ),
-            command(
-                SYSTEM,
-                "4_about",
-                0,
-                "workbench.about",
-                &title("workbench.about"),
-            ),
-            command(
-                SYSTEM,
-                "9_quit",
-                0,
-                "workbench.quit",
-                &title("workbench.quit"),
-            ),
-            command(
-                SYSTEM_PROFILES,
-                "2",
-                0,
-                "profile.export",
-                &title("profile.export"),
-            ),
-            command(
-                SYSTEM_PROFILES,
-                "2",
-                1,
-                "profile.import",
-                &title("profile.import"),
-            ),
-            command(
-                SYSTEM_THEMES,
-                "2",
-                0,
-                "theme.export",
-                &title("theme.export"),
-            ),
+            command(SYSTEM, "2_preferences", 2, "workbench.keybindings"),
+            command(SYSTEM, "4_about", 0, "workbench.about"),
+            command(SYSTEM, "9_quit", 0, "workbench.quit"),
+            command(SYSTEM_PROFILES, "2", 0, "profile.export"),
+            command(SYSTEM_PROFILES, "2", 1, "profile.import"),
+            command(SYSTEM_THEMES, "2", 0, "theme.export"),
             // A parameter's context menu: its widget gives the path.
-            command(plugins::PARAM, "1", 0, "param.reset", &title("param.reset")),
-            command(
-                plugins::PARAM,
-                "2",
-                0,
-                "param.copyPath",
-                &title("param.copyPath"),
-            ),
-            command(
-                plugins::PARAM,
-                "2",
-                1,
-                "param.copyValue",
-                &title("param.copyValue"),
-            ),
+            command(plugins::PARAM, "1", 0, "param.reset"),
+            command(plugins::PARAM, "2", 0, "param.copyPath"),
+            command(plugins::PARAM, "2", 1, "param.copyValue"),
             // The same commands in the menu bar.
-            command(
-                MENU_FILE,
-                "1_workspace",
-                0,
-                "workspace.open",
-                &title("workspace.open"),
-            ),
+            command(MENU_FILE, "1_workspace", 0, "workspace.open"),
             // The workspace's own edits.
-            command(
-                MENU_FILE,
-                "2_edit",
-                0,
-                "workspace.edit",
-                &title("workspace.edit"),
-            ),
-            command(
-                MENU_FILE,
-                "2_edit",
-                1,
-                "workspace.library",
-                &title("workspace.library"),
-            ),
-            command(
-                MENU_FILE,
-                "2_edit",
-                2,
-                "workspace.importParts",
-                &title("workspace.importParts"),
-            ),
-            command(
-                MENU_FILE,
-                "2_edit",
-                3,
-                "workspace.saveAsTemplate",
-                &title("workspace.saveAsTemplate"),
-            ),
-            command(
-                MENU_FILE,
-                "2_edit",
-                4,
-                "workspace.reset",
-                &title("workspace.reset"),
-            ),
-            command(
-                MENU_HELP,
-                "4_about",
-                0,
-                "workbench.about",
-                &title("workbench.about"),
-            ),
+            command(MENU_FILE, "2_edit", 0, "workspace.edit"),
+            command(MENU_FILE, "2_edit", 1, "workspace.library"),
+            command(MENU_FILE, "2_edit", 2, "workspace.importParts"),
+            command(MENU_FILE, "2_edit", 3, "workspace.saveAsTemplate"),
+            command(MENU_FILE, "2_edit", 4, "workspace.reset"),
+            command(MENU_HELP, "4_about", 0, "workbench.about"),
         ];
         // A row's context menu in the Masks panel: its commands act on
         // that row's member, the tree giving its key. Its entries are
@@ -2741,7 +2640,7 @@ impl Shell {
                         } => {
                             let title = label.unwrap_or_else(|| {
                                 h.command(&id)
-                                    .map_or_else(|| id.to_string(), |s| menu_title(&s.title))
+                                    .map_or_else(|| id.to_string(), |s| h.command_menu_title(&s))
                             });
                             json!({
                                 "kind": "command",
@@ -3831,7 +3730,7 @@ fn menu_rows(
                 let Some(spec) = h.command(&cid) else {
                     continue;
                 };
-                let mut button = egui::Button::new(menu_title(&spec.title));
+                let mut button = egui::Button::new(h.command_menu_title(&spec));
                 if let Some(k) = h.keys_for(&cid).first() {
                     button = button.shortcut_text(k.clone());
                 }

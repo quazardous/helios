@@ -56,15 +56,6 @@ pub fn command_id(id: &str) -> Result<CommandId, PluginError> {
     CommandId::new(id).map_err(|e| PluginError::Failed(e.to_string()))
 }
 
-/// A command's title as a menu shows it: without the hint of its
-/// arguments (`Open a workspace (`path`)`), which the palette keeps.
-pub fn menu_title(title: &str) -> String {
-    match title.rfind(" (`") {
-        Some(i) if title.ends_with(')') => title[..i].to_string(),
-        _ => title.to_string(),
-    }
-}
-
 /// A command of Helios's registry as egui-pop declares it: its `when`,
 /// and the tick and palette visibility Helios gives it.
 pub fn declared(spec: &HeliosSpec, d: &Declarations) -> Result<CommandSpec, PluginError> {

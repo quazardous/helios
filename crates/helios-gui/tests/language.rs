@@ -150,3 +150,20 @@ fn a_gpu_fallback_is_told_in_french() {
     let toasts = app.service(&TOASTS).expect("egui-pop's toasts").shown();
     assert!(toasts.iter().any(|t| t.toast.text == french), "{toasts:?}");
 }
+
+/// French on: Helios's commands in the menu bar show their French titles,
+/// without the hint of their arguments the palette keeps.
+#[test]
+fn menu_entries_show_french_titles_without_their_argument_hint() {
+    let mut h = headless::harness(Shell::new(helios_panels(), None), vec2(1280.0, 800.0));
+    h.run();
+    let app = h.state().app().handle().clone();
+    egui_pop::i18n::plugin::set_language(&app, "fr").unwrap();
+    h.run();
+    h.run();
+    h.get_by_label("Fichier").click();
+    h.run();
+    h.get_by_label("Ouvrir un espace de travail dans une nouvelle fenêtre");
+    assert!(h.query_by_label_contains("(`path`)").is_none());
+    assert!(h.query_by_label_contains("Open a workspace").is_none());
+}
