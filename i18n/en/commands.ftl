@@ -392,10 +392,10 @@ command-workbench-systemMenu =
     .title = Show the Helios menu
 
 command-workspace-edit =
-    .title = Edit the workspace: its name, description and icon (`name`, `description`, `icon`) or its parts (`changes`), one undo step; asked when absent
+    .title = Edit the workspace (`name`, `description`, `icon`, `changes`)
 
 command-workspace-importParts =
-    .title = Add parts from a workspace or template (`source`, `parts`, `picks`, `dry_run`), one undo step; asked when absent
+    .title = Add parts from a workspace or template (`source`, `parts`, `picks`, `dry_run`)
 
 command-workspace-importParts-apply =
     .title = Add the parts reviewed, each conflict's side picked
@@ -404,7 +404,7 @@ command-workspace-importParts-review =
     .title = Review the parts to add: what changes, and the side to keep for each conflict
 
 command-workspace-library =
-    .title = The workspace's library settings: import source, placement, renaming, duplicates, stacks and auto-advance, one undo step; asked when absent
+    .title = Library settings of the workspace
 
 command-workspace-new =
     .title = New workspace from a template (`template`, `path`)
@@ -416,7 +416,7 @@ command-workspace-parts =
     .title = List the parts of the workspace, or of a workspace or template (`source`)
 
 command-workspace-reset =
-    .title = Reset the workspace to its template, one undo step (`dry_run` says whether it changes anything)
+    .title = Reset the workspace to its template (`dry_run`)
 
 command-workspace-saveAsTemplate =
-    .title = Save the workspace as a template, after a review of what goes in, what is stripped and what is asked on create (`id`, `name`, `description`, `icon`, `dry_run`); asked when absent
+    .title = Save the workspace as a template (`id`, `name`, `description`, `icon`, `dry_run`)

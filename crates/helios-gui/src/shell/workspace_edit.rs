@@ -34,19 +34,19 @@ pub const STATE: &str = "workspace/state";
 pub(super) const COMMANDS: &[(&str, &str)] = &[
     (
         "workspace.edit",
-        "Edit the workspace: its name, description and icon (`name`, `description`, `icon`) or its parts (`changes`), one undo step; asked when absent",
+        "Edit the workspace (`name`, `description`, `icon`, `changes`)",
     ),
     (
         "workspace.library",
-        "The workspace's library settings: import source, placement, renaming, duplicates, stacks and auto-advance, one undo step; asked when absent",
+        "Library settings of the workspace",
     ),
     (
         "workspace.reset",
-        "Reset the workspace to its template, one undo step (`dry_run` says whether it changes anything)",
+        "Reset the workspace to its template (`dry_run`)",
     ),
     (
         "workspace.saveAsTemplate",
-        "Save the workspace as a template, after a review of what goes in, what is stripped and what is asked on create (`id`, `name`, `description`, `icon`, `dry_run`); asked when absent",
+        "Save the workspace as a template (`id`, `name`, `description`, `icon`, `dry_run`)",
     ),
     (
         "workspace.parts",
@@ -54,7 +54,7 @@ pub(super) const COMMANDS: &[(&str, &str)] = &[
     ),
     (
         "workspace.importParts",
-        "Add parts from a workspace or template (`source`, `parts`, `picks`, `dry_run`), one undo step; asked when absent",
+        "Add parts from a workspace or template (`source`, `parts`, `picks`, `dry_run`)",
     ),
     (
         "workspace.importParts.review",
