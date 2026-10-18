@@ -24,6 +24,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-10-18
+
+### Changed
+
+- A workspace created from "Import, cull, de-duplicate" shows the jobs
+  centre beside the filmstrip, so an import's progress is in view while
+  culling.
+- The Vault panel keeps its search field, import button and marks bar in
+  place while the library is empty, instead of showing them only once
+  images are imported.
+
 ## [0.8.0] - 2026-10-14
 
 ### Added
