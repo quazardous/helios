@@ -169,6 +169,8 @@ gui-copied 2f397b47ced4b53e
 gui-edit-does-not-fit b270477011039ced
 gui-edit-not-saved 988fbabe3acbb2ab
 gui-gesture-in-progress c25ee937ebc97642
+gui-image-opened 8cddc04842c75210
+gui-image-opening 0a3761ae857369a4
 gui-job-batch-done ccc1a6756b4cc887
 gui-job-batch-failed ca77875dcfbaac86
 gui-job-export-done 5fdda5b0fb93ec0f
@@ -176,6 +178,8 @@ gui-job-export-failed f5ce199f9e1502ae
 gui-layout-not-saved 942738e1ab7b193d
 gui-library-file f5342066f92b83c2
 gui-library-not-saved f4c82ef926e77b5e
+gui-library-read f8261f7d1dc7fc43
+gui-library-reading 86a6bd85ffd7fbf5
 gui-masks-add 69d8839a97ff0076
 gui-masks-add-hint 07fe685ae4f68f99
 gui-masks-beside-refinement 129a0c6bb2a976a6

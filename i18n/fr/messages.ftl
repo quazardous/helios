@@ -532,3 +532,11 @@ gui-import-path = carte ou dossier
 gui-import-verb = Importer
 
 gui-library-import = Importer…
+
+gui-image-opened = { $name } est ouverte
+
+gui-image-opening = Ouverture de { $name }…
+
+gui-library-read = { $count } images dans la bibliothèque
+
+gui-library-reading = Lecture de la bibliothèque…
