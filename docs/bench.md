@@ -286,10 +286,24 @@ from incidents on the box; every agent prompt points here.
 - Never delete box storage you did not create. After a branch with its own
   Benchfile merges, `config benchfile rm <branch>`: each live label keeps
   its image for 14 days.
-- egui-pop's targets live on the hard disk (a gate needs 25 to 35 GB);
-  Helios's targets, sccache and the images on the SSD (60 GB quota).
+- Helios's and egui-pop's targets live on the hard disk (an egui-pop gate
+  needs 25 to 35 GB); sccache, the registry and the images on the SSD
+  (60 GB quota).
 - Exit 75 with "needs about N GB": wait for space; do not free it by
   deleting others' storage.
+
+**The development machine**
+- Every local cargo command builds into one shared folder: set
+  `CARGO_TARGET_DIR` once (for example to the main checkout's `target/`)
+  and keep it for every worktree of Helios and egui-pop. A `target/` per
+  worktree costs 1 to 15 GB each, and a few dozen of them once filled the
+  disk. `bench-remote` warns when a linked worktree builds into its own
+  `target/`.
+- Cargo locks the shared folder, so local checks run one at a time. That is
+  intended: heavy builds and tests belong on the box.
+- At most three agents compile at once.
+- A worktree goes when its branch merges, after checking it holds no
+  unpushed or uncommitted work; its box storage goes with it (`storage rm`).
 
 ## Exit 75: the box could not serve
 

@@ -549,6 +549,11 @@ fn conditions_warning(json: &str) -> Option<String> {
 
 pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
     let mut req = parse_args(args)?;
+    let linked = root.join(".git").is_file();
+    let shared = std::env::var_os("CARGO_TARGET_DIR").map(PathBuf::from);
+    if let Some(w) = own_target_warning(linked, shared.as_deref(), root) {
+        eprintln!("bench-remote: {w}");
+    }
     let result = if req.affected {
         affected(root, &req)
     } else {
@@ -697,9 +702,40 @@ fn remote(root: &Path, req: &mut Request) -> Result<u8, String> {
     })
 }
 
+/// A warning when a linked worktree builds into a `target/` of its own:
+/// every worktree should share one `CARGO_TARGET_DIR` (docs/bench.md, "The
+/// development machine"). `linked` is whether `root` is a linked worktree.
+fn own_target_warning(linked: bool, shared: Option<&Path>, root: &Path) -> Option<String> {
+    if !linked {
+        return None;
+    }
+    match shared {
+        None => Some(
+            "this worktree builds into its own target/; set CARGO_TARGET_DIR to one \
+             folder shared by every worktree (docs/bench.md, \"The development machine\")"
+                .into(),
+        ),
+        Some(dir) if dir.starts_with(root) => Some(format!(
+            "CARGO_TARGET_DIR ({}) is inside this worktree; point it at one folder \
+             shared by every worktree",
+            dir.display()
+        )),
+        Some(_) => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_linked_worktree_without_a_shared_target_is_warned() {
+        let root = Path::new("/work/helios-wt");
+        assert!(own_target_warning(true, None, root).is_some());
+        assert!(own_target_warning(true, Some(Path::new("/work/helios-wt/target")), root).is_some());
+        assert!(own_target_warning(true, Some(Path::new("/work/helios/target")), root).is_none());
+        assert!(own_target_warning(false, None, root).is_none());
+    }
 
     #[test]
     fn a_run_on_a_throttled_box_is_flagged() {

@@ -13,6 +13,13 @@ cargo fmt --all --check
 cargo xtask check
 ```
 
+Working on several branches at once with `git worktree`? Point every
+worktree at one build folder, so each does not grow its own `target/`:
+
+```bash
+export CARGO_TARGET_DIR="$HOME/.cache/helios-target"   # any one folder
+```
+
 Rust first (see ROADMAP.md, section 1): new code is Rust unless Rust is not
 practical. Ask before adding a dependency whose license is not compatible
 with the GPLv3.
