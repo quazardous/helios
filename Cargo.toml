@@ -41,21 +41,20 @@ helios-i18n = { path = "crates/helios-i18n" }
 helios-display = { path = "crates/helios-display" }
 helios-template = { path = "crates/helios-template" }
 # MIT: the UI library and application framework Helios is built on.
-# Pinned to a commit until egui-pop 0.1 is on crates.io, then to that
-# version. Its eframe support (the window's place) runs on the same
+# Pinned to a commit while the two move together. Its eframe support (the window's place) runs on the same
 # eframe as Helios; its icon font stays off.
-egui-pop = { git = "https://github.com/quazardous/egui-pop", rev = "b666ffd", default-features = false, features = ["eframe"] }
+egui-pop = { git = "https://github.com/quazardous/egui-pop", rev = "67d7d02", default-features = false, features = ["eframe"] }
 # MIT: egui-pop's translation plugin, alone for the tools (xtask's
 # catalogue tasks) that do not build the window's stack.
-egui-pop-i18n = { git = "https://github.com/quazardous/egui-pop", rev = "b666ffd" }
+egui-pop-i18n = { git = "https://github.com/quazardous/egui-pop", rev = "67d7d02" }
 # MIT: egui-pop's logic without egui (layouts, panels), for what checks a
 # layout without building the window's stack (workspace templates).
-egui-pop-model = { git = "https://github.com/quazardous/egui-pop", rev = "b666ffd" }
+egui-pop-model = { git = "https://github.com/quazardous/egui-pop", rev = "67d7d02" }
 # MIT: egui-pop's test kit (keymap checks, the accessibility tree).
-egui-pop-test = { git = "https://github.com/quazardous/egui-pop", rev = "b666ffd" }
+egui-pop-test = { git = "https://github.com/quazardous/egui-pop", rev = "67d7d02" }
 # MIT: egui-pop's Wayland layer, for the compositor announcements the
 # image surface's tests fake.
-egui-pop-wayland = { git = "https://github.com/quazardous/egui-pop", rev = "b666ffd" }
+egui-pop-wayland = { git = "https://github.com/quazardous/egui-pop", rev = "67d7d02" }
 blake3 = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

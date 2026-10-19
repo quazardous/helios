@@ -512,8 +512,8 @@ fn check_panel(
     match specs.iter().find(|s| s.id.as_str() == panel) {
         None => problems.push(format!("{at}: unknown panel `{panel}`")),
         Some(spec) => {
-            if let Some(why) = area.and_then(|a| spec.refuses(a)) {
-                problems.push(format!("{at}: {why}"));
+            if let Some(a) = area.filter(|&a| !spec.allows(a)) {
+                problems.push(format!("{at}: {} stays out of {}", spec.title, a.name()));
             }
         }
     }

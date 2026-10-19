@@ -59,7 +59,7 @@ pub const HELIOS_TOKENS: &[(&str, &str)] = &[
 pub fn themes() -> Themes {
     let mut themes = Themes::default();
     for (name, text) in BUILT_IN {
-        themes.add_json(name, text).expect("built-in themes parse");
+        themes.add_text(name, text).expect("built-in themes parse");
     }
     themes
 }
