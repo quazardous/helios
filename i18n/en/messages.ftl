@@ -59,6 +59,14 @@ gui-about-crashes = Crash reports: { $path }
 
 gui-about-logs = Log file: { $path }
 
+gui-caption-decisions = Decisions waiting
+
+gui-caption-decisions-count = { $count } stack suggestions waiting for an answer
+
+gui-caption-jobs = Show the jobs
+
+gui-caption-profile = Profile in use: { $name }
+
 gui-confirmed-by-policy = { $verb }: confirmed by policy
 
 gui-copied = copied { $text }

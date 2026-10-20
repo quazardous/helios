@@ -297,7 +297,12 @@ Helios declares into it:
   pixels, drawn by Helios on the desktop; the `window.frame` setting
   gives the system's frame back. Its buttons are egui-pop's
   `frame.*` steps, which Helios's `window.minimize`, `window.maximize`
-  and `window.close` commands run too;
+  and `window.close` commands run too. The bar's `CAPTION` zone holds
+  Helios's global items (2026-10-20): the jobs going on (a ring with
+  their estimate, opening the Jobs panel), the decisions waiting for an
+  answer (a count on a bell, opening the Stacks panel) and the profile
+  in use (opening the Profiles menu). In full screen the bar stays with
+  them, a button leaving full screen in place of maximize;
 - **keys**: egui-pop's keymap resolves them (layers, `when` clauses, a
   text field keeping plain keys), with the traces its debug bridge shows.
 

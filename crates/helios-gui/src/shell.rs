@@ -2053,7 +2053,8 @@ impl Shell {
             (
                 "Escape",
                 "mask.cancel",
-                format!("{image} && maskTool == 'path'"),
+                // In zen mode Escape leaves it (egui-pop's).
+                format!("{image} && maskTool == 'path' && !workbenchZen"),
             ),
             (
                 "Delete",
@@ -2073,6 +2074,13 @@ impl Shell {
             String::new(),
         ));
         d.hidden.insert(crate::quick_open::GO.into());
+        // Zen mode (egui-pop's, no default key): the image alone, as in
+        // VS Code; Escape leaves it.
+        d.keys.push((
+            "Ctrl+K Z".into(),
+            egui_pop::api::workbench::CMD_ZEN.as_str().into(),
+            String::new(),
+        ));
         for name in crate::theme::choosable(w.themes) {
             d.checked
                 .insert(format!("theme.{name}"), format!("heliosTheme == '{name}'"));
@@ -3669,6 +3677,8 @@ impl Shell {
         line.recording = self.recording.is_some();
         line.note = self.notes.last().cloned();
         line.hint = self.viewport.borrow().masks().hint(ctx);
+        line.decisions = self.stack_review.borrow().decisions().len();
+        line.profile.clone_from(&self.profile_name);
     }
 
     /// What the status line says now: the hovered mask handle's

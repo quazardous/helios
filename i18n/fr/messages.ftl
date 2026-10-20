@@ -58,6 +58,17 @@ gui-about-crashes = Rapports de plantage : { $path }
 
 gui-about-logs = Fichier journal : { $path }
 
+gui-caption-decisions = Décisions en attente
+
+gui-caption-decisions-count = { $count ->
+    [one] { $count } suggestion de piles en attente de réponse
+   *[other] { $count } suggestions de piles en attente de réponse
+}
+
+gui-caption-jobs = Afficher les tâches
+
+gui-caption-profile = Profil utilisé : { $name }
+
 gui-confirmed-by-policy = { $verb } : confirmé par la règle
 
 gui-copied = copié { $text }

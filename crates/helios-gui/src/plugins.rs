@@ -261,7 +261,8 @@ impl Plugin for History {
 /// right click on the caption, `Alt+Space`) is Helios's, opened as a
 /// popup where the frame asks: the `frame.system_menu` step is replaced.
 /// Helios's status line is a block of egui-pop's status bar, beside its
-/// jobs item.
+/// jobs item; its global items (jobs, decisions, profile) are a block of
+/// the bar's `CAPTION` zone, kept in full screen (`crate::caption`).
 pub struct Frame {
     pub status: crate::jobs::Status,
 }
@@ -333,6 +334,14 @@ impl Plugin for Frame {
                 BLOCK_STATUS,
                 100,
                 crate::jobs::status_block(self.status.clone()),
+            ),
+        );
+        ctx.block(
+            zones::CAPTION,
+            Block::add(
+                crate::caption::BLOCK,
+                100,
+                crate::caption::block(self.status.clone()),
             ),
         );
         ctx.replace(STEP_SYSTEM_MENU, |app, args| {

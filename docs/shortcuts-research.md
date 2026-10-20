@@ -131,6 +131,7 @@ keyboard has no common key.
 | Bottom panel, filmstrip | `Ctrl+J` | `Ctrl+F` | — | `Ctrl+F` stays find |
 | All panels | `Tab` (not in text or graph) | `Tab` | `Shift+Tab` | kept |
 | Fullscreen | `F11` | `F11` | `F` | kept |
+| Zen mode (the image alone) | `Ctrl+K Z` | — | — | VS Code; Escape leaves it |
 | Split, editor group n | `Ctrl+\`, `Ctrl+1…9` | — | — | VS Code |
 | Next, previous editor | `Ctrl+Tab`, `Ctrl+Shift+Tab` | — | — | VS Code |
 | Close editor | `Ctrl+W` | focus detection | close | platform wins |

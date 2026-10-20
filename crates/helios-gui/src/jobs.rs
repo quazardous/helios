@@ -163,8 +163,9 @@ impl Forgotten {
 
 /// What Helios says in the status bar, beside egui-pop's items (the jobs
 /// item): keys pending, a recording, the last note, or while a mask
-/// handle is hovered its gestures. The shell sets it each frame; the
-/// status bar block draws it.
+/// handle is hovered its gestures; and what the title bar's global items
+/// show beside the jobs (`crate::caption`). The shell sets it each
+/// frame; the status bar's and the title bar's blocks draw it.
 #[derive(Clone, Debug, Default)]
 pub struct StatusLine {
     pub recording: bool,
@@ -172,6 +173,10 @@ pub struct StatusLine {
     /// The gestures of the mask handle under the pointer, said in place
     /// of the note.
     pub hint: Option<String>,
+    /// The decisions waiting for an answer (the stack suggestions).
+    pub decisions: usize,
+    /// The profile in use.
+    pub profile: String,
 }
 
 /// The status line, shared between the shell and its block.

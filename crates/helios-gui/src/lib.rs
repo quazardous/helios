@@ -2,6 +2,7 @@
 //! egui-pop's workbench), its commands run by Helios's kernel, and the
 //! framework's own pictures and recordings of it.
 
+pub mod caption;
 pub mod dialogs;
 pub mod display;
 pub mod duplicates;

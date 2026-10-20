@@ -164,6 +164,10 @@ export-png-bits 7417c9b85a17189f
 export-write-failed 34d8ef0da0f905fa
 gui-about-crashes 1da3aeb451edcc70
 gui-about-logs 32905031a5b47d8e
+gui-caption-decisions 10452c9e778ad3f7
+gui-caption-decisions-count 81c7f058fde7d9c6
+gui-caption-jobs 2dc28dab487c66ad
+gui-caption-profile 26164a66658cfc41
 gui-confirmed-by-policy 3cbe35a902970f08
 gui-copied 2f397b47ced4b53e
 gui-edit-does-not-fit b270477011039ced
