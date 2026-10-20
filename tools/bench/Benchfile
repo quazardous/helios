@@ -118,14 +118,16 @@ run = ["for d in /work/helios /work/egui-pop /work/${src:-helios}; do [ -d $d ] 
 
 # Helios's own directories on the box. Build trees are keyed by the branch
 # they build (Helios's `branch`, egui-pop's `egui_pop`), so neither needs the
-# other's parameter; all of it regenerates (tmp, the default).
+# other's parameter; all of it regenerates (tmp, the default). Every storage
+# states when it ends: a branch's tree goes with its branch or after two
+# weeks unused, and what stays (main's tree, the shared caches) is capped.
 [storage]
-target = { about = "Helios's cargo target directories, one per branch, a new one starting from main's; on the hard disk, so several agents' branches fit (sccache stays on the SSD and keeps rebuilds fast)", lock = true, seed = "main", media = "hdd" }
-egui-pop-target = { about = "egui-pop's cargo target directories, one per egui-pop branch, a new one starting from main's; on the hard disk, where a gate's 25 to 35 GB fit beside Helios's own targets", lock = true, seed = "main", media = "hdd" }
-registry = "the cargo registry, shared by every job"
-darktable-build = { about = "darktable-cli builds for the mask parity, one per pinned checkout", lock = true, media = "hdd" }
-cargo-git = "the cargo git dependencies, shared by every job"
-sccache = "sccache's compile cache, shared by every job and branch: a branch reuses what another compiled"
+target = { about = "Helios's cargo target directories, one per branch, a new one starting from main's; on the hard disk, so several agents' branches fit (sccache stays on the SSD and keeps rebuilds fast)", lock = true, seed = "main", media = "hdd", until = "branch", ttl = "14d", max = "40g" }
+egui-pop-target = { about = "egui-pop's cargo target directories, one per egui-pop branch, a new one starting from main's; on the hard disk, where a gate's 25 to 35 GB fit beside Helios's own targets", lock = true, seed = "main", media = "hdd", until = "branch", ttl = "14d", max = "40g" }
+registry = { about = "the cargo registry, shared by every job", keep = true, max = "5g" }
+darktable-build = { about = "darktable-cli builds for the mask parity, one per pinned checkout", lock = true, media = "hdd", ttl = "30d", max = "10g" }
+cargo-git = { about = "the cargo git dependencies, shared by every job", keep = true, max = "5g" }
+sccache = { about = "sccache's compile cache, shared by every job and branch: a branch reuses what another compiled (it caps itself at 12G)", keep = true, max = "14g" }
 
 # Every job builds from a copy at a fixed path (/tmp/w/<repo>): the target
 # cache is shared by branch runs (/work/helios) and pushed code
