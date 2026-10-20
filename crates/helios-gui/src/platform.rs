@@ -435,7 +435,8 @@ impl Plugin for Platform {
 /// egui-pop's platform services for the desktop window: the single
 /// instance (its launches handed to [`Platform`]), the desktop's
 /// notifications, tied to Helios's desktop file, the log file and crash
-/// reports in the user's state directory.
+/// reports in the user's state directory, and the cache of compiled kit
+/// and theme files.
 pub fn desktop(app: AppBuilder, instance: Instance) -> AppBuilder {
     let mut logs = LogsPlugin::new(STATE_NAME);
     if let Some(dir) = log_dir() {
@@ -445,7 +446,10 @@ pub fn desktop(app: AppBuilder, instance: Instance) -> AppBuilder {
     if let Some(dir) = crash_dir() {
         crashes = crashes.dir(dir);
     }
-    app.plugin(logs)
+    // User kits and themes read from disk are compiled once into the
+    // user's cache directory, under Helios's id.
+    app.cache(egui_pop::tokens::cache::Cache::for_app(APP_ID))
+        .plugin(logs)
         .plugin(crashes)
         .plugin(InstancePlugin::new(instance).scheme(SCHEME))
         .plugin(NotifyPlugin::new("Helios").backend(Desktop::new("Helios").app_id(APP_ID)))
