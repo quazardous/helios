@@ -123,7 +123,7 @@ run = ["for d in /work/helios /work/egui-pop /work/${src:-helios}; do [ -d $d ] 
 # weeks unused, and what stays (main's tree, the shared caches) is capped.
 [storage]
 target = { about = "Helios's cargo target directories, one per branch, a new one starting from main's; on the hard disk, so several agents' branches fit (sccache stays on the SSD and keeps rebuilds fast)", lock = true, seed = "main", media = "hdd", until = "branch", ttl = "14d", max = "40g" }
-egui-pop-target = { about = "egui-pop's cargo target directories, one per egui-pop branch, a new one starting from main's; on the hard disk, where a gate's 25 to 35 GB fit beside Helios's own targets", lock = true, seed = "main", media = "hdd", until = "branch", ttl = "14d", max = "40g" }
+egui-pop-target = { about = "egui-pop's cargo target directories, one per egui-pop branch, a new one starting from main's; on the hard disk, where a gate's 25 to 35 GB fit beside Helios's own targets", lock = true, seed = "main", media = "hdd", until = "egui_pop", ttl = "14d", max = "40g" }
 registry = { about = "the cargo registry, shared by every job", keep = true, max = "5g" }
 darktable-build = { about = "darktable-cli builds for the mask parity, one per pinned checkout", lock = true, media = "hdd", ttl = "30d", max = "10g" }
 cargo-git = { about = "the cargo git dependencies, shared by every job", keep = true, max = "5g" }
