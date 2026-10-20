@@ -24,6 +24,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.0] - 2026-10-20
+
+### Added
+
+- The keyboard shortcuts editor can change keys for the open workspace alone
+  as well as for every workspace (the default), and says after each key
+  whether it comes from the workspace's template, the workspace or you. A
+  workspace's own keys are kept with it and undone with Edit > Undo.
+
+### Fixed
+
+- An agent editing a workspace that is open on the desktop now goes through
+  the desktop: the change shows at once, is one step of Edit > Undo, and the
+  desktop's next save no longer overwrites it. A workspace's files changed
+  outside Helios are reloaded as one undo step, keeping what you changed
+  meanwhile unless the same part changed on both sides, which a warning names.
+
 ## [0.13.0] - 2026-10-20
 
 ### Changed
