@@ -24,6 +24,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.0] - 2026-10-20
+
+### Added
+
+- The title bar shows the jobs going on, the stack suggestions waiting for
+  an answer and the profile in use, in full screen too: a click opens the
+  Jobs panel, the Stacks panel or the Profiles menu.
+- `Ctrl+K Z` enters zen mode, the image alone on the screen; Escape
+  brings the bars and panels back.
+
+### Changed
+
+- In full screen the title bar stays, with its menu, logo and buttons: a
+  button leaves full screen in place of maximize. Zen mode (View > Zen
+  mode) shows the image alone, Escape brings the workbench back.
+- A tab dragged in the workbench shows a ghost of itself under the
+  pointer, drawn by the theme's kit.
+
 ## [0.14.0] - 2026-10-20
 
 ### Added
