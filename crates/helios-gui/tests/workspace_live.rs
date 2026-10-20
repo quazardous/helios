@@ -300,17 +300,22 @@ fn files_changed_outside_are_seen_and_reloaded_as_one_step_part_by_part() {
     h.run();
     assert_eq!(description(&h), "Watched");
     assert_eq!(steps(&h), before + 1);
-    // The window moved a panel it has not saved yet; the files got a
+    // The window closed a panel it has not saved yet; the files got a
     // description and a layout of their own: both taken, the layout
-    // being one both changed, said so.
+    // being one both changed, said so. Each side closes its panel (puts
+    // it in `hidden`): a panel merely taken out of the layout, neither
+    // placed nor closed, reads as new to egui-pop's repair, which places
+    // it back in its default area.
     let mine = {
         let mut l = h.state().layout();
-        assert!(l.remove(&panel("helios.masks")));
+        assert!(l.shows(&panel("helios.masks")));
+        l.hide(&panel("helios.masks"));
         l
     };
-    h.state_mut().set_layout(mine.clone());
     // Applied in a frame with a button held (a splitter being dragged):
-    // shown, not saved yet.
+    // shown, not saved yet. The harness runs a frame per event, and a
+    // frame with no button held saves the layout: the pointer moves
+    // there first, then the layout changes, then the button goes down.
     let press = |pressed| egui::Event::PointerButton {
         pos: egui::pos2(640.0, 400.0),
         button: egui::PointerButton::Primary,
@@ -318,6 +323,8 @@ fn files_changed_outside_are_seen_and_reloaded_as_one_step_part_by_part() {
         modifiers: egui::Modifiers::NONE,
     };
     h.event(egui::Event::PointerMoved(egui::pos2(640.0, 400.0)));
+    h.step();
+    h.state_mut().set_layout(mine.clone());
     h.event(press(true));
     h.step();
     assert!(
@@ -327,7 +334,8 @@ fn files_changed_outside_are_seen_and_reloaded_as_one_step_part_by_part() {
             .contains(&&panel("helios.masks"))
     );
     let mut theirs = files.load().unwrap().bundle.layout;
-    assert!(theirs.remove(&panel("helios.params")));
+    assert!(theirs.shows(&panel("helios.params")));
+    theirs.hide(&panel("helios.params"));
     tools::edit(
         &config,
         &json!({ "workspace": dir, "changes": {
