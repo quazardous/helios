@@ -24,6 +24,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.0] - 2026-10-20
+
+### Added
+
+- Agents can read and move a workspace's places and modes through MCP (helios_context_read, _request, _go and _set_mode), each with a dry run and a revision check: a desktop that has the workspace open moves at once, otherwise a desktop opening the workspace later comes back where the agent left it.
+- The window now knows where you are and how you work: the library, the darkroom on an image and the workspace's network are places with their own arrangement, and culling, mask editing and compare are modes. A breadcrumb and mode chips in the status bar show them; Alt+Left goes back, Escape leaves a compare or a path being drawn, and View offers the library, the network and culling, whose keys then work from anywhere.
+- A workspace opens again where it was left, even after a crash: the same place, the image open in the darkroom again, culling and compare as they were. An image that was deleted or moved since, or a network that is another workspace's, is left out with a message, and the rest comes back.
+
 ## [0.15.0] - 2026-10-20
 
 ### Added
