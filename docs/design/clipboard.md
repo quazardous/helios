@@ -1,7 +1,8 @@
 # Copy and paste on the Helios side: what is copied, how it is adapted, agents and nodes
 
-Status: **proposed** (2026-10-18), to study. The owner accepted the
-analysis's direction: an internal clipboard versus the system one, and
+Status: **decided** (2026-10-21): the owner accepted this note with the
+default of every open question; building follows its steps. Proposed on
+2026-10-18. The owner accepted the analysis's direction: an internal clipboard versus the system one, and
 hooks that process and transform what is copied and pasted. Nothing is
 built. The generic part (the contract between kernel and interface,
 formats and negotiation, the copy and paste steps, sanitisers and

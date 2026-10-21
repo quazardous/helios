@@ -496,7 +496,7 @@ hash) is part of Helios; deploying a NAS is not.
   **copies** the parts (no link kept); **delegating** part of a network
   to a sub-workspace is a link, entered and left through the context
   stack.
-- (2026-10-18, not decided) **Copy and paste** go through a clipboard the
+- (2026-10-18, decided 2026-10-21) **Copy and paste** go through a clipboard the
   kernel owns: typed items (an edit or part of one, nodes, masks, a
   colour, library images, workspace parts) with readable fallbacks on the
   system clipboard, stripped of local paths and secrets when they leave
