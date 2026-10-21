@@ -93,6 +93,16 @@ gui-layout-not-saved = La disposition n’a pas été enregistrée : { $error }
 
 gui-library-not-saved = Non enregistré, la bibliothèque montre ce que contient le coffre : { $error }
 
+gui-mask-display = Afficher le masque
+
+gui-mask-display-grey = le masque seul en gris
+
+gui-mask-display-hint = Afficher { $mask } sur l’image, actuellement { $mode }. Ce bouton, M quand l’image a le focus et la palette alternent une superposition colorée, le masque seul en gris, et désactivé.
+
+gui-mask-display-off = désactivé
+
+gui-mask-display-overlay = une superposition colorée
+
 gui-masks-add = Ajouter…
 
 gui-masks-add-hint = Ajouter une forme ou un membre paramétrique au groupe sélectionné. L’image ayant le focus : C un cercle, E une ellipse, G un dégradé, P un chemin.

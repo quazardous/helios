@@ -12,7 +12,10 @@
 //!   engine plans the union once, each tile is a view into it), at the
 //!   tile's scale: proxies at powers of two, exact tiles at `min(zoom, 1)`;
 //! - delivers linear RGBA floats in the working space, the display
-//!   transform left to the viewport.
+//!   transform left to the viewport;
+//! - with a mask shown ([`Shown::mask`]), renders the mask's node over the
+//!   same union at the same scale, through the same engine and its cache,
+//!   and composites it into each tile (`crate::mask_display`).
 //!
 //! [`EngineSource::show`] changes what is shown (an edit, another image):
 //! the viewport hears that the whole image changed, keeps its tiles on
@@ -97,6 +100,8 @@ pub struct Shown {
     pub port: String,
     /// The node's extent: the image's size.
     pub extent: Region,
+    /// A mask node of the same graph shown over it (the mask display).
+    pub mask: Option<crate::mask_display::Layer>,
 }
 
 impl Shown {
@@ -108,7 +113,15 @@ impl Shown {
             node,
             port: port.into(),
             extent,
+            mask: None,
         }))
+    }
+
+    /// The same output with a mask shown over it, or none.
+    #[must_use]
+    pub fn with_mask(mut self, mask: Option<crate::mask_display::Layer>) -> Shown {
+        self.mask = mask;
+        self
     }
 }
 
@@ -246,11 +259,17 @@ fn read_out(engine: &Engine, s: &Shown, p: [i64; 2], sink: &TileSink, stats: &St
     };
     let px = image.pixel(p[0], p[1]);
     let n = px.len();
-    let values = ["R", "G", "B"]
+    let mut values: Vec<(String, f32)> = ["R", "G", "B"]
         .iter()
         .enumerate()
         .map(|(i, name)| ((*name).to_string(), px[i.min(n - 1)]))
         .collect();
+    // The mask shown, under the pointer too.
+    if let Some(m) = &s.mask
+        && let Ok(mask) = engine.render(&s.graph, m.target.node, &m.target.port, one)
+    {
+        values.push(("Mask".into(), mask.pixel(p[0], p[1])[0]));
+    }
     sink.readout(p, values);
     Stats::add(&stats.readouts, 1);
 }
@@ -287,13 +306,34 @@ fn render(engine: &Engine, s: &Shown, tiles: Vec<TileRequest>, sink: &TileSink, 
             match engine.render_at(&s.graph, s.node, &s.port, union, scale.get()) {
                 Ok(image) => {
                     Stats::add(&stats.renders, 1);
+                    // The mask shown: its node over the same union and
+                    // scale, usually from the cache the image's render
+                    // filled. Without it, the image alone.
+                    let mask = s.mask.as_ref().and_then(|m| {
+                        engine
+                            .render_at(&s.graph, m.target.node, &m.target.port, union, scale.get())
+                            .inspect_err(|e| {
+                                eprintln!("helios-gui: mask display of {}: {e}", m.target.name);
+                            })
+                            .ok()
+                            .map(|image| (m, image))
+                    });
                     for r in live {
                         if r.is_cancelled() {
                             Stats::add(&stats.skipped, 1);
                             continue;
                         }
                         let tile = image.sample(region_of(r));
-                        sink.deliver(Tile::answer(r, Pixels::Scene(rgba(&tile))));
+                        let mut pixels = rgba(&tile);
+                        if let Some((m, mask)) = &mask {
+                            crate::mask_display::composite(
+                                &mut pixels,
+                                &mask.sample(region_of(r)),
+                                m.mode,
+                                &m.style,
+                            );
+                        }
+                        sink.deliver(Tile::answer(r, Pixels::Scene(pixels)));
                         Stats::add(&stats.tiles, 1);
                     }
                 }

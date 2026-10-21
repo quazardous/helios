@@ -358,6 +358,12 @@ command-view-network =
 command-viewport-compare =
     .title = Image: before and after side by side
 
+command-viewport-mask-display =
+    .title = Image: show the mask (cycles overlay, grey, off; or `mode`)
+
+command-viewport-mask-display-off =
+    .title = Image: stop showing the mask
+
 command-viewport-zoom-100 =
     .title = Image: actual pixels (100 %, 1 image pixel = 1 screen pixel)
 

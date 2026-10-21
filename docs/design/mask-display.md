@@ -170,3 +170,26 @@ tests too.
 4. `helios_render` with `node` and `port`; the masks-shots pictures.
 5. Docs: `docs/gui.md` (the viewport and the Masks panel) and
    `docs/masks.md`.
+
+## What is built (2026-10-21)
+
+- **Choices 1 to 4** as decided: `crate::mask_display` in `helios-gui`
+  (the value `view/viewport/mask_display`, the commands
+  `viewport.mask.display` and `viewport.mask.display.off`, `M` in the
+  image, the Masks panel's Show mask button), the node chosen from the
+  Masks panel's network. `M` was free in the image's keys (`C`, `E`,
+  `G`, `P` draw shapes there).
+- **Choice 2's tokens**: `mask.overlay.color` (the accent),
+  `mask.overlay.opacity` (0.6) and `mask.overlay.desaturate` (1: the
+  image grey under the overlay, as darktable shows it), in each of
+  Helios's themes. The colour is mixed in encoded sRGB, as darktable
+  mixes its yellow; the grey mode is exact on an sRGB display.
+- **Choice 6, first step**: the overlay is composited on the viewport's
+  render thread (`EngineSource`), on the CPU tiles the engine renders
+  for the image and the mask over the same unions and scale, before the
+  display transform. It needed no egui-pop change. The overlay layer in
+  egui-pop's viewport shader, with the mask kept on the device, stays
+  the next step for the GPU path (build plan, steps 2 and 3).
+- **Choice 5**: `helios_render` already took a `node` and a `port`.
+  Pictures: `gui.snapshot viewport.display` shows the display, and
+  `helios-gui --mask-display overlay|grey` starts with it on.

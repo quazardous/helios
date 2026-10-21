@@ -179,6 +179,18 @@ deletes its members (see [gui.md](gui.md), "The Masks panel"); moving a
 member is rewiring the group's ports (finding 3), its opacity and
 inversion moved with it (finding 2).
 
+The mask display (2026-10-21) shows a mask on the image: the node
+selected in the Masks panel, else the module's final mask, as a
+coloured overlay (theme tokens `mask.overlay.*`) or alone in grey.
+Since a mask is a node, showing it is rendering one more port through
+the same engine and cache, composited over the image: nothing
+downstream is bypassed, nothing travels in alpha, the cache stays on,
+and any node of the tree can be shown, where darktable shows a
+module's final mask only. `M` with the image focused, the Masks
+panel's Show mask button and `viewport.mask.display` cycle it (see
+[gui.md](gui.md), "The mask display", and
+[design/mask-display.md](design/mask-display.md)).
+
 ## From darktable's drawn masks
 
 `helios_xmp::drawn` reads a sidecar's `darktable:masks_history` (each

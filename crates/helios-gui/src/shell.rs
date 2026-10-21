@@ -102,6 +102,8 @@ enum Action {
     Zoom(crate::viewport::ZoomTo),
     /// Before and after side by side, or not.
     Compare,
+    /// The mask display set to a mode, or moved along its cycle.
+    MaskDisplay(Option<crate::mask_display::Mode>, Origin),
     /// Goes to a place of the context stack at the workspace's top: the
     /// library, or the workspace's network.
     Place(crate::contexts::FrameId),
@@ -693,6 +695,7 @@ impl Shell {
         {
             let mut store = lock(&shell.values);
             crate::viewport::declare(&mut store);
+            crate::mask_display::declare(&mut store);
             crate::masks::declare(&mut store);
             store.declare(
                 crate::params::SELECTION,
@@ -2002,6 +2005,37 @@ impl Shell {
             ),
             Box::new(|_, _| Ok(Action::Compare)),
         );
+        add(
+            CommandSpec::new(
+                crate::mask_display::COMMAND,
+                "Image: show the mask (cycles overlay, grey, off; or `mode`)",
+                "View",
+            ),
+            Box::new(|a, origin| {
+                let mode = match a.get("mode") {
+                    None | Some(Value::Null) => None,
+                    Some(m) => Some(
+                        m.as_str()
+                            .and_then(crate::mask_display::Mode::parse)
+                            .ok_or_else(|| format!("`mode`: {m} is not off, overlay or grey"))?,
+                    ),
+                };
+                Ok(Action::MaskDisplay(mode, origin.clone()))
+            }),
+        );
+        add(
+            CommandSpec::new(
+                crate::mask_display::COMMAND_OFF,
+                "Image: stop showing the mask",
+                "View",
+            ),
+            Box::new(|_, origin| {
+                Ok(Action::MaskDisplay(
+                    Some(crate::mask_display::Mode::Off),
+                    origin.clone(),
+                ))
+            }),
+        );
         Shell::declare_mask_commands(&mut add);
         Shell::declare_member_commands(&mut add);
         add(
@@ -2117,6 +2151,8 @@ impl Shell {
             ("E", "mask.add.ellipse", image.to_string()),
             ("G", "mask.add.gradient", image.to_string()),
             ("P", "mask.add.path", image.to_string()),
+            // The mask display, as darktable's mask key.
+            ("M", crate::mask_display::COMMAND, image.to_string()),
             (
                 "Enter",
                 "mask.path.close",
@@ -2854,6 +2890,7 @@ impl Shell {
             let store = lock(&self.values);
             h.set_context("maskTool", &crate::masks::tool(&store));
             h.set_context("maskPoint", flag(crate::masks::point(&store).is_some()));
+            h.set_context("maskDisplay", crate::mask_display::mode(&store).name());
         }
         h.set_context("heliosTheme", &self.theme_name);
         h.set_context("heliosProfile", &self.profile_name);
@@ -3377,6 +3414,24 @@ impl Shell {
             }
             Action::RenameInTree(member) => {
                 self.mask_tree.borrow_mut().start_rename(member)?;
+            }
+            Action::MaskDisplay(mode, origin) => {
+                let mut store = lock(&self.values);
+                let now = match mode {
+                    Some(m) => crate::mask_display::set(&mut store, m, &origin)?,
+                    None => crate::mask_display::cycle(&mut store, &origin)?,
+                };
+                // What it shows: the node the selection gives, if the
+                // selected module has a mask.
+                let target = self
+                    .viewport
+                    .borrow()
+                    .graph()
+                    .and_then(|g| crate::mask_display::target(g, &store));
+                return Ok(json!({
+                    "mode": now.name(),
+                    "mask": target.map(|t| t.key),
+                }));
             }
             Action::Compare => {
                 use crate::viewport::COMPARE;

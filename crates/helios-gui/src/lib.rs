@@ -12,6 +12,7 @@ pub mod host;
 pub mod i18n;
 pub mod jobs;
 pub mod library;
+pub mod mask_display;
 pub mod mask_tree;
 pub mod masks;
 pub mod navigator;

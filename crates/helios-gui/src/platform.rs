@@ -245,7 +245,12 @@ impl Opens {
 }
 
 /// Flags of `helios-gui` followed by a value that is not something to open.
-const VALUED: [&str; 3] = ["--vault", "--node", "--token-file"];
+const VALUED: [&str; 4] = [
+    "--vault",
+    "--node",
+    "--token-file",
+    crate::mask_display::FLAG,
+];
 
 /// What a launch's arguments ask to open: paths (relative ones from
 /// `cwd`), `file://` URIs as a file manager passes them, `--image FILE`.
@@ -472,6 +477,8 @@ mod tests {
             &args(&[
                 "--vault",
                 "v.db",
+                "--mask-display",
+                "grey",
                 "a.jpg",
                 "--image",
                 "b.png",

@@ -25,7 +25,11 @@
 //! - **Drawn masks**: the selected mask's shapes are outlined over the
 //!   image and the selected shape's handles edit it (see
 //!   [`crate::masks`]).
-//! - **Pictures**: `viewport.display` is what is on screen;
+//! - **The mask display**: the selected mask node over the image, as an
+//!   overlay or in grey, rendered with the image (see
+//!   [`crate::mask_display`]); it follows the selection and the edits.
+//! - **Pictures**: `viewport.display` is what is on screen (the mask
+//!   display included);
 //!   `viewport.scene` is the float data of the view before the display
 //!   transform.
 
@@ -259,6 +263,9 @@ pub struct Viewport {
     masks: crate::masks::Masks,
     /// What the viewport's window wants to be drawn in.
     wanted: DisplayTarget,
+    /// The mask shown over the image, when the mask display is on and
+    /// the selected module has a mask.
+    layer: Option<crate::mask_display::Layer>,
     pub stats: Arc<Stats>,
 }
 
@@ -294,6 +301,7 @@ impl Default for Viewport {
             readout: None,
             masks: crate::masks::Masks::default(),
             wanted: DisplayTarget::srgb(),
+            layer: None,
             stats,
         }
     }
@@ -306,6 +314,8 @@ impl Viewport {
     pub fn set_source(&mut self, graph: Graph, node: NodeId, port: &str) -> Result<(), String> {
         let shown = Shown::new(Arc::new(graph.clone()), node, port)?
             .ok_or("the node has no source feeding it")?;
+        // Another image: its mask is found again at the next frame.
+        self.layer = None;
         self.after.show(Some(shown.clone()));
         self.before.show(Some(shown));
         self.edited = Some(Edited {
@@ -316,12 +326,43 @@ impl Viewport {
         Ok(())
     }
 
-    /// Shows the graph as it is now (after a node was added).
+    /// Shows the graph as it is now (after a node was added), with the
+    /// mask shown over it.
     fn reshow(&mut self) {
         let Some(e) = &self.edited else { return };
         match Shown::new(Arc::new(e.graph.clone()), e.node, &e.port) {
-            Ok(shown) => self.after.show(shown),
+            Ok(shown) => self
+                .after
+                .show(shown.map(|s| s.with_mask(self.layer.clone()))),
             Err(e) => eprintln!("helios-gui: viewport: {e}"),
+        }
+    }
+
+    /// The mask shown over the image, if any.
+    pub fn mask_layer(&self) -> Option<&crate::mask_display::Layer> {
+        self.layer.as_ref()
+    }
+
+    /// Follows the mask display: the mode the store holds, the node the
+    /// selection shows (found again in the graph as it is now, so it
+    /// follows edits, undo and the selection), the theme's style. A
+    /// change shows the image again with it; the same layer costs nothing.
+    pub fn follow_mask_display(&mut self, store: &Store, style: crate::mask_display::Style) {
+        use crate::mask_display::{self as display, Layer, Mode};
+        let mode = display::mode(store);
+        let wanted = match (&self.edited, mode) {
+            (Some(e), Mode::Overlay | Mode::Grey) => {
+                display::target(&e.graph, store).map(|target| Layer {
+                    mode,
+                    target,
+                    style,
+                })
+            }
+            _ => None,
+        };
+        if wanted != self.layer {
+            self.layer = wanted;
+            self.reshow();
         }
     }
 
@@ -681,10 +722,7 @@ impl Viewport {
         let Some(e) = &mut self.edited else { return };
         match helios_values::sync(store, &mut e.graph) {
             Ok(0) => {}
-            Ok(_) => match Shown::new(Arc::new(e.graph.clone()), e.node, &e.port) {
-                Ok(shown) => self.after.show(shown),
-                Err(e) => eprintln!("helios-gui: viewport: {e}"),
-            },
+            Ok(_) => self.reshow(),
             Err(e) => eprintln!("helios-gui: viewport: {e}"),
         }
     }
@@ -795,6 +833,10 @@ impl Viewport {
         }
         let (mut view, compare) = {
             let store = store.lock().unwrap_or_else(PoisonError::into_inner);
+            let style = crate::mask_display::Style::of(&crate::theme::Extra::of(
+                &crate::theme::Tokens::of(&ctx),
+            ));
+            self.follow_mask_display(&store, style);
             let pointer = ui.input(|i| i.pointer.hover_pos());
             self.masks.hook(self.state.hooks_mut());
             let hovered = self.masks.hovered();

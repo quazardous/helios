@@ -163,6 +163,16 @@ gui-library-sync = Sync zoom and pan
 
 gui-library-tags = Tags
 
+gui-mask-display = Show mask
+
+gui-mask-display-grey = the mask alone in grey
+
+gui-mask-display-hint = Show { $mask } on the image, now { $mode }. This button, M with the image focused and the palette cycle a coloured overlay, the mask alone in grey, and off.
+
+gui-mask-display-off = off
+
+gui-mask-display-overlay = a coloured overlay
+
 gui-masks-add = Add…
 
 gui-masks-add-hint = Add a shape or a parametric member to the selected group. With the image focused: C a circle, E an ellipse, G a gradient, P a path.

@@ -605,7 +605,7 @@ fn name_of(graph: &Graph, id: NodeId) -> String {
 }
 
 /// The node feeding an input port of a node, by the port's name.
-fn input_of(graph: &Graph, id: NodeId, port: &str) -> Option<(NodeId, String)> {
+pub(crate) fn input_of(graph: &Graph, id: NodeId, port: &str) -> Option<(NodeId, String)> {
     let m = graph.manifest(id).ok().flatten()?;
     let i = m.inputs.iter().position(|p| p.name == port)?;
     graph.input_ports(id).ok()?.get(i).cloned().flatten()
@@ -1449,6 +1449,8 @@ impl MaskTree {
         viewport: &RefCell<crate::viewport::Viewport>,
         values: &Mutex<Store>,
     ) {
+        // The mask display's mode, and the row it shows.
+        let display: (crate::mask_display::Mode, Option<String>);
         let net = {
             let store = values.lock().unwrap_or_else(PoisonError::into_inner);
             let v = viewport.borrow();
@@ -1460,6 +1462,11 @@ impl MaskTree {
             net.translate(&|m: Message| crate::i18n::text(&ctx, m));
             self.follow(&net);
             self.follow_selection(&net, &store);
+            display = (
+                crate::mask_display::mode(&store),
+                crate::mask_display::shown_key(&net, &store)
+                    .and_then(|k| net.items.get(&k).map(|i| i.name().to_string())),
+            );
             net
         };
         self.shown = net.clone();
@@ -1502,6 +1509,7 @@ impl MaskTree {
             ui.add(egui::Label::new(egui::RichText::new(text).weak()).wrap());
         }
         let mut commands = Vec::new();
+        let mut cycle_display = false;
         // The row selected, when it is a member (or the root): a
         // refinement is neither inverted, hidden nor taken out.
         let current = self
@@ -1575,6 +1583,24 @@ impl MaskTree {
                     },
                 );
             }
+            // The mask display: the same cycle as the command and M.
+            let (mode, shown) = &display;
+            let hint = tr(Message::new(
+                "gui-mask-display-hint",
+                "Show { $mask } on the image, now { $mode }. This button, M with the image focused and the palette cycle a coloured overlay, the mask alone in grey, and off.",
+            )
+            .with("mask", shown.clone().unwrap_or_default())
+            .with("mode", tr(mode.words())));
+            if ui
+                .selectable_label(
+                    *mode != crate::mask_display::Mode::Off,
+                    tr(Message::new("gui-mask-display", "Show mask")),
+                )
+                .on_hover_text(hint)
+                .clicked()
+            {
+                cycle_display = true;
+            }
         });
         let id = egui::Id::new(("egui_pop_views::tree", TREE));
         let focused = ui.memory(|m| m.has_focus(id));
@@ -1626,6 +1652,9 @@ impl MaskTree {
         let out = view.show(ui, &mut self.state, &net);
         commands.extend(toggles);
         let mut store = values.lock().unwrap_or_else(PoisonError::into_inner);
+        if cycle_display && let Err(e) = crate::mask_display::cycle(&mut store, &Origin::User) {
+            request(ui.ctx(), Request::Notify(Level::Warning, e.into()));
+        }
         for signal in out.signals {
             match signal {
                 Signal::Select {

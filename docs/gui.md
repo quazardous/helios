@@ -677,8 +677,11 @@ and the colour (`helios-gui/src/viewport.rs`).
   ("before" left of a split dragged by its handle, `view/viewport/split`);
   holding `\` shows "before" alone. "Before" is the edit as it was
   opened (not decided: the unedited image, or a snapshot taken by hand).
+- **Mask display** (2026-10-21, see "The mask display" below). `M`
+  with the image focused shows the selected mask over the image.
 - **Readout.** The working-space R, G, B of the pixel under the pointer
-  show in the bottom left corner.
+  show in the bottom left corner, and the mask's value while the mask
+  display is on.
 - **Pictures.** `viewport.display` is what is on screen,
   `viewport.scene` the float data of the view before the display
   transform (`gui.snapshot`).
@@ -787,6 +790,41 @@ The picture is a run of `helios-gui --image` in wbox, driven by its
 keys and pointer: `C` for a circle, then `P`, five clicks and Enter for
 a path. The path, selected, shows its edge and its handles; the circle
 is drawn faint, its feather dashed.
+
+### The mask display
+
+What a module or a mask node affects, shown on the image (2026-10-21,
+`helios-gui/src/mask_display.rs`; the design and its choices are in
+[design/mask-display.md](design/mask-display.md)):
+
+- **What shows.** The row selected in the Masks panel: a member as its
+  group reads it (after its refinements, before the group's opacity and
+  inversion of it), a group, a refinement. With nothing selected, the
+  module's final mask: what its blend reads. The blend's own opacity is
+  not applied: the display says where the module acts, not how much.
+- **How.** `overlay` lays the theme's `mask.overlay.color` (the accent
+  by default) over the image by the mask's value, at
+  `mask.overlay.opacity` (0.6), the image under it turned grey by
+  `mask.overlay.desaturate` (1, as darktable shows it); `grey` shows the
+  mask alone, 0 black and 1 white on an sRGB display.
+- **One value.** `view/viewport/mask_display` (`off`, `overlay`,
+  `grey`) is a view value: transient, never an undo step, never saved
+  with the edit. `viewport.mask.display` cycles it (or sets `mode`),
+  `viewport.mask.display.off` turns it off; `M` with the image focused
+  and the Masks panel's Show mask button run the same cycle. The keys'
+  `when` clauses can read it as `maskDisplay`.
+- **While editing.** It stays on through handle drags, parameter
+  changes, an agent's edits and undo, and follows the selection; with a
+  module that has no mask it shows nothing and comes back with the next
+  one that has.
+- **Rendered** by the viewport's engine: the mask's node at the image's
+  tiles' regions and scale, usually from the cache the image's render
+  filled (the blend read it), composited on the viewport's render
+  thread before the display transform. The navigator, the scopes and
+  exports never show it; `viewport.scene` stays the image's data.
+- **Pictures and agents.** `gui.snapshot viewport.display` pictures it;
+  `helios-gui --mask-display overlay` (or `grey`) starts with it on, for
+  pictures and benches.
 
 ### The Masks panel
 

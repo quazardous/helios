@@ -123,6 +123,8 @@ command-view-culling.title 6565827e00999411
 command-view-library.title f8ecfd5316229aaf
 command-view-network.title 302d61539ec3f628
 command-viewport-compare.title 27a11d0c9daaf86f
+command-viewport-mask-display-off.title f8dcd04c9ed5d30a
+command-viewport-mask-display.title 0fce58839d419c9d
 command-viewport-zoom-100.title be6c10eb69bafd7c
 command-viewport-zoom-fit.title 6042270d43060d0e
 command-viewport-zoom-in.title 7a24f601c24aad20
@@ -195,6 +197,11 @@ gui-library-file f5342066f92b83c2
 gui-library-not-saved f4c82ef926e77b5e
 gui-library-read f8261f7d1dc7fc43
 gui-library-reading 86a6bd85ffd7fbf5
+gui-mask-display e386310422b43af2
+gui-mask-display-grey a3252d1873c23889
+gui-mask-display-hint 08a963e3e539c9a9
+gui-mask-display-off 721d4f4fe78bec18
+gui-mask-display-overlay 8848a73d35d7de51
 gui-masks-add 69d8839a97ff0076
 gui-masks-add-hint 07fe685ae4f68f99
 gui-masks-beside-refinement 129a0c6bb2a976a6

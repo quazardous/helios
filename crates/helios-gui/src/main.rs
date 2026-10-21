@@ -7,7 +7,8 @@
 //! both, the image is imported into the vault, opens with its saved edit,
 //! and each edit step is saved there as a version.
 //! `--snapshot <target> <file.png>` draws it offscreen instead and saves a
-//! picture of the target.
+//! picture of the target. `--mask-display off|overlay|grey` starts with
+//! the mask display in that mode (for pictures and benches).
 //! `--node NAME=INSPECT[,CONTROL]` (repeatable) follows a running node's
 //! jobs in the jobs centre, Cancel going to its control endpoint; a
 //! `tcp://` address takes the node's session token from `--token-file
@@ -871,6 +872,8 @@ fn main() -> Result<(), String> {
     if args.last().is_some_and(|a| a == "--image") {
         return Err("--image takes a FILE".into());
     }
+    // The mask display from the start, for pictures and benches.
+    let mask_display = helios_gui::mask_display::flag(&args)?;
     let cwd = std::env::current_dir().ok();
     let asked = platform::opens(&args, cwd.as_deref());
     // The last image named, the first workspace (else the current
@@ -1019,6 +1022,17 @@ fn main() -> Result<(), String> {
                 shell.notes.push(format!("workspace: {e}"));
             }
             start::mark("workspace opened (keys, library settings)");
+            if let Some(mode) = mask_display
+                && let Err(e) = shell.run(
+                    helios_gui::mask_display::COMMAND,
+                    serde_json::json!({ "mode": mode.name() }),
+                    helios_shell::commands::Origin::User,
+                )
+            {
+                shell
+                    .notes
+                    .push(format!("{}: {e}", helios_gui::mask_display::FLAG));
+            }
             if library_reading.is_some() {
                 shell.notify(
                     helios_gui::dialogs::Level::Info,
