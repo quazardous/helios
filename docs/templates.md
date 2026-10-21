@@ -111,6 +111,9 @@ The starting graph, written like a node's network description
   which nodes came from which composite.
 - `params` are checked against the module's (or the composite's)
   manifest, completed with defaults.
+- `bypassed: true` places a node bypassed: it keeps its parameters and
+  renders as if absent (see module-contract.md, "Bypass"). An opened
+  composite is not bypassed whole: its inner nodes are, one by one.
 - `view` is the output the viewport shows.
 - `presets` are named sets of parameter values by node name (for a
   composite, its exposed parameters). Building with a preset puts its

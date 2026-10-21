@@ -8,6 +8,7 @@
 //!
 //!     helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] render NODE [--port PORT] --region X,Y,W,H
 //!     helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] set-param NODE PARAM VALUE
+//!     helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] bypass NODE on|off
 //!     helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] load-source NODE PATH
 //!     helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] export NODE --format jpeg|png|tiff
 //!                    [--quality Q] [--port PORT] [--region X,Y,W,H] [--set NODE.PARAM=VALUE]... --to PATH
@@ -99,6 +100,7 @@ const USAGE: &str = "usage:
   helios inspect [--socket PATH|tcp://HOST:PORT --token-file FILE] wait-idle [--timeout MS]
   helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] render NODE [--port PORT] --region X,Y,W,H
   helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] set-param NODE PARAM VALUE
+  helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] bypass NODE on|off
   helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] load-source NODE PATH
   helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] export NODE --format jpeg|png|tiff
                  [--quality Q] [--port PORT] [--region X,Y,W,H] [--set NODE.PARAM=VALUE]... --to PATH
@@ -297,6 +299,14 @@ fn parse(args: Vec<String>) -> Result<Call, String> {
                 node: node.to_string(),
                 param: param.to_string(),
                 value: value(v),
+            },
+            ["bypass", node, on] => ControlRequest::NodeBypass {
+                node: node.to_string(),
+                on: match *on {
+                    "on" => true,
+                    "off" => false,
+                    other => return Err(format!("bypass takes on or off, not `{other}`")),
+                },
             },
             ["cancel", job] => ControlRequest::Cancel {
                 job: job

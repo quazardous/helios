@@ -282,3 +282,36 @@ fn a_template_writes_only_its_own_text() {
     assert_eq!(report.problems.len(), 1, "{:?}", report.problems);
     assert!(report.problems[0].contains("gui-open-workspace-verb"));
 }
+
+#[test]
+fn a_node_placed_bypassed_renders_as_its_input() {
+    let mut t = template();
+    t["network"]["nodes"][0]["bypassed"] = json!(true);
+    let b = bundle(&t);
+    let built = b.build(&catalogue()).unwrap();
+    let folded = built.nodes["folded"];
+    assert!(built.graph.is_bypassed(folded).unwrap());
+    let engine = Engine::new(Arc::new(Bus::new()));
+    let region = Region::sized(8, 8);
+    let out = engine
+        .render(&built.graph, folded, "output", region)
+        .unwrap();
+    let source = engine
+        .render(&built.graph, built.nodes["source"], "image", region)
+        .unwrap();
+    assert_eq!(out.to_vec(), source.to_vec());
+    // Written back as placed, and the schema knows the field.
+    let written = serde_json::to_value(&b.template).unwrap();
+    assert_eq!(written["network"]["nodes"][0]["bypassed"], true);
+    assert!(written["network"]["nodes"][1].get("bypassed").is_none());
+    assert_eq!(
+        schema::check(&schema::template(), &written),
+        Vec::<String>::new()
+    );
+    // An opened composite is not bypassed whole.
+    t["network"]["nodes"][1]["bypassed"] = json!(true);
+    match bundle(&t).build(&catalogue()) {
+        Err(e) => assert!(e.contains("opened composite"), "{e}"),
+        Ok(_) => panic!("an opened composite was bypassed whole"),
+    }
+}

@@ -17,6 +17,11 @@ helios control --socket control.sock export tone --format jpeg --quality 90 --to
 `load-source NODE PATH` gives a source node the image of a file (a raw or a
 picture); the network stays and its results follow the new image.
 
+`bypass NODE on|off` bypasses a module node or brings it back
+(`node.bypass`, the MCP tool `helios_node_bypass`): bypassed, it keeps its
+parameters and renders as if absent, its output the input it passes
+through. Like `set-param`, it is saved with the image's edit as a step.
+
 `export NODE --format jpeg|png|tiff [--quality Q] --to PATH` writes a node's
 output to a file as a scheduler job holding the destination: two exports to
 the same file take turns, and the file appears whole or not at all (an export

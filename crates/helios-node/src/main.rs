@@ -806,6 +806,13 @@ mod control {
                     .map(|()| json!({}))
                     .map_err(|e| Message::plain(e.to_string()))
             }),
+            ControlRequest::NodeBypass { node: name, on } => node.id(name).and_then(|id| {
+                let mut graph = node.graph.0.write().expect("graph lock");
+                graph
+                    .set_bypass(id, *on)
+                    .map(|()| json!({ "node": name, "bypassed": on }))
+                    .map_err(|e| Message::plain(e.to_string()))
+            }),
             ControlRequest::LoadSource { node: name, path } => node
                 .load_source(name, path)
                 .map(|loaded| json!({ "source": loaded })),
@@ -937,6 +944,11 @@ mod control {
             ControlRequest::SetParam {
                 node: name, param, ..
             } => Some(format!("set {name}.{param}")),
+            ControlRequest::NodeBypass { node: name, on } => Some(if *on {
+                format!("bypass {name}")
+            } else {
+                format!("restore {name}")
+            }),
             ControlRequest::DecisionResolve => Some("decisions resolved".into()),
             ControlRequest::DecisionAccept { node: name, .. } => {
                 Some(format!("decision {name} accepted"))

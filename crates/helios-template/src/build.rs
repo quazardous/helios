@@ -125,11 +125,19 @@ pub fn build(
             }
         }
         let p = if n.open {
+            if n.bypassed {
+                return Err(at(
+                    "an opened composite is not bypassed whole: bypass its inner nodes".into(),
+                ));
+            }
             open(&mut graph, &mut nodes, n, &module, &params).map_err(at)?
         } else {
             let id = graph
                 .add_module(&n.name, module.clone(), &params)
                 .map_err(|e| at(e.to_string()))?;
+            if n.bypassed {
+                graph.set_bypass(id, true).map_err(|e| at(e.to_string()))?;
+            }
             nodes.insert(n.name.clone(), id);
             Placed::module(id, &module)
         };

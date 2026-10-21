@@ -257,6 +257,10 @@ pub struct NodeDesc {
     /// nodes (`<name>.<inner>`), which panels can edit.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub open: bool,
+    /// Rendered as if absent, its parameters kept (see
+    /// `helios_core::Graph::set_bypass`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub bypassed: bool,
     /// Overrides the composite's panel hint.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub panel: Option<PanelHint>,
