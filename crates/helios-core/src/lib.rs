@@ -35,7 +35,7 @@ pub use bus::{Bus, Envelope, Event};
 pub use describe::Describe;
 pub use engine::{Counters, Engine, FaultKind};
 pub use error::Error;
-pub use graph::{Graph, LayoutHint, NodeId};
+pub use graph::{Graph, LayoutHint, NodeId, passed_input};
 pub use image::{ContentHash, Image, Region};
 pub use manifest::{
     Family, Manifest, ModuleKind, Needs, ParamHint, ParamKind, ParamSpec, ParamWidget, PixelFormat,
