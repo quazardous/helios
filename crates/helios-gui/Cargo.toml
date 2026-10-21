@@ -16,6 +16,8 @@ helios-shell.workspace = true
 # vt100) for the jobs centre's log consoles.
 egui-pop = { workspace = true, features = ["viewport", "imaging", "i18n", "views", "editors", "platform-instance", "platform-notify", "platform-logs", "platform-crash"] }
 helios-i18n.workspace = true
+# The settings the desktop reads (the Queue panel's when empty).
+helios-config.workspace = true
 # A connected node's jobs, followed through its inspect endpoint.
 helios-inspect.workspace = true
 helios-profile.workspace = true

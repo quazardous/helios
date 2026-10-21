@@ -182,6 +182,29 @@ node:
 For a node without a queue the panel stays in place with an empty state by
 default; hiding it is a user setting.
 
+Built (interim, until the workflow level runs): the Queue panel
+(`helios.queue`, `helios_gui::queue`) follows the selected node
+(`view/graph/selection`, the value the graph editor, the Masks panel and
+the Parameters panel share) and lists the jobs that name it: a job may
+name the graph node it works for (`node` in `job.started`, see
+[jobs.md](jobs.md)), and an export names the node it renders, a connected
+node's exports included. Per item: its state (waiting until its first
+progress, running, paused, cancelling, done, failed, cancelled), since
+when, its attempts, and where it runs (this desktop, or the node's name).
+The summary counts them and gives the oldest wait.
+
+- Its data comes through a small trait (`QueueSource`): the interim source
+  (`JobsQueue`) reads egui-pop's jobs model; the workflow's own queue
+  (claims, leases, retries, the mode and the concurrency limit) replaces it
+  without touching the panel.
+- Cancel is `job.cancel`, as in the jobs centre: run in the desktop, or
+  sent to the node that runs the job. Retry and reprioritise are not
+  offered yet: no Helios job can be retried or moved in its queue.
+- With `interface.panels.queue_when_empty` off (the user's settings layer
+  in the vault), the panel closes while the selected node has nothing
+  queued, and opens again once it has work. On, the default, it shows
+  "Nothing queued" in place.
+
 ## Decision prompts
 
 A decision node waiting for an answer stops the render that goes through

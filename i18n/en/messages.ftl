@@ -441,6 +441,52 @@ gui-profile-layout-error = profile { $name }: layout: { $error }
 
 gui-profile-variants = profile { $name }: { $count } values from variants: { $variants }
 
+gui-queue-cancel = Cancel
+
+gui-queue-column-attempts = Attempts
+
+gui-queue-column-item = Item
+
+gui-queue-column-since = Since
+
+gui-queue-column-state = State
+
+gui-queue-column-where = Where
+
+gui-queue-empty = Nothing queued at { $node }
+
+gui-queue-here = This desktop
+
+gui-queue-hours = { $n } h
+
+gui-queue-minutes = { $n } min
+
+gui-queue-no-selection = Select a node to see its queue
+
+gui-queue-oldest-wait = Oldest wait: { $time }
+
+gui-queue-on-node = Node { $name }
+
+gui-queue-seconds = { $n } s
+
+gui-queue-state-cancelled = Cancelled
+
+gui-queue-state-cancelling = Cancelling
+
+gui-queue-state-done = Done
+
+gui-queue-state-failed = Failed
+
+gui-queue-state-paused = Paused
+
+gui-queue-state-running = Running
+
+gui-queue-state-waiting = Waiting
+
+gui-queue-summary = { $waiting } waiting, { $running } running, { $done } done, { $failed } failed
+
+gui-queue-title = Queue of { $node }
+
 gui-quick-open-image = image
 
 gui-quick-open-module = module { $module }

@@ -694,3 +694,49 @@ gui-image-opening = Ouverture de { $name }…
 gui-library-read = { $count } images dans la bibliothèque
 
 gui-library-reading = Lecture de la bibliothèque…
+
+gui-queue-cancel = Annuler
+
+gui-queue-column-attempts = Tentatives
+
+gui-queue-column-item = Élément
+
+gui-queue-column-since = Depuis
+
+gui-queue-column-state = État
+
+gui-queue-column-where = Où
+
+gui-queue-empty = Rien en file d’attente à { $node }
+
+gui-queue-here = Ce poste
+
+gui-queue-hours = { $n } h
+
+gui-queue-minutes = { $n } min
+
+gui-queue-no-selection = Sélectionnez un nœud pour voir sa file d’attente
+
+gui-queue-oldest-wait = Attente la plus longue : { $time }
+
+gui-queue-on-node = Nœud { $name }
+
+gui-queue-seconds = { $n } s
+
+gui-queue-state-cancelled = Annulé
+
+gui-queue-state-cancelling = Annulation
+
+gui-queue-state-done = Terminé
+
+gui-queue-state-failed = Échoué
+
+gui-queue-state-paused = En pause
+
+gui-queue-state-running = En cours
+
+gui-queue-state-waiting = En attente
+
+gui-queue-summary = { $waiting } en attente, { $running } en cours, { $done } terminés, { $failed } échoués
+
+gui-queue-title = File d’attente de { $node }
