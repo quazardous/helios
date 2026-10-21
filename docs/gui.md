@@ -182,6 +182,46 @@ node:
 For a node without a queue the panel stays in place with an empty state by
 default; hiding it is a user setting.
 
+## Decision prompts
+
+A decision node waiting for an answer stops the render that goes through
+it (see [module-contract.md](module-contract.md), "Decision nodes"). The
+desktop says so and lets a person answer (2026-10-21,
+`helios-gui/src/decisions.rs`):
+
+- **The Decisions panel** (`helios.decisions`, closed by default) has a
+  card per decision of the open image that waits: what it asks (its
+  module's description and its question), and in AI-assisted mode what
+  the model proposes, how sure it is (a bar) and why. **Accept** takes
+  the model's best option; **Correct…** opens the answer's form, generated
+  from the parameters the decision module declares (a slider for a
+  number, a box for a choice, a check box, a text field), filled with the
+  proposal; **Record** answers with it. A decision with no proposal (human
+  mode, or a model that has not answered yet) has **Answer…**, the same
+  form. With two proposals or more waiting, **Accept the N above X %**
+  takes every best option the model is at least that sure of (80 % by
+  default, set with the slider beside it).
+- **The pending badge**: a count in the status bar while decisions wait,
+  in the warning tone when one waits for a person (the accent when they
+  all wait for a model); nothing when none waits. A click opens the
+  Decisions panel. egui-pop has no badge on a panel's tab yet: the panel
+  says the count at its top instead.
+- **Answers go through the edit's book** (`helios-decision`'s `Book`), on
+  the graph the viewport shows, as `who` the user (or the agent or script
+  that ran the command): accepted, corrected or decided by a human,
+  versioned, kept with the edit. The viewport renders again at once. An
+  answer is not an undo step: asking again withdraws it and the next
+  answer is a new version, as in the core.
+- **Agents** use the same verbs: `decision.list` (what waits, with the
+  proposals, confidence and why), `decision.accept` (`node`, `option`),
+  `decision.decide` (`node`, `values` as plain values: `{"gain": 1.5}`)
+  and `decision.acceptAbove` (`confidence`). The cards are made again from
+  the book each frame, so an agent's answer removes its card.
+- The image's decision nodes that its edit does not know wait for a
+  person (human mode): no model is configured in the desktop yet.
+- **In the graph view** (once it exists) the same card shows next to its
+  node (`Decisions::card_ui`).
+
 ## Graph view
 
 - Layout is automatic and layered: nodes never overlap and edges do not

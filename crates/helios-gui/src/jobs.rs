@@ -175,6 +175,10 @@ pub struct StatusLine {
     pub hint: Option<String>,
     /// The decisions waiting for an answer (the stack suggestions).
     pub decisions: usize,
+    /// The open image's decisions waiting (the Decisions panel's cards),
+    /// and how many of them wait for a person rather than a model.
+    pub pending_decisions: usize,
+    pub decisions_for_a_person: usize,
     /// The profile in use.
     pub profile: String,
 }
@@ -190,6 +194,10 @@ pub fn status_block(status: Status) -> impl FnMut(&mut egui::Ui, &AppHandle) + '
         // height (the viewport under it would move).
         ui.set_min_height(ui.spacing().interact_size.y);
         ui.horizontal_centered(|ui| {
+            if line.pending_decisions > 0 {
+                decisions_badge(ui, app, &line);
+                ui.separator();
+            }
             if let Some(keys) = app.pending_keys() {
                 ui.label(format!("{keys} …"));
                 ui.separator();
@@ -204,5 +212,44 @@ pub fn status_block(status: Status) -> impl FnMut(&mut egui::Ui, &AppHandle) + '
                 ui.label(note);
             }
         });
+    }
+}
+
+/// The pending badge: how many of the open image's decisions wait, in
+/// the warning tone while one waits for a person (the accent while they
+/// all wait for a model). Shown only when one waits; a click opens the
+/// Decisions panel.
+fn decisions_badge(ui: &mut egui::Ui, app: &AppHandle, line: &StatusLine) {
+    use egui_pop::core::indicator::{Indicator, Tone};
+    let ctx = ui.ctx().clone();
+    let meaning = crate::i18n::text(
+        &ctx,
+        helios_core::Message::new(
+            "gui-status-decisions",
+            "{ $count } decisions wait for an answer",
+        )
+        .with("count", line.pending_decisions),
+    );
+    let action = crate::i18n::text(
+        &ctx,
+        helios_core::Message::new("gui-status-decisions-show", "Show the decisions"),
+    );
+    let tone = if line.decisions_for_a_person > 0 {
+        Tone::Warning
+    } else {
+        Tone::Accent
+    };
+    let r = ui.add(
+        Indicator::count(line.pending_decisions as u64)
+            .tone(tone)
+            .id(crate::decisions::MARK)
+            .name(meaning.clone())
+            .tooltip(meaning)
+            .interactive(action),
+    );
+    if r.clicked() {
+        let _ = app.focus_panel(&egui_pop::model::ids::PanelId::from_static(
+            crate::decisions::PANEL,
+        ));
     }
 }

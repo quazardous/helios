@@ -752,6 +752,20 @@ impl Viewport {
         self.edited.as_ref().map(|e| &e.graph)
     }
 
+    /// Changes the graph shown (a decision answered) and, when that went
+    /// well, renders it again; `None` when no image is open.
+    pub fn edit_graph<T>(
+        &mut self,
+        f: impl FnOnce(&mut Graph) -> Result<T, String>,
+    ) -> Option<Result<T, String>> {
+        let e = self.edited.as_mut()?;
+        let done = f(&mut e.graph);
+        if done.is_ok() {
+            self.reshow();
+        }
+        Some(done)
+    }
+
     /// egui-pop's viewport state: its tiles, its last mapping, its hooks.
     pub fn state(&self) -> &ViewportState {
         &self.state

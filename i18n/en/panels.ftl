@@ -4,6 +4,9 @@
 panel-helios-compare =
     .title = Compare
 
+panel-helios-decisions =
+    .title = Decisions
+
 panel-helios-duplicates =
     .title = Duplicates
 

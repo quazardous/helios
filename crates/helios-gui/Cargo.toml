@@ -22,6 +22,8 @@ helios-profile.workspace = true
 helios-scopes.workspace = true
 helios-values.workspace = true
 helios-core.workspace = true
+# The edit's decisions, answered in the Decisions panel.
+helios-decision.workspace = true
 # The process's one GPU device, which the window draws with.
 helios-gpu.workspace = true
 helios-photo.workspace = true

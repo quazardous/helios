@@ -4,6 +4,7 @@
 
 pub mod caption;
 pub mod contexts;
+pub mod decisions;
 pub mod dialogs;
 pub mod display;
 pub mod duplicates;
@@ -86,6 +87,7 @@ pub fn helios_panels() -> Vec<PanelSpec> {
             &sides[..],
             false,
         ),
+        ("helios.decisions", "Decisions", EndSide, &sides[..], false),
     ]
     .into_iter()
     .map(|(id, title, area, areas, open)| {

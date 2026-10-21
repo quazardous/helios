@@ -78,6 +78,12 @@ enum Action {
     ProfileUse(String),
     ScopeMode(crate::scopes::Mode),
     ScopeStops(bool),
+    /// A decision answered, as whom.
+    Decision(crate::decisions::Request, Origin),
+    /// A decision answered with plain JSON values (`decision.decide`).
+    DecisionDecide(String, Value, Origin),
+    /// The decisions waiting (`decision.list`).
+    DecisionList,
     Rate(i64),
     Reject,
     /// Pick, reject or unflag (culling).
@@ -365,6 +371,8 @@ pub struct Shell {
     library: Rc<RefCell<crate::library::Library>>,
     /// The Stacks panel's proposals.
     stack_review: Rc<RefCell<crate::stack_review::Review>>,
+    /// The open image's decisions, and the Decisions panel's cards.
+    decisions: Rc<RefCell<crate::decisions::Decisions>>,
     /// The duplicates imports found (the Duplicates panel).
     duplicates: Rc<RefCell<crate::duplicates::Duplicates>>,
     /// Where the workspace imports from, and how (its template's).
@@ -667,6 +675,7 @@ impl Shell {
             scopes: Rc::default(),
             library: Rc::default(),
             stack_review: Rc::default(),
+            decisions: Rc::default(),
             duplicates: Rc::default(),
             import_source: None,
             imports: Vec::new(),
@@ -849,6 +858,12 @@ impl Shell {
                 if let Some(ids) = show {
                     library.borrow_mut().select_ids(&ids);
                 }
+            });
+        }
+        if has(&shell, crate::decisions::PANEL) {
+            let decisions = shell.decisions.clone();
+            shell.set_content(crate::decisions::PANEL, move |ui| {
+                decisions.borrow_mut().ui(ui);
             });
         }
         for (panel, view) in [
@@ -1062,7 +1077,122 @@ impl Shell {
             }
             store.take_dirty();
         }
-        self.viewport.borrow_mut().set_source(graph, node, port)
+        let mut viewport = self.viewport.borrow_mut();
+        viewport.set_source(graph, node, port)?;
+        // Another image: its own decisions, the decision nodes of its
+        // network waiting for a person until an edit's book says more.
+        let mut decisions = self.decisions.borrow_mut();
+        decisions.set_book(helios_decision::Book::new());
+        if let Some(g) = viewport.graph() {
+            decisions.adopt(g);
+        }
+        decisions.refresh(viewport.graph());
+        Ok(())
+    }
+
+    /// The open image's decisions and their cards, to read.
+    pub fn decisions(&self) -> std::cell::Ref<'_, crate::decisions::Decisions> {
+        self.decisions.borrow()
+    }
+
+    /// The Decisions panel, to act as the user would (its requests are
+    /// answered at the next frame).
+    pub fn decisions_mut(&self) -> std::cell::RefMut<'_, crate::decisions::Decisions> {
+        self.decisions.borrow_mut()
+    }
+
+    /// The open image's edit's decisions (a loaded edit's book): their
+    /// answers are applied to the graph shown, which renders again; the
+    /// decision nodes the book does not know wait for a person.
+    pub fn set_decisions(&mut self, book: helios_decision::Book) -> Result<(), String> {
+        let mut viewport = self.viewport.borrow_mut();
+        let mut decisions = self.decisions.borrow_mut();
+        decisions.set_book(book);
+        if let Some(replayed) = viewport.edit_graph(|graph| {
+            decisions.adopt(graph);
+            decisions.book().replay(graph).map(|_| ())
+        }) {
+            replayed?;
+        }
+        decisions.refresh(viewport.graph());
+        Ok(())
+    }
+
+    /// Answers a decision of the open image through its book, as
+    /// `origin` (recorded as who decided): the graph shown takes the
+    /// answer and renders again, its card goes. The panel's buttons and
+    /// the `decision.*` commands come here.
+    pub fn answer_decision(
+        &mut self,
+        request: crate::decisions::Request,
+        origin: &Origin,
+    ) -> Result<Value, String> {
+        use crate::decisions::Request;
+        let who = match origin {
+            Origin::User => "user".to_string(),
+            Origin::Agent(id) | Origin::Script(id) | Origin::Remote(id) => id.clone(),
+            Origin::Midi => "midi".to_string(),
+        };
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs());
+        let mut viewport = self.viewport.borrow_mut();
+        let region = viewport.shown().map(|s| s.extent);
+        let engine = viewport.engine().clone();
+        let mut decisions = self.decisions.borrow_mut();
+        decisions.refresh(viewport.graph());
+        let above: Vec<String> = match &request {
+            Request::AcceptAbove { confidence } => decisions
+                .above(*confidence)
+                .into_iter()
+                .map(String::from)
+                .collect(),
+            _ => Vec::new(),
+        };
+        let answered = viewport
+            .edit_graph(|graph| {
+                let book = decisions.book_mut();
+                match request {
+                    Request::Accept { node, option } => book
+                        .accept(graph, &node, &who, option, now)
+                        .map(|v| json!({ "node": node, "version": v })),
+                    Request::Decide { node, values } => {
+                        let inputs = match region {
+                            Some(r) => helios_decision::input_keys(&engine, graph, &node, r)?,
+                            None => Vec::new(),
+                        };
+                        book.decide(graph, &node, &who, values, inputs, now)
+                            .map(|v| json!({ "node": node, "version": v }))
+                    }
+                    Request::AcceptAbove { .. } => {
+                        let (mut accepted, mut failed) = (Vec::new(), Vec::new());
+                        for node in above {
+                            match book.accept(graph, &node, &who, 0, now) {
+                                Ok(_) => accepted.push(node),
+                                Err(e) => failed.push(json!({ "node": node, "error": e })),
+                            }
+                        }
+                        Ok(json!({ "accepted": accepted, "failed": failed }))
+                    }
+                }
+            })
+            .ok_or_else(|| "no image is open: no decision to answer".to_string())?;
+        decisions.refresh(viewport.graph());
+        answered
+    }
+
+    /// Answers what the Decisions panel asked during the last frame, and
+    /// makes its cards again from the book (an agent's answer removes
+    /// its card here).
+    fn follow_decisions(&mut self) {
+        let requests = self.decisions.borrow_mut().take_requests();
+        for r in requests {
+            if let Err(e) = self.answer_decision(r, &Origin::User) {
+                self.warn(e);
+            }
+        }
+        let viewport = self.viewport.borrow();
+        self.decisions.borrow_mut().refresh(viewport.graph());
     }
 
     /// Gives the viewport the GPU path it draws with, on the render state
@@ -1917,6 +2047,67 @@ impl Shell {
                 Box::new(move |_, _| Ok(Action::ScopeMode(mode))),
             );
         }
+        add(
+            CommandSpec::new(
+                "decision.list",
+                "List the open image's decisions waiting for an answer: what each asks, the model's proposal, how sure it is and why",
+                "Decisions",
+            ),
+            Box::new(|_, _| Ok(Action::DecisionList)),
+        );
+        add(
+            CommandSpec::new(
+                "decision.accept",
+                "Accept a decision's proposal (`node`; `option`, 0 for the model's best)",
+                "Decisions",
+            ),
+            Box::new(|a, origin| {
+                let node = a
+                    .get("node")
+                    .and_then(Value::as_str)
+                    .ok_or("`node` is missing")?;
+                let option = a.get("option").and_then(Value::as_u64).unwrap_or(0);
+                Ok(Action::Decision(
+                    crate::decisions::Request::Accept {
+                        node: node.into(),
+                        option: usize::try_from(option).map_err(|e| e.to_string())?,
+                    },
+                    origin.clone(),
+                ))
+            }),
+        );
+        add(
+            CommandSpec::new(
+                "decision.decide",
+                "Answer a decision, or correct its proposal (`node`; `values`: the answer's parameters, as plain values)",
+                "Decisions",
+            ),
+            Box::new(|a, origin| {
+                let node = a
+                    .get("node")
+                    .and_then(Value::as_str)
+                    .ok_or("`node` is missing")?;
+                let values = a.get("values").cloned().ok_or("`values` is missing")?;
+                Ok(Action::DecisionDecide(node.into(), values, origin.clone()))
+            }),
+        );
+        add(
+            CommandSpec::new(
+                "decision.acceptAbove",
+                "Accept every proposal the model is at least this sure of (`confidence`, 0 to 1)",
+                "Decisions",
+            ),
+            Box::new(|a, origin| {
+                let confidence = a
+                    .get("confidence")
+                    .and_then(Value::as_f64)
+                    .ok_or("`confidence` is missing")?;
+                Ok(Action::Decision(
+                    crate::decisions::Request::AcceptAbove { confidence },
+                    origin.clone(),
+                ))
+            }),
+        );
         add(
             CommandSpec::new(
                 "vault.rate",
@@ -3404,6 +3595,23 @@ impl Shell {
                 .map_err(|e| format!("profile {name}: {e}"))?,
             Action::ScopeMode(mode) => self.scopes.borrow_mut().set_mode(mode),
             Action::ScopeStops(on) => self.scopes.borrow_mut().set_stops(on),
+            Action::Decision(request, origin) => return self.answer_decision(request, &origin),
+            Action::DecisionDecide(node, values, origin) => {
+                let values = {
+                    let viewport = self.viewport.borrow();
+                    let mut decisions = self.decisions.borrow_mut();
+                    decisions.refresh(viewport.graph());
+                    decisions.values_of(&node, &values)?
+                };
+                return self
+                    .answer_decision(crate::decisions::Request::Decide { node, values }, &origin);
+            }
+            Action::DecisionList => {
+                let viewport = self.viewport.borrow();
+                let mut decisions = self.decisions.borrow_mut();
+                decisions.refresh(viewport.graph());
+                return Ok(decisions.describe());
+            }
             Action::Rate(n) => self
                 .library
                 .borrow_mut()
@@ -3765,9 +3973,10 @@ impl Shell {
         });
         self.rects.insert("window".into(), ctx.content_rect());
 
+        self.viewport.borrow_mut().sync(&mut lock(&self.values));
+        self.follow_decisions();
         self.status_bar(&ctx);
         self.status_items(&ctx);
-        self.viewport.borrow_mut().sync(&mut lock(&self.values));
         // Duplicates an import asks about: said once, answered in the
         // Duplicates panel.
         let asked = self.duplicates.borrow_mut().receive();
@@ -3960,6 +4169,11 @@ impl Shell {
         line.note = self.notes.last().cloned();
         line.hint = self.viewport.borrow().masks().hint(ctx);
         line.decisions = self.stack_review.borrow().decisions().len();
+        {
+            let decisions = self.decisions.borrow();
+            line.pending_decisions = decisions.pending();
+            line.decisions_for_a_person = decisions.for_a_person();
+        }
         line.profile.clone_from(&self.profile_name);
     }
 

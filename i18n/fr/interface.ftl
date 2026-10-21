@@ -1,5 +1,7 @@
 # Traduction de ../en/interface.ftl, sous les mêmes clés.
 
+category-decisions = Décisions
+
 category-developer = Développement
 
 category-masks = Masques

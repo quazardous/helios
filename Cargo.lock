@@ -2145,6 +2145,7 @@ dependencies = [
  "egui-pop-wayland",
  "egui_kittest",
  "helios-core",
+ "helios-decision",
  "helios-display",
  "helios-export",
  "helios-gpu",

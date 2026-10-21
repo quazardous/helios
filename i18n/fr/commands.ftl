@@ -1,5 +1,17 @@
 # Traduction de ../en/commands.ftl, sous les mêmes clés.
 
+command-decision-accept =
+    .title = Accepter la proposition d’une décision (`node` ; `option`, 0 pour la meilleure du modèle)
+
+command-decision-acceptAbove =
+    .title = Accepter chaque proposition dont le modèle est au moins aussi sûr (`confidence`, de 0 à 1)
+
+command-decision-decide =
+    .title = Répondre à une décision, ou corriger sa proposition (`node` ; `values` : les paramètres de la réponse, en valeurs simples)
+
+command-decision-list =
+    .title = Lister les décisions de l’image ouverte qui attendent une réponse : ce que chacune demande, la proposition du modèle, sa confiance et pourquoi
+
 command-dialog-answer =
     .title = Répondre au dialogue (`answer` : primary ou cancel ; `values` pour un formulaire ; `choice` pour un sélecteur)
 
@@ -26,6 +38,15 @@ command-helios-compare-dock =
 
 command-helios-compare-moveTo =
     .title = Déplacer Comparer vers une zone (`area`)
+
+command-helios-decisions-detach =
+    .title = Déplacer Décisions dans une nouvelle fenêtre
+
+command-helios-decisions-dock =
+    .title = Remettre Décisions dans sa zone
+
+command-helios-decisions-moveTo =
+    .title = Déplacer Décisions vers une zone (`area`)
 
 command-helios-duplicates-detach =
     .title = Déplacer Doublons dans une nouvelle fenêtre

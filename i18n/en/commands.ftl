@@ -1,6 +1,18 @@
 # Generated from Helios's declarations and code by `cargo xtask i18n extract`:
 # do not edit. Translations live in i18n/<locale>/ under the same names.
 
+command-decision-accept =
+    .title = Accept a decision's proposal (`node`; `option`, 0 for the model's best)
+
+command-decision-acceptAbove =
+    .title = Accept every proposal the model is at least this sure of (`confidence`, 0 to 1)
+
+command-decision-decide =
+    .title = Answer a decision, or correct its proposal (`node`; `values`: the answer's parameters, as plain values)
+
+command-decision-list =
+    .title = List the open image's decisions waiting for an answer: what each asks, the model's proposal, how sure it is and why
+
 command-dialog-answer =
     .title = Answer the dialog (`answer`: primary or cancel; `values` for a form; `choice` for a picker)
 
@@ -27,6 +39,15 @@ command-helios-compare-dock =
 
 command-helios-compare-moveTo =
     .title = Move Compare to an area (`area`)
+
+command-helios-decisions-detach =
+    .title = Move Decisions to a new window
+
+command-helios-decisions-dock =
+    .title = Dock Decisions back in its area
+
+command-helios-decisions-moveTo =
+    .title = Move Decisions to an area (`area`)
 
 command-helios-duplicates-detach =
     .title = Move Duplicates to a new window

@@ -3,6 +3,9 @@
 panel-helios-compare =
     .title = Comparer
 
+panel-helios-decisions =
+    .title = Décisions
+
 panel-helios-duplicates =
     .title = Doublons
 

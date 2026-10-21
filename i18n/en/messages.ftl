@@ -73,6 +73,42 @@ gui-confirmed-by-policy = { $verb }: confirmed by policy
 
 gui-copied = copied { $text }
 
+gui-decisions-accept = Accept
+
+gui-decisions-accept-above = Accept the { $count } above { $percent } %
+
+gui-decisions-answer = Answer…
+
+gui-decisions-cancel = Cancel
+
+gui-decisions-confidence = Confidence: { $percent } %
+
+gui-decisions-correct = Correct…
+
+gui-decisions-correct-hint = Change the proposal before it is recorded
+
+gui-decisions-count = { $count } decisions waiting
+
+gui-decisions-mode-assisted = { $node }: a model proposes, you settle
+
+gui-decisions-mode-full-ai = { $node }: decided by a model, you may answer instead
+
+gui-decisions-mode-human = { $node }: answered by you
+
+gui-decisions-none = No decision waiting for an answer
+
+gui-decisions-other-options = { $count } other options
+
+gui-decisions-proposal = { $model } proposes:
+
+gui-decisions-record = Record
+
+gui-decisions-threshold-hint = How sure the model must be for its proposal to be taken
+
+gui-decisions-waiting-model = Waiting for the model
+
+gui-decisions-why = Why: { $why }
+
 gui-duplicates-asked = Keep it as one more copy, or skip it?
 
 gui-duplicates-clear = Clear the answered
@@ -464,6 +500,10 @@ gui-stacks-suggest-hint = Over the images selected (two or more), else over ever
 gui-stacks-top = Proposed on top: the sharpest
 
 gui-status-culled = { $picked } picked, { $rejected } rejected
+
+gui-status-decisions = { $count } decisions wait for an answer
+
+gui-status-decisions-show = Show the decisions
 
 gui-status-history = History
 

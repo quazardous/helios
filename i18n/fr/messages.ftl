@@ -75,6 +75,48 @@ gui-confirmed-by-policy = { $verb } : confirmé par la règle
 
 gui-copied = copié { $text }
 
+gui-decisions-accept = Accepter
+
+gui-decisions-accept-above = Accepter les { $count } au-dessus de { $percent } %
+
+gui-decisions-answer = Répondre…
+
+gui-decisions-cancel = Annuler
+
+gui-decisions-confidence = Confiance : { $percent } %
+
+gui-decisions-correct = Corriger…
+
+gui-decisions-correct-hint = Modifier la proposition avant de l’enregistrer
+
+gui-decisions-count = { $count ->
+    [one] { $count } décision en attente
+   *[other] { $count } décisions en attente
+}
+
+gui-decisions-mode-assisted = { $node } : un modèle propose, vous tranchez
+
+gui-decisions-mode-full-ai = { $node } : décidé par un modèle, vous pouvez répondre à sa place
+
+gui-decisions-mode-human = { $node } : c’est vous qui répondez
+
+gui-decisions-none = Aucune décision n’attend de réponse
+
+gui-decisions-other-options = { $count ->
+    [one] { $count } autre option
+   *[other] { $count } autres options
+}
+
+gui-decisions-proposal = { $model } propose :
+
+gui-decisions-record = Enregistrer
+
+gui-decisions-threshold-hint = À quel point le modèle doit être sûr pour que sa proposition soit acceptée
+
+gui-decisions-waiting-model = En attente du modèle
+
+gui-decisions-why = Pourquoi : { $why }
+
 gui-edit-does-not-fit = Une partie de la retouche enregistrée ne correspond pas à ce réseau : { $part }
 
 gui-edit-not-saved = La retouche n’a pas été enregistrée : { $error }
@@ -352,6 +394,13 @@ gui-status-culled = { $picked ->
     [one] { $rejected } rejetée
    *[other] { $rejected } rejetées
 }
+
+gui-status-decisions = { $count ->
+    [one] { $count } décision attend une réponse
+   *[other] { $count } décisions attendent une réponse
+}
+
+gui-status-decisions-show = Afficher les décisions
 
 gui-status-history = Historique
 
