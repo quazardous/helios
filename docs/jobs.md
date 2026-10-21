@@ -63,12 +63,16 @@ fn import(jobs: &Jobs, files: &[std::path::PathBuf]) {
   `job.cancelling`, then runs it; the job then says `cancelled` itself.
   A job that cannot be stopped says so when it starts
   (`Start::not_cancellable`): no Cancel button.
+- **Its node.** A job that works for a node of the graph names it
+  (`Start::node`, `node` in `job.started`): an export names the node it
+  renders. The desktop's Queue panel lists the jobs of the selected node
+  by it (see [gui.md](gui.md), "Queue panel").
 
 ## Events
 
 | Event | Data |
 |---|---|
-| `job.started` | `id`, `title`, `kind`, `total`, `steps` (`[{id, title, weight}]`), `parent`, `weight`, `cancellable` |
+| `job.started` | `id`, `title`, `kind`, `total`, `steps` (`[{id, title, weight}]`), `parent`, `weight`, `cancellable`, `node` |
 | `job.progress` | `id`, `done`, `total`, `failed`, `skipped`, `item`, `item_progress`, `step`, `step_done`, `step_total`, `estimate` |
 | `job.item_failed` | `id`, `item`, `error` |
 | `job.log` | `id`, `text` |
@@ -84,7 +88,9 @@ whose images are jobs of their own.
 
 - **Exports** (`helios_export::submit_reported`, and `submit_with` on its
   bus): started when queued, then its steps, a log line with the file
-  written, its end; cancelled queued or running, writing nothing.
+  written, its end; cancelled queued or running, writing nothing. An
+  export names the node it renders when it has one (a node's exports
+  do).
 - **The GPU calibration** (`helios_compute::Manager::report_to`): each
   device's reference modules as items, its speeds as log lines, a device
   that failed as a failed item; cancelled between two modules.

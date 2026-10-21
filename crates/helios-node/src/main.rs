@@ -343,6 +343,7 @@ impl Node {
         let job = helios_export::submit_reported(
             &self.scheduler,
             &self.jobs,
+            Some(&export.node),
             &export.path,
             export.format()?,
             move || {
@@ -420,9 +421,14 @@ impl Node {
             }
         };
         let job = match batch {
-            None => {
-                helios_export::submit_reported(&self.scheduler, &self.jobs, path, format, render)?
-            }
+            None => helios_export::submit_reported(
+                &self.scheduler,
+                &self.jobs,
+                Some(name),
+                path,
+                format,
+                render,
+            )?,
             Some(batch) => {
                 let (stopped, children) = {
                     let batches = self.batches.lock().expect("batches lock");
@@ -442,6 +448,7 @@ impl Node {
                     &self.scheduler,
                     &self.jobs,
                     batch,
+                    Some(name),
                     path,
                     format,
                     render,

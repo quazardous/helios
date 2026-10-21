@@ -277,7 +277,7 @@ pub fn submit_with(
     format: Format,
     render: impl FnOnce() -> Result<Image, String> + Send + 'static,
 ) -> Result<JobId, Message> {
-    submit_reported(scheduler, &Jobs::new(bus), path, format, render)
+    submit_reported(scheduler, &Jobs::new(bus), None, path, format, render)
 }
 
 /// The steps of an export, as its job reports them: the render weighs
@@ -336,15 +336,19 @@ static NEXT: AtomicU64 = AtomicU64::new(1);
 /// [`submit_with`] reporting to `jobs`: the export is a job people follow
 /// (`job.*` on the jobs' bus: started when queued, its steps, a log line,
 /// its end), and [`Jobs::cancel`] with its id (`export-<n>`) cancels it,
-/// queued or running.
+/// queued or running. `node` is the graph node it renders, when there is
+/// one: the job names it, and that node's queue lists it.
 pub fn submit_reported(
     scheduler: &Scheduler,
     jobs: &Jobs,
+    node: Option<&str>,
     path: &Path,
     format: Format,
     render: impl FnOnce() -> Result<Image, String> + Send + 'static,
 ) -> Result<JobId, Message> {
-    Ok(submit_job(scheduler, jobs, None, path, format, render))
+    Ok(submit_job(
+        scheduler, jobs, None, node, path, format, render,
+    ))
 }
 
 /// [`submit_reported`] as a child of the job `parent` (a batch), with a
@@ -353,6 +357,7 @@ pub fn submit_child(
     scheduler: &Scheduler,
     jobs: &Jobs,
     parent: &str,
+    node: Option<&str>,
     path: &Path,
     format: Format,
     render: impl FnOnce() -> Result<Image, String> + Send + 'static,
@@ -361,6 +366,7 @@ pub fn submit_child(
         scheduler,
         jobs,
         Some(parent),
+        node,
         path,
         format,
         render,
@@ -371,6 +377,7 @@ fn submit_job(
     scheduler: &Scheduler,
     jobs: &Jobs,
     parent: Option<&str>,
+    node: Option<&str>,
     path: &Path,
     format: Format,
     render: impl FnOnce() -> Result<Image, String> + Send + 'static,
@@ -396,6 +403,9 @@ fn submit_job(
     }
     if let Some(parent) = parent {
         start = start.parent(parent, 1.0);
+    }
+    if let Some(node) = node {
+        start = start.node(node);
     }
     let report = Arc::new(jobs.start(start));
     let mut unstarted = Unstarted(Some(report.clone()));

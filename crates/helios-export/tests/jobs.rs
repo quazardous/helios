@@ -201,8 +201,9 @@ fn an_export_cancelled_while_rendering_writes_nothing() {
     let _ = std::fs::remove_dir_all(&d);
 }
 
-/// An export is a job people follow: started when queued, its steps, a
-/// log line, finished; its id cancels it through the jobs.
+/// An export is a job people follow: started when queued, naming the node
+/// it renders, its steps, a log line, finished; its id cancels it through
+/// the jobs.
 #[test]
 fn an_export_reports_its_job_and_is_cancelled_by_its_id() {
     use helios_core::jobs::Jobs;
@@ -214,6 +215,7 @@ fn an_export_reports_its_job_and_is_cancelled_by_its_id() {
     helios_export::submit_reported(
         &s.scheduler,
         &jobs,
+        Some("grade"),
         &d.join("a.png"),
         Format::Png { bits: 8 },
         move || Ok(image),
@@ -233,6 +235,7 @@ fn an_export_reports_its_job_and_is_cancelled_by_its_id() {
     let started = &events[0].payload;
     assert_eq!(started["kind"], "export");
     assert_eq!(started["title"], "Export a.png");
+    assert_eq!(started["node"], "grade", "it names the node it renders");
     assert_eq!(started["steps"].as_array().unwrap().len(), 3);
     let steps: Vec<&str> = events
         .iter()
@@ -249,6 +252,7 @@ fn an_export_reports_its_job_and_is_cancelled_by_its_id() {
     helios_export::submit_reported(
         &s.scheduler,
         &jobs,
+        None,
         &path,
         Format::Png { bits: 8 },
         move || {
@@ -293,6 +297,7 @@ fn an_export_in_a_batch_names_its_parent() {
         &s.scheduler,
         &jobs,
         "batch-1",
+        None,
         &d.join("a.png"),
         Format::Png { bits: 8 },
         move || Ok(image),

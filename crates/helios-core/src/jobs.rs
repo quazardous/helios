@@ -10,12 +10,16 @@
 //!
 //! | Event | Data |
 //! |---|---|
-//! | `job.started` | `id`, `title`, `kind`, `total`, `steps` (`[{id, title, weight}]`), `parent`, `weight`, `cancellable` |
+//! | `job.started` | `id`, `title`, `kind`, `total`, `steps` (`[{id, title, weight}]`), `parent`, `weight`, `cancellable`, `node` |
 //! | `job.progress` | `id`, `done`, `total`, `failed`, `skipped`, `item`, `item_progress`, `step`, `step_done`, `step_total`, `estimate` |
 //! | `job.item_failed` | `id`, `item`, `error` |
 //! | `job.log` | `id`, `text` |
 //! | `job.cancelling` | `id` |
 //! | `job.finished`, `job.failed`, `job.cancelled` | `id`, `kind`, `seconds`; `error` when failed |
+//!
+//! A job may name the graph node it works for (`node`, [`Start::node`]):
+//! an export names the node it renders. The desktop's Queue panel lists a
+//! node's jobs by it.
 //!
 //! A job is cancelled by its id ([`Jobs::cancel`], what the `job.cancel`
 //! command runs): the job gave the way when it started
@@ -145,6 +149,8 @@ pub struct Start {
     /// The job it is part of, and its weight there.
     pub parent: Option<(String, f64)>,
     pub cancellable: bool,
+    /// The graph node it works for (an export: the node it renders).
+    pub node: Option<String>,
 }
 
 impl Start {
@@ -157,6 +163,7 @@ impl Start {
             steps: Vec::new(),
             parent: None,
             cancellable: true,
+            node: None,
         }
     }
 
@@ -172,6 +179,12 @@ impl Start {
 
     pub fn parent(mut self, id: &str, weight: f64) -> Self {
         self.parent = Some((id.into(), weight));
+        self
+    }
+
+    /// The graph node it works for: its queue lists it.
+    pub fn node(mut self, node: &str) -> Self {
+        self.node = Some(node.into());
         self
     }
 
@@ -203,6 +216,9 @@ impl Start {
         if let Some((parent, weight)) = &self.parent {
             d["parent"] = json!(parent);
             d["weight"] = json!(weight);
+        }
+        if let Some(node) = &self.node {
+            d["node"] = json!(node);
         }
         d
     }
@@ -387,7 +403,8 @@ mod tests {
         let job = jobs.start(
             Start::new("e1", "Export", "export")
                 .total(2)
-                .step("render", "Render", 3.0),
+                .step("render", "Render", 3.0)
+                .node("exposure"),
         );
         job.progress(Progress::new().counts(1, 2).item("a.jpg").step("render"));
         job.item_failed("b.jpg", "disk full");
@@ -407,6 +424,7 @@ mod tests {
         );
         assert_eq!(events[0].payload["total"], 2);
         assert_eq!(events[0].payload["steps"][0]["weight"], 3.0);
+        assert_eq!(events[0].payload["node"], "exposure");
         assert_eq!(events[1].payload["item"], "a.jpg");
         assert_eq!(events[1].payload["id"], "e1");
         assert_eq!(events[3].payload["kind"], "export");
