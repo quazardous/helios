@@ -210,8 +210,23 @@ command-mask-point-smooth =
 command-mask-select =
     .title = Masques : sélectionner un masque, une de ses formes, un point de chemin (`mask`, `shape`, `point`)
 
+command-network-add =
+    .title = Ajouter des nœuds au réseau (`nodes` : chacun `module` ou `copy_of`, `at` : [x, y])
+
+command-network-connect =
+    .title = Relier une sortie à une entrée (`from`, `port`, `to`, `input`, `replaces`)
+
 command-network-delegate =
     .title = Déléguer des nœuds du réseau à un nouveau sous-espace de travail (`name`, `nodes`, `dry_run`)
+
+command-network-disconnect =
+    .title = Retirer des liaisons du réseau (`connections` : chacune `from`, `port`, `to`, `input`)
+
+command-network-move =
+    .title = Déplacer des nœuds dans la vue du graphe (`moves` : chacun `node`, `to` : [x, y])
+
+command-network-remove =
+    .title = Retirer des nœuds du réseau, avec leurs liaisons (`nodes`)
 
 command-param-copyPath =
     .title = Copier le chemin d’une valeur (`path`)

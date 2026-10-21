@@ -81,6 +81,32 @@ gui-edit-not-saved = La retouche n’a pas été enregistrée : { $error }
 
 gui-gesture-in-progress = { $gesture } est en cours
 
+gui-graph-label = Le réseau de l’espace de travail
+
+gui-graph-no-workspace = Aucun espace de travail n’est ouvert : son réseau s’affiche ici.
+
+gui-graph-state-done = fait
+
+gui-graph-state-failed = échec
+
+gui-graph-state-idle = inactif
+
+gui-graph-state-pending = en attente
+
+gui-graph-state-running = en cours
+
+gui-graph-state-stale = périmé
+
+gui-graph-subworkspace-not-yet = Entrer dans un sous-espace de travail ({ $id }) n’est pas encore possible
+
+gui-graph-wires = Liaisons
+
+gui-graph-wires-curves = Courbes
+
+gui-graph-wires-orthogonal = Orthogonales
+
+gui-graph-wires-straight = Droites
+
 gui-job-batch-done = Lot terminé
 
 gui-job-batch-failed = Échec du lot

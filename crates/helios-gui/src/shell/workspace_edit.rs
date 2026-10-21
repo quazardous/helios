@@ -391,7 +391,7 @@ impl Shell {
     /// written to the value store as one step labelled `label`, then
     /// applied. A change made to its files outside the desktop is taken
     /// in first, as a step of its own.
-    fn workspace_step(
+    pub(super) fn workspace_step(
         &mut self,
         label: &str,
         origin: &Origin,
@@ -712,6 +712,9 @@ impl Shell {
             }
             "network.delegate" => self.delegate_nodes(args, origin),
             "subworkspace.delete" => self.delete_subworkspace(args, origin),
+            network if network.starts_with("network.") => {
+                self.network_command(network, args, origin)
+            }
             other => Err(format!("no workspace command `{other}`")),
         }
     }

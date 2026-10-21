@@ -192,6 +192,57 @@ default; hiding it is a user setting.
 - Edits use explicit actions (insert before, insert after, group as macro)
   rather than precise gestures.
 
+**The Graph panel (2026-10-21).** `helios.graph` shows the workspace's
+network with egui-pop's node graph editor (`docs/node-graph.md` there),
+through an adapter over the workspace's state (`helios-gui/src/graph.rs`),
+which stays the one source of truth: the editor never holds the
+network.
+
+- **What it shows.** The network's sources, modules and composites,
+  each with its manifest's ports (typed `image`, `mask`, `<n> channels`;
+  a source's image and an input decided when connected take any), and
+  its connections. A node stands where the workspace's `positions` put
+  it (see [templates.md](templates.md), `positions`), else at its rank:
+  a layered layout until the user moves it.
+- **Headers.** Each node's title bar carries the engine's status for
+  the image shown (`Engine::status` over the whole image): its state
+  (idle, stale, running, done, failed, waiting) in the state's colour
+  token and where it runs (`done · CPU`); its content key and load, or
+  why it failed, on hover.
+- **Levels and stacks.** The zoom picks egui-pop's levels: the
+  overview, the ports, the detail (each node's number parameters as
+  sliders, from the value store while an image is open). Every node
+  that is not principal (the rule above) is grouped under the principal
+  node it leads to (`stack:<principal>`), so the overview folds it into
+  that node's stack and a click unfolds it. A top sub-workspace is a
+  group of its own (`subworkspace:<id>`), named by its name.
+- **Edits are steps.** Each edit runs egui-pop's `graph.*` step (a
+  plugin may veto or redirect it), then becomes one of Helios's
+  `network.*` commands, one undoable workspace step written to the
+  workspace's files at once: `network.connect` (`from`, `port`, `to`,
+  `input`, `replaces`), `network.disconnect` (`connections`),
+  `network.move` (`moves`), `network.add` (`nodes`: a `module` or a
+  `copy_of`, `at`) and `network.remove` (`nodes`; a source and the node
+  the viewport shows stay). They are checked as any edit of the
+  workspace (types, loops, the template's validation), and agents run
+  them too (the desktop's commands, the workspace's live endpoint). A
+  parameter's slider writes the value store as one gesture, as the
+  Parameters panel does.
+- **Selection.** The editor's selection is `view/graph/selection`, the
+  value the Parameters, Masks and Modules panels follow: selecting a
+  node makes it the selected module, and a node selected elsewhere is
+  selected in the graph.
+- **Wires.** Curves by default, as egui-pop draws them; Orthogonal
+  (routed around the nodes) and Straight are picked above the graph,
+  kept in `view/graph/wires` (`param.set` for agents).
+- **Sub-workspaces.** A double click on a sub-workspace's title (its
+  stack in the overview) enters the `helios.sub-workspace` place with
+  the sub-workspace's id, once that place is declared; until then it
+  says so.
+- **Agents** read and drive the editor through egui-pop's commands on
+  the graph named `helios.graph` (`graph.read`, `graph.edit`,
+  `graph.select`, `graph.view`), the same steps as the user's.
+
 ### Principal nodes, stacks and semantic zoom
 
 A network quickly grows past what a screen shows. Some nodes are principal

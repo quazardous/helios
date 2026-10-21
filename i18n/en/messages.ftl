@@ -109,6 +109,32 @@ gui-edit-not-saved = The edit was not saved: { $error }
 
 gui-gesture-in-progress = { $gesture } is in progress
 
+gui-graph-label = The workspace's network
+
+gui-graph-no-workspace = No workspace is open: its network shows here.
+
+gui-graph-state-done = done
+
+gui-graph-state-failed = failed
+
+gui-graph-state-idle = idle
+
+gui-graph-state-pending = waiting
+
+gui-graph-state-running = running
+
+gui-graph-state-stale = stale
+
+gui-graph-subworkspace-not-yet = Entering a sub-workspace ({ $id }) is not available yet
+
+gui-graph-wires = Wires
+
+gui-graph-wires-curves = Curves
+
+gui-graph-wires-orthogonal = Orthogonal
+
+gui-graph-wires-straight = Straight
+
 gui-image-not-reopened = The image left open could not be opened again: { $error }
 
 gui-image-opened = { $name } is open

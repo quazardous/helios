@@ -52,6 +52,7 @@ use crate::workbench::Contents;
 pub use crate::workbench::Content;
 pub use workspace_edit::STATE as WORKSPACE_STATE;
 
+mod network_edit;
 mod workspace_edit;
 mod workspace_live;
 
@@ -397,6 +398,8 @@ pub struct Shell {
     params: Rc<RefCell<crate::params::Params>>,
     /// The Masks panel: the selected module's mask network as a tree.
     mask_tree: Rc<RefCell<crate::mask_tree::MaskTree>>,
+    /// The Graph panel: the workspace's network in egui-pop's editor.
+    graph: Rc<RefCell<crate::graph::GraphPanel>>,
     /// Every value widgets and agents edit (`param.*` commands).
     pub values: Arc<Mutex<helios_values::Store>>,
     /// Headless runs: no cursor blink and no animation, so a frame settles
@@ -680,6 +683,7 @@ impl Shell {
             image_surface: crate::display::ImageSurfaceSwitch::default(),
             params: Rc::default(),
             mask_tree: Rc::default(),
+            graph: Rc::default(),
             values,
             workspace,
             layout_saved: None,
@@ -717,6 +721,7 @@ impl Shell {
             crate::viewport::declare(&mut store);
             crate::mask_display::declare(&mut store);
             crate::masks::declare(&mut store);
+            crate::graph::declare(&mut store);
             store.declare(
                 crate::params::SELECTION,
                 // Which node one looks at is not an edit: never undone.
@@ -775,6 +780,17 @@ impl Shell {
                 if leave {
                     crate::contexts::leave_darkroom(&app, &egui_pop::model::commands::Origin::User);
                 }
+            });
+        }
+        if has(&shell, crate::graph::PANEL) {
+            shell.graph.borrow_mut().set_app(shell.app.handle().clone());
+            let (graph, viewport, values) = (
+                shell.graph.clone(),
+                shell.viewport.clone(),
+                shell.values.clone(),
+            );
+            shell.set_content(crate::graph::PANEL, move |ui| {
+                graph.borrow_mut().ui(ui, &values, &viewport);
             });
         }
         if has(&shell, crate::mask_tree::PANEL) {
@@ -1683,7 +1699,10 @@ impl Shell {
                 ))
             }),
         );
-        for (id, title) in workspace_edit::COMMANDS {
+        for (id, title) in workspace_edit::COMMANDS
+            .iter()
+            .chain(network_edit::COMMANDS)
+        {
             let id = *id;
             add(
                 CommandSpec::new(id, title, "Workspace"),
@@ -3764,6 +3783,7 @@ impl Shell {
         self.preview.follow(self.viewport.borrow().shown(), &ctx);
         self.app.show(ui);
         crate::start::mark_in_first_frame("panels drawn");
+        self.graph_edits();
         if self.library.borrow_mut().take_import_asked() {
             let _ = self.run("library.importSource", Value::Null, Origin::User);
         }
@@ -3794,6 +3814,28 @@ impl Shell {
             ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::default()));
             ctx.request_repaint();
         }
+    }
+
+    /// What the Graph panel's edits asked for: its `network.*` commands,
+    /// each run as the user's (one undo step each), and what it has to
+    /// say.
+    fn graph_edits(&mut self) {
+        let (commands, notes) = {
+            let mut g = self.graph.borrow_mut();
+            (g.take_commands(), std::mem::take(&mut g.notes))
+        };
+        for (id, args) in commands {
+            // A refusal is said by `run`.
+            let _ = self.run(&id, args, Origin::User);
+        }
+        for n in notes {
+            self.note(n);
+        }
+    }
+
+    /// The Graph panel's state (its view, selection and folds).
+    pub fn graph_panel(&self) -> std::cell::Ref<'_, crate::graph::GraphPanel> {
+        self.graph.borrow()
     }
 
     /// Saves the workspace's layout once it changed (egui-pop's

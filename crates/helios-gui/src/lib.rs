@@ -8,6 +8,7 @@ pub mod dialogs;
 pub mod display;
 pub mod duplicates;
 pub mod engine_source;
+pub mod graph;
 pub mod host;
 pub mod i18n;
 pub mod jobs;

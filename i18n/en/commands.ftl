@@ -211,8 +211,23 @@ command-mask-point-smooth =
 command-mask-select =
     .title = Masks: select a mask, a shape of it, a path point (`mask`, `shape`, `point`)
 
+command-network-add =
+    .title = Add nodes to the network (`nodes`: each `module` or `copy_of`, `at`: [x, y])
+
+command-network-connect =
+    .title = Connect an output to an input (`from`, `port`, `to`, `input`, `replaces`)
+
 command-network-delegate =
     .title = Delegate nodes of the network to a new sub-workspace (`name`, `nodes`, `dry_run`)
+
+command-network-disconnect =
+    .title = Remove wires of the network (`connections`: each `from`, `port`, `to`, `input`)
+
+command-network-move =
+    .title = Move nodes in the graph view (`moves`: each `node`, `to`: [x, y])
+
+command-network-remove =
+    .title = Remove nodes from the network, with their wires (`nodes`)
 
 command-param-copyPath =
     .title = Copy a value's path (`path`)
