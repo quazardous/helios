@@ -174,6 +174,12 @@ command-helios-viewport-dock =
 command-helios-viewport-moveTo =
     .title = Déplacer Image vers une zone (`area`)
 
+command-keymap-package =
+    .title = Ajouter les touches d'un paquet de raccourcis par-dessus celles par défaut (`name` : darktable-classic)
+
+command-keymap-package-remove =
+    .title = Retirer les touches d'un paquet de raccourcis (`name`)
+
 command-library-importSource =
     .title = Importer depuis la source d’import de l’espace de travail (`path` : la carte ou le dossier ; demandé en son absence)
 
@@ -381,14 +387,23 @@ command-vault-reject =
 command-vault-stack-toggle =
     .title = Déplier ou replier la pile de l’image sélectionnée
 
+command-view-bottomPanel-toggle =
+    .title = Replier le panneau du bas
+
 command-view-culling =
     .title = Tri : marquer, noter et étiqueter de partout, l’image d’abord (`on` ; basculé en son absence)
+
+command-view-endSideBar-toggle =
+    .title = Replier la barre latérale de fin
 
 command-view-library =
     .title = Aller à la bibliothèque : les images du coffre, à parcourir, noter et trier
 
 command-view-network =
     .title = Aller au réseau de l’espace de travail, pour le modifier
+
+command-view-startSideBar-toggle =
+    .title = Replier la barre latérale de début
 
 command-viewport-compare =
     .title = Image : avant et après côte à côte
@@ -401,6 +416,9 @@ command-viewport-mask-display-off =
 
 command-viewport-zoom-100 =
     .title = Image : pixels réels (100 %, 1 pixel de l’image = 1 pixel de l’écran)
+
+command-viewport-zoom-fill =
+    .title = Image : remplir la vue (en rognant le côté le plus long)
 
 command-viewport-zoom-fit =
     .title = Image : ajuster à la vue
