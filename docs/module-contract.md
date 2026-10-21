@@ -234,6 +234,19 @@ Open: how a macro is saved with an edit (a network description inside
 the node's), how a surface shows a composite folded or opened, and an
 accelerator running kernels of two inputs or more.
 
+## Bypass: a node rendered as if absent
+
+Any module node can be **bypassed** (`Graph::set_bypass`): it keeps its
+parameters and its wiring, and the engine plans through it. Each of its
+outputs is the input it passes through: its first input carrying the
+same channels (`passed_input`); a node with none for its first output
+(a source, a generator) is not bypassed. A bypassed node has no step of
+its own and its other inputs are not read: what reads it reads that
+input, under that input's content key, so the network renders exactly
+as without the node and shares its cache. Bringing the node back finds
+its earlier content by its keys. A composite is bypassed whole; an
+opened composite's inner nodes are bypassed one by one.
+
 ## Full-extent analysis (design note, proposed, not decided)
 
 Written 2026-10-12, before porting haze removal, highlight
