@@ -232,6 +232,8 @@ pub fn write_view(store: &mut Store, view: &View, gesture: Option<GestureId>) {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ZoomTo {
     Fit,
+    /// The view filled, the image centred, its longer side cropped.
+    Fill,
     /// 100 %: one image pixel per physical screen pixel.
     Actual,
     /// One step up the zoom ladder.
@@ -818,6 +820,19 @@ impl Viewport {
         match to {
             ZoomTo::Fit => {
                 self.state.propose(&mut view, View::fit());
+            }
+            ZoomTo::Fill => {
+                let Some(m) = self.state.mapping() else {
+                    return;
+                };
+                let [w, h] = m.image;
+                if w <= 0.0 || h <= 0.0 {
+                    return;
+                }
+                let zoom =
+                    ((m.rect_px[2] - m.rect_px[0]) / w).max((m.rect_px[3] - m.rect_px[1]) / h);
+                self.state
+                    .propose(&mut view, View::at(zoom, [w / 2.0, h / 2.0]));
             }
             ZoomTo::Actual => {
                 let to = match (self.state.mapping(), self.after.size()) {

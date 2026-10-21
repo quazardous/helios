@@ -621,6 +621,39 @@ darktable and Lightroom columns behind each key):
     command's keys, `Ctrl+K Ctrl+S` opens the shortcuts editor, and
     holding `H` will show the keys of the current context.
 
+**The default map** (2026-10-21, `helios-gui/src/keys.rs`): the
+keymap's default layer, every key scoped. *Library* is the vault's grid,
+the filmstrip or Compare having the focus, anywhere but the darkroom;
+*culling* is the culling mode, wherever the focus is; *image* is the
+image having the focus, not culling; *view* is the image having the focus
+or the darkroom. The grid and the filmstrip read no culling key
+themselves, so a key taken away in the shortcuts editor stays away.
+
+| Scope | Keys | Commands |
+|---|---|---|
+| everywhere | `Ctrl+Shift+P`, `F1` (egui-pop) | the palette |
+| everywhere | `Ctrl+P` | quick open (a module, an image, a workspace) |
+| everywhere | `Ctrl+K Ctrl+S`, `Ctrl+,` (egui-pop) | the shortcuts editor, settings |
+| everywhere | `Ctrl+B`, `Ctrl+Alt+B`, `Ctrl+J` | fold the start side bar, the end side bar, the bottom panel |
+| everywhere | `Ctrl+K Z`, `F11` (egui-pop), `Alt+Left` (egui-pop) | zen mode, full screen, back |
+| library, culling | `0`–`5` | rate (`vault.rate.<n>`) |
+| library, culling | `R`; `X` | toggle the reject (darktable); reject (Lightroom) |
+| library, culling | `P`, `U` | pick, take the flag off |
+| library, culling | `F2`–`F5`; `6`–`9` | yellow, green, blue, purple; red, yellow, green, blue |
+| library, culling | `Right`, `Left`, `S` | next, previous image; open or close a stack |
+| culling | `Space`, `Backspace` | next, previous image (in the grid `Space` selects) |
+| image | `C`, `E`, `G`, `P`, `M` | circle, ellipse, gradient, path masks; the mask display |
+| image | `Enter`, `Escape`, `Delete` | close, stop the path; remove a point |
+| view | `Alt+1`, `Alt+2`, `Alt+3` | zoom 100 %, fill, fit (`viewport.zoom.*`) |
+| view | `Ctrl+=` (or `Ctrl++`), `Ctrl+-` | zoom in, out |
+
+Not bound yet, for want of the command: `F1` for red stays the palette's
+(egui-pop's palette holds it in the same layer; red is `6`, or `F1` with
+the darktable package); `O` (overexposure) and `G` (guides, which would
+meet the gradient mask's `G` in the image); `Ctrl+/` (bypass the
+selected module: the engine has no bypass yet); the graph's keys
+(`Shift+A`, `F`, `Ctrl+G`, `Del`) wait for the graph editor.
+
 ## Jobs
 
 What runs in the background shows in egui-pop's jobs centre (decided

@@ -40,8 +40,8 @@ use egui_pop::views::library::filter::{Candidate, Filter, SearchField, SearchSta
 use egui_pop::views::library::marks::{ColorLabels, FlagToggle, RatingStars};
 use egui_pop::views::library::tags::{TagInput, TagInputState};
 use egui_pop::views::library::{
-    Badge, Change as Mark, ColorLabel, CullKeymap, Flag, LibraryItems, LibraryState, Marks, Signal,
-    Stack, Thumb, ThumbGrid, ThumbSource, change,
+    Badge, Change as Mark, ColorLabel, CullAction, CullKeymap, Flag, LibraryItems, LibraryState,
+    Marks, Signal, Stack, Thumb, ThumbGrid, ThumbSource, change,
 };
 use helios_core::{Image, Message, Region};
 pub use helios_vault::fields::Op;
@@ -53,6 +53,16 @@ use serde_json::Value;
 pub const LIBRARY: &str = "helios.library";
 
 /// The labels, in the order darktable gives them F1 to F5.
+/// The keys the grid and the filmstrip read themselves: the thumbnails'
+/// size only. The culling keys are the keymap's alone (`crate::keys`),
+/// scoped by their `when`, so a key the user takes away stays away.
+fn grid_keys() -> CullKeymap {
+    let mut keys = CullKeymap::lightroom();
+    keys.bindings
+        .retain(|(_, a)| matches!(a, CullAction::ZoomIn | CullAction::ZoomOut));
+    keys
+}
+
 pub const LABELS: [&str; 5] = ["red", "yellow", "green", "blue", "purple"];
 
 /// Where thumbnails are sent, by image id, from any thread: the first one
@@ -1151,7 +1161,7 @@ impl Library {
             return;
         }
         let label = crate::i18n::text(ui.ctx(), Message::new("gui-library-images", "Images"));
-        let keymap = CullKeymap::lightroom().auto_advance(self.auto_advance);
+        let keymap = grid_keys();
         let out = {
             let items = Items {
                 entries: &self.entries,
@@ -1192,7 +1202,7 @@ impl Library {
             ));
             return;
         }
-        let keymap = CullKeymap::lightroom().auto_advance(self.auto_advance);
+        let keymap = grid_keys();
         let height = ui.available_height().clamp(64.0, 200.0);
         let out = {
             let items = Items {

@@ -13,6 +13,7 @@ pub mod graph;
 pub mod host;
 pub mod i18n;
 pub mod jobs;
+pub mod keys;
 pub mod library;
 pub mod mask_display;
 pub mod mask_tree;
