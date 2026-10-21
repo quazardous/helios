@@ -24,6 +24,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.23.0] - 2026-10-21
+
+### Added
+
+- Agents can export a mask as a grey picture of its values (black where the
+  mask is 0, white where it is 1) with the export tool's new `as_mask`
+  option, the same grey the mask display shows.
+- Press M with the image focused (or use the Masks panel's Show mask button,
+  or the palette) to see a mask on the photo: the member or group selected
+  in the Masks panel, else the module's whole mask, as a coloured overlay
+  or alone in grey. It stays on while you edit, and themes set its colour.
+
 ## [0.22.0] - 2026-10-21
 
 ### Added
