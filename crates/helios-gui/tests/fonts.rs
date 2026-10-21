@@ -52,11 +52,18 @@ fn the_text_size_and_fonts_stay_across_themes() {
             Some("DejaVu Sans Mono"),
             "{name}"
         );
+        // The size is a factor of the theme's own: high contrast has
+        // larger body text of its own, scaled the same.
+        let scaled = body_size(&h);
+        text::set_text_size(&handle, 1.0);
+        h.run();
+        let own = body_size(&h);
         assert!(
-            (body_size(&h) - large).abs() < 0.6,
-            "{name}: {}",
-            body_size(&h)
+            (scaled - own * 1.5).abs() < 0.6,
+            "{name}: {scaled}, its own size {own}"
         );
+        text::set_text_size(&handle, 1.5);
+        h.run();
     }
     // Back to 100 %: the theme's own size.
     text::set_text_size(&handle, 1.0);
