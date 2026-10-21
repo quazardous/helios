@@ -1,0 +1,36 @@
+{
+  "name": "darktable-classic",
+  "title": "darktable classic",
+  "keymap": [
+    { "keys": "F1", "command": null },
+    { "keys": "F1", "command": "vault.label.red", "when": "${library}" },
+    { "keys": "F1", "command": "vault.label.red", "when": "${culling}" },
+    { "keys": "L", "command": "view.library" },
+    { "keys": "Ctrl+Shift+L", "command": "view.startSideBar.toggle" },
+    { "keys": "Ctrl+Shift+R", "command": "view.endSideBar.toggle" },
+    { "keys": "Ctrl+Shift+B", "command": "view.bottomPanel.toggle" }
+  ],
+  "left_out": [
+    { "keys": "x", "what": "culling mode", "reason": "X rejects, as in Lightroom; culling is view.culling in the palette" },
+    { "keys": "d", "what": "darkroom", "reason": "no command opens the darkroom without an image; Enter in the grid opens the selected one" },
+    { "keys": "Space", "what": "next image in the darkroom", "reason": "the darkroom does not follow the library's selection yet; Space steps while culling" },
+    { "keys": "Backspace", "what": "previous image in the darkroom", "reason": "as Space" },
+    { "keys": "o", "what": "overexposure indicator", "reason": "no such command yet" },
+    { "keys": "g", "what": "guides", "reason": "no such command yet, and G adds a gradient mask on the image" },
+    { "keys": "f", "what": "full preview", "reason": "no such command yet" },
+    { "keys": "w", "what": "sticky preview (hold)", "reason": "no such command yet; holds are opt-in triggers" },
+    { "keys": "a", "what": "pan (hold)", "reason": "the image pans by dragging" },
+    { "keys": "h", "what": "shortcuts of this context (hold)", "reason": "no such command yet; Ctrl+K Ctrl+S opens the shortcuts editor" },
+    { "keys": "Tab", "what": "hide all panels", "reason": "Tab moves the focus and shows floating palettes; zen mode is Ctrl+K Z" },
+    { "keys": "s, p, t, m", "what": "slideshow, print, tethering, map views", "reason": "global letters fire by accident, and these views do not exist" },
+    { "keys": "Ctrl+S", "what": "softproof", "reason": "Ctrl+S saves" },
+    { "keys": "Ctrl+W", "what": "focus detection", "reason": "Ctrl+W closes" },
+    { "keys": "Ctrl+F", "what": "filmstrip", "reason": "Ctrl+F finds; the bottom panel is Ctrl+Shift+B here, Ctrl+J by default" },
+    { "keys": "Ctrl+H", "what": "header", "reason": "Ctrl+H replaces in text editors" },
+    { "keys": "Ctrl+K", "what": "collection history", "reason": "Ctrl+K starts chords (Ctrl+K Ctrl+S, Ctrl+K Z)" },
+    { "keys": "Ctrl+B", "what": "colour assessment", "reason": "Ctrl+B folds the side bar" },
+    { "keys": "Ctrl+G", "what": "gamut check, group images", "reason": "Ctrl+G is kept for one meaning everywhere (group); no such command yet" },
+    { "keys": "Ctrl+Shift+T", "what": "top panel", "reason": "Helios has no top panel" },
+    { "keys": "Ctrl+E, Ctrl+D, Ctrl+T, Ctrl+C, Ctrl+V", "what": "export, duplicate, tag, copy and paste edits", "reason": "no such commands yet" }
+  ]
+}

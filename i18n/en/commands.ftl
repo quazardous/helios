@@ -175,6 +175,12 @@ command-helios-viewport-dock =
 command-helios-viewport-moveTo =
     .title = Move Image to an area (`area`)
 
+command-keymap-package =
+    .title = Add a keymap package's keys over the defaults (`name`: darktable-classic)
+
+command-keymap-package-remove =
+    .title = Take a keymap package's keys away (`name`)
+
 command-library-importSource =
     .title = Import from the workspace's import source (`path`: the card or folder; asked when absent)
 
