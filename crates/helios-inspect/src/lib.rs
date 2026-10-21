@@ -378,6 +378,14 @@ pub mod control {
             param: String,
             value: Value,
         },
+        /// Bypasses a module node (`on`), or brings it back: bypassed, it
+        /// keeps its parameters and renders as if absent, its output the
+        /// input it passes through.
+        #[serde(rename = "node.bypass")]
+        NodeBypass {
+            node: String,
+            on: bool,
+        },
         /// Gives a source node the image of a file (a raw or a picture),
         /// read by the node: the network stays, its results follow the new
         /// image. `path` is absolute.

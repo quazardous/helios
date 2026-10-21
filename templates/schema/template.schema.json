@@ -112,6 +112,10 @@
           "description": "A composite opened: its inner nodes put in the graph as <name>.<inner>, which panels edit.",
           "type": "boolean"
         },
+        "bypassed": {
+          "description": "Rendered as if absent, its parameters kept: its output is the input it passes through.",
+          "type": "boolean"
+        },
         "panel": { "$ref": "#/$defs/panel_hint" }
       },
       "oneOf": [

@@ -136,6 +136,12 @@ fn an_agent_drives_a_node_through_mcp() {
     );
     assert!(failed, "an out-of-range value is an error result");
     assert!(refused["error"].as_str().unwrap().contains("outside"));
+    let (failed, on) = client.tool("helios_node_bypass", json!({ "node": "exp", "on": true }));
+    assert!(!failed, "{on}");
+    assert_eq!(on["bypassed"], true, "{on}");
+    let (failed, off) = client.tool("helios_node_bypass", json!({ "node": "exp", "on": false }));
+    assert!(!failed, "{off}");
+    assert_eq!(off["bypassed"], false, "{off}");
     let (failed, missing) = client.tool("helios_describe", json!({}));
     assert!(failed);
     assert_eq!(missing, json!("helios_describe: missing argument `entity`"));

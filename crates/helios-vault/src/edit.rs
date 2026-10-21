@@ -22,6 +22,9 @@
 //!   "decisions": { … } }
 //! ```
 //!
+//! A bypassed node (rendered as if absent, its parameters kept) says so
+//! on its entry: `"bypassed": true`; an entry without it is not bypassed.
+//!
 //! The network's shape (its sources and connections) belongs to the
 //! surface; a version carries the parameters of its modules by name, and
 //! the decision book when there is one. An imported sidecar's version
@@ -34,7 +37,7 @@
 //! Every save is announced on the vault's bus as `edit.saved`, with the
 //! session's step number: a test waits for that event, it never sleeps.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use helios_core::{Event, Graph, ModuleKind, Params};
 use serde::Serialize;
@@ -47,6 +50,7 @@ use crate::{ImageId, Store, Vault, Version, VersionId, versions};
 /// decision nodes are left out (a decision's answer is in its book).
 pub fn of_graph(graph: &Graph) -> Value {
     let mut modules = BTreeMap::new();
+    let mut bypassed = BTreeSet::new();
     for id in graph.ids() {
         let Ok(Some(manifest)) = graph.manifest(id) else {
             continue;
@@ -57,12 +61,37 @@ pub fn of_graph(graph: &Graph) -> Value {
         let (Ok(name), Ok(params)) = (graph.name(id), graph.params(id)) else {
             continue;
         };
+        if graph.is_bypassed(id).unwrap_or(false) {
+            bypassed.insert(name.to_string());
+        }
         modules.insert(
             name.to_string(),
             (manifest.name.clone(), params.unwrap_or_default()),
         );
     }
-    from_modules(&modules)
+    let mut edit = from_modules(&modules);
+    mark_bypassed(&mut edit, &bypassed);
+    edit
+}
+
+/// Marks the entries of these nodes bypassed (`"bypassed": true`).
+pub fn mark_bypassed(edit: &mut Value, nodes: &BTreeSet<String>) {
+    for m in edit["modules"].as_array_mut().into_iter().flatten() {
+        if m["name"].as_str().is_some_and(|n| nodes.contains(n)) {
+            m["bypassed"] = Value::Bool(true);
+        }
+    }
+}
+
+/// The nodes an edit says are bypassed, by name.
+pub fn bypassed(edit: &Value) -> BTreeSet<String> {
+    edit["modules"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|m| m["bypassed"].as_bool() == Some(true))
+        .filter_map(|m| m["name"].as_str().map(String::from))
+        .collect()
 }
 
 /// An edit from each node's module and parameters, by node name: the
@@ -100,10 +129,13 @@ pub fn modules(edit: &Value) -> Result<BTreeMap<String, (Option<String>, Params)
     Ok(out)
 }
 
-/// Sets a graph's parameters to an edit's, by node name; returns what was
-/// left out (a node the graph lacks, or runs another module in).
+/// Sets a graph's parameters to an edit's, by node name, and bypasses the
+/// nodes it says are (the others it names are not); returns what was left
+/// out (a node the graph lacks, or runs another module in, or that cannot
+/// be bypassed).
 pub fn apply_to_graph(graph: &mut Graph, edit: &Value) -> Result<Vec<String>, String> {
     let mut skipped = Vec::new();
+    let bypassed = bypassed(edit);
     for (name, (module, params)) in modules(edit)? {
         let Some(id) = graph.find(&name) else {
             skipped.push(format!("`{name}`: no such node"));
@@ -125,6 +157,9 @@ pub fn apply_to_graph(graph: &mut Graph, edit: &Value) -> Result<Vec<String>, St
             graph
                 .set_param(id, param, value.clone())
                 .map_err(|e| format!("`{name}.{param}`: {e}"))?;
+        }
+        if let Err(e) = graph.set_bypass(id, bypassed.contains(&name)) {
+            skipped.push(format!("`{name}`: {e}"));
         }
     }
     Ok(skipped)

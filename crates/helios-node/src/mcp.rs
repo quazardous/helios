@@ -691,6 +691,21 @@ pub const TOOLS: &[Tool] = &[
         ],
     },
     Tool {
+        name: "helios_node_bypass",
+        endpoint: Endpoint::Control,
+        cmd: "node.bypass",
+        description: "Bypasses a module node, or brings it back: bypassed, it keeps its parameters and renders as if absent, its output the input it passes through. Saved with the edit as a step (debug control)",
+        params: &[
+            NODE,
+            Param {
+                name: "on",
+                schema: boolean,
+                description: "True to bypass, false to bring it back",
+                default: None,
+            },
+        ],
+    },
+    Tool {
         name: "helios_load_source",
         endpoint: Endpoint::Control,
         cmd: "load_source",
@@ -1467,6 +1482,7 @@ mod tests {
                     "value" => json!({ "float": 1.0 }),
                     "values" => json!({ "exposure": { "float": 1.0 } }),
                     "job" => json!(3),
+                    "on" => json!(true),
                     "format" => json!("png"),
                     "path" => json!("/nonexistent/out.png"),
                     _ => json!("exp"),
@@ -1509,6 +1525,7 @@ mod tests {
         let control = [
             "render",
             "set_param",
+            "node.bypass",
             "load_source",
             "export",
             "cancel",
