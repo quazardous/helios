@@ -24,6 +24,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.0] - 2026-10-21
+
+### Added
+
+- A third built-in workspace template, "Develop (preview)", sets exposure and
+  the sigmoid tone curve on a picture, with the image large and its
+  parameters and scopes beside it. A raw file is developed from its embedded
+  preview for now, not from its sensor data.
+- Workspace templates opened on the desktop may now use the sigmoid tone
+  mapper, which maps scene light to the display's range.
+
 ## [0.20.1] - 2026-10-21
 
 ### Fixed
