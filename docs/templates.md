@@ -116,6 +116,37 @@ The starting graph, written like a node's network description
   composite, its exposed parameters). Building with a preset puts its
   values over the nodes' own.
 
+### `subworkspaces`
+
+Named scopes over nodes of the network (optional): a sub-workspace is a
+part of the network delegated so that, entered, only its nodes are
+shown and edited (see [design/context-stack.md](design/context-stack.md),
+"Sub-workspaces"). There is still one network and one engine graph: a
+scope changes nothing in the render.
+
+```json
+"subworkspaces": [
+  { "id": "face", "name": "Face", "nodes": ["exposure", "retouch"] },
+  { "id": "mask", "name": "Mask", "nodes": ["retouch.mask"], "parent": "face" }
+],
+"retired_subworkspaces": ["skin"]
+```
+
+- `id` is stable, a slug of the name it was first given (`face`,
+  `face-2`), and never given twice in a workspace: a deleted one goes to
+  `retired_subworkspaces`.
+- `nodes` names every node in it, those of the sub-workspaces nested in
+  it included: a node of the network, or an opened composite's inner
+  node (`retouch.mask`); naming a composite takes its inner nodes in.
+- `parent` nests it in another; its nodes are among its parent's, and
+  the sub-workspaces under one parent share no node, so each node has
+  one innermost sub-workspace.
+
+Validation refuses an id that is not one, used twice or retired, an
+empty name, a node the network does not have, an unknown parent or a
+cycle of parents, and nodes outside the parent's or shared between
+sub-workspaces side by side.
+
 ### `tools`
 
 ```json
@@ -380,14 +411,39 @@ on its own (`workspace.parts` lists them):
 
 An import is refused while a conflict has no side picked; its dry run
 lists the changes and the conflicts. Nothing records where a part came
-from: imported twice, it is two copies. Not decided (later, on egui-pop's
-context stack): delegating part of a network to a sub-workspace.
+from: imported twice, it is two copies. The network's sub-workspaces
+come with it, each a copy under an id free in the workspace, its nodes
+renamed with the network's (`<name>.<node>`), nested as they were.
+
+**Sub-workspaces.** Delegating nodes to a sub-workspace and deleting
+one are workspace steps like the others (one Edit > Undo step each,
+with `dry_run`), on the desktop and for agents:
+
+- `network.delegate {name, nodes}`: a new sub-workspace over nodes of
+  the network. It is nested in the innermost sub-workspace holding all
+  of them, and the sub-workspaces beside it whose nodes are all among
+  them move inside it. Nodes crossing a sub-workspace's edge (some in
+  it, some not) are refused. The answer gives its `id`, its `parent`
+  and the sub-workspaces moved (`adopted`).
+- `subworkspace.delete {id}`: the sub-workspace goes, its nodes stay in
+  the network, the sub-workspaces nested in it move up to its parent
+  (`moved`), and its id is retired.
+- `workspace.edit` takes `subworkspaces` whole (as in a template); one
+  left out is deleted and its id retired. A node taken out of the
+  network (an edit, a composite closed) leaves every sub-workspace; a
+  sub-workspace left empty stays until it is deleted.
+- A reset to the template keeps the ids used so far retired; "Save as
+  template" starts the new template's ids afresh.
+
+Entering a sub-workspace (its place on the context stack, its scoped
+panels, layout and keys) comes next.
 
 **Agents.** The desktop's commands take their arguments whole, with
 `dry_run`. The node's MCP server has the same as tools
 (`helios_workspace_parts`, `_state`, `_edit`, `_reset`,
-`_import_parts`, `_save_as_template`, each with `dry_run`, and
-`_undo`); each answer says where it was made (`via`):
+`_import_parts`, `_save_as_template`, `helios_network_delegate` and
+`helios_subworkspace_delete`, each with `dry_run`, and
+`helios_workspace_undo`); each answer says where it was made (`via`):
 
 - **Through the desktop** (`via: desktop`), when a desktop holds the
   workspace open. The desktop says so in the workspace's files

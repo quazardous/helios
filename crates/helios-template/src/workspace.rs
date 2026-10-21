@@ -305,7 +305,15 @@ const MERGED: &[(&str, &[&str])] = &[
     ("name", &["/meta/name"]),
     ("description", &["/meta/description"]),
     ("icon", &["/meta/icon"]),
-    ("network", &["/template/network", "/composites"]),
+    (
+        "network",
+        &[
+            "/template/network",
+            "/composites",
+            "/template/subworkspaces",
+            "/template/retired_subworkspaces",
+        ],
+    ),
     ("tools", &["/template/tools"]),
     ("library", &["/template/library"]),
     ("layout", &["/layout"]),
@@ -466,8 +474,10 @@ impl State {
     }
 
     /// The state with `changes` made: `name`, `description`, `icon`,
-    /// `network`, `tools`, `library` (null for none) and `layout`, each
-    /// written as in a template. Fields it does not know are refused.
+    /// `network`, `subworkspaces`, `tools`, `library` (null for none) and
+    /// `layout`, each written as in a template. Fields it does not know
+    /// are refused. A sub-workspace left out is deleted (its id retired),
+    /// and a node taken out of the network leaves every sub-workspace.
     pub fn edited(&self, changes: &Json) -> Result<State, String> {
         let object = changes.as_object().ok_or("changes are an object")?;
         let mut next = self.clone();
@@ -495,6 +505,10 @@ impl State {
                     next.bundle.template.network =
                         serde_json::from_value(v.clone()).map_err(bad)?;
                 }
+                "subworkspaces" => {
+                    next.bundle.template.subworkspaces =
+                        serde_json::from_value(v.clone()).map_err(bad)?;
+                }
                 "tools" => {
                     next.bundle.template.tools = serde_json::from_value(v.clone()).map_err(bad)?;
                 }
@@ -506,7 +520,28 @@ impl State {
                 other => return Err(format!("`{other}` is not a part of a workspace")),
             }
         }
+        next.bundle
+            .template
+            .follow_subworkspaces(&self.bundle.template);
         Ok(next)
+    }
+
+    /// The state with a new sub-workspace `name` over `nodes` (see
+    /// [`Template::delegated`]), and what was done.
+    pub fn delegated(&self, name: &str, nodes: &[String]) -> Result<(State, Json), String> {
+        let (template, answer) = self.bundle.template.delegated(name, nodes)?;
+        let mut next = self.clone();
+        next.bundle.template = template;
+        Ok((next, answer))
+    }
+
+    /// The state without the sub-workspace `id`, retired (see
+    /// [`Template::without_subworkspace`]), and what was done.
+    pub fn subworkspace_deleted(&self, id: &str) -> Result<(State, Json), String> {
+        let (template, answer) = self.bundle.template.without_subworkspace(id)?;
+        let mut next = self.clone();
+        next.bundle.template = template;
+        Ok((next, answer))
     }
 
     /// The state its template gives, built (the composites' panel hints
@@ -515,6 +550,9 @@ impl State {
         let mut bundle = origin.clone();
         bundle.bundle_composites(catalogue)?;
         bundle.layout = bundle.build(catalogue)?.layout;
+        // The ids used before stay retired: the context stack or an undo
+        // step may still name them.
+        bundle.template.follow_subworkspaces(&self.bundle.template);
         Ok(State {
             meta: self.meta.clone(),
             bundle,
@@ -560,6 +598,8 @@ pub fn blank() -> Bundle {
         tools: crate::format::Tools::default(),
         library: None,
         parameters: Vec::new(),
+        subworkspaces: Vec::new(),
+        retired_subworkspaces: Vec::new(),
     };
     Bundle::new(template, Layout::default())
 }
@@ -1077,6 +1117,19 @@ pub fn import(
         for n in &src.network.nodes {
             renamed.insert(n.name.clone(), format!("{name}.{}", n.name));
         }
+        // Its sub-workspaces come along as copies, each under a new id.
+        let copied = t.copy_subworkspaces(src, |n| format!("{name}.{n}"));
+        for (from, id) in &copied {
+            let s = t.subworkspace(id).expect("just copied");
+            changes.push(json!({
+                "part": "network",
+                "change": "delegated",
+                "what": id,
+                "name": s.name,
+                "nodes": s.nodes,
+                "copy_of": from,
+            }));
+        }
         changes.push(json!({
             "part": "network",
             "change": "added",
@@ -1380,6 +1433,8 @@ pub fn review(state: &State, x: &Extract, catalogue: &Catalogue) -> Review {
         tags: t.meta.tags.clone(),
     };
     t.parameters.clear();
+    // A new template starts its own ids afresh.
+    t.retired_subworkspaces.clear();
     if x.without.contains(&Part::Network) || x.without.contains(&Part::Layout) {
         problems.push("the network and the layout always go in a template".into());
     }
@@ -1791,6 +1846,71 @@ pub mod tools {
             return Err(problems.join("; "));
         }
         files.save_step(&before, &next, "edit workspace")?;
+        Ok(answer)
+    }
+
+    /// `{workspace, name, nodes, dry_run}`: a new sub-workspace over
+    /// nodes of the network, as one step; checked first. The answer says
+    /// its id, its parent and the sub-workspaces moved inside it.
+    pub fn delegate(config: &Path, args: &Json, catalogue: &Catalogue) -> Result<Json, String> {
+        let files = files(config, args)?;
+        let before = files.load()?;
+        let nodes: Vec<String> =
+            serde_json::from_value(args["nodes"].clone()).map_err(|e| format!("nodes: {e}"))?;
+        let (next, answer) = before.delegated(text(args, "name")?, &nodes)?;
+        step(
+            &files,
+            &before,
+            &next,
+            answer,
+            args,
+            catalogue,
+            "delegate nodes",
+        )
+    }
+
+    /// `{workspace, id, dry_run}`: a sub-workspace deleted (its nodes
+    /// stay in the network, its id is retired), as one step.
+    pub fn delete_subworkspace(
+        config: &Path,
+        args: &Json,
+        catalogue: &Catalogue,
+    ) -> Result<Json, String> {
+        let files = files(config, args)?;
+        let before = files.load()?;
+        let (next, answer) = before.subworkspace_deleted(text(args, "id")?)?;
+        step(
+            &files,
+            &before,
+            &next,
+            answer,
+            args,
+            catalogue,
+            "delete a sub-workspace",
+        )
+    }
+
+    /// Answers a step worked out (with its `problems` and `dry_run`),
+    /// written unless it is a dry run; refused with problems.
+    fn step(
+        files: &Files,
+        before: &super::State,
+        next: &super::State,
+        mut answer: Json,
+        args: &Json,
+        catalogue: &Catalogue,
+        label: &str,
+    ) -> Result<Json, String> {
+        let problems = next.problems(catalogue);
+        answer["problems"] = json!(problems);
+        answer["dry_run"] = json!(dry(args));
+        if dry(args) {
+            return Ok(answer);
+        }
+        if !problems.is_empty() {
+            return Err(problems.join("; "));
+        }
+        files.save_step(before, next, label)?;
         Ok(answer)
     }
 

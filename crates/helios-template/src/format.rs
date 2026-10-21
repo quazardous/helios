@@ -37,6 +37,36 @@ pub struct Template {
     /// create"): the import source, a file a parameter names.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub parameters: Vec<Parameter>,
+    /// Named scopes over nodes of its network, nested or side by side
+    /// (see [`crate::subworkspace`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub subworkspaces: Vec<SubWorkspace>,
+    /// The ids of sub-workspaces deleted: never given again in this
+    /// workspace, so a stale reference (a context stack, an undo step)
+    /// never lands on another one.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub retired_subworkspaces: Vec<String>,
+}
+
+/// A sub-workspace: a named scope over nodes of the workspace's own
+/// network (one network, one engine graph). Entered, it shows and edits
+/// only its nodes.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SubWorkspace {
+    /// Stable, never reused in the workspace: a slug of its first name
+    /// (`skin`, `skin-2`). What the context stack's payload names.
+    pub id: String,
+    /// Shown, in the user's words.
+    pub name: String,
+    /// Every node in it, those of the sub-workspaces nested in it
+    /// included: a network node's name, or an opened composite's inner
+    /// node (`<name>.<inner>`).
+    pub nodes: Vec<String>,
+    /// The sub-workspace it is nested in; at the top of the workspace
+    /// without one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<String>,
 }
 
 /// A value asked for when a workspace is created from a template: where

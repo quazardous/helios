@@ -15,6 +15,8 @@
 //! - [`workspace`]: a workspace made from a template, as it is edited:
 //!   its own files, its parts, saved back as a template, reset to its
 //!   template, and parts of another imported as a copy.
+//! - [`subworkspace`]: sub-workspaces as data, named scopes over nodes
+//!   of a workspace's network, delegated, deleted, checked and copied.
 //! - [`contexts`]: Helios's places and modes on egui-pop's context
 //!   stack, shared by the desktop and the MCP server, and the tools
 //!   agents move a workspace's stack with.
@@ -26,6 +28,7 @@ pub mod contexts;
 pub mod format;
 pub mod schema;
 pub mod shipped;
+pub mod subworkspace;
 pub mod workspace;
 
 pub use build::{Built, SOURCE_PORT, placeholder};
@@ -33,5 +36,5 @@ pub use bundle::{Bundle, Report, Text, Update, parse_composite, parse_template};
 pub use catalogue::Catalogue;
 pub use format::{
     CompositeFile, CompositeRef, FORMAT, ImportDesc, LibraryDesc, Parameter, ParameterKind,
-    Template,
+    SubWorkspace, Template,
 };

@@ -30,6 +30,16 @@
       "description": "What is asked when a workspace is created from the template (ask on create).",
       "type": "array",
       "items": { "$ref": "#/$defs/parameter" }
+    },
+    "subworkspaces": {
+      "description": "Named scopes over nodes of the network (sub-workspaces), nested through 'parent'. Scopes under one parent share no node.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/subworkspace" }
+    },
+    "retired_subworkspaces": {
+      "description": "The ids of deleted sub-workspaces: never given again in this workspace.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/subworkspace_id" }
     }
   },
   "$defs": {
@@ -242,6 +252,30 @@
         },
         "kind": { "enum": ["text", "path", "choice"] },
         "choices": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "subworkspace_id": {
+      "description": "A sub-workspace's stable id, a slug of its first name: lowercase words of letters and digits joined by '.' or '-' (skin, skin-2).",
+      "type": "string",
+      "pattern": "^[a-z0-9]+([.-][a-z0-9]+)*$"
+    },
+    "subworkspace": {
+      "description": "A sub-workspace: a named scope over nodes of the network; entered, it shows and edits only its nodes.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "nodes"],
+      "properties": {
+        "id": { "$ref": "#/$defs/subworkspace_id" },
+        "name": { "description": "Shown, in the user's words.", "type": "string" },
+        "nodes": {
+          "description": "Every node in it, those of the sub-workspaces nested in it included: a node's name, or an opened composite's inner node (<name>.<inner>).",
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "parent": {
+          "description": "The id of the sub-workspace it is nested in; at the top without one.",
+          "$ref": "#/$defs/subworkspace_id"
+        }
       }
     },
     "binding": {

@@ -420,6 +420,7 @@ impl Bundle {
             check_import(import, p);
         }
         check_parameters(t, p);
+        crate::subworkspace::problems(t, &catalogue, p);
         for (area, node) in &self.layout.areas {
             for panel in node.panels() {
                 check_panel(&catalogue, panel.as_str(), Some(*area), "layout", p);

@@ -34,6 +34,40 @@ What exists today, none of it stacked or published:
   (`view/viewport/compare`), the mask tool (`view/masks/tool`), the
   scopes mode, culling's auto-advance.
 
+## Sub-workspaces as data
+
+Decided 2026-10-21, built: a sub-workspace is a **named scope over
+nodes of the workspace's own network**, kept in the workspace state's
+template as `subworkspaces: [{id, name, nodes, parent?}]` (see
+[templates.md](../templates.md), "`subworkspaces`"). One network, one
+engine graph: delegating changes nothing in the render, and undo is the
+workspace's own steps.
+
+- **Ids.** A slug of the first name (`face`, then `face-2`), never given
+  twice in a workspace: deleted ids are kept in
+  `retired_subworkspaces`, across a reset too, so a context stack or an
+  undo step naming one never lands on another. The place's payload is
+  `{"id": "<id>"}`.
+- **Nesting.** `parent` names the enclosing one; a nested scope's nodes
+  are among its parent's, and scopes under one parent share no node, so
+  a node has one innermost scope.
+- **Commands.** `network.delegate {name, nodes}` and
+  `subworkspace.delete {id}`, each one undoable workspace step with
+  `dry_run`; `workspace.edit` and templates take `subworkspaces` whole.
+  A node taken out of the network leaves every scope.
+- **Import.** Copying the network part copies its sub-workspaces with
+  new ids; nothing links a copy to its source.
+- **Accessors** for the place (next step): `Template::subworkspace`,
+  `subworkspace_nodes` (the nodes of a scope, nested ones included),
+  `scope_of` (a node's innermost scope), `in_subworkspace`,
+  `subworkspace_path` (top down, for the crumb) and
+  `subworkspace_children`.
+
+Not built yet: the `helios.sub-workspace` place itself (entering with
+`nav.enter` or quick open, scoped panels refusing edits outside the
+scope, its own layout and keymap layer, restore). The failure table's
+"a deleted sub-workspace" row relies on the ids above.
+
 ## Recommendation in one paragraph
 
 The context stack is a **kernel service with one owner**, in
