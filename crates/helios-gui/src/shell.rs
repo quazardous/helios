@@ -129,6 +129,9 @@ enum Action {
     Run(String, Value, Origin),
     About,
     Keybindings,
+    /// A keymap package's keys added over the defaults (`true`), or taken
+    /// away.
+    KeymapPackage(String, bool),
     OpenWorkspace(Option<PathBuf>),
     /// A workspace from a template (its id), in a directory, the
     /// template's parameters answered (`parameter.<id>`); what is
@@ -2398,6 +2401,28 @@ impl Shell {
             ),
             Box::new(|_, _| Ok(Action::ProfileApply)),
         );
+        for (id, title, on) in [
+            (
+                "keymap.package",
+                "Add a keymap package's keys over the defaults (`name`: darktable-classic)",
+                true,
+            ),
+            (
+                "keymap.package.remove",
+                "Take a keymap package's keys away (`name`)",
+                false,
+            ),
+        ] {
+            add(
+                CommandSpec::new(id, title, "Preferences"),
+                Box::new(move |a, _| {
+                    a.get("name")
+                        .and_then(Value::as_str)
+                        .map(|n| Action::KeymapPackage(n.to_string(), on))
+                        .ok_or_else(|| "`name` is missing".to_string())
+                }),
+            );
+        }
         add(
             CommandSpec::new("profile.use", "Use a saved profile by name", "Preferences"),
             Box::new(move |a, _| {
@@ -3118,6 +3143,38 @@ impl Shell {
         h.set_context("heliosProfile", &self.profile_name);
     }
 
+    /// Adds a keymap package's keys to the user's layer, before the
+    /// user's own (which keep winning), or takes them away; the user's
+    /// other keys stay.
+    fn keymap_package(&mut self, name: &str, on: bool) -> Result<Value, String> {
+        let package = crate::keymaps::package(name).ok_or_else(|| {
+            let names: Vec<String> = crate::keymaps::packages()
+                .into_iter()
+                .map(|p| p.name)
+                .collect();
+            format!(
+                "no keymap package `{name}` (there are: {})",
+                names.join(", ")
+            )
+        })?;
+        let ours = package.bindings();
+        let mut doc = self.app.handle().export_keymap(Layer::User);
+        doc.bindings
+            .retain(|b| !ours.iter().any(|o| crate::keymaps::same(o, b)));
+        if on {
+            doc.bindings.splice(0..0, ours);
+        }
+        let diff = self.app.load_keymap(&doc, Layer::User)?;
+        Ok(json!({
+            "package": package.name,
+            "on": on,
+            "added": diff.added.len(),
+            "removed": diff.removed.len(),
+            "skipped": diff.skipped,
+            "conflicts": diff.conflicts,
+        }))
+    }
+
     /// Loads a workspace template's keys into egui-pop's workspace keymap
     /// layer: over the defaults, under the user's own keys.
     pub fn apply_template_tools(&mut self, name: &str, tools: &helios_template::format::Tools) {
@@ -3424,6 +3481,7 @@ impl Shell {
                     &text,
                 ));
             }
+            Action::KeymapPackage(name, on) => return self.keymap_package(&name, on),
             Action::Keybindings => {
                 let w = self
                     .app

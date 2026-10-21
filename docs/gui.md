@@ -654,6 +654,35 @@ meet the gradient mask's `G` in the image); `Ctrl+/` (bypass the
 selected module: the engine has no bypass yet); the graph's keys
 (`Shift+A`, `F`, `Ctrl+G`, `Del`) wait for the graph editor.
 
+**Keymap packages** (2026-10-21, `helios-gui/src/keymaps.rs`): a keymap
+document shipped with Helios (`helios-gui/keymaps/*.json`), added to the
+user's layer by `keymap.package` (`name`) before the user's own keys,
+which keep winning, and taken away by `keymap.package.remove`. Its
+clauses name the default map's scopes (`${library}`, `${culling}`,
+`${image}`, `${darkroom}`, `${viewport}`), so it follows them. Keyboard
+packages and egui-pop's pointer profiles are chosen separately.
+
+*darktable classic* (`darktable-classic`) gives darktable's exact keys
+where they collide with nothing. The default map already holds `0`–`5`,
+`R`, `F2`–`F5`, `Alt+1/2/3`, `Ctrl+Z`/`Ctrl+Y`, `Ctrl+Q`, `F11` and
+`Ctrl+,`; the package adds `F1` for red (taken from the palette, which
+keeps `Ctrl+Shift+P`), `L` for the library, and `Ctrl+Shift+L`,
+`Ctrl+Shift+R`, `Ctrl+Shift+B` for the start and end side bars and the
+bottom panel. What it leaves out, and why (listed in the package too):
+
+| darktable | What | Why not |
+|---|---|---|
+| `x` | culling mode | `X` rejects, as in Lightroom; culling is `view.culling` |
+| `d` | darkroom | no command opens it without an image; `Enter` in the grid does |
+| `Space`, `Backspace` | next, previous image in the darkroom | the darkroom does not follow the library's selection yet |
+| `o`, `g` | overexposure, guides | no such commands yet; `G` adds a gradient mask |
+| `f`, `w`, `a`, `h` | previews, pan, the keys of the context | no such commands yet, or a drag already does it |
+| `Tab` | hide all panels | `Tab` moves the focus; zen mode is `Ctrl+K Z` |
+| `s`, `p`, `t`, `m` | slideshow, print, tethering, map | global letters, and views Helios does not have |
+| `Ctrl+S`, `Ctrl+W`, `Ctrl+F`, `Ctrl+H` | softproof, focus detection, filmstrip, header | save, close, find, replace |
+| `Ctrl+K`, `Ctrl+B`, `Ctrl+G` | collection history, colour assessment, gamut | the chord prefix, the side bar, group |
+| `Ctrl+E`, `Ctrl+D`, `Ctrl+T`, `Ctrl+C`, `Ctrl+V` | export, duplicate, tag, copy and paste edits | no such commands yet |
+
 ## Jobs
 
 What runs in the background shows in egui-pop's jobs centre (decided

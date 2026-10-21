@@ -1,6 +1,7 @@
 //! The default keymap (see `docs/gui.md`, "Keyboard shortcuts"): it loads
 //! with no conflict and no single global letter; each culling key runs
-//! its command in the library and does nothing in the darkroom.
+//! its command in the library and does nothing in the darkroom; the
+//! darktable package loads over it and comes off again.
 
 use std::path::{Path, PathBuf};
 
@@ -11,7 +12,7 @@ use egui_pop::model::ids::CommandId;
 use egui_pop::model::keymap::{Keys, Resolution};
 use helios_gui::contexts::{self, Opened};
 use helios_gui::library::Entry;
-use helios_gui::{Shell, headless, helios_panels, keys};
+use helios_gui::{Shell, headless, helios_panels, keymaps, keys};
 use helios_shell::commands::Origin;
 use serde_json::{Value, json};
 
@@ -175,4 +176,65 @@ fn culling_keys_run_their_commands_in_the_library_and_nothing_in_the_darkroom() 
     assert_eq!(h.state().library().selected, at);
     drop(h);
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn the_darktable_package_loads_over_the_defaults_and_comes_off_again() {
+    let shell = Shell::new(helios_panels(), None);
+    let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+    h.run();
+    let app = h.state().app().handle().clone();
+    let keys_of = |id: &'static str| app.keys_for(&CommandId::from_static(id));
+    run(
+        &mut h,
+        "keymap.package",
+        json!({ "name": "darktable-classic" }),
+    );
+    // Clean: F1 is taken from the palette before it labels red.
+    egui_pop_test::assert_keymap_clean(h.state().app());
+    assert!(keys_of("vault.label.red").contains(&"F1".to_string()));
+    let palette = keys_of("app.palette");
+    assert!(!palette.contains(&"F1".to_string()), "{palette:?}");
+    assert!(palette.contains(&"Ctrl+Shift+P".to_string()), "{palette:?}");
+    assert!(keys_of("view.library").contains(&"L".to_string()));
+    assert!(keys_of("view.startSideBar.toggle").contains(&"Ctrl+Shift+L".to_string()));
+    // What it leaves out of darktable's keys, it does not bind.
+    let package = keymaps::package("darktable-classic").unwrap();
+    assert!(!package.left_out.is_empty());
+    for left in &package.left_out {
+        for k in left.keys.split(", ") {
+            let k = Keys::parse(k).unwrap();
+            assert!(
+                !package
+                    .keymap
+                    .iter()
+                    .any(|b| b.command.is_some() && Keys::parse(&b.keys).ok() == Some(k.clone())),
+                "`{k}` is left out and bound"
+            );
+        }
+    }
+    // Twice is once.
+    run(
+        &mut h,
+        "keymap.package",
+        json!({ "name": "darktable-classic" }),
+    );
+    egui_pop_test::assert_keymap_clean(h.state().app());
+    // Taken away: the defaults again.
+    run(
+        &mut h,
+        "keymap.package.remove",
+        json!({ "name": "darktable-classic" }),
+    );
+    assert!(keys_of("app.palette").contains(&"F1".to_string()));
+    assert!(!keys_of("vault.label.red").contains(&"F1".to_string()));
+    assert!(keys_of("view.library").is_empty());
+    assert!(
+        h.state()
+            .app()
+            .handle()
+            .export_keymap(egui_pop::model::keymap::Layer::User)
+            .bindings
+            .is_empty()
+    );
 }
