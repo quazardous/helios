@@ -569,6 +569,10 @@ impl Shell {
             // the workspace's layout.
             .plugin(crate::contexts::stack(workspace.clone(), images.clone()))
             .plugin(crate::contexts::Frames(workspace.clone()))
+            // egui-pop's status bar: the breadcrumb and the mode chips,
+            // then the status items (Helios's by place, the jobs'); no
+            // activity bar.
+            .plugin(egui_pop::api::strips::StripsPlugin::status_only())
             .plugin(i18n_plugin);
         if let Some(dir) = ui_settings {
             builder = builder.persist(dir);
