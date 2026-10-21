@@ -156,6 +156,10 @@ fn ai_assisted_proposes_and_waits_for_a_human() {
     .unwrap();
     assert_eq!(report.proposed, ["d0"]);
     assert_eq!(s.book.status("d0").unwrap(), Status::Proposed);
+    // How sure the model is and why, for the human who answers.
+    let proposal = s.book.proposal("d0").unwrap();
+    assert_eq!(proposal.confidence, Some(0.8));
+    assert_eq!(proposal.rationale, "dark scene");
     assert!(matches!(render(&s, "d0"), Err(Error::Pending { .. })));
     // The human takes the second option.
     s.book.accept(&mut s.graph, "d0", "ana", 1, 50).unwrap();

@@ -129,6 +129,13 @@ pub struct Proposal {
     pub model: Model,
     pub inputs: Vec<String>,
     pub at: u64,
+    /// How sure the model is, from 0 (a guess) to 1 (certain), when it
+    /// said ([`Book::explain`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<f64>,
+    /// Why, in the model's words (empty when it gave no reason).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub rationale: String,
 }
 
 /// Where a node stands.
@@ -418,8 +425,23 @@ impl Book {
             model,
             inputs,
             at: now,
+            confidence: None,
+            rationale: String::new(),
         });
         self.publish(&event);
+        Ok(())
+    }
+
+    /// Says how sure the model is of its proposal (from 0 to 1, clamped)
+    /// and why, for the human who answers it.
+    pub fn explain(&mut self, node: &str, confidence: f64, rationale: &str) -> Result<(), String> {
+        let proposal = self
+            .record_mut(node)?
+            .proposal
+            .as_mut()
+            .ok_or_else(|| format!("`{node}` has no proposal to explain"))?;
+        proposal.confidence = Some(confidence.clamp(0.0, 1.0));
+        proposal.rationale = rationale.to_string();
         Ok(())
     }
 

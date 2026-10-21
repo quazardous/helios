@@ -196,6 +196,28 @@ fn ai_assisted_proposes_and_a_human_accepts_or_corrects() {
 }
 
 #[test]
+fn a_proposal_keeps_how_sure_the_model_is_and_why() {
+    let mut g = network([1.0; 4]);
+    let mut book = Book::new();
+    book.declare("sky", Mode::AiAssisted);
+    assert!(
+        book.explain("sky", 0.5, "nothing proposed")
+            .unwrap_err()
+            .contains("no proposal")
+    );
+    book.model_answer(&mut g, "sky", gain(2.0), model(), vec![], 1)
+        .unwrap();
+    assert_eq!(book.proposal("sky").unwrap().confidence, None);
+    book.explain("sky", 1.5, "an overcast sky").unwrap();
+    let proposal = book.proposal("sky").unwrap();
+    assert_eq!(proposal.confidence, Some(1.0), "clamped to 0..1");
+    assert_eq!(proposal.rationale, "an overcast sky");
+    // Kept with the edit.
+    let back = Book::from_json(book.to_json()).unwrap();
+    assert_eq!(back.proposal("sky"), book.proposal("sky"));
+}
+
+#[test]
 fn human_mode_takes_no_model_answer() {
     let mut g = network([1.0; 4]);
     let mut book = Book::new();

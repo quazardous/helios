@@ -539,6 +539,7 @@ pub fn record(
                     .map(|_| true),
                 _ => book
                     .propose(graph, &node, r.options, r.model, keys, now)
+                    .and_then(|()| book.explain(&node, r.confidence, &r.rationale))
                     .map(|()| false),
             }
             .map_err(failed),
