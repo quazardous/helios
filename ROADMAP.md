@@ -207,7 +207,7 @@ framework from the start: fixed areas (editor groups, side and bottom
 panels, activity and status bars), panels declared rather than hard-coded,
 every action a named command reachable from menus, shortcuts, the palette,
 agents and tests. Shortcuts follow darktable's where they fit a clear
-credo (being researched, see docs/gui.md).
+credo (decided 2026-10-21, see docs/gui.md, "Keyboard shortcuts").
 
 **Helios makes darktable and vkdt meet** (2026-10-11, decided as the
 long-term goal). darktable brings compatibility (edits, workflow, users) and

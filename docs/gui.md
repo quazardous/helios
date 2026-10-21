@@ -32,8 +32,8 @@ The shell is a framework from the start:
   palette, agents (control API) and tests;
 - **navigation by keyboard**: editor groups, tabs, the palette, quick open
   (an image, a node), a key per panel, cycling between areas; the map
-  follows darktable's keys where they fit a clear credo, and is being
-  researched;
+  follows darktable's keys where they fit a clear credo (see "Keyboard
+  shortcuts");
 - the layout, auxiliary windows and their screens included, is saved per
   workspace in the user scope.
 
@@ -584,6 +584,42 @@ too.
 The pictures are written by `HELIOS_DOC_PICTURES=$PWD/docs/gui cargo test
 -p helios-gui --test dialogs pictures` (and `--test params pictures`), from
 the repository's root: headless, never on the desktop.
+
+## Keyboard shortcuts
+
+The credo (decided 2026-10-21, from
+[shortcuts-research.md](shortcuts-research.md), which also holds the
+darktable and Lightroom columns behind each key):
+
+1. **Everything is a command** with a stable id (`vault.rate.3`,
+   `viewport.zoom.fit`); keys bind to commands, never to widgets, and
+   every command runs from the palette.
+2. **Components suggest, the framework decides.** Modules and plugins
+   suggest `{command, key, when}`; egui-pop's keymap orders user >
+   workspace > defaults > suggestions, the most specific `when` winning
+   within a layer. A widget never reads a key a command could take.
+3. **Contexts are explicit**: every binding has a `when` over named keys
+   (`focusedPanel`, `place`, `mode.orientation`); a plain key never fires
+   while typing, and no single global letter switches the view.
+4. **Conflicts are visible**: the shortcuts editor shows where a key
+   comes from and the other bindings of the same keys; losing
+   suggestions are listed. The default map has none (a test says so).
+5. **Removing a default is first-class** (`"-command"`, or keys bound to
+   nothing) and survives restarts.
+6. **Keys are logical characters**: top-row and keypad digits alike.
+7. **Shared conventions first**: platform and editor keys (`Ctrl+S`,
+   `Ctrl+W`, `Ctrl+F`, `Ctrl+Shift+P`) and photographers' habits (digits,
+   arrows, `P`/`X`/`U`) before darktable's; darktable's keys stay where
+   they collide with neither.
+8. **Keymaps are packages**: a set of keys a user adds over the defaults
+   in one step (a "darktable classic" one, a Lightroom one later), and
+   takes away the same way.
+9. **Rich triggers stay, opt-in**: a key with scroll or drag, holds and
+   double presses are part of the grammar (egui-pop's pointer gestures,
+   chosen in their own profiles); the default map uses plain keys.
+10. **Discoverable**: the palette, the menus and tooltips show each
+    command's keys, `Ctrl+K Ctrl+S` opens the shortcuts editor, and
+    holding `H` will show the keys of the current context.
 
 ## Jobs
 
