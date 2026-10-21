@@ -40,6 +40,7 @@ fn an_export_shows_in_the_jobs_centre_and_is_cancelled_from_it() {
     submit_reported(
         &scheduler,
         &shell_jobs,
+        None,
         &d.join("a.png"),
         Format::Png { bits: 8 },
         move || Ok(picture),
@@ -80,6 +81,7 @@ fn an_export_shows_in_the_jobs_centre_and_is_cancelled_from_it() {
     submit_reported(
         &scheduler,
         &shell_jobs,
+        None,
         &path,
         Format::Png { bits: 8 },
         move || {
