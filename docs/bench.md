@@ -309,14 +309,18 @@ from incidents on the box; every agent prompt points here.
   deleting others' storage.
 
 **The development machine**
-- Every local cargo command builds into one shared folder: set
-  `CARGO_TARGET_DIR` once (for example to the main checkout's `target/`)
-  and keep it for every worktree of Helios and egui-pop. A `target/` per
-  worktree costs 1 to 15 GB each, and a few dozen of them once filled the
-  disk. `bench-remote` warns when a linked worktree builds into its own
-  `target/`.
-- Cargo locks the shared folder, so local checks run one at a time. That is
-  intended: heavy builds and tests belong on the box.
+- Each worktree builds into its own `target/`: leave `CARGO_TARGET_DIR`
+  unset there (`env -u CARGO_TARGET_DIR cargo …` when the shell exports
+  one). Cargo names a workspace crate's artifacts after its path inside the
+  workspace, so worktrees of one repository sharing a folder overwrite each
+  other's builds, and cargo then reads another branch's build as fresh:
+  false "not found" errors until a source file is touched. `bench-remote`
+  warns when a linked worktree builds outside itself.
+- Local work is check-only (see "The work cycle"), so a worktree's
+  `target/` stays small: about 0.6 GB for a clippy of all of egui-pop's
+  targets from scratch, in about 80 s. Full builds and tests belong on the
+  box; a worktree used for them locally grew to 1 to 15 GB, and a few dozen
+  of those once filled the disk.
 - At most three agents compile at once.
 - A worktree goes when its branch merges, after checking it holds no
   unpushed or uncommitted work; its box storage goes with it (`storage rm`).

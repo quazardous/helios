@@ -551,7 +551,7 @@ pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
     let mut req = parse_args(args)?;
     let linked = root.join(".git").is_file();
     let shared = std::env::var_os("CARGO_TARGET_DIR").map(PathBuf::from);
-    if let Some(w) = own_target_warning(linked, shared.as_deref(), root) {
+    if let Some(w) = shared_target_warning(linked, shared.as_deref(), root) {
         eprintln!("bench-remote: {w}");
     }
     let result = if req.affected {
@@ -702,25 +702,21 @@ fn remote(root: &Path, req: &mut Request) -> Result<u8, String> {
     })
 }
 
-/// A warning when a linked worktree builds into a `target/` of its own:
-/// every worktree should share one `CARGO_TARGET_DIR` (docs/bench.md, "The
+/// A warning when a linked worktree builds into a folder outside it.
+/// Cargo names a workspace crate's artifacts after its path inside the
+/// workspace, so two worktrees of one repository sharing a folder overwrite
+/// each other's builds and read stale ones as fresh (docs/bench.md, "The
 /// development machine"). `linked` is whether `root` is a linked worktree.
-fn own_target_warning(linked: bool, shared: Option<&Path>, root: &Path) -> Option<String> {
-    if !linked {
-        return None;
-    }
-    match shared {
-        None => Some(
-            "this worktree builds into its own target/; set CARGO_TARGET_DIR to one \
-             folder shared by every worktree (docs/bench.md, \"The development machine\")"
-                .into(),
-        ),
-        Some(dir) if dir.starts_with(root) => Some(format!(
-            "CARGO_TARGET_DIR ({}) is inside this worktree; point it at one folder \
-             shared by every worktree",
+fn shared_target_warning(linked: bool, target: Option<&Path>, root: &Path) -> Option<String> {
+    match target {
+        Some(dir) if linked && !dir.starts_with(root) => Some(format!(
+            "CARGO_TARGET_DIR ({}) is outside this worktree; worktrees of one \
+             repository overwrite each other's builds there. Unset it so the \
+             worktree builds into its own target/ (docs/bench.md, \"The \
+             development machine\")",
             dir.display()
         )),
-        Some(_) => None,
+        _ => None,
     }
 }
 
@@ -729,12 +725,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_linked_worktree_without_a_shared_target_is_warned() {
+    fn a_linked_worktree_building_outside_itself_is_warned() {
         let root = Path::new("/work/helios-wt");
-        assert!(own_target_warning(true, None, root).is_some());
-        assert!(own_target_warning(true, Some(Path::new("/work/helios-wt/target")), root).is_some());
-        assert!(own_target_warning(true, Some(Path::new("/work/helios/target")), root).is_none());
-        assert!(own_target_warning(false, None, root).is_none());
+        assert!(
+            shared_target_warning(true, Some(Path::new("/work/helios/target")), root).is_some()
+        );
+        assert!(shared_target_warning(true, None, root).is_none());
+        assert!(
+            shared_target_warning(true, Some(Path::new("/work/helios-wt/target")), root).is_none()
+        );
+        assert!(
+            shared_target_warning(false, Some(Path::new("/work/helios/target")), root).is_none()
+        );
     }
 
     #[test]
