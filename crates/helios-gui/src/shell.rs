@@ -438,6 +438,8 @@ pub struct Shell {
     relays: crate::jobs::Relays,
     /// The lost nodes' jobs to take out of the jobs centre.
     forgotten: crate::jobs::Forgotten,
+    /// The Queue panel: the selected node's queue.
+    queue_panel: Rc<RefCell<crate::queue::QueuePanel>>,
     /// The image's compare and mask tool, kept with their modes.
     follow: crate::contexts::Follow,
     /// Helios's status bar items, published when what they say changes.
@@ -711,6 +713,7 @@ impl Shell {
             ended: crate::jobs::Ended::default(),
             relays,
             forgotten: crate::jobs::Forgotten::default(),
+            queue_panel: Rc::default(),
             follow: crate::contexts::Follow::default(),
             status_items: crate::status_items::Items::default(),
             pointer_choice: false,
@@ -774,6 +777,12 @@ impl Shell {
                 params
                     .borrow_mut()
                     .panel_ui(ui, &values, selection.as_deref(), &members);
+            });
+        }
+        if has(&shell, crate::queue::PANEL) {
+            let (panel, app) = (shell.queue_panel.clone(), shell.app.handle().clone());
+            shell.set_content(crate::queue::PANEL, move |ui| {
+                panel.borrow_mut().ui(ui, &app);
             });
         }
         if has(&shell, "helios.viewport") {
@@ -4027,6 +4036,7 @@ impl Shell {
         self.save_layout_on_change(&ctx);
         self.engine_notices();
         self.job_notices();
+        self.follow_queue();
         self.menus_ui(&ctx);
         self.pointer_choice_ui(&ctx);
 
@@ -4224,6 +4234,38 @@ impl Shell {
             self.job_finished(&end);
         }
         self.forgotten.take(self.app.handle());
+    }
+
+    /// The Queue panel follows the selected node: its queue read again,
+    /// the panel closed or opened again as its setting says when empty.
+    fn follow_queue(&mut self) {
+        if !self
+            .panels
+            .iter()
+            .any(|p| p.id.as_str() == crate::queue::PANEL)
+        {
+            return;
+        }
+        let node = lock(&self.values)
+            .get(crate::params::SELECTION)
+            .and_then(|e| match &e.value {
+                helios_core::Value::Text(t) if !t.is_empty() => Some(t.clone()),
+                _ => None,
+            });
+        self.queue_panel
+            .borrow_mut()
+            .update(self.app.handle(), node.as_deref());
+    }
+
+    /// The Queue panel (see `crate::queue`).
+    pub fn queue_panel(&self) -> std::cell::RefMut<'_, crate::queue::QueuePanel> {
+        self.queue_panel.borrow_mut()
+    }
+
+    /// Whether the Queue panel shows when the selected node has no queue
+    /// (`interface.panels.queue_when_empty`, on by default).
+    pub fn set_queue_when_empty(&mut self, on: bool) {
+        self.queue_panel.borrow_mut().set_when_empty(on);
     }
 
     /// Follows a node's jobs in the jobs centre (see `crate::relay`):

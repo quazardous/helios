@@ -934,6 +934,16 @@ fn main() -> Result<(), String> {
     let vault = persist.as_ref().map(|p| p.vault().clone());
     // The library is read while the window opens.
     let library_reading = vault.clone().map(read_library);
+    // The user's settings the desktop follows, from the vault's user
+    // layer (the one `helios-node --vault` keeps there).
+    let queue_when_empty = vault
+        .as_ref()
+        .map_or(Ok(None), |v| v.config_layer("user"))
+        .and_then(|layer| helios_gui::queue::when_empty(layer.as_deref()))
+        .unwrap_or_else(|e| {
+            warn(&format!("the user's settings: {e}"));
+            true
+        });
     // The workspace as it stands: its template's network, as edited.
     let config = helios_gui::shell::config_dir();
     let bundle = match helios_template::workspace::Files::new(&config, &workspace).load() {
@@ -1000,6 +1010,7 @@ fn main() -> Result<(), String> {
             shell.set_title(&name);
             // The first run asks "Coming from darktable?" (once).
             shell.offer_pointer_choice();
+            shell.set_queue_when_empty(queue_when_empty);
             if let Err(e) = shell.use_profile(&profile) {
                 shell.notes.push(format!("profile {profile}: {e}"));
             }
