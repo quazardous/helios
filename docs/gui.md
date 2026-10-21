@@ -359,8 +359,9 @@ sync through the vault.
   `Ctrl+Alt+=`, `Ctrl+Alt+-`, `Ctrl+Alt+0`), the accent colour and the
   dark/light/system preference are ordinary settings, so changing the
   theme does not undo them (`tests/fonts.rs`).
-- **Live preview** in the theme picker. `theme.export` writes the current
-  theme with its overrides merged into one file.
+- **Live preview** in the theme picker. `theme.exportMerged` writes the
+  current theme with its overrides merged into one file (`theme.export`
+  belongs to egui-pop's theme editor, which gives a theme's changes only).
 
 ### Profiles
 

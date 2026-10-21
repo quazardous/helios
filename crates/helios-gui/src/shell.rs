@@ -2012,7 +2012,7 @@ impl Shell {
         );
         add(
             CommandSpec::new(
-                "theme.export",
+                "theme.exportMerged",
                 "Export the theme in use, overrides merged",
                 "Preferences",
             ),
@@ -2758,7 +2758,7 @@ impl Shell {
             command(SYSTEM, "9_quit", 0, "workbench.quit"),
             command(SYSTEM_PROFILES, "2", 0, "profile.export"),
             command(SYSTEM_PROFILES, "2", 1, "profile.import"),
-            command(SYSTEM_THEMES, "2", 0, "theme.export"),
+            command(SYSTEM_THEMES, "2", 0, "theme.exportMerged"),
             // A parameter's context menu: its widget gives the path.
             command(plugins::PARAM, "1", 0, "param.reset"),
             command(plugins::PARAM, "2", 0, "param.copyPath"),

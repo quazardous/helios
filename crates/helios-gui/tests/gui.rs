@@ -270,7 +270,7 @@ fn themes_switch_from_the_palette_and_export_to_a_token_file() {
     let path =
         std::env::temp_dir().join(format!("helios-theme-{}.tokens.json", std::process::id()));
     let s = h.state_mut();
-    s.run("theme.export", json!({ "path": path }), Origin::User)
+    s.run("theme.exportMerged", json!({ "path": path }), Origin::User)
         .unwrap();
     h.run();
     let file: serde_json::Value =

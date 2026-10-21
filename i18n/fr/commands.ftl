@@ -306,7 +306,7 @@ command-scopes-waveform =
 command-subworkspace-delete =
     .title = Supprimer un sous-espace de travail, ses nœuds gardés dans le réseau (`id`, `dry_run`)
 
-command-theme-export =
+command-theme-exportMerged =
     .title = Exporter le thème en usage, ajustements fusionnés
 
 command-theme-helios-dark =

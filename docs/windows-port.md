@@ -93,7 +93,7 @@ with the same snippet:
 | Location | Use |
 |---|---|
 | `crates/helios-gui/src/main.rs:17-19` | per-workspace layout file |
-| `crates/helios-gui/src/shell.rs:903-906` | `theme.export` default path |
+| `crates/helios-gui/src/shell.rs:903-906` | `theme.exportMerged` default path |
 | `crates/helios-gui/src/shell.rs:2437-2442` | `config_dir()` (recent workspaces) |
 | `crates/helios-gui/src/shell.rs:2376, 2389` | `default_path`: `$HOME/Pictures/Helios` for snapshots and recordings |
 | `crates/helios-gui/src/dialogs.rs:342-356` | `~` expansion (`/` only) and `home()`, which falls back to `/` |
