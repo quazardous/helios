@@ -382,14 +382,23 @@ command-vault-reject =
 command-vault-stack-toggle =
     .title = Expand or collapse the stack of the selected image
 
+command-view-bottomPanel-toggle =
+    .title = Fold the bottom panel
+
 command-view-culling =
     .title = Culling: flag, rate and label from anywhere, the image first (`on`; toggled when absent)
+
+command-view-endSideBar-toggle =
+    .title = Fold the end side bar
 
 command-view-library =
     .title = Go to the library: the vault's images to browse, rate and cull
 
 command-view-network =
     .title = Go to the workspace's network, to edit it
+
+command-view-startSideBar-toggle =
+    .title = Fold the start side bar
 
 command-viewport-compare =
     .title = Image: before and after side by side
@@ -402,6 +411,9 @@ command-viewport-mask-display-off =
 
 command-viewport-zoom-100 =
     .title = Image: actual pixels (100 %, 1 image pixel = 1 screen pixel)
+
+command-viewport-zoom-fill =
+    .title = Image: fill the view (cropping the longer side)
 
 command-viewport-zoom-fit =
     .title = Image: fit to the view

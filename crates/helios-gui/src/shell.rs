@@ -106,6 +106,8 @@ enum Action {
     /// cascaded.
     Float(String, Option<[f32; 2]>),
     MoveTo(String, Area),
+    /// Folds an area to its strip, or unfolds it.
+    Fold(Area),
     Zoom(crate::viewport::ZoomTo),
     /// Before and after side by side, or not.
     Compare,
@@ -1994,6 +1996,17 @@ impl Shell {
                 Action::Maximize
             }),
             ("window.close", "Close the window", || Action::Close),
+            (
+                "view.startSideBar.toggle",
+                "Fold the start side bar",
+                || Action::Fold(Area::StartSide),
+            ),
+            ("view.endSideBar.toggle", "Fold the end side bar", || {
+                Action::Fold(Area::EndSide)
+            }),
+            ("view.bottomPanel.toggle", "Fold the bottom panel", || {
+                Action::Fold(Area::Bottom)
+            }),
         ] {
             add(
                 CommandSpec::new(id, title, "View"),
@@ -2274,6 +2287,11 @@ impl Shell {
         for (id, title, zoom) in [
             ("viewport.zoom.fit", "Image: fit to the view", ZoomTo::Fit),
             (
+                "viewport.zoom.fill",
+                "Image: fill the view (cropping the longer side)",
+                ZoomTo::Fill,
+            ),
+            (
                 "viewport.zoom.100",
                 "Image: actual pixels (100 %, 1 image pixel = 1 screen pixel)",
                 ZoomTo::Actual,
@@ -2391,97 +2409,12 @@ impl Shell {
         );
         drop(registry);
         let mut d = w.declarations.borrow_mut();
-        // As in darktable's lighttable, while the library has the focus
-        // (egui-pop leaves plain keys to a text field being typed in).
-        // Culling keys as in Lightroom: P, X, U flag, 6 to 9 label, S
-        // opens a stack.
-        let library = "focusedPanel == 'helios.vault' || focusedPanel == 'helios.filmstrip' || focusedPanel == 'helios.compare'";
-        // While culling (a mode of the context stack), the same keys work
-        // wherever the focus is, the image's included.
-        let culling = format!(
-            "mode.{} == '{}'",
-            crate::contexts::ORIENTATION,
-            crate::contexts::CULLING
-        );
-        for n in 0..=5 {
-            for when in [library, culling.as_str()] {
-                d.keys
-                    .push((n.to_string(), format!("vault.rate.{n}"), when.into()));
-            }
-        }
-        for (k, command) in [
-            ("R", "vault.reject"),
-            ("Right", "vault.next"),
-            ("Left", "vault.previous"),
-            ("P", "vault.flag.pick"),
-            ("X", "vault.flag.reject"),
-            ("U", "vault.flag.none"),
-            ("6", "vault.label.red"),
-            ("7", "vault.label.yellow"),
-            ("8", "vault.label.green"),
-            ("9", "vault.label.blue"),
-            ("S", "vault.stack.toggle"),
-        ] {
-            for when in [library, culling.as_str()] {
-                d.keys.push((k.into(), command.into(), when.into()));
-            }
-        }
-        // Drawing masks, while the image has the focus. Escape and Enter
-        // bind only while a path is drawn: otherwise Escape is the
-        // viewport's (it cancels a drag).
-        // Not while culling: its keys are the vault's there.
-        let image = format!(
-            "focusedPanel == 'helios.viewport' && {}",
-            culling.replace("==", "!=")
-        );
-        let image = image.as_str();
-        for (k, command, when) in [
-            ("C", "mask.add.circle", image.to_string()),
-            ("E", "mask.add.ellipse", image.to_string()),
-            ("G", "mask.add.gradient", image.to_string()),
-            ("P", "mask.add.path", image.to_string()),
-            // The mask display, as darktable's mask key.
-            ("M", crate::mask_display::COMMAND, image.to_string()),
-            (
-                "Enter",
-                "mask.path.close",
-                format!("{image} && maskTool == 'path'"),
-            ),
-            // While a path is drawn, mask editing is a pushed mode:
-            // Escape pops it (egui-pop's `nav.back`), which stops the
-            // path; this binding serves a path drawn without the stack.
-            (
-                "Escape",
-                "mask.cancel",
-                // In zen mode Escape leaves it (egui-pop's); while a mode is
-                // pushed it pops it.
-                format!("{image} && maskTool == 'path' && !workbenchZen && !modePushed"),
-            ),
-            (
-                "Delete",
-                "mask.point.remove",
-                format!("{image} && maskPoint"),
-            ),
-        ] {
-            d.keys.push((k.into(), command.into(), when));
-        }
+        // The default map, every key with its `when` (see `keys`).
+        d.keys.extend(crate::keys::defaults());
         // egui-pop's palette is the palette; Helios's name for it stays
         // for scripts.
         d.hidden.insert("workbench.palette".into());
-        // Quick open, everywhere; what it runs needs its item.
-        d.keys.push((
-            "Ctrl+P".into(),
-            crate::quick_open::COMMAND.into(),
-            String::new(),
-        ));
         d.hidden.insert(crate::quick_open::GO.into());
-        // Zen mode (egui-pop's, no default key): the image alone, as in
-        // VS Code; Escape leaves it.
-        d.keys.push((
-            "Ctrl+K Z".into(),
-            egui_pop::api::workbench::CMD_ZEN.as_str().into(),
-            String::new(),
-        ));
         for name in crate::theme::choosable(w.themes) {
             d.checked
                 .insert(format!("theme.{name}"), format!("heliosTheme == '{name}'"));
@@ -3686,6 +3619,11 @@ impl Shell {
                 .toggle_stack()
                 .map_err(|e| format!("vault.stack.toggle: {e}"))?,
             Action::Zoom(z) => self.viewport.borrow_mut().zoom(z, &self.values),
+            Action::Fold(area) => {
+                let h = self.app.handle();
+                let folded = h.layout().folded.contains(&area);
+                h.fold_area(area, !folded);
+            }
             Action::Mask(command, origin) => {
                 // A person taking out a group that holds members (the
                 // row's menu, the palette, a key) is asked first; agents

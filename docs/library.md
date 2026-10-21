@@ -209,8 +209,10 @@ key, the grid, the marks bar or an agent's `library.*` command, so a
 plugin may veto or redirect it; what ran is what is written. A mark
 applies to the selection, else to the image under the cursor.
 
-**Culling keys**, while a library panel has the focus (Lightroom's, and
-darktable's R), each a command a profile or a template may rebind:
+**Culling keys**, while a library panel has the focus outside the
+darkroom, or while culling (Lightroom's, and darktable's R and F2 to F5),
+each a command a profile or a template may rebind (the whole map is in
+[gui.md](gui.md), "Keyboard shortcuts"):
 
 | Keys | Command |
 |------|---------|
@@ -218,13 +220,16 @@ darktable's R), each a command a profile or a template may rebind:
 | P, X, U | `vault.flag.pick`, `vault.flag.reject`, `vault.flag.none` |
 | R | `vault.reject` (toggled) |
 | 6, 7, 8, 9 | `vault.label.red`, `.yellow`, `.green`, `.blue` |
+| F2, F3, F4, F5 | `vault.label.yellow`, `.green`, `.blue`, `.purple` |
 | S | `vault.stack.toggle` |
 | Left, Right | `vault.previous`, `vault.next` |
+| Backspace, Space (culling only) | `vault.previous`, `vault.next` |
 
 `vault.autoAdvance` (or the Auto-advance box) moves the cursor to the
 next image after each mark, as Lightroom's Caps Lock mode. The grid's
 own keys (arrows, Shift and Ctrl with them, Space, Ctrl+A, Enter, + and
--) work as egui-pop describes; Enter or a double click opens the image
+-) work as egui-pop describes; it reads no culling key itself, so a key
+taken away stays away; Enter or a double click opens the image
 in the viewport.
 
 **Stacks.** A stack shows collapsed in the grid and the filmstrip: its
