@@ -3,7 +3,8 @@
 //! tools, each an undo step written to its files at once; saved as a
 //! template after a review; reset to its template as one undo step; parts
 //! of a template added through their review, a side picked for each
-//! conflict; and what agents run with their dry runs.
+//! conflict; nodes delegated to sub-workspaces and deleted again; and
+//! what agents run with their dry runs.
 
 use std::path::{Path, PathBuf};
 
@@ -365,6 +366,94 @@ fn parts_are_added_through_their_review_as_one_undo_step() {
             .view
             .node,
         "retouch"
+    );
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn sub_workspaces_are_delegated_and_deleted_as_undo_steps() {
+    let root = temp("subworkspaces");
+    let (mut h, _, files) = window(&root, "helios.portrait-retouch");
+    let before = files.load().unwrap();
+    let ids = |files: &Files| -> Vec<String> {
+        let state = files.load().unwrap();
+        state
+            .bundle
+            .template
+            .subworkspaces
+            .iter()
+            .map(|s| s.id.clone())
+            .collect()
+    };
+    let first = steps(&h);
+    // A dry run says what it would do and changes nothing.
+    let dry = h
+        .state_mut()
+        .delegate_nodes(
+            &json!({ "name": "Skin", "nodes": ["retouch"], "dry_run": true }),
+            &Origin::User,
+        )
+        .unwrap();
+    assert_eq!(dry["id"], json!("skin"), "{dry}");
+    assert_eq!(dry["problems"], json!([]), "{dry}");
+    assert_eq!(steps(&h), first);
+    assert_eq!(files.load().unwrap(), before);
+    // Through the command: one undo step, written at once.
+    run(
+        &mut h,
+        "network.delegate",
+        json!({ "name": "Skin", "nodes": ["retouch"] }),
+    );
+    assert_eq!(steps(&h), first + 1);
+    assert_eq!(ids(&files), ["skin"]);
+    // Nested: a second one inside the first.
+    let nested = h
+        .state_mut()
+        .delegate_nodes(
+            &json!({ "name": "Mask", "nodes": ["retouch.mask"] }),
+            &Origin::User,
+        )
+        .unwrap();
+    assert_eq!(nested["parent"], json!("skin"), "{nested}");
+    // Refused: nothing changes.
+    assert!(
+        h.state_mut()
+            .delegate_nodes(
+                &json!({ "name": "Bad", "nodes": ["nowhere"] }),
+                &Origin::User
+            )
+            .is_err()
+    );
+    assert_eq!(steps(&h), first + 2);
+    // Deleted: the nested one moves up, the id is retired.
+    let dry = h
+        .state_mut()
+        .delete_subworkspace(&json!({ "id": "skin", "dry_run": true }), &Origin::User)
+        .unwrap();
+    assert_eq!(dry["moved"], json!(["mask"]), "{dry}");
+    assert_eq!(ids(&files), ["skin", "mask"]);
+    run(&mut h, "subworkspace.delete", json!({ "id": "skin" }));
+    assert_eq!(ids(&files), ["mask"]);
+    let state = h.state().workspace_state().unwrap();
+    assert_eq!(state.bundle.template.retired_subworkspaces, ["skin"]);
+    // The same name again gets a new id.
+    let again = h
+        .state_mut()
+        .delegate_nodes(
+            &json!({ "name": "Skin", "nodes": ["exposure"], "dry_run": true }),
+            &Origin::User,
+        )
+        .unwrap();
+    assert_eq!(again["id"], json!("skin-2"), "{again}");
+    // Undone step by step, back to the workspace as it was.
+    undo(&mut h);
+    assert_eq!(ids(&files), ["skin", "mask"]);
+    undo(&mut h);
+    undo(&mut h);
+    assert!(ids(&files).is_empty());
+    assert_eq!(
+        files.load().unwrap().bundle.template,
+        before.bundle.template
     );
     std::fs::remove_dir_all(&root).unwrap();
 }

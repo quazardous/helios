@@ -210,6 +210,9 @@ command-mask-point-smooth =
 command-mask-select =
     .title = Masques : sélectionner un masque, une de ses formes, un point de chemin (`mask`, `shape`, `point`)
 
+command-network-delegate =
+    .title = Déléguer des nœuds du réseau à un nouveau sous-espace de travail (`name`, `nodes`, `dry_run`)
+
 command-param-copyPath =
     .title = Copier le chemin d’une valeur (`path`)
 
@@ -263,6 +266,9 @@ command-scopes-stops =
 
 command-scopes-waveform =
     .title = Mesures : forme d’onde
+
+command-subworkspace-delete =
+    .title = Supprimer un sous-espace de travail, ses nœuds gardés dans le réseau (`id`, `dry_run`)
 
 command-theme-export =
     .title = Exporter le thème en usage, ajustements fusionnés

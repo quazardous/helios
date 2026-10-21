@@ -211,6 +211,9 @@ command-mask-point-smooth =
 command-mask-select =
     .title = Masks: select a mask, a shape of it, a path point (`mask`, `shape`, `point`)
 
+command-network-delegate =
+    .title = Delegate nodes of the network to a new sub-workspace (`name`, `nodes`, `dry_run`)
+
 command-param-copyPath =
     .title = Copy a value's path (`path`)
 
@@ -264,6 +267,9 @@ command-scopes-stops =
 
 command-scopes-waveform =
     .title = Scopes: waveform
+
+command-subworkspace-delete =
+    .title = Delete a sub-workspace, its nodes kept in the network (`id`, `dry_run`)
 
 command-theme-export =
     .title = Export the theme in use, overrides merged

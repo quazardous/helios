@@ -62,6 +62,14 @@ pub(super) const COMMANDS: &[(&str, &str)] = &[
         "workspace.importParts.apply",
         "Add the parts reviewed, each conflict's side picked",
     ),
+    (
+        "network.delegate",
+        "Delegate nodes of the network to a new sub-workspace (`name`, `nodes`, `dry_run`)",
+    ),
+    (
+        "subworkspace.delete",
+        "Delete a sub-workspace, its nodes kept in the network (`id`, `dry_run`)",
+    ),
 ];
 
 /// The workspace open, as the shell edits it.
@@ -534,6 +542,67 @@ impl Shell {
         Ok(answer)
     }
 
+    /// Delegates nodes of the network to a new sub-workspace (`name`,
+    /// `nodes`, `dry_run`), as one undo step; checked first. The answer
+    /// gives its id, its parent and the sub-workspaces moved inside it.
+    pub fn delegate_nodes(&mut self, args: &Value, origin: &Origin) -> Result<Value, String> {
+        let name = text(args, "name")
+            .filter(|s| !s.trim().is_empty())
+            .ok_or("`name` is missing")?
+            .to_string();
+        let nodes: Vec<String> =
+            serde_json::from_value(args["nodes"].clone()).map_err(|e| format!("nodes: {e}"))?;
+        self.subworkspace_step("delegate nodes", args, origin, |now| {
+            now.delegated(&name, &nodes)
+        })
+    }
+
+    /// Deletes a sub-workspace (`id`, `dry_run`), as one undo step: its
+    /// nodes stay in the network, the ones nested in it move up, its id
+    /// is retired.
+    pub fn delete_subworkspace(&mut self, args: &Value, origin: &Origin) -> Result<Value, String> {
+        let id = text(args, "id")
+            .filter(|s| !s.is_empty())
+            .ok_or("`id` is missing")?
+            .to_string();
+        self.subworkspace_step("delete a sub-workspace", args, origin, |now| {
+            now.subworkspace_deleted(&id)
+        })
+    }
+
+    /// A sub-workspace change as one undo step, checked first; a dry run
+    /// answers what it would do (with its `problems`) and changes
+    /// nothing.
+    fn subworkspace_step(
+        &mut self,
+        label: &str,
+        args: &Value,
+        origin: &Origin,
+        make: impl Fn(&State) -> Result<(State, Value), String>,
+    ) -> Result<Value, String> {
+        let catalogue = self.workspace_catalogue();
+        if args["dry_run"].as_bool().unwrap_or(false) {
+            let now = self.workspace_state().ok_or_else(no_workspace)?;
+            let (next, mut answer) = make(&now)?;
+            answer["problems"] = json!(next.problems(&catalogue));
+            answer["dry_run"] = json!(true);
+            return Ok(answer);
+        }
+        let mut answer = Value::Null;
+        self.workspace_step(label, origin, |now| {
+            let (next, made) = make(now)?;
+            let problems = next.problems(&catalogue);
+            if !problems.is_empty() {
+                return Err(problems.join("; "));
+            }
+            answer = made;
+            Ok(next)
+        })?;
+        answer["problems"] = json!([]);
+        answer["dry_run"] = json!(false);
+        Ok(answer)
+    }
+
     /// Saves the workspace as a template (what an agent passes whole, or
     /// the review form's values): the review, and the bundle written
     /// among the user's templates unless it is a dry run.
@@ -641,6 +710,8 @@ impl Shell {
                 });
                 self.import_workspace_parts(&direct, origin)
             }
+            "network.delegate" => self.delegate_nodes(args, origin),
+            "subworkspace.delete" => self.delete_subworkspace(args, origin),
             other => Err(format!("no workspace command `{other}`")),
         }
     }

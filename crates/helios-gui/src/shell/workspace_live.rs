@@ -505,6 +505,8 @@ impl Shell {
                 Ok(answer)
             }
             "workspace.save_as_template" => self.save_workspace_as_template(request),
+            "network.delegate" => self.delegate_nodes(request, &origin),
+            "subworkspace.delete" => self.delete_subworkspace(request, &origin),
             "workspace.undo" => self.agent_undo(&origin),
             cmd if cmd.starts_with("context.") => {
                 crate::contexts::agent_tool(self.app.handle(), request, AGENT)
