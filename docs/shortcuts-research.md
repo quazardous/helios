@@ -1,10 +1,14 @@
 # Keyboard shortcuts: research and proposal
 
-Status: **proposal, for review** (2026-10-11). The GUI follows VS Code's
-model (one window per workspace, every action a named command; see
-[gui.md](gui.md)); this note gathers how darktable, VS Code, Lightroom,
-Capture One and node editors handle keys, then proposes Helios's credo and
-a default map. darktable paths are relative to its source tree.
+Status: **decided** (2026-10-21): the credo and the map are in
+[gui.md](gui.md), "Keyboard shortcuts", with the three open choices
+settled (picks with `P`/`U` and `X` reject, `6`–`9` colour aliases,
+`Ctrl+/` for bypass). Research and proposal of 2026-10-11 below.
+
+The GUI follows VS Code's model (one window per workspace, every action
+a named command; see [gui.md](gui.md)); this note gathers how darktable,
+VS Code, Lightroom, Capture One and node editors handle keys, then
+proposes Helios's credo and a default map. darktable paths are relative to its source tree.
 
 ## darktable
 
