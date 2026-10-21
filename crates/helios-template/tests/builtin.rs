@@ -236,13 +236,14 @@ fn develop_preview_is_valid_and_builds_exposure_into_sigmoid_beside_the_image() 
     let names: Vec<&str> = built.nodes.keys().map(String::as_str).collect();
     assert_eq!(names, ["exposure", "sigmoid", "source"]);
     assert_eq!(built.view.0, built.nodes["sigmoid"]);
-    // The image large, the parameters above the scopes beside it; the
-    // panels of other tasks away.
+    // The image large, the parameters above the scopes beside it, the
+    // filmstrip under to pick the picture; the panels of other tasks away.
     let area = |p: &str| built.layout.area_of(&PanelId::new(p).unwrap());
     assert_eq!(area("helios.viewport"), Some(Area::Center));
     assert_eq!(area("helios.params"), Some(Area::EndSide));
     assert_eq!(area("helios.scopes"), Some(Area::EndSide));
-    for p in ["helios.graph", "helios.masks", "helios.filmstrip"] {
+    assert_eq!(area("helios.filmstrip"), Some(Area::Bottom));
+    for p in ["helios.graph", "helios.masks"] {
         assert!(
             built.layout.hidden.contains(&PanelId::new(p).unwrap()),
             "{p}"

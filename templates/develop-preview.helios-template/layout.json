@@ -12,7 +12,8 @@
         "a": { "kind": "tabs", "panels": ["helios.params"], "active": 0 },
         "b": { "kind": "tabs", "panels": ["helios.scopes"], "active": 0 }
       }
-    ]
+    ],
+    ["bottom", { "kind": "tabs", "panels": ["helios.filmstrip"], "active": 0 }]
   ],
   "auxiliary": [],
   "hidden": [
@@ -20,7 +21,6 @@
     "helios.vault",
     "helios.modules",
     "helios.masks",
-    "helios.filmstrip",
     "helios.queue",
     "helios.log"
   ]

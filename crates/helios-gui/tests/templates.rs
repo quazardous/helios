@@ -347,12 +347,16 @@ fn a_workspace_from_develop_preview_shows_the_image_with_its_parameters_and_scop
     let mut h = headless::harness(shell, vec2(1280.0, 800.0));
     h.run();
     // The image central, the parameters and the scopes beside it, the
-    // panels of other tasks away.
+    // filmstrip under to pick the picture, the panels of other tasks away.
     let shown = h.state().layout();
     assert_eq!(shown.area_of(&panel("helios.viewport")), Some(Area::Center));
     assert_eq!(shown.area_of(&panel("helios.params")), Some(Area::EndSide));
     assert_eq!(shown.area_of(&panel("helios.scopes")), Some(Area::EndSide));
-    for p in ["helios.graph", "helios.masks", "helios.filmstrip"] {
+    assert_eq!(
+        shown.area_of(&panel("helios.filmstrip")),
+        Some(Area::Bottom)
+    );
+    for p in ["helios.graph", "helios.masks"] {
         assert!(shown.hidden.contains(&panel(p)), "{p}");
     }
     std::fs::remove_dir_all(&root).unwrap();
