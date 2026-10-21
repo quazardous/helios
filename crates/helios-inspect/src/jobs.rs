@@ -9,7 +9,7 @@
 //! nothing.
 
 use std::collections::VecDeque;
-use std::sync::{Arc, Condvar, Mutex, PoisonError};
+use std::sync::{Arc, Condvar, Mutex, PoisonError, Weak};
 use std::time::{Duration, Instant};
 
 use helios_core::jobs::{CANCELLED, CANCELLING, FAILED, FINISHED, PROGRESS, STARTED};
@@ -19,10 +19,16 @@ use serde_json::{Map, Value, json};
 /// How many ended jobs the view remembers.
 pub const ENDED: usize = 256;
 
+/// How long a description waits for the view to fold what the bus has
+/// already published.
+const CATCH_UP: Duration = Duration::from_secs(2);
+
 /// The running and recently ended jobs of a bus.
 #[derive(Clone)]
 pub struct JobsView {
     fold: Arc<(Mutex<Fold>, Condvar)>,
+    /// Weak, so the view does not keep the bus (and its thread) alive.
+    bus: Weak<Bus>,
     instance: String,
 }
 
@@ -120,6 +126,7 @@ impl JobsView {
             .expect("a thread for the jobs view");
         Self {
             fold,
+            bus: Arc::downgrade(bus),
             instance: instance.to_string(),
         }
     }
@@ -150,7 +157,13 @@ impl Describe for JobsView {
     /// "cancelling"}], "ended": [{"kind", "data"}]}`: `started` is the job's
     /// `job.started` data, `progress` its `job.progress` fields merged,
     /// `ended` its end event, the oldest first.
+    /// It first waits (briefly) for the view to fold every event the bus
+    /// has published, so a client that has seen an event on the stream
+    /// finds it here too.
     fn describe(&self) -> Value {
+        if let Some(bus) = self.bus.upgrade() {
+            self.caught_up(bus.last_seq(), CATCH_UP);
+        }
         let f = self.fold.0.lock().unwrap_or_else(PoisonError::into_inner);
         let running: Vec<Value> = f
             .running
@@ -190,8 +203,7 @@ mod tests {
         let second =
             jobs.start(Start::new("export-2", "Export b", "export").parent("batch-1", 1.0));
         let last = bus.last_seq();
-        // The thread folds behind the bus: wait for it to catch up.
-        assert!(view.caught_up(last, Duration::from_secs(10)));
+        // A description waits for the thread folding behind the bus.
         let snapshot = view.describe();
         assert_eq!(snapshot["seq"], last);
         assert_eq!(snapshot["instance"], "here");
