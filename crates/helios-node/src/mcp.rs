@@ -748,6 +748,12 @@ pub const TOOLS: &[Tool] = &[
                 description: "Parameters changed for this export only, by node name",
                 default: Some(empty_object),
             },
+            Param {
+                name: "as_mask",
+                schema: boolean,
+                description: "A one-channel port (a mask node's `mask`) written as its values, 0 black and 1 white, as the desktop's mask display shows it in grey",
+                default: Some(no),
+            },
         ],
     },
     Tool {

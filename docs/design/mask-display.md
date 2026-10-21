@@ -190,6 +190,9 @@ tests too.
   display transform. It needed no egui-pop change. The overlay layer in
   egui-pop's viewport shader, with the mask kept on the device, stays
   the next step for the GPU path (build plan, steps 2 and 3).
-- **Choice 5**: `helios_render` already took a `node` and a `port`.
-  Pictures: `gui.snapshot viewport.display` shows the display, and
+- **Choice 5**: `helios_render` already took a `node` and a `port`,
+  but answers a job, not a picture: the MCP argument is `as_mask` on
+  `helios_export`, which writes a mask node's port as the grey mode
+  shows it (0 black, 1 white) rather than as light. Pictures:
+  `gui.snapshot viewport.display` shows the display, and
   `helios-gui --mask-display overlay|grey` starts with it on.

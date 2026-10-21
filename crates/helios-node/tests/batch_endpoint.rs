@@ -197,6 +197,7 @@ fn a_batch_job_is_cancelled_by_its_id() {
         quality: None,
         params: std::collections::BTreeMap::new(),
         batch: Some(id.clone()),
+        as_mask: false,
     });
     assert_eq!(refused["ok"], false, "{refused}");
     assert_eq!(refused["message"]["key"], "batch-cancelled", "{refused}");

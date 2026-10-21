@@ -102,3 +102,23 @@ fn the_format_follows_the_extension() {
     assert_eq!(Format::from_path("b.tif".as_ref()), Some(Format::Tiff));
     assert_eq!(Format::from_path("b.webp".as_ref()), None);
 }
+
+#[test]
+fn a_mask_is_written_as_its_values() {
+    use helios_export::mask_as_grey;
+    let values = [0.0_f32, 0.25, 0.5, 1.0, 1.5];
+    let mask = Image::from_fn(Region::sized(5, 1), 1, |x, _, _| values[x as usize]);
+    let bytes = encode(&mask_as_grey(&mask).unwrap(), &Format::Png { bits: 8 }).unwrap();
+    let decoded = image::load_from_memory(&bytes).unwrap().to_rgb8();
+    for (x, v) in values.iter().enumerate() {
+        let want = (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+        let got = decoded.get_pixel(x as u32, 0).0;
+        assert!(
+            got.iter().all(|c| c.abs_diff(want) <= 1),
+            "{v}: {got:?}, {want} expected"
+        );
+    }
+    // Only a mask: an RGB image is refused.
+    let rgb = Image::from_fn(Region::sized(1, 1), 3, |_, _, _| 0.5);
+    assert_eq!(mask_as_grey(&rgb).unwrap_err().key, "export-not-a-mask");
+}

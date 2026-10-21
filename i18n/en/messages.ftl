@@ -51,6 +51,8 @@ export-no-format = no format for { $path }
 
 export-not-a-file = { $path } is not a file path
 
+export-not-a-mask = a mask has one channel, not { $channels }
+
 export-png-bits = PNG has 8 or 16 bits, not { $bits }
 
 export-write-failed = cannot write { $path }: { $error }

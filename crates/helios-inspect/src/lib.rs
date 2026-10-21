@@ -408,6 +408,10 @@ pub mod control {
             /// which the export's job is a child of.
             #[serde(default, skip_serializing_if = "Option::is_none")]
             batch: Option<String>,
+            /// A one-channel port (a mask) written as its values, 0 black
+            /// and 1 white, rather than as light.
+            #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+            as_mask: bool,
         },
         /// Cancels a job.
         Cancel {

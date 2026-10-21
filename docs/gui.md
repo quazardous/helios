@@ -824,7 +824,9 @@ What a module or a mask node affects, shown on the image (2026-10-21,
   exports never show it; `viewport.scene` stays the image's data.
 - **Pictures and agents.** `gui.snapshot viewport.display` pictures it;
   `helios-gui --mask-display overlay` (or `grey`) starts with it on, for
-  pictures and benches.
+  pictures and benches. Without a window, the node's MCP tool
+  `helios_export` writes any mask node's `mask` port as that grey
+  picture with `as_mask`.
 
 ### The Masks panel
 

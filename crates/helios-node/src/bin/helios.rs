@@ -291,6 +291,7 @@ fn parse(args: Vec<String>) -> Result<Call, String> {
                 quality,
                 params: sets,
                 batch: None,
+                as_mask: false,
             },
             ["set-param", node, param, v] => ControlRequest::SetParam {
                 node: node.to_string(),

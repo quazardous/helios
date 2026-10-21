@@ -378,6 +378,7 @@ impl Node {
         format: helios_export::Format,
         params: &BTreeMap<String, helios_core::Params>,
         batch: Option<&str>,
+        as_mask: bool,
     ) -> Result<(JobId, Region), Message> {
         absolute(path)?;
         let id = self.id(name)?;
@@ -408,9 +409,15 @@ impl Node {
         };
         let (engine, port) = (self.engine.clone(), port.to_string());
         let render = move || {
-            engine
+            let image = engine
                 .render(&graph, id, &port, region)
-                .map_err(|e| e.to_string())
+                .map_err(|e| e.to_string())?;
+            // A mask written as its values (the mask display's grey).
+            if as_mask {
+                helios_export::mask_as_grey(&image).map_err(|m| m.english)
+            } else {
+                Ok(image)
+            }
         };
         let job = match batch {
             None => {
@@ -804,6 +811,7 @@ mod control {
                 quality,
                 params,
                 batch,
+                as_mask,
             } => {
                 let format = match format {
                     FileFormat::Jpeg => Format::Jpeg {
@@ -812,8 +820,17 @@ mod control {
                     FileFormat::Png => Format::Png { bits: 8 },
                     FileFormat::Tiff => Format::Tiff,
                 };
-                node.submit_export_now(name, port, *region, path, format, params, batch.as_deref())
-                    .map(|(job, region)| json!({ "job": job.0, "region": region }))
+                node.submit_export_now(
+                    name,
+                    port,
+                    *region,
+                    path,
+                    format,
+                    params,
+                    batch.as_deref(),
+                    *as_mask,
+                )
+                .map(|(job, region)| json!({ "job": job.0, "region": region }))
             }
             ControlRequest::JobCancel { id } => node
                 .jobs

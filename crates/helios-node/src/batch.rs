@@ -710,6 +710,7 @@ fn submit(
         quality: Some(options.quality),
         params,
         batch: node.batch.clone(),
+        as_mask: false,
     });
     match asked {
         Ok(answer) => {

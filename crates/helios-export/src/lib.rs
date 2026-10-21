@@ -106,6 +106,23 @@ fn to_srgb(image: &Image) -> Result<Vec<f64>, Message> {
     Ok(out)
 }
 
+/// A mask (one channel, 0 to 1) made ready to write as its values: 0
+/// black, 1 white and 0.5 the middle of the file's scale, rather than as
+/// linear light (which [`encode`] lifts through the sRGB curve). The
+/// mask display's grey, for agents and pictures.
+pub fn mask_as_grey(mask: &Image) -> Result<Image, Message> {
+    if mask.channels() != 1 {
+        return Err(Message::new(
+            "export-not-a-mask",
+            "a mask has one channel, not { $channels }",
+        )
+        .with("channels", mask.channels()));
+    }
+    Ok(Image::from_fn(mask.region(), 1, |x, y, _| {
+        color::srgb_decode(f64::from(mask.pixel(x, y)[0]).clamp(0.0, 1.0)) as f32
+    }))
+}
+
 /// Encodes an image (linear Rec.2020) into the bytes of a file.
 pub fn encode(image: &Image, format: &Format) -> Result<Vec<u8>, Message> {
     let (w, h) = (image.region().width, image.region().height);
