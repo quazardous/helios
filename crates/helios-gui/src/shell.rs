@@ -520,6 +520,11 @@ impl Shell {
             .themes(themes.clone())
             .theme(crate::theme::ThemeSpec::new(crate::theme::DEFAULT))
             .plugins(DefaultPlugins)
+            // The wheel zooms the image and steps the slider under the
+            // pointer, a double click on the image leaves the darkroom, as
+            // in darktable (the user picks another profile in the
+            // settings).
+            .pointer_profile("darktable")
             .plugin(plugins::Commands {
                 registry: registry.clone(),
                 declarations: declarations.clone(),
@@ -739,9 +744,22 @@ impl Shell {
             });
         }
         if has(&shell, "helios.viewport") {
-            let (viewport, values) = (shell.viewport.clone(), shell.values.clone());
+            let (viewport, values, app) = (
+                shell.viewport.clone(),
+                shell.values.clone(),
+                shell.app.handle().clone(),
+            );
             shell.set_content("helios.viewport", move |ui| {
-                viewport.borrow_mut().ui(ui, &values);
+                let leave = {
+                    let mut viewport = viewport.borrow_mut();
+                    viewport.ui(ui, &values);
+                    viewport.take_leave()
+                };
+                // The darktable profile's double click on the image: back
+                // where the darkroom was opened from.
+                if leave {
+                    crate::contexts::leave_darkroom(&app, &egui_pop::model::commands::Origin::User);
+                }
             });
         }
         if has(&shell, crate::mask_tree::PANEL) {
@@ -3473,7 +3491,7 @@ impl Shell {
                 let id = panel_id(&p)?;
                 let h = self.app.handle();
                 let pos = pos.unwrap_or_else(|| {
-                    egui_pop::model::layout::Floating::cascade(h.layout().floating.len())
+                    egui_pop::model::layout::FloatingGroup::cascade(h.layout().floating.len())
                 });
                 return workbench_outcome(
                     h.change_workbench(egui_pop::api::workbench::Change::Float(id, pos)),

@@ -207,11 +207,30 @@ fn escape_gives_a_drag_up_without_a_trace() {
     assert!(h.state().values.lock().unwrap().undo_steps().is_empty());
 }
 
-/// The wheel scrolls past a slider: it steps one only once focused (or
-/// with Alt held over it).
+/// With the wheel over sliders guarded (the setting; darktable's
+/// profile, Helios's default, steps the slider under the pointer), the
+/// wheel scrolls past a slider: it steps one only once focused (or with
+/// Alt held over it).
 #[test]
-fn the_wheel_steps_a_slider_only_once_focused() {
+fn the_wheel_guarded_steps_a_slider_only_once_focused() {
     let mut h = harness();
+    {
+        use egui_pop::model::values::{Change, Set, Value as PopValue};
+        let store = h.state().app().handle().store();
+        store
+            .lock()
+            .unwrap()
+            .set(
+                Set::new(
+                    "settings/input.slider_wheel",
+                    Change::To(PopValue::Choice("guarded".into())),
+                    egui_pop::model::commands::Origin::User,
+                )
+                .untracked(),
+            )
+            .unwrap();
+    }
+    h.run();
     // Steps, not `run`: a tooltip fading in keeps asking for frames.
     let wheel = |h: &mut egui_kittest::Harness<'_, Shell>, modifiers: Modifiers| {
         let at = h

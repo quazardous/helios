@@ -92,6 +92,46 @@ fn places_have_their_arrangements_and_the_breadcrumb_says_where() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Darktable's pointer profile, Helios's default: a double click on the
+/// image leaves the darkroom, back where it was opened from.
+#[test]
+fn a_double_click_on_the_image_leaves_the_darkroom() {
+    let dir = temp("leave");
+    let mut h = window(&dir);
+    run(&mut h, "view.library", json!(null));
+    let photo = dir.join("photo.png");
+    std::fs::write(&photo, b"not read").unwrap();
+    contexts::open(
+        h.state().app().handle(),
+        &Opened::File(photo),
+        &PopOrigin::User,
+    );
+    h.run();
+    assert_eq!(key(&h, "place"), "helios.darkroom");
+    let at = h
+        .state()
+        .target_rect("viewport.display")
+        .expect("the darkroom shows the image")
+        .center();
+    h.hover_at(at);
+    h.step();
+    let mut t = h.ctx.input(|i| i.time) + 1.0;
+    for pressed in [true, false, true, false] {
+        t += 0.05;
+        h.input_mut().time = Some(t);
+        h.input_mut().events.push(egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+        h.step();
+    }
+    h.run();
+    assert_eq!(key(&h, "place"), "helios.library");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn culling_is_an_orientation_with_its_keys_and_the_image_first() {
     let dir = temp("culling");

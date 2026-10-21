@@ -2,11 +2,15 @@
 //! windowing system sends them), never by widget calls, checking the
 //! interface's grammar (docs/gui.md) where panels meet:
 //!
-//! - the wheel scrolls the panel under the pointer; a slider takes it
-//!   only with the focus or Alt held; over the image it zooms;
+//! - Helios starts on darktable's pointer profile: the wheel over the
+//!   image zooms, over a slider it changes the value (Ctrl+Alt: the panel
+//!   scrolls); with the wheel over sliders guarded (a setting), the wheel
+//!   scrolls the panel and a slider takes it only with the focus or Alt
+//!   held;
 //! - a drag belongs to where it started, wherever it ends;
-//! - a double click resets a slider, fits the image, never resets on the
-//!   canvas;
+//! - a double click resets a slider, never resets on the canvas, and
+//!   fits the image when the setting says so (darktable's leaves the
+//!   darkroom, `tests/contexts.rs`);
 //! - a held key repeats a step, never a command, and a held arrow is one
 //!   undo step;
 //! - nothing but the user moves the keyboard focus, and a field typed in
@@ -126,6 +130,26 @@ fn image(h: &Harness<'_, Shell>) -> Pos2 {
     rect(h, "viewport.display").center()
 }
 
+/// One of egui-pop's settings, a choice, written as the user would in
+/// the settings window (`input.slider_wheel`...).
+fn setting(h: &mut Harness<'_, Shell>, id: &str, choice: &str) {
+    use egui_pop::model::values::{Change, Set, Value as PopValue};
+    let store = h.state().app().handle().store();
+    store
+        .lock()
+        .unwrap()
+        .set(
+            Set::new(
+                &format!("settings/{id}"),
+                Change::To(PopValue::Choice(choice.into())),
+                egui_pop::model::commands::Origin::User,
+            )
+            .untracked(),
+        )
+        .unwrap();
+    settle(h);
+}
+
 fn modifiers(h: &mut Harness<'_, Shell>, m: Modifiers) {
     h.input_mut().events.push(Event::ModifiersChanged(m));
 }
@@ -210,8 +234,36 @@ fn two_clicks(h: &mut Harness<'_, Shell>, a: Pos2, b: Pos2, gap: f64) {
 // --- The wheel ---
 
 #[test]
-fn the_wheel_over_a_slider_scrolls_the_panel_and_never_changes_the_value() {
+fn darktable_s_wheel_over_a_slider_changes_it_and_ctrl_alt_leaves_it() {
     let mut h = harness();
+    let ev = slider(&h, EV);
+    // A notch up over the slider, without the focus: a step up, the
+    // panel still.
+    wheel(
+        &mut h,
+        ev.center(),
+        MouseWheelUnit::Line,
+        vec2(0.0, 1.0),
+        Modifiers::NONE,
+    );
+    assert!(f(&h, EV) > 0.0, "{}", f(&h, EV));
+    assert_eq!(slider(&h, EV), ev, "the panel scrolled");
+    // Ctrl+Alt and the wheel leave it to the panel: the value stays.
+    let up = f(&h, EV);
+    wheel(
+        &mut h,
+        ev.center(),
+        MouseWheelUnit::Line,
+        vec2(0.0, -2.0),
+        Modifiers::CTRL | Modifiers::ALT,
+    );
+    assert_eq!(f(&h, EV), up, "Ctrl+Alt and the wheel changed the value");
+}
+
+#[test]
+fn the_wheel_guarded_over_a_slider_scrolls_the_panel_and_never_changes_the_value() {
+    let mut h = harness();
+    setting(&mut h, "input.slider_wheel", "guarded");
     let ev = slider(&h, EV);
     let before = (f(&h, EV), view(&h));
     // Notches, then a touchpad's stream of small pixel deltas.
@@ -250,6 +302,7 @@ fn the_wheel_over_a_slider_scrolls_the_panel_and_never_changes_the_value() {
 #[test]
 fn a_focused_slider_or_alt_takes_the_wheel_and_the_panel_stays() {
     let mut h = harness();
+    setting(&mut h, "input.slider_wheel", "guarded");
     let ev = slider(&h, EV);
     // Alt held over it, without the focus: a step up, the panel still.
     wheel(
@@ -371,8 +424,9 @@ fn a_pan_that_ends_over_the_parameters_moves_only_the_view() {
 // --- Double clicks ---
 
 #[test]
-fn a_double_click_on_the_image_fits_and_resets_nothing() {
+fn a_double_click_on_the_image_set_to_fit_fits_and_resets_nothing() {
     let mut h = harness();
+    setting(&mut h, "input.image_double_click", "fit");
     let ev = slider(&h, EV);
     // A value changed, a shape selected, the view zoomed.
     two_clicks(&mut h, ev.center(), ev.center(), 0.1);

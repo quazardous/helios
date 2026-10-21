@@ -432,13 +432,18 @@ impl Bundle {
         for h in &self.layout.hidden {
             check_panel(&catalogue, h.as_str(), None, "layout.hidden", p);
         }
-        for f in &self.layout.floating {
-            check_panel(&catalogue, f.panel.as_str(), None, "layout.floating", p);
-            let specs = catalogue.panel_specs();
-            if let Some(spec) = specs.iter().find(|s| s.id == f.panel)
+        let specs = catalogue.panel_specs();
+        for panel in self
+            .layout
+            .floating
+            .iter()
+            .flat_map(egui_pop_model::layout::FloatingGroup::panels)
+        {
+            check_panel(&catalogue, panel.as_str(), None, "layout.floating", p);
+            if let Some(spec) = specs.iter().find(|s| s.id == *panel)
                 && !spec.floatable
             {
-                p.push(format!("layout.floating: `{}` does not float", f.panel));
+                p.push(format!("layout.floating: `{panel}` does not float"));
             }
         }
         let own = format!("{}-", slug(&t.id));

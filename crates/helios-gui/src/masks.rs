@@ -589,12 +589,18 @@ struct Faint {
     pointer: Option<Pos2>,
 }
 
-/// A double click on the canvas the editor took (adding a path point).
+/// A double click on the canvas the editor took (adding a path point),
+/// or passed on to a pointer profile that leaves the view.
 #[derive(Default)]
 struct Double {
     /// The selected path's edge, to test the double click against.
     edge: Option<Vec<[f64; 2]>>,
     taken: Option<[f64; 2]>,
+    /// The pointer profile's double click leaves the view (darktable's),
+    /// as the viewport said before it was drawn.
+    leaves: bool,
+    /// A double click the editor did not take, under such a profile.
+    left: bool,
 }
 
 /// What Shift does to a handle's drag.
@@ -866,7 +872,13 @@ impl Masks {
                     d.taken = Some(m.screen_to_image(pos));
                     None
                 } else {
-                    default()
+                    // egui-pop signals the profile's "leave the view"
+                    // only without a hook: say it from here.
+                    let to = default();
+                    if to.is_none() && d.leaves {
+                        d.left = true;
+                    }
+                    to
                 }
             },
         ));
@@ -1170,6 +1182,18 @@ impl Masks {
     /// edge), in image pixels.
     pub fn take_double(&mut self) -> Option<[f64; 2]> {
         self.double.borrow_mut().taken.take()
+    }
+
+    /// Before the viewport is drawn: whether the pointer profile's double
+    /// click on the image leaves the view.
+    pub fn set_double_click_leaves(&mut self, leaves: bool) {
+        self.double.borrow_mut().leaves = leaves;
+    }
+
+    /// Whether a double click the editor did not take asked to leave the
+    /// view since the last call.
+    pub fn take_left(&mut self) -> bool {
+        std::mem::take(&mut self.double.borrow_mut().left)
     }
 
     /// Whether a drag is under way.

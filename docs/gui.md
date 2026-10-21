@@ -590,9 +590,12 @@ bar's end when the module declares a picker (its click publishes
 gesture (one undo step; an agent's write meanwhile is refused; Ctrl
 finer, Shift coarser; Escape gives it up and leaves no trace), the arrows
 step (Shift coarse, Ctrl fine), a double click resets. The wheel
-scrolls the panel: a slider takes the wheel only when it has focus or
-while Alt is held, so scrolling past sliders never changes a value
-(decided 2026-10-12, after darktable's most complained-about default).
+follows egui-pop's pointer profile, darktable's by default (decided
+2026-10-21): the wheel over a slider changes it, Ctrl+Alt and the wheel
+scroll the panel. Settings › Input › Wheel over sliders, set to
+`guarded`, keeps the rule decided on 2026-10-12 instead: the wheel
+scrolls the panel and a slider takes it only when it has focus or while
+Alt is held, so scrolling past sliders never changes a value.
 Steps in a row on one slider (a held arrow's repeats, a turned wheel)
 are one undo step; a held key repeats a step, never a command.
 Enter types a value or an expression (`x * 2`, `x - 0,5`, `x` being the
@@ -666,10 +669,14 @@ and the colour (`helios-gui/src/viewport.rs`).
   image pixel on one screen pixel at any window scale. A drag is one
   gesture (an agent's write meanwhile is refused); none of it is an undo
   step nor saves the edit.
-- **Gestures** are egui-pop's: a drag (the middle button anywhere, or
-  Space and drag) pans and Escape puts it back, the wheel zooms around the
-  pointer and stops at 100 % when it crosses it (Shift and the wheel
-  pans), a double click fits; with the viewport focused, `+` and `-` walk
+- **Gestures** are egui-pop's, from its pointer profile (darktable's by
+  default since 2026-10-21; the user picks another in the settings): a
+  drag (the middle button anywhere, or Space and drag) pans and Escape
+  puts it back, the wheel zooms around the pointer and stops at 100 %
+  when it crosses it (Ctrl: without stops; Shift and the wheel pan), a
+  middle click cycles 100 %, 200 % and fit, a double click leaves the
+  darkroom, back where it was opened from (Settings › Input › Double
+  click on the image: fit, or nothing); with the viewport focused, `+` and `-` walk
   the zoom ladder, `0` fits, `1` is 100 %, `2` is 200 %, the arrows pan. The commands
   `viewport.zoom.fit`, `viewport.zoom.100`, `viewport.zoom.in` and
   `viewport.zoom.out` do the same from the palette and for agents.
@@ -760,7 +767,7 @@ node: `view/masks/mask`, the network's first by default) and edits them
   resets it (a rotation to 0, a feather to none, a corner to sharp); the
   wheel over a handle adjusts it (a size or feather, a rotation), one
   undo step while it turns. Elsewhere the viewport's grammar holds: the
-  wheel zooms, a double click fits.
+  wheel zooms, a double click does what the pointer profile says.
 - **Hints.** While a handle is hovered, the status line says the
   gestures it takes, in the interface's language: what Shift snaps (an
   angle to 15° steps, or a move to the axes and diagonals), Ctrl's fine

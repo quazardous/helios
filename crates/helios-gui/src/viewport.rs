@@ -266,6 +266,9 @@ pub struct Viewport {
     /// The mask shown over the image, when the mask display is on and
     /// the selected module has a mask.
     layer: Option<crate::mask_display::Layer>,
+    /// The pointer asked to leave the view (the darktable profile's
+    /// double click on the image), not yet acted on.
+    leave: bool,
     pub stats: Arc<Stats>,
 }
 
@@ -302,6 +305,7 @@ impl Default for Viewport {
             masks: crate::masks::Masks::default(),
             wanted: DisplayTarget::srgb(),
             layer: None,
+            leave: false,
             stats,
         }
     }
@@ -758,6 +762,13 @@ impl Viewport {
         &mut self.state
     }
 
+    /// Whether the pointer asked to leave the view since the last call
+    /// (the darktable profile's double click on the image); the shell
+    /// leaves the darkroom.
+    pub fn take_leave(&mut self) -> bool {
+        std::mem::take(&mut self.leave)
+    }
+
     /// The values under the pointer, once they arrived.
     pub fn readout(&self) -> Option<&Readout> {
         self.readout.as_ref()
@@ -839,6 +850,16 @@ impl Viewport {
             self.follow_mask_display(&store, style);
             let pointer = ui.input(|i| i.pointer.hover_pos());
             self.masks.hook(self.state.hooks_mut());
+            let leaves = {
+                use egui_pop::viewport::gestures::{Gestures, ViewAction};
+                let map = egui_pop::core::pointer::map(&ctx);
+                let modifiers = ui.input(|i| i.modifiers);
+                Gestures::from_map(&map)
+                    .pointer
+                    .double_click_action(egui::PointerButton::Primary, modifiers)
+                    == ViewAction::Leave
+            };
+            self.masks.set_double_click_leaves(leaves);
             let hovered = self.masks.hovered();
             self.masks.prepare(
                 self.edited.as_ref().map(|e| &e.graph),
@@ -874,6 +895,9 @@ impl Viewport {
         let mut store = store.lock().unwrap_or_else(PoisonError::into_inner);
         let now = ui.input(|i| i.time);
         self.masks.signals(&out.signals, &mut store, now);
+        if self.masks.take_left() {
+            self.leave = true;
+        }
         if let Some(m) = out.mapping {
             if out.response.clicked()
                 && !self.masks.dragging()
@@ -913,6 +937,7 @@ impl Viewport {
                     compare: Compare::Split(t),
                     ..
                 } => write(&mut store, SPLIT, Value::Float(f64::from(t)), None),
+                Signal::Leave => self.leave = true,
                 _ => {}
             }
         }
