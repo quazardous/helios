@@ -49,6 +49,7 @@ pub fn modules() -> Catalogue {
     use helios_module_masks as m;
     let mut c = Catalogue::new()
         .module(ModuleRef::new(helios_module_exposure::Exposure))
+        .module(ModuleRef::new(helios_module_sigmoid::Sigmoid))
         .module(ModuleRef::new(m::MaskCombine))
         .module(ModuleRef::new(m::MaskFeather))
         .module(ModuleRef::new(m::MaskBlur))
