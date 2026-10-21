@@ -1152,7 +1152,15 @@ impl Shell {
         self.theme = crate::theme::resolve(&self.themes, resolved, &self.theme_overrides);
         let mut spec = crate::theme::ThemeSpec::new(resolved);
         spec.overrides.clone_from(&self.theme_overrides);
-        self.app.handle().theme().set(spec);
+        // What the user chose across themes stays: the text size, the
+        // fonts (Settings › Appearance › Fonts) and the accent colour.
+        let service = self.app.handle().theme();
+        let kept = service.spec();
+        spec.text_size = kept.text_size;
+        spec.font_ui = kept.font_ui;
+        spec.font_mono = kept.font_mono;
+        spec.accent = kept.accent;
+        service.set(spec);
         let problems: Vec<String> = self
             .theme
             .resolved()

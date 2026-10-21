@@ -262,10 +262,12 @@ sync through the vault.
   theme, in the user's settings: the counterpart of VS Code's `[Theme]`
   keys and darktable's `user.css`. They are applied last and validated;
   unknown tokens are reported, not fatal.
-- **Settings outside the theme.** Font size, interface zoom (egui-pop's,
-  in fixed steps: `Ctrl+Alt+=`, `Ctrl+Alt+-`, `Ctrl+Alt+0`) and the
+- **Settings outside the theme.** The text size (85 % to 200 %) and the
+  interface and monospace fonts (egui-pop's Settings › Appearance ›
+  Fonts, 2026-10-21), the interface zoom (egui-pop's, in fixed steps:
+  `Ctrl+Alt+=`, `Ctrl+Alt+-`, `Ctrl+Alt+0`), the accent colour and the
   dark/light/system preference are ordinary settings, so changing the
-  theme does not undo them.
+  theme does not undo them (`tests/fonts.rs`).
 - **Live preview** in the theme picker. `theme.export` writes the current
   theme with its overrides merged into one file.
 
