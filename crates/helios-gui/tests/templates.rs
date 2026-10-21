@@ -322,3 +322,48 @@ fn the_intake_template_speaks_french() {
         "Importer, trier, dédoublonner"
     );
 }
+
+#[test]
+fn a_workspace_from_develop_preview_shows_the_image_with_its_parameters_and_scopes() {
+    let root = temp("develop");
+    let (config, dir) = (root.join("config"), root.join("develop"));
+    let develop = templates::find("helios.develop-preview").unwrap();
+    let created = templates::create_workspace(&develop, &desktop(), &dir, &config).unwrap();
+    let kept = templates::workspace_template(&config, &created.workspace)
+        .unwrap()
+        .unwrap();
+    assert_eq!(kept.template, develop.template);
+    // Exposure into sigmoid, on the desktop's own modules.
+    let built = kept.build(&templates::modules()).unwrap();
+    let names: Vec<&str> = built.nodes.keys().map(String::as_str).collect();
+    assert_eq!(names, ["exposure", "sigmoid", "source"]);
+    assert_eq!(built.view.0, built.nodes["sigmoid"]);
+    let mut shell = Shell::builder(helios_panels(), Some(config.join("ui")))
+        .workspace(&created.workspace)
+        .build();
+    shell.load_layout().unwrap();
+    shell.apply_template_tools(&kept.template.meta.name, &kept.template.tools);
+    shell.apply_template_library(kept.template.library.as_ref());
+    let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+    h.run();
+    // The image central, the parameters and the scopes beside it, the
+    // panels of other tasks away.
+    let shown = h.state().layout();
+    assert_eq!(shown.area_of(&panel("helios.viewport")), Some(Area::Center));
+    assert_eq!(shown.area_of(&panel("helios.params")), Some(Area::EndSide));
+    assert_eq!(shown.area_of(&panel("helios.scopes")), Some(Area::EndSide));
+    for p in ["helios.graph", "helios.masks", "helios.filmstrip"] {
+        assert!(shown.hidden.contains(&panel(p)), "{p}");
+    }
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn the_develop_template_speaks_french() {
+    let i = I18n::with_egui_pop("fr");
+    i.add_catalogues(helios_i18n::CATALOGUES).unwrap();
+    templates::add_texts(&i, &templates::builtin()).unwrap();
+    let develop = templates::find("helios.develop-preview").unwrap();
+    assert_eq!(i.t(&develop.name_key(), &[]), "Développer (aperçu)");
+    assert!(i.t(&develop.scenario_key(), &[]).contains("aperçu intégré"));
+}

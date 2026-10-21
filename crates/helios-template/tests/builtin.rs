@@ -18,6 +18,7 @@ fn catalogue() -> Catalogue {
     use helios_module_masks as m;
     let mut c = Catalogue::new()
         .module(ModuleRef::new(helios_module_exposure::Exposure))
+        .module(ModuleRef::new(helios_module_sigmoid::Sigmoid))
         .module(ModuleRef::new(m::MaskCombine))
         .module(ModuleRef::new(m::MaskFeather))
         .module(ModuleRef::new(m::MaskBlend));
@@ -212,4 +213,68 @@ fn an_import_source_names_known_words() {
             "{expected}: {problems:?}"
         );
     }
+}
+
+fn develop() -> Bundle {
+    Bundle::load(&root().join("develop-preview.helios-template")).unwrap()
+}
+
+#[test]
+fn develop_preview_is_valid_and_builds_exposure_into_sigmoid_beside_the_image() {
+    let bundle = develop();
+    assert_eq!(bundle.template.id, "helios.develop-preview");
+    let report = bundle.validate(&catalogue());
+    assert!(report.is_ok(), "{:?}", report.problems);
+    assert!(report.updates.is_empty());
+    let json = serde_json::to_value(&bundle.template).unwrap();
+    assert_eq!(
+        schema::check(&schema::template(), &json),
+        Vec::<String>::new()
+    );
+    let built = bundle.build(&catalogue()).unwrap();
+    // The source through exposure into sigmoid, the sigmoid shown.
+    let names: Vec<&str> = built.nodes.keys().map(String::as_str).collect();
+    assert_eq!(names, ["exposure", "sigmoid", "source"]);
+    assert_eq!(built.view.0, built.nodes["sigmoid"]);
+    // The image large, the parameters above the scopes beside it; the
+    // panels of other tasks away.
+    let area = |p: &str| built.layout.area_of(&PanelId::new(p).unwrap());
+    assert_eq!(area("helios.viewport"), Some(Area::Center));
+    assert_eq!(area("helios.params"), Some(Area::EndSide));
+    assert_eq!(area("helios.scopes"), Some(Area::EndSide));
+    for p in ["helios.graph", "helios.masks", "helios.filmstrip"] {
+        assert!(
+            built.layout.hidden.contains(&PanelId::new(p).unwrap()),
+            "{p}"
+        );
+    }
+    // It says what it develops: the picture, or a raw's embedded preview.
+    assert!(bundle.template.meta.name.contains("preview"));
+    assert!(bundle.template.meta.scenario.contains("embedded preview"));
+}
+
+#[test]
+fn develop_preview_speaks_english_and_french() {
+    let bundle = develop();
+    for locale in ["en", "fr"] {
+        let text = bundle
+            .texts
+            .iter()
+            .find(|t| t.locale == locale)
+            .unwrap_or_else(|| panic!("no {locale} text"));
+        for key in [bundle.name_key(), bundle.scenario_key()] {
+            assert!(
+                text.source.contains(&format!("{key} = ")),
+                "{locale}: {key}"
+            );
+        }
+    }
+    let en = &bundle
+        .texts
+        .iter()
+        .find(|t| t.locale == "en")
+        .unwrap()
+        .source;
+    assert!(en.contains(&format!("= {}\n", bundle.template.meta.name)));
+    assert!(en.contains(&format!("= {}\n", bundle.template.meta.scenario)));
 }

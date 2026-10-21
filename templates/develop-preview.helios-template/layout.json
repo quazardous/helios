@@ -1,0 +1,27 @@
+{
+  "kind": "layout",
+  "version": 2,
+  "areas": [
+    ["center", { "kind": "tabs", "panels": ["helios.viewport"], "active": 0 }],
+    [
+      "end_side",
+      {
+        "kind": "split",
+        "vertical": true,
+        "ratio": 0.6,
+        "a": { "kind": "tabs", "panels": ["helios.params"], "active": 0 },
+        "b": { "kind": "tabs", "panels": ["helios.scopes"], "active": 0 }
+      }
+    ]
+  ],
+  "auxiliary": [],
+  "hidden": [
+    "helios.graph",
+    "helios.vault",
+    "helios.modules",
+    "helios.masks",
+    "helios.filmstrip",
+    "helios.queue",
+    "helios.log"
+  ]
+}

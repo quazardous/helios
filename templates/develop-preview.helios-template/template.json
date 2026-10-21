@@ -1,0 +1,22 @@
+{
+  "format": 1,
+  "id": "helios.develop-preview",
+  "version": 1,
+  "meta": {
+    "name": "Develop (preview)",
+    "scenario": "Develop the picture with exposure and a sigmoid tone curve, the image large, its parameters and scopes beside. A raw file is developed from its embedded preview, not from its sensor data.",
+    "tags": ["develop", "tone"]
+  },
+  "network": {
+    "sources": ["source"],
+    "nodes": [
+      { "name": "exposure", "module": "exposure" },
+      { "name": "sigmoid", "module": "sigmoid" }
+    ],
+    "connections": [
+      { "from": "source", "port": "image", "to": "exposure", "input": "input" },
+      { "from": "exposure", "port": "output", "to": "sigmoid", "input": "input" }
+    ],
+    "view": { "node": "sigmoid", "port": "output" }
+  }
+}

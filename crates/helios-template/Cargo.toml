@@ -16,6 +16,7 @@ serde_json.workspace = true
 [dev-dependencies]
 helios-module-exposure = { path = "../../modules/exposure" }
 helios-module-masks = { path = "../../modules/masks" }
+helios-module-sigmoid = { path = "../../modules/sigmoid" }
 
 [lints]
 workspace = true

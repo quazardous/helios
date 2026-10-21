@@ -2443,6 +2443,7 @@ dependencies = [
  "helios-core",
  "helios-module-exposure",
  "helios-module-masks",
+ "helios-module-sigmoid",
  "serde",
  "serde_json",
 ]

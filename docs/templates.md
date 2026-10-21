@@ -2,10 +2,10 @@
 
 Status: **design note, format in code** (2026-10-13). The format, its
 schema, validation, the headless build check and composite files live in
-`crates/helios-template`; two built-in templates ("Portrait retouch" and
-"Import, cull, de-duplicate") ship as data under `templates/`, and the
-desktop's "New workspace from template" creates a workspace from them or
-from the user's own. A workspace is then edited, saved back as a
+`crates/helios-template`; three built-in templates ("Portrait retouch",
+"Import, cull, de-duplicate" and "Develop (preview)") ship as data under
+`templates/`, and the desktop's "New workspace from template" creates a
+workspace from them or from the user's own. A workspace is then edited, saved back as a
 template, reset to its template, and given parts of another (see
 "Editing a workspace"). What is marked "not decided" waits for the
 owner.
