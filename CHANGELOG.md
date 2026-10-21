@@ -24,6 +24,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.24.0] - 2026-10-21
+
+### Added
+
+- Settings › Appearance › Fonts sets the text size, from 85 % to 200 %, and the interface and monospace fonts; numbers on sliders no longer jitter while dragged.
+- Floating palettes can be stacked together or grouped as tabs, anchored to the window's edges, and resized by dragging their edges.
+
+### Changed
+
+- The mouse now works as in darktable: the wheel over a slider changes it (Ctrl+Alt and the wheel scroll the panel), a middle click on the image cycles 100 %, 200 % and fit, and a double click on the image goes back to where it was opened from. Settings › Input picks another pointer profile, or keeps the wheel over sliders from changing values.
+- The status bar starts with where you are, from Helios to the image open in the darkroom, and a coloured chip for each mode on (culling, mask editing, compare). It then shows what matters there: the number of images in the library, the zoom and the history in the darkroom, the picks and rejects while culling. A right click on an item hides it or moves it, for that place.
+
+### Fixed
+
+- Opening an image from the library shows it: the darkroom starts from the workspace's default layout, the image in the centre, instead of keeping the library's grid.
+- Keyboard shortcuts now work in a detached panel's window, and a dialog opens over the window you were working in.
+- Dock tab labels are no longer garbled after switching between the light and dark themes.
+
 ## [0.23.0] - 2026-10-21
 
 ### Added
