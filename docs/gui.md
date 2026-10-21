@@ -85,9 +85,16 @@ MCP server alike (`helios_gui::contexts` on the desktop).
 | `helios.mask-editing` | mode of `tool`, pushed, transient | drawing a mask's path | the Masks panel shown |
 | `helios.compare` | mode of `compare`, pushed | before and after side by side | the image shown |
 
-The root is the workspace the window shows. The status bar shows the
-breadcrumb and the mode chips once the user is in a place or a mode is
-on; egui-pop's `nav.back` (Alt+Left, and Escape while a mode is
+The root is the workspace the window shows, its crumb named Helios.
+egui-pop's status bar starts with the breadcrumb (a crumb goes back to
+its place; the darkroom on a file says the file's name, the network
+never its workspace's key) and a chip per mode on, culling in the
+accent tone, mask editing in the warning tone, compare in the info tone
+(2026-10-21). Helios's own items follow, each shown only where it means
+something (`helios-gui/src/status_items.rs`, a `when` clause over the
+stack's keys): the number of images in the library, the zoom and the
+history's length in the darkroom, the picks and rejects while culling;
+a right click on an item hides it or moves it, kept per place. egui-pop's `nav.back` (Alt+Left, and Escape while a mode is
 pushed) and `nav.up` go back, a chip turns its mode off. Compare and
 mask editing are short pushed modes: they show the panel they need
 rather than switch arrangement, so toggling them never moves the

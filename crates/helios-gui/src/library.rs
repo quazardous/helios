@@ -620,6 +620,20 @@ impl Library {
             .collect()
     }
 
+    /// The images the views show, and of them those picked and those
+    /// rejected (a reject wins over a pick).
+    pub fn counts(&self) -> (usize, usize, usize) {
+        let (mut picked, mut rejected) = (0, 0);
+        for &i in &self.order {
+            match self.entries[i].flag() {
+                Flag::Pick => picked += 1,
+                Flag::Reject => rejected += 1,
+                Flag::None => {}
+            }
+        }
+        (self.order.len(), picked, rejected)
+    }
+
     /// Whether the views show the stack topped by `top` expanded.
     pub fn is_expanded(&self, top: &str) -> bool {
         self.state.is_expanded(&top.to_string())

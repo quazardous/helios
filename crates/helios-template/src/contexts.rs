@@ -13,6 +13,9 @@
 //!
 //! Each is mapped to an arrangement, or, for the short pushed modes, to
 //! the panels it shows, so toggling them never moves the user's panels.
+//! The modes show as chips in egui-pop's status bar, each in its tone,
+//! and a place whose payload says nothing readable names its crumb
+//! itself ([`crumb`]).
 //! The stack of a workspace is egui-pop's `context` document beside its
 //! layout, `<config>/ui/workspaces/<key>/context.json`; [`tools`] reads
 //! it and applies transitions to it for agents.
@@ -61,14 +64,45 @@ pub fn frames() -> Vec<FrameSpec> {
         FrameSpec::place(LIBRARY, "Library").arrangement(LIBRARY_ARRANGEMENT),
         // The darkroom keeps the layout the user had: it starts from the
         // workspace's own, and remembers what was picked there.
-        FrameSpec::place(DARKROOM, "Darkroom"),
-        FrameSpec::place(WORKSPACE, "Network").arrangement(NETWORK_ARRANGEMENT),
-        FrameSpec::mode(CULLING, ORIENTATION, "Culling").arrangement(IMAGE_ARRANGEMENT),
+        FrameSpec::place(DARKROOM, "Darkroom").label(|c| crumb(c.frame, c.title, c.payload)),
+        FrameSpec::place(WORKSPACE, "Network")
+            .arrangement(NETWORK_ARRANGEMENT)
+            .label(|c| crumb(c.frame, c.title, c.payload)),
+        // The modes the user turns on show as chips in the status bar.
+        FrameSpec::mode(CULLING, ORIENTATION, "Culling")
+            .arrangement(IMAGE_ARRANGEMENT)
+            .visible()
+            .tone("accent"),
         FrameSpec::mode(MASK_EDITING, TOOL, "Mask editing")
             .transient()
-            .show(PanelId::from_static(MASKS_PANEL)),
-        FrameSpec::mode(COMPARE, COMPARING, "Compare").show(PanelId::from_static(IMAGE_PANEL)),
+            .show(PanelId::from_static(MASKS_PANEL))
+            .visible()
+            .tone("warning"),
+        FrameSpec::mode(COMPARE, COMPARING, "Compare")
+            .show(PanelId::from_static(IMAGE_PANEL))
+            .visible()
+            .tone("info"),
     ]
+}
+
+/// A place's crumb in the breadcrumb, from its payload (`None`: egui-pop's
+/// default, the title): the darkroom on a file says the file's name (an
+/// image of the vault, only its id: the title alone), the network says
+/// only its title (its payload is the workspace's key, not a name).
+pub fn crumb(frame: &FrameId, title: &str, payload: &serde_json::Value) -> Option<String> {
+    if *frame == WORKSPACE {
+        return Some(title.to_string());
+    }
+    if *frame == DARKROOM {
+        return Some(match Opened::of(payload) {
+            Some(Opened::File(p)) => match p.file_name() {
+                Some(name) => format!("{title} · {}", name.to_string_lossy()),
+                None => title.to_string(),
+            },
+            _ => title.to_string(),
+        });
+    }
+    None
 }
 
 /// The workspace's network guarded: entered only on the workspace
@@ -304,6 +338,43 @@ mod tests {
         let groups = r.groups();
         assert_eq!(groups.len(), 3);
         assert!(r.get(&MASK_EDITING).unwrap().transient);
+        // The modes show as chips, each in its tone; places do not.
+        for (mode, tone) in [
+            (CULLING, "accent"),
+            (MASK_EDITING, "warning"),
+            (COMPARE, "info"),
+        ] {
+            let spec = r.get(&mode).unwrap();
+            assert!(spec.visible, "{mode}");
+            assert_eq!(spec.tone.as_deref(), Some(tone), "{mode}");
+        }
+        assert!(!r.get(&LIBRARY).unwrap().visible);
+    }
+
+    #[test]
+    fn crumbs_say_a_file_s_name_and_never_a_workspace_key() {
+        let r = registry("k");
+        let darkroom = r.get(&DARKROOM).unwrap();
+        let file = file_payload(Path::new("/photos/shoot/img_0042.cr3"));
+        assert_eq!(
+            darkroom.label_of("Darkroom", &file).as_deref(),
+            Some("Darkroom · img_0042.cr3")
+        );
+        assert_eq!(
+            darkroom
+                .label_of("Chambre noire", &image_payload("ab12"))
+                .as_deref(),
+            Some("Chambre noire")
+        );
+        let network = r.get(&WORKSPACE).unwrap();
+        assert_eq!(
+            network.label_of("Network", &json!("0f3a9c")).as_deref(),
+            Some("Network")
+        );
+        assert_eq!(
+            r.get(&LIBRARY).unwrap().label_of("Library", &json!(null)),
+            None
+        );
     }
 
     #[test]

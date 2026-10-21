@@ -429,6 +429,8 @@ pub struct Shell {
     forgotten: crate::jobs::Forgotten,
     /// The image's compare and mask tool, kept with their modes.
     follow: crate::contexts::Follow,
+    /// Helios's status bar items, published when what they say changes.
+    status_items: crate::status_items::Items,
 }
 
 impl Shell {
@@ -685,6 +687,7 @@ impl Shell {
             relays,
             forgotten: crate::jobs::Forgotten::default(),
             follow: crate::contexts::Follow::default(),
+            status_items: crate::status_items::Items::default(),
         };
         for d in shell.app.handle().diagnostics() {
             shell.notes.push(format!("{}: {}", d.code, d.message));
@@ -1164,6 +1167,22 @@ impl Shell {
                     .with("problem", p),
             );
         }
+    }
+
+    /// Measures what Helios's status bar items say, and publishes what
+    /// changed.
+    fn status_items(&mut self, ctx: &egui::Context) {
+        let (images, picked, rejected) = self.library.borrow().counts();
+        let zoom = self.viewport.borrow().state().mapping().map(|m| m.zoom);
+        let history = lock(&self.values).undo_steps().len();
+        let measure = crate::status_items::Measure {
+            images,
+            picked,
+            rejected,
+            zoom,
+            history,
+        };
+        self.status_items.frame(self.app.handle(), ctx, &measure);
     }
 
     /// The name of the theme in use, as chosen.
@@ -3708,6 +3727,7 @@ impl Shell {
         self.rects.insert("window".into(), ctx.content_rect());
 
         self.status_bar(&ctx);
+        self.status_items(&ctx);
         self.viewport.borrow_mut().sync(&mut lock(&self.values));
         // Duplicates an import asks about: said once, answered in the
         // Duplicates panel.

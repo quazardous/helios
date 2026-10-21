@@ -309,6 +309,28 @@ gui-snapshot-failed = capture échouée : { $error }
 
 gui-snapshot-saved = { $target } capturé dans { $path }
 
+gui-status-culled = { $picked ->
+    [one] { $picked } retenue
+   *[other] { $picked } retenues
+}, { $rejected ->
+    [one] { $rejected } rejetée
+   *[other] { $rejected } rejetées
+}
+
+gui-status-history = Historique
+
+gui-status-history-detail = { $count ->
+    [one] { $count } étape à annuler
+   *[other] { $count } étapes à annuler
+}
+
+gui-status-images = { $count ->
+    [one] { $count } image
+   *[other] { $count } images
+}
+
+gui-status-zoom = Zoom
+
 gui-template-keys-error = modèle { $name } : raccourcis : { $error }
 
 gui-theme-exported = thème exporté vers { $path }

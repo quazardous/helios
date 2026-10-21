@@ -421,6 +421,16 @@ gui-stacks-suggest-hint = Over the images selected (two or more), else over ever
 
 gui-stacks-top = Proposed on top: the sharpest
 
+gui-status-culled = { $picked } picked, { $rejected } rejected
+
+gui-status-history = History
+
+gui-status-history-detail = { $count } steps to undo
+
+gui-status-images = { $count } images
+
+gui-status-zoom = Zoom
+
 gui-template-keys-error = template { $name }: keys: { $error }
 
 gui-theme-exported = theme exported to { $path }

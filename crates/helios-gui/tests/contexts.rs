@@ -92,6 +92,64 @@ fn places_have_their_arrangements_and_the_breadcrumb_says_where() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+fn items(h: &Harness<'_, Shell>) -> Vec<(String, String)> {
+    egui_pop::api::strips::visible(h.state().app().handle())
+        .into_iter()
+        .filter(|i| i.id.starts_with("helios.status."))
+        .map(|i| (i.id, i.text))
+        .collect()
+}
+
+fn shows(h: &Harness<'_, Shell>, id: &str) -> bool {
+    items(h).iter().any(|(i, _)| i == id)
+}
+
+/// egui-pop's status bar starts with the breadcrumb (the root named
+/// Helios, the darkroom on a file by the file's name) and a chip per mode
+/// on, in its tone; Helios's items follow the place and the mode.
+#[test]
+fn the_status_bar_says_where_and_its_items_follow_the_place() {
+    use helios_gui::status_items::{CULLED, HISTORY, IMAGES, ZOOM};
+    let dir = temp("status");
+    let mut h = window(&dir);
+    let crumbs = |h: &Harness<'_, Shell>| egui_pop::api::contexts::crumbs(h.state().app().handle());
+    assert_eq!(crumbs(&h), ["Helios"]);
+    assert!(items(&h).is_empty(), "{:?}", items(&h));
+    // The library: its images counted.
+    run(&mut h, "view.library", json!(null));
+    assert_eq!(crumbs(&h), ["Helios", "Library"]);
+    assert_eq!(
+        items(&h),
+        [(IMAGES.to_string(), "0 images".to_string())],
+        "{:?}",
+        egui_pop::api::strips::status(h.state().app().handle())
+    );
+    // The darkroom on a file: the zoom and the history, not the count.
+    let photo = dir.join("photo.png");
+    std::fs::write(&photo, b"not read").unwrap();
+    contexts::open(
+        h.state().app().handle(),
+        &Opened::File(photo),
+        &PopOrigin::User,
+    );
+    h.run();
+    assert_eq!(crumbs(&h), ["Helios", "Library", "Darkroom · photo.png"]);
+    assert!(shows(&h, ZOOM) && shows(&h, HISTORY), "{:?}", items(&h));
+    assert!(!shows(&h, IMAGES), "{:?}", items(&h));
+    // Culling: a chip in the accent tone, and the picks and rejects.
+    run(&mut h, "view.culling", json!({ "on": true }));
+    let chips = egui_pop::api::contexts::chips(h.state().app().handle());
+    let culling = chips
+        .iter()
+        .find(|c| c.frame == contexts::CULLING)
+        .expect("culling has its chip");
+    assert_eq!(culling.tone.as_deref(), Some("accent"));
+    assert!(shows(&h, CULLED), "{:?}", items(&h));
+    run(&mut h, "view.culling", json!({ "on": false }));
+    assert!(!shows(&h, CULLED), "{:?}", items(&h));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// Darktable's pointer profile, Helios's default: a double click on the
 /// image leaves the darkroom, back where it was opened from.
 #[test]
