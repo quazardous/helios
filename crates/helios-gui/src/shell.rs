@@ -111,6 +111,9 @@ enum Action {
     Compare,
     /// The mask display set to a mode, or moved along its cycle.
     MaskDisplay(Option<crate::mask_display::Mode>, Origin),
+    /// A module (the selected one by default) bypassed, brought back, or
+    /// toggled, as whom.
+    Bypass(Option<String>, Option<bool>, Origin),
     /// Goes to a place of the context stack at the workspace's top: the
     /// library, or the workspace's network.
     Place(crate::contexts::FrameId),
@@ -804,6 +807,12 @@ impl Shell {
             );
             shell.set_content(crate::graph::PANEL, move |ui| {
                 graph.borrow_mut().ui(ui, &values, &viewport);
+            });
+        }
+        if has(&shell, crate::modules::PANEL) {
+            let (viewport, values) = (shell.viewport.clone(), shell.values.clone());
+            shell.set_content(crate::modules::PANEL, move |ui| {
+                crate::modules::ui(ui, &viewport, &values);
             });
         }
         if has(&shell, crate::mask_tree::PANEL) {
@@ -2325,6 +2334,26 @@ impl Shell {
                 ))
             }),
         );
+        add(
+            CommandSpec::new(
+                crate::modules::COMMAND,
+                "Bypass a module or bring it back (`node`: the selected one by default; `on`: toggled by default)",
+                "Node graph",
+            ),
+            Box::new(|a, origin| {
+                let node = match a.get("node") {
+                    None | Some(Value::Null) => None,
+                    Some(Value::String(n)) => Some(n.clone()),
+                    Some(n) => return Err(format!("`node`: {n} is not a node's name")),
+                };
+                let on = match a.get("on") {
+                    None | Some(Value::Null) => None,
+                    Some(Value::Bool(b)) => Some(*b),
+                    Some(v) => return Err(format!("`on`: {v} is not true or false")),
+                };
+                Ok(Action::Bypass(node, on, origin.clone()))
+            }),
+        );
         Shell::declare_mask_commands(&mut add);
         Shell::declare_member_commands(&mut add);
         add(
@@ -2468,6 +2497,12 @@ impl Shell {
         // egui-pop's palette is the palette; Helios's name for it stays
         // for scripts.
         d.hidden.insert("workbench.palette".into());
+        // Bypass the selected module, as darktable's and Blender's keys.
+        d.keys.push((
+            crate::modules::KEY.into(),
+            crate::modules::COMMAND.into(),
+            String::new(),
+        ));
         // Quick open, everywhere; what it runs needs its item.
         d.keys.push((
             "Ctrl+P".into(),
@@ -3738,6 +3773,11 @@ impl Shell {
                     "mode": now.name(),
                     "mask": target.map(|t| t.key),
                 }));
+            }
+            Action::Bypass(node, on, origin) => {
+                let mut store = lock(&self.values);
+                let (node, on) = crate::modules::bypass(&mut store, node.as_deref(), on, &origin)?;
+                return Ok(json!({ "node": node, "bypassed": on }));
             }
             Action::Compare => {
                 use crate::viewport::COMPARE;

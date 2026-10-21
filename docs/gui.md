@@ -964,6 +964,27 @@ What a module or a mask node affects, shown on the image (2026-10-21,
   `helios_export` writes any mask node's `mask` port as that grey
   picture with `as_mask`.
 
+### The Modules panel
+
+The Modules panel (`helios.modules`, in the start side bar,
+`helios-gui/src/modules.rs`) lists the modules of the network shown, in
+the order they were added (2026-10-21):
+
+- **A row selects its module** (`view/graph/selection`, which the
+  Parameters and Masks panels follow); the module it runs is named
+  beside it.
+- **Bypass.** Each module with an input to pass through has a Bypass
+  toggle: bypassed, it keeps its parameters and the image renders as if
+  it were absent (see module-contract.md, "Bypass"); its name is struck
+  through. The bypass is a value of the store, `bypass/<node>`: changing
+  it is one undo step ("bypass exposure", "restore exposure"), saved
+  with the image's edit like a parameter.
+- **The command** `node.bypass` takes `node` (the selected module by
+  default) and `on` (by default, the other way round); `Ctrl+/` runs it
+  on the selected module, as darktable's and Blender's keys do. Agents
+  run the same command; a node's control endpoint answers `node.bypass`
+  too (MCP `helios_node_bypass`).
+
 ### The Masks panel
 
 The Masks panel (`helios.masks`, in the start side bar) shows the

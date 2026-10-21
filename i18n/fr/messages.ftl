@@ -291,6 +291,14 @@ gui-masks-tree-hint = F2 renomme la ligne sélectionnée. Glissez une ligne pour
 
 gui-masks-unlock = Déverrouiller { $name }
 
+gui-modules-bypass = Contourner
+
+gui-modules-bypass-hint = Contourner { $node } : l’image est rendue comme s’il était absent, ses paramètres gardés ({ $key })
+
+gui-modules-none = Aucun module : ouvrez une image pour voir les modules de son réseau
+
+gui-modules-restore-hint = Rétablir { $node } : l’image le rend de nouveau ({ $key })
+
 gui-new-workspace-created = espace de travail { $path } créé depuis { $template }
 
 gui-new-workspace-directory = dossier
