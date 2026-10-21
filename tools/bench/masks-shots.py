@@ -12,8 +12,12 @@ maximizes the window, then drives it through the command palette
 (Ctrl+Shift+P, a query, Enter), as a person would: the theme, the Masks
 panel focused, then two shapes and two parametric members added. It
 shoots the screen at each stage: `<theme>-1-empty.png` (the empty mask's
-message) and `<theme>-2-mask.png` (the mask with two parametric members
-and two shapes, the last one selected with its handles on the image).
+message), `<theme>-2-mask.png` (the mask with two parametric members
+and two shapes, the last one selected with its handles on the image),
+then the mask display on that selected shape: `<theme>-3-overlay.png`
+(`M` with the image focused: the theme's colour over the image turned
+grey) and `<theme>-4-grey.png` (the palette's next step: the mask alone
+in grey).
 What each step answered goes to `masks-shots.jsonl`.
 """
 
@@ -149,6 +153,15 @@ def run_theme(args, theme: str, raw: Path) -> list:
         palette(comp, "Focus Masks", log)
         time.sleep(args.settle)
         shoot(comp, args.out, f"{theme}-2-mask", log)
+        # The mask display, as a person turns it on: M with the image
+        # focused, then the palette's cycle to grey.
+        palette(comp, "Focus Image", log)
+        log.append({"key": "m", "answer": comp.key("m")})
+        time.sleep(args.settle)
+        shoot(comp, args.out, f"{theme}-3-overlay", log)
+        palette(comp, "show the mask (cycles", log)
+        time.sleep(args.settle)
+        shoot(comp, args.out, f"{theme}-4-grey", log)
         log.append({"alive": alive()})
         return log
     finally:
@@ -181,7 +194,10 @@ def main() -> int:
             for entry in log:
                 f.write(json.dumps(entry, default=str) + "\n")
                 print(json.dumps(entry, default=str), flush=True)
-            shots = [args.out / f"{theme}-{n}.png" for n in ("1-empty", "2-mask")]
+            shots = [
+                args.out / f"{theme}-{n}.png"
+                for n in ("1-empty", "2-mask", "3-overlay", "4-grey")
+            ]
             failed |= not all(s.exists() for s in shots)
     return 1 if failed else 0
 
