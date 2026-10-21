@@ -111,6 +111,42 @@ fn a_workspace_reads_as_its_template_until_edited_and_keeps_its_edits() {
 }
 
 #[test]
+fn graph_positions_are_a_view_kept_with_the_workspace_and_follow_its_nodes() {
+    let root = temp("positions");
+    let (_, files) = made(&root, "helios.portrait-retouch", "portrait");
+    let state = files.load().unwrap();
+    let node = state.bundle.template.network.nodes[0].name.clone();
+    let placed = state
+        .edited(&json!({ "positions": { node.clone(): [120.0, -40.5] } }))
+        .unwrap();
+    assert!(placed.problems(&catalogue()).is_empty());
+    files.save(&placed, true).unwrap();
+    let read = files.load().unwrap();
+    assert_eq!(read.bundle.template.positions[&node], [120.0, -40.5]);
+    // A node taken out of the network takes its position with it.
+    let mut network = read.bundle.template.network.clone();
+    network.nodes.retain(|n| n.name != node);
+    network
+        .connections
+        .retain(|c| c.from != node && c.to != node);
+    let without = read.edited(&json!({ "network": network })).unwrap();
+    assert!(!without.bundle.template.positions.contains_key(&node));
+    // A position for no node is a problem.
+    let stray = state
+        .edited(&json!({ "positions": { "nowhere": [0.0, 0.0] } }))
+        .unwrap();
+    assert!(
+        stray
+            .problems(&catalogue())
+            .iter()
+            .any(|p| p.contains("nowhere")),
+        "{:?}",
+        stray.problems(&catalogue())
+    );
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
 fn saved_as_a_template_then_created_again_gives_an_equivalent_workspace() {
     let root = temp("again");
     let config = root.join("config");

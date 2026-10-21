@@ -374,6 +374,16 @@ impl Bundle {
         if !names.contains(net.view.node.as_str()) {
             p.push(format!("network.view: no node `{}`", net.view.node));
         }
+        for (node, at) in &t.positions {
+            // An opened composite's inner node goes by `<name>.<inner>`.
+            let top = node.split('.').next().unwrap_or(node);
+            if !names.contains(top) {
+                p.push(format!("positions: no node `{node}`"));
+            }
+            if !at.iter().all(|v| v.is_finite()) {
+                p.push(format!("positions: `{node}` is not a place"));
+            }
+        }
         let mut presets = BTreeSet::new();
         for (i, preset) in net.presets.iter().enumerate() {
             if !presets.insert(preset.id.as_str()) {

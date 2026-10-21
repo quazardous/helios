@@ -70,6 +70,11 @@ impl Catalogue {
         self
     }
 
+    /// Every module's name, in order.
+    pub fn module_names(&self) -> impl Iterator<Item = &str> {
+        self.modules.keys().map(String::as_str)
+    }
+
     pub fn get_module(&self, name: &str) -> Option<&ModuleRef> {
         self.modules.get(name)
     }

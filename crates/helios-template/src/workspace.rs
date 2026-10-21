@@ -312,6 +312,7 @@ const MERGED: &[(&str, &[&str])] = &[
             "/composites",
             "/template/subworkspaces",
             "/template/retired_subworkspaces",
+            "/template/positions",
         ],
     ),
     ("tools", &["/template/tools"]),
@@ -474,10 +475,11 @@ impl State {
     }
 
     /// The state with `changes` made: `name`, `description`, `icon`,
-    /// `network`, `subworkspaces`, `tools`, `library` (null for none) and
-    /// `layout`, each written as in a template. Fields it does not know
-    /// are refused. A sub-workspace left out is deleted (its id retired),
-    /// and a node taken out of the network leaves every sub-workspace.
+    /// `network`, `subworkspaces`, `positions`, `tools`, `library` (null
+    /// for none) and `layout`, each written as in a template. Fields it
+    /// does not know are refused. A sub-workspace left out is deleted
+    /// (its id retired), and a node taken out of the network leaves
+    /// every sub-workspace and the graph view's positions.
     pub fn edited(&self, changes: &Json) -> Result<State, String> {
         let object = changes.as_object().ok_or("changes are an object")?;
         let mut next = self.clone();
@@ -509,6 +511,10 @@ impl State {
                     next.bundle.template.subworkspaces =
                         serde_json::from_value(v.clone()).map_err(bad)?;
                 }
+                "positions" => {
+                    next.bundle.template.positions =
+                        serde_json::from_value(v.clone()).map_err(bad)?;
+                }
                 "tools" => {
                     next.bundle.template.tools = serde_json::from_value(v.clone()).map_err(bad)?;
                 }
@@ -523,6 +529,7 @@ impl State {
         next.bundle
             .template
             .follow_subworkspaces(&self.bundle.template);
+        next.bundle.template.follow_positions();
         Ok(next)
     }
 
@@ -600,6 +607,7 @@ pub fn blank() -> Bundle {
         parameters: Vec::new(),
         subworkspaces: Vec::new(),
         retired_subworkspaces: Vec::new(),
+        positions: BTreeMap::new(),
     };
     Bundle::new(template, Layout::default())
 }

@@ -147,6 +147,21 @@ empty name, a node the network does not have, an unknown parent or a
 cycle of parents, and nodes outside the parent's or shared between
 sub-workspaces side by side.
 
+### `positions`
+
+Where the graph view draws each node (optional), by node name: its
+top-left corner in graph units (points at 100 %). It is a view, never
+read by the render, kept with the workspace so a network arranged by
+hand stays arranged; a node without a position is placed by its rank
+(see [gui.md](gui.md), "Graph view").
+
+```json
+"positions": { "source": [0, 0], "exposure": [240, 0] }
+```
+
+A node taken out of the network takes its position with it; validation
+refuses a position for a node the network does not have.
+
 ### `tools`
 
 ```json

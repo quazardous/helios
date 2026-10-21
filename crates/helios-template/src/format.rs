@@ -46,6 +46,11 @@ pub struct Template {
     /// never lands on another one.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub retired_subworkspaces: Vec<String>,
+    /// Where the graph view draws each node, by name: the top-left
+    /// corner in graph units. A view, not part of the network (the
+    /// render never reads it); a node without one is placed by rank.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub positions: BTreeMap<String, [f32; 2]>,
 }
 
 /// A sub-workspace: a named scope over nodes of the workspace's own
@@ -101,6 +106,17 @@ pub enum ParameterKind {
 }
 
 impl Template {
+    /// Drops the positions of nodes no longer in the network (an opened
+    /// composite's inner nodes go with it).
+    pub fn follow_positions(&mut self) {
+        let net = &self.network;
+        let known = |name: &str| {
+            let top = name.split('.').next().unwrap_or(name);
+            net.sources.iter().any(|s| s == top) || net.nodes.iter().any(|n| n.name == top)
+        };
+        self.positions.retain(|name, _| known(name));
+    }
+
     /// The template with answers to its parameters (by id) put where each
     /// one points; a parameter not answered keeps the template's value.
     /// An answer of the wrong kind, or to no parameter, is refused.

@@ -40,6 +40,16 @@
       "description": "The ids of deleted sub-workspaces: never given again in this workspace.",
       "type": "array",
       "items": { "$ref": "#/$defs/subworkspace_id" }
+    },
+    "positions": {
+      "description": "Where the graph view draws each node, by name: its top-left corner in graph units. A view, never read by the render.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "array",
+        "items": { "type": "number" },
+        "minItems": 2,
+        "maxItems": 2
+      }
     }
   },
   "$defs": {
