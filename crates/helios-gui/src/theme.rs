@@ -9,7 +9,8 @@
 //! tokens ([`HELIOS_TOKENS`]), which egui-pop's contract does not have,
 //! among them a neutral surround behind photos. A theme without them (a user's
 //! theme extending an egui-pop base directly) still works: [`Extra`] falls
-//! back to the nearest egui-pop token.
+//! back to the nearest egui-pop token, and its number tokens
+//! ([`HELIOS_NUMBERS`]) to their defaults.
 
 use std::collections::BTreeMap;
 
@@ -53,6 +54,25 @@ pub const HELIOS_TOKENS: &[(&str, &str)] = &[
         "the primary button of a destructive dialog",
     ),
     ("button.danger.text", "the label on that button"),
+    (
+        "mask.overlay.color",
+        "a mask shown over the image, laid by the mask's value",
+    ),
+];
+
+/// The number tokens Helios reads beyond egui-pop's contract, with their
+/// meaning and the value a theme without them gets.
+pub const HELIOS_NUMBERS: &[(&str, &str, f32)] = &[
+    (
+        "mask.overlay.opacity",
+        "how much of the overlay's colour where the mask is full",
+        0.6,
+    ),
+    (
+        "mask.overlay.desaturate",
+        "how far the image under the overlay turns grey",
+        1.0,
+    ),
 ];
 
 /// egui-pop's built-in themes and Helios's.
@@ -94,11 +114,23 @@ pub struct Extra {
     pub state_pending: Color32,
     pub danger_background: Color32,
     pub danger_text: Color32,
+    /// The mask display's overlay: its colour, its opacity where the
+    /// mask is full, how far the image under it turns grey (0 to 1).
+    pub mask_overlay: Color32,
+    pub mask_overlay_opacity: f32,
+    pub mask_overlay_desaturate: f32,
 }
 
 impl Extra {
     pub fn of(t: &Tokens) -> Extra {
         let c = |path: &str, or: Color32| t.color(path).unwrap_or(or);
+        let n = |path: &str| {
+            let or = HELIOS_NUMBERS
+                .iter()
+                .find(|(p, ..)| *p == path)
+                .map_or(0.0, |(.., v)| *v);
+            t.resolved().dimension(path).unwrap_or(or).clamp(0.0, 1.0)
+        };
         Extra {
             viewport_surround: c("viewport.surround", t.surface.canvas),
             state_done: c("state.done", t.status.success),
@@ -108,6 +140,9 @@ impl Extra {
             state_pending: c("state.pending", t.accent.default),
             danger_background: c("button.danger.background", t.status.danger),
             danger_text: c("button.danger.text", t.surface.panel),
+            mask_overlay: c("mask.overlay.color", t.accent.default),
+            mask_overlay_opacity: n("mask.overlay.opacity"),
+            mask_overlay_desaturate: n("mask.overlay.desaturate"),
         }
     }
 }

@@ -16,6 +16,14 @@
     "failed": {"$value": "{danger}", "$description": "A node whose computation failed."},
     "pending": {"$value": "{accent.default}", "$description": "A decision waiting for an answer."}
   },
+  "mask": {
+    "overlay": {
+      "$description": "Helios component tokens: a mask shown over the image (the mask display's overlay).",
+      "color": {"$type": "color", "$value": "{accent.default}", "$description": "Laid over the image where the mask applies, by the mask's value."},
+      "opacity": {"$type": "number", "$value": 0.6, "$description": "How much of the colour where the mask is full (0 to 1)."},
+      "desaturate": {"$type": "number", "$value": 1.0, "$description": "How far the image under the overlay turns grey (0 its colours, 1 grey, as darktable shows it), so the colour reads on any photo."}
+    }
+  },
   "button": {
     "danger": {
       "$type": "color",

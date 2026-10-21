@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 
 use egui_pop::tokens::contrast::{self, Level};
-use helios_gui::theme::{self, Extra, HELIOS_TOKENS};
+use helios_gui::theme::{self, Extra, HELIOS_NUMBERS, HELIOS_TOKENS};
 use serde_json::json;
 
 const HELIOS: [&str; 3] = ["helios-dark", "helios-light", "helios-high-contrast"];
@@ -18,6 +18,9 @@ fn built_in_themes_resolve_cleanly_with_helios_tokens() {
         assert!(r.problems().is_empty(), "{name}: {:?}", r.problems());
         for (path, _) in HELIOS_TOKENS {
             assert!(r.color(path).is_some(), "{name}: `{path}` is not a color");
+        }
+        for (path, _, default) in HELIOS_NUMBERS {
+            assert_eq!(r.dimension(path), Some(*default), "{name}: `{path}`");
         }
     }
 }
@@ -80,4 +83,35 @@ fn a_theme_without_helios_tokens_falls_back_to_egui_pops() {
     let extra = Extra::of(&t);
     assert_eq!(extra.state_failed, t.status.danger);
     assert_eq!(extra.viewport_surround, t.surface.canvas);
+}
+
+#[test]
+fn the_mask_overlay_is_the_accent_by_default_and_a_theme_can_change_it() {
+    for name in HELIOS {
+        let t = theme::resolve(&theme::themes(), name, &BTreeMap::new());
+        let extra = Extra::of(&t);
+        assert_eq!(extra.mask_overlay, t.accent.default, "{name}");
+        assert!((extra.mask_overlay_opacity - 0.6).abs() < 1e-6, "{name}");
+        assert!((extra.mask_overlay_desaturate - 1.0).abs() < 1e-6, "{name}");
+    }
+    let overrides = BTreeMap::from([
+        ("mask.overlay.color".to_string(), json!("#ff00ff")),
+        ("mask.overlay.opacity".to_string(), json!(0.25)),
+        ("mask.overlay.desaturate".to_string(), json!(0.0)),
+    ]);
+    let t = theme::resolve(&theme::themes(), "helios-dark", &overrides);
+    assert!(
+        t.resolved().problems().is_empty(),
+        "{:?}",
+        t.resolved().problems()
+    );
+    let extra = Extra::of(&t);
+    assert_eq!(extra.mask_overlay, egui::Color32::from_rgb(0xff, 0, 0xff));
+    assert!((extra.mask_overlay_opacity - 0.25).abs() < 1e-6);
+    assert!(extra.mask_overlay_desaturate.abs() < 1e-6);
+    // A theme without Helios's tokens: the accent, and the defaults.
+    let t = theme::resolve(&theme::themes(), "pop-dark", &BTreeMap::new());
+    let extra = Extra::of(&t);
+    assert_eq!(extra.mask_overlay, t.accent.default);
+    assert!((extra.mask_overlay_opacity - 0.6).abs() < 1e-6);
 }
