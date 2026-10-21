@@ -314,9 +314,9 @@ device's texture limit). What follows is kept as the record of why.
    frame from the window that draws the viewport. A window moved to another
    monitor keeps "100 %" at 1:1 (the image changes apparent size, which is
    what 1:1 means). "Fit" stays derived from the view rect. Label the
-   control "100 % (1 image px = 1 screen px)" in its tooltip. *Not decided*:
-   whether to also offer a "100 % of points" (darktable's current
-   behaviour); recommendation: no, offer "fit" and the ladder instead.
+   control "100 % (1 image px = 1 screen px)" in its tooltip. *Decided*
+   (2026-10-21): no "100 % of points" (darktable's current behaviour);
+   "fit" and the ladder cover the rest.
 2. **1:1 at fractional scales.** In the shader an output pixel centre
    `n + 0.5` maps to image `q = (n + 0.5 − c_px) / zoom_px + centre_img`;
    for a clean 1:1 (and for integer zooms 2, 3, 4 and 1/2, 1/3...) the
