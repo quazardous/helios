@@ -80,6 +80,8 @@ command-helios-vault-moveTo.title b3f2ea3b80fbb581
 command-helios-viewport-detach.title b50a7332638c7f29
 command-helios-viewport-dock.title b544485bfff8325e
 command-helios-viewport-moveTo.title 8653b4bdbc43ce4e
+command-keymap-package-remove.title 09c89d2776f3a70e
+command-keymap-package.title dafef66dd3b9bf88
 command-library-importSource.title 1cb6337694fcbe70
 command-mask-add-circle.title 853e800a379c3a26
 command-mask-add-ellipse.title 369f2cd0736ffec6
@@ -149,13 +151,17 @@ command-vault-rate-5.title ae8185ae2fb6b4c8
 command-vault-rate.title fd805adcc664569a
 command-vault-reject.title cb419c21cee9d849
 command-vault-stack-toggle.title 79d1043b3db93512
+command-view-bottomPanel-toggle.title 8fa1bfab3ef2d094
 command-view-culling.title 6565827e00999411
+command-view-endSideBar-toggle.title 7e1e38e1eef14830
 command-view-library.title f8ecfd5316229aaf
 command-view-network.title 302d61539ec3f628
+command-view-startSideBar-toggle.title ffd265ea29a952c1
 command-viewport-compare.title 27a11d0c9daaf86f
 command-viewport-mask-display-off.title f8dcd04c9ed5d30a
 command-viewport-mask-display.title 0fce58839d419c9d
 command-viewport-zoom-100.title be6c10eb69bafd7c
+command-viewport-zoom-fill.title 50f8c8159088d565
 command-viewport-zoom-fit.title 6042270d43060d0e
 command-viewport-zoom-in.title 7a24f601c24aad20
 command-viewport-zoom-out.title 9526f42d761b042b
