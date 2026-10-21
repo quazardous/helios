@@ -259,6 +259,22 @@ Several agents share one box, one queue and one disk quota. A job that hangs
 or hoards blocks everyone for the length of its timeout. These rules come
 from incidents on the box; every agent prompt points here.
 
+**The work cycle**
+- Code the whole change with local checks only: `cargo fmt --check`, then
+  `cargo check` and `cargo clippy` on the crates touched, with
+  `CARGO_INCREMENTAL=0` (incremental caches grew to 20 GB and more). These
+  type-check and lint without generating code, so they are quick and light.
+  Local tests are not run.
+- Once the code is finished and clean locally, finalise on the box: tests,
+  gate and snapshots. The box confirms; it is not where errors are first
+  looked for (a failing gate costs about seven minutes for what a local
+  clippy shows in seconds).
+- Full runs (gate, snapshots, release, the daily full suite) are queued by
+  one agent dedicated to the box, at fixed points: a branch is ready, before
+  a merge, after a Helios merge (release), once a day. It does the waiting,
+  so the agents writing code never wait on the box, and its jobs run one at
+  a time.
+
 **Before queuing**
 - Run the narrowest job first: `test-affected` (or one test) before `test`,
   `survival` or `check-commits`. A full run is the last step, not the first.
