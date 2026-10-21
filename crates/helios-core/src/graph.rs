@@ -41,6 +41,9 @@ pub(crate) struct Node {
     pub(crate) kind: Kind,
     /// For each input port: the node and output port feeding it.
     pub(crate) inputs: Vec<Option<(NodeId, usize)>>,
+    /// Rendered as if absent: each output is the input it passes through
+    /// (see [`Graph::set_bypass`]).
+    pub(crate) bypassed: bool,
 }
 
 pub struct Graph {
@@ -87,6 +90,7 @@ impl Graph {
             name: name.into(),
             kind: Kind::Source { image, hash },
             inputs: Vec::new(),
+            bypassed: false,
         })
     }
 
@@ -109,6 +113,7 @@ impl Graph {
                 answered,
             },
             inputs,
+            bypassed: false,
         }))
     }
 
@@ -275,6 +280,49 @@ impl Graph {
                 reason: "only a decision node is answered".into(),
             }),
         }
+    }
+
+    /// Bypasses a module node, or brings it back. A bypassed node keeps
+    /// its parameters and its wiring, and renders as if it were absent:
+    /// each of its outputs is the input it passes through (see
+    /// [`passed_input`]), so what reads it gets the same content, under
+    /// the same keys, as without it. Its other inputs are not read. A
+    /// source is never bypassed, nor a module with no input carrying what
+    /// its first output gives.
+    pub fn set_bypass(&mut self, id: NodeId, on: bool) -> Result<(), Error> {
+        let node = self.node(id)?;
+        match &node.kind {
+            Kind::Source { .. } if on => {
+                return Err(Error::Module {
+                    module: node.name.clone(),
+                    reason: "a source cannot be bypassed".into(),
+                });
+            }
+            Kind::Module { module, .. } if on && passed_input(module.manifest(), 0).is_none() => {
+                return Err(Error::Module {
+                    module: node.name.clone(),
+                    reason: "nothing to pass through: no input carries what its output gives"
+                        .into(),
+                });
+            }
+            _ => {}
+        }
+        self.node_mut(id)?.bypassed = on;
+        Ok(())
+    }
+
+    /// Whether a node is bypassed (see [`Graph::set_bypass`]).
+    pub fn is_bypassed(&self, id: NodeId) -> Result<bool, Error> {
+        Ok(self.node(id)?.bypassed)
+    }
+
+    /// Whether a node can be bypassed: a module with an input carrying
+    /// what its first output gives.
+    pub fn can_bypass(&self, id: NodeId) -> Result<bool, Error> {
+        Ok(match &self.node(id)?.kind {
+            Kind::Source { .. } => false,
+            Kind::Module { module, .. } => passed_input(module.manifest(), 0).is_some(),
+        })
     }
 
     /// The extent of what a node outputs: its source's image region,
@@ -585,6 +633,9 @@ impl Describe for Graph {
                         if module.manifest().kind == ModuleKind::Decision {
                             node["answered"] = (*answered).into();
                         }
+                        if n.bypassed {
+                            node["bypassed"] = true.into();
+                        }
                         node
                     }
                 }
@@ -592,6 +643,17 @@ impl Describe for Graph {
             .collect();
         serde_json::json!({ "nodes": nodes, "layout": self.layout() })
     }
+}
+
+/// The input a bypassed module passes through as its output `output` (by
+/// index): its first input carrying the same channels, `None` when it has
+/// none (that output cannot be passed through).
+pub fn passed_input(manifest: &Manifest, output: usize) -> Option<usize> {
+    let channels = manifest.outputs.get(output)?.channels()?;
+    manifest
+        .inputs
+        .iter()
+        .position(|i| i.channels() == Some(channels))
 }
 
 /// An answer completed with the question it answers: the question's

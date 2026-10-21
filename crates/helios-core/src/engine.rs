@@ -16,6 +16,11 @@
 //! lineage cached over a wider region is cropped; only missing content is
 //! computed.
 //!
+//! A bypassed node ([`Graph::set_bypass`]) has no step: what reads it
+//! reads the input it passes through, under that input's content key, so a
+//! network with a node bypassed shares its content with the same network
+//! without the node.
+//!
 //! The engine counts every request and every computation, so tests can
 //! assert budgets ("rendering twice computes nothing the second time").
 //!
@@ -407,11 +412,17 @@ impl Planning<'_> {
     }
 
     /// The unit and port that really produce output `port` of `unit`
-    /// (shaped): a composite's output is one of its inner nodes'.
-    fn resolve(&self, unit: Unit, port: usize) -> (Unit, usize) {
-        match &self.shapes[&unit].kind {
-            ShapeKind::Composite { exits, .. } => exits[port],
-            _ => (unit, port),
+    /// (shaped): a composite's output is one of its inner nodes', a
+    /// bypassed node's the input it passes through.
+    fn resolve(&self, unit: Unit, port: usize) -> Result<(Unit, usize), Error> {
+        let shape = &self.shapes[&unit];
+        match &shape.kind {
+            ShapeKind::Composite { exits, .. } => Ok(exits[port]),
+            ShapeKind::Bypass { exits } => exits[port].ok_or_else(|| Error::Module {
+                module: shape.name.clone(),
+                reason: format!("bypassed: no connected input passes its output {port} through"),
+            }),
+            _ => Ok((unit, port)),
         }
     }
 }
@@ -433,6 +444,11 @@ enum ShapeKind {
     },
     Pending {
         inputs: Vec<(Unit, usize)>,
+    },
+    /// A bypassed node: no step of its own, each output the input it
+    /// passes through (resolved), `None` for an output it cannot pass.
+    Bypass {
+        exits: Vec<Option<(Unit, usize)>>,
     },
     /// The same node at full resolution, reduced to the unit's scale.
     Reduce {
@@ -1247,7 +1263,7 @@ impl Engine {
         };
         let top = Unit::of(id, scale.to_bits());
         self.shape(&mut p, top)?;
-        let (root, port) = p.resolve(top, port);
+        let (root, port) = p.resolve(top, port)?;
         let Planning { shapes, order, .. } = p;
 
         // The regions each unit is read over, then their unions.
@@ -1261,7 +1277,9 @@ impl Engine {
             let shape: &Shape = &shapes[unit];
             for r in &merged {
                 match &shape.kind {
-                    ShapeKind::Source(..) | ShapeKind::Composite { .. } => {}
+                    ShapeKind::Source(..)
+                    | ShapeKind::Composite { .. }
+                    | ShapeKind::Bypass { .. } => {}
                     ShapeKind::Reduce { input, scale } => {
                         asked
                             .entry(*input)
@@ -1314,6 +1332,7 @@ impl Engine {
                 let work = match &shape.kind {
                     ShapeKind::Source(image, scale) => Work::Source(image.clone(), *scale),
                     ShapeKind::Composite { .. } => unreachable!("a composite has no step"),
+                    ShapeKind::Bypass { .. } => unreachable!("a bypassed node has no step"),
                     ShapeKind::Reduce { input, scale } => Work::Reduce {
                         input: reading(input, r.full_resolution(*scale)),
                         scale: *scale,
@@ -1442,7 +1461,7 @@ impl Engine {
     /// really produce it.
     fn input(&self, p: &mut Planning, input: (Unit, usize)) -> Result<(Unit, usize), Error> {
         self.shape(p, input.0)?;
-        Ok(p.resolve(input.0, input.1))
+        p.resolve(input.0, input.1)
     }
 
     /// Plans `unit` and everything it reads, each once (`p.shapes`),
@@ -1452,6 +1471,9 @@ impl Engine {
     fn shape(&self, p: &mut Planning, unit: Unit) -> Result<(), Error> {
         if p.shapes.contains_key(&unit) {
             return Ok(());
+        }
+        if unit.inner == 0 && p.graph.node(unit.node)?.bypassed {
+            return self.shape_bypass(p, unit);
         }
         let scale = f64::from_bits(unit.scale);
         let desc = Self::describe(p, unit)?;
@@ -1581,6 +1603,52 @@ impl Engine {
             },
         );
         p.order.push(unit);
+        Ok(())
+    }
+
+    /// A bypassed node: each output resolved to the input it passes
+    /// through ([`crate::passed_input`]), shaped at the node's scale; the
+    /// node itself has no step, and what reads it reads that input, under
+    /// its content key. Inputs it does not pass are not read.
+    fn shape_bypass(&self, p: &mut Planning, unit: Unit) -> Result<(), Error> {
+        let node = p.graph.node(unit.node)?;
+        let name = node.name.clone();
+        let (manifest, inputs) = match &node.kind {
+            Kind::Module { module, .. } => (module.manifest().clone(), node.inputs.clone()),
+            Kind::Source { .. } => {
+                return Err(Error::Module {
+                    module: name,
+                    reason: "a source cannot be bypassed".into(),
+                });
+            }
+        };
+        let mut h = blake3::Hasher::new();
+        h.update(&f64::from_bits(unit.scale).to_le_bytes());
+        h.update(b"helios.step.bypass.v1");
+        let mut exits = Vec::with_capacity(manifest.outputs.len());
+        for k in 0..manifest.outputs.len() {
+            let wired = crate::graph::passed_input(&manifest, k)
+                .and_then(|i| inputs[i])
+                .map(|(src, port)| (Unit::of(src, unit.scale), port));
+            let exit = match wired {
+                Some(input) => {
+                    let exit = self.input(p, input)?;
+                    h.update(&p.shapes[&exit.0].lineage.0);
+                    h.update(&(exit.1 as u64).to_le_bytes());
+                    Some(exit)
+                }
+                None => None,
+            };
+            exits.push(exit);
+        }
+        p.shapes.insert(
+            unit,
+            Shape {
+                lineage: ContentHash(*h.finalize().as_bytes()),
+                name,
+                kind: ShapeKind::Bypass { exits },
+            },
+        );
         Ok(())
     }
 
