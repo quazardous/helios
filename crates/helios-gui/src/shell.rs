@@ -575,6 +575,10 @@ impl Shell {
             .plugin(crate::jobs::plugin(jobs.clone(), relays.clone()))
             .plugin(egui_pop::editors::JobConsolesPlugin)
             .plugin(crate::display::Display)
+            // egui-pop's theme editor, as a page of the settings window
+            // (Appearance), on the theme in use.
+            .plugin(egui_pop::api::theme_editor::ThemeEditorPlugin)
+            .plugin(crate::theme_editor::Page)
             .plugin(crate::platform::Platform::new(opens.clone()))
             .plugin(crate::workbench::Panels {
                 specs: panels.clone(),
@@ -1349,6 +1353,24 @@ impl Shell {
             history,
         };
         self.status_items.frame(self.app.handle(), ctx, &measure);
+    }
+
+    /// Takes a theme installed from elsewhere (the theme editor) as the
+    /// one in use: its base and overrides become what a profile saves and
+    /// what `theme.exportMerged` writes. The theme the shell installed
+    /// itself, or an unknown name it fell back from, changes nothing.
+    fn follow_theme(&mut self, spec: &crate::theme::ThemeSpec) {
+        let ours = if self.themes.get(&self.theme_name).is_some() {
+            self.theme_name.as_str()
+        } else {
+            crate::theme::DEFAULT
+        };
+        if spec.base == ours && spec.overrides == self.theme_overrides {
+            return;
+        }
+        self.theme_name.clone_from(&spec.base);
+        self.theme_overrides.clone_from(&spec.overrides);
+        self.theme = crate::theme::resolve(&self.themes, &spec.base, &self.theme_overrides);
     }
 
     /// The name of the theme in use, as chosen.
@@ -3961,6 +3983,7 @@ impl Shell {
                     style.animation_time = 0.0;
                 });
             }
+            self.follow_theme(&spec);
             self.installed = Some(spec);
         }
         self.set_context(&ctx);

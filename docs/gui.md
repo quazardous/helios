@@ -362,6 +362,19 @@ sync through the vault.
 - **Live preview** in the theme picker. `theme.exportMerged` writes the
   current theme with its overrides merged into one file (`theme.export`
   belongs to egui-pop's theme editor, which gives a theme's changes only).
+- **The theme editor.** egui-pop's theme editor (`ThemeEditorPlugin`) is
+  a page of the settings window, Settings › Appearance › Theme editor
+  (`app.settings.page` with `{"page": "helios.theme-editor"}`). It edits
+  the theme in use token by token, Helios's own tokens included, with
+  each token's contrast, undo and redo; every change is installed at
+  once (or kept in its preview with "Preview only"). Helios Dark and
+  Helios Light are a pair, edited as a pair: the "Variant edited" switch
+  edits the other one, each with its own changes. The edits become the
+  theme's overrides, which a profile saves (the light variant's own
+  changes are not saved yet). Token files are opened and saved through
+  egui-pop's file chooser (the files plugin); the `theme.*` agent
+  commands (`theme.read`, `theme.set`, `theme.export`, ...) are the
+  editor's. Icon tokens are not edited there.
 
 ### Profiles
 

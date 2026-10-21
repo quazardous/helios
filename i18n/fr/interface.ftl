@@ -80,6 +80,9 @@ plugin-helios-lists =
 plugin-helios-platform =
     .title = Plateforme de Helios
 
+plugin-helios-theme-editor =
+    .title = Éditeur de thème
+
 plugin-helios-workbench =
     .title = Zones de Helios
 
