@@ -164,6 +164,17 @@ fn a_double_click_on_the_image_leaves_the_darkroom() {
         &Opened::File(photo),
         &PopOrigin::User,
     );
+    // The desktop loads the file (main.rs); here the viewport is given an
+    // image of its own: the pointer's gestures need one shown.
+    let mut g = helios_core::Graph::new();
+    let src = g.add_source(
+        "source",
+        helios_core::Image::from_fn(helios_core::Region::sized(64, 48), 4, |_, _, _| 0.5),
+    );
+    h.state_mut().set_view_source(g, src, "image").unwrap();
+    for _ in 0..8 {
+        h.step();
+    }
     h.run();
     assert_eq!(key(&h, "place"), "helios.darkroom");
     let at = h
