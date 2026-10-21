@@ -249,13 +249,15 @@ fn darktable_s_wheel_over_a_slider_changes_it_and_ctrl_alt_leaves_it() {
     assert!(f(&h, EV) > 0.0, "{}", f(&h, EV));
     assert_eq!(slider(&h, EV), ev, "the panel scrolled");
     // Ctrl+Alt and the wheel leave it to the panel: the value stays.
+    // (Ctrl as egui-winit reports it off macOS: `command` with `ctrl`,
+    // which the profile's `Ctrl` matches.)
     let up = f(&h, EV);
     wheel(
         &mut h,
         ev.center(),
         MouseWheelUnit::Line,
         vec2(0.0, -2.0),
-        Modifiers::CTRL | Modifiers::ALT,
+        Modifiers::COMMAND | Modifiers::ALT,
     );
     assert_eq!(f(&h, EV), up, "Ctrl+Alt and the wheel changed the value");
 }
