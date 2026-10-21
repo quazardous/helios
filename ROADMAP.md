@@ -150,6 +150,11 @@ tree on egui-pop's `TreeView`, live through its handle, its selection
 two-way with the viewport's; rename, invert and opacity are undo steps
 of the store, moving and deleting members rewire the network (to become
 undo steps, as decided above).
+Decided (2026-10-21): the mask display shows the node selected in the
+Masks panel, else the selected module's final mask, as a coloured
+overlay (theme tokens) or the mask alone in grey; one transient view
+value behind a command, the `M` key and a button, on through edits,
+rendered by the same engine and cache (see docs/design/mask-display.md).
 The desktop runs on egui-pop's workbench (2026-10-12): its window frame,
 per-window scale and interface zoom, panels in areas with auxiliary
 windows and arrangements (Helios's image-first layout a template), the

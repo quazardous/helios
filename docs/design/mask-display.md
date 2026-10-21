@@ -1,7 +1,8 @@
 # Mask display: seeing what a module or a mask node affects
 
-Status: **design note, not decided** (2026-10-14). Nothing here is built.
-Each choice below has a recommended default for the owner to settle.
+Status: **decided** (2026-10-21): the owner accepted this note with the
+default of every choice; building follows its plan. Proposed on
+2026-10-14.
 
 A mask is hard to judge from the image alone: a soft feather, an
 intersection that leaves almost nothing, a parametric range that catches
@@ -71,7 +72,7 @@ final mask.
 - (b) The output of the node selected in the Masks panel: a member, a
   group, a refinement, or the root.
 
-**Recommended: (b), falling back to (a).** With nothing selected in the
+**Decided (2026-10-21): (b), falling back to (a).** With nothing selected in the
 tree, the root shows: the final mask. Selecting a member shows that
 member alone, as it reaches its group (after its refinements, before the
 group's opacity and inversion of it), which is what one checks when a
@@ -85,7 +86,7 @@ display says where the module acts, not how much.
 - (b) The mask alone, in grey (0 black, 1 white).
 - (c) Both, as modes of one toggle.
 
-**Recommended: (c), the overlay first.** The overlay's colour and
+**Decided (2026-10-21): (c), the overlay first.** The overlay's colour and
 opacity are theme tokens (`mask.overlay.color`, defaulting to the
 theme's accent; `mask.overlay.opacity`, 0.6), never a hard-coded yellow,
 so a theme can keep it visible on its own image surround. The image
@@ -97,7 +98,7 @@ the parametric member's editor, not the viewport toggle.
 
 ### 3. How it is toggled
 
-**Recommended: all three, one value behind them.** The state is a view
+**Decided (2026-10-21): all three, one value behind them.** The state is a view
 value, `view/viewport/mask_display` (`off`, `overlay`, `grey`),
 transient: never an undo step, never saved with the edit, like the
 zoom.
@@ -111,7 +112,7 @@ zoom.
 
 ### 4. Whether it stays on while editing
 
-**Recommended: it stays on**, through handle drags, parameter changes,
+**Decided (2026-10-21): it stays on**, through handle drags, parameter changes,
 an agent's edits and undo, and follows the tree's selection. It goes
 off only when toggled, or when the selected module has no mask (it
 comes back with the next module that has one, since the value is the
@@ -131,7 +132,7 @@ drawn over it.
   are added: the overlay on the root, then grey on one member, through
   the palette as a person would.
 
-**Recommended: all three**, the MCP argument first since it serves
+**Decided (2026-10-21): all three**, the MCP argument first since it serves
 tests too.
 
 ### 6. GPU path and preview pipe
