@@ -24,6 +24,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.22.0] - 2026-10-21
+
+### Added
+
+- Part of a workspace's network can be delegated to a named sub-workspace, nested if wanted, and deleted again, each as one undoable step with a dry run; templates and workspace edits carry them, and importing a network copies its sub-workspaces. Entering a sub-workspace comes in a later release.
+
 ## [0.21.0] - 2026-10-21
 
 ### Added
