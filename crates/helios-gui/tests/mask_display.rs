@@ -87,12 +87,22 @@ fn harness() -> Harness<'static, Shell> {
     harness_of(g, blend, "output")
 }
 
+/// Runs a command as a person would and answers its result: the
+/// shell's commands are queued and run at the next frame, their result
+/// in the history.
 fn run(h: &mut Harness<'_, Shell>, command: &str, args: serde_json::Value) -> serde_json::Value {
-    let out = h.state_mut().run(command, args, Origin::User).unwrap();
+    h.state_mut().run(command, args, Origin::User).unwrap();
     for _ in 0..3 {
         h.step();
     }
-    out
+    let run = h
+        .state()
+        .history()
+        .into_iter()
+        .rev()
+        .find(|r| r.id == command)
+        .unwrap_or_else(|| panic!("{command} never ran"));
+    run.result.unwrap_or_else(|e| panic!("{command}: {e}"))
 }
 
 fn mode(h: &Harness<'_, Shell>) -> Mode {
@@ -284,7 +294,8 @@ fn it_stays_on_through_a_drag_a_parameter_change_and_undo() {
     run(&mut h, COMMAND, json!({ "mode": "grey" }));
     run(&mut h, "mask.select", json!({ "shape": "spot" }));
     settled(&mut h);
-    assert!(on_screen(&mut h, 400.0, 200.0).iter().all(|&c| c >= 250));
+    // Off the centre: the selected spot's handles are drawn there.
+    assert!(on_screen(&mut h, 385.0, 185.0).iter().all(|&c| c >= 250));
     // A handle dragged by a command: the spot moves, the display follows.
     run(
         &mut h,
@@ -294,8 +305,8 @@ fn it_stays_on_through_a_drag_a_parameter_change_and_undo() {
     settled(&mut h);
     assert_eq!(mode(&h), Mode::Grey);
     assert_eq!(shown(&h), Some(("spot".into(), "spot".into())));
-    assert!(on_screen(&mut h, 400.0, 600.0).iter().all(|&c| c >= 250));
-    assert!(on_screen(&mut h, 400.0, 200.0).iter().all(|&c| c <= 5));
+    assert!(on_screen(&mut h, 385.0, 585.0).iter().all(|&c| c >= 250));
+    assert!(on_screen(&mut h, 385.0, 185.0).iter().all(|&c| c <= 5));
     // A parameter changed in the store.
     put(&mut h, "node/spot/radius", Value::Float(10.0));
     settled(&mut h);

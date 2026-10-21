@@ -1583,7 +1583,10 @@ impl MaskTree {
                     },
                 );
             }
-            // The mask display: the same cycle as the command and M.
+        });
+        // The mask display, on a row of its own (the actions fill the
+        // panel's width): the same cycle as the command and M.
+        ui.horizontal(|ui| {
             let (mode, shown) = &display;
             let hint = tr(Message::new(
                 "gui-mask-display-hint",
