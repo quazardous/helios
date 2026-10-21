@@ -161,6 +161,12 @@ clicked or focused), in place of darktable's (2026-10-21), whose wheel
 over a slider changed values while scrolling (darktable pitfall 7). A
 saved choice is kept; the first run offers darktable's profile in one
 click, and that profile stays faithful to darktable (see docs/gui.md).
+A node can be bypassed (2026-10-21, done): it keeps its parameters and
+the engine plans through it, its output the input it passes through,
+so the image and its content keys are those without it. One undo step
+(`node.bypass`, Ctrl+/ on the selected module, the Modules panel's
+toggle), saved with the edit; agents reach it on the desktop and through
+a node's control (see docs/module-contract.md, "Bypass").
 The desktop runs on egui-pop's workbench (2026-10-12): its window frame,
 per-window scale and interface zoom, panels in areas with auxiliary
 windows and arrangements (Helios's image-first layout a template), the

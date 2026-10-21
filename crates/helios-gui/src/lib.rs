@@ -19,6 +19,7 @@ pub mod library;
 pub mod mask_display;
 pub mod mask_tree;
 pub mod masks;
+pub mod modules;
 pub mod navigator;
 pub mod params;
 pub mod persist;

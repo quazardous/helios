@@ -430,6 +430,43 @@ fn the_graph_renders_what_the_store_holds() {
 }
 
 #[test]
+fn a_bypass_is_a_value_the_graph_follows_and_an_undo_step() {
+    let (mut g, exp, mut store, _) = exposure();
+    let path = bypass_path("exposure");
+    assert_eq!(path, "bypass/exposure");
+    assert_eq!(store.get(&path).unwrap().value, Value::Bool(false));
+    assert!(
+        store.get(&bypass_path("source")).is_none(),
+        "a source has none"
+    );
+    store
+        .set(Set::new(&path, Change::To(Value::Bool(true)), agent()))
+        .unwrap();
+    assert_eq!(sync(&mut store, &mut g).unwrap(), 1);
+    assert!(g.is_bypassed(exp).unwrap());
+    // Bypassed, the node shows its input: the grey source.
+    let engine = Engine::new(Arc::new(Bus::new()));
+    let r = Region::sized(4, 4);
+    let out = engine.render(&g, exp, "output", r).unwrap();
+    assert!(
+        (out.pixel(1, 1)[0] - 0.25).abs() < 1e-6,
+        "{:?}",
+        out.pixel(1, 1)
+    );
+    // One undo step: undone, the graph follows.
+    assert_eq!(
+        store.undo(&agent()).unwrap().as_deref(),
+        Some("set bypass/exposure")
+    );
+    assert_eq!(sync(&mut store, &mut g).unwrap(), 1);
+    assert!(!g.is_bypassed(exp).unwrap());
+    // Bound again, the store takes the graph's state.
+    g.set_bypass(exp, true).unwrap();
+    bind_node(&mut store, &g, exp).unwrap();
+    assert_eq!(store.get(&path).unwrap().value, Value::Bool(true));
+}
+
+#[test]
 fn the_commands_drive_the_store_with_their_origin() {
     let (_, _, store, _) = exposure();
     let store = Arc::new(Mutex::new(store));

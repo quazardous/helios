@@ -255,6 +255,9 @@ command-network-move =
 command-network-remove =
     .title = Retirer des nœuds du réseau, avec leurs liaisons (`nodes`)
 
+command-node-bypass =
+    .title = Contourner un module ou le rétablir (`node` : le module sélectionné par défaut ; `on` : alterné par défaut)
+
 command-param-copyPath =
     .title = Copier le chemin d’une valeur (`path`)
 

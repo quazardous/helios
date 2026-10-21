@@ -163,7 +163,7 @@ keyboard has no common key.
 | Graph: add node | `Shift+A`, `Tab` in the graph | — | — | Blender, Nuke |
 | Graph: frame selection, all | `F`, `Home` in the graph | — | — | `F` is full preview elsewhere |
 | Graph: group, ungroup | `Ctrl+G`, `Ctrl+Shift+G` | image group | — | one meaning everywhere |
-| Graph: bypass node | `Ctrl+/` (not decided) | — | — | no common key |
+| Graph: bypass node | `Ctrl+/` (bound 2026-10-21) | — | — | no common key |
 | Graph: delete, dissolve | `Del`, `Ctrl+Del` | remove image | — | dissolve reconnects |
 | Graph: connect | palette only | — | — | no common key |
 

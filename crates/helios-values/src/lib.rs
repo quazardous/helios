@@ -1,8 +1,9 @@
 //! The value store: every value a widget or an agent edits lives here, at a
 //! stable path, never in a widget (see `docs/widgets.md`).
 //!
-//! - Paths: `node/<node>/<param>` for a module's parameters (mirrored onto
-//!   the graph, which renders), `settings/<key>`, `view/<key>`.
+//! - Paths: `node/<node>/<param>` for a module's parameters and
+//!   `bypass/<node>` for its bypass (both mirrored onto the graph, which
+//!   renders), `settings/<key>`, `view/<key>`.
 //! - Each path has a [`Descriptor`]: type, hard and soft range, fine and
 //!   coarse steps, unit, display scale and precision, default, label,
 //!   choices. A module's come from its manifest and its parameter hints.
@@ -25,7 +26,7 @@ mod commands;
 mod graph;
 
 pub use commands::{register, value_from_json, value_to_json};
-pub use graph::{bind_node, node_path, sync};
+pub use graph::{BYPASS, bind_node, bypass_path, node_path, sync};
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -475,7 +476,8 @@ pub struct Store {
     next_gesture: u64,
     undo: Vec<Step>,
     redo: Vec<Step>,
-    /// `node/…` paths changed since the graph was last synced.
+    /// `node/…` and `bypass/…` paths changed since the graph was last
+    /// synced.
     dirty: BTreeSet<String>,
     /// Steps committed so far, and what the last one was.
     committed: u64,
@@ -693,7 +695,7 @@ impl Store {
         let old = std::mem::replace(&mut entry.value, value.clone());
         entry.seq = seq;
         entry.origin = Some(origin.clone());
-        if path.starts_with("node/") {
+        if path.starts_with("node/") || path.starts_with(graph::BYPASS) {
             self.dirty.insert(path.into());
         }
         if let Some(bus) = &self.bus {

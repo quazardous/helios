@@ -17,10 +17,10 @@
 //!   proposal accepted (all of it or corrected) or declined, as the user,
 //!   and shows the proposals waiting again on `library.decision`;
 //! - saves the edit of the image shown ([`Persist::open_image`]), with
-//!   the labels and locks of its mask nodes (its `marks`), as a
-//!   version each time the value store commits a step: a write outside a
-//!   gesture, the end of a gesture (a drag is one step, saved once when
-//!   it ends), an undo, a redo. While a gesture goes on, what it changed
+//!   the labels and locks of its mask nodes (its `marks`) and the modules
+//!   bypassed, as a version each time the value store commits a step: a
+//!   write outside a gesture, the end of a gesture (a drag is one step,
+//!   saved once when it ends), an undo, a redo. While a gesture goes on, what it changed
 //!   is saved every [`FLUSH_SECONDS`] as a version labelled "in progress",
 //!   so a crash in the middle of a long drag loses at most that much of
 //!   it. Each save is announced on the bus as `edit.saved`.
@@ -370,6 +370,14 @@ impl<S: Store> Persist<S> {
                 }
             }
             let mut current = edit::from_modules(&modules);
+            // The modules bypassed, marked on their entries.
+            let bypassed: BTreeSet<String> = store
+                .list(helios_values::BYPASS)
+                .into_iter()
+                .filter(|(_, e)| e.value.as_bool() == Some(true))
+                .filter_map(|(p, _)| p.strip_prefix(helios_values::BYPASS).map(String::from))
+                .collect();
+            edit::mark_bypassed(&mut current, &bypassed);
             // The Masks panel's labels and locks, kept with the edit.
             let marks = crate::mask_tree::marks(&store);
             if !marks.is_empty() {
