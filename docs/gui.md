@@ -79,7 +79,7 @@ MCP server alike (`helios_gui::contexts` on the desktop).
 | Frame | Kind | What | Projection |
 |---|---|---|---|
 | `helios.library` | place | the vault's images to browse, rate and cull (`view.library`) | the `Library` arrangement |
-| `helios.darkroom` | place, payload `{"image": id}` or `{"file": path}` | an image edited: entered when one opens, under the place the user was in (the library, the root) | the workspace's own layout, and what the user picks there |
+| `helios.darkroom` | place, payload `{"image": id}` or `{"file": path}` | an image edited: entered when one opens, under the place the user was in (the library, the root) | the `Darkroom` arrangement: the workspace's default layout (each panel open by default in its area), the image in the centre, wherever the image was opened from (the library's grid included); then what the user picks there |
 | `helios.workspace` | place, payload the workspace's key | the workspace's network, edited (`view.network`) | the `Network` arrangement |
 | `helios.culling` | mode of `orientation`, set | culling (`view.culling`): the vault's keys (0 to 5, P, X, U, R, 6 to 9, S, Left, Right) wherever the focus is, the mask keys off | the `Image` arrangement |
 | `helios.mask-editing` | mode of `tool`, pushed, transient | drawing a mask's path | the Masks panel shown |

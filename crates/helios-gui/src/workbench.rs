@@ -39,6 +39,11 @@ pub const LIBRARY: &str = helios_template::contexts::LIBRARY_ARRANGEMENT;
 /// and parameters beside it, every other panel closed.
 pub const NETWORK: &str = helios_template::contexts::NETWORK_ARRANGEMENT;
 
+/// The darkroom's arrangement: the workspace's default layout (each
+/// panel open by default in its own area), the image shown in the
+/// centre.
+pub const DARKROOM: &str = helios_template::contexts::DARKROOM_ARRANGEMENT;
+
 /// Helios's panels, declared to egui-pop's workbench.
 pub(crate) struct Panels {
     pub specs: Vec<PanelSpec>,
@@ -70,6 +75,7 @@ impl Plugin for Panels {
         ctx.arrangement(IMAGE_FIRST, image_first(&self.specs));
         ctx.arrangement(LIBRARY, library(&self.specs));
         ctx.arrangement(NETWORK, network(&self.specs));
+        ctx.arrangement(DARKROOM, darkroom(&self.specs));
         Ok(())
     }
 }
@@ -110,6 +116,34 @@ fn only(specs: &[PanelSpec], shown: &[(Area, &str)]) -> Layout {
         hidden: specs
             .iter()
             .filter(|s| !shown.iter().any(|(_, p)| *p == s.id.as_str()))
+            .map(|s| s.id.clone())
+            .collect(),
+        ..Layout::default()
+    }
+}
+
+/// The darkroom layout of these panels (see [`DARKROOM`]): each panel
+/// open by default in its own area, as tabs in declaration order, the
+/// image shown in the centre; the others closed.
+pub fn darkroom(specs: &[PanelSpec]) -> Layout {
+    let image = "helios.viewport";
+    let areas = [Area::Center, Area::StartSide, Area::EndSide, Area::Bottom]
+        .into_iter()
+        .filter_map(|area| {
+            let panels: Vec<PanelId> = specs
+                .iter()
+                .filter(|s| s.open && s.area == area)
+                .map(|s| s.id.clone())
+                .collect();
+            let active = panels.iter().position(|p| p.as_str() == image).unwrap_or(0);
+            (!panels.is_empty()).then_some((area, Node::Tabs { panels, active }))
+        })
+        .collect();
+    Layout {
+        areas,
+        hidden: specs
+            .iter()
+            .filter(|s| !s.open)
             .map(|s| s.id.clone())
             .collect(),
         ..Layout::default()

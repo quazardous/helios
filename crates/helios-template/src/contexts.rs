@@ -52,6 +52,9 @@ pub const LIBRARY_ARRANGEMENT: &str = "Library";
 pub const NETWORK_ARRANGEMENT: &str = "Network";
 /// The image-first arrangement: culling.
 pub const IMAGE_ARRANGEMENT: &str = "Image";
+/// The darkroom's arrangement: the workspace's default layout, the image
+/// in the centre.
+pub const DARKROOM_ARRANGEMENT: &str = "Darkroom";
 
 /// The Masks panel, shown while a mask is edited.
 pub const MASKS_PANEL: &str = "helios.masks";
@@ -62,9 +65,13 @@ pub const IMAGE_PANEL: &str = "helios.viewport";
 pub fn frames() -> Vec<FrameSpec> {
     vec![
         FrameSpec::place(LIBRARY, "Library").arrangement(LIBRARY_ARRANGEMENT),
-        // The darkroom keeps the layout the user had: it starts from the
-        // workspace's own, and remembers what was picked there.
-        FrameSpec::place(DARKROOM, "Darkroom").label(|c| crumb(c.frame, c.title, c.payload)),
+        // The darkroom starts from the workspace's default layout, the
+        // image in the centre, wherever the image was opened from (the
+        // library's grid included), and remembers what the user picks
+        // there.
+        FrameSpec::place(DARKROOM, "Darkroom")
+            .arrangement(DARKROOM_ARRANGEMENT)
+            .label(|c| crumb(c.frame, c.title, c.payload)),
         FrameSpec::place(WORKSPACE, "Network")
             .arrangement(NETWORK_ARRANGEMENT)
             .label(|c| crumb(c.frame, c.title, c.payload)),
