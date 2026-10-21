@@ -605,6 +605,11 @@ scroll the panel. Settings › Input › Wheel over sliders, set to
 `guarded`, keeps the rule decided on 2026-10-12 instead: the wheel
 scrolls the panel and a slider takes it only when it has focus or while
 Alt is held, so scrolling past sliders never changes a value.
+The darktable profile follows darktable's behaviour (decided
+2026-10-21); it deviates only for named bugs, listed here (none so
+far). The wheel and Ctrl+Alt are darktable's sidebar scroll
+(`darkroom/ui/sidebar_scroll_default` off), a double click on the
+image leaves the darkroom as darktable's goes back to the lighttable.
 Steps in a row on one slider (a held arrow's repeats, a turned wheel)
 are one undo step; a held key repeats a step, never a command.
 Enter types a value or an expression (`x * 2`, `x - 0,5`, `x` being the
