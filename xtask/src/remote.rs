@@ -272,7 +272,9 @@ impl Bench {
     fn ssh(&self, connect_timeout: u32, args: &[&str]) -> Command {
         let mut c = Command::new("ssh");
         if let Some(key) = &self.key {
-            c.arg("-i").arg(key);
+            // Only this key: an agent offering its own keys first can use
+            // up the server's tries ("Too many authentication failures").
+            c.arg("-i").arg(key).args(["-o", "IdentitiesOnly=yes"]);
         }
         c.args(["-o", "BatchMode=yes", "-o"])
             .arg(format!("ConnectTimeout={connect_timeout}"))
