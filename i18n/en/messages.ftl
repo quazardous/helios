@@ -347,7 +347,7 @@ gui-params-show-values = Show the values
 
 gui-params-values = { $count } values
 
-gui-pointer-choice-close = Close
+gui-pointer-choice-close = Close the pointer profile notice
 
 gui-pointer-choice-darktable = Use darktable's
 

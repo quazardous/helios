@@ -13,12 +13,11 @@
 //! and the close button dismisses it. It never blocks the window, and
 //! whatever the answer it is remembered with the interface's settings
 //! ([`ASKED`]), so it shows once. Only the desktop offers it
-//! (`Shell::offer_pointer_choice`): tests and tools never see it unless
-//! they ask.
+//! (`Shell::offer_pointer_choice`; the shell draws it, as it draws its
+//! popups): tests and tools never see it unless they ask.
 
 use std::sync::PoisonError;
 
-use egui::{Align2, Id, Order, Rect, vec2};
 use egui_pop::api::AppHandle;
 use egui_pop::model::commands::Origin;
 use egui_pop::model::ids::OwnerId;
@@ -92,12 +91,12 @@ pub fn dismiss(app: &AppHandle) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
-/// Draws the notice when it is wanted, at the bottom of the window over
-/// the panels, without blocking them. Returns where it was drawn.
-pub fn ui(ctx: &egui::Context, app: &AppHandle) -> Option<Rect> {
-    if !wanted(app) {
-        return None;
-    }
+/// Draws the notice's body in `ui`: the shell places it, in an area of
+/// its own over the panels that blocks nothing (`Shell::ui`, shown while
+/// [`wanted`]). Applies what was clicked.
+pub fn body(ui: &mut egui::Ui, app: &AppHandle) {
+    let ctx = ui.ctx().clone();
+    let ctx = &ctx;
     let title = crate::i18n::text(
         ctx,
         Message::new("gui-pointer-choice-title", "Coming from darktable?"),
@@ -117,34 +116,33 @@ pub fn ui(ctx: &egui::Context, app: &AppHandle) -> Option<Rect> {
         ctx,
         Message::new("gui-pointer-choice-keep", "Keep Lightroom-style"),
     );
-    let close = crate::i18n::text(ctx, Message::new("gui-pointer-choice-close", "Close"));
+    let close = crate::i18n::text(
+        ctx,
+        Message::new(
+            "gui-pointer-choice-close",
+            "Close the pointer profile notice",
+        ),
+    );
     let mut chosen: Option<bool> = None;
     let mut closed = false;
-    let shown = egui::Area::new(Id::new(RECT))
-        .order(Order::Foreground)
-        .anchor(Align2::CENTER_BOTTOM, vec2(0.0, -48.0))
-        .show(ctx, |ui| {
-            egui::Frame::popup(ui.style()).show(ui, |ui| {
-                ui.set_max_width(440.0);
-                ui.horizontal(|ui| {
-                    ui.strong(&title);
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let r = ui.small_button("✕").on_hover_text(&close);
-                        egui_pop::core::a11y::name(&r, egui::WidgetType::Button, &close);
-                        closed = r.clicked();
-                    });
-                });
-                ui.label(&text);
-                ui.horizontal(|ui| {
-                    if ui.button(&use_darktable).clicked() {
-                        chosen = Some(true);
-                    }
-                    if ui.button(&keep).clicked() {
-                        chosen = Some(false);
-                    }
-                });
-            });
+    ui.set_max_width(440.0);
+    ui.horizontal(|ui| {
+        ui.strong(&title);
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let r = ui.small_button("✕").on_hover_text(&close);
+            egui_pop::core::a11y::name(&r, egui::WidgetType::Button, &close);
+            closed = r.clicked();
         });
+    });
+    ui.label(&text);
+    ui.horizontal(|ui| {
+        if ui.button(&use_darktable).clicked() {
+            chosen = Some(true);
+        }
+        if ui.button(&keep).clicked() {
+            chosen = Some(false);
+        }
+    });
     let done = match chosen {
         Some(darktable) => answer(app, darktable),
         None if closed => dismiss(app),
@@ -153,5 +151,4 @@ pub fn ui(ctx: &egui::Context, app: &AppHandle) -> Option<Rect> {
     if let Err(e) = done {
         log::warn!("pointer choice: {e}");
     }
-    Some(shown.response.rect)
 }

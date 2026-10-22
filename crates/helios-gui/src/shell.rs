@@ -3776,11 +3776,7 @@ impl Shell {
         self.engine_notices();
         self.job_notices();
         self.menus_ui(&ctx);
-        if self.pointer_choice
-            && let Some(rect) = crate::pointer_choice::ui(&ctx, self.app.handle())
-        {
-            self.rects.insert(crate::pointer_choice::RECT.into(), rect);
-        }
+        self.pointer_choice_ui(&ctx);
 
         let named = ctx.data(|d| {
             d.get_temp::<BTreeMap<String, (Rect, egui::ViewportId)>>(Id::new("helios.named"))
@@ -3853,6 +3849,26 @@ impl Shell {
             };
             self.rects.insert(name.into(), o.rect);
         }
+    }
+
+    /// The first run's "Coming from darktable?" (`pointer_choice`), when
+    /// offered and wanted: an area at the bottom of the window over the
+    /// panels, not a dialog, so it blocks neither keys nor clicks.
+    fn pointer_choice_ui(&mut self, ctx: &Egui) {
+        let h = self.app.handle().clone();
+        if !self.pointer_choice || !crate::pointer_choice::wanted(&h) {
+            return;
+        }
+        let shown = egui::Area::new(Id::new(crate::pointer_choice::RECT))
+            .order(egui::Order::Foreground)
+            .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -48.0))
+            .show(ctx, |ui| {
+                egui::Frame::popup(ui.style()).show(ui, |ui| {
+                    crate::pointer_choice::body(ui, &h);
+                });
+            });
+        self.rects
+            .insert(crate::pointer_choice::RECT.into(), shown.response.rect);
     }
 
     /// Menus of commands asked for, in egui's popups (the system menu is

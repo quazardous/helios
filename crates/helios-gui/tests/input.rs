@@ -738,7 +738,10 @@ fn the_first_run_offers_darktable_s_profile_once() {
 
 #[test]
 fn keeping_lightroom_s_habits_or_closing_the_notice_is_remembered() {
-    for (button, name) in [("Keep Lightroom-style", "keep"), ("Close", "close")] {
+    for (button, name) in [
+        ("Keep Lightroom-style", "keep"),
+        ("Close the pointer profile notice", "close"),
+    ] {
         let dir = temp(name);
         let mut h = first_run(&dir);
         h.get_by_label(button).click();
