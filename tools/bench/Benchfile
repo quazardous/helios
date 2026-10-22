@@ -358,6 +358,8 @@ env = { CARGO_NET_OFFLINE = "true" }
 mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
 timeout = "1h"
 
+# (darktable builds with -Werror; GCC's ASan instrumentation raises false
+# stringop, array-bounds and maybe-uninitialized warnings, kept as warnings)
 # A darktable commit built with AddressSanitizer (recovering, so one
 # report does not end the run), Lua on for the GUI setup, then the
 # rgbcurve scroll scenario (cases B and C) in a headless labwc via wbox.
@@ -377,7 +379,7 @@ if [ "$(cat $p/.commit 2> /dev/null)" != "$c" ]; then \
   for s in rawspeed:/work/rawspeed-dt-master whereami:/work/whereami LibRaw:/work/libraw OpenCL:/work/opencl-headers libxcf:/work/libxcf lua-scripts:/work/lua-scripts; do \
     rm -rf $b/src/src/external/${s%%:*}; cp -r --preserve=mode ${s#*:} $b/src/src/external/${s%%:*}; done; \
   [ "$(cat $b/.commit 2> /dev/null)" = "$c" ] || rm -rf $b/tree $p; \
-  F='-fsanitize=address -fsanitize-recover=address -fno-omit-frame-pointer'; \
+  F='-fsanitize=address -fsanitize-recover=address -fno-omit-frame-pointer -Wno-error=stringop-overflow -Wno-error=stringop-overread -Wno-error=array-bounds -Wno-error=maybe-uninitialized'; \
   cmake -S $b/src -B $b/tree -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_INSTALL_PREFIX=$p \
     -DCMAKE_C_FLAGS="$F" -DCMAKE_CXX_FLAGS="$F" \
     -DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address -DCMAKE_SHARED_LINKER_FLAGS=-fsanitize=address -DCMAKE_MODULE_LINKER_FLAGS=-fsanitize=address \
