@@ -15,7 +15,9 @@
 //!   every node only they lead to, are omitted in the same write;
 //! - a failure is **retried** when the node declares it, after a delay that
 //!   can grow; past the limit it stands;
-//! - **leases** expire: `expire` gives back what a dead worker held.
+//! - **leases** expire: `expire` gives back what a dead worker held;
+//! - every write runs in one store **transaction**: kept whole or not at
+//!   all.
 //!
 //! Time is always passed in (milliseconds), never read from a clock, so the
 //! journal is deterministic and every worker agrees on what is due.
@@ -27,7 +29,6 @@
 //! Not yet: groups, lanes, waits and signals, rate limits, graph versions,
 //! history of what forget and retries take away.
 
-use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Mutex;
 
@@ -36,6 +37,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 pub mod contract;
+mod store;
+
+pub use store::{MemoryStore, Pending, Store, Write};
 
 /// Where an item stands at a node.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -71,40 +75,6 @@ pub struct Row {
     /// When a running lease expires, or when a scheduled retry is due.
     pub due: Option<u64>,
     pub error: Option<String>,
-}
-
-/// Where rows are kept. A store only stores: every rule is the journal's.
-pub trait Store: Send {
-    fn get(&self, item: &str, node: &str) -> Option<Row>;
-    fn put(&mut self, item: &str, node: &str, row: Row);
-    fn remove(&mut self, item: &str, node: &str);
-    /// Every row, as (item, node, row).
-    fn rows(&self) -> Vec<(String, String, Row)>;
-}
-
-/// Rows in memory: the reference other stores are checked against.
-#[derive(Default)]
-pub struct MemoryStore(BTreeMap<(String, String), Row>);
-
-impl Store for MemoryStore {
-    fn get(&self, item: &str, node: &str) -> Option<Row> {
-        self.0.get(&(item.to_string(), node.to_string())).cloned()
-    }
-
-    fn put(&mut self, item: &str, node: &str, row: Row) {
-        self.0.insert((item.to_string(), node.to_string()), row);
-    }
-
-    fn remove(&mut self, item: &str, node: &str) {
-        self.0.remove(&(item.to_string(), node.to_string()));
-    }
-
-    fn rows(&self) -> Vec<(String, String, Row)> {
-        self.0
-            .iter()
-            .map(|((i, n), r)| (i.clone(), n.clone(), r.clone()))
-            .collect()
-    }
 }
 
 /// How a failure is retried: at most `limit` attempts in all, the first
@@ -279,7 +249,19 @@ impl std::error::Error for Error {}
 
 struct Inner<S> {
     store: S,
-    next_token: u64,
+    /// The last token handed out.
+    last_token: u64,
+}
+
+impl<S: Store> Inner<S> {
+    /// Runs `f` in one store transaction: its writes are kept whole or not
+    /// at all. `f` checks before it writes: an error leaves nothing written.
+    fn atomically<T>(&mut self, f: impl FnOnce(&mut Self) -> T) -> T {
+        self.store.begin();
+        let value = f(self);
+        self.store.commit();
+        value
+    }
 }
 
 /// The journal of a workflow, over a store.
@@ -289,13 +271,20 @@ pub struct Journal<S: Store> {
 }
 
 impl<S: Store> Journal<S> {
+    /// Opens the journal over `store`. Tokens start above every token the
+    /// store kept or a row carries, so a journal opened again over rows a
+    /// dead process left never hands out a token they hold.
     pub fn new(workflow: Workflow, store: S) -> Self {
+        let in_rows = store
+            .rows()
+            .iter()
+            .filter_map(|(_, _, r)| r.token)
+            .max()
+            .unwrap_or(0);
+        let last_token = store.last_token().max(in_rows);
         Self {
             workflow,
-            inner: Mutex::new(Inner {
-                store,
-                next_token: 0,
-            }),
+            inner: Mutex::new(Inner { store, last_token }),
         }
     }
 
@@ -332,27 +321,34 @@ impl<S: Store> Journal<S> {
     ) -> Result<Lease, Error> {
         let node = self.node(node)?;
         let mut inner = self.inner.lock().expect("journal lock");
-        inner.next_token += 1;
-        let token = inner.next_token;
-        let mut items = Vec::new();
-        for item in candidates {
-            if items.len() == max {
-                break;
+        inner.last_token += 1;
+        let token = inner.last_token;
+        let items = inner.atomically(|inner| {
+            let mut items = Vec::new();
+            for item in candidates {
+                if items.len() == max {
+                    break;
+                }
+                if Self::claimable(&inner.store, item, node, now) {
+                    let attempts = inner.store.get(item, &node.name).map_or(0, |r| r.attempts);
+                    let row = Row {
+                        status: Status::Running,
+                        attempts: attempts + 1,
+                        token: Some(token),
+                        since: now,
+                        due: Some(now + node.lease_ms),
+                        error: None,
+                    };
+                    inner.store.put(item, &node.name, row);
+                    items.push(item.to_string());
+                }
             }
-            if Self::claimable(&inner.store, item, node, now) {
-                let attempts = inner.store.get(item, &node.name).map_or(0, |r| r.attempts);
-                let row = Row {
-                    status: Status::Running,
-                    attempts: attempts + 1,
-                    token: Some(token),
-                    since: now,
-                    due: Some(now + node.lease_ms),
-                    error: None,
-                };
-                inner.store.put(item, &node.name, row);
-                items.push(item.to_string());
+            // An empty lease marks no row: its token need not be kept.
+            if !items.is_empty() {
+                inner.store.set_last_token(token);
             }
-        }
+            items
+        });
         Ok(Lease {
             node: node.name.clone(),
             token,
@@ -392,37 +388,39 @@ impl<S: Store> Journal<S> {
                 });
             }
         }
-        for item in &lease.items {
-            let previous = inner.store.get(item, &node.name).expect("checked above");
-            let mut row = Row {
-                token: None,
-                since: now,
-                due: None,
-                ..previous
-            };
-            match &outcome {
-                Outcome::Done | Outcome::Branch(_) => row.status = Status::Done,
-                Outcome::Skipped => row.status = Status::Skipped,
-                Outcome::Failed(error) => {
-                    row.error = Some(error.clone());
-                    if row.attempts < node.retry.limit {
-                        let factor = if node.retry.exponential {
-                            1u64 << (row.attempts - 1).min(32)
+        inner.atomically(|inner| {
+            for item in &lease.items {
+                let previous = inner.store.get(item, &node.name).expect("checked above");
+                let mut row = Row {
+                    token: None,
+                    since: now,
+                    due: None,
+                    ..previous
+                };
+                match &outcome {
+                    Outcome::Done | Outcome::Branch(_) => row.status = Status::Done,
+                    Outcome::Skipped => row.status = Status::Skipped,
+                    Outcome::Failed(error) => {
+                        row.error = Some(error.clone());
+                        if row.attempts < node.retry.limit {
+                            let factor = if node.retry.exponential {
+                                1u64 << (row.attempts - 1).min(32)
+                            } else {
+                                1
+                            };
+                            row.status = Status::Scheduled;
+                            row.due = Some(now + node.retry.delay_ms.saturating_mul(factor));
                         } else {
-                            1
-                        };
-                        row.status = Status::Scheduled;
-                        row.due = Some(now + node.retry.delay_ms.saturating_mul(factor));
-                    } else {
-                        row.status = Status::Failed;
+                            row.status = Status::Failed;
+                        }
                     }
                 }
+                inner.store.put(item, &node.name, row);
+                if let Outcome::Branch(branch) = &outcome {
+                    self.omit_other_branches(&mut inner.store, item, node, branch, now);
+                }
             }
-            inner.store.put(item, &node.name, row);
-            if let Outcome::Branch(branch) = &outcome {
-                self.omit_other_branches(&mut inner.store, item, node, branch, now);
-            }
-        }
+        });
         Ok(())
     }
 
@@ -472,21 +470,26 @@ impl<S: Store> Journal<S> {
             .into_iter()
             .filter(|(_, _, r)| r.status == Status::Running && r.due.is_some_and(|d| d <= now))
             .collect();
-        for (item, node, row) in &expired {
-            if row.attempts <= 1 {
-                inner.store.remove(item, node);
-            } else {
-                let back = Row {
-                    status: Status::Scheduled,
-                    attempts: row.attempts - 1,
-                    token: None,
-                    since: now,
-                    due: Some(now),
-                    ..row.clone()
-                };
-                inner.store.put(item, node, back);
-            }
+        if expired.is_empty() {
+            return 0;
         }
+        inner.atomically(|inner| {
+            for (item, node, row) in &expired {
+                if row.attempts <= 1 {
+                    inner.store.remove(item, node);
+                } else {
+                    let back = Row {
+                        status: Status::Scheduled,
+                        attempts: row.attempts - 1,
+                        token: None,
+                        since: now,
+                        due: Some(now),
+                        ..row.clone()
+                    };
+                    inner.store.put(item, node, back);
+                }
+            }
+        });
         expired.len()
     }
 

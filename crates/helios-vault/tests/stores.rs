@@ -22,6 +22,19 @@ fn a_journal_in_the_memory_vault_passes_the_journal_contract() {
 }
 
 #[test]
+fn a_journal_in_the_memory_vault_passes_the_lasting_contract() {
+    use helios_vault::journal::VaultJournal;
+    helios_journal::contract::check_lasting(
+        || {
+            std::sync::Arc::new(helios_vault::Vault::new(
+                helios_vault::MemoryStore::default(),
+            ))
+        },
+        |vault| VaultJournal::new(std::sync::Arc::clone(vault), "test"),
+    );
+}
+
+#[test]
 fn configuration_layers_round_trip_as_text() {
     let vault = helios_vault::Vault::new(helios_vault::MemoryStore::default());
     assert_eq!(vault.config_layer("user").unwrap(), None);

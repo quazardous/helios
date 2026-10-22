@@ -3,13 +3,15 @@
 //!
 //! ```ignore
 //! helios_journal::contract::check(MemoryStore::default);
+//! helios_journal::contract::check_lasting(MemoryStore::default, MemoryStore::share);
 //! ```
 
 use std::collections::BTreeSet;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
 use std::thread;
 
-use crate::{Error, Journal, Node, Outcome, Status, Store, Workflow};
+use crate::{Error, Journal, Node, Outcome, Row, Status, Store, Workflow};
 
 /// Runs every scenario against fresh stores made by `make`; panics naming
 /// the first scenario that fails.
@@ -22,6 +24,15 @@ pub fn check<S: Store + 'static>(make: impl Fn() -> S) {
     a_choice_omits_the_other_branches_and_what_only_they_lead_to(journal(&make, choice()));
     concurrent_claimers_never_take_an_item_twice(Arc::new(journal(&make, linear())));
     unknown_nodes_and_bad_branches_are_refused(journal(&make, choice()));
+}
+
+/// The scenarios of a journal that outlives its process: `backing` makes
+/// what keeps the rows (a vault, a shared map), `open` opens a store over
+/// it, as a process does when it starts. A crash is a store dropped
+/// without its commit, then opened again.
+pub fn check_lasting<B, S: Store + 'static>(backing: impl Fn() -> B, open: impl Fn(&B) -> S) {
+    a_crash_between_two_puts_leaves_nothing(&backing(), &open);
+    reopened_tokens_never_collide(&backing(), &open);
 }
 
 fn journal<S: Store>(make: &impl Fn() -> S, workflow: Workflow) -> Journal<S> {
@@ -254,4 +265,104 @@ impl Lease1 {
             ..lease.clone()
         }
     }
+}
+
+/// A store that panics at its `n`-th put, as a process dying in the middle
+/// of a write.
+struct DiesAtPut<S> {
+    store: S,
+    puts_left: usize,
+}
+
+impl<S: Store> Store for DiesAtPut<S> {
+    fn get(&self, item: &str, node: &str) -> Option<Row> {
+        self.store.get(item, node)
+    }
+    fn put(&mut self, item: &str, node: &str, row: Row) {
+        self.puts_left -= 1;
+        assert!(self.puts_left > 0, "the process died mid-transaction");
+        self.store.put(item, node, row);
+    }
+    fn remove(&mut self, item: &str, node: &str) {
+        self.store.remove(item, node);
+    }
+    fn rows(&self) -> Vec<(String, String, Row)> {
+        self.store.rows()
+    }
+    fn begin(&mut self) {
+        self.store.begin();
+    }
+    fn commit(&mut self) {
+        self.store.commit();
+    }
+    fn last_token(&self) -> u64 {
+        self.store.last_token()
+    }
+    fn set_last_token(&mut self, token: u64) {
+        self.store.set_last_token(token);
+    }
+}
+
+fn a_crash_between_two_puts_leaves_nothing<B, S: Store + 'static>(
+    backing: &B,
+    open: &impl Fn(&B) -> S,
+) {
+    let dying = Journal::new(
+        linear(),
+        DiesAtPut {
+            store: open(backing),
+            puts_left: 2,
+        },
+    );
+    let crashed = catch_unwind(AssertUnwindSafe(|| {
+        dying.claim("fetch", 2, &["i1", "i2"], 0)
+    }));
+    assert!(crashed.is_err(), "the second put must panic");
+    drop(dying);
+    let j = Journal::new(linear(), open(backing));
+    assert_eq!(
+        (j.row("i1", "fetch"), j.row("i2", "fetch")),
+        (None, None),
+        "a crash between two puts leaves nothing"
+    );
+    let lease = j.claim("fetch", 2, &["i1", "i2"], 1).unwrap();
+    assert_eq!(lease.items, ["i1", "i2"], "both still claimable");
+    j.conclude(&lease, Outcome::Done, 2).unwrap();
+    drop(j);
+    let j = Journal::new(linear(), open(backing));
+    assert_eq!(
+        j.status("i2", "fetch"),
+        Some(Status::Done),
+        "a committed write outlives its journal"
+    );
+}
+
+fn reopened_tokens_never_collide<B, S: Store + 'static>(backing: &B, open: &impl Fn(&B) -> S) {
+    let first = Journal::new(linear(), open(backing));
+    let concluded = first.claim("fetch", 1, &["a"], 0).unwrap();
+    first.conclude(&concluded, Outcome::Done, 1).unwrap();
+    let left_running = first.claim("fetch", 1, &["b"], 1).unwrap();
+    drop(first);
+    let again = Journal::new(linear(), open(backing));
+    let lease = again.claim("fetch", 1, &["c"], 2).unwrap();
+    assert_eq!(lease.items, ["c"]);
+    assert!(
+        lease.token > concluded.token && lease.token > left_running.token,
+        "reopened, the tokens never collide ({} after {} and {})",
+        lease.token,
+        concluded.token,
+        left_running.token
+    );
+    // No row carries a token any more: only the kept counter remembers.
+    again.conclude(&lease, Outcome::Done, 3).unwrap();
+    again.conclude(&left_running, Outcome::Done, 3).unwrap();
+    drop(again);
+    let third = Journal::new(linear(), open(backing));
+    let last = third.claim("fetch", 1, &["d"], 4).unwrap();
+    assert!(
+        last.token > lease.token,
+        "the store keeps the counter ({} after {})",
+        last.token,
+        lease.token
+    );
 }

@@ -9,6 +9,11 @@ fn the_memory_store_passes_the_contract() {
 }
 
 #[test]
+fn the_memory_store_passes_the_lasting_contract() {
+    contract::check_lasting(MemoryStore::default, MemoryStore::share);
+}
+
+#[test]
 fn monitoring_counts_rows_per_node() {
     let workflow = Workflow::new(vec![
         Node::new("fetch").retry(2, 5, false),
