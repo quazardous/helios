@@ -537,8 +537,16 @@ impl GraphModel for NetworkModel {
 // The network, edited
 // ---------------------------------------------------------------------
 
+/// A connection's four fields; the other keys of a command's arguments
+/// (`replaces`) are not the connection's, which refuses unknown fields.
 fn conn(v: &Json) -> Result<Connection, String> {
-    serde_json::from_value(v.clone()).map_err(|e| format!("a connection: {e}"))
+    let only = json!({
+        "from": v["from"],
+        "port": v["port"],
+        "to": v["to"],
+        "input": v["input"],
+    });
+    serde_json::from_value(only).map_err(|e| format!("a connection: {e}"))
 }
 
 fn conns(v: &Json) -> Result<Vec<Connection>, String> {
@@ -589,12 +597,14 @@ pub fn connect(
             c.from, c.port, out.ty, c.to, c.input, input.ty
         ));
     }
-    net.connections
+    let mut next = net.clone();
+    next.connections
         .retain(|k| !(replaces.contains(k) || k.to == c.to && k.input == c.input));
-    if feeds(net, &c.to, &c.from) {
+    if feeds(&next, &c.to, &c.from) {
         return Err(format!("`{}` already feeds `{}`", c.to, c.from));
     }
-    net.connections.push(c.clone());
+    next.connections.push(c.clone());
+    *net = next;
     Ok(c)
 }
 
@@ -1246,11 +1256,23 @@ mod tests {
     fn edits_change_the_network_and_refuse_what_cannot_be() {
         let c = crate::templates::modules();
         let mut net = network();
-        // A second wire into an input replaces the first.
+        // A loop is refused: the exposure feeds the blend.
+        let looped = connect(
+            &mut net,
+            &c,
+            &json!({ "from": "blend", "port": "output", "to": "exposure", "input": "input" }),
+        );
+        assert!(looped.is_err(), "{looped:?}");
+        assert_eq!(net, network(), "a refused edit changes nothing");
+        // A second wire into an input replaces the first; the editor's
+        // arguments carry the wires replaced too.
         connect(
             &mut net,
             &c,
-            &json!({ "from": "source", "port": "image", "to": "blend", "input": "processed" }),
+            &json!({
+                "from": "source", "port": "image", "to": "blend", "input": "processed",
+                "replaces": [{ "from": "exposure", "port": "output", "to": "blend", "input": "processed" }],
+            }),
         )
         .unwrap();
         let into: Vec<_> = net
@@ -1260,13 +1282,6 @@ mod tests {
             .collect();
         assert_eq!(into.len(), 1);
         assert_eq!(into[0].from, "source");
-        // A loop is refused.
-        let looped = connect(
-            &mut net,
-            &c,
-            &json!({ "from": "blend", "port": "output", "to": "exposure", "input": "input" }),
-        );
-        assert!(looped.is_err(), "{looped:?}");
         // A port that is not there.
         assert!(
             connect(

@@ -131,10 +131,18 @@ fn graph_positions_are_a_view_kept_with_the_workspace_and_follow_its_nodes() {
         .retain(|c| c.from != node && c.to != node);
     let without = read.edited(&json!({ "network": network })).unwrap();
     assert!(!without.bundle.template.positions.contains_key(&node));
-    // A position for no node is a problem.
-    let stray = state
+    // An edit drops a position for no node; one written by hand in the
+    // files is a problem.
+    let pruned = state
         .edited(&json!({ "positions": { "nowhere": [0.0, 0.0] } }))
         .unwrap();
+    assert!(pruned.bundle.template.positions.is_empty());
+    let mut stray = state.clone();
+    stray
+        .bundle
+        .template
+        .positions
+        .insert("nowhere".into(), [0.0, 0.0]);
     assert!(
         stray
             .problems(&catalogue())
