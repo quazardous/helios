@@ -111,13 +111,22 @@ fn shell(decisions: &[(&str, Option<f64>)]) -> Shell {
     shell
 }
 
+/// Steps a few frames: the viewport keeps asking for frames while it
+/// renders, so `run` (until nothing more is asked) never ends here; a
+/// command queued is applied at the next frame, its answer drawn after.
+fn frames(h: &mut Harness<'_, Shell>) {
+    for _ in 0..3 {
+        h.step();
+    }
+}
+
 fn harness<'a>(shell: Shell) -> Harness<'a, Shell> {
     let mut h = headless::harness(shell, vec2(1280.0, 800.0));
-    h.run();
+    h.step();
     h.state_mut()
         .run(&format!("{PANEL}.focus"), json!(null), Origin::User)
         .unwrap();
-    h.run();
+    frames(&mut h);
     h
 }
 
@@ -179,7 +188,7 @@ fn a_pending_decision_shows_a_card_and_accept_lets_the_render_through() {
 
     // Accepted: recorded as the user's, the card goes, the render goes on.
     h.state_mut().decisions_mut().accept("sky", 0);
-    h.run();
+    frames(&mut h);
     assert_eq!(
         decider(h.state(), "sky"),
         Decider::Accepted {
@@ -201,7 +210,7 @@ fn correct_records_the_corrected_answer() {
     let mut h = harness(shell(&[("sky", Some(0.6))]));
     // The form opens on the model's best option.
     h.state_mut().decisions_mut().correct("sky").unwrap();
-    h.run();
+    frames(&mut h);
     assert_eq!(h.state().decisions().form("sky"), Some(&gain(2.0)));
     assert!(h.state().target_rect("helios.decisions.sky.gain").is_ok());
     assert!(h.state().target_rect("helios.decisions.sky.record").is_ok());
@@ -217,7 +226,7 @@ fn correct_records_the_corrected_answer() {
         .set_field("sky", "gain", Value::Float(3.0))
         .unwrap();
     h.state_mut().decisions_mut().submit("sky").unwrap();
-    h.run();
+    frames(&mut h);
     let answer = h.state().decisions().book().answer("sky").unwrap().clone();
     assert_eq!(answer.values, gain(3.0));
     assert_eq!(
@@ -251,8 +260,7 @@ fn the_badge_counts_and_accept_all_above_takes_the_sure_ones() {
     // Above 80 %: only the sure one.
     let t = h.state().decisions().threshold();
     h.state_mut().decisions_mut().accept_above(t);
-    h.run();
-    h.run();
+    frames(&mut h);
     assert!(h.state().decisions().book().answer("sure").is_some());
     assert!(h.state().decisions().book().answer("unsure").is_none());
     assert_eq!(badge(&h).unwrap().value, Some(2.0));
@@ -265,8 +273,7 @@ fn the_badge_counts_and_accept_all_above_takes_the_sure_ones() {
             Origin::User,
         )
         .unwrap();
-    h.run();
-    h.run();
+    frames(&mut h);
     assert!(h.state().decisions().book().answer("unsure").is_some());
     assert_eq!(badge(&h).unwrap().value, Some(1.0));
 
@@ -274,8 +281,7 @@ fn the_badge_counts_and_accept_all_above_takes_the_sure_ones() {
     h.state_mut().decisions_mut().correct("by_hand").unwrap();
     assert_eq!(h.state().decisions().form("by_hand"), Some(&gain(1.0)));
     h.state_mut().decisions_mut().submit("by_hand").unwrap();
-    h.run();
-    h.run();
+    frames(&mut h);
     assert_eq!(
         decider(h.state(), "by_hand"),
         Decider::Human { who: "user".into() }
@@ -303,8 +309,7 @@ fn an_agents_answer_removes_the_card() {
             Origin::Agent("helper".into()),
         )
         .unwrap();
-    h.run();
-    h.run();
+    frames(&mut h);
     assert!(h.state().decisions().cards().is_empty());
     assert_eq!(
         decider(h.state(), "sky"),

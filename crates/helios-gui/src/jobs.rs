@@ -31,6 +31,7 @@ use egui_pop::api::AppHandle;
 use egui_pop::api::host::Seq;
 use egui_pop::api::jobs::JobsPlugin;
 use egui_pop::model::jobs::Request;
+use helios_core::Message;
 use helios_core::jobs::Jobs;
 use serde_json::json;
 
@@ -224,7 +225,7 @@ fn decisions_badge(ui: &mut egui::Ui, app: &AppHandle, line: &StatusLine) {
     let ctx = ui.ctx().clone();
     let meaning = crate::i18n::text(
         &ctx,
-        helios_core::Message::new(
+        Message::new(
             "gui-status-decisions",
             "{ $count } decisions wait for an answer",
         )
@@ -232,7 +233,7 @@ fn decisions_badge(ui: &mut egui::Ui, app: &AppHandle, line: &StatusLine) {
     );
     let action = crate::i18n::text(
         &ctx,
-        helios_core::Message::new("gui-status-decisions-show", "Show the decisions"),
+        Message::new("gui-status-decisions-show", "Show the decisions"),
     );
     let tone = if line.decisions_for_a_person > 0 {
         Tone::Warning
