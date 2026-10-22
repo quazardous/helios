@@ -229,6 +229,43 @@ fn each_shape_kind_is_created_in_the_mask_at_the_view_s_centre() {
     assert!(steps(&h).is_empty(), "{:?}", steps(&h));
 }
 
+/// Adobe's pointer profile toggles fit and 100 % on a click on the
+/// image, but not on a click the mask editor takes (a path's points, a
+/// shape's edge): the view stays while a path is drawn.
+#[test]
+fn a_click_the_mask_editor_takes_leaves_the_view() {
+    let mut h = harness_at(1.0);
+    egui_pop::api::pointer::set_profile(h.state().app().handle(), "adobe").unwrap();
+    h.step();
+    h.step();
+    run(&mut h, "mask.add.path", json!(null));
+    let m = mapping(&h);
+    let corners = [[300.0, 200.0], [700.0, 250.0], [500.0, 600.0]];
+    for c in corners {
+        click(&mut h, m.image_to_screen(c));
+        assert_eq!(mapping(&h).zoom, m.zoom, "a path's click moved the view");
+    }
+    click(&mut h, m.image_to_screen(corners[0]));
+    assert_eq!(text(&h, SHAPE), "path");
+    assert_eq!(path_len(&h, "path"), 3);
+    // A circle selected, a click on the path's edge selects the path,
+    // the view still.
+    run(&mut h, "mask.add.circle", json!(null));
+    assert_eq!(text(&h, SHAPE), "circle");
+    click(&mut h, m.image_to_screen([500.0, 225.0]));
+    assert_eq!(text(&h, SHAPE), "path");
+    assert_eq!(mapping(&h).zoom, m.zoom, "an edge's click moved the view");
+    // Away from the shapes, the profile's click goes to 100 %.
+    let away = h
+        .state()
+        .target_rect("viewport.display")
+        .unwrap()
+        .left_top()
+        + vec2(30.0, 30.0);
+    click(&mut h, away);
+    assert!(mapping(&h).zoom != m.zoom, "Adobe's click did nothing");
+}
+
 #[test]
 fn the_shape_keys_bind_while_the_image_has_the_focus() {
     let mut h = harness_at(1.0);

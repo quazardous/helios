@@ -32,7 +32,7 @@ use egui::{Painter, Pos2, Stroke};
 use egui_pop::viewport::hooks::HandleMove;
 use egui_pop::viewport::overlay::{self, HIT_RADIUS, Handle, HandleKind, Overlay, Shape};
 use egui_pop::viewport::tokens::ViewportTokens;
-use egui_pop::viewport::{Mapping, Phase, Signal, Verdict};
+use egui_pop::viewport::{Cause, Mapping, Phase, Signal, Verdict, ViewChange};
 use helios_core::{Graph, Message, ModuleRef, NodeId, Params, Value};
 use helios_module_masks::shape::{Outline, PathPoint, path_points, path_values};
 use helios_module_masks::{MaskCircle, MaskEllipse, MaskGradient, MaskPath};
@@ -574,10 +574,15 @@ enum Constraint {
     None,
 }
 
-/// What the `before_handle` hook knows, set before each frame.
+/// What the `before_handle` and `before_view` hooks know, set before
+/// each frame.
 #[derive(Default)]
 struct Snap {
     constraints: BTreeMap<(String, u32), Constraint>,
+    /// A primary click this frame is the editor's (a path point, a
+    /// shape's edge or a handle): the pointer profile's click on the
+    /// image (Adobe's fit or 100 %) leaves the view alone.
+    claims_click: bool,
 }
 
 /// What the paint hooks draw, set before each frame.
@@ -700,6 +705,8 @@ pub struct Masks {
     guides: Vec<Overlay>,
     /// The gestures of the handle under the pointer this frame.
     hovered: Option<Gestures>,
+    /// The primary button goes up this frame (a click may end).
+    primary_up: bool,
 }
 
 /// A request to the mask editor, from a command.
@@ -858,6 +865,17 @@ impl Masks {
         hooks.after_paint = Some(Box::new(move |painter: &Painter, m: &Mapping| {
             paint_draft(painter, m, &faint.borrow());
         }));
+        // A click the editor takes is not also the profile's view
+        // action (Adobe's click toggles fit and 100 %): drawing a path
+        // or selecting a shape keeps the view where it is.
+        let snap = self.snap.clone();
+        hooks.before_view = Some(Box::new(move |change: &ViewChange, _m: &Mapping| {
+            if change.cause == Cause::Click && snap.borrow().claims_click {
+                Verdict::Veto
+            } else {
+                Verdict::Allow
+            }
+        }));
         let double = self.double.clone();
         hooks.on_double_click = Some(Box::new(
             move |pos: Pos2,
@@ -976,9 +994,28 @@ impl Masks {
             }),
             _ => None,
         };
+        snap.claims_click = self.primary_up
+            && (tool(store) == "path"
+                || match (pointer, mapping) {
+                    (Some(pos), Some(m)) => {
+                        overlay::hit(&self.overlays, m, pos).is_some()
+                            || self.members.iter().any(|mb| {
+                                distance_to(&mb.outline.edge, mb.outline.closed, m, pos)
+                                    <= HIT_RADIUS
+                            })
+                    }
+                    _ => false,
+                });
         *self.faint.borrow_mut() = faint;
         let mut d = self.double.borrow_mut();
         d.edge = if tool(store) == "path" { None } else { edge };
+    }
+
+    /// Before the viewport is drawn: whether the primary button goes up
+    /// this frame, so a click the editor takes is known before the
+    /// viewport acts on it.
+    pub fn set_primary_up(&mut self, up: bool) {
+        self.primary_up = up;
     }
 
     /// The member named `node`, as drawn this frame.

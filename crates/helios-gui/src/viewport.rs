@@ -860,6 +860,8 @@ impl Viewport {
                     == ViewAction::Leave
             };
             self.masks.set_double_click_leaves(leaves);
+            self.masks
+                .set_primary_up(ui.input(|i| i.pointer.primary_released()));
             let hovered = self.masks.hovered();
             self.masks.prepare(
                 self.edited.as_ref().map(|e| &e.graph),
