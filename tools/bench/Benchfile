@@ -156,6 +156,7 @@ sccache = { about = "sccache's compile cache, shared by every job and branch: a 
 # ---------------------------------------------------------------- correctness
 
 [jobs.build]
+about = "the whole workspace built, every target (debug), the build cache warmed"
 checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 5
 memory = "6g"
@@ -172,6 +173,7 @@ timeout = "1h"
 # "Helios Dev" launcher runs the latest one from main, fetched with
 # tools/bench/fetch-gui.sh, so no local build is needed
 [jobs.build-gui]
+about = "helios-gui built in release, kept as the output `gui` for the desktop launcher"
 checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 5
 memory = "6g"
@@ -190,6 +192,7 @@ timeout = "1h"
 # `budget=<ms>` fails the job when a window outlives its close request by
 # more (tools/bench/quit-timing.py)
 [jobs.quit-timing]
+about = "helios-gui closed repeatedly in a headless labwc, each quit step timed"
 checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 5
 memory = "6g"
@@ -211,6 +214,7 @@ timeout = "1h"
 # `interactive=<ms>` fail the job when a run is slower to its first frame
 # or to interactive; `kinds=` joins kinds with `+` (tools/bench/start-timing.py)
 [jobs.start-timing]
+about = "helios-gui started repeatedly in a headless labwc, its first frame and first input timed"
 checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 5
 memory = "6g"
@@ -230,6 +234,7 @@ timeout = "1h"
 # the empty mask, then two parametric members and two shapes; the PNG
 # files and what each step answered in /out (tools/bench/masks-shots.py)
 [jobs.masks-shots]
+about = "helios-gui screenshots of the masks panel and mask display, per theme, in a headless labwc"
 checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 5
 memory = "6g"
@@ -244,6 +249,7 @@ mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", c
 timeout = "1h"
 
 [jobs.lint]
+about = "clippy with warnings denied, cargo xtask check and the i18n check"
 checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 5
 memory = "6g"
@@ -258,6 +264,7 @@ timeout = "1h"
 # the CI profile (no retry, no fail-fast), its JUnit report and a Markdown
 # summary of the slowest tests in /out
 [jobs.test]
+about = "the whole test suite (CI profile), with its JUnit report and the slowest tests"
 checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 5
 memory = "6g"
@@ -276,6 +283,7 @@ timeout = "1h"
 # render, load and save round trip, survival); its selection in
 # /out/affected.json, the JUnit report and the slowest tests in /out
 [jobs.test-affected]
+about = "the tests a change affects since a base commit, plus the critical set"
 cores = 5
 memory = "6g"
 cwd = "/work/${src:-helios}"
@@ -291,6 +299,7 @@ timeout = "1h"
 
 # quit, kill -9 and reopen: the scenarios that gate a release
 [jobs.survival]
+about = "quit, kill -9 and reopen: the survival scenarios that gate a release"
 checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 4
 memory = "4g"
@@ -307,6 +316,7 @@ timeout = "15m"
 # /out/release.patch, to apply, commit "Release X.Y.Z" and tag (see
 # CONTRIBUTING.md)
 [jobs.release]
+about = "cargo xtask release, checked and tested; the change as a patch to apply"
 checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 5
 memory = "6g"
@@ -322,6 +332,7 @@ timeout = "1h"
 # (helios-declarations, a headless desktop) then `i18n stamp fr`; the
 # changes as /out/i18n.patch, to apply on the branch (git apply --index)
 [jobs.i18n-extract]
+about = "the translation catalogues regenerated on a branch; the change as a patch"
 checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 5
 memory = "6g"
@@ -340,6 +351,7 @@ timeout = "1h"
 # history-*.json, asan.*, darktable.log; /out/SUMMARY.txt.
 # The scenario is tools/bench/rgbcurve (docs/bench.md).
 [jobs.dt-asan-rgbcurve]
+about = "an ASan darktable at a fork commit, driven through the rgbcurve scroll scenario in wbox"
 checkouts = ["helios", "darktable-fork", "rawspeed-dt-master", "whereami", "libraw"]
 cores = 8
 memory = "10g"
@@ -373,6 +385,7 @@ timeout = "2h"
 # full=yes: every fast test on every commit); the per-commit report in
 # /out/check-commits.md
 [jobs.check-commits]
+about = "every commit of a range builds, passes clippy and the tests it touches"
 checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 5
 memory = "6g"
@@ -386,6 +399,7 @@ timeout = "2h"
 
 # the GPU backend's tests on the box's NVIDIA GPU, not lavapipe
 [jobs.gpu]
+about = "the GPU backend's tests on the box's NVIDIA GPU, not lavapipe"
 checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 4
 memory = "4g"
@@ -401,6 +415,7 @@ timeout = "30m"
 
 # the same tests on the Intel iGPU (Mesa ANV), the second real backend
 [jobs.gpu-intel]
+about = "the GPU backend's tests on the box's Intel iGPU (Mesa ANV)"
 checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 4
 memory = "4g"
@@ -416,6 +431,7 @@ timeout = "30m"
 
 # egui-pop's gate: fmt, clippy, the workspace tests with the doctests, docs
 [jobs.egui-pop-gate]
+about = "egui-pop's gate: fmt, clippy, the workspace tests with the doctests, and the docs build"
 checkouts = ["egui-pop"]
 cores = 5
 memory = "8g"
@@ -434,6 +450,7 @@ timeout = "1h"
 # as in CI): every PNG of crates/egui-pop-gallery/tests/snapshots lands in
 # /out/snapshots, to review and commit
 [jobs.egui-pop-snapshots]
+about = "egui-pop's gallery snapshots regenerated, every PNG returned"
 checkouts = ["egui-pop"]
 cores = 5
 memory = "7g"
@@ -450,6 +467,7 @@ timeout = "1h"
 # the gallery's `threading` example, headless, one JSON line per scenario
 # in /out/threading.jsonl (`scenarios=` picks some)
 [jobs.egui-pop-threading]
+about = "egui-pop's threading example headless, one JSON line per scenario"
 checkouts = ["egui-pop"]
 cores = 8
 memory = "6g"
@@ -467,6 +485,7 @@ timeout = "1h"
 # for a storm (period 8) and views held (period 30), one JSON line per run
 # in /out/gpu-tiles.jsonl (`intakes=` picks some); the adapter in each line
 [jobs.egui-pop-gpu-tiles]
+about = "egui-pop's viewport tile intakes on the GPU, frame budgets and uploads measured"
 checkouts = ["egui-pop"]
 cores = 4
 memory = "4g"
@@ -490,6 +509,7 @@ timeout = "1h"
 # the CPU (pixman: byte-identical PNGs from run to run); the PNGs as the
 # output `screenshots`
 [jobs.egui-pop-screenshots]
+about = "egui-pop's documentation screenshots in a headless labwc"
 checkouts = ["egui-pop"]
 cores = 5
 memory = "4g"
@@ -503,6 +523,7 @@ outputs = { screenshots = { path = "screenshots/", kind = "images" } }
 timeout = "1h"
 
 [jobs.egui-pop-catalogues]
+about = "egui-pop's catalogue test: the English catalogues match the sources, the French stamped"
 checkouts = ["egui-pop"]
 cores = 5
 memory = "7g"
@@ -535,6 +556,7 @@ timeout = "30m"
 # thumbnails in /out. `bless=yes` accepts the thumbnails as they are now:
 # the new tests/raw-corpus.thumbs.toml lands in /out, to commit.
 [jobs.raw-corpus]
+about = "every corpus raw decodes, names its camera, keeps its sensor description and thumbnail"
 checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 4
 memory = "4g"
@@ -556,6 +578,7 @@ timeout = "30m"
 # Helios, and compares the masks in Delta E. JUnit, a summary, the numbers
 # and both masks as images in /out.
 [jobs.mask-parity]
+about = "Helios's drawn masks against darktable-cli's, pixel by pixel"
 cores = 8
 memory = "8g"
 cwd = "/work/${src:-helios}"
@@ -574,6 +597,7 @@ timeout = "2h"
 # alone on the machine, so the numbers compare from one run to the next
 
 [jobs.bench-masks]
+about = "the masks benchmark, alone on the machine so runs compare"
 checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 8
 memory = "6g"
@@ -586,6 +610,7 @@ timeout = "1h"
 
 # the per-branch history (in the target cache) says which tests got slower
 [jobs.test-times]
+about = "the test suite's timings, the slowest tests listed"
 checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 8
 memory = "6g"
