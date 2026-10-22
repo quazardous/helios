@@ -342,7 +342,7 @@ timeout = "1h"
 [jobs.dt-asan-rgbcurve]
 checkouts = ["helios", "darktable-fork", "rawspeed-dt-master", "whereami", "libraw"]
 cores = 8
-memory = "12g"
+memory = "10g"
 cwd = "/work/${src:-helios}"
 command = """set -e; \
 b=/dtasan/build; p=/dtasan/prefix; c=$(git -C /work/darktable-fork rev-parse HEAD); \
