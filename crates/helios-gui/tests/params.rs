@@ -207,29 +207,12 @@ fn escape_gives_a_drag_up_without_a_trace() {
     assert!(h.state().values.lock().unwrap().undo_steps().is_empty());
 }
 
-/// With the wheel over sliders guarded (the setting; darktable's
-/// profile, Helios's default, steps the slider under the pointer), the
-/// wheel scrolls past a slider: it steps one only once focused (or with
-/// Alt held over it).
+/// On Helios's default pointer profile (Adobe's), the wheel scrolls
+/// past a slider: it steps one only once focused (darktable's profile
+/// and its Alt are in `tests/input.rs`).
 #[test]
-fn the_wheel_guarded_steps_a_slider_only_once_focused() {
+fn the_wheel_steps_a_slider_only_once_focused() {
     let mut h = harness();
-    {
-        use egui_pop::model::values::{Change, Set, Value as PopValue};
-        let store = h.state().app().handle().store();
-        store
-            .lock()
-            .unwrap()
-            .set(
-                Set::new(
-                    "settings/input.slider_wheel",
-                    Change::To(PopValue::Choice("guarded".into())),
-                    egui_pop::model::commands::Origin::User,
-                )
-                .untracked(),
-            )
-            .unwrap();
-    }
     h.run();
     // Steps, not `run`: a tooltip fading in keeps asking for frames.
     let wheel = |h: &mut egui_kittest::Harness<'_, Shell>, modifiers: Modifiers| {
@@ -256,8 +239,6 @@ fn the_wheel_guarded_steps_a_slider_only_once_focused() {
     };
     wheel(&mut h, Modifiers::NONE);
     assert_eq!(ev(&h), 0.0, "not focused: the wheel scrolls the panel");
-    wheel(&mut h, Modifiers::ALT);
-    assert!((ev(&h) - 0.02).abs() < 1e-9, "Alt held: {}", ev(&h));
     // Focused by a click: the wheel steps it.
     let at = h
         .state()
@@ -270,7 +251,7 @@ fn the_wheel_guarded_steps_a_slider_only_once_focused() {
         h.step();
     }
     wheel(&mut h, Modifiers::NONE);
-    assert!((ev(&h) - 0.04).abs() < 1e-9, "focused: {}", ev(&h));
+    assert!((ev(&h) - 0.02).abs() < 1e-9, "focused: {}", ev(&h));
 }
 
 /// Enter types an expression of the current value, `x`.
@@ -346,6 +327,9 @@ fn a_change_by_an_agent_shows_and_says_who() {
 #[test]
 fn keys_step_enter_types_and_double_click_resets() {
     let mut h = harness();
+    // darktable's profile, where Shift is coarse (Adobe's makes it fine).
+    egui_pop::api::pointer::set_profile(h.state().app().handle(), "darktable").unwrap();
+    h.run();
     let r = h.state().target_rect(&format!("param:{EV}")).unwrap();
     h.hover_at(r.center());
     press(&h, r.center(), true);

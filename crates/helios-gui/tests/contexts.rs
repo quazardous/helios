@@ -150,12 +150,13 @@ fn the_status_bar_says_where_and_its_items_follow_the_place() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// Darktable's pointer profile, Helios's default: a double click on the
+/// darktable's pointer profile, once chosen: a double click on the
 /// image leaves the darkroom, back where it was opened from.
 #[test]
-fn a_double_click_on_the_image_leaves_the_darkroom() {
+fn darktable_s_double_click_on_the_image_leaves_the_darkroom() {
     let dir = temp("leave");
     let mut h = window(&dir);
+    egui_pop::api::pointer::set_profile(h.state().app().handle(), "darktable").unwrap();
     run(&mut h, "view.library", json!(null));
     let photo = dir.join("photo.png");
     std::fs::write(&photo, b"not read").unwrap();

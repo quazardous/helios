@@ -20,6 +20,7 @@ pub mod params;
 pub mod persist;
 pub mod platform;
 mod plugins;
+pub mod pointer_choice;
 pub mod preview;
 pub mod quick_open;
 pub mod quit;

@@ -2,11 +2,12 @@
 //! windowing system sends them), never by widget calls, checking the
 //! interface's grammar (docs/gui.md) where panels meet:
 //!
-//! - Helios starts on darktable's pointer profile: the wheel over the
-//!   image zooms, over a slider it changes the value (Ctrl+Alt: the panel
-//!   scrolls); with the wheel over sliders guarded (a setting), the wheel
-//!   scrolls the panel and a slider takes it only with the focus or Alt
-//!   held;
+//! - Helios starts on Adobe's pointer profile: the wheel over a slider
+//!   scrolls the panel and the slider takes it only once focused (a
+//!   click); on darktable's profile, once chosen, the wheel over the
+//!   image zooms and over a slider changes the value (Ctrl+Alt: the panel
+//!   scrolls), and with the wheel over sliders guarded (a setting) a
+//!   slider takes it only with the focus or Alt held;
 //! - a drag belongs to where it started, wherever it ends;
 //! - a double click resets a slider, never resets on the canvas, and
 //!   fits the image when the setting says so (darktable's leaves the
@@ -150,6 +151,17 @@ fn setting(h: &mut Harness<'_, Shell>, id: &str, choice: &str) {
     settle(h);
 }
 
+/// The pointer profile, chosen as the user would in the settings window
+/// (`darktable`...).
+fn profile(h: &mut Harness<'_, Shell>, id: &str) {
+    egui_pop::api::pointer::set_profile(h.state().app().handle(), id).unwrap();
+    settle(h);
+    assert_eq!(
+        egui_pop::api::pointer::profile_id(h.state().app().handle()),
+        id
+    );
+}
+
 fn modifiers(h: &mut Harness<'_, Shell>, m: Modifiers) {
     h.input_mut().events.push(Event::ModifiersChanged(m));
 }
@@ -236,6 +248,7 @@ fn two_clicks(h: &mut Harness<'_, Shell>, a: Pos2, b: Pos2, gap: f64) {
 #[test]
 fn darktable_s_wheel_over_a_slider_changes_it_and_ctrl_alt_leaves_it() {
     let mut h = harness();
+    profile(&mut h, "darktable");
     let ev = slider(&h, EV);
     // A notch up over the slider, without the focus: a step up, the
     // panel still.
@@ -262,10 +275,15 @@ fn darktable_s_wheel_over_a_slider_changes_it_and_ctrl_alt_leaves_it() {
     assert_eq!(f(&h, EV), up, "Ctrl+Alt and the wheel changed the value");
 }
 
+/// Helios's default profile (Adobe's), nothing saved: scrolling past
+/// sliders never changes a value.
 #[test]
-fn the_wheel_guarded_over_a_slider_scrolls_the_panel_and_never_changes_the_value() {
+fn the_wheel_over_a_slider_scrolls_the_panel_by_default_and_never_changes_the_value() {
     let mut h = harness();
-    setting(&mut h, "input.slider_wheel", "guarded");
+    assert_eq!(
+        egui_pop::api::pointer::profile_id(h.state().app().handle()),
+        helios_gui::pointer_choice::DEFAULT_PROFILE
+    );
     let ev = slider(&h, EV);
     let before = (f(&h, EV), view(&h));
     // Notches, then a touchpad's stream of small pixel deltas.
@@ -283,7 +301,7 @@ fn the_wheel_guarded_over_a_slider_scrolls_the_panel_and_never_changes_the_value
         vec2(0.0, -30.0),
         Modifiers::NONE,
     );
-    // Shift (coarse for a focused slider) still scrolls.
+    // Shift (finer for a focused slider) still scrolls.
     let ev2 = slider(&h, EV);
     wheel(
         &mut h,
@@ -302,9 +320,38 @@ fn the_wheel_guarded_over_a_slider_scrolls_the_panel_and_never_changes_the_value
 }
 
 #[test]
-fn a_focused_slider_or_alt_takes_the_wheel_and_the_panel_stays() {
+fn a_focused_slider_takes_the_wheel_by_default_and_the_panel_stays() {
     let mut h = harness();
+    let ev = slider(&h, EV);
+    // Focused by a click: the plain wheel steps it, the panel still.
+    click(&mut h, ev.center());
+    let before = f(&h, EV);
+    wheel(
+        &mut h,
+        ev.center(),
+        MouseWheelUnit::Line,
+        vec2(0.0, 1.0),
+        Modifiers::NONE,
+    );
+    assert!(f(&h, EV) > before, "{} after {before}", f(&h, EV));
+    assert_eq!(slider(&h, EV), ev, "the panel scrolled");
+}
+
+#[test]
+fn darktable_s_guarded_wheel_leaves_a_slider_to_alt_or_the_focus() {
+    let mut h = harness();
+    profile(&mut h, "darktable");
     setting(&mut h, "input.slider_wheel", "guarded");
+    let ev = slider(&h, EV);
+    // The plain wheel without the focus: the value stays.
+    wheel(
+        &mut h,
+        ev.center(),
+        MouseWheelUnit::Line,
+        vec2(0.0, 1.0),
+        Modifiers::NONE,
+    );
+    assert_eq!(f(&h, EV), 0.0, "the guarded wheel changed the value");
     let ev = slider(&h, EV);
     // Alt held over it, without the focus: a step up, the panel still.
     wheel(
@@ -331,8 +378,9 @@ fn a_focused_slider_or_alt_takes_the_wheel_and_the_panel_stays() {
 }
 
 #[test]
-fn the_wheel_over_the_image_zooms_and_leaves_the_panels() {
+fn darktable_s_wheel_over_the_image_zooms_and_leaves_the_panels() {
     let mut h = harness();
+    profile(&mut h, "darktable");
     let ev = slider(&h, EV);
     let at = image(&h) + vec2(-100.0, 0.0);
     let zoom = shown_zoom(&h);
@@ -428,6 +476,9 @@ fn a_pan_that_ends_over_the_parameters_moves_only_the_view() {
 #[test]
 fn a_double_click_on_the_image_set_to_fit_fits_and_resets_nothing() {
     let mut h = harness();
+    // darktable's profile, whose plain click on the image does nothing:
+    // Adobe's toggles fit and 100 % on each click of the pair.
+    profile(&mut h, "darktable");
     setting(&mut h, "input.image_double_click", "fit");
     let ev = slider(&h, EV);
     // A value changed, a shape selected, the view zoomed.

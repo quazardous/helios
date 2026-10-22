@@ -522,11 +522,12 @@ impl Shell {
             .themes(themes.clone())
             .theme(crate::theme::ThemeSpec::new(crate::theme::DEFAULT))
             .plugins(DefaultPlugins)
-            // The wheel zooms the image and steps the slider under the
-            // pointer, a double click on the image leaves the darkroom, as
-            // in darktable (the user picks another profile in the
-            // settings).
-            .pointer_profile("darktable")
+            // Lightroom's habits by default: the wheel scrolls the panel
+            // and a slider takes it once clicked or focused (darktable's
+            // pitfall of values changed by a scroll). A saved choice is
+            // kept; the first run offers darktable's profile
+            // (`pointer_choice`), and Settings › Input picks any.
+            .pointer_profile(crate::pointer_choice::DEFAULT_PROFILE)
             .plugin(plugins::Commands {
                 registry: registry.clone(),
                 declarations: declarations.clone(),
