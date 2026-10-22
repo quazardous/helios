@@ -24,6 +24,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.27.0] - 2026-10-22
+
+### Added
+
+- A decision waiting for an answer now shows as a card in the new Decisions
+  panel: the model's proposal with how sure it is and why, Accept, Correct
+  with a form for the answer, and "accept all above" a confidence. A badge
+  in the status bar counts the decisions waiting, and agents answer them
+  with the `decision.*` commands.
+- A model's proposal for a decision now keeps how sure the model is and why,
+  so whoever answers it (in the desktop or through a node's decisions list)
+  sees them beside the options.
+
 ## [0.26.0] - 2026-10-22
 
 ### Added
