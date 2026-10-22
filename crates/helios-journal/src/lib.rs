@@ -14,7 +14,9 @@
 //! - an **exclusive choice** concludes with a branch: the other branches, and
 //!   every node only they lead to, are omitted in the same write;
 //! - a failure is **retried** when the node declares it, after a delay that
-//!   can grow; past the limit it stands;
+//!   can grow; past the limit, or failed for good, it stands;
+//! - a worker can hand a row to someone outside: it **waits** (no lease, no
+//!   expiry) until a **signal** concludes it;
 //! - **leases** expire: `expire` gives back what a dead worker held, and
 //!   a worker renews the lease of a long job; `recover` gives back every
 //!   running row when a process opens the journal again;
@@ -28,7 +30,7 @@
 //! (`helios_vault::journal::VaultJournal`) for a journal that lasts. Every
 //! store must pass the same [`contract`].
 //!
-//! Not yet: groups, lanes, waits and signals, rate limits, graph versions,
+//! Not yet: groups, lanes, rate limits, graph versions,
 //! history of what forget and retries take away.
 
 use std::collections::BTreeMap;
@@ -56,17 +58,21 @@ pub enum Status {
     Failed,
     /// Not on the branch a choice took.
     Omitted,
+    /// Held for an answer from outside (a person): no lease, no expiry,
+    /// not claimable; [`Journal::signal`] concludes it.
+    Waiting,
 }
 
 impl Status {
     /// Every status, in the order of their declaration.
-    pub const ALL: [Status; 6] = [
+    pub const ALL: [Status; 7] = [
         Status::Running,
         Status::Scheduled,
         Status::Done,
         Status::Skipped,
         Status::Failed,
         Status::Omitted,
+        Status::Waiting,
     ];
 
     /// Its name, as rows and `monitor` spell it.
@@ -78,6 +84,7 @@ impl Status {
             Status::Skipped => "skipped",
             Status::Failed => "failed",
             Status::Omitted => "omitted",
+            Status::Waiting => "waiting",
         }
     }
 
@@ -235,6 +242,10 @@ pub enum Outcome {
     Done,
     Skipped,
     Failed(String),
+    /// A failure that another attempt would not change (a file that is not
+    /// a picture, a destination refused): it stands, whatever attempts are
+    /// left.
+    FailedForGood(String),
     /// For a choice node: the child it takes.
     Branch(String),
 }
@@ -252,6 +263,11 @@ pub enum Error {
         node: String,
         branch: String,
     },
+    /// A signal for a row that is not waiting: nothing was written.
+    NotWaiting {
+        node: String,
+        item: String,
+    },
 }
 
 impl fmt::Display for Error {
@@ -265,6 +281,9 @@ impl fmt::Display for Error {
             Error::NotAChoice(n) => write!(f, "`{n}` is not a choice node"),
             Error::UnknownBranch { node, branch } => {
                 write!(f, "`{branch}` is not a branch of `{node}`")
+            }
+            Error::NotWaiting { node, item } => {
+                write!(f, "`{node}` for `{item}` is not waiting, nothing written")
             }
         }
     }
@@ -458,11 +477,10 @@ impl<S: Store> Journal<S> {
             .collect()
     }
 
-    /// Concludes a lease for all its items. If any item is no longer held by
-    /// this lease, nothing at all is written.
-    pub fn conclude(&self, lease: &Lease, outcome: Outcome, now: u64) -> Result<(), Error> {
-        let node = self.node(&lease.node)?;
-        if let Outcome::Branch(branch) = &outcome {
+    /// Refuses a branch from a node that is not a choice, or to a node
+    /// that is not one of its children.
+    fn check_outcome(&self, node: &Node, outcome: &Outcome) -> Result<(), Error> {
+        if let Outcome::Branch(branch) = outcome {
             if !node.choice {
                 return Err(Error::NotAChoice(node.name.clone()));
             }
@@ -477,39 +495,115 @@ impl<S: Store> Journal<S> {
                 });
             }
         }
+        Ok(())
+    }
+
+    /// The row `previous` becomes once concluded with `outcome`.
+    fn concluded(node: &Node, previous: &Row, outcome: &Outcome, now: u64) -> Row {
+        let mut row = Row {
+            token: None,
+            since: now,
+            due: None,
+            ..previous.clone()
+        };
+        match outcome {
+            Outcome::Done | Outcome::Branch(_) => row.status = Status::Done,
+            Outcome::Skipped => row.status = Status::Skipped,
+            Outcome::FailedForGood(error) => {
+                row.error = Some(error.clone());
+                row.status = Status::Failed;
+            }
+            Outcome::Failed(error) => {
+                row.error = Some(error.clone());
+                if row.attempts < node.retry.limit {
+                    let factor = if node.retry.exponential {
+                        1u64 << row.attempts.saturating_sub(1).min(32)
+                    } else {
+                        1
+                    };
+                    row.status = Status::Scheduled;
+                    row.due = Some(now + node.retry.delay_ms.saturating_mul(factor));
+                } else {
+                    row.status = Status::Failed;
+                }
+            }
+        }
+        row
+    }
+
+    /// Writes the conclusion of `item` at `node`, with the omissions of a
+    /// branch.
+    fn write_conclusion(
+        &self,
+        inner: &mut Inner<S>,
+        item: &str,
+        node: &Node,
+        previous: &Row,
+        outcome: &Outcome,
+        now: u64,
+    ) {
+        let row = Self::concluded(node, previous, outcome, now);
+        inner.write(item, &node.name, Some(previous), Some(row));
+        if let Outcome::Branch(branch) = outcome {
+            self.omit_other_branches(inner, item, node, branch, now);
+        }
+    }
+
+    /// Concludes a lease for all its items. If any item is no longer held by
+    /// this lease, nothing at all is written.
+    pub fn conclude(&self, lease: &Lease, outcome: Outcome, now: u64) -> Result<(), Error> {
+        let node = self.node(&lease.node)?;
+        self.check_outcome(node, &outcome)?;
+        let mut inner = self.inner.lock().expect("journal lock");
+        let rows = Self::held(&inner, lease)?;
+        inner.atomically(|inner| {
+            for (item, previous) in lease.items.iter().zip(&rows) {
+                self.write_conclusion(inner, item, node, previous, &outcome, now);
+            }
+        });
+        Ok(())
+    }
+
+    /// Turns the rows a lease holds into `waiting`: the worker hands them
+    /// to someone outside (a person), and [`Journal::signal`] concludes
+    /// them. A waiting row has no lease: it never expires and is not
+    /// claimed. If any item is no longer held, nothing is written.
+    pub fn wait(&self, lease: &Lease, now: u64) -> Result<(), Error> {
+        let node = self.node(&lease.node)?;
         let mut inner = self.inner.lock().expect("journal lock");
         let rows = Self::held(&inner, lease)?;
         inner.atomically(|inner| {
             for (item, previous) in lease.items.iter().zip(rows) {
-                let mut row = Row {
+                let row = Row {
+                    status: Status::Waiting,
                     token: None,
                     since: now,
                     due: None,
                     ..previous.clone()
                 };
-                match &outcome {
-                    Outcome::Done | Outcome::Branch(_) => row.status = Status::Done,
-                    Outcome::Skipped => row.status = Status::Skipped,
-                    Outcome::Failed(error) => {
-                        row.error = Some(error.clone());
-                        if row.attempts < node.retry.limit {
-                            let factor = if node.retry.exponential {
-                                1u64 << row.attempts.saturating_sub(1).min(32)
-                            } else {
-                                1
-                            };
-                            row.status = Status::Scheduled;
-                            row.due = Some(now + node.retry.delay_ms.saturating_mul(factor));
-                        } else {
-                            row.status = Status::Failed;
-                        }
-                    }
-                }
                 inner.write(item, &node.name, Some(&previous), Some(row));
-                if let Outcome::Branch(branch) = &outcome {
-                    self.omit_other_branches(inner, item, node, branch, now);
-                }
             }
+        });
+        Ok(())
+    }
+
+    /// Concludes the waiting row of `item` at `node` with `outcome`, as
+    /// [`Journal::conclude`] does a lease. A row that is not waiting (never
+    /// asked, or already answered) is refused.
+    pub fn signal(&self, item: &str, node: &str, outcome: Outcome, now: u64) -> Result<(), Error> {
+        let node = self.node(node)?;
+        self.check_outcome(node, &outcome)?;
+        let mut inner = self.inner.lock().expect("journal lock");
+        let previous = inner
+            .store
+            .get(item, &node.name)
+            .filter(|r| r.status == Status::Waiting)
+            .ok_or_else(|| Error::NotWaiting {
+                node: node.name.clone(),
+                item: item.to_string(),
+            })?;
+        inner.atomically(|inner| {
+            self.write_conclusion(inner, item, node, &previous, &outcome, now);
         });
         Ok(())
     }

@@ -26,6 +26,8 @@ pub fn check<S: Store + 'static>(make: impl Fn() -> S) {
     concurrent_claimers_never_take_an_item_twice(Arc::new(journal(&make, linear())));
     unknown_nodes_and_bad_branches_are_refused(journal(&make, choice()));
     a_renewed_lease_does_not_expire(journal(&make, linear()));
+    a_signal_concludes_a_waiting_row_once(journal(&make, linear()));
+    a_failure_for_good_is_not_retried(journal(&make, retried()));
     a_claim_reads_only_its_candidates(&make);
 }
 
@@ -510,4 +512,64 @@ fn reopened_running_rows_are_given_back<B, S: Store + 'static>(
     let lease = j.claim("call", 2, &["a", "b"], 61).unwrap();
     assert_eq!(lease.items, ["a", "b"]);
     assert_eq!(j.row("b", "call").unwrap().attempts, 2);
+}
+
+fn a_signal_concludes_a_waiting_row_once<S: Store>(j: Journal<S>) {
+    assert_eq!(
+        j.signal("i", "fetch", Outcome::Done, 0).unwrap_err(),
+        Error::NotWaiting {
+            node: "fetch".into(),
+            item: "i".into()
+        },
+        "nothing asked yet"
+    );
+    let lease = j.claim("fetch", 1, &["i"], 0).unwrap();
+    j.wait(&lease, 1).unwrap();
+    let row = j.row("i", "fetch").unwrap();
+    assert_eq!(
+        (row.status, row.token, row.due),
+        (Status::Waiting, None, None)
+    );
+    assert_eq!(j.expire(1_000_000), 0, "a waiting row never expires");
+    assert!(
+        j.claim("fetch", 1, &["i"], 2).unwrap().items.is_empty(),
+        "a waiting row is not claimed"
+    );
+    assert!(
+        matches!(
+            j.conclude(&lease, Outcome::Done, 3),
+            Err(Error::StaleLease { .. })
+        ),
+        "the lease ended when the row began to wait"
+    );
+    assert!(
+        j.claim("develop", 1, &["i"], 3).unwrap().items.is_empty(),
+        "a waiting parent holds its children"
+    );
+    assert_eq!(j.monitor(3)["nodes"]["fetch"]["waiting"], 1);
+    j.signal("i", "fetch", Outcome::Done, 4).unwrap();
+    assert_eq!(j.status("i", "fetch"), Some(Status::Done));
+    assert_eq!(
+        j.signal("i", "fetch", Outcome::Skipped, 5).unwrap_err(),
+        Error::NotWaiting {
+            node: "fetch".into(),
+            item: "i".into()
+        },
+        "a second signal is refused"
+    );
+    assert_eq!(j.status("i", "fetch"), Some(Status::Done));
+    assert_eq!(j.claim("develop", 1, &["i"], 5).unwrap().items, ["i"]);
+}
+
+fn a_failure_for_good_is_not_retried<S: Store>(j: Journal<S>) {
+    let lease = j.claim("call", 1, &["i"], 0).unwrap();
+    j.conclude(&lease, Outcome::FailedForGood("not a picture".into()), 1)
+        .unwrap();
+    let row = j.row("i", "call").unwrap();
+    assert_eq!(
+        (row.status, row.attempts, row.error.as_deref()),
+        (Status::Failed, 1, Some("not a picture")),
+        "two attempts were left, none is used"
+    );
+    assert!(j.claim("call", 1, &["i"], 1_000).unwrap().items.is_empty());
 }
