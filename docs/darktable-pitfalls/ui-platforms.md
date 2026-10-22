@@ -166,6 +166,14 @@ Statements marked [guess] are inference, not read in a thread.
   (docs/gui.md, "Parameters"). The Parameters panel's own slider still
   stepped on hover until the raw-event scenarios (`helios-gui`'s
   `tests/input.rs`) caught it.
+  Update (2026-10-22): Helios 0.24.0 made darktable's pointer profile
+  the default, which brought the pitfall back (the wheel over a slider
+  changed it). The default is now Adobe's profile: the wheel scrolls the
+  panel and a slider takes it once clicked or focused. A profile the
+  user saved is kept, and the first run offers darktable's profile in
+  one click ("Coming from darktable?"); that profile stays faithful to
+  darktable, its users keep their habits by choice. Handled again; the
+  raw-event scenarios run the default (`tests/input.rs`).
 - **Recommendation.** By default, the wheel scrolls the panel. A slider
   takes the wheel only once it has focus (click or keyboard), or while a
   modifier is held. Decide this before users get used to the other

@@ -155,6 +155,12 @@ Masks panel, else the selected module's final mask, as a coloured
 overlay (theme tokens) or the mask alone in grey; one transient view
 value behind a command, the `M` key and a button, on through edits,
 rendered by the same engine and cache (see docs/design/mask-display.md).
+Decided (2026-10-22): the desktop's default pointer profile is Adobe's
+(Lightroom's habits: the wheel scrolls the panel, a slider takes it once
+clicked or focused), in place of darktable's (2026-10-21), whose wheel
+over a slider changed values while scrolling (darktable pitfall 7). A
+saved choice is kept; the first run offers darktable's profile in one
+click, and that profile stays faithful to darktable (see docs/gui.md).
 The desktop runs on egui-pop's workbench (2026-10-12): its window frame,
 per-window scale and interface zoom, panels in areas with auxiliary
 windows and arrangements (Helios's image-first layout a template), the
