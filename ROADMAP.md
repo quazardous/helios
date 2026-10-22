@@ -341,6 +341,15 @@ separated, as the catalog SDK does.
   on the fly, validated, dry-run and confirmed by a human before it is
   saved; a ritual editor edits and tries them. Until then the ritual
   contract stays serialisable and free of hidden state.
+- (2026-10-22, proposed, not decided) **Batches run through the workflow
+  journal.** A batch submitted to a node process becomes a run: one
+  journal row per item and queueing graph node (the export, then decision
+  nodes), kept in the workspace's vault, worked by claim and conclude
+  with renewed leases, retries with backoff, cancel, retry and
+  reprioritise as control verbs and MCP tools, monitored per graph node
+  and relayed to the desktop's Queue panel; a crashed node resumes its
+  runs. Single exports and one-off renders stay jobs. Design note and
+  open questions: [docs/workflow-level.md](docs/workflow-level.md).
 
 ### 2.3 Vault: the catalog as an API
 

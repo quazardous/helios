@@ -299,8 +299,11 @@ part (2026-10-11): rows, claims with leases and tokens, joins (all or k of
 n), exclusive choices with omission, retries with a growing delay, lease
 expiry and per-node monitoring, over an in-memory store, and a contract
 every store must pass (grampy's driver contract is the model). Groups,
-lanes, waits and signals, rate limits and graph versions come next, then a
-vault-backed store.
+lanes, waits and signals, rate limits and graph versions come next. A
+vault-backed store followed (`helios_vault::journal::VaultJournal`). How
+node processes run batches through it (runs, workers, control verbs,
+monitoring, restart) is proposed in [workflow-level.md](workflow-level.md)
+(2026-10-22, not decided).
 
 ## Configuration
 
