@@ -60,6 +60,10 @@ run = [
  && dnf -y builddep darktable \
  && dnf -y install cmake ninja-build \
  && dnf clean all""",
+  # the rgbcurve scroll check: gcc's AddressSanitizer runtime for an ASan
+  # darktable, and a session bus daemon for darktable's D-Bus Lua method
+  """dnf -y install --setopt=install_weak_deps=False libasan dbus-daemon \
+ && dnf clean all""",
   # wbox drives a headless labwc (egui-pop-screenshots)
   """python3 -m venv /opt/wbox \
  && /opt/wbox/bin/pip install --quiet \
@@ -111,6 +115,18 @@ ref = "e07bc35ecd92ee4c3ac71cf0fb6b01132bfa50de"
 repo = "https://github.com/LibRaw/LibRaw.git"
 ref = "f74ddd995c5447458f132a5377ca0f4b394dff6e"
 
+# darktable at any commit of the fork, which carries upstream master and the
+# fix branches: `dt_ref=<sha>` (the rgbcurve scroll check)
+[checkout.darktable-fork]
+repo = "https://github.com/quazardous/darktable.git"
+ref = "${dt_ref}"
+
+# rawspeed at the commit darktable master pins today (src/external/rawspeed);
+# [checkout.rawspeed] stays at the mask-parity checkouts' pin
+[checkout.rawspeed-dt-master]
+repo = "https://github.com/darktable-org/rawspeed.git"
+ref = "0c16fee7772594e98897bded01fc31bc3409b4cb"
+
 # the job's env applies here too: CARGO_NET_OFFLINE is lifted for the fetch
 [fetch]
 # a job fetches only its own checkouts: skip the ones it does not have
@@ -126,6 +142,7 @@ target = { about = "Helios's cargo target directories, one per branch, a new one
 egui-pop-target = { about = "egui-pop's cargo target directories, one per egui-pop branch, a new one starting from main's; on the hard disk, where a gate's 25 to 35 GB fit beside Helios's own targets", lock = true, seed = "main", media = "hdd", until = "egui_pop", ttl = "14d", max = "40g" }
 registry = { about = "the cargo registry, shared by every job", keep = true, max = "5g" }
 darktable-build = { about = "darktable-cli builds for the mask parity, one per pinned checkout", lock = true, media = "hdd", ttl = "30d", max = "10g" }
+darktable-asan = { about = "ASan darktable builds for GUI checks, one per dt_ref", lock = true, media = "hdd", until = "dt_ref", ttl = "14d", max = "30g" }
 cargo-git = { about = "the cargo git dependencies, shared by every job", keep = true, max = "5g" }
 sccache = { about = "sccache's compile cache, shared by every job and branch: a branch reuses what another compiled (it caps itself at 12G)", keep = true, max = "14g" }
 
@@ -314,6 +331,41 @@ git add -A i18n && git diff --cached --binary -- i18n > /out/i18n.patch"""
 env = { CARGO_NET_OFFLINE = "true" }
 mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
 timeout = "1h"
+
+# A darktable commit built with AddressSanitizer (recovering, so one
+# report does not end the run), Lua on for the GUI setup, then the
+# rgbcurve scroll scenario (cases B and C) in a headless labwc via wbox.
+# Run once per build: dt_ref=<sha>. Results in /out/<case>/summary.txt,
+# history-*.json, asan.*, darktable.log; /out/SUMMARY.txt.
+# The scenario is tools/bench/rgbcurve (docs/bench.md).
+[jobs.dt-asan-rgbcurve]
+checkouts = ["helios", "darktable-fork", "rawspeed-dt-master", "whereami", "libraw"]
+cores = 8
+memory = "12g"
+cwd = "/work/${src:-helios}"
+command = """set -e; \
+b=/dtasan/build; p=/dtasan/prefix; c=$(git -C /work/darktable-fork rev-parse HEAD); \
+if [ "$(cat $p/.commit 2> /dev/null)" != "$c" ]; then \
+  rm -rf $b/src && mkdir -p $b/src && cp -r --preserve=mode /work/darktable-fork/. $b/src/; \
+  for s in rawspeed:/work/rawspeed-dt-master whereami:/work/whereami LibRaw:/work/libraw; do \
+    rm -rf $b/src/src/external/${s%%:*}; cp -r --preserve=mode ${s#*:} $b/src/src/external/${s%%:*}; done; \
+  [ "$(cat $b/.commit 2> /dev/null)" = "$c" ] || rm -rf $b/tree $p; \
+  F='-fsanitize=address -fsanitize-recover=address -fno-omit-frame-pointer'; \
+  cmake -S $b/src -B $b/tree -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_INSTALL_PREFIX=$p \
+    -DCMAKE_C_FLAGS="$F" -DCMAKE_CXX_FLAGS="$F" \
+    -DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address -DCMAKE_SHARED_LINKER_FLAGS=-fsanitize=address -DCMAKE_MODULE_LINKER_FLAGS=-fsanitize=address \
+    -DBINARY_PACKAGE_BUILD=ON -DBUILD_TESTING=OFF -DUSE_LUA=ON -DUSE_OPENCL=OFF -DUSE_MAP=OFF \
+    -DUSE_CAMERA_SUPPORT=OFF -DUSE_COLORD=OFF -DUSE_KWALLET=OFF -DUSE_LIBSECRET=OFF \
+    -DUSE_GMIC=OFF -DUSE_AI=OFF -DUSE_MCP=OFF -DUSE_PORTMIDI=OFF -DUSE_SDL2=OFF \
+    > /out/build.log 2>&1; \
+  echo $c > $b/.commit; \
+  cmake --build $b/tree -j 8 >> /out/build.log 2>&1 || { tail -50 /out/build.log; exit 1; }; \
+  cmake --install $b/tree >> /out/build.log 2>&1; echo $c > $p/.commit; fi; \
+img=$(ls /corpus/*.* | head -1); \
+for k in B C; do tools/bench/rgbcurve/run_case.sh $p $k "$img" /out/$k || true; done; \
+cat /out/B/summary.txt /out/C/summary.txt > /out/SUMMARY.txt"""
+mounts = { "darktable-asan/${dt_ref}" = "/dtasan", raw-corpus = "/corpus" }
+timeout = "2h"
 
 # every commit of base..HEAD but the head builds, passes clippy and the
 # tests it touches (base=<commit or branch>, origin/main by default;
