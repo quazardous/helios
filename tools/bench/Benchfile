@@ -116,10 +116,11 @@ repo = "https://github.com/LibRaw/LibRaw.git"
 ref = "f74ddd995c5447458f132a5377ca0f4b394dff6e"
 
 # darktable at any commit of the fork, which carries upstream master and the
-# fix branches: `dt_ref=<sha>` (the rgbcurve scroll check)
+# fix branches: `dt_ref=<sha>` (the rgbcurve scroll check); master by
+# default, as the box resolves every checkout for every job
 [checkout.darktable-fork]
 repo = "https://github.com/quazardous/darktable.git"
-ref = "${dt_ref}"
+ref = "${dt_ref:-master}"
 
 # rawspeed at the commit darktable master pins today (src/external/rawspeed);
 # [checkout.rawspeed] stays at the mask-parity checkouts' pin
