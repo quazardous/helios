@@ -1,9 +1,9 @@
 # The workflow level: nodes run items through the journal
 
-Status: **proposed** (2026-10-22), not decided. The plan to wire the
-workflow journal into the node was accepted on 2026-10-22; this note is
-its design pass. Every choice below has a default and the reason for it;
-nothing is built until the owner settles the open questions at the end.
+Status: **decided** (2026-10-22). The plan to wire the workflow journal
+into the node was accepted on 2026-10-22, and this design, with every
+default below and the answers to the questions at the end, was accepted
+the same day.
 
 It extends [architecture.md](architecture.md), "Two levels of
 execution", which states the model (after
@@ -532,9 +532,9 @@ bench box (see [bench.md](bench.md)).
 Steps 1 to 5 are the batch export end to end; 6 and 7 can run side by
 side once 5 is merged; 8 waits for a branching decision module.
 
-## Open questions for the owner
+## Questions settled (2026-10-22)
 
-Each with the default proposed.
+Each one was decided with its default.
 
 1. **Where does a batch started from the desktop run?** Default: in a
    node process the desktop starts for the workspace (as `helios batch`

@@ -341,7 +341,7 @@ separated, as the catalog SDK does.
   on the fly, validated, dry-run and confirmed by a human before it is
   saved; a ritual editor edits and tries them. Until then the ritual
   contract stays serialisable and free of hidden state.
-- (2026-10-22, proposed, not decided) **Batches run through the workflow
+- (2026-10-22, decided) **Batches run through the workflow
   journal.** A batch submitted to a node process becomes a run: one
   journal row per item and queueing graph node (the export, then decision
   nodes), kept in the workspace's vault, worked by claim and conclude
