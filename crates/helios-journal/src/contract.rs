@@ -9,6 +9,7 @@
 use std::collections::BTreeSet;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 
 use crate::{Error, Journal, Node, Outcome, Row, Status, Store, Workflow};
@@ -24,6 +25,7 @@ pub fn check<S: Store + 'static>(make: impl Fn() -> S) {
     a_choice_omits_the_other_branches_and_what_only_they_lead_to(journal(&make, choice()));
     concurrent_claimers_never_take_an_item_twice(Arc::new(journal(&make, linear())));
     unknown_nodes_and_bad_branches_are_refused(journal(&make, choice()));
+    a_claim_reads_only_its_candidates(&make);
 }
 
 /// The scenarios of a journal that outlives its process: `backing` makes
@@ -365,4 +367,100 @@ fn reopened_tokens_never_collide<B, S: Store + 'static>(backing: &B, open: &impl
         last.token,
         lease.token
     );
+}
+
+/// Counts the reads of the store it wraps.
+struct Counting<S> {
+    store: S,
+    gets: Arc<AtomicUsize>,
+    scans: Arc<AtomicUsize>,
+}
+
+impl<S: Store> Store for Counting<S> {
+    fn get(&self, item: &str, node: &str) -> Option<Row> {
+        self.gets.fetch_add(1, Ordering::Relaxed);
+        self.store.get(item, node)
+    }
+    fn put(&mut self, item: &str, node: &str, row: Row) {
+        self.store.put(item, node, row);
+    }
+    fn remove(&mut self, item: &str, node: &str) {
+        self.store.remove(item, node);
+    }
+    fn rows(&self) -> Vec<(String, String, Row)> {
+        self.scans.fetch_add(1, Ordering::Relaxed);
+        self.store.rows()
+    }
+    fn begin(&mut self) {
+        self.store.begin();
+    }
+    fn commit(&mut self) {
+        self.store.commit();
+    }
+    fn last_token(&self) -> u64 {
+        self.store.last_token()
+    }
+    fn set_last_token(&mut self, token: u64) {
+        self.store.set_last_token(token);
+    }
+}
+
+/// A batch of 3,200 items: claiming one reads the rows of the candidates
+/// it looks at, never every row; expiring and watching read none.
+fn a_claim_reads_only_its_candidates<S: Store>(make: &impl Fn() -> S) {
+    let gets = Arc::new(AtomicUsize::new(0));
+    let scans = Arc::new(AtomicUsize::new(0));
+    let workflow = Workflow::new(vec![
+        Node::new("submit"),
+        Node::new("export").after(&["submit"]),
+    ])
+    .unwrap();
+    let j = Journal::new(
+        workflow,
+        Counting {
+            store: make(),
+            gets: Arc::clone(&gets),
+            scans: Arc::clone(&scans),
+        },
+    );
+    let items: Vec<String> = (0..3_200).map(|i| format!("i{i:04}")).collect();
+    let candidates: Vec<&str> = items.iter().map(String::as_str).collect();
+    let submitted = j.claim("submit", items.len(), &candidates, 0).unwrap();
+    j.conclude(&submitted, Outcome::Done, 0).unwrap();
+    let reads = || {
+        (
+            gets.swap(0, Ordering::Relaxed),
+            scans.swap(0, Ordering::Relaxed),
+        )
+    };
+    reads();
+
+    let first = j.claim("export", 1, &candidates, 1).unwrap();
+    assert_eq!(first.items, ["i0000"]);
+    let (got, scanned) = reads();
+    assert!(
+        got <= 2 && scanned == 0,
+        "one claim of 3,200 candidates read {got} rows and scanned {scanned} times: \
+         its row and its parent's only"
+    );
+    j.conclude(&first, Outcome::Done, 2).unwrap();
+    reads();
+    let second = j.claim("export", 1, &candidates, 3).unwrap();
+    assert_eq!(second.items, ["i0001"]);
+    let (got, scanned) = reads();
+    assert!(
+        got <= 3 && scanned == 0,
+        "past one done item, a claim read {got} rows and scanned {scanned} times"
+    );
+
+    assert_eq!(j.expire(4), 0);
+    let watched = j.monitor(4);
+    assert_eq!(
+        reads(),
+        (0, 0),
+        "expiring and watching read no row: the journal keeps the counts"
+    );
+    assert_eq!(watched["nodes"]["submit"]["done"], 3_200);
+    assert_eq!(watched["nodes"]["export"]["done"], 1);
+    assert_eq!(watched["nodes"]["export"]["running"], 1);
 }

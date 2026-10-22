@@ -29,6 +29,7 @@
 //! Not yet: groups, lanes, waits and signals, rate limits, graph versions,
 //! history of what forget and retries take away.
 
+use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Mutex;
 
@@ -56,6 +57,28 @@ pub enum Status {
 }
 
 impl Status {
+    /// Every status, in the order of their declaration.
+    pub const ALL: [Status; 6] = [
+        Status::Running,
+        Status::Scheduled,
+        Status::Done,
+        Status::Skipped,
+        Status::Failed,
+        Status::Omitted,
+    ];
+
+    /// Its name, as rows and `monitor` spell it.
+    pub fn name(self) -> &'static str {
+        match self {
+            Status::Running => "running",
+            Status::Scheduled => "scheduled",
+            Status::Done => "done",
+            Status::Skipped => "skipped",
+            Status::Failed => "failed",
+            Status::Omitted => "omitted",
+        }
+    }
+
     /// Whether a child may count this parent as concluded.
     fn accepted(self) -> bool {
         matches!(self, Status::Done | Status::Skipped | Status::Omitted)
@@ -247,10 +270,46 @@ impl fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
+/// What the journal keeps in memory of a node's rows, so watching it reads
+/// no row: counts by status, and the rows that time moves on (running ones
+/// for their expiry, scheduled ones for their retry).
+#[derive(Default)]
+struct Tally {
+    counts: [usize; Status::ALL.len()],
+    /// Running items: since, due.
+    running: BTreeMap<String, (u64, Option<u64>)>,
+    /// Scheduled items: due.
+    scheduled: BTreeMap<String, Option<u64>>,
+}
+
+impl Tally {
+    fn add(&mut self, item: &str, row: &Row) {
+        self.counts[row.status as usize] += 1;
+        match row.status {
+            Status::Running => {
+                self.running.insert(item.into(), (row.since, row.due));
+            }
+            Status::Scheduled => {
+                self.scheduled.insert(item.into(), row.due);
+            }
+            _ => {}
+        }
+    }
+
+    fn take(&mut self, item: &str, row: &Row) {
+        let count = &mut self.counts[row.status as usize];
+        *count = count.saturating_sub(1);
+        self.running.remove(item);
+        self.scheduled.remove(item);
+    }
+}
+
 struct Inner<S> {
     store: S,
     /// The last token handed out.
     last_token: u64,
+    /// Per node, built when the journal opens and kept by its writes.
+    tallies: BTreeMap<String, Tally>,
 }
 
 impl<S: Store> Inner<S> {
@@ -262,6 +321,22 @@ impl<S: Store> Inner<S> {
         self.store.commit();
         value
     }
+
+    /// Writes (or with `None` removes) the row of `item` at `node`, which
+    /// was `before`, keeping the tallies.
+    fn write(&mut self, item: &str, node: &str, before: Option<&Row>, after: Option<Row>) {
+        let tally = self.tallies.entry(node.to_string()).or_default();
+        if let Some(b) = before {
+            tally.take(item, b);
+        }
+        match after {
+            Some(row) => {
+                tally.add(item, &row);
+                self.store.put(item, node, row);
+            }
+            None => self.store.remove(item, node),
+        }
+    }
 }
 
 /// The journal of a workflow, over a store.
@@ -271,20 +346,24 @@ pub struct Journal<S: Store> {
 }
 
 impl<S: Store> Journal<S> {
-    /// Opens the journal over `store`. Tokens start above every token the
-    /// store kept or a row carries, so a journal opened again over rows a
-    /// dead process left never hands out a token they hold.
+    /// Opens the journal over `store`, reading its rows once. Tokens start
+    /// above every token the store kept or a row carries, so a journal
+    /// opened again over rows a dead process left never hands out a token
+    /// they hold.
     pub fn new(workflow: Workflow, store: S) -> Self {
-        let in_rows = store
-            .rows()
-            .iter()
-            .filter_map(|(_, _, r)| r.token)
-            .max()
-            .unwrap_or(0);
-        let last_token = store.last_token().max(in_rows);
+        let mut tallies: BTreeMap<String, Tally> = BTreeMap::new();
+        let mut last_token = store.last_token();
+        for (item, node, row) in store.rows() {
+            last_token = last_token.max(row.token.unwrap_or(0));
+            tallies.entry(node).or_default().add(&item, &row);
+        }
         Self {
             workflow,
-            inner: Mutex::new(Inner { store, last_token }),
+            inner: Mutex::new(Inner {
+                store,
+                last_token,
+                tallies,
+            }),
         }
     }
 
@@ -303,15 +382,18 @@ impl<S: Store> Journal<S> {
         accepted >= node.need.unwrap_or(node.parents.len())
     }
 
-    fn claimable(store: &S, item: &str, node: &Node, now: u64) -> bool {
-        match store.get(item, &node.name) {
+    /// Whether `row`, the row of `item` at `node`, may be claimed now.
+    fn claimable(store: &S, item: &str, node: &Node, row: Option<&Row>, now: u64) -> bool {
+        match row {
             None => Self::joined(store, item, node),
             Some(r) => r.status == Status::Scheduled && r.due.is_none_or(|d| d <= now),
         }
     }
 
     /// Claims `node` for at most `max` of the `candidates` that are
-    /// claimable now. The claim is atomic: two workers never get the same item.
+    /// claimable now. The claim is atomic: two workers never get the same
+    /// item. It reads the rows of its candidates (and their parents) only,
+    /// and stops at the `max`-th.
     pub fn claim(
         &self,
         node: &str,
@@ -329,17 +411,17 @@ impl<S: Store> Journal<S> {
                 if items.len() == max {
                     break;
                 }
-                if Self::claimable(&inner.store, item, node, now) {
-                    let attempts = inner.store.get(item, &node.name).map_or(0, |r| r.attempts);
+                let before = inner.store.get(item, &node.name);
+                if Self::claimable(&inner.store, item, node, before.as_ref(), now) {
                     let row = Row {
                         status: Status::Running,
-                        attempts: attempts + 1,
+                        attempts: before.as_ref().map_or(0, |r| r.attempts) + 1,
                         token: Some(token),
                         since: now,
                         due: Some(now + node.lease_ms),
                         error: None,
                     };
-                    inner.store.put(item, &node.name, row);
+                    inner.write(item, &node.name, before.as_ref(), Some(row));
                     items.push(item.to_string());
                 }
             }
@@ -354,6 +436,24 @@ impl<S: Store> Journal<S> {
             token,
             items,
         })
+    }
+
+    /// The rows `lease` holds, or the first item it no longer holds.
+    fn held(inner: &Inner<S>, lease: &Lease) -> Result<Vec<Row>, Error> {
+        lease
+            .items
+            .iter()
+            .map(|item| {
+                inner
+                    .store
+                    .get(item, &lease.node)
+                    .filter(|r| r.status == Status::Running && r.token == Some(lease.token))
+                    .ok_or_else(|| Error::StaleLease {
+                        node: lease.node.clone(),
+                        item: item.clone(),
+                    })
+            })
+            .collect()
     }
 
     /// Concludes a lease for all its items. If any item is no longer held by
@@ -376,26 +476,14 @@ impl<S: Store> Journal<S> {
             }
         }
         let mut inner = self.inner.lock().expect("journal lock");
-        for item in &lease.items {
-            let held = inner
-                .store
-                .get(item, &node.name)
-                .is_some_and(|r| r.status == Status::Running && r.token == Some(lease.token));
-            if !held {
-                return Err(Error::StaleLease {
-                    node: node.name.clone(),
-                    item: item.clone(),
-                });
-            }
-        }
+        let rows = Self::held(&inner, lease)?;
         inner.atomically(|inner| {
-            for item in &lease.items {
-                let previous = inner.store.get(item, &node.name).expect("checked above");
+            for (item, previous) in lease.items.iter().zip(rows) {
                 let mut row = Row {
                     token: None,
                     since: now,
                     due: None,
-                    ..previous
+                    ..previous.clone()
                 };
                 match &outcome {
                     Outcome::Done | Outcome::Branch(_) => row.status = Status::Done,
@@ -404,7 +492,7 @@ impl<S: Store> Journal<S> {
                         row.error = Some(error.clone());
                         if row.attempts < node.retry.limit {
                             let factor = if node.retry.exponential {
-                                1u64 << (row.attempts - 1).min(32)
+                                1u64 << row.attempts.saturating_sub(1).min(32)
                             } else {
                                 1
                             };
@@ -415,9 +503,9 @@ impl<S: Store> Journal<S> {
                         }
                     }
                 }
-                inner.store.put(item, &node.name, row);
+                inner.write(item, &node.name, Some(&previous), Some(row));
                 if let Outcome::Branch(branch) = &outcome {
-                    self.omit_other_branches(&mut inner.store, item, node, branch, now);
+                    self.omit_other_branches(inner, item, node, branch, now);
                 }
             }
         });
@@ -428,7 +516,7 @@ impl<S: Store> Journal<S> {
     /// parents are all omitted: what only the other branches lead to.
     fn omit_other_branches(
         &self,
-        store: &mut S,
+        inner: &mut Inner<S>,
         item: &str,
         choice: &Node,
         branch: &str,
@@ -443,51 +531,57 @@ impl<S: Store> Journal<S> {
             error: None,
         };
         for child in self.workflow.children(&choice.name) {
-            if child.name != branch && store.get(item, &child.name).is_none() {
-                store.put(item, &child.name, omitted.clone());
+            if child.name != branch && inner.store.get(item, &child.name).is_none() {
+                inner.write(item, &child.name, None, Some(omitted.clone()));
             }
         }
         for node in &self.workflow.nodes {
             let all_omitted = !node.parents.is_empty()
                 && node.parents.iter().all(|p| {
-                    store
+                    inner
+                        .store
                         .get(item, p)
                         .is_some_and(|r| r.status == Status::Omitted)
                 });
-            if all_omitted && store.get(item, &node.name).is_none() {
-                store.put(item, &node.name, omitted.clone());
+            if all_omitted && inner.store.get(item, &node.name).is_none() {
+                inner.write(item, &node.name, None, Some(omitted.clone()));
             }
         }
     }
 
     /// Gives back every lease held past its expiry; returns how many rows.
-    /// An expired lease does not count as an attempt.
+    /// An expired lease does not count as an attempt. It reads the expired
+    /// rows only.
     pub fn expire(&self, now: u64) -> usize {
         let mut inner = self.inner.lock().expect("journal lock");
-        let expired: Vec<_> = inner
-            .store
-            .rows()
-            .into_iter()
-            .filter(|(_, _, r)| r.status == Status::Running && r.due.is_some_and(|d| d <= now))
+        let expired: Vec<(String, String)> = inner
+            .tallies
+            .iter()
+            .flat_map(|(node, tally)| {
+                tally
+                    .running
+                    .iter()
+                    .filter(|(_, (_, due))| due.is_some_and(|d| d <= now))
+                    .map(|(item, _)| (item.clone(), node.clone()))
+            })
             .collect();
         if expired.is_empty() {
             return 0;
         }
         inner.atomically(|inner| {
-            for (item, node, row) in &expired {
-                if row.attempts <= 1 {
-                    inner.store.remove(item, node);
-                } else {
-                    let back = Row {
-                        status: Status::Scheduled,
-                        attempts: row.attempts - 1,
-                        token: None,
-                        since: now,
-                        due: Some(now),
-                        ..row.clone()
-                    };
-                    inner.store.put(item, node, back);
-                }
+            for (item, node) in &expired {
+                let Some(row) = inner.store.get(item, node) else {
+                    continue;
+                };
+                let back = (row.attempts > 1).then(|| Row {
+                    status: Status::Scheduled,
+                    attempts: row.attempts - 1,
+                    token: None,
+                    since: now,
+                    due: Some(now),
+                    ..row.clone()
+                });
+                inner.write(item, node, Some(&row), back);
             }
         });
         expired.len()
@@ -510,39 +604,30 @@ impl<S: Store> Journal<S> {
             .get(item, node)
     }
 
-    /// Per node: rows by status, the oldest running since, retries due by `now`.
+    /// Per node: rows by status, the oldest running since, retries due by
+    /// `now`. Read from what the journal keeps in memory: no row is read.
     pub fn monitor(&self, now: u64) -> serde_json::Value {
         let inner = self.inner.lock().expect("journal lock");
-        let rows = inner.store.rows();
+        let empty = Tally::default();
         let nodes: serde_json::Map<_, _> = self
             .workflow
             .nodes
             .iter()
             .map(|n| {
-                let mine: Vec<&Row> = rows
+                let tally = inner.tallies.get(&n.name).unwrap_or(&empty);
+                let mut out: serde_json::Map<_, _> = Status::ALL
                     .iter()
-                    .filter(|(_, node, _)| node == &n.name)
-                    .map(|(_, _, r)| r)
+                    .map(|s| (s.name().to_string(), json!(tally.counts[*s as usize])))
                     .collect();
-                let count = |s: Status| mine.iter().filter(|r| r.status == s).count();
-                let oldest_running = mine
-                    .iter()
-                    .filter(|r| r.status == Status::Running)
-                    .map(|r| r.since)
-                    .min();
-                let retries_due = mine
-                    .iter()
-                    .filter(|r| r.status == Status::Scheduled && r.due.is_none_or(|d| d <= now))
+                let oldest_running = tally.running.values().map(|(since, _)| *since).min();
+                let retries_due = tally
+                    .scheduled
+                    .values()
+                    .filter(|due| due.is_none_or(|d| d <= now))
                     .count();
-                (
-                    n.name.clone(),
-                    json!({
-                        "running": count(Status::Running), "scheduled": count(Status::Scheduled),
-                        "done": count(Status::Done), "skipped": count(Status::Skipped),
-                        "failed": count(Status::Failed), "omitted": count(Status::Omitted),
-                        "oldest_running_since": oldest_running, "retries_due": retries_due,
-                    }),
-                )
+                out.insert("oldest_running_since".into(), json!(oldest_running));
+                out.insert("retries_due".into(), json!(retries_due));
+                (n.name.clone(), serde_json::Value::Object(out))
             })
             .collect();
         json!({ "nodes": nodes })
