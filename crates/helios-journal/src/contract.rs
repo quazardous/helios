@@ -28,6 +28,8 @@ pub fn check<S: Store + 'static>(make: impl Fn() -> S) {
     a_renewed_lease_does_not_expire(journal(&make, linear()));
     a_signal_concludes_a_waiting_row_once(journal(&make, linear()));
     a_failure_for_good_is_not_retried(journal(&make, retried()));
+    a_cancelled_parent_holds_its_children(journal(&make, linear()));
+    a_retry_by_hand_resets_the_attempts(journal(&make, retried()));
     a_claim_reads_only_its_candidates(&make);
 }
 
@@ -572,4 +574,105 @@ fn a_failure_for_good_is_not_retried<S: Store>(j: Journal<S>) {
         "two attempts were left, none is used"
     );
     assert!(j.claim("call", 1, &["i"], 1_000).unwrap().items.is_empty());
+}
+
+fn a_cancelled_parent_holds_its_children<S: Store>(j: Journal<S>) {
+    let lease = j.claim("fetch", 1, &["running"], 0).unwrap();
+    let done = j.claim("fetch", 1, &["done"], 0).unwrap();
+    j.conclude(&done, Outcome::Done, 1).unwrap();
+    let written = j.cancel(&["running", "new", "done"], None, 2).unwrap();
+    assert_eq!(
+        written,
+        [
+            ("running".to_string(), "fetch".to_string()),
+            ("new".to_string(), "fetch".to_string()),
+            ("done".to_string(), "develop".to_string()),
+        ],
+        "open rows, and rows claimable now; a concluded row stays"
+    );
+    assert_eq!(j.status("running", "fetch"), Some(Status::Cancelled));
+    assert_eq!(j.status("done", "fetch"), Some(Status::Done));
+    assert_eq!(
+        j.status("running", "develop"),
+        None,
+        "held behind its parent"
+    );
+    assert!(
+        matches!(
+            j.conclude(&lease, Outcome::Done, 3),
+            Err(Error::StaleLease { .. })
+        ),
+        "a cancelled row's lease writes nothing"
+    );
+    assert!(
+        j.claim("fetch", 3, &["running", "new"], 3)
+            .unwrap()
+            .items
+            .is_empty(),
+        "a cancelled row is not claimed"
+    );
+    assert!(
+        j.claim("develop", 3, &["running", "new", "done"], 3)
+            .unwrap()
+            .items
+            .is_empty(),
+        "a cancelled parent holds its children"
+    );
+    assert_eq!(j.monitor(3)["nodes"]["fetch"]["cancelled"], 2);
+    assert_eq!(
+        j.cancel(&["x"], Some("nope"), 3).unwrap_err(),
+        Error::UnknownNode("nope".into())
+    );
+    assert_eq!(
+        j.cancel(&["later"], Some("develop"), 3).unwrap(),
+        [("later".to_string(), "develop".to_string())],
+        "at a named node, an item with no row is cancelled there"
+    );
+    let fetched = j.claim("fetch", 1, &["later"], 4).unwrap();
+    j.conclude(&fetched, Outcome::Done, 4).unwrap();
+    assert!(
+        j.claim("develop", 1, &["later"], 4)
+            .unwrap()
+            .items
+            .is_empty()
+    );
+}
+
+fn a_retry_by_hand_resets_the_attempts<S: Store>(j: Journal<S>) {
+    for now in [0, 10, 30] {
+        let lease = j.claim("call", 1, &["i"], now).unwrap();
+        assert_eq!(lease.items, ["i"], "claimable at {now}");
+        j.conclude(&lease, Outcome::Failed("timeout".into()), now)
+            .unwrap();
+    }
+    assert_eq!(j.row("i", "call").unwrap().attempts, 3);
+    assert_eq!(j.status("i", "call"), Some(Status::Failed));
+    assert_eq!(
+        j.retry(&["i"], None, 40).unwrap(),
+        [("i".to_string(), "call".to_string())]
+    );
+    let row = j.row("i", "call").unwrap();
+    assert_eq!(
+        (row.status, row.attempts, row.due),
+        (Status::Scheduled, 0, Some(40)),
+        "a retry by hand resets the attempts"
+    );
+    let lease = j.claim("call", 1, &["i"], 40).unwrap();
+    assert_eq!(lease.items, ["i"]);
+    j.conclude(&lease, Outcome::Failed("timeout".into()), 41)
+        .unwrap();
+    assert_eq!(
+        j.status("i", "call"),
+        Some(Status::Scheduled),
+        "the full allowance again: this failure is retried"
+    );
+    // A cancelled row that never started goes back to no row at all.
+    j.cancel(&["fresh"], None, 50).unwrap();
+    assert_eq!(j.status("fresh", "call"), Some(Status::Cancelled));
+    assert_eq!(
+        j.retry(&["fresh", "done"], Some("call"), 51).unwrap().len(),
+        1
+    );
+    assert_eq!(j.status("fresh", "call"), None);
+    assert_eq!(j.claim("call", 1, &["fresh"], 51).unwrap().items, ["fresh"]);
 }

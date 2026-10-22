@@ -15,6 +15,8 @@
 //!   every node only they lead to, are omitted in the same write;
 //! - a failure is **retried** when the node declares it, after a delay that
 //!   can grow; past the limit, or failed for good, it stands;
+//! - rows are **cancelled** and **retried** by hand: a cancelled row holds
+//!   its children, a retry resets the attempts;
 //! - a worker can hand a row to someone outside: it **waits** (no lease, no
 //!   expiry) until a **signal** concludes it;
 //! - **leases** expire: `expire` gives back what a dead worker held, and
@@ -61,11 +63,13 @@ pub enum Status {
     /// Held for an answer from outside (a person): no lease, no expiry,
     /// not claimable; [`Journal::signal`] concludes it.
     Waiting,
+    /// Stopped by hand: satisfies no child, until retried.
+    Cancelled,
 }
 
 impl Status {
     /// Every status, in the order of their declaration.
-    pub const ALL: [Status; 7] = [
+    pub const ALL: [Status; 8] = [
         Status::Running,
         Status::Scheduled,
         Status::Done,
@@ -73,6 +77,7 @@ impl Status {
         Status::Failed,
         Status::Omitted,
         Status::Waiting,
+        Status::Cancelled,
     ];
 
     /// Its name, as rows and `monitor` spell it.
@@ -85,7 +90,13 @@ impl Status {
             Status::Failed => "failed",
             Status::Omitted => "omitted",
             Status::Waiting => "waiting",
+            Status::Cancelled => "cancelled",
         }
+    }
+
+    /// Whether the row is still to be concluded.
+    pub fn open(self) -> bool {
+        matches!(self, Status::Running | Status::Scheduled | Status::Waiting)
     }
 
     /// Whether a child may count this parent as concluded.
@@ -712,6 +723,102 @@ impl<S: Store> Journal<S> {
             }
         });
         Ok(())
+    }
+
+    /// The nodes a control verb acts on: `node`, or every node.
+    fn nodes_named(&self, node: Option<&str>) -> Result<Vec<&Node>, Error> {
+        match node {
+            Some(n) => Ok(vec![self.node(n)?]),
+            None => Ok(self.workflow.nodes.iter().collect()),
+        }
+    }
+
+    /// Cancels `items` at `node`, or at every node: the rows not concluded
+    /// (running, scheduled, waiting) become `cancelled`, and a lease that
+    /// held one writes nothing after. An item with no row gets a cancelled
+    /// row at `node`, or without one at each node it could be claimed at
+    /// now, so it is never claimed. A cancelled row satisfies no child.
+    /// Returns the (item, node) rows written.
+    pub fn cancel(
+        &self,
+        items: &[&str],
+        node: Option<&str>,
+        now: u64,
+    ) -> Result<Vec<(String, String)>, Error> {
+        let nodes = self.nodes_named(node)?;
+        let mut inner = self.inner.lock().expect("journal lock");
+        let written = inner.atomically(|inner| {
+            let mut written = Vec::new();
+            for item in items {
+                for n in &nodes {
+                    let before = inner.store.get(item, &n.name);
+                    let row = match &before {
+                        Some(r) if r.status.open() => Row {
+                            status: Status::Cancelled,
+                            token: None,
+                            since: now,
+                            due: None,
+                            ..r.clone()
+                        },
+                        None if node.is_some() || Self::joined(&inner.store, item, n) => Row {
+                            status: Status::Cancelled,
+                            attempts: 0,
+                            token: None,
+                            since: now,
+                            due: None,
+                            error: None,
+                        },
+                        // A concluded row stays; an item that cannot be
+                        // claimed here yet is held by what is cancelled above.
+                        _ => continue,
+                    };
+                    inner.write(item, &n.name, before.as_ref(), Some(row));
+                    written.push((item.to_string(), n.name.clone()));
+                }
+            }
+            written
+        });
+        Ok(written)
+    }
+
+    /// Retries `items` by hand at `node`, or at every node: their failed
+    /// and cancelled rows become scheduled, due `now`, with their attempts
+    /// reset, so they get the full allowance again. A row that never
+    /// started is removed instead: the item waits for its parents as if it
+    /// had never been cancelled. Returns the (item, node) rows written.
+    pub fn retry(
+        &self,
+        items: &[&str],
+        node: Option<&str>,
+        now: u64,
+    ) -> Result<Vec<(String, String)>, Error> {
+        let nodes = self.nodes_named(node)?;
+        let mut inner = self.inner.lock().expect("journal lock");
+        let written = inner.atomically(|inner| {
+            let mut written = Vec::new();
+            for item in items {
+                for n in &nodes {
+                    let Some(before) = inner.store.get(item, &n.name) else {
+                        continue;
+                    };
+                    if !matches!(before.status, Status::Failed | Status::Cancelled) {
+                        continue;
+                    }
+                    let after = (before.attempts > 0).then(|| Row {
+                        status: Status::Scheduled,
+                        attempts: 0,
+                        token: None,
+                        since: now,
+                        due: Some(now),
+                        ..before.clone()
+                    });
+                    inner.write(item, &n.name, Some(&before), after);
+                    written.push((item.to_string(), n.name.clone()));
+                }
+            }
+            written
+        });
+        Ok(written)
     }
 
     pub fn status(&self, item: &str, node: &str) -> Option<Status> {
