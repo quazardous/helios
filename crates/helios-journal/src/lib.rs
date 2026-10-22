@@ -15,7 +15,9 @@
 //!   every node only they lead to, are omitted in the same write;
 //! - a failure is **retried** when the node declares it, after a delay that
 //!   can grow; past the limit it stands;
-//! - **leases** expire: `expire` gives back what a dead worker held;
+//! - **leases** expire: `expire` gives back what a dead worker held, and
+//!   a worker renews the lease of a long job; `recover` gives back every
+//!   running row when a process opens the journal again;
 //! - every write runs in one store **transaction**: kept whole or not at
 //!   all.
 //!
@@ -553,23 +555,35 @@ impl<S: Store> Journal<S> {
     /// An expired lease does not count as an attempt. It reads the expired
     /// rows only.
     pub fn expire(&self, now: u64) -> usize {
+        self.give_back(now, |due| due.is_some_and(|d| d <= now))
+    }
+
+    /// Gives back every running row, as `expire` does, whatever its due
+    /// time; returns how many rows. Called when a process opens a journal
+    /// others may have left: no lease is alive across a restart.
+    pub fn recover(&self, now: u64) -> usize {
+        self.give_back(now, |_| true)
+    }
+
+    /// Gives back the running rows whose due time `expired` accepts.
+    fn give_back(&self, now: u64, expired: impl Fn(Option<u64>) -> bool) -> usize {
         let mut inner = self.inner.lock().expect("journal lock");
-        let expired: Vec<(String, String)> = inner
+        let rows: Vec<(String, String)> = inner
             .tallies
             .iter()
             .flat_map(|(node, tally)| {
                 tally
                     .running
                     .iter()
-                    .filter(|(_, (_, due))| due.is_some_and(|d| d <= now))
+                    .filter(|(_, (_, due))| expired(*due))
                     .map(|(item, _)| (item.clone(), node.clone()))
             })
             .collect();
-        if expired.is_empty() {
+        if rows.is_empty() {
             return 0;
         }
         inner.atomically(|inner| {
-            for (item, node) in &expired {
+            for (item, node) in &rows {
                 let Some(row) = inner.store.get(item, node) else {
                     continue;
                 };
@@ -584,7 +598,26 @@ impl<S: Store> Journal<S> {
                 inner.write(item, node, Some(&row), back);
             }
         });
-        expired.len()
+        rows.len()
+    }
+
+    /// Extends a lease: every item it holds is due `lease_ms` from `now`.
+    /// A worker whose job outlasts the lease renews it while it runs. If any
+    /// item is no longer held, nothing is written.
+    pub fn renew(&self, lease: &Lease, now: u64) -> Result<(), Error> {
+        let node = self.node(&lease.node)?;
+        let mut inner = self.inner.lock().expect("journal lock");
+        let rows = Self::held(&inner, lease)?;
+        inner.atomically(|inner| {
+            for (item, previous) in lease.items.iter().zip(rows) {
+                let row = Row {
+                    due: Some(now + node.lease_ms),
+                    ..previous.clone()
+                };
+                inner.write(item, &node.name, Some(&previous), Some(row));
+            }
+        });
+        Ok(())
     }
 
     pub fn status(&self, item: &str, node: &str) -> Option<Status> {

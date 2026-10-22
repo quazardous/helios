@@ -25,6 +25,7 @@ pub fn check<S: Store + 'static>(make: impl Fn() -> S) {
     a_choice_omits_the_other_branches_and_what_only_they_lead_to(journal(&make, choice()));
     concurrent_claimers_never_take_an_item_twice(Arc::new(journal(&make, linear())));
     unknown_nodes_and_bad_branches_are_refused(journal(&make, choice()));
+    a_renewed_lease_does_not_expire(journal(&make, linear()));
     a_claim_reads_only_its_candidates(&make);
 }
 
@@ -35,6 +36,7 @@ pub fn check<S: Store + 'static>(make: impl Fn() -> S) {
 pub fn check_lasting<B, S: Store + 'static>(backing: impl Fn() -> B, open: impl Fn(&B) -> S) {
     a_crash_between_two_puts_leaves_nothing(&backing(), &open);
     reopened_tokens_never_collide(&backing(), &open);
+    reopened_running_rows_are_given_back(&backing(), &open);
 }
 
 fn journal<S: Store>(make: &impl Fn() -> S, workflow: Workflow) -> Journal<S> {
@@ -463,4 +465,49 @@ fn a_claim_reads_only_its_candidates<S: Store>(make: &impl Fn() -> S) {
     assert_eq!(watched["nodes"]["submit"]["done"], 3_200);
     assert_eq!(watched["nodes"]["export"]["done"], 1);
     assert_eq!(watched["nodes"]["export"]["running"], 1);
+}
+
+fn a_renewed_lease_does_not_expire<S: Store>(j: Journal<S>) {
+    let lease = j.claim("fetch", 1, &["i"], 0).unwrap();
+    j.renew(&lease, 90).unwrap();
+    assert_eq!(j.expire(150), 0, "renewed at 90, due at 190");
+    assert_eq!(j.row("i", "fetch").unwrap().due, Some(190));
+    assert_eq!(j.expire(190), 1, "not renewed again: given back");
+    assert_eq!(
+        j.renew(&lease, 191).unwrap_err(),
+        Error::StaleLease {
+            node: "fetch".into(),
+            item: "i".into()
+        },
+        "a lease given back cannot be renewed"
+    );
+    let fresh = j.claim("fetch", 1, &["i"], 191).unwrap();
+    j.renew(&fresh, 250).unwrap();
+    j.conclude(&fresh, Outcome::Done, 340).unwrap();
+}
+
+fn reopened_running_rows_are_given_back<B, S: Store + 'static>(
+    backing: &B,
+    open: &impl Fn(&B) -> S,
+) {
+    let dead = Journal::new(retried(), open(backing));
+    let first = dead.claim("call", 2, &["a", "b"], 0).unwrap();
+    dead.conclude(&Lease1::only(&first, "b"), Outcome::Failed("x".into()), 1)
+        .unwrap();
+    let second = dead.claim("call", 1, &["b"], 50).unwrap();
+    assert_eq!(second.items, ["b"]);
+    drop(dead);
+    let j = Journal::new(retried(), open(backing));
+    assert_eq!(j.recover(60), 2, "every running row, due or not");
+    assert_eq!(j.status("a", "call"), None, "back to claimable");
+    let b = j.row("b", "call").unwrap();
+    assert_eq!(
+        (b.status, b.attempts, b.due),
+        (Status::Scheduled, 1, Some(60)),
+        "the attempt cut short does not count"
+    );
+    assert_eq!(j.recover(61), 0);
+    let lease = j.claim("call", 2, &["a", "b"], 61).unwrap();
+    assert_eq!(lease.items, ["a", "b"]);
+    assert_eq!(j.row("b", "call").unwrap().attempts, 2);
 }
