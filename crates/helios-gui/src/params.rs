@@ -445,20 +445,18 @@ impl Params {
         let about = description(&ctx, path, d);
         out.response.on_hover_text(format!(
             "{}\n{}\n{}",
-            if about.is_empty() { &shown_label } else { &about },
+            if about.is_empty() {
+                &shown_label
+            } else {
+                &about
+            },
             crate::i18n::text(
                 &ctx,
                 Message::new("gui-param-default", "{ $path } · default { $value }")
                     .with("path", path)
                     .with("value", shown_in(&locale, d, &d.default)),
             ),
-            crate::i18n::text(
-                &ctx,
-                Message::new(
-                    "gui-param-hint",
-                    "Drag to change (Ctrl finer, Shift coarser), arrows to step, the wheel once focused or with Alt; double click resets; Enter types a value or an expression (x is the value)",
-                ),
-            ),
+            gesture_hint(&ctx),
         ))
     }
 
@@ -958,4 +956,33 @@ fn origin_name(o: &Origin) -> String {
         Origin::Midi => "a MIDI controller".into(),
         Origin::Remote(id) => format!("remote {id}"),
     }
+}
+
+/// A slider's gestures, as the pointer profile gives them: the finer and
+/// coarser modifiers, and when the wheel steps it.
+fn gesture_hint(ctx: &egui::Context) -> String {
+    let g = egui_pop::core::slider::gestures(ctx);
+    let mac = ctx.os() == egui::os::OperatingSystem::Mac;
+    let keys = |m: egui::Modifiers| egui::ModifierNames::NAMES.format(&m, mac);
+    let wheel = if g.wheel_steps {
+        Message::new("gui-param-hint-wheel-over", "the wheel over it")
+    } else if g.wheel.any() {
+        Message::new(
+            "gui-param-hint-wheel-focused-or",
+            "the wheel once focused or with { $keys }",
+        )
+        .with("keys", keys(g.wheel))
+    } else {
+        Message::new("gui-param-hint-wheel-focused", "the wheel once focused")
+    };
+    crate::i18n::text(
+        ctx,
+        Message::new(
+            "gui-param-hint",
+            "Drag to change ({ $fine } finer, { $coarse } coarser), arrows to step, { $wheel }; double click resets; Enter types a value or an expression (x is the value)",
+        )
+        .with("fine", keys(g.fine))
+        .with("coarse", keys(g.coarse))
+        .with("wheel", wheel),
+    )
 }

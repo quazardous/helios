@@ -359,7 +359,13 @@ gui-param-default = { $path } · par défaut { $value }
 
 gui-param-held = { $label } : maintenu à { $value }
 
-gui-param-hint = Glisser pour changer (Ctrl plus fin, Maj plus grand), flèches pour avancer d’un pas, la molette une fois le focus pris ou avec Alt ; double clic pour réinitialiser ; Entrée pour saisir une valeur ou une expression (x est la valeur)
+gui-param-hint = Glisser pour changer ({ $fine } plus fin, { $coarse } plus grand), flèches pour avancer d’un pas, { $wheel } ; double clic pour réinitialiser ; Entrée pour saisir une valeur ou une expression (x est la valeur)
+
+gui-param-hint-wheel-focused = la molette une fois le focus pris
+
+gui-param-hint-wheel-focused-or = la molette une fois le focus pris ou avec { $keys }
+
+gui-param-hint-wheel-over = la molette au survol
 
 gui-param-past-range = { $label } : au-delà de sa plage habituelle
 

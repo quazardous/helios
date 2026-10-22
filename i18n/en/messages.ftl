@@ -321,7 +321,13 @@ gui-param-default = { $path } · default { $value }
 
 gui-param-held = { $label }: held to { $value }
 
-gui-param-hint = Drag to change (Ctrl finer, Shift coarser), arrows to step, the wheel once focused or with Alt; double click resets; Enter types a value or an expression (x is the value)
+gui-param-hint = Drag to change ({ $fine } finer, { $coarse } coarser), arrows to step, { $wheel }; double click resets; Enter types a value or an expression (x is the value)
+
+gui-param-hint-wheel-focused = the wheel once focused
+
+gui-param-hint-wheel-focused-or = the wheel once focused or with { $keys }
+
+gui-param-hint-wheel-over = the wheel over it
 
 gui-param-past-range = { $label }: past its usual range
 

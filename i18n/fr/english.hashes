@@ -323,7 +323,10 @@ gui-open-workspace-verb 41f71ad49a338131
 gui-opening d5d72748385fb15c
 gui-param-default d476a7a117218209
 gui-param-held b6d3dd43597a853a
-gui-param-hint bd380e9e657c585d
+gui-param-hint 4a3998954c9f0c92
+gui-param-hint-wheel-focused cd76af83a9f1a799
+gui-param-hint-wheel-focused-or 69d0fb19160d0cc2
+gui-param-hint-wheel-over 6298df6f49c5660a
 gui-param-past-range 34a7fc44204d4fc6
 gui-param-picker 50d22f15ce19390e
 gui-params-hide-values 1dba4d3073dbc59a
