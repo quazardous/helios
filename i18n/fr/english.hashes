@@ -333,6 +333,11 @@ gui-params-port-hint 207939d7a4813cda
 gui-params-port-member 6b3de0179d0cc50e
 gui-params-show-values 1ca86a61fcd25ceb
 gui-params-values 0e265cf773d72c36
+gui-pointer-choice-close 1f6b3eb35a454a53
+gui-pointer-choice-darktable 7be5d454e9047774
+gui-pointer-choice-keep 1a9aa3dc53464923
+gui-pointer-choice-text e4d6eee2fcc4d25d
+gui-pointer-choice-title 1358b2e0c16fcd03
 gui-policy-ask 91e427951fd5eb3b
 gui-policy-yes f89fd83bb7b8bfc6
 gui-profile-applied 5e5069fbe39e5b74

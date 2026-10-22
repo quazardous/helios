@@ -15,10 +15,13 @@
 //! - a held key repeats a step, never a command, and a held arrow is one
 //!   undo step;
 //! - nothing but the user moves the keyboard focus, and a field typed in
-//!   lets go with Escape.
+//!   lets go with Escape;
+//! - the first run offers darktable's profile once, without blocking the
+//!   window.
 
 use egui::{Event, Key, Modifiers, MouseWheelUnit, PointerButton, Pos2, TouchPhase, Vec2, vec2};
 use egui_kittest::Harness;
+use egui_kittest::kittest::Queryable;
 use helios_core::{Graph, Image, ModuleRef, Params, Region, Value};
 use helios_gui::masks::SHAPE;
 use helios_gui::viewport::{CENTER_X, CENTER_Y, FIT, ZOOM};
@@ -671,4 +674,99 @@ fn a_click_elsewhere_ends_typing_and_takes_the_focus() {
         "circle",
         "the image's key went to the field"
     );
+}
+
+// --- The first run ---
+
+const ASKED: &str = "Coming from darktable?";
+
+/// A desktop whose settings are kept in `dir`, offering the first run's
+/// choice as the desktop does.
+fn first_run(dir: &std::path::Path) -> Harness<'static, Shell> {
+    let mut shell = Shell::builder(helios_panels(), Some(dir.to_path_buf())).build();
+    shell.offer_pointer_choice();
+    let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+    // The labels below are English, whatever the system's language.
+    setting(&mut h, "appearance.language", "en");
+    h
+}
+
+fn temp(name: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("helios-input-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    dir
+}
+
+fn profile_id(h: &Harness<'_, Shell>) -> String {
+    egui_pop::api::pointer::profile_id(h.state().app().handle())
+}
+
+#[test]
+fn the_first_run_offers_darktable_s_profile_once() {
+    let dir = temp("first-run");
+    let mut h = first_run(&dir);
+    assert_eq!(profile_id(&h), helios_gui::pointer_choice::DEFAULT_PROFILE);
+    assert!(h.query_by_label(ASKED).is_some(), "the first run asks");
+    assert!(
+        h.state()
+            .target_rect(helios_gui::pointer_choice::RECT)
+            .is_ok()
+    );
+    // It blocks nothing: the palette opens and closes meanwhile.
+    h.key_press_modifiers(Modifiers::COMMAND | Modifiers::SHIFT, Key::P);
+    settle(&mut h);
+    assert!(h.state().palette_open(), "the notice held the keys");
+    h.key_press(Key::Escape);
+    settle(&mut h);
+    assert!(
+        h.query_by_label(ASKED).is_some(),
+        "Escape closed the notice"
+    );
+    h.get_by_label("Use darktable's").click();
+    settle(&mut h);
+    assert_eq!(profile_id(&h), "darktable");
+    assert!(h.query_by_label(ASKED).is_none(), "answered, it goes");
+    h.state_mut().exit().unwrap();
+    drop(h);
+    // The next run keeps the profile and does not ask again.
+    let h = first_run(&dir);
+    assert_eq!(profile_id(&h), "darktable");
+    assert!(h.query_by_label(ASKED).is_none(), "asked again");
+    drop(h);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn keeping_lightroom_s_habits_or_closing_the_notice_is_remembered() {
+    for (button, name) in [("Keep Lightroom-style", "keep"), ("Close", "close")] {
+        let dir = temp(name);
+        let mut h = first_run(&dir);
+        h.get_by_label(button).click();
+        settle(&mut h);
+        assert_eq!(profile_id(&h), helios_gui::pointer_choice::DEFAULT_PROFILE);
+        assert!(h.query_by_label(ASKED).is_none(), "{button}: still shown");
+        h.state_mut().exit().unwrap();
+        drop(h);
+        let h = first_run(&dir);
+        assert!(h.query_by_label(ASKED).is_none(), "{button}: asked again");
+        drop(h);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[test]
+fn the_first_run_notice_shows_only_when_offered_and_no_profile_is_saved() {
+    // Tests and tools: never offered.
+    let h = harness();
+    assert!(h.query_by_label(ASKED).is_none());
+    // A profile the user saved: not asked.
+    let dir = temp("saved");
+    let mut h = first_run(&dir);
+    profile(&mut h, "document");
+    assert!(
+        h.query_by_label(ASKED).is_none(),
+        "a saved profile was asked about"
+    );
+    drop(h);
+    let _ = std::fs::remove_dir_all(&dir);
 }

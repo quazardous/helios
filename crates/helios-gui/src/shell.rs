@@ -431,6 +431,9 @@ pub struct Shell {
     follow: crate::contexts::Follow,
     /// Helios's status bar items, published when what they say changes.
     status_items: crate::status_items::Items,
+    /// The first run's "Coming from darktable?" is offered (the desktop
+    /// only, `offer_pointer_choice`).
+    pointer_choice: bool,
 }
 
 impl Shell {
@@ -693,7 +696,11 @@ impl Shell {
             forgotten: crate::jobs::Forgotten::default(),
             follow: crate::contexts::Follow::default(),
             status_items: crate::status_items::Items::default(),
+            pointer_choice: false,
         };
+        if let Err(e) = crate::pointer_choice::declare(shell.app.handle()) {
+            shell.notes.push(format!("pointer choice: {e}"));
+        }
         for d in shell.app.handle().diagnostics() {
             shell.notes.push(format!("{}: {}", d.code, d.message));
         }
@@ -3769,6 +3776,11 @@ impl Shell {
         self.engine_notices();
         self.job_notices();
         self.menus_ui(&ctx);
+        if self.pointer_choice
+            && let Some(rect) = crate::pointer_choice::ui(&ctx, self.app.handle())
+        {
+            self.rects.insert(crate::pointer_choice::RECT.into(), rect);
+        }
 
         let named = ctx.data(|d| {
             d.get_temp::<BTreeMap<String, (Rect, egui::ViewportId)>>(Id::new("helios.named"))
@@ -3872,6 +3884,14 @@ impl Shell {
                 self.menu = Some((at, items));
             }
         }
+    }
+
+    /// Offers the first run's choice of darktable's pointer profile
+    /// ("Coming from darktable?", `pointer_choice`): shown while no
+    /// profile is saved and the question was never answered. The
+    /// desktop asks for it; tests and tools do only when they test it.
+    pub fn offer_pointer_choice(&mut self) {
+        self.pointer_choice = true;
     }
 
     /// Helios's status line, which its block draws in egui-pop's status

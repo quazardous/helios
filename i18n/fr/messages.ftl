@@ -261,6 +261,16 @@ gui-params-show-values = Afficher les valeurs
 
 gui-params-values = { $count } valeurs
 
+gui-pointer-choice-close = Fermer
+
+gui-pointer-choice-darktable = Utiliser ceux de darktable
+
+gui-pointer-choice-keep = Garder le style Lightroom
+
+gui-pointer-choice-text = Reprendre les habitudes de souris et de molette de darktable : la molette change le curseur sous le pointeur et zoome l’image. Ce choix se change plus tard dans les Réglages (profil de pointeur).
+
+gui-pointer-choice-title = Vous venez de darktable ?
+
 gui-policy-ask = les confirmations sont de nouveau demandées
 
 gui-policy-yes = les confirmations sont acceptées par la règle

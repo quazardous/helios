@@ -998,6 +998,8 @@ fn main() -> Result<(), String> {
             }
             start::mark("GPU attached to the viewport");
             shell.set_title(&name);
+            // The first run asks "Coming from darktable?" (once).
+            shell.offer_pointer_choice();
             if let Err(e) = shell.use_profile(&profile) {
                 shell.notes.push(format!("profile {profile}: {e}"));
             }

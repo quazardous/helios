@@ -341,6 +341,16 @@ gui-params-show-values = Show the values
 
 gui-params-values = { $count } values
 
+gui-pointer-choice-close = Close
+
+gui-pointer-choice-darktable = Use darktable's
+
+gui-pointer-choice-keep = Keep Lightroom-style
+
+gui-pointer-choice-text = Use darktable's mouse and wheel habits: the wheel changes the slider under the pointer and zooms the image. You can change this later in Settings › Input.
+
+gui-pointer-choice-title = Coming from darktable?
+
 gui-policy-ask = confirmations are asked again
 
 gui-policy-yes = confirmations are answered yes by policy

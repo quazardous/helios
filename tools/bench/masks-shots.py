@@ -105,6 +105,19 @@ def run_theme(args, theme: str, raw: Path) -> list:
     shutil.rmtree(work, ignore_errors=True)
     for d in ("config", "workspace", "shots"):
         (work / d).mkdir(parents=True)
+    # A first run: the "Coming from darktable?" notice is answered
+    # beforehand, so the shots show the panels alone.
+    ui = work / "config" / "helios" / "ui"
+    ui.mkdir(parents=True)
+    (ui / "settings.json").write_text(
+        json.dumps(
+            {
+                "kind": "settings",
+                "version": 1,
+                "values": {"settings/helios.pointer_profile_asked": True},
+            }
+        )
+    )
     comp = build_compositor(config(f"helios-masks-{theme}", args.screen))
     comp.state.screenshot_dir = work / "shots"
     if hasattr(comp, "set_log_dir"):
