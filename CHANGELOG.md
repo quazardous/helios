@@ -24,6 +24,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.25.0] - 2026-10-22
+
+### Added
+
+- The first time Helios starts, a small notice asks "Coming from darktable?": one click sets darktable's mouse and wheel habits, another keeps Lightroom's. It never blocks the window, shows once, and the choice can be changed later in Settings › Input.
+
+### Changed
+
+- The wheel scrolls the panels again by default: Helios now starts with Lightroom's mouse habits (Adobe's pointer profile), where a slider takes the wheel only once clicked, so scrolling past sliders never changes a value. A pointer profile you already chose is kept, and darktable's stays one choice away in Settings › Input.
+
+### Fixed
+
+- With a pointer profile whose click zooms the image (Adobe's), drawing a path or clicking a shape's edge no longer zooms the image too.
+- A parameter's tooltip now names the finer and coarser keys and when the wheel changes the value as the pointer profile in use has them, instead of always darktable's.
+
 ## [0.24.0] - 2026-10-21
 
 ### Added
