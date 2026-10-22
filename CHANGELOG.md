@@ -24,6 +24,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.26.0] - 2026-10-22
+
+### Added
+
+- The Graph panel shows the workspace's network: move, connect, add and remove nodes, each change one undo step saved with the workspace; node headers show the engine's status, the overview folds nodes into stacks under their principal node, and the selection follows the Parameters panel both ways.
+
 ## [0.25.0] - 2026-10-22
 
 ### Added
