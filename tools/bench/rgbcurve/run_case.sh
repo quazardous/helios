@@ -100,9 +100,10 @@ fi
 [ "$status" = ok ] && sleep 8
 if [ "$status" = ok ] && ! dtlua "
 local dt = require 'darktable'
-local e = dt.gui.action('iop/rgbcurve', 'enable', 'on')
-local f = dt.gui.action('iop/rgbcurve', 'focus', 'on')
-local s = dt.gui.action('iop/rgbcurve', 'show', 'on')
+-- without a size the action only reads the state
+local e = dt.gui.action('iop/rgbcurve', 'enable', 'on', 1.0)
+local f = dt.gui.action('iop/rgbcurve', 'focus', 'on', 1.0)
+local s = dt.gui.action('iop/rgbcurve', 'show', 'on', 1.0)
 dt.gui.views.darkroom.display_image()
 return string.format('enable=%s focus=%s show=%s', e, f, s)" >> "$out/lua-setup.txt" 2>&1; then
   status="rgb curve setup failed"
@@ -135,7 +136,7 @@ fi
 if dt_running; then
   # the global "quit" action, as ctrl+q; the call does not return once
   # darktable quits, so its error is expected
-  dtlua "local dt = require 'darktable'; dt.gui.action('global/quit'); return 'ok'" > /dev/null 2>&1 || true
+  dtlua "local dt = require 'darktable'; dt.gui.action('global/quit', 1.0); return 'ok'" > /dev/null 2>&1 || true
   for _ in $(seq 120); do dt_running || break; sleep 0.5; done
 fi
 [ -f "$work/config/library.db" ] && readback final > /dev/null || true
