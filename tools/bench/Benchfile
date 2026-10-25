@@ -368,6 +368,9 @@ timeout = "1h"
 # The scenario is tools/bench/rgbcurve (docs/bench.md).
 [jobs.dt-asan-rgbcurve]
 about = "an ASan darktable at a fork commit, driven through the rgbcurve scroll scenario in wbox"
+# GTK loads icons through glycin, which runs its loaders under bwrap: the
+# job needs a container that may run sandboxes (the job runs as PID 1)
+sandbox = true
 checkouts = ["helios", "darktable-fork", "rawspeed-dt-master", "whereami", "libraw", "opencl-headers", "libxcf", "lua-scripts"]
 cores = 8
 memory = "10g"
