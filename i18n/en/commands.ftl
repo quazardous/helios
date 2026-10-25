@@ -256,6 +256,9 @@ command-network-move =
 command-network-remove =
     .title = Remove nodes from the network, with their wires (`nodes`)
 
+command-node-bypass =
+    .title = Bypass a module or bring it back (`node`: the selected one by default; `on`: toggled by default)
+
 command-param-copyPath =
     .title = Copy a value's path (`path`)
 

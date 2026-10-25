@@ -355,6 +355,14 @@ gui-masks-tree-hint = F2 renames the selected row. Drag a row to reorder it or i
 
 gui-masks-unlock = Unlock { $name }
 
+gui-modules-bypass = Bypass
+
+gui-modules-bypass-hint = Bypass { $node }: the image renders as if it were absent, its parameters kept ({ $key })
+
+gui-modules-none = No module: open an image to see its network's modules
+
+gui-modules-restore-hint = Bring { $node } back: the image renders it again ({ $key })
+
 gui-new-workspace-created = workspace { $path } created from { $template }
 
 gui-new-workspace-directory = directory
