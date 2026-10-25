@@ -347,14 +347,22 @@ impl QueuePanel {
     /// Follows `node` (the selection), reads its queue, and closes or
     /// opens the panel as the setting says: closed while empty when it is
     /// off, opened again once there is work if it closed itself.
-    pub fn update(&mut self, app: &AppHandle, node: Option<&str>) {
-        self.node = node.filter(|n| !n.is_empty()).map(str::to_string);
-        self.queue = match &self.node {
+    ///
+    /// Whether what the panel shows changed (the node or its items): it
+    /// was drawn already this frame, so the caller asks for another.
+    pub fn update(&mut self, app: &AppHandle, node: Option<&str>) -> bool {
+        let node = node.filter(|n| !n.is_empty()).map(str::to_string);
+        let queue = match &node {
             Some(n) => self.source.queue(app, n),
             None => None,
         };
+        // `now` moves every frame: only the node and the items count.
+        let changed = node != self.node
+            || queue.as_ref().map(|q| &q.items) != self.queue.as_ref().map(|q| &q.items);
+        self.node = node;
+        self.queue = queue;
         let Ok(id) = PanelId::new(PANEL) else {
-            return;
+            return changed;
         };
         let empty = self.is_empty();
         if empty && !self.when_empty && app.panel_visible(&id) {
@@ -366,6 +374,7 @@ impl QueuePanel {
                 app.set_panel_visible(&id, true);
             }
         }
+        changed
     }
 
     /// Runs the actions clicked in the last drawing.

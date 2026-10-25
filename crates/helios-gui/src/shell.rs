@@ -4027,7 +4027,7 @@ impl Shell {
         self.save_layout_on_change(&ctx);
         self.engine_notices();
         self.job_notices();
-        self.follow_queue();
+        self.follow_queue(&ctx);
         self.menus_ui(&ctx);
         self.pointer_choice_ui(&ctx);
 
@@ -4229,7 +4229,7 @@ impl Shell {
 
     /// The Queue panel follows the selected node: its queue read again,
     /// the panel closed or opened again as its setting says when empty.
-    fn follow_queue(&mut self) {
+    fn follow_queue(&mut self, ctx: &Egui) {
         if !self
             .panels
             .iter()
@@ -4243,9 +4243,14 @@ impl Shell {
                 helios_core::Value::Text(t) if !t.is_empty() => Some(t.clone()),
                 _ => None,
             });
-        self.queue_panel
+        // The panels are drawn already: a change shows at the next frame.
+        if self
+            .queue_panel
             .borrow_mut()
-            .update(self.app.handle(), node.as_deref());
+            .update(self.app.handle(), node.as_deref())
+        {
+            ctx.request_repaint();
+        }
     }
 
     /// The Queue panel (see `crate::queue`).
