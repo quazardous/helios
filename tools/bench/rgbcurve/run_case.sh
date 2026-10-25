@@ -145,8 +145,8 @@ asan_files=$(ls "$out"/asan.* 2> /dev/null || true)
 asan_reports=0
 move_point=0
 if [ -n "$asan_files" ]; then
-  asan_reports=$(grep -h -c "ERROR: AddressSanitizer" $asan_files | paste -sd+ | bc)
-  move_point=$(grep -h -c "_move_point_internal" $asan_files | paste -sd+ | bc)
+  asan_reports=$(grep -h -c "ERROR: AddressSanitizer" $asan_files | awk "{ s += \$1 } END { print s + 0 }")
+  move_point=$(grep -h -c "_move_point_internal" $asan_files | awk "{ s += \$1 } END { print s + 0 }")
 fi
 {
   echo "case=$case_id prefix=$prefix commit=$(cat "$prefix/.commit" 2> /dev/null || echo unknown)"
