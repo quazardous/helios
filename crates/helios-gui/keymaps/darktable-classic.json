@@ -6,7 +6,7 @@
     { "keys": "F1", "command": "vault.label.red", "when": "${library}" },
     { "keys": "F1", "command": "vault.label.red", "when": "${culling}" },
     { "keys": "L", "command": "view.library" },
-    { "keys": "Ctrl+Shift+L", "command": "view.startSideBar.toggle" },
+    { "keys": "Ctrl+Shift+L", "command": "view.side_bar.toggle" },
     { "keys": "Ctrl+Shift+R", "command": "view.endSideBar.toggle" },
     { "keys": "Ctrl+Shift+B", "command": "view.bottomPanel.toggle" }
   ],

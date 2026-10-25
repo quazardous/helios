@@ -197,7 +197,7 @@ fn the_darktable_package_loads_over_the_defaults_and_comes_off_again() {
     assert!(!palette.contains(&"F1".to_string()), "{palette:?}");
     assert!(palette.contains(&"Ctrl+Shift+P".to_string()), "{palette:?}");
     assert!(keys_of("view.library").contains(&"L".to_string()));
-    assert!(keys_of("view.startSideBar.toggle").contains(&"Ctrl+Shift+L".to_string()));
+    assert!(keys_of("view.side_bar.toggle").contains(&"Ctrl+Shift+L".to_string()));
     // What it leaves out of darktable's keys, it does not bind.
     let package = keymaps::package("darktable-classic").unwrap();
     assert!(!package.left_out.is_empty());

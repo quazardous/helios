@@ -402,9 +402,6 @@ command-view-library =
 command-view-network =
     .title = Aller au réseau de l’espace de travail, pour le modifier
 
-command-view-startSideBar-toggle =
-    .title = Replier la barre latérale de début
-
 command-viewport-compare =
     .title = Image : avant et après côte à côte
 

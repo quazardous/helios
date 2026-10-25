@@ -1999,11 +1999,6 @@ impl Shell {
                 Action::Maximize
             }),
             ("window.close", "Close the window", || Action::Close),
-            (
-                "view.startSideBar.toggle",
-                "Fold the start side bar",
-                || Action::Fold(Area::StartSide),
-            ),
             ("view.endSideBar.toggle", "Fold the end side bar", || {
                 Action::Fold(Area::EndSide)
             }),

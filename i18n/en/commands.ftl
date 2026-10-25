@@ -403,9 +403,6 @@ command-view-library =
 command-view-network =
     .title = Go to the workspace's network, to edit it
 
-command-view-startSideBar-toggle =
-    .title = Fold the start side bar
-
 command-viewport-compare =
     .title = Image: before and after side by side
 
