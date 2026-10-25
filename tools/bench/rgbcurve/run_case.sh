@@ -34,10 +34,12 @@ mkdir -p "$out/config" "$out/cache"
 work="$out"
 
 # darktablerc: no password store on the private bus (libsecret would wait
-# 25 s), no background thumbnail crawler
+# 25 s), no background thumbnail crawler, no sidecar beside the read-only
+# image (its error toast would cover the screenshots)
 cat > "$work/config/darktablerc" << RC
 plugins/pwstorage/pwstorage_backend=none
 backthumbs_mipsize=never
+write_sidecar_files=never
 RC
 
 command -v dbus-daemon > /dev/null || { echo "status: dbus-daemon missing from the image"; exit 1; }
