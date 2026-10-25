@@ -100,9 +100,9 @@ fi
 [ "$status" = ok ] && sleep 8
 if [ "$status" = ok ] && ! dtlua "
 local dt = require 'darktable'
-local e = dt.gui.action('iop/rgb curve', 'enable', 'on')
-local f = dt.gui.action('iop/rgb curve', 'focus', 'on')
-local s = dt.gui.action('iop/rgb curve', 'show', 'on')
+local e = dt.gui.action('iop/rgbcurve', 'enable', 'on')
+local f = dt.gui.action('iop/rgbcurve', 'focus', 'on')
+local s = dt.gui.action('iop/rgbcurve', 'show', 'on')
 dt.gui.views.darkroom.display_image()
 return string.format('enable=%s focus=%s show=%s', e, f, s)" >> "$out/lua-setup.txt" 2>&1; then
   status="rgb curve setup failed"
