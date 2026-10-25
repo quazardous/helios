@@ -124,82 +124,60 @@ def read_png(path):
 # fills the graph, inset by 1 px, with a flat .3 grey (77,77,77) whatever the
 # theme; grid lines, the identity line, nodes and the histogram are drawn on
 # top. The drawing area is square (dtgtk_drawing_area_new_with_height(0):
-# height = width), so the fill is square too.
+# height = width), so the fill is square too. The graph's columns are fill
+# nearly top to bottom, then its rows nearly side to side; the identity line
+# and the grid only thin them.
 
 FILL = 77          # .3 * 255
 FILL_TOL = 8       # per channel
-RUN_GAP = 4        # px of non-fill tolerated inside a row (grid, curve, nodes)
-ROW_GAP = 4        # rows without a run tolerated (horizontal grid lines)
-EDGE_TOL = 2       # px of drift allowed on a run's ends between rows
+RUN_GAP = 4        # columns or rows short of fill tolerated inside the graph (grid lines)
+EDGE_TOL = 2       # px short of square still counted as the full height
 MIN_WIDTH = 100    # px
 
 
-def _row_runs(row, bpp, x_from, w):
-    runs, start, last = [], None, None
+def _is_fill(row, i):
     lo, hi = FILL - FILL_TOL, FILL + FILL_TOL
-    for x in range(x_from, w):
-        i = x * bpp
-        r, g, b = row[i], row[i + 1], row[i + 2]
-        if lo <= r <= hi and lo <= g <= hi and lo <= b <= hi:
-            if start is None:
-                start = x
-            elif x - last - 1 > RUN_GAP:
-                if last - start + 1 >= MIN_WIDTH:
-                    runs.append((start, last))
-                start = x
-            last = x
-    if start is not None and last - start + 1 >= MIN_WIDTH:
-        runs.append((start, last))
-    return runs
+    return lo <= row[i] <= hi and lo <= row[i + 1] <= hi and lo <= row[i + 2] <= hi
+
+
+def _longest_span(counts, start, threshold):
+    """The longest stretch of counts at or over threshold, gaps of up to
+    RUN_GAP entries (grid lines) allowed inside; (first, last) or None."""
+    best, run_start, last = None, None, None
+    for i, c in enumerate(counts):
+        if c < threshold:
+            continue
+        if run_start is None or i - last - 1 > RUN_GAP:
+            run_start = i
+        last = i
+        if best is None or last - run_start > best[1] - best[0]:
+            best = (run_start, last)
+    return None if best is None else (start + best[0], start + best[1])
 
 
 def detect_graph(png_path):
     w, h, bpp, rows = read_png(png_path)
     x_from = w * 2 // 5  # the right panel; the image itself is left alone
-    groups = []          # [x0, x1, y0, y_last, starts, ends]
-    open_groups = []
-    for y in range(h):
-        runs = _row_runs(rows[y], bpp, x_from, w)
-        still_open = []
-        for grp in open_groups:
-            match = next((r for r in runs if abs(r[0] - grp[0]) <= EDGE_TOL
-                          and abs(r[1] - grp[1]) <= EDGE_TOL), None)
-            if match:
-                runs.remove(match)
-                grp[3] = y
-                grp[4].append(match[0])
-                grp[5].append(match[1])
-                still_open.append(grp)
-            elif y - grp[3] <= ROW_GAP:
-                still_open.append(grp)
-            else:
-                groups.append(grp)
-        for r in runs:
-            still_open.append([r[0], r[1], y, y, [r[0]], [r[1]]])
-        open_groups = still_open
-    groups.extend(open_groups)
-    best = None
-    for _, _, y0, y_last, starts, ends in groups:
-        # the most common ends: a curve or grid pixel can clip one row's run
-        x0 = max(set(starts), key=starts.count)
-        x1 = max(set(ends), key=ends.count)
-        width, height = x1 - x0 + 1, y_last - y0 + 1
-        if height < width // 4:
-            continue
-        if best is None or width * height > best[4]:
-            best = (x0, x1, y0, y_last, width * height)
-    if best is None:
-        return None, {"png_size": [w, h], "groups": len(groups)}
-    x0, x1, y0, y_last, _ = best
+    # columns: the graph's are fill from top to bottom, but for the grid,
+    # curve and nodes drawn over it
+    cols = [sum(_is_fill(rows[y], x * bpp) for y in range(h)) for x in range(x_from, w)]
+    xs = _longest_span(cols, x_from, MIN_WIDTH)
+    if xs is None:
+        return None, {"png_size": [w, h], "max_column": max(cols)}
+    x0, x1 = xs
     width = x1 - x0 + 1
+    lines = [sum(_is_fill(rows[y], x * bpp) for x in range(x0, x1 + 1)) for y in range(h)]
+    ys = _longest_span(lines, 0, width // 2)
+    if ys is None or width < MIN_WIDTH:
+        return None, {"png_size": [w, h], "x": [x0, x1]}
+    y0, y_last = ys
     # the histogram can hide the lower rows; the fill is square
     measured = y_last - y0 + 1
     if measured >= width - 2 * EDGE_TOL:
         y1, y1_from = y_last, "measured"
     else:
         y1, y1_from = y0 + width - 1, "square"
-    info = {"png_size": [w, h], "measured_height": measured, "y1_from": y1_from,
-            "groups": len(groups)}
+    info = {"png_size": [w, h], "measured_height": measured, "y1_from": y1_from}
     return {"x0": x0, "y0": y0, "x1": x1, "y1": y1}, info
 
 
