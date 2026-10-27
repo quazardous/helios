@@ -1,6 +1,11 @@
 # The context stack on the Helios side: kernel, bus, vault, node, MCP
 
-Status: **design note, not decided** (2026-10-13). Nothing here is built.
+Status: **decided** (2026-10-13), **partly built** (2026-10-27): places,
+modes, restore on reopen and the MCP `helios_context_*` tools are on main;
+the `helios.sub-workspace` place is not built yet. Two departures from the
+decisions below: the stack is egui-pop's `LocalContexts`, kept in the
+configuration directory rather than the vault, and there is no kernel
+`ContextService` on the node yet.
 The generic part (what a frame is, the three architectures compared, the
 contract between kernel and interface) is egui-pop's ADR 0012, "The
 context stack: owned by the kernel, projected by the interface"
