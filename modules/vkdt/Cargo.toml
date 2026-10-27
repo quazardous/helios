@@ -1,6 +1,6 @@
 [package]
 name = "helios-module-vkdt"
-description = "Modules ported from vkdt (exposure, unsharp mask), checked against vkdt-cli"
+description = "Modules ported from vkdt, checked against vkdt-cli"
 version.workspace = true
 edition.workspace = true
 # GPLv3 for Helios's code, BSD-2-Clause for what is ported from vkdt

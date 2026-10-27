@@ -366,6 +366,38 @@ param-vkdt-exposure-exposure =
     .description = la correction d’exposition, en diaphs
     .label = exposition
 
+param-vkdt-grade-gain =
+    .description = multiplication, appliquée en premier : rouge, vert, bleu, et les trois
+    .label = gain
+
+param-vkdt-grade-gamma =
+    .description = puissance des tons moyens, au-dessus de 1 éclaircit : rouge, vert, bleu, et les trois
+    .label = gamma
+
+param-vkdt-grade-hi-pivot =
+    .description = où les tons moyens deviennent hautes lumières (zones log)
+    .label = pivot des hautes lumières
+
+param-vkdt-grade-lift =
+    .description = mélange vers une couleur dans les ombres : rouge, vert, bleu, et les trois
+    .label = relèvement
+
+param-vkdt-grade-mode =
+    .description = appliquer à tous les tons pareil, ou par zone
+    .label = mode
+
+param-vkdt-grade-mode-choice-classic = classique
+
+param-vkdt-grade-mode-choice-zoned-log = zones log
+
+param-vkdt-grade-offset =
+    .description = addition, appliquée en dernier : rouge, vert, bleu, et les trois
+    .label = décalage
+
+param-vkdt-grade-sh-pivot =
+    .description = où les ombres deviennent tons moyens (zones log)
+    .label = pivot des ombres
+
 param-vkdt-usm-amount =
     .description = à quel point augmenter la netteté
     .label = quantité

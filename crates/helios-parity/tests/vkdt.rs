@@ -160,3 +160,86 @@ fn ported_vkdt_contrast_matches_vkdt() {
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// One vkdt module (its name, and Helios's port) rendered by both and
+/// compared on the whole image (point operations: no border). `cfg` gives the same
+/// parameters as vkdt's cfg writes them; `f16` feeds vkdt half floats, for
+/// a module reading `rgba:f16` (the input must be rounded already).
+fn point_case(
+    vkdt: &Vkdt,
+    (name, module): (&str, ModuleRef),
+    params: Params,
+    cfg: &[(&str, String)],
+    input: &Image,
+    f16: bool,
+    dir: &std::path::Path,
+) {
+    let ours = helios(module, params, input);
+    let theirs = if f16 {
+        vkdt.render_f16(input, name, cfg, dir)
+    } else {
+        vkdt.render(input, name, cfg, dir)
+    }
+    .unwrap();
+    let d = compare(&ours, &theirs).unwrap();
+    eprintln!("vkdt {name} {cfg:?}: {d:?}");
+    assert!(d.within(&DARKTABLE), "{name} {cfg:?}: {d:?}");
+}
+
+/// A list parameter as vkdt's cfg writes it: values joined by colons.
+fn cfg_list(values: &[f64]) -> String {
+    values
+        .iter()
+        .map(f64::to_string)
+        .collect::<Vec<_>>()
+        .join(":")
+}
+
+#[test]
+fn ported_vkdt_grade_matches_vkdt() {
+    let vkdt = match Vkdt::find() {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("skipped: {e}");
+            return;
+        }
+    };
+    let input = chart();
+    let dir = std::env::temp_dir().join(format!("helios-parity-vkdt-grade-{}", std::process::id()));
+    let lift = [0.05, -0.02, 0.1, 0.01];
+    let gamma = [1.2, 0.9, 1.0, 0.05];
+    let gain = [1.1, 1.0, 0.8, 0.1];
+    let offset = [0.0, 0.01, -0.02, 0.0];
+    for (i, mode) in [0, 1].into_iter().enumerate() {
+        let params = Params::new()
+            .with("lift", Value::List(lift.to_vec()))
+            .with("gamma", Value::List(gamma.to_vec()))
+            .with("gain", Value::List(gain.to_vec()))
+            .with("offset", Value::List(offset.to_vec()))
+            .with(
+                "mode",
+                Value::Choice(if mode == 0 { "classic" } else { "zoned_log" }.into()),
+            )
+            .with("sh_pivot", Value::Float(0.35))
+            .with("hi_pivot", Value::Float(0.6));
+        let cfg = [
+            ("lift", cfg_list(&lift)),
+            ("gamma", cfg_list(&gamma)),
+            ("gain", cfg_list(&gain)),
+            ("offset", cfg_list(&offset)),
+            ("mode", mode.to_string()),
+            ("sh_pivot", "0.35".to_string()),
+            ("hi_pivot", "0.6".to_string()),
+        ];
+        point_case(
+            &vkdt,
+            ("grade", ModuleRef::new(helios_module_vkdt::VkdtGrade)),
+            params,
+            &cfg,
+            &input,
+            false,
+            &dir.join(i.to_string()),
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

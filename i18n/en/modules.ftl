@@ -367,6 +367,38 @@ param-vkdt-exposure-exposure =
     .description = the exposure correction value in stops
     .label = exposure
 
+param-vkdt-grade-gain =
+    .description = multiply, applied first: red, green, blue, and all three
+    .label = gain
+
+param-vkdt-grade-gamma =
+    .description = power for the midtones, above 1 brightens: red, green, blue, and all three
+    .label = gamma
+
+param-vkdt-grade-hi-pivot =
+    .description = where midtones turn into highlights (zoned log)
+    .label = hi_pivot
+
+param-vkdt-grade-lift =
+    .description = blend towards a colour in the shadows: red, green, blue, and all three
+    .label = lift
+
+param-vkdt-grade-mode =
+    .description = apply to all tones alike, or by zone
+    .label = mode
+
+param-vkdt-grade-mode-choice-classic = classic
+
+param-vkdt-grade-mode-choice-zoned-log = zoned_log
+
+param-vkdt-grade-offset =
+    .description = add, applied last: red, green, blue, and all three
+    .label = offset
+
+param-vkdt-grade-sh-pivot =
+    .description = where shadows turn into midtones (zoned log)
+    .label = sh_pivot
+
 param-vkdt-usm-amount =
     .description = how much to increase sharpness
     .label = amount

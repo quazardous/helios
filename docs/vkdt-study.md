@@ -114,3 +114,16 @@ creates (`qvk`), which matters for sharing GPU memory with Helios.
    the vkdt files it comes from. vkdt also has GPLv3 files, marked as such
    in their sources; a port checks the files it reads (GPLv3 code can
    enter Helios too, under Helios's own licence).
+
+## Ported modules
+
+Each port is a Rust CPU reference and a WGSL variant (`modules/vkdt`,
+module docs in each file), checked against `vkdt-cli` by `helios-parity`
+and against each other by the backend contract tests.
+
+| vkdt module | Helios | ported | left for later |
+|---|---|---|---|
+| `exposure` | `vkdt_exposure` | all | |
+| `usm` | `vkdt_usm` | all | vkdt mirrors at the edges, Helios replicates |
+| `contrast` | `vkdt_contrast` | all (a composite of vkdt's kernels) | |
+| `grade` | `vkdt_grade` | lift, gamma, gain, offset; classic and zoned log modes | |

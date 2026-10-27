@@ -299,6 +299,40 @@ fn vkdt_modules_on_the_gpu_match_their_cpu_reference() {
 }
 
 #[test]
+fn vkdt_grade_on_the_gpu_matches_its_cpu_reference() {
+    let _gpu = helios_testkit::gpu_lock();
+    let Some(gpu) = gpu() else { return };
+    let input = helios_testkit::noise(Region::sized(70, 50), 4, 13);
+    let grade = ModuleRef::new(helios_module_vkdt::VkdtGrade);
+    let classic = Params::new()
+        .with("lift", Value::List(vec![0.05, -0.02, 0.1, 0.01]))
+        .with("gamma", Value::List(vec![1.2, 0.9, 1.0, 0.05]))
+        .with("gain", Value::List(vec![1.1, 1.0, 0.8, 0.1]))
+        .with("offset", Value::List(vec![0.0, 0.01, -0.02, 0.0]));
+    let zoned = classic
+        .clone()
+        .with("mode", Value::Choice("zoned_log".into()))
+        .with("sh_pivot", Value::Float(0.35))
+        .with("hi_pivot", Value::Float(0.6));
+    for (name, params) in [
+        ("defaults", Params::new()),
+        ("classic", classic),
+        ("zoned log", zoned),
+    ] {
+        let c = check(
+            &gpu,
+            &grade,
+            &params,
+            &Context::new(),
+            &input,
+            input.region(),
+        )
+        .unwrap();
+        assert!(c.max_abs < 1e-4, "grade {name}: {c:?}");
+    }
+}
+
+#[test]
 fn a_step_over_4_mpx_matches_the_cpu() {
     let _gpu = helios_testkit::gpu_lock();
     let Some(gpu) = gpu() else { return };

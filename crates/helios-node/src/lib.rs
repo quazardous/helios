@@ -278,6 +278,7 @@ pub fn registry() -> BTreeMap<&'static str, ModuleRef> {
             "vkdt_contrast",
             ModuleRef::composite(helios_module_vkdt::VkdtContrast),
         ),
+        ("vkdt_grade", ModuleRef::new(helios_module_vkdt::VkdtGrade)),
         (
             "mask_combine",
             ModuleRef::new(helios_module_masks::MaskCombine),
