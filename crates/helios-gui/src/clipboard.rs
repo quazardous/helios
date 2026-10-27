@@ -179,10 +179,21 @@ impl Endpoints {
 /// canvas whose parts take the focus themselves, a node of the graph, a
 /// row of a tree): the endpoint is bound to it this pass, so the Edit
 /// commands reach the endpoint whichever part has the focus.
+///
+/// The widget's rectangle is read from the passes' widget lists, never
+/// through `Context::read_response`: building a response surrenders the
+/// focus of a widget a press did not hover (a tree whose row was
+/// clicked), which took the keys away from the Masks panel's tree.
 pub fn focused_within(ctx: &egui::Context, area: egui::Rect) -> Option<egui::Id> {
     let id = ctx.memory(egui::Memory::focused)?;
-    let r = ctx.read_response(id)?;
-    area.contains(r.rect.center()).then_some(id)
+    let rect = ctx.viewport(|v| {
+        v.this_pass
+            .widgets
+            .get(id)
+            .or_else(|| v.prev_pass.widgets.get(id))
+            .map(|w| w.rect)
+    })?;
+    area.contains(rect.center()).then_some(id)
 }
 
 /// Runs a command at the next frame, as whom: a paste whose edit the
