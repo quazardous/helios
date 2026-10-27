@@ -26,6 +26,7 @@ command-dialog-answer.title eafe9e4e2e36ad73
 command-dialog-assumeYes.title 6f49391f70e668f3
 command-dialog-current.title 6ccc78624dd76c64
 command-graph-edit.description b63d754457ea4f8f
+command-graph-export.description 57102c77a80a4198
 command-graph-read.description d4172960d73723e3
 command-graph-select.description d3abf79d4e949b6d
 command-graph-view.description 8da7b338fb66a8b7
@@ -395,7 +396,7 @@ gui-params-show-values 1ca86a61fcd25ceb
 gui-params-values 0e265cf773d72c36
 gui-pointer-choice-close 4ee816d1021e4e6e
 gui-pointer-choice-darktable 7be5d454e9047774
-gui-pointer-choice-keep 1a9aa3dc53464923
+gui-pointer-choice-keep bb433e2ea951769e
 gui-pointer-choice-text e4d6eee2fcc4d25d
 gui-pointer-choice-title 1358b2e0c16fcd03
 gui-policy-ask 91e427951fd5eb3b
@@ -776,6 +777,7 @@ param-whitebalance-mode.label fb7fa70993198320
 param-whitebalance-red.description 722fa3ef16bb771a
 param-whitebalance-red.label c52ebe3823cca04a
 plugin-egui-pop-imaging.title 219716cbb2031449
+plugin-helios-clipboard.title e653820221e1c6bc
 plugin-helios-commands.title 28daeae8a505789f
 plugin-helios-contexts.title 5819f33f9af005c6
 plugin-helios-display.title 48ac8940d45b8005
