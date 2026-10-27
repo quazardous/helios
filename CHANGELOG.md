@@ -24,6 +24,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.28.0] - 2026-10-25
+
+### Added
+
+- A "darktable classic" keymap package adds darktable's own keys over the
+  defaults in one step (F1 for the red label, L for the library, Ctrl+Shift+L,
+  R and B for the panels) and comes off the same way; the keys it cannot
+  take, and why, are listed in the GUI notes.
+- A default keyboard map: function keys F2 to F5 label images beside 6 to 9,
+  Space and Backspace step through images while culling, Alt+1, Alt+2 and
+  Alt+3 zoom the image to 100 %, fill and fit, Ctrl+B, Ctrl+Alt+B and Ctrl+J
+  fold the side bars and the bottom panel, and Ctrl+K Ctrl+S opens the
+  shortcuts editor. Culling keys no longer act in the darkroom, and a culling
+  key taken away in the shortcuts editor stays away.
+- Settings › Appearance has a theme editor: the theme in use edited token
+  by token, with each colour's contrast, undo and redo, changes shown at
+  once, and the dark and light themes edited as a pair. Themes are opened
+  and saved as token files.
+
+### Changed
+
+- The command writing the theme in use with its overrides merged into one
+  file is now `theme.exportMerged`: `theme.export` is the theme editor's,
+  which exports only the tokens changed. Keys bound to the old name need
+  binding again.
+
 ## [0.27.0] - 2026-10-22
 
 ### Added
