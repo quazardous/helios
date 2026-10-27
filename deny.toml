@@ -24,6 +24,9 @@ allow = [
     "MIT",
     "Unicode-3.0",
     "Zlib",
+    # Zero-clause BSD, public-domain-like: doctest-file and recvmsg, both
+    # transitive.
+    "0BSD",
     # rawler, the raw decoder (see the clarification below). The LGPL lets a
     # GPL program link with it.
     "LGPL-2.1-only",
