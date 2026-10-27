@@ -239,6 +239,25 @@ fn a_device_render_needs_an_accelerator() {
 }
 
 #[test]
+fn an_accelerator_attached_later_runs_the_next_renders() {
+    let gain = ModuleRef::new(Gain);
+    let (g, last) = chain(&[gain.clone(), gain]);
+    let engine = Engine::new(Arc::new(Bus::new()));
+    let cpu = engine.render(&g, last, "output", region()).unwrap();
+    assert_eq!(engine.counters().accelerated, 0);
+
+    let fake = Arc::new(Fake::default());
+    assert!(engine.attach_accelerator(fake.clone()));
+    // One accelerator in an engine's life.
+    assert!(!engine.attach_accelerator(Arc::new(Fake::default())));
+    let out = engine.render_device(&g, last, "output", region()).unwrap();
+    assert_eq!(out.handle::<Image>().unwrap().data(), cpu.data());
+    let c = engine.counters();
+    assert_eq!((c.accelerated, c.uploads, c.readbacks), (2, 1, 0), "{c:?}");
+    assert_eq!(fake.uploads.load(Ordering::SeqCst), 1);
+}
+
+#[test]
 fn the_cpu_path_moves_nothing() {
     let (g, last) = chain(&[ModuleRef::new(Gain), ModuleRef::new(Offset)]);
     let engine = Engine::new(Arc::new(Bus::new()));

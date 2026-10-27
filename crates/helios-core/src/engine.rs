@@ -645,8 +645,9 @@ pub struct Engine {
     tracks: Mutex<HashMap<TrackKey, Track>>,
     /// Faults injected and not yet hit: (graph, node, kind).
     faults: Mutex<Vec<(u64, NodeId, FaultKind)>>,
-    /// Runs GPU variants; `None`: everything on the CPU.
-    accelerator: Option<Arc<dyn Accelerator>>,
+    /// Runs GPU variants; unset: everything on the CPU. Set once, at
+    /// construction or later ([`Engine::attach_accelerator`]).
+    accelerator: OnceLock<Arc<dyn Accelerator>>,
     accelerated: AtomicU64,
     uploads: AtomicU64,
     readbacks: AtomicU64,
@@ -711,7 +712,7 @@ impl Engine {
             source_reads: AtomicU64::new(0),
             tracks: Mutex::new(HashMap::new()),
             faults: Mutex::new(Vec::new()),
-            accelerator: None,
+            accelerator: OnceLock::new(),
             accelerated: AtomicU64::new(0),
             uploads: AtomicU64::new(0),
             readbacks: AtomicU64::new(0),
@@ -728,9 +729,18 @@ impl Engine {
     /// Computes the steps whose module has a GPU variant on `accelerator`;
     /// the others stay on the CPU. Their content is keyed apart from CPU
     /// content, as the two agree within a tolerance only.
-    pub fn with_accelerator(mut self, accelerator: Arc<dyn Accelerator>) -> Self {
-        self.accelerator = Some(accelerator);
+    pub fn with_accelerator(self, accelerator: Arc<dyn Accelerator>) -> Self {
+        self.attach_accelerator(accelerator);
         self
+    }
+
+    /// [`Engine::with_accelerator`] on an engine already shared: the
+    /// desktop's, made before its window opened the GPU device. Renders
+    /// planned from then on accelerate; one under way finishes as planned.
+    /// An engine takes one accelerator in its life: false, and nothing
+    /// changes, when it has one already.
+    pub fn attach_accelerator(&self, accelerator: Arc<dyn Accelerator>) -> bool {
+        self.accelerator.set(accelerator).is_ok()
     }
 
     /// The accelerator, unless its device was lost for good.
@@ -738,7 +748,7 @@ impl Engine {
         if self.gpu_off.lock().expect("engine gpu lock").is_some() {
             return None;
         }
-        self.accelerator.as_ref()
+        self.accelerator.get()
     }
 
     /// Why the accelerator is no longer used (its device was lost and could
@@ -1143,7 +1153,7 @@ impl Engine {
         }
         let accelerator = self
             .accelerator
-            .as_ref()
+            .get()
             .expect("device content comes from the accelerator");
         self.readbacks.fetch_add(1, Ordering::SeqCst);
         let copy = accelerator
@@ -2042,8 +2052,8 @@ impl Describe for Engine {
             },
             "counters": counters,
             "gpu": {
-                "accelerator": self.accelerator.as_ref().map(|a| a.id().to_string()),
-                "memory": self.accelerator.as_ref().and_then(|a| a.memory()),
+                "accelerator": self.accelerator.get().map(|a| a.id().to_string()),
+                "memory": self.accelerator.get().and_then(|a| a.memory()),
                 "off": self.gpu_off(),
                 "last_fallback": *self.last_fallback.lock().expect("engine gpu lock"),
             },
