@@ -714,3 +714,42 @@ fn a_path_s_bezier_handles_are_controls() {
     assert_eq!(kind_of("after.2"), HandleKind::Control);
     assert_eq!(kind_of("centre"), HandleKind::Move);
 }
+
+/// A shape copied pastes into the mask as a new shape, named as new
+/// shapes are, with the same parameters on an image of the same size
+/// (other sizes scale: `clipboard::mask`'s tests).
+#[test]
+fn a_copied_shape_pastes_as_a_new_shape_of_the_mask() {
+    use egui_pop::api::clipboard::{self, CopyRequest, PasteRequest};
+    use egui_pop::model::commands::Origin as PopOrigin;
+    use helios_gui::clipboard::{MASK, MASKS_ENDPOINT};
+
+    let mut h = harness_at(1.0);
+    run(&mut h, "mask.add.circle", json!(null));
+    assert_eq!(text(&h, SHAPE), "circle");
+    let app = h.state().app().handle().clone();
+    let out = clipboard::copy(&app, CopyRequest::new(MASKS_ENDPOINT), &PopOrigin::User);
+    assert!(out.ok(), "{out:?}");
+    let item = clipboard::with_owner(&app, |c| c.get(&clipboard::Slot::User))
+        .flatten()
+        .unwrap();
+    assert_eq!(item.kind, MASK);
+    assert!(
+        item.text().unwrap().starts_with("circle (drawn on"),
+        "{:?}",
+        item.text()
+    );
+    let out = clipboard::paste(&app, PasteRequest::new(MASKS_ENDPOINT), &PopOrigin::User);
+    assert!(out.ok(), "{out:?}");
+    h.step();
+    h.step();
+    h.step();
+    assert_eq!(text(&h, SHAPE), "circle2");
+    for p in ["x", "y", "radius", "feather"] {
+        assert_eq!(
+            f(&h, &format!("node/circle2/{p}")),
+            f(&h, &format!("node/circle/{p}")),
+            "{p}"
+        );
+    }
+}

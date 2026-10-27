@@ -225,6 +225,9 @@ command-mask-member-rename =
 command-mask-path-close =
     .title = Masques : fermer le chemin en cours de tracé
 
+command-mask-paste =
+    .title = Masques : coller des formes copiées dans le masque édité, mises à l’échelle de l’image (`clip` : un contenu `helios.mask`)
+
 command-mask-point-add =
     .title = Masques : ajouter un point au chemin sélectionné, sur son bord le plus proche de `x`, `y`
 

@@ -1068,6 +1068,20 @@ node: `view/masks/mask`, the network's first by default) and edits them
   (with `params`, and `corners` for a path), `mask.path.close`,
   `mask.cancel`, `mask.point.add`, `mask.point.remove`,
   `mask.point.smooth`, `mask.handle.move` (one undo step).
+- **Copy and paste (2026-10-27).** While the image or a row of the
+  Masks panel has the focus, Edit › Copy (Ctrl+C) copies the selected
+  shape, or every shape of the mask edited when none is selected
+  (`application/x-helios.mask+json`), with the size of the image they
+  were drawn on; other applications get their names and that size.
+  Edit › Paste (Ctrl+V) adds them to the mask edited as new shapes
+  (`mask.paste`), named as new shapes are (`circle2`), scaled to the
+  image open: positions by its width and height, radii and feathers by
+  its smaller side, a path's or a brush's points the same way, angles
+  kept. When the aspect ratio differs, a shape keeps its relative place
+  and the paste says to check the sizes. Paste special takes some
+  shapes only; pasted into the graph view, shapes become nodes
+  (`helios.mask-as-nodes`). Like creating a shape, pasting one is not
+  an undo step yet.
 
 Not yet: creating a shape is not an undo step and is not saved with the
 image's edit (both change the network, which the value store does not

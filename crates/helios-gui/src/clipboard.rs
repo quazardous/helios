@@ -9,27 +9,34 @@
 //!
 //! - **its types**, each `application/x-helios.<type>+json` with a
 //!   readable text fallback: a parameter's value ([`param`]), nodes of
-//!   the workspace's network ([`nodes`]);
+//!   the workspace's network ([`nodes`]), drawn mask shapes ([`mask`]),
+//!   scaled to the image they are pasted onto;
+//! - **a transform**, `helios.mask-as-nodes`: shapes pasted into the
+//!   graph view become nodes;
 //! - **a sanitiser** for what leaves for other applications: the
 //!   Save-as-template rules (`helios_template::workspace::strip_for_outside`):
 //!   a local path becomes its file name, secrets and embedded data go,
 //!   and the copy's toast says so;
 //! - **endpoints**, the focused component's source and target: a
 //!   parameter's widget ([`PARAM_ENDPOINT`]), the graph view
-//!   ([`GRAPH_ENDPOINT`]). A paste whose edit is the shell's (the
-//!   workspace's network) runs as a command at the next frame
+//!   ([`GRAPH_ENDPOINT`]), the Masks panel and the image
+//!   ([`MASKS_ENDPOINT`], [`MASK_IMAGE_ENDPOINT`]). A paste whose edit is
+//!   the shell's (the workspace's network, the image's masks) runs as a command at the next frame
 //!   ([`defer`]);
 //! - **one undo step per paste**: egui-pop's history group is a group of
 //!   Helios's value store (`host::HeliosHost::begin_group`).
 
+pub mod mask;
 pub mod nodes;
 pub mod param;
 
+use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 use egui_pop::api::clipboard::{
     self, Boundary, ClipType, CopyRequest, FormatId, PasteRequest, Repr, Sanitiser, TEXT,
+    Transform, TransformSpec, Transformed,
 };
 use egui_pop::api::steps::Outcome;
 use egui_pop::api::{AppHandle, Ctx, Plugin, PluginError};
@@ -50,6 +57,18 @@ pub const NODES: FormatId = FormatId::from_static("application/x-helios.nodes+js
 
 /// The graph view's endpoint: its selection, the workspace's network.
 pub const GRAPH_ENDPOINT: &str = "helios.graph";
+
+/// Drawn mask shapes, with the size of the image they were drawn on.
+pub const MASK: FormatId = FormatId::from_static("application/x-helios.mask+json");
+
+/// The Masks panel's endpoint: the mask edited.
+pub const MASKS_ENDPOINT: &str = "helios.masks";
+
+/// The image's endpoint, for its masks: the same as the Masks panel's.
+pub const MASK_IMAGE_ENDPOINT: &str = "helios.masks.image";
+
+/// Shapes pasted into the graph view become nodes.
+pub const MASK_AS_NODES: &str = "helios.mask-as-nodes";
 
 /// The plugin declaring Helios's types and sanitiser.
 pub const PLUGIN: PluginId = PluginId::from_static("helios.clipboard");
@@ -89,6 +108,25 @@ impl Plugin for Types {
                 .parts(nodes::parts),
         )
         .map_err(failed)?
+        .clip_type(
+            ClipType::new(MASK, mask::VERSION, "shapes")
+                .fallbacks(|p| {
+                    let text = mask::Clip::from_json(p)
+                        .map(|c| c.text())
+                        .unwrap_or_default();
+                    vec![Repr::new(TEXT, Json::String(text))]
+                })
+                .parts(mask::parts),
+        )
+        .map_err(failed)?
+        .clip_transform(Transform::new(
+            TransformSpec::new(MASK_AS_NODES, MASK, NODES),
+            |r| {
+                let clip = mask::Clip::from_json(&r.data)?;
+                Ok(Transformed::exact(mask::as_nodes(&clip).to_json()))
+            },
+        ))
+        .map_err(failed)?
         .clip_sanitiser(Sanitiser::new(SANITISER, Boundary::System, |data| {
             helios_template::workspace::strip_for_outside(data)
         }))
@@ -101,11 +139,16 @@ impl Plugin for Types {
 pub struct Endpoints {
     pub param: Rc<param::Endpoint>,
     pub graph: Rc<nodes::Endpoint>,
+    pub masks: Rc<mask::Endpoint>,
 }
 
 impl Endpoints {
     /// Registers the endpoints on the application.
-    pub fn register(app: &AppHandle, values: Arc<Mutex<Store>>) -> Endpoints {
+    pub fn register(
+        app: &AppHandle,
+        values: Arc<Mutex<Store>>,
+        viewport: Rc<RefCell<crate::viewport::Viewport>>,
+    ) -> Endpoints {
         let param = Rc::new(param::Endpoint::new(values.clone()));
         clipboard::register(
             app,
@@ -113,14 +156,22 @@ impl Endpoints {
             Some(param.clone()),
             Some(param.clone()),
         );
-        let graph = Rc::new(nodes::Endpoint::new(values));
+        let graph = Rc::new(nodes::Endpoint::new(values.clone()));
         clipboard::register(
             app,
             GRAPH_ENDPOINT,
             Some(graph.clone()),
             Some(graph.clone()),
         );
-        Endpoints { param, graph }
+        let masks = Rc::new(mask::Endpoint::new(values, viewport));
+        for name in [MASKS_ENDPOINT, MASK_IMAGE_ENDPOINT] {
+            clipboard::register(app, name, Some(masks.clone()), Some(masks.clone()));
+        }
+        Endpoints {
+            param,
+            graph,
+            masks,
+        }
     }
 }
 

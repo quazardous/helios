@@ -718,6 +718,16 @@ impl Viewport {
                 Self::write_step(store, &label, &origin, &m.node, writes)?;
                 Ok(json!({}))
             }
+            Command::Paste { clip } => {
+                let clip = crate::clipboard::mask::Clip::from_json(&clip)?;
+                let [w, h] = self.image_size().ok_or("no image is open")?;
+                let (shapes, lost) = clip.scaled_to([f64::from(w), f64::from(h)]);
+                let mut added = Vec::new();
+                for s in shapes {
+                    added.push(self.add_shape(store, &s.module, &s.params)?);
+                }
+                Ok(json!({ "shapes": added, "lost": lost }))
+            }
             member => self.member(member, &origin, store),
         }
     }

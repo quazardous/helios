@@ -665,7 +665,8 @@ impl Shell {
             let _ = dialogs.set((*d).clone());
         }
         let viewport: Rc<RefCell<crate::viewport::Viewport>> = Rc::default();
-        let clip = crate::clipboard::Endpoints::register(app.handle(), values.clone());
+        let clip =
+            crate::clipboard::Endpoints::register(app.handle(), values.clone(), viewport.clone());
         let preview = Rc::new(crate::preview::Preview::new(
             viewport.borrow().engine().clone(),
         ));
@@ -812,11 +813,17 @@ impl Shell {
                 shell.app.handle().clone(),
             );
             shell.set_content("helios.viewport", move |ui| {
+                let area = ui.max_rect();
                 let leave = {
                     let mut viewport = viewport.borrow_mut();
                     viewport.ui(ui, &values);
                     viewport.take_leave()
                 };
+                // While the image has the focus, the Edit commands copy
+                // its mask's shapes and paste into it.
+                if let Some(id) = crate::clipboard::focused_within(ui.ctx(), area) {
+                    crate::clipboard::mask::focus(&app, crate::clipboard::MASK_IMAGE_ENDPOINT, id);
+                }
                 // The darktable profile's double click on the image: back
                 // where the darkroom was opened from.
                 if leave {
@@ -846,13 +853,20 @@ impl Shell {
                 .mask_tree
                 .borrow_mut()
                 .set_app(shell.app.handle().clone());
-            let (tree, viewport, values) = (
+            let (tree, viewport, values, app) = (
                 shell.mask_tree.clone(),
                 shell.viewport.clone(),
                 shell.values.clone(),
+                shell.app.handle().clone(),
             );
             shell.set_content(crate::mask_tree::PANEL, move |ui| {
+                let area = ui.max_rect();
                 tree.borrow_mut().ui(ui, &viewport, &values);
+                // While a row has the focus, the Edit commands copy the
+                // mask's shapes (the selected one) and paste into it.
+                if let Some(id) = crate::clipboard::focused_within(ui.ctx(), area) {
+                    crate::clipboard::mask::focus(&app, crate::clipboard::MASKS_ENDPOINT, id);
+                }
             });
         }
         if has(&shell, crate::navigator::PANEL) {
@@ -954,6 +968,11 @@ impl Shell {
     /// The graph's clipboard endpoint (a test pins the nodes it copies).
     pub fn clip_graph(&self) -> &crate::clipboard::nodes::Endpoint {
         &self.clip.graph
+    }
+
+    /// The masks' clipboard endpoint.
+    pub fn clip_masks(&self) -> &crate::clipboard::mask::Endpoint {
+        &self.clip.masks
     }
 
     /// Saves the interface's settings and the user's keys (when built
@@ -2608,6 +2627,21 @@ impl Shell {
                 }),
             );
         }
+        add(
+            CommandSpec::new(
+                "mask.paste",
+                "Masks: paste copied shapes into the mask edited, scaled to the image (`clip`: a `helios.mask` payload)",
+                "Masks",
+            ),
+            Box::new(|a, origin| {
+                Ok(Action::Mask(
+                    Command::Paste {
+                        clip: a.get("clip").cloned().unwrap_or(Value::Null),
+                    },
+                    origin.clone(),
+                ))
+            }),
+        );
         add(
             CommandSpec::new(
                 "mask.path.close",

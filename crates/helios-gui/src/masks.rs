@@ -782,6 +782,9 @@ pub enum Command {
         member: Option<String>,
         locked: Option<bool>,
     },
+    /// Add copied shapes (a `helios.mask` payload) to the mask edited,
+    /// scaled to the image open (see `crate::clipboard::mask`).
+    Paste { clip: serde_json::Value },
 }
 
 impl Masks {

@@ -352,3 +352,16 @@ Each with the default proposed:
   and the shell applies `network.paste` at the next frame. Not yet: an
   open composite's inner nodes, presets' values for the nodes copied,
   and a cut (the delete is not offered).
+- **2026-10-27, `helios.mask`** (migration step 4: the scaling
+  transform). The Masks panel and the image are endpoints: a copy takes
+  the selected shape, or every shape of the mask edited, with the
+  source image's size; a paste is `mask.paste`, the shapes added to the
+  mask edited and scaled to the image open (positions by width and
+  height, lengths by the smaller side, path and brush points the same,
+  angles kept; a different aspect ratio said as a loss). The transform
+  `helios.mask-as-nodes` makes nodes of shapes pasted into the graph
+  view. Not yet: a group's structure (nested groups, the group's
+  per-port opacity and inversion) is not copied, only its drawn shapes;
+  "keep pixel size" in paste special; a pasted shape is not an undo
+  step, as creating one is not. Library images (`helios.images`) are
+  left for a later branch.
