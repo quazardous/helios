@@ -24,6 +24,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.30.1] - 2026-10-27
+
+### Fixed
+
+- A slider drag held for more than a second and then cancelled with Escape is no longer left as the latest edit if the application quits or crashes right after.
+- Each saved step of an edit now records who made it (you, an agent, a script, or the decision answered on a node) instead of always naming the desktop user or the control client.
+- Undo after opening another image no longer reaches the previous image: its steps could write its values into the new one.
+
 ## [0.30.0] - 2026-10-27
 
 ### Added
