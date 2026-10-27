@@ -24,6 +24,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.30.0] - 2026-10-27
+
+### Added
+
+- Agents and scripts can bypass a node and bring it back (the MCP tool
+  `helios_node_bypass`, `helios control bypass NODE on|off`): the node keeps
+  its parameters and the image renders as if it were absent. A bypassed node
+  is saved with the image's edit, and a template can place a node bypassed.
+- The Modules panel lists the modules of the image's network: a click
+  selects one, and its Bypass toggle (or Ctrl+/ on the selected module)
+  renders the image as if the module were absent, keeping its settings. A
+  bypass is one undo step and is saved with the edit.
+
 ## [0.29.0] - 2026-10-27
 
 ### Added
