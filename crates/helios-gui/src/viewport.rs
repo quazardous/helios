@@ -9,7 +9,10 @@
 //! - **The pixels** come from [`EngineSource`]s: the edit ("after") and
 //!   the edit as it was opened ("before"), sharing one engine and its
 //!   cache. An edit (a value of the store moved) shows the new graph and
-//!   the viewport renders again.
+//!   the viewport renders again. Once the window's GPU path is attached
+//!   ([`Viewport::attach_gpu`]), the engine computes on the GPU the window
+//!   draws with, and its results reach the screen as device tiles,
+//!   without leaving the GPU.
 //! - **The display transform** ([`HeliosDisplay`]) takes the working
 //!   space (linear Rec.2020) to the encoding egui-pop draws for: the
 //!   target's primaries, clamped to its range, through its transfer (in
@@ -47,7 +50,7 @@ use helios_core::{Bus, Engine, Graph, Image, NodeId, Region, Value};
 use helios_shell::commands::Origin;
 use helios_values::{Change, Descriptor, GestureId, Set, Store};
 
-use crate::engine_source::{EngineSource, Shown, Stats};
+use crate::engine_source::{EngineSource, GpuSlot, Shown, Stats};
 
 /// The value paths of the view.
 pub const ZOOM: &str = "view/viewport/zoom";
@@ -268,6 +271,9 @@ pub struct Viewport {
     /// The mask shown over the image, when the mask display is on and
     /// the selected module has a mask.
     layer: Option<crate::mask_display::Layer>,
+    /// The GPU the engine computes on, once attached; the sources hand
+    /// what it renders as device tiles.
+    gpu: GpuSlot,
     /// The pointer asked to leave the view (the darktable profile's
     /// double click on the image), not yet acted on.
     leave: bool,
@@ -284,17 +290,20 @@ impl Default for Viewport {
         let mut state = ViewportState::new();
         state.set_display_transform(Arc::new(HeliosDisplay));
         let stats = Arc::<Stats>::default();
-        let after = EngineSource::new(
+        let gpu = GpuSlot::default();
+        let after = EngineSource::on_gpu(
             "helios-viewport",
             engine.clone(),
             state.sink(),
             stats.clone(),
+            gpu.clone(),
         );
-        let before = EngineSource::new(
+        let before = EngineSource::on_gpu(
             "helios-viewport-before",
             engine.clone(),
             state.before_sink(),
             stats.clone(),
+            gpu.clone(),
         );
         Viewport {
             engine,
@@ -307,6 +316,7 @@ impl Default for Viewport {
             masks: crate::masks::Masks::default(),
             wanted: DisplayTarget::srgb(),
             layer: None,
+            gpu,
             leave: false,
             stats,
         }
@@ -741,6 +751,18 @@ impl Viewport {
             Ok(_) => self.reshow(),
             Err(e) => eprintln!("helios-gui: viewport: {e}"),
         }
+    }
+
+    /// Computes on `gpu`, the process's device the window draws with:
+    /// the engine accelerates on it from the next render, and the tiles it
+    /// renders there are handed to the viewport on the device. Once in the
+    /// viewport's life; false when it had a GPU already.
+    pub fn attach_gpu(&self, gpu: Arc<helios_gpu::Gpu>) -> bool {
+        if self.gpu.get().is_some() {
+            return false;
+        }
+        self.engine.attach_accelerator(gpu.clone());
+        self.gpu.set(gpu).is_ok()
     }
 
     /// The size of the image shown, in pixels.

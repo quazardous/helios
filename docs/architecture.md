@@ -65,6 +65,39 @@ viewport sharing the engine's device; `Gpu::buffer` gives the `wgpu`
 buffer behind it (tightly packed `f32` pixels). It is shared with the
 cache: read it, never write it.
 
+### The viewport on the GPU
+
+(2026-10-27) The desktop's viewport shows the engine's GPU results
+without a copy. The window draws with the process's one device (see
+below), and once its GPU path is attached (`Shell::attach_gpu`, the
+first frame) the viewport's engine takes that device's `Gpu` as its
+accelerator (`Engine::attach_accelerator`: the engine exists before the
+window does). Its tile source (`helios_gui::engine_source`) then renders
+each union of neighbouring tiles with `Engine::render_device_at` and
+hands every tile as a view into the union's buffer: an egui-pop device
+tile (`egui_pop::viewport::device::DeviceTile`), which the viewport's
+shader reads in place, running the display transform there. A chain of
+GPU steps shown on screen is thus read back zero times and uploaded
+again zero times; only the source's pixels, which live on the host, go
+up once a render. The counters say so: the engine's `Counters::uploads`
+and `Counters::readbacks`, and the viewport's `ViewportState::transfers`
+(device tiles are `bound`, no byte copied). The test
+`crates/helios-gui/tests/zero_copy.rs` asserts them, and compares the
+picture with the host path's.
+
+Each tile keeps its union's `DeviceImage` (`DeviceTile::keep`) while the
+viewport holds it, so the GPU's memory ledger counts what is on screen.
+The host path stays: before the GPU path is installed, after a device
+rebuild (the window keeps the device it opened with), on an adapter whose
+fragment shaders cannot read storage buffers (WebGL 2), for a result the
+viewport cannot bind (more than four channels), and for a tile the
+viewport refuses when it is delivered (the device tile's fallback renders
+it on the host, on the render thread). A tile refused later, when the
+interface takes it in, is asked for again.
+The mask display composites the mask over the image on the host
+(`crate::mask_display`), so a module with its mask shown takes the host
+path too; moving that composite into a GPU kernel is still to do.
+
 ### GPU failures
 
 (2026-10-12) A failing GPU never fails a render, and never gives wrong

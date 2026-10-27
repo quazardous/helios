@@ -1270,13 +1270,24 @@ impl Shell {
     /// Gives the viewport the GPU path it draws with, on the render state
     /// the window (or a test harness) draws with: the process's one device
     /// ([`wgpu_setup`]), never one of the window's own. Installed on the
-    /// next frame, in its context.
+    /// next frame, in its context. The viewport's engine computes on that
+    /// device from then on, and hands its results to the window there
+    /// (device tiles: nothing read back to be uploaded again).
     pub fn attach_gpu(&mut self, rs: &eframe::egui_wgpu::RenderState) {
         debug_assert!(
             helios_gpu::shared::owns(&rs.instance),
             "the window opened a wgpu instance of its own: hand it wgpu_setup()"
         );
         self.gpu = Some(rs.clone());
+        match helios_gpu::shared::opened() {
+            Some((_, gpu)) if gpu.handles().device == rs.device => {
+                self.viewport.borrow().attach_gpu(gpu);
+            }
+            _ => eprintln!(
+                "helios-gui: the window draws on another device than the process's GPU: \
+                 the viewport computes on the CPU"
+            ),
+        }
     }
 
     /// The viewport's GPU path, once installed: `None` draws on the CPU.
@@ -4608,6 +4619,19 @@ pub mod headless {
         })
     }
 
+    /// A render state on the process's one GPU device, with a renderer of
+    /// its own: the textures and the viewport's GPU objects drawn with it
+    /// belong to its user alone (a harness, a test of the viewport).
+    pub fn render_state() -> RenderState {
+        let mut rs = device().clone();
+        rs.renderer = Arc::new(RwLock::new(Renderer::new(
+            &rs.device,
+            rs.target_format,
+            RendererOptions::PREDICTABLE,
+        )));
+        rs
+    }
+
     /// A shell drawn offscreen at a size, on the wgpu renderer.
     pub fn harness<'a>(shell: Shell, size: egui::Vec2) -> Harness<'a, Shell> {
         harness_at(shell, size, 1.0)
@@ -4626,14 +4650,7 @@ pub mod headless {
         size: egui::Vec2,
         scale: f32,
     ) -> (Harness<'a, Shell>, RenderState) {
-        // The shared device, with a renderer of our own: the textures and
-        // the viewport's GPU objects belong to this harness alone.
-        let mut rs = device().clone();
-        rs.renderer = Arc::new(RwLock::new(Renderer::new(
-            &rs.device,
-            rs.target_format,
-            RendererOptions::PREDICTABLE,
-        )));
+        let rs = render_state();
         shell.attach_gpu(&rs);
         shell.still = true;
         let title = shell.window_title();

@@ -13,9 +13,22 @@
 //!   tile's scale: proxies at powers of two, exact tiles at `min(zoom, 1)`;
 //! - delivers linear RGBA floats in the working space, the display
 //!   transform left to the viewport;
+//! - on a source given the GPU the window draws with ([`GpuSlot`]), once
+//!   the viewport's GPU path is installed on that very device, renders
+//!   each union into the GPU's memory (`Engine::render_device_at`) and
+//!   hands each tile as a view into that buffer (a device tile): nothing
+//!   is read back, nothing uploaded again, the display transform runs in
+//!   the viewport's shader. Each tile keeps its union's `DeviceImage`
+//!   while the viewport holds it, so the GPU's memory ledger counts what
+//!   is shown. A tile the viewport refuses on this thread is rendered on
+//!   the host instead (the device tile's fallback, run here); one refused
+//!   later, when the interface takes it in, is asked for again. An adapter
+//!   whose fragment shaders cannot read storage buffers (WebGL 2) takes
+//!   the host path from the start;
 //! - with a mask shown ([`Shown::mask`]), renders the mask's node over the
 //!   same union at the same scale, through the same engine and its cache,
-//!   and composites it into each tile (`crate::mask_display`).
+//!   and composites it into each tile on the host (`crate::mask_display`):
+//!   the mask display takes the host path, GPU or not.
 //!
 //! [`EngineSource::show`] changes what is shown (an edit, another image):
 //! the viewport hears that the whole image changed, keeps its tiles on
@@ -25,9 +38,11 @@
 use std::collections::{BTreeMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
-use std::sync::{Arc, Condvar, Mutex, PoisonError};
+use std::sync::{Arc, Condvar, Mutex, OnceLock, PoisonError};
 use std::time::{Duration, Instant};
 
+use eframe::egui_wgpu::wgpu;
+use egui_pop::viewport::device::{BufferLayout, DeviceTile};
 use egui_pop::viewport::source::{Pixels, Tile, TileRequest, TileSink, TileSource};
 use helios_core::{Engine, Graph, Image, NodeId, Region};
 
@@ -38,6 +53,8 @@ pub struct Stats {
     pub renders: AtomicU64,
     /// Tiles delivered.
     pub tiles: AtomicU64,
+    /// Of those, tiles handed on the GPU (device tiles), not read back.
+    pub device_tiles: AtomicU64,
     /// Tiles not rendered: the viewport no longer wanted them.
     pub skipped: AtomicU64,
     /// Tiles the engine could not render.
@@ -125,6 +142,11 @@ impl Shown {
     }
 }
 
+/// The GPU a source's engine computes on, shared by the sources of a
+/// viewport and set once the window's GPU path is attached: the process's
+/// one device (`helios_gpu::shared`), which the window draws with.
+pub type GpuSlot = Arc<OnceLock<Arc<helios_gpu::Gpu>>>;
+
 enum Job {
     Tiles(Vec<TileRequest>),
     Readout([i64; 2]),
@@ -143,12 +165,25 @@ impl EngineSource {
     /// A source delivering to `sink`, rendering with `engine` on a thread
     /// named `name`, counting in `stats`.
     pub fn new(name: &str, engine: Arc<Engine>, sink: TileSink, stats: Arc<Stats>) -> Self {
+        Self::on_gpu(name, engine, sink, stats, GpuSlot::default())
+    }
+
+    /// [`EngineSource::new`], handing tiles on the device once `gpu` is
+    /// set (to the GPU `engine` accelerates on) and the viewport's GPU
+    /// path is installed on that GPU's device.
+    pub fn on_gpu(
+        name: &str,
+        engine: Arc<Engine>,
+        sink: TileSink,
+        stats: Arc<Stats>,
+        gpu: GpuSlot,
+    ) -> Self {
         let shown: Arc<Mutex<Option<Shown>>> = Arc::default();
         let (jobs, rx) = channel();
         let (s, sk, st) = (shown.clone(), sink.clone(), stats.clone());
         std::thread::Builder::new()
             .name(name.into())
-            .spawn(move || work(&engine, &rx, &s, &sk, &st))
+            .spawn(move || work(&engine, &gpu, &rx, &s, &sk, &st))
             .expect("a thread for the viewport");
         EngineSource {
             shown,
@@ -221,7 +256,8 @@ pub fn rgba(image: &Image) -> Vec<f32> {
 }
 
 fn work(
-    engine: &Engine,
+    engine: &Arc<Engine>,
+    gpu: &GpuSlot,
     jobs: &Receiver<Job>,
     shown: &Mutex<Option<Shown>>,
     sink: &TileSink,
@@ -245,7 +281,8 @@ fn work(
             if let Some(p) = readout {
                 read_out(engine, &s, p, sink, stats);
             }
-            render(engine, &s, tiles, sink, stats);
+            let device = on_device(gpu, &s, sink);
+            render(engine, device.as_ref(), &s, tiles, sink, stats);
         }
         stats.done(n);
     }
@@ -274,9 +311,88 @@ fn read_out(engine: &Engine, s: &Shown, p: [i64; 2], sink: &TileSink, stats: &St
     Stats::add(&stats.readouts, 1);
 }
 
+/// The GPU to hand tiles on, and its device: set, the viewport's GPU path
+/// installed on that very device and able to read storage buffers in its
+/// fragment shader (else every buffer tile would be refused with
+/// `BuffersUnsupported`), and no mask shown (the mask display composites
+/// on the host).
+fn on_device(
+    gpu: &GpuSlot,
+    s: &Shown,
+    sink: &TileSink,
+) -> Option<(Arc<helios_gpu::Gpu>, wgpu::Device)> {
+    let gpu = gpu.get()?;
+    if s.mask.is_some() {
+        return None;
+    }
+    let render = sink.render_device().filter(|r| r.buffers)?;
+    // A rebuilt device (after a loss) is no longer the window's.
+    let device = gpu.handles().device;
+    (render.device == device).then(|| (gpu.clone(), device))
+}
+
+/// Renders `live`, the tiles of `union` at `scale`, into the GPU's memory
+/// and hands each as a device tile, a view into the union's buffer. False
+/// when the union could not be had on the device (the engine lost its GPU,
+/// a result of more than four channels): the host path renders it then.
+fn deliver_on_device(
+    engine: &Arc<Engine>,
+    (gpu, device): &(Arc<helios_gpu::Gpu>, wgpu::Device),
+    s: &Shown,
+    (union, scale): (Region, f64),
+    live: &[&TileRequest],
+    sink: &TileSink,
+    stats: &Stats,
+) -> bool {
+    let Ok(image) = engine.render_device_at(&s.graph, s.node, &s.port, union, scale) else {
+        return false;
+    };
+    let channels = image.channels();
+    let Some(buffer) = gpu.buffer(&image).filter(|_| (1..=4).contains(&channels)) else {
+        return false;
+    };
+    let at = image.region();
+    let layout = BufferLayout::packed(at.width, channels);
+    Stats::add(&stats.renders, 1);
+    for r in live {
+        if r.is_cancelled() {
+            Stats::add(&stats.skipped, 1);
+            continue;
+        }
+        let region = region_of(r);
+        let origin = [(region.x - at.x) as u32, (region.y - at.y) as u32];
+        // Run only when `deliver_device` refuses the tile, on this render
+        // thread (never the interface's): a host render of the one tile,
+        // with no lock held.
+        let (engine, s) = (engine.clone(), s.clone());
+        let tile = DeviceTile::buffer(device, buffer.clone(), layout)
+            .origin(origin)
+            // The image and its ledger charge, while the tile is shown.
+            .keep(image.clone())
+            .fallback(move || {
+                engine
+                    .render_at(&s.graph, s.node, &s.port, region, scale)
+                    .ok()
+                    .map(|image| Pixels::Scene(rgba(&image)))
+            });
+        sink.deliver_device(r, tile);
+        Stats::add(&stats.tiles, 1);
+        Stats::add(&stats.device_tiles, 1);
+    }
+    true
+}
+
 /// Renders tiles by quality (proxies first) and scale, one union of
-/// neighbouring tiles at a time, each tile a view into its union.
-fn render(engine: &Engine, s: &Shown, tiles: Vec<TileRequest>, sink: &TileSink, stats: &Stats) {
+/// neighbouring tiles at a time, each tile a view into its union: on the
+/// GPU, handed on the device, when `device` says so.
+fn render(
+    engine: &Arc<Engine>,
+    device: Option<&(Arc<helios_gpu::Gpu>, wgpu::Device)>,
+    s: &Shown,
+    tiles: Vec<TileRequest>,
+    sink: &TileSink,
+    stats: &Stats,
+) {
     let mut groups: BTreeMap<_, Vec<TileRequest>> = BTreeMap::new();
     for r in tiles {
         if r.is_cancelled() {
@@ -301,6 +417,11 @@ fn render(engine: &Engine, s: &Shown, tiles: Vec<TileRequest>, sink: &TileSink, 
                 .collect();
             Stats::add(&stats.skipped, (inside.len() - live.len()) as u64);
             if live.is_empty() {
+                continue;
+            }
+            if let Some(d) = device
+                && deliver_on_device(engine, d, s, (union, scale.get()), &live, sink, stats)
+            {
                 continue;
             }
             match engine.render_at(&s.graph, s.node, &s.port, union, scale.get()) {
