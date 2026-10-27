@@ -18,6 +18,9 @@ category-workspace = Workspace
 command-graph-edit =
     .description = Asks a node editor for an edit, done at its next frame as the user's (a connection type-checked, then its graph.* step): `edit` is `connect` (`from`, `to`), `disconnect` (`edges`), `move` (`moves`), `delete` (`nodes`, `edges`) or `add` (`nodes`).
 
+command-graph-export =
+    .description = A node editor's graph as an image, drawn from the graph and its layout as the editor drew it last: `format` (svg by default; png or pdf when built with them), `selection` (true: only the selected nodes), `level` (overview, ports or detail; ports by default), `wires` (curves, orthogonal or straight; the editor's by default), `background` (false: transparent), `title`, `scale` (a PNG's pixels per point, 1 by default). Gives `svg` as text, or `png` or `pdf` base64-encoded.
+
 command-graph-read =
     .description = The graph a node editor drew last: nodes (place, ports, group, parameters), wires, groups, the kinds it can add, the selection, the level and the part in view.
 
@@ -59,6 +62,9 @@ menu-helios-system-themes =
 
 plugin-egui-pop-imaging =
     .title = Image tools
+
+plugin-helios-clipboard =
+    .title = Helios's clipboard types
 
 plugin-helios-commands =
     .title = Helios

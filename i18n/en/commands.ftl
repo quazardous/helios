@@ -223,6 +223,9 @@ command-mask-member-opacity =
 command-mask-member-rename =
     .title = Masks: name a member (`member`, the selected one by default) `label`; without it, rename in the Masks panel
 
+command-mask-paste =
+    .title = Masks: paste copied shapes into the mask edited, scaled to the image (`clip`: a `helios.mask` payload)
+
 command-mask-path-close =
     .title = Masks: close the path being drawn
 
@@ -253,6 +256,9 @@ command-network-disconnect =
 command-network-move =
     .title = Move nodes in the graph view (`moves`: each `node`, `to`: [x, y])
 
+command-network-paste =
+    .title = Paste copied nodes into the network (`clip`: a `helios.nodes` payload; `parts`), renamed on a clash
+
 command-network-remove =
     .title = Remove nodes from the network, with their wires (`nodes`)
 
@@ -270,6 +276,9 @@ command-param-get =
 
 command-param-list =
     .title = List the values under a path (`prefix`)
+
+command-param-paste =
+    .title = Paste onto a value (`path`; `dry_run` says what it would set)
 
 command-param-redo =
     .title = Redo the last undone change of values
