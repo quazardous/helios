@@ -106,5 +106,11 @@ creates (`qvk`), which matters for sharing GPU memory with Helios.
    device or importing its buffers; porting its shaders to wgpu keeps one
    device. That choice comes with running vkdt modules.
 5. vkdt's file formats are simple and stable enough that the converter
-   needs no vkdt code, only the files, which keeps licensing simple (the
-   BSD-2 module files are read, not copied into Helios).
+   needs no vkdt code, only the files: the module files it reads are not
+   copied into Helios. The ported modules (`modules/vkdt`) are another
+   matter: their Rust and WGSL are translated from vkdt's GLSL and C, so
+   they keep vkdt's BSD-2-Clause notice (`modules/vkdt/LICENSE-vkdt`, the
+   copyright line and licence of vkdt's `LICENCE.bsd2`), and each names
+   the vkdt files it comes from. vkdt also has GPLv3 files, marked as such
+   in their sources; a port checks the files it reads (GPLv3 code can
+   enter Helios too, under Helios's own licence).
