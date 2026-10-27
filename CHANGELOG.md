@@ -24,6 +24,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.32.0] - 2026-10-27
+
+### Added
+
+- Drawn mask shapes can be copied and pasted, from the image or the Masks
+  panel, onto the same image or another one: pasted shapes are scaled to
+  the image's size, and the paste warns when its proportions differ.
+- Nodes of the graph view can be copied and pasted, with their current
+  parameters and the wires between them: a pasted node whose name is taken
+  gets a new one (exposure_2), and paste special can take some nodes only.
+- A parameter can be copied and pasted: Ctrl+C and Ctrl+V on a focused
+  slider, or Copy value, Copy path and Paste in its context menu. A copied
+  value reads as it is shown ("+0.30 EV") and now pastes back, onto any
+  parameter of the same kind, as one undo step.
+
+### Changed
+
+- Helios now starts on the Photoshop pointer profile, which egui-pop split
+  from its former Adobe one: the wheel pans the image (Ctrl and the wheel
+  sideways), Alt and the wheel zoom, a drag pans as the Hand tool does, and
+  Shift steps a value coarser and Alt finer. A slider still takes the wheel
+  only once focused. A saved Adobe profile is read as Lightroom Classic,
+  which stays a choice in the settings.
+
 ## [0.31.0] - 2026-10-27
 
 ### Added
