@@ -1,3 +1,13 @@
+// Ported from vkdt (https://github.com/hanatos/vkdt, commit 0e0d098):
+// src/pipe/modules/shared/blur.comp, src/pipe/modules/shared/blurs.comp,
+// src/pipe/modules/shared/blurh.comp, src/pipe/modules/shared/blurv.comp,
+// src/pipe/modules/shared/blur_head.glsl, src/pipe/modules/shared/guided1.comp,
+// src/pipe/modules/shared/guided2.comp, src/pipe/modules/shared/guided3.comp,
+// src/pipe/modules/shared/resample.comp, src/pipe/modules/shared.glsl,
+// src/pipe/modules/api.h. vkdt: copyright 2019 johannes hanika, under the
+// BSD-2-Clause licence; its notice is in modules/vkdt/LICENSE-vkdt.
+// SPDX-License-Identifier: GPL-3.0-or-later AND BSD-2-Clause
+
 //! vkdt's shared kernels for blurs and guided filters (`pipe/modules/shared`
 //! and `dt_api_blur`, `dt_api_guided_filter` in `pipe/modules/api.h`), each
 //! a module of its own, so that a multi-kernel module wires them into its

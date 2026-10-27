@@ -135,3 +135,8 @@ bench) lives in the darktable fork under `tools/helios/`.
 
 GNU General Public License v3.0. See [LICENSE](./LICENSE). Helios links with
 darktable, which is GPLv3.
+
+The modules ported from [vkdt](https://github.com/hanatos/vkdt)
+(`modules/vkdt`) are also under vkdt's BSD-2-Clause licence: its copyright
+notice and licence are in [modules/vkdt/LICENSE-vkdt](./modules/vkdt/LICENSE-vkdt),
+and each ported file names the vkdt sources it comes from.

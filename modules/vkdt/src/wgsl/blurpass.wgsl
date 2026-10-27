@@ -1,3 +1,9 @@
+// Ported from vkdt (https://github.com/hanatos/vkdt, commit 0e0d098):
+// src/pipe/modules/shared/blurh.comp, src/pipe/modules/shared/blurv.comp,
+// src/pipe/modules/shared/blur_head.glsl. vkdt: copyright 2019 johannes hanika,
+// under the BSD-2-Clause licence; its notice is in modules/vkdt/LICENSE-vkdt.
+// SPDX-License-Identifier: GPL-3.0-or-later AND BSD-2-Clause
+
 // vkdt's blurh and blurv (shared/blurh.comp, blurv.comp): one pass of a
 // separable Gaussian. plan[0].x: 1 along columns, 0 along rows; plan[0].y:
 // taps on each side; then the weights, the centre's first, four a vec4.

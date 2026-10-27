@@ -1,3 +1,9 @@
+// Ported from vkdt (https://github.com/hanatos/vkdt, commit 0e0d098):
+// src/pipe/modules/usm/main.comp, src/pipe/modules/shared.glsl. vkdt: copyright
+// 2019 johannes hanika, under the BSD-2-Clause licence; its notice is in
+// modules/vkdt/LICENSE-vkdt.
+// SPDX-License-Identifier: GPL-3.0-or-later AND BSD-2-Clause
+
 // vkdt's usm: a "flower" blur of five bilinear taps, then the difference to
 // the centre boosted by `amount` where it is under `thrs` (vkdt's main.comp
 // and sample_flower4 in shared.glsl).

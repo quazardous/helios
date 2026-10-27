@@ -1,3 +1,9 @@
+// Ported from vkdt (https://github.com/hanatos/vkdt, commit 0e0d098):
+// src/pipe/modules/shared/blurs.comp, src/pipe/modules/shared.glsl. vkdt:
+// copyright 2019 johannes hanika, under the BSD-2-Clause licence; its notice is
+// in modules/vkdt/LICENSE-vkdt.
+// SPDX-License-Identifier: GPL-3.0-or-later AND BSD-2-Clause
+
 // vkdt's blurs (shared/blurs.comp): four bilinear taps over a 3x3
 // support, plan[0].x from the centre on each axis.
 

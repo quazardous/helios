@@ -1,7 +1,16 @@
-//! Modules ported from vkdt (`src/pipe/modules/` of a vkdt checkout,
-//! BSD-2): each a Rust CPU reference written from vkdt's GLSL, and a WGSL
-//! variant translated from the same shader, checked against each other and
-//! against `vkdt-cli` (`helios-parity`).
+// Ported from vkdt (https://github.com/hanatos/vkdt, commit 0e0d098):
+// src/pipe/modules/exposure/main.comp, src/pipe/modules/usm/main.comp,
+// src/pipe/modules/shared.glsl. vkdt: copyright 2019 johannes hanika, under the
+// BSD-2-Clause licence; its notice is in modules/vkdt/LICENSE-vkdt.
+// SPDX-License-Identifier: GPL-3.0-or-later AND BSD-2-Clause
+
+//! Modules ported from vkdt (`src/pipe/modules/` of a vkdt checkout): each
+//! a Rust CPU reference written from vkdt's GLSL, and a WGSL variant
+//! translated from the same shader, checked against each other and against
+//! `vkdt-cli` (`helios-parity`). The ported files are under vkdt's
+//! BSD-2-Clause licence as well as Helios's GPLv3: each names its vkdt
+//! sources, and vkdt's copyright notice and licence are in `LICENSE-vkdt`,
+//! beside this crate's `Cargo.toml`.
 //!
 //! - `vkdt_exposure`: `rgb * 2^ev`, alpha set to 1;
 //! - `vkdt_usm`: unsharp mask. vkdt blurs with a "flower" of five bilinear
