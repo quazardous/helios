@@ -284,6 +284,10 @@ pub fn registry() -> BTreeMap<&'static str, ModuleRef> {
             ModuleRef::new(helios_module_vkdt::VkdtFilmcurv),
         ),
         (
+            "vkdt_colour",
+            ModuleRef::new(helios_module_vkdt::VkdtColour),
+        ),
+        (
             "mask_combine",
             ModuleRef::new(helios_module_masks::MaskCombine),
         ),

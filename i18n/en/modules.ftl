@@ -347,6 +347,38 @@ param-sigmoid-white-target =
     .description = display white, in %
     .label = white_target
 
+param-vkdt-colour-clip =
+    .description = clip the highlights
+    .label = clip
+
+param-vkdt-colour-clipmax =
+    .description = where the highlights clip, in camera white
+    .label = clipmax
+
+param-vkdt-colour-exposure =
+    .description = the exposure correction, in stops
+    .label = exposure
+
+param-vkdt-colour-matrix =
+    .description = the colours of the input: the camera's, or a known space
+    .label = matrix
+
+param-vkdt-colour-matrix-choice-image = image
+
+param-vkdt-colour-matrix-choice-rec2020 = rec2020
+
+param-vkdt-colour-matrix-choice-rec709 = rec709
+
+param-vkdt-colour-matrix-choice-xyz = xyz
+
+param-vkdt-colour-sat =
+    .description = the saturation, a chroma multiplier
+    .label = sat
+
+param-vkdt-colour-white =
+    .description = the white balance, red, green, blue; all zero for the camera's
+    .label = white
+
 param-vkdt-contrast-detail =
     .description = the amount of detail enhancement
     .label = detail

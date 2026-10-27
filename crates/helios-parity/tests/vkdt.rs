@@ -8,9 +8,20 @@ use helios_parity::vkdt::Vkdt;
 use helios_parity::{DARKTABLE, compare, inset};
 
 fn helios(module: ModuleRef, params: Params, input: &Image) -> Image {
+    helios_in(module, params, helios_core::Context::new(), input)
+}
+
+/// [`helios`] with the image's context (a camera's description).
+fn helios_in(
+    module: ModuleRef,
+    params: Params,
+    context: helios_core::Context,
+    input: &Image,
+) -> Image {
     let mut g = Graph::new();
     let src = g.add_source("src", input.clone());
     let n = g.add_module("m", module, &params).unwrap();
+    g.set_context(n, context).unwrap();
     g.connect(src, helios_core::graph::SOURCE_PORT, n, "input")
         .unwrap();
     Engine::new(Arc::new(Bus::new()))
@@ -168,13 +179,13 @@ fn ported_vkdt_contrast_matches_vkdt() {
 fn point_case(
     vkdt: &Vkdt,
     (name, module): (&str, ModuleRef),
-    params: Params,
+    (params, context): (Params, helios_core::Context),
     cfg: &[(&str, String)],
     input: &Image,
     f16: bool,
     dir: &std::path::Path,
 ) {
-    let ours = helios(module, params, input);
+    let ours = helios_in(module, params, context, input);
     let theirs = if f16 {
         vkdt.render_f16(input, name, cfg, dir)
     } else {
@@ -234,7 +245,7 @@ fn ported_vkdt_grade_matches_vkdt() {
         point_case(
             &vkdt,
             ("grade", ModuleRef::new(helios_module_vkdt::VkdtGrade)),
-            params,
+            (params, helios_core::Context::new()),
             &cfg,
             &input,
             false,
@@ -287,10 +298,79 @@ fn ported_vkdt_filmcurv_matches_vkdt() {
         point_case(
             &vkdt,
             ("filmcurv", ModuleRef::new(helios_module_vkdt::VkdtFilmcurv)),
-            params,
+            (params, helios_core::Context::new()),
             &cfg,
             &input,
             false,
+            &dir.join(i.to_string()),
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// vkdt's colour reads and writes `rgba:f16`: vkdt gets half floats
+/// through its format module, Helios the same rounded pixels. vkdt-cli
+/// reads a float image (i-pfm), which carries no camera: vkdt is given the
+/// camera's matrix explicitly (its `matrix` 5 reads `mat`, row by row),
+/// Helios the camera's `XYZ to camera` matrix as context, which it turns
+/// into the same matrix as vkdt's raw loader. The white balance is given
+/// explicitly to both (i-pfm has no as-shot coefficients).
+#[test]
+fn ported_vkdt_colour_matches_vkdt() {
+    use helios_photo::camera::fields;
+    let vkdt = match Vkdt::find() {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("skipped: {e}");
+            return;
+        }
+    };
+    let input = helios_parity::vkdt::to_f16(&chart());
+    let dir =
+        std::env::temp_dir().join(format!("helios-parity-vkdt-colour-{}", std::process::id()));
+    // The Canon EOS 40D's matrix.
+    let xyz_to_camera = [
+        0.6071, -0.0747, -0.0856, -0.7653, 1.5365, 0.2441, -0.2025, 0.2553, 0.7315,
+    ];
+    let cam = helios_module_vkdt::colour::camera_to_rec2020(&xyz_to_camera).unwrap();
+    let mat: Vec<f64> = cam.iter().flatten().copied().collect();
+    let context = helios_core::Context::new()
+        .with(fields::XYZ_TO_CAMERA, Value::List(xyz_to_camera.to_vec()));
+    let white = [0.55, 1.0, 0.8];
+    // (exposure, sat, clip, Helios's matrix, vkdt's matrix)
+    let cases = [
+        (0.0, 1.0, None, "image", 5),
+        (0.7, 1.3, None, "image", 5),
+        (-0.5, 0.7, Some(0.9), "image", 5),
+        (0.3, 1.5, Some(1.2), "rec2020", 0),
+    ];
+    for (i, (exposure, sat, clip, matrix, vkdt_matrix)) in cases.into_iter().enumerate() {
+        let mut params = Params::new()
+            .with("exposure", Value::Float(exposure))
+            .with("sat", Value::Float(sat))
+            .with("matrix", Value::Choice(matrix.into()))
+            .with("white", Value::List(white.to_vec()));
+        let mut cfg = vec![
+            ("exposure", exposure.to_string()),
+            ("sat", sat.to_string()),
+            ("matrix", vkdt_matrix.to_string()),
+            ("white", cfg_list(&[white[0], white[1], white[2], 0.0])),
+            ("mat", cfg_list(&mat)),
+        ];
+        if let Some(max) = clip {
+            params = params
+                .with("clip", Value::Bool(true))
+                .with("clipmax", Value::Float(max));
+            cfg.push(("clip", "1".into()));
+            cfg.push(("clipmax", f64::to_string(&max)));
+        }
+        point_case(
+            &vkdt,
+            ("colour", ModuleRef::new(helios_module_vkdt::VkdtColour)),
+            (params, context.clone()),
+            &cfg,
+            &input,
+            true,
             &dir.join(i.to_string()),
         );
     }

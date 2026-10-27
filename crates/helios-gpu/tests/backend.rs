@@ -371,6 +371,45 @@ fn vkdt_filmcurv_on_the_gpu_matches_its_cpu_reference() {
 }
 
 #[test]
+fn vkdt_colour_on_the_gpu_matches_its_cpu_reference() {
+    let _gpu = helios_testkit::gpu_lock();
+    let Some(gpu) = gpu() else { return };
+    let input = helios_testkit::noise(Region::sized(70, 50), 4, 19);
+    // The camera's description, as context (the Canon EOS 40D's).
+    let context = Context::new()
+        .with(
+            "photo.xyz_to_camera",
+            Value::List(vec![
+                0.6071, -0.0747, -0.0856, -0.7653, 1.5365, 0.2441, -0.2025, 0.2553, 0.7315,
+            ]),
+        )
+        .with("photo.white_balance", Value::List(vec![2.1, 1.0, 1.4, 1.0]));
+    let colour = ModuleRef::new(helios_module_vkdt::VkdtColour);
+    let cases = [
+        ("as shot", Params::new()),
+        (
+            "saturated, clipped",
+            Params::new()
+                .with("sat", Value::Float(1.4))
+                .with("exposure", Value::Float(0.5))
+                .with("clip", Value::Bool(true))
+                .with("clipmax", Value::Float(0.9)),
+        ),
+        (
+            "rec709, desaturated",
+            Params::new()
+                .with("matrix", Value::Choice("rec709".into()))
+                .with("white", Value::List(vec![1.2, 1.0, 0.9]))
+                .with("sat", Value::Float(0.6)),
+        ),
+    ];
+    for (name, params) in cases {
+        let c = check(&gpu, &colour, &params, &context, &input, input.region()).unwrap();
+        assert!(c.max_abs < 2e-4, "colour {name}: {c:?}");
+    }
+}
+
+#[test]
 fn a_step_over_4_mpx_matches_the_cpu() {
     let _gpu = helios_testkit::gpu_lock();
     let Some(gpu) = gpu() else { return };

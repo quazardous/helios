@@ -346,6 +346,38 @@ param-sigmoid-white-target =
     .description = blanc de l’affichage, en %
     .label = cible du blanc
 
+param-vkdt-colour-clip =
+    .description = écrêter les hautes lumières
+    .label = écrêter
+
+param-vkdt-colour-clipmax =
+    .description = où les hautes lumières sont écrêtées, en blanc de l’appareil
+    .label = seuil d’écrêtage
+
+param-vkdt-colour-exposure =
+    .description = la correction d’exposition, en diaphs
+    .label = exposition
+
+param-vkdt-colour-matrix =
+    .description = les couleurs de l’entrée : celles de l’appareil, ou un espace connu
+    .label = matrice
+
+param-vkdt-colour-matrix-choice-image = image
+
+param-vkdt-colour-matrix-choice-rec2020 = rec2020
+
+param-vkdt-colour-matrix-choice-rec709 = rec709
+
+param-vkdt-colour-matrix-choice-xyz = xyz
+
+param-vkdt-colour-sat =
+    .description = la saturation, un multiplicateur de chroma
+    .label = saturation
+
+param-vkdt-colour-white =
+    .description = la balance des blancs, rouge, vert, bleu ; tout à zéro pour celle de l’appareil
+    .label = blanc
+
 param-vkdt-contrast-detail =
     .description = le renforcement du détail
     .label = détail

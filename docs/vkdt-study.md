@@ -128,3 +128,23 @@ and against each other by the backend contract tests.
 | `contrast` | `vkdt_contrast` | all (a composite of vkdt's kernels) | |
 | `grade` | `vkdt_grade` | lift, gamma, gain, offset; classic and zoned log modes | |
 | `filmcurv` | `vkdt_filmcurv` | the Weibull curve; colour modes hsl (the default) and per channel | colour modes darktable UCS, Munsell, AgX and lum ratio; the `dspy` curve plot |
+| `colour` | `vkdt_colour` | camera matrix (image, Rec.2020, XYZ, Rec.709), CAT16 white balance (as shot or given), exposure, saturation in darktable UCS, highlight clip | the CLUT and its temperature, the RBF mapping (colour checker), the picker inputs, the gamut limits (spectral tables), non-linear input curves |
+
+**The white balance rule for mixed chains** (2026-10-27). vkdt does not
+balance the raw data: its loader leaves camera RGB as it is, and `colour`
+balances after the camera matrix, with a CAT16 adaptation towards the
+camera's white. Helios balances the mosaic (`whitebalance`, as darktable)
+and turns it into Rec.2020 later (`colorin`). A chain that feeds
+`vkdt_colour` therefore leaves `whitebalance` and `colorin` out, and the
+camera's matrix (`photo.xyz_to_camera`) and as-shot coefficients
+(`photo.white_balance`) reach `vkdt_colour` as context inputs, as
+`colorin` gets its matrix; `vkdt_colour` turns them into vkdt's
+`cam_to_rec2020` the way vkdt's raw loader does. Balancing in both would
+tint the image. Nothing enforces the rule yet: a graph check refusing
+both in one chain is not decided.
+
+`colour`'s saturation uses darktable's uniform colour space (dt UCS
+2022, by Aurélien Pierre, MIT licence), which vkdt carries in
+`shared/dtucs.glsl`; the port credits it in its files and in the crate's
+licence. vkdt's `shared/oetf.glsl` is GPLv3 (from OpenDRT): the input
+curves that need it are not ported.

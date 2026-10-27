@@ -26,16 +26,26 @@
 //!   ([`grade`]).
 //! - `vkdt_filmcurv`: the Weibull film curve, its colour rebuilt per
 //!   channel or by the DNG hue-preserving step ([`filmcurv`]).
+//! - `vkdt_colour`: camera matrix, CAT16 white balance, exposure,
+//!   saturation in darktable UCS and highlight clip ([`colour`]). It takes
+//!   the camera's matrix and coefficients as context inputs: a chain
+//!   feeding it leaves Helios's `whitebalance` out (vkdt balances here).
+//!
+//! [`ucs`] holds the colour spaces they share, darktable's uniform colour
+//! space among them (MIT licence, by Aurélien Pierre, as vkdt carries it).
 //!
 //! vkdt samples its textures with mirrored repeat at the image's edges;
 //! here the framework replicates edge pixels, so the outer two pixels of
 //! `vkdt_usm` may differ from vkdt's.
 
+pub mod colour;
 pub mod contrast;
 pub mod filmcurv;
 pub mod grade;
 pub mod guided;
+pub mod ucs;
 
+pub use colour::VkdtColour;
 pub use contrast::VkdtContrast;
 pub use filmcurv::VkdtFilmcurv;
 pub use grade::VkdtGrade;
