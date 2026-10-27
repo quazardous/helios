@@ -108,7 +108,9 @@ fn harness(on_gpu: bool) -> Harness<'static, Scene> {
 }
 
 /// Steps frames until every tile wanted is on screen, waiting after each
-/// for the render thread to answer what the frame asked.
+/// for the render thread to answer what the frame asked. Each frame is
+/// painted: the GPU path binds (or uploads) its tiles at the paint, and
+/// counts them there.
 fn settle(h: &mut Harness<'_, Scene>) {
     for _ in 0..40 {
         h.step();
@@ -117,6 +119,7 @@ fn settle(h: &mut Harness<'_, Scene>) {
             "the render thread never answered"
         );
         h.step();
+        let _ = h.render().expect("a painted frame");
         if h.state().state.tiles_complete() {
             return;
         }
@@ -145,7 +148,8 @@ fn a_gpu_chain_reaches_the_screen_without_a_transfer() {
     // The viewport: every tile bound where it lies, no byte copied.
     let t = s.state.transfers();
     assert_eq!((t.bytes, t.tiles), (0, 0), "{t:?}");
-    assert_eq!(t.bound, tiles, "{t:?}");
+    // A tile replaced before a paint is never bound.
+    assert!(t.bound > 0 && t.bound <= tiles, "{t:?} for {tiles} tiles");
     let refused = s
         .state
         .stats()
@@ -156,12 +160,14 @@ fn a_gpu_chain_reaches_the_screen_without_a_transfer() {
 
     // Drawn again, nothing moves.
     let before = s.engine.counters();
-    h.step();
-    h.step();
-    let s = h.state();
-    let d = s.engine.counters().since(&before);
+    for _ in 0..3 {
+        h.run();
+        let _ = h.render().expect("a painted frame");
+        let f = h.state().state.frame_transfers();
+        assert_eq!((f.bytes, f.tiles), (0, 0), "the last frame copied {f:?}");
+    }
+    let d = h.state().engine.counters().since(&before);
     assert_eq!((d.uploads, d.readbacks), (0, 0), "{d:?}");
-    assert_eq!(s.state.frame_transfers().bytes, 0);
 }
 
 #[test]
