@@ -1,6 +1,10 @@
 //! Every WGSL shader in the workspace parses and validates with naga, the
 //! shader compiler wgpu uses: a broken shader fails `cargo test`, even on a
 //! machine without a GPU, where the backend's own tests skip.
+//!
+//! A shader that is put after another one at run time says so on a line
+//! `// wgsl-prelude: <file>` (a path next to it), and is validated with
+//! that file in front, as it is compiled.
 
 use std::path::{Path, PathBuf};
 
@@ -34,7 +38,18 @@ fn every_shader_validates() {
 
     let mut failures = Vec::new();
     for path in &found {
-        let source = std::fs::read_to_string(path).expect("a readable shader");
+        let mut source = std::fs::read_to_string(path).expect("a readable shader");
+        let preludes: Vec<String> = source
+            .lines()
+            .filter_map(|l| l.trim().strip_prefix("// wgsl-prelude:"))
+            .map(|f| f.trim().to_string())
+            .collect();
+        for prelude in preludes.iter().rev() {
+            let file = path.with_file_name(prelude);
+            let text = std::fs::read_to_string(&file)
+                .unwrap_or_else(|e| panic!("{}: prelude {prelude}: {e}", path.display()));
+            source = format!("{text}\n{source}");
+        }
         let name = path
             .strip_prefix(&root)
             .unwrap_or(path)

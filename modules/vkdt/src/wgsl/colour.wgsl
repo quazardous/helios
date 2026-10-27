@@ -4,6 +4,7 @@
 // hanika, under the BSD-2-Clause licence; its notice is in
 // modules/vkdt/LICENSE-vkdt.
 // SPDX-License-Identifier: GPL-3.0-or-later AND BSD-2-Clause
+// wgsl-prelude: ucs.wgsl
 
 // vkdt's colour: the camera matrix and the CAT16 balance (one matrix, from
 // the plan), the highlight clip, exposure, then the saturation in dt UCS
