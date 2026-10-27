@@ -951,6 +951,11 @@ impl Shell {
         &self.clip.param
     }
 
+    /// The graph's clipboard endpoint (a test pins the nodes it copies).
+    pub fn clip_graph(&self) -> &crate::clipboard::nodes::Endpoint {
+        &self.clip.graph
+    }
+
     /// Saves the interface's settings and the user's keys (when built
     /// with a place for them).
     pub fn save(&self) -> Result<(), String> {
@@ -4061,6 +4066,9 @@ impl Shell {
                 Request::Picker(p) => self.pick(p),
                 Request::Menu { at, items } => self.open_menu(at, items),
                 Request::Notify(level, text) => self.notify(level, text),
+                Request::Run(id, args, origin) => {
+                    let _ = self.run(&id, args, origin);
+                }
             }
         }
         self.set_context(&ctx);

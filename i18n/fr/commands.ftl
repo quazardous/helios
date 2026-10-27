@@ -252,6 +252,9 @@ command-network-disconnect =
 command-network-move =
     .title = Déplacer des nœuds dans la vue du graphe (`moves` : chacun `node`, `to` : [x, y])
 
+command-network-paste =
+    .title = Coller des nœuds copiés dans le réseau (`clip` : un contenu `helios.nodes` ; `parts`), renommés en cas de conflit
+
 command-network-remove =
     .title = Retirer des nœuds du réseau, avec leurs liaisons (`nodes`)
 

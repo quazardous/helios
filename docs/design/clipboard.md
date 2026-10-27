@@ -341,3 +341,14 @@ Each with the default proposed:
   paste is one undo step. Not yet: the kernel as the owner (slots in
   the vault, the node's), and the `helios_copy`, `helios_paste` and
   `helios_clipboard` MCP tools; agents use egui-pop's `clipboard.*`.
+- **2026-10-27, `helios.nodes`** (from migration step 4: renames on
+  clash). The graph view is an endpoint: a copy takes the selected
+  nodes with their live parameters, the wires between them, the wires
+  coming in and their places; a paste is `network.paste`, one workspace
+  step, renaming on a clash (`exposure` → `exposure_2`), rewriting the
+  wires and wiring the cut inputs again when their node is there. Paste
+  special's parts are the nodes and `inputs`. The network is the
+  shell's to edit, so the target answers its plan (the dry run) at once
+  and the shell applies `network.paste` at the next frame. Not yet: an
+  open composite's inner nodes, presets' values for the nodes copied,
+  and a cut (the delete is not offered).

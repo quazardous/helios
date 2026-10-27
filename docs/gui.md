@@ -291,6 +291,18 @@ network.
   them too (the desktop's commands, the workspace's live endpoint). A
   parameter's slider writes the value store as one gesture, as the
   Parameters panel does.
+- **Copy and paste (2026-10-27).** While a part of the graph has the
+  focus, Edit › Copy (Ctrl+C) copies the selected nodes
+  (`application/x-helios.nodes+json`): each with its parameters as they
+  are now, the wires between them, the wires coming in (by the names of
+  the nodes they come from) and their places; other applications get
+  their names. Edit › Paste (Ctrl+V) adds them to the workspace's
+  network as `network.paste` (`clip`, `parts`), one undoable workspace
+  step: a name the network holds already is made unique (`exposure` →
+  `exposure_2`), the wires rewritten with the new names, a wire coming
+  in wired again when the node it came from is there, the places
+  shifted. Paste special (Ctrl+Shift+V) takes some nodes only, with or
+  without the wires coming in, and previews the names given.
 - **Selection.** The editor's selection is `view/graph/selection`, the
   value the Parameters, Masks and Modules panels follow: selecting a
   node makes it the selected module, and a node selected elsewhere is

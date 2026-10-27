@@ -8,16 +8,21 @@
 //! agents' `clipboard.*`. Helios brings:
 //!
 //! - **its types**, each `application/x-helios.<type>+json` with a
-//!   readable text fallback: a parameter's value ([`param`]);
+//!   readable text fallback: a parameter's value ([`param`]), nodes of
+//!   the workspace's network ([`nodes`]);
 //! - **a sanitiser** for what leaves for other applications: the
 //!   Save-as-template rules (`helios_template::workspace::strip_for_outside`):
 //!   a local path becomes its file name, secrets and embedded data go,
 //!   and the copy's toast says so;
 //! - **endpoints**, the focused component's source and target: a
-//!   parameter's widget ([`PARAM`]);
+//!   parameter's widget ([`PARAM_ENDPOINT`]), the graph view
+//!   ([`GRAPH_ENDPOINT`]). A paste whose edit is the shell's (the
+//!   workspace's network) runs as a command at the next frame
+//!   ([`defer`]);
 //! - **one undo step per paste**: egui-pop's history group is a group of
 //!   Helios's value store (`host::HeliosHost::begin_group`).
 
+pub mod nodes;
 pub mod param;
 
 use std::rc::Rc;
@@ -39,6 +44,12 @@ pub const PARAM: FormatId = FormatId::from_static("application/x-helios.param+js
 /// The endpoint of the parameter widget with the focus (or the one a
 /// command names).
 pub const PARAM_ENDPOINT: &str = "helios.param";
+
+/// Nodes of the workspace's network, with the wires between them.
+pub const NODES: FormatId = FormatId::from_static("application/x-helios.nodes+json");
+
+/// The graph view's endpoint: its selection, the workspace's network.
+pub const GRAPH_ENDPOINT: &str = "helios.graph";
 
 /// The plugin declaring Helios's types and sanitiser.
 pub const PLUGIN: PluginId = PluginId::from_static("helios.clipboard");
@@ -67,6 +78,17 @@ impl Plugin for Types {
                 .fallbacks(|p| vec![Repr::new(TEXT, Json::String(param::text_of(p)))]),
         )
         .map_err(failed)?
+        .clip_type(
+            ClipType::new(NODES, nodes::VERSION, "nodes")
+                .fallbacks(|p| {
+                    let text = nodes::Clip::from_json(p)
+                        .map(|c| c.text())
+                        .unwrap_or_default();
+                    vec![Repr::new(TEXT, Json::String(text))]
+                })
+                .parts(nodes::parts),
+        )
+        .map_err(failed)?
         .clip_sanitiser(Sanitiser::new(SANITISER, Boundary::System, |data| {
             helios_template::workspace::strip_for_outside(data)
         }))
@@ -78,20 +100,50 @@ impl Plugin for Types {
 /// The endpoints, registered once the shell is assembled.
 pub struct Endpoints {
     pub param: Rc<param::Endpoint>,
+    pub graph: Rc<nodes::Endpoint>,
 }
 
 impl Endpoints {
     /// Registers the endpoints on the application.
     pub fn register(app: &AppHandle, values: Arc<Mutex<Store>>) -> Endpoints {
-        let param = Rc::new(param::Endpoint::new(values));
+        let param = Rc::new(param::Endpoint::new(values.clone()));
         clipboard::register(
             app,
             PARAM_ENDPOINT,
             Some(param.clone()),
             Some(param.clone()),
         );
-        Endpoints { param }
+        let graph = Rc::new(nodes::Endpoint::new(values));
+        clipboard::register(
+            app,
+            GRAPH_ENDPOINT,
+            Some(graph.clone()),
+            Some(graph.clone()),
+        );
+        Endpoints { param, graph }
     }
+}
+
+/// The widget with the focus, when it lies inside `area` (a panel's
+/// canvas whose parts take the focus themselves, a node of the graph, a
+/// row of a tree): the endpoint is bound to it this pass, so the Edit
+/// commands reach the endpoint whichever part has the focus.
+pub fn focused_within(ctx: &egui::Context, area: egui::Rect) -> Option<egui::Id> {
+    let id = ctx.memory(egui::Memory::focused)?;
+    let r = ctx.read_response(id)?;
+    area.contains(r.rect.center()).then_some(id)
+}
+
+/// Runs a command at the next frame, as whom: a paste whose edit the
+/// shell makes (the workspace's network, the image's masks). The paste
+/// answered its plan already; a failure then shows as a warning.
+pub fn defer(app: &AppHandle, command: &str, args: Json, origin: &PopOrigin) {
+    let ctx = app.egui();
+    crate::dialogs::request(
+        &ctx,
+        crate::dialogs::Request::Run(command.into(), args, crate::host::to_helios(origin)),
+    );
+    ctx.request_repaint();
 }
 
 /// An outcome as a result: a veto is a refusal with its reason.

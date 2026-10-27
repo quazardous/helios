@@ -135,6 +135,9 @@ pub enum Request {
         items: Vec<MenuItem>,
     },
     Notify(Level, helios_core::Message),
+    /// A command to run as whom (a paste whose edit is the shell's: the
+    /// workspace's network, the image's masks).
+    Run(String, serde_json::Value, helios_shell::commands::Origin),
 }
 
 fn requests_id() -> Id {

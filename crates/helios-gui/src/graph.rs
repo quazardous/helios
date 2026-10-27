@@ -650,7 +650,7 @@ pub fn place(
 }
 
 /// A name for a new node: `base`, else `base_2`, `base_3`...
-fn fresh_name(net: &NetworkDesc, base: &str) -> String {
+pub(crate) fn fresh_name(net: &NetworkDesc, base: &str) -> String {
     let mut base: String = base
         .chars()
         .map(|c| {
@@ -1059,6 +1059,14 @@ impl GraphPanel {
             if let GraphEvent::Selection(nodes) = e {
                 self.select(values, nodes);
             }
+        }
+        // The Edit commands copy the selection and paste into the
+        // network while a part of the graph has the focus.
+        if let Some(app) = &self.app
+            && let Some(id) = crate::clipboard::focused_within(&ctx, out.response.rect)
+        {
+            let selection = self.state.selection.iter().cloned().collect();
+            crate::clipboard::nodes::focus(app, selection, id);
         }
         for edit in &out.edits {
             match edit {

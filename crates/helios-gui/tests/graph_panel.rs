@@ -296,3 +296,51 @@ fn the_overview_stacks_nodes_under_their_principal_node() {
     assert!(h.query_by_label_contains("Unfold").is_some());
     std::fs::remove_dir_all(&root).unwrap();
 }
+
+/// Copied nodes paste into the network renamed on a clash, wired from
+/// the node their input came from, as one undo step.
+#[test]
+fn copied_nodes_paste_renamed_and_wired_as_one_undo_step() {
+    use egui_pop::api::clipboard::{self, CopyRequest, PasteRequest};
+    use egui_pop::model::commands::Origin as PopOrigin;
+    use helios_gui::clipboard::GRAPH_ENDPOINT;
+
+    let root = temp("paste");
+    let (mut h, _) = window(&root);
+    let app = h.state().app().handle().clone();
+    h.state().clip_graph().pin(vec!["exposure".into()]);
+    let out = clipboard::copy(&app, CopyRequest::new(GRAPH_ENDPOINT), &PopOrigin::User);
+    h.state().clip_graph().unpin();
+    assert!(out.ok(), "{out:?}");
+    let before = steps(&h);
+    // A dry run says the name it would give, and adds nothing.
+    let plan = clipboard::paste(
+        &app,
+        PasteRequest::new(GRAPH_ENDPOINT).dry_run(),
+        &PopOrigin::User,
+    );
+    let plan = plan.result().unwrap().clone().unwrap();
+    assert!(
+        plan["changes"].as_str().unwrap().contains("exposure_2"),
+        "{plan}"
+    );
+    frames(&mut h);
+    assert_eq!(steps(&h), before);
+    let out = clipboard::paste(&app, PasteRequest::new(GRAPH_ENDPOINT), &PopOrigin::User);
+    assert!(out.ok(), "{out:?}");
+    frames(&mut h);
+    let net =
+        |h: &Harness<'static, Shell>| h.state().workspace_state().unwrap().bundle.template.network;
+    let n = net(&h);
+    assert!(n.nodes.iter().any(|d| d.name == "exposure_2"), "{n:?}");
+    assert!(
+        n.connections
+            .iter()
+            .any(|c| c.from == "source" && c.to == "exposure_2" && c.input == "input"),
+        "{n:?}"
+    );
+    assert_eq!(steps(&h), before + 1, "one undo step");
+    undo(&mut h);
+    assert!(!net(&h).nodes.iter().any(|d| d.name == "exposure_2"));
+    std::fs::remove_dir_all(&root).unwrap();
+}
