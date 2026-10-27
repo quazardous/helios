@@ -1409,6 +1409,52 @@ fn fluent(key: &str, text: &str) -> String {
     format!("{key} = {}\n", v.trim())
 }
 
+/// Strips from a value leaving for another application (the system
+/// clipboard) what "Save as template" strips from a template's
+/// parameters: an absolute path becomes its file name, a value under a
+/// key naming a secret and text longer than [`DATA_LENGTH`] are emptied.
+/// Answers what went, one entry each ("a local path", "a secret",
+/// "embedded data").
+pub fn strip_for_outside(json: &mut Json) -> Vec<String> {
+    let mut out = Vec::new();
+    strip_value(json, None, &mut out);
+    out
+}
+
+fn strip_value(json: &mut Json, key: Option<&str>, out: &mut Vec<String>) {
+    match json {
+        Json::String(text) if key.is_some_and(credential) && !text.is_empty() => {
+            text.clear();
+            out.push("a secret".into());
+        }
+        Json::String(text) if absolute(text) => {
+            let name = text
+                .trim_end_matches(['/', '\\'])
+                .rsplit(['/', '\\'])
+                .next()
+                .unwrap_or_default()
+                .to_string();
+            *text = name;
+            out.push("a local path".into());
+        }
+        Json::String(text) if text.len() > DATA_LENGTH => {
+            text.clear();
+            out.push("embedded data".into());
+        }
+        Json::Array(items) => {
+            for v in items {
+                strip_value(v, key, out);
+            }
+        }
+        Json::Object(map) => {
+            for (k, v) in map.iter_mut() {
+                strip_value(v, Some(k), out);
+            }
+        }
+        _ => {}
+    }
+}
+
 /// Works out "Save as template" for a workspace as it stands: its
 /// network, layout and the parts not left out go in, under the new id
 /// and text; images and edit history never are in a workspace's files;

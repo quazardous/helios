@@ -264,6 +264,9 @@ command-param-copyPath =
 command-param-copyValue =
     .title = Copier une valeur (`path`)
 
+command-param-paste =
+    .title = Coller sur une valeur (`path` ; `dry_run` dit ce qu’il réglerait)
+
 command-param-get =
     .title = Lire une valeur (`path`)
 

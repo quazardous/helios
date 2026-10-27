@@ -126,7 +126,10 @@ enum Action {
     /// Rename a node of the Masks panel (its selected one by default) in
     /// place.
     RenameInTree(Option<String>),
-    Copy(String),
+    /// A parameter copied, its text the value as shown or the path.
+    CopyParam(String, crate::clipboard::param::Text, Origin),
+    /// The clipboard pasted onto a parameter (or only said, a dry run).
+    PasteParam(String, bool, Origin),
     SystemMenu,
     /// A command, its arguments, as whom.
     Run(String, Value, Origin),
@@ -412,6 +415,8 @@ pub struct Shell {
     /// preview setting.
     image_surface: crate::display::ImageSurfaceSwitch,
     params: Rc<RefCell<crate::params::Params>>,
+    /// The clipboard's endpoints (`crate::clipboard`).
+    clip: crate::clipboard::Endpoints,
     /// The Masks panel: the selected module's mask network as a tree.
     mask_tree: Rc<RefCell<crate::mask_tree::MaskTree>>,
     /// The Graph panel: the workspace's network in egui-pop's editor.
@@ -563,6 +568,11 @@ impl Shell {
                 values: values.clone(),
                 i18n: i18n.clone(),
             })
+            // Copy and paste: egui-pop's clipboard (its default owner,
+            // the Edit commands, the agents' `clipboard.*`), Helios's
+            // types and sanitiser over it.
+            .plugin(egui_pop::api::clipboard::ClipboardPlugin)
+            .plugin(crate::clipboard::Types)
             // egui-pop's data views (the Masks panel's tree).
             .plugin(egui_pop::views::ViewsPlugin)
             // The photo library's steps and commands (the library panels).
@@ -655,6 +665,7 @@ impl Shell {
             let _ = dialogs.set((*d).clone());
         }
         let viewport: Rc<RefCell<crate::viewport::Viewport>> = Rc::default();
+        let clip = crate::clipboard::Endpoints::register(app.handle(), values.clone());
         let preview = Rc::new(crate::preview::Preview::new(
             viewport.borrow().engine().clone(),
         ));
@@ -705,6 +716,7 @@ impl Shell {
             gpu_info: None,
             image_surface: crate::display::ImageSurfaceSwitch::default(),
             params: Rc::default(),
+            clip,
             mask_tree: Rc::default(),
             graph: Rc::default(),
             values,
@@ -931,6 +943,12 @@ impl Shell {
     /// The egui-pop application (its handle: services, menus, history).
     pub fn app(&self) -> &App {
         &self.app
+    }
+
+    /// The parameters' clipboard endpoint (a command or a test pins the
+    /// parameter it copies or pastes onto).
+    pub fn clip_param(&self) -> &crate::clipboard::param::Endpoint {
+        &self.clip.param
     }
 
     /// Saves the interface's settings and the user's keys (when built
@@ -2281,28 +2299,48 @@ impl Shell {
             CommandSpec::new("vault.previous", "Select the previous image", "Vault"),
             Box::new(|_, _| Ok(Action::Step(-1))),
         );
-        for (id, title, value) in [
-            ("param.copyPath", "Copy a value's path (`path`)", false),
-            ("param.copyValue", "Copy a value (`path`)", true),
+        // A parameter copied: the item is the parameter with its type,
+        // its text the value as shown (`+0.30 EV`) or the path; either
+        // pastes back (`param.paste`).
+        for (id, title, text) in [
+            (
+                "param.copyPath",
+                "Copy a value's path (`path`)",
+                crate::clipboard::param::Text::Path,
+            ),
+            (
+                "param.copyValue",
+                "Copy a value (`path`)",
+                crate::clipboard::param::Text::Value,
+            ),
         ] {
             let values = w.values.clone();
             add(
                 CommandSpec::new(id, title, "Values"),
-                Box::new(move |a, _| {
+                Box::new(move |a, origin| {
                     let path = string(a, "path")?;
-                    if !value {
-                        return Ok(Action::Copy(path));
+                    if lock(&values).get(&path).is_none() {
+                        return Err(format!("no value at `{path}`"));
                     }
-                    let store = lock(&values);
-                    let e = store
-                        .get(&path)
-                        .ok_or_else(|| format!("no value at `{path}`"))?;
-                    Ok(Action::Copy(
-                        helios_values::value_to_json(&e.value).to_string(),
-                    ))
+                    Ok(Action::CopyParam(path, text, origin.clone()))
                 }),
             );
         }
+        add(
+            CommandSpec::new(
+                "param.paste",
+                "Paste onto a value (`path`; `dry_run` says what it would set)",
+                "Values",
+            ),
+            Box::new(move |a, origin| {
+                let dry_run = a.get("dry_run").and_then(Value::as_bool).unwrap_or(false);
+                Ok(Action::PasteParam(
+                    string(a, "path")?,
+                    dry_run,
+                    origin.clone(),
+                ))
+            }),
+        );
         for (id, title, zoom) in [
             ("viewport.zoom.fit", "Image: fit to the view", ZoomTo::Fit),
             (
@@ -2779,6 +2817,7 @@ impl Shell {
             command(plugins::PARAM, "1", 0, "param.reset"),
             command(plugins::PARAM, "2", 0, "param.copyPath"),
             command(plugins::PARAM, "2", 1, "param.copyValue"),
+            command(plugins::PARAM, "2", 2, "param.paste"),
             // The same commands in the menu bar.
             command(MENU_FILE, "1_workspace", 0, "workspace.open"),
             // The workspace's own edits.
@@ -3791,9 +3830,36 @@ impl Shell {
                     ))
                     .map_err(|e| e.to_string())?;
             }
-            Action::Copy(text) => {
-                ctx.copy_text(text.clone());
-                self.note(Message::new("gui-copied", "copied { $text }").with("text", &text));
+            Action::CopyParam(path, text, origin) => {
+                let out = crate::clipboard::copy_param(
+                    self.app.handle(),
+                    &self.clip.param,
+                    &path,
+                    text,
+                    &to_pop(&origin),
+                )?;
+                let shown = {
+                    let store = lock(&self.values);
+                    store.get(&path).map(|e| match text {
+                        crate::clipboard::param::Text::Value => {
+                            crate::clipboard::param::shown(&e.descriptor, &e.value)
+                        }
+                        crate::clipboard::param::Text::Path => path.clone(),
+                    })
+                };
+                if let Some(t) = shown {
+                    self.note(Message::new("gui-copied", "copied { $text }").with("text", &t));
+                }
+                return Ok(out);
+            }
+            Action::PasteParam(path, dry_run, origin) => {
+                return crate::clipboard::paste_param(
+                    self.app.handle(),
+                    &self.clip.param,
+                    &path,
+                    dry_run,
+                    &to_pop(&origin),
+                );
             }
             // The workbench's steps: the panel's rules, then any plugin,
             // may refuse.

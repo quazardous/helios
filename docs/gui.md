@@ -871,7 +871,25 @@ wired port, the member's name and its value in words ("spot: opacity
 30 %", "oval: inverted"), the port in the line's hint. Each widget
 is found by its path
 (`param:<path>`), is a slider to assistive technology, and its context
-menu resets, copies the path or copies the value.
+menu resets, copies the path, copies the value or pastes.
+
+**Copy and paste (2026-10-27).** Through egui-pop's clipboard (its
+ADR 0015; Helios's side is
+[design/clipboard.md](design/clipboard.md)): while a parameter's widget
+has the focus, Edit › Copy and Paste (Ctrl+C, Ctrl+V) copy it and paste
+onto it, as `param.copyValue`, `param.copyPath` and `param.paste` do
+for a parameter they name. A copy is the parameter with its type
+(`application/x-helios.param+json`); other applications get the value
+as shown (`+0.30 EV`), or the path for Copy path, with local paths,
+secrets and embedded data left out (the toast says so). Either pastes
+back: onto a parameter of the same kind (an integer and a number onto
+each other, rounded), clamped to its range; text read with the
+parameter's type (a value as shown, `on`/`off`, a choice, a list in
+JSON, another parameter's path for its value). Anything else is
+refused with the reason and Paste is greyed. A paste is one undo step
+("Paste Exposure"); `param.paste {dry_run: true}` says what it would
+set. Agents copy and paste in their own slot: they never read what the
+user copied.
 
 ![The Parameters panel, the exposure moved by an agent](gui/params-helios-dark.png)
 

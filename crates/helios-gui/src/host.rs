@@ -23,8 +23,10 @@
 //!   the host, which answers from Helios's value store
 //!   ([`HeliosHost::with_values`]): its steps, their labels ("Undo drag
 //!   exposure"), and an undo or redo as a step of its own, which the
-//!   vault saves as a version (`persist`). The interface settings keep
-//!   their own undo, in the settings window;
+//!   vault saves as a version (`persist`). The history groups egui-pop
+//!   opens around a paste or a cut are groups of that store too, so a
+//!   paste is one of its steps. The interface settings keep their own
+//!   undo, in the settings window;
 //! - **the waker**: a thread follows the bus and asks for a frame when an
 //!   event comes from elsewhere (a render done, a node's status);
 //! - **the layout's document**: each workspace keeps its own
@@ -37,6 +39,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use egui_pop::api::host::{self, Dispatch, Event, Host, Reply, Resolver, Seq, Waker};
 use egui_pop::core::binding::SharedStore;
 use egui_pop::model::commands::Origin as PopOrigin;
+use egui_pop::model::values::GestureId as PopGestureId;
 use egui_pop::model::when::WhenContext;
 use helios_core::Bus;
 use helios_shell::commands::{Origin, Registry};
@@ -325,6 +328,25 @@ impl Host for HeliosHost {
         match self.values() {
             Some(mut v) => v.redo(&to_helios(origin)).map_err(|e| e.to_string()),
             None => Ok(None),
+        }
+    }
+
+    // A paste or a cut is one step of Helios's values, the steps undo
+    // walks: egui-pop's group is a group of that store, and a target's
+    // writes carry it (`helios_values::GestureId` of the same number).
+    fn begin_group(&mut self, origin: &PopOrigin, label: &str) -> Option<PopGestureId> {
+        let g = self.values()?.begin_group(to_helios(origin), label);
+        Some(PopGestureId(g.0))
+    }
+
+    fn end_group(&mut self, group: PopGestureId, keep: bool) {
+        if let Some(mut v) = self.values() {
+            let g = helios_values::GestureId(group.0);
+            if keep {
+                v.end(g);
+            } else {
+                v.cancel(g);
+            }
         }
     }
 }

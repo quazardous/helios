@@ -25,7 +25,9 @@
 //!   outside the soft range.
 //! - The widget's id comes from the path, and so does its picture's name
 //!   (`param:<path>`); the context menu resets, copies the path or the
-//!   value: commands, like everything else.
+//!   value, and pastes: commands, like everything else. While a widget
+//!   has the focus, Edit › Copy and Paste (Ctrl+C, Ctrl+V) copy its
+//!   parameter and paste onto it (`crate::clipboard::param`).
 
 use std::collections::BTreeMap;
 use std::sync::Mutex;
@@ -354,6 +356,12 @@ impl Params {
                     }
                 };
                 crate::name_rect(ui.ctx(), &format!("param:{path}"), response.rect);
+                if let Some(app) = &self.app
+                    && response.has_focus()
+                {
+                    // The Edit commands copy it and paste onto it.
+                    crate::clipboard::param::focus(app, path, response.id);
+                }
                 if let Some(app) = &self.app {
                     egui_pop::api::menus::context_menu_with(
                         menu_on.as_ref().unwrap_or(&response),

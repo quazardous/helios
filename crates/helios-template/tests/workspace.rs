@@ -710,3 +710,41 @@ fn a_key_taken_away_is_kept_as_a_removal_and_imported_as_one() {
     assert_eq!(merged.state.bundle.template.tools.keymap.len(), 3);
     std::fs::remove_dir_all(&root).unwrap();
 }
+
+/// What leaves for another application (the system clipboard) loses
+/// what "Save as template" strips: paths become file names, secrets and
+/// embedded data go, each said.
+#[test]
+fn strip_for_outside_keeps_file_names_and_drops_secrets_and_data() {
+    let mut v = json!({
+        "lut": "/srv/luts/film/lut.cube",
+        "windows": "C:\\Looks\\warm.cube",
+        "api_token": "abc",
+        "blob": "x".repeat(workspace::DATA_LENGTH + 1),
+        "list": ["~/notes.txt", "plain"],
+        "amount": 0.5,
+    });
+    let what = workspace::strip_for_outside(&mut v);
+    assert_eq!(v["lut"], "lut.cube");
+    assert_eq!(v["windows"], "warm.cube");
+    assert_eq!(v["api_token"], "");
+    assert_eq!(v["blob"], "");
+    assert_eq!(v["list"], json!(["notes.txt", "plain"]));
+    assert_eq!(v["amount"], 0.5);
+    let mut sorted = what.clone();
+    sorted.sort();
+    assert_eq!(
+        sorted,
+        [
+            "a local path",
+            "a local path",
+            "a local path",
+            "a secret",
+            "embedded data"
+        ]
+    );
+    // A bare text is checked too: it is what a text fallback holds.
+    let mut text = json!("/home/someone/lut.cube");
+    assert_eq!(workspace::strip_for_outside(&mut text), ["a local path"]);
+    assert_eq!(text, "lut.cube");
+}

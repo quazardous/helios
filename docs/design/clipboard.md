@@ -3,8 +3,8 @@
 Status: **decided** (2026-10-21): the owner accepted this note with the
 default of every open question; building follows its steps. Proposed on
 2026-10-18. The owner accepted the analysis's direction: an internal clipboard versus the system one, and
-hooks that process and transform what is copied and pasted. Nothing is
-built. The generic part (the contract between kernel and interface,
+hooks that process and transform what is copied and pasted. Building
+started on 2026-10-27 (see "Built" at the end). The generic part (the contract between kernel and interface,
 formats and negotiation, the copy and paste steps, sanitisers and
 transforms, the Edit menu and keys, a survey of egui, of the clipboard
 crates and of VS Code, browsers, GIMP, Krita, Blender, Lightroom and
@@ -325,3 +325,19 @@ Each with the default proposed:
 9. **Copy of a value to the system clipboard as JSON (today) or as a
    readable form ("+0.30 EV")?** Readable text by default; JSON stays
    in the private payload.
+
+## Built
+
+- **2026-10-27, `helios.param`** (migration step 1, with bug 5 fixed:
+  `param.copyPath` and `param.copyValue` copied text that could never
+  be pasted back). egui-pop's clipboard is connected with its default
+  owner (`LocalClipboard`, in memory); Helios declares the type, its
+  text fallback (the value as shown, `+0.30 EV`, or the path) and the
+  `helios.outside` sanitiser, which applies the Save-as-template rules
+  (`helios_template::workspace::strip_for_outside`) to what goes to the
+  system clipboard. The focused parameter widget is an endpoint;
+  `param.paste` pastes onto a named one (with a dry run). egui-pop's
+  history group around a paste is a group of Helios's value store, so a
+  paste is one undo step. Not yet: the kernel as the owner (slots in
+  the vault, the node's), and the `helios_copy`, `helios_paste` and
+  `helios_clipboard` MCP tools; agents use egui-pop's `clipboard.*`.
