@@ -716,6 +716,16 @@ param-vkdt-contrast-thrs.description 01eff23808ea86a3
 param-vkdt-contrast-thrs.label e5ca9860dbf8e704
 param-vkdt-exposure-exposure.description d00ef9c3a0f17392
 param-vkdt-exposure-exposure.label f30ba140f0818436
+param-vkdt-filmcurv-bias.description 1b8711a3423dcfd7
+param-vkdt-filmcurv-bias.label b8583cbdb1d58272
+param-vkdt-filmcurv-colour-choice-hsl cc3bdc680d5f8306
+param-vkdt-filmcurv-colour-choice-per-channel e4b57af5fc3c3bfe
+param-vkdt-filmcurv-colour.description 772860c9ef23c78b
+param-vkdt-filmcurv-colour.label 23beaf75e808f8dd
+param-vkdt-filmcurv-contrast.description 62e10ce6d95b7245
+param-vkdt-filmcurv-contrast.label 2c7312508b515193
+param-vkdt-filmcurv-light.description 52b8d0a4128cc687
+param-vkdt-filmcurv-light.label 1a075a58dac3f3b7
 param-vkdt-grade-gain.description 5c68e9fbc41d90e8
 param-vkdt-grade-gain.label 37d9993b326c3f94
 param-vkdt-grade-gamma.description f49ed222279f2ca9

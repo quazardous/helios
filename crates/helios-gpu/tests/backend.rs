@@ -333,6 +333,44 @@ fn vkdt_grade_on_the_gpu_matches_its_cpu_reference() {
 }
 
 #[test]
+fn vkdt_filmcurv_on_the_gpu_matches_its_cpu_reference() {
+    let _gpu = helios_testkit::gpu_lock();
+    let Some(gpu) = gpu() else { return };
+    // Scene-referred light: past 1 too.
+    let input = helios_testkit::noise(Region::sized(70, 50), 4, 17);
+    let input = helios_core::Image::new(
+        input.region(),
+        4,
+        input.data().iter().map(|v| v * 3.0).collect(),
+    );
+    let filmcurv = ModuleRef::new(helios_module_vkdt::VkdtFilmcurv);
+    for (light, contrast, bias, colour) in [
+        (3.0, 1.2, 0.0, "hsl"),
+        (1.5, 0.8, 0.01, "hsl"),
+        (5.0, 1.6, 0.005, "per_channel"),
+    ] {
+        let params = Params::new()
+            .with("light", Value::Float(light))
+            .with("contrast", Value::Float(contrast))
+            .with("bias", Value::Float(bias))
+            .with("colour", Value::Choice(colour.into()));
+        let c = check(
+            &gpu,
+            &filmcurv,
+            &params,
+            &Context::new(),
+            &input,
+            input.region(),
+        )
+        .unwrap();
+        assert!(
+            c.max_abs < 1e-4,
+            "filmcurv {light} {contrast} {colour}: {c:?}"
+        );
+    }
+}
+
+#[test]
 fn a_step_over_4_mpx_matches_the_cpu() {
     let _gpu = helios_testkit::gpu_lock();
     let Some(gpu) = gpu() else { return };

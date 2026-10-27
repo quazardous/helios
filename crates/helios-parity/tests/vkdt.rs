@@ -243,3 +243,56 @@ fn ported_vkdt_grade_matches_vkdt() {
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// vkdt's filmcurv writes `rgba:f16`: the difference to Helios's f32 is
+/// the half floats' rounding, well within the thresholds.
+#[test]
+fn ported_vkdt_filmcurv_matches_vkdt() {
+    let vkdt = match Vkdt::find() {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("skipped: {e}");
+            return;
+        }
+    };
+    // Scene-referred: the chart's light spread up to about 2.
+    let chart = chart();
+    let input = Image::new(
+        chart.region(),
+        4,
+        chart.data().iter().map(|v| v * 2.5).collect(),
+    );
+    let dir = std::env::temp_dir().join(format!(
+        "helios-parity-vkdt-filmcurv-{}",
+        std::process::id()
+    ));
+    // vkdt's colour modes: 1 per channel, 3 hsl.
+    let cases = [
+        (3.0, 1.2, 0.0, "hsl", 3),
+        (1.5, 0.8, 0.01, "hsl", 3),
+        (5.0, 1.6, 0.005, "per_channel", 1),
+    ];
+    for (i, (light, contrast, bias, colour, mode)) in cases.into_iter().enumerate() {
+        let params = Params::new()
+            .with("light", Value::Float(light))
+            .with("contrast", Value::Float(contrast))
+            .with("bias", Value::Float(bias))
+            .with("colour", Value::Choice(colour.into()));
+        let cfg = [
+            ("light", light.to_string()),
+            ("contrast", contrast.to_string()),
+            ("bias", bias.to_string()),
+            ("colour", mode.to_string()),
+        ];
+        point_case(
+            &vkdt,
+            ("filmcurv", ModuleRef::new(helios_module_vkdt::VkdtFilmcurv)),
+            params,
+            &cfg,
+            &input,
+            false,
+            &dir.join(i.to_string()),
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

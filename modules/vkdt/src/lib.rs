@@ -24,16 +24,20 @@
 //!   `combine`), each kernel a module of [`guided`] with its GPU variant.
 //! - `vkdt_grade`: lift, gamma, gain and offset, on all tones or by zone
 //!   ([`grade`]).
+//! - `vkdt_filmcurv`: the Weibull film curve, its colour rebuilt per
+//!   channel or by the DNG hue-preserving step ([`filmcurv`]).
 //!
 //! vkdt samples its textures with mirrored repeat at the image's edges;
 //! here the framework replicates edge pixels, so the outer two pixels of
 //! `vkdt_usm` may differ from vkdt's.
 
 pub mod contrast;
+pub mod filmcurv;
 pub mod grade;
 pub mod guided;
 
 pub use contrast::VkdtContrast;
+pub use filmcurv::VkdtFilmcurv;
 pub use grade::VkdtGrade;
 
 use helios_core::{

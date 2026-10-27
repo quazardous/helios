@@ -366,6 +366,26 @@ param-vkdt-exposure-exposure =
     .description = la correction d’exposition, en diaphs
     .label = exposition
 
+param-vkdt-filmcurv-bias =
+    .description = ajouté d’abord à chaque canal, pour relever les noirs
+    .label = biais
+
+param-vkdt-filmcurv-colour =
+    .description = comment la couleur est reconstruite après la courbe
+    .label = couleur
+
+param-vkdt-filmcurv-colour-choice-hsl = hsl
+
+param-vkdt-filmcurv-colour-choice-per-channel = par canal
+
+param-vkdt-filmcurv-contrast =
+    .description = le contraste : le k de la courbe de Weibull
+    .label = contraste
+
+param-vkdt-filmcurv-light =
+    .description = la luminosité d’ensemble : le 1 / lambda de la courbe de Weibull
+    .label = lumière
+
 param-vkdt-grade-gain =
     .description = multiplication, appliquée en premier : rouge, vert, bleu, et les trois
     .label = gain

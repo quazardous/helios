@@ -127,3 +127,4 @@ and against each other by the backend contract tests.
 | `usm` | `vkdt_usm` | all | vkdt mirrors at the edges, Helios replicates |
 | `contrast` | `vkdt_contrast` | all (a composite of vkdt's kernels) | |
 | `grade` | `vkdt_grade` | lift, gamma, gain, offset; classic and zoned log modes | |
+| `filmcurv` | `vkdt_filmcurv` | the Weibull curve; colour modes hsl (the default) and per channel | colour modes darktable UCS, Munsell, AgX and lum ratio; the `dspy` curve plot |
