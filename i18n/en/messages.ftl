@@ -421,7 +421,7 @@ gui-pointer-choice-close = Close the pointer profile notice
 
 gui-pointer-choice-darktable = Use darktable's
 
-gui-pointer-choice-keep = Keep Lightroom-style
+gui-pointer-choice-keep = Keep Photoshop-style
 
 gui-pointer-choice-text = Use darktable's mouse and wheel habits: the wheel changes the slider under the pointer and zooms the image. You can change this later in Settings › Input.
 

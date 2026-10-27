@@ -2,7 +2,7 @@
 //! windowing system sends them), never by widget calls, checking the
 //! interface's grammar (docs/gui.md) where panels meet:
 //!
-//! - Helios starts on Lightroom Classic's pointer profile: the wheel over a slider
+//! - Helios starts on Photoshop's pointer profile: the wheel over a slider
 //!   scrolls the panel and the slider takes it only once focused (a
 //!   click); on darktable's profile, once chosen, the wheel over the
 //!   image zooms and over a slider changes the value (Ctrl+Alt: the panel
@@ -278,7 +278,7 @@ fn darktable_s_wheel_over_a_slider_changes_it_and_ctrl_alt_leaves_it() {
     assert_eq!(f(&h, EV), up, "Ctrl+Alt and the wheel changed the value");
 }
 
-/// Helios's default profile (Lightroom Classic's), nothing saved: scrolling past
+/// Helios's default profile (Photoshop's), nothing saved: scrolling past
 /// sliders never changes a value.
 #[test]
 fn the_wheel_over_a_slider_scrolls_the_panel_by_default_and_never_changes_the_value() {
@@ -453,7 +453,7 @@ fn a_pan_that_ends_over_the_parameters_moves_only_the_view() {
     let to = ev.center();
     h.hover_at(from);
     h.step();
-    // Lightroom Classic's drag pans (its middle button is unbound).
+    // Photoshop's drag pans, as its Hand tool does.
     button(&mut h, PointerButton::Primary, from, true, Modifiers::NONE);
     h.step();
     for i in 1..=8 {
@@ -740,7 +740,7 @@ fn the_first_run_offers_darktable_s_profile_once() {
 #[test]
 fn keeping_lightroom_s_habits_or_closing_the_notice_is_remembered() {
     for (button, name) in [
-        ("Keep Lightroom-style", "keep"),
+        ("Keep Photoshop-style", "keep"),
         ("Close the pointer profile notice", "close"),
     ] {
         let dir = temp(name);

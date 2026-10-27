@@ -551,7 +551,7 @@ impl Shell {
             .themes(themes.clone())
             .theme(crate::theme::ThemeSpec::new(crate::theme::DEFAULT))
             .plugins(DefaultPlugins)
-            // Lightroom's habits by default: the wheel scrolls the panel
+            // Photoshop's habits by default: the wheel over a slider scrolls the panel
             // and a slider takes it once clicked or focused (darktable's
             // pitfall of values changed by a scroll). A saved choice is
             // kept; the first run offers darktable's profile

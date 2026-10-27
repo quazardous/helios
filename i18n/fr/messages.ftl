@@ -341,7 +341,7 @@ gui-pointer-choice-close = Fermer l’avis du profil de pointeur
 
 gui-pointer-choice-darktable = Utiliser ceux de darktable
 
-gui-pointer-choice-keep = Garder le style Lightroom
+gui-pointer-choice-keep = Garder le style Photoshop
 
 gui-pointer-choice-text = Reprendre les habitudes de souris et de molette de darktable : la molette change le curseur sous le pointeur et zoome l’image. Ce choix se change plus tard dans les Réglages (profil de pointeur).
 

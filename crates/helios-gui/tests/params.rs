@@ -207,7 +207,7 @@ fn escape_gives_a_drag_up_without_a_trace() {
     assert!(h.state().values.lock().unwrap().undo_steps().is_empty());
 }
 
-/// On Helios's default pointer profile (Lightroom Classic's), the wheel scrolls
+/// On Helios's default pointer profile (Photoshop's), the wheel scrolls
 /// past a slider: it steps one only once focused (darktable's profile
 /// and its Alt are in `tests/input.rs`).
 #[test]
@@ -327,7 +327,7 @@ fn a_change_by_an_agent_shows_and_says_who() {
 #[test]
 fn keys_step_enter_types_and_double_click_resets() {
     let mut h = harness();
-    // darktable's profile, where Shift is coarse (Lightroom Classic's makes a Shift drag fine).
+    // darktable's profile, where Shift is coarse (Photoshop's makes it coarse too, and Alt fine).
     egui_pop::api::pointer::set_profile(h.state().app().handle(), "darktable").unwrap();
     h.run();
     let r = h.state().target_rect(&format!("param:{EV}")).unwrap();

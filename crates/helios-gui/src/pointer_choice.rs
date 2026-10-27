@@ -1,7 +1,7 @@
 //! The pointer profile Helios starts with, and the first run's offer of
 //! darktable's.
 //!
-//! Helios starts on Lightroom Classic's profile: the wheel
+//! Helios starts on Photoshop's profile: the wheel over a slider
 //! scrolls the panel and a slider takes it only once clicked or focused,
 //! so scrolling past sliders never changes a value (darktable's pitfall
 //! 7, `docs/darktable-pitfalls/ui-platforms.md`). A profile the user
@@ -9,7 +9,7 @@
 //!
 //! The first time the desktop starts with no profile saved, a small
 //! notice at the bottom of the window asks "Coming from darktable?": one
-//! button sets darktable's profile, the other keeps Lightroom's habits,
+//! button sets darktable's profile, the other keeps Photoshop's habits,
 //! and the close button dismisses it. It never blocks the window, and
 //! whatever the answer it is remembered with the interface's settings
 //! ([`ASKED`]), so it shows once. Only the desktop offers it
@@ -25,7 +25,7 @@ use egui_pop::model::values::{Change, Descriptor, Set, Value};
 use helios_core::Message;
 
 /// The pointer profile by default (egui-pop's `input.pointer_profile`).
-pub const DEFAULT_PROFILE: &str = "lightroom";
+pub const DEFAULT_PROFILE: &str = "photoshop";
 
 /// darktable's profile, faithful to darktable.
 pub const DARKTABLE_PROFILE: &str = "darktable";
@@ -114,7 +114,7 @@ pub fn body(ui: &mut egui::Ui, app: &AppHandle) {
     );
     let keep = crate::i18n::text(
         ctx,
-        Message::new("gui-pointer-choice-keep", "Keep Lightroom-style"),
+        Message::new("gui-pointer-choice-keep", "Keep Photoshop-style"),
     );
     let close = crate::i18n::text(
         ctx,
