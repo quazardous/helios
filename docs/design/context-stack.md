@@ -353,7 +353,12 @@ The owner accepted the proposed answers:
 1. `helios-core` may depend on `egui-pop-model` (no egui, MIT or Apache)
    and shares the pure machine.
 2. The stack lives in the vault, one document per workspace, written
-   inside each transition (survival).
+   inside each transition (survival). **Amended (2026-10-27):** the stack
+   stays where it was built, in egui-pop's `LocalContexts` document in the
+   configuration directory (`<config>/ui/workspaces/<key>/context`). Where
+   a desktop is (its place and modes) is that machine's view state; the
+   vault keeps the edits. A node-side owner (`ContextService`) waits until
+   a desktop follows a node.
 3. The desktop will serve an inspect and control endpoint, so MCP
    reaches it as it reaches a node (its own piece of work).
 4. `context.request` is available in every build, like the other agent
