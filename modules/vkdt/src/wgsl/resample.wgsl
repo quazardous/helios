@@ -1,3 +1,9 @@
+// Ported from vkdt (https://github.com/hanatos/vkdt, commit 0e0d098):
+// src/pipe/modules/shared/resample.comp, src/pipe/modules/shared.glsl. vkdt:
+// copyright 2019 johannes hanika, under the BSD-2-Clause licence; its notice is
+// in modules/vkdt/LICENSE-vkdt.
+// SPDX-License-Identifier: GPL-3.0-or-later AND BSD-2-Clause
+
 // vkdt's resample (shared/resample.comp, sample_catmull_rom in
 // shared.glsl): upsampling by plan[0].x (a power of two) with a
 // Catmull-Rom kernel over 4x4 input pixels.

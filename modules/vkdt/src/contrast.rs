@@ -1,3 +1,9 @@
+// Ported from vkdt (https://github.com/hanatos/vkdt, commit 0e0d098):
+// src/pipe/modules/contrast/main.c, src/pipe/modules/contrast/combine.comp,
+// src/pipe/modules/shared.glsl. vkdt: copyright 2019 johannes hanika, under the
+// BSD-2-Clause licence; its notice is in modules/vkdt/LICENSE-vkdt.
+// SPDX-License-Identifier: GPL-3.0-or-later AND BSD-2-Clause
+
 //! vkdt's `contrast`: local contrast from a guided filter. The first
 //! multi-kernel module ported: it declares the network vkdt's
 //! `create_nodes` builds (a guided filter on the luminance, its blurs a

@@ -1,3 +1,9 @@
+// Ported from vkdt (https://github.com/hanatos/vkdt, commit 0e0d098):
+// src/pipe/modules/shared/blur.comp, src/pipe/modules/shared.glsl. vkdt:
+// copyright 2019 johannes hanika, under the BSD-2-Clause licence; its notice is
+// in modules/vkdt/LICENSE-vkdt.
+// SPDX-License-Identifier: GPL-3.0-or-later AND BSD-2-Clause
+
 // vkdt's blur (shared/blur.comp): the 5x5 a-trous kernel over two
 // channels, sampled bilinearly; at half the resolution when plan[0].x is 1
 // (output pixel o centred at input position 2 o + 0.5).

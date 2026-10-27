@@ -3,7 +3,9 @@ name = "helios-module-vkdt"
 description = "Modules ported from vkdt (exposure, unsharp mask), checked against vkdt-cli"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
+# GPLv3 for Helios's code, BSD-2-Clause for what is ported from vkdt
+# (its notice: LICENSE-vkdt)
+license = "GPL-3.0-or-later AND BSD-2-Clause"
 repository.workspace = true
 
 [dependencies]

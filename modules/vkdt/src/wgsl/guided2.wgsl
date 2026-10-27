@@ -1,3 +1,8 @@
+// Ported from vkdt (https://github.com/hanatos/vkdt, commit 0e0d098):
+// src/pipe/modules/shared/guided2.comp. vkdt: copyright 2019 johannes hanika,
+// under the BSD-2-Clause licence; its notice is in modules/vkdt/LICENSE-vkdt.
+// SPDX-License-Identifier: GPL-3.0-or-later AND BSD-2-Clause
+
 // vkdt's guided2 (shared/guided2.comp): the linear model (a, b) from the
 // blurred (I, I*I). plan[0].x: edges^2 / 1000.
 

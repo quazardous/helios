@@ -1,3 +1,8 @@
+// Ported from vkdt (https://github.com/hanatos/vkdt, commit 0e0d098):
+// src/pipe/modules/exposure/main.comp. vkdt: copyright 2019 johannes hanika,
+// under the BSD-2-Clause licence; its notice is in modules/vkdt/LICENSE-vkdt.
+// SPDX-License-Identifier: GPL-3.0-or-later AND BSD-2-Clause
+
 // vkdt's exposure: rgb * 2^ev, alpha set to 1 (vkdt's main.comp).
 
 @group(0) @binding(0) var<storage, read> input: array<f32>;
