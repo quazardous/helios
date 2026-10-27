@@ -24,6 +24,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.31.0] - 2026-10-27
+
+### Added
+
+- vkdt's colour module (`vkdt_colour`): the camera's matrix, white balance
+  towards the camera's white (as shot, or set by hand), exposure, saturation
+  and highlight clipping. A chain using it leaves out Helios's own white
+  balance, since vkdt balances here. It runs on the GPU, and the nightly
+  check compares it with vkdt's own render.
+- vkdt's film curve (`vkdt_filmcurv`): a Weibull tone curve that compresses
+  scene light for display, its colour kept by vkdt's default hue-preserving
+  step or applied per channel. It runs on the GPU, and the nightly check
+  compares it with vkdt's own render.
+- vkdt's colour grading (`vkdt_grade`): lift, gamma, gain and offset per
+  channel, applied to all tones alike or weighted by zone (shadows,
+  midtones, highlights). It runs on the GPU, and the nightly check compares
+  it with vkdt's own render.
+
+### Fixed
+
+- The modules ported from vkdt now carry vkdt's copyright notice and its
+  BSD-2-Clause licence, shipped with the source, and each ported file names
+  the vkdt sources it comes from.
+
 ## [0.30.1] - 2026-10-27
 
 ### Fixed

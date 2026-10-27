@@ -11,7 +11,7 @@ services = ["device"]
 activation = ["onService:device"]
 
 [compat]
-helios = ">=0.30.0, <0.31.0"
+helios = ">=0.31.0, <0.32.0"
 interfaces = { protocol = 1, device = 1 }
 
 [settings.gphoto2]
