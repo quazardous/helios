@@ -1,7 +1,7 @@
 //! The pointer profile Helios starts with, and the first run's offer of
 //! darktable's.
 //!
-//! Helios starts on Adobe's profile (Lightroom's habits): the wheel
+//! Helios starts on Lightroom Classic's profile: the wheel
 //! scrolls the panel and a slider takes it only once clicked or focused,
 //! so scrolling past sliders never changes a value (darktable's pitfall
 //! 7, `docs/darktable-pitfalls/ui-platforms.md`). A profile the user
@@ -25,7 +25,7 @@ use egui_pop::model::values::{Change, Descriptor, Set, Value};
 use helios_core::Message;
 
 /// The pointer profile by default (egui-pop's `input.pointer_profile`).
-pub const DEFAULT_PROFILE: &str = "adobe";
+pub const DEFAULT_PROFILE: &str = "lightroom";
 
 /// darktable's profile, faithful to darktable.
 pub const DARKTABLE_PROFILE: &str = "darktable";

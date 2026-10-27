@@ -229,13 +229,13 @@ fn each_shape_kind_is_created_in_the_mask_at_the_view_s_centre() {
     assert!(steps(&h).is_empty(), "{:?}", steps(&h));
 }
 
-/// Adobe's pointer profile toggles fit and 100 % on a click on the
+/// Lightroom Classic's pointer profile toggles fit and 100 % on a click on the
 /// image, but not on a click the mask editor takes (a path's points, a
 /// shape's edge): the view stays while a path is drawn.
 #[test]
 fn a_click_the_mask_editor_takes_leaves_the_view() {
     let mut h = harness_at(1.0);
-    egui_pop::api::pointer::set_profile(h.state().app().handle(), "adobe").unwrap();
+    egui_pop::api::pointer::set_profile(h.state().app().handle(), "lightroom").unwrap();
     h.step();
     h.step();
     run(&mut h, "mask.add.path", json!(null));
@@ -263,7 +263,7 @@ fn a_click_the_mask_editor_takes_leaves_the_view() {
         .left_top()
         + vec2(30.0, 30.0);
     click(&mut h, away);
-    assert!(mapping(&h).zoom != m.zoom, "Adobe's click did nothing");
+    assert!(mapping(&h).zoom != m.zoom, "Lightroom's click did nothing");
 }
 
 #[test]

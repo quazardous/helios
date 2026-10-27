@@ -825,10 +825,13 @@ bar's end when the module declares a picker (its click publishes
 gesture (one undo step; an agent's write meanwhile is refused; Escape
 gives it up and leaves no trace), the arrows step, a double click
 resets; the finer and coarser modifiers of a drag and of the arrows are
-the pointer profile's (Adobe's: Shift finer, Ctrl coarser; darktable's:
+the pointer profile's (Lightroom Classic's: a Shift drag finer and no
+coarser drag, Alt with the arrows finer and Shift coarser; darktable's:
 Ctrl finer, Shift coarser), and the slider's tooltip says them. The wheel follows egui-pop's pointer
-profile, Adobe's by default (decided 2026-10-22, in place of darktable's
-decided on 2026-10-21): the wheel scrolls the panel and a slider takes
+profile, Lightroom Classic's by default (decided 2026-10-22 as egui-pop's
+Adobe profile, in place of darktable's decided on 2026-10-21; egui-pop
+split Adobe's into Photoshop's and Lightroom Classic's, and still reads
+a saved `adobe` as `lightroom`): the wheel scrolls the panel and a slider takes
 it only once it has focus (a click, the keyboard), so scrolling past
 sliders never changes a value (the rule decided on 2026-10-12, and
 darktable's pitfall 7). A profile the user saved is kept. The first run
@@ -915,13 +918,13 @@ and the colour (`helios-gui/src/viewport.rs`).
   image pixel on one screen pixel at any window scale. A drag is one
   gesture (an agent's write meanwhile is refused); none of it is an undo
   step nor saves the edit.
-- **Gestures** are egui-pop's, from its pointer profile (Adobe's by
-  default since 2026-10-22, darktable's offered at the first run; the
-  user picks another in the settings). On Adobe's, a drag (the middle
-  button anywhere, or Space and drag) pans, the wheel pans (Shift:
-  sideways), Ctrl or Alt and the wheel zoom around the pointer, a click
+- **Gestures** are egui-pop's, from its pointer profile (Lightroom
+  Classic's by default since 2026-10-22, darktable's offered at the
+  first run; the user picks another in the settings). On Lightroom
+  Classic's, a drag (or Space and drag) pans, the plain wheel leaves the
+  image alone, Ctrl and the wheel zoom around the pointer, a click
   toggles fit and 100 % (not a click the mask editor takes: a path's
-  points, a shape's edge). On darktable's, a drag
+  points, a shape's edge), and a double click leaves the view. On darktable's, a drag
   pans and Escape puts it back, the wheel zooms around the pointer and
   stops at 100 % when it crosses it (Ctrl: without stops; Shift and the
   wheel pan), a middle click cycles 100 %, 200 % and fit, a double click

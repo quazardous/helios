@@ -581,7 +581,7 @@ struct Snap {
     constraints: BTreeMap<(String, u32), Constraint>,
     /// A primary click this frame is the editor's (a path point, a
     /// shape's edge or a handle): the pointer profile's click on the
-    /// image (Adobe's fit or 100 %) leaves the view alone.
+    /// image (Lightroom Classic's fit or 100 %) leaves the view alone.
     claims_click: bool,
 }
 
@@ -866,7 +866,7 @@ impl Masks {
             paint_draft(painter, m, &faint.borrow());
         }));
         // A click the editor takes is not also the profile's view
-        // action (Adobe's click toggles fit and 100 %): drawing a path
+        // action (Lightroom Classic's click toggles fit and 100 %): drawing a path
         // or selecting a shape keeps the view where it is.
         let snap = self.snap.clone();
         hooks.before_view = Some(Box::new(move |change: &ViewChange, _m: &Mapping| {

@@ -2,7 +2,7 @@
 //! windowing system sends them), never by widget calls, checking the
 //! interface's grammar (docs/gui.md) where panels meet:
 //!
-//! - Helios starts on Adobe's pointer profile: the wheel over a slider
+//! - Helios starts on Lightroom Classic's pointer profile: the wheel over a slider
 //!   scrolls the panel and the slider takes it only once focused (a
 //!   click); on darktable's profile, once chosen, the wheel over the
 //!   image zooms and over a slider changes the value (Ctrl+Alt: the panel
@@ -278,7 +278,7 @@ fn darktable_s_wheel_over_a_slider_changes_it_and_ctrl_alt_leaves_it() {
     assert_eq!(f(&h, EV), up, "Ctrl+Alt and the wheel changed the value");
 }
 
-/// Helios's default profile (Adobe's), nothing saved: scrolling past
+/// Helios's default profile (Lightroom Classic's), nothing saved: scrolling past
 /// sliders never changes a value.
 #[test]
 fn the_wheel_over_a_slider_scrolls_the_panel_by_default_and_never_changes_the_value() {
@@ -453,7 +453,8 @@ fn a_pan_that_ends_over_the_parameters_moves_only_the_view() {
     let to = ev.center();
     h.hover_at(from);
     h.step();
-    button(&mut h, PointerButton::Middle, from, true, Modifiers::NONE);
+    // Lightroom Classic's drag pans (its middle button is unbound).
+    button(&mut h, PointerButton::Primary, from, true, Modifiers::NONE);
     h.step();
     for i in 1..=8 {
         h.hover_at(from + (to - from) * (i as f32 / 8.0));
@@ -467,7 +468,7 @@ fn a_pan_that_ends_over_the_parameters_moves_only_the_view() {
         modifiers: Modifiers::NONE,
     });
     h.step();
-    button(&mut h, PointerButton::Middle, to, false, Modifiers::NONE);
+    button(&mut h, PointerButton::Primary, to, false, Modifiers::NONE);
     settle(&mut h);
     assert!((f(&h, CENTER_X), f(&h, CENTER_Y)) != (cx, cy), "no pan");
     assert_eq!(f(&h, EV), 0.0, "the pan changed a parameter");
@@ -480,7 +481,7 @@ fn a_pan_that_ends_over_the_parameters_moves_only_the_view() {
 fn a_double_click_on_the_image_set_to_fit_fits_and_resets_nothing() {
     let mut h = harness();
     // darktable's profile, whose plain click on the image does nothing:
-    // Adobe's toggles fit and 100 % on each click of the pair.
+    // Lightroom Classic's toggles fit and 100 % on a click.
     profile(&mut h, "darktable");
     setting(&mut h, "input.image_double_click", "fit");
     let ev = slider(&h, EV);
