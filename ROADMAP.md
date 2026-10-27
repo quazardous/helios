@@ -549,6 +549,13 @@ hash) is part of Helios; deploying a NAS is not.
   a multi-kernel module, and shares its content with the flat network it
   packages. Not decided: how a macro is saved with an edit and offered
   in the GUI (folded, opened, promoted from a stack).
+- (2026-10-27, not decided) **Macros on the desktop**: made from the
+  graph's selection or the Modules panel (Ctrl+G), an editor for the
+  exposed parameters (renamed, ranges narrowed, ordered, grouped),
+  folded and opened in place on both surfaces, saved as a versioned
+  composite file in the workspace then published, each action one undo
+  step and an MCP verb. Proposed in
+  [docs/design/macros.md](docs/design/macros.md).
 - (2026-10-13) **Workspace templates**: a ready-to-use combination of
   tools, network and panel layout for one known scenario, shared as a
   `.helios-template` bundle like a plugin, schema-checked and built
