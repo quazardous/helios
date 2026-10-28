@@ -544,6 +544,35 @@ bench box (see [bench.md](bench.md)).
    follows a run; its JSON lines and exit codes unchanged; `--vault`
    makes it durable; `--again`. Tests: the existing `tests/batch.rs`
    pass unchanged, plus a resumed batch.
+   *As delivered (2026-10-28):* the client works out each image's
+   sidecar, then submits every image at once (a sidecar's edit as the
+   item's parameters), and follows the rows at the export: the
+   `workflow.rows` events wake it, and it reads the run whole
+   (`workflow.items`, `workflow.runs`) every two seconds, which catches up
+   what the bounded event journal let go. Its lines keep their fields; an
+   image given twice is one item, with one line. `--jobs` reaches the run
+   as `concurrency` in `workflow.submit`: that run's own limit, counted
+   for it alone, instead of the export node's limit shared by its runs
+   (kept in the run document; not part of the run's id). A run's job is of
+   kind `batch`, titled by its submitter ("Batch of N images"), and
+   `workflow.submit` answers its id. The runner keeps a failure's message
+   by key (a file it cannot load says `node-load-refused`, as a single
+   export does) beside the row's English, in memory, and gives it in
+   `workflow.rows` and `workflow.items`. `--vault` on the batch's own
+   node is `helios-node --runs-vault`: the runs only, not the vault's
+   settings layers nor an edit of the network's source, which `--vault`
+   would bring; with a node attached to, `--vault` keeps sidecars only.
+   Ctrl-C cancels the run's job (the batch's lines and exit code as
+   before), except on the batch's own node with a vault: the node is
+   stopped, what it was writing removed, the images left reported
+   `batch-stopped`, and the same batch run again finishes the run. A run
+   that cannot move without a person (only `asking` rows, nothing
+   running, claimable or due) or is paused ends the batch with exit
+   code 1 rather than keep it waiting. The batch no longer holds a
+   connection nor opens a client batch job: a run outlives its client
+   by design. Ctrl-C cancels the whole run, including images another
+   client added to it: `workflow.cancel` of the batch's own items comes
+   with step 5.
 5. **Control verbs and MCP** (`helios-inspect`, `helios-node`).
    `workflow.cancel`, `.retry`, `.prioritize`, `.pause`, `.resume`,
    `.forget` on both endpoints, their MCP tools and CLI verbs,

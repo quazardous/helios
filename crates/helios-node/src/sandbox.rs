@@ -119,14 +119,20 @@ fn is_our_node(pid: u32, state: &State) -> bool {
 /// Starts the sandbox's node (`node_bin` is the `helios-node` executable)
 /// and returns once it serves. The control endpoint is served in debug builds.
 pub fn start(dir: &Path, node_bin: &Path) -> Result<State, String> {
-    launch(dir, node_bin, false)
+    launch(dir, node_bin, false, None)
 }
 
 /// Starts the sandbox's node like [`start`], with the batch endpoint
-/// (`load-source`, `export`, `cancel`) on the control socket instead of the
-/// debug one: what `helios batch` needs, in every build.
-pub fn start_batch(dir: &Path, node_bin: &Path) -> Result<State, String> {
-    launch(dir, node_bin, true)
+/// (`load-source`, `export`, `cancel`, the runs' `workflow.*`) on the
+/// control socket instead of the debug one: what `helios batch` needs, in
+/// every build. With `runs_vault`, the node keeps its runs there
+/// (`--runs-vault`), so they outlive it.
+pub fn start_batch(
+    dir: &Path,
+    node_bin: &Path,
+    runs_vault: Option<&Path>,
+) -> Result<State, String> {
+    launch(dir, node_bin, true, runs_vault)
 }
 
 /// Creates the runtime directory, open to this user only: the sockets in
@@ -143,7 +149,12 @@ fn private_dir(dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn launch(dir: &Path, node_bin: &Path, batch: bool) -> Result<State, String> {
+fn launch(
+    dir: &Path,
+    node_bin: &Path,
+    batch: bool,
+    runs_vault: Option<&Path>,
+) -> Result<State, String> {
     let dir = dir
         .canonicalize()
         .map_err(|e| format!("{}: {e}", dir.display()))?;
@@ -176,6 +187,10 @@ fn launch(dir: &Path, node_bin: &Path, batch: bool) -> Result<State, String> {
     // for that command, not for the node, which outlives it.
     #[cfg(unix)]
     std::os::unix::process::CommandExt::process_group(&mut command, 0);
+    if let Some(vault) = runs_vault {
+        let vault = std::path::absolute(vault).map_err(|e| format!("{}: {e}", vault.display()))?;
+        command.arg("--runs-vault").arg(vault);
+    }
     if batch {
         command.arg("--batch-control").arg(&state.control);
     } else if cfg!(debug_assertions) {

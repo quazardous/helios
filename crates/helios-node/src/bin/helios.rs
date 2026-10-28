@@ -23,8 +23,8 @@
 //!     helios sandbox new DIR [--network FILE] | start DIR | stop DIR | clean DIR
 //!
 //!     helios batch --network FILE --out DIR [--format jpeg|png|tiff] [--quality Q] [--jobs N]
-//!                  [--name TEMPLATE] [--sidecar [--vault FILE]] [--source NAME] [--node NAME]
-//!                  [--socket ADDR --control ADDR [--token-file FILE]] IMAGES...
+//!                  [--name TEMPLATE] [--sidecar] [--vault FILE] [--again] [--source NAME]
+//!                  [--node NAME] [--socket ADDR --control ADDR [--token-file FILE]] IMAGES...
 //!
 //!     helios import-darktable --vault FILE FOLDERS-OR-IMAGES...
 //!
@@ -40,15 +40,19 @@
 //!
 //! `batch` applies a network to many images, each exported to a file in
 //! `--out` (named by `--name`, `{stem}.{ext}` by default; a name already
-//! taken gets `-1`, `-2`...). It starts its own node in a temporary sandbox,
-//! or drives the node at `--socket` and `--control`; `--sidecar` applies each
-//! image's darktable XMP history on top of the network, and with `--vault`
-//! keeps it there as a version with origin `import:xmp`, with the sidecar's
-//! rating when the vault has none. It prints one JSON
+//! taken gets `-1`, `-2`...). It submits them as a run of the workflow
+//! level to its own node, started in a temporary sandbox, or to the node at
+//! `--socket` and `--control`, and follows the run. With `--vault`, its own
+//! node keeps the run in that vault: the same batch run again extends it
+//! and writes nothing twice (`--again` starts a new run). `--sidecar`
+//! applies each image's darktable XMP history on top of the network, and
+//! with `--vault` keeps it there as a version with origin `import:xmp`,
+//! with the sidecar's rating when the vault has none. It prints one JSON
 //! line per image (`path`, `output`, `duration_ms`, `error`, `sidecar`) and
 //! exits with 1 when an image failed (the others go on), 130 when
-//! interrupted: Ctrl-C cancels the exports in flight and leaves no partial
-//! file. See `docs/cli.md`.
+//! interrupted: Ctrl-C cancels the run and leaves no partial file, or,
+//! with `--vault` and its own node, stops it to be finished by the same
+//! batch run again. See `docs/cli.md`.
 //!
 //! `doctor display` says what the display offers the desktop: the session
 //! (Wayland, X11 or none), on Wayland what the compositor's colour
@@ -116,8 +120,8 @@ const USAGE: &str = "usage:
   helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] workflow-runs | workflow-items RUN [NODE] | workflow-forget RUN
   helios sandbox new DIR [--network FILE] | start DIR | stop DIR | clean DIR
   helios batch --network FILE --out DIR [--format jpeg|png|tiff] [--quality Q] [--jobs N]
-               [--name TEMPLATE] [--sidecar [--vault FILE]] [--source NAME] [--node NAME]
-               [--socket ADDR --control ADDR [--token-file FILE]] IMAGES...
+               [--name TEMPLATE] [--sidecar] [--vault FILE] [--again] [--source NAME]
+               [--node NAME] [--socket ADDR --control ADDR [--token-file FILE]] IMAGES...
   helios import-darktable --vault FILE FOLDERS-OR-IMAGES...
   helios import --vault FILE [--reference | --copy [--into DIR]] [--rename PATTERN]
                 [--duplicates skip|keep|ask] [--no-signals] FOLDERS-CARDS-OR-FILES...
@@ -428,6 +432,7 @@ fn batch_options(args: &[String]) -> Result<Options, String> {
         source: None,
         node: None,
         attach: None,
+        again: false,
         images: Vec::new(),
     };
     let (mut out, mut socket, mut control) = (None, None, None);
@@ -452,6 +457,7 @@ fn batch_options(args: &[String]) -> Result<Options, String> {
             }
             "--name" => options.name = value()?,
             "--sidecar" => options.sidecar = true,
+            "--again" => options.again = true,
             "--vault" => options.vault = Some(PathBuf::from(value()?)),
             "--source" => options.source = Some(value()?),
             "--node" => options.node = Some(value()?),

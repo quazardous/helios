@@ -1,13 +1,15 @@
 # Generated from Helios's declarations and code by `cargo xtask i18n extract`:
 # do not edit. Translations live in i18n/<locale>/ under the same names.
 
+batch-asking = not exported: the run { $run } waits for a person to answer a decision
+
 batch-cancelled = cancelled
 
 batch-cannot-create = cannot create { $path }: { $error }
 
 batch-cannot-read = cannot read { $path }: { $error }
 
-batch-failed = failed
+batch-held = not exported: a step before the export failed or was cancelled
 
 batch-needs-network = batch needs --network FILE, or a node to attach to
 
@@ -17,11 +19,17 @@ batch-node-refused = the node refused
 
 batch-node-unreachable = cannot reach the node at { $address }: { $error }
 
+batch-run-gone = the run { $run } left the node
+
+batch-run-paused = not exported: the run { $run } is paused
+
 batch-several-ends = the network ends in several nodes ({ $names }): say --node NAME
 
 batch-several-sources = the network has several sources ({ $names }): say --source NAME
 
-batch-vault-needs-sidecar = --vault keeps sidecars: it needs --sidecar
+batch-stopped = stopped before it was written: the same batch run again finishes it
+
+batch-vault-attached = --vault with a running node only keeps sidecars: it needs --sidecar (the node keeps its runs in its own vault)
 
 engine-failure-compile = compile
 

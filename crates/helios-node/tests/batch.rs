@@ -837,6 +837,25 @@ fn a_batch_cancelled_on_its_node_stops_and_leaves_no_file() {
         .expect("the batch's job");
     let id = batch["payload"]["id"].as_str().unwrap().to_string();
     assert_eq!(node.control(&["job-cancel", &id])["ok"], true);
+    // `job.cancel` is a request: the run acts on it at its next tick, and
+    // an export already done stays done. The node stays paused until the
+    // batch's job has ended cancelled, so no export can finish first.
+    let mut since = "0".to_string();
+    loop {
+        let ended = node.inspect(&[
+            "wait-event",
+            "job.cancelled",
+            "--since",
+            &since,
+            "--timeout",
+            "30000",
+        ]);
+        assert_eq!(ended["ok"], true, "the batch's job ends cancelled: {ended}");
+        if ended["event"]["payload"]["id"] == id.as_str() {
+            break;
+        }
+        since = ended["event"]["seq"].as_u64().unwrap().to_string();
+    }
     node.control(&["resume"]);
     let out = child.wait_with_output().unwrap();
     assert_eq!(out.status.code(), Some(130));

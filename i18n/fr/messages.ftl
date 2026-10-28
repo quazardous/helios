@@ -1,12 +1,14 @@
 # Traduction de ../en/messages.ftl, sous les mêmes clés.
 
+batch-asking = non exporté : l’exécution { $run } attend qu’une personne réponde à une décision
+
 batch-cancelled = annulé
 
 batch-cannot-create = impossible de créer { $path } : { $error }
 
 batch-cannot-read = impossible de lire { $path } : { $error }
 
-batch-failed = échec
+batch-held = non exporté : une étape avant l’export a échoué ou a été annulée
 
 batch-needs-network = batch demande --network FICHIER, ou un nœud auquel se rattacher
 
@@ -16,11 +18,17 @@ batch-node-refused = le nœud a refusé
 
 batch-node-unreachable = impossible de joindre le nœud à { $address } : { $error }
 
+batch-run-gone = l’exécution { $run } a quitté le nœud
+
+batch-run-paused = non exporté : l’exécution { $run } est en pause
+
 batch-several-ends = le réseau se termine par plusieurs nœuds ({ $names }) : précisez --node NOM
 
 batch-several-sources = le réseau a plusieurs sources ({ $names }) : précisez --source NOM
 
-batch-vault-needs-sidecar = --vault conserve les sidecars : il demande --sidecar
+batch-stopped = arrêté avant d’être écrit : relancer le même lot le termine
+
+batch-vault-attached = --vault avec un nœud déjà lancé ne conserve que les sidecars : il demande --sidecar (le nœud garde ses exécutions dans son propre coffre)
 
 engine-failure-compile = compilation
 

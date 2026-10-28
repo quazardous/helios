@@ -1,16 +1,20 @@
 # The hash of the English text each key was translated from: a key
 # whose English changed since is reported by the catalogue check.
+batch-asking fa09d6acc7cd9c99
 batch-cancelled 3fa4bf73465b82da
 batch-cannot-create 4a1d10311d5aa5a3
 batch-cannot-read 85ea10f780b3cbdf
-batch-failed d15aea9ea7f99692
+batch-held b3755a60a83a9ee0
 batch-needs-network 4e81514523690f41
 batch-no-source c04a8a08b5cbd994
 batch-node-refused e41ff51226b69a9e
 batch-node-unreachable dddd9b8cc4c4fa49
+batch-run-gone 1ab22f86621faaba
+batch-run-paused 7d2f38f003dc8368
 batch-several-ends 64a674c6169d3f03
 batch-several-sources 9e966f5d4cf4a738
-batch-vault-needs-sidecar 31b3ffb415090a18
+batch-stopped bf8c5265f0d7c6ae
+batch-vault-attached 96665044590f1b33
 category-decisions b5763e317b887036
 category-developer 3bef768f6a95f10d
 category-masks 6849246780dae374

@@ -58,8 +58,10 @@ at work (its files stay). With `--vault`, the node keeps its runs in that
 vault: started again after a crash, it resumes them (each file written
 once); a node started on the same vault while another works it lists that
 run read-only and takes it over if the other dies; a finished run is
-removed after `system.workflow.keep_days` (30 by default). The batch
-endpoint answers these four as well.
+removed after `system.workflow.keep_days` (30 by default); `--runs-vault`
+keeps only the runs in that vault (no settings layer, no edit), as
+`helios batch --vault` asks of its own node. The batch endpoint answers
+these four as well.
 
 A refusal answers `{"ok": false, "error": ...}` in English; when the node
 says it by key (a file it cannot load, a node it does not have, a job
@@ -81,21 +83,40 @@ Applies a network to many images, each exported to a file in `--out`:
 | `--out DIR` | | where files are written; created if needed |
 | `--format jpeg\|png\|tiff` | `jpeg` | |
 | `--quality Q` | `92` | JPEG quality, 1 to 100 |
-| `--jobs N` | `2` | exports in flight at once; the node's scheduler runs them side by side |
+| `--jobs N` | `2` | exports of the run out at once; the node's scheduler runs them side by side |
 | `--name TEMPLATE` | `{stem}.{ext}` | the output file name; `{stem}` is the image's name without extension, `{ext}` the format's |
 | `--sidecar` | off | applies each image's darktable sidecar (`IMG_0001.CR2.xmp`) on top of the network |
-| `--vault FILE` | | with `--sidecar`: keeps each sidecar applied in this vault (see below) |
+| `--vault FILE` | | its own node keeps the run in this vault, so the same batch run again finishes it; with `--sidecar`, keeps each sidecar applied there too (see below) |
+| `--again` | off | a new run, even if the same batch has one: every image exported again, under new names |
 | `--source NAME` | the only source | the source given each image |
 | `--node NAME` | the network's first export, else the node nothing reads | the node exported |
 | `--socket ADDR --control ADDR` | | attach to a running node instead of starting one (`--token-file FILE` for TCP) |
 
 Without `--socket`, `helios batch` starts its own node in a temporary
-sandbox and removes it when done. For each image it gives the source the
-file (`load-source`), asks for the export (`export`) and waits for the job.
-A name already taken, by an earlier image or by a file already there, gets
-`-1`, `-2`... before its extension: nothing is overwritten.
+sandbox and removes it when done. It submits the images as one **run** of
+the workflow level (`workflow.submit`, see
+[workflow-level.md](workflow-level.md)) and follows it: the node exports
+each image itself, retrying a failure another attempt may change (three
+attempts, 2 s then 4 s apart), and the batch prints an image's line when
+its export ends. Each output name is decided when the run gets the image,
+once: a name already taken, by an earlier image or by a file already there,
+gets `-1`, `-2`... before its extension, and nothing is overwritten.
 
-Each image prints one JSON line on stdout, in the order they finish:
+The run's id follows from the network and the export settings (`--out`,
+`--format`, `--quality`, `--name`, the node exported and its source), so
+the same batch run again extends the same run: an image it already
+exported is not exported again (its line comes at once, with the file
+written then), a new image is added. `--again` starts a new run. A run
+lasts as long as its node: on a node attached to, while that node runs; on
+the batch's own node, with `--vault FILE`, in that vault, so the same batch
+run again after an interrupt or a crash finishes what was left; without
+`--vault`, it ends with the batch.
+
+On a terminal, stderr also shows the run's progress per queueing node
+(done, failed, running, waiting, asking for a person).
+
+Each image prints one JSON line on stdout, in the order they finish (an
+image given twice is one item, with one line):
 
 ```json
 {"path":"/photos/IMG_0001.CR2","output":"/out/IMG_0001.jpg","duration_ms":1840,"error":null,"sidecar":null}
@@ -191,22 +212,31 @@ there); its `image` comes from its `xmpMM:DerivedFrom`, else from its
 name. Importing again adds nothing new. A sidecar that cannot be read
 does not stop the others: it gets an `error`, and the exit code is 1.
 
-On the node, the batch is a job people follow (kind `batch`, its exports
+On the node, the run is a job people follow (kind `batch`, its exports
 as its children, see [jobs.md](jobs.md)): `helios control job-cancel
-batch-N` on that node cancels the exports in flight and the ones not
-asked for yet, which are reported `cancelled`, and the batch exits with
+run-N` on that node cancels the run, its exports in flight and the images
+not exported yet, which are reported `cancelled`, and the batch exits with
 130.
 
-A failed image (a file that does not load, an export that fails) says why
-in `error`, and the others go on; the exit code is then 1. Ctrl-C cancels the
-exports in flight (an interrupted export leaves no file, not even a part of
-one), prints a `cancelled` line for each image not written, and exits with
-130.
+A failed image (a file that does not load, an export that failed its
+attempts) says why in `error`, and the others go on; the exit code is then
+1. A run that can only go on with a person's answer (a decision of the
+network nobody answered) or that is paused does not keep the batch
+waiting: the images left get an `error` (`batch-asking`,
+`batch-run-paused`), and the exit code is 1.
+
+Ctrl-C cancels the run (an interrupted export leaves no file, not even a
+part of one), prints a `cancelled` line for each image not written, and
+exits with 130. With `--vault` and its own node, it stops that node
+instead: each image not written gets a `batch-stopped` line, the run stays
+in the vault, and the same batch run again finishes it. A batch that dies
+without Ctrl-C leaves a run on a node it attached to going.
 
 The batch works with release builds. The node it starts serves the
 *batch endpoint* (`helios-node --batch-control PATH`), not the debug
-control endpoint: it answers `load-source`, `export` and `cancel` only, on
-a Unix socket in a directory made for that run and open to its user alone.
+control endpoint: it answers `load-source`, `export`, `cancel`,
+`job.cancel` and the runs' `workflow.*` only, on a Unix socket in a
+directory made for that run and open to its user alone.
 The other control verbs (render, set-param, pause, fault injection,
 decisions) stay in debug builds. With `--socket` and `--control`, the batch
 drives a running node through either endpoint.

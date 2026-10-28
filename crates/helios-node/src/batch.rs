@@ -1,36 +1,49 @@
 //! `helios batch`: a network applied to many files, each exported to a file.
 //!
-//! A client of a node's control and inspect endpoints with no logic of its
-//! own: for each image it gives the network's source the file
-//! (`load_source`), asks for an export (`export`, a scheduler job holding
-//! its destination) and waits for the job's end on the bus. Up to `jobs`
-//! exports are asked at once; the node's scheduler runs them side by side.
+//! A client of a node's control and inspect endpoints: the images are
+//! submitted as one **run** of the workflow level (`workflow.submit`, see
+//! `docs/workflow-level.md`), which the node works itself, an item at a
+//! time under a lease, retried when another attempt may pass, each output
+//! path decided once at submission. The batch then follows the run's rows
+//! at its export (`workflow.rows`, and the run read whole every two
+//! seconds) and prints an image's line when its export settles. Up to
+//! `jobs` exports of the run are out at once; the node's scheduler runs
+//! them side by side.
+//!
 //! It starts its own node in a temporary sandbox, serving the batch
-//! endpoint (those three verbs only, in every build) on a private socket,
-//! or attaches to a running node's batch or debug control endpoint.
+//! endpoint (every build) on a private socket, or attaches to a running
+//! node's batch or debug control endpoint. With `--vault FILE`, its own
+//! node keeps the run in that vault: the same batch run again (after a
+//! crash, or an interrupt) extends the same run, and what was written is
+//! not written again.
 //!
 //! Each image gets one JSON line on stdout: its path, the file written, how
 //! long it took, and the error if it failed, in English (`error`) and by
 //! key when it has one (`message`, a [`Message`] to show translated). The
 //! others go on after a failure.
 //!
-//! With `--sidecar`, each image's base darktable sidecar is applied; its
-//! folder is listed once to find it and its duplicates
-//! ([`helios_xmp::files`]). With `--vault FILE` as well, every sidecar of
-//! the image is kept in that vault ([`keep_sidecar`]): the image, each
-//! darktable edit (base and duplicates) as a version with origin
-//! `import:xmp`, and the base's rating when the vault has none. On an
-//! interrupt, the exports asked for are cancelled: a file is written whole
-//! or not at all, never in part.
+//! With `--sidecar`, each image's base darktable sidecar is applied: its
+//! edit becomes the item's own parameters. Its folder is listed once to
+//! find it and its duplicates ([`helios_xmp::files`]). With `--vault FILE`
+//! as well, every sidecar of the image is kept in that vault
+//! ([`keep_sidecar`]): the image, each darktable edit (base and duplicates)
+//! as a version with origin `import:xmp`, and the base's rating when the
+//! vault has none.
+//!
+//! On an interrupt, the run is cancelled (its exports stopped: a file is
+//! written whole or not at all, never in part), except a run the batch's
+//! own node keeps in a vault: that node stops, and the same batch run
+//! again finishes the run. A client that dies leaves a run on a node it
+//! attached to going.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use helios_core::{Message, Params};
-use helios_inspect::control::{ControlRequest, FileFormat};
+use helios_inspect::control::{ControlRequest, FileFormat, RunItem};
 use helios_inspect::{Address, Request, request_at};
 use serde_json::{Value, json};
 
@@ -45,13 +58,14 @@ pub struct Options {
     pub out: PathBuf,
     pub format: FileFormat,
     pub quality: u8,
-    /// Exports asked for at once.
+    /// Exports of the run out at once.
     pub jobs: usize,
     /// The output file name: `{stem}` and `{ext}` are replaced.
     pub name: String,
     /// Apply each image's darktable sidecar on top of the network.
     pub sidecar: bool,
-    /// Keep each sidecar applied in this vault (see [`keep_sidecar`]).
+    /// Keep each sidecar applied in this vault (see [`keep_sidecar`]);
+    /// the batch's own node keeps its run there too.
     pub vault: Option<PathBuf>,
     /// The source given each image; the network's only source by default.
     pub source: Option<String>,
@@ -59,6 +73,8 @@ pub struct Options {
     pub node: Option<String>,
     /// A running node to attach to, instead of starting one.
     pub attach: Option<(Address, Address)>,
+    /// A new run, even if the same batch has one.
+    pub again: bool,
     pub images: Vec<PathBuf>,
 }
 
@@ -178,18 +194,12 @@ fn sandbox_network(path: &Path) -> Result<(String, Option<String>), String> {
     ))
 }
 
-/// A node the batch talks to; its own sandbox is removed when dropped.
+/// A node the batch talks to; its own sandbox is removed when dropped,
+/// which stops its node.
 struct Node {
     inspect: Address,
     control: Address,
     sandbox: Option<PathBuf>,
-    /// The batch's job on the node, the parent of its exports; none with
-    /// a node that does not know batch jobs.
-    batch: Option<String>,
-    /// The connection the batch job was asked on, kept open while the
-    /// batch runs: should this process die, the node sees it close and
-    /// ends the batch.
-    held: Option<helios_inspect::Client>,
 }
 
 impl Drop for Node {
@@ -201,6 +211,13 @@ impl Drop for Node {
 }
 
 impl Node {
+    /// Stops the batch's own node now, and removes its sandbox.
+    fn stop(&mut self) {
+        if let Some(dir) = self.sandbox.take() {
+            let _ = crate::sandbox::clean(&dir);
+        }
+    }
+
     fn call(address: &Address, body: &Value) -> Result<Value, Message> {
         let answer = request_at(address, body).map_err(|e| {
             Message::new(
@@ -241,9 +258,11 @@ impl Node {
 /// Starts a node in a fresh sandbox (`node_bin` is `helios-node`), serving
 /// the batch endpoint on a socket in a directory private to this run: the
 /// debug control endpoint is not needed, so this works in release builds.
+/// With `runs_vault`, the node keeps its runs there.
 fn own_node(
     network: &Path,
     jobs: usize,
+    runs_vault: Option<&Path>,
     node_bin: &Path,
 ) -> Result<(Node, Option<String>), String> {
     let (text, first_export) = sandbox_network(network)?;
@@ -257,15 +276,13 @@ fn own_node(
         format!("[system.scheduler]\nworkers = {jobs}\n"),
     )
     .map_err(|e| e.to_string())
-    .and_then(|()| crate::sandbox::start_batch(&dir, node_bin));
+    .and_then(|()| crate::sandbox::start_batch(&dir, node_bin, runs_vault));
     match started {
         Ok(state) => Ok((
             Node {
                 inspect: Address::Unix(state.inspect),
                 control: Address::Unix(state.control),
                 sandbox: Some(dir),
-                batch: None,
-                held: None,
             },
             first_export,
         )),
@@ -276,61 +293,35 @@ fn own_node(
     }
 }
 
-/// The source and the node a batch uses, from the node's graph.
-fn pick(
-    graph: &Value,
-    options: &Options,
-    first_export: Option<String>,
-) -> Result<(String, String), Message> {
-    let nodes = graph["nodes"].as_array().cloned().unwrap_or_default();
-    let names = |kind: &str| -> Vec<String> {
-        nodes
-            .iter()
-            .filter(|n| n["kind"] == kind)
-            .filter_map(|n| n["name"].as_str().map(str::to_string))
-            .collect()
+/// Removes what a node stopped in the middle of writing `output` left
+/// (`helios_export::write_atomic`'s temporary file, `.NAME.helios-PID`
+/// next to it): an interrupted export leaves no part of a file.
+fn remove_parts(output: &Path) {
+    let (Some(dir), Some(name)) = (output.parent(), output.file_name()) else {
+        return;
     };
-    let source = match &options.source {
-        Some(s) => s.clone(),
-        None => match names("source").as_slice() {
-            [one] => one.clone(),
-            [] => {
-                return Err(Message::new("batch-no-source", "the network has no source"));
-            }
-            many => {
-                return Err(Message::new(
-                    "batch-several-sources",
-                    "the network has several sources ({ $names }): say --source NAME",
-                )
-                .with("names", many.join(", ")));
-            }
-        },
-    };
-    let read: BTreeSet<u64> = nodes
-        .iter()
-        .flat_map(|n| n["inputs"].as_array().cloned().unwrap_or_default())
-        .filter_map(|i| i[0].as_u64())
-        .collect();
-    let sinks: Vec<String> = nodes
-        .iter()
-        .filter(|n| n["kind"] == "module" && !n["id"].as_u64().is_some_and(|id| read.contains(&id)))
-        .filter_map(|n| n["name"].as_str().map(str::to_string))
-        .collect();
-    let node = match options.node.clone().or(first_export) {
-        Some(n) => n,
-        None => match sinks.as_slice() {
-            [one] => one.clone(),
-            [] => source.clone(),
-            many => {
-                return Err(Message::new(
-                    "batch-several-ends",
-                    "the network ends in several nodes ({ $names }): say --node NAME",
-                )
-                .with("names", many.join(", ")));
-            }
-        },
-    };
-    Ok((source, node))
+    let prefix = format!(".{}.helios-", name.to_string_lossy());
+    for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        if entry.file_name().to_string_lossy().starts_with(&prefix) {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
+/// The module each node of the node's graph runs, by node name: where a
+/// sidecar's edit goes.
+fn modules(graph: &Value) -> BTreeMap<String, String> {
+    graph["nodes"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|n| {
+            Some((
+                n["name"].as_str()?.to_string(),
+                n["module"].as_str()?.to_string(),
+            ))
+        })
+        .collect()
 }
 
 /// One image on its way.
@@ -368,15 +359,230 @@ fn cancelled_message() -> Message {
 pub enum Outcome {
     /// Every image was written.
     Done,
-    /// At least one image failed; the others were written.
+    /// At least one image failed, or waits for what the batch cannot
+    /// give (a person's answer, a paused run); the others were written.
     Failed,
-    /// Interrupted: what was asked was cancelled.
+    /// Interrupted: what was asked was cancelled, or, in a run kept in a
+    /// vault by the batch's own node, stopped to be finished by the same
+    /// batch run again.
     Interrupted,
+}
+
+/// How often the run is read whole besides its events: what the node's
+/// bounded event journal let go of is caught up then.
+const RECONCILE: Duration = Duration::from_secs(2);
+
+/// How long a cancelled batch waits for the node to cancel its items.
+const CANCEL_WAIT: Duration = Duration::from_secs(30);
+
+/// Items read at once from the run.
+const PAGE: usize = 500;
+
+/// What became of an item at the run's export.
+enum Settled {
+    Written,
+    Failed(Message),
+    Cancelled,
+}
+
+/// What a state of an item at the export (a row status, or where the
+/// run places an item without a row) says: settled, or still on its way
+/// (`None`).
+fn settled(state: &str, error: Option<&str>, message: &Value) -> Option<Settled> {
+    let failure = || {
+        serde_json::from_value::<Message>(message.clone())
+            .ok()
+            .filter(Message::is_keyed)
+            .unwrap_or_else(|| Message::plain(error.unwrap_or(state)))
+    };
+    match state {
+        "done" => Some(Settled::Written),
+        "cancelled" => Some(Settled::Cancelled),
+        "failed" | "skipped" | "omitted" => Some(Settled::Failed(failure())),
+        "held" => Some(Settled::Failed(Message::new(
+            "batch-held",
+            "not exported: a step before the export failed or was cancelled",
+        ))),
+        _ => None,
+    }
+}
+
+/// The items of the batch still on their way, by item id, and how the
+/// settled ones ended.
+struct Follow {
+    pending: BTreeMap<String, Pending>,
+    failed: u64,
+    cancelled: bool,
+    /// The last progress written on stderr.
+    shown: String,
+}
+
+impl Follow {
+    /// Settles `item` when `state` says it is, with its line.
+    fn apply(
+        &mut self,
+        item: &str,
+        state: &str,
+        error: Option<&str>,
+        message: &Value,
+        emit: &mut impl FnMut(&Value),
+    ) {
+        if state == "running"
+            && let Some(p) = self.pending.get_mut(item)
+        {
+            // Its time counts from when its export started.
+            p.started = Instant::now();
+            return;
+        }
+        let Some(how) = settled(state, error, message) else {
+            return;
+        };
+        let Some(p) = self.pending.remove(item) else {
+            return;
+        };
+        match how {
+            Settled::Written => emit(&line(&p, None)),
+            Settled::Cancelled => {
+                self.cancelled = true;
+                emit(&line(&p, Some(&cancelled_message())));
+            }
+            Settled::Failed(why) => {
+                self.failed += 1;
+                emit(&line(&p, Some(&why)));
+            }
+        }
+    }
+
+    /// Ends every item still on its way with `why`.
+    fn end_all(&mut self, why: &Message, emit: &mut impl FnMut(&Value)) {
+        for p in std::mem::take(&mut self.pending).into_values() {
+            emit(&line(&p, Some(why)));
+        }
+    }
+
+    /// Reads the run whole: each item where it stands, then whether the
+    /// run can still move on its own. A run that only waits for a person
+    /// (a decision nobody answered), or is paused, ends the items left
+    /// with why.
+    fn reconcile(
+        &mut self,
+        node: &Node,
+        run: &str,
+        emit: &mut impl FnMut(&Value),
+    ) -> Result<(), Message> {
+        let mut offset = 0;
+        loop {
+            let page = node.control(&ControlRequest::WorkflowItems {
+                run: run.to_string(),
+                node: None,
+                state: None,
+                offset,
+                limit: PAGE,
+            })?;
+            let items = page["items"].as_array().cloned().unwrap_or_default();
+            for i in &items {
+                if let (Some(id), Some(state)) = (i["item"].as_str(), i["state"].as_str()) {
+                    self.apply(id, state, i["error"].as_str(), &i["message"], emit);
+                }
+            }
+            offset += items.len();
+            if items.is_empty() || offset as u64 >= page["total"].as_u64().unwrap_or(0) {
+                break;
+            }
+        }
+        if self.pending.is_empty() {
+            return Ok(());
+        }
+        let runs = node.control(&ControlRequest::WorkflowRuns)?;
+        let Some(summary) = runs["runs"]
+            .as_array()
+            .and_then(|all| all.iter().find(|r| r["id"] == run))
+        else {
+            self.failed += self.pending.len() as u64;
+            let gone =
+                Message::new("batch-run-gone", "the run { $run } left the node").with("run", run);
+            self.end_all(&gone, emit);
+            return Ok(());
+        };
+        self.show(run, summary);
+        let nodes: Vec<&Value> = summary["nodes"]
+            .as_object()
+            .map(|n| n.values().collect())
+            .unwrap_or_default();
+        let count = |n: &Value, key: &str| n[key].as_u64().unwrap_or(0);
+        let moving = nodes.iter().any(|n| {
+            ["running", "scheduled", "waiting", "leases_out"]
+                .iter()
+                .any(|k| count(n, k) > 0)
+        });
+        let why = if summary["state"] == "paused" {
+            Some(Message::new(
+                "batch-run-paused",
+                "not exported: the run { $run } is paused",
+            ))
+        } else if !moving && nodes.iter().any(|n| count(n, "asking") > 0) {
+            Some(Message::new(
+                "batch-asking",
+                "not exported: the run { $run } waits for a person to answer a decision",
+            ))
+        } else {
+            None
+        };
+        if let Some(why) = why {
+            self.failed += self.pending.len() as u64;
+            self.end_all(&why.with("run", run), emit);
+        }
+        Ok(())
+    }
+
+    /// Writes the run's progress per queueing node on stderr, when it is
+    /// a terminal and the progress changed.
+    fn show(&mut self, run: &str, summary: &Value) {
+        if !std::io::IsTerminal::is_terminal(&std::io::stderr()) {
+            return;
+        }
+        let Some(nodes) = summary["nodes"].as_object() else {
+            return;
+        };
+        let parts: Vec<String> = nodes
+            .iter()
+            .map(|(name, n)| {
+                let counts: Vec<String> = [
+                    "done",
+                    "failed",
+                    "running",
+                    "scheduled",
+                    "waiting",
+                    "asking",
+                    "held",
+                ]
+                .iter()
+                .filter_map(|k| {
+                    let v = n[*k].as_u64().unwrap_or(0);
+                    (v > 0).then(|| format!("{v} {k}"))
+                })
+                .collect();
+                format!("{name}: {}", counts.join(", "))
+            })
+            .collect();
+        let shown = format!("helios batch: run {run}: {}", parts.join("; "));
+        if shown != self.shown {
+            eprintln!("{shown}");
+            self.shown = shown;
+        }
+    }
 }
 
 /// Runs a batch, printing a JSON line per image through `emit`. Errors
 /// that stop the whole batch (no node, a network that does not fit) come
 /// back as `Err`.
+///
+/// The images are submitted as one run of the workflow level
+/// (`workflow.submit`), which the node works with leases and retries; the
+/// batch then follows the run's rows (`workflow.rows` events, and the run
+/// read whole every two seconds) and prints each image's line when its
+/// export settles. The same batch run again extends the same run: what it
+/// wrote is not written again (`again` starts a new run).
 pub fn run(
     options: &Options,
     node_bin: &Path,
@@ -389,6 +595,12 @@ pub fn run(
             .with("error", e.to_string())
     })?;
     let out = std::path::absolute(&options.out).map_err(|e| Message::plain(e.to_string()))?;
+    if options.attach.is_some() && options.vault.is_some() && !options.sidecar {
+        return Err(Message::new(
+            "batch-vault-attached",
+            "--vault with a running node only keeps sidecars: it needs --sidecar (the node keeps its runs in its own vault)",
+        ));
+    }
     let (mut node, first_export) = match (&options.attach, &options.network) {
         (Some((inspect, control)), network) => {
             let first = match network {
@@ -399,12 +611,12 @@ pub fn run(
                 inspect: inspect.clone(),
                 control: control.clone(),
                 sandbox: None,
-                batch: None,
-                held: None,
             };
             (node, first)
         }
-        (None, Some(network)) => own_node(network, options.jobs, node_bin)?,
+        (None, Some(network)) => {
+            own_node(network, options.jobs, options.vault.as_deref(), node_bin)?
+        }
         (None, None) => {
             return Err(Message::new(
                 "batch-needs-network",
@@ -416,187 +628,216 @@ pub fn run(
         entity: "graph".into(),
     })?["describe"]
         .clone();
-    let (source, target) = pick(&graph, options, first_export)?;
-    let modules: BTreeMap<String, String> = graph["nodes"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|n| {
-            Some((
-                n["name"].as_str()?.to_string(),
-                n["module"].as_str()?.to_string(),
-            ))
-        })
-        .collect();
+    let modules = modules(&graph);
     let images: Vec<PathBuf> = options
         .images
         .iter()
         .map(|i| std::path::absolute(i).unwrap_or_else(|_| i.clone()))
         .collect();
-    let outputs = output_paths(
-        &images,
-        &out,
-        &options.name,
-        extension(options.format),
-        Path::exists,
-    );
 
     let vault = match (&options.vault, options.sidecar) {
         (Some(path), true) => Some(helios_vault::Vault::new(
             helios_vault_sqlite::SqliteStore::open(path)
                 .map_err(|e| Message::plain(format!("{}: {e}", path.display())))?,
         )),
-        (Some(_), false) => {
-            return Err(Message::new(
-                "batch-vault-needs-sidecar",
-                "--vault keeps sidecars: it needs --sidecar",
-            ));
-        }
-        (None, _) => None,
+        _ => None,
     };
-
     let mut sidecars = Sidecars {
         vault: vault.as_ref(),
         listings: Listings::default(),
     };
-    // The batch is a job people follow on the node's bus, its exports
-    // its children: cancelled there (`job.cancel`), the node cancels the
-    // exports and refuses the next ones.
-    // Asked on a connection held until the batch ends: should this
-    // process die, the node ends the batch instead of leaving it running.
-    let mut held = helios_inspect::Client::connect(&node.control).ok();
-    node.batch = held
-        .as_mut()
-        .and_then(|c| {
-            c.request(&ControlRequest::BatchStart {
-                title: format!("Batch of {} images", images.len()),
-                total: images.len() as u64,
-                hold: true,
-                idle_timeout_s: None,
-            })
-            .ok()
-        })
-        .filter(|answer| answer["ok"] == true)
-        .and_then(|answer| answer["id"].as_str().map(String::from));
-    node.held = held;
-    let mut failed = 0u64;
-    let mut cursor = 0;
-    let mut running: BTreeMap<u64, Pending> = BTreeMap::new();
-    let mut next = 0;
-    let mut cancelled = false;
-    let mut cancelled_on_node = false;
-    while next < images.len() || !running.is_empty() {
-        if (interrupted.load(Ordering::SeqCst) || cancelled_on_node) && !cancelled {
-            cancelled = true;
-            for job in running.keys() {
-                let _ = node.control(&ControlRequest::Cancel { job: *job });
-            }
-            for image in &images[next..] {
-                emit(&json!({
-                    "path": image,
-                    "output": null,
-                    "duration_ms": 0,
-                    "error": cancelled_message().english,
-                    "message": cancelled_message(),
-                    "sidecar": null,
-                }));
-            }
-            next = images.len();
+    let mut follow = Follow {
+        pending: BTreeMap::new(),
+        failed: 0,
+        cancelled: false,
+        shown: String::new(),
+    };
+    // Each image's sidecar first: what it changes is part of its item.
+    let mut items = Vec::with_capacity(images.len());
+    let mut reports: BTreeMap<PathBuf, Value> = BTreeMap::new();
+    let mut refused: BTreeSet<&PathBuf> = BTreeSet::new();
+    for image in &images {
+        if interrupted.load(Ordering::SeqCst) {
+            break;
         }
-        while !cancelled
-            && !cancelled_on_node
-            && running.len() < options.jobs.max(1)
-            && next < images.len()
-        {
-            let pending = Pending {
-                image: images[next].clone(),
-                output: outputs[next].clone(),
+        match sidecar_of(options, &mut sidecars, &modules, image) {
+            Ok((params, report)) => {
+                reports.insert(image.clone(), report);
+                items.push(if params.is_empty() {
+                    RunItem::Path(image.clone())
+                } else {
+                    RunItem::With {
+                        path: image.clone(),
+                        params,
+                    }
+                });
+            }
+            Err(e) => {
+                follow.failed += 1;
+                refused.insert(image);
+                let p = Pending {
+                    image: image.clone(),
+                    output: PathBuf::new(),
+                    started: Instant::now(),
+                    sidecar: Value::Null,
+                };
+                emit(&line(&p, Some(&e)));
+            }
+        }
+    }
+    drop(sidecars);
+    drop(vault);
+    if interrupted.load(Ordering::SeqCst) {
+        // Nothing was asked of the node yet.
+        for image in images.iter().filter(|i| !refused.contains(i)) {
+            let p = Pending {
+                image: image.clone(),
+                output: PathBuf::new(),
                 started: Instant::now(),
                 sidecar: Value::Null,
             };
-            next += 1;
-            match submit(
-                &node,
-                options,
-                &mut sidecars,
-                &source,
-                &target,
-                &modules,
-                pending,
-            ) {
-                Ok((job, seq, pending)) => {
-                    if cursor == 0 {
-                        cursor = seq;
-                    }
-                    running.insert(job, pending);
-                }
-                Err(refused) => {
-                    let (pending, error) = *refused;
-                    if error.key == cancelled_message().key {
-                        // The batch was cancelled on the node.
-                        cancelled_on_node = true;
-                    } else {
-                        failed += 1;
-                    }
-                    emit(&line(&pending, Some(&error)));
-                }
-            }
+            emit(&line(&p, Some(&cancelled_message())));
         }
-        if running.is_empty() {
-            continue;
-        }
-        // Bounded, so an interrupt is seen soon.
-        let ended = node.inspect(&Request::WaitEvent {
-            kind: "scheduler.job_ended".into(),
-            since: cursor,
-            timeout_ms: 200,
+        return Ok(Outcome::Interrupted);
+    }
+    if items.is_empty() {
+        return Ok(if follow.failed > 0 {
+            Outcome::Failed
+        } else {
+            Outcome::Done
         });
-        let Ok(ended) = ended else {
-            if let Err(e) = ended
+    }
+
+    let answer = node.control(&ControlRequest::WorkflowSubmit {
+        title: Some(format!("Batch of {} images", images.len())),
+        items,
+        out,
+        format: options.format,
+        quality: Some(options.quality),
+        name: options.name.clone(),
+        node: options.node.clone().or(first_export),
+        source: options.source.clone(),
+        again: options.again,
+        concurrency: Some(options.jobs.max(1)),
+    })?;
+    let run = answer["run"].as_str().unwrap_or_default().to_string();
+    let job = answer["job"].as_str().map(str::to_string);
+    // The batch's own node stops with it; a run it keeps in a vault is
+    // finished by the same batch run again.
+    let resumable = options.attach.is_none() && answer["durable"] == true;
+    let export = answer["workflow"]
+        .as_array()
+        .and_then(|nodes| nodes.iter().find(|n| n["kind"] == "export"))
+        .and_then(|n| n["name"].as_str())
+        .unwrap_or_default()
+        .to_string();
+    if std::io::IsTerminal::is_terminal(&std::io::stderr()) {
+        eprintln!(
+            "helios batch: run {run}: {} new, {} already in it{}",
+            answer["new"],
+            answer["already"],
+            if answer["durable"] == true {
+                ", kept in the vault"
+            } else {
+                ""
+            }
+        );
+    }
+    let started = Instant::now();
+    for i in answer["items"].as_array().into_iter().flatten() {
+        let (Some(id), Some(path), Some(output)) =
+            (i["item"].as_str(), i["path"].as_str(), i["output"].as_str())
+        else {
+            continue;
+        };
+        let image = PathBuf::from(path);
+        follow.pending.insert(
+            id.to_string(),
+            Pending {
+                sidecar: reports.get(&image).cloned().unwrap_or(Value::Null),
+                image,
+                output: PathBuf::from(output),
+                started,
+            },
+        );
+    }
+
+    let mut cursor = answer["seq"].as_u64().unwrap_or(0);
+    let mut cancel_asked: Option<Instant> = None;
+    let mut read_whole: Option<Instant> = None;
+    while !follow.pending.is_empty() {
+        if interrupted.load(Ordering::SeqCst) && cancel_asked.is_none() {
+            if resumable {
+                follow.cancelled = true;
+                node.stop();
+                for p in follow.pending.values() {
+                    remove_parts(&p.output);
+                }
+                let stopped = Message::new(
+                    "batch-stopped",
+                    "stopped before it was written: the same batch run again finishes it",
+                );
+                follow.end_all(&stopped, &mut emit);
+                break;
+            }
+            // The run's job cancelled: its exports stop, its rows not
+            // concluded are cancelled.
+            // A job already ended has nothing left to cancel.
+            if let Some(id) = &job
+                && let Err(e) = node.control(&ControlRequest::JobCancel { id: id.clone() })
                 && e.key == UNREACHABLE
             {
                 return Err(e);
             }
+            cancel_asked = Some(Instant::now());
+        }
+        if cancel_asked.is_some_and(|at| at.elapsed() > CANCEL_WAIT) {
+            follow.cancelled = true;
+            follow.end_all(&cancelled_message(), &mut emit);
+            break;
+        }
+        if read_whole.is_none_or(|at| at.elapsed() >= RECONCILE) {
+            read_whole = Some(Instant::now());
+            follow.reconcile(&node, &run, &mut emit)?;
             continue;
-        };
-        let event = &ended["event"];
-        cursor = event["seq"].as_u64().unwrap_or(cursor);
-        let Some(pending) = event["payload"]["job"]
-            .as_u64()
-            .and_then(|j| running.remove(&j))
-        else {
-            continue;
-        };
-        match event["payload"]["state"].as_str() {
-            Some("done") => emit(&line(&pending, None)),
-            Some("cancelled") => emit(&line(&pending, Some(&cancelled_message()))),
-            _ => {
-                failed += 1;
-                // The job's message by key, else its English.
-                let error = serde_json::from_value::<Message>(event["payload"]["message"].clone())
-                    .unwrap_or_else(|_| match event["payload"]["error"].as_str() {
-                        Some(e) => Message::plain(e),
-                        None => Message::new("batch-failed", "failed"),
-                    });
-                emit(&line(&pending, Some(&error)));
+        }
+        // Bounded, so an interrupt is seen soon.
+        let woken = node.inspect(&Request::WaitEvent {
+            kind: "workflow.rows".into(),
+            since: cursor,
+            timeout_ms: 250,
+        });
+        match woken {
+            Ok(_) => {}
+            Err(e) if e.key == UNREACHABLE => return Err(e),
+            Err(_) => continue,
+        }
+        let events = node.inspect(&Request::Events { since: cursor })?;
+        for event in events["events"].as_array().into_iter().flatten() {
+            cursor = cursor.max(event["seq"].as_u64().unwrap_or(cursor));
+            let payload = &event["payload"];
+            if event["kind"] != "workflow.rows" || payload["run"] != run.as_str() {
+                continue;
+            }
+            if payload["node"] != export.as_str() {
+                continue;
+            }
+            for row in payload["items"].as_array().into_iter().flatten() {
+                if let (Some(id), Some(status)) = (row["item"].as_str(), row["status"].as_str()) {
+                    follow.apply(
+                        id,
+                        status,
+                        row["error"].as_str(),
+                        &row["message"],
+                        &mut emit,
+                    );
+                }
             }
         }
     }
-    if let Some(id) = node.batch.clone() {
-        let ended = node.control(&ControlRequest::BatchEnd {
-            id,
-            failed,
-            cancelled,
-        });
-        // Cancelled on the node once every export was asked for: its
-        // exports said so, and so does the batch.
-        if ended.is_ok_and(|answer| answer["cancelled"] == true) {
-            cancelled = true;
-        }
-    }
-    Ok(if cancelled {
+    Ok(if follow.cancelled {
         Outcome::Interrupted
-    } else if failed > 0 {
+    } else if follow.failed > 0 {
         Outcome::Failed
     } else {
         Outcome::Done
@@ -609,117 +850,80 @@ struct Sidecars<'a> {
     listings: Listings,
 }
 
-/// Gives the source the image and asks for its export: the job and the
-/// sequence number of the request, or why the image cannot be exported.
-fn submit(
-    node: &Node,
+/// What an image's sidecars change, with `--sidecar`: the parameters of
+/// its base sidecar by node name, and the report of its line (`null`
+/// without a sidecar); each sidecar kept in the vault when there is one.
+fn sidecar_of(
     options: &Options,
     sidecars: &mut Sidecars,
-    source: &str,
-    target: &str,
     modules: &BTreeMap<String, String>,
-    mut pending: Pending,
-) -> Result<(u64, u64, Pending), Box<(Pending, Message)>> {
+    image: &Path,
+) -> Result<(BTreeMap<String, Params>, Value), Message> {
     let mut params = BTreeMap::new();
+    if !options.sidecar {
+        return Ok((params, Value::Null));
+    }
     let vault = sidecars.vault;
-    if options.sidecar {
-        let files = match sidecars.listings.sidecars(&pending.image) {
-            Ok(files) => files,
-            Err(e) => return Err(Box::new((pending, Message::plain(e)))),
-        };
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |d| d.as_secs());
-        let mut warn = |path: &Path, warning: &str| {
-            // Once per import, beside the image's JSON line.
-            eprintln!("helios batch: {}: {warning}", path.display());
-        };
-        // The base sidecar is the edit exported; the others are kept only.
-        let (base, others) = match files.split_first() {
-            Some((first, rest)) if first.version == 0 => (Some(first), rest),
-            _ => (None, &files[..]),
-        };
-        let mut report = Value::Null;
-        if let Some(base) = base {
-            let path = &base.path;
-            let read = std::fs::read_to_string(path)
-                .map_err(|e| {
-                    Message::new("batch-cannot-read", "cannot read { $path }: { $error }")
-                        .with("path", path)
-                        .with("error", e.to_string())
-                })
-                .and_then(|xml| {
-                    let (sidecar, imported) = read_sidecar(&xml).map_err(Message::plain)?;
-                    if let Some(warning) = imported.report.summary() {
-                        warn(path, &warning.english);
-                    }
-                    let (params, mut report) = sidecar_params(&imported, modules);
-                    if let Some(vault) = vault {
-                        report["vault"] =
-                            keep_sidecar(vault, &pending.image, 0, true, &sidecar, &imported, now)
-                                .map_err(Message::plain)?;
-                    }
-                    Ok((params, report))
-                });
-            match read {
-                Ok((p, mut r)) => {
-                    r["path"] = json!(path);
-                    report = r;
-                    params = p;
+    let files = sidecars.listings.sidecars(image).map_err(Message::plain)?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    let mut warn = |path: &Path, warning: &str| {
+        // Once per import, beside the image's JSON line.
+        eprintln!("helios batch: {}: {warning}", path.display());
+    };
+    // The base sidecar is the edit exported; the others are kept only.
+    let (base, others) = match files.split_first() {
+        Some((first, rest)) if first.version == 0 => (Some(first), rest),
+        _ => (None, &files[..]),
+    };
+    let mut report = Value::Null;
+    if let Some(base) = base {
+        let path = &base.path;
+        let read = std::fs::read_to_string(path)
+            .map_err(|e| {
+                Message::new("batch-cannot-read", "cannot read { $path }: { $error }")
+                    .with("path", path)
+                    .with("error", e.to_string())
+            })
+            .and_then(|xml| {
+                let (sidecar, imported) = read_sidecar(&xml).map_err(Message::plain)?;
+                if let Some(warning) = imported.report.summary() {
+                    warn(path, &warning.english);
                 }
-                Err(e) => {
-                    let e = if e.is_keyed() {
-                        e
-                    } else {
-                        Message::plain(format!("{}: {e}", path.display()))
-                    };
-                    return Err(Box::new((pending, e)));
+                let (params, mut report) = sidecar_params(&imported, modules);
+                if let Some(vault) = vault {
+                    report["vault"] = keep_sidecar(vault, image, 0, true, &sidecar, &imported, now)
+                        .map_err(Message::plain)?;
                 }
+                Ok((params, report))
+            });
+        match read {
+            Ok((p, mut r)) => {
+                r["path"] = json!(path);
+                report = r;
+                params = p;
             }
+            Err(e) if e.is_keyed() => return Err(e),
+            Err(e) => return Err(Message::plain(format!("{}: {e}", path.display()))),
         }
-        if !others.is_empty() {
-            let others: Vec<Value> = others
-                .iter()
-                .map(|file| match vault {
-                    Some(vault) => keep_file(vault, &pending.image, file, false, now, &mut warn),
-                    None => {
-                        json!({ "path": file.path, "version": file.version, "exact": file.exact })
-                    }
-                })
-                .collect();
-            if report.is_null() {
-                report = json!({});
-            }
-            report["duplicates"] = json!(others);
+    }
+    if !others.is_empty() {
+        let others: Vec<Value> = others
+            .iter()
+            .map(|file| match vault {
+                Some(vault) => keep_file(vault, image, file, false, now, &mut warn),
+                None => {
+                    json!({ "path": file.path, "version": file.version, "exact": file.exact })
+                }
+            })
+            .collect();
+        if report.is_null() {
+            report = json!({});
         }
-        pending.sidecar = report;
+        report["duplicates"] = json!(others);
     }
-    let loaded = node.control(&ControlRequest::LoadSource {
-        node: source.into(),
-        path: pending.image.clone(),
-    });
-    if let Err(e) = loaded {
-        return Err(Box::new((pending, e)));
-    }
-    let asked = node.control(&ControlRequest::Export {
-        node: target.into(),
-        port: "output".into(),
-        region: None,
-        path: pending.output.clone(),
-        format: options.format,
-        quality: Some(options.quality),
-        params,
-        batch: node.batch.clone(),
-        as_mask: false,
-    });
-    match asked {
-        Ok(answer) => {
-            let job = answer["job"].as_u64().unwrap_or_default();
-            let seq = answer["seq"].as_u64().unwrap_or_default();
-            Ok((job, seq, pending))
-        }
-        Err(e) => Err(Box::new((pending, e))),
-    }
+    Ok((params, report))
 }
 
 #[cfg(test)]

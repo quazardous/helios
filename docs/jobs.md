@@ -105,19 +105,24 @@ whose images are jobs of their own.
 `helios_core::job`, whose events named a job by a number, is gone.
 
 - **A node's exports and batches** (`helios-node`): each export as a job
-  on the node's bus (`export-<n>`); `helios batch` starts a batch job on
-  the node it drives (`batch_start`, kind `batch`, its total the number of
-  images), each export a child of it (weight 1), and ends it
-  (`batch_end`): finished, failed when an image failed, or cancelled.
+  on the node's bus (`export-<n>`). A run of the workflow level (what
+  `helios batch` submits, see [workflow-level.md](workflow-level.md)) is
+  a job of kind `batch` (`run-<n>`, its total the number of images), each
+  export a child of it (weight 1), ending finished, failed when an image
+  failed, or cancelled. A batch job asked for by a client
+  (`batch_start`, `batch-<n>`) works the same way, its exports asked one
+  by one and the job ended by `batch_end`.
   `job.cancel` with an id (`helios control job-cancel ID`, the
   `helios_job_cancel` tool) cancels an export, or a batch with its
-  exports, queued or running; the batch's next exports are refused and
+  exports, queued or running; a run's images not exported yet are
+  cancelled, a client batch's next exports are refused, and
   `helios batch` exits as interrupted.
-  A batch whose client goes without ending it does not stay running:
-  `helios batch` asks for it on a connection it holds open (`hold`), and
-  the node fails the batch ("abandoned: its client went away") when
-  that connection closes; any batch also fails once no export was asked
-  for it, and none of its exports ran, for its idle timeout
+  A run lasts until its images are done or it is cancelled, whether its
+  client stays or not. A client batch whose client goes without ending
+  it does not stay running: asked for on a connection held open
+  (`hold`), the node fails it ("abandoned: its client went away") when
+  that connection closes; any client batch also fails once no export was
+  asked for it, and none of its exports ran, for its idle timeout
   (`idle_timeout_s`, ten minutes by default). Its exports already asked
   for go on.
 
