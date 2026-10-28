@@ -2355,6 +2355,7 @@ dependencies = [
 name = "helios-node"
 version = "0.36.0"
 dependencies = [
+ "blake3",
  "egui-pop-model",
  "helios-ai",
  "helios-config",
@@ -2363,6 +2364,7 @@ dependencies = [
  "helios-display",
  "helios-export",
  "helios-inspect",
+ "helios-journal",
  "helios-library",
  "helios-load",
  "helios-module-blur",

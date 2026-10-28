@@ -45,6 +45,7 @@ pub mod batch;
 pub mod darktable;
 pub mod mcp;
 pub mod sandbox;
+pub mod workflow;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};

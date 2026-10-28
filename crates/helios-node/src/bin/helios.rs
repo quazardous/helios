@@ -16,6 +16,9 @@
 //!     helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] job-cancel ID
 //!     helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] pause | resume
 //!     helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] fault NODE compute|source-read
+//!     helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] workflow-submit --format jpeg|png|tiff
+//!                    [--quality Q] [--again] --to DIR IMAGES...
+//!     helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] workflow-runs | workflow-items RUN [NODE]
 //!
 //!     helios sandbox new DIR [--network FILE] | start DIR | stop DIR | clean DIR
 //!
@@ -88,7 +91,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use helios_core::{FaultKind, Params, Region, Value};
-use helios_inspect::control::{ControlRequest, FileFormat};
+use helios_inspect::control::{ControlRequest, FileFormat, RunItem};
 use helios_inspect::{Address, Request, request_at};
 use helios_node::batch::{Options, Outcome};
 
@@ -108,6 +111,9 @@ const USAGE: &str = "usage:
   helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] job-cancel ID
   helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] pause | resume
   helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] fault NODE compute|source-read
+  helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] workflow-submit --format jpeg|png|tiff
+                 [--quality Q] [--again] --to DIR IMAGES...
+  helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] workflow-runs | workflow-items RUN [NODE]
   helios sandbox new DIR [--network FILE] | start DIR | stop DIR | clean DIR
   helios batch --network FILE --out DIR [--format jpeg|png|tiff] [--quality Q] [--jobs N]
                [--name TEMPLATE] [--sidecar [--vault FILE]] [--source NAME] [--node NAME]
@@ -206,6 +212,7 @@ fn parse(args: Vec<String>) -> Result<Call, String> {
     let (mut since, mut timeout) = (0, 10_000);
     let (mut port, mut area) = ("output".to_string(), None);
     let (mut format, mut quality, mut to) = (None, None, None);
+    let mut again = false;
     let mut sets: BTreeMap<String, Params> = BTreeMap::new();
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -242,6 +249,7 @@ fn parse(args: Vec<String>) -> Result<Call, String> {
                 );
             }
             "--to" => to = Some(absolute(&args.next().ok_or("--to needs a path")?)?),
+            "--again" => again = true,
             "--set" => {
                 let (node, param, v) =
                     setting(&args.next().ok_or("--set needs NODE.PARAM=VALUE")?)?;
@@ -347,6 +355,37 @@ fn parse(args: Vec<String>) -> Result<Call, String> {
             },
             ["decision-reask", node] => ControlRequest::DecisionReask {
                 node: node.to_string(),
+            },
+            ["workflow-submit", images @ ..] if !images.is_empty() => {
+                ControlRequest::WorkflowSubmit {
+                    title: None,
+                    items: images
+                        .iter()
+                        .map(|i| absolute(i).map(RunItem::Path))
+                        .collect::<Result<_, _>>()?,
+                    out: to.ok_or("workflow-submit needs --to DIR")?,
+                    format: format.ok_or("workflow-submit needs --format jpeg|png|tiff")?,
+                    quality,
+                    name: "{stem}.{ext}".into(),
+                    node: None,
+                    source: None,
+                    again,
+                }
+            }
+            ["workflow-runs"] => ControlRequest::WorkflowRuns,
+            ["workflow-items", run] => ControlRequest::WorkflowItems {
+                run: run.to_string(),
+                node: None,
+                state: None,
+                offset: 0,
+                limit: 100,
+            },
+            ["workflow-items", run, node] => ControlRequest::WorkflowItems {
+                run: run.to_string(),
+                node: Some(node.to_string()),
+                state: None,
+                offset: 0,
+                limit: 100,
             },
             [] => return Err("control needs an action".into()),
             other => return Err(format!("unknown action `{}`", other.join(" "))),

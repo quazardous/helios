@@ -34,14 +34,21 @@
 //! change answered.
 //!
 //! `--batch-control` serves the batch endpoint in every build: only
-//! `load-source`, `export`, `cancel`, `job.cancel` and the batch job's
-//! `batch_start` and `batch_end`, on a Unix socket only its user can
+//! `load-source`, `export`, `cancel`, `job.cancel`, the batch job's
+//! `batch_start` and `batch_end`, and the runs' `workflow.submit`,
+//! `workflow.runs` and `workflow.items`, on a Unix socket only its user can
 //! open. `helios batch` starts its own node with it, on a socket in a
 //! private directory made for that run.
 //!
 //! Its exports and batches are jobs people follow (`helios_core::jobs`,
 //! `job.*` on its bus): `job.cancel` with a job's id cancels it, a batch
 //! with its exports.
+//!
+//! A batch submitted with `workflow.submit` is a run of the workflow level
+//! (`helios_node::workflow`): one journal row per item and queueing node,
+//! worked with leases and retries, kept in the vault with `--vault` and in
+//! memory without; `describe workflow` shows the runs per queueing node,
+//! and `workflow.*` events announce their rows.
 
 use std::collections::BTreeMap;
 use std::io::Write;
@@ -60,6 +67,7 @@ use helios_decision::Book;
 use helios_inspect::control::ControlRequest;
 use helios_inspect::{Inspector, Listen, new_token, serve_inspector, write_token};
 use helios_node::ExportDesc;
+use helios_node::workflow::runs::{Context as RunsContext, Workflows};
 use helios_photo::CameraInfo;
 use helios_resolve::{Report, Resolver, Settings};
 use serde::Serialize;
@@ -237,6 +245,12 @@ struct Node {
     jobs: Jobs,
     /// The batch jobs running, by id.
     batches: Mutex<BTreeMap<String, Batch>>,
+    /// The runs of the workflow level.
+    workflows: Arc<Workflows>,
+    /// Every decision node with its mode: what a run derives its workflow from.
+    decisions: BTreeMap<String, helios_decision::Mode>,
+    /// The network's first export: what a run exports unless told.
+    first_export: Option<String>,
 }
 
 /// A batch job: the parent of the exports a batch asks for.
@@ -699,6 +713,7 @@ mod control {
     use helios_core::{Event, JobId, Message};
     use helios_export::Format;
     use helios_inspect::control::{ControlRequest, FileFormat};
+    use helios_node::workflow::runs::Submit;
     use serde::Serialize;
     use serde_json::{Value, json};
 
@@ -733,8 +748,9 @@ mod control {
             )
         )]
         Debug,
-        /// `load-source`, `export`, `cancel`, `job.cancel`, `batch_start`
-        /// and `batch_end`: the batch endpoint.
+        /// `load-source`, `export`, `cancel`, `job.cancel`, `batch_start`,
+        /// `batch_end` and the runs' `workflow.submit`, `workflow.runs` and
+        /// `workflow.items`: the batch endpoint.
         Batch,
     }
 
@@ -749,6 +765,9 @@ mod control {
                         | ControlRequest::JobCancel { .. }
                         | ControlRequest::BatchStart { .. }
                         | ControlRequest::BatchEnd { .. }
+                        | ControlRequest::WorkflowSubmit { .. }
+                        | ControlRequest::WorkflowRuns
+                        | ControlRequest::WorkflowItems { .. }
                 )
         }
     }
@@ -775,7 +794,7 @@ mod control {
                 None,
                 &Message::new(
                     "node-batch-only",
-                    "the batch endpoint only answers load-source, export, cancel, job.cancel, batch_start and batch_end",
+                    "the batch endpoint only answers load-source, export, cancel, job.cancel, batch_start, batch_end and workflow.submit, workflow.runs, workflow.items",
                 ),
             );
         }
@@ -895,8 +914,50 @@ mod control {
             ControlRequest::Fault { node: name, kind } => node.id(name).map(|id| {
                 let graph = node.graph.0.read().expect("graph lock");
                 node.engine.inject_fault(&graph, id, *kind);
+                // A run's export renders a copy of the network: it takes
+                // the fault for its next render.
+                node.workflows.inject_fault(name, *kind);
                 json!({})
             }),
+            ControlRequest::WorkflowSubmit {
+                title,
+                items,
+                out,
+                format,
+                quality,
+                name,
+                node: export,
+                source,
+                again,
+            } => {
+                let graph = node.graph.0.read().expect("graph lock");
+                node.workflows.submit(
+                    &graph,
+                    &node.decisions,
+                    node.first_export.as_deref(),
+                    &Submit {
+                        title: title.as_deref(),
+                        items,
+                        out,
+                        format: *format,
+                        quality: *quality,
+                        name,
+                        node: export.as_deref(),
+                        source: source.as_deref(),
+                        again: *again,
+                    },
+                )
+            }
+            ControlRequest::WorkflowRuns => Ok(node.workflows.runs()),
+            ControlRequest::WorkflowItems {
+                run,
+                node: at,
+                state,
+                offset,
+                limit,
+            } => node
+                .workflows
+                .items(run, at.as_deref(), state.as_deref(), *offset, *limit),
             ControlRequest::Decisions => {
                 let book = node.book.lock().expect("book lock");
                 Ok(json!({ "decisions": helios_core::Describe::describe(&*book)["nodes"] }))
@@ -1256,17 +1317,44 @@ fn main() -> ExitCode {
         _ => None,
     };
     let budget = config.cache_budget(helios_core::engine::physical_memory());
+    let workers = config.number("system.scheduler.workers") as usize;
+    let engine = Arc::new(Engine::with_budget(bus.clone(), budget));
+    let scheduler = Arc::new(Scheduler::with_resources(
+        bus.clone(),
+        workers,
+        &[(
+            helios_resolve::AI_CALLS,
+            config.number("system.ai.calls") as u64,
+        )],
+    ));
+    let jobs = Jobs::new(bus.clone());
+    // Built first: its instance names the owner of the runs.
+    let inspector = Inspector::new(bus.clone());
+    // The runs last in the vault, on a connection of their own.
+    let runs_vault = match &args.vault {
+        None => None,
+        Some(path) => match helios_vault_sqlite::SqliteStore::open(path) {
+            Ok(store) => Some(Arc::new(helios_vault::Vault::new(store))),
+            Err(e) => {
+                eprintln!("helios-node: {}: {e}", path.display());
+                return ExitCode::from(1);
+            }
+        },
+    };
+    let workflows = Arc::new(Workflows::new(RunsContext {
+        bus: bus.clone(),
+        engine: engine.clone(),
+        scheduler: scheduler.clone(),
+        jobs: jobs.clone(),
+        vault: runs_vault,
+        workers,
+        owner: inspector.instance().to_string(),
+    }));
+    workflows.start();
     let node = Arc::new(Node {
         bus: bus.clone(),
-        engine: Arc::new(Engine::with_budget(bus.clone(), budget)),
-        scheduler: Arc::new(Scheduler::with_resources(
-            bus.clone(),
-            config.number("system.scheduler.workers") as usize,
-            &[(
-                helios_resolve::AI_CALLS,
-                config.number("system.ai.calls") as u64,
-            )],
-        )),
+        engine,
+        scheduler,
         graph: Arc::new(SharedGraph(RwLock::new(loaded.graph))),
         names: loaded.nodes,
         targets: Mutex::new(Vec::new()),
@@ -1279,8 +1367,11 @@ fn main() -> ExitCode {
         frame: loaded.frame,
         cameras: Mutex::new(loaded.cameras),
         edit,
-        jobs: Jobs::new(bus.clone()),
+        jobs,
         batches: Mutex::new(BTreeMap::new()),
+        workflows: workflows.clone(),
+        decisions: loaded.decisions.clone(),
+        first_export: loaded.exports.first().map(|e| e.node.clone()),
     });
     // A batch whose client went without ending it ends on its own.
     {
@@ -1295,8 +1386,9 @@ fn main() -> ExitCode {
             })
             .expect("a thread for the batches' watch");
     }
-    let inspector = Inspector::new(bus.clone())
+    let inspector = inspector
         .with("graph", node.graph.clone())
+        .with("workflow", workflows)
         .with("engine", node.engine.clone())
         .with("node", Arc::new(Status(node.clone())))
         .with("config", config.clone())

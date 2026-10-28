@@ -490,6 +490,95 @@ pub mod control {
         DecisionReask {
             node: String,
         },
+        /// Submits a batch as a **run** of the workflow level: one journal
+        /// row per item and queueing node (the export, and the decisions
+        /// it depends on), worked by the node with leases and retries.
+        /// The run's id follows from the network and the export settings:
+        /// submitting them again extends the same run, leaving the items
+        /// already in it as they are, unless `again` asks for a new run.
+        /// Each item's output path is decided here, once. Answers the run's
+        /// id, its derived workflow, and how many items were new, already
+        /// there, or the same file twice (merged).
+        #[serde(rename = "workflow.submit")]
+        WorkflowSubmit {
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            title: Option<String>,
+            items: Vec<RunItem>,
+            /// The folder the files are written to, absolute.
+            out: PathBuf,
+            format: FileFormat,
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            quality: Option<u8>,
+            /// The output file name: `{stem}` and `{ext}` are replaced.
+            #[serde(default = "name_pattern")]
+            name: String,
+            /// The node exported: the network's first export, else its
+            /// only end, unless given.
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            node: Option<String>,
+            /// The source given each item: the network's only source
+            /// unless given.
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            source: Option<String>,
+            #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+            again: bool,
+        },
+        /// The runs of the node: id, title, state, counts, durable.
+        #[serde(rename = "workflow.runs")]
+        WorkflowRuns,
+        /// One page of a run's items at a queueing node (the export when
+        /// not given), in the order they are worked, with their rows;
+        /// `state` keeps only the items in that state: `waiting` (can be
+        /// claimed, or a retry due), `upstream`, `held` (behind a failure),
+        /// `asking` (waiting for a person), or another row status.
+        #[serde(rename = "workflow.items")]
+        WorkflowItems {
+            run: String,
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            node: Option<String>,
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            state: Option<String>,
+            #[serde(default)]
+            offset: usize,
+            #[serde(default = "page")]
+            limit: usize,
+        },
+    }
+
+    /// One item of a run: an image file (absolute), with parameters
+    /// changed for it only, by node name (a sidecar's edit).
+    #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+    #[serde(untagged)]
+    pub enum RunItem {
+        Path(PathBuf),
+        With {
+            path: PathBuf,
+            #[serde(default)]
+            params: BTreeMap<String, Params>,
+        },
+    }
+
+    impl RunItem {
+        pub fn path(&self) -> &std::path::Path {
+            match self {
+                RunItem::Path(path) | RunItem::With { path, .. } => path,
+            }
+        }
+
+        pub fn params(&self) -> BTreeMap<String, Params> {
+            match self {
+                RunItem::Path(_) => BTreeMap::new(),
+                RunItem::With { params, .. } => params.clone(),
+            }
+        }
+    }
+
+    fn name_pattern() -> String {
+        "{stem}.{ext}".into()
+    }
+
+    fn page() -> usize {
+        100
     }
 
     fn someone() -> String {

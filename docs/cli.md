@@ -42,6 +42,20 @@ started with `--control` and `HELIOS_DEBUG_CONTROL` is set (a sandbox does
 both). `load-source`, `export`, `cancel` and `job-cancel` are also
 answered by the batch endpoint, which every build serves (see below).
 
+`workflow-submit --format F --to DIR IMAGES...` submits the images as a
+**run** of the workflow level (see [workflow-level.md](workflow-level.md)):
+each image is exported through the network by the node itself, claimed
+under a lease, retried on a failure that another attempt may change (three
+attempts, 2 s then 4 s apart), and followed per queueing node in `describe
+workflow` and in `workflow.rows` events. Each output path is decided at
+submission, once. Submitting the same network and settings again extends
+the same run: the images already in it are left as they are, and the
+answer counts the new ones, those already there and those given twice;
+`--again` starts a new run. `workflow-runs` lists the runs with their
+counts, `workflow-items RUN [NODE]` one page of a run's items at a node
+(the export by default). With `--vault`, the node keeps its runs in that
+vault. The batch endpoint answers these three as well.
+
 A refusal answers `{"ok": false, "error": ...}` in English; when the node
 says it by key (a file it cannot load, a node it does not have, a job
 already ended), a `message` comes beside it (`{"key", "args", "english"}`),

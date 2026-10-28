@@ -493,6 +493,20 @@ bench box (see [bench.md](bench.md)).
    retried then succeeds; a permanent failure is not retried; the output
    names are fixed at submission; the derived workflow of a network with a
    decision and an export.
+   *As delivered (2026-10-28):* items are files (`path:` ids); image ids
+   from the library wait for a library-driven batch. Decision rows
+   conclude `done` at once until step 6 gives them workers, the export
+   rendering the decisions as the network answers them. A decision that
+   does not reach the exported node is left out of the run. The item
+   documents are written in one vault transaction, then the `submit` rows
+   in the journal's own (a crash in between leaves items to enter again,
+   step 3). A run of the vault not yet opened by the process is opened on
+   its next submission, its running rows given back. `workflow.items`
+   names a claimable item `waiting` and a row waiting for a person
+   `asking`. A failure is for good when the file cannot be read as a
+   picture or does not fit the network; any other is retried. The
+   `helios control` CLI has `workflow-submit`, `workflow-runs` and
+   `workflow-items`; `helios workflow` comes with step 5.
 3. **Survival** (`helios-node`). Opening a run at start, recovery,
    take-over of a run whose owner is dead, retention and `forget`, format
    versions. Tests in `tests/survival.rs`: `kill -9` mid-batch then
