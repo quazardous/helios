@@ -173,7 +173,30 @@ from there.
   grid (library), an image (culling) and a graph (network), the module
   bypass a power sign. egui-pop's own Edit commands (cut, copy, paste,
   paste special) are declared by egui-pop, which gives them no icon yet.
-- A unit test checks every name resolves, Phosphor ones included.
+- **Panels** (`PANEL_ICONS`, `helios-gui/src/lib.rs`, given to egui-pop
+  as `PanelSpec::icon`): what the activity bar and the folded side bars
+  show instead of the title's first letter.
+
+  | Panel | Icon |
+  |---|---|
+  | Image | `phosphor:image` |
+  | Graph | `phosphor:graph` |
+  | Vault | `phosphor:vault` |
+  | Modules | `phosphor:puzzle-piece` |
+  | Masks | `phosphor:selection` |
+  | Navigator | `phosphor:compass` |
+  | Parameters | `phosphor:sliders-horizontal` |
+  | Scopes | `phosphor:chart-bar` |
+  | Filmstrip | `phosphor:film-strip` |
+  | Queue | `phosphor:queue` |
+  | Log | `phosphor:scroll` |
+  | Compare | `phosphor:square-split-horizontal` |
+  | Stacks | `phosphor:stack` |
+  | Duplicates | `copy` |
+  | Decisions | `phosphor:seal-question` |
+
+- Unit tests check every name resolves, Phosphor ones included, and that
+  every panel has one.
 
 ## Settings pages
 

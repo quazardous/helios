@@ -447,6 +447,29 @@ mod tests {
     }
 
     #[test]
+    fn every_panel_has_an_icon_that_resolves() {
+        // The folded side bars and the activity bar show it instead of
+        // the title's first letter.
+        for spec in crate::helios_panels() {
+            let id = spec.id.as_str();
+            assert!(!spec.icon.is_empty(), "panel {id} has no icon");
+            assert!(
+                egui_pop::core::icon::registry::is_known(&spec.icon),
+                "panel {id}: `{}` is not in egui-pop's icon registry",
+                spec.icon
+            );
+        }
+        // Every icon names a panel Helios declares.
+        let ids: Vec<String> = crate::helios_panels()
+            .iter()
+            .map(|p| p.id.as_str().to_string())
+            .collect();
+        for (id, _) in crate::PANEL_ICONS {
+            assert!(ids.iter().any(|p| p == id), "{id} is not a Helios panel");
+        }
+    }
+
+    #[test]
     fn every_command_with_an_icon_is_one_of_helios() {
         // A command's English title is `command-<id, dots as dashes>`: an
         // icon on an id no command has would never show.

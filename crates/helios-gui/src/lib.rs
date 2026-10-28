@@ -58,6 +58,28 @@ use egui_pop::model::panels::{Area, PanelSpec};
 /// `<panel>.float`, hidden and shown again with Tab.
 pub const FLOATABLE: [&str; 3] = ["helios.masks", "helios.scopes", "helios.navigator"];
 
+/// The icon of each of Helios's panels, by name in egui-pop's icon
+/// registry: what the activity bar and the folded side bars show
+/// (`PanelSpec::icon`). A Phosphor glyph (`phosphor:<name>`) where
+/// egui-pop's built-in set has none.
+pub const PANEL_ICONS: &[(&str, &str)] = &[
+    ("helios.viewport", "phosphor:image"),
+    ("helios.graph", "phosphor:graph"),
+    ("helios.vault", "phosphor:vault"),
+    ("helios.modules", "phosphor:puzzle-piece"),
+    ("helios.masks", "phosphor:selection"),
+    ("helios.navigator", "phosphor:compass"),
+    ("helios.params", "phosphor:sliders-horizontal"),
+    ("helios.scopes", "phosphor:chart-bar"),
+    ("helios.filmstrip", "phosphor:film-strip"),
+    ("helios.queue", "phosphor:queue"),
+    ("helios.log", "phosphor:scroll"),
+    ("helios.compare", "phosphor:square-split-horizontal"),
+    ("helios.stacks", "phosphor:stack"),
+    ("helios.duplicates", "copy"),
+    ("helios.decisions", "phosphor:seal-question"),
+];
+
 /// The panels Helios declares today, with the areas each may be moved to
 /// (egui-pop's placement rules); each shows a placeholder until its
 /// widget lands. Every panel may be detached into a window of its own;
@@ -101,9 +123,13 @@ pub fn helios_panels() -> Vec<PanelSpec> {
     .map(|(id, title, area, areas, open)| {
         let id = PanelId::new(id).expect("Helios's panel ids are valid");
         let floats = FLOATABLE.contains(&id.as_str());
+        let icon = PANEL_ICONS.iter().find(|(p, _)| *p == id.as_str());
         let mut spec = PanelSpec::new(id, title, area).only_in(areas);
         if floats {
             spec = spec.palette();
+        }
+        if let Some((_, icon)) = icon {
+            spec = spec.icon(icon);
         }
         if !open {
             spec = spec.closed();
