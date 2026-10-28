@@ -18,14 +18,21 @@
 //!   it ends; a value held by another origin's gesture refuses them too.
 //! - **Groups** are the store's groups: what an origin writes in one is a
 //!   single step.
+//! - **The place** of each step is the context stack's place it was made
+//!   in (the store's [`helios_values::Store::set_place`], which
+//!   `crate::contexts::follow_place` keeps on the place shown): an undo,
+//!   a redo or a jump that walks a step made out of sight makes egui-pop
+//!   say "Undone in <place>", with Go there.
 
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
+use egui_pop::api::contexts::Entry;
 use egui_pop::api::history::{
     Answer, History, Label, Line, Refusal, RefusalKind, Request, ScopeId, ScopeInfo, StepInfo,
     Walked, plan_jump,
 };
 use egui_pop::model::commands::Origin as PopOrigin;
+use egui_pop::model::ids::FrameId;
 use helios_values::{GestureId, Refused, Step, Store};
 
 use crate::host::{to_helios, to_pop};
@@ -97,7 +104,18 @@ impl HeliosHistory {
 
 /// A step of the store as egui-pop sees it, numbered `id`.
 fn step_info(id: u64, step: &Step) -> StepInfo {
-    StepInfo::new(id, EDIT, Label::text(&step.label), to_pop(&step.origin))
+    let mut info = StepInfo::new(id, EDIT, Label::text(&step.label), to_pop(&step.origin));
+    info.place = step
+        .place
+        .iter()
+        .filter_map(|p| {
+            Some(Entry {
+                frame: FrameId::new(p.frame.as_str()).ok()?,
+                payload: p.payload.clone(),
+            })
+        })
+        .collect();
+    info
 }
 
 /// The store's steps as a line: undo steps numbered from 1, oldest
@@ -331,6 +349,29 @@ mod tests {
             panic!("jumped back");
         };
         assert_eq!(value(&values), Value::Float(2.0));
+    }
+
+    #[test]
+    fn a_step_says_the_place_it_was_made_in() {
+        let values = store();
+        values.lock().unwrap().set_place(vec![helios_values::Place {
+            frame: "helios.darkroom".into(),
+            payload: serde_json::json!({ "image": "i1" }),
+        }]);
+        set(&values, 1.0);
+        values.lock().unwrap().set_place(Vec::new());
+        set(&values, 2.0);
+        let mut h = HeliosHistory::new(values.clone());
+        let line = h.line(&EDIT).unwrap();
+        assert_eq!(line.undo[0].place.len(), 1);
+        assert_eq!(line.undo[0].place[0].frame.as_str(), "helios.darkroom");
+        assert_eq!(line.undo[0].place[0].payload["image"], "i1");
+        assert!(line.undo[1].place.is_empty());
+        // The walked step carries its place to egui-pop's toast.
+        let Answer::Done(Ok(w)) = h.jump(&Request::new(EDIT), 0, &PopOrigin::User) else {
+            panic!("jumped");
+        };
+        assert_eq!(w.steps.last().unwrap().place.len(), 1);
     }
 
     #[test]

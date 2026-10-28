@@ -230,6 +230,27 @@ pub fn culling(app: &AppHandle, on: Option<bool>, origin: &Origin) -> Result<Jso
     }
 }
 
+/// Keeps the value store's place on the stack's place shown: the steps
+/// made from now on are made there (`helios_values::Step::place`), which
+/// egui-pop's undo toast reads to say "Undone in <place>" with Go there.
+/// Called each frame, once the interface's logic ran.
+pub fn follow_place(app: &AppHandle, values: &mut Store) {
+    let Some(now) = contexts::state(app) else {
+        return;
+    };
+    let place: Vec<helios_values::Place> = now
+        .places
+        .into_iter()
+        .map(|e| helios_values::Place {
+            frame: e.frame.as_str().to_string(),
+            payload: e.payload,
+        })
+        .collect();
+    if values.place() != place.as_slice() {
+        values.set_place(place);
+    }
+}
+
 /// A state of the image kept in the value store and on the stack as a
 /// mode: what each was at the last frame.
 #[derive(Clone, Copy, Debug, Default)]

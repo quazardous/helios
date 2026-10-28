@@ -4360,6 +4360,8 @@ impl Shell {
         let wanted = crate::display::wanted(crate::display::wide_gamut(self.app.handle()));
         self.viewport.borrow_mut().set_wanted(wanted);
         self.app.logic(&ctx);
+        // New undo steps are made in the place the stack shows now.
+        crate::contexts::follow_place(self.app.handle(), &mut lock(&self.values));
         self.apply_queue(&ctx);
         // The workspace's files changed outside, and agents' requests.
         self.follow_workspace(&ctx);

@@ -271,6 +271,43 @@ fn a_gesture_or_a_group_is_one_undo_step_and_a_write_another() {
 }
 
 #[test]
+fn a_step_keeps_the_place_it_was_made_in() {
+    let (_, _, mut store, _) = exposure();
+    let path = "node/exposure/exposure";
+    let place = |frame: &str| Place {
+        frame: frame.into(),
+        payload: json!(null),
+    };
+    let s1 = vec![place("helios.library"), place("helios.darkroom")];
+    store
+        .set(Set::new(path, Change::To(Value::Float(0.5)), Origin::User))
+        .unwrap();
+    store.set_place(s1.clone());
+    // A drag begun in the darkroom is made there, wherever it ends.
+    let drag = store.begin_gesture(Origin::User, "drag exposure");
+    store
+        .set(Set::new(path, Change::To(Value::Float(1.0)), Origin::User).gesture(drag))
+        .unwrap();
+    store.set_place(Vec::new());
+    store.end(drag);
+    store
+        .set(Set::new(path, Change::To(Value::Float(2.0)), Origin::User))
+        .unwrap();
+    let places: Vec<&[Place]> = store
+        .undo_steps()
+        .iter()
+        .map(|s| s.place.as_slice())
+        .collect();
+    assert_eq!(places, [&[][..], &s1[..], &[][..]]);
+    // An undo and a redo move the step with its place.
+    store.undo(&Origin::User).unwrap();
+    store.undo(&Origin::User).unwrap();
+    assert_eq!(store.redo_steps().last().unwrap().place, s1);
+    store.redo(&Origin::User).unwrap();
+    assert_eq!(store.undo_steps().last().unwrap().place, s1);
+}
+
+#[test]
 fn a_cancelled_gesture_puts_its_values_back_and_is_no_undo_step() {
     let (_, _, mut store, bus) = exposure();
     let path = "node/exposure/exposure";

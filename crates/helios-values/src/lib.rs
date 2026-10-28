@@ -20,7 +20,9 @@
 //!   origin, sequence); a write equal to the value changes nothing and
 //!   announces nothing, so a change never loops back.
 //! - Undo: one step per gesture or group, else one per write; a cancelled
-//!   gesture puts its values back and is no step.
+//!   gesture puts its values back and is no step. Each step keeps the
+//!   place of the context stack it was made in ([`Store::set_place`]), so
+//!   an undo made elsewhere can say where it went back to.
 
 mod commands;
 mod graph;
@@ -34,7 +36,7 @@ use std::sync::Arc;
 
 use helios_core::{Bus, Event, ParamHint, ParamKind, ParamSpec, ParamWidget, Value};
 use helios_shell::commands::Origin;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// The type of a value.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -456,6 +458,18 @@ struct Gesture {
     holds: bool,
     paths: BTreeSet<String>,
     changes: Vec<(String, Value, Value)>,
+    /// Where it began: its step is made there.
+    place: Vec<Place>,
+}
+
+/// A place of the context stack (the library, the darkroom on an image,
+/// a sub-workspace): its frame and the frame's payload, as the interface's
+/// stack names them.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Place {
+    pub frame: String,
+    #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
+    pub payload: serde_json::Value,
 }
 
 /// One undo step.
@@ -465,6 +479,10 @@ pub struct Step {
     pub origin: Origin,
     /// Path, old value, new value, in the order written.
     pub changes: Vec<(String, Value, Value)>,
+    /// The place of the context stack it was made in, root first; empty
+    /// at the root or without a stack.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub place: Vec<Place>,
 }
 
 #[derive(Default)]
@@ -487,6 +505,8 @@ pub struct Store {
     last_origin: Option<Origin>,
     /// Moves on with every change of the undo or redo steps.
     history_rev: u64,
+    /// The place new steps are made in.
+    place: Vec<Place>,
 }
 
 fn clamp(v: f64, range: Option<(f64, f64)>, soft: bool) -> (f64, Clamped) {
@@ -774,6 +794,7 @@ impl Store {
                 label: format!("set {}", set.path),
                 origin: set.origin,
                 changes: vec![change],
+                place: self.place.clone(),
             }),
         }
         Ok(Applied {
@@ -864,9 +885,22 @@ impl Store {
                 holds,
                 paths: BTreeSet::new(),
                 changes: Vec::new(),
+                place: self.place.clone(),
             },
         );
         id
+    }
+
+    /// The place of the context stack new steps are made in, root first
+    /// (the interface follows its stack). A gesture or a group keeps the
+    /// place it began in.
+    pub fn set_place(&mut self, place: Vec<Place>) {
+        self.place = place;
+    }
+
+    /// The place new steps are made in.
+    pub fn place(&self) -> &[Place] {
+        &self.place
     }
 
     /// Starts a gesture (a drag): its writes are one undo step, and the
@@ -889,6 +923,7 @@ impl Store {
                 label: g.label,
                 origin: g.origin,
                 changes: g.changes,
+                place: g.place,
             });
         }
     }

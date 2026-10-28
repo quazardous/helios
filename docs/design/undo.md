@@ -2,7 +2,10 @@
 
 Status: **decided** (2026-10-14): the owner accepted the plan and answered
 its open questions (see "Decisions" at the end). Built so far: the first
-migration step (the fixes below). The generic part (the contract between
+migration step (the fixes below); egui-pop's `History` contract over the
+value store as one scope, `edit` (`HeliosHistory`, part of step 4); each
+step's place on the context stack, so an undo made elsewhere says where
+(2026-10-28). The generic part (the contract between
 kernel and interface, the focus rule, grouping, the history panel, a
 survey of darktable, Lightroom, Photoshop, Blender, VS Code, Krita and
 GIMP) is egui-pop's ADR 0014, "Undo: histories owned by the kernel,
@@ -19,7 +22,7 @@ branch where said.
 
 | History | Holds | Scope | Persisted | Limit | Ctrl+Z | Gaps |
 |---|---|---|---|---|---|---|
-| Value store (`helios-values::Store`) | `Step { label, origin, changes: [(path, old, new)] }`; gestures (a drag: one step, Escape cancels and leaves none); groups (held arrows and wheel, masks panel edits) | one store per window, every image and the workspace mixed | no | none | `edit.undo` → `HeliosHistory` (egui-pop's `History` contract, scope `edit`) → `Store::undo`; vetoed while a gesture is open (`plugins::History`); also `param.undo` | unbounded; not cleared when another image opens, so an undo may write the previous image's values into paths of the same name; one step per agent write |
+| Value store (`helios-values::Store`) | `Step { label, origin, changes: [(path, old, new)], place }`; gestures (a drag: one step, Escape cancels and leaves none); groups (held arrows and wheel, masks panel edits) | one store per window, every image and the workspace mixed | no | none | `edit.undo` → `HeliosHistory` (egui-pop's `History` contract, scope `edit`) → `Store::undo`; vetoed while a gesture is open (`plugins::History`); also `param.undo` | unbounded; not cleared when another image opens, so an undo may write the previous image's values into paths of the same name; one step per agent write |
 | The image's edit (`helios-vault` versions, `EditSession`) | a content-addressed version per committed step (a write, a gesture's end, an undo, a redo, an agent's parameter, a decision answered), a drag every second as "in progress"; parameters by node, marks (labels and locks), the decision book | per image (a line of first parents from a head; two writers make two heads) | SQLite, one transaction per step; survives `kill -9` (survival scenarios gate a release) | none | an undo or redo of the store is saved as a new version; history only grows | the network's shape is not saved (only parameters of the nodes known when the image opened); undo stacks not rebuilt on reopen; the desktop saves every version as `user`, the node as `control`, whoever made the step; nothing lists or checks out versions |
 | Network edits (masks panel, `mask.*` commands) | adding a shape, moving, taking out, rewiring: graph calls, no record | per image, in memory | no | n/a | not reachable | not undo steps, not saved; an undo across them can give a group's opacities and inversions to the members now on those ports; taking out a group with members asks for confirmation because it cannot be undone |
 | Masks panel values | rename, invert, opacity, lock: store groups | per image | as versions (marks and parameters) | as the store | as the store | fine |
@@ -316,6 +319,14 @@ user : leaves to root; Ctrl+Z
 K    : the image's scope is active in root too → undone, a version
 UI   : toast "Undone in s1" with "Go there" (read from the step)
 ```
+
+Built (2026-10-28) for the value store's steps: each `helios_values::Step`
+keeps the place it was made in (`Store::set_place`; a gesture or a group
+the place it began in), which `contexts::follow_place` keeps on the
+stack's place shown, each frame once the interface's logic ran.
+`HeliosHistory` gives it to egui-pop as `StepInfo::place`, and egui-pop's
+context stack says "Undone in <place>" (or "Redone in") with Go there
+after an undo, a redo or a jump that walks a step made out of sight.
 
 ## Migration
 
