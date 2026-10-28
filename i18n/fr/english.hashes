@@ -83,6 +83,7 @@ command-helios-viewport-dock.title b544485bfff8325e
 command-helios-viewport-moveTo.title 8653b4bdbc43ce4e
 command-keymap-package-remove.title 09c89d2776f3a70e
 command-keymap-package.title dafef66dd3b9bf88
+command-library-importFiles.title 2ae7b0b7cb69e013
 command-library-importSource.title 1cb6337694fcbe70
 command-mask-add-circle.title 853e800a379c3a26
 command-mask-add-ellipse.title 369f2cd0736ffec6
@@ -394,6 +395,11 @@ gui-params-port-hint 207939d7a4813cda
 gui-params-port-member 6b3de0179d0cc50e
 gui-params-show-values 1ca86a61fcd25ceb
 gui-params-values 0e265cf773d72c36
+gui-paste-import-copy a5a72b9ec113def9
+gui-paste-import-reference d11a0a67d74a1a81
+gui-paste-import-source 8061b9d994ba38d0
+gui-paste-import-title e2a22e1aa186806e
+gui-paste-import-verb 809bb223e747d022
 gui-pointer-choice-close 4ee816d1021e4e6e
 gui-pointer-choice-darktable 7be5d454e9047774
 gui-pointer-choice-keep bb433e2ea951769e
