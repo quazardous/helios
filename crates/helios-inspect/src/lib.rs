@@ -557,6 +557,64 @@ pub mod control {
         WorkflowForget {
             run: String,
         },
+        /// Cancels a run's `items` (every item when not given) at `node`
+        /// (every queueing node when not given): their rows not concluded
+        /// become `cancelled`, their running exports stopped first (a file
+        /// is written whole or not at all); an item not yet at a node gets
+        /// a cancelled row there, so it is never claimed. Done rows stay
+        /// done. An item is named by its id (`path:…`) or its absolute
+        /// path. `job.cancel` of a run's job is this, for the whole run.
+        #[serde(rename = "workflow.cancel")]
+        WorkflowCancel {
+            run: String,
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            items: Option<Vec<String>>,
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            node: Option<String>,
+        },
+        /// Retries a run's failed and cancelled `items` (every item when
+        /// not given) at `node` (every queueing node when not given):
+        /// their rows are scheduled again, due now, with the full allowance
+        /// of attempts. A finished run is worked again; a paused one stays
+        /// paused.
+        #[serde(rename = "workflow.retry")]
+        WorkflowRetry {
+            run: String,
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            items: Option<Vec<String>>,
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            node: Option<String>,
+        },
+        /// Moves a run's `items` before (`top`) or after (`bottom`) every
+        /// other item of the run, in the order they are claimed; items
+        /// running or concluded at the export are left where they are.
+        #[serde(rename = "workflow.prioritize")]
+        WorkflowPrioritize {
+            run: String,
+            items: Vec<String>,
+            to: MoveTo,
+        },
+        /// Stops claiming a run's items; those running finish. Kept in the
+        /// run document: a paused run stays paused after a restart.
+        #[serde(rename = "workflow.pause")]
+        WorkflowPause {
+            run: String,
+        },
+        /// Claims a paused run's items again.
+        #[serde(rename = "workflow.resume")]
+        WorkflowResume {
+            run: String,
+        },
+    }
+
+    /// Where `workflow.prioritize` moves items within their run.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+    #[serde(rename_all = "lowercase")]
+    pub enum MoveTo {
+        /// Before every other item: claimed next.
+        Top,
+        /// After every other item: claimed last.
+        Bottom,
     }
 
     /// One item of a run: an image file (absolute), with parameters

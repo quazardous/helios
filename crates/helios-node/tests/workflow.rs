@@ -3,7 +3,8 @@
 //! re-submitting redoing nothing, output names fixed at submission, a
 //! transient failure retried, a permanent one not, the workflow derived
 //! from a network with a decision, whose items wait while it is unanswered,
-//! and a finished run forgotten.
+//! a finished run forgotten, and the verbs on a run (cancel, retry,
+//! prioritize, pause, resume) with its rows checked after.
 
 #![cfg(unix)]
 
@@ -384,4 +385,203 @@ fn an_injected_fault_is_retried_then_succeeds() {
         "failed once, then done: {items:?}"
     );
     assert!(Path::new(items[0]["output"].as_str().unwrap()).exists());
+}
+
+impl Node {
+    /// The scheduler paused (`true`) or resumed, through the debug control
+    /// endpoint: exports claimed meanwhile wait in its queue.
+    #[cfg(debug_assertions)]
+    fn hold(&self, on: bool) {
+        let answer = self.call(
+            "control",
+            "control.sock",
+            &[if on { "pause" } else { "resume" }],
+        );
+        assert_eq!(answer["ok"], true, "{answer}");
+    }
+
+    /// A verb through the batch endpoint, answered ok.
+    fn verb(&self, args: &[&str]) -> Value {
+        let answer = self.batch(args);
+        assert_eq!(answer["ok"], true, "{args:?}: {answer}");
+        answer
+    }
+
+    /// Each item's title and state at the export, in the order they are
+    /// claimed.
+    fn states(&self, run: &str) -> Vec<(String, String)> {
+        self.items(run)
+            .iter()
+            .map(|i| {
+                (
+                    i["title"].as_str().unwrap().to_string(),
+                    i["state"].as_str().unwrap().to_string(),
+                )
+            })
+            .collect()
+    }
+}
+
+/// `workflow.prioritize`, `.pause` and `.resume`: an item moved to the top
+/// is claimed next, and a paused run claims nothing while what runs ends.
+#[cfg(debug_assertions)]
+#[test]
+fn a_run_is_reordered_paused_and_resumed() {
+    let node = Node::start("order", NETWORK, true);
+    let images: Vec<PathBuf> = ["a.png", "b.png", "c.png", "d.png"]
+        .iter()
+        .map(|n| node.picture(n))
+        .collect();
+    let refs: Vec<&Path> = images.iter().map(PathBuf::as_path).collect();
+    // One export at a time, held in the scheduler's queue.
+    node.hold(true);
+    let run = node.submit(&node.dir.join("out"), &refs, &["--jobs", "1"])["run"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    node.until(&run, "claiming a.png", |r| {
+        r["nodes"]["exp"]["running"] == 1
+    });
+
+    let d = images[3].to_str().unwrap();
+    let moved = node.verb(&["workflow-prioritize", &run, "top", d]);
+    assert_eq!(moved["moved"], 1, "{moved}");
+    // a.png is running: it stays where it is.
+    let a = images[0].to_str().unwrap();
+    let kept = node.verb(&["workflow-prioritize", &run, "bottom", a]);
+    assert_eq!(kept["moved"], 0, "{kept}");
+    assert_eq!(kept["unchanged"], 1, "{kept}");
+    let order: Vec<String> = node.states(&run).into_iter().map(|(t, _)| t).collect();
+    assert_eq!(order, ["d.png", "a.png", "b.png", "c.png"]);
+
+    let paused = node.verb(&["workflow-pause", &run]);
+    assert_eq!(paused["state"], "paused", "{paused}");
+    assert_eq!(paused["changed"], true, "{paused}");
+    // The export already claimed finishes; nothing more is claimed.
+    node.hold(false);
+    let after = node.until(&run, "a.png done", |r| r["nodes"]["exp"]["done"] == 1);
+    assert_eq!(after["state"], "paused", "{after}");
+    std::thread::sleep(Duration::from_secs(1));
+    let still = node.until(&run, "listed", |r| !r.is_null());
+    assert_eq!(still["nodes"]["exp"]["done"], 1, "{still}");
+    assert_eq!(still["nodes"]["exp"]["running"], 0, "{still}");
+    assert_eq!(still["nodes"]["exp"]["waiting"], 3, "{still}");
+
+    // Resumed with the scheduler held: the item moved to the top goes
+    // first.
+    node.hold(true);
+    let resumed = node.verb(&["workflow-resume", &run]);
+    assert_eq!(resumed["state"], "active", "{resumed}");
+    node.until(&run, "claiming again", |r| {
+        r["nodes"]["exp"]["running"] == 1
+    });
+    let running: Vec<String> = node
+        .states(&run)
+        .into_iter()
+        .filter(|(_, s)| s == "running")
+        .map(|(t, _)| t)
+        .collect();
+    assert_eq!(running, ["d.png"]);
+    node.hold(false);
+    let done = node.finished(&run);
+    assert_eq!(done["nodes"]["exp"]["done"], 4, "{done}");
+    let again = node.verb(&["workflow-resume", &run]);
+    assert_eq!(again["changed"], false, "a finished run: {again}");
+}
+
+/// `workflow.cancel` and `.retry` by item: a cancelled export writes
+/// nothing and the others go on; retried, the item is written.
+#[cfg(debug_assertions)]
+#[test]
+fn items_are_cancelled_then_retried() {
+    let node = Node::start("cancel", NETWORK, true);
+    let images: Vec<PathBuf> = ["a.png", "b.png", "c.png"]
+        .iter()
+        .map(|n| node.picture(n))
+        .collect();
+    let refs: Vec<&Path> = images.iter().map(PathBuf::as_path).collect();
+    let out = node.dir.join("out");
+    node.hold(true);
+    let run = node.submit(&out, &refs, &["--jobs", "1"])["run"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    node.until(&run, "claiming a.png", |r| {
+        r["nodes"]["exp"]["running"] == 1
+    });
+    let (a, b) = (images[0].to_str().unwrap(), images[1].to_str().unwrap());
+    // a.png's export is in the scheduler's queue; b.png is not claimed yet.
+    let cancelled = node.verb(&["workflow-cancel", &run, a, b]);
+    assert_eq!(cancelled["items"], 2, "{cancelled}");
+    node.hold(false);
+    let done = node.finished(&run);
+    assert_eq!(done["nodes"]["exp"]["done"], 1, "{done}");
+    assert_eq!(done["nodes"]["exp"]["cancelled"], 2, "{done}");
+    assert_eq!(
+        node.states(&run),
+        [
+            ("a.png".into(), "cancelled".into()),
+            ("b.png".into(), "cancelled".into()),
+            ("c.png".into(), "done".into()),
+        ]
+    );
+    assert!(!out.join("a.png").exists() && !out.join("b.png").exists());
+    assert!(out.join("c.png").exists());
+
+    // b.png by its id, as `workflow-items` lists it.
+    let id = node.items(&run)[1]["item"].as_str().unwrap().to_string();
+    let retried = node.verb(&["workflow-retry", &run, &id]);
+    assert_eq!(retried["retried"], 1, "{retried}");
+    let done = node.until(&run, "b.png done", |r| {
+        r["state"] == "finished" && r["nodes"]["exp"]["done"] == 2
+    });
+    assert_eq!(done["nodes"]["exp"]["cancelled"], 1, "{done}");
+    assert!(out.join("b.png").exists());
+    // The whole run: what is left cancelled is retried.
+    let all = node.verb(&["workflow-retry", &run]);
+    assert_eq!(all["retried"], 1, "{all}");
+    let done = node.until(&run, "all done", |r| {
+        r["state"] == "finished" && r["nodes"]["exp"]["done"] == 3
+    });
+    assert_eq!(done["nodes"]["exp"]["cancelled"], 0, "{done}");
+    for item in node.items(&run) {
+        assert_eq!(item["row"]["attempts"], 1, "written once: {item}");
+    }
+    assert!(out.join("a.png").exists());
+
+    // What a verb cannot name is refused.
+    let missing = node.batch(&["workflow-cancel", &run, "/no/such.png"]);
+    assert_eq!(missing["message"]["key"], "workflow-no-item", "{missing}");
+    let nowhere = node.batch(&["workflow-retry", &run, "--node", "src"]);
+    assert_eq!(nowhere["message"]["key"], "workflow-no-node", "{nowhere}");
+    let unknown = node.batch(&["workflow-pause", "nope"]);
+    assert_eq!(unknown["message"]["key"], "workflow-no-run", "{unknown}");
+}
+
+/// The verbs on the batch endpoint of any build: an item waiting for a
+/// person is cancelled at the decision, which holds its export, then
+/// retried, and waits again.
+#[test]
+fn an_item_asking_is_cancelled_then_asks_again_when_retried() {
+    let node = Node::start("asking", DECIDED, false);
+    let pic = node.picture("p.png");
+    let run = node.submit(&node.dir.join("out"), &[&pic], &[])["run"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    node.until(&run, "asking at the decision", |r| {
+        r["nodes"]["bright"]["asking"] == 1
+    });
+    let cancelled = node.verb(&["workflow-cancel", &run, "--node", "bright"]);
+    assert_eq!(cancelled["cancelled"], 1, "{cancelled}");
+    let held = node.finished(&run);
+    assert_eq!(held["nodes"]["bright"]["cancelled"], 1, "{held}");
+    assert_eq!(held["nodes"]["exp"]["held"], 1, "{held}");
+    let retried = node.verb(&["workflow-retry", &run, "--node", "bright"]);
+    assert_eq!(retried["retried"], 1, "{retried}");
+    let asking = node.until(&run, "asking again", |r| {
+        r["nodes"]["bright"]["asking"] == 1
+    });
+    assert_eq!(asking["state"], "active", "{asking}");
+    assert_eq!(asking["nodes"]["exp"]["upstream"], 1, "{asking}");
 }

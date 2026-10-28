@@ -17,8 +17,10 @@
 //!     helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] pause | resume
 //!     helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] fault NODE compute|source-read
 //!     helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] workflow-submit --format jpeg|png|tiff
-//!                    [--quality Q] [--again] --to DIR IMAGES...
+//!                    [--quality Q] [--again] [--jobs N] --to DIR IMAGES...
 //!     helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] workflow-runs | workflow-items RUN [NODE] | workflow-forget RUN
+//!                    | workflow-cancel RUN [ITEMS...] [--node NODE] | workflow-retry RUN [ITEMS...] [--node NODE]
+//!                    | workflow-prioritize RUN top|bottom ITEMS... | workflow-pause RUN | workflow-resume RUN
 //!
 //!     helios sandbox new DIR [--network FILE] | start DIR | stop DIR | clean DIR
 //!
@@ -95,7 +97,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use helios_core::{FaultKind, Params, Region, Value};
-use helios_inspect::control::{ControlRequest, FileFormat, RunItem};
+use helios_inspect::control::{ControlRequest, FileFormat, MoveTo, RunItem};
 use helios_inspect::{Address, Request, request_at};
 use helios_node::batch::{Options, Outcome};
 
@@ -116,8 +118,10 @@ const USAGE: &str = "usage:
   helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] pause | resume
   helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] fault NODE compute|source-read
   helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] workflow-submit --format jpeg|png|tiff
-                 [--quality Q] [--again] --to DIR IMAGES...
+                 [--quality Q] [--again] [--jobs N] --to DIR IMAGES...
   helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] workflow-runs | workflow-items RUN [NODE] | workflow-forget RUN
+                 | workflow-cancel RUN [ITEMS...] [--node NODE] | workflow-retry RUN [ITEMS...] [--node NODE]
+                 | workflow-prioritize RUN top|bottom ITEMS... | workflow-pause RUN | workflow-resume RUN
   helios sandbox new DIR [--network FILE] | start DIR | stop DIR | clean DIR
   helios batch --network FILE --out DIR [--format jpeg|png|tiff] [--quality Q] [--jobs N]
                [--name TEMPLATE] [--sidecar] [--vault FILE] [--again] [--source NAME]
@@ -185,6 +189,25 @@ fn absolute(path: &str) -> Result<PathBuf, String> {
     std::path::absolute(path).map_err(|e| format!("{path}: {e}"))
 }
 
+/// The items a `workflow-*` verb names: ids (`path:…`) as given, files
+/// made absolute; none for every item of the run.
+fn run_items(words: &[&str]) -> Result<Option<Vec<String>>, String> {
+    if words.is_empty() {
+        return Ok(None);
+    }
+    words
+        .iter()
+        .map(|w| {
+            if w.starts_with("path:") {
+                Ok((*w).to_string())
+            } else {
+                absolute(w).map(|p| p.to_string_lossy().into_owned())
+            }
+        })
+        .collect::<Result<_, _>>()
+        .map(Some)
+}
+
 /// `NODE.PARAM=VALUE`: the node name may hold dots, the parameter not.
 fn setting(text: &str) -> Result<(String, String, String), String> {
     let bad = || format!("--set takes NODE.PARAM=VALUE, got `{text}`");
@@ -217,6 +240,8 @@ fn parse(args: Vec<String>) -> Result<Call, String> {
     let (mut port, mut area) = ("output".to_string(), None);
     let (mut format, mut quality, mut to) = (None, None, None);
     let mut again = false;
+    let mut at = None;
+    let mut jobs = None;
     let mut sets: BTreeMap<String, Params> = BTreeMap::new();
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -254,6 +279,10 @@ fn parse(args: Vec<String>) -> Result<Call, String> {
             }
             "--to" => to = Some(absolute(&args.next().ok_or("--to needs a path")?)?),
             "--again" => again = true,
+            "--node" => at = Some(args.next().ok_or("--node needs a node name")?),
+            "--jobs" => {
+                jobs = Some(usize::try_from(number(args.next(), "--jobs")?).unwrap_or(usize::MAX));
+            }
             "--set" => {
                 let (node, param, v) =
                     setting(&args.next().ok_or("--set needs NODE.PARAM=VALUE")?)?;
@@ -374,7 +403,7 @@ fn parse(args: Vec<String>) -> Result<Call, String> {
                     node: None,
                     source: None,
                     again,
-                    concurrency: None,
+                    concurrency: jobs,
                 }
             }
             ["workflow-runs"] => ControlRequest::WorkflowRuns,
@@ -393,6 +422,37 @@ fn parse(args: Vec<String>) -> Result<Call, String> {
                 limit: 100,
             },
             ["workflow-forget", run] => ControlRequest::WorkflowForget {
+                run: run.to_string(),
+            },
+            ["workflow-cancel", run, items @ ..] => ControlRequest::WorkflowCancel {
+                run: run.to_string(),
+                items: run_items(items)?,
+                node: at,
+            },
+            ["workflow-retry", run, items @ ..] => ControlRequest::WorkflowRetry {
+                run: run.to_string(),
+                items: run_items(items)?,
+                node: at,
+            },
+            ["workflow-prioritize", run, to, items @ ..] if !items.is_empty() => {
+                ControlRequest::WorkflowPrioritize {
+                    run: run.to_string(),
+                    items: run_items(items)?.unwrap_or_default(),
+                    to: match *to {
+                        "top" => MoveTo::Top,
+                        "bottom" => MoveTo::Bottom,
+                        other => {
+                            return Err(format!(
+                                "workflow-prioritize takes top or bottom, not `{other}`"
+                            ));
+                        }
+                    },
+                }
+            }
+            ["workflow-pause", run] => ControlRequest::WorkflowPause {
+                run: run.to_string(),
+            },
+            ["workflow-resume", run] => ControlRequest::WorkflowResume {
                 run: run.to_string(),
             },
             [] => return Err("control needs an action".into()),

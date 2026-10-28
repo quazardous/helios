@@ -303,6 +303,18 @@ const fn optional(name: &'static str, schema: fn() -> Value, description: &'stat
     }
 }
 
+fn move_to() -> Value {
+    json!({ "type": "string", "enum": ["top", "bottom"] })
+}
+
+/// A run's id, for the `workflow.*` tools.
+const RUN: Param = Param {
+    name: "run",
+    schema: string,
+    description: "The run's id",
+    default: None,
+};
+
 const PROVIDER_ID: Param = Param {
     name: "id",
     schema: string,
@@ -1346,12 +1358,80 @@ pub const TOOLS: &[Tool] = &[
         endpoint: Endpoint::Control,
         cmd: "workflow.forget",
         description: "Removes a run that is not at work (finished, or paused with nothing running), with its items and rows, from the vault too; nothing is kept of it. Refused for a run another live node works",
-        params: &[Param {
-            name: "run",
-            schema: string,
-            description: "The run's id",
-            default: None,
-        }],
+        params: &[RUN],
+    },
+    Tool {
+        name: "helios_workflow_cancel",
+        endpoint: Endpoint::Control,
+        cmd: "workflow.cancel",
+        description: "Cancels a run's items at a queueing node: rows not concluded become cancelled (running exports stopped first, a file is written whole or not at all), items not yet there are never claimed, done rows stay done. Every item and every node when null; the whole run cancelled ends its job cancelled",
+        params: &[
+            RUN,
+            optional(
+                "items",
+                optional_strings,
+                "Item ids (path:...) or absolute paths; every item of the run when null",
+            ),
+            optional(
+                "node",
+                optional_string,
+                "A queueing node; every one when null",
+            ),
+        ],
+    },
+    Tool {
+        name: "helios_workflow_retry",
+        endpoint: Endpoint::Control,
+        cmd: "workflow.retry",
+        description: "Retries a run's failed and cancelled items at a queueing node: their rows are scheduled again, due now, with the full allowance of attempts. A finished run is worked again; a paused run stays paused",
+        params: &[
+            RUN,
+            optional(
+                "items",
+                optional_strings,
+                "Item ids (path:...) or absolute paths; every item of the run when null",
+            ),
+            optional(
+                "node",
+                optional_string,
+                "A queueing node; every one when null",
+            ),
+        ],
+    },
+    Tool {
+        name: "helios_workflow_prioritize",
+        endpoint: Endpoint::Control,
+        cmd: "workflow.prioritize",
+        description: "Moves a run's items before (top) or after (bottom) every other item of the run in the order they are claimed; items running, or concluded at the export, stay where they are",
+        params: &[
+            RUN,
+            Param {
+                name: "items",
+                schema: strings,
+                description: "Item ids (path:...) or absolute paths",
+                default: None,
+            },
+            Param {
+                name: "to",
+                schema: move_to,
+                description: "top: claimed next; bottom: claimed last",
+                default: None,
+            },
+        ],
+    },
+    Tool {
+        name: "helios_workflow_pause",
+        endpoint: Endpoint::Control,
+        cmd: "workflow.pause",
+        description: "Pauses a run: nothing more is claimed, running items finish. A paused run stays paused after the node restarts",
+        params: &[RUN],
+    },
+    Tool {
+        name: "helios_workflow_resume",
+        endpoint: Endpoint::Control,
+        cmd: "workflow.resume",
+        description: "Resumes a paused run: its items are claimed again",
+        params: &[RUN],
     },
     Tool {
         name: "helios_ai_providers_list",
@@ -1975,7 +2055,9 @@ mod tests {
                     "on" => json!(true),
                     "format" => json!("png"),
                     "path" => json!("/nonexistent/out.png"),
+                    "items" if tool.cmd == "workflow.prioritize" => json!(["/nonexistent/a.png"]),
                     "items" => json!(["/nonexistent/a.png", { "path": "/nonexistent/b.png" }]),
+                    "to" => json!("top"),
                     _ => json!("exp"),
                 };
                 (p.name.to_string(), v)
@@ -2033,6 +2115,11 @@ mod tests {
             "workflow.runs",
             "workflow.items",
             "workflow.forget",
+            "workflow.cancel",
+            "workflow.retry",
+            "workflow.prioritize",
+            "workflow.pause",
+            "workflow.resume",
         ];
         for cmd in inspect.iter().chain(&control) {
             assert!(TOOLS.iter().any(|t| t.cmd == *cmd), "no tool for `{cmd}`");

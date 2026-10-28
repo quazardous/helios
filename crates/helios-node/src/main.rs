@@ -36,9 +36,10 @@
 //!
 //! `--batch-control` serves the batch endpoint in every build: only
 //! `load-source`, `export`, `cancel`, `job.cancel`, the batch job's
-//! `batch_start` and `batch_end`, and the runs' `workflow.submit`,
-//! `workflow.runs`, `workflow.items` and `workflow.forget`, on a Unix
-//! socket only its user can open. `helios batch` starts its own node with it, on a socket in a
+//! `batch_start` and `batch_end`, and the runs' `workflow.*` requests
+//! (`submit`, `runs`, `items`, `forget`, `cancel`, `retry`,
+//! `prioritize`, `pause`, `resume`), on a Unix socket only its user can
+//! open. `helios batch` starts its own node with it, on a socket in a
 //! private directory made for that run.
 //!
 //! Its exports and batches are jobs people follow (`helios_core::jobs`,
@@ -755,8 +756,8 @@ mod control {
         )]
         Debug,
         /// `load-source`, `export`, `cancel`, `job.cancel`, `batch_start`,
-        /// `batch_end` and the runs' `workflow.submit`, `workflow.runs`,
-        /// `workflow.items` and `workflow.forget`: the batch endpoint.
+        /// `batch_end` and the runs' `workflow.*` requests: the batch
+        /// endpoint.
         Batch,
     }
 
@@ -775,6 +776,11 @@ mod control {
                         | ControlRequest::WorkflowRuns
                         | ControlRequest::WorkflowItems { .. }
                         | ControlRequest::WorkflowForget { .. }
+                        | ControlRequest::WorkflowCancel { .. }
+                        | ControlRequest::WorkflowRetry { .. }
+                        | ControlRequest::WorkflowPrioritize { .. }
+                        | ControlRequest::WorkflowPause { .. }
+                        | ControlRequest::WorkflowResume { .. }
                 )
         }
     }
@@ -801,7 +807,7 @@ mod control {
                 None,
                 &Message::new(
                     "node-batch-only",
-                    "the batch endpoint only answers load-source, export, cancel, job.cancel, batch_start, batch_end and workflow.submit, workflow.runs, workflow.items, workflow.forget",
+                    "the batch endpoint only answers load-source, export, cancel, job.cancel, batch_start, batch_end and the workflow.* requests",
                 ),
             );
         }
@@ -968,6 +974,21 @@ mod control {
                 .workflows
                 .items(run, at.as_deref(), state.as_deref(), *offset, *limit),
             ControlRequest::WorkflowForget { run } => node.workflows.forget(run),
+            ControlRequest::WorkflowCancel {
+                run,
+                items,
+                node: at,
+            } => node.workflows.cancel(run, items.as_deref(), at.as_deref()),
+            ControlRequest::WorkflowRetry {
+                run,
+                items,
+                node: at,
+            } => node.workflows.retry(run, items.as_deref(), at.as_deref()),
+            ControlRequest::WorkflowPrioritize { run, items, to } => {
+                node.workflows.prioritize(run, items, *to)
+            }
+            ControlRequest::WorkflowPause { run } => node.workflows.pause(run),
+            ControlRequest::WorkflowResume { run } => node.workflows.resume(run),
             ControlRequest::Decisions => {
                 let book = node.book.lock().expect("book lock");
                 Ok(json!({ "decisions": helios_core::Describe::describe(&*book)["nodes"] }))

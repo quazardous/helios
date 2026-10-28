@@ -51,17 +51,37 @@ workflow` and in `workflow.rows` events. Each output path is decided at
 submission, once. Submitting the same network and settings again extends
 the same run: the images already in it are left as they are, and the
 answer counts the new ones, those already there and those given twice;
-`--again` starts a new run. `workflow-runs` lists the runs with their
+`--again` starts a new run; `--jobs N` lets N exports of the run out at
+once (the export node's concurrency by default). `workflow-runs` lists the runs with their
 counts, `workflow-items RUN [NODE]` one page of a run's items at a node
 (the export by default), `workflow-forget RUN` removes a run that is not
-at work (its files stay). With `--vault`, the node keeps its runs in that
+at work (its files stay).
+
+The verbs on a run name its items by id (`path:…`, as `workflow-items`
+lists them) or by file, and act on every item when given none:
+
+- `workflow-cancel RUN [ITEMS...] [--node NODE]` cancels them (at that
+  queueing node, else at every one): their exports in flight are stopped
+  and write nothing, the rest are never claimed, done ones stay done.
+  Cancelling a whole run is `job-cancel` of its job;
+- `workflow-retry RUN [ITEMS...] [--node NODE]` gives their failed and
+  cancelled rows the full allowance of attempts again, at once; a finished
+  run is worked again;
+- `workflow-prioritize RUN top|bottom ITEMS...` moves them before or after
+  every other item of the run, in the order items are claimed (those
+  running, or done, stay where they are);
+- `workflow-pause RUN` stops claiming the run's items (those running
+  finish), and the run stays paused across a restart; `workflow-resume
+  RUN` works it again.
+
+With `--vault`, the node keeps its runs in that
 vault: started again after a crash, it resumes them (each file written
 once); a node started on the same vault while another works it lists that
 run read-only and takes it over if the other dies; a finished run is
 removed after `system.workflow.keep_days` (30 by default); `--runs-vault`
 keeps only the runs in that vault (no settings layer, no edit), as
 `helios batch --vault` asks of its own node. The batch endpoint answers
-these four as well.
+every `workflow-*` verb as well.
 
 A refusal answers `{"ok": false, "error": ...}` in English; when the node
 says it by key (a file it cannot load, a node it does not have, a job

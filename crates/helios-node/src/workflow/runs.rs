@@ -25,9 +25,15 @@
 //!
 //! Every write is announced on the bus as `workflow.rows` (the rows it
 //! changed), and a run's life as `workflow.run` (created, extended,
-//! finished, resumed, opened, lost, forgotten). A run is also a job
-//! (`job.*`), its exports its children; cancelled there, its rows not
-//! concluded are cancelled and its exports stopped.
+//! finished, resumed, opened, lost, forgotten, paused, reordered). A run
+//! is also a job (`job.*`), its exports its children; cancelled there, its
+//! rows not concluded are cancelled and its exports stopped.
+//!
+//! The control verbs act on a run's rows through the journal: `cancel` and
+//! `retry` (some items, some node, or all), `prioritize` (items moved to
+//! the top or the bottom of the claim order), `pause` and `resume` (a
+//! paused run claims nothing; its running exports finish and keep their
+//! leases).
 //!
 //! With a vault, runs outlive the process (see [`super::lifecycle`]):
 //!
@@ -56,7 +62,7 @@ use helios_core::{Bus, Describe, Engine, FaultKind, Graph, Image, JobId, Message
 use helios_core::{ModuleKind, Scheduler};
 use helios_decision::Mode;
 use helios_export::Format;
-use helios_inspect::control::{FileFormat, RunItem};
+use helios_inspect::control::{FileFormat, MoveTo, RunItem};
 use helios_journal::{Journal, Lease, MemoryStore, Outcome, Row, Status};
 use helios_vault::journal::VaultJournal;
 use helios_vault_sqlite::SqliteStore;
@@ -1533,6 +1539,278 @@ impl Workflows {
     }
 }
 
+fn no_item(run: &str, item: &str) -> Message {
+    Message::new("workflow-no-item", "run `{ $run }` has no item `{ $item }`")
+        .with("run", run)
+        .with("item", item)
+}
+
+/// The run `id` worked here, refused for one listed read-only.
+fn run_of<'a>(
+    runs: &'a mut BTreeMap<String, Run>,
+    foreign: &BTreeMap<String, Foreign>,
+    id: &str,
+) -> Result<&'a mut Run, Message> {
+    if let Some(f) = foreign.get(id) {
+        return Err(f.why.clone());
+    }
+    runs.get_mut(id).ok_or_else(|| no_run(id))
+}
+
+/// The queueing node a verb names, checked against the run.
+fn queue_node<'a>(run: &Run, node: Option<&'a str>) -> Result<Option<&'a str>, Message> {
+    match node {
+        Some(name) if run.node_index(name).is_none() => Err(Message::new(
+            "workflow-no-node",
+            "run `{ $run }` does not queue at `{ $node }`",
+        )
+        .with("run", &run.id)
+        .with("node", name)),
+        _ => Ok(node),
+    }
+}
+
+/// The ids of the items a verb names, by id or absolute path; every item
+/// of the run when it names none.
+fn item_ids(run: &Run, named: Option<&[String]>) -> Result<Vec<String>, Message> {
+    let Some(named) = named else {
+        return Ok(run.items.iter().map(|i| i.id.clone()).collect());
+    };
+    let mut ids = Vec::with_capacity(named.len());
+    let mut seen = BTreeSet::new();
+    for name in named {
+        let path = Path::new(name);
+        let id = if !run.known.contains(name) && path.is_absolute() {
+            super::item_id(path)
+        } else {
+            name.clone()
+        };
+        if !run.known.contains(&id) {
+            return Err(no_item(&run.id, name));
+        }
+        if seen.insert(id.clone()) {
+            ids.push(id);
+        }
+    }
+    Ok(ids)
+}
+
+/// The control verbs on a run: cancel, retry, prioritize, pause, resume.
+impl Workflows {
+    /// Cancels `items` of `run` at `node` (each `None` for all): the rows
+    /// not concluded become cancelled, then the exports still holding one
+    /// are stopped, so a lease given back this way writes nothing. Answers
+    /// how many rows were written.
+    fn cancel_rows(
+        &self,
+        run: &mut Run,
+        leases: &BTreeMap<u64, Held>,
+        items: &[String],
+        node: Option<&str>,
+        now: u64,
+    ) -> usize {
+        let refs: Vec<&str> = items.iter().map(String::as_str).collect();
+        let written = match run.journal.cancel(&refs, node, now) {
+            Ok(written) => written,
+            Err(e) => {
+                eprintln!("helios-node: run {}: {e}", run.id);
+                return 0;
+            }
+        };
+        let picked: BTreeSet<&str> = refs.iter().copied().collect();
+        let stopping = leases.iter().filter(|(_, h)| {
+            h.run == run.id
+                && node.is_none_or(|n| h.lease.node == n)
+                && h.lease.items.iter().any(|i| picked.contains(i.as_str()))
+        });
+        for (job, _) in stopping {
+            self.ctx.scheduler.cancel(JobId(*job));
+        }
+        let count = written.len();
+        self.refresh_pairs(run, written);
+        count
+    }
+
+    /// `workflow.cancel`: cancels a run's items (all when `items` is not
+    /// given) at a queueing node (all when `node` is not given). The whole
+    /// run cancelled ends its job cancelled, as `job.cancel` of it does.
+    pub fn cancel(
+        &self,
+        id: &str,
+        items: Option<&[String]>,
+        node: Option<&str>,
+    ) -> Result<Value, Message> {
+        let now = now_ms();
+        let mut state = self.state();
+        let answer = {
+            let State {
+                runs,
+                leases,
+                foreign,
+                ..
+            } = &mut *state;
+            let run = run_of(runs, foreign, id)?;
+            let node = queue_node(run, node)?;
+            let ids = item_ids(run, items)?;
+            let cancelled = self.cancel_rows(run, leases, &ids, node, now);
+            if items.is_none()
+                && node.is_none()
+                && let Some(job) = &mut run.job
+            {
+                job.cancelled = true;
+            }
+            json!({ "run": run.id, "items": ids.len(), "cancelled": cancelled })
+        };
+        self.tick(&mut state, now);
+        Ok(answer)
+    }
+
+    /// `workflow.retry`: the failed and cancelled rows of a run's items
+    /// (all when `items` is not given) at a queueing node (all when `node`
+    /// is not given) are scheduled again, due now, with their attempts
+    /// reset. A finished run is worked again, under a new job when the
+    /// last one ended or was cancelled; a paused run stays paused.
+    pub fn retry(
+        &self,
+        id: &str,
+        items: Option<&[String]>,
+        node: Option<&str>,
+    ) -> Result<Value, Message> {
+        let now = now_ms();
+        let mut state = self.state();
+        let answer = {
+            let State { runs, foreign, .. } = &mut *state;
+            let run = run_of(runs, foreign, id)?;
+            let node = queue_node(run, node)?;
+            let ids = item_ids(run, items)?;
+            let refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+            let written = run
+                .journal
+                .retry(&refs, node, now)
+                .map_err(|e| Message::plain(e.to_string()))?;
+            let retried = written.len();
+            for pair in &written {
+                run.messages.remove(pair);
+            }
+            self.refresh_pairs(run, written);
+            if retried > 0 {
+                // The cancelled job ends as it was asked; the retried
+                // items are worked under a new one.
+                if run.job.as_ref().is_some_and(|j| j.cancelled)
+                    && let Some(job) = run.job.take()
+                {
+                    job.report.cancelled();
+                }
+                if run.state == RunState::Finished {
+                    run.state = RunState::Active;
+                    run.finished_at = None;
+                }
+                if run.state == RunState::Active && run.job.is_none() {
+                    self.start_job(run);
+                }
+                self.persist_run(run);
+            }
+            json!({ "run": run.id, "items": ids.len(), "retried": retried, "state": run.state })
+        };
+        self.tick(&mut state, now);
+        Ok(answer)
+    }
+
+    /// `workflow.prioritize`: moves `items` before (`top`) or after
+    /// (`bottom`) every other item of the run in the order they are
+    /// claimed, keeping their own order. An item running anywhere in the
+    /// run, or concluded at its export, is left where it is.
+    pub fn prioritize(&self, id: &str, items: &[String], to: MoveTo) -> Result<Value, Message> {
+        let now = now_ms();
+        let mut state = self.state();
+        let answer = {
+            let State { runs, foreign, .. } = &mut *state;
+            let run = run_of(runs, foreign, id)?;
+            let ids = item_ids(run, Some(items))?;
+            let export = run.export_index();
+            let moving: BTreeSet<String> = ids
+                .iter()
+                .filter(|id| {
+                    let places = run.places(id);
+                    let running = places
+                        .iter()
+                        .any(|p| matches!(p, Place::Row(s) if s.status == Status::Running));
+                    !running && !places[export].settled()
+                })
+                .cloned()
+                .collect();
+            let priorities = run.items.iter().map(|i| i.priority);
+            let priority = match to {
+                MoveTo::Top => priorities.min().unwrap_or(0).saturating_sub(1),
+                MoveTo::Bottom => priorities.max().unwrap_or(0).saturating_add(1),
+            };
+            let mut writes = Vec::with_capacity(moving.len());
+            for item in run.items.iter_mut().filter(|i| moving.contains(&i.id)) {
+                item.priority = priority;
+                writes.push((
+                    format!("{}/items", run.id),
+                    item.id.clone(),
+                    Some(serde_json::to_value(&*item).expect("items serialize")),
+                ));
+            }
+            self.persist(&writes);
+            run.items.sort_by_key(|i| (i.priority, i.order));
+            if !moving.is_empty() {
+                let moved: Vec<&String> = moving.iter().collect();
+                self.announce(run, "reordered", json!({ "items": moved, "to": to }));
+            }
+            json!({
+                "run": run.id,
+                "to": to,
+                "moved": moving.len(),
+                "unchanged": ids.len() - moving.len(),
+            })
+        };
+        self.tick(&mut state, now);
+        Ok(answer)
+    }
+
+    /// `workflow.pause`: an active run claims nothing more; what runs
+    /// finishes. Kept in the run document, so it stays paused after a
+    /// restart. A run paused or finished is left as it is.
+    pub fn pause(&self, id: &str) -> Result<Value, Message> {
+        let mut state = self.state();
+        let State { runs, foreign, .. } = &mut *state;
+        let run = run_of(runs, foreign, id)?;
+        let changed = run.state == RunState::Active;
+        if changed {
+            run.state = RunState::Paused;
+            self.persist_run(run);
+            self.announce(run, "paused", json!({}));
+        }
+        Ok(json!({ "run": run.id, "state": run.state, "changed": changed }))
+    }
+
+    /// `workflow.resume`: a paused run is worked again, under its job (a
+    /// new one when it has none, as after a restart). A run not paused is
+    /// left as it is.
+    pub fn resume(&self, id: &str) -> Result<Value, Message> {
+        let now = now_ms();
+        let mut state = self.state();
+        let answer = {
+            let State { runs, foreign, .. } = &mut *state;
+            let run = run_of(runs, foreign, id)?;
+            let changed = run.state == RunState::Paused;
+            if changed {
+                run.state = RunState::Active;
+                if run.job.is_none() {
+                    self.start_job(run);
+                }
+                self.persist_run(run);
+                self.announce(run, "resumed", json!({ "asked": true }));
+            }
+            json!({ "run": run.id, "state": run.state, "changed": changed })
+        };
+        self.tick(&mut state, now);
+        Ok(answer)
+    }
+}
+
 /// The runner.
 impl Workflows {
     fn tick(&self, state: &mut State, now: u64) {
@@ -1547,7 +1825,7 @@ impl Workflows {
         let Some(run) = runs.get_mut(id) else {
             return;
         };
-        if run.state != RunState::Active {
+        if run.state == RunState::Finished {
             return;
         }
         if run
@@ -1560,10 +1838,15 @@ impl Workflows {
         if run.journal.expire(now) > 0 {
             self.refresh_running(run);
         }
+        // A paused run's exports still running keep their leases.
         for held in leases.values_mut().filter(|h| h.run == run.id) {
             if now >= held.renewed + RENEW_MS && run.journal.renew(&held.lease, now).is_ok() {
                 held.renewed = now;
             }
+        }
+        if run.state == RunState::Paused {
+            run.report_progress();
+            return;
         }
         let cancelled = run.job.as_ref().is_some_and(|j| j.cancelled);
         for index in 0..run.nodes.len() {
@@ -1815,18 +2098,12 @@ impl Workflows {
         self.tick(&mut state, now);
     }
 
-    /// Cancels a run asked to stop through its job: its exports are
-    /// stopped and its rows not concluded cancelled.
+    /// Cancels a run asked to stop through its job, as `workflow.cancel`
+    /// of the whole run: its rows not concluded cancelled, its exports
+    /// stopped.
     fn cancel_run(&self, run: &mut Run, leases: &BTreeMap<u64, Held>, now: u64) {
-        for (job, _) in leases.iter().filter(|(_, h)| h.run == run.id) {
-            self.ctx.scheduler.cancel(JobId(*job));
-        }
         let ids: Vec<String> = run.items.iter().map(|i| i.id.clone()).collect();
-        let refs: Vec<&str> = ids.iter().map(String::as_str).collect();
-        match run.journal.cancel(&refs, None, now) {
-            Ok(written) => self.refresh_pairs(run, written),
-            Err(e) => eprintln!("helios-node: run {}: {e}", run.id),
-        }
+        self.cancel_rows(run, leases, &ids, None, now);
         if let Some(job) = &mut run.job {
             job.cancelled = true;
         }
@@ -1839,10 +2116,16 @@ impl Workflows {
         run.finished_at = Some(now);
         let (done, failed) = run.tally();
         let total = run.items.len() as u64;
+        // Items cancelled by name, and nothing failed: the run ends
+        // cancelled, as when it was cancelled whole.
+        let export = run.export_index();
+        let some_cancelled = run.items.iter().any(|item| {
+            matches!(run.places(&item.id)[export], Place::Row(s) if s.status == Status::Cancelled)
+        });
         let mut cancelled = false;
         if let Some(job) = run.job.take() {
-            cancelled = job.cancelled;
-            if job.cancelled {
+            cancelled = job.cancelled || (failed == 0 && some_cancelled);
+            if cancelled {
                 job.report.cancelled();
             } else if failed > 0 {
                 job.report

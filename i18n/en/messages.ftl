@@ -685,7 +685,7 @@ gui-workspace-template-toolbox = with its tools
 
 gui-workspace-template-version = version
 
-node-batch-only = the batch endpoint only answers load-source, export, cancel, job.cancel, batch_start, batch_end and workflow.submit, workflow.runs, workflow.items, workflow.forget
+node-batch-only = the batch endpoint only answers load-source, export, cancel, job.cancel, batch_start, batch_end and the workflow.* requests
 
 node-edit-not-saved = done, but the edit was not saved: { $error }
 
@@ -710,6 +710,8 @@ resolve-not-asked = { $node } was not asked: { $reason }
 resolve-refused = { $node }: the model gave no answer ({ $reason })
 
 workflow-newer-format = run `{ $run }` was kept by a newer Helios: it cannot be worked here
+
+workflow-no-item = run `{ $run }` has no item `{ $item }`
 
 workflow-no-items = a run needs at least one item
 

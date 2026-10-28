@@ -334,7 +334,8 @@ cancelled job is not a failure (below).
 
 New control requests, on the debug control endpoint and the batch
 endpoint (every build), each an MCP tool of the same name with
-underscores, and a `helios workflow` CLI verb:
+underscores, and a `helios control workflow-*` CLI verb (decided as
+`helios workflow` at first; see step 5 below):
 
 | Request | Arguments | Effect |
 |---|---|---|
@@ -508,7 +509,7 @@ bench box (see [bench.md](bench.md)).
    waiting for a person `asking`. A failure is for good when the file cannot be read as a
    picture or does not fit the network; any other is retried. The
    `helios control` CLI has `workflow-submit`, `workflow-runs` and
-   `workflow-items`; `helios workflow` comes with step 5.
+   `workflow-items`; the verbs of step 5 joined them there.
 3. **Survival** (`helios-node`). Opening a run at start, recovery,
    take-over of a run whose owner is dead, retention and `forget`, format
    versions. Tests in `tests/survival.rs`: `kill -9` mid-batch then
@@ -579,6 +580,26 @@ bench box (see [bench.md](bench.md)).
    `job.cancel` of a run's job. Tests: each verb through the batch
    endpoint and through the MCP server (`tests/mcp.rs`), with the rows
    checked after.
+   *As delivered (2026-10-28):* the CLI verbs are `helios control
+   workflow-cancel`, `-retry`, `-prioritize`, `-pause` and `-resume`,
+   beside the step 2 and 3 ones, rather than a separate `helios workflow`
+   command; `workflow-submit` gained `--jobs` (the run's `concurrency`).
+   A verb names items by id (`path:…`) or by absolute path, and acts on
+   every item of the run when given none; `cancel` and `retry` also take a
+   queueing node. Cancelling rows first and then stopping the exports that
+   held them, a cancel never lets a stopped export write. A run whose
+   export rows end cancelled with nothing failed ends its job cancelled,
+   whether it was cancelled whole or item by item; a retry after that
+   works the run again under a new job. `prioritize` gives the items a
+   priority above (or below) every item of the run, kept in their item
+   documents, and leaves alone those running or concluded at the export.
+   `pause` and `resume` act on an active or paused run only and answer
+   whether they changed it; a paused run keeps renewing the leases of its
+   running exports, and its job stays open. `job.cancel` of a run's job
+   was already `workflow.cancel` of the whole run (step 2); `forget` came
+   with step 3.
+   `workflow.run` events add `paused`, `resumed` (with `asked`) and
+   `reordered`.
 6. **Decision nodes in runs** (`helios-node`, `helios-decision`). Workers
    for decision nodes, waits and signals, answers kept per item,
    `decision_accept` and `decision_decide` with `run` and `item`, the

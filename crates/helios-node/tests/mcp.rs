@@ -1,5 +1,6 @@
 //! `helios-mcp` in front of a running node: an MCP client lists the tools,
-//! renders through control and observes through inspect.
+//! renders through control and observes through inspect, and drives a
+//! run of the workflow level with its verbs.
 
 #![cfg(all(unix, debug_assertions))]
 
@@ -146,9 +147,101 @@ fn an_agent_drives_a_node_through_mcp() {
     assert!(failed);
     assert_eq!(missing, json!("helios_describe: missing argument `entity`"));
 
+    workflow_verbs(&mut client, &dir);
+
     drop(client);
     let _ = server.wait();
     let _ = node.kill();
     let _ = node.wait();
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The run of `client`'s node named `run`, once `ready` holds for it.
+fn run_until(client: &mut Client, run: &str, ready: impl Fn(&Value) -> bool) -> Value {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_mins(1);
+    loop {
+        let (_, runs) = client.tool("helios_workflow_runs", json!({}));
+        let found = runs["runs"]
+            .as_array()
+            .and_then(|r| r.iter().find(|r| r["id"] == run))
+            .cloned()
+            .unwrap_or(Value::Null);
+        if ready(&found) {
+            return found;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "run {run} not ready: {runs}"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+}
+
+/// The verbs on a run, as MCP tools: an item moved to the top, the run
+/// paused and resumed, an item cancelled then retried, the rows checked.
+fn workflow_verbs(client: &mut Client, dir: &std::path::Path) {
+    let images: Vec<String> = ["a.png", "b.png"]
+        .iter()
+        .map(|name| {
+            let path = dir.join(name);
+            image::RgbImage::from_fn(4, 4, |x, y| image::Rgb([(x * 50) as u8, (y * 50) as u8, 9]))
+                .save(&path)
+                .unwrap();
+            path.to_str().unwrap().to_string()
+        })
+        .collect();
+    let out = dir.join("out");
+    // The exports wait in the scheduler's queue.
+    let (failed, _) = client.tool("helios_pause", json!({}));
+    assert!(!failed);
+    let (failed, submitted) = client.tool(
+        "helios_workflow_submit",
+        json!({ "items": images, "out": out, "format": "png", "concurrency": 1 }),
+    );
+    assert!(!failed, "{submitted}");
+    let run = submitted["run"].as_str().unwrap().to_string();
+    run_until(client, &run, |r| r["nodes"]["exp"]["running"] == 1);
+
+    let (failed, paused) = client.tool("helios_workflow_pause", json!({ "run": run }));
+    assert!(!failed, "{paused}");
+    assert_eq!(paused["state"], "paused", "{paused}");
+    let (failed, moved) = client.tool(
+        "helios_workflow_prioritize",
+        json!({ "run": run, "items": [images[1]], "to": "top" }),
+    );
+    assert!(!failed, "{moved}");
+    assert_eq!(moved["moved"], 1, "{moved}");
+    let (failed, cancelled) = client.tool(
+        "helios_workflow_cancel",
+        json!({ "run": run, "items": [images[0]] }),
+    );
+    assert!(!failed, "{cancelled}");
+    let (failed, resumed) = client.tool("helios_workflow_resume", json!({ "run": run }));
+    assert!(!failed, "{resumed}");
+    let (failed, _) = client.tool("helios_resume", json!({}));
+    assert!(!failed);
+    let done = run_until(client, &run, |r| r["state"] == "finished");
+    assert_eq!(done["nodes"]["exp"]["done"], 1, "{done}");
+    assert_eq!(done["nodes"]["exp"]["cancelled"], 1, "{done}");
+    let (_, page) = client.tool("helios_workflow_items", json!({ "run": run }));
+    let states: Vec<(&str, &str)> = page["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| (i["title"].as_str().unwrap(), i["state"].as_str().unwrap()))
+        .collect();
+    assert_eq!(
+        states,
+        [("b.png", "done"), ("a.png", "cancelled")],
+        "{page}"
+    );
+
+    let (failed, retried) = client.tool("helios_workflow_retry", json!({ "run": run }));
+    assert!(!failed, "{retried}");
+    assert_eq!(retried["retried"], 1, "{retried}");
+    let done = run_until(client, &run, |r| {
+        r["state"] == "finished" && r["nodes"]["exp"]["done"] == 2
+    });
+    assert_eq!(done["nodes"]["exp"]["cancelled"], 0, "{done}");
+    assert!(out.join("a.png").exists() && out.join("b.png").exists());
 }
