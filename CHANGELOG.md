@@ -24,6 +24,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.42.0] - 2026-10-28
+
+### Added
+
+- A batch running on a node can now be steered while it runs:
+  `helios control workflow-cancel`, `workflow-retry`, `workflow-prioritize`,
+  `workflow-pause` and `workflow-resume` (and the matching MCP tools)
+  cancel or retry some of its images or all of them, move images to the
+  front or the back of the queue, and pause or resume it; a paused batch
+  stays paused when the node restarts.
+
+### Changed
+
+- Ctrl-C on `helios batch` attached to a node now cancels only its own
+  images: images another client added to the same run go on.
+
+### Fixed
+
+- A PNG tagged Rec.2020 by its cICP chunk with the 10- or 12-bit BT.2020
+  transfer code, as video tools write it, is now reported as Rec.2020 rather
+  than by its raw code points. Its colours were already read right.
+- Colours on the edge of an export's colour space, such as the pure blue of a
+  loaded sRGB picture, are now written unchanged. The rounding in colour
+  profiles places them a hair outside the space, and the gamut mapping then
+  drained part of their saturation: a reloaded sRGB blue exported again came
+  out a duller, greener blue.
+
 ## [0.41.0] - 2026-10-28
 
 ### Added
