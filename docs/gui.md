@@ -154,6 +154,27 @@ keyboard. The Portrait retouch template opens with the Scopes floating
 over the image, beside the Masks panel. Where they float is kept with
 the workspace's layout.
 
+### Icons (2026-10-28)
+
+Icons come from egui-pop's icon registry, by name: egui-pop's built-in
+names (`undo`, `folder`, `copy`...) and, with egui-pop's `phosphor`
+feature that Helios turns on, every glyph of the
+[Phosphor](https://phosphoricons.com) set (MIT) as `phosphor:<name>`
+(`phosphor:star`). The built-in names are kept where one says what the
+command does; a Phosphor glyph covers the rest. Each name is declared
+once, where the thing is declared, and every surface showing it reads it
+from there.
+
+- **Commands** (`COMMAND_ICONS`, `helios-gui/src/plugins.rs`): an icon
+  only where it says what the command does, shown in menus, the palette
+  and wherever the command appears. Ratings show a star (clearing one,
+  an eraser), the reject a prohibition sign, pastes a clipboard, imports
+  a tray with a down arrow, exports Phosphor's export arrow, the views a
+  grid (library), an image (culling) and a graph (network), the module
+  bypass a power sign. egui-pop's own Edit commands (cut, copy, paste,
+  paste special) are declared by egui-pop, which gives them no icon yet.
+- A unit test checks every name resolves, Phosphor ones included.
+
 ## Settings pages
 
 Settings pages are generated, never laid out by hand: a setting named

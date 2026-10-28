@@ -54,26 +54,63 @@ pub struct Declarations {
     pub hidden: BTreeSet<String>,
 }
 
-/// The icons of Helios's commands, from egui-pop's built-in set (the
-/// Phosphor font stays off): only where the icon says what the command
-/// does.
+/// The icons of Helios's commands, by name in egui-pop's icon registry:
+/// egui-pop's built-in names where one says what the command does, a
+/// Phosphor glyph (`phosphor:<name>`) where the built-in set has none.
+/// Only where the icon says what the command does.
 pub const COMMAND_ICONS: &[(&str, &str)] = &[
     ("param.undo", "undo"),
     ("param.redo", "redo"),
     ("param.reset", "reset"),
+    ("param.copyValue", "copy"),
+    ("param.copyPath", "copy"),
+    ("param.paste", "phosphor:clipboard-text"),
+    ("mask.paste", "phosphor:clipboard-text"),
+    ("network.paste", "phosphor:clipboard-text"),
     ("workspace.open", "folder"),
     ("workspace.new", "plus"),
+    ("workspace.saveAsTemplate", "save"),
+    ("workspace.importParts", "phosphor:tray-arrow-down"),
+    ("library.importFiles", "phosphor:tray-arrow-down"),
+    ("library.importSource", "phosphor:tray-arrow-down"),
+    ("profile.import", "phosphor:tray-arrow-down"),
+    ("profile.export", "phosphor:export"),
+    ("theme.exportMerged", "phosphor:export"),
     ("workbench.keybindings", "keyboard"),
     ("workbench.about", "info"),
     ("workbench.fullscreen", "fullscreen"),
+    ("workbench.quickOpen", "search"),
+    ("workbench.quit", "phosphor:sign-out"),
     ("theme.select", "theme"),
+    ("view.library", "phosphor:squares-four"),
+    ("view.culling", "phosphor:image"),
+    ("view.network", "phosphor:graph"),
+    ("node.bypass", "phosphor:power"),
     ("mask.add.circle", "circle"),
+    ("mask.add.gradient", "phosphor:gradient"),
+    ("mask.add.path", "phosphor:pen-nib"),
+    ("mask.member.invert", "phosphor:selection-inverse"),
     ("mask.member.delete", "delete"),
     ("mask.member.lock", "lock"),
+    ("vault.rate", "phosphor:star"),
+    ("vault.rate.0", "phosphor:eraser"),
+    ("vault.rate.1", "phosphor:star"),
+    ("vault.rate.2", "phosphor:star"),
+    ("vault.rate.3", "phosphor:star"),
+    ("vault.rate.4", "phosphor:star"),
+    ("vault.rate.5", "phosphor:star"),
+    ("vault.reject", "phosphor:prohibit"),
     ("vault.flag.pick", "check"),
     ("vault.flag.reject", "close"),
+    ("vault.next", "chevron-right"),
+    ("vault.previous", "chevron-left"),
+    ("vault.stack.toggle", "phosphor:stack"),
+    ("viewport.compare", "phosphor:square-split-horizontal"),
+    ("viewport.mask.display", "visible"),
     ("viewport.zoom.in", "plus"),
     ("viewport.zoom.out", "minus"),
+    ("scopes.histogram", "phosphor:chart-bar"),
+    ("scopes.waveform", "phosphor:waveform"),
     ("window.minimize", "window-minimize"),
     ("window.maximize", "window-maximize"),
     ("window.close", "window-close"),
@@ -390,11 +427,37 @@ mod tests {
     use super::COMMAND_ICONS;
 
     #[test]
-    fn every_command_icon_is_a_built_in_name() {
+    fn every_command_icon_resolves() {
+        assert!(
+            egui_pop::core::icon::registry::phosphor_available(),
+            "Helios builds egui-pop with its `phosphor` feature"
+        );
         for (id, icon) in COMMAND_ICONS {
             assert!(
                 egui_pop::core::icon::registry::is_known(icon),
                 "{id}: `{icon}` is not in egui-pop's icon registry"
+            );
+        }
+        // The Phosphor names are checked, not only the built-in ones.
+        assert!(
+            COMMAND_ICONS
+                .iter()
+                .any(|(_, i)| i.starts_with("phosphor:"))
+        );
+    }
+
+    #[test]
+    fn every_command_with_an_icon_is_one_of_helios() {
+        // A command's English title is `command-<id, dots as dashes>`: an
+        // icon on an id no command has would never show.
+        let catalog = include_str!("../../../i18n/en/commands.ftl");
+        let mut seen = std::collections::BTreeSet::new();
+        for (id, _) in COMMAND_ICONS {
+            assert!(seen.insert(*id), "{id} has two icons");
+            let key = format!("\ncommand-{} =", id.replace('.', "-"));
+            assert!(
+                catalog.contains(&key),
+                "{id} is not one of Helios's commands"
             );
         }
     }
