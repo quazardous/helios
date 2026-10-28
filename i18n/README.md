@@ -2,9 +2,11 @@
 
 One directory per locale, one Fluent file per area: `commands.ftl`,
 `panels.ftl`, `modules.ftl`, `interface.ftl` for the rest of what the
-desktop declares (command categories, menus, settings), and
+desktop declares (command categories, menus, settings),
 `messages.ftl` for the messages the code builds (a GPU that fell back, an
-export that failed, a toast). They are built
+export that failed, a toast), and `tips.ftl` for the tips
+(`crates/helios-gui/tips/<id>.md`: `tip-<id>` with `.title` and `.text`,
+`{key}` written `{ $key }`). They are built
 into the desktop (`helios-i18n`) and read by egui-pop's translation
 plugin, which also brings egui-pop's own strings (its menus, palette,
 settings window and dialogs) in English and French.

@@ -63,6 +63,11 @@ pub struct Declarations {
     /// by key with their English Fluent pattern: `messages.ftl`.
     #[serde(default)]
     pub messages: BTreeMap<String, String>,
+    /// The tips' titles and texts (`tip-<id>.title`, `tip-<id>.text`),
+    /// by key with their English Fluent pattern ([`tip_pattern`]):
+    /// `tips.ftl`.
+    #[serde(default)]
+    pub tips: BTreeMap<String, String>,
 }
 
 /// The calls whose literal key and English the extractor reads from
@@ -148,6 +153,7 @@ impl Declarations {
                 .collect(),
             interface: BTreeMap::new(),
             messages: BTreeMap::new(),
+            tips: BTreeMap::new(),
         }
     }
 
@@ -175,6 +181,7 @@ impl Declarations {
         let patterns = self
             .messages
             .iter()
+            .chain(&self.tips)
             .map(|(k, p)| (k.clone(), English::Pattern(p.clone())));
         plain
             .chain(patterns)
@@ -280,10 +287,76 @@ impl Declarations {
             let messages = extract::messages(&found)?;
             files.insert("messages.ftl", extract::english(&messages, HEADER));
         }
+        if !self.tips.is_empty() {
+            let found: Vec<Found> = self
+                .tips
+                .iter()
+                .map(|(key, pattern)| Found {
+                    key: key.clone(),
+                    english: English::Pattern(pattern.clone()),
+                    origin: "tips.ftl".into(),
+                })
+                .collect();
+            all.extend(found.iter().cloned());
+            let messages = extract::messages(&found)?;
+            files.insert("tips.ftl", extract::english(&messages, HEADER));
+        }
         // Across files too: one key, one text.
         extract::messages(&all)?;
         Ok(files)
     }
+}
+
+/// A tip's text (`{key}`, `{key:<command>}`, as egui-pop's tips write
+/// it) as a Fluent pattern: `{ $key }` and `{ $key-<command> }` (every
+/// character of the command other than an ASCII letter, a digit or `-`
+/// written `-`), Fluent's own placeholders, every other brace escaped.
+pub fn tip_pattern(text: &str) -> String {
+    // The placeholders are set aside while the rest is escaped.
+    let mut names = Vec::new();
+    let mut marked = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(open) = rest.find('{') {
+        let Some(close) = rest[open..].find('}').map(|i| i + open) else {
+            break;
+        };
+        let inner = rest[open + 1..close].trim();
+        let name = if inner == "key" {
+            Some("key".to_string())
+        } else {
+            inner.strip_prefix("key:").map(|c| {
+                let slug: String = c
+                    .trim()
+                    .chars()
+                    .map(|ch| {
+                        if ch.is_ascii_alphanumeric() || ch == '-' {
+                            ch
+                        } else {
+                            '-'
+                        }
+                    })
+                    .collect();
+                format!("key-{slug}")
+            })
+        };
+        match name {
+            Some(n) => {
+                marked.push_str(&rest[..open]);
+                marked.push('\u{E000}');
+                marked.push_str(&names.len().to_string());
+                marked.push('\u{E001}');
+                names.push(n);
+            }
+            None => marked.push_str(&rest[..=close]),
+        }
+        rest = &rest[close + 1..];
+    }
+    marked.push_str(rest);
+    let mut pattern = extract::escape(&marked);
+    for (i, n) in names.iter().enumerate() {
+        pattern = pattern.replace(&format!("\u{E000}{i}\u{E001}"), &format!("{{ ${n} }}"));
+    }
+    pattern
 }
 
 const HEADER: &str = "\
@@ -383,5 +456,33 @@ mod tests {
         let i = I18n::new("fr");
         i.add("fr", source).unwrap();
         assert_eq!(i.t("m", &[]), "first {line}\n[second]\n.third");
+    }
+
+    #[test]
+    fn a_tip_s_keys_become_fluent_placeholders_in_tips_ftl() {
+        assert_eq!(
+            tip_pattern("{key} rates, {key:vault.flag.pick} picks, {other} stays."),
+            "{ $key } rates, { $key-vault-flag-pick } picks, {\"{\"}other{\"}\"} stays."
+        );
+        let mut d = Declarations::default();
+        d.tips.insert(
+            "tip-demo-rate.text".into(),
+            tip_pattern("{key:vault.rate.1} rates."),
+        );
+        d.tips.insert("tip-demo-rate.title".into(), "Rate".into());
+        let source = &d.english_files().unwrap()["tips.ftl"];
+        assert!(
+            source.ends_with(
+                "tip-demo-rate =\n    .text = { $key-vault-rate-1 } rates.\n    .title = Rate\n"
+            ),
+            "{source}"
+        );
+        let i = I18n::new("en");
+        i.add("en", source).unwrap();
+        let args = [("key-vault-rate-1", crate::FluentValue::from("`1`"))];
+        assert_eq!(
+            i.get("tip-demo-rate.text", &args),
+            Some("`1` rates.".to_string())
+        );
     }
 }

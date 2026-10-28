@@ -65,6 +65,9 @@ menu-helios-system-themes =
 plugin-egui-pop-imaging =
     .title = Outils d’image
 
+plugin-helios =
+    .title = Helios
+
 plugin-helios-clipboard =
     .title = Types de presse-papiers d’Helios
 

@@ -1005,6 +1005,8 @@ fn main() -> Result<(), String> {
             shell.set_title(&name);
             // The first run asks "Coming from darktable?" (once).
             shell.offer_pointer_choice();
+            // Tips come by themselves in the window, never in tests.
+            shell.tips_by_themselves(true);
             shell.set_queue_when_empty(queue_when_empty);
             if let Err(e) = shell.use_profile(&profile) {
                 shell.notes.push(format!("profile {profile}: {e}"));

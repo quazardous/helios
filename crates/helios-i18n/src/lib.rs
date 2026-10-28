@@ -16,7 +16,8 @@
 //!   catalogues' language.
 //!
 //! Catalogues live in `i18n/<locale>/` as one file per area
-//! (`commands.ftl`, `panels.ftl`, `modules.ftl`, `interface.ftl`).
+//! (`commands.ftl`, `panels.ftl`, `modules.ftl`, `interface.ftl`,
+//! `messages.ftl`, `tips.ftl`).
 //! `i18n/en` is generated and never edited; the other locales are
 //! translations of it.
 

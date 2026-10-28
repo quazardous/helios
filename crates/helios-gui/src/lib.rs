@@ -42,6 +42,7 @@ pub mod status_items;
 pub mod templates;
 pub mod theme;
 pub mod theme_editor;
+pub mod tips;
 pub mod viewport;
 mod windows;
 mod workbench;

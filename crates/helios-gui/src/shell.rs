@@ -691,6 +691,11 @@ impl Shell {
             .plugin(egui_pop::api::strips::StripsPlugin::status_only())
             // Help > About Helios.
             .plugin(egui_pop::api::about::AboutPlugin::new(about_info()))
+            // Help > Tips… and the tips' card (egui-pop's), with Helios's
+            // tips; they come by themselves once the desktop asks
+            // (`Shell::tips_by_themselves`).
+            .plugin(egui_pop::api::tips::TipsPlugin)
+            .plugin(crate::tips::Tips)
             .plugin(i18n_plugin);
         if let Some(dir) = ui_settings {
             builder = builder.persist(dir);
@@ -3562,6 +3567,15 @@ impl Shell {
             },
         };
         d.answer(answer, to_pop(origin))
+    }
+
+    /// Lets tips come by themselves (`on`), as cards: the desktop's
+    /// window does; a shell in tests, pictures or tools shows them only
+    /// when asked (`tips.show`).
+    pub fn tips_by_themselves(&self, on: bool) {
+        if let Some(tips) = self.app.handle().service(&egui_pop::api::tips::TIPS) {
+            tips.set_auto(on);
+        }
     }
 
     /// Translates what Helios gives About again once the language

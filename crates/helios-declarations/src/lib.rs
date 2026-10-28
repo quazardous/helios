@@ -1,8 +1,8 @@
 //! Everything Helios declares with English text: the desktop's commands
 //! (the shell's registry, values commands included) and panels, every
 //! module's parameters, and the rest of what the desktop declares to
-//! egui-pop (categories, submenus, settings, plugins), and the messages
-//! its code builds (`Message::new`, read from the sources). The English
+//! egui-pop (categories, submenus, settings, plugins), its tips, and the
+//! messages its code builds (`Message::new`, read from the sources). The English
 //! catalogue (`i18n/en`) is generated from it, so no list of the ids built
 //! at run time is kept by hand.
 //!
@@ -65,6 +65,25 @@ pub fn collect() -> Declarations {
         }
         if let extract::English::Plain(text) = f.english {
             d.interface.entry(f.key).or_insert(text);
+        }
+    }
+    // The tips' titles and texts, `{key}` written as Fluent's
+    // placeholders (egui-pop declares no tips of its own).
+    if let Some(tips) = shell.app().handle().service(&egui_pop::api::tips::TIPS) {
+        for tip in tips.all() {
+            for (attr, english) in [
+                ("title", extract::escape(&tip.title)),
+                ("text", helios_i18n::extract::tip_pattern(&tip.text)),
+            ] {
+                let key = egui_pop::core::strings::declared_key(
+                    egui_pop::api::tips::TIP_KIND,
+                    &tip.id,
+                    Some(attr),
+                );
+                if !egui_pop.contains(&key) {
+                    d.tips.insert(key, english);
+                }
+            }
         }
     }
     // The messages the code builds, read from the sources.

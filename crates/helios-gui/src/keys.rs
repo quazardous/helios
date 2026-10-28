@@ -110,11 +110,12 @@ pub fn defaults() -> Vec<(String, String, String)> {
     // While a path is drawn, mask editing is a pushed mode: Escape pops
     // it (egui-pop's `nav.back`), which stops the path; this binding
     // serves a path drawn without the stack. In zen mode Escape leaves
-    // it (egui-pop's).
+    // it (egui-pop's), and a tip's card shown closes first (egui-pop's
+    // `tips.notNow`).
     bind(
         "Escape",
         "mask.cancel",
-        &format!("{image} && maskTool == 'path' && !workbenchZen && !modePushed"),
+        &format!("{image} && maskTool == 'path' && !workbenchZen && !modePushed && !tipShown"),
     );
     bind(
         "Delete",

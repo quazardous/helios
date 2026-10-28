@@ -66,6 +66,9 @@ menu-helios-system-themes =
 plugin-egui-pop-imaging =
     .title = Image tools
 
+plugin-helios =
+    .title = Helios
+
 plugin-helios-clipboard =
     .title = Helios's clipboard types
 

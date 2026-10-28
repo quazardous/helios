@@ -794,6 +794,24 @@ Each entry runs `workbench.quickOpen.go` with its item
 (`module:<node>`, `image:<id>`, `workspace:<path>`), which agents run
 too.
 
+**Tips (2026-10-28).** egui-pop's tips (`TipsPlugin`, see its
+`docs/tips.md`) with Helios's own: one idea per file,
+`crates/helios-gui/tips/<id>.md`, built in and declared by the `helios`
+plugin (`helios_gui::tips`). A tip names the command it teaches, and
+`{key}` in its text shows that command's key as the keymap binds it now;
+a `surface` (a `when` clause, `focusedPanel == 'helios.viewport'`) keeps
+it to where it makes sense. On the desktop they come by themselves, as a
+card that never takes the focus: once five seconds after the start, then
+the first time a surface holds, never a tip whose command the person
+already used, never twice a day; "Got it" dismisses one for good, "No
+more tips" all of them. Help > Tips… lists them all, with a switch per
+plugin. Only the desktop's window lets them come by themselves
+(`Shell::tips_by_themselves`); a shell in tests, pictures or tools shows
+them only when asked (`tips.show`). Their English is generated in
+`i18n/en/tips.ftl` (`tip-<id>.title`, `.text`, `{key}` written
+`{ $key }`), their French in `i18n/fr/tips.ftl`; a test checks every
+tip against the commands the desktop declares.
+
 The pictures are written by `HELIOS_DOC_PICTURES=$PWD/docs/gui cargo test
 -p helios-gui --test dialogs pictures` (and `--test params pictures`), from
 the repository's root: headless, never on the desktop.
