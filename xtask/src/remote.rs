@@ -9,6 +9,11 @@
 //!    job runs on it (`src=helios-local-<id>`) instead of the pushed branch.
 //! 3. `run <job> [key=value...]`, its log followed; `branch=` defaults to
 //!    the current branch. On a dropped connection, `wait <id>` reattaches.
+//!    Once the job has its id, `health` gives one line on the box (its
+//!    capacity, what is in use, the job's own request), then, while the job
+//!    waits, its place in the queue: polled at most once a minute, printed
+//!    when it changes, silent once the job runs. A box that does not answer
+//!    changes nothing to the run.
 //! 4. `fetch <id>`, extracted to `target/bench-remote/<id>/` (the job's
 //!    `log`, `status`, `request` and `out/`), then a summary.
 //!
@@ -24,6 +29,9 @@
 //! under the job. It prints "bench box unavailable: <reason>" and is never
 //! a test failure. Otherwise the exit code is the job's.
 //!
+//! `cargo xtask bench-remote queue` prints the box's `queue`: what runs,
+//! what waits and why, to read before submitting.
+//!
 //! The box is `HELIOS_BENCH_HOST` (`user@host`, or `host` for the user
 //! `bench-helios`) and the key `HELIOS_BENCH_KEY` (default
 //! `~/.ssh/bench-helios`), from the environment or from the untracked
@@ -32,12 +40,15 @@
 use std::io::{BufRead as _, BufReader, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+use serde_json::Value;
 
 use crate::test_times::target_dir;
 
-pub const USAGE: &str = "bench-remote <job> [key=value...] [--push] | bench-remote --affected [base=REF] [key=value...] [--push]";
+pub const USAGE: &str = "bench-remote <job> [key=value...] [--push] | bench-remote --affected [base=REF] [key=value...] [--push] | bench-remote queue";
 
 /// The exit code of a job the box could not serve.
 pub const EX_TEMPFAIL: u8 = 75;
@@ -242,6 +253,7 @@ pub fn read_env(text: &str, key: &str) -> Option<String> {
     })
 }
 
+#[derive(Clone)]
 struct Bench {
     destination: String,
     key: Option<PathBuf>,
@@ -295,8 +307,11 @@ fn unavailable(reason: &str) -> u8 {
     EX_TEMPFAIL
 }
 
+/// What `follow` calls on each line the box prints, from either stream.
+type OnLine = Arc<dyn Fn(&str) + Send + Sync>;
+
 /// Runs a box command, its output streamed to ours and kept.
-fn follow(cmd: &mut Command) -> (Option<i32>, Vec<String>) {
+fn follow(cmd: &mut Command, on_line: &OnLine) -> (Option<i32>, Vec<String>) {
     let mut child = match cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn() {
         Ok(c) => c,
         Err(e) => return (Some(255), vec![format!("cannot run ssh: {e}")]),
@@ -304,9 +319,11 @@ fn follow(cmd: &mut Command) -> (Option<i32>, Vec<String>) {
     let lines = Arc::new(Mutex::new(Vec::new()));
     let stderr = child.stderr.take().map(|err| {
         let lines = Arc::clone(&lines);
+        let on_line = Arc::clone(on_line);
         std::thread::spawn(move || {
             for line in BufReader::new(err).lines().map_while(Result::ok) {
                 eprintln!("{line}");
+                on_line(&line);
                 lines.lock().unwrap().push(line);
             }
         })
@@ -315,6 +332,7 @@ fn follow(cmd: &mut Command) -> (Option<i32>, Vec<String>) {
         let mut stdout = std::io::stdout();
         for line in BufReader::new(out).lines().map_while(Result::ok) {
             let _ = writeln!(stdout, "{line}");
+            on_line(&line);
             lines.lock().unwrap().push(line);
         }
     }
@@ -550,6 +568,12 @@ fn conditions_warning(json: &str) -> Option<String> {
 }
 
 pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
+    if args == ["queue"] {
+        return Some(match queue(root) {
+            Ok(code) => ExitCode::from(code),
+            Err(e) => crate::fail(&[e]),
+        });
+    }
     let mut req = parse_args(args)?;
     let linked = root.join(".git").is_file();
     let shared = std::env::var_os("CARGO_TARGET_DIR").map(PathBuf::from);
@@ -650,8 +674,24 @@ fn remote(root: &Path, req: &mut Request) -> Result<u8, String> {
     let mut words: Vec<String> = vec!["run".into(), req.job.clone()];
     words.extend(req.params.iter().map(|(k, v)| format!("{k}={v}")));
     let words: Vec<&str> = words.iter().map(String::as_str).collect();
-    let (mut code, mut lines) = follow(b.ssh(10, &words).stdin(Stdio::null()));
+    // the queue display starts once the box names the job, and stops with it
+    let stop = Arc::new(AtomicBool::new(false));
+    let watching = {
+        let (b, stop) = (b.clone(), Arc::clone(&stop));
+        let started = AtomicBool::new(false);
+        let hook: OnLine = Arc::new(move |line: &str| {
+            if let Some(id) = queued_id(line)
+                && !started.swap(true, Ordering::Relaxed)
+            {
+                watch_queue(b.clone(), id.to_string(), Arc::clone(&stop));
+            }
+        });
+        hook
+    };
+    let (mut code, mut lines) = follow(b.ssh(10, &words).stdin(Stdio::null()), &watching);
+    let quiet: OnLine = Arc::new(|_: &str| {});
     let Some(id) = lines.iter().find_map(|l| queued_id(l)).map(str::to_string) else {
+        stop.store(true, Ordering::Relaxed);
         return Ok(match classify(code) {
             Outcome::Unavailable => unavailable(&unavailable_reason(&lines)),
             Outcome::Lost => unavailable(&format!("unreachable ({})", b.destination)),
@@ -666,10 +706,11 @@ fn remote(root: &Path, req: &mut Request) -> Result<u8, String> {
             "bench-remote: lost the connection to job {id}; reattaching ({attempts}/{REATTACH})"
         );
         std::thread::sleep(REATTACH_PAUSE);
-        let (c, more) = follow(b.ssh(10, &["wait", &id]).stdin(Stdio::null()));
+        let (c, more) = follow(b.ssh(10, &["wait", &id]).stdin(Stdio::null()), &quiet);
         code = c;
         lines.extend(more);
     }
+    stop.store(true, Ordering::Relaxed);
     if classify(code) == Outcome::Lost {
         return Ok(unavailable(&format!(
             "lost the connection during job {id}; it may still run: reattach later with `wait {id}`"
@@ -704,6 +745,234 @@ fn remote(root: &Path, req: &mut Request) -> Result<u8, String> {
     })
 }
 
+/// How often the queue is read while a job waits.
+const QUEUE_POLL: Duration = Duration::from_mins(1);
+
+/// How many unusable answers in a row end the queue display.
+const QUEUE_TRIES: u32 = 3;
+
+/// A box command's JSON answer; `None` when it fails or is not JSON. Text
+/// before the JSON (`box` prints its state line first) is skipped.
+fn query_json(b: &Bench, command: &str) -> Option<Value> {
+    let out = b
+        .ssh(5, &[command])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    parse_json(&String::from_utf8_lossy(&out.stdout))
+}
+
+fn parse_json(text: &str) -> Option<Value> {
+    serde_json::from_str(&text[text.find('{')?..]).ok()
+}
+
+/// Bytes as the box shows them: GiB, one decimal.
+fn gb(bytes: f64) -> String {
+    format!("{:.1} GB", bytes / f64::from(1u32 << 30))
+}
+
+/// A job's threads: a count, or the list of the threads it holds.
+fn threads_of(v: &Value) -> Option<u64> {
+    v.as_u64().or_else(|| v.as_array().map(|a| a.len() as u64))
+}
+
+/// The job's entry in `health`, and whether it runs (else it waits).
+fn job_entry<'a>(health: &'a Value, id: &str) -> Option<(&'a Value, bool)> {
+    let queue = health.get("queue")?;
+    let find = |list: &str| {
+        queue
+            .get(list)?
+            .as_array()?
+            .iter()
+            .find(|j| j.get("id").and_then(Value::as_str) == Some(id))
+    };
+    find("waiting")
+        .map(|j| (j, false))
+        .or_else(|| find("running").map(|j| (j, true)))
+}
+
+/// The line printed once a job has its id, from `health`: the box's
+/// capacity, what running jobs hold, and what this job asks for. `None`
+/// when a field is missing.
+pub fn capacity_line(health: &Value, id: &str) -> Option<String> {
+    let queue = health.get("queue")?;
+    let cap = queue.get("capacity")?;
+    let threads = cap.get("threads")?.as_u64()?;
+    let memory = cap.get("memory")?.as_f64()?;
+    let running = queue.get("running")?.as_array()?;
+    let waiting = queue.get("waiting")?.as_array()?;
+    let mut used_threads = 0;
+    let mut used_memory = 0.0;
+    for j in running {
+        used_threads += threads_of(j.get("threads")?)?;
+        used_memory += j.get("memory")?.as_f64()?;
+    }
+    let (job, is_running) = job_entry(health, id)?;
+    let job_threads = threads_of(job.get(if is_running { "threads" } else { "cores" })?)?;
+    let job_memory = job.get("memory")?.as_f64()?;
+    Some(format!(
+        "box: {threads} threads, {} for jobs; in use {used_threads} threads, {} \
+         ({} running, {} waiting); this job {job_threads} threads, {}",
+        gb(memory),
+        gb(used_memory),
+        running.len(),
+        waiting.len(),
+        gb(job_memory)
+    ))
+}
+
+/// Where a job stands in `health`.
+#[derive(Debug, PartialEq)]
+pub enum Place {
+    Waiting(Waiting),
+    /// Running, or no longer in the queue (done, cancelled).
+    Started,
+}
+
+/// A waiting job's place in the queue.
+#[derive(Debug, PartialEq)]
+pub struct Waiting {
+    pub position: u64,
+    /// The waiting jobs ahead of it, as `project/job`.
+    pub ahead: Vec<String>,
+    /// Why it waits, as the box says it.
+    pub why: String,
+    /// When it should start (Unix seconds); `None` when the box cannot say.
+    pub eta_start: Option<u64>,
+}
+
+impl Waiting {
+    /// What a change is judged on: the start estimate to the minute.
+    fn key(&self) -> (u64, &[String], &str, Option<u64>) {
+        (
+            self.position,
+            &self.ahead,
+            &self.why,
+            self.eta_start.map(|t| t / 60),
+        )
+    }
+}
+
+/// The job's place in `health`; `None` when a field is missing.
+pub fn job_place(health: &Value, id: &str) -> Option<Place> {
+    let Some((job, running)) = job_entry(health, id) else {
+        // the queue must be readable to tell "gone" from "unreadable"
+        health.pointer("/queue/waiting")?.as_array()?;
+        health.pointer("/queue/running")?.as_array()?;
+        return Some(Place::Started);
+    };
+    if running {
+        return Some(Place::Started);
+    }
+    let ahead = job
+        .get("ahead")?
+        .as_array()?
+        .iter()
+        .map(|a| {
+            let project = a.get("project")?.as_str()?;
+            let job = a.get("job")?.as_str()?;
+            Some(format!("{project}/{job}"))
+        })
+        .collect::<Option<Vec<_>>>()?;
+    Some(Place::Waiting(Waiting {
+        position: job.get("position")?.as_u64()?,
+        ahead,
+        why: job.get("waiting")?.as_str()?.to_string(),
+        eta_start: job
+            .get("eta_start")
+            .and_then(Value::as_f64)
+            .map(|t| t.max(0.0) as u64),
+    }))
+}
+
+/// A waiting job's line, its start estimate relative to `now` (Unix seconds).
+pub fn waiting_line(w: &Waiting, now: u64) -> String {
+    let ahead = match w.ahead.len() {
+        0 => "none ahead".to_string(),
+        n => format!("{n} ahead ({})", w.ahead.join(", ")),
+    };
+    let start = match w.eta_start {
+        None => "start unknown".to_string(),
+        Some(t) if t <= now + 60 => "start within a minute".to_string(),
+        Some(t) => format!("start in ~{} min", (t - now).div_ceil(60)),
+    };
+    format!(
+        "queued: position {}, {ahead}; {}; {start}",
+        w.position, w.why
+    )
+}
+
+fn unix_now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs())
+}
+
+/// Shows the box's capacity once, then the job's place while it waits, in
+/// the background; it ends when the job starts, when `stop` is set, or
+/// after a few unusable answers. It never fails the run.
+fn watch_queue(b: Bench, id: String, stop: Arc<AtomicBool>) {
+    std::thread::spawn(move || {
+        let mut shown_capacity = false;
+        let mut last: Option<Waiting> = None;
+        let mut misses = 0;
+        loop {
+            let health = query_json(&b, "health");
+            if stop.load(Ordering::Relaxed) {
+                return;
+            }
+            if let (Some(h), false) = (&health, shown_capacity) {
+                shown_capacity = true;
+                if let Some(line) = capacity_line(h, &id) {
+                    eprintln!("bench-remote: {line}");
+                }
+            }
+            match health.as_ref().and_then(|h| job_place(h, &id)) {
+                Some(Place::Started) => return,
+                Some(Place::Waiting(w)) => {
+                    misses = 0;
+                    if last.as_ref().map(Waiting::key) != Some(w.key()) {
+                        eprintln!("bench-remote: {}", waiting_line(&w, unix_now()));
+                        last = Some(w);
+                    }
+                }
+                None => {
+                    misses += 1;
+                    if misses >= QUEUE_TRIES {
+                        return;
+                    }
+                }
+            }
+            let until = Instant::now() + QUEUE_POLL;
+            while Instant::now() < until {
+                if stop.load(Ordering::Relaxed) {
+                    return;
+                }
+                std::thread::sleep(Duration::from_secs(1));
+            }
+        }
+    });
+}
+
+/// `bench-remote queue`: the box's `queue`, as it prints it.
+fn queue(root: &Path) -> Result<u8, String> {
+    let b = Bench::configure(root)?;
+    let status = b
+        .ssh(5, &["queue"])
+        .stdin(Stdio::null())
+        .status()
+        .map_err(|e| format!("cannot run ssh: {e}"))?;
+    Ok(match classify(status.code()) {
+        Outcome::Exit(c) => c,
+        Outcome::Unavailable => EX_TEMPFAIL,
+        Outcome::Lost => unavailable(&format!("unreachable ({})", b.destination)),
+    })
+}
+
 /// A warning when a linked worktree builds into a folder outside it.
 /// Cargo names a workspace crate's artifacts after its path inside the
 /// workspace, so two worktrees of one repository sharing a folder overwrite
@@ -725,6 +994,125 @@ fn shared_target_warning(linked: bool, target: Option<&Path>, root: &Path) -> Op
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `health`'s queue as the box answers it, trimmed to what is read.
+    const HEALTH: &str = r#"{
+      "status": "ok",
+      "queue": {
+        "mode": "open",
+        "running": [
+          {"project": "helios", "job": "test-affected", "threads": [1, 2, 3, 4, 5],
+           "memory": 10737418240, "id": "20261028-103218-d1ba", "eta_end": 1793183036}
+        ],
+        "waiting": [
+          {"project": "helios", "job": "test-affected", "cores": 5, "memory": 10737418240,
+           "waiting": "needs 10.0 GB of memory, 4.0 GB free (held by helios/test-affected 10.0 GB)",
+           "id": "20261028-104708-16ad", "position": 1, "eta_start": 1793183036, "ahead": []},
+          {"project": "helios", "job": "egui-pop-snapshots", "cores": 5, "memory": 7516192768,
+           "waiting": "needs 7.0 GB of memory, 4.0 GB free (held by helios/test-affected 10.0 GB)",
+           "id": "20261028-104742-163c", "position": 2, "eta_start": 1793185209.4,
+           "ahead": [{"project": "helios", "job": "test-affected", "threads": 5,
+                      "memory": 10737418240, "params": "branch=wip/x"}]},
+          {"project": "egui-pop", "job": "gate", "cores": 5, "memory": 7516192768,
+           "waiting": "a job ahead has no history", "id": "20261028-104800-0000",
+           "position": 3, "eta_start": null, "ahead": []}
+        ],
+        "capacity": {"threads": 10, "memory": 15032385536}
+      }
+    }"#;
+
+    fn health() -> Value {
+        parse_json(HEALTH).expect("the sample parses")
+    }
+
+    #[test]
+    fn the_capacity_line_comes_from_health() {
+        assert_eq!(
+            capacity_line(&health(), "20261028-104742-163c").as_deref(),
+            Some(
+                "box: 10 threads, 14.0 GB for jobs; in use 5 threads, 10.0 GB \
+                 (1 running, 3 waiting); this job 5 threads, 7.0 GB"
+            )
+        );
+        assert!(
+            capacity_line(&health(), "20261028-103218-d1ba")
+                .is_some_and(|l| l.ends_with("this job 5 threads, 10.0 GB")),
+            "a running job's threads are a list"
+        );
+        assert_eq!(capacity_line(&health(), "unknown-id"), None);
+        let mut h = health();
+        h["queue"].as_object_mut().unwrap().remove("capacity");
+        assert_eq!(capacity_line(&h, "20261028-104742-163c"), None);
+    }
+
+    #[test]
+    fn a_waiting_job_has_its_place() {
+        let Some(Place::Waiting(w)) = job_place(&health(), "20261028-104742-163c") else {
+            panic!("waiting");
+        };
+        assert_eq!(
+            w,
+            Waiting {
+                position: 2,
+                ahead: vec!["helios/test-affected".into()],
+                why: "needs 7.0 GB of memory, 4.0 GB free (held by helios/test-affected 10.0 GB)"
+                    .into(),
+                eta_start: Some(1_793_185_209),
+            }
+        );
+        assert_eq!(
+            waiting_line(&w, 1_793_185_209 - 35 * 60 - 10),
+            "queued: position 2, 1 ahead (helios/test-affected); needs 7.0 GB of memory, \
+             4.0 GB free (held by helios/test-affected 10.0 GB); start in ~36 min"
+        );
+        assert!(waiting_line(&w, 1_793_185_209).ends_with("start within a minute"));
+        let Some(Place::Waiting(w)) = job_place(&health(), "20261028-104800-0000") else {
+            panic!("waiting");
+        };
+        assert_eq!(w.eta_start, None);
+        assert_eq!(
+            waiting_line(&w, 0),
+            "queued: position 3, none ahead; a job ahead has no history; start unknown"
+        );
+    }
+
+    #[test]
+    fn a_started_or_unreadable_job_has_no_waiting_line() {
+        let h = health();
+        assert_eq!(job_place(&h, "20261028-103218-d1ba"), Some(Place::Started));
+        assert_eq!(job_place(&h, "done-and-gone"), Some(Place::Started));
+        assert_eq!(job_place(&Value::Null, "20261028-104742-163c"), None);
+        assert_eq!(
+            job_place(&parse_json(r#"{"status": "ok"}"#).unwrap(), "x"),
+            None
+        );
+        let mut h = health();
+        h["queue"]["waiting"][1]
+            .as_object_mut()
+            .unwrap()
+            .remove("position");
+        assert_eq!(job_place(&h, "20261028-104742-163c"), None);
+    }
+
+    #[test]
+    fn box_answers_parse_after_their_state_line() {
+        let v = parse_json("ok\n{\"threads\": 10}\n").expect("parses");
+        assert_eq!(v["threads"], 10);
+        assert_eq!(parse_json("ok\n"), None);
+        assert_eq!(parse_json("{ not json"), None);
+    }
+
+    #[test]
+    fn a_waiting_line_changes_with_the_minute_of_its_estimate() {
+        let w = |eta| Waiting {
+            position: 1,
+            ahead: vec![],
+            why: "x".into(),
+            eta_start: Some(eta),
+        };
+        assert_eq!(w(600).key(), w(659).key());
+        assert_ne!(w(600).key(), w(660).key());
+    }
 
     #[test]
     fn a_linked_worktree_building_outside_itself_is_warned() {

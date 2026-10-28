@@ -83,6 +83,7 @@ cargo xtask bench-remote build branch=main
 cargo xtask bench-remote test --push             # this working tree, uncommitted changes included
 cargo xtask bench-remote check-commits base=main
 cargo xtask bench-remote check-commits base=main full=yes
+cargo xtask bench-remote queue                   # the box's queue: what runs, what waits and why
 ```
 
 `bench-remote` asks the box whether it can serve (`box`), runs the job and
@@ -102,6 +103,14 @@ same checkout still share it.
 `check-commits` needs the git history, so it runs on a branch, not on
 pushed code.
 
+Once the box has queued the job, `bench-remote` prints one line on the
+box (its capacity, what running jobs hold, what this job asks for) and,
+while the job waits, its place in the queue: its position, the jobs ahead,
+why it waits and when it should start. The box is asked at most once a
+minute and a line is printed only when it changes; nothing more once the
+job runs. A box that does not answer these questions changes nothing to
+the run.
+
 If the connection drops while a job runs, the job goes on: `bench-remote`
 reattaches (`wait <id>`) a few times, and otherwise prints the id to
 reattach to later.
@@ -109,7 +118,9 @@ reattach to later.
 The box's commands work directly too:
 
 ```bash
-ssh -i ~/.ssh/bench-helios bench-helios@<host> box               # can it serve?
+ssh -i ~/.ssh/bench-helios bench-helios@<host> box               # can it serve? (then JSON)
+ssh -i ~/.ssh/bench-helios bench-helios@<host> queue             # what runs, what waits and why
+ssh -i ~/.ssh/bench-helios bench-helios@<host> health            # the same as JSON
 ssh -i ~/.ssh/bench-helios bench-helios@<host> list              # recent jobs
 ssh -i ~/.ssh/bench-helios bench-helios@<host> fetch <id> > r.tar
 ssh -t -i ~/.ssh/bench-helios bench-helios@<host> debug test branch=main   # a shell in the job's container
@@ -129,6 +140,17 @@ only from `main`, once the change is merged:
 ```bash
 ssh -i ~/.ssh/bench-helios bench-helios@<host> config benchfile < tools/bench/Benchfile
 ```
+
+### Capacity and the queue
+
+Jobs run side by side when their threads and memory fit in what the box
+gives to jobs (`queue` and `box` say how much); a job with an `exclusive`
+resource, such as the timing jobs holding the machine, runs alone. Memory,
+more than threads, is what usually makes a job wait. Check
+`cargo xtask bench-remote queue` before submitting: a long queue is a
+reason to run a narrower job, or later. A queued job made stale by a
+rebase or a new push is cancelled with `ssh … cancel <id>` rather than
+left to run.
 
 ## Running what a change touches
 
