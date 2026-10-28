@@ -24,6 +24,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.35.0] - 2026-10-28
+
+### Added
+
+- Images can be copied from the library grid or the filmstrip and pasted
+  into another library: the images it lacks are imported from their files
+  once you confirm, and paste special chooses whether the files stay where
+  they are or are copied into the library folder. Files and folders copied
+  in a file manager can be pasted into the library to import them the same
+  way.
+
 ## [0.34.0] - 2026-10-28
 
 ### Changed
