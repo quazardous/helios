@@ -431,7 +431,7 @@ fn fail(problems: &[String]) -> ExitCode {
     ExitCode::from(1)
 }
 
-const USAGE: &str = "usage: cargo xtask changelog | release [--date YYYY-MM-DD] | check [--base REF] | lint [--fix] [--require-all] | test-times [--profile P] [--top N] [--from-junit FILE [--summary]] | check-commits [--full] [BASE..HEAD | BASE] | bench masks [--modules N] [--budget MIB] | bench-remote <job> [key=value...] [--push] | bench-remote --affected [base=REF] [key=value...] [--push] | bench-remote queue | affected [BASE] [--filter | --critical] | i18n extract | i18n check | i18n stamp LOCALE [--all]";
+const USAGE: &str = "usage: cargo xtask changelog | release [--date YYYY-MM-DD] | check [--base REF] | lint [--fix] [--require-all] | test-times [--profile P] [--top N] [--from-junit FILE [--summary]] | check-commits [--full] [BASE..HEAD | BASE] | bench masks [--modules N] [--budget MIB] | bench-remote <job> [key=value...] [--priority high|normal] [--push] | bench-remote --affected [base=REF] [key=value...] [--push] | bench-remote queue | affected [BASE] [--filter | --critical] | i18n extract | i18n check | i18n stamp LOCALE [--all]";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();

@@ -141,6 +141,48 @@ only from `main`, once the change is merged:
 ssh -i ~/.ssh/bench-helios bench-helios@<host> config benchfile < tools/bench/Benchfile
 ```
 
+### Job names, priority and dependencies
+
+Each job goes to the box under a name of its own, its `ext_job_id`:
+`helios-<branch>-<job>`, such as `helios-wip-undo-test-affected`, or
+`egui-pop-<egui_pop branch>-<job>` for egui-pop's jobs
+(`egui-pop-feat-dock-gate` for `egui-pop-gate egui_pop=feat/dock`).
+Characters the box refuses become `-`; a branch too long for the box's 64
+characters is cut and a hash added. `bench-remote` prints the name it
+uses; `ext_job_id=<name>` gives another. **Submitting under a name the box
+already holds replaces that job, queued or running** (it is cancelled): the
+run made stale by a rebase or a new push goes, and the jobs waiting on the
+name follow the new one. Two runs of one job on one branch that must both
+happen need names of their own.
+
+The name stands for the job wherever the box takes a job id, as
+`x:<name>`:
+
+```bash
+ssh … status x:helios-wip-undo-lint
+ssh … cancel x:egui-pop-feat-dock-gate
+cargo xtask bench-remote release after_ok=x:helios-wip-undo-lint   # only if it succeeded
+cargo xtask bench-remote test after=x:helios-wip-undo-lint         # once it ended, any outcome
+```
+
+A job waiting on dependencies holds nothing on the box. When an `after_ok`
+dependency does not succeed, the job never runs and ends with **exit 79**.
+Dependencies are Helios's own jobs on the box (egui-pop's jobs included).
+
+**egui-pop jobs first.** Every `egui-pop-*` job is submitted with
+`priority=high`, ahead of every normal job on the box; the other jobs are
+normal. `--priority high|normal` (or `priority=`) says otherwise:
+
+```bash
+cargo xtask bench-remote egui-pop-gate egui_pop=feat/dock                     # high
+cargo xtask bench-remote egui-pop-gate egui_pop=feat/dock --priority normal  # normal
+cargo xtask bench-remote release --priority high                            # a merge waits on it
+```
+
+The box keeps one high-priority job waiting per project: the last one
+submitted (or `ssh … bump <id>`) takes it, and the one before goes back to
+normal; the box says so.
+
 ### Capacity and the queue
 
 Jobs run side by side when their threads and memory fit in what the box
@@ -149,8 +191,9 @@ resource, such as the timing jobs holding the machine, runs alone. Memory,
 more than threads, is what usually makes a job wait. Check
 `cargo xtask bench-remote queue` before submitting: a long queue is a
 reason to run a narrower job, or later. A queued job made stale by a
-rebase or a new push is cancelled with `ssh … cancel <id>` rather than
-left to run.
+rebase or a new push is replaced when the job is submitted again under
+its name (above), or cancelled with `ssh … cancel <id>`, rather than left
+to run.
 
 ## Running what a change touches
 

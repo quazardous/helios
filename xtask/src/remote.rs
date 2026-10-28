@@ -8,7 +8,10 @@
 //!    per checkout so parallel worktrees never overwrite each other, and the
 //!    job runs on it (`src=helios-local-<id>`) instead of the pushed branch.
 //! 3. `run <job> [key=value...]`, its log followed; `branch=` defaults to
-//!    the current branch. On a dropped connection, `wait <id>` reattaches.
+//!    the current branch, `ext_job_id=` to `<project>-<branch>-<job>` (see
+//!    `default_ext_job_id`: a resubmission replaces the stale job), and
+//!    `priority=` to `high` for egui-pop's jobs (`--priority` sets it). On a
+//!    dropped connection, `wait <id>` reattaches.
 //!    Once the job has its id, `health` gives one line on the box (its
 //!    capacity, what is in use, the job's own request), then, while the job
 //!    waits, its place in the queue: polled at most once a minute, printed
@@ -48,21 +51,91 @@ use serde_json::Value;
 
 use crate::test_times::target_dir;
 
-pub const USAGE: &str = "bench-remote <job> [key=value...] [--push] | bench-remote --affected [base=REF] [key=value...] [--push] | bench-remote queue";
+pub const USAGE: &str = "bench-remote <job> [key=value...] [--priority high|normal] [--push] | bench-remote --affected [base=REF] [key=value...] [--push] | bench-remote queue";
 
 /// The exit code of a job the box could not serve.
 pub const EX_TEMPFAIL: u8 = 75;
+
+/// FNV-1a: stable across runs and Rust versions, unlike the std hasher.
+fn fnv1a(text: &str) -> u32 {
+    let mut h: u32 = 0x811c_9dc5;
+    for b in text.bytes() {
+        h = (h ^ u32::from(b)).wrapping_mul(0x0100_0193);
+    }
+    h
+}
 
 /// The name local code is pushed under, at `/work/<name>` on the box: one
 /// per checkout (a hash of its path), so two worktrees pushing at once do not
 /// overwrite each other's code.
 fn pushed_name(root: &Path) -> String {
-    // FNV-1a: stable across runs and Rust versions, unlike the std hasher
-    let mut h: u32 = 0x811c_9dc5;
-    for b in root.to_string_lossy().bytes() {
-        h = (h ^ u32::from(b)).wrapping_mul(0x0100_0193);
+    format!("helios-local-{:08x}", fnv1a(&root.to_string_lossy()))
+}
+
+/// The prefix of egui-pop's jobs in the Benchfile.
+const EGUI_POP_JOB: &str = "egui-pop-";
+
+/// The longest `ext_job_id` the box accepts.
+const EXT_ID_MAX: usize = 64;
+
+/// The name a job is submitted under when none is given (`ext_job_id=`):
+/// `<project>-<branch>-<job>`, egui-pop's jobs named after their
+/// `egui_pop=` branch (`main` by default, as in the Benchfile) and without
+/// their `egui-pop-` prefix. Resubmitting under the same name replaces the
+/// job while it is queued or running, so a run made stale by a rebase does
+/// not pile up behind the new one.
+pub fn default_ext_job_id(job: &str, params: &[(String, String)]) -> String {
+    let param = |key: &str| {
+        params
+            .iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.as_str())
+    };
+    let (project, branch, step) = match job.strip_prefix(EGUI_POP_JOB) {
+        Some(step) => ("egui-pop", param("egui_pop").unwrap_or("main"), step),
+        None => ("helios", param("branch").unwrap_or("main"), job),
+    };
+    ext_job_id(project, branch, step)
+}
+
+/// `<project>-<branch>-<step>` as the box accepts an `ext_job_id`: letters,
+/// digits and `. _ -`, a letter or digit first, 64 characters at most. Other
+/// characters become `-`; a branch too long for the room left is cut and a
+/// hash of the whole name added, so two long branches keep apart.
+pub fn ext_job_id(project: &str, branch: &str, step: &str) -> String {
+    let clean = |s: &str| -> String {
+        s.chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || "._-".contains(c) {
+                    c
+                } else {
+                    '-'
+                }
+            })
+            .collect()
+    };
+    let (project, branch, step) = (clean(project), clean(branch), clean(step));
+    let full = format!("{project}-{branch}-{step}");
+    let mut name = if full.len() <= EXT_ID_MAX {
+        full
+    } else {
+        let hash = format!("{:08x}", fnv1a(&full));
+        let room = EXT_ID_MAX.saturating_sub(project.len() + step.len() + hash.len() + 3);
+        let cut = branch[..room.min(branch.len())].trim_end_matches(['-', '.', '_']);
+        let mut name = format!("{project}-{cut}-{hash}-{step}");
+        name.truncate(EXT_ID_MAX);
+        name
+    };
+    if !name.starts_with(|c: char| c.is_ascii_alphanumeric()) {
+        name.insert(0, 'x');
+        name.truncate(EXT_ID_MAX);
     }
-    format!("helios-local-{h:08x}")
+    name
+}
+
+/// The priority a job asks for when none is given: egui-pop's jobs first.
+fn default_priority(job: &str) -> Option<&'static str> {
+    job.starts_with(EGUI_POP_JOB).then_some("high")
 }
 
 /// The box's user when `HELIOS_BENCH_HOST` names a host only.
@@ -72,7 +145,7 @@ const DEFAULT_USER: &str = "bench-helios";
 const REATTACH: u32 = 5;
 const REATTACH_PAUSE: Duration = Duration::from_secs(15);
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Request {
     pub job: String,
     pub params: Vec<(String, String)>,
@@ -106,6 +179,18 @@ fn valid_value(s: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || "._/@+-".contains(c))
 }
 
+/// A parameter's value: `after=` and `after_ok=` take job ids or
+/// `x:<ext_job_id>`, separated by commas; `priority=` is `high` or `normal`.
+fn valid_param(key: &str, value: &str) -> bool {
+    match key {
+        "after" | "after_ok" => value.split(',').all(|r| {
+            valid_value(r.strip_prefix("x:").unwrap_or(r)) && !r.contains(['/', '@', '+'])
+        }),
+        "priority" => matches!(value, "high" | "normal"),
+        _ => valid_value(value),
+    }
+}
+
 /// A job name, as the box accepts it: `[a-z][a-z0-9-]*`.
 fn valid_job(s: &str) -> bool {
     let mut chars = s.chars();
@@ -118,13 +203,21 @@ pub fn parse_args(args: &[&str]) -> Option<Request> {
     let mut params: Vec<(String, String)> = Vec::new();
     let mut push = false;
     let mut affected = false;
-    for a in args {
+    let mut args = args.iter();
+    while let Some(a) = args.next() {
         if *a == "--push" {
             push = true;
         } else if *a == "--affected" {
             affected = true;
+        } else if *a == "--priority" {
+            // the same as priority=, given once either way
+            let v = args.next()?;
+            if !valid_param("priority", v) || params.iter().any(|(p, _)| p == "priority") {
+                return None;
+            }
+            params.push(("priority".into(), (*v).to_string()));
         } else if let Some((k, v)) = a.split_once('=') {
-            if !valid_name(k) || !valid_value(v) || params.iter().any(|(p, _)| p == k) {
+            if !valid_name(k) || !valid_param(k, v) || params.iter().any(|(p, _)| p == k) {
                 return None;
             }
             params.push((k.to_string(), v.to_string()));
@@ -661,6 +754,16 @@ fn remote(root: &Path, req: &mut Request) -> Result<u8, String> {
         req.params.insert(0, ("branch".into(), branch));
     }
     let branch = req.param("branch").unwrap_or_default().to_string();
+    if req.param("ext_job_id").is_none() {
+        let name = default_ext_job_id(&req.job, &req.params);
+        eprintln!("bench-remote: ext_job_id={name} (a new run under this name replaces this one)");
+        req.params.push(("ext_job_id".into(), name));
+    }
+    if req.param("priority").is_none()
+        && let Some(p) = default_priority(&req.job)
+    {
+        req.params.push(("priority".into(), p.into()));
+    }
     if req.push {
         if let Err(e) = push(&b, root, false) {
             return Ok(unavailable(&e));
@@ -1160,8 +1263,109 @@ mod tests {
                 .map(|(k, v)| ((*k).into(), (*v).into()))
                 .collect(),
             push,
-            affected: false,
+            ..Request::default()
         }
+    }
+
+    fn owned(params: &[(&str, &str)]) -> Vec<(String, String)> {
+        params
+            .iter()
+            .map(|(k, v)| ((*k).into(), (*v).into()))
+            .collect()
+    }
+
+    #[test]
+    fn a_job_is_named_after_its_project_branch_and_job() {
+        assert_eq!(
+            default_ext_job_id("test-affected", &owned(&[("branch", "wip/bench-remote")])),
+            "helios-wip-bench-remote-test-affected"
+        );
+        assert_eq!(
+            default_ext_job_id(
+                "egui-pop-gate",
+                &owned(&[("branch", "main"), ("egui_pop", "feat/dock+tabs")])
+            ),
+            "egui-pop-feat-dock-tabs-gate",
+            "egui-pop's jobs go by their egui_pop= branch"
+        );
+        assert_eq!(
+            default_ext_job_id("egui-pop-snapshots", &[]),
+            "egui-pop-main-snapshots"
+        );
+        assert_eq!(default_ext_job_id("lint", &[]), "helios-main-lint");
+    }
+
+    /// What the box accepts as an `ext_job_id`.
+    fn box_accepts(name: &str) -> bool {
+        name.len() <= EXT_ID_MAX
+            && name.starts_with(|c: char| c.is_ascii_alphanumeric())
+            && name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || "._-".contains(c))
+    }
+
+    #[test]
+    fn a_job_name_is_sanitised_for_the_box() {
+        for branch in ["a@b", "x/y/z", "ünïcode", "-lead", "v1.2_rc"] {
+            let name = ext_job_id("helios", branch, "lint");
+            assert!(box_accepts(&name), "{name}");
+        }
+        assert_eq!(
+            ext_job_id("helios", "v1.2_rc", "lint"),
+            "helios-v1.2_rc-lint"
+        );
+        let long = "feature/".repeat(12);
+        let a = ext_job_id("helios", &long, "test-affected");
+        let b = ext_job_id("helios", &format!("{long}x"), "test-affected");
+        assert!(box_accepts(&a) && box_accepts(&b), "{a} {b}");
+        assert!(a.ends_with("-test-affected"), "the job is kept: {a}");
+        assert!(a.starts_with("helios-feature-"), "{a}");
+        assert_ne!(a, b, "two long branches keep apart");
+        assert_eq!(a, ext_job_id("helios", &long, "test-affected"), "stable");
+    }
+
+    #[test]
+    fn egui_pop_jobs_come_first_unless_told_otherwise() {
+        assert_eq!(default_priority("egui-pop-gate"), Some("high"));
+        assert_eq!(default_priority("test"), None);
+        assert_eq!(
+            parse_args(&["egui-pop-gate", "--priority", "normal"]),
+            Some(req("egui-pop-gate", &[("priority", "normal")], false))
+        );
+        assert_eq!(
+            parse_args(&["test", "--priority", "high"]),
+            Some(req("test", &[("priority", "high")], false))
+        );
+        assert_eq!(parse_args(&["test", "--priority", "urgent"]), None);
+        assert_eq!(parse_args(&["test", "--priority"]), None);
+        assert_eq!(
+            parse_args(&["test", "--priority", "high", "priority=high"]),
+            None,
+            "once"
+        );
+    }
+
+    #[test]
+    fn dependencies_name_job_ids_or_ext_job_ids() {
+        assert_eq!(
+            parse_args(&[
+                "release",
+                "after_ok=x:helios-main-lint,20261028-104512-3f2a"
+            ]),
+            Some(req(
+                "release",
+                &[("after_ok", "x:helios-main-lint,20261028-104512-3f2a")],
+                false
+            ))
+        );
+        assert!(parse_args(&["release", "after=x:a,x:b"]).is_some());
+        assert_eq!(parse_args(&["release", "after_ok=x:a/b"]), None);
+        assert_eq!(parse_args(&["release", "after_ok=a,,b"]), None);
+        assert_eq!(
+            parse_args(&["release", "branch=a,b"]),
+            None,
+            "commas only there"
+        );
     }
 
     #[test]
