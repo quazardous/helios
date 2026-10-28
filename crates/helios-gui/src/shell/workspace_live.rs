@@ -517,8 +517,9 @@ impl Shell {
             "workspace.save_as_template" => self.save_workspace_as_template(request),
             "network.delegate" => self.delegate_nodes(request, &origin),
             "subworkspace.delete" => self.delete_subworkspace(request, &origin),
-            cmd @ ("network.connect" | "network.disconnect" | "network.move" | "network.add"
-            | "network.remove") => self.network_command(cmd, request, &origin),
+            cmd if helios_template::network::is_command(cmd) => {
+                self.network_command(cmd, request, &origin)
+            }
             "workspace.undo" => self.agent_undo(&origin),
             cmd if cmd.starts_with("context.") => {
                 crate::contexts::agent_tool(self.app.handle(), request, AGENT)

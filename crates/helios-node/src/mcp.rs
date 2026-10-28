@@ -503,6 +503,137 @@ pub const TOOLS: &[Tool] = &[
         ],
     },
     Tool {
+        name: "helios_network_connect",
+        endpoint: Endpoint::Workspace,
+        cmd: "network.connect",
+        description: "Connects an output of a workspace's network to an input, as one undoable step: the input's wire (and the wires in `replaces`) removed first. Refused when a port is not there, the types differ or the wire would close a loop",
+        params: &[
+            WORKSPACE,
+            Param {
+                name: "from",
+                schema: string,
+                description: "The node (or source) whose output feeds",
+                default: None,
+            },
+            Param {
+                name: "port",
+                schema: string,
+                description: "Its output (a source's is `image`)",
+                default: None,
+            },
+            Param {
+                name: "to",
+                schema: string,
+                description: "The node fed",
+                default: None,
+            },
+            Param {
+                name: "input",
+                schema: string,
+                description: "Its input",
+                default: None,
+            },
+            Param {
+                name: "replaces",
+                schema: objects,
+                description: "Other wires taken out first, each {from, port, to, input}",
+                default: Some(empty_list),
+            },
+            DRY_RUN,
+            CONFIG,
+        ],
+    },
+    Tool {
+        name: "helios_network_disconnect",
+        endpoint: Endpoint::Workspace,
+        cmd: "network.disconnect",
+        description: "Removes wires of a workspace's network, as one undoable step; every one must be there",
+        params: &[
+            WORKSPACE,
+            Param {
+                name: "connections",
+                schema: objects,
+                description: "The wires, each {from, port, to, input}",
+                default: None,
+            },
+            DRY_RUN,
+            CONFIG,
+        ],
+    },
+    Tool {
+        name: "helios_network_move",
+        endpoint: Endpoint::Workspace,
+        cmd: "network.move",
+        description: "Moves nodes of a workspace's network in the graph view, as one undoable step",
+        params: &[
+            WORKSPACE,
+            Param {
+                name: "moves",
+                schema: objects,
+                description: "Each {node, to: [x, y]}, in the graph's units",
+                default: None,
+            },
+            DRY_RUN,
+            CONFIG,
+        ],
+    },
+    Tool {
+        name: "helios_network_add",
+        endpoint: Endpoint::Workspace,
+        cmd: "network.add",
+        description: "Adds nodes to a workspace's network, unconnected, as one undoable step: a module by its name, or a copy of a node (its module or composite and its parameters). Answers the names given (`added`), made unique (exposure_2)",
+        params: &[
+            WORKSPACE,
+            Param {
+                name: "nodes",
+                schema: objects,
+                description: "Each {module} or {copy_of}, with `at`: [x, y] in the graph view",
+                default: None,
+            },
+            DRY_RUN,
+            CONFIG,
+        ],
+    },
+    Tool {
+        name: "helios_network_remove",
+        endpoint: Endpoint::Workspace,
+        cmd: "network.remove",
+        description: "Removes nodes from a workspace's network with their wires, as one undoable step; a source (the workspace's image) and the node the viewport shows stay",
+        params: &[
+            WORKSPACE,
+            Param {
+                name: "nodes",
+                schema: strings,
+                description: "The nodes' names",
+                default: None,
+            },
+            DRY_RUN,
+            CONFIG,
+        ],
+    },
+    Tool {
+        name: "helios_network_paste",
+        endpoint: Endpoint::Workspace,
+        cmd: "network.paste",
+        description: "Pastes copied nodes into a workspace's network, as one undoable step: a name the network holds already is made unique, the wires rewritten with the new names, a wire coming in wired again when the node it came from is there, the places shifted. Answers the names given (`added`) and those changed (`renamed`)",
+        params: &[
+            WORKSPACE,
+            Param {
+                name: "clip",
+                schema: object,
+                description: "A `helios.nodes` payload, as Edit > Copy in the graph view makes it: {nodes, connections, inputs, positions}",
+                default: None,
+            },
+            optional(
+                "parts",
+                optional_strings,
+                "The nodes taken by name, and `inputs` for the wires coming in; all when null",
+            ),
+            DRY_RUN,
+            CONFIG,
+        ],
+    },
+    Tool {
         name: "helios_subworkspace_delete",
         endpoint: Endpoint::Workspace,
         cmd: "subworkspace.delete",
@@ -1773,6 +1904,9 @@ fn workspace_call(request: &Value) -> Result<Value, String> {
         "workspace.import_parts" => tools::import_parts(&config, &args, &catalogue),
         "workspace.save_as_template" => tools::save_as_template(&config, &args, &catalogue),
         "network.delegate" => tools::delegate(&config, &args, &catalogue),
+        cmd if helios_template::network::is_command(cmd) => {
+            tools::network(&config, cmd, &args, &catalogue)
+        }
         "subworkspace.delete" => tools::delete_subworkspace(&config, &args, &catalogue),
         "workspace.undo" => tools::undo(&config, &args),
         "context.read" => helios_template::contexts::tools::read(&config, &args),
@@ -2253,6 +2387,162 @@ mod tests {
         args["payload_format"] = json!("png");
         let (failed, _) = tool(&mut s, "helios_clipboard", args);
         assert!(failed);
+    }
+
+    #[test]
+    fn an_agent_edits_a_workspace_s_network_node_by_node_through_mcp() {
+        let root = std::env::temp_dir().join(format!("helios-mcp-network-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let config = root.join("config");
+        let portrait = helios_template::shipped::templates()
+            .into_iter()
+            .find(|b| b.template.id == "helios.portrait-retouch")
+            .unwrap();
+        let (dir, _) = helios_template::workspace::create(
+            &portrait,
+            &std::collections::BTreeMap::new(),
+            &workspace_catalogue(),
+            &root.join("work"),
+            &config,
+        )
+        .unwrap();
+        let mut s = Sockets {
+            inspect: None,
+            control: None,
+            node_bin: PathBuf::from("helios-node"),
+            ai: None,
+        };
+        let args = |extra: Value| {
+            let mut a = json!({ "workspace": dir, "config": config });
+            for (k, v) in extra.as_object().unwrap() {
+                a[k] = v.clone();
+            }
+            a
+        };
+        let network = |s: &mut Sockets| {
+            let (failed, state) = tool(s, "helios_workspace_state", args(json!({})));
+            assert!(!failed, "{state}");
+            state["template"]["network"].clone()
+        };
+        let has = |net: &Value, name: &str| {
+            net["nodes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|n| n["name"] == name)
+        };
+        // An added module gets a free name; a dry run writes nothing.
+        let add = json!({ "nodes": [{ "module": "exposure", "at": [40.0, 300.0] }] });
+        let mut dry = add.clone();
+        dry["dry_run"] = json!(true);
+        let (failed, said) = tool(&mut s, "helios_network_add", args(dry));
+        assert!(!failed, "{said}");
+        assert_eq!(
+            (&said["added"], &said["dry_run"], &said["via"]),
+            (&json!(["exposure_2"]), &json!(true), &json!("files"))
+        );
+        assert!(!has(&network(&mut s), "exposure_2"));
+        let (failed, added) = tool(&mut s, "helios_network_add", args(add));
+        assert!(!failed, "{added}");
+        assert!(has(&network(&mut s), "exposure_2"));
+        // Wired between the source and the first exposure.
+        let (failed, wired) = tool(
+            &mut s,
+            "helios_network_connect",
+            args(
+                json!({ "from": "source", "port": "image", "to": "exposure_2", "input": "input" }),
+            ),
+        );
+        assert!(!failed, "{wired}");
+        let (failed, wired) = tool(
+            &mut s,
+            "helios_network_connect",
+            args(
+                json!({ "from": "exposure_2", "port": "output", "to": "exposure", "input": "input" }),
+            ),
+        );
+        assert!(!failed, "{wired}");
+        let net = network(&mut s);
+        let into_exposure: Vec<&Value> = net["connections"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|c| c["to"] == "exposure")
+            .collect();
+        assert_eq!(into_exposure.len(), 1, "the input's old wire went");
+        assert_eq!(into_exposure[0]["from"], "exposure_2");
+        // A loop is refused and changes nothing.
+        let (failed, refused) = tool(
+            &mut s,
+            "helios_network_connect",
+            args(
+                json!({ "from": "exposure", "port": "output", "to": "exposure_2", "input": "input" }),
+            ),
+        );
+        assert!(failed, "{refused}");
+        assert_eq!(network(&mut s), net);
+        // Moved, then removed with its wires; the node shown stays.
+        let (failed, moved) = tool(
+            &mut s,
+            "helios_network_move",
+            args(json!({ "moves": [{ "node": "exposure_2", "to": [0.0, 0.0] }] })),
+        );
+        assert!(!failed, "{moved}");
+        let (failed, _) = tool(
+            &mut s,
+            "helios_network_remove",
+            args(json!({ "nodes": ["retouch"] })),
+        );
+        assert!(failed, "the node the viewport shows stays");
+        // Taken off the render path first (a node the view reads from
+        // keeps every input wired), then removed.
+        let (failed, rewired) = tool(
+            &mut s,
+            "helios_network_connect",
+            args(json!({ "from": "source", "port": "image", "to": "exposure", "input": "input" })),
+        );
+        assert!(!failed, "{rewired}");
+        let (failed, removed) = tool(
+            &mut s,
+            "helios_network_remove",
+            args(json!({ "nodes": ["exposure_2"] })),
+        );
+        assert!(!failed, "{removed}");
+        let net = network(&mut s);
+        assert!(!has(&net, "exposure_2"));
+        assert!(
+            !net["connections"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|c| c["from"] == "exposure_2" || c["to"] == "exposure_2")
+        );
+        // Copied nodes pasted: renamed on a clash, wired in again.
+        let clip = json!({
+            "nodes": [{ "name": "exposure", "module": "exposure" }],
+            "inputs": [{ "from": "source", "port": "image", "to": "exposure", "input": "input" }],
+        });
+        let (failed, pasted) = tool(
+            &mut s,
+            "helios_network_paste",
+            args(json!({ "clip": clip })),
+        );
+        assert!(!failed, "{pasted}");
+        assert_eq!(pasted["added"], json!(["exposure_2"]));
+        assert_eq!(pasted["renamed"]["exposure"], "exposure_2");
+        assert!(
+            network(&mut s)["connections"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|c| c["from"] == "source" && c["to"] == "exposure_2")
+        );
+        // Each edit is one step an agent undoes.
+        let (failed, undone) = tool(&mut s, "helios_workspace_undo", args(json!({})));
+        assert!(!failed, "{undone}");
+        assert_eq!(undone["undone"], "paste nodes");
+        assert!(!has(&network(&mut s), "exposure_2"));
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

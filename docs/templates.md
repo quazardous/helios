@@ -463,8 +463,10 @@ panels, layout and keys) comes next.
 **Agents.** The desktop's commands take their arguments whole, with
 `dry_run`. The node's MCP server has the same as tools
 (`helios_workspace_parts`, `_state`, `_edit`, `_reset`,
-`_import_parts`, `_save_as_template`, `helios_network_delegate` and
-`helios_subworkspace_delete`, each with `dry_run`, and
+`_import_parts`, `_save_as_template`, `helios_network_delegate`,
+`helios_subworkspace_delete`, the network edited node by node as the
+graph view does it (`helios_network_connect`, `_disconnect`, `_move`,
+`_add`, `_remove`, `_paste`), each with `dry_run`, and
 `helios_workspace_undo`); each answer says where it was made (`via`):
 
 - **Through the desktop** (`via: desktop`), when a desktop holds the

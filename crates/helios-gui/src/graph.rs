@@ -29,11 +29,14 @@ use egui_pop::viewport::graph::{
     Edge, Edit, GraphEditor, GraphEvent, GraphModel, GraphState, Group, Kind, Level, Node, Param,
     Port, PortRef, PortType, Refusal, Request, WireStyle,
 };
-use helios_core::{Engine, Graph, Message, ModuleKind, NodeState, PortKind, PortSpec, Region};
+use helios_core::{Engine, Graph, Message, ModuleKind, NodeState, Region};
 use helios_shell::commands::Origin;
 use helios_template::Catalogue;
+use helios_template::Template;
 use helios_template::format::{Connection, NetworkDesc, NodeDesc};
-use helios_template::{SOURCE_PORT, Template};
+pub use helios_template::network::{
+    ANY, PortInfo, add, connect, disconnect, fresh_name, names, place, ports_of, remove, types_fit,
+};
 use helios_values::{Change, Descriptor, GestureId, Set, Store, Type};
 use serde_json::{Value as Json, json};
 
@@ -50,10 +53,6 @@ pub const WIRES: &str = "view/graph/wires";
 
 /// The place a delegated group enters, once Helios declares it.
 pub const SUBWORKSPACE_PLACE: &str = "helios.sub-workspace";
-
-/// A port type that takes any other (an input whose channels are
-/// decided when connected, a source whose image may be anything).
-const ANY: &str = "any";
 
 /// The layered layout's steps, in graph units.
 const RANK_STEP: f32 = 260.0;
@@ -91,92 +90,6 @@ pub fn wire_style(name: &str) -> WireStyle {
 // ---------------------------------------------------------------------
 // The network, read
 // ---------------------------------------------------------------------
-
-/// A port of a node of the network.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct PortInfo {
-    pub name: String,
-    /// `image` (four channels), `mask` (one), `<n> channels`, `buffer`,
-    /// or [`ANY`].
-    pub ty: String,
-}
-
-impl PortInfo {
-    fn of(spec: &PortSpec) -> PortInfo {
-        let ty = match &spec.kind {
-            PortKind::Image { channels: 4 } => "image".to_string(),
-            PortKind::Image { channels: 1 } => "mask".to_string(),
-            PortKind::Image { channels } => format!("{channels} channels"),
-            PortKind::AnyImage | PortKind::SameAs { .. } => ANY.to_string(),
-            PortKind::Buffer => "buffer".to_string(),
-        };
-        PortInfo {
-            name: spec.name.clone(),
-            ty,
-        }
-    }
-}
-
-/// Whether an output of type `from` may feed an input of type `to`.
-pub fn types_fit(from: &str, to: &str) -> bool {
-    from == ANY || to == ANY || from == to
-}
-
-/// Every node's name: the sources, then the nodes, in order.
-pub fn names(net: &NetworkDesc) -> Vec<String> {
-    net.sources
-        .iter()
-        .cloned()
-        .chain(net.nodes.iter().map(|n| n.name.clone()))
-        .collect()
-}
-
-/// A node's inputs and outputs, from its module's manifest or its
-/// composite's file; a source has one output, its image. `None` for a
-/// node the network does not have, or whose module is unknown.
-pub fn ports_of(
-    net: &NetworkDesc,
-    catalogue: &Catalogue,
-    node: &str,
-) -> Option<(Vec<PortInfo>, Vec<PortInfo>)> {
-    if net.sources.iter().any(|s| s == node) {
-        let image = PortInfo {
-            name: SOURCE_PORT.into(),
-            ty: ANY.into(),
-        };
-        return Some((Vec::new(), vec![image]));
-    }
-    let n = net.nodes.iter().find(|n| n.name == node)?;
-    if let Some(m) = &n.module {
-        let manifest = catalogue.get_module(m)?.manifest();
-        return Some((
-            manifest.inputs.iter().map(PortInfo::of).collect(),
-            manifest.outputs.iter().map(PortInfo::of).collect(),
-        ));
-    }
-    let file = catalogue.get_composite(n.composite.as_ref()?)?;
-    let of = |ports: &[helios_template::format::Port]| {
-        ports.iter().map(|p| PortInfo::of(&p.spec())).collect()
-    };
-    Some((of(&file.inputs), of(&file.outputs)))
-}
-
-/// Whether `upstream` feeds `node`, directly or not.
-fn feeds(net: &NetworkDesc, upstream: &str, node: &str) -> bool {
-    let mut seen = BTreeSet::new();
-    let mut todo = vec![node.to_string()];
-    while let Some(at) = todo.pop() {
-        for c in net.connections.iter().filter(|c| c.to == at) {
-            if c.from == upstream {
-                return true;
-            }
-            if seen.insert(c.from.clone()) {
-                todo.push(c.from.clone());
-            }
-        }
-    }
-    false
-}
 
 /// A node's rank in the layered layout.
 fn rank_of(i: usize, inputs: &[Vec<usize>], memo: &mut [Option<usize>], depth: usize) -> usize {
@@ -536,215 +449,6 @@ impl GraphModel for NetworkModel {
 // ---------------------------------------------------------------------
 // The network, edited
 // ---------------------------------------------------------------------
-
-/// A connection's four fields; the other keys of a command's arguments
-/// (`replaces`) are not the connection's, which refuses unknown fields.
-fn conn(v: &Json) -> Result<Connection, String> {
-    let only = json!({
-        "from": v["from"],
-        "port": v["port"],
-        "to": v["to"],
-        "input": v["input"],
-    });
-    serde_json::from_value(only).map_err(|e| format!("a connection: {e}"))
-}
-
-fn conns(v: &Json) -> Result<Vec<Connection>, String> {
-    match v {
-        Json::Null => Ok(Vec::new()),
-        Json::Array(a) => a.iter().map(conn).collect(),
-        _ => Err("connections are a list".into()),
-    }
-}
-
-fn names_arg(v: &Json, key: &str) -> Result<Vec<String>, String> {
-    serde_json::from_value(v[key].clone()).map_err(|e| format!("`{key}`: {e}"))
-}
-
-fn pair(v: &Json) -> Option<[f32; 2]> {
-    Some([v.get(0)?.as_f64()? as f32, v.get(1)?.as_f64()? as f32])
-}
-
-/// Connects an output to an input (`from`, `port`, `to`, `input`): the
-/// input's wire, and the wires in `replaces`, removed first. Refused
-/// when a port is not there, the types differ or the wire would close a
-/// loop.
-pub fn connect(
-    net: &mut NetworkDesc,
-    catalogue: &Catalogue,
-    args: &Json,
-) -> Result<Connection, String> {
-    let c = conn(args)?;
-    let replaces = conns(&args["replaces"])?;
-    let (_, outputs) =
-        ports_of(net, catalogue, &c.from).ok_or_else(|| format!("no node `{}`", c.from))?;
-    let (inputs, _) =
-        ports_of(net, catalogue, &c.to).ok_or_else(|| format!("no node `{}`", c.to))?;
-    let out = outputs
-        .iter()
-        .find(|p| p.name == c.port)
-        .ok_or_else(|| format!("`{}` has no output `{}`", c.from, c.port))?;
-    let input = inputs
-        .iter()
-        .find(|p| p.name == c.input)
-        .ok_or_else(|| format!("`{}` has no input `{}`", c.to, c.input))?;
-    if c.from == c.to {
-        return Err(format!("`{}` cannot feed itself", c.from));
-    }
-    if !types_fit(&out.ty, &input.ty) {
-        return Err(format!(
-            "`{}.{}` gives {}, `{}.{}` takes {}",
-            c.from, c.port, out.ty, c.to, c.input, input.ty
-        ));
-    }
-    let mut next = net.clone();
-    next.connections
-        .retain(|k| !(replaces.contains(k) || k.to == c.to && k.input == c.input));
-    if feeds(&next, &c.to, &c.from) {
-        return Err(format!("`{}` already feeds `{}`", c.to, c.from));
-    }
-    next.connections.push(c.clone());
-    *net = next;
-    Ok(c)
-}
-
-/// Removes wires (`connections`: each `{from, port, to, input}`); every
-/// one must be there.
-pub fn disconnect(net: &mut NetworkDesc, args: &Json) -> Result<usize, String> {
-    let gone = conns(&args["connections"])?;
-    if gone.is_empty() {
-        return Err("`connections` is missing".into());
-    }
-    for c in &gone {
-        if !net.connections.contains(c) {
-            return Err(format!(
-                "no wire from `{}.{}` to `{}.{}`",
-                c.from, c.port, c.to, c.input
-            ));
-        }
-    }
-    net.connections.retain(|c| !gone.contains(c));
-    Ok(gone.len())
-}
-
-/// Places nodes (`moves`: each `{node, to: [x, y]}`).
-pub fn place(
-    net: &NetworkDesc,
-    positions: &mut BTreeMap<String, [f32; 2]>,
-    args: &Json,
-) -> Result<usize, String> {
-    let moves = args["moves"].as_array().ok_or("`moves` is a list")?;
-    let known = names(net);
-    for m in moves {
-        let node = m["node"].as_str().ok_or("a move names its `node`")?;
-        if !known.iter().any(|n| n == node) {
-            return Err(format!("no node `{node}`"));
-        }
-        let to = pair(&m["to"]).ok_or("a move's `to` is [x, y]")?;
-        if !to.iter().all(|v| v.is_finite()) {
-            return Err(format!("`{node}`: not a place"));
-        }
-        positions.insert(node.to_string(), to);
-    }
-    Ok(moves.len())
-}
-
-/// A name for a new node: `base`, else `base_2`, `base_3`...
-pub(crate) fn fresh_name(net: &NetworkDesc, base: &str) -> String {
-    let mut base: String = base
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() {
-                c.to_ascii_lowercase()
-            } else {
-                '_'
-            }
-        })
-        .collect();
-    if !base.starts_with(|c: char| c.is_ascii_lowercase()) {
-        base.insert(0, 'n');
-    }
-    let taken = names(net);
-    if !taken.contains(&base) {
-        return base;
-    }
-    // Among `taken.len() + 1` names, one is free.
-    (2..=taken.len() + 2)
-        .map(|i| format!("{base}_{i}"))
-        .find(|n| !taken.contains(n))
-        .expect("a free name")
-}
-
-/// Adds nodes (`nodes`: each `{module, at, copy_of}`): a module by its
-/// name, or a copy of another node (its module or composite and its
-/// parameters). Answers the names given.
-pub fn add(
-    net: &mut NetworkDesc,
-    positions: &mut BTreeMap<String, [f32; 2]>,
-    catalogue: &Catalogue,
-    args: &Json,
-) -> Result<Vec<String>, String> {
-    let nodes = args["nodes"].as_array().ok_or("`nodes` is a list")?;
-    let mut added = Vec::new();
-    for n in nodes {
-        let copy = n["copy_of"].as_str().filter(|s| !s.is_empty());
-        let desc = if let Some(of) = copy {
-            let orig = net
-                .nodes
-                .iter()
-                .find(|d| d.name == of)
-                .ok_or_else(|| format!("no node `{of}` to copy (a source is not copied)"))?;
-            NodeDesc {
-                name: fresh_name(net, &orig.name),
-                ..orig.clone()
-            }
-        } else {
-            let module = n["module"]
-                .as_str()
-                .or_else(|| n["kind"].as_str())
-                .ok_or("a node to add names its `module`")?;
-            if catalogue.get_module(module).is_none() {
-                return Err(format!("unknown module `{module}`"));
-            }
-            NodeDesc {
-                name: fresh_name(net, module),
-                module: Some(module.to_string()),
-                ..NodeDesc::default()
-            }
-        };
-        if let Some(at) = pair(&n["at"]) {
-            positions.insert(desc.name.clone(), at);
-        }
-        added.push(desc.name.clone());
-        net.nodes.push(desc);
-    }
-    Ok(added)
-}
-
-/// Removes nodes (`nodes`) with their wires and preset values. A source
-/// is the workspace's image and stays; so does the node the viewport
-/// shows.
-pub fn remove(net: &mut NetworkDesc, args: &Json) -> Result<usize, String> {
-    let nodes = names_arg(args, "nodes")?;
-    for n in &nodes {
-        if net.sources.contains(n) {
-            return Err(format!("`{n}` is an image of the workspace: it stays"));
-        }
-        if net.view.node == *n {
-            return Err(format!("`{n}` is what the viewport shows: it stays"));
-        }
-        if !net.nodes.iter().any(|d| d.name == *n) {
-            return Err(format!("no node `{n}`"));
-        }
-    }
-    net.nodes.retain(|d| !nodes.contains(&d.name));
-    net.connections
-        .retain(|c| !nodes.contains(&c.from) && !nodes.contains(&c.to));
-    for p in &mut net.presets {
-        p.values.retain(|k, _| !nodes.contains(k));
-    }
-    Ok(nodes.len())
-}
 
 /// The command an editor's edit becomes (`None`: a parameter, written to
 /// the value store instead).

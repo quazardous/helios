@@ -15,6 +15,9 @@
 //! - [`workspace`]: a workspace made from a template, as it is edited:
 //!   its own files, its parts, saved back as a template, reset to its
 //!   template, and parts of another imported as a copy.
+//! - [`network`]: a workspace's network edited node by node (connect,
+//!   disconnect, move, add, remove, paste copied nodes), the same edits
+//!   for the desktop's graph view and the MCP tools.
 //! - [`subworkspace`]: sub-workspaces as data, named scopes over nodes
 //!   of a workspace's network, delegated, deleted, checked and copied.
 //! - [`contexts`]: Helios's places and modes on egui-pop's context
@@ -26,6 +29,7 @@ pub mod bundle;
 pub mod catalogue;
 pub mod contexts;
 pub mod format;
+pub mod network;
 pub mod schema;
 pub mod shipped;
 pub mod subworkspace;

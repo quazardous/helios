@@ -402,8 +402,14 @@ network.
   `network.move` (`moves`), `network.add` (`nodes`: a `module` or a
   `copy_of`, `at`) and `network.remove` (`nodes`; a source and the node
   the viewport shows stay). They are checked as any edit of the
-  workspace (types, loops, the template's validation), and agents run
-  them too (the desktop's commands, the workspace's live endpoint). A
+  workspace (types, loops, the template's validation: a node added may
+  wait for its wires, a node the view reads from has every input
+  wired), and agents run
+  them too: the desktop's commands, and the node's MCP tools
+  (`helios_network_connect`, `_disconnect`, `_move`, `_add`, `_remove`,
+  `_paste`, each with `dry_run`), through the desktop holding the
+  workspace or on its files when none does
+  (`helios_template::network`, the same edits). A
   parameter's slider writes the value store as one gesture, as the
   Parameters panel does.
 - **Copy and paste (2026-10-27).** While a part of the graph has the

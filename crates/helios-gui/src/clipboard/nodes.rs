@@ -14,14 +14,13 @@
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::fmt::Write as _;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use egui_pop::api::AppHandle;
 use egui_pop::api::clipboard::{ClipItem, ClipSource, ClipTarget, FormatId, Part, Paste, TEXT};
-use helios_template::format::{Connection, NetworkDesc, NodeDesc};
+use helios_template::format::{NetworkDesc, NodeDesc};
+pub use helios_template::network::{Clip, INPUTS, Pasted, SHIFT, paste};
 use helios_values::Store;
-use serde::{Deserialize, Serialize};
 use serde_json::{Value as Json, json};
 
 use super::NODES;
@@ -29,63 +28,14 @@ use super::NODES;
 /// The type's version.
 pub const VERSION: u32 = 1;
 
-/// How far a pasted node is placed from where it was copied.
-pub const SHIFT: f32 = 40.0;
-
-/// The part of paste special that wires the cut inputs again.
-pub const INPUTS: &str = "inputs";
+/// The item a copy makes.
+pub fn item(clip: &Clip) -> ClipItem {
+    ClipItem::new(NODES, VERSION, clip.to_json(), &clip.title())
+        .fallback(TEXT, Json::String(clip.text()))
+}
 
 /// The egui memory key of the graph's selection while it has the focus.
 const SELECTION: &str = "helios.clipboard.graph";
-
-/// What a copy of nodes holds.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct Clip {
-    pub nodes: Vec<NodeDesc>,
-    /// The wires between the nodes copied.
-    #[serde(default)]
-    pub connections: Vec<Connection>,
-    /// The wires into them from nodes not copied.
-    #[serde(default)]
-    pub inputs: Vec<Connection>,
-    /// Their places in the graph view.
-    #[serde(default)]
-    pub positions: BTreeMap<String, [f32; 2]>,
-}
-
-impl Clip {
-    /// Its nodes' names.
-    pub fn names(&self) -> Vec<String> {
-        self.nodes.iter().map(|n| n.name.clone()).collect()
-    }
-
-    /// Its text fallback: the nodes' names.
-    pub fn text(&self) -> String {
-        self.names().join(", ")
-    }
-
-    /// What it is called ("a node", "3 nodes").
-    pub fn title(&self) -> String {
-        match self.nodes.len() {
-            1 => "a node".into(),
-            n => format!("{n} nodes"),
-        }
-    }
-
-    pub fn to_json(&self) -> Json {
-        serde_json::to_value(self).unwrap_or_default()
-    }
-
-    pub fn from_json(data: &Json) -> Result<Clip, String> {
-        serde_json::from_value(data.clone()).map_err(|e| format!("not nodes: {e}"))
-    }
-
-    /// The item a copy makes.
-    pub fn item(&self) -> ClipItem {
-        ClipItem::new(NODES, VERSION, self.to_json(), &self.title())
-            .fallback(TEXT, Json::String(self.text()))
-    }
-}
 
 /// The parameters of a node as the store holds them now
 /// (`node/<node>/<param>`), over the network's.
@@ -144,90 +94,6 @@ pub fn take(
             .collect(),
         nodes,
     })
-}
-
-/// What a paste did.
-#[derive(Clone, Debug, Default, PartialEq, Serialize)]
-pub struct Pasted {
-    /// The names given, in the clip's order.
-    pub added: Vec<String>,
-    /// The names changed on a clash: copied → given.
-    pub renamed: BTreeMap<String, String>,
-    /// The cut wires wired again.
-    pub reconnected: usize,
-}
-
-impl Pasted {
-    /// In words, for paste special's preview.
-    pub fn describe(&self) -> String {
-        let mut s = format!("adds {}", self.added.join(", "));
-        if !self.renamed.is_empty() {
-            let r: Vec<String> = self
-                .renamed
-                .iter()
-                .map(|(a, b)| format!("{a} as {b}"))
-                .collect();
-            let _ = write!(s, " ({})", r.join(", "));
-        }
-        if self.reconnected > 0 {
-            let _ = write!(s, ", wires {} input(s) again", self.reconnected);
-        }
-        s
-    }
-}
-
-/// Pastes nodes into a network: the nodes `parts` names (all when
-/// `None`), renamed on a clash, their wires rewritten, the cut inputs
-/// wired again when [`INPUTS`] is wanted and the node they came from is
-/// there.
-pub fn paste(
-    net: &mut NetworkDesc,
-    positions: &mut BTreeMap<String, [f32; 2]>,
-    clip: &Clip,
-    parts: Option<&[String]>,
-) -> Result<Pasted, String> {
-    let wants = |p: &str| parts.is_none_or(|ps| ps.iter().any(|x| x == p));
-    let before = crate::graph::names(net);
-    let mut out = Pasted::default();
-    let mut given: BTreeMap<String, String> = BTreeMap::new();
-    for n in clip.nodes.iter().filter(|n| wants(&n.name)) {
-        let name = crate::graph::fresh_name(net, &n.name);
-        if name != n.name {
-            out.renamed.insert(n.name.clone(), name.clone());
-        }
-        if let Some(p) = clip.positions.get(&n.name) {
-            positions.insert(name.clone(), [p[0] + SHIFT, p[1] + SHIFT]);
-        }
-        given.insert(n.name.clone(), name.clone());
-        out.added.push(name.clone());
-        net.nodes.push(NodeDesc { name, ..n.clone() });
-    }
-    if out.added.is_empty() {
-        return Err("no node to paste".into());
-    }
-    for c in &clip.connections {
-        if let (Some(from), Some(to)) = (given.get(&c.from), given.get(&c.to)) {
-            net.connections.push(Connection {
-                from: from.clone(),
-                to: to.clone(),
-                ..c.clone()
-            });
-        }
-    }
-    if wants(INPUTS) {
-        for c in &clip.inputs {
-            if let Some(to) = given.get(&c.to)
-                && before.contains(&c.from)
-            {
-                net.connections.push(Connection {
-                    to: to.clone(),
-                    ..c.clone()
-                });
-                out.reconnected += 1;
-            }
-        }
-    }
-    Ok(out)
 }
 
 /// The parts paste special offers: each node, and the cut inputs.
@@ -310,7 +176,7 @@ impl ClipSource for Endpoint {
         let (net, positions) = network(&store)?;
         take(&net, &positions, &self.selection(app), Some(&store))
             .ok()
-            .map(|c| c.item())
+            .map(|c| item(&c))
     }
 
     fn can_copy(&self, app: &AppHandle) -> bool {
@@ -353,7 +219,7 @@ impl ClipTarget for Endpoint {
 mod tests {
     use super::*;
     use helios_core::Value;
-    use helios_template::format::Endpoint as Out;
+    use helios_template::format::{Connection, Endpoint as Out};
 
     fn wire(from: &str, port: &str, to: &str, input: &str) -> Connection {
         Connection {

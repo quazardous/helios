@@ -1944,6 +1944,22 @@ pub mod tools {
         )
     }
 
+    /// `{workspace, dry_run, …}` and one of the network's commands
+    /// (`network.connect`, `network.add`... see [`crate::network`]) with
+    /// its arguments: the network edited as one step; checked first.
+    pub fn network(
+        config: &Path,
+        id: &str,
+        args: &Json,
+        catalogue: &Catalogue,
+    ) -> Result<Json, String> {
+        let files = files(config, args)?;
+        let before = files.load()?;
+        let label = crate::network::label(id, args)?;
+        let (next, answer) = crate::network::edited(&before, catalogue, id, args)?;
+        step(&files, &before, &next, answer, args, catalogue, &label)
+    }
+
     /// Answers a step worked out (with its `problems` and `dry_run`),
     /// written unless it is a dry run; refused with problems.
     fn step(
