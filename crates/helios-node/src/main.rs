@@ -36,8 +36,8 @@
 //! `--batch-control` serves the batch endpoint in every build: only
 //! `load-source`, `export`, `cancel`, `job.cancel`, the batch job's
 //! `batch_start` and `batch_end`, and the runs' `workflow.submit`,
-//! `workflow.runs` and `workflow.items`, on a Unix socket only its user can
-//! open. `helios batch` starts its own node with it, on a socket in a
+//! `workflow.runs`, `workflow.items` and `workflow.forget`, on a Unix
+//! socket only its user can open. `helios batch` starts its own node with it, on a socket in a
 //! private directory made for that run.
 //!
 //! Its exports and batches are jobs people follow (`helios_core::jobs`,
@@ -48,7 +48,9 @@
 //! (`helios_node::workflow`): one journal row per item and queueing node,
 //! worked with leases and retries, kept in the vault with `--vault` and in
 //! memory without; `describe workflow` shows the runs per queueing node,
-//! and `workflow.*` events announce their rows.
+//! and `workflow.*` events announce their rows. With a vault, a node
+//! resumes at its start the runs a dead node left (itself before a crash),
+//! and removes finished runs after `system.workflow.keep_days`.
 
 use std::collections::BTreeMap;
 use std::io::Write;
@@ -749,8 +751,8 @@ mod control {
         )]
         Debug,
         /// `load-source`, `export`, `cancel`, `job.cancel`, `batch_start`,
-        /// `batch_end` and the runs' `workflow.submit`, `workflow.runs` and
-        /// `workflow.items`: the batch endpoint.
+        /// `batch_end` and the runs' `workflow.submit`, `workflow.runs`,
+        /// `workflow.items` and `workflow.forget`: the batch endpoint.
         Batch,
     }
 
@@ -768,6 +770,7 @@ mod control {
                         | ControlRequest::WorkflowSubmit { .. }
                         | ControlRequest::WorkflowRuns
                         | ControlRequest::WorkflowItems { .. }
+                        | ControlRequest::WorkflowForget { .. }
                 )
         }
     }
@@ -794,7 +797,7 @@ mod control {
                 None,
                 &Message::new(
                     "node-batch-only",
-                    "the batch endpoint only answers load-source, export, cancel, job.cancel, batch_start, batch_end and workflow.submit, workflow.runs, workflow.items",
+                    "the batch endpoint only answers load-source, export, cancel, job.cancel, batch_start, batch_end and workflow.submit, workflow.runs, workflow.items, workflow.forget",
                 ),
             );
         }
@@ -958,6 +961,7 @@ mod control {
             } => node
                 .workflows
                 .items(run, at.as_deref(), state.as_deref(), *offset, *limit),
+            ControlRequest::WorkflowForget { run } => node.workflows.forget(run),
             ControlRequest::Decisions => {
                 let book = node.book.lock().expect("book lock");
                 Ok(json!({ "decisions": helios_core::Describe::describe(&*book)["nodes"] }))
@@ -1349,8 +1353,9 @@ fn main() -> ExitCode {
         vault: runs_vault,
         workers,
         owner: inspector.instance().to_string(),
+        keep_ms: (config.number("system.workflow.keep_days") * 86_400_000.0) as u64,
     }));
-    workflows.start();
+    workflows.start(&loaded.graph);
     let node = Arc::new(Node {
         bus: bus.clone(),
         engine,

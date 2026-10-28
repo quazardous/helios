@@ -675,7 +675,7 @@ gui-workspace-template-toolbox = with its tools
 
 gui-workspace-template-version = version
 
-node-batch-only = the batch endpoint only answers load-source, export, cancel, job.cancel, batch_start, batch_end and workflow.submit, workflow.runs, workflow.items
+node-batch-only = the batch endpoint only answers load-source, export, cancel, job.cancel, batch_start, batch_end and workflow.submit, workflow.runs, workflow.items, workflow.forget
 
 node-edit-not-saved = done, but the edit was not saved: { $error }
 
@@ -706,6 +706,12 @@ workflow-no-items = a run needs at least one item
 workflow-no-node = run `{ $run }` does not queue at `{ $node }`
 
 workflow-no-run = no run `{ $run }`
+
+workflow-other-network = run `{ $run }` was submitted to another network ({ $why }): it cannot be worked here
+
+workflow-run-at-work = run `{ $run }` is still at work: let it finish, or cancel it, before forgetting it
+
+workflow-run-elsewhere = run `{ $run }` is worked by another node ({ $owner })
 
 xmp-blend-details = the mask's details threshold
 

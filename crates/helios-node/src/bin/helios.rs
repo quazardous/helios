@@ -18,7 +18,7 @@
 //!     helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] fault NODE compute|source-read
 //!     helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] workflow-submit --format jpeg|png|tiff
 //!                    [--quality Q] [--again] --to DIR IMAGES...
-//!     helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] workflow-runs | workflow-items RUN [NODE]
+//!     helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] workflow-runs | workflow-items RUN [NODE] | workflow-forget RUN
 //!
 //!     helios sandbox new DIR [--network FILE] | start DIR | stop DIR | clean DIR
 //!
@@ -113,7 +113,7 @@ const USAGE: &str = "usage:
   helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] fault NODE compute|source-read
   helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] workflow-submit --format jpeg|png|tiff
                  [--quality Q] [--again] --to DIR IMAGES...
-  helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] workflow-runs | workflow-items RUN [NODE]
+  helios control [--socket PATH|tcp://HOST:PORT --token-file FILE] workflow-runs | workflow-items RUN [NODE] | workflow-forget RUN
   helios sandbox new DIR [--network FILE] | start DIR | stop DIR | clean DIR
   helios batch --network FILE --out DIR [--format jpeg|png|tiff] [--quality Q] [--jobs N]
                [--name TEMPLATE] [--sidecar [--vault FILE]] [--source NAME] [--node NAME]
@@ -386,6 +386,9 @@ fn parse(args: Vec<String>) -> Result<Call, String> {
                 state: None,
                 offset: 0,
                 limit: 100,
+            },
+            ["workflow-forget", run] => ControlRequest::WorkflowForget {
+                run: run.to_string(),
             },
             [] => return Err("control needs an action".into()),
             other => return Err(format!("unknown action `{}`", other.join(" "))),

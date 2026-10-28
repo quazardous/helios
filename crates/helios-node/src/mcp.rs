@@ -1179,6 +1179,18 @@ pub const TOOLS: &[Tool] = &[
         ],
     },
     Tool {
+        name: "helios_workflow_forget",
+        endpoint: Endpoint::Control,
+        cmd: "workflow.forget",
+        description: "Removes a run that is not at work (finished, or paused with nothing running), with its items and rows, from the vault too; nothing is kept of it. Refused for a run another live node works",
+        params: &[Param {
+            name: "run",
+            schema: string,
+            description: "The run's id",
+            default: None,
+        }],
+    },
+    Tool {
         name: "helios_ai_providers_list",
         endpoint: Endpoint::Ai,
         cmd: "ai.providers.list",
@@ -1854,6 +1866,7 @@ mod tests {
             "workflow.submit",
             "workflow.runs",
             "workflow.items",
+            "workflow.forget",
         ];
         for cmd in inspect.iter().chain(&control) {
             assert!(TOOLS.iter().any(|t| t.cmd == *cmd), "no tool for `{cmd}`");

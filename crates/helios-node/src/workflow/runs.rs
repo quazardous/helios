@@ -25,9 +25,25 @@
 //!
 //! Every write is announced on the bus as `workflow.rows` (the rows it
 //! changed), and a run's life as `workflow.run` (created, extended,
-//! finished). A run is also a job (`job.*`), its exports its children;
-//! cancelled there, its rows not concluded are cancelled and its exports
-//! stopped.
+//! finished, resumed, opened, lost, forgotten). A run is also a job
+//! (`job.*`), its exports its children; cancelled there, its rows not
+//! concluded are cancelled and its exports stopped.
+//!
+//! With a vault, runs outlive the process (see [`super::lifecycle`]):
+//!
+//! - when the node starts, and every few seconds after, it opens the
+//!   vault's runs no live node owns: it takes them over in one vault
+//!   transaction (so two nodes cannot both take one), migrates an older
+//!   format, gives back their running rows (no lease lives across a
+//!   restart), enters the items a crash left between their documents and
+//!   their `submit` rows, and works them again unless they are paused or
+//!   finished. A run another live node owns, of a newer format, or of
+//!   another network is listed read-only;
+//! - the owner says it is alive in each of its runs every 10 s; finding
+//!   another owner there (it was silent too long), it lets the run go;
+//! - a finished run is kept `system.workflow.keep_days` (30 days), then
+//!   removed whole, when the node starts and once a day after;
+//!   `workflow.forget` removes a run that is not at work at once.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -47,14 +63,17 @@ use helios_vault_sqlite::SqliteStore;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+use super::lifecycle::{self, FORMAT, Owner};
 use super::{Queue, QueueNode, SUBMIT};
 
 /// The vault a node process keeps its runs in.
 pub type SharedVault = Arc<helios_vault::Vault<SqliteStore>>;
 
-/// The format of the run and item documents: raised by a change old code
-/// cannot read.
-pub const FORMAT: u64 = 1;
+/// How often the vault is looked through for runs whose owner died.
+const SCAN_MS: u64 = 5_000;
+
+/// How often finished runs past their retention are removed.
+const SWEEP_MS: u64 = 24 * 60 * 60 * 1000;
 
 /// How often the runner works the runs when nothing happens.
 const TICK: Duration = Duration::from_millis(250);
@@ -196,6 +215,8 @@ impl Item {
 pub enum RunState {
     /// Items are worked.
     Active,
+    /// Nothing is claimed; it stays so across a restart.
+    Paused,
     /// No row open and no item claimable: until items are added.
     Finished,
 }
@@ -297,6 +318,8 @@ struct Run {
     /// The rows, by node then item, as the runner last wrote or read them.
     seen: BTreeMap<String, BTreeMap<String, Seen>>,
     job: Option<RunJob>,
+    /// When it last finished: its retention counts from then.
+    finished_at: Option<u64>,
 }
 
 impl Run {
@@ -415,6 +438,7 @@ impl Run {
             "created": self.created,
             "owner": owner,
             "state": self.state,
+            "finished": self.finished_at,
             "workflow": self.nodes,
             "network": self.snapshot,
             "export": self.settings,
@@ -432,11 +456,24 @@ struct Held {
     permanent: Arc<AtomicBool>,
 }
 
+/// A run of the vault this process does not work: listed read-only.
+struct Foreign {
+    summary: Value,
+    /// Why, as a refusal of what is asked of it.
+    why: Message,
+}
+
 #[derive(Default)]
 struct State {
     runs: BTreeMap<String, Run>,
+    foreign: BTreeMap<String, Foreign>,
     /// By scheduler job id.
     leases: BTreeMap<u64, Held>,
+    /// When this process last said it was alive in its runs, looked for
+    /// runs to take over, and removed runs past their retention.
+    beat: u64,
+    scanned: u64,
+    swept: u64,
 }
 
 /// What the runs need of the node process.
@@ -451,6 +488,8 @@ pub struct Context {
     pub workers: usize,
     /// The node instance that owns the runs it creates.
     pub owner: String,
+    /// How long a finished run is kept, in milliseconds.
+    pub keep_ms: u64,
 }
 
 /// A batch to submit as a run (`workflow.submit`).
@@ -474,6 +513,11 @@ pub struct Workflows {
     /// a run: its render works on a copy of the network, which a fault
     /// injected in the node's own graph does not reach.
     faults: Mutex<Vec<(String, FaultKind)>>,
+    /// The node's network, which runs opened from the vault are rebuilt
+    /// over.
+    base: Mutex<Option<Graph>>,
+    /// This process, as the owner of its runs.
+    me: Owner,
 }
 
 fn not_absolute(path: &Path) -> Message {
@@ -486,6 +530,46 @@ fn not_absolute(path: &Path) -> Message {
 
 fn no_run(id: &str) -> Message {
     Message::new("workflow-no-run", "no run `{ $run }`").with("run", id)
+}
+
+fn newer_format(id: &str) -> Message {
+    Message::new(
+        "workflow-newer-format",
+        "run `{ $run }` was kept by a newer Helios: it cannot be worked here",
+    )
+    .with("run", id)
+}
+
+fn elsewhere(id: &str, owner: &str) -> Message {
+    Message::new(
+        "workflow-run-elsewhere",
+        "run `{ $run }` is worked by another node ({ $owner })",
+    )
+    .with("run", id)
+    .with("owner", owner)
+}
+
+fn other_network(id: &str, why: &str) -> Message {
+    Message::new(
+        "workflow-other-network",
+        "run `{ $run }` was submitted to another network ({ $why }): it cannot be worked here",
+    )
+    .with("run", id)
+    .with("why", why)
+}
+
+fn at_work(id: &str) -> Message {
+    Message::new(
+        "workflow-run-at-work",
+        "run `{ $run }` is still at work: let it finish, or cancel it, before forgetting it",
+    )
+    .with("run", id)
+}
+
+/// A storage error where the runs cannot go on: as the journal's store
+/// does, the node stops rather than run on what it did not keep.
+fn kept<T>(result: Result<T, String>) -> T {
+    result.unwrap_or_else(|e| panic!("workflow documents: {e}"))
 }
 
 fn row_json(item: &str, row: Option<&Row>) -> Value {
@@ -505,9 +589,11 @@ fn row_json(item: &str, row: Option<&Row>) -> Value {
 impl Workflows {
     pub fn new(ctx: Context) -> Self {
         Self {
+            me: Owner::this(&ctx.owner, now_ms()),
             ctx,
             state: Mutex::new(State::default()),
             faults: Mutex::new(Vec::new()),
+            base: Mutex::new(None),
         }
     }
 
@@ -515,9 +601,19 @@ impl Workflows {
         self.state.lock().expect("workflow lock")
     }
 
-    /// Starts the runner: a thread working the runs every tick, and at
-    /// once when a job ends.
-    pub fn start(self: &Arc<Self>) {
+    /// Starts the runner over the node's network `base`: first the
+    /// vault's runs are opened (see [`Workflows::scan`]) and those past
+    /// their retention removed, then a thread works the runs every tick,
+    /// and at once when a job ends.
+    pub fn start(self: &Arc<Self>, base: &Graph) {
+        *self.base.lock().expect("base lock") = Some(base.clone());
+        {
+            let now = now_ms();
+            let mut state = self.state();
+            self.scan(&mut state, now);
+            self.sweep(&mut state, now);
+            (state.beat, state.scanned, state.swept) = (now, now, now);
+        }
         let this = self.clone();
         let events = self.ctx.bus.subscribe();
         std::thread::Builder::new()
@@ -532,8 +628,10 @@ impl Workflows {
                     }
                     if last.elapsed() >= TICK {
                         last = std::time::Instant::now();
+                        let now = now_ms();
                         let mut state = this.state();
-                        this.tick(&mut state, now_ms());
+                        this.housekeep(&mut state, now);
+                        this.tick(&mut state, now);
                     }
                 }
             })
@@ -552,11 +650,7 @@ impl Workflows {
     /// Persists documents in the vault, when the runs last.
     fn persist(&self, writes: &[helios_vault::workflow::WorkflowWrite]) {
         if let Some(vault) = &self.ctx.vault {
-            // As the journal's store does: a vault that cannot keep a run
-            // stops the node rather than let it run on what it did not keep.
-            vault
-                .set_workflow_documents(writes)
-                .unwrap_or_else(|e| panic!("workflow documents: {e}"));
+            kept(vault.set_workflow_documents(writes));
         }
     }
 
@@ -651,7 +745,7 @@ impl Workflows {
 }
 
 /// Resolving what a submission names in the network.
-fn names(graph: &Graph) -> BTreeMap<String, NodeId> {
+pub(super) fn node_names(graph: &Graph) -> BTreeMap<String, NodeId> {
     graph
         .ids()
         .filter_map(|id| Some((graph.name(id).ok()?.to_string(), id)))
@@ -738,7 +832,7 @@ impl Workflows {
         if let Some(item) = ask.items.iter().find(|i| !i.path().is_absolute()) {
             return Err(not_absolute(item.path()));
         }
-        let ids = names(graph);
+        let ids = node_names(graph);
         let source = pick_source(graph, ask.source)?;
         let export = pick_export(graph, ask.node, first_export, &source)?;
         let node_id = |name: &str| {
@@ -778,9 +872,19 @@ impl Workflows {
         let created = if state.runs.contains_key(&id) {
             false
         } else {
-            let run = match self.open(&id, graph, source_id, export_id, now)? {
-                Some(run) => run,
-                None => self.create(
+            let kept = match &self.ctx.vault {
+                Some(vault) => vault
+                    .workflow_document("runs", &id)
+                    .map_err(Message::plain)?,
+                None => None,
+            };
+            // In the vault, not opened here yet: taken over if its owner
+            // is gone, else refused.
+            if let Some(doc) = kept {
+                self.adopt(&mut state, &id, doc, graph, now)?;
+                false
+            } else {
+                let run = self.create(
                     &id,
                     ask.title,
                     graph,
@@ -789,15 +893,23 @@ impl Workflows {
                     snapshot,
                     derived,
                     now,
-                )?,
-            };
-            state.runs.insert(id.clone(), run);
-            true
+                )?;
+                if let Some(vault) = &self.ctx.vault {
+                    // Another node may have created it meanwhile.
+                    self.take(vault, &id, now, &[])
+                        .map_err(|owner| elsewhere(&id, &owner.instance))?;
+                }
+                state.runs.insert(id.clone(), run);
+                true
+            }
         };
         let run = state.runs.get_mut(&id).expect("the run was just put");
         let (new, already, merged) = self.add_items(run, ask, now);
-        if new > 0 && run.state == RunState::Finished {
-            run.state = RunState::Active;
+        if new > 0 {
+            run.finished_at = None;
+            if run.state == RunState::Finished {
+                run.state = RunState::Active;
+            }
         }
         if run.state == RunState::Active && run.job.is_none() {
             self.start_job(run);
@@ -830,89 +942,6 @@ impl Workflows {
         });
         self.tick(&mut state, now);
         Ok(answer)
-    }
-
-    /// A run of the vault that this process has not opened yet: its
-    /// documents read, every running row given back (no lease lives across
-    /// a restart).
-    fn open(
-        &self,
-        id: &str,
-        graph: &Graph,
-        source: NodeId,
-        export: NodeId,
-        now: u64,
-    ) -> Result<Option<Run>, Message> {
-        let Some(vault) = &self.ctx.vault else {
-            return Ok(None);
-        };
-        let doc = vault
-            .workflow_document("runs", id)
-            .map_err(Message::plain)?;
-        let Some(doc) = doc else {
-            return Ok(None);
-        };
-        if doc["format"].as_u64() != Some(FORMAT) {
-            return Err(Message::new(
-                "workflow-newer-format",
-                "run `{ $run }` was kept by a newer Helios: it cannot be worked here",
-            )
-            .with("run", id));
-        }
-        let unreadable = |e: serde_json::Error| {
-            Message::plain(format!("run `{id}`: its document cannot be read: {e}"))
-        };
-        let nodes: Vec<QueueNode> =
-            serde_json::from_value(doc["workflow"].clone()).map_err(unreadable)?;
-        let settings: ExportSettings =
-            serde_json::from_value(doc["export"].clone()).map_err(unreadable)?;
-        let mut items: Vec<Item> = vault
-            .workflow_documents(&format!("{id}/items"))
-            .map_err(Message::plain)?
-            .into_iter()
-            .map(|(_, d)| serde_json::from_value(d))
-            .collect::<Result<_, _>>()
-            .map_err(unreadable)?;
-        items.sort_by_key(|i| (i.priority, i.order));
-        let workflow = super::journal_workflow(&nodes).map_err(Message::plain)?;
-        let journal = Journal::new(
-            workflow,
-            RunStore::Vault(VaultJournal::new(vault.clone(), id)),
-        );
-        journal.recover(now);
-        let mut run = Run {
-            id: id.to_string(),
-            title: doc["title"].as_str().unwrap_or(id).to_string(),
-            created: doc["created"].as_u64().unwrap_or(now),
-            state: RunState::Active,
-            durable: true,
-            settings,
-            snapshot: doc["network"].clone(),
-            known: items.iter().map(|i| i.id.clone()).collect(),
-            items,
-            nodes,
-            journal,
-            graph: graph.clone(),
-            source,
-            export,
-            seen: BTreeMap::new(),
-            job: None,
-        };
-        let names: Vec<String> = std::iter::once(SUBMIT.to_string())
-            .chain(run.nodes.iter().map(|n| n.name.clone()))
-            .collect();
-        for node in names {
-            let ids: Vec<String> = run.items.iter().map(|i| i.id.clone()).collect();
-            for item in ids {
-                if let Some(row) = run.journal.row(&item, &node) {
-                    run.seen
-                        .entry(node.clone())
-                        .or_default()
-                        .insert(item, Seen::of(&row));
-                }
-            }
-        }
-        Ok(Some(run))
     }
 
     #[allow(
@@ -955,6 +984,7 @@ impl Workflows {
             known: BTreeSet::new(),
             seen: BTreeMap::new(),
             job: None,
+            finished_at: None,
         })
     }
 
@@ -1033,6 +1063,441 @@ impl Workflows {
     }
 }
 
+/// Runs across node processes: opening, owning, keeping, forgetting.
+impl Workflows {
+    /// Takes run `id` for this process, writing `writes` in the same
+    /// transaction, unless another live owner holds it (answered then).
+    /// Answers the owner it took it from, if any.
+    fn take(
+        &self,
+        vault: &SharedVault,
+        id: &str,
+        now: u64,
+        writes: &[helios_vault::workflow::WorkflowWrite],
+    ) -> Result<Option<String>, Owner> {
+        let me = Owner {
+            heartbeat: now,
+            ..self.me.clone()
+        };
+        kept(vault.workflow_transaction(|tx| {
+            let before: Option<Owner> = tx
+                .document("owners", id)?
+                .and_then(|d| serde_json::from_value(d).ok());
+            if let Some(owner) = &before
+                && owner.alive(&me, now)
+                && owner.instance != me.instance
+            {
+                return Ok(Err(owner.clone()));
+            }
+            let doc = serde_json::to_value(&me).expect("an owner serializes");
+            tx.set("owners", id, Some(&doc))?;
+            for (ns, key, doc) in writes {
+                tx.set(ns, key, doc.as_ref())?;
+            }
+            Ok(Ok(before.map(|o| o.instance).filter(|o| *o != me.instance)))
+        }))
+    }
+
+    /// The owner the vault names for run `id`, read outside a transaction:
+    /// a first look, which [`Workflows::take`] checks again.
+    fn owner_of(vault: &SharedVault, id: &str) -> Option<Owner> {
+        kept(vault.workflow_document("owners", id)).and_then(|d| serde_json::from_value(d).ok())
+    }
+
+    /// Lists run `id` read-only, for `why`.
+    fn keep_foreign(state: &mut State, id: &str, doc: &Value, reason: &str, why: Message) {
+        let summary = json!({
+            "id": id,
+            "title": doc["title"].as_str().unwrap_or(id),
+            "state": doc["state"],
+            "durable": true,
+            "owner": doc["owner"],
+            "created": doc["created"],
+            "finished": doc["finished"],
+            "format": lifecycle::format_of(doc),
+            "read_only": true,
+            "reason": reason,
+            "error": why.english,
+            "nodes": {},
+        });
+        state
+            .foreign
+            .insert(id.to_string(), Foreign { summary, why });
+    }
+
+    /// Opens run `id` of the vault (its run document `doc`) in this
+    /// process, rebuilt over the network `base`: taken over unless a live
+    /// node owns it, migrated from an older format in the same
+    /// transaction, its running rows given back, the items a crash left
+    /// without their `submit` row entered, and worked unless it is paused
+    /// or finished. A run that cannot be worked here is listed read-only,
+    /// and the reason answered.
+    fn adopt(
+        &self,
+        state: &mut State,
+        id: &str,
+        doc: Value,
+        base: &Graph,
+        now: u64,
+    ) -> Result<(), Message> {
+        let Some(vault) = self.ctx.vault.clone() else {
+            return Err(no_run(id));
+        };
+        if lifecycle::format_of(&doc) > FORMAT {
+            let why = newer_format(id);
+            Self::keep_foreign(state, id, &doc, "newer-format", why.clone());
+            return Err(why);
+        }
+        if let Some(owner) = Self::owner_of(&vault, id)
+            && owner.instance != self.me.instance
+            && owner.alive(&self.me, now)
+        {
+            let why = elsewhere(id, &owner.instance);
+            Self::keep_foreign(state, id, &doc, "elsewhere", why.clone());
+            return Err(why);
+        }
+        let opened = Self::open_run(&vault, id, &doc, base, now);
+        let (mut run, writes) = match opened {
+            Ok(opened) => opened,
+            Err((reason, why)) => {
+                Self::keep_foreign(state, id, &doc, reason, why.clone());
+                return Err(why);
+            }
+        };
+        let migrated = !writes.is_empty();
+        let from = match self.take(&vault, id, now, &writes) {
+            Ok(from) => from,
+            Err(owner) => {
+                let why = elsewhere(id, &owner.instance);
+                Self::keep_foreign(state, id, &doc, "elsewhere", why.clone());
+                return Err(why);
+            }
+        };
+        state.foreign.remove(id);
+        // No lease lives across a restart or a take-over.
+        let given_back = run.journal.recover(now);
+        let names: Vec<String> = std::iter::once(SUBMIT.to_string())
+            .chain(run.nodes.iter().map(|n| n.name.clone()))
+            .collect();
+        let ids: Vec<String> = run.items.iter().map(|i| i.id.clone()).collect();
+        for node in names {
+            for item in &ids {
+                if let Some(row) = run.journal.row(item, &node) {
+                    run.seen
+                        .entry(node.clone())
+                        .or_default()
+                        .insert(item.clone(), Seen::of(&row));
+                }
+            }
+        }
+        // Items whose documents were written but not their `submit` row:
+        // a crash between the two transactions of a submission.
+        let entering: Vec<String> = ids
+            .iter()
+            .filter(|item| run.seen(SUBMIT, item).is_none())
+            .cloned()
+            .collect();
+        if !entering.is_empty() {
+            let refs: Vec<&str> = entering.iter().map(String::as_str).collect();
+            if let Ok(lease) = run.journal.claim(SUBMIT, refs.len(), &refs, now)
+                && let Err(e) = run.journal.conclude(&lease, Outcome::Done, now)
+            {
+                eprintln!("helios-node: run {id}: {e}");
+            }
+            self.refresh(&mut run, SUBMIT, &entering);
+        }
+        if run.state == RunState::Finished && !run.finished() {
+            run.state = RunState::Active;
+            run.finished_at = None;
+        }
+        if run.state == RunState::Finished && run.finished_at.is_none() {
+            // Kept by a node that did not date it: kept from now.
+            run.finished_at = Some(now);
+        }
+        if run.state == RunState::Active {
+            self.start_job(&mut run);
+        }
+        self.persist_run(&run);
+        self.announce(
+            &run,
+            if run.state == RunState::Active {
+                "resumed"
+            } else {
+                "opened"
+            },
+            json!({
+                "from": from,
+                "given_back": given_back,
+                "entered": entering.len(),
+                "migrated": migrated,
+                "run_state": run.state,
+            }),
+        );
+        state.runs.insert(id.to_string(), run);
+        Ok(())
+    }
+
+    /// Reads run `id` from the vault into a run of this process, migrated
+    /// to this format: the run, and the documents a migration rewrote.
+    /// Refused with a reason (`other-network`, `unreadable`) and why.
+    #[allow(clippy::type_complexity, reason = "a run and its writes, or why not")]
+    fn open_run(
+        vault: &SharedVault,
+        id: &str,
+        doc: &Value,
+        base: &Graph,
+        now: u64,
+    ) -> Result<(Run, Vec<helios_vault::workflow::WorkflowWrite>), (&'static str, Message)> {
+        let unreadable = |e: String| {
+            (
+                "unreadable",
+                Message::plain(format!("run `{id}`: its documents cannot be read: {e}")),
+            )
+        };
+        let items_ns = format!("{id}/items");
+        let kept_items = vault.workflow_documents(&items_ns).map_err(&unreadable)?;
+        let mut doc = doc.clone();
+        let (keys, mut items): (Vec<String>, Vec<Value>) = kept_items.into_iter().unzip();
+        let migrated =
+            lifecycle::migrate(lifecycle::STEPS, &mut doc, &mut items).map_err(&unreadable)?;
+        let graph = lifecycle::restore(base, &doc["network"])
+            .map_err(|e| ("other-network", other_network(id, &e)))?;
+        let nodes: Vec<QueueNode> = serde_json::from_value(doc["workflow"].clone())
+            .map_err(|e| unreadable(e.to_string()))?;
+        let settings: ExportSettings =
+            serde_json::from_value(doc["export"].clone()).map_err(|e| unreadable(e.to_string()))?;
+        let mut parsed: Vec<Item> = items
+            .iter()
+            .map(|d| serde_json::from_value(d.clone()))
+            .collect::<Result<_, _>>()
+            .map_err(|e| unreadable(e.to_string()))?;
+        parsed.sort_by_key(|i| (i.priority, i.order));
+        let ids = node_names(&graph);
+        let node = |name: &str| {
+            ids.get(name)
+                .copied()
+                .ok_or_else(|| unreadable(format!("no node named `{name}`")))
+        };
+        let (source, export) = (node(&settings.source)?, node(&settings.node)?);
+        let workflow = super::journal_workflow(&nodes).map_err(&unreadable)?;
+        let journal = Journal::new(
+            workflow,
+            RunStore::Vault(VaultJournal::new(vault.clone(), id)),
+        );
+        let state = match doc["state"].as_str() {
+            Some("paused") => RunState::Paused,
+            Some("finished") => RunState::Finished,
+            _ => RunState::Active,
+        };
+        let writes = if migrated {
+            std::iter::once(("runs".to_string(), id.to_string(), Some(doc.clone())))
+                .chain(
+                    keys.into_iter()
+                        .zip(items)
+                        .map(|(key, item)| (items_ns.clone(), key, Some(item))),
+                )
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let run = Run {
+            id: id.to_string(),
+            title: doc["title"].as_str().unwrap_or(id).to_string(),
+            created: doc["created"].as_u64().unwrap_or(now),
+            state,
+            durable: true,
+            settings,
+            snapshot: doc["network"].clone(),
+            known: parsed.iter().map(|i| i.id.clone()).collect(),
+            items: parsed,
+            nodes,
+            journal,
+            graph,
+            source,
+            export,
+            seen: BTreeMap::new(),
+            job: None,
+            finished_at: doc["finished"].as_u64(),
+        };
+        Ok((run, writes))
+    }
+
+    /// Opens the vault's runs this process does not work yet and no live
+    /// node owns; a run it cannot work is listed read-only.
+    fn scan(&self, state: &mut State, now: u64) {
+        let Some(vault) = &self.ctx.vault else {
+            return;
+        };
+        let Some(base) = self.base.lock().expect("base lock").clone() else {
+            return;
+        };
+        let docs = kept(vault.workflow_documents("runs"));
+        let present: BTreeSet<&str> = docs.iter().map(|(id, _)| id.as_str()).collect();
+        state.foreign.retain(|id, _| present.contains(id.as_str()));
+        for (id, doc) in docs {
+            // Only an owner's death changes what can be done with a run
+            // listed read-only; another format or network stays so.
+            let settled = state
+                .foreign
+                .get(&id)
+                .is_some_and(|f| f.summary["reason"] != "elsewhere");
+            if !state.runs.contains_key(&id) && !settled {
+                // Refused: listed read-only, with the reason.
+                let _ = self.adopt(state, &id, doc, &base, now);
+            }
+        }
+    }
+
+    /// Says this process is alive in each run it keeps in the vault; a run
+    /// another node took over meanwhile (this one was silent too long) is
+    /// let go.
+    fn beat(&self, state: &mut State, now: u64) {
+        let Some(vault) = &self.ctx.vault else {
+            return;
+        };
+        let ids: Vec<String> = state
+            .runs
+            .values()
+            .filter(|r| r.durable)
+            .map(|r| r.id.clone())
+            .collect();
+        if ids.is_empty() {
+            return;
+        }
+        let me = Owner {
+            heartbeat: now,
+            ..self.me.clone()
+        };
+        let doc = serde_json::to_value(&me).expect("an owner serializes");
+        let lost: Vec<String> = kept(vault.workflow_transaction(|tx| {
+            let mut lost = Vec::new();
+            for id in ids {
+                let owner: Option<Owner> = tx
+                    .document("owners", &id)?
+                    .and_then(|d| serde_json::from_value(d).ok());
+                match owner {
+                    Some(o) if o.instance != me.instance => lost.push(id),
+                    _ => tx.set("owners", &id, Some(&doc))?,
+                }
+            }
+            Ok(lost)
+        }));
+        for id in lost {
+            self.let_go(state, &id);
+        }
+    }
+
+    /// Stops working a run another node took over: its exports are
+    /// stopped without writing, its job ends.
+    fn let_go(&self, state: &mut State, id: &str) {
+        let Some(mut run) = state.runs.remove(id) else {
+            return;
+        };
+        let jobs: Vec<u64> = state
+            .leases
+            .iter()
+            .filter(|(_, h)| h.run == id)
+            .map(|(job, _)| *job)
+            .collect();
+        for job in jobs {
+            state.leases.remove(&job);
+            self.ctx.scheduler.cancel(JobId(job));
+        }
+        if let Some(job) = run.job.take() {
+            job.report.failed("taken over by another node");
+        }
+        self.announce(&run, "lost", json!({}));
+    }
+
+    /// Removes the finished runs kept longer than `system.workflow.keep_days`.
+    fn sweep(&self, state: &mut State, now: u64) {
+        let old: Vec<String> = state
+            .runs
+            .values()
+            .filter(|r| {
+                r.state == RunState::Finished
+                    && r.finished_at
+                        .is_some_and(|t| now.saturating_sub(t) >= self.ctx.keep_ms)
+            })
+            .map(|r| r.id.clone())
+            .collect();
+        for id in old {
+            if let Err(e) = self.remove(state, &id, now, "retention") {
+                eprintln!("helios-node: run {id}: {}", e.english);
+            }
+        }
+    }
+
+    /// What the runner does besides working the runs: say it is alive,
+    /// look for runs to take over, remove runs past their retention.
+    fn housekeep(&self, state: &mut State, now: u64) {
+        if now >= state.beat + lifecycle::HEARTBEAT_MS {
+            state.beat = now;
+            self.beat(state, now);
+        }
+        if now >= state.scanned + SCAN_MS {
+            state.scanned = now;
+            self.scan(state, now);
+        }
+        if now >= state.swept + SWEEP_MS {
+            state.swept = now;
+            self.sweep(state, now);
+        }
+    }
+
+    /// Removes run `id` whole, in the vault when it is kept there; `why`
+    /// goes in the `workflow.run` event (`forget`, `retention`).
+    fn remove(&self, state: &mut State, id: &str, now: u64, why: &str) -> Result<(), Message> {
+        if let Some(run) = state.runs.get(id) {
+            if run.state == RunState::Active || state.leases.values().any(|h| h.run == id) {
+                return Err(at_work(id));
+            }
+        } else if !state.foreign.contains_key(id) {
+            return Err(no_run(id));
+        }
+        if let Some(vault) = &self.ctx.vault {
+            let me = self.me.clone();
+            let refused: Option<String> = kept(vault.workflow_transaction(|tx| {
+                let owner: Option<Owner> = tx
+                    .document("owners", id)?
+                    .and_then(|d| serde_json::from_value(d).ok());
+                if let Some(o) = owner
+                    && o.instance != me.instance
+                    && o.alive(&me, now)
+                {
+                    return Ok(Some(o.instance));
+                }
+                tx.remove_run(id)?;
+                Ok(None)
+            }));
+            if let Some(owner) = refused {
+                return Err(elsewhere(id, &owner));
+            }
+        }
+        state.foreign.remove(id);
+        if let Some(run) = state.runs.remove(id) {
+            self.announce(&run, "forgotten", json!({ "why": why }));
+        } else {
+            self.ctx.bus.publish_value(
+                SOURCE,
+                None,
+                "workflow.run",
+                json!({ "run": id, "state": "forgotten", "why": why }),
+            );
+        }
+        Ok(())
+    }
+
+    /// `workflow.forget`: removes a run that is not at work (finished, or
+    /// paused with nothing running), with its items and rows; nothing is
+    /// kept of it.
+    pub fn forget(&self, id: &str) -> Result<Value, Message> {
+        let mut state = self.state();
+        self.remove(&mut state, id, now_ms(), "forget")?;
+        Ok(json!({ "run": id, "forgotten": true }))
+    }
+}
+
 /// The runner.
 impl Workflows {
     fn tick(&self, state: &mut State, now: u64) {
@@ -1043,7 +1508,7 @@ impl Workflows {
     }
 
     fn tick_run(&self, state: &mut State, id: &str, now: u64) {
-        let State { runs, leases } = state;
+        let State { runs, leases, .. } = state;
         let Some(run) = runs.get_mut(id) else {
             return;
         };
@@ -1080,7 +1545,7 @@ impl Workflows {
                     if items.is_empty() {
                         continue;
                     }
-                    let answered = names(&run.graph)
+                    let answered = node_names(&run.graph)
                         .get(&node.name)
                         .is_some_and(|id| run.graph.is_answered(*id).unwrap_or(false));
                     let refs: Vec<&str> = items.iter().map(String::as_str).collect();
@@ -1137,7 +1602,7 @@ impl Workflows {
         }
         run.report_progress();
         if run.finished() && !leases.values().any(|h| h.run == run.id) {
-            self.finish(run);
+            self.finish(run, now);
         }
     }
 
@@ -1147,7 +1612,7 @@ impl Workflows {
         let mut graph = run.graph.clone();
         let faults: Vec<(String, FaultKind)> =
             std::mem::take(&mut *self.faults.lock().expect("faults lock"));
-        let ids = names(&graph);
+        let ids = node_names(&graph);
         for (name, kind) in faults {
             if let Some(id) = ids.get(&name) {
                 self.ctx.engine.inject_fault(&graph, *id, kind);
@@ -1277,8 +1742,9 @@ impl Workflows {
 
     /// Ends a run with nothing left to work: its job ends, it is
     /// announced, and its document says so.
-    fn finish(&self, run: &mut Run) {
+    fn finish(&self, run: &mut Run, now: u64) {
         run.state = RunState::Finished;
+        run.finished_at = Some(now);
         let (done, failed) = run.tally();
         let total = run.items.len() as u64;
         let mut cancelled = false;
@@ -1360,6 +1826,9 @@ impl Workflows {
             "durable": run.durable,
             "owner": self.ctx.owner,
             "created": run.created,
+            "finished": run.finished_at,
+            "format": FORMAT,
+            "read_only": false,
             "items": run.items.len(),
             "job": run.job.as_ref().map(|j| j.report.id()),
             "export": run.settings,
@@ -1367,16 +1836,22 @@ impl Workflows {
         })
     }
 
+    /// Every run: those worked here with their counts, then those listed
+    /// read-only.
+    fn summaries(&self, state: &State, now: u64) -> Vec<Value> {
+        state
+            .runs
+            .values()
+            .map(|r| self.summary(r, &state.leases, now))
+            .chain(state.foreign.values().map(|f| f.summary.clone()))
+            .collect()
+    }
+
     /// `workflow.runs`: every run with its counts.
     pub fn runs(&self) -> Value {
         let now = now_ms();
         let state = self.state();
-        let runs: Vec<Value> = state
-            .runs
-            .values()
-            .map(|r| self.summary(r, &state.leases, now))
-            .collect();
-        json!({ "runs": runs, "now": now })
+        json!({ "runs": self.summaries(&state, now), "now": now })
     }
 
     /// `workflow.items`: one page of a run's items at a queueing node (the
@@ -1392,6 +1867,9 @@ impl Workflows {
     ) -> Result<Value, Message> {
         let now = now_ms();
         let state = self.state();
+        if let Some(foreign) = state.foreign.get(run) {
+            return Err(foreign.why.clone());
+        }
         let run = state.runs.get(run).ok_or_else(|| no_run(run))?;
         let index = match node {
             Some(name) => run.node_index(name).ok_or_else(|| {
@@ -1450,11 +1928,7 @@ impl Describe for Workflows {
     fn describe(&self) -> Value {
         let now = now_ms();
         let state = self.state();
-        let runs: Vec<Value> = state
-            .runs
-            .values()
-            .map(|r| self.summary(r, &state.leases, now))
-            .collect();
+        let runs = self.summaries(&state, now);
         json!({
             "now": now,
             "owner": self.ctx.owner,

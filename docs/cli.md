@@ -53,8 +53,13 @@ the same run: the images already in it are left as they are, and the
 answer counts the new ones, those already there and those given twice;
 `--again` starts a new run. `workflow-runs` lists the runs with their
 counts, `workflow-items RUN [NODE]` one page of a run's items at a node
-(the export by default). With `--vault`, the node keeps its runs in that
-vault. The batch endpoint answers these three as well.
+(the export by default), `workflow-forget RUN` removes a run that is not
+at work (its files stay). With `--vault`, the node keeps its runs in that
+vault: started again after a crash, it resumes them (each file written
+once); a node started on the same vault while another works it lists that
+run read-only and takes it over if the other dies; a finished run is
+removed after `system.workflow.keep_days` (30 by default). The batch
+endpoint answers these four as well.
 
 A refusal answers `{"ok": false, "error": ...}` in English; when the node
 says it by key (a file it cannot load, a node it does not have, a job

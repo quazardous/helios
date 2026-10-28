@@ -543,6 +543,14 @@ pub mod control {
             #[serde(default = "page")]
             limit: usize,
         },
+        /// Removes a run that is not at work (finished, or paused with
+        /// nothing running): its run, items and rows, in the vault too.
+        /// Nothing is kept of it. Refused for a run another live node
+        /// works.
+        #[serde(rename = "workflow.forget")]
+        WorkflowForget {
+            run: String,
+        },
     }
 
     /// One item of a run: an image file (absolute), with parameters

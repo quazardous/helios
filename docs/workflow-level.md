@@ -515,6 +515,31 @@ bench box (see [bench.md](bench.md)).
    restart on the same vault finishes the batch with each file written
    once; a paused run stays paused; a run past its retention is removed;
    a run of a newer format is listed read-only.
+   *As delivered (2026-10-28):* the owner of a run is a document of its
+   own (`workflow/owners/<run>`: instance, machine, process id and start
+   time, heartbeat), so the run document is not rewritten every
+   heartbeat. The owner beats every 10 s; it is dead when silent for 60 s,
+   or at once when it ran on the same machine and its process is gone (so
+   a node restarted after a crash resumes its runs without waiting a
+   minute). Taking a run over checks and writes the owner in one vault
+   transaction (SQLite's write lock from the first statement), so two
+   nodes cannot both take it; an owner that finds another owner in its
+   run at its next beat (it was silent too long) lets the run go, its
+   exports stopped without writing. A node opens the vault's runs at its
+   start, before it says it is ready, and looks for runs to take over
+   every 5 s. A run is rebuilt over the node's own network from its
+   snapshot; one submitted to another network is listed read-only, as is
+   one of a newer format or one another live node works (`read_only`,
+   `reason` in `workflow.runs`). Opening a run also enters the items a
+   crash left between their documents and their `submit` rows. A run
+   document says when the run finished (`finished`); retention counts from
+   then (a run finished before this step counts from when it is first
+   opened). Migrations are steps from one format to the next, applied with
+   the take-over in one transaction; none exist yet (format 1).
+   `workflow.forget` came with this step (control, batch endpoint, MCP
+   tool, `helios control workflow-forget`), refusing a run at work or
+   another live node's; a run is paused only by its document until step
+   5 brings `workflow.pause`.
 4. **`helios batch` over runs** (`helios-node`). The client submits and
    follows a run; its JSON lines and exit codes unchanged; `--vault`
    makes it durable; `--again`. Tests: the existing `tests/batch.rs`

@@ -267,6 +267,19 @@ pub const SETTINGS: &[Setting] = &[
         },
     },
     Setting {
+        key: "system.workflow.keep_days",
+        concern: Concern::Project,
+        label: "Finished batches kept",
+        about: "How long a finished batch (a run of the workflow level) stays in the vault, failures included, before it is removed whole; 0 removes it when the node next starts.",
+        kind: Kind::Number {
+            min: 0.0,
+            max: 3650.0,
+            default: 30.0,
+            unit: "days",
+            integer: true,
+        },
+    },
+    Setting {
         key: "project.decisions.mode",
         concern: Concern::Project,
         label: "Decision nodes",

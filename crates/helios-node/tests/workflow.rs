@@ -1,8 +1,9 @@
 //! Batches as runs of the workflow level (`workflow.submit`), through the
 //! batch endpoint every build serves: each item exported once by the node,
 //! re-submitting redoing nothing, output names fixed at submission, a
-//! transient failure retried, a permanent one not, and the workflow derived
-//! from a network with a decision, whose items wait while it is unanswered.
+//! transient failure retried, a permanent one not, the workflow derived
+//! from a network with a decision, whose items wait while it is unanswered,
+//! and a finished run forgotten.
 
 #![cfg(unix)]
 
@@ -203,6 +204,46 @@ fn a_run_exports_each_item_once_and_a_second_submit_redoes_nothing() {
         state["describe"]["runs"].as_array().map(Vec::len),
         Some(2),
         "{state}"
+    );
+}
+
+#[test]
+fn a_finished_run_is_forgotten_and_one_at_work_is_not() {
+    let node = Node::start("forget", NETWORK, false);
+    let pic = node.picture("a.png");
+    let out = node.dir.join("out");
+    let run = node.submit(&out, &[&pic], &[])["run"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    node.finished(&run);
+    let forgotten = node.batch(&["workflow-forget", &run]);
+    assert_eq!(forgotten["ok"], true, "{forgotten}");
+    let runs = node.batch(&["workflow-runs"]);
+    assert_eq!(runs["runs"].as_array().map(Vec::len), Some(0), "{runs}");
+    let again = node.batch(&["workflow-forget", &run]);
+    assert_eq!(again["message"]["key"], "workflow-no-run", "{again}");
+    // The file written stays.
+    assert!(out.join("a.png").exists());
+
+    // A run waiting for a decision is at work: not forgotten.
+    let waiting = Node::start("forget-busy", DECIDED, false);
+    let pic = waiting.picture("p.png");
+    let run = waiting.submit(&waiting.dir.join("out"), &[&pic], &[])["run"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    waiting.until(&run, "asking at the decision", |r| {
+        r["nodes"]["bright"]["asking"] == 1
+    });
+    let refused = waiting.batch(&["workflow-forget", &run]);
+    assert_eq!(
+        refused["message"]["key"], "workflow-run-at-work",
+        "{refused}"
+    );
+    assert_eq!(
+        waiting.until(&run, "listed", |r| !r.is_null())["state"],
+        "active"
     );
 }
 

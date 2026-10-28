@@ -567,7 +567,7 @@ gui-workspace-template-toolbox = avec ses outils
 
 gui-workspace-template-version = version
 
-node-batch-only = le point d’accès des lots ne répond qu’à load-source, export, cancel, job.cancel, batch_start, batch_end et workflow.submit, workflow.runs, workflow.items
+node-batch-only = le point d’accès des lots ne répond qu’à load-source, export, cancel, job.cancel, batch_start, batch_end et workflow.submit, workflow.runs, workflow.items, workflow.forget
 
 node-edit-not-saved = fait, mais la retouche n’a pas été enregistrée : { $error }
 
@@ -598,6 +598,12 @@ workflow-no-items = une exécution demande au moins un élément
 workflow-no-node = l’exécution `{ $run }` ne passe pas par une file à `{ $node }`
 
 workflow-no-run = aucune exécution `{ $run }`
+
+workflow-other-network = l’exécution `{ $run }` a été soumise à un autre réseau ({ $why }) : elle ne peut pas être traitée ici
+
+workflow-run-at-work = l’exécution `{ $run }` est encore en cours : laissez-la finir, ou annulez-la, avant de l’oublier
+
+workflow-run-elsewhere = l’exécution `{ $run }` est traitée par un autre nœud ({ $owner })
 
 xmp-blend-details = le seuil de détails du masque
 
