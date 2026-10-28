@@ -4,7 +4,7 @@
 //! shared with the other panels both ways, and selecting a node brings
 //! up the Parameters panel; a node's header carries the
 //! engine's status; the overview stacks the nodes under their principal
-//! node.
+//! node; the 58-node masks stress network stays fluid.
 
 use std::path::{Path, PathBuf};
 
@@ -384,5 +384,92 @@ fn copied_nodes_paste_renamed_and_wired_as_one_undo_step() {
     assert_eq!(steps(&h), before + 1, "one undo step");
     undo(&mut h);
     assert!(!net(&h).nodes.iter().any(|d| d.name == "exposure_2"));
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+/// The longest a frame of the Graph panel may take on average, at each
+/// level, over the masks stress network (debug builds on the bench box
+/// included).
+const FRAME_BUDGET: std::time::Duration = std::time::Duration::from_millis(100);
+
+/// The masks stress network (three masked modules, 58 nodes) as a
+/// workspace's network: its nodes named without dots (a dot names an
+/// opened composite's inner node), its source the workspace's.
+fn stress_network() -> Value {
+    use helios_module_masks::stress;
+    let built = stress::build(stress::picture(Region::sized(8, 6)), 3, |k| {
+        (
+            ModuleRef::new(helios_module_exposure::Exposure),
+            Params::new().with("exposure", helios_core::Value::Float(0.5 - k as f64 * 0.4)),
+        )
+    })
+    .unwrap();
+    let g = &built.graph;
+    let name = |id| {
+        if id == built.source {
+            "source".to_string()
+        } else {
+            g.name(id).unwrap().replace('.', "_")
+        }
+    };
+    let mut nodes = Vec::new();
+    let mut connections = Vec::new();
+    for id in g.ids() {
+        let Some(manifest) = g.manifest(id).unwrap() else {
+            continue;
+        };
+        nodes.push(json!({
+            "name": name(id),
+            "module": manifest.name,
+            "params": g.params(id).unwrap().unwrap_or_default(),
+        }));
+        for (input, from) in manifest.inputs.iter().zip(g.input_ports(id).unwrap()) {
+            if let Some((from, port)) = from {
+                connections.push(json!({
+                    "from": name(from), "port": port, "to": name(id), "input": input.name,
+                }));
+            }
+        }
+    }
+    json!({
+        "sources": ["source"],
+        "nodes": nodes,
+        "connections": connections,
+        "view": { "node": name(built.output()), "port": "output" },
+    })
+}
+
+#[test]
+fn the_masks_stress_network_stays_fluid() {
+    let root = temp("fluid");
+    let (mut h, _) = window(&root);
+    h.state_mut()
+        .edit_workspace(&json!({ "network": stress_network() }), &Origin::User)
+        .unwrap();
+    frames(&mut h);
+    let g = read(&mut h);
+    assert!(
+        g["nodes"].as_array().unwrap().len() >= 58,
+        "the network is shown whole: {}",
+        g["nodes"].as_array().unwrap().len()
+    );
+    for level in ["overview", "ports", "detail"] {
+        run(
+            &mut h,
+            "graph.view",
+            json!({ "graph": GRAPH, "level": level }),
+        );
+        run(&mut h, "graph.view", json!({ "graph": GRAPH, "fit": true }));
+        let frames = 20;
+        let start = std::time::Instant::now();
+        for _ in 0..frames {
+            h.step();
+        }
+        let mean = start.elapsed() / frames;
+        assert!(
+            mean <= FRAME_BUDGET,
+            "{level}: {mean:?} a frame, over {FRAME_BUDGET:?}"
+        );
+    }
     std::fs::remove_dir_all(&root).unwrap();
 }
