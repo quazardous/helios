@@ -10,7 +10,8 @@ use std::io::Cursor;
 
 use helios_core::{Image, Region};
 use helios_export::{Format, OutputSpace, encode, encode_in};
-use image::{ImageDecoder, ImageReader};
+use image::codecs::tiff::TiffDecoder;
+use image::{ImageDecoder, ImageFormat, ImageReader};
 
 /// Linear Rec.2020 patches: black, middle grey, white, the three
 /// primaries, and a brown inside every output space's gamut.
@@ -42,12 +43,19 @@ fn formats() -> [Format; 4] {
 
 /// The ICC profile a file carries, as its format's decoder finds it.
 fn embedded_profile(bytes: &[u8]) -> Option<Vec<u8>> {
-    let mut decoder = ImageReader::new(Cursor::new(bytes))
+    let reader = ImageReader::new(Cursor::new(bytes))
         .with_guessed_format()
-        .unwrap()
-        .into_decoder()
         .unwrap();
-    decoder.icc_profile().unwrap()
+    if reader.format() == Some(ImageFormat::Tiff) {
+        // Not through `ImageReader`: its default limits give the TIFF
+        // decoder a value budget the size of the pixel buffer (image
+        // 0.25.10, `TiffDecoder::set_limits`), so on a small image the
+        // ICC tag exceeds it and `icc_profile` answers None although the
+        // tag is there. The decoder alone keeps `tiff`'s own limits.
+        let mut decoder = TiffDecoder::new(Cursor::new(bytes)).unwrap();
+        return decoder.icc_profile().unwrap();
+    }
+    reader.into_decoder().unwrap().icc_profile().unwrap()
 }
 
 /// The cICP code points of a PNG, through `png`'s decoder.
