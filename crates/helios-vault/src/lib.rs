@@ -36,6 +36,7 @@ pub mod journal;
 pub mod settings;
 pub mod stacks;
 pub mod versions;
+pub mod workflow;
 
 pub use catalog::{ApplyReport, CursorId, CursorInfo, Delta, Row};
 pub use edit::{EditSaved, EditSession};
