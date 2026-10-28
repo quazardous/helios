@@ -609,19 +609,60 @@ impl Shell {
     /// answered by this desktop: egui-pop's command of that name, run in
     /// the interface as an agent, through the same steps as the keys and
     /// the History panel (a hook vetoing an undo vetoes it too).
+    ///
+    /// An agent walks only its own steps (`HeliosHistory`'s lane);
+    /// `history.undo` with a `group` undoes that batch of the agent's
+    /// alone, even under later steps that left its values alone.
     fn agent_history(&mut self, cmd: &str, request: &Value) -> Result<Value, String> {
+        let origin = egui_pop::model::commands::Origin::Agent(AGENT.into());
+        if cmd == "history.undo"
+            && let Some(group) = request["group"].as_u64()
+        {
+            return self.agent_undo_group(request, group, &origin);
+        }
         let id = egui_pop::model::ids::CommandId::new(cmd).map_err(|e| e.to_string())?;
         let mut args = request.clone();
         if let Some(o) = args.as_object_mut() {
-            for k in ["cmd", "workspace", "config"] {
+            for k in ["cmd", "workspace", "config", "group"] {
                 o.remove(k);
             }
         }
-        let origin = egui_pop::model::commands::Origin::Agent(AGENT.into());
         match self.app.run(&id, args, origin) {
             egui_pop::api::host::Reply::Done(r) => r,
             egui_pop::api::host::Reply::Later(_) => Ok(json!({ "queued": true })),
         }
+    }
+
+    /// `history.undo` with a `group`: that batch of the agent's undone
+    /// alone, in the value store's history (`edit`, the only scope
+    /// holding agents' steps).
+    fn agent_undo_group(
+        &mut self,
+        request: &Value,
+        group: u64,
+        origin: &egui_pop::model::commands::Origin,
+    ) -> Result<Value, String> {
+        use egui_pop::api::history::Request;
+        let scope = match request["scope"].as_str() {
+            Some(s) => {
+                egui_pop::api::history::ScopeId::new(s).map_err(|e| format!("`scope`: {e}"))?
+            }
+            None => crate::history::EDIT,
+        };
+        let mut ask = Request::new(scope);
+        if let Some(rev) = request["if_rev"].as_u64() {
+            ask = ask.if_rev(rev);
+        }
+        if request["dry_run"] == true {
+            ask = ask.dry_run();
+        }
+        let walked = crate::history::HeliosHistory::new(self.values.clone())
+            .undo_group(&ask, group, origin)
+            .map_err(|r| r.reason)?;
+        if !walked.dry_run {
+            self.sync_workspace();
+        }
+        serde_json::to_value(&walked).map_err(|e| e.to_string())
     }
 
     /// An agent's undo on the desktop: the last step, when it is a

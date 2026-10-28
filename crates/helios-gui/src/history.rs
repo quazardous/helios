@@ -23,6 +23,12 @@
 //!   group's number ([`StepInfo::group`]) and the agent as its origin,
 //!   which the History panel names after the label; a step that changed
 //!   several values says how many.
+//! - **An agent's lane**: an agent's undo, redo or jump (egui-pop's
+//!   `history.*` run as an agent) walks only its own steps; a step of the
+//!   user's or of another origin refuses it, as the workspace's undo for
+//!   agents does. [`HeliosHistory::undo_group`] undoes one of its batches
+//!   alone, even under later steps, unless one of them changed the same
+//!   values (the store's [`helios_values::Store::undo_group`]).
 //! - **The place** of each step is the context stack's place it was made
 //!   in (the store's [`helios_values::Store::set_place`], which
 //!   `crate::contexts::follow_place` keeps on the place shown): an undo,
@@ -178,6 +184,23 @@ fn refused(r: &Refused) -> Refusal {
     Refusal::new(kind, r.to_string())
 }
 
+/// Refused when an agent would walk a step that is not its own.
+fn lane(origin: &PopOrigin, steps: &[StepInfo]) -> Result<(), Refusal> {
+    if !matches!(origin, PopOrigin::Agent(_)) {
+        return Ok(());
+    }
+    match steps.iter().find(|s| s.origin != *origin) {
+        Some(s) => Err(Refusal::new(
+            RefusalKind::Owner,
+            format!(
+                "“{}” is not this agent's step: the user undoes it, or the agent that made it",
+                s.label
+            ),
+        )),
+        None => Ok(()),
+    }
+}
+
 /// A step's values held by a gesture of another origin.
 fn held(store: &Store, step: &Step) -> Option<Refusal> {
     step.changes.iter().find_map(|(path, _, _)| {
@@ -202,6 +225,7 @@ fn walk(
     let Some(info) = (if redo { line.next() } else { line.head() }).cloned() else {
         return Ok(Vec::new());
     };
+    lane(origin, std::slice::from_ref(&info))?;
     if dry_run {
         let list = if redo {
             store.redo_steps()
@@ -221,6 +245,51 @@ fn walk(
     }
     .map_err(|e| refused(&e))?;
     Ok(vec![info])
+}
+
+impl HeliosHistory {
+    /// Undoes the steps of `group` (an agent's batch) alone, newest
+    /// first, even under later steps (the answer to "undo only the
+    /// agent's last batch"): refused when a later step changed one of its
+    /// values, and, asked by an agent, unless the batch is its own. The
+    /// steps undone go on the redo list. `history.undo` with a `group`.
+    pub fn undo_group(
+        &self,
+        request: &Request,
+        group: u64,
+        origin: &PopOrigin,
+    ) -> Result<Walked, Refusal> {
+        let mut store = self.lock();
+        Self::check(&store, request)?;
+        let line = line_of(&store);
+        let steps: Vec<StepInfo> = line
+            .undo
+            .iter()
+            .rev()
+            .filter(|s| s.group == Some(group))
+            .cloned()
+            .collect();
+        if steps.is_empty() {
+            return Err(Refusal::new(
+                RefusalKind::Nothing,
+                format!("no step of group {group} left to undo"),
+            ));
+        }
+        lane(origin, &steps)?;
+        let o = to_helios(origin);
+        store.check_undo_group(group, &o).map_err(|e| refused(&e))?;
+        if !request.dry_run {
+            store.undo_group(group, &o).map_err(|e| refused(&e))?;
+        }
+        let line = line_of(&store);
+        Ok(Walked {
+            scope: EDIT,
+            steps,
+            rev: line.rev,
+            head: line.head_id(),
+            dry_run: request.dry_run,
+        })
+    }
 }
 
 impl History for HeliosHistory {
@@ -254,6 +323,7 @@ impl History for HeliosHistory {
             let jump = plan_jump(&line, to)?;
             let list = if jump.redo { &line.redo } else { &line.undo };
             let walked: Vec<StepInfo> = list.iter().rev().take(jump.count).cloned().collect();
+            lane(origin, &walked)?;
             let steps = if jump.redo {
                 s.redo_steps()
             } else {
@@ -433,6 +503,77 @@ mod tests {
         // The user's write is no group, its label as the store has it.
         assert_eq!(line.undo[1].group, None);
         assert_eq!(line.undo[1].label.key, None);
+    }
+
+    #[test]
+    fn an_agent_walks_its_own_steps_and_undoes_its_batch_alone() {
+        let values = store();
+        values
+            .lock()
+            .unwrap()
+            .declare("node/black", Descriptor::float("Black", -1.0, 1.0, 0.0));
+        let agent = helios_shell::commands::Origin::Agent("retouch".into());
+        let pop_agent = PopOrigin::Agent("retouch".into());
+        let g = {
+            let mut s = values.lock().unwrap();
+            let g = s.begin_request(agent.clone(), None);
+            s.set(Set::new(
+                "node/black",
+                Change::To(Value::Float(-0.1)),
+                agent.clone(),
+            ))
+            .unwrap();
+            s.end_request();
+            g
+        };
+        set(&values, 1.0);
+        let mut h = HeliosHistory::new(values.clone());
+        // The head is the user's: the agent's undo is refused, the user's
+        // goes.
+        let Answer::Done(Err(r)) = h.undo(&Request::new(EDIT), &pop_agent) else {
+            panic!("refused");
+        };
+        assert_eq!(r.kind, RefusalKind::Owner);
+        let Answer::Done(Err(_)) = h.jump(&Request::new(EDIT), 0, &pop_agent) else {
+            panic!("refused");
+        };
+        // Its batch alone: a dry run says what, then it goes, under the
+        // user's step, which stays.
+        let rev = h.rev(&EDIT);
+        let dry = h
+            .undo_group(&Request::new(EDIT).dry_run(), g, &pop_agent)
+            .unwrap();
+        assert_eq!(dry.steps.len(), 1);
+        assert_eq!(h.rev(&EDIT), rev);
+        let done = h
+            .undo_group(&Request::new(EDIT).if_rev(rev), g, &pop_agent)
+            .unwrap();
+        assert_eq!(done.steps[0].group, Some(g));
+        assert_eq!(value(&values), Value::Float(1.0));
+        assert_eq!(
+            values.lock().unwrap().get("node/black").unwrap().value,
+            Value::Float(0.0)
+        );
+        // Redone: its own step again, which the agent may undo when it is
+        // the head.
+        let Answer::Done(Ok(_)) = h.redo(&Request::new(EDIT), &PopOrigin::User) else {
+            panic!("redone");
+        };
+        let Answer::Done(Ok(w)) = h.undo(&Request::new(EDIT), &pop_agent) else {
+            panic!("its own head undone");
+        };
+        assert_eq!(w.steps[0].group, Some(g));
+        // Another agent's batch is not this one's.
+        let other = PopOrigin::Agent("other".into());
+        let Answer::Done(Ok(_)) = h.redo(&Request::new(EDIT), &PopOrigin::User) else {
+            panic!("redone");
+        };
+        assert_eq!(
+            h.undo_group(&Request::new(EDIT), g, &other)
+                .unwrap_err()
+                .kind,
+            RefusalKind::Owner
+        );
     }
 
     #[test]

@@ -301,6 +301,9 @@ command-param-set =
 command-param-undo =
     .title = Undo the last change of values
 
+command-param-undoAgent =
+    .title = Undo an agent's last changes alone (`agent`, `group`)
+
 command-profile-export =
     .title = Export the profile (all parts, or `parts`; `this_machine` flattens its variants)
 

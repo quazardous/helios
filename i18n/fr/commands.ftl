@@ -300,6 +300,9 @@ command-param-set =
 command-param-undo =
     .title = Annuler la dernière modification des valeurs
 
+command-param-undoAgent =
+    .title = Annuler seules les dernières modifications d’un agent (`agent`, `group`)
+
 command-profile-export =
     .title = Exporter le profil (toutes les parties, ou `parts` ; `this_machine` aplatit ses variantes)
 

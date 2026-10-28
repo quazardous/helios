@@ -649,6 +649,59 @@ fn the_commands_drive_the_store_with_their_origin() {
 }
 
 #[test]
+fn the_user_undoes_an_agent_s_last_batch_alone_and_an_agent_only_its_own() {
+    let (_, _, store, _) = exposure();
+    let store = Arc::new(Mutex::new(store));
+    let mut r = Registry::new();
+    register(&mut r, store.clone()).unwrap();
+    let cx = Context::new();
+    let mut set = |path: &str, v: f64, origin: Origin| {
+        r.run(
+            "param.set",
+            json!({ "path": path, "value": v }),
+            origin,
+            &cx,
+        )
+        .unwrap();
+    };
+    // Two agents' batches, then the user's change of the first one's
+    // value.
+    set("node/exposure/exposure", 1.0, agent());
+    set("node/exposure/black", -0.02, Origin::Agent("a2".into()));
+    set("node/exposure/exposure", 1.5, Origin::User);
+    // a1 undoes only its own: its batch is under the user's change of
+    // the same value, so it is refused, and nothing moves.
+    let refused = r
+        .run("param.undoAgent", json!(null), agent(), &cx)
+        .unwrap_err();
+    assert!(refused.contains("later steps"), "{refused}");
+    assert_eq!(ev(&store.lock().unwrap()), 1.5);
+    // The user undoes the newest agent's batch, a2's, alone.
+    let undone = r
+        .run("param.undoAgent", json!(null), Origin::User, &cx)
+        .unwrap();
+    assert_eq!(undone["undone"], json!("set node/exposure/black"));
+    let s = store.lock().unwrap();
+    assert_eq!(
+        s.get("node/exposure/black").unwrap().value,
+        Value::Float(0.0)
+    );
+    assert_eq!(ev(&s), 1.5, "the user's change stays");
+    let a1 = s.last_agent_group(Some("a1")).unwrap();
+    drop(s);
+    // a2 cannot undo a1's batch by its number.
+    let refused = r
+        .run(
+            "param.undoAgent",
+            json!({ "group": a1 }),
+            Origin::Agent("a2".into()),
+            &cx,
+        )
+        .unwrap_err();
+    assert!(refused.contains("not a batch of agent `a2`"), "{refused}");
+}
+
+#[test]
 fn a_path_is_a_text_that_says_what_it_names() {
     let d = Descriptor::path("sidecar", PathKind::File, &["XMP"]);
     assert_eq!(d.ty, Type::Text);

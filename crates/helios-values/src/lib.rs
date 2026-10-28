@@ -1155,18 +1155,17 @@ impl Store {
         Ok(Some(label))
     }
 
-    /// Undoes the steps of `group` alone, newest first, even under later
-    /// steps (VS Code's rule for a workspace edit): refused when a later
-    /// step outside the group changed one of its values, with those
-    /// steps' labels. Each step undone goes on the redo list, so a redo
-    /// makes it again. Returns the label undone, `None` when no step of
-    /// the group is left to undo.
-    pub fn undo_group(&mut self, group: u64, origin: &Origin) -> Result<Option<String>, Refused> {
+    /// Whether the steps of `group` can be undone alone, now, by
+    /// `origin`: their places in [`Store::undo_steps`], oldest first
+    /// (none: no step of the group is left to undo). Refused when a later
+    /// step outside the group changed one of its values (with those
+    /// steps' labels), or when a gesture of another origin holds one.
+    pub fn check_undo_group(&self, group: u64, origin: &Origin) -> Result<Vec<usize>, Refused> {
         let at: Vec<usize> = (0..self.undo.len())
             .filter(|i| self.undo[*i].group == Some(group))
             .collect();
         let Some(&first) = at.first() else {
-            return Ok(None);
+            return Ok(at);
         };
         let mut since: Vec<String> = Vec::new();
         for later in &self.undo[first + 1..] {
@@ -1201,6 +1200,16 @@ impl Store {
                 }
             }
         }
+        Ok(at)
+    }
+
+    /// Undoes the steps of `group` alone, newest first, even under later
+    /// steps (VS Code's rule for a workspace edit), when
+    /// [`Store::check_undo_group`] allows it. Each step undone goes on the
+    /// redo list, so a redo makes it again. Returns the label undone,
+    /// `None` when no step of the group is left to undo.
+    pub fn undo_group(&mut self, group: u64, origin: &Origin) -> Result<Option<String>, Refused> {
+        let at = self.check_undo_group(group, origin)?;
         let mut label = None;
         for i in at.into_iter().rev() {
             let step = self.undo.remove(i);

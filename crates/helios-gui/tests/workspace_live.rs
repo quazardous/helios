@@ -664,3 +664,64 @@ fn an_agent_s_requests_are_its_steps_grouped_by_the_name_it_gives() {
     assert_eq!(description(&h), start);
     let _ = std::fs::remove_dir_all(&root);
 }
+
+#[test]
+fn an_agent_undoes_only_its_own_steps_and_its_batch_alone() {
+    use helios_values::{Change, Descriptor, Set};
+
+    let root = temp("agent-lane");
+    let (mut h, config, dir, _) = window(&root);
+    let start = description(&h);
+    let edit = describe_as_agent(&mut h, &dir, &config, "The agent's", Value::Null);
+    let group = edit["group"].clone();
+    // Then the user changes a value of their own.
+    {
+        let mut s = h.state().values.lock().unwrap();
+        s.declare("view/test", Descriptor::float("Test", 0.0, 1.0, 0.0));
+        s.set(Set::new(
+            "view/test",
+            Change::To(helios_core::Value::Float(0.5)),
+            Origin::User,
+        ))
+        .unwrap();
+    }
+    // The head is the user's: the agent's plain undo is refused.
+    let (failed, refused) = through(
+        &mut h,
+        "helios_history_undo",
+        args(&dir, &config, &json!({})),
+    );
+    assert!(failed, "{refused}");
+    assert!(
+        refused.to_string().contains("not this agent's"),
+        "{refused}"
+    );
+    // Its batch alone: a dry run first, then for real, under the user's
+    // step, which stays.
+    let (failed, dry) = through(
+        &mut h,
+        "helios_history_undo",
+        args(&dir, &config, &json!({ "group": group, "dry_run": true })),
+    );
+    assert!(!failed, "{dry}");
+    assert_eq!(dry["steps"][0]["group"], group, "{dry}");
+    assert_eq!(description(&h), "The agent's");
+    let (failed, done) = through(
+        &mut h,
+        "helios_history_undo",
+        args(&dir, &config, &json!({ "group": group })),
+    );
+    assert!(!failed, "{done}");
+    assert_eq!(description(&h), start);
+    assert_eq!(
+        h.state()
+            .values
+            .lock()
+            .unwrap()
+            .get("view/test")
+            .unwrap()
+            .value,
+        helios_core::Value::Float(0.5)
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}

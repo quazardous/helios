@@ -50,8 +50,11 @@
 //! The `helios_history_*` tools are egui-pop's `history.*` commands
 //! (list, read, undo, redo, jump, each with `if_rev` and a dry run) on
 //! the desktop holding a workspace open, run there as an agent through
-//! the same steps as the user's Ctrl+Z and History panel. The histories
-//! live in that window, so without one they are refused.
+//! the same steps as the user's Ctrl+Z and History panel, in the agent's
+//! own lane: it walks only its own steps, and `helios_history_undo` with a
+//! `group` undoes one of its batches alone, even under later steps that
+//! left its values alone. The histories live in that window, so without
+//! one they are refused.
 //!
 //! Transport: JSON-RPC 2.0, one message per line on stdin and stdout.
 
@@ -768,21 +771,32 @@ pub const TOOLS: &[Tool] = &[
         name: "helios_history_undo",
         endpoint: Endpoint::Workspace,
         cmd: "history.undo",
-        description: "Undoes the last step of a history on the desktop holding a workspace open, as the user's Ctrl+Z would (egui-pop's history.undo); refused unless the history is still at `if_rev`; a dry run says what it would undo",
-        params: &[WORKSPACE, HISTORY_SCOPE, HISTORY_IF_REV, DRY_RUN, CONFIG],
+        description: "Undoes the last step of a history on the desktop holding a workspace open, as the user's Ctrl+Z would (egui-pop's history.undo), when that step is this agent's own (the user's or another's is refused); with `group`, undoes that batch of this agent's alone, even under later steps, refused when one of them changed the same values. Refused unless the history is still at `if_rev`; a dry run says what it would undo",
+        params: &[
+            WORKSPACE,
+            HISTORY_SCOPE,
+            optional(
+                "group",
+                optional_integer,
+                "One of this agent's batches (a step's `group` from helios_history_read, or the `group` an edit answered): undone alone",
+            ),
+            HISTORY_IF_REV,
+            DRY_RUN,
+            CONFIG,
+        ],
     },
     Tool {
         name: "helios_history_redo",
         endpoint: Endpoint::Workspace,
         cmd: "history.redo",
-        description: "Redoes the last undone step of a history on the desktop holding a workspace open (egui-pop's history.redo); refused unless the history is still at `if_rev`; a dry run says what it would redo",
+        description: "Redoes the last undone step of a history on the desktop holding a workspace open (egui-pop's history.redo), when it is this agent's own; refused unless the history is still at `if_rev`; a dry run says what it would redo",
         params: &[WORKSPACE, HISTORY_SCOPE, HISTORY_IF_REV, DRY_RUN, CONFIG],
     },
     Tool {
         name: "helios_history_jump",
         endpoint: Endpoint::Workspace,
         cmd: "history.jump",
-        description: "Brings a history on the desktop holding a workspace open to one of its steps (`to`, a step's id from helios_history_read; 0: the start) by undos or redos, all or nothing (egui-pop's history.jump); refused unless the history is still at `if_rev`; a dry run says which steps it would walk",
+        description: "Brings a history on the desktop holding a workspace open to one of its steps (`to`, a step's id from helios_history_read; 0: the start) by undos or redos, all or nothing (egui-pop's history.jump), when every step walked is this agent's own; refused unless the history is still at `if_rev`; a dry run says which steps it would walk",
         params: &[
             WORKSPACE,
             HISTORY_SCOPE,

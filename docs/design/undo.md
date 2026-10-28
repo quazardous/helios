@@ -7,7 +7,8 @@ value store as one scope, `edit` (`HeliosHistory`, part of step 4); each
 step's place on the context stack, so an undo made elsewhere says where
 (2026-10-28); the History panel and the agents' `history.*` commands
 over that scope (part of steps 5 and 7, 2026-10-28; see "Built: the
-History panel" below). The generic part (the contract between
+History panel" below); agents' requests as attributed groups, undoable
+alone (step 5, 2026-10-28; see "Built: agents' groups and attribution"). The generic part (the contract between
 kernel and interface, the focus rule, grouping, the history panel, a
 survey of darktable, Lightroom, Photoshop, Blender, VS Code, Krita and
 GIMP) is egui-pop's ADR 0014, "Undo: histories owned by the kernel,
@@ -237,9 +238,41 @@ egui-pop's `HistoryPlugin` is on in Helios, over `HeliosHistory`:
   go to the desktop holding the workspace open (as the workspace and
   context tools do) and run these commands there as the agent; without
   such a desktop they are refused. Not built yet from the plan above:
-  groups per request (`history_group`), undoing only an agent's batch,
   snapshots, the image, library and workspace scopes, and the node's
   own history service.
+
+### Built: agents' groups and attribution (2026-10-28)
+
+- **One request, one step.** Each request the desktop answers for an
+  agent opens a request on the value store (`Store::begin_request`):
+  every step the agent makes meanwhile joins its group, and the group's
+  steps that follow each other are one step, the agent's (`Step.group`,
+  `StepInfo::group`). The user's steps meanwhile stay their own. The
+  answer names the group's number.
+- **A longer group** is not opened and closed by separate calls
+  (`history_group` and `history_close` above): an agent passes the same
+  `group` name to the edit tools instead, and the calls make one step
+  labelled with that name while no other step comes between; a step in
+  between starts a new step of the same group, and undoing the group
+  takes both. Nothing is left open when an agent goes away.
+- **Attribution.** The step's origin is the agent; egui-pop's History
+  panel names it after the label ("Retouch skin (3 values)
+  (agent:mcp)"). Agents reaching the desktop through MCP are all
+  `agent:mcp` until the server forwards which client it serves.
+- **Undo only the agent's batch.** `Store::undo_group`, VS Code's rule:
+  allowed when no later step outside the group changed one of its
+  values, otherwise refused with those steps' labels; each step undone
+  goes on the redo list. The user reaches it by "Undo an agent's last
+  changes alone" (`param.undoAgent`); an agent by `helios_history_undo
+  {group}`. The panel's own "Undo this" on a row waits on egui-pop (its
+  rows only jump).
+- **The agents' lane.** An agent's `history.undo`, `history.redo` and
+  `history.jump` walk only its own steps; one of the user's or of
+  another origin refuses them (`HeliosHistory`), as the workspace's undo
+  for agents already did.
+- **Not yet:** the group in the saved version (versions name the agent,
+  not the request), and a paste into the graph or the masks, applied at
+  the next frame, is a step of its own outside the request.
 
 ## The node and other processes
 

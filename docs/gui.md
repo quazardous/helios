@@ -246,6 +246,17 @@ that name, while no other step comes between; a step that changed
 several values says how many ("Retouch skin (3 values)"). The answer of
 a request that changed something carries its `group` number.
 
+**Undoing an agent's batch alone.** "Undo an agent's last changes alone"
+(`param.undoAgent`, in the command palette; `agent` and `group` to pick
+one) takes back the newest agent's batch even when the user worked
+after it, as long as nothing since changed the same values; otherwise it
+is refused with what changed them, and Edit > Undo takes both back in
+turn. The batch goes on the redo list. Agents stay in their own lane: an
+agent's `history.undo`, `history.redo` and `history.jump` walk only its
+own steps (the user's or another's refuses them), and
+`helios_history_undo` with a `group` undoes one of its batches alone,
+by the same rule.
+
 ## Settings pages
 
 Settings pages are generated, never laid out by hand: a setting named

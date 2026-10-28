@@ -1,7 +1,8 @@
-//! `param.list`, `param.get`, `param.set`, `param.reset`, `param.undo` and
-//! `param.redo`: the store as commands, what menus, keys, scripts and
-//! agents (through MCP) run alike. Values are plain JSON (a number, a
-//! bool, a string, an array), typed by the path's descriptor.
+//! `param.list`, `param.get`, `param.set`, `param.reset`, `param.undo`,
+//! `param.redo` and `param.undoAgent`: the store as commands, what menus,
+//! keys, scripts and agents (through MCP) run alike. Values are plain
+//! JSON (a number, a bool, a string, an array), typed by the path's
+//! descriptor.
 
 use std::sync::{Arc, Mutex};
 
@@ -120,6 +121,42 @@ fn set(store: &Mutex<Store>, args: &Json, origin: &Origin, reset: bool) -> Resul
     }
 }
 
+/// Undoes an agent's batch alone (`param.undoAgent`): the `group` given,
+/// else the newest agent's batch (of `agent`, if given), even under later
+/// steps that did not touch its values. An agent asking undoes only its
+/// own batches.
+fn undo_agent(store: &mut Store, args: &Json, origin: &Origin) -> Result<Json, String> {
+    let own = match origin {
+        Origin::Agent(a) => Some(a.as_str()),
+        _ => None,
+    };
+    let agent = own.or_else(|| args.get("agent").and_then(Json::as_str));
+    let group = match args.get("group").and_then(Json::as_u64) {
+        Some(g) => g,
+        None => store.last_agent_group(agent).ok_or_else(|| match agent {
+            Some(a) => format!("no change of agent `{a}` to undo"),
+            None => "no agent's change to undo".to_string(),
+        })?,
+    };
+    let steps = store.undo_steps();
+    let mine = |s: &crate::Step| match (&s.origin, agent) {
+        (Origin::Agent(a), Some(want)) => a == want,
+        (Origin::Agent(_), None) => true,
+        _ => false,
+    };
+    if steps.iter().any(|s| s.group == Some(group) && !mine(s)) {
+        return Err(match agent {
+            Some(a) => format!("group {group} is not a batch of agent `{a}`"),
+            None => format!("group {group} is not an agent's batch"),
+        });
+    }
+    let undone = store
+        .undo_group(group, origin)
+        .map_err(|r| r.to_string())?
+        .ok_or_else(|| format!("nothing of group {group} left to undo"))?;
+    Ok(json!({ "undone": undone, "group": group }))
+}
+
 /// Declares the `param.*` commands on a registry, over a shared store.
 pub fn register(registry: &mut Registry, store: Arc<Mutex<Store>>) -> Result<(), String> {
     let s = store.clone();
@@ -182,6 +219,15 @@ pub fn register(registry: &mut Registry, store: Arc<Mutex<Store>>) -> Result<(),
                 .map_err(|r| r.to_string())?;
             Ok(json!({ "undone": undone }))
         },
+    )?;
+    let s = store.clone();
+    registry.register(
+        CommandSpec::new(
+            "param.undoAgent",
+            "Undo an agent's last changes alone (`agent`, `group`)",
+            "Values",
+        ),
+        move |args, origin| undo_agent(&mut s.lock().expect("value store lock"), args, origin),
     )?;
     let s = store;
     registry.register(
