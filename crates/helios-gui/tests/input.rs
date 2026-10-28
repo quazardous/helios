@@ -77,7 +77,10 @@ fn shell() -> Shell {
 /// The window, its Parameters panel shown: short enough that the panel
 /// scrolls.
 fn harness() -> Harness<'static, Shell> {
-    let mut h = headless::harness(shell(), vec2(1280.0, 480.0));
+    // Short enough that the Parameters panel overflows and can scroll: the
+    // side bars run the window's full height, the bottom panel lying under
+    // the editors only.
+    let mut h = headless::harness(shell(), vec2(1280.0, 400.0));
     h.step();
     h.state_mut()
         .run("helios.params.focus", json!(null), Origin::User)
