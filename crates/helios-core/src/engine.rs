@@ -781,7 +781,21 @@ impl Engine {
         node: NodeId,
         region: Region,
     ) -> Result<Vec<NodeStatus>, Error> {
-        let step = self.plan(graph, node, 0, region, 1.0)?.root;
+        self.status_at(graph, node, region, 1.0)
+    }
+
+    /// [`Engine::status`] for a render at `scale` (`region` in the scaled
+    /// image's pixels, as [`Engine::render_at`] takes it): the viewport's
+    /// tiles are rendered so, below 100 %, and a status asked at full
+    /// size would never find what they computed.
+    pub fn status_at(
+        &self,
+        graph: &Graph,
+        node: NodeId,
+        region: Region,
+        scale: f64,
+    ) -> Result<Vec<NodeStatus>, Error> {
+        let step = self.plan(graph, node, 0, region, scale)?.root;
         let mut out = Vec::new();
         self.collect_status(graph, &step, &mut out)?;
         Ok(out)

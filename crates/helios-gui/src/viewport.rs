@@ -777,6 +777,12 @@ impl Viewport {
         self.after.shown()
     }
 
+    /// The part of the image (in the scaled image's pixels) and the scale
+    /// the render of what "after" shows last asked for.
+    pub fn rendered(&self) -> Option<(Region, f64)> {
+        self.stats.rendered(self.shown()?.graph.id())
+    }
+
     pub fn image_size(&self) -> Option<[u32; 2]> {
         self.after.size()
     }

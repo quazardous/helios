@@ -298,10 +298,12 @@ fn a_node_header_carries_the_engine_status() {
             .unwrap();
     }
     frames(&mut h);
+    // Done, or served from the cache when the viewport's tiles found
+    // what the render above computed.
+    let says =
+        |h: &Harness<'static, Shell>, text: &str| h.query_all_by_label(text).next().is_some();
     assert!(
-        !h.query_all_by_label("done · CPU")
-            .collect::<Vec<_>>()
-            .is_empty(),
+        says(&h, "done · CPU") || says(&h, "cached · CPU"),
         "no header says done"
     );
     std::fs::remove_dir_all(&root).unwrap();

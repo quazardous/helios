@@ -500,15 +500,25 @@ pub fn command_of(edit: &Edit) -> Option<(&'static str, Json)> {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Header {
     pub state: NodeState,
+    /// Done without computing anything for this render: served from what
+    /// the engine held (a cache hit, or a wider render cropped).
+    pub cached: bool,
     pub runs_on: String,
     /// The content key and the load, or why it failed.
     pub detail: String,
 }
 
-/// Every node's header for a render of `region`: the status of each
-/// node with what it reads (the last nodes first, so most come from one
-/// planning); a node that cannot be planned is failed, with the reason.
-pub fn statuses(engine: &Engine, graph: &Graph, region: Region) -> BTreeMap<String, Header> {
+/// Every node's header for a render of `region` at `scale` (`region` in
+/// the scaled image's pixels, as the viewport's tiles are rendered): the
+/// status of each node with what it reads (the last nodes first, so most
+/// come from one planning); a node that cannot be planned is failed,
+/// with the reason.
+pub fn statuses(
+    engine: &Engine,
+    graph: &Graph,
+    region: Region,
+    scale: f64,
+) -> BTreeMap<String, Header> {
     let mut out = BTreeMap::new();
     let ids: Vec<_> = graph.ids().collect();
     for id in ids.into_iter().rev() {
@@ -516,15 +526,16 @@ pub fn statuses(engine: &Engine, graph: &Graph, region: Region) -> BTreeMap<Stri
         if out.contains_key(name) {
             continue;
         }
-        match engine.status(graph, id, region) {
+        match engine.status_at(graph, id, region, scale) {
             Ok(list) => {
                 for s in list {
                     out.entry(s.name.clone()).or_insert_with(|| Header {
                         state: s.state,
+                        cached: s.state == NodeState::Done && s.load.computed == 0,
                         runs_on: s.runs_on.to_string(),
                         detail: format!(
-                            "{} ({} requests, {} computed)",
-                            s.key, s.load.requests, s.load.computed
+                            "{} ({} requests, {} computed, {} from the cache)",
+                            s.key, s.load.requests, s.load.computed, s.load.shared
                         ),
                     });
                 }
@@ -534,6 +545,7 @@ pub fn statuses(engine: &Engine, graph: &Graph, region: Region) -> BTreeMap<Stri
                     name.to_string(),
                     Header {
                         state: NodeState::Failed,
+                        cached: false,
                         runs_on: String::new(),
                         detail: e.to_string(),
                     },
@@ -557,9 +569,14 @@ fn state_text(ctx: &egui::Context, s: NodeState) -> String {
     crate::i18n::text(ctx, m)
 }
 
-/// A header's text: `done · CPU`.
+/// A header's text: `done · CPU`, `cached · CPU` when nothing was
+/// computed for this render.
 pub fn header_text(ctx: &egui::Context, h: &Header) -> String {
-    let state = state_text(ctx, h.state);
+    let state = if h.cached {
+        crate::i18n::text(ctx, Message::new("gui-graph-state-cached", "cached"))
+    } else {
+        state_text(ctx, h.state)
+    };
     if h.runs_on.is_empty() {
         state
     } else {
@@ -678,7 +695,10 @@ impl GraphPanel {
 
     /// The headers, read again a few times a second.
     fn follow_engine(&mut self, now: f64, viewport: &crate::viewport::Viewport) {
-        let Some(graph) = viewport.graph() else {
+        // The graph the viewport renders (a copy of the edit's, whose
+        // renders the engine counts), else the edit's.
+        let shown = viewport.shown().map(|s| s.graph);
+        let Some(graph) = shown.as_deref().or_else(|| viewport.graph()) else {
             self.headers.clear();
             return;
         };
@@ -689,8 +709,15 @@ impl GraphPanel {
             return;
         }
         self.headers_at = Some((graph.id(), now));
-        self.headers = match viewport.image_size() {
-            Some([w, h]) => statuses(viewport.engine(), graph, Region::sized(w, h)),
+        // What the viewport's tiles last asked for (a part of the image,
+        // below 100 % at their scale), else the whole image at full size.
+        let asked = viewport.rendered().or_else(|| {
+            viewport
+                .image_size()
+                .map(|[w, h]| (Region::sized(w, h), 1.0))
+        });
+        self.headers = match asked {
+            Some((region, scale)) => statuses(viewport.engine(), graph, region, scale),
             None => BTreeMap::new(),
         };
     }
@@ -1032,6 +1059,42 @@ mod tests {
             !net.connections
                 .iter()
                 .any(|k| k.from == "exposure" || k.to == "exposure")
+        );
+    }
+
+    #[test]
+    fn a_node_served_from_the_cache_says_so() {
+        let engine = Engine::new(Arc::new(helios_core::Bus::new()));
+        let mut g = Graph::new();
+        let full = Region::sized(32, 32);
+        let src = g.add_source(
+            "source",
+            helios_core::Image::from_fn(full, 4, |_, _, _| 0.5),
+        );
+        let exp = g
+            .add_module(
+                "exposure",
+                helios_core::ModuleRef::new(helios_module_exposure::Exposure),
+                &helios_core::Params::new(),
+            )
+            .unwrap();
+        g.connect(src, "image", exp, "input").unwrap();
+        assert_eq!(
+            statuses(&engine, &g, full, 1.0)["exposure"].state,
+            NodeState::Idle
+        );
+        engine.render(&g, exp, "output", full).unwrap();
+        let whole = &statuses(&engine, &g, full, 1.0)["exposure"];
+        assert_eq!((whole.state, whole.cached), (NodeState::Done, false));
+        // A tile inside what was rendered: nothing computed for it.
+        engine
+            .render(&g, exp, "output", Region::new(0, 0, 16, 16))
+            .unwrap();
+        let tile = &statuses(&engine, &g, Region::new(0, 0, 16, 16), 1.0)["exposure"];
+        assert_eq!(
+            (tile.state, tile.cached),
+            (NodeState::Done, true),
+            "{tile:?}"
         );
     }
 

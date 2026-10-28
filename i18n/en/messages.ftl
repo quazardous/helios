@@ -157,6 +157,8 @@ gui-graph-label = The workspace's network
 
 gui-graph-no-workspace = No workspace is open: its network shows here.
 
+gui-graph-state-cached = cached
+
 gui-graph-state-done = done
 
 gui-graph-state-failed = failed

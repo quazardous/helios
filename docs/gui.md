@@ -383,9 +383,13 @@ network.
   it (see [templates.md](templates.md), `positions`), else at its rank:
   a layered layout until the user moves it.
 - **Headers.** Each node's title bar carries the engine's status for
-  the image shown (`Engine::status` over the whole image): its state
-  (idle, stale, running, done, failed, waiting) in the state's colour
-  token and where it runs (`done · CPU`); its content key and load, or
+  the image shown (`Engine::status_at`), for the part of the image and
+  the scale the viewport's tiles last asked for (the whole image at full
+  size before any): its state (idle, stale, running, done, failed,
+  waiting) in the state's colour token and where it runs
+  (`done · CPU`); `cached` when the engine served it without computing
+  anything for that render (a cache hit, or a wider render cropped); its
+  content key and load (requests, computed, served from the cache), or
   why it failed, on hover.
 - **Levels and stacks.** The zoom picks egui-pop's levels: the
   overview, the ports, the detail (each node's number parameters as

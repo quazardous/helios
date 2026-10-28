@@ -141,6 +141,8 @@ gui-graph-label = Le réseau de l’espace de travail
 
 gui-graph-no-workspace = Aucun espace de travail n’est ouvert : son réseau s’affiche ici.
 
+gui-graph-state-cached = en cache
+
 gui-graph-state-done = fait
 
 gui-graph-state-failed = échec

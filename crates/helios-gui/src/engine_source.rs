@@ -67,6 +67,9 @@ pub struct Stats {
     pub readouts: AtomicU64,
     /// Jobs sent to the render threads, and jobs they are done with.
     jobs: Mutex<(u64, u64)>,
+    /// The part of the image each graph's render last asked for and its
+    /// scale, by graph (the newest few), for the graph view's headers.
+    rendered: Mutex<Vec<(u64, Region, f64)>>,
     idle: Condvar,
 }
 
@@ -101,6 +104,29 @@ impl Stats {
                 .0;
         }
         true
+    }
+
+    /// How many graphs [`Stats::rendered`] remembers.
+    const RENDERED: usize = 4;
+
+    fn render_of(&self, graph: u64, union: Region, scale: f64) {
+        let mut r = self.rendered.lock().unwrap_or_else(PoisonError::into_inner);
+        r.retain(|(g, _, _)| *g != graph);
+        r.push((graph, union, scale));
+        if r.len() > Self::RENDERED {
+            r.remove(0);
+        }
+    }
+
+    /// The part of the image (in the scaled image's pixels) and the scale
+    /// a graph's render last asked for, while it is among the newest.
+    pub fn rendered(&self, graph: u64) -> Option<(Region, f64)> {
+        self.rendered
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .find(|(g, _, _)| *g == graph)
+            .map(|(_, r, s)| (*r, *s))
     }
 
     /// A counter's value.
@@ -463,6 +489,7 @@ fn render(
             if live.is_empty() {
                 continue;
             }
+            stats.render_of(s.graph.id(), union, scale.get());
             if let Some(d) = device
                 && deliver_on_device(engine, d, s, (union, scale.get()), &live, sink, stats)
             {
