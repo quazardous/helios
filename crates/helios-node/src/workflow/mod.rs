@@ -246,7 +246,8 @@ pub fn item_id(path: &Path) -> String {
 }
 
 /// What a run keeps of the network it renders: each node with its
-/// module, parameters, bypass and inputs, in the network's order.
+/// module, parameters, bypass, whether it is answered (a decision) and
+/// inputs, in the network's order.
 pub fn snapshot(graph: &Graph) -> Value {
     let nodes: Vec<Value> = graph
         .ids()
@@ -263,6 +264,7 @@ pub fn snapshot(graph: &Graph) -> Value {
                 "module": manifest.map(|m| m.name),
                 "params": graph.params(id).ok().flatten(),
                 "bypassed": graph.is_bypassed(id).unwrap_or(false),
+                "answered": graph.is_answered(id).unwrap_or(true),
                 "inputs": inputs,
             })
         })

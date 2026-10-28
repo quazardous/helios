@@ -2,7 +2,7 @@
 //! batch endpoint every build serves: each item exported once by the node,
 //! re-submitting redoing nothing, output names fixed at submission, a
 //! transient failure retried, a permanent one not, and the workflow derived
-//! from a network with a decision.
+//! from a network with a decision, whose items wait while it is unanswered.
 
 #![cfg(unix)]
 
@@ -114,6 +114,12 @@ impl Node {
 
     /// The run, once finished; fails past the deadline with what it saw.
     fn finished(&self, run: &str) -> Value {
+        self.until(run, "finished", |r| r["state"] == "finished")
+    }
+
+    /// The run, once `ready` holds for it; fails past the deadline with
+    /// what it saw, saying what it waited for (`what`).
+    fn until(&self, run: &str, what: &str, ready: impl Fn(&Value) -> bool) -> Value {
         let start = Instant::now();
         loop {
             let runs = self.batch(&["workflow-runs"]);
@@ -122,12 +128,12 @@ impl Node {
                 .and_then(|r| r.iter().find(|r| r["id"] == run))
                 .cloned()
                 .unwrap_or(Value::Null);
-            if found["state"] == "finished" {
+            if ready(&found) {
                 return found;
             }
             assert!(
                 start.elapsed() < DEADLINE,
-                "run {run} not finished in {DEADLINE:?}: {runs}"
+                "run {run} not {what} in {DEADLINE:?}: {runs}"
             );
             std::thread::sleep(Duration::from_millis(100));
         }
@@ -281,10 +287,41 @@ fn the_workflow_of_a_network_with_a_decision_is_derived() {
     assert_eq!(workflow[0]["mode"], "full_ai");
     assert_eq!(workflow[1]["parents"], serde_json::json!(["bright"]));
     assert_eq!(workflow[1]["kind"], "export");
+    // The network has no answer for `bright`: no export could render, so
+    // the item waits for the answer and the export holds it, failing
+    // nothing.
+    let run = submitted["run"].as_str().unwrap().to_string();
+    let asking = node.until(&run, "asking at the decision", |r| {
+        r["nodes"]["bright"]["asking"] == 1
+    });
+    assert_eq!(asking["state"], "active", "{asking}");
+    assert_eq!(asking["nodes"]["exp"]["upstream"], 1, "{asking}");
+    assert_eq!(asking["nodes"]["exp"]["failed"], 0, "{asking}");
+    let page = node.batch(&["workflow-items", &run, "bright"]);
+    assert_eq!(page["items"][0]["state"], "asking", "{page}");
+}
+
+/// A decision the network answered (through the debug control endpoint)
+/// before the batch is submitted: the item goes through it to the export.
+#[cfg(debug_assertions)]
+#[test]
+fn an_answered_decision_lets_the_item_through_to_the_export() {
+    let node = Node::start("answered", DECIDED, true);
+    let answer = node.call(
+        "control",
+        "control.sock",
+        &["decision-decide", "bright", "exposure", "0.5"],
+    );
+    assert_eq!(answer["ok"], true, "{answer}");
+    let pic = node.picture("p.png");
+    let out = node.dir.join("out");
+    let submitted = node.submit(&out, &[&pic], &[]);
     let run = submitted["run"].as_str().unwrap().to_string();
     let done = node.finished(&run);
     assert_eq!(done["nodes"]["bright"]["done"], 1, "{done}");
     assert_eq!(done["nodes"]["exp"]["done"], 1, "{done}");
+    let items = node.items(&run);
+    assert!(Path::new(items[0]["output"].as_str().unwrap()).exists());
 }
 
 /// A fault is injected through the debug control endpoint only.

@@ -17,8 +17,11 @@
 //!    the node's retry, or for good when the file cannot be read as a
 //!    picture or does not fit the network), or cancelled.
 //!
-//! Decision nodes have no worker yet: their rows conclude `done` at once,
-//! the export rendering the network's decisions as they stand.
+//! Decision nodes have no worker yet. A decision the network had answered
+//! when the run was submitted concludes `done` at once, the export
+//! rendering that answer; one still unanswered would make every render
+//! fail, so its rows wait for an answer instead (`asking`), holding the
+//! export, until decision workers and their signals come.
 //!
 //! Every write is announced on the bus as `workflow.rows` (the rows it
 //! changed), and a run's life as `workflow.run` (created, extended,
@@ -1069,16 +1072,27 @@ impl Workflows {
             }
             let node = run.nodes[index].clone();
             match node.queue {
-                // No worker for decisions yet: the export renders them as
-                // the network answers them now.
+                // No worker for decisions yet: an answer the network had
+                // at submission is the item's; without one, the item waits
+                // for it (a render of an unanswered decision fails).
                 Queue::Decision { .. } => {
                     let items = run.candidates(index, now, usize::MAX);
                     if items.is_empty() {
                         continue;
                     }
+                    let answered = names(&run.graph)
+                        .get(&node.name)
+                        .is_some_and(|id| run.graph.is_answered(*id).unwrap_or(false));
                     let refs: Vec<&str> = items.iter().map(String::as_str).collect();
                     if let Ok(lease) = run.journal.claim(&node.name, refs.len(), &refs, now) {
-                        let _ = run.journal.conclude(&lease, Outcome::Done, now);
+                        let written = if answered {
+                            run.journal.conclude(&lease, Outcome::Done, now)
+                        } else {
+                            run.journal.wait(&lease, now)
+                        };
+                        if let Err(e) = written {
+                            eprintln!("helios-node: run {}: {e}", run.id);
+                        }
                         self.refresh(run, &node.name, &lease.items);
                     }
                 }
@@ -1291,7 +1305,8 @@ impl Workflows {
 /// Monitoring.
 impl Workflows {
     /// What a run says of itself, and per queueing node: the journal's
-    /// counts by status, plus `waiting` (claimable now), `upstream`, `held`
+    /// counts by status (a row waiting for a person counted as `asking`),
+    /// plus `waiting` (claimable now), `upstream`, `held`
     /// (behind a failure), the oldest waiting since, the concurrency and
     /// the leases out.
     fn summary(&self, run: &Run, leases: &BTreeMap<u64, Held>, now: u64) -> Value {
@@ -1314,6 +1329,10 @@ impl Workflows {
                     })
                     .min();
                 if let Some(map) = out.as_object_mut() {
+                    // The journal's `waiting` rows wait for a person: named
+                    // `asking` here, `waiting` being what can be claimed.
+                    let asking = map.remove("waiting").unwrap_or(json!(0));
+                    map.insert("asking".into(), asking);
                     map.insert("waiting".into(), json!(count(&|p| p.claimable(now))));
                     map.insert("upstream".into(), json!(count(&|p| p == Place::Upstream)));
                     map.insert("held".into(), json!(count(&|p| p == Place::Held)));
