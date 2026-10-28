@@ -319,11 +319,81 @@ fn pixels_read_through_their_profile_give_back_the_colours() {
 }
 
 #[test]
-fn colours_outside_the_space_are_clipped_per_channel() {
-    // No gamut mapping yet: Rec.2020 red leaves sRGB at full red.
-    let bytes = encode_in(&chart(), &Format::Png { bits: 16 }, OutputSpace::Srgb).unwrap();
-    let decoded = image::load_from_memory(&bytes).unwrap().to_rgb16();
-    assert_eq!(decoded.get_pixel(3, 0).0[0], 65535);
+fn colours_outside_the_space_are_mapped_alike_in_every_format() {
+    // Linear Rec.2020 colours outside sRGB, Display P3 and Adobe RGB (the
+    // primaries and secondaries, a bright orange, a highlight above
+    // white, a negative blue), in flat 16 x 16 patches so that JPEG's
+    // blocks see one colour each. Every format holds what the one gamut
+    // mapping gives, encoded with the space's curve.
+    const SIDE: u32 = 16;
+    let colours: [[f64; 3]; 9] = [
+        [1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [0.0, 0.0, 1.0],
+        [1.0, 1.0, 0.0],
+        [0.0, 1.0, 1.0],
+        [1.0, 0.0, 1.0],
+        [0.9, 0.3, 0.0],
+        [1.6, 1.2, 0.9],
+        [0.2, 0.3, -0.1],
+    ];
+    let image = Image::from_fn(
+        Region::sized(colours.len() as u32 * SIDE, SIDE),
+        3,
+        |x, _, c| colours[(x / i64::from(SIDE)) as usize][c as usize] as f32,
+    );
+    for space in [
+        OutputSpace::Srgb,
+        OutputSpace::DisplayP3,
+        OutputSpace::AdobeRgb,
+    ] {
+        let map = space.gamut_map();
+        let want: Vec<[f64; 3]> = colours
+            .iter()
+            .map(|c| {
+                // The working image holds f32: map what it holds.
+                let held = c.map(|v| f64::from(v as f32));
+                map.map(held).map(|v| space.encode(v))
+            })
+            .collect();
+        // The values the file holds, over [0, 1], at each patch's centre.
+        let read = |format: &Format| -> Vec<[f64; 3]> {
+            let bytes = encode_in(&image, format, space).unwrap();
+            let decoded = image::load_from_memory(&bytes).unwrap().to_rgb16();
+            (0..colours.len() as u32)
+                .map(|i| {
+                    let p = decoded.get_pixel(i * SIDE + SIDE / 2, SIDE / 2).0;
+                    p.map(|v| f64::from(v) / 65535.0)
+                })
+                .collect()
+        };
+        // Tolerances: the rounding of 16 and 8 bits, and JPEG's quantising
+        // at quality 100 on top of 8 bits.
+        for (format, tolerance) in [
+            (Format::Png { bits: 16 }, 0.6 / 65535.0),
+            (Format::Tiff, 0.6 / 65535.0),
+            (Format::Png { bits: 8 }, 0.6 / 255.0),
+            (Format::Jpeg { quality: 100 }, 4.0 / 255.0),
+        ] {
+            let got = read(&format);
+            for (i, (g, w)) in got.iter().zip(&want).enumerate() {
+                assert!(
+                    g.iter().zip(w).all(|(g, w)| (g - w).abs() <= tolerance),
+                    "{format:?} in {space:?}, colour {:?}: {g:?} for {w:?}",
+                    colours[i]
+                );
+            }
+        }
+        // Not a per-channel clip: Rec.2020 red needs a channel that
+        // clipping leaves at 0 to hold its hue.
+        let m = space.from_rec2020();
+        let clipped = m.map(|row| space.encode(row[0].clamp(0.0, 1.0)));
+        let red = want[0];
+        assert!(
+            (0..3).any(|c| clipped[c] == 0.0 && red[c] > 0.1),
+            "{space:?}: {red:?} where clipping gives {clipped:?}"
+        );
+    }
 }
 
 #[test]

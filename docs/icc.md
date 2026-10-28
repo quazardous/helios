@@ -269,3 +269,41 @@ What the second step built (`helios-colour`'s `InputSpace`, used by
 - Untagged pictures and raw previews now use the sRGB matrix derived from
   the xy primaries, the same as the exports, instead of the rounded
   0.4124564 one (a difference under 2.5e-4).
+
+What the third step built (`helios-colour`'s `GamutMap`, used by
+`helios-export`): the one gamut mapping.
+
+- **Method: chroma reduction toward the neutral axis in Oklab**, the way
+  CSS Color 4 maps colours for the web. A colour inside the output space is
+  left exactly as it is (the mapping is colorimetric wherever it can be:
+  exports keep matching their profile). A colour outside moves along a
+  straight line in Oklab toward the grey of its own lightness, keeping its
+  Oklab hue, to the last point of the line inside the space; what the
+  search leaves outside (a few parts in a billion) is clipped. A colour
+  lighter than white goes to white, one darker than black to black. NaN
+  counts as 0 and infinities as very large, so the result is always finite.
+- Why this one: per-channel clipping, what exports did until now, shifts
+  hue and lightness (darktable's pitfall 6). A soft compression that
+  starts inside the gamut (ACES-style) would also move colours the file can
+  hold, so an export would no longer say exactly what its profile tags. A
+  constant-lightness, constant-hue reduction keeps both, is monotonic (more
+  chroma in never gives less out; CSS's "close enough, clip" shortcut is
+  left out for that reason), and is a published, widely used method.
+  Oklab rather than CIELAB: its hue lines stay straight in the blues,
+  where CIELAB turns them purple.
+- Oklab's first matrix is scaled so that the D65 white Helios derives from
+  its xy lands on the neutral axis exactly (a 1e-4 change from the
+  published matrix, fitted to a white rounded differently).
+- **One intent, no setting.** It is the only rendering Helios does at
+  output, so no intent is offered that the engine would not implement
+  (pitfall 6). A choice of method can be added later if a need shows up.
+- Used by every export path: JPEG, PNG (8 and 16 bits), TIFF, and the
+  clipboard's images, all through the same conversion.
+- **Not yet on screen.** The viewport, the library's thumbnails and the
+  mask display still clip each channel to sRGB: the screen side waits for a
+  per-window display target, and then takes the same `GamutMap` with that
+  display's space as its destination.
+- Tests: colours inside unchanged, colours outside land inside, Oklab hue
+  within 0.01 rad and lightness within 1e-4, chroma monotonic along ramps
+  of constant lightness and hue, finite results for NaN, infinities and
+  huge values, and every export format holding the same mapped values.

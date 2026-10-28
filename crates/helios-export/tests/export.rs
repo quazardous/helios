@@ -48,10 +48,11 @@ fn png16_holds_srgb_encoded_values() {
         "middle grey encodes near 46 %, got {grey}"
     );
     let red = decoded.get_pixel(3, 0).0;
-    assert_eq!(
-        (red[0], red[1]),
-        (65535, 0),
-        "Rec.2020 red is out of sRGB: clipped, green at 0"
+    // Rec.2020 red is out of sRGB: brought inside at its hue and
+    // lightness, so green and blue rise a little instead of staying at 0.
+    assert!(
+        red[0] > 65000 && (1000..30000).contains(&red[1]) && (1000..30000).contains(&red[2]),
+        "Rec.2020 red is mapped, not clipped: {red:?}"
     );
 }
 

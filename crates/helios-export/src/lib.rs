@@ -85,7 +85,7 @@ fn to_space(image: &Image, space: OutputSpace) -> Result<Vec<f64>, Message> {
         )
         .with("channels", channels));
     }
-    let m = space.from_rec2020();
+    let gamut = space.gamut_map();
     let mut out = Vec::with_capacity(image.region().area() * 3);
     for pixel in image.data().chunks_exact(channels) {
         let rgb = if channels == 1 {
@@ -97,10 +97,11 @@ fn to_space(image: &Image, space: OutputSpace) -> Result<Vec<f64>, Message> {
                 f64::from(pixel[2]),
             ]
         };
-        // Each channel is clamped to the file's range on its own: no gamut
-        // mapping yet.
-        for v in helios_colour::apply(&m, rgb) {
-            out.push(space.encode(v.clamp(0.0, 1.0)));
+        // Colours the space cannot hold are brought inside keeping their
+        // hue and lightness (Helios's one gamut mapping), not clipped
+        // channel by channel.
+        for v in gamut.map(rgb) {
+            out.push(space.encode(v));
         }
     }
     Ok(out)

@@ -141,8 +141,11 @@ per-channel clamp, no ICC written), `crates/helios-load/src/lib.rs`
   https://github.com/darktable-org/darktable/issues/12047
   https://github.com/darktable-org/darktable/issues/14652
   https://github.com/darktable-org/darktable/pull/16917
-- Helios exposure: at risk. Both the viewport (`display()`, the shader) and
-  `helios-export::to_srgb` clamp each channel to [0, 1] after the matrix.
+- Helios exposure: half done (2026-10-28). Exports go through one gamut
+  mapping, `helios-colour`'s `GamutMap` (chroma reduction toward the neutral
+  axis in Oklab, see `docs/icc.md`); the viewport (`display()`, the shader)
+  still clamps each channel to [0, 1] after the matrix, until it has a
+  per-window display target to map into.
 - Recommendation: decide explicitly (ROADMAP, dated) where gamut mapping
   lives: an explicit, visible gamut-compression node before output (and the
   same function in the viewport so screen = file), with per-channel clamp only
