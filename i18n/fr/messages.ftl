@@ -163,6 +163,8 @@ gui-graph-wires-orthogonal = Orthogonales
 
 gui-graph-wires-straight = Droites
 
+gui-history-batch = { $label } ({ $count } valeurs)
+
 gui-job-batch-done = Lot terminé
 
 gui-job-batch-failed = Échec du lot

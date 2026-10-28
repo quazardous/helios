@@ -587,3 +587,80 @@ fn an_agent_reads_and_walks_the_desktop_s_history_each_step_with_its_place() {
     assert!(failed, "{stale}");
     let _ = std::fs::remove_dir_all(&root);
 }
+
+fn last_step(h: &Harness<'static, Shell>) -> helios_values::Step {
+    h.state()
+        .values
+        .lock()
+        .unwrap()
+        .undo_steps()
+        .last()
+        .cloned()
+        .unwrap()
+}
+
+/// The workspace's description set by an agent, under a `group` name or
+/// none: the tool's answer.
+fn describe_as_agent(
+    h: &mut Harness<'static, Shell>,
+    dir: &Path,
+    config: &Path,
+    text: &str,
+    group: Value,
+) -> Value {
+    let (failed, answer) = through(
+        h,
+        "helios_workspace_edit",
+        args(
+            dir,
+            config,
+            &json!({ "changes": { "description": text }, "group": group }),
+        ),
+    );
+    assert!(!failed, "{answer}");
+    answer
+}
+
+#[test]
+fn an_agent_s_requests_are_its_steps_grouped_by_the_name_it_gives() {
+    let root = temp("agent-groups");
+    let (mut h, config, dir, _) = window(&root);
+    let start = description(&h);
+    let before = steps(&h);
+    // Two calls under one name: one step, labelled with it, the agent's.
+    let a = describe_as_agent(&mut h, &dir, &config, "One", json!("Describe"));
+    let b = describe_as_agent(&mut h, &dir, &config, "Two", json!("Describe"));
+    assert!(a["group"].is_u64(), "{a}");
+    assert_eq!(a["group"], b["group"]);
+    assert_eq!(steps(&h), before + 1);
+    assert_eq!(last_step(&h).label, "Describe");
+    assert_eq!(last_step(&h).origin, Origin::Agent("mcp".into()));
+    assert_eq!(last_step(&h).group, a["group"].as_u64());
+    // Without a name, each call is a step of its own, under its own label.
+    let c = describe_as_agent(&mut h, &dir, &config, "Three", Value::Null);
+    assert_ne!(c["group"], b["group"]);
+    assert_eq!(steps(&h), before + 2);
+    assert_ne!(last_step(&h).label, "Describe");
+    // A read changes nothing and names no group.
+    let (failed, state) = through(
+        &mut h,
+        "helios_workspace_state",
+        args(&dir, &config, &json!({})),
+    );
+    assert!(!failed, "{state}");
+    assert!(state.get("group").is_none(), "{state}");
+    // The History panel's line gives each step its group and origin.
+    let (failed, read) = through(
+        &mut h,
+        "helios_history_read",
+        args(&dir, &config, &json!({ "scope": "edit" })),
+    );
+    assert!(!failed, "{read}");
+    let line = read["undo"].as_array().unwrap();
+    assert_eq!(line[line.len() - 2]["group"], a["group"], "{read}");
+    // One undo takes the named batch back whole.
+    undo(&mut h);
+    undo(&mut h);
+    assert_eq!(description(&h), start);
+    let _ = std::fs::remove_dir_all(&root);
+}

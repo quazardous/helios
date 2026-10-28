@@ -235,6 +235,17 @@ progress refuses an agent's undo too. Through MCP,
 desktop holding the workspace open, run there as the agent; without
 such a desktop they are refused, the histories living in its window.
 
+**An agent's requests are its steps.** Each MCP request the desktop
+answers for an agent (a `helios_workspace_*`, network, sub-workspace or
+paste tool) is one group of the value store
+(`helios_values::Store::begin_request`): what it changes is one undo
+step, the agent's, so the History panel names it ("… (agent:mcp)") and
+gives it its group (`group` in `history.read`). An agent that passes the
+same `group` name to several calls makes them one step, labelled with
+that name, while no other step comes between; a step that changed
+several values says how many ("Retouch skin (3 values)"). The answer of
+a request that changed something carries its `group` number.
+
 ## Settings pages
 
 Settings pages are generated, never laid out by hand: a setting named

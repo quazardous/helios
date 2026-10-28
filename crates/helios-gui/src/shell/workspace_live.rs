@@ -453,10 +453,20 @@ impl Shell {
         if held.is_none() || held != named {
             return gone();
         }
-        match self.agent_workspace(request) {
+        // The request is one group of the desktop's undo: what the agent
+        // changes through it is one step, the agent's, labelled with the
+        // name it gave, if any.
+        let name = request["group"].as_str().filter(|g| !g.trim().is_empty());
+        lock(&self.values).begin_request(Origin::Agent(AGENT.into()), name);
+        let answer = self.agent_workspace(request);
+        let group = lock(&self.values).end_request();
+        match answer {
             Ok(mut answer) => {
                 if let Some(o) = answer.as_object_mut() {
                     o.insert("via".into(), json!("desktop"));
+                    if let Some(g) = group {
+                        o.insert("group".into(), json!(g));
+                    }
                 }
                 json!({ "ok": true, "answer": answer })
             }

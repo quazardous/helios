@@ -179,6 +179,8 @@ gui-graph-wires-orthogonal = Orthogonal
 
 gui-graph-wires-straight = Straight
 
+gui-history-batch = { $label } ({ $count } values)
+
 gui-image-not-reopened = The image left open could not be opened again: { $error }
 
 gui-image-opened = { $name } is open

@@ -17,7 +17,12 @@
 //! - **A gesture in progress** (a drag) refuses undo, redo and jump until
 //!   it ends; a value held by another origin's gesture refuses them too.
 //! - **Groups** are the store's groups: what an origin writes in one is a
-//!   single step.
+//!   single step. An agent's request (a tool call, or the calls it names
+//!   with one `group`) is a group of the store's too
+//!   ([`helios_values::Store::begin_request`]): its step carries the
+//!   group's number ([`StepInfo::group`]) and the agent as its origin,
+//!   which the History panel names after the label; a step that changed
+//!   several values says how many.
 //! - **The place** of each step is the context stack's place it was made
 //!   in (the store's [`helios_values::Store::set_place`], which
 //!   `crate::contexts::follow_place` keeps on the place shown): an undo,
@@ -33,6 +38,7 @@ use egui_pop::api::history::{
 };
 use egui_pop::model::commands::Origin as PopOrigin;
 use egui_pop::model::ids::FrameId;
+use helios_core::Message;
 use helios_values::{GestureId, Refused, Step, Store};
 
 use crate::host::{to_helios, to_pop};
@@ -104,7 +110,8 @@ impl HeliosHistory {
 
 /// A step of the store as egui-pop sees it, numbered `id`.
 fn step_info(id: u64, step: &Step) -> StepInfo {
-    let mut info = StepInfo::new(id, EDIT, Label::text(&step.label), to_pop(&step.origin));
+    let mut info = StepInfo::new(id, EDIT, label_of(step), to_pop(&step.origin));
+    info.group = step.group;
     info.place = step
         .place
         .iter()
@@ -116,6 +123,28 @@ fn step_info(id: u64, step: &Step) -> StepInfo {
         })
         .collect();
     info
+}
+
+/// A step's label: an agent's batch that changed several values says
+/// how many, in the interface's language.
+fn label_of(step: &Step) -> Label {
+    let n = step.paths().len();
+    if step.group.is_none() || n < 2 {
+        return Label::text(&step.label);
+    }
+    let count = n.to_string();
+    let m = Message::new("gui-history-batch", "{ $label } ({ $count } values)")
+        .with("label", step.label.clone())
+        .with("count", count.clone());
+    Label {
+        text: m.english.clone(),
+        key: Some(m.key),
+        args: [
+            ("label".to_string(), step.label.clone()),
+            ("count".to_string(), count),
+        ]
+        .into(),
+    }
 }
 
 /// The store's steps as a line: undo steps numbered from 1, oldest
@@ -372,6 +401,38 @@ mod tests {
             panic!("jumped");
         };
         assert_eq!(w.steps.last().unwrap().place.len(), 1);
+    }
+
+    #[test]
+    fn an_agent_s_request_is_one_step_with_its_group_and_origin() {
+        let values = store();
+        values
+            .lock()
+            .unwrap()
+            .declare("node/black", Descriptor::float("Black", -1.0, 1.0, 0.0));
+        let agent = helios_shell::commands::Origin::Agent("retouch".into());
+        let g = {
+            let mut s = values.lock().unwrap();
+            let g = s.begin_request(agent.clone(), Some("Retouch skin"));
+            for (path, v) in [("node/exposure", 0.5), ("node/black", -0.1)] {
+                s.set(Set::new(path, Change::To(Value::Float(v)), agent.clone()))
+                    .unwrap();
+            }
+            assert_eq!(s.end_request(), Some(g));
+            g
+        };
+        set(&values, 1.0);
+        let h = HeliosHistory::new(values.clone());
+        let line = h.line(&EDIT).unwrap();
+        assert_eq!(line.undo.len(), 2);
+        let batch = &line.undo[0];
+        assert_eq!(batch.group, Some(g));
+        assert_eq!(batch.origin, PopOrigin::Agent("retouch".into()));
+        assert_eq!(batch.label.key.as_deref(), Some("gui-history-batch"));
+        assert_eq!(batch.label.text, "Retouch skin (2 values)");
+        // The user's write is no group, its label as the store has it.
+        assert_eq!(line.undo[1].group, None);
+        assert_eq!(line.undo[1].label.key, None);
     }
 
     #[test]

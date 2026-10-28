@@ -19,7 +19,9 @@
 //! each step undone by `helios_workspace_undo`. When a desktop holds the
 //! workspace open (it says so among the workspace's files,
 //! `workspace::HOLDER`), the request goes to it: the edit is one step of
-//! its Edit > Undo, seen at once, and its next save keeps it. Otherwise
+//! its Edit > Undo, the agent's, seen at once, and its next save keeps it;
+//! the calls the agent gives one `group` name are one step labelled with
+//! it (the answer carries the group's number). Otherwise
 //! they work on the workspace's files (`helios_template::workspace::tools`),
 //! which a desktop opening the workspace later reads, and one that has
 //! it open without having said so takes in as an undo step. Each answer
@@ -386,6 +388,12 @@ const HISTORY_IF_REV: Param = optional(
     "Refused unless the history is still at this revision (from helios_history_read)",
 );
 
+const GROUP: Param = optional(
+    "group",
+    optional_string,
+    "A name for this request's changes on the desktop: calls with the same name make one undo step, labelled with it, while no other step comes between; each call is its own step when null",
+);
+
 const SOURCE: Param = Param {
     name: "source",
     schema: string,
@@ -430,6 +438,7 @@ pub const TOOLS: &[Tool] = &[
                 description: "The parts changed: name, description, icon, network, tools, library (null for none), layout",
                 default: None,
             },
+            GROUP,
             DRY_RUN,
             CONFIG,
         ],
@@ -439,7 +448,7 @@ pub const TOOLS: &[Tool] = &[
         endpoint: Endpoint::Workspace,
         cmd: "workspace.reset",
         description: "Resets a workspace to the template it was made from, as one undoable step; its name, description and icon stay",
-        params: &[WORKSPACE, DRY_RUN, CONFIG],
+        params: &[WORKSPACE, GROUP, DRY_RUN, CONFIG],
     },
     Tool {
         name: "helios_workspace_import_parts",
@@ -461,6 +470,7 @@ pub const TOOLS: &[Tool] = &[
                 description: "The side kept for each conflict, by its id (view, panel:<id>, key:<keys>, library): ours or theirs",
                 default: Some(empty_object),
             },
+            GROUP,
             DRY_RUN,
             CONFIG,
         ],
@@ -484,6 +494,7 @@ pub const TOOLS: &[Tool] = &[
                 description: "Nodes of the network (a node's name, or an opened composite's inner node: retouch.mask)",
                 default: None,
             },
+            GROUP,
             DRY_RUN,
             CONFIG,
         ],
@@ -501,6 +512,7 @@ pub const TOOLS: &[Tool] = &[
                 description: "The sub-workspace's id",
                 default: None,
             },
+            GROUP,
             DRY_RUN,
             CONFIG,
         ],
@@ -733,6 +745,7 @@ pub const TOOLS: &[Tool] = &[
                 "Refused unless the clipboard is still at this revision",
             ),
             SLOT,
+            GROUP,
             DRY_RUN,
             CONFIG,
         ],
