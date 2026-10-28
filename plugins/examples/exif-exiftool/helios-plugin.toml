@@ -9,7 +9,7 @@ services = ["metadata.read"]
 activation = ["onService:metadata.read", "onCommand:exiftool.version"]
 
 [compat]
-helios = ">=0.37.0, <0.38.0"
+helios = ">=0.38.0, <0.39.0"
 interfaces = { protocol = 1, "metadata.read" = 1 }
 
 [[commands]]

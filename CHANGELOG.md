@@ -24,6 +24,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.38.0] - 2026-10-28
+
+### Added
+
+- A History panel lists the edit's undo steps, newest at the bottom, the
+  steps a redo would bring back muted, an agent's named with its origin; a
+  click goes back or forward to that step. It sits in the end side bar,
+  closed until opened from the command palette. Agents read and walk the same history
+  through the new `helios_history_*` MCP tools.
+- JPEG, PNG and TIFF pictures now open in the colour space they are tagged
+  with (an embedded ICC profile, PNG's colour chunks, or a camera's Adobe RGB
+  setting), so their colours are no longer shifted. Untagged pictures are
+  still read as sRGB, and the load report says so; a broken profile does not
+  stop the load, the report gives the reason.
+- A batch kept in a vault now survives its node: started again after a
+  crash, the node finishes the batch without writing any file twice, and a
+  second node on the same vault takes over the batches of one that died.
+  Finished batches are removed after 30 days (`system.workflow.keep_days`),
+  or at once with `helios control workflow-forget`.
+- An undo, a redo or a jump that takes back a change made in another place
+  (the library, the darkroom, a workspace's network) says where in a toast,
+  "Undone in <place>", with Go there to go back to it.
+
+### Changed
+
+- Colours an export's colour space cannot hold (for instance the most
+  saturated reds and greens of a wide-gamut edit, exported to sRGB) now keep
+  their hue and lightness and lose only saturation, instead of each channel
+  being clipped on its own, which shifted hues. Colours the space can hold
+  are written unchanged.
+
 ## [0.37.0] - 2026-10-28
 
 ### Added
