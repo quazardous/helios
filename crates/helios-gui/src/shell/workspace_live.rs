@@ -522,7 +522,7 @@ impl Shell {
             }
             "workspace.undo" => self.agent_undo(&origin),
             cmd if cmd.starts_with("context.") => {
-                crate::contexts::agent_tool(self.app.handle(), request, AGENT)
+                crate::contexts::agent_tool(self.app.handle(), &self.subworkspaces, request, AGENT)
             }
             cmd if cmd.starts_with("clipboard.") => self.agent_clipboard(cmd, request, &origin),
             cmd if cmd.starts_with("history.") => self.agent_history(cmd, request),

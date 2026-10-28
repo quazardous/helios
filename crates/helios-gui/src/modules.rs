@@ -1,7 +1,7 @@
 //! The Modules panel, and bypassing a module.
 //!
 //! - **The panel** lists the modules of the network shown, in the order
-//!   they were added: a row selects its module (`view/graph/selection`,
+//!   they were added (inside a sub-workspace, its modules only): a row selects its module (`view/graph/selection`,
 //!   what the Parameters and Masks panels follow), and its Bypass toggle
 //!   bypasses it or brings it back.
 //! - **A bypass** is a value of the store, `bypass/<node>`
@@ -47,13 +47,17 @@ pub struct Row {
 }
 
 /// The modules of `graph`, in the order they were added, with their
-/// bypass as the store holds it.
+/// bypass as the store holds it; inside a sub-workspace (the store's
+/// scope), its modules only.
 pub fn rows(graph: &Graph, store: &Store) -> Vec<Row> {
     graph
         .ids()
         .filter_map(|id| {
             let manifest = graph.manifest(id).ok()??;
             let node = graph.name(id).ok()?.to_string();
+            if !store.in_scope(&node) {
+                return None;
+            }
             let bypassed = store
                 .get(&bypass_path(&node))
                 .and_then(|e| e.value.as_bool());
@@ -113,20 +117,31 @@ pub fn ui(ui: &mut Ui, viewport: &RefCell<crate::viewport::Viewport>, values: &M
     // Named, to be pictured and found by tests.
     crate::name_rect(&ctx, PANEL, ui.max_rect());
     let tr = |m: Message| crate::i18n::text(&ctx, m);
-    let (rows, selection) = {
+    let (rows, selection, scope) = {
         let store = values.lock().unwrap_or_else(PoisonError::into_inner);
         let rows = viewport
             .borrow()
             .graph()
             .map(|g| rows(g, &store))
             .unwrap_or_default();
-        (rows, selected(&store))
+        (
+            rows,
+            selected(&store),
+            store.scope().map(|s| s.name.clone()),
+        )
     };
     if rows.is_empty() {
-        ui.weak(tr(Message::new(
-            "gui-modules-none",
-            "No module: open an image to see its network's modules",
-        )));
+        ui.weak(tr(match scope {
+            Some(name) => Message::new(
+                "gui-modules-none-in-scope",
+                "No module of the sub-workspace { $name } in the image's network",
+            )
+            .with("name", name),
+            None => Message::new(
+                "gui-modules-none",
+                "No module: open an image to see its network's modules",
+            ),
+        }));
         return;
     }
     let mut select = None;

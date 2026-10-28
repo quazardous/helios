@@ -2,7 +2,7 @@
 //! default layer of egui-pop's keymap, every binding scoped by a `when`
 //! clause; [`crate::keymaps`] adds packages over it.
 
-use crate::contexts::{CULLING, DARKROOM, ORIENTATION};
+use crate::contexts::{CULLING, DARKROOM, ORIENTATION, SUBWORKSPACE};
 
 /// While the library has the focus (its grid, the filmstrip or Compare),
 /// anywhere but the darkroom: as in darktable's lighttable. egui-pop
@@ -28,6 +28,18 @@ pub fn image() -> String {
 /// In the darkroom.
 pub fn darkroom() -> String {
     format!("place == '{DARKROOM}'")
+}
+
+/// While the network's graph has the focus, not culling (whose keys
+/// are the vault's everywhere).
+pub fn graph() -> String {
+    format!("focusedPanel == 'helios.graph' && mode.{ORIENTATION} != '{CULLING}'")
+}
+
+/// Inside a sub-workspace, the graph focused: the sub-workspace's own
+/// keymap layer.
+pub fn subworkspace() -> String {
+    format!("place == '{SUBWORKSPACE}' && {}", graph())
 }
 
 /// In the darkroom, or wherever the image has the focus: its zoom.
@@ -120,6 +132,11 @@ pub fn defaults() -> Vec<(String, String, String)> {
     ] {
         bind(k, command, &viewport);
     }
+    // Sub-workspaces, in the graph, as Houdini goes in and out of a
+    // network: I enters the one holding the selected node, U goes up
+    // (inside one only: its own layer).
+    bind("I", "subworkspace.enter", &graph());
+    bind("U", "nav.up", &subworkspace());
     // Navigation, everywhere (egui-pop adds the palette, settings, back,
     // full screen, undo and quit).
     bind("Ctrl+P", crate::quick_open::COMMAND, "");

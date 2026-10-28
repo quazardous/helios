@@ -29,7 +29,8 @@
 //!
 //! The `helios_context_*` tools are egui-pop's `context.*` commands for a
 //! workspace: they read its places and modes (the library, the darkroom
-//! on an image, its network; culling, mask editing, compare) and move
+//! on an image, its network, a sub-workspace; culling, mask editing,
+//! compare) and move
 //! them, through the same machine and frames as the desktop
 //! (`helios_template::contexts`), each with `if_rev` and a dry run. Like
 //! the workspace tools they go to the desktop holding the workspace,
@@ -730,7 +731,7 @@ pub const TOOLS: &[Tool] = &[
         name: "helios_context_read",
         endpoint: Endpoint::Workspace,
         cmd: "context.read",
-        description: "A workspace's places and modes (the desktop's that has it open, else what a desktop opening it comes back to): the place path (the library, the darkroom on an image, its network), the modes on (culling, mask editing, compare), the revision, and every frame it may hold",
+        description: "A workspace's places and modes (the desktop's that has it open, else what a desktop opening it comes back to): the place path (the library, the darkroom on an image, its network, a sub-workspace), the modes on (culling, mask editing, compare), the revision, every frame it may hold, and its sub-workspaces (`id`, `name`, `parent`)",
         params: &[WORKSPACE, CONFIG],
     },
     Tool {
@@ -759,7 +760,7 @@ pub const TOOLS: &[Tool] = &[
         name: "helios_context_go",
         endpoint: Endpoint::Workspace,
         cmd: "context.go",
-        description: "Goes to a place path of a workspace: `places`, each a `frame` (helios.library, helios.darkroom, helios.workspace) with its `payload` (the darkroom's {\"image\": id} or {\"file\": path}, the workspace's key)",
+        description: "Goes to a place path of a workspace: `places`, each a `frame` (helios.library, helios.darkroom, helios.workspace, helios.sub-workspace) with its `payload` (the darkroom's {\"image\": id} or {\"file\": path}, the workspace's key, a sub-workspace's {\"id\": id} under its parent's)",
         params: &[
             WORKSPACE,
             Param {

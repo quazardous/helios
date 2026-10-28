@@ -39,6 +39,11 @@ pub const LIBRARY: &str = helios_template::contexts::LIBRARY_ARRANGEMENT;
 /// and parameters beside it, every other panel closed.
 pub const NETWORK: &str = helios_template::contexts::NETWORK_ARRANGEMENT;
 
+/// A sub-workspace's arrangement: the network's (its nodes in the
+/// centre, the modules and parameters beside it), kept apart so a change
+/// made inside sub-workspaces stays theirs.
+pub const SUBWORKSPACE: &str = helios_template::contexts::SUBWORKSPACE_ARRANGEMENT;
+
 /// The darkroom's arrangement: the workspace's default layout (each
 /// panel open by default in its own area), the image shown in the
 /// centre.
@@ -84,6 +89,7 @@ impl Plugin for Panels {
         ctx.arrangement(IMAGE_FIRST, image_first(&self.specs));
         ctx.arrangement(LIBRARY, library(&self.specs));
         ctx.arrangement(NETWORK, network(&self.specs));
+        ctx.arrangement(SUBWORKSPACE, network(&self.specs));
         ctx.arrangement(DARKROOM, darkroom(&self.specs));
         Ok(())
     }

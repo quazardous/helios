@@ -337,6 +337,9 @@ command-scopes-waveform =
 command-subworkspace-delete =
     .title = Delete a sub-workspace, its nodes kept in the network (`id`, `dry_run`)
 
+command-subworkspace-enter =
+    .title = Enter a sub-workspace: its nodes only, shown and edited (`id`; without it, the one holding the selected node)
+
 command-theme-exportMerged =
     .title = Export the theme in use, overrides merged
 
@@ -473,10 +476,10 @@ command-workbench-palette =
     .title = Show all commands
 
 command-workbench-quickOpen =
-    .title = Go to a module, an image or a workspace
+    .title = Go to a module, a sub-workspace, an image or a workspace
 
 command-workbench-quickOpen-go =
-    .title = Go to what quick open offers (`item`: module:<node>, image:<id> or workspace:<path>)
+    .title = Go to what quick open offers (`item`: module:<node>, subworkspace:<id>, image:<id> or workspace:<path>)
 
 command-workbench-quit =
     .title = Quit Helios

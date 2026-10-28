@@ -45,6 +45,9 @@ frame-helios-library =
 frame-helios-mask-editing =
     .title = Mask editing
 
+frame-helios-sub-workspace =
+    .title = Sub-workspace
+
 frame-helios-workspace =
     .title = Network
 

@@ -1,6 +1,6 @@
 //! Helios's places and modes on egui-pop's context stack (its ADR 0012):
 //! where the user is (the library, the darkroom on an image, the
-//! workspace's network) and how the window behaves (culling, mask
+//! workspace's network, one of its sub-workspaces) and how the window behaves (culling, mask
 //! editing, compare), each with its arrangement or its panels, its keys,
 //! egui-pop's breadcrumb and mode chips at the start of the status bar
 //! (Helios's own items following the place, `crate::status_items`), and
@@ -13,6 +13,14 @@
 //! against today's frames and what still exists ([`stack`]): a darkroom
 //! whose image is gone, or another workspace's network, is cut, and a
 //! toast says so.
+//!
+//! A sub-workspace ([`SUBWORKSPACE`], `{"id": id}`) is entered under its
+//! parent's place ([`enter_subworkspace`]), named by its name, from the
+//! workspace's state the shell keeps in [`Subworkspaces`]. Inside it, the
+//! value store's scope is its nodes ([`follow_place`]): the panels show
+//! them only and a write to another node is refused. One deleted while
+//! shown, or gone when the workspace opens again, is left
+//! ([`leave_gone`]).
 //!
 //! The image's own states follow the stack ([`Follow`]): the value
 //! store's before-and-after flag and mask tool push and pop their modes,
@@ -31,9 +39,10 @@ use serde_json::Value as Json;
 
 use crate::host::Workspace;
 pub use helios_template::contexts::{
-    COMPARE, COMPARING, CULLING, DARKROOM, LIBRARY, MASK_EDITING, ORIENTATION, Opened, TOOL,
-    WORKSPACE,
+    COMPARE, COMPARING, CULLING, DARKROOM, LIBRARY, MASK_EDITING, ORIENTATION, Opened,
+    SUBWORKSPACE, TOOL, WORKSPACE,
 };
+use helios_template::format::SubWorkspace;
 
 pub const PLUGIN: PluginId = PluginId::from_static("helios.contexts");
 
@@ -48,13 +57,110 @@ pub type ImageCheck = Arc<dyn Fn(&str) -> bool + Send + Sync>;
 /// (`ShellBuilder::images`).
 pub type Images = Arc<Mutex<Option<ImageCheck>>>;
 
+/// The sub-workspaces of the workspace the window shows, as its state
+/// holds them; `None` until it is read (the shell follows it).
+#[derive(Clone, Default)]
+pub struct Subworkspaces(Arc<Mutex<Option<Vec<SubWorkspace>>>>);
+
+impl Subworkspaces {
+    fn lock(&self) -> std::sync::MutexGuard<'_, Option<Vec<SubWorkspace>>> {
+        self.0.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// The workspace's sub-workspaces now (`None`: no workspace read).
+    pub fn set(&self, list: Option<Vec<SubWorkspace>>) {
+        *self.lock() = list;
+    }
+
+    /// Whether the workspace was read.
+    pub fn known(&self) -> bool {
+        self.lock().is_some()
+    }
+
+    /// A sub-workspace, by id: `None` while no workspace is read,
+    /// `Some(None)` when it has none of that id.
+    pub fn get(&self, id: &str) -> Option<Option<SubWorkspace>> {
+        self.lock()
+            .as_ref()
+            .map(|l| l.iter().find(|s| s.id == id).cloned())
+    }
+
+    /// What the frame's guard and crumb read.
+    pub fn lookup(&self) -> helios_template::contexts::Lookup {
+        let this = self.clone();
+        Arc::new(move |id| this.get(id).map(|s| s.map(|s| s.name)))
+    }
+
+    /// A sub-workspace and its parents, top down, by id.
+    pub fn path(&self, id: &str) -> Option<Vec<String>> {
+        let guard = self.lock();
+        let list = guard.as_ref()?;
+        let mut path = Vec::new();
+        let mut next = list.iter().find(|s| s.id == id);
+        while let Some(s) = next {
+            // A parent named twice would loop: the path stops there.
+            if path.contains(&s.id) {
+                break;
+            }
+            path.push(s.id.clone());
+            next = s
+                .parent
+                .as_deref()
+                .and_then(|p| list.iter().find(|s| s.id == p));
+        }
+        path.reverse();
+        (!path.is_empty()).then_some(path)
+    }
+
+    /// The sub-workspace right under `parent` (the top when `None`)
+    /// holding `node`, if one does.
+    pub fn child_holding(&self, parent: Option<&str>, node: &str) -> Option<String> {
+        let scope = |s: &SubWorkspace| helios_values::Scope {
+            name: s.name.clone(),
+            nodes: s.nodes.clone(),
+        };
+        self.lock()
+            .as_ref()?
+            .iter()
+            .find(|s| s.parent.as_deref() == parent && scope(s).holds(node))
+            .map(|s| s.id.clone())
+    }
+
+    /// The value store's scope inside a sub-workspace: its nodes.
+    pub fn scope(&self, id: &str) -> Option<helios_values::Scope> {
+        self.get(id).flatten().map(|s| helios_values::Scope {
+            name: s.name,
+            nodes: s.nodes,
+        })
+    }
+
+    /// The sub-workspaces as agents name them (`id`, `name`, `parent`).
+    pub fn listed(&self) -> Json {
+        match self.lock().as_ref() {
+            Some(l) => helios_template::contexts::tools::listed(l),
+            None => Json::Array(Vec::new()),
+        }
+    }
+}
+
 /// egui-pop's context stack, checking at start what the saved one names:
 /// the workspace's network must be this window's, the darkroom's file or
-/// image must still be there (`images`, when the desktop has a vault).
-pub fn stack(workspace: Workspace, images: Images) -> ContextsPlugin {
+/// image must still be there (`images`, when the desktop has a vault), a
+/// sub-workspace must still be the workspace's (once it is read: until
+/// then it is kept, and [`leave_gone`] checks it).
+pub fn stack(workspace: Workspace, images: Images, subworkspaces: Subworkspaces) -> ContextsPlugin {
     ContextsPlugin::default()
         .root(ROOT)
         .valid(move |frame, payload| {
+            if *frame == SUBWORKSPACE {
+                let Some(id) = helios_template::contexts::subworkspace_of(payload) else {
+                    return Some("it names no sub-workspace".into());
+                };
+                return match subworkspaces.get(id) {
+                    Some(None) => Some(format!("sub-workspace {id} is gone")),
+                    _ => None,
+                };
+            }
             if *frame == WORKSPACE {
                 return match (workspace.get(), payload.as_str()) {
                     (Some(k), Some(p)) if k == p => None,
@@ -83,9 +189,10 @@ pub fn stack(workspace: Workspace, images: Images) -> ContextsPlugin {
 }
 
 /// Helios's frames, declared to the stack (the network guarded: only
-/// the shown workspace's), and Helios's status bar items, each shown
-/// where it means something.
-pub struct Frames(pub Workspace);
+/// the shown workspace's; a sub-workspace: only one it has, named by its
+/// name), and Helios's status bar items, each shown where it means
+/// something.
+pub struct Frames(pub Workspace, pub Subworkspaces);
 
 impl Plugin for Frames {
     fn id(&self) -> PluginId {
@@ -107,9 +214,11 @@ impl Plugin for Frames {
         }
         for f in frames {
             let shown = self.0.clone();
-            ctx.frame(helios_template::contexts::guard_network(f, move || {
-                shown.get()
-            }))?;
+            let f = helios_template::contexts::guard_network(f, move || shown.get());
+            ctx.frame(helios_template::contexts::guard_subworkspace(
+                f,
+                self.1.lookup(),
+            ))?;
         }
         Ok(())
     }
@@ -171,11 +280,67 @@ pub fn go(app: &AppHandle, frame: FrameId, payload: Json, origin: &Origin) -> Re
     }
 }
 
+/// Enters a sub-workspace (`id`): the places above the sub-workspaces
+/// shown are kept (the network, the darkroom, the root), then its parents
+/// and it, so a nested one is entered under its parent wherever the user
+/// is.
+pub fn enter_subworkspace(
+    app: &AppHandle,
+    subworkspaces: &Subworkspaces,
+    id: &str,
+    origin: &Origin,
+) -> Result<Json, String> {
+    let path = match subworkspaces.get(id) {
+        None => return Err("no workspace is open".into()),
+        Some(None) => return Err(format!("the workspace has no sub-workspace `{id}`")),
+        Some(Some(_)) => subworkspaces.path(id).unwrap_or_else(|| vec![id.into()]),
+    };
+    let ids: Vec<&str> = path.iter().map(String::as_str).collect();
+    let places = helios_template::contexts::subworkspace_places(&state(app), &ids);
+    if state(app).places == places {
+        return Ok(Json::Null);
+    }
+    match contexts::request(app, Envelope::new(Request::Go { places }), origin) {
+        egui_pop::api::steps::Outcome::Done(r) => r,
+        egui_pop::api::steps::Outcome::Vetoed { by, reason } => {
+            Err(format!("vetoed by {by}: {reason}"))
+        }
+    }
+}
+
+/// The sub-workspace shown, if the top place is one.
+pub fn subworkspace_shown(app: &AppHandle) -> Option<String> {
+    helios_template::contexts::subworkspace_shown(&state(app)).map(String::from)
+}
+
+/// Leaves a sub-workspace shown that the workspace no longer has (deleted
+/// while shown, or gone when the workspace opened again): back to the
+/// place it was entered from. Its id, when one was left.
+pub fn leave_gone(app: &AppHandle, subworkspaces: &Subworkspaces) -> Option<String> {
+    if !subworkspaces.known() {
+        return None;
+    }
+    let now = state(app);
+    let (depth, id) = now.places.iter().enumerate().find_map(|(i, e)| {
+        let id = (e.frame == SUBWORKSPACE)
+            .then(|| helios_template::contexts::subworkspace_of(&e.payload))
+            .flatten()?;
+        matches!(subworkspaces.get(id), Some(None)).then(|| (i, id.to_string()))
+    })?;
+    contexts::request(app, Envelope::new(Request::Jump { depth }), &Origin::User);
+    Some(id)
+}
+
 /// An agent's `context.*` tool (the node's MCP tools, the same `cmd` and
 /// arguments as on the workspace's files), answered by this desktop: the
 /// window moves at once, through the same `context.request` step as the
 /// user's moves, and the answer has the same fields as on the files.
-pub fn agent_tool(app: &AppHandle, request: &Json, agent: &str) -> Result<Json, String> {
+pub fn agent_tool(
+    app: &AppHandle,
+    subworkspaces: &Subworkspaces,
+    request: &Json,
+    agent: &str,
+) -> Result<Json, String> {
     use helios_template::contexts::tools;
     let cmd = request["cmd"].as_str().unwrap_or_default();
     if cmd == "context.read" {
@@ -185,6 +350,7 @@ pub fn agent_tool(app: &AppHandle, request: &Json, agent: &str) -> Result<Json, 
             "place": state.place(),
             "state": state,
             "frames": helios_template::contexts::frames(),
+            "subworkspaces": subworkspaces.listed(),
         }));
     }
     let env = tools::envelope_of(cmd, request)?;
@@ -232,12 +398,18 @@ pub fn culling(app: &AppHandle, on: Option<bool>, origin: &Origin) -> Result<Jso
 
 /// Keeps the value store's place on the stack's place shown: the steps
 /// made from now on are made there (`helios_values::Step::place`), which
-/// egui-pop's undo toast reads to say "Undone in <place>" with Go there.
-/// Called each frame, once the interface's logic ran.
-pub fn follow_place(app: &AppHandle, values: &mut Store) {
+/// egui-pop's undo toast reads to say "Undone in <place>" with Go there;
+/// and its scope on the sub-workspace shown, if one is: its nodes only
+/// may be written. Called each frame, once the interface's logic ran.
+pub fn follow_place(app: &AppHandle, values: &mut Store, subworkspaces: &Subworkspaces) {
     let Some(now) = contexts::state(app) else {
         return;
     };
+    let scope =
+        helios_template::contexts::subworkspace_shown(&now).and_then(|id| subworkspaces.scope(id));
+    if values.scope() != scope.as_ref() {
+        values.set_scope(scope);
+    }
     let place: Vec<helios_values::Place> = now
         .places
         .into_iter()

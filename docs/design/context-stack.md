@@ -2,7 +2,7 @@
 
 Status: **decided** (2026-10-13), **partly built** (2026-10-27): places,
 modes, restore on reopen and the MCP `helios_context_*` tools are on main;
-the `helios.sub-workspace` place is not built yet. Two departures from the
+the `helios.sub-workspace` place since 2026-10-28. Two departures from the
 decisions below: the stack is egui-pop's `LocalContexts`, kept in the
 configuration directory rather than the vault, and there is no kernel
 `ContextService` on the node yet.
@@ -68,10 +68,19 @@ workspace's own steps.
   `subworkspace_path` (top down, for the crumb) and
   `subworkspace_children`.
 
-Not built yet: the `helios.sub-workspace` place itself (entering with
-`nav.enter` or quick open, scoped panels refusing edits outside the
-scope, its own layout and keymap layer, restore). The failure table's
-"a deleted sub-workspace" row relies on the ids above.
+The place is built (2026-10-28, see [gui.md](../gui.md), "Sub-workspaces
+as places"): `helios.sub-workspace` with `{"id": id}`, entered under its
+parent's place by `subworkspace.enter`, the graph's double click,
+quick open or `nav.enter`; its crumb its name; the value store's scope
+its nodes, so the panels show them only and a write to another node is
+refused with the sub-workspace's name; the `Sub-workspace` arrangement;
+`I` and `U` in the graph as its keymap layer; a deleted id refused on
+enter, cut on restore and left when deleted while shown, with a toast.
+Departures from the flows below: the guard refuses a deleted id rather
+than redirecting to the parent (an entry may come in a `go` whose
+parent is not the place shown); the layout is egui-pop's per projection
+key rather than a `sub/<id>/layout` document; a node added to the
+network from inside a sub-workspace is not added to it.
 
 ## Recommendation in one paragraph
 

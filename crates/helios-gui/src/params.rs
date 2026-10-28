@@ -704,7 +704,8 @@ impl Params {
     }
 
     /// The Parameters panel: the selected node's values, or every node's,
-    /// grouped by node in the manifest's order.
+    /// grouped by node in the manifest's order; inside a sub-workspace
+    /// (the store's scope), its nodes' only.
     /// A mask group's per-port lists say which member each value is for,
     /// from `members`.
     pub fn panel_ui(
@@ -728,6 +729,7 @@ impl Params {
                     Some((node.to_string(), p.to_string()))
                 })
                 .filter(|(node, _)| selection.is_none_or(|s| s == node))
+                .filter(|(node, _)| s.in_scope(node))
                 .collect()
         };
         if paths.is_empty() {

@@ -81,6 +81,7 @@ MCP server alike (`helios_gui::contexts` on the desktop).
 | `helios.library` | place | the vault's images to browse, rate and cull (`view.library`) | the `Library` arrangement |
 | `helios.darkroom` | place, payload `{"image": id}` or `{"file": path}` | an image edited: entered when one opens, under the place the user was in (the library, the root) | the `Darkroom` arrangement: the workspace's default layout (each panel open by default in its area), the image in the centre, wherever the image was opened from (the library's grid included); then what the user picks there |
 | `helios.workspace` | place, payload the workspace's key | the workspace's network, edited (`view.network`) | the `Network` arrangement |
+| `helios.sub-workspace` | place, payload `{"id": id}` | a sub-workspace of the network (`subworkspace.enter`), under its parent's place: its nodes only, shown and edited | the `Sub-workspace` arrangement (the network's), its own once changed |
 | `helios.culling` | mode of `orientation`, set | culling (`view.culling`): the vault's keys (0 to 5, P, X, U, R, 6 to 9, S, Left, Right) wherever the focus is, the mask keys off | the `Image` arrangement |
 | `helios.mask-editing` | mode of `tool`, pushed, transient | drawing a mask's path | the Masks panel shown |
 | `helios.compare` | mode of `compare`, pushed | before and after side by side | the image shown |
@@ -107,6 +108,33 @@ viewport's `view/viewport/compare`, the mask tool): each frame,
 leading (the viewport's command pushes the mode; Escape, a chip or an
 agent leaving the mode turns the flag or the tool off).
 
+**Sub-workspaces as places (2026-10-28).** A sub-workspace (a named
+scope over nodes of the network, see [templates.md](templates.md),
+"`subworkspaces`") is entered as the `helios.sub-workspace` place, its
+payload `{"id": id}`:
+
+- **Entering.** A double click on its group in the graph, `I` with the
+  graph focused (the sub-workspace right under the place shown holding
+  the selected node, as Houdini dives into a network), quick open's
+  `subworkspace:<id>` entries, or `subworkspace.enter` (`id`). The
+  places above the sub-workspaces shown are kept (the network, the
+  darkroom, the root) and its parents come before it, so a nested one
+  is always under its parent. egui-pop's `nav.enter` enters one under
+  the place shown as it is. An id the workspace does not have (deleted
+  ones are never given again) is refused with a reason.
+- **Inside.** The crumb is its name. The value store's scope is its
+  nodes (`helios_values::Store::set_scope`, kept each frame by
+  `contexts::follow_place`): the Modules and Parameters panels and the
+  graph show them only, and a write to another node's value, from a
+  panel, a command or an agent, is refused saying the sub-workspace's
+  name. Undo and redo still reach any step, saying where it was made.
+  The viewport keeps rendering the whole network.
+- **Leaving.** `U` with the graph focused (its own keymap layer), `nav.up`
+  (Alt+Shift+Up), `nav.back` or a crumb. A sub-workspace deleted while
+  shown is left at once, back where it was entered from, with a toast.
+- **Its layout.** The `Sub-workspace` arrangement, the network's, the
+  first time; what the user changes there is kept per sub-workspace.
+
 **Coming back.** The stack is egui-pop's `context` document beside the
 workspace's layout (`workspaces/<key>/context`, its view state in
 `.../view`), written inside each transition, so a quit or a `kill -9`
@@ -116,16 +144,19 @@ the darkroom's image is opened again, compare is on again; mask
 editing, transient, is not. What no longer exists is cut, with a
 toast: a darkroom whose file is gone or whose image the vault no
 longer has (the places above it go with it), another workspace's
-network; the modes stay. An image named on the command line wins over
+network, a sub-workspace the workspace no longer has (checked once the
+workspace's state is read: back to where it was entered from); the
+modes stay. An image named on the command line wins over
 the darkroom restored.
 
 **Agents.** On the desktop, egui-pop's `context.*` commands
 (`context.read`, `context.request` with `if_rev` and `dry_run`,
 `context.go`, `context.set_mode`, `context.hold`, `context.release`)
 and the debug bridge's `contexts` collector. Through MCP,
-`helios_context_read`, `helios_context_request`, `helios_context_go`
-and `helios_context_set_mode` read and move a workspace's stack (each
-with `if_rev` and a dry run). Like the workspace tools, they go to the
+`helios_context_read` (with the sub-workspaces a place may name),
+`helios_context_request`, `helios_context_go` and
+`helios_context_set_mode` read and move a workspace's stack (each with
+`if_rev` and a dry run). Like the workspace tools, they go to the
 desktop holding the workspace open, whose window moves at once
 (through the same `context.request` step as the user's moves, as an
 agent); without one they work on the stored stack, what a desktop
@@ -442,9 +473,9 @@ network.
   sessions with the interface's settings
   (`settings/helios.graph_wires`, not shown in the settings window).
 - **Sub-workspaces.** A double click on a sub-workspace's title (its
-  stack in the overview) enters the `helios.sub-workspace` place with
-  the sub-workspace's id, once that place is declared; until then it
-  says so.
+  stack in the overview) enters it (see "Sub-workspaces as places");
+  inside, the graph shows its nodes only, the wires between them, and
+  the sub-workspaces nested right under it as groups.
 - **Agents** read and drive the editor through egui-pop's commands on
   the graph named `helios.graph` (`graph.read`, `graph.edit`,
   `graph.select`, `graph.view`), the same steps as the user's.

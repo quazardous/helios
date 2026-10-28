@@ -4,8 +4,10 @@
 //!
 //! - **Places**: the library ([`LIBRARY`]), the darkroom on an image
 //!   ([`DARKROOM`], its payload `{"image": id}` or `{"file": path}`),
-//!   entered from the library or opened alone, and the workspace's own
-//!   network ([`WORKSPACE`], its payload the workspace's key). The root is
+//!   entered from the library or opened alone, the workspace's own
+//!   network ([`WORKSPACE`], its payload the workspace's key), and a
+//!   sub-workspace of it ([`SUBWORKSPACE`], its payload `{"id": id}`),
+//!   entered under its parent's place, its crumb its name. The root is
 //!   the workspace the window shows.
 //! - **Modes**: culling (an orientation, set), mask editing (drawing a
 //!   path, pushed and never restored) and before-and-after compare
@@ -21,8 +23,9 @@
 //! it and applies transitions to it for agents.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
-use egui_pop_model::context::{FrameRegistry, FrameSpec, Verdict};
+use egui_pop_model::context::{Entry, FrameRegistry, FrameSpec, State, Verdict};
 use egui_pop_model::ids::{FrameId, GroupId, PanelId};
 
 /// The library: the vault's images to browse, rate and cull.
@@ -31,6 +34,8 @@ pub const LIBRARY: FrameId = FrameId::from_static("helios.library");
 pub const DARKROOM: FrameId = FrameId::from_static("helios.darkroom");
 /// The workspace's network, edited (its payload: the workspace's key).
 pub const WORKSPACE: FrameId = FrameId::from_static("helios.workspace");
+/// A sub-workspace, edited (`{"id": id}`): its nodes only.
+pub const SUBWORKSPACE: FrameId = FrameId::from_static("helios.sub-workspace");
 
 /// Culling: flag, rate and label from anywhere, the image first.
 pub const CULLING: FrameId = FrameId::from_static("helios.culling");
@@ -55,6 +60,9 @@ pub const IMAGE_ARRANGEMENT: &str = "Image";
 /// The darkroom's arrangement: the workspace's default layout, the image
 /// in the centre.
 pub const DARKROOM_ARRANGEMENT: &str = "Darkroom";
+/// A sub-workspace's arrangement: the network's, its own once the user
+/// changes it.
+pub const SUBWORKSPACE_ARRANGEMENT: &str = "Sub-workspace";
 
 /// The Masks panel, shown while a mask is edited.
 pub const MASKS_PANEL: &str = "helios.masks";
@@ -74,6 +82,10 @@ pub fn frames() -> Vec<FrameSpec> {
             .label(|c| crumb(c.frame, c.title, c.payload)),
         FrameSpec::place(WORKSPACE, "Network")
             .arrangement(NETWORK_ARRANGEMENT)
+            .label(|c| crumb(c.frame, c.title, c.payload)),
+        // Its crumb is its name ([`guard_subworkspace`]), else its id.
+        FrameSpec::place(SUBWORKSPACE, "Sub-workspace")
+            .arrangement(SUBWORKSPACE_ARRANGEMENT)
             .label(|c| crumb(c.frame, c.title, c.payload)),
         // The modes the user turns on show as chips in the status bar.
         FrameSpec::mode(CULLING, ORIENTATION, "Culling")
@@ -95,10 +107,15 @@ pub fn frames() -> Vec<FrameSpec> {
 /// A place's crumb in the breadcrumb, from its payload (`None`: egui-pop's
 /// default, the title): the darkroom on a file says the file's name (an
 /// image of the vault, only its id: the title alone), the network says
-/// only its title (its payload is the workspace's key, not a name).
+/// only its title (its payload is the workspace's key, not a name), a
+/// sub-workspace its id (its name once the workspace is known:
+/// [`guard_subworkspace`]).
 pub fn crumb(frame: &FrameId, title: &str, payload: &serde_json::Value) -> Option<String> {
     if *frame == WORKSPACE {
         return Some(title.to_string());
+    }
+    if *frame == SUBWORKSPACE {
+        return Some(subworkspace_of(payload).unwrap_or(title).to_string());
     }
     if *frame == DARKROOM {
         return Some(match Opened::of(payload) {
@@ -128,16 +145,95 @@ pub fn guard_network(
     })
 }
 
+/// What a sub-workspace's lookup answers for an id: `None` while no
+/// workspace is known, `Some(None)` when it has no sub-workspace of that
+/// id (never had one, or deleted), else `Some(Some(name))`.
+pub type Lookup = Arc<dyn Fn(&str) -> Option<Option<String>> + Send + Sync>;
+
+/// A sub-workspace guarded and named from the workspace `lookup` reads:
+/// entered only when it exists (an id deleted is refused, never reused),
+/// its crumb its name.
+pub fn guard_subworkspace(spec: FrameSpec, lookup: Lookup) -> FrameSpec {
+    if spec.id != SUBWORKSPACE {
+        return spec;
+    }
+    let names = lookup.clone();
+    spec.can_enter(move |c| match subworkspace_of(c.payload) {
+        None => Verdict::Refuse("a sub-workspace is entered by its id: {\"id\": \"…\"}".into()),
+        Some(id) => match lookup(id) {
+            None => Verdict::Refuse("no workspace is open".into()),
+            Some(None) => Verdict::Refuse(format!("the workspace has no sub-workspace `{id}`")),
+            Some(Some(_)) => Verdict::Go,
+        },
+    })
+    .label(move |c| {
+        let id = subworkspace_of(c.payload)?;
+        Some(names(id).flatten().unwrap_or_else(|| id.to_string()))
+    })
+}
+
 /// The frames of the workspace `key`: entering its network checks the
-/// payload is that workspace.
-pub fn registry(key: &str) -> FrameRegistry {
+/// payload is that workspace; entering a sub-workspace, that it has it
+/// (`subworkspaces`: its sub-workspaces, as its template keeps them).
+pub fn registry(key: &str, subworkspaces: &[crate::format::SubWorkspace]) -> FrameRegistry {
+    let names: Vec<(String, String)> = subworkspaces
+        .iter()
+        .map(|s| (s.id.clone(), s.name.clone()))
+        .collect();
+    let lookup: Lookup = Arc::new(move |id| {
+        Some(
+            names
+                .iter()
+                .find(|(i, _)| i == id)
+                .map(|(_, name)| name.clone()),
+        )
+    });
     let mut r = FrameRegistry::new();
     for f in frames() {
         let key = key.to_string();
-        r.insert(guard_network(f, move || Some(key.clone())))
+        let f = guard_network(f, move || Some(key.clone()));
+        r.insert(guard_subworkspace(f, lookup.clone()))
             .expect("Helios's frames are declared once");
     }
     r
+}
+
+/// A sub-workspace's payload.
+pub fn subworkspace_payload(id: &str) -> serde_json::Value {
+    serde_json::json!({ "id": id })
+}
+
+/// The sub-workspace a payload names.
+pub fn subworkspace_of(payload: &serde_json::Value) -> Option<&str> {
+    payload["id"].as_str().filter(|id| !id.is_empty())
+}
+
+/// The place path that shows a sub-workspace (`path`: it and its
+/// parents, top down, as `Template::subworkspace_path` gives them) from
+/// the state shown: the places above the first sub-workspace are kept
+/// (the network, the darkroom, the root), the sub-workspaces are its
+/// parents then it.
+pub fn subworkspace_places(state: &State, path: &[&str]) -> Vec<Entry> {
+    let mut places: Vec<Entry> = state
+        .places
+        .iter()
+        .take_while(|e| e.frame != SUBWORKSPACE)
+        .cloned()
+        .collect();
+    places.extend(path.iter().map(|id| Entry {
+        frame: SUBWORKSPACE,
+        payload: subworkspace_payload(id),
+    }));
+    places
+}
+
+/// The sub-workspace shown, if the top place is one.
+pub fn subworkspace_shown(state: &State) -> Option<&str> {
+    state
+        .places
+        .last()
+        .filter(|e| e.frame == SUBWORKSPACE)
+        .and_then(|e| subworkspace_of(&e.payload))
 }
 
 /// The darkroom's payload for an image of the vault.
@@ -232,8 +328,27 @@ pub mod tools {
         std::fs::rename(&tmp, path).map_err(|e| e.to_string())
     }
 
-    /// `{workspace}`: the stack (places, modes, revision) and the frames
-    /// it may hold.
+    /// The workspace's sub-workspaces, as its files hold it (none when
+    /// they cannot be read: entering one is then refused).
+    fn subworkspaces(config: &Path, dir: &Path) -> Vec<crate::format::SubWorkspace> {
+        crate::workspace::Files::new(config, dir)
+            .load_on_disk()
+            .map(|s| s.bundle.template.subworkspaces)
+            .unwrap_or_default()
+    }
+
+    /// The sub-workspaces as agents enter them: each `id` (the
+    /// `helios.sub-workspace` payload's), `name` and `parent`.
+    pub fn listed(subworkspaces: &[crate::format::SubWorkspace]) -> Json {
+        subworkspaces
+            .iter()
+            .map(|s| json!({ "id": s.id, "name": s.name, "parent": s.parent }))
+            .collect()
+    }
+
+    /// `{workspace}`: the stack (places, modes, revision), the frames it
+    /// may hold, and the sub-workspaces a `helios.sub-workspace` place
+    /// may name.
     pub fn read(config: &Path, args: &Json) -> Result<Json, String> {
         let dir = workspace(args)?;
         let path = super::document(config, &dir);
@@ -244,6 +359,7 @@ pub mod tools {
             "rev": doc.state.rev,
             "place": doc.state.place(),
             "frames": frames,
+            "subworkspaces": listed(&subworkspaces(config, &dir)),
             "document": path,
         }))
     }
@@ -322,7 +438,7 @@ pub mod tools {
         let env = envelope_of(cmd, args)?;
         let path = super::document(config, &dir);
         let mut doc = load(&path)?;
-        let registry = super::registry(&crate::workspace::key(&dir));
+        let registry = super::registry(&crate::workspace::key(&dir), &subworkspaces(config, &dir));
         let t = context::apply(&doc.state, &registry, &[], &env)
             .map_err(|r| format!("refused ({:?}, by {}): {}", r.kind, r.by, r.reason))?;
         if !env.dry_run {
@@ -340,8 +456,8 @@ mod tests {
 
     #[test]
     fn the_frames_are_declared_once_with_their_groups() {
-        let r = registry("k");
-        assert_eq!(r.len(), 6);
+        let r = registry("k", &[]);
+        assert_eq!(r.len(), 7);
         let groups = r.groups();
         assert_eq!(groups.len(), 3);
         assert!(r.get(&MASK_EDITING).unwrap().transient);
@@ -360,7 +476,7 @@ mod tests {
 
     #[test]
     fn crumbs_say_a_file_s_name_and_never_a_workspace_key() {
-        let r = registry("k");
+        let r = registry("k", &[]);
         let darkroom = r.get(&DARKROOM).unwrap();
         let file = file_payload(Path::new("/photos/shoot/img_0042.cr3"));
         assert_eq!(
@@ -400,7 +516,16 @@ mod tests {
         };
         let read = tools::read(&config, &args(json!({}))).unwrap();
         assert_eq!(read["place"], "root");
-        assert_eq!(read["frames"].as_array().unwrap().len(), 6);
+        assert_eq!(read["frames"].as_array().unwrap().len(), 7);
+        // A blank workspace has no sub-workspace to enter.
+        assert_eq!(read["subworkspaces"], json!([]));
+        let sub = tools::request(
+            &config,
+            &args(
+                json!({ "request": { "op": "enter", "frame": "helios.sub-workspace", "payload": { "id": "skin" } } }),
+            ),
+        );
+        assert!(sub.unwrap_err().contains("`skin`"));
         // A dry run answers, writes nothing.
         let places = json!([{ "frame": "helios.library" }, { "frame": "helios.darkroom", "payload": { "image": "ab12" } }]);
         let dry = tools::go(&config, &args(json!({ "places": places, "dry_run": true }))).unwrap();
@@ -436,6 +561,72 @@ mod tests {
         let text = std::fs::read_to_string(document(&config, &ws)).unwrap();
         assert!(text.contains("\"kind\": \"context\"") || text.contains("\"kind\":\"context\""));
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_sub_workspace_is_entered_by_its_id_and_named_by_its_name() {
+        use egui_pop_model::context::{self as machine, Envelope, Request};
+        let sub = |id: &str, name: &str, parent: Option<&str>| crate::format::SubWorkspace {
+            id: id.into(),
+            name: name.into(),
+            nodes: vec!["retouch".into()],
+            parent: parent.map(String::from),
+        };
+        let subs = [
+            sub("skin", "Skin & eyes", None),
+            sub("eyes", "Eyes", Some("skin")),
+        ];
+        let r = registry("k", &subs);
+        let spec = r.get(&SUBWORKSPACE).unwrap();
+        assert_eq!(spec.arrangement.as_deref(), Some(SUBWORKSPACE_ARRANGEMENT));
+        assert_eq!(
+            spec.label_of("Sub-workspace", &subworkspace_payload("skin"))
+                .as_deref(),
+            Some("Skin & eyes")
+        );
+        // Without the workspace's names, its id.
+        assert_eq!(
+            registry("k", &[])
+                .get(&SUBWORKSPACE)
+                .unwrap()
+                .label_of("Sub-workspace", &subworkspace_payload("skin"))
+                .as_deref(),
+            Some("skin")
+        );
+        let enter = |id: &str| {
+            Envelope::new(Request::Enter {
+                frame: SUBWORKSPACE,
+                payload: subworkspace_payload(id),
+            })
+        };
+        let t = machine::apply(&State::default(), &r, &[], &enter("skin")).unwrap();
+        assert_eq!(subworkspace_shown(&t.state), Some("skin"));
+        // A deleted (or unknown) id, or no id, is refused with a reason.
+        let gone = machine::apply(&State::default(), &r, &[], &enter("hair")).unwrap_err();
+        assert!(gone.reason.contains("`hair`"), "{}", gone.reason);
+        let none = Envelope::new(Request::enter(SUBWORKSPACE));
+        assert!(machine::apply(&State::default(), &r, &[], &none).is_err());
+        // The path to a nested one keeps the places above the first
+        // sub-workspace and replaces the sub-workspaces.
+        let mut state = t.state.clone();
+        state.places.insert(
+            0,
+            Entry {
+                frame: WORKSPACE,
+                payload: serde_json::json!("k"),
+            },
+        );
+        let places = subworkspace_places(&state, &["skin", "eyes"]);
+        let frames: Vec<&str> = places.iter().map(|e| e.frame.as_str()).collect();
+        assert_eq!(
+            frames,
+            [
+                "helios.workspace",
+                "helios.sub-workspace",
+                "helios.sub-workspace"
+            ]
+        );
+        assert_eq!(subworkspace_of(&places[2].payload), Some("eyes"));
     }
 
     #[test]

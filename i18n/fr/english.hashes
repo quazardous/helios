@@ -139,6 +139,7 @@ command-scopes-parade.title 5dc176790ef255dc
 command-scopes-stops.title 5744f06785438735
 command-scopes-waveform.title 6ca90b9ea2b78819
 command-subworkspace-delete.title f18d10f55bcd71ef
+command-subworkspace-enter.title 18429e3375834f38
 command-theme-exportMerged.title eb8d2597662ec3be
 command-theme-helios-dark.title b97def08319c69a2
 command-theme-helios-high-contrast.title 2ada4a7e31241f64
@@ -184,8 +185,8 @@ command-window-minimize.title 3cc56699d77f2fe8
 command-workbench-fullscreen.title ae3886b1f1272280
 command-workbench-keybindings.title 0d070a1def8c650f
 command-workbench-palette.title 6ddb5508d068cafb
-command-workbench-quickOpen-go.title 7ef4c0db7ce7af09
-command-workbench-quickOpen.title 09a6e1a16e27094c
+command-workbench-quickOpen-go.title 30c91664e395840d
+command-workbench-quickOpen.title d9995403971598bf
 command-workbench-quit.title fda91000eb874652
 command-workbench-run.title e0ffb620171da04e
 command-workbench-systemMenu.title f5046dbb28364688
@@ -221,6 +222,7 @@ frame-helios-culling.title 16eea5882fa67c2b
 frame-helios-darkroom.title 85327dfe18519848
 frame-helios-library.title 6d7e88ea6aaf5346
 frame-helios-mask-editing.title 9d40fb207fdf75d9
+frame-helios-sub-workspace.title e8980ceace620065
 frame-helios-workspace.title e7a125cdd87cf1f5
 gui-about-description 6b6356eedfe61a4e
 gui-caption-decisions 10452c9e778ad3f7
@@ -278,7 +280,6 @@ gui-graph-state-idle 73b44f4174fc6f73
 gui-graph-state-pending f34efab8d72ebf9e
 gui-graph-state-running 686bda3db72136fa
 gui-graph-state-stale e9d771d0efa1c754
-gui-graph-subworkspace-not-yet 876efb90abb1aae6
 gui-graph-wires 975574539642e579
 gui-graph-wires-curves e0bf0953320fe655
 gui-graph-wires-orthogonal 1f12e5c062151690
@@ -379,6 +380,7 @@ gui-masks-unlock 52d38f3a80ff723a
 gui-modules-bypass 90c419da8337da4d
 gui-modules-bypass-hint b821d3b701af9968
 gui-modules-none 5314405d4be22513
+gui-modules-none-in-scope b1dde6f86d2f89f2
 gui-modules-restore-hint c8974d4a6ead1982
 gui-new-workspace-created 6ffa8013c877eae5
 gui-new-workspace-directory 790976655fc2525e
@@ -455,7 +457,8 @@ gui-queue-title 4bf5bb4b41d5e877
 gui-quick-open-image 629f69163a374538
 gui-quick-open-module 94e6d2cc1b97242f
 gui-quick-open-source 0a91c26e765f385e
-gui-quick-open-title 09a6e1a16e27094c
+gui-quick-open-subworkspace fa800e0bdb61e7c5
+gui-quick-open-title d9995403971598bf
 gui-quick-open-workspace 83fb01ff0702e457
 gui-recording-saved a76310c7e51efad9
 gui-recording-stopped 2162a30bfb25f825
@@ -492,6 +495,7 @@ gui-status-images 4afec94fc4bb8812
 gui-status-zoom b7f0fac92d5ef120
 gui-status-zoom-fill 17ff0f2a952bf24e
 gui-status-zoom-fit d584f3a86901a72a
+gui-subworkspace-gone 25a07085ab9e56ac
 gui-template-keys-error 79b6acf6ef87110a
 gui-theme-exported bd511001e8a42de3
 gui-theme-problem 96dfd71611027a04

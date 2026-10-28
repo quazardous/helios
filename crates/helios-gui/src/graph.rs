@@ -13,6 +13,9 @@
 //!   rule) is grouped under the principal node it leads to, so the
 //!   overview folds it into that node's stack; a top sub-workspace is a
 //!   group of its own, entered by a double click on its title or stack.
+//! - **Inside a sub-workspace** (the `helios.sub-workspace` place) the
+//!   graph shows its nodes only, the wires between them, and the
+//!   sub-workspaces nested right under it as groups.
 //! - **Edits** go through egui-pop's `graph.*` steps, then become
 //!   Helios's `network.*` commands, each one undoable workspace step that
 //!   agents see; a parameter's slider writes the value store as one
@@ -59,9 +62,6 @@ pub const WIRES_KEPT: &str = "settings/helios.graph_wires";
 /// Who declares [`WIRES_KEPT`].
 const WIRES_OWNER: egui_pop::model::ids::OwnerId =
     egui_pop::model::ids::OwnerId::from_static("helios.graph");
-
-/// The place a delegated group enters, once Helios declares it.
-pub const SUBWORKSPACE_PLACE: &str = "helios.sub-workspace";
 
 /// The layered layout's steps, in graph units.
 const RANK_STEP: f32 = 260.0;
@@ -224,25 +224,48 @@ pub struct NetworkModel {
     groups: Vec<Group>,
     kinds: Vec<Kind>,
     params: BTreeMap<String, Vec<Param>>,
-    /// The top sub-workspaces' ids by group id.
+    /// The sub-workspaces shown as groups (the top ones, or those right
+    /// under the one shown): their ids by group id.
     subworkspaces: BTreeMap<String, String>,
 }
 
 impl NetworkModel {
     /// The model of a template's network; `moved` overrides positions
-    /// (moves handed to the workspace, not applied yet).
+    /// (moves handed to the workspace, not applied yet). `inside` a
+    /// sub-workspace, its nodes only, the wires between them, and the
+    /// sub-workspaces right under it as groups.
     pub fn new(
         t: &Template,
         catalogue: &Catalogue,
         moved: &BTreeMap<String, [f32; 2]>,
+        inside: Option<&str>,
     ) -> NetworkModel {
         let net = &t.network;
-        let placements = placements(net, catalogue);
-        // The top sub-workspaces, and the node each holds.
+        let shown = |node: &str| match inside {
+            None => true,
+            // A node in it, or one whose inner nodes are.
+            Some(id) => {
+                t.in_subworkspace(node, id)
+                    || t.subworkspace_nodes(id).is_some_and(|nodes| {
+                        nodes.iter().any(|n| {
+                            n.strip_prefix(node)
+                                .is_some_and(|rest| rest.starts_with('.'))
+                        })
+                    })
+            }
+        };
+        let mut placements = placements(net, catalogue);
+        placements.retain(|p| shown(&p.node));
+        // The sub-workspaces right under the place shown, and the node
+        // each holds.
         let mut delegated: BTreeMap<String, String> = BTreeMap::new();
         let mut subworkspaces = BTreeMap::new();
         let mut groups = Vec::new();
-        for s in t.subworkspaces.iter().filter(|s| s.parent.is_none()) {
+        for s in t
+            .subworkspaces
+            .iter()
+            .filter(|s| s.parent.as_deref() == inside)
+        {
             let group = subworkspace_group(&s.id);
             for n in &s.nodes {
                 let top = n.split('.').next().unwrap_or(n);
@@ -287,7 +310,12 @@ impl NetworkModel {
                 .into_iter()
                 .map(|principal| Group::new(stack_group(&principal), principal)),
         );
-        let edges = net.connections.iter().map(edge_of).collect();
+        let edges = net
+            .connections
+            .iter()
+            .filter(|k| shown(&k.from) && shown(&k.to))
+            .map(edge_of)
+            .collect();
         // The add menu: every module, then every composite at its newest
         // version (added by `id@version`, shown by its name).
         let kinds = catalogue
@@ -644,7 +672,8 @@ pub struct GraphPanel {
     headers: BTreeMap<String, Header>,
     /// When the headers were read, for which graph.
     headers_at: Option<(u64, f64)>,
-    /// Commands for the shell to run (`network.*`), in order.
+    /// Commands for the shell to run (`network.*`,
+    /// `subworkspace.enter`), in order.
     commands: Vec<(String, Json)>,
     /// A node was selected in the editor: the Parameters panel is to be
     /// brought up.
@@ -652,7 +681,7 @@ pub struct GraphPanel {
     /// The wires' style as kept with the settings: `None` until read
     /// back at the first frame, then what was last written there.
     kept_wires: Option<String>,
-    /// A sub-workspace asked to be entered while its place is missing.
+    /// What the panel has to say.
     pub notes: Vec<Message>,
 }
 
@@ -822,8 +851,12 @@ impl GraphPanel {
                 });
                 return;
             };
-            let model =
-                NetworkModel::new(t, &self.catalogue, &self.moved).with_params(&ctx, &store);
+            let inside = self
+                .app
+                .as_ref()
+                .and_then(crate::contexts::subworkspace_shown);
+            let model = NetworkModel::new(t, &self.catalogue, &self.moved, inside.as_deref())
+                .with_params(&ctx, &store);
             let wires = match store.get(WIRES).map(|e| &e.value) {
                 Some(helios_core::Value::Choice(c)) => wire_style(c),
                 _ => WireStyle::Curves,
@@ -1033,28 +1066,12 @@ impl GraphPanel {
         }
     }
 
-    /// Enters a sub-workspace: the `helios.sub-workspace` place, with
-    /// the sub-workspace's id, once Helios declares that place; until
-    /// then it says so.
+    /// Enters a sub-workspace: the `helios.sub-workspace` place, under
+    /// its parent's (`subworkspace.enter`, run by the shell as the
+    /// user's).
     pub fn enter_subworkspace(&mut self, id: &str) {
-        let Some(app) = &self.app else { return };
-        let Ok(frame) = egui_pop::model::ids::FrameId::new(SUBWORKSPACE_PLACE) else {
-            return;
-        };
-        let declared = app
-            .service(&egui_pop::api::contexts::CONTEXTS)
-            .is_some_and(|c| c.frames().get(&frame).is_some());
-        if !declared {
-            self.notes.push(
-                Message::new(
-                    "gui-graph-subworkspace-not-yet",
-                    "Entering a sub-workspace ({ $id }) is not available yet",
-                )
-                .with("id", id),
-            );
-            return;
-        }
-        let _ = egui_pop::api::contexts::enter(app, frame, json!({ "subworkspace": id }));
+        self.commands
+            .push(("subworkspace.enter".into(), json!({ "id": id })));
     }
 }
 
@@ -1183,7 +1200,7 @@ mod tests {
             .find(|b| b.template.id == "helios.portrait-retouch")
             .unwrap()
             .template;
-        let model = NetworkModel::new(&t, &c, &BTreeMap::new());
+        let model = NetworkModel::new(&t, &c, &BTreeMap::new(), None);
         let kinds: Vec<String> = model.kinds().into_iter().map(|k| k.id).collect();
         assert!(kinds.iter().any(|k| k == "exposure"), "{kinds:?}");
         assert!(

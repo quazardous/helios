@@ -457,8 +457,9 @@ with `dry_run`), on the desktop and for agents:
 - A reset to the template keeps the ids used so far retired; "Save as
   template" starts the new template's ids afresh.
 
-Entering a sub-workspace (its place on the context stack, its scoped
-panels, layout and keys) comes next.
+Entering a sub-workspace is its place on the context stack,
+`helios.sub-workspace` (see [gui.md](gui.md), "Sub-workspaces as
+places"): its nodes only shown and edited, its own layout and keys.
 
 **Agents.** The desktop's commands take their arguments whole, with
 `dry_run`. The node's MCP server has the same as tools

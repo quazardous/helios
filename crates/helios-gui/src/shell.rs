@@ -152,6 +152,9 @@ enum Action {
     /// Goes to a place of the context stack at the workspace's top: the
     /// library, or the workspace's network.
     Place(crate::contexts::FrameId),
+    /// Enters a sub-workspace (by id; without one, the one under the
+    /// place shown that holds the selected node), as whom.
+    EnterSubworkspace(Option<String>, Origin),
     /// Culling on, off, or toggled.
     Culling(Option<bool>),
     /// A drawn-mask command, as whom.
@@ -279,6 +282,8 @@ struct Parts {
     relays: crate::jobs::Relays,
     /// What checks a restored darkroom's image is still there.
     images: crate::contexts::Images,
+    /// The workspace's sub-workspaces, for their place.
+    subworkspaces: crate::contexts::Subworkspaces,
 }
 
 /// A shell whose egui-pop application is still to build: in a test
@@ -504,6 +509,11 @@ pub struct Shell {
     queue_panel: Rc<RefCell<crate::queue::QueuePanel>>,
     /// The image's compare and mask tool, kept with their modes.
     follow: crate::contexts::Follow,
+    /// The workspace's sub-workspaces, for their place; whether they
+    /// were read, and at which of the state's sequence numbers (none: no
+    /// state).
+    subworkspaces: crate::contexts::Subworkspaces,
+    subworkspaces_seen: (bool, Option<u64>),
     /// Helios's status bar items, published when what they say changes.
     status_items: crate::status_items::Items,
     /// The first run's "Coming from darktable?" is offered (the desktop
@@ -555,6 +565,7 @@ impl Shell {
         let later = host.later();
         let workspace = host.workspace();
         let images = crate::contexts::Images::default();
+        let subworkspaces = crate::contexts::Subworkspaces::default();
         let contents = Contents::default();
         let themes = crate::theme::themes();
         let declarations = Rc::new(RefCell::new(Declarations::default()));
@@ -665,8 +676,15 @@ impl Shell {
             })
             // Places and modes (egui-pop's context stack), kept beside
             // the workspace's layout.
-            .plugin(crate::contexts::stack(workspace.clone(), images.clone()))
-            .plugin(crate::contexts::Frames(workspace.clone()))
+            .plugin(crate::contexts::stack(
+                workspace.clone(),
+                images.clone(),
+                subworkspaces.clone(),
+            ))
+            .plugin(crate::contexts::Frames(
+                workspace.clone(),
+                subworkspaces.clone(),
+            ))
             // egui-pop's status bar: the breadcrumb and the mode chips,
             // then the status items (Helios's by place, the jobs'); no
             // activity bar.
@@ -697,6 +715,7 @@ impl Shell {
                 status,
                 relays,
                 images,
+                subworkspaces,
             },
         }
     }
@@ -721,6 +740,7 @@ impl Shell {
             status,
             relays,
             images: _,
+            subworkspaces,
         } = parts;
         if let Some(d) = app.handle().service(&DIALOGS) {
             let _ = dialogs.set((*d).clone());
@@ -809,6 +829,8 @@ impl Shell {
             forgotten: crate::jobs::Forgotten::default(),
             queue_panel: Rc::default(),
             follow: crate::contexts::Follow::default(),
+            subworkspaces,
+            subworkspaces_seen: (false, None),
             status_items: crate::status_items::Items::default(),
             pointer_choice: false,
             palettes_to_place: None,
@@ -1795,6 +1817,44 @@ impl Shell {
         }
     }
 
+    /// Reads the workspace's sub-workspaces again when its state changed
+    /// (an edit, an undo, an agent, another workspace opened), then
+    /// leaves a sub-workspace shown that is gone, with a toast.
+    fn follow_subworkspaces(&mut self) {
+        let (seq, list) = {
+            let store = lock(&self.values);
+            let entry = store.get(WORKSPACE_STATE);
+            let seq = entry.map(|e| e.seq);
+            if self.subworkspaces_seen == (true, seq) {
+                (seq, None)
+            } else {
+                let list = entry.and_then(|e| match &e.value {
+                    helios_core::Value::Text(t) => serde_json::from_str::<Value>(t)
+                        .ok()
+                        .and_then(|j| {
+                            serde_json::from_value(j["template"]["subworkspaces"].clone()).ok()
+                        })
+                        .or(Some(Vec::new())),
+                    _ => None,
+                });
+                (seq, Some(list))
+            }
+        };
+        if let Some(list) = list {
+            self.subworkspaces_seen = (true, seq);
+            self.subworkspaces.set(list);
+        }
+        if let Some(id) = crate::contexts::leave_gone(self.app.handle(), &self.subworkspaces) {
+            self.warn(
+                Message::new(
+                    "gui-subworkspace-gone",
+                    "The sub-workspace { $id } is gone: back to where it was entered from",
+                )
+                .with("id", id),
+            );
+        }
+    }
+
     /// The open workspace's key (see `host::workspace_key`), if any.
     pub fn workspace(&self) -> Option<String> {
         self.workspace.get()
@@ -1808,6 +1868,10 @@ impl Shell {
         step_result(self.app.save_layout())?;
         self.workspace.set(Some(workspace_key(dir)));
         self.load_layout()?;
+        // Its sub-workspaces are read once its state is: until then a
+        // restored one is kept, and left then if it is gone.
+        self.subworkspaces.set(None);
+        self.subworkspaces_seen = (false, None);
         // Its places and modes, kept beside its layout.
         egui_pop::api::contexts::reload(self.app.handle());
         Ok(())
@@ -2107,7 +2171,7 @@ impl Shell {
         add(
             CommandSpec::new(
                 crate::quick_open::COMMAND,
-                "Go to a module, an image or a workspace",
+                "Go to a module, a sub-workspace, an image or a workspace",
                 "View",
             ),
             Box::new(|_, _| Ok(Action::QuickOpen)),
@@ -2115,7 +2179,7 @@ impl Shell {
         add(
             CommandSpec::new(
                 crate::quick_open::GO,
-                "Go to what quick open offers (`item`: module:<node>, image:<id> or workspace:<path>)",
+                "Go to what quick open offers (`item`: module:<node>, subworkspace:<id>, image:<id> or workspace:<path>)",
                 "View",
             ),
             Box::new(|a, _| {
@@ -2444,6 +2508,17 @@ impl Shell {
                 "View",
             ),
             Box::new(|_, _| Ok(Action::Place(crate::contexts::WORKSPACE))),
+        );
+        add(
+            CommandSpec::new(
+                "subworkspace.enter",
+                "Enter a sub-workspace: its nodes only, shown and edited (`id`; without it, the one holding the selected node)",
+                "View",
+            ),
+            Box::new(|a, origin| {
+                let id = a.get("id").and_then(Value::as_str).map(String::from);
+                Ok(Action::EnterSubworkspace(id, origin.clone()))
+            }),
         );
         add(
             CommandSpec::new(
@@ -3284,15 +3359,27 @@ impl Shell {
             .iter()
             .map(|e| (e.id.clone(), e.name.clone()))
             .collect();
+        let subworkspaces = self
+            .workspace_state()
+            .map(|st| {
+                st.bundle
+                    .template
+                    .subworkspaces
+                    .iter()
+                    .map(|s| (s.id.clone(), s.name.clone()))
+                    .collect()
+            })
+            .unwrap_or_default();
         let sources = crate::quick_open::Sources {
             modules,
+            subworkspaces,
             images,
             workspaces: recent_workspaces(),
         };
         let choices = crate::quick_open::choices(&sources, |m| self.text(m));
         let title = self.text(Message::new(
             "gui-quick-open-title",
-            "Go to a module, an image or a workspace",
+            "Go to a module, a sub-workspace, an image or a workspace",
         ));
         self.pick(crate::dialogs::Picker {
             title,
@@ -3328,6 +3415,15 @@ impl Shell {
                     self.run("helios.params.focus", Value::Null, Origin::User)?;
                 }
                 Ok(json!({ "module": node }))
+            }
+            Item::Subworkspace(id) => {
+                crate::contexts::enter_subworkspace(
+                    self.app.handle(),
+                    &self.subworkspaces,
+                    &id,
+                    &egui_pop::model::commands::Origin::User,
+                )?;
+                Ok(json!({ "subworkspace": id }))
             }
             Item::Image(id) => {
                 let path = self
@@ -4024,6 +4120,26 @@ impl Shell {
                     &egui_pop::model::commands::Origin::User,
                 );
             }
+            Action::EnterSubworkspace(id, origin) => {
+                let id = if let Some(id) = id {
+                    id
+                } else {
+                    let node = crate::modules::selected(&lock(&self.values))
+                        .ok_or("no node is selected: name the sub-workspace (`id`)")?;
+                    let shown = crate::contexts::subworkspace_shown(self.app.handle());
+                    self.subworkspaces
+                        .child_holding(shown.as_deref(), &node)
+                        .ok_or_else(|| {
+                            format!("`{node}` is in no sub-workspace under the place shown")
+                        })?
+                };
+                return crate::contexts::enter_subworkspace(
+                    self.app.handle(),
+                    &self.subworkspaces,
+                    &id,
+                    &crate::host::to_pop(&origin),
+                );
+            }
             Action::Culling(on) => {
                 return crate::contexts::culling(
                     self.app.handle(),
@@ -4391,8 +4507,15 @@ impl Shell {
         let wanted = crate::display::wanted(crate::display::wide_gamut(self.app.handle()));
         self.viewport.borrow_mut().set_wanted(wanted);
         self.app.logic(&ctx);
-        // New undo steps are made in the place the stack shows now.
-        crate::contexts::follow_place(self.app.handle(), &mut lock(&self.values));
+        // The workspace's sub-workspaces; one shown that is gone is left.
+        self.follow_subworkspaces();
+        // New undo steps are made in the place the stack shows now, and
+        // inside a sub-workspace only its nodes may be written.
+        crate::contexts::follow_place(
+            self.app.handle(),
+            &mut lock(&self.values),
+            &self.subworkspaces,
+        );
         self.apply_queue(&ctx);
         // The workspace's files changed outside, and agents' requests.
         self.follow_workspace(&ctx);

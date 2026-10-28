@@ -336,6 +336,9 @@ command-scopes-waveform =
 command-subworkspace-delete =
     .title = Supprimer un sous-espace de travail, ses nœuds gardés dans le réseau (`id`, `dry_run`)
 
+command-subworkspace-enter =
+    .title = Entrer dans un sous-espace de travail : ses nœuds seuls, affichés et modifiés (`id` ; sans lui, celui qui contient le nœud sélectionné)
+
 command-theme-exportMerged =
     .title = Exporter le thème en usage, ajustements fusionnés
 
@@ -472,10 +475,10 @@ command-workbench-palette =
     .title = Afficher toutes les commandes
 
 command-workbench-quickOpen =
-    .title = Aller à un module, une image ou un espace de travail
+    .title = Aller à un module, un sous-espace de travail, une image ou un espace de travail
 
 command-workbench-quickOpen-go =
-    .title = Aller à ce que propose l’ouverture rapide (`item` : module:<nœud>, image:<id> ou workspace:<chemin>)
+    .title = Aller à ce que propose l’ouverture rapide (`item` : module:<nœud>, subworkspace:<id>, image:<id> ou workspace:<chemin>)
 
 command-workbench-quit =
     .title = Quitter Helios

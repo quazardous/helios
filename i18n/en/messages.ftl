@@ -177,8 +177,6 @@ gui-graph-state-running = running
 
 gui-graph-state-stale = stale
 
-gui-graph-subworkspace-not-yet = Entering a sub-workspace ({ $id }) is not available yet
-
 gui-graph-wires = Wires
 
 gui-graph-wires-curves = Curves
@@ -379,6 +377,8 @@ gui-modules-bypass-hint = Bypass { $node }: the image renders as if it were abse
 
 gui-modules-none = No module: open an image to see its network's modules
 
+gui-modules-none-in-scope = No module of the sub-workspace { $name } in the image's network
+
 gui-modules-restore-hint = Bring { $node } back: the image renders it again ({ $key })
 
 gui-new-workspace-created = workspace { $path } created from { $template }
@@ -531,7 +531,9 @@ gui-quick-open-module = module { $module }
 
 gui-quick-open-source = source
 
-gui-quick-open-title = Go to a module, an image or a workspace
+gui-quick-open-subworkspace = sub-workspace
+
+gui-quick-open-title = Go to a module, a sub-workspace, an image or a workspace
 
 gui-quick-open-workspace = workspace { $path }
 
@@ -604,6 +606,8 @@ gui-status-zoom = Zoom
 gui-status-zoom-fill = Fill
 
 gui-status-zoom-fit = Fit
+
+gui-subworkspace-gone = The sub-workspace { $id } is gone: back to where it was entered from
 
 gui-template-keys-error = template { $name }: keys: { $error }
 
