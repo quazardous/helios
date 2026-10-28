@@ -571,9 +571,9 @@ bench box (see [bench.md](bench.md)).
    running, claimable or due) or is paused ends the batch with exit
    code 1 rather than keep it waiting. The batch no longer holds a
    connection nor opens a client batch job: a run outlives its client
-   by design. Ctrl-C cancels the whole run, including images another
-   client added to it: `workflow.cancel` of the batch's own items comes
-   with step 5.
+   by design. Ctrl-C cancelled the whole run, including images another
+   client added to it, until step 5 made it `workflow.cancel` of the
+   batch's own items.
 5. **Control verbs and MCP** (`helios-inspect`, `helios-node`).
    `workflow.cancel`, `.retry`, `.prioritize`, `.pause`, `.resume`,
    `.forget` on both endpoints, their MCP tools and CLI verbs,
@@ -597,7 +597,7 @@ bench box (see [bench.md](bench.md)).
    whether they changed it; a paused run keeps renewing the leases of its
    running exports, and its job stays open. `job.cancel` of a run's job
    was already `workflow.cancel` of the whole run (step 2); `forget` came
-   with step 3.
+   with step 3. `helios batch` cancels only its own items on Ctrl-C.
    `workflow.run` events add `paused`, `resumed` (with `asked`) and
    `reordered`.
 6. **Decision nodes in runs** (`helios-node`, `helios-decision`). Workers

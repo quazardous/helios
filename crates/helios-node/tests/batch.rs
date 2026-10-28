@@ -684,6 +684,87 @@ fn an_interrupt_cancels_the_exports_and_leaves_no_file() {
     );
 }
 
+/// Ctrl-C cancels the batch's own images only: an image another client
+/// added to the same run (the same network and settings) is still written.
+#[cfg(debug_assertions)]
+#[test]
+fn an_interrupt_leaves_another_clients_images_in_the_run() {
+    let p = Place::new("interrupt-shared");
+    let node = Sandbox::start(p.join("node"), NETWORK);
+    let other = p.join("other.png");
+    picture(&other, 8, 8);
+    let images: Vec<PathBuf> = (0..2).map(|i| p.join(&format!("in{i}.png"))).collect();
+    for i in &images {
+        picture(i, 8, 8);
+    }
+    // Paused: the other client's export waits in the queue, and holds the
+    // run's one export slot.
+    node.control(&["pause"]);
+    let submitted = node.control(&[
+        "workflow-submit",
+        "--format",
+        "jpeg",
+        "--quality",
+        "92",
+        "--to",
+        &p.s("out"),
+        other.to_str().unwrap(),
+    ]);
+    assert_eq!(submitted["ok"], true, "{submitted}");
+    let run = submitted["run"].as_str().unwrap().to_string();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_helios"))
+        .args([
+            "batch",
+            "--socket",
+            &node.inspect,
+            "--control",
+            &node.control,
+        ])
+        .args(["--out", &p.s("out"), "--jobs", "1"])
+        .args(&images)
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    // The batch's images joined the same run.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    loop {
+        let runs = node.control(&["workflow-runs"]);
+        let found = runs["runs"]
+            .as_array()
+            .and_then(|r| r.iter().find(|r| r["id"] == run.as_str()))
+            .cloned();
+        if found.as_ref().is_some_and(|r| r["items"] == 3) {
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline, "{runs}");
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    let status = Command::new("kill")
+        .args(["-INT", &child.id().to_string()])
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let lines: Vec<Value> = BufReader::new(child.stdout.take().unwrap())
+        .lines()
+        .map(|l| serde_json::from_str(&l.unwrap()).unwrap())
+        .collect();
+    assert_eq!(child.wait().unwrap().code(), Some(130));
+    assert_eq!(lines.len(), 2, "{lines:?}");
+    assert!(lines.iter().all(|l| l["error"] == "cancelled"), "{lines:?}");
+    node.control(&["resume"]);
+    assert_eq!(node.inspect(&["wait-idle"])["ok"], true);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while !p.join("out/other.jpg").exists() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "{:?}",
+            files(&p.join("out"))
+        );
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    assert_eq!(files(&p.join("out")), ["other.jpg"]);
+}
+
 /// The `job.*` events of a node, from its journal.
 #[cfg(debug_assertions)]
 fn job_events(node: &Sandbox) -> Vec<Value> {

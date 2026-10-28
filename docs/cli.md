@@ -245,9 +245,10 @@ network nobody answered) or that is paused does not keep the batch
 waiting: the images left get an `error` (`batch-asking`,
 `batch-run-paused`), and the exit code is 1.
 
-Ctrl-C cancels the run (an interrupted export leaves no file, not even a
-part of one), prints a `cancelled` line for each image not written, and
-exits with 130. With `--vault` and its own node, it stops that node
+Ctrl-C cancels the batch's images in the run (`workflow-cancel`: an
+interrupted export leaves no file, not even a part of one; images another
+client added to the run go on), prints a `cancelled` line for each image
+not written, and exits with 130. With `--vault` and its own node, it stops that node
 instead: each image not written gets a `batch-stopped` line, the run stays
 in the vault, and the same batch run again finishes it. A batch that dies
 without Ctrl-C leaves a run on a node it attached to going.

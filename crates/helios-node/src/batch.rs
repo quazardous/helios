@@ -30,11 +30,12 @@
 //! as a version with origin `import:xmp`, and the base's rating when the
 //! vault has none.
 //!
-//! On an interrupt, the run is cancelled (its exports stopped: a file is
-//! written whole or not at all, never in part), except a run the batch's
-//! own node keeps in a vault: that node stops, and the same batch run
-//! again finishes the run. A client that dies leaves a run on a node it
-//! attached to going.
+//! On an interrupt, the batch's items are cancelled in the run
+//! (`workflow.cancel`: their exports stopped, a file is written whole or
+//! not at all, never in part; items another client added go on), except
+//! in a run the batch's own node keeps in a vault: that node stops, and the
+//! same batch run again finishes the run. A client that dies leaves a run
+//! on a node it attached to going.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -721,7 +722,6 @@ pub fn run(
         concurrency: Some(options.jobs.max(1)),
     })?;
     let run = answer["run"].as_str().unwrap_or_default().to_string();
-    let job = answer["job"].as_str().map(str::to_string);
     // The batch's own node stops with it; a run it keeps in a vault is
     // finished by the same batch run again.
     let resumable = options.attach.is_none() && answer["durable"] == true;
@@ -780,12 +780,15 @@ pub fn run(
                 follow.end_all(&stopped, &mut emit);
                 break;
             }
-            // The run's job cancelled: its exports stop, its rows not
-            // concluded are cancelled.
-            // A job already ended has nothing left to cancel.
-            if let Some(id) = &job
-                && let Err(e) = node.control(&ControlRequest::JobCancel { id: id.clone() })
-                && e.key == UNREACHABLE
+            // This batch's items cancelled: their exports stop, their rows
+            // not concluded are cancelled. Items another client added to
+            // the run go on.
+            let items: Vec<String> = follow.pending.keys().cloned().collect();
+            if let Err(e) = node.control(&ControlRequest::WorkflowCancel {
+                run: run.clone(),
+                items: Some(items),
+                node: None,
+            }) && e.key == UNREACHABLE
             {
                 return Err(e);
             }

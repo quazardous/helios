@@ -52,9 +52,9 @@
 //! with the sidecar's rating when the vault has none. It prints one JSON
 //! line per image (`path`, `output`, `duration_ms`, `error`, `sidecar`) and
 //! exits with 1 when an image failed (the others go on), 130 when
-//! interrupted: Ctrl-C cancels the run and leaves no partial file, or,
-//! with `--vault` and its own node, stops it to be finished by the same
-//! batch run again. See `docs/cli.md`.
+//! interrupted: Ctrl-C cancels the batch's images in the run and leaves no
+//! partial file, or, with `--vault` and its own node, stops it to be
+//! finished by the same batch run again. See `docs/cli.md`.
 //!
 //! `doctor display` says what the display offers the desktop: the session
 //! (Wayland, X11 or none), on Wayland what the compositor's colour
