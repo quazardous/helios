@@ -24,6 +24,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.36.0] - 2026-10-28
+
+### Added
+
+- Menus and the command palette show an icon beside the commands it fits:
+  undo, redo and reset, opening and creating a workspace, zoom, the culling
+  flags, the mask tools and the window's buttons.
+- Exported JPEG, PNG and TIFF files now carry the colour profile of the space
+  they are written in, so other applications show their colours as Helios
+  meant them. PNG files also say their colour space in the newer cICP tag.
+- The title bar has layout controls, as in VS Code: a button opening the
+  layout menu (arrangements, the side bar's side, the bottom panel's width)
+  and one toggle per side bar and for the bottom panel.
+- In the darkroom, hovering the status bar's zoom offers Fit, Fill and 100 %,
+  and hovering its history offers Undo and Redo. On a narrow window the image
+  counts stay in the bar longest; the other items go into its "…" menu.
+- Helios follows the desktop's "larger text" setting (GNOME and KDE Plasma on
+  Wayland, Windows) for its text size, until you pick a size of your own in
+  the settings.
+
+### Changed
+
+- Ctrl+Z in the theme editor now undoes the editor's last change instead of
+  the image's. Menus keep their entries aligned in an icon column, with ticks
+  and radio dots.
+- The interface is now drawn in Inter, with values and code in JetBrains Mono
+  NL (no ligatures, digits of equal width), both bundled with Helios.
+
 ## [0.35.0] - 2026-10-28
 
 ### Added
