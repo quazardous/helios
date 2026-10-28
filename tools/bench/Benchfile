@@ -545,6 +545,7 @@ timeout = "1h"
 # branch, main by default): the binary in /out/egui-pop-gallery, which
 # tools/bench/fetch-gallery.sh puts where the gallery's launcher points
 [jobs.egui-pop-gallery]
+about = "egui-pop's gallery built in release, kept as the output `gallery` for its desktop launcher"
 checkouts = ["egui-pop"]
 cores = 5
 memory = "6g"
