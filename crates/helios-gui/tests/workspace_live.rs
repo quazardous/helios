@@ -725,3 +725,91 @@ fn an_agent_undoes_only_its_own_steps_and_its_batch_alone() {
     );
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// The Graph panel's editor as `graph.read` gives it.
+fn graph(h: &mut Harness<'static, Shell>) -> Value {
+    for _ in 0..3 {
+        h.run();
+    }
+    h.state_mut()
+        .run(
+            "graph.read",
+            json!({ "graph": helios_gui::graph::GRAPH }),
+            Origin::User,
+        )
+        .unwrap()
+}
+
+#[test]
+fn the_graph_view_follows_an_agent_s_network_edits_made_through_mcp() {
+    let root = temp("graph");
+    let (mut h, config, dir, _) = window(&root);
+    h.state_mut()
+        .run("helios.graph.focus", Value::Null, Origin::User)
+        .unwrap();
+    let before = steps(&h);
+    let has = |g: &Value, id: &str| g["nodes"].as_array().unwrap().iter().any(|n| n["id"] == id);
+    assert!(!has(&graph(&mut h), "exposure_2"));
+    // A node added by another client shows at once, where it was put.
+    let (failed, added) = through(
+        &mut h,
+        "helios_network_add",
+        args(
+            &dir,
+            &config,
+            &json!({ "nodes": [{ "module": "exposure", "at": [40.0, 400.0] }] }),
+        ),
+    );
+    assert!(!failed, "{added}");
+    assert_eq!(
+        (&added["via"], &added["added"]),
+        (&json!("desktop"), &json!(["exposure_2"]))
+    );
+    let g = graph(&mut h);
+    let node = g["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|n| n["id"] == "exposure_2")
+        .unwrap_or_else(|| panic!("the new node is not shown: {g}"));
+    assert_eq!(node["pos"], json!([40.0, 400.0]));
+    // So do its wires (its input first: a node the view reads from has
+    // every input wired), and the wire replaced goes.
+    let (failed, fed) = through(
+        &mut h,
+        "helios_network_connect",
+        args(
+            &dir,
+            &config,
+            &json!({ "from": "source", "port": "image", "to": "exposure_2", "input": "input" }),
+        ),
+    );
+    assert!(!failed, "{fed}");
+    let (failed, wired) = through(
+        &mut h,
+        "helios_network_connect",
+        args(
+            &dir,
+            &config,
+            &json!({ "from": "exposure_2", "port": "output", "to": "exposure", "input": "input" }),
+        ),
+    );
+    assert!(!failed, "{wired}");
+    let edges = graph(&mut h)["edges"].clone();
+    let into: Vec<&Value> = edges
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|e| e["to"]["node"] == "exposure")
+        .collect();
+    assert_eq!(into.len(), 1, "{edges}");
+    assert_eq!(into[0]["from"]["node"], "exposure_2");
+    // Each is one step of the window's Edit > Undo; undone, the graph
+    // follows back.
+    assert_eq!(steps(&h), before + 3);
+    undo(&mut h);
+    undo(&mut h);
+    undo(&mut h);
+    assert!(!has(&graph(&mut h), "exposure_2"));
+    let _ = std::fs::remove_dir_all(&root);
+}

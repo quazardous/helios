@@ -438,6 +438,10 @@ network.
 - **Agents** read and drive the editor through egui-pop's commands on
   the graph named `helios.graph` (`graph.read`, `graph.edit`,
   `graph.select`, `graph.view`), the same steps as the user's.
+- **Live.** The panel reads the workspace's state again whenever it
+  changes, whoever changed it: an agent's `helios_network_*` tool run
+  through the desktop, a script, the files changed outside and taken
+  in, an undo. The network shown is never a copy that could lag.
 
 ### Principal nodes, stacks and semantic zoom
 
