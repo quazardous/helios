@@ -473,8 +473,12 @@ gui-status-decisions c0ca1b2f6767f144
 gui-status-decisions-show aa59b37d30632236
 gui-status-history 32a082307a8ba077
 gui-status-history-detail 19faa215b0c20fae
+gui-status-history-redo ef2842c65cf40641
+gui-status-history-undo cc7022a2d9050a57
 gui-status-images 4afec94fc4bb8812
 gui-status-zoom b7f0fac92d5ef120
+gui-status-zoom-fill 17ff0f2a952bf24e
+gui-status-zoom-fit d584f3a86901a72a
 gui-template-keys-error 79b6acf6ef87110a
 gui-theme-exported bd511001e8a42de3
 gui-theme-problem 96dfd71611027a04

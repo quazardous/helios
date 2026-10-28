@@ -430,12 +430,20 @@ gui-status-history-detail = { $count ->
    *[other] { $count } étapes à annuler
 }
 
+gui-status-history-redo = Rétablir
+
+gui-status-history-undo = Annuler
+
 gui-status-images = { $count ->
     [one] { $count } image
    *[other] { $count } images
 }
 
 gui-status-zoom = Zoom
+
+gui-status-zoom-fill = Remplir
+
+gui-status-zoom-fit = Ajuster
 
 gui-template-keys-error = modèle { $name } : raccourcis : { $error }
 

@@ -94,7 +94,10 @@ accent tone, mask editing in the warning tone, compare in the info tone
 something (`helios-gui/src/status_items.rs`, a `when` clause over the
 stack's keys): the number of images in the library, the zoom and the
 history's length in the darkroom, the picks and rejects while culling;
-a right click on an item hides it or moves it, kept per place. egui-pop's `nav.back` (Alt+Left, and Escape while a mode is
+a right click on an item hides it or moves it, kept per place. On a
+narrow window the counts stay longest, then the zoom, then the history,
+the others going into the bar's `…` menu. Hovering the zoom shows a card
+with Fit, Fill and 100 %; hovering the history, one with Undo and Redo. egui-pop's `nav.back` (Alt+Left, and Escape while a mode is
 pushed) and `nav.up` go back, a chip turns its mode off. Compare and
 mask editing are short pushed modes: they show the panel they need
 rather than switch arrangement, so toggling them never moves the

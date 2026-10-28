@@ -8,12 +8,18 @@
 //! an event (`helios.status.<item>`) when it changed; each item's reducer
 //! takes the text and the count from it. A hidden item keeps following
 //! its events, so it is current when its place comes back.
+//!
+//! On a narrow window the counts stay longest (their priority), then the
+//! zoom, then the history. The zoom's and the history's hover cards hold
+//! their actions: fit, fill and 100 %; undo and redo.
 
 use std::collections::BTreeMap;
 
 use egui_pop::api::AppHandle;
 use egui_pop::api::strips::{Indicator, IndicatorState};
+use egui_pop::core::hover_card::Card;
 use egui_pop::model::context::FrameSpec;
+use egui_pop::model::ids::CommandId;
 use helios_core::Message;
 use serde_json::{Value as Json, json};
 
@@ -30,6 +36,18 @@ pub const ZOOM: &str = "helios.status.zoom";
 pub const HISTORY: &str = "helios.status.history";
 /// Culling: the images picked and rejected.
 pub const CULLED: &str = "helios.status.culled";
+
+/// The commands the items' cards run.
+const ZOOM_FIT: CommandId = CommandId::from_static("viewport.zoom.fit");
+const ZOOM_FILL: CommandId = CommandId::from_static("viewport.zoom.fill");
+const ZOOM_100: CommandId = CommandId::from_static("viewport.zoom.100");
+const UNDO: CommandId = CommandId::from_static("param.undo");
+const REDO: CommandId = CommandId::from_static("param.redo");
+
+/// What stays on a narrow bar, the highest the longest.
+const PRIORITY_COUNTS: i32 = 30;
+const PRIORITY_ZOOM: i32 = 20;
+const PRIORITY_HISTORY: i32 = 10;
 
 /// What the items say, measured by the shell each frame.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -48,21 +66,69 @@ pub struct Measure {
 /// The items, declared with the frames they show in.
 pub fn indicators(frames: &[FrameSpec]) -> Vec<Indicator> {
     let frame = |id| frames.iter().find(|f| f.id == id);
-    let item = |id: &str, label: &str, weight: i32| {
-        Indicator::new(id, label, id).weight(weight).reduce(reduce)
+    let item = |id: &str, weight: i32, priority: i32| {
+        Indicator::new(id, "", id)
+            .weight(weight)
+            .priority(priority)
+            .reduce(reduce)
     };
     let mut items = Vec::new();
     if let Some(library) = frame(LIBRARY) {
-        items.push(item(IMAGES, "", 30).during(library));
+        items.push(item(IMAGES, 30, PRIORITY_COUNTS).during(library));
     }
     if let Some(darkroom) = frame(DARKROOM) {
-        items.push(item(ZOOM, "", 20).during(darkroom));
-        items.push(item(HISTORY, "", 25).during(darkroom));
+        items.push(
+            item(ZOOM, 20, PRIORITY_ZOOM)
+                .hover(zoom_card)
+                .during(darkroom),
+        );
+        items.push(
+            item(HISTORY, 25, PRIORITY_HISTORY)
+                .hover(history_card)
+                .during(darkroom),
+        );
     }
     if let Some(culling) = frame(CULLING) {
-        items.push(item(CULLED, "", 30).during(culling));
+        items.push(item(CULLED, 30, PRIORITY_COUNTS).during(culling));
     }
     items
+}
+
+/// The zoom's card: what it is, and the zooms one click away.
+fn zoom_card(state: &IndicatorState, app: &AppHandle) -> Card {
+    let ctx = app.egui();
+    let t = |msg: Message| crate::i18n::text(&ctx, msg);
+    Card::new()
+        .row(&state.detail, &state.text)
+        .link(
+            t(Message::new("gui-status-zoom-fit", "Fit")),
+            ZOOM_FIT,
+            Json::Null,
+        )
+        .link(
+            t(Message::new("gui-status-zoom-fill", "Fill")),
+            ZOOM_FILL,
+            Json::Null,
+        )
+        .link("100 %", ZOOM_100, Json::Null)
+}
+
+/// The history's card: the steps there are, undo and redo.
+fn history_card(state: &IndicatorState, app: &AppHandle) -> Card {
+    let ctx = app.egui();
+    let t = |msg: Message| crate::i18n::text(&ctx, msg);
+    Card::new()
+        .text(&state.detail)
+        .link(
+            t(Message::new("gui-status-history-undo", "Undo")),
+            UNDO,
+            Json::Null,
+        )
+        .link(
+            t(Message::new("gui-status-history-redo", "Redo")),
+            REDO,
+            Json::Null,
+        )
 }
 
 /// An item's event: its text, its tooltip and its count, if any.

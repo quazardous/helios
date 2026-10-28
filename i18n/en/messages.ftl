@@ -573,9 +573,17 @@ gui-status-history = History
 
 gui-status-history-detail = { $count } steps to undo
 
+gui-status-history-redo = Redo
+
+gui-status-history-undo = Undo
+
 gui-status-images = { $count } images
 
 gui-status-zoom = Zoom
+
+gui-status-zoom-fill = Fill
+
+gui-status-zoom-fit = Fit
 
 gui-template-keys-error = template { $name }: keys: { $error }
 
