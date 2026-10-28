@@ -235,9 +235,13 @@ pub(crate) fn choose(tags: &Tags<'_>, gray: bool) -> (InputSpace, Colour) {
 }
 
 fn cicp_name([primaries, transfer, _, _]: [u8; 4]) -> String {
+    // H.273 lists the BT.709 curve as 1, 6, 14 and 15 (the last two are
+    // BT.2020's 10- and 12-bit codes, as video tools write them): the same
+    // space under any of them.
+    let curve = |t: u8| if matches!(t, 6 | 14 | 15) { 1 } else { t };
     let named = OutputSpace::ALL.into_iter().find(|s| {
         s.cicp()
-            .is_some_and(|c| c[0] == primaries && c[1] == transfer)
+            .is_some_and(|c| c[0] == primaries && c[1] == curve(transfer))
     });
     match named {
         Some(space) => space.name().to_string(),
@@ -454,5 +458,16 @@ mod tests {
             true,
         );
         assert!(colour.assumed() && colour.ignored.len() == 1, "{colour:?}");
+    }
+
+    #[test]
+    fn cicp_names_the_space_under_every_code_of_its_curve() {
+        for transfer in [1, 6, 14, 15] {
+            assert_eq!(cicp_name([9, transfer, 0, 1]), "Rec.2020");
+        }
+        assert_eq!(cicp_name([12, 13, 0, 1]), "Display P3");
+        // The BT.709 curve on sRGB's primaries is video, not sRGB.
+        assert_eq!(cicp_name([1, 1, 0, 1]), "cICP 1/1");
+        assert_eq!(cicp_name([9, 8, 0, 1]), "cICP 9/8");
     }
 }
