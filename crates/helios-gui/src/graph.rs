@@ -279,7 +279,17 @@ impl NetworkModel {
                 .map(|principal| Group::new(stack_group(&principal), principal)),
         );
         let edges = net.connections.iter().map(edge_of).collect();
-        let kinds = catalogue.module_names().map(|m| Kind::new(m, m)).collect();
+        // The add menu: every module, then every composite at its newest
+        // version (added by `id@version`, shown by its name).
+        let kinds = catalogue
+            .module_names()
+            .map(|m| Kind::new(m, m))
+            .chain(
+                helios_template::network::addable_composites(catalogue)
+                    .into_iter()
+                    .map(|(id, name)| Kind::new(id, name)),
+            )
+            .collect();
         NetworkModel {
             nodes,
             edges,
@@ -1095,6 +1105,23 @@ mod tests {
             (tile.state, tile.cached),
             (NodeState::Done, true),
             "{tile:?}"
+        );
+    }
+
+    #[test]
+    fn the_add_menu_offers_modules_and_composites() {
+        let c = crate::templates::modules();
+        let t = helios_template::shipped::templates()
+            .into_iter()
+            .find(|b| b.template.id == "helios.portrait-retouch")
+            .unwrap()
+            .template;
+        let model = NetworkModel::new(&t, &c, &BTreeMap::new());
+        let kinds: Vec<String> = model.kinds().into_iter().map(|k| k.id).collect();
+        assert!(kinds.iter().any(|k| k == "exposure"), "{kinds:?}");
+        assert!(
+            kinds.iter().any(|k| k == "helios.masked-adjustment@1"),
+            "{kinds:?}"
         );
     }
 

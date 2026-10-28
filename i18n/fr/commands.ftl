@@ -250,7 +250,7 @@ command-mask-select =
     .title = Masques : sélectionner un masque, une de ses formes, un point de chemin (`mask`, `shape`, `point`)
 
 command-network-add =
-    .title = Ajouter des nœuds au réseau (`nodes` : chacun `module` ou `copy_of`, `at` : [x, y])
+    .title = Ajouter des nœuds au réseau (`nodes` : chacun `module`, `composite` ou `copy_of`, `at` : [x, y])
 
 command-network-connect =
     .title = Relier une sortie à une entrée (`from`, `port`, `to`, `input`, `replaces`)

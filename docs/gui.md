@@ -403,8 +403,9 @@ network.
   `network.*` commands, one undoable workspace step written to the
   workspace's files at once: `network.connect` (`from`, `port`, `to`,
   `input`, `replaces`), `network.disconnect` (`connections`),
-  `network.move` (`moves`), `network.add` (`nodes`: a `module` or a
-  `copy_of`, `at`) and `network.remove` (`nodes`; a source and the node
+  `network.move` (`moves`), `network.add` (`nodes`: a `module`, a
+  `composite` as `id@version`, or a `copy_of`, `at`; the editor's add
+  menu offers every module, then every composite at its newest version) and `network.remove` (`nodes`; a source and the node
   the viewport shows stay). They are checked as any edit of the
   workspace (types, loops, the template's validation: a node added may
   wait for its wires, a node the view reads from has every input

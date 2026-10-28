@@ -13,7 +13,7 @@ use serde_json::{Value as Json, json};
 
 use crate::build::SOURCE_PORT;
 use crate::catalogue::Catalogue;
-use crate::format::{Connection, NetworkDesc, NodeDesc};
+use crate::format::{CompositeRef, Connection, NetworkDesc, NodeDesc};
 use crate::workspace::State;
 
 /// A port type that takes any image.
@@ -35,7 +35,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ),
     (
         "network.add",
-        "Add nodes to the network (`nodes`: each `module` or `copy_of`, `at`: [x, y])",
+        "Add nodes to the network (`nodes`: each `module`, `composite` or `copy_of`, `at`: [x, y])",
     ),
     (
         "network.remove",
@@ -139,6 +139,31 @@ pub fn feeds(net: &NetworkDesc, upstream: &str, node: &str) -> bool {
         }
     }
     false
+}
+
+/// The composites a node may be added as: the newest version of each,
+/// as `(id@version, name)`.
+pub fn addable_composites(catalogue: &Catalogue) -> Vec<(String, String)> {
+    catalogue
+        .composite_files()
+        .filter(|f| {
+            let r = CompositeRef {
+                id: f.id.clone(),
+                version: f.version,
+            };
+            catalogue.newer(&r).is_none()
+        })
+        .map(|f| (format!("{}@{}", f.id, f.version), f.name.clone()))
+        .collect()
+}
+
+/// A composite named `id@version`.
+fn composite_ref(kind: &str) -> Option<CompositeRef> {
+    let (id, version) = kind.rsplit_once('@')?;
+    Some(CompositeRef {
+        id: id.to_string(),
+        version: version.parse().ok()?,
+    })
 }
 
 // ---------------------------------------------------------------------
@@ -283,9 +308,10 @@ pub fn fresh_name(net: &NetworkDesc, base: &str) -> String {
         .expect("a free name")
 }
 
-/// Adds nodes (`nodes`: each `{module, at, copy_of}`): a module by its
-/// name, or a copy of another node (its module or composite and its
-/// parameters). Answers the names given.
+/// Adds nodes (`nodes`: each `{module, composite, at, copy_of}`): a
+/// module by its name, a composite by `id@version` (the graph editor's
+/// `kind` names either), or a copy of another node (its module or
+/// composite and its parameters). Answers the names given.
 pub fn add(
     net: &mut NetworkDesc,
     positions: &mut BTreeMap<String, [f32; 2]>,
@@ -306,18 +332,23 @@ pub fn add(
                 name: fresh_name(net, &orig.name),
                 ..orig.clone()
             }
+        } else if let Some(c) = n["composite"].as_str().filter(|s| !s.is_empty()) {
+            new_composite(net, catalogue, c)?
         } else {
-            let module = n["module"]
+            let kind = n["module"]
                 .as_str()
                 .or_else(|| n["kind"].as_str())
-                .ok_or("a node to add names its `module`")?;
-            if catalogue.get_module(module).is_none() {
-                return Err(format!("unknown module `{module}`"));
-            }
-            NodeDesc {
-                name: fresh_name(net, module),
-                module: Some(module.to_string()),
-                ..NodeDesc::default()
+                .ok_or("a node to add names its `module` or `composite`")?;
+            if catalogue.get_module(kind).is_some() {
+                NodeDesc {
+                    name: fresh_name(net, kind),
+                    module: Some(kind.to_string()),
+                    ..NodeDesc::default()
+                }
+            } else if composite_ref(kind).is_some() {
+                new_composite(net, catalogue, kind)?
+            } else {
+                return Err(format!("unknown module `{kind}`"));
             }
         };
         if let Some(at) = pair(&n["at"]) {
@@ -327,6 +358,21 @@ pub fn add(
         net.nodes.push(desc);
     }
     Ok(added)
+}
+
+/// A new node of a composite named `id@version`, named after the last
+/// word of its id.
+fn new_composite(net: &NetworkDesc, catalogue: &Catalogue, kind: &str) -> Result<NodeDesc, String> {
+    let r = composite_ref(kind).ok_or_else(|| format!("`{kind}` is not `id@version`"))?;
+    if catalogue.get_composite(&r).is_none() {
+        return Err(format!("unknown composite `{kind}`"));
+    }
+    let base = r.id.rsplit('.').next().unwrap_or(&r.id).to_string();
+    Ok(NodeDesc {
+        name: fresh_name(net, &base),
+        composite: Some(r),
+        ..NodeDesc::default()
+    })
 }
 
 /// Removes nodes (`nodes`) with their wires and preset values. A source
@@ -562,4 +608,50 @@ pub fn edited(
     }
     let next = now.edited(&json!({ "network": net, "positions": positions }))?;
     Ok((next, answer))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn catalogue() -> Catalogue {
+        let mut c = Catalogue::new()
+            .module(helios_core::ModuleRef::new(
+                helios_module_exposure::Exposure,
+            ))
+            .module(helios_core::ModuleRef::new(helios_module_sigmoid::Sigmoid))
+            .module(helios_core::ModuleRef::new(helios_module_masks::MaskBlend));
+        for file in crate::shipped::composites() {
+            c.add_composite(file);
+        }
+        c
+    }
+
+    #[test]
+    fn a_composite_is_added_by_its_id_and_version() {
+        let c = catalogue();
+        let (kind, _) = addable_composites(&c)
+            .into_iter()
+            .next()
+            .expect("a composite is shipped");
+        let mut net = crate::workspace::blank_network();
+        let mut positions = BTreeMap::new();
+        let added = add(
+            &mut net,
+            &mut positions,
+            &c,
+            &json!({ "nodes": [{ "module": kind, "at": [0.0, 0.0] }] }),
+        )
+        .unwrap();
+        let node = net.nodes.iter().find(|n| n.name == added[0]).unwrap();
+        assert_eq!(node.composite.as_ref().map(ToString::to_string), Some(kind));
+        assert!(ports_of(&net, &c, &added[0]).is_some());
+        let unknown = add(
+            &mut net,
+            &mut positions,
+            &c,
+            &json!({ "nodes": [{ "composite": "nothing@1" }] }),
+        );
+        assert!(unknown.is_err(), "{unknown:?}");
+    }
 }

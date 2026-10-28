@@ -581,13 +581,13 @@ pub const TOOLS: &[Tool] = &[
         name: "helios_network_add",
         endpoint: Endpoint::Workspace,
         cmd: "network.add",
-        description: "Adds nodes to a workspace's network, unconnected, as one undoable step: a module by its name, or a copy of a node (its module or composite and its parameters). Answers the names given (`added`), made unique (exposure_2)",
+        description: "Adds nodes to a workspace's network, unconnected, as one undoable step: a module by its name, a composite by `id@version`, or a copy of a node (its module or composite and its parameters). Answers the names given (`added`), made unique (exposure_2)",
         params: &[
             WORKSPACE,
             Param {
                 name: "nodes",
                 schema: objects,
-                description: "Each {module} or {copy_of}, with `at`: [x, y] in the graph view",
+                description: "Each {module}, {composite} or {copy_of}, with `at`: [x, y] in the graph view",
                 default: None,
             },
             DRY_RUN,

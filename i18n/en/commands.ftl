@@ -251,7 +251,7 @@ command-mask-select =
     .title = Masks: select a mask, a shape of it, a path point (`mask`, `shape`, `point`)
 
 command-network-add =
-    .title = Add nodes to the network (`nodes`: each `module` or `copy_of`, `at`: [x, y])
+    .title = Add nodes to the network (`nodes`: each `module`, `composite` or `copy_of`, `at`: [x, y])
 
 command-network-connect =
     .title = Connect an output to an input (`from`, `port`, `to`, `input`, `replaces`)
