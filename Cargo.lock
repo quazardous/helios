@@ -2029,6 +2029,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "helios-colour"
+version = "0.34.0"
+dependencies = [
+ "moxcms",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "helios-compute"
 version = "0.35.0"
 dependencies = [

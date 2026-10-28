@@ -1,0 +1,20 @@
+[package]
+name = "helios-colour"
+description = "Helios colour tagging: the output colour spaces, their transfer curves and the ICC profiles and cICP code points that describe them"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde.workspace = true
+# BSD-3-Clause OR Apache-2.0: the ICC library (see docs/icc.md). The same
+# minor as `image` uses, so the tree keeps one copy; its SIMD features come
+# from `image` anyway, Helios asks for none.
+moxcms = { version = "0.8", default-features = false }
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true
