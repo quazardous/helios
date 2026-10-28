@@ -24,6 +24,44 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.37.0] - 2026-10-28
+
+### Added
+
+- A node can now take a batch as a run of the workflow level: each image is
+  exported by the node itself, retried when a second try may help, and
+  followed per step, and submitting the same batch again redoes nothing that
+  is done. Output file names are decided once, when the batch is submitted.
+- Agents can read and use the clipboard through MCP: `helios_clipboard`,
+  `helios_copy` and `helios_paste` copy from and paste into the desktop
+  holding a workspace (a parameter, the graph, the masks, the library),
+  each with a dry run, in a slot of the agent's own: an agent never reads
+  or overwrites what you copied unless you allow it.
+- Files and images now go between Helios and other applications. Edit ›
+  Copy files puts the selected images' files on the clipboard as a file
+  manager copies them; Edit › Copy the image puts the edited image,
+  rendered whole, there for an image editor or a chat. Edit › Paste from
+  other applications imports files a file manager copied, or an image a
+  browser or an editor copied (saved as a PNG file in the library folder),
+  once you confirm.
+- Every panel has an icon: a folded side bar shows its panels as icons
+  instead of the first letter of their names.
+
+### Changed
+
+- The Masks panel, the Scopes and the Navigator open as floating palettes
+  in a new layout, stacked together against the image's right edge
+  beside the side bar, out of the image's centre; they dock back from
+  their header and a saved layout keeps where they are.
+- Icons are now drawn from the Phosphor icon set, and more commands carry
+  one: the culling ratings, flags and next image, copy and paste, import and
+  export, the views and more of the mask tools.
+
+### Fixed
+
+- In a floating Masks panel, a row clicked keeps the keyboard: Delete and
+  F2 act on it as they do with the panel docked.
+
 ## [0.36.0] - 2026-10-28
 
 ### Added
