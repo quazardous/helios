@@ -14,7 +14,7 @@ helios-shell.workspace = true
 # (`egui_pop::platform`: the single instance, notifications, logs and
 # crash reports) too; the editors (`egui_pop::editors`, MIT: syntect,
 # vt100) for the jobs centre's log consoles.
-egui-pop = { workspace = true, features = ["viewport", "imaging", "i18n", "views", "editors", "platform-instance", "platform-notify", "platform-logs", "platform-crash"] }
+egui-pop = { workspace = true, features = ["viewport", "imaging", "i18n", "views", "editors", "platform-instance", "platform-notify", "platform-logs", "platform-crash", "platform-text-scale"] }
 helios-i18n.workspace = true
 # The settings the desktop reads (the Queue panel's when empty).
 helios-config.workspace = true

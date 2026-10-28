@@ -440,8 +440,9 @@ impl Plugin for Platform {
 /// egui-pop's platform services for the desktop window: the single
 /// instance (its launches handed to [`Platform`]), the desktop's
 /// notifications, tied to Helios's desktop file, the log file and crash
-/// reports in the user's state directory, and the cache of compiled kit
-/// and theme files.
+/// reports in the user's state directory, the cache of compiled kit
+/// and theme files, and the desktop's text scaling ("larger text", read
+/// once at start), the text size's default until the user picks one.
 pub fn desktop(app: AppBuilder, instance: Instance) -> AppBuilder {
     let mut logs = LogsPlugin::new(STATE_NAME);
     if let Some(dir) = log_dir() {
@@ -454,6 +455,7 @@ pub fn desktop(app: AppBuilder, instance: Instance) -> AppBuilder {
     // User kits and themes read from disk are compiled once into the
     // user's cache directory, under Helios's id.
     app.cache(egui_pop::tokens::cache::Cache::for_app(APP_ID))
+        .system_text_scale(egui_pop::platform::text_scale::read())
         .plugin(logs)
         .plugin(crashes)
         .plugin(InstancePlugin::new(instance).scheme(SCHEME))

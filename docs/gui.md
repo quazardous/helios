@@ -391,8 +391,11 @@ sync through the vault.
   theme, in the user's settings: the counterpart of VS Code's `[Theme]`
   keys and darktable's `user.css`. They are applied last and validated;
   unknown tokens are reported, not fatal.
-- **Settings outside the theme.** The text size (85 % to 200 %) and the
-  interface and monospace fonts (egui-pop's Settings › Appearance ›
+- **Settings outside the theme.** The text size (85 % to 200 %; until
+  the user picks one, the desktop's "larger text" scaling read at start,
+  on GNOME and KDE Plasma under Wayland and on Windows) and the
+  interface and monospace fonts (Inter and JetBrains Mono NL by default,
+  bundled) (egui-pop's Settings › Appearance ›
   Fonts, 2026-10-21), the interface zoom (egui-pop's, in fixed steps:
   `Ctrl+Alt+=`, `Ctrl+Alt+-`, `Ctrl+Alt+0`), the accent colour and the
   dark/light/system preference are ordinary settings, so changing the
