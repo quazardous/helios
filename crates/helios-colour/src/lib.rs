@@ -7,8 +7,16 @@
 //! ([`OutputSpace::cicp`]). The profile is built from the same primaries and
 //! curve the pixels are encoded with, so the file and its tag never
 //! disagree. See `docs/icc.md` for the choices.
+//!
+//! A file comes in through an [`InputSpace`]: what its tags say (an ICC
+//! profile, cICP code points, a PNG gamma and chromaticities, or nothing and
+//! so sRGB), turned into the conversion from its values to the working
+//! space.
 
 mod icc;
+mod input;
+
+pub use input::{Curve, InputSpace};
 
 use serde::{Deserialize, Serialize};
 
@@ -32,10 +40,10 @@ pub enum OutputSpace {
 }
 
 /// CIE xy chromaticities of red, green and blue.
-type Primaries = [[f64; 2]; 3];
+pub type Primaries = [[f64; 2]; 3];
 
 /// The D65 white, CIE xy.
-const D65: [f64; 2] = [0.3127, 0.3290];
+pub const D65: [f64; 2] = [0.3127, 0.3290];
 
 /// The ICC profile connection space's white (D50), as ICC.1 fixes it.
 pub const ICC_D50: [f64; 3] = [0.9642, 1.0, 0.8249];
@@ -73,7 +81,8 @@ impl OutputSpace {
         }
     }
 
-    fn primaries(self) -> Primaries {
+    /// The CIE xy chromaticities of its red, green and blue.
+    pub fn primaries(self) -> Primaries {
         match self {
             OutputSpace::Srgb => [[0.64, 0.33], [0.30, 0.60], [0.15, 0.06]],
             OutputSpace::DisplayP3 => [[0.680, 0.320], [0.265, 0.690], [0.150, 0.060]],
@@ -183,28 +192,45 @@ pub fn srgb_decode(v: f64) -> f64 {
 
 const IDENTITY: Mat3 = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
 
-fn xy_to_xyz([x, y]: [f64; 2]) -> [f64; 3] {
+/// CIE xy to XYZ at Y = 1.
+pub fn xy_to_xyz([x, y]: [f64; 2]) -> [f64; 3] {
     [x / y, 1.0, (1.0 - x - y) / y]
 }
 
 /// The RGB-to-XYZ matrix of a set of primaries and a white point: each
 /// primary scaled so that RGB (1, 1, 1) lands on the white at Y = 1.
-fn rgb_to_xyz(primaries: Primaries, white: [f64; 2]) -> Mat3 {
+/// Panics when the primaries are not independent: [`try_rgb_to_xyz`] for
+/// primaries a file gives.
+pub fn rgb_to_xyz(primaries: Primaries, white: [f64; 2]) -> Mat3 {
+    try_rgb_to_xyz(primaries, white).expect("primaries are independent")
+}
+
+/// [`rgb_to_xyz`], or `None` when the primaries or the white are
+/// degenerate (on a line, or y = 0).
+pub fn try_rgb_to_xyz(primaries: Primaries, white: [f64; 2]) -> Option<Mat3> {
+    if primaries.iter().chain([&white]).any(|p| p[1].abs() < 1e-9) {
+        return None;
+    }
     let p = primaries.map(xy_to_xyz);
     let columns: Mat3 = [
         [p[0][0], p[1][0], p[2][0]],
         [p[0][1], p[1][1], p[2][1]],
         [p[0][2], p[1][2], p[2][2]],
     ];
-    let inv = inverse(&columns).expect("primaries are independent");
+    let inv = inverse(&columns)?;
     let s = apply(&inv, xy_to_xyz(white));
-    columns.map(|row| [row[0] * s[0], row[1] * s[1], row[2] * s[2]])
+    Some(columns.map(|row| [row[0] * s[0], row[1] * s[1], row[2] * s[2]]))
 }
 
 /// Bradford adaptation from D65 to the ICC D50.
 pub fn d65_to_d50() -> Mat3 {
-    let src = apply(&BRADFORD, xy_to_xyz(D65));
-    let dst = apply(&BRADFORD, ICC_D50);
+    bradford(xy_to_xyz(D65), ICC_D50)
+}
+
+/// Bradford adaptation from one white (XYZ) to another.
+pub fn bradford(from: [f64; 3], to: [f64; 3]) -> Mat3 {
+    let src = apply(&BRADFORD, from);
+    let dst = apply(&BRADFORD, to);
     let scale = [
         [dst[0] / src[0], 0.0, 0.0],
         [0.0, dst[1] / src[1], 0.0],

@@ -10,8 +10,9 @@ repository.workspace = true
 serde.workspace = true
 # BSD-3-Clause OR Apache-2.0: the ICC library (see docs/icc.md). The same
 # minor as `image` uses, so the tree keeps one copy; its SIMD features come
-# from `image` anyway, Helios asks for none.
-moxcms = { version = "0.8", default-features = false }
+# from `image` anyway, Helios asks for none. `lut` reads the profiles that
+# describe their colours with tables, also when this crate builds alone.
+moxcms = { version = "0.8", default-features = false, features = ["lut"] }
 
 [dev-dependencies]
 serde_json.workspace = true
