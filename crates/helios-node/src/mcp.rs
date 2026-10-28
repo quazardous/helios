@@ -145,6 +145,28 @@ fn zero() -> Value {
     json!(0)
 }
 
+fn hundred() -> Value {
+    json!(100)
+}
+
+fn name_pattern() -> Value {
+    json!("{stem}.{ext}")
+}
+
+fn run_items() -> Value {
+    json!({
+        "type": "array",
+        "minItems": 1,
+        "items": { "anyOf": [
+            { "type": "string" },
+            { "type": "object", "properties": {
+                "path": { "type": "string" },
+                "params": node_params()
+            }, "required": ["path"] }
+        ] }
+    })
+}
+
 fn agent() -> Value {
     json!("agent")
 }
@@ -878,6 +900,108 @@ pub const TOOLS: &[Tool] = &[
         params: &[NODE],
     },
     Tool {
+        name: "helios_workflow_submit",
+        endpoint: Endpoint::Control,
+        cmd: "workflow.submit",
+        description: "Submits a batch as a run of the workflow level: each item exported through the network, claimed under a lease and retried on failure, followed per queueing node (describe workflow). The same network and settings again extend the same run, leaving done items done; each output path is decided now, once. Answers the run's id, its workflow and the counts new, already there, merged",
+        params: &[
+            optional(
+                "title",
+                optional_string,
+                "The run's title, as the jobs centre shows it",
+            ),
+            Param {
+                name: "items",
+                schema: run_items,
+                description: "The image files, absolute paths on the node's machine; an item may be {path, params} to change parameters for it only",
+                default: None,
+            },
+            Param {
+                name: "out",
+                schema: string,
+                description: "Absolute path of the folder the files are written to",
+                default: None,
+            },
+            Param {
+                name: "format",
+                schema: file_format,
+                description: "File format",
+                default: None,
+            },
+            Param {
+                name: "quality",
+                schema: optional_quality,
+                description: "JPEG quality, 1 to 100 (92 when null)",
+                default: Some(null),
+            },
+            Param {
+                name: "name",
+                schema: string,
+                description: "Output file name, `{stem}` and `{ext}` replaced; a name taken gets -1, -2...",
+                default: Some(name_pattern),
+            },
+            optional(
+                "node",
+                optional_string,
+                "The node exported; the network's first export, else its only end, when null",
+            ),
+            optional(
+                "source",
+                optional_string,
+                "The source given each item; the network's only source when null",
+            ),
+            Param {
+                name: "again",
+                schema: boolean,
+                description: "A new run even if the same one exists",
+                default: Some(no),
+            },
+        ],
+    },
+    Tool {
+        name: "helios_workflow_runs",
+        endpoint: Endpoint::Control,
+        cmd: "workflow.runs",
+        description: "The runs of the node: id, title, state, durable, and per queueing node the counts by status, waiting, upstream, held and leases out",
+        params: &[],
+    },
+    Tool {
+        name: "helios_workflow_items",
+        endpoint: Endpoint::Control,
+        cmd: "workflow.items",
+        description: "One page of a run's items at a queueing node, in the order they are worked, with their rows (status, attempts, error) and output paths",
+        params: &[
+            Param {
+                name: "run",
+                schema: string,
+                description: "The run's id",
+                default: None,
+            },
+            optional(
+                "node",
+                optional_string,
+                "A queueing node; the export when null",
+            ),
+            optional(
+                "state",
+                optional_string,
+                "Only the items in this state: waiting, upstream, held, running, scheduled, asking (waiting for a person), done, skipped, failed, cancelled, omitted",
+            ),
+            Param {
+                name: "offset",
+                schema: integer,
+                description: "Items skipped",
+                default: Some(zero),
+            },
+            Param {
+                name: "limit",
+                schema: integer,
+                description: "Items in the page",
+                default: Some(hundred),
+            },
+        ],
+    },
+    Tool {
         name: "helios_ai_providers_list",
         endpoint: Endpoint::Ai,
         cmd: "ai.providers.list",
@@ -1485,6 +1609,7 @@ mod tests {
                     "on" => json!(true),
                     "format" => json!("png"),
                     "path" => json!("/nonexistent/out.png"),
+                    "items" => json!(["/nonexistent/a.png", { "path": "/nonexistent/b.png" }]),
                     _ => json!("exp"),
                 };
                 (p.name.to_string(), v)
@@ -1538,6 +1663,9 @@ mod tests {
             "decision_accept",
             "decision_decide",
             "decision_reask",
+            "workflow.submit",
+            "workflow.runs",
+            "workflow.items",
         ];
         for cmd in inspect.iter().chain(&control) {
             assert!(TOOLS.iter().any(|t| t.cmd == *cmd), "no tool for `{cmd}`");
