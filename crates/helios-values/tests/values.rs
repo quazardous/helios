@@ -403,6 +403,52 @@ fn an_agent_s_group_is_undone_alone_unless_a_later_step_touched_it() {
 }
 
 #[test]
+fn a_scope_refuses_writes_to_nodes_outside_it_but_not_undo() {
+    let (_, _, mut store, _) = exposure();
+    let path = "node/exposure/exposure";
+    let before = store.get(path).unwrap().value.clone();
+    store
+        .set(Set::new(path, Change::To(Value::Float(0.5)), Origin::User))
+        .unwrap();
+    // Inside a sub-workspace over other nodes: refused, whoever writes,
+    // with the sub-workspace's name; values of no node are not limited.
+    store.set_scope(Some(Scope {
+        name: "Skin".into(),
+        nodes: vec!["retouch".into()],
+    }));
+    assert!(!store.in_scope("exposure"));
+    assert!(store.in_scope("retouch.mask"));
+    for origin in [Origin::User, agent()] {
+        let r = store
+            .set(Set::new(path, Change::To(Value::Float(1.0)), origin))
+            .unwrap_err();
+        assert!(
+            matches!(&r, Refused::OutOfScope { node, scope, .. } if node == "exposure" && scope == "Skin"),
+            "{r:?}"
+        );
+        assert!(r.to_string().contains("Skin"), "{r}");
+    }
+    assert_eq!(store.get(path).unwrap().value, Value::Float(0.5));
+    // An undo still puts back what its step changed.
+    store.undo(&Origin::User).unwrap();
+    assert_eq!(store.get(path).unwrap().value, before);
+    // Its own nodes may be written; out of the scope, everything may.
+    store.set_scope(Some(Scope {
+        name: "Light".into(),
+        nodes: vec!["exposure".into()],
+    }));
+    store
+        .set(Set::new(path, Change::To(Value::Float(1.5)), Origin::User))
+        .unwrap();
+    store.set_scope(None);
+    assert!(store.scope().is_none());
+    assert!(store.in_scope("anything"));
+    assert_eq!(node_of("node/retouch.mask/opacity"), Some("retouch.mask"));
+    assert_eq!(node_of("bypass/exposure"), Some("exposure"));
+    assert_eq!(node_of("view/graph/selection"), None);
+}
+
+#[test]
 fn a_cancelled_gesture_puts_its_values_back_and_is_no_undo_step() {
     let (_, _, mut store, bus) = exposure();
     let path = "node/exposure/exposure";

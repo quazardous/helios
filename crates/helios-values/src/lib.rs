@@ -29,6 +29,10 @@
 //!   that follow each other are one step. A group can be undone alone,
 //!   out of order, when no later step touched its values
 //!   ([`Store::undo_group`]).
+//! - A scope ([`Store::set_scope`]): while the user is inside a
+//!   sub-workspace, a write to a node outside it (`node/…`, `bypass/…`)
+//!   is refused, whoever writes; an undo or a redo still puts back what
+//!   its step changed.
 
 mod commands;
 mod graph;
@@ -423,6 +427,12 @@ pub enum Refused {
     Touched {
         since: Vec<String>,
     },
+    /// Its node is outside the scope being edited (a sub-workspace).
+    OutOfScope {
+        node: String,
+        scope: String,
+        current: Value,
+    },
 }
 
 impl fmt::Display for Refused {
@@ -444,6 +454,14 @@ impl fmt::Display for Refused {
                 f,
                 "later steps changed the same values ({}): undo them first, or together",
                 since.join(", ")
+            ),
+            Refused::OutOfScope {
+                node,
+                scope,
+                current,
+            } => write!(
+                f,
+                "`{node}` is outside the sub-workspace being edited, {scope} (the value stays {current:?})"
             ),
         }
     }
@@ -486,6 +504,38 @@ pub struct Place {
     pub frame: String,
     #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
     pub payload: serde_json::Value,
+}
+
+/// The nodes being edited (a sub-workspace entered): writes to other
+/// nodes are refused.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Scope {
+    /// What it is called, as a refusal says it (the sub-workspace's name).
+    pub name: String,
+    /// The nodes in it, as the network names them; a node named holds its
+    /// inner nodes too (`retouch` holds `retouch.mask`).
+    pub nodes: Vec<String>,
+}
+
+impl Scope {
+    /// Whether a node is in the scope, itself or inside one of its nodes.
+    pub fn holds(&self, node: &str) -> bool {
+        self.nodes.iter().any(|n| {
+            node == n
+                || node
+                    .strip_prefix(n.as_str())
+                    .is_some_and(|rest| rest.starts_with('.'))
+        })
+    }
+}
+
+/// The node a value's path is about: `node/<node>/<param>` and
+/// `bypass/<node>`; `None` for every other path.
+pub fn node_of(path: &str) -> Option<&str> {
+    if let Some(rest) = path.strip_prefix("node/") {
+        return rest.rsplit_once('/').map(|(node, _)| node);
+    }
+    path.strip_prefix(graph::BYPASS)
 }
 
 /// One undo step.
@@ -562,6 +612,8 @@ pub struct Store {
     /// The groups named by their origin (a request id an agent gives),
     /// by origin and name.
     named: BTreeMap<(String, String), u64>,
+    /// The nodes that may be written, when a scope is set.
+    scope: Option<Scope>,
 }
 
 fn clamp(v: f64, range: Option<(f64, f64)>, soft: bool) -> (f64, Clamped) {
@@ -815,6 +867,15 @@ impl Store {
                 by: by.clone(),
             });
         }
+        if let (Some(scope), Some(node)) = (&self.scope, node_of(&set.path))
+            && !scope.holds(node)
+        {
+            return Err(Refused::OutOfScope {
+                node: node.into(),
+                scope: scope.name.clone(),
+                current,
+            });
+        }
         if let Some(g) = set.gesture
             && !self.gestures.contains_key(&g)
         {
@@ -1027,6 +1088,24 @@ impl Store {
     /// The place new steps are made in.
     pub fn place(&self) -> &[Place] {
         &self.place
+    }
+
+    /// Limits writes to a node's values (`node/…`, `bypass/…`) to the
+    /// nodes of `scope` (a sub-workspace entered), or lifts the limit.
+    /// Other values, and undo and redo, are not limited.
+    pub fn set_scope(&mut self, scope: Option<Scope>) {
+        self.scope = scope;
+    }
+
+    /// The scope writes are limited to, if any.
+    pub fn scope(&self) -> Option<&Scope> {
+        self.scope.as_ref()
+    }
+
+    /// Whether a node's values may be written: no scope is set, or the
+    /// node is in it.
+    pub fn in_scope(&self, node: &str) -> bool {
+        self.scope.as_ref().is_none_or(|s| s.holds(node))
     }
 
     /// Starts a gesture (a drag): its writes are one undo step, and the
