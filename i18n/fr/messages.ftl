@@ -551,7 +551,7 @@ gui-workspace-template-toolbox = avec ses outils
 
 gui-workspace-template-version = version
 
-node-batch-only = le point d’accès des lots ne répond qu’à load-source, export, cancel, job.cancel, batch_start et batch_end
+node-batch-only = le point d’accès des lots ne répond qu’à load-source, export, cancel, job.cancel, batch_start, batch_end et workflow.submit, workflow.runs, workflow.items
 
 node-edit-not-saved = fait, mais la retouche n’a pas été enregistrée : { $error }
 
@@ -574,6 +574,14 @@ resolve-failed = { $node } : { $reason }
 resolve-not-asked = { $node } n’a pas été demandé : { $reason }
 
 resolve-refused = { $node } : le modèle n’a pas répondu ({ $reason })
+
+workflow-newer-format = l’exécution `{ $run }` a été conservée par un Helios plus récent : elle ne peut pas être traitée ici
+
+workflow-no-items = une exécution demande au moins un élément
+
+workflow-no-node = l’exécution `{ $run }` ne passe pas par une file à `{ $node }`
+
+workflow-no-run = aucune exécution `{ $run }`
 
 xmp-blend-details = le seuil de détails du masque
 

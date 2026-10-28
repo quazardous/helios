@@ -665,7 +665,7 @@ gui-workspace-template-toolbox = with its tools
 
 gui-workspace-template-version = version
 
-node-batch-only = the batch endpoint only answers load-source, export, cancel, job.cancel, batch_start and batch_end
+node-batch-only = the batch endpoint only answers load-source, export, cancel, job.cancel, batch_start, batch_end and workflow.submit, workflow.runs, workflow.items
 
 node-edit-not-saved = done, but the edit was not saved: { $error }
 
@@ -688,6 +688,14 @@ resolve-failed = { $node }: { $reason }
 resolve-not-asked = { $node } was not asked: { $reason }
 
 resolve-refused = { $node }: the model gave no answer ({ $reason })
+
+workflow-newer-format = run `{ $run }` was kept by a newer Helios: it cannot be worked here
+
+workflow-no-items = a run needs at least one item
+
+workflow-no-node = run `{ $run }` does not queue at `{ $node }`
+
+workflow-no-run = no run `{ $run }`
 
 xmp-blend-details = the mask's details threshold
 
