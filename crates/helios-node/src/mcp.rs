@@ -36,7 +36,9 @@
 //! the workspace tools they go to the desktop holding the workspace,
 //! whose window moves at once; otherwise they work on the stack the
 //! workspace keeps beside its layout, what a desktop opening it comes
-//! back to.
+//! back to. `helios_context_hold` and `helios_context_release` hold the
+//! stack of the desktop holding the workspace (a hold lives in its
+//! window), so without one they are refused.
 //!
 //! The clipboard tools (`helios_clipboard`, `helios_copy`,
 //! `helios_paste`) are egui-pop's `clipboard.*` commands on the desktop
@@ -894,6 +896,43 @@ pub const TOOLS: &[Tool] = &[
             SLOT,
             GROUP,
             DRY_RUN,
+            CONFIG,
+        ],
+    },
+    Tool {
+        name: "helios_context_hold",
+        endpoint: Endpoint::Workspace,
+        cmd: "context.hold",
+        description: "Holds the places and modes of the desktop holding a workspace open (egui-pop's context.hold), so that nobody moves them while an agent works: a transition touching the held groups is refused with `reason` until the hold is released (helios_context_release) or the window closes. Its `token`. Refused without such a desktop",
+        params: &[
+            WORKSPACE,
+            optional(
+                "groups",
+                optional_strings,
+                "The groups held: `place` for the places, a mode group (orientation, tool, compare); all of them when null",
+            ),
+            Param {
+                name: "reason",
+                schema: string,
+                description: "Why, as a refused transition says it: \"an agent is retouching this image\"",
+                default: None,
+            },
+            CONFIG,
+        ],
+    },
+    Tool {
+        name: "helios_context_release",
+        endpoint: Endpoint::Workspace,
+        cmd: "context.release",
+        description: "Releases a hold of helios_context_hold on the desktop holding a workspace open (`token`); whether it was held",
+        params: &[
+            WORKSPACE,
+            Param {
+                name: "token",
+                schema: integer,
+                description: "The hold's token, as helios_context_hold answered it",
+                default: None,
+            },
             CONFIG,
         ],
     },
@@ -2002,6 +2041,9 @@ fn workspace_call(request: &Value) -> Result<Value, String> {
         cmd if cmd.starts_with("history.") => {
             Err("the histories are the desktop's: no desktop holds this workspace open".into())
         }
+        "context.hold" | "context.release" => {
+            Err("holds live in the desktop's window: no desktop holds this workspace open".into())
+        }
         other => Err(format!("no workspace tool `{other}`")),
     }?;
     if let Some(o) = answer.as_object_mut() {
@@ -2328,7 +2370,7 @@ mod tests {
     }
 
     #[test]
-    fn the_history_tools_need_the_desktop_holding_the_workspace() {
+    fn the_history_and_hold_tools_need_the_desktop_holding_the_workspace() {
         let root = std::env::temp_dir().join(format!("helios-mcp-history-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         let mut s = Sockets {
@@ -2343,8 +2385,17 @@ mod tests {
             "helios_history_read",
             "helios_history_undo",
             "helios_history_redo",
+            "helios_context_hold",
+            "helios_context_release",
         ] {
-            let (failed, answer) = tool(&mut s, name, args.clone());
+            let mut args = args.clone();
+            if name == "helios_context_hold" {
+                args["reason"] = json!("an agent is retouching");
+            }
+            if name == "helios_context_release" {
+                args["token"] = json!(1);
+            }
+            let (failed, answer) = tool(&mut s, name, args);
             assert!(failed, "{name}: {answer}");
             assert!(answer.to_string().contains("no desktop holds"), "{answer}");
         }

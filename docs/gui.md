@@ -160,9 +160,14 @@ and the debug bridge's `contexts` collector. Through MCP,
 desktop holding the workspace open, whose window moves at once
 (through the same `context.request` step as the user's moves, as an
 agent); without one they work on the stored stack, what a desktop
-opening the workspace comes back to. Holds last only while the agent
-holding them is connected, which these one-call tools are not, so they
-are not offered.
+opening the workspace comes back to. `helios_context_hold` (`groups`,
+`reason`) and `helios_context_release` (`token`) hold that desktop's
+stack while an agent works (2026-10-28): a transition touching a held
+group is refused with the reason, whoever asks. A hold lives in the
+window, so these two need a desktop holding the workspace; it lasts
+until released or the window closes, since one-call tools have no
+connection whose end would release it, and `helios_context_read` lists
+the holds on, so a forgotten one can be found and released.
 
 **Palettes (2026-10-13; floating by default 2026-10-28).** The Masks
 panel, the Scopes and the Navigator are egui-pop's palettes

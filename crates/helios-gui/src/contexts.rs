@@ -335,6 +335,9 @@ pub fn leave_gone(app: &AppHandle, subworkspaces: &Subworkspaces) -> Option<Stri
 /// arguments as on the workspace's files), answered by this desktop: the
 /// window moves at once, through the same `context.request` step as the
 /// user's moves, and the answer has the same fields as on the files.
+/// `context.hold` (`groups`, `reason`) and `context.release` (`token`)
+/// are the desktop's only: a hold lasts until released or the window
+/// closes.
 pub fn agent_tool(
     app: &AppHandle,
     subworkspaces: &Subworkspaces,
@@ -351,7 +354,26 @@ pub fn agent_tool(
             "state": state,
             "frames": helios_template::contexts::frames(),
             "subworkspaces": subworkspaces.listed(),
+            "holds": contexts::with_owner(app, |c| c.holds()).unwrap_or_default(),
         }));
+    }
+    if cmd == "context.hold" {
+        let groups: Vec<egui_pop::model::ids::GroupId> = match request.get("groups") {
+            Some(g) if !g.is_null() => {
+                serde_json::from_value(g.clone()).map_err(|e| format!("`groups`: {e}"))?
+            }
+            _ => Vec::new(),
+        };
+        let reason = request["reason"]
+            .as_str()
+            .filter(|r| !r.is_empty())
+            .ok_or("`reason` is missing: a refused transition says it")?;
+        let token = contexts::hold(app, groups, reason, &format!("agent:{agent}"))?;
+        return Ok(serde_json::json!({ "token": token }));
+    }
+    if cmd == "context.release" {
+        let token = request["token"].as_u64().ok_or("`token` is missing")?;
+        return Ok(serde_json::json!({ "released": contexts::release(app, token) }));
     }
     let env = tools::envelope_of(cmd, request)?;
     let frames = app

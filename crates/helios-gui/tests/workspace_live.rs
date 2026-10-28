@@ -813,3 +813,79 @@ fn the_graph_view_follows_an_agent_s_network_edits_made_through_mcp() {
     assert!(!has(&graph(&mut h), "exposure_2"));
     let _ = std::fs::remove_dir_all(&root);
 }
+
+#[test]
+fn an_agent_holds_the_desktop_s_places_until_it_releases_them() {
+    let root = temp("context-hold");
+    let (mut h, config, dir, _) = window(&root);
+    // A reason is needed: a refused transition says it.
+    let (failed, _) = through(
+        &mut h,
+        "helios_context_hold",
+        args(&dir, &config, &json!({ "groups": ["place"], "reason": "" })),
+    );
+    assert!(failed);
+    let (failed, held) = through(
+        &mut h,
+        "helios_context_hold",
+        args(
+            &dir,
+            &config,
+            &json!({ "groups": ["place"], "reason": "an agent is retouching" }),
+        ),
+    );
+    assert!(!failed, "{held}");
+    let token = held["token"].as_u64().unwrap();
+    let (_, read) = through(
+        &mut h,
+        "helios_context_read",
+        args(&dir, &config, &json!({})),
+    );
+    assert_eq!(
+        read["holds"][0]["reason"], "an agent is retouching",
+        "{read}"
+    );
+    // The places are held, for the user too, saying why in a toast (the
+    // command is the shell's, run at the next frame); the modes not.
+    h.state_mut()
+        .run("view.library", json!(null), Origin::User)
+        .unwrap();
+    h.run();
+    h.run();
+    assert_eq!(h.state().app().handle().context().get("place"), "root");
+    let toasts = h
+        .state()
+        .app()
+        .handle()
+        .service(&egui_pop::api::toasts::TOASTS)
+        .unwrap()
+        .shown();
+    assert!(
+        toasts
+            .iter()
+            .any(|t| t.toast.text.contains("an agent is retouching")),
+        "{toasts:?}"
+    );
+    let (failed, _) = through(
+        &mut h,
+        "helios_context_set_mode",
+        args(&dir, &config, &json!({ "mode": "helios.culling" })),
+    );
+    assert!(!failed);
+    // Released: the user moves again.
+    let (failed, released) = through(
+        &mut h,
+        "helios_context_release",
+        args(&dir, &config, &json!({ "token": token })),
+    );
+    assert!(!failed && released["released"] == true, "{released}");
+    h.state_mut()
+        .run("view.library", json!(null), Origin::User)
+        .unwrap();
+    h.run();
+    assert_eq!(
+        h.state().app().handle().context().get("place"),
+        "helios.library"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
