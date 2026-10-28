@@ -1,7 +1,7 @@
 # ICC / colour-management library survey for Helios
 
-Status: research note, 2026-10-12. Nothing is decided; the recommendation
-below is a proposal for the ROADMAP.
+Status: research note, 2026-10-12; the recommendation was accepted on
+2026-10-27 (see "Decisions" at the end).
 
 ## What Helios needs
 
@@ -216,12 +216,31 @@ compatible licences.
 - Avoid vendoring Apple's or Adobe's own profiles and the WebKit P3 demo
   images: their licences do not clearly allow redistribution.
 
-## Open questions (not decided)
+## Decisions (2026-10-27)
 
-- Rec.2020 export TRC: BT.709 OETF, sRGB curve, or gamma 2.4? cICP transfer
-  code must match the ICC TRC.
-- Profile version for exports: v4 (moxcms) everywhere, or v2 for JPEG
-  maximum compatibility.
-- Exif writing: own minimal writer or a crate (none in the tree today).
-- Where the module lives: `helios-photo` (next to the existing matrices) or a
-  new `helios-colour` crate shared by load, export and the display path.
+The recommendation above was accepted (wrap moxcms), with these answers to
+the questions it left open:
+
+- **Rec.2020 export TRC: the BT.2020 curve** (the BT.709 camera curve, as
+  BT.2020 defines it), not darktable's gamma 2.2. The ICC profile carries it
+  as a parametric curve, PNG's cICP as transfer 1 (H.273 lists the same
+  function as 1, 6, 14 and 15).
+- **Profile version: v4 for PNG and TIFF, v2 for JPEG**, for older readers.
+  moxcms writes the v4 profiles; Helios writes the v2 ones itself (a plain
+  matrix/TRC display profile).
+- **Exif writing: a small writer of Helios's own**, for the few tags it sets.
+- **Where the code lives: a new `helios-colour` crate**, shared by export,
+  load and later the display path.
+
+What the first step built (`crates/helios-colour`, used by `helios-export`):
+
+- Four output spaces: sRGB (the default), Display P3, Adobe RGB (1998) and
+  Rec.2020. Their matrices come from the primaries and the D65 white in
+  f64; the profiles' colorants are the same matrix adapted to the ICC D50
+  white (Bradford), so the tag says exactly what the pixels are.
+- Profiles have a fixed creation date (2026-01-01) and a zero profile ID:
+  the same export gives the same bytes. The v4 profiles carry no cicp tag
+  (an ICC v4.4 addition); PNG says the code points in its cICP chunk.
+- JPEG: the v2 profile in APP2. PNG: the v4 profile in iCCP, plus cICP for
+  every space but Adobe RGB, which has no code. TIFF: the v4 profile in tag
+  34675.

@@ -2119,10 +2119,13 @@ dependencies = [
 name = "helios-export"
 version = "0.35.0"
 dependencies = [
+ "helios-colour",
  "helios-core",
  "helios-photo",
  "helios-testkit",
  "image",
+ "moxcms",
+ "png",
  "serde",
 ]
 

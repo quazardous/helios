@@ -3,7 +3,9 @@
 //! Writing a file is framework IO, never a module's (see
 //! `docs/architecture.md`, "Data access"). An export renders a node over a
 //! region, converts the result from the linear Rec.2020 working space to
-//! sRGB, encodes it and writes it atomically: to a temporary file next to
+//! an output space (sRGB unless asked otherwise, [`OutputSpace`]), encodes
+//! it with that space's tags (an ICC profile, and cICP in PNG) so readers
+//! show the right colours, and writes it atomically: to a temporary file next to
 //! the destination, then renamed, so a reader never sees half a file. Two
 //! exports to the same destination never race: the caller runs them as
 //! scheduler jobs holding the destination as a resource ([`destination`]).
@@ -16,14 +18,16 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 
+pub use helios_colour::OutputSpace;
 use helios_core::jobs::{Jobs, Progress, Report, Start};
 use helios_core::{
     Bus, ContentHash, Engine, Event, Graph, Image, JobId, JobSpec, Message, NodeId, Priority,
     Region, Scheduler,
 };
-use helios_photo::color::{self, Mat3};
+use helios_photo::color;
 use image::codecs::jpeg::JpegEncoder;
-use image::{DynamicImage, ImageBuffer, ImageFormat, Rgb};
+use image::codecs::tiff::TiffEncoder;
+use image::{DynamicImage, ImageBuffer, ImageEncoder, Rgb};
 use serde::{Deserialize, Serialize};
 
 /// An output format.
@@ -71,14 +75,8 @@ pub fn destination(path: &Path) -> String {
     format!("destination:{}", path.display())
 }
 
-/// Linear Rec.2020 to linear sRGB.
-fn rec2020_to_srgb() -> Mat3 {
-    let xyz_to_srgb = color::inverse(&color::SRGB_TO_XYZ).expect("sRGB primaries are invertible");
-    color::mul(&xyz_to_srgb, &color::REC2020_TO_XYZ)
-}
-
-/// Encoded sRGB values in [0, 1], three per pixel, row by row.
-fn to_srgb(image: &Image) -> Result<Vec<f64>, Message> {
+/// Values encoded in `space`, in [0, 1], three per pixel, row by row.
+fn to_space(image: &Image, space: OutputSpace) -> Result<Vec<f64>, Message> {
     let channels = image.channels() as usize;
     if channels != 1 && channels < 3 {
         return Err(Message::new(
@@ -87,7 +85,7 @@ fn to_srgb(image: &Image) -> Result<Vec<f64>, Message> {
         )
         .with("channels", channels));
     }
-    let m = rec2020_to_srgb();
+    let m = space.from_rec2020();
     let mut out = Vec::with_capacity(image.region().area() * 3);
     for pixel in image.data().chunks_exact(channels) {
         let rgb = if channels == 1 {
@@ -99,8 +97,10 @@ fn to_srgb(image: &Image) -> Result<Vec<f64>, Message> {
                 f64::from(pixel[2]),
             ]
         };
-        for v in color::apply(&m, rgb) {
-            out.push(color::srgb_encode(v.clamp(0.0, 1.0)));
+        // Each channel is clamped to the file's range on its own: no gamut
+        // mapping yet.
+        for v in helios_colour::apply(&m, rgb) {
+            out.push(space.encode(v.clamp(0.0, 1.0)));
         }
     }
     Ok(out)
@@ -123,28 +123,50 @@ pub fn mask_as_grey(mask: &Image) -> Result<Image, Message> {
     }))
 }
 
-/// Encodes an image (linear Rec.2020) into the bytes of a file.
+/// Encodes an image (linear Rec.2020) into the bytes of a file, in sRGB.
 pub fn encode(image: &Image, format: &Format) -> Result<Vec<u8>, Message> {
+    encode_in(image, format, OutputSpace::Srgb)
+}
+
+/// Encodes an image (linear Rec.2020) into the bytes of a file in `space`,
+/// tagged with it: JPEG carries the space's ICC v2 profile (APP2), for
+/// older readers; PNG its ICC v4 profile (iCCP) and, but for Adobe RGB,
+/// its cICP chunk; TIFF its ICC v4 profile (tag 34675).
+pub fn encode_in(image: &Image, format: &Format, space: OutputSpace) -> Result<Vec<u8>, Message> {
     let (w, h) = (image.region().width, image.region().height);
-    let srgb = to_srgb(image)?;
-    let eight = || {
-        let bytes: Vec<u8> = srgb.iter().map(|v| (v * 255.0).round() as u8).collect();
-        ImageBuffer::<Rgb<u8>, _>::from_raw(w, h, bytes).expect("sizes match")
+    let values = to_space(image, space)?;
+    let eight = || -> Vec<u8> { values.iter().map(|v| (v * 255.0).round() as u8).collect() };
+    let sixteen = || -> Vec<u16> {
+        values
+            .iter()
+            .map(|v| (v * 65535.0).round() as u16)
+            .collect()
     };
-    let sixteen = || {
-        let words: Vec<u16> = srgb.iter().map(|v| (v * 65535.0).round() as u16).collect();
-        ImageBuffer::<Rgb<u16>, _>::from_raw(w, h, words).expect("sizes match")
+    let failed = |error: String| {
+        Message::new(
+            "export-encode-failed",
+            "cannot encode the image: { $error }",
+        )
+        .with("error", error)
     };
     let mut out = Cursor::new(Vec::new());
     let result = match format {
-        Format::Jpeg { quality } => DynamicImage::ImageRgb8(eight()).write_with_encoder(
-            JpegEncoder::new_with_quality(&mut out, (*quality).clamp(1, 100)),
-        ),
+        Format::Jpeg { quality } => {
+            let mut encoder = JpegEncoder::new_with_quality(&mut out, (*quality).clamp(1, 100));
+            encoder
+                .set_icc_profile(space.icc_v2())
+                .map_err(|e| failed(e.to_string()))?;
+            let buffer = ImageBuffer::<Rgb<u8>, _>::from_raw(w, h, eight()).expect("sizes match");
+            DynamicImage::ImageRgb8(buffer).write_with_encoder(encoder)
+        }
         Format::Png { bits: 8 } => {
-            DynamicImage::ImageRgb8(eight()).write_to(&mut out, ImageFormat::Png)
+            return write_png(w, h, &eight(), png::BitDepth::Eight, space)
+                .map_err(|e| failed(e.to_string()));
         }
         Format::Png { bits: 16 } => {
-            DynamicImage::ImageRgb16(sixteen()).write_to(&mut out, ImageFormat::Png)
+            let bytes: Vec<u8> = sixteen().iter().flat_map(|v| v.to_be_bytes()).collect();
+            return write_png(w, h, &bytes, png::BitDepth::Sixteen, space)
+                .map_err(|e| failed(e.to_string()));
         }
         Format::Png { bits } => {
             return Err(
@@ -152,16 +174,48 @@ pub fn encode(image: &Image, format: &Format) -> Result<Vec<u8>, Message> {
                     .with("bits", u32::from(*bits)),
             );
         }
-        Format::Tiff => DynamicImage::ImageRgb16(sixteen()).write_to(&mut out, ImageFormat::Tiff),
+        Format::Tiff => {
+            let mut encoder = TiffEncoder::new(&mut out);
+            encoder
+                .set_icc_profile(space.icc_v4())
+                .map_err(|e| failed(e.to_string()))?;
+            let buffer =
+                ImageBuffer::<Rgb<u16>, _>::from_raw(w, h, sixteen()).expect("sizes match");
+            DynamicImage::ImageRgb16(buffer).write_with_encoder(encoder)
+        }
     };
-    result.map_err(|e| {
-        Message::new(
-            "export-encode-failed",
-            "cannot encode the image: { $error }",
-        )
-        .with("error", e.to_string())
-    })?;
+    result.map_err(|e| failed(e.to_string()))?;
     Ok(out.into_inner())
+}
+
+/// A PNG through `png` directly: `image`'s encoder cannot write cICP. The
+/// samples are RGB, big-endian when 16-bit; compression and filter are
+/// `image`'s defaults.
+fn write_png(
+    w: u32,
+    h: u32,
+    samples: &[u8],
+    depth: png::BitDepth,
+    space: OutputSpace,
+) -> Result<Vec<u8>, png::EncodingError> {
+    let mut info = png::Info::with_size(w, h);
+    // No sRGB chunk: with one set, `png` would leave the profile out.
+    info.icc_profile = Some(space.icc_v4().into());
+    let mut out = Vec::new();
+    let mut encoder = png::Encoder::with_info(&mut out, info)?;
+    encoder.set_color(png::ColorType::Rgb);
+    encoder.set_depth(depth);
+    encoder.set_compression(png::Compression::Balanced);
+    encoder.set_filter(png::Filter::Adaptive);
+    let mut writer = encoder.write_header()?;
+    // PNG third edition: cICP comes before the image data, and readers
+    // that know it take it over iCCP.
+    if let Some(cicp) = space.cicp() {
+        writer.write_chunk(png::chunk::cICP, &cicp)?;
+    }
+    writer.write_image_data(samples)?;
+    writer.finish()?;
+    Ok(out)
 }
 
 /// Writes bytes so that `path` holds either its old content or the new one,
