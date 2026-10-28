@@ -449,6 +449,60 @@ fn a_scope_refuses_writes_to_nodes_outside_it_but_not_undo() {
 }
 
 #[test]
+fn a_write_refused_by_the_scope_joins_no_group_and_the_group_still_undoes() {
+    let (_, _, mut store, _) = exposure();
+    let path = "node/exposure/exposure";
+    let black = "node/exposure/black";
+    let black_before = store.get(black).unwrap().value.clone();
+    let to = |v: f64| Change::To(Value::Float(v));
+    let skin = || {
+        Some(Scope {
+            name: "Skin".into(),
+            nodes: vec!["retouch".into()],
+        })
+    };
+    // A request whose only write is refused opens no group and no step.
+    store.set_scope(skin());
+    let rev = store.history_rev();
+    store.begin_request(agent(), None);
+    assert!(matches!(
+        store.set(Set::new(path, to(0.5), agent())),
+        Err(Refused::OutOfScope { .. })
+    ));
+    assert_eq!(store.end_request(), None);
+    assert!(store.undo_steps().is_empty());
+    assert_eq!(store.last_agent_group(None), None);
+    assert_eq!(store.history_rev(), rev);
+    // A named request spans two calls; between them the user enters a
+    // sub-workspace over other nodes. The second call's write is refused
+    // and leaves the group as the first call made it.
+    store.set_scope(Some(Scope {
+        name: "Light".into(),
+        nodes: vec!["exposure".into()],
+    }));
+    let g = store.begin_request(agent(), Some("brighten"));
+    store.set(Set::new(path, to(1.0), agent())).unwrap();
+    assert_eq!(store.end_request(), Some(g));
+    store.set_scope(skin());
+    assert_eq!(store.begin_request(agent(), Some("brighten")), g);
+    assert!(matches!(
+        store.set(Set::new(black, to(-0.02), agent())),
+        Err(Refused::OutOfScope { .. })
+    ));
+    assert_eq!(store.end_request(), None, "no step joined this call");
+    assert_eq!(store.undo_steps().len(), 1);
+    assert_eq!(store.undo_steps()[0].group, Some(g));
+    assert_eq!(store.group_size(g), 1);
+    // Undoing the group alone is not limited by the scope, like undo.
+    assert_eq!(
+        store.undo_group(g, &Origin::User).unwrap().as_deref(),
+        Some("brighten")
+    );
+    assert_eq!(ev(&store), 0.0);
+    assert_eq!(store.get(black).unwrap().value, black_before);
+}
+
+#[test]
 fn a_cancelled_gesture_puts_its_values_back_and_is_no_undo_step() {
     let (_, _, mut store, bus) = exposure();
     let path = "node/exposure/exposure";
