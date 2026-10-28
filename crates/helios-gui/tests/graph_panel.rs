@@ -473,3 +473,60 @@ fn the_masks_stress_network_stays_fluid() {
     }
     std::fs::remove_dir_all(&root).unwrap();
 }
+
+#[test]
+fn the_wire_style_is_kept_between_sessions() {
+    use egui_pop::model::values::{Change, Set, Value as PopValue};
+    let kept = |h: &Harness<'static, Shell>| {
+        let store = h.state().app().handle().store();
+        let store = store.lock().unwrap();
+        store
+            .get(helios_gui::graph::WIRES_KEPT)
+            .map(|e| e.value.clone())
+    };
+    let wires = |h: &Harness<'static, Shell>| {
+        let store = h.state().values.lock().unwrap();
+        store.get(helios_gui::graph::WIRES).map(|e| e.value.clone())
+    };
+    let root = temp("wires");
+    let (mut h, _) = window(&root);
+    // Picked (here by an agent): kept with the interface's settings.
+    run(
+        &mut h,
+        "param.set",
+        json!({ "path": helios_gui::graph::WIRES, "value": "orthogonal" }),
+    );
+    assert_eq!(kept(&h), Some(PopValue::Choice("orthogonal".into())));
+    drop(h);
+    // The next session starts with the style kept.
+    let config = root.join("config");
+    let dir = root.join("photos");
+    let mut shell = Shell::builder(helios_panels(), Some(config.join("ui")))
+        .workspace(&dir)
+        .build();
+    shell.load_layout().unwrap();
+    shell.open_workspace(&config, &dir).unwrap();
+    shell
+        .app()
+        .handle()
+        .store()
+        .lock()
+        .unwrap()
+        .set(
+            Set::new(
+                helios_gui::graph::WIRES_KEPT,
+                Change::To(PopValue::Choice("straight".into())),
+                egui_pop::model::commands::Origin::User,
+            )
+            .untracked(),
+        )
+        .unwrap();
+    let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+    h.run();
+    run(&mut h, "helios.graph.focus", json!(null));
+    assert_eq!(
+        wires(&h),
+        Some(helios_core::Value::Choice("straight".into()))
+    );
+    std::fs::remove_dir_all(&root).unwrap();
+}

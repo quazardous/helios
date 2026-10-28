@@ -51,6 +51,15 @@ pub const GRAPH: &str = "helios.graph";
 /// `orthogonal` (routed around the nodes) or `straight`.
 pub const WIRES: &str = "view/graph/wires";
 
+/// Where the wires' style is kept between sessions: with the
+/// interface's settings (saved with them, not shown in the settings
+/// window). [`WIRES`] stays the value the panel and agents use.
+pub const WIRES_KEPT: &str = "settings/helios.graph_wires";
+
+/// Who declares [`WIRES_KEPT`].
+const WIRES_OWNER: egui_pop::model::ids::OwnerId =
+    egui_pop::model::ids::OwnerId::from_static("helios.graph");
+
 /// The place a delegated group enters, once Helios declares it.
 pub const SUBWORKSPACE_PLACE: &str = "helios.sub-workspace";
 
@@ -640,6 +649,9 @@ pub struct GraphPanel {
     /// A node was selected in the editor: the Parameters panel is to be
     /// brought up.
     reveal: bool,
+    /// The wires' style as kept with the settings: `None` until read
+    /// back at the first frame, then what was last written there.
+    kept_wires: Option<String>,
     /// A sub-workspace asked to be entered while its place is missing.
     pub notes: Vec<Message>,
 }
@@ -659,6 +671,7 @@ impl Default for GraphPanel {
             headers_at: None,
             commands: Vec::new(),
             reveal: false,
+            kept_wires: None,
             notes: Vec::new(),
         }
     }
@@ -667,7 +680,60 @@ impl Default for GraphPanel {
 impl GraphPanel {
     /// The application, for the editor's steps and the context stack.
     pub fn set_app(&mut self, app: AppHandle) {
+        let store = app.store();
+        let mut store = store.lock().unwrap_or_else(PoisonError::into_inner);
+        // A style saved by an earlier run, read before this, is taken.
+        let _ = store.declare(
+            &WIRES_OWNER,
+            WIRES_KEPT,
+            egui_pop::model::values::Descriptor::choice(
+                "Graph wires",
+                &["curves", "orthogonal", "straight"],
+                "curves",
+            ),
+        );
+        drop(store);
         self.app = Some(app);
+    }
+
+    /// The wires' style kept between sessions: the one saved put back at
+    /// the first frame, then each change saved.
+    fn keep_wires(&mut self, values: &mut Store, wires: WireStyle) -> WireStyle {
+        use egui_pop::model::values::{Change as PopChange, Set as PopSet, Value as PopValue};
+        let Some(app) = &self.app else {
+            return wires;
+        };
+        let store = app.store();
+        let mut kept = store.lock().unwrap_or_else(PoisonError::into_inner);
+        let Some(saved) = self.kept_wires.clone() else {
+            // The first frame: the saved style comes back.
+            let saved = match kept.get(WIRES_KEPT).map(|e| &e.value) {
+                Some(PopValue::Choice(c)) => c.clone(),
+                _ => wires.name().to_string(),
+            };
+            let style = wire_style(&saved);
+            if style != wires {
+                let _ = values.set(Set::new(
+                    WIRES,
+                    Change::To(helios_core::Value::Choice(style.name().into())),
+                    Origin::User,
+                ));
+            }
+            self.kept_wires = Some(style.name().to_string());
+            return style;
+        };
+        if saved != wires.name() {
+            let _ = kept.set(
+                PopSet::new(
+                    WIRES_KEPT,
+                    PopChange::To(PopValue::Choice(wires.name().into())),
+                    egui_pop::model::commands::Origin::User,
+                )
+                .untracked(),
+            );
+            self.kept_wires = Some(wires.name().to_string());
+        }
+        wires
     }
 
     /// The commands the editor's edits became, for the shell to run.
@@ -741,7 +807,7 @@ impl GraphPanel {
     ) {
         let ctx = ui.ctx().clone();
         let (model, wires, selected) = {
-            let store = lock(values);
+            let mut store = lock(values);
             self.follow_workspace(&store);
             let Some(t) = &self.template else {
                 drop(store);
@@ -762,6 +828,7 @@ impl GraphPanel {
                 Some(helios_core::Value::Choice(c)) => wire_style(c),
                 _ => WireStyle::Curves,
             };
+            let wires = self.keep_wires(&mut store, wires);
             let selected = match store.get(crate::params::SELECTION).map(|e| &e.value) {
                 Some(helios_core::Value::Text(t)) => t.clone(),
                 _ => String::new(),

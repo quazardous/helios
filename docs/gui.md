@@ -438,7 +438,9 @@ network.
   shares the graph's tabs, which would hide the graph.
 - **Wires.** Curves by default, as egui-pop draws them; Orthogonal
   (routed around the nodes) and Straight are picked above the graph,
-  kept in `view/graph/wires` (`param.set` for agents).
+  kept in `view/graph/wires` (`param.set` for agents), and between
+  sessions with the interface's settings
+  (`settings/helios.graph_wires`, not shown in the settings window).
 - **Sub-workspaces.** A double click on a sub-workspace's title (its
   stack in the overview) enters the `helios.sub-workspace` place with
   the sub-workspace's id, once that place is declared; until then it
