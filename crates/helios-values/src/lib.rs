@@ -485,6 +485,8 @@ pub struct Store {
     /// Who made the last committed step (who undid or redid, for an undo
     /// or a redo).
     last_origin: Option<Origin>,
+    /// Moves on with every change of the undo or redo steps.
+    history_rev: u64,
 }
 
 fn clamp(v: f64, range: Option<(f64, f64)>, soft: bool) -> (f64, Clamped) {
@@ -790,6 +792,7 @@ impl Store {
 
     fn commit(&mut self, label: String, origin: &Origin) {
         self.committed += 1;
+        self.history_rev += 1;
         self.last_committed = label;
         self.last_origin = Some(origin.clone());
     }
@@ -806,6 +809,13 @@ impl Store {
     pub fn clear_history(&mut self) {
         self.undo.clear();
         self.redo.clear();
+        self.history_rev += 1;
+    }
+
+    /// The history's revision: it moves on with every change of the undo
+    /// or redo steps (a step, an undo, a redo, the history cleared).
+    pub fn history_rev(&self) -> u64 {
+        self.history_rev
     }
 
     /// How many steps were committed: a write outside a gesture, the end

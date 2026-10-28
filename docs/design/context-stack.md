@@ -308,7 +308,7 @@ what was dropped.
 ```
 user : in s1, changes a parameter → Step 41 {path root›s1, origin user}
 user : leaves to root (rev 11)
-user : Ctrl+Z → HeliosHost::undo
+user : Ctrl+Z → HeliosHistory::undo
 host : Step 41's path is root›s1, the current path is root
        → undo it (a new version in the vault, as today) and toast
          "Undone in s1" with "Go there"

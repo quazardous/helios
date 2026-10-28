@@ -19,11 +19,11 @@
 //! - **the store** holds the interface's own settings (focus mode, window
 //!   place, the user's keys); Helios's values (node parameters, the
 //!   viewport) stay in `helios_values`;
-//! - **undo and redo**: egui-pop's Edit > Undo and Redo (`Ctrl+Z`...) ask
-//!   the host, which answers from Helios's value store
-//!   ([`HeliosHost::with_values`]): its steps, their labels ("Undo drag
-//!   exposure"), and an undo or redo as a step of its own, which the
-//!   vault saves as a version (`persist`). The history groups egui-pop
+//! - **undo and redo**: the host owns the history egui-pop routes
+//!   Ctrl+Z to and labels the Edit menu from ([`HeliosHistory`], over
+//!   Helios's value store given by [`HeliosHost::with_values`]): its
+//!   steps, their labels ("Undo drag exposure"), and an undo or redo as a
+//!   step of its own, which the vault saves as a version (`persist`). The history groups egui-pop
 //!   opens around a paste or a cut are groups of that store too, so a
 //!   paste is one of its steps. The interface settings keep their own
 //!   undo, in the settings window;
@@ -36,6 +36,7 @@
 
 use std::sync::{Arc, Mutex, PoisonError};
 
+use egui_pop::api::history::History;
 use egui_pop::api::host::{self, Dispatch, Event, Host, Reply, Resolver, Seq, Waker};
 use egui_pop::core::binding::SharedStore;
 use egui_pop::model::commands::Origin as PopOrigin;
@@ -45,6 +46,8 @@ use helios_core::Bus;
 use helios_shell::commands::{Origin, Registry};
 use helios_shell::when::Context;
 use serde_json::{Value as Json, json};
+
+use crate::history::HeliosHistory;
 
 /// Where a handler that finishes on a later frame takes its resolver: set
 /// while the host runs a command, empty otherwise.
@@ -112,6 +115,8 @@ const KINDS: &[(&str, &str)] = &[
     ("edit.redone", "gui.edit.redone"),
     ("edit.undo_failed", "gui.edit.undo_failed"),
     ("edit.redo_failed", "gui.edit.redo_failed"),
+    ("history.changed", "gui.history.changed"),
+    ("history.refused", "gui.history.refused"),
 ];
 
 /// The kind of an egui-pop event whose name is not in [`KINDS`]; its
@@ -127,6 +132,8 @@ pub struct HeliosHost {
     waker: Arc<Mutex<Waker>>,
     /// Helios's values, whose steps undo and redo walk.
     values: Option<Arc<Mutex<helios_values::Store>>>,
+    /// The history egui-pop reaches: the steps of `values`.
+    history: Option<HeliosHistory>,
     workspace: Workspace,
 }
 
@@ -162,12 +169,14 @@ impl HeliosHost {
             store,
             waker,
             values: None,
+            history: None,
             workspace: Workspace::default(),
         }
     }
 
     /// Undo and redo walk the steps of these values.
     pub fn with_values(mut self, values: Arc<Mutex<helios_values::Store>>) -> Self {
+        self.history = Some(HeliosHistory::new(values.clone()));
         self.values = Some(values);
         self
     }
@@ -301,34 +310,8 @@ impl Host for HeliosHost {
         Some(self.workspace.layout_document())
     }
 
-    fn can_undo(&self) -> bool {
-        self.values().is_some_and(|v| !v.undo_steps().is_empty())
-    }
-
-    fn can_redo(&self) -> bool {
-        self.values().is_some_and(|v| !v.redo_steps().is_empty())
-    }
-
-    fn undo_label(&self) -> Option<String> {
-        self.values()?.undo_steps().last().map(|s| s.label.clone())
-    }
-
-    fn redo_label(&self) -> Option<String> {
-        self.values()?.redo_steps().last().map(|s| s.label.clone())
-    }
-
-    fn undo(&mut self, origin: &PopOrigin) -> Result<Option<String>, String> {
-        match self.values() {
-            Some(mut v) => v.undo(&to_helios(origin)).map_err(|e| e.to_string()),
-            None => Ok(None),
-        }
-    }
-
-    fn redo(&mut self, origin: &PopOrigin) -> Result<Option<String>, String> {
-        match self.values() {
-            Some(mut v) => v.redo(&to_helios(origin)).map_err(|e| e.to_string()),
-            None => Ok(None),
-        }
+    fn history(&mut self) -> Option<&mut dyn History> {
+        self.history.as_mut().map(|h| h as &mut dyn History)
     }
 
     // A paste or a cut is one step of Helios's values, the steps undo
