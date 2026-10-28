@@ -197,6 +197,43 @@ from there.
 
 - Unit tests check every name resolves, Phosphor ones included, and that
   every panel has one.
+### Undo and the History panel (2026-10-28)
+
+Helios's kernel owns the undo (egui-pop's ADR 0014, `docs/design/undo.md`):
+`HeliosHistory` (`helios-gui/src/history.rs`) gives egui-pop the value
+store's steps as one history, `edit`. egui-pop routes Ctrl+Z and
+Ctrl+Shift+Z to it (after a focused text field and a component's own
+history, the theme editor's or the settings window's), labels Edit >
+Undo and Redo from it, and refuses undo, redo and a jump while a drag
+is going (`plugins::History` vetoes the `edit.undo`, `edit.redo` and
+`edit.jump` steps with the reason).
+
+**The History panel.** egui-pop's `HistoryPlugin` brings the History
+panel (`egui_pop.history`), in the end side bar, closed until asked for
+(`egui_pop.history.toggle`, in the command palette). It lists the
+history's steps under a Start row, oldest first: the head selected, the
+steps a redo would make again muted under it, a step made by an agent
+or a script named with its origin ("Exposure (agent:mcp)"). A click on
+a row brings the edit there, by undos or redos, all or nothing, through
+`edit.jump`.
+
+**Undone out of sight.** Each step keeps the place of the context stack
+it was made in (the library, the darkroom on an image, a workspace's
+network). An undo, a redo or a jump that walks a step made in another
+place than the one shown says so in a toast, "Undone in <place>", with
+Go there.
+
+**Agents.** On the desktop, egui-pop's `history.list`, `history.read`,
+`history.undo`, `history.redo` and `history.jump` (each with `scope`,
+else where the keys go, `if_rev` and `dry_run`; kept out of the
+palette). They run in the interface, not through Helios's dispatch
+(egui-pop's `IN_INTERFACE`): the owner they reach is held by no command
+meanwhile, and they go through the same steps as the keys, so a drag in
+progress refuses an agent's undo too. Through MCP,
+`helios_history_list`, `helios_history_read`, `helios_history_undo`,
+`helios_history_redo` and `helios_history_jump` reach them on the
+desktop holding the workspace open, run there as the agent; without
+such a desktop they are refused, the histories living in its window.
 
 ## Settings pages
 

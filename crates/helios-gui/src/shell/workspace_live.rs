@@ -514,6 +514,7 @@ impl Shell {
                 crate::contexts::agent_tool(self.app.handle(), request, AGENT)
             }
             cmd if cmd.starts_with("clipboard.") => self.agent_clipboard(cmd, request, &origin),
+            cmd if cmd.starts_with("history.") => self.agent_history(cmd, request),
             other => Err(format!("no workspace tool `{other}`")),
         }
     }
@@ -591,6 +592,25 @@ impl Shell {
                 origin.clone(),
             ),
             other => Err(format!("no clipboard tool `{other}`")),
+        }
+    }
+
+    /// An agent's `history.*` tool (the node's MCP `helios_history_*`),
+    /// answered by this desktop: egui-pop's command of that name, run in
+    /// the interface as an agent, through the same steps as the keys and
+    /// the History panel (a hook vetoing an undo vetoes it too).
+    fn agent_history(&mut self, cmd: &str, request: &Value) -> Result<Value, String> {
+        let id = egui_pop::model::ids::CommandId::new(cmd).map_err(|e| e.to_string())?;
+        let mut args = request.clone();
+        if let Some(o) = args.as_object_mut() {
+            for k in ["cmd", "workspace", "config"] {
+                o.remove(k);
+            }
+        }
+        let origin = egui_pop::model::commands::Origin::Agent(AGENT.into());
+        match self.app.run(&id, args, origin) {
+            egui_pop::api::host::Reply::Done(r) => r,
+            egui_pop::api::host::Reply::Later(_) => Ok(json!({ "queued": true })),
         }
     }
 

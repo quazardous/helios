@@ -512,3 +512,78 @@ fn an_agent_copies_and_pastes_in_its_own_slot_on_the_desktop() {
     assert!(failed);
     let _ = std::fs::remove_dir_all(&root);
 }
+
+#[test]
+fn an_agent_reads_and_walks_the_desktop_s_history_each_step_with_its_place() {
+    let root = temp("history");
+    let (mut h, config, dir, _) = window(&root);
+    // The History panel is there, closed until asked for.
+    let app = h.state().app().handle();
+    let history = egui_pop::api::history_view::PANEL_HISTORY;
+    assert!(app.declared_panels().iter().any(|(p, _)| p.id == history));
+    assert!(!app.panel_visible(&history));
+    let start = description(&h);
+    // An edit made in the library, then the window back at the root.
+    let (failed, _) = through(
+        &mut h,
+        "helios_context_go",
+        args(
+            &dir,
+            &config,
+            &json!({ "places": [{ "frame": "helios.library" }] }),
+        ),
+    );
+    assert!(!failed);
+    let (failed, _) = through(
+        &mut h,
+        "helios_workspace_edit",
+        args(
+            &dir,
+            &config,
+            &json!({ "changes": { "description": "In the library" } }),
+        ),
+    );
+    assert!(!failed);
+    let (failed, _) = through(
+        &mut h,
+        "helios_context_request",
+        args(&dir, &config, &json!({ "request": { "op": "leave" } })),
+    );
+    assert!(!failed);
+    // The step says where it was made.
+    let (failed, read) = through(
+        &mut h,
+        "helios_history_read",
+        args(&dir, &config, &json!({ "scope": "edit" })),
+    );
+    assert!(!failed, "{read}");
+    let last = read["undo"].as_array().unwrap().last().unwrap().clone();
+    assert_eq!(last["place"][0]["frame"], "helios.library", "{read}");
+    let (rev, head) = (read["rev"].clone(), read["head"].clone());
+    // A dry run says what an undo would take back, and changes nothing.
+    let (failed, dry) = through(
+        &mut h,
+        "helios_history_undo",
+        args(&dir, &config, &json!({ "if_rev": rev, "dry_run": true })),
+    );
+    assert!(!failed, "{dry}");
+    assert_eq!(dry["steps"][0]["id"], head);
+    assert_eq!(description(&h), "In the library");
+    // Undone as the user's Ctrl+Z would, from another place.
+    let (failed, done) = through(
+        &mut h,
+        "helios_history_undo",
+        args(&dir, &config, &json!({ "scope": "edit", "if_rev": rev })),
+    );
+    assert!(!failed, "{done}");
+    assert_eq!(done["steps"][0]["place"][0]["frame"], "helios.library");
+    assert_eq!(description(&h), start);
+    // A stale revision is refused.
+    let (failed, stale) = through(
+        &mut h,
+        "helios_history_redo",
+        args(&dir, &config, &json!({ "scope": "edit", "if_rev": rev })),
+    );
+    assert!(failed, "{stale}");
+    let _ = std::fs::remove_dir_all(&root);
+}

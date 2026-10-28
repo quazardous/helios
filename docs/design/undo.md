@@ -5,7 +5,9 @@ its open questions (see "Decisions" at the end). Built so far: the first
 migration step (the fixes below); egui-pop's `History` contract over the
 value store as one scope, `edit` (`HeliosHistory`, part of step 4); each
 step's place on the context stack, so an undo made elsewhere says where
-(2026-10-28). The generic part (the contract between
+(2026-10-28); the History panel and the agents' `history.*` commands
+over that scope (part of steps 5 and 7, 2026-10-28; see "Built: the
+History panel" below). The generic part (the contract between
 kernel and interface, the focus rule, grouping, the history panel, a
 survey of darktable, Lightroom, Photoshop, Blender, VS Code, Krita and
 GIMP) is egui-pop's ADR 0014, "Undo: histories owned by the kernel,
@@ -217,6 +219,27 @@ view state, restored by the context stack, not undone.
   `helios_workspace_undo` becomes the workspace scope's undo. On the
   desktop they arrive with its inspect and control endpoint (decided
   with the context stack); until then through egui-pop's commands.
+
+### Built: the History panel (2026-10-28)
+
+egui-pop's `HistoryPlugin` is on in Helios, over `HeliosHistory`:
+
+- **The panel** (`egui_pop.history`, end side bar, closed until asked
+  for) lists the `edit` scope's steps under Start; a click jumps there
+  through `edit.jump`, vetoed like an undo while a drag is going.
+- **The commands** `history.list`, `history.read`, `history.undo`,
+  `history.redo`, `history.jump` (`scope`, `if_rev`, `dry_run`; `to`
+  for a jump) run in the interface (egui-pop's `IN_INTERFACE`), never
+  through Helios's dispatch, which would hold the host and with it the
+  owner.
+- **MCP**: `helios_history_list`, `helios_history_read`,
+  `helios_history_undo`, `helios_history_redo`, `helios_history_jump`
+  go to the desktop holding the workspace open (as the workspace and
+  context tools do) and run these commands there as the agent; without
+  such a desktop they are refused. Not built yet from the plan above:
+  groups per request (`history_group`), undoing only an agent's batch,
+  snapshots, the image, library and workspace scopes, and the node's
+  own history service.
 
 ## The node and other processes
 

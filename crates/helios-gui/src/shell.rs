@@ -590,6 +590,10 @@ impl Shell {
                 values: values.clone(),
                 i18n: i18n.clone(),
             })
+            // egui-pop's History panel (the end side bar, closed until
+            // asked for) and the agents' `history.*` commands, over
+            // Helios's history owner (`crate::history::HeliosHistory`).
+            .plugin(egui_pop::api::history_view::HistoryPlugin::default())
             // Copy and paste: egui-pop's clipboard (its default owner,
             // the Edit commands, the agents' `clipboard.*`), Helios's
             // types and sanitiser over it.

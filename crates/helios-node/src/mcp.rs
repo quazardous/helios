@@ -45,6 +45,12 @@
 //! clipboard is the desktop's (a node's own slots, kept in the vault,
 //! are not built).
 //!
+//! The `helios_history_*` tools are egui-pop's `history.*` commands
+//! (list, read, undo, redo, jump, each with `if_rev` and a dry run) on
+//! the desktop holding a workspace open, run there as an agent through
+//! the same steps as the user's Ctrl+Z and History panel. The histories
+//! live in that window, so without one they are refused.
+//!
 //! Transport: JSON-RPC 2.0, one message per line on stdin and stdout.
 
 use std::path::PathBuf;
@@ -367,6 +373,18 @@ const SLOT: Param = optional(
 );
 
 const ENDPOINTS: &str = "helios.param (the focused parameter), helios.graph (the graph view's selection, the workspace's network), helios.masks (the mask edited), helios.library (the grid's selection, the library)";
+
+const HISTORY_SCOPE: Param = optional(
+    "scope",
+    optional_string,
+    "The history (`edit`: the image's edit); where Ctrl+Z goes when null",
+);
+
+const HISTORY_IF_REV: Param = optional(
+    "if_rev",
+    optional_integer,
+    "Refused unless the history is still at this revision (from helios_history_read)",
+);
 
 const SOURCE: Param = Param {
     name: "source",
@@ -715,6 +733,53 @@ pub const TOOLS: &[Tool] = &[
                 "Refused unless the clipboard is still at this revision",
             ),
             SLOT,
+            DRY_RUN,
+            CONFIG,
+        ],
+    },
+    Tool {
+        name: "helios_history_list",
+        endpoint: Endpoint::Workspace,
+        cmd: "history.list",
+        description: "The histories of the desktop holding a workspace open (egui-pop's history.list): each scope (id, title, local, durable, cap), whether it is active, its revision, head and counts, and where Undo and Redo go now with what they would do",
+        params: &[WORKSPACE, CONFIG],
+    },
+    Tool {
+        name: "helios_history_read",
+        endpoint: Endpoint::Workspace,
+        cmd: "history.read",
+        description: "A history's steps on the desktop holding a workspace open (egui-pop's history.read): `undo`, oldest first, and `redo`, the next one last, each with its id, label, text, origin and place; the revision and head",
+        params: &[WORKSPACE, HISTORY_SCOPE, CONFIG],
+    },
+    Tool {
+        name: "helios_history_undo",
+        endpoint: Endpoint::Workspace,
+        cmd: "history.undo",
+        description: "Undoes the last step of a history on the desktop holding a workspace open, as the user's Ctrl+Z would (egui-pop's history.undo); refused unless the history is still at `if_rev`; a dry run says what it would undo",
+        params: &[WORKSPACE, HISTORY_SCOPE, HISTORY_IF_REV, DRY_RUN, CONFIG],
+    },
+    Tool {
+        name: "helios_history_redo",
+        endpoint: Endpoint::Workspace,
+        cmd: "history.redo",
+        description: "Redoes the last undone step of a history on the desktop holding a workspace open (egui-pop's history.redo); refused unless the history is still at `if_rev`; a dry run says what it would redo",
+        params: &[WORKSPACE, HISTORY_SCOPE, HISTORY_IF_REV, DRY_RUN, CONFIG],
+    },
+    Tool {
+        name: "helios_history_jump",
+        endpoint: Endpoint::Workspace,
+        cmd: "history.jump",
+        description: "Brings a history on the desktop holding a workspace open to one of its steps (`to`, a step's id from helios_history_read; 0: the start) by undos or redos, all or nothing (egui-pop's history.jump); refused unless the history is still at `if_rev`; a dry run says which steps it would walk",
+        params: &[
+            WORKSPACE,
+            HISTORY_SCOPE,
+            Param {
+                name: "to",
+                schema: integer,
+                description: "The step's id; 0: before the first step",
+                default: None,
+            },
+            HISTORY_IF_REV,
             DRY_RUN,
             CONFIG,
         ],
@@ -1637,8 +1702,9 @@ fn through_desktop(config: &std::path::Path, request: &Value) -> Option<Result<V
     }
 }
 
-/// A `helios_workspace_*` or `helios_context_*` tool: through the
-/// desktop holding the workspace, else on its files.
+/// A `helios_workspace_*`, `helios_context_*` or `helios_history_*`
+/// tool: through the desktop holding the workspace, else on its files
+/// (the histories: refused).
 fn workspace_call(request: &Value) -> Result<Value, String> {
     use helios_template::workspace::{config_dir, tools};
     let config = request["config"]
@@ -1674,6 +1740,9 @@ fn workspace_call(request: &Value) -> Result<Value, String> {
         "context.request" => helios_template::contexts::tools::request(&config, &args),
         "context.go" => helios_template::contexts::tools::go(&config, &args),
         "context.set_mode" => helios_template::contexts::tools::set_mode(&config, &args),
+        cmd if cmd.starts_with("history.") => {
+            Err("the histories are the desktop's: no desktop holds this workspace open".into())
+        }
         other => Err(format!("no workspace tool `{other}`")),
     }?;
     if let Some(o) = answer.as_object_mut() {
@@ -1988,6 +2057,30 @@ mod tests {
         let (_, read) = tool(&mut s, "helios_context_read", args(json!({})));
         assert_eq!(read["place"], "helios.darkroom");
         assert_eq!(read["state"]["modes"][0]["frame"], "helios.culling");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_history_tools_need_the_desktop_holding_the_workspace() {
+        let root = std::env::temp_dir().join(format!("helios-mcp-history-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let mut s = Sockets {
+            inspect: None,
+            control: None,
+            node_bin: PathBuf::from("helios-node"),
+            ai: None,
+        };
+        let args = json!({ "workspace": root.join("shoot"), "config": root.join("config") });
+        for name in [
+            "helios_history_list",
+            "helios_history_read",
+            "helios_history_undo",
+            "helios_history_redo",
+        ] {
+            let (failed, answer) = tool(&mut s, name, args.clone());
+            assert!(failed, "{name}: {answer}");
+            assert!(answer.to_string().contains("no desktop holds"), "{answer}");
+        }
         let _ = std::fs::remove_dir_all(&root);
     }
 
