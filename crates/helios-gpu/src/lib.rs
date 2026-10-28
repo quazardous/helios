@@ -32,8 +32,8 @@ use std::sync::{Arc, Mutex, PoisonError, RwLock};
 use std::time::{Duration, Instant};
 
 use helios_core::{
-    Accelerator, AcceleratorError, Context, DeviceImage, Error, Failure, GpuJob, Image, Memory,
-    ModuleRef, Params, Region,
+    Accelerator, AcceleratorError, Context, DeviceImage, Error, Failure, GpuJob, GpuKernel, Image,
+    Memory, ModuleRef, Params, Region,
 };
 use wgpu::util::DeviceExt;
 
@@ -462,15 +462,15 @@ impl Gpu {
         &self,
         live: &Live,
         name: &str,
-        job: &GpuJob,
+        kernel: GpuKernel,
     ) -> Result<wgpu::ComputePipeline, AcceleratorError> {
         if self.struck(Fault::Compile) {
             return Err(AcceleratorError::new(
                 Failure::Compile,
-                format!("kernel `{}`: did not compile (injected)", job.kernel.entry),
+                format!("kernel `{}`: did not compile (injected)", kernel.entry),
             ));
         }
-        let key = (job.kernel.wgsl, job.kernel.entry);
+        let key = (kernel.wgsl, kernel.entry);
         if let Some(p) = live
             .pipelines
             .lock()
@@ -483,20 +483,20 @@ impl Gpu {
         let (pipeline, error) = live.scoped(|| {
             let shader = d.create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some(name),
-                source: wgpu::ShaderSource::Wgsl(job.kernel.wgsl.into()),
+                source: wgpu::ShaderSource::Wgsl(kernel.wgsl.into()),
             });
             d.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
                 label: Some(name),
                 layout: None,
                 module: &shader,
-                entry_point: Some(job.kernel.entry),
+                entry_point: Some(kernel.entry),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
                 cache: None,
             })
         });
         if let Some(e) = error {
             let mut e = live.failure(&e, Failure::Compile);
-            e.reason = format!("kernel `{}`: {}", job.kernel.entry, e.reason);
+            e.reason = format!("kernel `{}`: {}", kernel.entry, e.reason);
             return Err(e);
         }
         live.pipelines
@@ -618,7 +618,7 @@ impl Gpu {
                 ),
             ));
         }
-        let pipeline = self.pipeline(&live, name, job)?;
+        let pipeline = self.pipeline(&live, name, job.kernel)?;
         if self.struck(Fault::Dispatch) {
             return Err(AcceleratorError::new(
                 Failure::Dispatch,
@@ -703,6 +703,113 @@ impl Gpu {
             return Err(live.failure(&e, Failure::Dispatch));
         }
         Ok(Self::resident(&live, output, channels, output_buf, charge))
+    }
+
+    /// Runs a pixel-wise kernel reading two images of one region on the
+    /// device, `image` and `over` (a mask, say), into a new image of
+    /// `channels` channels over the same region: what a viewport lays over
+    /// a result that stayed on the GPU. Nothing is read back, nothing
+    /// waited for. Bindings, group 0: `0` the image and `1` the other
+    /// (`array<f32>`, read), `2` the output (`array<f32>`, read and write),
+    /// `3` the uniforms (`array<vec4<f32>>`), `4` the shape
+    /// (`array<vec4<u32>, 2>`: pixel count, image channels, the other's
+    /// channels, invocations per grid row; then `extra`). One invocation a
+    /// pixel, as a module's kernel ([`GpuKernel`]).
+    pub fn composite(
+        &self,
+        kernel: GpuKernel,
+        image: &DeviceImage,
+        over: &DeviceImage,
+        uniforms: &[f32],
+        extra: [u32; 4],
+        channels: u32,
+    ) -> Result<DeviceImage, AcceleratorError> {
+        let live = self.live()?;
+        let image_buf = Self::buffer_on(&live, image)?;
+        let over_buf = Self::buffer_on(&live, over)?;
+        let region = image.region();
+        if over.region() != region {
+            return Err(AcceleratorError::new(
+                Failure::Dispatch,
+                format!("the images cover {region} and {}", over.region()),
+            ));
+        }
+        let pipeline = self.pipeline(&live, "composite", kernel)?;
+        if self.struck(Fault::Dispatch) {
+            return Err(AcceleratorError::new(
+                Failure::Dispatch,
+                format!("kernel `{}`: did not run (injected)", kernel.entry),
+            ));
+        }
+        let pixels = region.area() as u32;
+        let (groups_x, groups_y) = grid(
+            pixels,
+            live.device.limits().max_compute_workgroups_per_dimension,
+        )
+        .map_err(|e| AcceleratorError::new(Failure::Dispatch, e))?;
+        let out_size = (u64::from(pixels) * u64::from(channels) * 4).max(4);
+        let charge = self.reserve(out_size)?;
+        let d = &live.device;
+        let (output_buf, error) = live.scoped(|| {
+            let uniform = |data: &[u8], label: &str| {
+                d.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some(label),
+                    contents: data,
+                    usage: wgpu::BufferUsages::UNIFORM,
+                })
+            };
+            let output_buf = d.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("composite"),
+                size: out_size,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            });
+            // A uniform binding is never empty.
+            let plan: &[f32] = if uniforms.is_empty() {
+                &[0.0; 4]
+            } else {
+                uniforms
+            };
+            let plan_buf = uniform(bytemuck::cast_slice(plan), "plan");
+            let shape = [
+                pixels,
+                image.channels(),
+                over.channels(),
+                groups_x * WORKGROUP,
+                extra[0],
+                extra[1],
+                extra[2],
+                extra[3],
+            ];
+            let shape_buf = uniform(bytemuck::cast_slice(&shape), "shape");
+            let buffers = [image_buf, over_buf, &output_buf, &plan_buf, &shape_buf];
+            let entries: Vec<wgpu::BindGroupEntry<'_>> = buffers
+                .iter()
+                .enumerate()
+                .map(|(i, b)| wgpu::BindGroupEntry {
+                    binding: i as u32,
+                    resource: b.as_entire_binding(),
+                })
+                .collect();
+            let group = d.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("composite"),
+                layout: &pipeline.get_bind_group_layout(0),
+                entries: &entries,
+            });
+            let mut encoder = d.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+            {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
+                pass.set_pipeline(&pipeline);
+                pass.set_bind_group(0, &group, &[]);
+                pass.dispatch_workgroups(groups_x, groups_y, 1);
+            }
+            live.queue.submit([encoder.finish()]);
+            output_buf
+        });
+        if let Some(e) = error {
+            return Err(live.failure(&e, Failure::Dispatch));
+        }
+        Ok(Self::resident(&live, region, channels, output_buf, charge))
     }
 
     /// Reads an image on the device back into host memory, waiting for the
