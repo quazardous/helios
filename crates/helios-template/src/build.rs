@@ -164,7 +164,6 @@ pub fn build(
                 .map_err(|e| at(e.to_string()))?;
         }
     }
-    unconnected(&graph)?;
     let view = placed
         .get(&net.view.node)
         .and_then(|p| p.outputs.get(&net.view.port))
@@ -175,6 +174,7 @@ pub fn build(
                 net.view.port, net.view.node
             )
         })?;
+    unconnected(&graph, view.0)?;
     let (layout, notes) = hinted(layout, &hints)?;
     Ok(Built {
         graph,
@@ -262,9 +262,37 @@ fn open(
     Ok(placed)
 }
 
-/// Every required input of every module node is connected.
-fn unconnected(graph: &Graph) -> Result<(), String> {
+/// Every required input is connected on the network's render paths: the
+/// nodes the view reads from, and those every sink (an export, a
+/// writer) reads from. A node off those paths may wait for its wires (a
+/// node just added in the graph view, wired by the next edit): nothing
+/// renders it, and asking for its output says which input is missing.
+fn unconnected(graph: &Graph, view: NodeId) -> Result<(), String> {
+    let mut todo = vec![view];
     for id in graph.ids() {
+        if graph
+            .manifest(id)
+            .map_err(|e| e.to_string())?
+            .is_some_and(|m| m.kind == helios_core::ModuleKind::Sink)
+        {
+            todo.push(id);
+        }
+    }
+    let mut needed = std::collections::BTreeSet::new();
+    while let Some(id) = todo.pop() {
+        if !needed.insert(id) {
+            continue;
+        }
+        for (from, _) in graph
+            .input_ports(id)
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .flatten()
+        {
+            todo.push(from);
+        }
+    }
+    for id in graph.ids().filter(|id| needed.contains(id)) {
         let Some(m) = graph.manifest(id).map_err(|e| e.to_string())? else {
             continue;
         };

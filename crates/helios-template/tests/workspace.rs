@@ -748,3 +748,44 @@ fn strip_for_outside_keeps_file_names_and_drops_secrets_and_data() {
     assert_eq!(workspace::strip_for_outside(&mut text), ["a local path"]);
     assert_eq!(text, "lut.cube");
 }
+
+#[test]
+fn a_node_off_the_render_path_may_wait_for_its_wires() {
+    let root = temp("unwired");
+    let (_, files) = made(&root, "helios.portrait-retouch", "portrait");
+    let state = files.load().unwrap();
+    let c = catalogue();
+    let wire = |from: &str, port: &str, to: &str| json!({ "from": from, "port": port, "to": to, "input": "input" });
+    let with = |connections: Vec<Json>| {
+        let mut net = serde_json::to_value(&state.bundle.template.network).unwrap();
+        net["nodes"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({ "name": "exposure_2", "module": "exposure" }));
+        let all = net["connections"].as_array_mut().unwrap();
+        for c in connections {
+            all.retain(|k| !(k["to"] == c["to"] && k["input"] == c["input"]));
+            all.push(c);
+        }
+        state.edited(&json!({ "network": net })).unwrap()
+    };
+    // Added unconnected (the graph view's add, before its wires): fine,
+    // the presets too.
+    assert_eq!(with(vec![]).problems(&c), Vec::<String>::new());
+    // Wired in front of what the view shows while its own input waits:
+    // refused, the view would read a node missing its input.
+    let problems = with(vec![wire("exposure_2", "output", "exposure")]).problems(&c);
+    assert!(
+        problems
+            .iter()
+            .any(|p| p.contains("input `input` of `exposure_2` is not connected")),
+        "{problems:?}"
+    );
+    // Its input wired too: fine.
+    let wired = with(vec![
+        wire("source", "image", "exposure_2"),
+        wire("exposure_2", "output", "exposure"),
+    ]);
+    assert_eq!(wired.problems(&c), Vec::<String>::new());
+    let _ = std::fs::remove_dir_all(&root);
+}

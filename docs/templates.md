@@ -323,8 +323,12 @@ window:
    composite updates on offer.
 2. **Build** (`Bundle::build`): the network as a `helios_core::Graph`
    (sources filled with a placeholder image, composites folded or
-   opened, every required input connected, the view found) and the layout
+   opened, the view found, every required input connected on the render
+   paths: the nodes the view and every sink read from) and the layout
    with the composites' panel hints applied. A test renders the result.
+   A node off those paths may wait for its wires: the graph view adds a
+   node, then wires it, one edit each; nothing renders it meanwhile, and
+   asking for its output says which input is missing.
 
 The JSON schemas (`templates/schema/template.schema.json` and
 `composite.schema.json`, `helios_template::schema`) describe the files;
