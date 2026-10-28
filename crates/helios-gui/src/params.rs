@@ -46,6 +46,9 @@ use serde_json::json;
 
 use crate::dialogs::{Level, Request, request};
 
+/// The panel.
+pub const PANEL: &str = "helios.params";
+
 /// The node whose parameters the panel shows (a node name; empty or absent:
 /// every node). The graph editor sets it.
 pub const SELECTION: &str = "view/graph/selection";

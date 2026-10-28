@@ -1,7 +1,8 @@
 //! The Graph panel: the workspace's network in egui-pop's node graph
 //! editor. It shows the network; moving a node and connecting two ports
 //! are each one undo step that changes the workspace; the selection is
-//! shared with the other panels both ways; a node's header carries the
+//! shared with the other panels both ways, and selecting a node brings
+//! up the Parameters panel; a node's header carries the
 //! engine's status; the overview stacks the nodes under their principal
 //! node.
 
@@ -213,6 +214,45 @@ fn the_selection_is_shared_with_the_other_panels_both_ways() {
         json!({ "path": helios_gui::params::SELECTION, "value": "mask" }),
     );
     assert_eq!(read(&mut h)["selection"], json!(["mask"]));
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn selecting_a_node_brings_up_the_parameters_panel() {
+    use egui_pop::api::workbench::Change;
+    use egui_pop::model::ids::PanelId;
+    let root = temp("reveal");
+    let (mut h, _) = window(&root);
+    let params = PanelId::from_static(helios_gui::params::PANEL);
+    let graph = PanelId::from_static(helios_gui::graph::PANEL);
+    h.state()
+        .app()
+        .handle()
+        .change_workbench(Change::Hide(params.clone()));
+    frames(&mut h);
+    assert!(!h.state().layout().shows(&params), "closed first");
+    // Selected in the graph: the panel is back, the graph still shown.
+    run(
+        &mut h,
+        "graph.select",
+        json!({ "graph": GRAPH, "nodes": ["exposure"] }),
+    );
+    let layout = h.state().layout();
+    assert!(layout.shows(&params), "the Parameters panel opened");
+    assert!(layout.shows(&graph));
+    assert_eq!(selection(&h), json!("exposure"));
+    // An empty selection leaves the panels as they are.
+    h.state()
+        .app()
+        .handle()
+        .change_workbench(Change::Hide(params.clone()));
+    frames(&mut h);
+    run(
+        &mut h,
+        "graph.select",
+        json!({ "graph": GRAPH, "nodes": [] }),
+    );
+    assert!(!h.state().layout().shows(&params));
     std::fs::remove_dir_all(&root).unwrap();
 }
 

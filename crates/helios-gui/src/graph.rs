@@ -610,6 +610,9 @@ pub struct GraphPanel {
     headers_at: Option<(u64, f64)>,
     /// Commands for the shell to run (`network.*`), in order.
     commands: Vec<(String, Json)>,
+    /// A node was selected in the editor: the Parameters panel is to be
+    /// brought up.
+    reveal: bool,
     /// A sub-workspace asked to be entered while its place is missing.
     pub notes: Vec<Message>,
 }
@@ -628,6 +631,7 @@ impl Default for GraphPanel {
             headers: BTreeMap::new(),
             headers_at: None,
             commands: Vec::new(),
+            reveal: false,
             notes: Vec::new(),
         }
     }
@@ -642,6 +646,12 @@ impl GraphPanel {
     /// The commands the editor's edits became, for the shell to run.
     pub fn take_commands(&mut self) -> Vec<(String, Json)> {
         std::mem::take(&mut self.commands)
+    }
+
+    /// Whether a node was selected in the editor since the last call:
+    /// the shell brings up the Parameters panel.
+    pub fn take_reveal(&mut self) -> bool {
+        std::mem::take(&mut self.reveal)
     }
 
     /// The editor's state (its view, selection and folds).
@@ -835,7 +845,8 @@ impl GraphPanel {
     }
 
     /// The editor's selection, written to the shared value: the node
-    /// selected before when it still is, else the first.
+    /// selected before when it still is, else the first. A node newly
+    /// selected brings up the Parameters panel.
     fn select(&mut self, values: &Arc<Mutex<Store>>, nodes: &[String]) {
         let keep = self
             .selection
@@ -851,6 +862,7 @@ impl GraphPanel {
             Change::To(helios_core::Value::Text(node.clone())),
             Origin::User,
         ));
+        self.reveal |= !node.is_empty();
         self.selection = Some(node);
     }
 

@@ -427,7 +427,10 @@ network.
 - **Selection.** The editor's selection is `view/graph/selection`, the
   value the Parameters, Masks and Modules panels follow: selecting a
   node makes it the selected module, and a node selected elsewhere is
-  selected in the graph.
+  selected in the graph. Selecting a node in the graph also brings up
+  the Parameters panel (put back when it was closed, brought to the
+  front of its tabs), the keyboard staying with the graph; not when it
+  shares the graph's tabs, which would hide the graph.
 - **Wires.** Curves by default, as egui-pop draws them; Orthogonal
   (routed around the nodes) and Straight are picked above the graph,
   kept in `view/graph/wires` (`param.set` for agents).

@@ -4482,10 +4482,17 @@ impl Shell {
     /// each run as the user's (one undo step each), and what it has to
     /// say.
     fn graph_edits(&mut self) {
-        let (commands, notes) = {
+        let (commands, notes, reveal) = {
             let mut g = self.graph.borrow_mut();
-            (g.take_commands(), std::mem::take(&mut g.notes))
+            (
+                g.take_commands(),
+                std::mem::take(&mut g.notes),
+                g.take_reveal(),
+            )
         };
+        if reveal {
+            self.reveal_params();
+        }
         for (id, args) in commands {
             // A refusal is said by `run`.
             let _ = self.run(&id, args, Origin::User);
@@ -4493,6 +4500,32 @@ impl Shell {
         for n in notes {
             self.note(n);
         }
+    }
+
+    /// A node selected in the graph brings up the Parameters panel: shown
+    /// (put back in its area when closed) and made its tabs' front tab,
+    /// the keyboard left to the graph. Not when it shares the graph's
+    /// tabs (it would hide the graph), nor when it is in front already.
+    fn reveal_params(&mut self) {
+        let params = PanelId::from_static(crate::params::PANEL);
+        if !self.panels.iter().any(|p| p.id == params) {
+            return;
+        }
+        let graph = PanelId::from_static(crate::graph::PANEL);
+        let layout = self.layout();
+        let tabs = |p: &PanelId| layout.areas.iter().find_map(|(_, n)| tabs_holding(n, p));
+        if let Some((panels, active)) = tabs(&params) {
+            if panels.contains(&graph) || panels.get(active) == Some(&params) {
+                return;
+            }
+        } else if layout.shows(&params) {
+            // Floating or in a window of its own: in view already.
+            return;
+        }
+        let _ = self
+            .app
+            .handle()
+            .change_workbench(egui_pop::api::workbench::Change::Show(params));
     }
 
     /// The Graph panel's state (its view, selection and folds).
@@ -4977,5 +5010,19 @@ pub mod headless {
             recorder.push(&snapshot::crop(&full, rect, shell.pixels_per_point()))?;
         }
         Ok(())
+    }
+}
+
+/// The tabs holding a panel, with the index of the one in front.
+fn tabs_holding<'a>(
+    node: &'a egui_pop::model::layout::Node,
+    panel: &PanelId,
+) -> Option<(&'a [PanelId], usize)> {
+    use egui_pop::model::layout::Node;
+    match node {
+        Node::Tabs { panels, active } => panels
+            .contains(panel)
+            .then_some((panels.as_slice(), *active)),
+        Node::Split { a, b, .. } => tabs_holding(a, panel).or_else(|| tabs_holding(b, panel)),
     }
 }
