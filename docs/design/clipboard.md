@@ -416,3 +416,23 @@ Each with the default proposed:
   text beside the files and egui-pop's own copy still writes only text,
   since writing several formats at once is the system backend's
   (egui-pop, ADR 0015 step 5); the primary selection is egui-pop's too.
+- **2026-10-28, the agents' tools** (migration step 7, its desktop
+  half). `helios_clipboard {slot?, target?, payload?}`,
+  `helios_copy {source? | format, data, title?; cut?, slot?, dry_run}`
+  and `helios_paste {target, format?, transform?, parts?, if_rev?,
+  slot?, dry_run}` are node MCP tools that go, as the workspace and
+  context tools do, to the desktop holding the workspace open, where
+  they run egui-pop's `clipboard.offers`, `clipboard.read`,
+  `clipboard.copy`, `clipboard.write` and `clipboard.paste` as the
+  agent: its own slot (`agent:mcp`), the user's refused unless allowed
+  (question 8), a paste one undo step, a dry run answering the plan,
+  the transform, what is stripped and lost, and the target's changes.
+  Sources and targets are the desktop's named endpoints, not the
+  design's `{image, nodes?}` selectors: a copy takes the endpoint's
+  selection. Not yet, and why: without a desktop the tools are refused,
+  since the node's slots in the vault (question 7) wait for the kernel
+  to own the clipboard (`HeliosHost::clipboard`, migration step 2);
+  choosing what to copy by name (nodes, parameters) needs endpoints
+  keyed per element (egui-pop #73); a paste into the graph or the masks
+  answers its plan, its edit applied at the next frame (egui-pop #73
+  again); "Paste from agent" in paste special is not offered yet.

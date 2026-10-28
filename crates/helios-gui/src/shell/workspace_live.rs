@@ -513,7 +513,84 @@ impl Shell {
             cmd if cmd.starts_with("context.") => {
                 crate::contexts::agent_tool(self.app.handle(), request, AGENT)
             }
+            cmd if cmd.starts_with("clipboard.") => self.agent_clipboard(cmd, request, &origin),
             other => Err(format!("no workspace tool `{other}`")),
+        }
+    }
+
+    /// An agent's clipboard tool (`helios_clipboard`, `helios_copy`,
+    /// `helios_paste`): egui-pop's `clipboard.*` commands run as the agent,
+    /// in its own slot unless it names another the owner lets it use.
+    fn agent_clipboard(
+        &mut self,
+        cmd: &str,
+        request: &Value,
+        origin: &Origin,
+    ) -> Result<Value, String> {
+        // The arguments given (a tool's left-out ones come as null).
+        let pick = |keys: &[&str]| -> Value {
+            keys.iter()
+                .filter_map(|k| {
+                    let v = &request[*k];
+                    (!v.is_null()).then(|| ((*k).to_string(), v.clone()))
+                })
+                .collect::<serde_json::Map<_, _>>()
+                .into()
+        };
+        match cmd {
+            "clipboard.state" => {
+                let mut answer = self.run(
+                    "clipboard.offers",
+                    pick(&["slot", "target"]),
+                    origin.clone(),
+                )?;
+                if request["payload"] == true {
+                    let read = self.run("clipboard.read", pick(&["slot"]), origin.clone())?;
+                    answer["payload"] = read["item"]["payload"].clone();
+                }
+                Ok(answer)
+            }
+            "clipboard.copy" if !request["format"].is_null() => {
+                if request["data"].is_null() {
+                    return Err("an item given whole needs its `data`".into());
+                }
+                if request["dry_run"] == true {
+                    return Ok(json!({
+                        "dry_run": true,
+                        "kind": request["format"],
+                        "title": request["title"],
+                    }));
+                }
+                self.run(
+                    "clipboard.write",
+                    pick(&["slot", "format", "data", "title"]),
+                    origin.clone(),
+                )
+            }
+            "clipboard.copy" => {
+                if request["source"].is_null() {
+                    return Err("a copy needs a `source`, or a `format` and its `data`".into());
+                }
+                self.run(
+                    "clipboard.copy",
+                    pick(&["source", "slot", "cut", "dry_run"]),
+                    origin.clone(),
+                )
+            }
+            "clipboard.paste" => self.run(
+                "clipboard.paste",
+                pick(&[
+                    "target",
+                    "slot",
+                    "format",
+                    "transform",
+                    "parts",
+                    "if_rev",
+                    "dry_run",
+                ]),
+                origin.clone(),
+            ),
+            other => Err(format!("no clipboard tool `{other}`")),
         }
     }
 

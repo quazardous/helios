@@ -35,6 +35,16 @@
 //! workspace keeps beside its layout, what a desktop opening it comes
 //! back to.
 //!
+//! The clipboard tools (`helios_clipboard`, `helios_copy`,
+//! `helios_paste`) are egui-pop's `clipboard.*` commands on the desktop
+//! holding a workspace, reached the same way: the agent works in a slot
+//! of its own (`agent:mcp`), never in what the user copied unless the
+//! user allows it, copies from or pastes into the desktop's endpoints
+//! (a parameter, the graph, the masks, the library), with a dry run.
+//! Without a desktop holding the workspace they are refused: the
+//! clipboard is the desktop's (a node's own slots, kept in the vault,
+//! are not built).
+//!
 //! Transport: JSON-RPC 2.0, one message per line on stdin and stdout.
 
 use std::path::PathBuf;
@@ -243,6 +253,10 @@ fn object() -> Value {
     json!({ "type": "object" })
 }
 
+fn anything() -> Value {
+    json!({})
+}
+
 fn boolean() -> Value {
     json!({ "type": "boolean" })
 }
@@ -345,6 +359,14 @@ const DRY_RUN: Param = Param {
     description: "Say what would change, write nothing",
     default: Some(no),
 };
+
+const SLOT: Param = optional(
+    "slot",
+    optional_string,
+    "The clipboard slot: the agent's own (`agent:mcp`) when null; `user` is refused unless the user allows it",
+);
+
+const ENDPOINTS: &str = "helios.param (the focused parameter), helios.graph (the graph view's selection, the workspace's network), helios.masks (the mask edited), helios.library (the grid's selection, the library)";
 
 const SOURCE: Param = Param {
     name: "source",
@@ -603,6 +625,96 @@ pub const TOOLS: &[Tool] = &[
                 optional_integer,
                 "Refused unless the stack is still at this revision",
             ),
+            DRY_RUN,
+            CONFIG,
+        ],
+    },
+    Tool {
+        name: "helios_clipboard",
+        endpoint: Endpoint::Workspace,
+        cmd: "clipboard.state",
+        description: "What a clipboard slot holds on the desktop that has the workspace open: its type, title, formats, revision and what was stripped from it; with `target` (an endpoint), every way it fits there, each with its preview; with `payload`, the item's data too",
+        params: &[
+            WORKSPACE,
+            SLOT,
+            optional(
+                "target",
+                optional_string,
+                "An endpoint to fit the item to: helios.param, helios.graph, helios.masks or helios.library",
+            ),
+            Param {
+                name: "payload",
+                schema: boolean,
+                description: "Answer the item's data too",
+                default: Some(no),
+            },
+            CONFIG,
+        ],
+    },
+    Tool {
+        name: "helios_copy",
+        endpoint: Endpoint::Workspace,
+        cmd: "clipboard.copy",
+        description: "Copies into a clipboard slot on the desktop holding the workspace: from an endpoint's selection (`source`), or an item given whole (`format` and `data`: a Helios type such as application/x-helios.param+json, or text/plain; a `title`). `cut` deletes what was copied, as one undo step. A dry run says what would be copied and left out",
+        params: &[
+            WORKSPACE,
+            optional(
+                "source",
+                optional_string,
+                "The endpoint copied from: helios.param, helios.graph, helios.masks or helios.library; null with `format` and `data`",
+            ),
+            optional(
+                "format",
+                optional_string,
+                "The item's format, when it is given whole",
+            ),
+            optional("data", anything, "The item's data, as its format holds it"),
+            optional("title", optional_string, "What the item is called"),
+            Param {
+                name: "cut",
+                schema: boolean,
+                description: "Delete what was copied (an endpoint that can)",
+                default: Some(no),
+            },
+            SLOT,
+            DRY_RUN,
+            CONFIG,
+        ],
+    },
+    Tool {
+        name: "helios_paste",
+        endpoint: Endpoint::Workspace,
+        cmd: "clipboard.paste",
+        description: "Pastes a clipboard slot into an endpoint of the desktop holding the workspace (`target`), in the richest format it accepts or the one given, through a `transform`, only some `parts` (paste special's); refused unless the clipboard is still at `if_rev`; one undo step. A dry run answers the plan, the transform, what would be stripped and lost, and the target's changes, without making them. A paste into the graph or the masks is applied at the desktop's next frame: its answer is the plan",
+        params: &[
+            WORKSPACE,
+            Param {
+                name: "target",
+                schema: string,
+                description: ENDPOINTS,
+                default: None,
+            },
+            optional(
+                "format",
+                optional_string,
+                "The format pasted; the richest the target accepts when null",
+            ),
+            optional(
+                "transform",
+                optional_string,
+                "A transform to go through (helios.mask-as-nodes)",
+            ),
+            optional(
+                "parts",
+                optional_strings,
+                "Only these parts (paste special's); all when null",
+            ),
+            optional(
+                "if_rev",
+                optional_integer,
+                "Refused unless the clipboard is still at this revision",
+            ),
+            SLOT,
             DRY_RUN,
             CONFIG,
         ],
@@ -1535,13 +1647,20 @@ fn workspace_call(request: &Value) -> Result<Value, String> {
     if let Some(answer) = through_desktop(&config, request) {
         return answer;
     }
+    let cmd = request["cmd"].as_str().unwrap_or_default();
+    if cmd.starts_with("clipboard.") {
+        return Err(
+            "no desktop holds this workspace open: the clipboard is the desktop's (a node's own clipboard slots are not built yet)"
+                .into(),
+        );
+    }
     let mut args = request.clone();
     if let Some(o) = args.as_object_mut() {
         o.remove("cmd");
         o.remove("config");
     }
     let catalogue = workspace_catalogue();
-    let mut answer = match request["cmd"].as_str().unwrap_or_default() {
+    let mut answer = match cmd {
         "workspace.parts" => tools::parts_of(&config, &args),
         "workspace.state" => tools::state(&config, &args),
         "workspace.edit" => tools::edit(&config, &args, &catalogue),
@@ -1960,6 +2079,47 @@ mod tests {
         assert!(!failed, "{undone}");
         assert_eq!(nodes(&mut s), 3);
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_clipboard_tools_need_a_desktop_holding_the_workspace() {
+        let root =
+            std::env::temp_dir().join(format!("helios-mcp-clipboard-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let mut s = Sockets {
+            inspect: None,
+            control: None,
+            node_bin: PathBuf::from("helios-node"),
+            ai: None,
+        };
+        let base = json!({ "workspace": root.join("work"), "config": root.join("config") });
+        for (name, extra) in [
+            ("helios_clipboard", json!({})),
+            (
+                "helios_copy",
+                json!({ "format": "text/plain", "data": "hello" }),
+            ),
+            (
+                "helios_paste",
+                json!({ "target": "helios.library", "dry_run": true }),
+            ),
+        ] {
+            let mut args = base.clone();
+            for (k, v) in extra.as_object().unwrap() {
+                args[k] = v.clone();
+            }
+            let (failed, answer) = tool(&mut s, name, args);
+            assert!(failed, "{name}: {answer}");
+            assert!(
+                answer.to_string().contains("no desktop"),
+                "{name}: {answer}"
+            );
+        }
+        // Unknown arguments are refused before anything is sent.
+        let mut args = base;
+        args["payload_format"] = json!("png");
+        let (failed, _) = tool(&mut s, "helios_clipboard", args);
+        assert!(failed);
     }
 
     #[test]

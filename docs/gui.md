@@ -964,7 +964,13 @@ JSON, another parameter's path for its value). Anything else is
 refused with the reason and Paste is greyed. A paste is one undo step
 ("Paste Exposure"); `param.paste {dry_run: true}` says what it would
 set. Agents copy and paste in their own slot: they never read what the
-user copied. The library's grid and filmstrip copy their
+user copied. Through MCP, `helios_clipboard` (what a slot holds, how
+it fits an endpoint, its data on demand), `helios_copy` (from an
+endpoint's selection, or an item given whole: a format and its data)
+and `helios_paste` (into an endpoint, with `format`, `transform`,
+`parts`, `if_rev` and a dry run) are egui-pop's `clipboard.*` run as
+the agent on the desktop holding the workspace, in the slot
+`agent:mcp`; without a desktop they are refused. The library's grid and filmstrip copy their
 images and import what is pasted into them (see
 [library.md](library.md), "Copy and paste").
 

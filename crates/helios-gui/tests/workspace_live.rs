@@ -451,3 +451,64 @@ fn an_agent_moves_the_places_and_modes_of_the_desktop_holding_the_workspace() {
     );
     let _ = std::fs::remove_dir_all(&root);
 }
+
+#[test]
+fn an_agent_copies_and_pastes_in_its_own_slot_on_the_desktop() {
+    let root = temp("clipboard");
+    let (mut h, config, dir, _) = window(&root);
+    let file = root.join("pasted.jpg");
+    std::fs::write(&file, b"not a real image").unwrap();
+    let text = format!("file://{}", file.display());
+    // An item given whole, in the agent's own slot: the user's is
+    // untouched.
+    let (failed, wrote) = through(
+        &mut h,
+        "helios_copy",
+        args(
+            &dir,
+            &config,
+            &json!({ "format": "text/plain", "data": text, "title": "a file" }),
+        ),
+    );
+    assert!(!failed, "{wrote}");
+    assert_eq!(wrote["slot"], "agent:mcp");
+    let (failed, state) = through(
+        &mut h,
+        "helios_clipboard",
+        args(&dir, &config, &json!({ "payload": true })),
+    );
+    assert!(!failed, "{state}");
+    assert_eq!(state["item"]["kind"], "text/plain");
+    assert_eq!(state["payload"], json!(text));
+    let app = h.state().app().handle().clone();
+    let user = egui_pop::api::clipboard::with_owner(&app, |c| {
+        c.get(&egui_pop::api::clipboard::Slot::User)
+    })
+    .flatten();
+    assert!(user.is_none(), "{user:?}");
+    // The user's slot is refused to an agent.
+    let (failed, refused) = through(
+        &mut h,
+        "helios_clipboard",
+        args(&dir, &config, &json!({ "slot": "user" })),
+    );
+    assert!(failed, "{refused}");
+    // A paste's dry run into the library: the file it names, imported
+    // once done; nothing asked yet.
+    let (failed, plan) = through(
+        &mut h,
+        "helios_paste",
+        args(
+            &dir,
+            &config,
+            &json!({ "target": "helios.library", "dry_run": true }),
+        ),
+    );
+    assert!(!failed, "{plan}");
+    assert!(plan.to_string().contains("imports 1 files"), "{plan}");
+    assert!(h.state_mut().take_imports().is_empty());
+    // A copy needs a source or an item.
+    let (failed, _) = through(&mut h, "helios_copy", args(&dir, &config, &json!({})));
+    assert!(failed);
+    let _ = std::fs::remove_dir_all(&root);
+}
