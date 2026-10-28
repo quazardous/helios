@@ -181,7 +181,6 @@ command-viewport-zoom-out.title 9526f42d761b042b
 command-window-close.title e391973c152d0a92
 command-window-maximize.title 3fbd837ee314e593
 command-window-minimize.title 3cc56699d77f2fe8
-command-workbench-about.title 3733d924b38b057a
 command-workbench-fullscreen.title ae3886b1f1272280
 command-workbench-keybindings.title 0d070a1def8c650f
 command-workbench-palette.title 6ddb5508d068cafb
@@ -223,8 +222,7 @@ frame-helios-darkroom.title 85327dfe18519848
 frame-helios-library.title 6d7e88ea6aaf5346
 frame-helios-mask-editing.title 9d40fb207fdf75d9
 frame-helios-workspace.title e7a125cdd87cf1f5
-gui-about-crashes 1da3aeb451edcc70
-gui-about-logs 32905031a5b47d8e
+gui-about-description 6b6356eedfe61a4e
 gui-caption-decisions 10452c9e778ad3f7
 gui-caption-decisions-count 81c7f058fde7d9c6
 gui-caption-jobs 2dc28dab487c66ad

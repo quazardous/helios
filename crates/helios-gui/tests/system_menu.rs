@@ -112,18 +112,43 @@ fn the_system_menu_is_declared_with_keys_ticks_and_lists() {
 }
 
 #[test]
-fn about_and_keyboard_shortcuts_open_shell_dialogs() {
+fn the_help_menu_has_about_helios() {
+    let mut shell = framed();
+    let items = shell.menu_items("app.menu.help");
+    let about = items
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["id"] == "about")
+        .expect("Help has egui-pop's About");
+    assert_eq!(about["title"], json!("About Helios"));
+}
+
+#[test]
+fn about_and_keyboard_shortcuts_open_dialogs() {
     let mut h = headless::harness(framed(), vec2(1280.0, 800.0));
     h.state_mut()
-        .run("workbench.about", json!(null), Origin::User)
+        .run("about", json!(null), Origin::User)
         .unwrap();
     h.run();
     let about = h
         .state_mut()
         .run("dialog.current", json!(null), Origin::User)
         .unwrap();
-    assert_eq!(about["kind"], json!("info"));
-    assert!(about["title"].as_str().unwrap().starts_with("Helios "));
+    assert_eq!(about["kind"], json!("custom"));
+    assert_eq!(about["title"], json!("About Helios"));
+    // What agents read: Cargo's version, licence and repository.
+    let read = h
+        .state_mut()
+        .run("about.read", json!(null), Origin::User)
+        .unwrap();
+    assert_eq!(read["name"], json!("Helios"));
+    assert_eq!(read["version"], json!(env!("CARGO_PKG_VERSION")));
+    assert_eq!(read["licences"], json!(["GPL-3.0-or-later"]));
+    assert_eq!(
+        read["links"]["repository"],
+        json!("https://github.com/quazardous/helios")
+    );
     h.key_press(Key::Escape);
     h.run();
     h.state_mut()

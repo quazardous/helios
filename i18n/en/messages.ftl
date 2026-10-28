@@ -65,9 +65,7 @@ export-png-bits = PNG has 8 or 16 bits, not { $bits }
 
 export-write-failed = cannot write { $path }: { $error }
 
-gui-about-crashes = Crash reports: { $path }
-
-gui-about-logs = Log file: { $path }
+gui-about-description = A client/server, AI-first image processing framework.
 
 gui-caption-decisions = Decisions waiting
 

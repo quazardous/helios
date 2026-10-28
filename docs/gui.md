@@ -944,10 +944,10 @@ The log file rotates at 5 MiB (three older files kept), at the
 `developer.log_level` setting (`info` by default); egui-pop and the
 window's own warnings write to it. A panic writes a crash report (the
 version, the system, the backtrace, the last log lines and journal
-events); the next start offers it in a toast. Nothing is sent. Help >
-About Helios says where both are; the debug bridge's `logs` collector
-gives the file, its level and its last lines, and the `logs.reveal`
-command opens the folder.
+events); the next start offers it in a toast. Nothing is sent. The
+debug bridge's `logs` collector gives the file, its level and its last
+lines, and the `logs.reveal` command ("Show the log folder", in the
+palette) opens the folder.
 
 **Not wired yet:**
 

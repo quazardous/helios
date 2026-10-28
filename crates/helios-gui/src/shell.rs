@@ -60,6 +60,35 @@ mod workspace_live;
 /// left out) from which it is `hidpi` for profile variants.
 const HIDPI: f32 = 1.5;
 
+/// About's one-line description of Helios, as the README says it.
+fn about_description() -> Message {
+    Message::new(
+        "gui-about-description",
+        "A client/server, AI-first image processing framework.",
+    )
+}
+
+/// What Help > About Helios shows (egui-pop's `about::AboutPlugin`):
+/// Cargo's version, licence, authors and repository, and the logo. The
+/// description is translated once the shell runs (`follow_language`).
+fn about_info() -> egui_pop::api::about::AppInfo {
+    let mut info = egui_pop::api::about::AppInfo::new("Helios", env!("CARGO_PKG_VERSION"))
+        .description(&about_description().english)
+        .licence(env!("CARGO_PKG_LICENSE"))
+        .repository(env!("CARGO_PKG_REPOSITORY"))
+        .icon(|ui, side| {
+            let logo = crate::plugins::logo(ui.ctx());
+            ui.add(egui::Image::new((logo.id(), egui::vec2(side, side))));
+        });
+    for author in env!("CARGO_PKG_AUTHORS")
+        .split(':')
+        .filter(|a| !a.is_empty())
+    {
+        info = info.author(author);
+    }
+    info
+}
+
 /// What commands ask the shell to do; they are queued and applied at the
 /// next frame, where the shell's state is at hand. The command shows as
 /// running until then (see `host::Later`).
@@ -146,7 +175,6 @@ enum Action {
     SystemMenu,
     /// A command, its arguments, as whom.
     Run(String, Value, Origin),
-    About,
     Keybindings,
     /// A keymap package's keys added over the defaults (`true`), or taken
     /// away.
@@ -459,6 +487,9 @@ pub struct Shell {
     /// GPU fallback was already said.
     engine_seen: u64,
     fell_back: BTreeSet<String>,
+    /// The catalogues' generation About's description was last
+    /// translated for (`follow_language`).
+    about_generation: Option<u64>,
     /// Where background work reports (`job.*` on the shell's bus).
     jobs: helios_core::jobs::Jobs,
     /// Helios's status line, drawn in egui-pop's status bar.
@@ -640,6 +671,8 @@ impl Shell {
             // then the status items (Helios's by place, the jobs'); no
             // activity bar.
             .plugin(egui_pop::api::strips::StripsPlugin::status_only())
+            // Help > About Helios.
+            .plugin(egui_pop::api::about::AboutPlugin::new(about_info()))
             .plugin(i18n_plugin);
         if let Some(dir) = ui_settings {
             builder = builder.persist(dir);
@@ -767,6 +800,7 @@ impl Shell {
             i18n,
             engine_seen: 0,
             fell_back: BTreeSet::new(),
+            about_generation: None,
             opens,
             jobs,
             status,
@@ -2012,10 +2046,6 @@ impl Shell {
             }),
         );
         add(
-            CommandSpec::new("workbench.about", "About Helios", "Help"),
-            Box::new(|_, _| Ok(Action::About)),
-        );
-        add(
             CommandSpec::new("workbench.keybindings", "Keyboard shortcuts", "Preferences"),
             Box::new(|_, _| Ok(Action::Keybindings)),
         );
@@ -3030,7 +3060,7 @@ impl Shell {
     /// egui-pop's menu bar.
     fn declare_menus(w: &Wiring<'_>) {
         use crate::mask_tree::{ROW_MENU, ROW_MENU_ADD};
-        use egui_pop::api::app::{MENU_EDIT, MENU_FILE, MENU_HELP};
+        use egui_pop::api::app::{MENU_EDIT, MENU_FILE};
         // No label: egui-pop shows the command's title in the interface's
         // language, without its argument hint.
         let command = |menu: MenuId, group: &str, order: i32, id: &str| {
@@ -3047,7 +3077,8 @@ impl Shell {
             PopItem::submenu(SYSTEM, "2_preferences", 0, SYSTEM_PROFILES, "Profiles"),
             PopItem::submenu(SYSTEM, "2_preferences", 1, SYSTEM_THEMES, "Themes"),
             command(SYSTEM, "2_preferences", 2, "workbench.keybindings"),
-            command(SYSTEM, "4_about", 0, "workbench.about"),
+            // egui-pop's About (`about::AboutPlugin`), also in Help.
+            command(SYSTEM, "4_about", 0, "about"),
             command(SYSTEM, "9_quit", 0, "workbench.quit"),
             command(SYSTEM_PROFILES, "2", 0, "profile.export"),
             command(SYSTEM_PROFILES, "2", 1, "profile.import"),
@@ -3070,7 +3101,6 @@ impl Shell {
             command(MENU_EDIT, "1_clipboard", 10, "library.copyFiles"),
             command(MENU_EDIT, "1_clipboard", 11, "viewport.copyImage"),
             command(MENU_EDIT, "1_clipboard", 12, "library.pasteFiles"),
-            command(MENU_HELP, "4_about", 0, "workbench.about"),
         ];
         // A row's context menu in the Masks panel: its commands act on
         // that row's member, the tree giving its key. Its entries are
@@ -3438,6 +3468,20 @@ impl Shell {
         d.answer(answer, to_pop(origin))
     }
 
+    /// Translates what Helios gives About again once the language
+    /// changes.
+    fn follow_language(&mut self) {
+        let generation = self.i18n.generation();
+        if self.about_generation == Some(generation) {
+            return;
+        }
+        self.about_generation = Some(generation);
+        let description = self.text(about_description());
+        if let Some(about) = self.app.handle().service(&egui_pop::api::about::ABOUT) {
+            about.update(|i| i.description = description);
+        }
+    }
+
     /// Sets the context keys commands and keys are tested against.
     fn set_context(&self, ctx: &Egui) {
         let h = self.app.handle();
@@ -3798,23 +3842,6 @@ impl Shell {
                 frame::request(self.app.handle(), ctx, FrameRequest::SystemMenu(at));
             }
             Action::Run(id, args, origin) => return self.run(&id, args, origin),
-            Action::About => {
-                let mut text = String::from(
-                    "A node-based photo developer.\n\
-                     Free software under the GNU General Public License, version 3 or later.\n\
-                     Source: https://github.com/quazardous/helios",
-                );
-                // Where the logs and crash reports are, on the desktop.
-                let files = crate::platform::about(self.app.handle(), |m| self.text(m));
-                if !files.is_empty() {
-                    text.push_str("\n\n");
-                    text.push_str(&files.join("\n"));
-                }
-                self.open_dialog(dialogs::Info::new(
-                    &format!("Helios {}", env!("CARGO_PKG_VERSION")),
-                    &text,
-                ));
-            }
             Action::KeymapPackage(name, on) => return self.keymap_package(&name, on),
             Action::Keybindings => {
                 let w = self
@@ -4389,6 +4416,7 @@ impl Shell {
             self.installed = Some(spec);
         }
         self.set_context(&ctx);
+        self.follow_language();
         crate::start::mark_in_first_frame("commands run, theme installed");
 
         self.rects.clear();

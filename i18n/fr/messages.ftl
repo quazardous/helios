@@ -64,9 +64,7 @@ export-png-bits = le PNG a 8 ou 16 bits, pas { $bits }
 
 export-write-failed = impossible d’écrire { $path } : { $error }
 
-gui-about-crashes = Rapports de plantage : { $path }
-
-gui-about-logs = Fichier journal : { $path }
+gui-about-description = Un framework de traitement d’image client/serveur, pensé d’abord pour l’IA.
 
 gui-caption-decisions = Décisions en attente
 

@@ -8,13 +8,11 @@ use std::time::{Duration, Instant};
 use egui_pop::api::App;
 use egui_pop::model::commands::Origin;
 use egui_pop::model::values::{Change, Set, Value};
-use egui_pop::platform::crash::CrashPlugin;
 use egui_pop::platform::instance::{self, InstancePlugin, Launch, Single};
-use egui_pop::platform::logs::{Logs, LogsPlugin};
 use egui_pop::platform::notify::{NotifyPlugin, Simulated};
 use helios_gui::platform::{
-    Job, JobEnd, LONG_JOB_SECONDS, Open, Opens, Platform, SCHEME, SETTING_JOBS, STATE_NAME, about,
-    job_finished, jobs_enabled, should_notify, window_focused,
+    Job, JobEnd, LONG_JOB_SECONDS, Open, Opens, Platform, SCHEME, SETTING_JOBS, job_finished,
+    jobs_enabled, should_notify, window_focused,
 };
 
 const CHILD: &str = "HELIOS_GUI_PLATFORM_CHILD";
@@ -215,35 +213,4 @@ fn the_focus_is_any_helios_window_s() {
     assert!(focused(&[Some(false), Some(true)]));
     // Nothing known: taken as focused, nothing said.
     assert!(focused(&[None]));
-}
-
-#[test]
-fn the_about_dialog_says_where_logs_and_crash_reports_are() {
-    let dir = std::env::temp_dir().join(format!("helios-platform-{}", std::process::id()));
-    let ctx = egui::Context::default();
-    let app = App::builder()
-        .plugin(LogsPlugin::new(STATE_NAME).logs(Logs::new(dir.join("logs"), STATE_NAME)))
-        .plugin(
-            CrashPlugin::new("Helios", "0")
-                .dir(dir.join("crashes"))
-                .hook(false),
-        )
-        .build(&ctx)
-        .unwrap();
-    let lines = about(app.handle(), |m| m.english);
-    assert_eq!(
-        lines,
-        vec![
-            format!(
-                "Log file: {}",
-                dir.join("logs").join("helios.log").display()
-            ),
-            format!("Crash reports: {}", dir.join("crashes").display()),
-        ]
-    );
-    // Without the plugins (tests, pictures), nothing to say.
-    let bare = App::builder().build(&egui::Context::default()).unwrap();
-    assert!(about(bare.handle(), |m| m.english).is_empty());
-    drop(app);
-    let _ = std::fs::remove_dir_all(&dir);
 }

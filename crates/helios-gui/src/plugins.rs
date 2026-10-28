@@ -78,7 +78,6 @@ pub const COMMAND_ICONS: &[(&str, &str)] = &[
     ("profile.export", "phosphor:export"),
     ("theme.exportMerged", "phosphor:export"),
     ("workbench.keybindings", "keyboard"),
-    ("workbench.about", "info"),
     ("workbench.fullscreen", "fullscreen"),
     ("workbench.quickOpen", "search"),
     ("workbench.quit", "phosphor:sign-out"),
@@ -347,7 +346,7 @@ pub const BLOCK_STATUS: BlockId = BlockId::from_static("helios.frame.status");
 pub const BLOCK_LOGO: BlockId = BlockId::from_static("helios.frame.logo");
 
 /// The logo, decoded once per context.
-fn logo(ctx: &egui::Context) -> egui::TextureHandle {
+pub(crate) fn logo(ctx: &egui::Context) -> egui::TextureHandle {
     let id = egui::Id::new("helios.logo");
     if let Some(t) = ctx.data(|d| d.get_temp::<egui::TextureHandle>(id)) {
         return t;

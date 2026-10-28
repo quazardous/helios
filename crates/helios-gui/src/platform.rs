@@ -28,10 +28,10 @@ use std::sync::{Arc, Mutex, PoisonError};
 use egui_pop::api::{AppBuilder, AppHandle, Ctx, Plugin, PluginError};
 use egui_pop::model::ids::{PluginId, SettingId};
 use egui_pop::model::values::Descriptor;
-use egui_pop::platform::crash::{CRASHES, CrashPlugin};
+use egui_pop::platform::crash::CrashPlugin;
 use egui_pop::platform::dirs;
 use egui_pop::platform::instance::{Instance, InstancePlugin, STEP_DEEPLINK, STEP_SECOND_LAUNCH};
-use egui_pop::platform::logs::{LOGS, Logs, LogsPlugin};
+use egui_pop::platform::logs::{Logs, LogsPlugin};
 use egui_pop::platform::notify::{self, Desktop, Notification, NotifyPlugin};
 use helios_core::Message;
 use serde_json::{Value as Json, json};
@@ -79,25 +79,6 @@ pub fn log_dir() -> Option<PathBuf> {
 /// [`crash_dir_with`] from this process's environment.
 pub fn crash_dir() -> Option<PathBuf> {
     crash_dir_with(|name| std::env::var(name).ok())
-}
-
-/// Where the logs and crash reports of the running application are, as
-/// the About dialog says it: one line each, in the interface's language.
-pub fn about(app: &AppHandle, text: impl Fn(Message) -> String) -> Vec<String> {
-    let mut lines = Vec::new();
-    if let Some(logs) = app.service(&LOGS) {
-        lines.push(text(
-            Message::new("gui-about-logs", "Log file: { $path }")
-                .with("path", logs.path().display().to_string()),
-        ));
-    }
-    if let Some(crashes) = app.service(&CRASHES) {
-        lines.push(text(
-            Message::new("gui-about-crashes", "Crash reports: { $path }")
-                .with("path", crashes.dir().display().to_string()),
-        ));
-    }
-    lines
 }
 
 /// Whether a long job's end is said on the desktop, at

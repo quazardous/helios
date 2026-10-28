@@ -462,9 +462,6 @@ command-window-maximize =
 command-window-minimize =
     .title = Réduire la fenêtre
 
-command-workbench-about =
-    .title = À propos de Helios
-
 command-workbench-fullscreen =
     .title = Basculer le plein écran
 
