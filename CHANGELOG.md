@@ -24,6 +24,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.40.0] - 2026-10-28
+
+### Added
+
+- The graph view's add menu offers composites (such as the masked
+  adjustment) next to the modules, each at its newest version.
+- Selecting a node in the graph view brings up the Parameters panel, opening
+  it again if it was closed, so its settings are at hand.
+- The graph view keeps the wire style you picked (curves, orthogonal or
+  straight) from one session to the next.
+- Agents edit a workspace's network node by node through the MCP server:
+  connect, disconnect, move, add, remove and paste copied nodes, each one
+  step they can undo, with a dry run. When a desktop holds the workspace
+  open, the edit shows in its graph view at once and is one step of its
+  Edit > Undo.
+
+### Changed
+
+- `helios batch` now hands its images to the node as one batch the node
+  works through itself: running the same batch again only exports what is
+  new, and with `--vault` a batch interrupted or cut short by a crash is
+  finished by running it again, writing no file twice (`--again` starts
+  over). A batch that needs a person to answer a decision now ends with the
+  images left reported, instead of waiting.
+
+### Fixed
+
+- A node added in the graph view (or by an agent) is kept while it waits
+  for its wires, instead of the addition being refused; only the nodes the
+  image or an export reads from need every input wired.
+- The graph view's node headers follow what the viewport renders: a node
+  reads done as soon as the tiles on screen are computed instead of idle
+  until a full-size render, and says cached when it was served from the
+  cache without computing.
+
 ## [0.39.0] - 2026-10-28
 
 ### Added
