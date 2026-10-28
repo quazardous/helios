@@ -308,6 +308,101 @@ fn a_step_keeps_the_place_it_was_made_in() {
 }
 
 #[test]
+fn an_agent_s_request_is_one_attributed_step_and_a_named_one_spans_calls() {
+    let (_, _, mut store, _) = exposure();
+    let path = "node/exposure/exposure";
+    let black = "node/exposure/black";
+    let to = |v: f64| Change::To(Value::Float(v));
+    // One request: a write and a group of the agent are one step, under
+    // the first one's label.
+    let g = store.begin_request(agent(), None);
+    store.set(Set::new(path, to(0.5), agent())).unwrap();
+    let inner = store.begin_group(agent(), "lift");
+    store
+        .set(Set::new(black, to(-0.01), agent()).gesture(inner))
+        .unwrap();
+    store.end(inner);
+    assert_eq!(store.end_request(), Some(g));
+    let last = store.undo_steps().last().unwrap();
+    assert_eq!(last.label, "set node/exposure/exposure");
+    assert_eq!(last.group, Some(g));
+    assert_eq!(last.origin, agent());
+    assert_eq!(store.undo_steps().len(), 1);
+    assert_eq!(store.group_size(g), 2);
+    // A request that changes nothing has no group to name.
+    store.begin_request(agent(), None);
+    assert_eq!(store.end_request(), None);
+    // Two calls under one name, nothing between: one step, labelled with
+    // the name.
+    let named = store.begin_request(agent(), Some("Retouch skin"));
+    store.set(Set::new(path, to(0.7), agent())).unwrap();
+    store.end_request();
+    assert_eq!(store.begin_request(agent(), Some("Retouch skin")), named);
+    store.set(Set::new(black, to(-0.02), agent())).unwrap();
+    store.end_request();
+    assert_eq!(store.undo_steps().len(), 2);
+    assert_eq!(store.undo_steps()[1].changes.len(), 2);
+    assert_eq!(store.undo_steps()[1].label, "Retouch skin");
+    // Another origin's write during a request is not the agent's.
+    store.begin_request(agent(), None);
+    store.set(Set::new(path, to(0.9), Origin::User)).unwrap();
+    store.end_request();
+    let last = store.undo_steps().last().unwrap();
+    assert_eq!((last.origin.clone(), last.group), (Origin::User, None));
+    // One undo takes the named request back whole.
+    store.undo(&Origin::User).unwrap();
+    assert_eq!(
+        store.undo(&Origin::User).unwrap().as_deref(),
+        Some("Retouch skin")
+    );
+    assert_eq!(ev(&store), 0.5);
+    // An agent's write outside any request is a group of its own.
+    store.set(Set::new(path, to(1.0), agent())).unwrap();
+    assert!(store.undo_steps().last().unwrap().group.is_some());
+}
+
+#[test]
+fn an_agent_s_group_is_undone_alone_unless_a_later_step_touched_it() {
+    let (_, _, mut store, _) = exposure();
+    let path = "node/exposure/exposure";
+    let black = "node/exposure/black";
+    let to = |v: f64| Change::To(Value::Float(v));
+    let g = store.begin_request(agent(), Some("brighten"));
+    store.set(Set::new(path, to(1.0), agent())).unwrap();
+    store.end_request();
+    // The user changes something else: the agent's batch is undone
+    // alone, the user's change stays, and a redo makes it again.
+    store.set(Set::new(black, to(-0.02), Origin::User)).unwrap();
+    assert_eq!(store.last_agent_group(None), Some(g));
+    assert_eq!(store.last_agent_group(Some("other")), None);
+    assert_eq!(
+        store.undo_group(g, &Origin::User).unwrap().as_deref(),
+        Some("brighten")
+    );
+    assert_eq!(ev(&store), 0.0);
+    assert_eq!(
+        store.get(black).unwrap().value,
+        Value::Float(-0.02),
+        "the user's step stays"
+    );
+    assert_eq!(store.undo_steps().len(), 1);
+    assert_eq!(store.redo_steps().last().unwrap().group, Some(g));
+    assert_eq!(store.undo_group(g, &Origin::User).unwrap(), None);
+    store.redo(&Origin::User).unwrap();
+    assert_eq!(ev(&store), 1.0);
+    // The user then moves the agent's value: undoing the batch alone is
+    // refused, with what touched it, and nothing changes.
+    store.set(Set::new(path, to(2.0), Origin::User)).unwrap();
+    let rev = store.history_rev();
+    let Err(Refused::Touched { since }) = store.undo_group(g, &Origin::User) else {
+        panic!("refused");
+    };
+    assert_eq!(since, ["set node/exposure/exposure"]);
+    assert_eq!(ev(&store), 2.0);
+    assert_eq!(store.history_rev(), rev);
+}
+
+#[test]
 fn a_cancelled_gesture_puts_its_values_back_and_is_no_undo_step() {
     let (_, _, mut store, bus) = exposure();
     let path = "node/exposure/exposure";

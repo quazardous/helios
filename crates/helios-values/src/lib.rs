@@ -23,6 +23,12 @@
 //!   gesture puts its values back and is no step. Each step keeps the
 //!   place of the context stack it was made in ([`Store::set_place`]), so
 //!   an undo made elsewhere can say where it went back to.
+//! - Requests: while an origin's request is open ([`Store::begin_request`],
+//!   an agent's tool call), every step that origin makes joins the
+//!   request's group (under the name it gave, if any), and steps of one group
+//!   that follow each other are one step. A group can be undone alone,
+//!   out of order, when no later step touched its values
+//!   ([`Store::undo_group`]).
 
 mod commands;
 mod graph;
@@ -412,6 +418,11 @@ pub enum Refused {
         current: Value,
         by: Origin,
     },
+    /// An undo out of order: later steps changed the same values (their
+    /// labels), so the group cannot be undone alone.
+    Touched {
+        since: Vec<String>,
+    },
 }
 
 impl fmt::Display for Refused {
@@ -428,6 +439,11 @@ impl fmt::Display for Refused {
             Refused::Held { current, by } => write!(
                 f,
                 "a gesture of {by:?} holds it (the value stays {current:?})"
+            ),
+            Refused::Touched { since } => write!(
+                f,
+                "later steps changed the same values ({}): undo them first, or together",
+                since.join(", ")
             ),
         }
     }
@@ -483,6 +499,38 @@ pub struct Step {
     /// at the root or without a stack.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub place: Vec<Place>,
+    /// The request it was made under (an agent's tool call, or the
+    /// request id the agent gave), if any: see [`Store::begin_request`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<u64>,
+}
+
+impl Step {
+    /// Whether it changed `path`.
+    pub fn touches(&self, path: &str) -> bool {
+        self.changes.iter().any(|(p, _, _)| p == path)
+    }
+
+    /// The paths it changed, each once, in the order first written.
+    pub fn paths(&self) -> Vec<&str> {
+        let mut out: Vec<&str> = Vec::new();
+        for (p, _, _) in &self.changes {
+            if !out.contains(&p.as_str()) {
+                out.push(p);
+            }
+        }
+        out
+    }
+}
+
+/// An origin's request open on the store (see [`Store::begin_request`]).
+struct Request {
+    origin: Origin,
+    group: u64,
+    /// The name the origin gave, which labels the group's steps.
+    label: Option<String>,
+    /// Whether a step joined the group while it was open.
+    stepped: bool,
 }
 
 #[derive(Default)]
@@ -507,6 +555,13 @@ pub struct Store {
     history_rev: u64,
     /// The place new steps are made in.
     place: Vec<Place>,
+    /// The request open, if one is.
+    request: Option<Request>,
+    /// The last group number given.
+    next_group: u64,
+    /// The groups named by their origin (a request id an agent gives),
+    /// by origin and name.
+    named: BTreeMap<(String, String), u64>,
 }
 
 fn clamp(v: f64, range: Option<(f64, f64)>, soft: bool) -> (f64, Clamped) {
@@ -795,6 +850,7 @@ impl Store {
                 origin: set.origin,
                 changes: vec![change],
                 place: self.place.clone(),
+                group: None,
             }),
         }
         Ok(Applied {
@@ -805,10 +861,79 @@ impl Store {
         })
     }
 
-    fn push_step(&mut self, step: Step) {
+    fn push_step(&mut self, mut step: Step) {
+        if let Some(r) = self.request.as_mut().filter(|r| r.origin == step.origin) {
+            r.stepped = true;
+            step.group = Some(r.group);
+            if let Some(l) = &r.label {
+                step.label.clone_from(l);
+            }
+        } else if matches!(step.origin, Origin::Agent(_)) {
+            // An agent's step outside a request is a group of its own, so
+            // it can be undone alone too.
+            self.next_group += 1;
+            step.group = Some(self.next_group);
+        }
         self.commit(step.label.clone(), &step.origin);
-        self.undo.push(step);
         self.redo.clear();
+        // A group's steps that follow each other are one step.
+        match self.undo.last_mut() {
+            Some(last)
+                if step.group.is_some()
+                    && last.group == step.group
+                    && last.origin == step.origin =>
+            {
+                last.changes.append(&mut step.changes);
+            }
+            _ => self.undo.push(step),
+        }
+    }
+
+    /// Opens `origin`'s request (an agent's tool call): until
+    /// [`Store::end_request`], every step `origin` makes (a write, a
+    /// gesture's or a group's end) joins the request's group, and the
+    /// group's steps that follow each other are one undo step, under the
+    /// first one's label. A `name` (a request id the origin gives) names
+    /// the group and labels its steps: requests of the same origin and
+    /// name share it, so several calls make one step while nothing else
+    /// comes between. Steps of other origins made meanwhile stay their
+    /// own. Returns the group's number. A request already open is ended
+    /// first.
+    pub fn begin_request(&mut self, origin: Origin, name: Option<&str>) -> u64 {
+        self.end_request();
+        let key = name.map(|n| (format!("{origin:?}"), n.to_string()));
+        let group = if let Some(g) = key.as_ref().and_then(|k| self.named.get(k)) {
+            *g
+        } else {
+            self.next_group += 1;
+            if let Some(k) = key {
+                self.named.insert(k, self.next_group);
+            }
+            self.next_group
+        };
+        self.request = Some(Request {
+            origin,
+            group,
+            label: name.map(String::from),
+            stepped: false,
+        });
+        group
+    }
+
+    /// Ends the request open: its group's number, when a step joined it.
+    pub fn end_request(&mut self) -> Option<u64> {
+        self.request
+            .take()
+            .and_then(|r| r.stepped.then_some(r.group))
+    }
+
+    /// How many values the steps of `group` still undoable changed.
+    pub fn group_size(&self, group: u64) -> usize {
+        let mut paths: BTreeSet<&str> = BTreeSet::new();
+        for s in self.undo.iter().filter(|s| s.group == Some(group)) {
+            paths.extend(s.paths());
+        }
+        paths.len()
     }
 
     fn commit(&mut self, label: String, origin: &Origin) {
@@ -830,6 +955,7 @@ impl Store {
     pub fn clear_history(&mut self) {
         self.undo.clear();
         self.redo.clear();
+        self.named.clear();
         self.history_rev += 1;
     }
 
@@ -924,6 +1050,7 @@ impl Store {
                 origin: g.origin,
                 changes: g.changes,
                 place: g.place,
+                group: None,
             });
         }
     }
@@ -1026,6 +1153,80 @@ impl Store {
         self.commit(format!("redo {label}"), origin);
         self.undo.push(step);
         Ok(Some(label))
+    }
+
+    /// Undoes the steps of `group` alone, newest first, even under later
+    /// steps (VS Code's rule for a workspace edit): refused when a later
+    /// step outside the group changed one of its values, with those
+    /// steps' labels. Each step undone goes on the redo list, so a redo
+    /// makes it again. Returns the label undone, `None` when no step of
+    /// the group is left to undo.
+    pub fn undo_group(&mut self, group: u64, origin: &Origin) -> Result<Option<String>, Refused> {
+        let at: Vec<usize> = (0..self.undo.len())
+            .filter(|i| self.undo[*i].group == Some(group))
+            .collect();
+        let Some(&first) = at.first() else {
+            return Ok(None);
+        };
+        let mut since: Vec<String> = Vec::new();
+        for later in &self.undo[first + 1..] {
+            if later.group == Some(group) {
+                continue;
+            }
+            let touched = at.iter().any(|i| {
+                self.undo[*i]
+                    .changes
+                    .iter()
+                    .any(|(p, _, _)| later.touches(p))
+            });
+            if touched && !since.contains(&later.label) {
+                since.push(later.label.clone());
+            }
+        }
+        if !since.is_empty() {
+            return Err(Refused::Touched { since });
+        }
+        for i in &at {
+            for (path, _, _) in &self.undo[*i].changes {
+                let current = self
+                    .entries
+                    .get(path)
+                    .map(|e| e.value.clone())
+                    .ok_or_else(|| Refused::Unknown { path: path.clone() })?;
+                if let Some(by) = self.holder(path, origin, None) {
+                    return Err(Refused::Held {
+                        current,
+                        by: by.clone(),
+                    });
+                }
+            }
+        }
+        let mut label = None;
+        for i in at.into_iter().rev() {
+            let step = self.undo.remove(i);
+            if let Err(e) = self.replay(&step, origin, true) {
+                self.undo.insert(i, step);
+                return Err(e);
+            }
+            self.commit(format!("undo {}", step.label), origin);
+            label = Some(step.label.clone());
+            self.redo.push(step);
+        }
+        Ok(label)
+    }
+
+    /// The group of the newest undoable step an agent made (`agent`:
+    /// that one only); every agent's step has one.
+    pub fn last_agent_group(&self, agent: Option<&str>) -> Option<u64> {
+        self.undo
+            .iter()
+            .rev()
+            .find(|s| match (&s.origin, agent) {
+                (Origin::Agent(a), Some(want)) => a == want,
+                (Origin::Agent(_), None) => true,
+                _ => false,
+            })
+            .and_then(|s| s.group)
     }
 
     /// The `node/…` paths changed since the last call, for [`sync`].
