@@ -39,8 +39,8 @@ pub const HISTORY: PluginId = PluginId::from_static("helios.history");
 pub const FRAME: PluginId = PluginId::from_static("helios.frame");
 
 /// What Helios declares beside its commands' registry entries: default
-/// keys (with their `when`), menu entries, ticks, commands kept out of the
-/// palette.
+/// keys (with their `when`), menu entries, ticks, icons, commands kept
+/// out of the palette.
 #[derive(Default)]
 pub struct Declarations {
     /// Keys, command, `when`.
@@ -48,8 +48,36 @@ pub struct Declarations {
     pub menus: Vec<MenuItem>,
     /// A command's `checked` clause.
     pub checked: BTreeMap<String, String>,
+    /// A command's icon, by name in egui-pop's icon registry: shown in
+    /// menus, the palette and wherever the command appears.
+    pub icons: BTreeMap<String, String>,
     pub hidden: BTreeSet<String>,
 }
+
+/// The icons of Helios's commands, from egui-pop's built-in set (the
+/// Phosphor font stays off): only where the icon says what the command
+/// does.
+pub const COMMAND_ICONS: &[(&str, &str)] = &[
+    ("param.undo", "undo"),
+    ("param.redo", "redo"),
+    ("param.reset", "reset"),
+    ("workspace.open", "folder"),
+    ("workspace.new", "plus"),
+    ("workbench.keybindings", "keyboard"),
+    ("workbench.about", "info"),
+    ("workbench.fullscreen", "fullscreen"),
+    ("theme.select", "theme"),
+    ("mask.add.circle", "circle"),
+    ("mask.member.delete", "delete"),
+    ("mask.member.lock", "lock"),
+    ("vault.flag.pick", "check"),
+    ("vault.flag.reject", "close"),
+    ("viewport.zoom.in", "plus"),
+    ("viewport.zoom.out", "minus"),
+    ("window.minimize", "window-minimize"),
+    ("window.maximize", "window-maximize"),
+    ("window.close", "window-close"),
+];
 
 /// A command's id, checked.
 pub fn command_id(id: &str) -> Result<CommandId, PluginError> {
@@ -63,6 +91,9 @@ pub fn declared(spec: &HeliosSpec, d: &Declarations) -> Result<CommandSpec, Plug
         CommandSpec::new(command_id(&spec.id)?, &spec.title, &spec.category).when(&spec.when);
     if let Some(c) = d.checked.get(&spec.id) {
         s = s.checked(c);
+    }
+    if let Some(icon) = d.icons.get(&spec.id) {
+        s = s.icon(icon);
     }
     if d.hidden.contains(&spec.id) {
         s = s.hidden();
@@ -351,5 +382,20 @@ impl Plugin for Frame {
             Ok(json!({ "open": open, "menu": SYSTEM }))
         });
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::COMMAND_ICONS;
+
+    #[test]
+    fn every_command_icon_is_a_built_in_name() {
+        for (id, icon) in COMMAND_ICONS {
+            assert!(
+                egui_pop::core::icon::registry::is_known(icon),
+                "{id}: `{icon}` is not in egui-pop's icon registry"
+            );
+        }
     }
 }

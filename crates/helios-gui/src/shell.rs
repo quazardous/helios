@@ -2588,6 +2588,11 @@ impl Shell {
         // for scripts.
         d.hidden.insert("workbench.palette".into());
         d.hidden.insert(crate::quick_open::GO.into());
+        d.icons.extend(
+            crate::plugins::COMMAND_ICONS
+                .iter()
+                .map(|(id, icon)| ((*id).to_string(), (*icon).to_string())),
+        );
         for name in crate::theme::choosable(w.themes) {
             d.checked
                 .insert(format!("theme.{name}"), format!("heliosTheme == '{name}'"));
