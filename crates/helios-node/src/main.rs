@@ -6,8 +6,9 @@
 //! a signal.
 //!
 //!     helios-node --graph network.json --socket /path/to/node.sock
-//!                 [--global FILE] [--project DIR] [--user FILE] [--vault FILE] [--set KEY=VALUE]...
-//!                 [--control /path/to/control.sock] [--batch-control PATH] [--token-file FILE]
+//!                 [--global FILE] [--project DIR] [--user FILE] [--vault FILE] [--runs-vault FILE]
+//!                 [--set KEY=VALUE]... [--control /path/to/control.sock] [--batch-control PATH]
+//!                 [--token-file FILE]
 //!
 //! An endpoint is a Unix socket path or `tcp://127.0.0.1:PORT` (port 0 picks
 //! one); with TCP the node writes a session token to `--token-file` (readable
@@ -51,6 +52,9 @@
 //! and `workflow.*` events announce their rows. With a vault, a node
 //! resumes at its start the runs a dead node left (itself before a crash),
 //! and removes finished runs after `system.workflow.keep_days`.
+//! `--runs-vault FILE` keeps the runs in that vault instead, and nothing
+//! else: no settings layer and no edit (what `helios batch --vault` gives
+//! the node it starts).
 
 use std::collections::BTreeMap;
 use std::io::Write;
@@ -932,6 +936,7 @@ mod control {
                 node: export,
                 source,
                 again,
+                concurrency,
             } => {
                 let graph = node.graph.0.read().expect("graph lock");
                 node.workflows.submit(
@@ -948,6 +953,7 @@ mod control {
                         node: export.as_deref(),
                         source: source.as_deref(),
                         again: *again,
+                        concurrency: *concurrency,
                     },
                 )
             }
@@ -1132,6 +1138,8 @@ struct Args {
     layers: Vec<(Layer, PathBuf)>,
     sets: Vec<(String, String)>,
     vault: Option<PathBuf>,
+    /// Where runs are kept, when not in `vault`.
+    runs_vault: Option<PathBuf>,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -1143,6 +1151,7 @@ fn parse_args() -> Result<Args, String> {
     let mut layers = Vec::new();
     let mut sets = Vec::new();
     let mut vault = None;
+    let mut runs_vault = None;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         let mut value = || args.next().ok_or(format!("{arg} needs a value"));
@@ -1158,6 +1167,7 @@ fn parse_args() -> Result<Args, String> {
             }
             "--user" => layers.push((Layer::User, PathBuf::from(value()?))),
             "--vault" => vault = Some(PathBuf::from(value()?)),
+            "--runs-vault" => runs_vault = Some(PathBuf::from(value()?)),
             "--set" => {
                 let v = value()?;
                 let (k, val) = v
@@ -1177,6 +1187,7 @@ fn parse_args() -> Result<Args, String> {
         layers,
         sets,
         vault,
+        runs_vault,
     })
 }
 
@@ -1262,7 +1273,7 @@ fn main() -> ExitCode {
         Ok(a) => a,
         Err(e) => {
             eprintln!(
-                "helios-node: {e}\nusage: helios-node --graph FILE --socket PATH [--global FILE] [--project DIR] [--user FILE] [--vault FILE] [--set KEY=VALUE]... [--control PATH] [--batch-control PATH] [--token-file FILE]"
+                "helios-node: {e}\nusage: helios-node --graph FILE --socket PATH [--global FILE] [--project DIR] [--user FILE] [--vault FILE] [--runs-vault FILE] [--set KEY=VALUE]... [--control PATH] [--batch-control PATH] [--token-file FILE]"
             );
             return ExitCode::from(2);
         }
@@ -1335,7 +1346,7 @@ fn main() -> ExitCode {
     // Built first: its instance names the owner of the runs.
     let inspector = Inspector::new(bus.clone());
     // The runs last in the vault, on a connection of their own.
-    let runs_vault = match &args.vault {
+    let runs_vault = match args.runs_vault.as_ref().or(args.vault.as_ref()) {
         None => None,
         Some(path) => match helios_vault_sqlite::SqliteStore::open(path) {
             Ok(store) => Some(Arc::new(helios_vault::Vault::new(store))),
@@ -1351,7 +1362,12 @@ fn main() -> ExitCode {
         scheduler: scheduler.clone(),
         jobs: jobs.clone(),
         vault: runs_vault,
-        workers,
+        // 0 is one per CPU, as the scheduler counts it.
+        workers: if workers == 0 {
+            std::thread::available_parallelism().map_or(1, std::num::NonZero::get)
+        } else {
+            workers
+        },
         owner: inspector.instance().to_string(),
         keep_ms: (config.number("system.workflow.keep_days") * 86_400_000.0) as u64,
     }));

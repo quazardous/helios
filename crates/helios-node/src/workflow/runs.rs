@@ -320,6 +320,14 @@ struct Run {
     job: Option<RunJob>,
     /// When it last finished: its retention counts from then.
     finished_at: Option<u64>,
+    /// Exports of this run out at once, when its submitter said
+    /// (`helios batch --jobs`): counted for this run alone, instead of
+    /// the export node's concurrency across runs.
+    concurrency: Option<usize>,
+    /// The last failure of a row said by key, by (item, node), for a
+    /// client to show it translated; the row keeps its English. Not kept
+    /// across a restart.
+    messages: BTreeMap<(String, String), Message>,
 }
 
 impl Run {
@@ -442,6 +450,7 @@ impl Run {
             "workflow": self.nodes,
             "network": self.snapshot,
             "export": self.settings,
+            "concurrency": self.concurrency,
         })
     }
 }
@@ -454,6 +463,8 @@ struct Held {
     /// The job found the item cannot be done: another attempt would not
     /// change it.
     permanent: Arc<AtomicBool>,
+    /// Why the job failed, by key, when it said so.
+    message: Arc<Mutex<Option<Message>>>,
 }
 
 /// A run of the vault this process does not work: listed read-only.
@@ -503,6 +514,10 @@ pub struct Submit<'a> {
     pub node: Option<&'a str>,
     pub source: Option<&'a str>,
     pub again: bool,
+    /// Exports of the run out at once, counted for this run alone; the
+    /// export node's concurrency when not given. Not part of the run's
+    /// id: the last submission says it.
+    pub concurrency: Option<usize>,
 }
 
 /// The runs of a node process.
@@ -572,16 +587,23 @@ fn kept<T>(result: Result<T, String>) -> T {
     result.unwrap_or_else(|e| panic!("workflow documents: {e}"))
 }
 
-fn row_json(item: &str, row: Option<&Row>) -> Value {
+fn row_json(item: &str, row: Option<&Row>, message: Option<&Message>) -> Value {
     match row {
-        Some(r) => json!({
-            "item": item,
-            "status": r.status,
-            "attempts": r.attempts,
-            "since": r.since,
-            "due": r.due,
-            "error": r.error,
-        }),
+        Some(r) => {
+            let mut out = json!({
+                "item": item,
+                "status": r.status,
+                "attempts": r.attempts,
+                "since": r.since,
+                "due": r.due,
+                "error": r.error,
+            });
+            // The failure by key, while the row still says it.
+            if let Some(m) = message.filter(|_| r.error.is_some()) {
+                out["message"] = json!(m);
+            }
+            out
+        }
         None => json!({ "item": item, "status": null }),
     }
 }
@@ -676,7 +698,8 @@ impl Workflows {
                 Some(r) => seen.insert(item.clone(), Seen::of(r)),
                 None => seen.remove(item),
             };
-            rows.push(row_json(item, row.as_ref()));
+            let message = run.messages.get(&(item.clone(), node.to_string()));
+            rows.push(row_json(item, row.as_ref(), message));
         }
         self.ctx.bus.publish_value(
             SOURCE,
@@ -729,7 +752,8 @@ impl Workflows {
         let report = self
             .ctx
             .jobs
-            .start(Start::new(&id, &run.title, "workflow").total(total));
+            // Shown as a batch: the parent of its exports.
+            .start(Start::new(&id, &run.title, "batch").total(total));
         let asked = Arc::new(AtomicBool::new(false));
         {
             let asked = asked.clone();
@@ -904,6 +928,9 @@ impl Workflows {
             }
         };
         let run = state.runs.get_mut(&id).expect("the run was just put");
+        if let Some(n) = ask.concurrency {
+            run.concurrency = Some(n.max(1));
+        }
         let (new, already, merged) = self.add_items(run, ask, now);
         if new > 0 {
             run.finished_at = None;
@@ -932,6 +959,8 @@ impl Workflows {
         let answer = json!({
             "run": run.id,
             "title": run.title,
+            "state": run.state,
+            "job": run.job.as_ref().map(|j| j.report.id()),
             "durable": run.durable,
             "created": created,
             "new": new,
@@ -985,6 +1014,8 @@ impl Workflows {
             seen: BTreeMap::new(),
             job: None,
             finished_at: None,
+            concurrency: None,
+            messages: BTreeMap::new(),
         })
     }
 
@@ -1318,6 +1349,10 @@ impl Workflows {
             seen: BTreeMap::new(),
             job: None,
             finished_at: doc["finished"].as_u64(),
+            concurrency: doc["concurrency"]
+                .as_u64()
+                .and_then(|n| usize::try_from(n).ok()),
+            messages: BTreeMap::new(),
         };
         Ok((run, writes))
     }
@@ -1562,11 +1597,14 @@ impl Workflows {
                     }
                 }
                 Queue::Export => loop {
+                    // The run's own limit counts its own exports; the
+                    // node's counts every run's.
                     let out = leases
                         .values()
                         .filter(|h| h.lease.node == node.name)
+                        .filter(|h| run.concurrency.is_none() || h.run == run.id)
                         .count();
-                    if out >= node.concurrency {
+                    if out >= run.concurrency.unwrap_or(node.concurrency) {
                         break;
                     }
                     let items = run.candidates(index, now, 8);
@@ -1587,7 +1625,7 @@ impl Workflows {
                         .find(|i| i.id == lease.items[0])
                         .cloned()
                         .expect("a claimed item is the run's");
-                    let (job, permanent) = self.start_export(run, &item, &node.name);
+                    let (job, permanent, message) = self.start_export(run, &item, &node.name);
                     leases.insert(
                         job.0,
                         Held {
@@ -1595,6 +1633,7 @@ impl Workflows {
                             lease,
                             renewed: now,
                             permanent,
+                            message,
                         },
                     );
                 },
@@ -1608,7 +1647,16 @@ impl Workflows {
 
     /// Renders the item through a copy of the run's network, as a child
     /// of the run's job writing the item's output path.
-    fn start_export(&self, run: &Run, item: &Item, node: &str) -> (JobId, Arc<AtomicBool>) {
+    #[allow(
+        clippy::type_complexity,
+        reason = "the job, and what its render says of a failure"
+    )]
+    fn start_export(
+        &self,
+        run: &Run,
+        item: &Item,
+        node: &str,
+    ) -> (JobId, Arc<AtomicBool>, Arc<Mutex<Option<Message>>>) {
         let mut graph = run.graph.clone();
         let faults: Vec<(String, FaultKind)> =
             std::mem::take(&mut *self.faults.lock().expect("faults lock"));
@@ -1619,18 +1667,40 @@ impl Workflows {
             }
         }
         let permanent = Arc::new(AtomicBool::new(false));
+        let message = Arc::new(Mutex::new(None));
         let (engine, source, export) = (self.ctx.engine.clone(), run.source, run.export);
         let (path, params, flag) = (item.path.clone(), item.params.clone(), permanent.clone());
+        let (said, source_name) = (message.clone(), run.settings.source.clone());
         let render = move || -> Result<Image, String> {
             // What another attempt would not change.
             let for_good = |e: String| {
                 flag.store(true, Ordering::SeqCst);
                 e
             };
-            let loaded = helios_load::load(&path).map_err(for_good)?;
+            // Said by key too, as a single export says it.
+            let keyed = |m: Message| {
+                let english = m.english.clone();
+                *said.lock().expect("message lock") = Some(m);
+                for_good(english)
+            };
+            // The loader's English names the file and says what is wrong.
+            let loaded = helios_load::load(&path).map_err(|e| {
+                keyed(
+                    Message::new("node-load-refused", "cannot load the image: { $error }")
+                        .with("error", e),
+                )
+            })?;
             let mut cameras = BTreeMap::new();
-            crate::load_source(&mut graph, &mut cameras, source, loaded)
-                .map_err(|e| for_good(format!("the network cannot take the image: {e}")))?;
+            crate::load_source(&mut graph, &mut cameras, source, loaded).map_err(|e| {
+                keyed(
+                    Message::new(
+                        "node-source-refused",
+                        "`{ $name }` cannot take the image: { $error }",
+                    )
+                    .with("name", &source_name)
+                    .with("error", e),
+                )
+            })?;
             for (name, values) in &params {
                 let target = ids
                     .get(name)
@@ -1672,7 +1742,7 @@ impl Workflows {
             ),
         }
         .expect("an export job is always queued");
-        (job, permanent)
+        (job, permanent, message)
     }
 
     /// Concludes the lease of a job that ended (`scheduler.job_ended`).
@@ -1717,6 +1787,28 @@ impl Workflows {
                 // cancelled) writes nothing.
                 Ok(()) | Err(helios_journal::Error::StaleLease { .. }) => {}
                 Err(e) => eprintln!("helios-node: run {}: {e}", run.id),
+            }
+            // The failure by key: the render's own, else the job's.
+            let said = held
+                .message
+                .lock()
+                .expect("message lock")
+                .take()
+                .or_else(|| {
+                    serde_json::from_value::<Message>(payload["message"].clone())
+                        .ok()
+                        .filter(Message::is_keyed)
+                });
+            for item in &lease.items {
+                let key = (item.clone(), lease.node.clone());
+                match (&said, payload["state"].as_str()) {
+                    (Some(m), Some(s)) if s != "done" && s != "cancelled" => {
+                        run.messages.insert(key, m.clone());
+                    }
+                    _ => {
+                        run.messages.remove(&key);
+                    }
+                }
             }
             self.refresh(run, &lease.node, &lease.items);
         }
@@ -1900,13 +1992,15 @@ impl Workflows {
             .take(limit)
             .map(|(item, place)| {
                 let row = run.journal.row(&item.id, &name);
+                let message = run.messages.get(&(item.id.clone(), name.clone()));
                 json!({
                     "item": item.id,
                     "title": item.title(),
                     "path": item.path,
                     "output": item.output,
                     "state": place.name(),
-                    "row": row.as_ref().map(|r| row_json(&item.id, Some(r))),
+                    "row": row.as_ref().map(|r| row_json(&item.id, Some(r), message)),
+                    "message": message.filter(|_| row.as_ref().is_some_and(|r| r.error.is_some())),
                     "error": row.and_then(|r| r.error),
                 })
             })

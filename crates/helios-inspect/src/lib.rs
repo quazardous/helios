@@ -522,6 +522,12 @@ pub mod control {
             source: Option<String>,
             #[serde(default, skip_serializing_if = "std::ops::Not::not")]
             again: bool,
+            /// Exports of this run out at once, counted for this run
+            /// alone (`helios batch --jobs`); the export node's
+            /// concurrency, shared by its runs, when not given. Not part
+            /// of the run's id: the last submission sets it.
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            concurrency: Option<usize>,
         },
         /// The runs of the node: id, title, state, counts, durable.
         #[serde(rename = "workflow.runs")]

@@ -370,6 +370,7 @@ fn parse(args: Vec<String>) -> Result<Call, String> {
                     node: None,
                     source: None,
                     again,
+                    concurrency: None,
                 }
             }
             ["workflow-runs"] => ControlRequest::WorkflowRuns,

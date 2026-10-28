@@ -1291,6 +1291,11 @@ pub const TOOLS: &[Tool] = &[
                 description: "A new run even if the same one exists",
                 default: Some(no),
             },
+            optional(
+                "concurrency",
+                optional_integer,
+                "Exports of this run at once, counted for it alone; the export node's concurrency when null",
+            ),
         ],
     },
     Tool {
