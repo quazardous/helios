@@ -4233,6 +4233,7 @@ impl Shell {
         self.preview.follow(self.viewport.borrow().shown(), &ctx);
         self.app.show(ui);
         crate::start::mark_in_first_frame("panels drawn");
+        crate::workbench::keep_focus_taken(&ctx);
         self.graph_edits();
         if self.library.borrow_mut().take_import_asked() {
             let _ = self.run("library.importSource", Value::Null, Origin::User);

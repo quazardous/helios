@@ -66,9 +66,18 @@ impl Plugin for Panels {
             ctx.panel(spec.clone(), move |ui, _| {
                 // Named for pictures (`gui.snapshot`) and tests.
                 name_rect(ui.ctx(), &id, ui.max_rect());
+                let before = ui.memory(egui::Memory::focused);
                 match contents.borrow_mut().get_mut(&id) {
                     Some(c) => c(ui),
                     None => placeholder(ui, &id, &title),
+                }
+                // A widget of the panel took the keyboard: kept through
+                // the rest of the pass (`keep_focus_taken`).
+                let after = ui.memory(egui::Memory::focused);
+                if let Some(taken) = after.filter(|_| after != before) {
+                    let window = ui.ctx().viewport_id();
+                    ui.ctx()
+                        .data_mut(|d| d.insert_temp(focus_taken_id(), (window, taken)));
                 }
             })?;
         }
@@ -77,6 +86,35 @@ impl Plugin for Panels {
         ctx.arrangement(NETWORK, network(&self.specs));
         ctx.arrangement(DARKROOM, darkroom(&self.specs));
         Ok(())
+    }
+}
+
+fn focus_taken_id() -> egui::Id {
+    egui::Id::new("helios.focus_taken")
+}
+
+/// Gives the keyboard back to the widget of a panel that took it this
+/// pass, when something drawn after the panel dropped it (call it once
+/// the workbench is drawn).
+///
+/// egui-pop's palettes read the focused widget's response after drawing
+/// their panels (Escape there gives the keyboard back), and building a
+/// response surrenders the focus of a widget the click did not hover: a
+/// tree takes the focus when one of its rows is clicked, so in a palette
+/// it lost it in the same pass and its keys (Delete, F2) went nowhere.
+/// Docked, nothing reads it after the panel and the focus stays.
+pub(crate) fn keep_focus_taken(ctx: &egui::Context) {
+    let Some((window, taken)) = ctx.data_mut(|d| {
+        let taken = d.get_temp::<(egui::ViewportId, egui::Id)>(focus_taken_id());
+        d.remove::<(egui::ViewportId, egui::Id)>(focus_taken_id());
+        taken
+    }) else {
+        return;
+    };
+    // Only a focus dropped in this window, never one another widget took
+    // since.
+    if window == ctx.viewport_id() && ctx.memory(egui::Memory::focused).is_none() {
+        ctx.memory_mut(|m| m.request_focus(taken));
     }
 }
 
