@@ -123,6 +123,19 @@ pub fn mask_as_grey(mask: &Image) -> Result<Image, Message> {
     }))
 }
 
+/// An image (linear Rec.2020) as 8-bit sRGB, red, green, blue and an
+/// opaque alpha per pixel, row by row: what an 8-bit PNG export holds,
+/// for the system clipboard's images.
+pub fn srgb8_rgba(image: &Image) -> Result<Vec<u8>, Message> {
+    let srgb = to_space(image, OutputSpace::Srgb)?;
+    let mut out = Vec::with_capacity(srgb.len() / 3 * 4);
+    for rgb in srgb.chunks_exact(3) {
+        out.extend(rgb.iter().map(|v| (v * 255.0).round() as u8));
+        out.push(255);
+    }
+    Ok(out)
+}
+
 /// Encodes an image (linear Rec.2020) into the bytes of a file, in sRGB.
 pub fn encode(image: &Image, format: &Format) -> Result<Vec<u8>, Message> {
     encode_in(image, format, OutputSpace::Srgb)

@@ -56,6 +56,16 @@ fn png16_holds_srgb_encoded_values() {
 }
 
 #[test]
+fn rgba8_holds_what_an_8_bit_png_holds_opaque() {
+    let image = swatch();
+    let rgba = helios_export::srgb8_rgba(&image).unwrap();
+    let png = encode(&image, &Format::Png { bits: 8 }).unwrap();
+    let decoded = image::load_from_memory(&png).unwrap().to_rgba8();
+    assert_eq!(rgba, decoded.into_raw());
+    assert!(rgba.chunks_exact(4).all(|p| p[3] == 255));
+}
+
+#[test]
 fn every_format_decodes_to_the_right_size() {
     let image = Image::from_fn(Region::sized(17, 9), 4, |x, y, _| ((x + y) as f32) / 30.0);
     for format in [
