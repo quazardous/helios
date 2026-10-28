@@ -163,11 +163,19 @@ fn library_commands(
     shell.register(
         CommandSpec::new(
             "library.import",
-            "Import a folder or a card (`path`; `copy`, `into`, `rename`, `duplicates`)",
+            "Import a folder or a card (`path`, or `paths` for several files and folders; `copy`, `into`, `rename`, `duplicates`)",
             "Library",
         ),
         move |args, _| {
-            let path = text(args, "path").ok_or("`path` is missing")?;
+            let mut sources: Vec<std::path::PathBuf> = args
+                .get("paths")
+                .and_then(Value::as_array)
+                .map(|p| p.iter().filter_map(Value::as_str).map(Into::into).collect())
+                .unwrap_or_default();
+            sources.extend(text(args, "path").map(Into::into));
+            if sources.is_empty() {
+                return Err("`path` is missing".into());
+            }
             let mut options = Options::default();
             if args.get("copy").and_then(Value::as_bool).unwrap_or(false)
                 || args.get("into").is_some()
@@ -185,7 +193,6 @@ fn library_commands(
             let (vault, jobs, done, ctx) = (vault.clone(), jobs.clone(), done.clone(), ctx.clone());
             let (lines, asked) = (lines.clone(), args.clone());
             std::thread::spawn(move || {
-                let sources = [std::path::PathBuf::from(path)];
                 // The job's events say how it went; the lines feed the
                 // Duplicates panel.
                 let ended = helios_library::import::import(

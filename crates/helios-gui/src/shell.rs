@@ -97,6 +97,10 @@ enum Action {
     /// Import from the workspace's import source: this card or folder, or
     /// asked.
     ImportSource(Option<PathBuf>),
+    /// Files and folders to import, as the workspace's import source
+    /// places them unless told to copy them or not (a paste of files
+    /// into the library).
+    ImportFiles(Vec<PathBuf>, Option<bool>),
     Fullscreen,
     Minimize,
     Maximize,
@@ -2327,6 +2331,33 @@ impl Shell {
             }),
         );
         add(
+            CommandSpec::new(
+                "library.importFiles",
+                "Import files and folders (`paths`), placed as the workspace's import source says (`copy`: into the library folder or not)",
+                "Vault",
+            ),
+            Box::new(|a, _| {
+                let paths: Vec<PathBuf> = a
+                    .get("paths")
+                    .and_then(Value::as_array)
+                    .map(|p| {
+                        p.iter()
+                            .filter_map(Value::as_str)
+                            .filter(|s| !s.is_empty())
+                            .map(PathBuf::from)
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                if paths.is_empty() {
+                    return Err("`paths` is missing".into());
+                }
+                Ok(Action::ImportFiles(
+                    paths,
+                    a.get("copy").and_then(Value::as_bool),
+                ))
+            }),
+        );
+        add(
             CommandSpec::new("vault.next", "Select the next image", "Vault"),
             Box::new(|_, _| Ok(Action::Step(1))),
         );
@@ -3383,18 +3414,33 @@ impl Shell {
             });
             return Value::Null;
         };
-        let mut args = json!({ "path": path });
-        if let Some(source) = &self.import_source {
-            if source.placement == "copy" {
-                args["copy"] = json!(true);
-                if let Some(rename) = &source.rename {
-                    args["rename"] = json!(rename);
-                }
+        self.queue_import(json!({ "path": path }), None)
+    }
+
+    /// Queues an import (`library.import`'s arguments) for the host,
+    /// placed, renamed and with duplicates handled as the workspace's
+    /// import source says; `copy` overrides its placement (a reference
+    /// is never renamed).
+    fn queue_import(&mut self, mut args: Value, copy: Option<bool>) -> Value {
+        let source = self.import_source.as_ref();
+        if copy.unwrap_or_else(|| source.is_some_and(|s| s.placement == "copy")) {
+            args["copy"] = json!(true);
+            if let Some(rename) = source.and_then(|s| s.rename.as_ref()) {
+                args["rename"] = json!(rename);
             }
+        }
+        if let Some(source) = source {
             args["duplicates"] = json!(source.duplicates);
         }
         self.imports.push(args.clone());
         json!({ "queued": args })
+    }
+
+    /// Imports files and folders as one import, as the workspace's
+    /// import source places them (referenced, duplicates skipped without
+    /// one), or copied into the library folder or not as `copy` says.
+    fn import_files(&mut self, paths: Vec<PathBuf>, copy: Option<bool>) -> Value {
+        self.queue_import(json!({ "paths": paths }), copy)
     }
 
     /// A workspace from a template: the templates to pick from (the
@@ -3796,6 +3842,7 @@ impl Shell {
                 );
             }
             Action::ImportSource(path) => return Ok(self.import_from_source(path)),
+            Action::ImportFiles(paths, copy) => return Ok(self.import_files(paths, copy)),
             Action::ToggleStack => self
                 .library
                 .borrow_mut()

@@ -179,7 +179,8 @@ palette or by an agent:
 
 | Command | Arguments |
 |---------|-----------|
-| `library.import` | `path`; `copy`, `into`, `rename`, `duplicates` as on the command line. Runs in the background as a job, in the jobs centre and cancelled from it; the library is filled again when it ends |
+| `library.import` | `path` (or `paths`, several files and folders as one import); `copy`, `into`, `rename`, `duplicates` as on the command line. Runs in the background as a job, in the jobs centre and cancelled from it; the library is filled again when it ends |
+| `library.importFiles` | `paths`; `copy` (`true`: into the library folder, `false`: referenced). An import placed, renamed and with duplicates handled as the workspace's import source says, unless `copy` is given: what a paste of files asks for |
 | `library.stacks.suggest` | `images` (ids; every image when absent), `resolver` |
 | `library.stacks.accept` | `decision`, `groups` (all when absent) |
 | `library.stacks.decline` | `decision` |

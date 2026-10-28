@@ -181,6 +181,9 @@ command-keymap-package =
 command-keymap-package-remove =
     .title = Take a keymap package's keys away (`name`)
 
+command-library-importFiles =
+    .title = Import files and folders (`paths`), placed as the workspace's import source says (`copy`: into the library folder or not)
+
 command-library-importSource =
     .title = Import from the workspace's import source (`path`: the card or folder; asked when absent)
 

@@ -180,6 +180,9 @@ command-keymap-package =
 command-keymap-package-remove =
     .title = Retirer les touches d'un paquet de raccourcis (`name`)
 
+command-library-importFiles =
+    .title = Importer des fichiers et des dossiers (`paths`), placés comme le dit la source d’import de l’espace de travail (`copy` : dans le dossier de la bibliothèque ou non)
+
 command-library-importSource =
     .title = Importer depuis la source d’import de l’espace de travail (`path` : la carte ou le dossier ; demandé en son absence)
 
