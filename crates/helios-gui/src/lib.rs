@@ -47,20 +47,21 @@ mod windows;
 mod workbench;
 
 pub use shell::{Shell, headless, name_rect};
-pub use workbench::{IMAGE_FIRST, area_named, image_first};
+pub use workbench::{IMAGE_FIRST, area_named, beside_the_end_side, gather_palettes, image_first};
 
 use egui_pop::model::ids::PanelId;
 use egui_pop::model::panels::{Area, PanelSpec};
 
-/// The panels that may float over the image as palettes (egui-pop's
-/// `PanelSpec::floatable`): docked by default, floated from their tab's
-/// menu or `<panel>.float`, hidden and shown again with Tab.
+/// The panels that float over the image as palettes (egui-pop's
+/// `PanelSpec::palette`): floating in a new layout, docked from their
+/// header or `<panel>.dock`, floated again from their tab's menu or
+/// `<panel>.float`, hidden and shown again with Tab.
 pub const FLOATABLE: [&str; 3] = ["helios.masks", "helios.scopes", "helios.navigator"];
 
 /// The panels Helios declares today, with the areas each may be moved to
 /// (egui-pop's placement rules); each shows a placeholder until its
 /// widget lands. Every panel may be detached into a window of its own;
-/// the [`FLOATABLE`] ones may float too.
+/// the [`FLOATABLE`] ones are palettes.
 /// The culling panels (Compare, Stacks, Duplicates) and the Navigator
 /// start closed: a template's layout, or the user, opens them.
 pub fn helios_panels() -> Vec<PanelSpec> {
@@ -100,9 +101,10 @@ pub fn helios_panels() -> Vec<PanelSpec> {
     .map(|(id, title, area, areas, open)| {
         let id = PanelId::new(id).expect("Helios's panel ids are valid");
         let floats = FLOATABLE.contains(&id.as_str());
-        let mut spec = PanelSpec::new(id, title, area)
-            .only_in(areas)
-            .floatable(floats);
+        let mut spec = PanelSpec::new(id, title, area).only_in(areas);
+        if floats {
+            spec = spec.palette();
+        }
         if !open {
             spec = spec.closed();
         }

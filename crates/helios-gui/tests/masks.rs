@@ -61,6 +61,9 @@ fn shell() -> Shell {
     let (g, blend) = graph();
     let mut shell = Shell::new(helios_panels(), None);
     shell.set_view_source(g, blend, "output").unwrap();
+    // The palettes hidden (Tab): the whole image in sight for the
+    // clicks on it.
+    egui_pop::api::palettes::set_hidden(shell.app().handle(), true);
     shell
 }
 

@@ -148,8 +148,10 @@ fn settled(h: &mut Harness<'_, Shell>) {
     panic!("the viewport never settled");
 }
 
-/// The colour on screen at an image pixel.
+/// The colour on screen at an image pixel, the palettes hidden (Tab) so
+/// that none lies over it.
 fn on_screen(h: &mut Harness<'_, Shell>, x: f64, y: f64) -> [u8; 3] {
+    egui_pop::api::palettes::set_hidden(h.state().app().handle(), true);
     let shot = headless::snapshot(h, "viewport.display").unwrap();
     let r = h.state().target_rect("viewport.display").unwrap();
     let p = h

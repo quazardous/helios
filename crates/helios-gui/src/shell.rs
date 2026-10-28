@@ -464,6 +464,10 @@ pub struct Shell {
     /// The first run's "Coming from darktable?" is offered (the desktop
     /// only, `offer_pointer_choice`).
     pointer_choice: bool,
+    /// The palettes a new layout gathered at the workbench's end edge
+    /// (their group's first panel), moved off the end side bar once the
+    /// areas are drawn ([`Shell::place_palettes`]).
+    palettes_to_place: Option<PanelId>,
 }
 
 impl Shell {
@@ -749,6 +753,7 @@ impl Shell {
             follow: crate::contexts::Follow::default(),
             status_items: crate::status_items::Items::default(),
             pointer_choice: false,
+            palettes_to_place: None,
         };
         if let Err(e) = crate::pointer_choice::declare(shell.app.handle()) {
             shell.notes.push(format!("pointer choice: {e}"));
@@ -946,6 +951,14 @@ impl Shell {
                     }
                 });
             }
+        }
+        // A new layout's palettes open together at the end edge, not
+        // cascaded over the image; a loaded layout keeps its own.
+        let mut layout = shell.app.handle().layout();
+        if let Some(lead) = crate::workbench::gather_palettes(&mut layout) {
+            let notes = shell.app.handle().set_layout(layout);
+            shell.notes.extend(notes);
+            shell.palettes_to_place = Some(lead);
         }
         shell
     }
@@ -4234,6 +4247,7 @@ impl Shell {
         self.app.show(ui);
         crate::start::mark_in_first_frame("panels drawn");
         crate::workbench::keep_focus_taken(&ctx);
+        self.place_palettes();
         self.graph_edits();
         if self.library.borrow_mut().take_import_asked() {
             let _ = self.run("library.importSource", Value::Null, Origin::User);
@@ -4265,6 +4279,30 @@ impl Shell {
             self.shots.push_back(Shot::Frame);
             ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::default()));
             ctx.request_repaint();
+        }
+    }
+
+    /// Once the areas are drawn, moves the palettes a new layout gathered
+    /// at the workbench's end edge to the image's end edge, beside the end
+    /// side bar rather than over it (`workbench::beside_the_end_side`).
+    fn place_palettes(&mut self) {
+        let Some(lead) = self.palettes_to_place.clone() else {
+            return;
+        };
+        let h = self.app.handle();
+        let Some(centre) = h.area_rect(Area::Center) else {
+            return;
+        };
+        self.palettes_to_place = None;
+        let end = [Area::StartSide, Area::EndSide, Area::Bottom]
+            .into_iter()
+            .filter_map(|a| h.area_rect(a))
+            .map(|r| r.right())
+            .fold(centre.right(), f32::max);
+        let mut layout = h.layout();
+        if crate::workbench::beside_the_end_side(&mut layout, &lead, end - centre.right()) {
+            let notes = h.set_layout(layout);
+            self.notes.extend(notes);
         }
     }
 

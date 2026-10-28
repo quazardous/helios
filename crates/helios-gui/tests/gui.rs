@@ -67,32 +67,25 @@ fn a_layout_saved_before_egui_pop_s_workbench_migrates() {
         Some(&tabs(&["helios.filmstrip", "helios.queue"], 0))
     );
     assert_eq!(layout.auxiliary[0].panel, id("helios.log"));
-    // The shell opens in it, nothing of Helios's moved by the repair.
+    // The shell opens in it, nothing of Helios's moved by the repair:
+    // the Scopes, a palette now, stay docked where they were saved.
     let shell = Shell::new(helios_panels(), Some(layout.clone()));
     let open = shell.layout();
     for (a, node) in &layout.areas {
         let now = open.areas.iter().find(|(x, _)| x == a).unwrap();
-        // A panel declared since (Masks) joins its default area beside
-        // what was saved.
-        let node = match a {
-            Area::StartSide => Node::Split {
-                vertical: false,
-                ratio: 0.7,
-                a: Box::new(node.clone()),
-                b: Box::new(tabs(&["helios.masks"], 0)),
-            },
-            _ => node.clone(),
-        };
-        assert_eq!(now.1, node, "{a:?}");
+        assert_eq!(&now.1, node, "{a:?}");
     }
     assert_eq!(open.auxiliary, layout.auxiliary);
+    // A panel declared since (Masks), a palette, floats.
+    assert!(open.floating_of(&id("helios.masks")).is_some());
+    assert_eq!(open.area_of(&id("helios.masks")), None);
     assert_eq!(
         shell
             .notes
             .iter()
             .filter(|n| n.contains("helios."))
             .collect::<Vec<_>>(),
-        ["new panel `helios.masks` placed in its default area"],
+        ["new palette `helios.masks` floats"],
         "only the panel declared since is placed"
     );
     // Written back as egui-pop's document, it reads the same.
@@ -205,17 +198,27 @@ fn commands_move_panels_and_the_layout_follows() {
     let s = h.state_mut();
     s.run("helios.log.dock", json!(null), agent.clone())
         .unwrap();
-    s.run("helios.scopes.focus", json!(null), agent).unwrap();
+    s.run("helios.scopes.focus", json!(null), agent.clone())
+        .unwrap();
     h.run();
     let layout = h.state().layout();
     assert!(layout.auxiliary.is_empty());
+    // The Scopes, a palette, come back floating.
+    assert!(layout.floating_of(&id("helios.scopes")).is_some());
+    assert_eq!(h.state().focused().as_deref(), Some("helios.scopes"));
+    // Docked, they go to their area.
+    h.state_mut()
+        .run("helios.scopes.dock", json!(null), agent)
+        .unwrap();
+    h.run();
+    let layout = h.state().layout();
+    assert!(layout.floating_of(&id("helios.scopes")).is_none());
     let side = layout
         .areas
         .iter()
         .find(|(a, _)| *a == Area::EndSide)
         .unwrap();
     assert!(side.1.panels().contains(&&id("helios.scopes")));
-    assert_eq!(h.state().focused().as_deref(), Some("helios.scopes"));
 }
 
 #[test]

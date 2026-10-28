@@ -43,6 +43,8 @@ fn shell() -> Shell {
     g.connect(src, "image", exp, "input").unwrap();
     let mut shell = Shell::new(helios_panels(), None);
     shell.set_view_source(g, exp, "output").unwrap();
+    // The palettes hidden (Tab): the whole image in sight.
+    egui_pop::api::palettes::set_hidden(shell.app().handle(), true);
     shell
 }
 

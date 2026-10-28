@@ -1217,8 +1217,10 @@ fn rendered_after(h: &mut Harness<'_, Shell>, after: u64) {
     panic!("the viewport never rendered again");
 }
 
-/// The red of the viewport's picture at an image pixel.
+/// The red of the viewport's picture at an image pixel, the palettes
+/// hidden (Tab) so that none lies over it.
 fn red_at(h: &mut Harness<'_, Shell>, at: [f64; 2]) -> u8 {
+    egui_pop::api::palettes::set_hidden(h.state().app().handle(), true);
     let shot = headless::snapshot(h, "viewport.display").unwrap();
     let r = h.state().target_rect("viewport.display").unwrap();
     let p = h

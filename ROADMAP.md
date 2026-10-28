@@ -579,7 +579,9 @@ hash) is part of Helios; deploying a NAS is not.
   decision). Composites are saved as their own versioned files; a
   template pins a composite's version and a newer one is offered, never
   taken silently. First built-in: "Portrait retouch". Design in
-  [docs/templates.md](docs/templates.md). Not decided: the toolbox's
+  [docs/templates.md](docs/templates.md). The Masks panel, the Scopes and
+  the Navigator open as floating palettes by default (2026-10-28).
+  Not decided: the toolbox's
   widget, folding an opened composite back, a registry of shared
   templates, and whether the AI may write composite files.
 - A workshop: the AI translates an artistic intention ("too contrasty with the

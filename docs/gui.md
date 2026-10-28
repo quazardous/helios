@@ -133,10 +133,19 @@ opening the workspace comes back to. Holds last only while the agent
 holding them is connected, which these one-call tools are not, so they
 are not offered.
 
-**Palettes (2026-10-13).** The Masks panel, the Scopes and the
-Navigator may float over the image as egui-pop's palettes (`PanelSpec::floatable`,
-`helios_gui::FLOATABLE`): from their tab's menu (Float) or
-`<panel>.float` (`pos`, else cascaded from the top left), never modal.
+**Palettes (2026-10-13; floating by default 2026-10-28).** The Masks
+panel, the Scopes and the Navigator are egui-pop's palettes
+(`PanelSpec::palette`, `helios_gui::FLOATABLE`): a new layout opens the
+open ones floating, stacked in one group against the image's end edge,
+at the top, beside the end side bar (`helios_gui::gather_palettes`,
+then `beside_the_end_side` once the areas are drawn): out of the
+image's centre and off the Parameters panel, anchored so that they
+keep to that edge as the window is resized. egui-pop alone would
+cascade each from the workbench's top left, over the image; a saved
+layout keeps where they are. A palette opened later (the Navigator)
+still opens cascaded from the top left, as egui-pop places it. They
+float again from their tab's menu (Float) or `<panel>.float` (`pos`,
+else cascaded), never modal.
 A palette is dragged by its header band (Pin, Roll up, Close), snaps to
 the workbench's edges and to the other palettes, and docks back when
 dropped on an area or by `<panel>.dock`. Tab (egui-pop's

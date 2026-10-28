@@ -13,7 +13,7 @@ use std::rc::Rc;
 use egui::Ui;
 use egui_pop::api::{Ctx, Plugin, PluginError};
 use egui_pop::model::ids::{PanelId, PluginId};
-use egui_pop::model::layout::{Layout, Node};
+use egui_pop::model::layout::{Anchor, AnchorEdge, Arrangement, FloatingGroup, Layout, Node};
 use egui_pop::model::panels::{Area, PanelSpec};
 
 use crate::name_rect;
@@ -209,6 +209,69 @@ pub fn network(specs: &[PanelSpec]) -> Layout {
             (Area::EndSide, "helios.params"),
         ],
     )
+}
+
+/// Where the palettes a new layout gathers stick at first: the
+/// workbench's end edge, at the top.
+const GATHERED: Anchor = Anchor {
+    x: AnchorEdge::End,
+    y: AnchorEdge::Start,
+    offset: [0.0, 0.0],
+};
+
+/// Gathers a new layout's palettes where Helios opens them (2026-10-28):
+/// stacked in one group against the end edge, at the top, out of the
+/// image's way, as an image editor's palettes start against the screen's
+/// edge. The group is anchored there (egui-pop's `Anchor`), so it keeps
+/// to that edge as the window is resized, and moves, docks or comes
+/// apart as any group does. Once the areas are drawn, the shell moves it
+/// beside the end side bar ([`beside_the_end_side`]).
+///
+/// egui-pop floats each palette of a new layout alone, cascaded from the
+/// workbench's top left (`FloatingGroup::cascade`), over the image: a
+/// layout whose palettes are exactly that is taken for a new one. Any
+/// other (loaded, arranged, moved by the user) is left as it is. Gives
+/// the group's first panel when it gathered them.
+pub fn gather_palettes(layout: &mut Layout) -> Option<PanelId> {
+    let cascaded = !layout.floating.is_empty()
+        && layout.floating.iter().enumerate().all(|(n, g)| {
+            g.is_lone()
+                && g.pos == FloatingGroup::cascade(n)
+                && g.anchor.is_none()
+                && !g.pinned
+                && g.size.is_none()
+        });
+    if !cascaded {
+        return None;
+    }
+    let members: Vec<_> = layout.floating.drain(..).flat_map(|g| g.members).collect();
+    let lead = members[0].panel.clone();
+    layout.floating.push(FloatingGroup {
+        members,
+        arrangement: Arrangement::Stack,
+        active: 0,
+        // Unused on the anchored axes: the edges place it.
+        pos: [0.0, 0.0],
+        pinned: false,
+        anchor: GATHERED,
+        size: None,
+    });
+    Some(lead)
+}
+
+/// Moves the palettes [`gather_palettes`] put at the workbench's end edge
+/// to `offset` points from it, the end side bar's width: they then lie
+/// against the image's end edge, the end side bar left in sight. A group
+/// moved, anchored elsewhere or gone since is left as it is. Says whether
+/// it changed the layout.
+pub fn beside_the_end_side(layout: &mut Layout, lead: &PanelId, offset: f32) -> bool {
+    match layout.floating_mut(lead) {
+        Some(g) if g.anchor == GATHERED && offset > 0.0 => {
+            g.anchor.offset[0] = offset;
+            true
+        }
+        _ => false,
+    }
 }
 
 /// An area by its name: egui-pop's (`center`, `start_side`, `end_side`,
