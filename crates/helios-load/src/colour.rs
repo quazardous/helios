@@ -128,9 +128,13 @@ fn png_tags(bytes: &[u8]) -> Tags<'static> {
         }),
         icc: info.icc_profile.as_ref().map(|p| p.to_vec()),
         png_srgb: info.srgb.is_some(),
-        png_gamma: info.source_gamma.map(|g| f64::from(g.into_value())),
+        // The chunks as the file has them: `png`'s decoder fills
+        // `gama_chunk` and `chrm_chunk`, while `source_gamma` and
+        // `source_chromaticities` are only what an encoder is told to write
+        // (png 0.18), so they stay empty on read.
+        png_gamma: info.gama_chunk.map(|g| f64::from(g.into_value())),
         png_chromaticities: info
-            .source_chromaticities
+            .chrm_chunk
             .map(|c| [xy(c.white), xy(c.red), xy(c.green), xy(c.blue)]),
         exif: info.exif_metadata.as_ref().map(|e| Cow::Owned(e.to_vec())),
     }
