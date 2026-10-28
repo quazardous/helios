@@ -342,3 +342,48 @@ What the third step built (`helios-colour`'s `GamutMap`, used by
   within 0.01 rad and lightness within 5e-4, chroma monotonic along ramps
   of constant lightness and hue, finite results for NaN, infinities and
   huge values, and every export format holding the same mapped values.
+
+What the fourth step built: the round-trip suite
+(`crates/helios-load/tests/roundtrip.rs`, next to the per-step tests in
+`helios-export/tests/icc.rs`, `helios-load/tests/colour.rs` and
+`helios-colour`'s unit tests). Every file is made in the test; there are no
+binary fixtures.
+
+- **A colour chart** of named patches in linear Rec.2020: black, near-black
+  greys (0.1 % and 0.5 %), a shadow grey, middle grey, near-white greys (90
+  and 99 %), white, two near-black colours, ColorChecker colours, sRGB's
+  primaries on its edge; then the Rec.2020 primaries and yellow, a bright
+  orange and a deep blue, outside the smaller spaces; a highlight above
+  white and a negative blue, outside every space. Exported in each space
+  and format, loaded back, each patch is compared in CIEDE2000 with what the
+  gamut mapping gives for it (the patch itself when the space holds it).
+- **Tolerances (ΔE00).** 16-bit PNG and TIFF: 0.05. 8-bit PNG: 2.0 (under
+  0.4 but for the near-black colours in Rec.2020, whose curve is coarse
+  near black at 8 bits: up to 1.7 from rounding alone). JPEG at quality
+  100: 4.0 from L* 20 up, and linear values within 6e-3 below, where
+  CIELAB magnifies one code value.
+- **Generations.** Export, load and export again, twice: the tag found
+  stays the same, and losslessly stored files move no channel by more than
+  1e-4 in linear light from one generation to the next; JPEG keeps its code
+  values within 4.
+- **The gamut mapping end to end**, read back from 16-bit files: colours
+  the space holds come back within 0.05; the others are inside the space,
+  keep their Oklab lightness within 2e-3 and their hue within 0.02 rad, and
+  the highlight above white comes back white.
+- **Files tagged by other software**: a v2 sRGB profile written like the
+  common "sRGB IEC61966-2.1" one (a 1024-entry curve shared by the three
+  TRC tags, a D65 media white) in JPEG, PNG and TIFF; a legacy Adobe RGB
+  PNG with only gAMA and cHRM; a 16-bit Rec.2020 PNG with only cICP, under
+  transfer codes 14 and 1. The cICP one showed that the load report named
+  transfer 14 "cICP 9/14" instead of Rec.2020; fixed.
+- **A known limit, kept as it is.** ICC stores colorants and curve
+  parameters as s15Fixed16 numbers, so a profile describes its space to
+  within about 2.5e-5 in linear values (ΔE00 under 0.01). A reader that
+  follows the profile, Helios's included, sees the file that much off the
+  exact primaries the pixels were encoded with; cICP, where present, is
+  exact. Where a channel is exactly 0 the difference can come back as a
+  small positive value: Adobe RGB's pure gamma writes 1e-5 as a code value
+  of 1 or 2 at 8 bits, so a re-export of a reloaded Adobe RGB file can
+  differ there by a code value, invisibly. Encoding with the rounded
+  colorants instead would make the profile exact and cICP off by the same
+  amount; not done, not decided.
