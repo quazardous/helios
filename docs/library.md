@@ -264,6 +264,22 @@ filmstrip under; a card copied into the library and renamed
 import; auto-advance on; the culling keys also while the image has the
 focus (there they replace the mask tools' keys).
 
+**Copy and paste (2026-10-28).** While the grid or the filmstrip has
+the focus, Edit › Copy (Ctrl+C) copies the images selected, or the one
+under the cursor (`application/x-helios.images+json`: each image's id,
+its file name and where its file is); other applications get the file
+names, one per line. Edit › Paste (Ctrl+V) there imports, after a
+confirmation, what the library lacks: the images copied that it does not
+hold (the same file hash), from their files, or the files and folders
+another application's text names (absolute paths or `file://` URIs, one
+per line, as file managers copy them). An image the library holds
+already is a reference: nothing is copied, and a paste with nothing to
+import is refused with the reason. The import is `library.importFiles`,
+one job like any import, placed as the workspace's import source says;
+paste special (Ctrl+Shift+V) chooses **Import the files where they
+are** or **Copy the files into the library folder**. An import is not an
+undo step.
+
 **Search.** The search field's rating, labels, flags and tags become a
 vault query (several labels: any of them; several tags: all of them);
 its words (in the name or a tag) and dates (the file's day) are matched
@@ -279,3 +295,7 @@ on what the library holds. A filter shows stacks flattened.
 - Burst identifiers from maker notes; capture times of pictures (JPEG,
   TIFF) from their EXIF, which fall back to the file's date.
 - Cancelling an import halfway (the job runs to its end).
+- Copying the files themselves to other applications (`text/uri-list`)
+  and pasting files they offer only as `text/uri-list`: both wait for
+  egui-pop's system clipboard backend, which carries formats other than
+  text. Collections, projects and stacks are not paste targets yet.

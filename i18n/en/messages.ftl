@@ -417,6 +417,16 @@ gui-params-show-values = Show the values
 
 gui-params-values = { $count } values
 
+gui-paste-import-copy = The files are copied into the library folder.
+
+gui-paste-import-reference = The files stay where they are.
+
+gui-paste-import-source = The files are placed as the workspace's import source says.
+
+gui-paste-import-title = Import the pasted files ({ $count })?
+
+gui-paste-import-verb = Import
+
 gui-pointer-choice-close = Close the pointer profile notice
 
 gui-pointer-choice-darktable = Use darktable's

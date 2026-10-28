@@ -29,6 +29,7 @@
 //! names, tags and days the library holds.
 
 use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, SendError, Sender, channel};
 use std::sync::{Arc, OnceLock};
@@ -349,6 +350,8 @@ pub struct Library {
     sink: ThumbnailSink,
     receiver: Receiver<(String, Image)>,
     textures: HashMap<String, TextureHandle>,
+    /// Where each image's file is, by id: what a copy of images names.
+    files: HashMap<String, PathBuf>,
 }
 
 impl Default for Library {
@@ -386,6 +389,7 @@ impl Default for Library {
             },
             receiver,
             textures: HashMap::new(),
+            files: HashMap::new(),
         }
     }
 }
@@ -518,6 +522,21 @@ impl Library {
     /// The application whose steps the marks run through.
     pub fn set_app(&mut self, app: AppHandle) {
         self.app = Some(app);
+    }
+
+    /// Where the images' files are, by id (their first present copy).
+    pub fn set_files(&mut self, files: impl IntoIterator<Item = (String, PathBuf)>) {
+        self.files = files.into_iter().collect();
+    }
+
+    /// Where an image's file is, when it is on disk.
+    pub fn file(&self, id: &str) -> Option<&Path> {
+        self.files.get(id).map(PathBuf::as_path)
+    }
+
+    /// An image the library holds, by id.
+    pub fn entry(&self, id: &str) -> Option<&Entry> {
+        self.index.get(id).and_then(|&i| self.entries.get(i))
     }
 
     pub fn set_entries(&mut self, entries: Vec<Entry>) {
@@ -752,8 +771,9 @@ impl Library {
         self.select(index);
     }
 
-    /// What a mark acts on: the selection, else the cursor's image.
-    fn targets(&self) -> Result<Vec<String>, String> {
+    /// What a mark or a copy acts on: the selection, else the cursor's
+    /// image.
+    pub fn targets(&self) -> Result<Vec<String>, String> {
         let sel = self.state.selection();
         let keys: Vec<String> = if sel.is_empty() {
             sel.cursor().cloned().into_iter().collect()
@@ -1179,7 +1199,19 @@ impl Library {
             grid.show(ui, &mut self.state, &items, &thumbs)
         };
         crate::name_rect(ui.ctx(), "helios.library.grid", out.response.rect);
+        self.bind_clipboard(ui.ctx(), out.response.rect);
         self.handle(out.signals);
+    }
+
+    /// While the grid or the filmstrip has the focus, the Edit commands
+    /// copy its images and paste into the library
+    /// (`crate::clipboard::images`).
+    fn bind_clipboard(&self, ctx: &egui::Context, area: egui::Rect) {
+        if let Some(app) = &self.app
+            && let Some(id) = crate::clipboard::focused_within(ctx, area)
+        {
+            crate::clipboard::images::focus(app, id);
+        }
     }
 
     /// The Filmstrip panel: one row, the grid's selection.
@@ -1221,6 +1253,7 @@ impl Library {
             strip.show(ui, &mut self.state, &items, &thumbs)
         };
         crate::name_rect(ui.ctx(), "helios.library.strip", out.response.rect);
+        self.bind_clipboard(ui.ctx(), out.response.rect);
         self.handle(out.signals);
     }
 

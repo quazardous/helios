@@ -363,5 +363,29 @@ Each with the default proposed:
   view. Not yet: a group's structure (nested groups, the group's
   per-port opacity and inversion) is not copied, only its drawn shapes;
   "keep pixel size" in paste special; a pasted shape is not an undo
-  step, as creating one is not. Library images (`helios.images`) are
-  left for a later branch.
+  step, as creating one is not.
+- **2026-10-28, `helios.images`** (migration step 6: library images as
+  references). The grid and the filmstrip are endpoints: a copy takes
+  the images selected (the cursor's when none is), each its id (the
+  file's hash), name and file; other applications get the names, one
+  per line (the `helios.outside` sanitiser now strips a text of several
+  lines line by line, so a long list is not taken for embedded data). A
+  paste into the library follows question 6: an image the library holds
+  (same hash) is a reference, nothing to do; the others are imported
+  from their files, asked first, as `library.importFiles` (one
+  `library.import` job of several paths, placed as the workspace's
+  import source says). Paste special's parts are the table's "reference
+  or file": **reference** imports the files where they are, **file**
+  copies them into the library folder; both or neither leave it to the
+  import source. Text another application copied (absolute paths or
+  `file://` URIs, one per line) is the same import, asked first too: it
+  writes the vault, and a stray paste of a path must not start a job.
+  An import is a job, not an undo step. Not yet, and why: "Copy files"
+  (`text/uri-list` for other applications) and pasting `text/uri-list`
+  or `image/png` from them need egui-pop's system backend (ADR 0015,
+  step 5), since the system clipboard carries text only today and the
+  outside sanitiser turns paths into file names; a rendered image as
+  PNG for the same reason; collections, projects and stacks as targets
+  wait for those to exist; the item does not name the library it comes
+  from (a vault has no identity yet), the hash is enough to tell a
+  reference from an import.

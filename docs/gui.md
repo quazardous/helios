@@ -901,7 +901,9 @@ JSON, another parameter's path for its value). Anything else is
 refused with the reason and Paste is greyed. A paste is one undo step
 ("Paste Exposure"); `param.paste {dry_run: true}` says what it would
 set. Agents copy and paste in their own slot: they never read what the
-user copied.
+user copied. The library's grid and filmstrip copy their
+images and import what is pasted into them (see
+[library.md](library.md), "Copy and paste").
 
 ![The Parameters panel, the exposure moved by an agent](gui/params-helios-dark.png)
 

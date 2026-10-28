@@ -669,8 +669,13 @@ impl Shell {
             let _ = dialogs.set((*d).clone());
         }
         let viewport: Rc<RefCell<crate::viewport::Viewport>> = Rc::default();
-        let clip =
-            crate::clipboard::Endpoints::register(app.handle(), values.clone(), viewport.clone());
+        let library: Rc<RefCell<crate::library::Library>> = Rc::default();
+        let clip = crate::clipboard::Endpoints::register(
+            app.handle(),
+            values.clone(),
+            viewport.clone(),
+            library.clone(),
+        );
         let preview = Rc::new(crate::preview::Preview::new(
             viewport.borrow().engine().clone(),
         ));
@@ -703,7 +708,7 @@ impl Shell {
             loaded: None,
             resolved_view,
             scopes: Rc::default(),
-            library: Rc::default(),
+            library,
             stack_review: Rc::default(),
             decisions: Rc::default(),
             duplicates: Rc::default(),
@@ -1082,9 +1087,12 @@ impl Shell {
     }
 
     /// Where the library's images are on disk, by id: quick open opens
-    /// them from there.
+    /// them from there, and a copy of images names them.
     pub fn set_image_files(&mut self, files: impl IntoIterator<Item = (String, PathBuf)>) {
         self.image_files = files.into_iter().collect();
+        self.library
+            .borrow_mut()
+            .set_files(self.image_files.iter().map(|(k, v)| (k.clone(), v.clone())));
     }
 
     /// Where thumbnails are sent, by image id, from any thread.

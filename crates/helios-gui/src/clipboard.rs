@@ -10,22 +10,27 @@
 //! - **its types**, each `application/x-helios.<type>+json` with a
 //!   readable text fallback: a parameter's value ([`param`]), nodes of
 //!   the workspace's network ([`nodes`]), drawn mask shapes ([`mask`]),
-//!   scaled to the image they are pasted onto;
+//!   scaled to the image they are pasted onto, images of the library
+//!   ([`images`]), imported when pasted into another library or from
+//!   another application's files;
 //! - **a transform**, `helios.mask-as-nodes`: shapes pasted into the
 //!   graph view become nodes;
 //! - **a sanitiser** for what leaves for other applications: the
 //!   Save-as-template rules (`helios_template::workspace::strip_for_outside`):
 //!   a local path becomes its file name, secrets and embedded data go,
-//!   and the copy's toast says so;
+//!   and the copy's toast says so; a text of several lines is stripped
+//!   line by line ([`strip_lines`]);
 //! - **endpoints**, the focused component's source and target: a
 //!   parameter's widget ([`PARAM_ENDPOINT`]), the graph view
 //!   ([`GRAPH_ENDPOINT`]), the Masks panel and the image
-//!   ([`MASKS_ENDPOINT`], [`MASK_IMAGE_ENDPOINT`]). A paste whose edit is
+//!   ([`MASKS_ENDPOINT`], [`MASK_IMAGE_ENDPOINT`]), the grid and the
+//!   filmstrip ([`LIBRARY_ENDPOINT`]). A paste whose edit is
 //!   the shell's (the workspace's network, the image's masks) runs as a command at the next frame
 //!   ([`defer`]);
 //! - **one undo step per paste**: egui-pop's history group is a group of
 //!   Helios's value store (`host::HeliosHost::begin_group`).
 
+pub mod images;
 pub mod mask;
 pub mod nodes;
 pub mod param;
@@ -66,6 +71,12 @@ pub const MASKS_ENDPOINT: &str = "helios.masks";
 
 /// The image's endpoint, for its masks: the same as the Masks panel's.
 pub const MASK_IMAGE_ENDPOINT: &str = "helios.masks.image";
+
+/// Images of the library, by id, with their names and files.
+pub const IMAGES: FormatId = FormatId::from_static("application/x-helios.images+json");
+
+/// The grid's and the filmstrip's endpoint: the library's images.
+pub const LIBRARY_ENDPOINT: &str = "helios.library";
 
 /// Shapes pasted into the graph view become nodes.
 pub const MASK_AS_NODES: &str = "helios.mask-as-nodes";
@@ -119,6 +130,17 @@ impl Plugin for Types {
                 .parts(mask::parts),
         )
         .map_err(failed)?
+        .clip_type(
+            ClipType::new(IMAGES, images::VERSION, "images")
+                .fallbacks(|p| {
+                    let text = images::Clip::from_json(p)
+                        .map(|c| c.text())
+                        .unwrap_or_default();
+                    vec![Repr::new(TEXT, Json::String(text))]
+                })
+                .parts(images::parts),
+        )
+        .map_err(failed)?
         .clip_transform(Transform::new(
             TransformSpec::new(MASK_AS_NODES, MASK, NODES),
             |r| {
@@ -127,11 +149,32 @@ impl Plugin for Types {
             },
         ))
         .map_err(failed)?
-        .clip_sanitiser(Sanitiser::new(SANITISER, Boundary::System, |data| {
-            helios_template::workspace::strip_for_outside(data)
-        }))
+        .clip_sanitiser(Sanitiser::new(SANITISER, Boundary::System, strip_lines))
         .map_err(failed)?;
         Ok(())
+    }
+}
+
+/// Strips what leaves for other applications
+/// (`helios_template::workspace::strip_for_outside`), a text of several
+/// lines (a list of names) line by line: each line is a value of its
+/// own, so a long list is not taken for embedded data.
+pub fn strip_lines(data: &mut Json) -> Vec<String> {
+    match data {
+        Json::String(text) if text.contains('\n') => {
+            let mut lines: Vec<Json> = text.lines().map(|l| Json::String(l.into())).collect();
+            let mut out = Vec::new();
+            for line in &mut lines {
+                out.extend(helios_template::workspace::strip_for_outside(line));
+            }
+            *text = lines
+                .iter()
+                .filter_map(Json::as_str)
+                .collect::<Vec<_>>()
+                .join("\n");
+            out
+        }
+        _ => helios_template::workspace::strip_for_outside(data),
     }
 }
 
@@ -140,6 +183,7 @@ pub struct Endpoints {
     pub param: Rc<param::Endpoint>,
     pub graph: Rc<nodes::Endpoint>,
     pub masks: Rc<mask::Endpoint>,
+    pub images: Rc<images::Endpoint>,
 }
 
 impl Endpoints {
@@ -148,6 +192,7 @@ impl Endpoints {
         app: &AppHandle,
         values: Arc<Mutex<Store>>,
         viewport: Rc<RefCell<crate::viewport::Viewport>>,
+        library: Rc<RefCell<crate::library::Library>>,
     ) -> Endpoints {
         let param = Rc::new(param::Endpoint::new(values.clone()));
         clipboard::register(
@@ -167,10 +212,18 @@ impl Endpoints {
         for name in [MASKS_ENDPOINT, MASK_IMAGE_ENDPOINT] {
             clipboard::register(app, name, Some(masks.clone()), Some(masks.clone()));
         }
+        let images = Rc::new(images::Endpoint::new(library));
+        clipboard::register(
+            app,
+            LIBRARY_ENDPOINT,
+            Some(images.clone()),
+            Some(images.clone()),
+        );
         Endpoints {
             param,
             graph,
             masks,
+            images,
         }
     }
 }
@@ -249,4 +302,25 @@ pub fn paste_param(
     let out = clipboard::paste(app, req, origin);
     e.unpin();
     result(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_list_is_stripped_line_by_line() {
+        // Forty names make a long text, but no line is embedded data.
+        let names: Vec<String> = (0..40).map(|i| format!("IMG_{i:04}.CR3")).collect();
+        let mut list = Json::String(names.join("\n"));
+        assert!(strip_lines(&mut list).is_empty());
+        assert_eq!(list, Json::String(names.join("\n")));
+        // A local path on a line still becomes its file name.
+        let mut list = Json::String("a.jpg\n/home/someone/b.jpg".into());
+        assert_eq!(strip_lines(&mut list), ["a local path"]);
+        assert_eq!(list, Json::String("a.jpg\nb.jpg".into()));
+        // One line: the template's rules as they are.
+        let mut one = Json::String("x".repeat(300));
+        assert_eq!(strip_lines(&mut one), ["embedded data"]);
+    }
 }

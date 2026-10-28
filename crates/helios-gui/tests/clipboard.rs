@@ -161,3 +161,94 @@ fn an_agent_does_not_paste_the_user_s_copy() {
     run_as(&mut h, "param.paste", json!({ "path": EV }), agent);
     assert_eq!(value(&h, EV), Value::Float(1.0));
 }
+
+/// Images of the library: a copy names them; pasted into a library that
+/// lacks them, or as files from another application, they are imported
+/// once the user confirms; those it holds stay references.
+#[test]
+fn images_copied_or_files_pasted_are_imported_once_confirmed() {
+    use egui_pop::api::clipboard::CopyRequest;
+    use egui_pop::model::commands::Origin as PopOrigin;
+    use helios_gui::clipboard::{IMAGES, LIBRARY_ENDPOINT};
+    use helios_gui::library::Entry;
+
+    let dir = std::env::temp_dir().join(format!("helios-clip-images-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("b.jpg");
+    std::fs::write(&file, b"not a real image").unwrap();
+    let entries: Vec<Entry> = ["a", "b"]
+        .iter()
+        .map(|id| Entry {
+            id: id.to_string(),
+            name: format!("{id}.jpg"),
+            ..Entry::default()
+        })
+        .collect();
+    let mut shell = Shell::new(helios_panels(), None);
+    shell.set_library(entries);
+    shell.set_image_files([("b".to_string(), file.clone())]);
+    shell.library_mut().select_ids(&["a".into(), "b".into()]);
+    let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+    h.run();
+    let app = h.state().app().handle().clone();
+    let out = clipboard::copy(&app, CopyRequest::new(LIBRARY_ENDPOINT), &PopOrigin::User);
+    assert!(out.ok(), "{out:?}");
+    let item = clipboard::with_owner(&app, |c| c.get(&clipboard::Slot::User))
+        .flatten()
+        .unwrap();
+    assert_eq!(item.kind, IMAGES);
+    assert_eq!(item.text(), Some("a.jpg\nb.jpg"));
+    // The same library holds both: nothing to import.
+    let out = clipboard::paste(&app, PasteRequest::new(LIBRARY_ENDPOINT), &PopOrigin::User);
+    assert!(!out.ok(), "{out:?}");
+    // Another library, without `b`: its file is imported, asked first.
+    h.state_mut().set_library(vec![Entry {
+        id: "a".into(),
+        name: "a.jpg".into(),
+        ..Entry::default()
+    }]);
+    h.run();
+    let plan = clipboard::paste(
+        &app,
+        PasteRequest::new(LIBRARY_ENDPOINT).dry_run(),
+        &PopOrigin::User,
+    );
+    assert!(plan.ok(), "{plan:?}");
+    h.run();
+    assert!(
+        h.state().target_rect("helios.dialog").is_err(),
+        "a dry run asks nothing"
+    );
+    let out = clipboard::paste(&app, PasteRequest::new(LIBRARY_ENDPOINT), &PopOrigin::User);
+    assert!(out.ok(), "{out:?}");
+    h.run();
+    assert!(
+        h.state_mut().take_imports().is_empty(),
+        "nothing before the answer"
+    );
+    let current = h
+        .state_mut()
+        .run("dialog.current", json!(null), Origin::User)
+        .unwrap();
+    assert_eq!(current["kind"], json!("confirm"));
+    h.key_press(egui::Key::Enter);
+    h.run();
+    let imports = h.state_mut().take_imports();
+    assert_eq!(imports.len(), 1, "{imports:?}");
+    assert_eq!(imports[0]["paths"], json!([file]));
+    // Files named by another application's text: the same import.
+    let text = format!("file://{}\n/nowhere/c.jpg", file.display());
+    let out = clipboard::paste(
+        &app,
+        PasteRequest::new(LIBRARY_ENDPOINT).text(&text),
+        &PopOrigin::User,
+    );
+    assert!(out.ok(), "{out:?}");
+    h.run();
+    h.key_press(egui::Key::Enter);
+    h.run();
+    let imports = h.state_mut().take_imports();
+    assert_eq!(imports.len(), 1, "{imports:?}");
+    assert_eq!(imports[0]["paths"], json!([file]));
+    let _ = std::fs::remove_dir_all(&dir);
+}

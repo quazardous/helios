@@ -337,6 +337,19 @@ gui-params-show-values = Afficher les valeurs
 
 gui-params-values = { $count } valeurs
 
+gui-paste-import-copy = Les fichiers sont copiés dans le dossier de la bibliothèque.
+
+gui-paste-import-reference = Les fichiers restent où ils sont.
+
+gui-paste-import-source = Les fichiers sont placés comme le dit la source d’import de l’espace de travail.
+
+gui-paste-import-title = { $count ->
+    [one] Importer le fichier collé ?
+   *[other] Importer les { $count } fichiers collés ?
+}
+
+gui-paste-import-verb = Importer
+
 gui-pointer-choice-close = Fermer l’avis du profil de pointeur
 
 gui-pointer-choice-darktable = Utiliser ceux de darktable
