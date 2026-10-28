@@ -32,6 +32,14 @@
 //! under the job. It prints "bench box unavailable: <reason>" and is never
 //! a test failure. Otherwise the exit code is the job's.
 //!
+//! With `--chain egui-pop` (catalogues, then snapshots, then the gate) or
+//! `--chain helios` (lint and test-affected side by side, then with
+//! `--release` the release), the steps go to the box at once (`chain
+//! --detach`), each waiting on the ones before with `after_ok`; then each
+//! is followed in turn as above (`wait <id>`), and a table of their results
+//! ends the run (see `chain_steps`). A step skipped because one before it
+//! failed ends with 79.
+//!
 //! `cargo xtask bench-remote queue` prints the box's `queue`: what runs,
 //! what waits and why, to read before submitting.
 //!
@@ -40,6 +48,7 @@
 //! `~/.ssh/bench-helios`), from the environment or from the untracked
 //! `tools/bench/local.env` (`KEY=value` lines). See docs/bench.md.
 
+use std::fmt::Write as _;
 use std::io::{BufRead as _, BufReader, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
@@ -51,7 +60,7 @@ use serde_json::Value;
 
 use crate::test_times::target_dir;
 
-pub const USAGE: &str = "bench-remote <job> [key=value...] [--priority high|normal] [--push] | bench-remote --affected [base=REF] [key=value...] [--push] | bench-remote queue";
+pub const USAGE: &str = "bench-remote <job> [key=value...] [--priority high|normal] [--push] | bench-remote --affected [base=REF] [key=value...] [--push] | bench-remote --chain egui-pop|helios [--release] [key=value...] [--priority high|normal] [--push] | bench-remote queue";
 
 /// The exit code of a job the box could not serve.
 pub const EX_TEMPFAIL: u8 = 75;
@@ -152,6 +161,19 @@ pub struct Request {
     pub push: bool,
     /// The jobs come from `cargo xtask affected`: `job` is empty.
     pub affected: bool,
+    /// A chain of jobs (`--chain`): `job` is empty.
+    pub chain: Option<Chain>,
+}
+
+/// The usual sequences of a branch, submitted together (`--chain`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Chain {
+    /// An egui-pop branch (`egui_pop=`): catalogues, then snapshots, then
+    /// the gate, each only when the one before succeeded.
+    EguiPop,
+    /// A Helios branch: lint and test-affected side by side, then with
+    /// `--release` the release once both succeeded.
+    Helios { release: bool },
 }
 
 impl Request {
@@ -203,12 +225,25 @@ pub fn parse_args(args: &[&str]) -> Option<Request> {
     let mut params: Vec<(String, String)> = Vec::new();
     let mut push = false;
     let mut affected = false;
+    let mut chain = None;
+    let mut release = false;
     let mut args = args.iter();
     while let Some(a) = args.next() {
         if *a == "--push" {
             push = true;
         } else if *a == "--affected" {
             affected = true;
+        } else if *a == "--release" {
+            release = true;
+        } else if *a == "--chain" {
+            if chain.is_some() {
+                return None;
+            }
+            chain = Some(match *args.next()? {
+                "egui-pop" => Chain::EguiPop,
+                "helios" => Chain::Helios { release: false },
+                _ => return None,
+            });
         } else if *a == "--priority" {
             // the same as priority=, given once either way
             let v = args.next()?;
@@ -231,9 +266,20 @@ pub fn parse_args(args: &[&str]) -> Option<Request> {
     if push && params.iter().any(|(k, _)| k == "src") {
         return None;
     }
-    let job = match (job, affected) {
-        (Some(job), false) => job,
-        (None, true) => String::new(),
+    let chain = match chain {
+        Some(Chain::Helios { .. }) => Some(Chain::Helios { release }),
+        Some(Chain::EguiPop) if !release => Some(Chain::EguiPop),
+        None if !release => None,
+        _ => return None,
+    };
+    // a chain names its steps and links them itself
+    let linked = ["ext_job_id", "after", "after_ok"];
+    if chain.is_some() && params.iter().any(|(k, _)| linked.contains(&k.as_str())) {
+        return None;
+    }
+    let job = match (job, affected, chain) {
+        (Some(job), false, None) => job,
+        (None, true, None) | (None, false, Some(_)) => String::new(),
         _ => return None,
     };
     Some(Request {
@@ -241,6 +287,7 @@ pub fn parse_args(args: &[&str]) -> Option<Request> {
         params,
         push,
         affected,
+        chain,
     })
 }
 
@@ -675,6 +722,8 @@ pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
     }
     let result = if req.affected {
         affected(root, &req)
+    } else if let Some(c) = req.chain {
+        chain(root, &mut req, c)
     } else {
         remote(root, &mut req)
     };
@@ -697,7 +746,7 @@ pub fn affected_requests(req: &Request, jobs: &[String]) -> Vec<Request> {
                 .cloned()
                 .collect(),
             push: req.push,
-            affected: false,
+            ..Request::default()
         })
         .collect()
 }
@@ -743,17 +792,38 @@ fn affected(root: &Path, req: &Request) -> Result<u8, String> {
     Ok(combined(&codes))
 }
 
-fn remote(root: &Path, req: &mut Request) -> Result<u8, String> {
-    let b = Bench::configure(root)?;
-    if let Err(why) = check_box(&b) {
-        return Ok(unavailable(&why));
-    }
+/// `branch=` when none is given: the current branch.
+fn set_branch(root: &Path, req: &mut Request) -> Result<(), String> {
     if req.param("branch").is_none() {
         let branch = default_branch(root, req.push)
             .ok_or("no current branch (detached HEAD): give branch=<branch>")?;
         req.params.insert(0, ("branch".into(), branch));
     }
+    Ok(())
+}
+
+/// Before submitting: the working tree pushed with `--push` (`src=`), else
+/// a warning when the box will not see what is here. `Some(75)` when the
+/// push failed.
+fn prepare(root: &Path, b: &Bench, req: &mut Request) -> Option<u8> {
     let branch = req.param("branch").unwrap_or_default().to_string();
+    if req.push {
+        if let Err(e) = push(b, root, false) {
+            return Some(unavailable(&e));
+        }
+        req.params.push(("src".into(), pushed_name(root)));
+    } else {
+        warn_unpushed(root, &branch);
+    }
+    None
+}
+
+fn remote(root: &Path, req: &mut Request) -> Result<u8, String> {
+    let b = Bench::configure(root)?;
+    if let Err(why) = check_box(&b) {
+        return Ok(unavailable(&why));
+    }
+    set_branch(root, req)?;
     if req.param("ext_job_id").is_none() {
         let name = default_ext_job_id(&req.job, &req.params);
         eprintln!("bench-remote: ext_job_id={name} (a new run under this name replaces this one)");
@@ -764,13 +834,8 @@ fn remote(root: &Path, req: &mut Request) -> Result<u8, String> {
     {
         req.params.push(("priority".into(), p.into()));
     }
-    if req.push {
-        if let Err(e) = push(&b, root, false) {
-            return Ok(unavailable(&e));
-        }
-        req.params.push(("src".into(), pushed_name(root)));
-    } else {
-        warn_unpushed(root, &branch);
+    if let Some(code) = prepare(root, &b, req) {
+        return Ok(code);
     }
 
     let started = Instant::now();
@@ -791,17 +856,46 @@ fn remote(root: &Path, req: &mut Request) -> Result<u8, String> {
         });
         hook
     };
-    let (mut code, mut lines) = follow(b.ssh(10, &words).stdin(Stdio::null()), &watching);
-    let quiet: OnLine = Arc::new(|_: &str| {});
+    let (code, lines) = follow(b.ssh(10, &words).stdin(Stdio::null()), &watching);
     let Some(id) = lines.iter().find_map(|l| queued_id(l)).map(str::to_string) else {
         stop.store(true, Ordering::Relaxed);
-        return Ok(match classify(code) {
-            Outcome::Unavailable => unavailable(&unavailable_reason(&lines)),
-            Outcome::Lost => unavailable(&format!("unreachable ({})", b.destination)),
-            // refused (above the envelope, unknown job...): the box said why
-            Outcome::Exit(c) => c.max(1),
-        });
+        return Ok(refused(&b, code, &lines));
     };
+    let Some(code) = finish(&b, root, req, &id, started, (code, lines), &stop) else {
+        return Ok(EX_TEMPFAIL);
+    };
+    if req.push {
+        let _ = push(&b, root, true);
+    }
+    Ok(code)
+}
+
+/// The exit code of a submission the box did not queue.
+fn refused(b: &Bench, code: Option<i32>, lines: &[String]) -> u8 {
+    match classify(code) {
+        Outcome::Unavailable => unavailable(&unavailable_reason(lines)),
+        Outcome::Lost => unavailable(&format!("unreachable ({})", b.destination)),
+        // refused (above the envelope, unknown job...): the box said why
+        Outcome::Exit(c) => c.max(1),
+    }
+}
+
+/// Follows a queued job to its end from what the command following it left
+/// (`followed`: its exit code and lines): reattaches (`wait <id>`) on a
+/// dropped connection, then fetches the results and prints the summary;
+/// the job's exit code. `None` when the connection could not be
+/// reattached: the job may still run, and the reason is printed.
+fn finish(
+    b: &Bench,
+    root: &Path,
+    req: &Request,
+    id: &str,
+    started: Instant,
+    followed: (Option<i32>, Vec<String>),
+    stop: &AtomicBool,
+) -> Option<u8> {
+    let (mut code, mut lines) = followed;
+    let quiet: OnLine = Arc::new(|_: &str| {});
     let mut attempts = 0;
     while classify(code) == Outcome::Lost && attempts < REATTACH {
         attempts += 1;
@@ -809,43 +903,271 @@ fn remote(root: &Path, req: &mut Request) -> Result<u8, String> {
             "bench-remote: lost the connection to job {id}; reattaching ({attempts}/{REATTACH})"
         );
         std::thread::sleep(REATTACH_PAUSE);
-        let (c, more) = follow(b.ssh(10, &["wait", &id]).stdin(Stdio::null()), &quiet);
+        let (c, more) = follow(b.ssh(10, &["wait", id]).stdin(Stdio::null()), &quiet);
         code = c;
         lines.extend(more);
     }
     stop.store(true, Ordering::Relaxed);
     if classify(code) == Outcome::Lost {
-        return Ok(unavailable(&format!(
+        unavailable(&format!(
             "lost the connection during job {id}; it may still run: reattach later with `wait {id}`"
-        )));
+        ));
+        return None;
     }
     let took = started.elapsed();
     let exit = lines
         .iter()
         .rev()
-        .find_map(|l| final_exit(l, &id))
+        .find_map(|l| final_exit(l, id))
         .map_or_else(|| classify(code), |c| classify(Some(c)));
-    if req.push {
-        let _ = push(&b, root, true);
-    }
-    let dir = match fetch(&b, root, &id) {
+    let dir = match fetch(b, root, id) {
         Ok(dir) => Some(dir),
         Err(e) => {
             eprintln!("bench-remote: {e}");
             None
         }
     };
-    Ok(match exit {
+    Some(match exit {
         Outcome::Unavailable => {
-            summary(req, &id, EX_TEMPFAIL, took, dir.as_deref());
+            summary(req, id, EX_TEMPFAIL, took, dir.as_deref());
             unavailable(&unavailable_reason(&lines))
         }
         Outcome::Exit(c) => {
-            summary(req, &id, c, took, dir.as_deref());
+            summary(req, id, c, took, dir.as_deref());
             c
         }
         Outcome::Lost => unreachable!("handled above"),
     })
+}
+
+/// A step of a chain: its name in the chain, its job as a request (its
+/// parameters, `ext_job_id=` included), the steps it waits for.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Step {
+    pub name: &'static str,
+    pub req: Request,
+    pub after_ok: Vec<&'static str>,
+}
+
+/// A chain's steps from the request's parameters (`branch=` already set):
+/// each step gets them all but `base=`, kept for `test-affected`, and
+/// `priority=`, which only the first step carries (`high` by default for
+/// egui-pop's chain; the steps after it are bumped as their turn comes).
+/// Each step is named on the box by its default `ext_job_id`, so a step
+/// submitted again alone replaces it in the chain.
+pub fn chain_steps(chain: Chain, req: &Request) -> Vec<Step> {
+    let plan: Vec<(&'static str, &str, Vec<&'static str>)> = match chain {
+        Chain::EguiPop => vec![
+            ("catalogues", "egui-pop-catalogues", vec![]),
+            ("snapshots", "egui-pop-snapshots", vec!["catalogues"]),
+            ("gate", "egui-pop-gate", vec!["snapshots"]),
+        ],
+        Chain::Helios { release } => {
+            let mut steps = vec![("lint", "lint", vec![]), ("test", "test-affected", vec![])];
+            if release {
+                steps.push(("release", "release", vec!["lint", "test"]));
+            }
+            steps
+        }
+    };
+    let high = match req.param("priority") {
+        Some(p) => p == "high",
+        None => chain == Chain::EguiPop,
+    };
+    plan.into_iter()
+        .enumerate()
+        .map(|(n, (name, job, after_ok))| {
+            let mut params: Vec<(String, String)> = req
+                .params
+                .iter()
+                .filter(|(k, _)| k != "priority" && (k != "base" || job == "test-affected"))
+                .cloned()
+                .collect();
+            if high && n == 0 {
+                params.push(("priority".into(), "high".into()));
+            }
+            params.push(("ext_job_id".into(), default_ext_job_id(job, &params)));
+            Step {
+                name,
+                req: Request {
+                    job: job.into(),
+                    params,
+                    push: req.push,
+                    ..Request::default()
+                },
+                after_ok,
+            }
+        })
+        .collect()
+}
+
+/// The steps as `chain` reads them on its stdin: one
+/// `name = job [key=value...] [after_ok=name,...]` per line.
+pub fn chain_text(steps: &[Step]) -> String {
+    steps
+        .iter()
+        .map(|s| {
+            let mut line = format!("{} = {}", s.name, s.req.job);
+            for (k, v) in &s.req.params {
+                let _ = write!(line, " {k}={v}");
+            }
+            if !s.after_ok.is_empty() {
+                let _ = write!(line, " after_ok={}", s.after_ok.join(","));
+            }
+            line + "\n"
+        })
+        .collect()
+}
+
+/// The ids the box gave a chain's steps, from its line
+/// `bench-job: chain: <name>=<id> ...`.
+pub fn chain_ids(lines: &[String]) -> Option<Vec<(String, String)>> {
+    let line = lines
+        .iter()
+        .rev()
+        .find_map(|l| l.strip_prefix("bench-job: chain: "))?;
+    line.split_whitespace()
+        .map(|w| {
+            let (name, id) = w.split_once('=')?;
+            valid_id(id).then(|| (name.to_string(), id.to_string()))
+        })
+        .collect()
+}
+
+/// A step's result in the chain's table.
+fn step_result(code: u8) -> String {
+    match code {
+        0 => "ok".into(),
+        EX_TEMPFAIL => "unavailable (75)".into(),
+        EX_DEPENDENCY => "skipped: a step before failed (79)".into(),
+        c => format!("exit {c}"),
+    }
+}
+
+/// The exit code of a job whose `after_ok` dependency did not succeed.
+pub const EX_DEPENDENCY: u8 = 79;
+
+/// Runs a box command with `input` on its stdin, its output streamed to
+/// ours and kept.
+fn with_input(cmd: &mut Command, input: &str) -> (Option<i32>, Vec<String>) {
+    let mut child = match cmd
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+    {
+        Ok(c) => c,
+        Err(e) => return (Some(255), vec![format!("cannot run ssh: {e}")]),
+    };
+    if let Some(mut stdin) = child.stdin.take() {
+        let _ = stdin.write_all(input.as_bytes());
+    }
+    let Ok(out) = child.wait_with_output() else {
+        return (None, Vec::new());
+    };
+    let (stdout, stderr) = (
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr),
+    );
+    print!("{stdout}");
+    eprint!("{stderr}");
+    let lines = stdout.lines().chain(stderr.lines()).map(String::from);
+    (out.status.code(), lines.collect())
+}
+
+/// `--chain`: the chain's steps submitted at once (`chain --detach`), then
+/// each followed in turn like a single job (its log, results and summary),
+/// and a table of their results. The exit code is the first failure's (79
+/// for a step skipped because one before it failed), else 75 when a step
+/// could not be served, else 0.
+fn chain(root: &Path, req: &mut Request, kind: Chain) -> Result<u8, String> {
+    let b = Bench::configure(root)?;
+    if let Err(why) = check_box(&b) {
+        return Ok(unavailable(&why));
+    }
+    set_branch(root, req)?;
+    if let Some(code) = prepare(root, &b, req) {
+        return Ok(code);
+    }
+    let steps = chain_steps(kind, req);
+    for s in &steps {
+        eprintln!(
+            "bench-remote: --chain: {} = {} ext_job_id={}",
+            s.name,
+            s.req.job,
+            s.req.param("ext_job_id").unwrap_or_default()
+        );
+    }
+    let (code, lines) = with_input(&mut b.ssh(10, &["chain", "--detach"]), &chain_text(&steps));
+    let ids = chain_ids(&lines).filter(|ids| {
+        steps
+            .iter()
+            .all(|s| ids.iter().any(|(name, _)| name == s.name))
+    });
+    let Some(ids) = ids else {
+        if req.push {
+            let _ = push(&b, root, true);
+        }
+        return Ok(refused(&b, code, &lines));
+    };
+    let high = steps[0].req.param("priority") == Some("high");
+    let mut results: Vec<(&Step, &str, Option<u8>)> = Vec::new();
+    let mut lost = false;
+    for (n, step) in steps.iter().enumerate() {
+        let id = ids
+            .iter()
+            .find(|(name, _)| name == step.name)
+            .map_or("", |(_, id)| id.as_str());
+        if lost {
+            results.push((step, id, None));
+            continue;
+        }
+        println!("\nbench-remote: --chain: {} ({})", step.name, step.req.job);
+        if high && n > 0 {
+            bump(&b, id);
+        }
+        let started = Instant::now();
+        let stop = Arc::new(AtomicBool::new(false));
+        watch_queue(b.clone(), id.to_string(), Arc::clone(&stop));
+        let quiet: OnLine = Arc::new(|_: &str| {});
+        let followed = follow(b.ssh(10, &["wait", id]).stdin(Stdio::null()), &quiet);
+        let code = finish(&b, root, &step.req, id, started, followed, &stop);
+        lost = code.is_none();
+        results.push((step, id, code));
+    }
+    if req.push && !lost {
+        let _ = push(&b, root, true);
+    }
+    println!("\nbench-remote: --chain results");
+    for (step, id, code) in &results {
+        let result = code.map_or_else(
+            || format!("not followed: reattach with `wait {id}`"),
+            step_result,
+        );
+        println!("  {:<11} {:<20} {id:<22} {result}", step.name, step.req.job);
+    }
+    let codes: Vec<u8> = results
+        .iter()
+        .map(|(_, _, c)| c.unwrap_or(EX_TEMPFAIL))
+        .collect();
+    Ok(combined(&codes))
+}
+
+/// Gives a step of a high-priority chain the project's high priority once
+/// its turn comes (the box keeps one per project). A step already ended,
+/// or a box that refuses, changes nothing.
+fn bump(b: &Bench, id: &str) {
+    let Ok(out) = b
+        .ssh(5, &["bump", id])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+    else {
+        return;
+    };
+    if out.status.success() {
+        print!("{}", String::from_utf8_lossy(&out.stdout));
+    }
 }
 
 /// How often the queue is read while a job waits.
@@ -1343,6 +1665,132 @@ mod tests {
             None,
             "once"
         );
+    }
+
+    fn chain_req(chain: Chain, params: &[(&str, &str)]) -> Request {
+        Request {
+            chain: Some(chain),
+            ..req("", params, false)
+        }
+    }
+
+    #[test]
+    fn chains_parse() {
+        assert_eq!(
+            parse_args(&["--chain", "egui-pop", "egui_pop=feat/dock"]),
+            Some(chain_req(Chain::EguiPop, &[("egui_pop", "feat/dock")]))
+        );
+        assert_eq!(
+            parse_args(&["--chain", "helios", "--release", "branch=wip/x"]),
+            Some(chain_req(
+                Chain::Helios { release: true },
+                &[("branch", "wip/x")]
+            ))
+        );
+        assert_eq!(
+            parse_args(&["--release", "--chain", "helios"]),
+            Some(chain_req(Chain::Helios { release: true }, &[])),
+            "in any order"
+        );
+        assert_eq!(parse_args(&["--chain", "egui-pop", "--release"]), None);
+        assert_eq!(parse_args(&["test", "--release"]), None);
+        assert_eq!(parse_args(&["--chain", "helios", "lint"]), None, "no job");
+        assert_eq!(parse_args(&["--chain", "helios", "--affected"]), None);
+        assert_eq!(parse_args(&["--chain", "other"]), None);
+        assert_eq!(parse_args(&["--chain"]), None);
+        assert_eq!(
+            parse_args(&["--chain", "helios", "--chain", "egui-pop"]),
+            None
+        );
+        for linked in ["ext_job_id=x", "after=x:a", "after_ok=x:a"] {
+            assert_eq!(parse_args(&["--chain", "helios", linked]), None, "{linked}");
+        }
+    }
+
+    #[test]
+    fn the_egui_pop_chain_runs_its_steps_in_turn_at_high_priority() {
+        let r = chain_req(
+            Chain::EguiPop,
+            &[("branch", "main"), ("egui_pop", "feat/dock")],
+        );
+        let steps = chain_steps(Chain::EguiPop, &r);
+        assert_eq!(
+            chain_text(&steps),
+            "catalogues = egui-pop-catalogues branch=main egui_pop=feat/dock priority=high \
+             ext_job_id=egui-pop-feat-dock-catalogues\n\
+             snapshots = egui-pop-snapshots branch=main egui_pop=feat/dock \
+             ext_job_id=egui-pop-feat-dock-snapshots after_ok=catalogues\n\
+             gate = egui-pop-gate branch=main egui_pop=feat/dock \
+             ext_job_id=egui-pop-feat-dock-gate after_ok=snapshots\n"
+        );
+        let normal = chain_req(
+            Chain::EguiPop,
+            &[("branch", "main"), ("priority", "normal")],
+        );
+        assert!(
+            chain_steps(Chain::EguiPop, &normal)
+                .iter()
+                .all(|s| s.req.param("priority").is_none()),
+            "--priority normal"
+        );
+    }
+
+    #[test]
+    fn the_helios_chain_releases_after_lint_and_tests() {
+        let r = chain_req(
+            Chain::Helios { release: true },
+            &[("branch", "wip/x"), ("base", "main")],
+        );
+        let steps = chain_steps(Chain::Helios { release: true }, &r);
+        assert_eq!(
+            chain_text(&steps),
+            "lint = lint branch=wip/x ext_job_id=helios-wip-x-lint\n\
+             test = test-affected branch=wip/x base=main ext_job_id=helios-wip-x-test-affected\n\
+             release = release branch=wip/x ext_job_id=helios-wip-x-release after_ok=lint,test\n"
+        );
+        let without = chain_steps(Chain::Helios { release: false }, &r);
+        assert_eq!(
+            without.iter().map(|s| s.name).collect::<Vec<_>>(),
+            ["lint", "test"]
+        );
+        assert!(
+            without.iter().all(|s| s.after_ok.is_empty()),
+            "side by side"
+        );
+        let high = chain_req(
+            Chain::Helios { release: false },
+            &[("branch", "x"), ("priority", "high")],
+        );
+        let steps = chain_steps(Chain::Helios { release: false }, &high);
+        assert_eq!(steps[0].req.param("priority"), Some("high"));
+        assert_eq!(steps[1].req.param("priority"), None, "bumped in its turn");
+        let pushed = Request {
+            push: true,
+            ..chain_req(Chain::EguiPop, &[("src", "helios-local-1")])
+        };
+        assert!(
+            chain_steps(Chain::EguiPop, &pushed)
+                .iter()
+                .all(|s| s.req.push && s.req.param("src") == Some("helios-local-1"))
+        );
+    }
+
+    #[test]
+    fn a_chain_gives_each_step_its_id() {
+        let lines = |v: &[&str]| v.iter().map(|s| (*s).to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            chain_ids(&lines(&[
+                "bench-job: job 20261028-120000-aaaa (job lint ...) queued",
+                "bench-job: chain: lint=20261028-120000-aaaa test=20261028-120001-bbbb",
+            ])),
+            Some(vec![
+                ("lint".into(), "20261028-120000-aaaa".into()),
+                ("test".into(), "20261028-120001-bbbb".into()),
+            ])
+        );
+        assert_eq!(chain_ids(&lines(&["bench: refused"])), None);
+        assert_eq!(chain_ids(&lines(&["bench-job: chain: lint=bad;id"])), None);
+        assert_eq!(step_result(79), "skipped: a step before failed (79)");
     }
 
     #[test]

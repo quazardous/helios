@@ -183,6 +183,32 @@ The box keeps one high-priority job waiting per project: the last one
 submitted (or `ssh … bump <id>`) takes it, and the one before goes back to
 normal; the box says so.
 
+### Chains
+
+A branch's usual sequence goes to the box in one call, each step its own
+job waiting on the ones before (`after_ok`):
+
+```bash
+cargo xtask bench-remote --chain egui-pop egui_pop=feat/dock   # catalogues, then snapshots, then the gate
+cargo xtask bench-remote --chain helios                        # lint and test-affected side by side
+cargo xtask bench-remote --chain helios --release branch=wip/x # ... then the release, once both succeeded
+```
+
+Every parameter goes to each step (`base=` to `test-affected` alone), and
+`--push` works as for a single job. Each step carries its usual name
+(`egui-pop-feat-dock-snapshots`, `helios-wip-x-release`...): running one
+step again alone, after a fix, replaces it in the chain, and the steps
+after it wait on the new run. `bench-remote` then follows the steps in
+turn as single jobs (their logs, results folders and summaries) and ends
+with a table of their results. A step whose dependency failed never runs:
+it ends with **79**. The exit code is the first failure's (a step's own
+code, or 79), else 75 when a step could not be served, else 0.
+
+egui-pop's chain runs at high priority, Helios's at normal; `--priority`
+changes either. Since the box keeps one high-priority job per project, the
+first step is submitted high and each later one is bumped
+(`bump <id>`) when the steps before it have ended.
+
 ### Capacity and the queue
 
 Jobs run side by side when their threads and memory fit in what the box
