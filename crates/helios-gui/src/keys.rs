@@ -129,9 +129,8 @@ pub fn defaults() -> Vec<(String, String, String)> {
     // VS Code; Escape leaves it.
     bind("Ctrl+K Z", egui_pop::api::workbench::CMD_ZEN.as_str(), "");
     bind("Ctrl+K Ctrl+S", "workbench.keybindings", "");
-    // Ctrl+B folds the start side bar: egui-pop's status bar plugin
-    // declares it (view.side_bar.toggle).
-    bind("Ctrl+Alt+B", "view.endSideBar.toggle", "");
-    bind("Ctrl+J", "view.bottomPanel.toggle", "");
+    // Ctrl+B, Ctrl+Alt+B and Ctrl+J fold the start side bar, the end side
+    // bar and the bottom panel: egui-pop's layout toggles bind them
+    // (workbench.toggle.*), as in VS Code.
     keys
 }

@@ -586,8 +586,10 @@ impl Shell {
             .plugin(egui_pop::imaging::ImagingPlugin)
             // The window's frame: Helios's own on the desktop, the
             // system's elsewhere (tests, pictures, tools) until asked.
+            // On the desktop its title bar holds VS Code's layout
+            // controls: Customize layout and a toggle per area.
             .plugin(if ui_settings.is_some() {
-                FramePlugin::own()
+                FramePlugin::own().layout_controls(true)
             } else {
                 FramePlugin::system()
             })

@@ -509,7 +509,11 @@ Helios declares into it:
   pixels, drawn by Helios on the desktop; the `window.frame` setting
   gives the system's frame back. Its buttons are egui-pop's
   `frame.*` steps, which Helios's `window.minimize`, `window.maximize`
-  and `window.close` commands run too. The bar's `CAPTION` zone holds
+  and `window.close` commands run too. Before the window's buttons it
+  holds VS Code's layout controls (egui-pop's, 2026-10-28): Customize
+  layout, opening the layout menu (the area toggles, the arrangements,
+  the side bar's side, the bottom panel's alignment), and a toggle per
+  area, filled while the area shows. The bar's `CAPTION` zone holds
   Helios's global items (2026-10-20): the jobs going on (a ring with
   their estimate, opening the Jobs panel), the decisions waiting for an
   answer (a count on a bell, opening the Stacks panel) and the profile
@@ -676,7 +680,7 @@ themselves, so a key taken away in the shortcuts editor stays away.
 | everywhere | `Ctrl+P` | quick open (a module, an image, a workspace) |
 | everywhere | `Ctrl+/` (`Ctrl+Slash`) | bypass the selected module, or bring it back (`node.bypass`) |
 | everywhere | `Ctrl+K Ctrl+S`, `Ctrl+,` (egui-pop) | the shortcuts editor, settings |
-| everywhere | `Ctrl+B`, `Ctrl+Alt+B`, `Ctrl+J` | fold the start side bar, the end side bar, the bottom panel |
+| everywhere | `Ctrl+B`, `Ctrl+Alt+B`, `Ctrl+J` (egui-pop) | fold the start side bar, the end side bar, the bottom panel (`workbench.toggle.*`) |
 | everywhere | `Ctrl+K Z`, `F11` (egui-pop), `Alt+Left` (egui-pop) | zen mode, full screen, back |
 | library, culling | `0`–`5` | rate (`vault.rate.<n>`) |
 | library, culling | `R`; `X` | toggle the reject (darktable); reject (Lightroom) |
