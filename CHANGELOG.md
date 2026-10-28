@@ -24,6 +24,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.39.0] - 2026-10-28
+
+### Added
+
+- An agent's edit through the desktop (a workspace, network, sub-workspace
+  or paste tool) is one undo step, named with the agent in the History
+  panel. An agent can pass the same `group` name to several calls to make
+  them one step labelled with that name; a step that changed several
+  values says how many.
+- "Undo an agent's last changes alone" in the command palette takes back
+  what an agent last did even after you went on working, unless you have
+  changed the same values since. Agents undo, redo and jump only through
+  their own steps, and can undo one of their batches alone with
+  `helios_history_undo` and its `group`.
+
 ## [0.38.0] - 2026-10-28
 
 ### Added
