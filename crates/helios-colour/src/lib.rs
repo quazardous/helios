@@ -12,10 +12,16 @@
 //! profile, cICP code points, a PNG gamma and chromaticities, or nothing and
 //! so sRGB), turned into the conversion from its values to the working
 //! space.
+//!
+//! A colour the output space cannot hold is brought inside by
+//! [`GamutMap`], the one gamut mapping Helios uses: toward the neutral
+//! axis in Oklab, keeping hue and lightness, colours inside untouched.
 
+mod gamut;
 mod icc;
 mod input;
 
+pub use gamut::GamutMap;
 pub use input::{Curve, InputSpace};
 
 use serde::{Deserialize, Serialize};

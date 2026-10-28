@@ -1,6 +1,6 @@
 [package]
 name = "helios-colour"
-description = "Helios colour tagging: the output colour spaces, their transfer curves and the ICC profiles and cICP code points that describe them"
+description = "Helios colour tagging: the output colour spaces, their transfer curves, the ICC profiles and cICP code points that describe them, and the gamut mapping into them"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
