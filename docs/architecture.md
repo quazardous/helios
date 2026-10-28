@@ -94,9 +94,14 @@ viewport cannot bind (more than four channels), and for a tile the
 viewport refuses when it is delivered (the device tile's fallback renders
 it on the host, on the render thread). A tile refused later, when the
 interface takes it in, is asked for again.
-The mask display composites the mask over the image on the host
-(`crate::mask_display`), so a module with its mask shown takes the host
-path too; moving that composite into a GPU kernel is still to do.
+The mask display stays on the device too: the mask's node is rendered
+there over the same union and scale, and a WGSL kernel
+(`mask_display.wgsl`, run by `Gpu::composite`, a pixel-wise kernel over
+two images of one region) lays it over the image into a new RGBA buffer,
+which the tiles view. The host composite (`mask_display::composite`)
+stays the reference: the kernel is checked against it within
+`mask_display::GPU_TOLERANCE` (2e-4 relative), and it runs wherever the
+host path does, or when the mask cannot be had on the device.
 
 ### GPU failures
 

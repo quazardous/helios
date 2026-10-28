@@ -27,8 +27,10 @@
 //!   the host path from the start;
 //! - with a mask shown ([`Shown::mask`]), renders the mask's node over the
 //!   same union at the same scale, through the same engine and its cache,
-//!   and composites it into each tile on the host (`crate::mask_display`):
-//!   the mask display takes the host path, GPU or not.
+//!   and composites it into each tile: on the device when the union is
+//!   there (`crate::mask_display::composite_on_device`, a WGSL kernel, so
+//!   the overlay stays zero-copy), else on the host
+//!   (`crate::mask_display::composite`, the reference).
 //!
 //! [`EngineSource::show`] changes what is shown (an edit, another image):
 //! the viewport hears that the whole image changed, keeps its tiles on
@@ -44,7 +46,7 @@ use std::time::{Duration, Instant};
 use eframe::egui_wgpu::wgpu;
 use egui_pop::viewport::device::{BufferLayout, DeviceTile};
 use egui_pop::viewport::source::{Pixels, Tile, TileRequest, TileSink, TileSource};
-use helios_core::{Engine, Graph, Image, NodeId, Region};
+use helios_core::{DeviceImage, Engine, Graph, Image, NodeId, Region};
 
 /// What the render threads did, for tests and the status bar.
 #[derive(Default, Debug)]
@@ -55,6 +57,8 @@ pub struct Stats {
     pub tiles: AtomicU64,
     /// Of those, tiles handed on the GPU (device tiles), not read back.
     pub device_tiles: AtomicU64,
+    /// Of those, tiles with the mask display composited on the GPU.
+    pub device_masks: AtomicU64,
     /// Tiles not rendered: the viewport no longer wanted them.
     pub skipped: AtomicU64,
     /// Tiles the engine could not render.
@@ -281,7 +285,7 @@ fn work(
             if let Some(p) = readout {
                 read_out(engine, &s, p, sink, stats);
             }
-            let device = on_device(gpu, &s, sink);
+            let device = on_device(gpu, sink);
             render(engine, device.as_ref(), &s, tiles, sink, stats);
         }
         stats.done(n);
@@ -311,30 +315,64 @@ fn read_out(engine: &Engine, s: &Shown, p: [i64; 2], sink: &TileSink, stats: &St
     Stats::add(&stats.readouts, 1);
 }
 
-/// The GPU to hand tiles on, and its device: set, the viewport's GPU path
-/// installed on that very device and able to read storage buffers in its
-/// fragment shader (else every buffer tile would be refused with
-/// `BuffersUnsupported`), and no mask shown (the mask display composites
-/// on the host).
-fn on_device(
-    gpu: &GpuSlot,
-    s: &Shown,
-    sink: &TileSink,
-) -> Option<(Arc<helios_gpu::Gpu>, wgpu::Device)> {
+/// The GPU to hand tiles on, and its device: set, and the viewport's GPU
+/// path installed on that very device and able to read storage buffers in
+/// its fragment shader (else every buffer tile would be refused with
+/// `BuffersUnsupported`).
+fn on_device(gpu: &GpuSlot, sink: &TileSink) -> Option<(Arc<helios_gpu::Gpu>, wgpu::Device)> {
     let gpu = gpu.get()?;
-    if s.mask.is_some() {
-        return None;
-    }
     let render = sink.render_device().filter(|r| r.buffers)?;
     // A rebuilt device (after a loss) is no longer the window's.
     let device = gpu.handles().device;
     (render.device == device).then(|| (gpu.clone(), device))
 }
 
+/// One tile rendered on the host, the mask shown composited over it: a
+/// device tile's fallback.
+fn host_pixels(engine: &Engine, s: &Shown, region: Region, scale: f64) -> Option<Vec<f32>> {
+    let image = engine
+        .render_at(&s.graph, s.node, &s.port, region, scale)
+        .ok()?;
+    let mut pixels = rgba(&image);
+    if let Some(m) = &s.mask
+        && let Ok(mask) = engine.render_at(&s.graph, m.target.node, &m.target.port, region, scale)
+    {
+        crate::mask_display::composite(&mut pixels, &mask, m.mode, &m.style);
+    }
+    Some(pixels)
+}
+
+/// The mask shown laid over `image`, on the device: its node rendered
+/// there over the same union and scale (usually from the cache the
+/// image's render filled), then composited by the WGSL kernel. `None`
+/// when either step could not be had on the device.
+fn mask_on_device(
+    engine: &Engine,
+    gpu: &helios_gpu::Gpu,
+    s: &Shown,
+    m: &crate::mask_display::Layer,
+    image: &DeviceImage,
+    (union, scale): (Region, f64),
+) -> Option<DeviceImage> {
+    let mask = engine
+        .render_device_at(&s.graph, m.target.node, &m.target.port, union, scale)
+        .ok()?;
+    crate::mask_display::composite_on_device(gpu, image, &mask, m.mode, &m.style)
+        .inspect_err(|e| {
+            eprintln!(
+                "helios-gui: mask display of {} on the GPU: {e}",
+                m.target.name
+            );
+        })
+        .ok()
+}
+
 /// Renders `live`, the tiles of `union` at `scale`, into the GPU's memory
-/// and hands each as a device tile, a view into the union's buffer. False
-/// when the union could not be had on the device (the engine lost its GPU,
-/// a result of more than four channels): the host path renders it then.
+/// (the mask shown composited there too) and hands each as a device tile,
+/// a view into the union's buffer. False when the union could not be had
+/// on the device (the engine lost its GPU, a result of more than four
+/// channels, a mask that could not be laid there): the host path renders
+/// it then.
 fn deliver_on_device(
     engine: &Arc<Engine>,
     (gpu, device): &(Arc<helios_gpu::Gpu>, wgpu::Device),
@@ -347,12 +385,20 @@ fn deliver_on_device(
     let Ok(image) = engine.render_device_at(&s.graph, s.node, &s.port, union, scale) else {
         return false;
     };
+    let image = match &s.mask {
+        None => image,
+        Some(m) => match mask_on_device(engine, gpu, s, m, &image, (union, scale)) {
+            Some(laid) => laid,
+            None => return false,
+        },
+    };
     let channels = image.channels();
     let Some(buffer) = gpu.buffer(&image).filter(|_| (1..=4).contains(&channels)) else {
         return false;
     };
     let at = image.region();
     let layout = BufferLayout::packed(at.width, channels);
+    let masked = s.mask.is_some();
     Stats::add(&stats.renders, 1);
     for r in live {
         if r.is_cancelled() {
@@ -369,15 +415,13 @@ fn deliver_on_device(
             .origin(origin)
             // The image and its ledger charge, while the tile is shown.
             .keep(image.clone())
-            .fallback(move || {
-                engine
-                    .render_at(&s.graph, s.node, &s.port, region, scale)
-                    .ok()
-                    .map(|image| Pixels::Scene(rgba(&image)))
-            });
+            .fallback(move || host_pixels(&engine, &s, region, scale).map(Pixels::Scene));
         sink.deliver_device(r, tile);
         Stats::add(&stats.tiles, 1);
         Stats::add(&stats.device_tiles, 1);
+        if masked {
+            Stats::add(&stats.device_masks, 1);
+        }
     }
     true
 }

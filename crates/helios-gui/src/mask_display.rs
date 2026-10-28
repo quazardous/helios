@@ -15,11 +15,13 @@
 //!   button run the same cycle.
 //! - **Rendered** by the viewport's engine like the image: the mask's
 //!   node at the image's tiles' regions and scale, usually from the cache
-//!   the image's render filled (the blend read it), and composited on the
-//!   viewport's render thread before the display transform
-//!   ([`crate::engine_source`]).
+//!   the image's render filled (the blend read it), and composited before
+//!   the display transform ([`crate::engine_source`]): on the GPU when the
+//!   image stayed there ([`composite_on_device`], the WGSL twin of
+//!   [`composite`], which stays the reference), else on the viewport's
+//!   render thread.
 
-use helios_core::{Graph, Image, Message, NodeId, Value};
+use helios_core::{DeviceImage, GpuKernel, Graph, Image, Message, NodeId, Value};
 use helios_photo::color;
 use helios_shell::commands::Origin;
 use helios_values::{Change, Descriptor, Set, Store};
@@ -288,6 +290,63 @@ pub fn composite(rgba: &mut [f32], mask: &Image, mode: Mode, style: &Style) {
         };
         px[..3].copy_from_slice(&rgb);
     }
+}
+
+/// The GPU variant of [`composite`]: the same formula in WGSL.
+pub const KERNEL: GpuKernel = GpuKernel {
+    wgsl: include_str!("mask_display.wgsl"),
+    entry: "main",
+};
+
+/// How far [`composite_on_device`] may be from [`composite`], the CPU
+/// reference, relative to a value's size (at least 1): `f32` and the
+/// device's `pow` against `f64`, a twentieth of an 8-bit display step.
+pub const GPU_TOLERANCE: f32 = 2e-4;
+
+/// The uniforms of [`KERNEL`]: the two matrices by rows, the colour and
+/// its opacity, the desaturation and the luminance weights.
+fn uniforms(style: &Style) -> Vec<f32> {
+    let s = Spaces::new();
+    let mut out = Vec::with_capacity(32);
+    for m in [&s.to_srgb, &s.from_srgb] {
+        for row in m {
+            out.extend(row.map(|v| v as f32));
+            out.push(0.0);
+        }
+    }
+    out.extend(style.color);
+    out.push(style.opacity);
+    out.push(style.desaturate);
+    out.extend(LUMA);
+    out
+}
+
+/// [`composite`] on the GPU: `mask` (its first channel read) laid over
+/// `image` (a grey spread over the colour channels), both on `gpu`'s
+/// device and over one region, into a new RGBA image there with an alpha
+/// of 1, as the viewport's host tiles are. Nothing is read back. An error
+/// for [`Mode::Off`], which lays nothing.
+pub fn composite_on_device(
+    gpu: &helios_gpu::Gpu,
+    image: &DeviceImage,
+    mask: &DeviceImage,
+    mode: Mode,
+    style: &Style,
+) -> Result<DeviceImage, String> {
+    let mode = match mode {
+        Mode::Off => return Err("the mask display is off".into()),
+        Mode::Overlay => 0,
+        Mode::Grey => 1,
+    };
+    if !(1..=4).contains(&image.channels()) || mask.channels() == 0 {
+        return Err(format!(
+            "an image of {} channels and a mask of {}",
+            image.channels(),
+            mask.channels()
+        ));
+    }
+    gpu.composite(KERNEL, image, mask, &uniforms(style), [mode, 0, 0, 0], 4)
+        .map_err(|e| e.reason)
 }
 
 #[cfg(test)]
