@@ -541,6 +541,21 @@ mounts = { "egui-pop-target/${egui_pop:-main}" = "/target", registry = "/cargo/r
 outputs = { screenshots = { path = "screenshots/", kind = "images" } }
 timeout = "1h"
 
+# egui-pop's gallery, built in release for the desktop (`egui_pop=` picks the
+# branch, main by default): the binary in /out/egui-pop-gallery, which
+# tools/bench/fetch-gallery.sh puts where the gallery's launcher points
+[jobs.egui-pop-gallery]
+checkouts = ["egui-pop"]
+cores = 5
+memory = "6g"
+cwd = "/work/${src:-egui-pop}"
+command = """mkdir -p /tmp/w/egui-pop && cp -r --preserve=mode . /tmp/w/egui-pop/ && cd /tmp/w/egui-pop && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/egui-pop ] || { rm -rf /target/* && echo /tmp/w/egui-pop > /target/.built-at; }; } && \
+cargo build --release --locked -p egui-pop-gallery && cp /target/release/egui-pop-gallery /out/"""
+env = { CARGO_NET_OFFLINE = "true" }
+mounts = { "egui-pop-target/${egui_pop:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
+outputs = { gallery = { path = "egui-pop-gallery", kind = "file" } }
+timeout = "1h"
+
 [jobs.egui-pop-catalogues]
 about = "egui-pop's catalogue test: the English catalogues match the sources, the French stamped"
 checkouts = ["egui-pop"]
