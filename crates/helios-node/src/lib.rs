@@ -407,6 +407,10 @@ pub struct SourceLoaded {
     pub channels: u32,
     /// Whether the file is a raw, with a camera.
     pub raw: bool,
+    /// For a picture: what its colours were read as (its tag, or sRGB
+    /// assumed), and the tags skipped with why.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub colour: Option<helios_load::Colour>,
 }
 
 /// Gives the source `id` the image of a file: a raw with its camera (the
@@ -422,6 +426,7 @@ pub fn load_source(
         region: loaded.image.region(),
         channels: loaded.image.channels(),
         raw: loaded.camera.is_some(),
+        colour: loaded.colour,
     };
     graph
         .set_source(id, loaded.image)

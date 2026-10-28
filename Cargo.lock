@@ -2264,9 +2264,12 @@ name = "helios-load"
 version = "0.37.0"
 dependencies = [
  "blake3",
+ "helios-colour",
  "helios-core",
+ "helios-export",
  "helios-photo",
  "image",
+ "png",
  "rawler",
  "serde",
 ]

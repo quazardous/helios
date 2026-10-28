@@ -259,6 +259,12 @@ fn a_source_takes_a_file_and_exports_take_the_network_as_it_was() {
     assert_eq!(code, 0, "{loaded}");
     assert_eq!(loaded["source"]["region"]["width"], 20, "{loaded}");
     assert_eq!(loaded["source"]["raw"], false);
+    // An untagged picture is read as sRGB, and the report says so.
+    assert_eq!(
+        loaded["source"]["colour"]["from"]["tag"], "untagged",
+        "{loaded}"
+    );
+    assert_eq!(loaded["source"]["colour"]["space"], "sRGB (assumed)");
 
     // Queued while paused, then the network changes: the first export
     // still renders the network as it was asked.

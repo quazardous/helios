@@ -244,3 +244,28 @@ What the first step built (`crates/helios-colour`, used by `helios-export`):
 - JPEG: the v2 profile in APP2. PNG: the v4 profile in iCCP, plus cICP for
   every space but Adobe RGB, which has no code. TIFF: the v4 profile in tag
   34675.
+
+What the second step built (`helios-colour`'s `InputSpace`, used by
+`helios-load`):
+
+- Pictures are read through their tags, the first usable one winning:
+  PNG cICP, the embedded ICC profile, PNG sRGB, PNG gAMA (with cHRM when
+  present), Exif `ColorSpace` (1 is sRGB; 2, or 0xFFFF with the interop
+  index `R03`, is Adobe RGB). With none, sRGB is assumed.
+- The load report (`helios_load::Colour`, also in the node's
+  `load_source` answer) names the tag used and the space, and lists each
+  tag skipped with why: a profile that cannot be read, a cICP curve not
+  supported (PQ and HLG wait for HDR), a colour profile on a grey image.
+  A broken tag never stops the load.
+- Matrix/TRC profiles, cICP and the PNG chunks are converted by Helios in
+  f64 (curves tabulated per code value for 8- and 16-bit files); RGB
+  profiles with A2B tables go through moxcms's f32 transform to linear
+  Rec.2020. Grey profiles apply their curve to a neutral. CMYK, Lab and
+  device-link profiles are not supported: assumed sRGB, with the reason.
+- TIFF profiles are read with a TIFF decoder of their own, not the one
+  `ImageReader` makes: its default limits cap tag values at the pixel
+  buffer's size and `icc_profile()` turns the error into "no profile", so
+  small TIFFs would load untagged.
+- Untagged pictures and raw previews now use the sRGB matrix derived from
+  the xy primaries, the same as the exports, instead of the rounded
+  0.4124564 one (a difference under 2.5e-4).

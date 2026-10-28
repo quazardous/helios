@@ -9,20 +9,27 @@
 //!   as darktable's rawprepare), cropped to the recommended area, with its
 //!   filter pattern shifted to the crop and the camera description
 //!   ([`CameraInfo`]) for the context of the modules that declare it;
-//! - **pictures** (JPEG, PNG, TIFF): decoded, their sRGB curve removed and
-//!   converted to the linear Rec.2020 working space, four channels (alpha
-//!   last, 1 when the file has none);
+//! - **pictures** (JPEG, PNG, TIFF): decoded and converted to the linear
+//!   Rec.2020 working space through what their tags say of their colours
+//!   (an ICC profile, cICP, PNG chunks, Exif; sRGB when there is nothing,
+//!   and [`Colour`] says so), four channels (alpha last, 1 when the file
+//!   has none);
 //! - **embedded previews** of raw files ([`preview`]), for culling without
 //!   decoding the mosaic, converted to the working space like a picture;
 //! - **how a raw was shot** ([`Shot`]): its capture time, exposure and
 //!   frame number from its EXIF, read with its preview ([`look`]) for an
 //!   import's near-duplicate signals.
 
+mod colour;
+
+pub use colour::{Colour, ColourTag};
+
+use std::io::Cursor;
 use std::path::Path;
 use std::sync::Arc;
 
+use helios_colour::{InputSpace, OutputSpace};
 use helios_core::{Image, Region};
-use helios_photo::color::{self, Mat3};
 use helios_photo::{CameraInfo, Cfa};
 use image::DynamicImage;
 use rawler::decoders::{RawDecodeParams, RawMetadata};
@@ -40,6 +47,8 @@ pub struct Loaded {
     pub camera: Option<CameraInfo>,
     /// For raw files: where the image sits on the sensor.
     pub sensor: Option<Sensor>,
+    /// For pictures: what their colours were read as.
+    pub colour: Option<Colour>,
 }
 
 /// Where a raw's image sits on its sensor: the full photosite grid (what
@@ -83,11 +92,14 @@ fn read(path: &Path) -> Result<(String, Arc<Vec<u8>>), String> {
 pub fn load(path: &Path) -> Result<Loaded, String> {
     let (hash, bytes) = read(path)?;
     let named = |e: String| format!("{}: {e}", path.display());
-    let (image, camera, sensor) = match Kind::of(path) {
-        Kind::Picture => (picture(&bytes).map_err(named)?, None, None),
+    let (image, camera, sensor, colour) = match Kind::of(path) {
+        Kind::Picture => {
+            let (image, colour) = picture(&bytes).map_err(named)?;
+            (image, None, None, Some(colour))
+        }
         Kind::Raw => {
             let (image, camera, sensor) = raw(bytes).map_err(named)?;
-            (image, Some(camera), Some(sensor))
+            (image, Some(camera), Some(sensor), None)
         }
     };
     Ok(Loaded {
@@ -95,6 +107,7 @@ pub fn load(path: &Path) -> Result<Loaded, String> {
         image,
         camera,
         sensor,
+        colour,
     })
 }
 
@@ -200,30 +213,49 @@ pub fn look(path: &Path) -> Result<Look, String> {
     Ok(Look { preview, shot })
 }
 
-/// sRGB-encoded to the linear working space.
-fn srgb_to_working() -> Mat3 {
-    let xyz_to_rec2020 = color::inverse(&color::REC2020_TO_XYZ).expect("invertible primaries");
-    color::mul(&xyz_to_rec2020, &color::SRGB_TO_XYZ)
+/// The depth of an image's samples when they are integers.
+fn integer_bits(img: &DynamicImage) -> Option<u32> {
+    let color = img.color();
+    match color.bytes_per_pixel() / color.channel_count() {
+        1 => Some(8),
+        2 => Some(16),
+        _ => None,
+    }
 }
 
-fn working(img: &DynamicImage) -> Image {
+/// An image in `space` to the working space, RGBA.
+fn convert(img: &DynamicImage, space: &InputSpace) -> Result<Image, String> {
     let rgba = img.to_rgba32f();
     let (w, h) = rgba.dimensions();
-    let m = srgb_to_working();
-    let mut data = Vec::with_capacity((w * h * 4) as usize);
-    for p in rgba.pixels() {
-        let linear = [0, 1, 2].map(|c| color::srgb_decode(f64::from(p.0[c])));
-        for v in color::apply(&m, linear) {
-            data.push(v as f32);
-        }
-        data.push(p.0[3]);
-    }
-    Image::new(Region::sized(w, h), 4, data)
+    let mut data = rgba.into_raw();
+    space.to_working(&mut data, integer_bits(img))?;
+    Ok(Image::new(Region::sized(w, h), 4, data))
 }
 
-fn picture(bytes: &[u8]) -> Result<Image, String> {
-    let img = image::load_from_memory(bytes).map_err(|e| e.to_string())?;
-    Ok(working(&img))
+/// An image taken as sRGB (an embedded preview) to the working space.
+fn working(img: &DynamicImage) -> Image {
+    convert(img, &InputSpace::srgb()).expect("the sRGB conversion cannot fail")
+}
+
+fn picture(bytes: &[u8]) -> Result<(Image, Colour), String> {
+    let reader = image::ImageReader::new(Cursor::new(bytes))
+        .with_guessed_format()
+        .map_err(|e| e.to_string())?;
+    let format = reader.format();
+    let mut decoder = reader.into_decoder().map_err(|e| e.to_string())?;
+    let tags = colour::tags(bytes, format, &mut decoder);
+    let img = DynamicImage::from_decoder(decoder).map_err(|e| e.to_string())?;
+    let (space, mut colour) = colour::choose(&tags, !img.color().has_color());
+    match convert(&img, &space) {
+        Ok(image) => Ok((image, colour)),
+        Err(e) => {
+            // The pixels are as they were: read them as sRGB instead.
+            colour.ignored.push(e);
+            colour.from = ColourTag::Untagged;
+            colour.space = format!("{} (assumed)", OutputSpace::Srgb.name());
+            Ok((working(&img), colour))
+        }
+    }
 }
 
 fn ratio(n: f64, d: f64) -> f64 {

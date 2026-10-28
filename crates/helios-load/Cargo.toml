@@ -9,11 +9,18 @@ repository.workspace = true
 [dependencies]
 helios-core.workspace = true
 helios-photo.workspace = true
+helios-colour.workspace = true
 blake3.workspace = true
 serde.workspace = true
 # LGPL-2.1, compatible with GPL-3.0-or-later.
 rawler = { version = "0.8", default-features = false }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "tiff"] }
+# MIT OR Apache-2.0, already in the tree through `image`: PNG's cICP, sRGB,
+# gAMA and cHRM chunks, which `image` does not expose.
+png = "0.18"
+
+[dev-dependencies]
+helios-export.workspace = true
 
 [lints]
 workspace = true
