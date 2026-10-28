@@ -23,6 +23,11 @@ const SEP: char = '\u{1f}';
 /// The key of the last token handed out, in the meta namespace.
 const TOKEN: &str = "last_token";
 
+/// The namespaces of the journal named `name`: its rows, then its meta.
+pub(crate) fn namespaces(name: &str) -> [String; 2] {
+    [format!("journal/{name}"), format!("journal/{name}/meta")]
+}
+
 pub struct VaultJournal<S: Store> {
     vault: Arc<Vault<S>>,
     ns: String,
@@ -34,10 +39,11 @@ pub struct VaultJournal<S: Store> {
 impl<S: Store> VaultJournal<S> {
     /// The journal named `name` in `vault`.
     pub fn new(vault: Arc<Vault<S>>, name: &str) -> Self {
+        let [ns, meta] = namespaces(name);
         VaultJournal {
             vault,
-            ns: format!("journal/{name}"),
-            meta: format!("journal/{name}/meta"),
+            ns,
+            meta,
             pending: None,
         }
     }
