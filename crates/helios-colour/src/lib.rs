@@ -257,26 +257,33 @@ mod tests {
 
     #[test]
     fn matrices_match_the_published_ones() {
-        // IEC 61966-2-1 and ITU-R BT.2020, as Helios's photo crate has them.
+        // sRGB and Rec.2020: references of the same derivation, given to
+        // 8 decimals, with the primaries and the D65 white both taken as
+        // the xy chromaticities IEC 61966-2-1 and ITU-R BT.2020 state; 1e-6
+        // is well above their rounding. The often-quoted sRGB matrix
+        // (0.4124564, ..., which Helios's photo crate has) is not one: it
+        // takes the white as XYZ rounded to five decimals (0.95047, 1,
+        // 1.08883), not from its xy, and differs by up to 2.3e-4.
         let srgb: Mat3 = [
-            [0.412_456_4, 0.357_576_1, 0.180_437_5],
-            [0.212_672_9, 0.715_152_2, 0.072_175_0],
-            [0.019_333_9, 0.119_192_0, 0.950_304_1],
+            [0.412_390_80, 0.357_584_34, 0.180_480_79],
+            [0.212_639_01, 0.715_168_68, 0.072_192_32],
+            [0.019_330_82, 0.119_194_78, 0.950_532_15],
         ];
         let rec2020: Mat3 = [
-            [0.636_958_0, 0.144_616_9, 0.168_881_0],
-            [0.262_700_2, 0.677_998_1, 0.059_301_7],
-            [0.000_000_0, 0.028_072_7, 1.060_985_1],
+            [0.636_958_05, 0.144_616_90, 0.168_880_98],
+            [0.262_700_21, 0.677_998_07, 0.059_301_72],
+            [0.000_000_00, 0.028_072_69, 1.060_985_06],
         ];
         assert!(close(&OutputSpace::Srgb.to_xyz(), &srgb, 1e-6));
         assert!(close(&OutputSpace::Rec2020.to_xyz(), &rec2020, 1e-6));
-        // Adobe RGB (1998) specification, section 4.3.4.3.
+        // Adobe RGB (1998) specification, section 4.3.4.3, to five
+        // decimals: the tolerance is one unit of the last one.
         let adobe: Mat3 = [
             [0.576_67, 0.185_56, 0.188_23],
             [0.297_34, 0.627_36, 0.075_29],
             [0.027_03, 0.070_69, 0.991_34],
         ];
-        assert!(close(&OutputSpace::AdobeRgb.to_xyz(), &adobe, 2e-5));
+        assert!(close(&OutputSpace::AdobeRgb.to_xyz(), &adobe, 1e-5));
     }
 
     #[test]
