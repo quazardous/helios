@@ -3,8 +3,8 @@
 //! A copy takes the images selected in the grid or the filmstrip (the
 //! cursor's image when none is): each one's id (its file's hash), its
 //! name and where its file is. Other applications get the file names,
-//! one per line; the files themselves wait for a system clipboard that
-//! carries `text/uri-list` (egui-pop's system backend).
+//! one per line; the files themselves only through "Copy files"
+//! (`library.copyFiles`, [`super::system`]).
 //!
 //! A paste into the library is an import, asked first:
 //!
@@ -16,7 +16,12 @@
 //!   without a choice the workspace's import source decides.
 //! - **Files from another application** (`text/uri-list`, or text whose
 //!   lines are absolute paths or `file://` URIs): the files and folders
-//!   that exist are imported the same way.
+//!   that exist are imported the same way. A text naming no file (a file
+//!   manager that gives names only) pasted by the user takes the files
+//!   the system clipboard holds beside it ([`super::system`]).
+//! - **An image from another application** (`image/png`, written to a
+//!   file first): imported and copied into the library folder, since the
+//!   file it was written to is a temporary one.
 //!
 //! The import is a job, as `library.import` is, not an undo step.
 
@@ -26,8 +31,9 @@ use std::rc::Rc;
 
 use egui_pop::api::AppHandle;
 use egui_pop::api::clipboard::{
-    ClipItem, ClipSource, ClipTarget, FormatId, Part, Paste, TEXT, URI_LIST,
+    ClipItem, ClipSource, ClipTarget, FormatId, PNG, Part, Paste, TEXT, URI_LIST,
 };
+use egui_pop::model::commands::Origin;
 use helios_core::Message;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value as Json, json};
@@ -267,14 +273,25 @@ fn percent_decoded(text: &str) -> String {
     String::from_utf8(out).unwrap_or_else(|_| text.to_string())
 }
 
+/// Plans a paste of an image another application copied, written to
+/// `file`: imported and copied into the library folder, the file being
+/// a temporary one.
+pub fn plan_image(file: PathBuf, exists: impl Fn(&Path) -> bool) -> Plan {
+    let mut plan = plan_files(vec![file], exists);
+    plan.copy = Some(true);
+    plan
+}
+
 /// The library's endpoint: the grid's and the filmstrip's.
 pub struct Endpoint {
     library: Rc<RefCell<Library>>,
+    /// The system clipboard's files, for a text naming none.
+    system: super::system::Shared,
 }
 
 impl Endpoint {
-    pub fn new(library: Rc<RefCell<Library>>) -> Self {
-        Endpoint { library }
+    pub fn new(library: Rc<RefCell<Library>>, system: super::system::Shared) -> Self {
+        Endpoint { library, system }
     }
 
     /// What a copy takes now.
@@ -300,9 +317,17 @@ impl Endpoint {
                 Path::exists,
                 p.parts,
             )
+        } else if p.repr.format == PNG {
+            plan_image(super::system::png_file(&p.repr.data)?, Path::exists)
         } else {
             let text = p.repr.text().unwrap_or_default();
-            let paths = paths_in(text);
+            let mut paths = paths_in(text);
+            // A file manager that gives the names only (macOS's Finder):
+            // the files themselves are on the system clipboard beside
+            // them. The user's paste only: an agent never reads it.
+            if paths.is_empty() && p.item.external && *p.origin == Origin::User {
+                paths = self.system.borrow_mut().files().unwrap_or_default();
+            }
             if paths.is_empty() {
                 return Err("the text names no file to import".into());
             }
@@ -336,7 +361,7 @@ impl ClipSource for Endpoint {
 
 impl ClipTarget for Endpoint {
     fn accepts(&self, _: &AppHandle) -> Vec<FormatId> {
-        vec![IMAGES, URI_LIST, TEXT]
+        vec![IMAGES, URI_LIST, PNG, TEXT]
     }
 
     fn paste(&self, app: &AppHandle, p: &Paste<'_>) -> Result<Json, String> {
@@ -350,6 +375,10 @@ impl ClipTarget for Endpoint {
         let tr = |m: Message| crate::i18n::text(&ctx, m);
         let count = plan.import.len();
         let detail = match plan.copy {
+            Some(true) if p.repr.format == PNG => Message::new(
+                "gui-paste-import-image",
+                "The image is saved as a PNG file and copied into the library folder.",
+            ),
             Some(true) => Message::new(
                 "gui-paste-import-copy",
                 "The files are copied into the library folder.",
@@ -476,5 +505,16 @@ mod tests {
         let p = plan_files(paths_in(text), |p| p.ends_with("c.jpg"));
         assert_eq!(p.import, [PathBuf::from("/photos/c.jpg")]);
         assert_eq!(p.missing.len(), 2);
+    }
+
+    #[test]
+    fn an_image_from_another_application_is_copied_into_the_library() {
+        let p = plan_image(PathBuf::from("/tmp/Pasted image.png"), |_| true);
+        assert_eq!(p.import, [PathBuf::from("/tmp/Pasted image.png")]);
+        assert_eq!(p.copy, Some(true));
+        assert_eq!(p.import_args()["copy"], json!(true));
+        let gone = plan_image(PathBuf::from("/tmp/gone.png"), |_| false);
+        assert!(gone.import.is_empty());
+        assert_eq!(gone.missing.len(), 1);
     }
 }

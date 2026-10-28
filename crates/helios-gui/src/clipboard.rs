@@ -28,20 +28,26 @@
 //!   the shell's (the workspace's network, the image's masks) runs as a command at the next frame
 //!   ([`defer`]);
 //! - **one undo step per paste**: egui-pop's history group is a group of
-//!   Helios's value store (`host::HeliosHost::begin_group`).
+//!   Helios's value store (`host::HeliosHost::begin_group`);
+//! - **files and images with other applications** ([`system`]): "Copy
+//!   files" ([`copy_files`]), the rendered image copied ([`rendered`]),
+//!   and files or an image another application copied pasted into the
+//!   library ([`paste_from_system`]), while egui-pop's system clipboard
+//!   carries text only.
 
 pub mod images;
 pub mod mask;
 pub mod nodes;
 pub mod param;
+pub mod system;
 
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 use egui_pop::api::clipboard::{
-    self, Boundary, ClipType, CopyRequest, FormatId, PasteRequest, Repr, Sanitiser, TEXT,
-    Transform, TransformSpec, Transformed,
+    self, Answer, Boundary, ClipType, CopyRequest, FormatId, PasteRequest, Repr, Sanitiser, Slot,
+    TEXT, Transform, TransformSpec, Transformed,
 };
 use egui_pop::api::steps::Outcome;
 use egui_pop::api::{AppHandle, Ctx, Plugin, PluginError};
@@ -193,6 +199,7 @@ impl Endpoints {
         values: Arc<Mutex<Store>>,
         viewport: Rc<RefCell<crate::viewport::Viewport>>,
         library: Rc<RefCell<crate::library::Library>>,
+        system: system::Shared,
     ) -> Endpoints {
         let param = Rc::new(param::Endpoint::new(values.clone()));
         clipboard::register(
@@ -212,7 +219,7 @@ impl Endpoints {
         for name in [MASKS_ENDPOINT, MASK_IMAGE_ENDPOINT] {
             clipboard::register(app, name, Some(masks.clone()), Some(masks.clone()));
         }
-        let images = Rc::new(images::Endpoint::new(library));
+        let images = Rc::new(images::Endpoint::new(library, system));
         clipboard::register(
             app,
             LIBRARY_ENDPOINT,
@@ -302,6 +309,72 @@ pub fn paste_param(
     let out = clipboard::paste(app, req, origin);
     e.unpin();
     result(out)
+}
+
+/// "Copy files": the files of the images the library acts on, put on
+/// the system clipboard as a file manager copies them. Their paths go
+/// out whole: the user asked for the files (a plain copy gives their
+/// names only). Images without a file at hand are left out and said.
+pub fn copy_files(e: &images::Endpoint, system: &system::Shared) -> Result<Json, String> {
+    let clip = e.clip()?;
+    let mut files = Vec::new();
+    let mut missing = Vec::new();
+    for image in clip.images {
+        match image.path {
+            Some(p) if p.exists() => files.push(p),
+            _ => missing.push(image.name),
+        }
+    }
+    if files.is_empty() {
+        return Err("no file to copy: the images have none at hand".into());
+    }
+    system.borrow_mut().set_files(&files)?;
+    Ok(serde_json::json!({ "files": files, "missing": missing }))
+}
+
+/// Pastes into the library what another application copied: files, or
+/// an image (written as a PNG file first). It is read from the system
+/// clipboard now, kept in the owner's [`system::SLOT`] (what the user
+/// copied in Helios stays) and pasted from there through egui-pop's
+/// step, as external content. The user's only: an agent never reads the
+/// system clipboard.
+pub fn paste_from_system(
+    app: &AppHandle,
+    system: &system::Shared,
+    dry_run: bool,
+    origin: &PopOrigin,
+) -> Result<Json, String> {
+    if *origin != PopOrigin::User {
+        return Err("only the user pastes what other applications copied".into());
+    }
+    let item = system::external_item(&mut **system.borrow_mut(), &system::paste_dir())?;
+    let slot = Slot::parse(system::SLOT);
+    let answer = clipboard::with_owner(app, |c| c.put(&slot, item, origin))
+        .ok_or("no clipboard: the ClipboardPlugin is not connected")?;
+    if let Answer::Done(Err(e)) = answer {
+        return Err(e);
+    }
+    let mut req = PasteRequest::new(LIBRARY_ENDPOINT).slot(slot);
+    if dry_run {
+        req = req.dry_run();
+    }
+    result(clipboard::paste(app, req, origin))
+}
+
+/// The image the viewport shows, rendered whole at full resolution and
+/// made 8-bit sRGB as an 8-bit PNG export is: what "Copy the image" puts
+/// on the system clipboard. Without the mask display laid over it.
+pub fn rendered(
+    engine: &helios_core::Engine,
+    shown: &crate::engine_source::Shown,
+) -> Result<image::RgbaImage, String> {
+    let image = engine
+        .render(&shown.graph, shown.node, &shown.port, shown.extent)
+        .map_err(|e| e.to_string())?;
+    let rgba = helios_export::srgb8_rgba(&image).map_err(|m| m.english)?;
+    let r = image.region();
+    image::RgbaImage::from_raw(r.width, r.height, rgba)
+        .ok_or_else(|| "the rendered image has a wrong size".into())
 }
 
 #[cfg(test)]

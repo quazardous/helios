@@ -57,12 +57,16 @@ egui = "0.36"
 eframe = { version = "0.36", default-features = false, features = ["default_fonts", "wgpu", "wayland", "x11", "accesskit"] }
 egui_kittest = { version = "0.36", features = ["eframe", "wgpu"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
+# MIT OR Apache-2.0: the system clipboard beyond text (files and images),
+# already in the tree through egui-winit. On Linux it speaks X11, which
+# Wayland compositors bridge through XWayland.
+arboard = { version = "3.6", default-features = false, features = ["image-data"] }
+# The rendered image copied as 8-bit sRGB, as an export writes it.
+helios-export.workspace = true
 
 [dev-dependencies]
 egui-pop-test.workspace = true
 egui-pop-wayland.workspace = true
-# An export run as the desktop's job (the jobs centre's tests).
-helios-export.workspace = true
 # The node's MCP server, whose workspace tools go through the desktop.
 helios-node = { path = "../helios-node" }
 

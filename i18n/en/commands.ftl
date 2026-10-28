@@ -181,11 +181,17 @@ command-keymap-package =
 command-keymap-package-remove =
     .title = Take a keymap package's keys away (`name`)
 
+command-library-copyFiles =
+    .title = Copy files: the selected images' files, for a file manager or another application
+
 command-library-importFiles =
     .title = Import files and folders (`paths`), placed as the workspace's import source says (`copy`: into the library folder or not)
 
 command-library-importSource =
     .title = Import from the workspace's import source (`path`: the card or folder; asked when absent)
+
+command-library-pasteFiles =
+    .title = Paste files or an image another application copied into the library, imported once confirmed (`dry_run`: only say what would be imported)
 
 command-mask-add-circle =
     .title = Masks: add a circle at the view's centre
@@ -420,6 +426,9 @@ command-view-network =
 
 command-viewport-compare =
     .title = Image: before and after side by side
+
+command-viewport-copyImage =
+    .title = Copy the image: the edited image rendered whole, for another application (as PNG)
 
 command-viewport-mask-display =
     .title = Image: show the mask (cycles overlay, grey, off; or `mode`)

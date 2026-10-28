@@ -83,8 +83,10 @@ command-helios-viewport-dock.title b544485bfff8325e
 command-helios-viewport-moveTo.title 8653b4bdbc43ce4e
 command-keymap-package-remove.title 09c89d2776f3a70e
 command-keymap-package.title dafef66dd3b9bf88
+command-library-copyFiles.title 47994437a8a0f5ba
 command-library-importFiles.title 2ae7b0b7cb69e013
 command-library-importSource.title 1cb6337694fcbe70
+command-library-pasteFiles.title 409587651f782f9a
 command-mask-add-circle.title 853e800a379c3a26
 command-mask-add-ellipse.title 369f2cd0736ffec6
 command-mask-add-gradient.title a0410f60ded15dd6
@@ -163,6 +165,7 @@ command-view-endSideBar-toggle.title 7e1e38e1eef14830
 command-view-library.title f8ecfd5316229aaf
 command-view-network.title 302d61539ec3f628
 command-viewport-compare.title 27a11d0c9daaf86f
+command-viewport-copyImage.title 26349c0fe1312665
 command-viewport-mask-display-off.title f8dcd04c9ed5d30a
 command-viewport-mask-display.title 0fce58839d419c9d
 command-viewport-zoom-100.title be6c10eb69bafd7c
@@ -223,6 +226,10 @@ gui-caption-jobs 2dc28dab487c66ad
 gui-caption-profile 26164a66658cfc41
 gui-confirmed-by-policy 3cbe35a902970f08
 gui-copied 2f397b47ced4b53e
+gui-copied-files 3f8356c6e2ce0997
+gui-copied-files-missing cac988d22f12cea2
+gui-copied-image 513f6c53c2034b35
+gui-copy-image-failed fc49d5d80621fdbf
 gui-decisions-accept 7c5af01faa9909b1
 gui-decisions-accept-above 11b8a82a4868d334
 gui-decisions-answer 6b392d53a834f861
@@ -396,6 +403,7 @@ gui-params-port-member 6b3de0179d0cc50e
 gui-params-show-values 1ca86a61fcd25ceb
 gui-params-values 0e265cf773d72c36
 gui-paste-import-copy a5a72b9ec113def9
+gui-paste-import-image e911561c13914103
 gui-paste-import-reference d11a0a67d74a1a81
 gui-paste-import-source 8061b9d994ba38d0
 gui-paste-import-title e2a22e1aa186806e

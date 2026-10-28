@@ -389,3 +389,30 @@ Each with the default proposed:
   wait for those to exist; the item does not name the library it comes
   from (a vault has no identity yet), the hash is enough to tell a
   reference from an import.
+- **2026-10-28, files and images with other applications** (the
+  Helios side of the system backend). egui-pop's clipboard still writes
+  and reads the system clipboard as text only, so what Helios needs
+  beyond text goes through a seam of its own,
+  `crate::clipboard::system::SystemClipboard`, over arboard (in the tree
+  through egui-winit already; on Linux it speaks X11, bridged by Wayland
+  compositors through XWayland), with an in-memory stand-in for tests.
+  "Copy files" (`library.copyFiles`) puts the selected images' files on
+  it as a file manager does (`text/uri-list`, a Windows file list, macOS
+  file URLs); "Copy the image" (`viewport.copyImage`) renders the edited
+  image whole and puts it there as 8-bit sRGB (PNG for other
+  applications); "Paste from other applications" (`library.pasteFiles`)
+  reads files or an image another application copied and pastes them
+  through egui-pop's step as an external item, from a slot of their own
+  (`system`) so what the user copied in Helios stays. The library's
+  endpoint accepts `text/uri-list` and `image/png` (its data
+  `{file, width, height}`: the image is written to a temporary PNG file
+  first, then imported and copied into the library folder), and a text
+  naming no file pasted by the user takes the files beside it on the
+  system clipboard. Only the user copies to and pastes from other
+  applications (question 8's rule, for the system clipboard). Not
+  yet, and why: Ctrl+V when the system clipboard holds files or an image
+  and no text (Windows' Explorer, browsers) never reaches Helios, since
+  egui-winit drops the key when it finds no text; Copy files offers no
+  text beside the files and egui-pop's own copy still writes only text,
+  since writing several formats at once is the system backend's
+  (egui-pop, ADR 0015 step 5); the primary selection is egui-pop's too.

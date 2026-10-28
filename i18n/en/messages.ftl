@@ -73,6 +73,14 @@ gui-confirmed-by-policy = { $verb }: confirmed by policy
 
 gui-copied = copied { $text }
 
+gui-copied-files = copied { $count } files
+
+gui-copied-files-missing = copied { $count } files; { $missing } without a file left out
+
+gui-copied-image = copied the image ({ $width } × { $height })
+
+gui-copy-image-failed = the image was not copied: { $error }
+
 gui-decisions-accept = Accept
 
 gui-decisions-accept-above = Accept the { $count } above { $percent } %
@@ -418,6 +426,8 @@ gui-params-show-values = Show the values
 gui-params-values = { $count } values
 
 gui-paste-import-copy = The files are copied into the library folder.
+
+gui-paste-import-image = The image is saved as a PNG file and copied into the library folder.
 
 gui-paste-import-reference = The files stay where they are.
 

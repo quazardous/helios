@@ -75,6 +75,20 @@ gui-confirmed-by-policy = { $verb } : confirmé par la règle
 
 gui-copied = copié { $text }
 
+gui-copied-files = { $count ->
+    [one] fichier copié
+   *[other] { $count } fichiers copiés
+}
+
+gui-copied-files-missing = { $count ->
+    [one] fichier copié
+   *[other] { $count } fichiers copiés
+} ; images sans fichier laissées de côté : { $missing }
+
+gui-copied-image = image copiée ({ $width } × { $height })
+
+gui-copy-image-failed = l’image n’a pas été copiée : { $error }
+
 gui-decisions-accept = Accepter
 
 gui-decisions-accept-above = Accepter les { $count } au-dessus de { $percent } %
@@ -338,6 +352,8 @@ gui-params-show-values = Afficher les valeurs
 gui-params-values = { $count } valeurs
 
 gui-paste-import-copy = Les fichiers sont copiés dans le dossier de la bibliothèque.
+
+gui-paste-import-image = L’image est enregistrée en fichier PNG et copiée dans le dossier de la bibliothèque.
 
 gui-paste-import-reference = Les fichiers restent où ils sont.
 

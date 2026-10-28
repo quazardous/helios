@@ -180,11 +180,17 @@ command-keymap-package =
 command-keymap-package-remove =
     .title = Retirer les touches d'un paquet de raccourcis (`name`)
 
+command-library-copyFiles =
+    .title = Copier les fichiers : ceux des images sélectionnées, pour un gestionnaire de fichiers ou une autre application
+
 command-library-importFiles =
     .title = Importer des fichiers et des dossiers (`paths`), placés comme le dit la source d’import de l’espace de travail (`copy` : dans le dossier de la bibliothèque ou non)
 
 command-library-importSource =
     .title = Importer depuis la source d’import de l’espace de travail (`path` : la carte ou le dossier ; demandé en son absence)
+
+command-library-pasteFiles =
+    .title = Coller dans la bibliothèque des fichiers ou une image copiés par une autre application, importés une fois confirmé (`dry_run` : dire seulement ce qui serait importé)
 
 command-mask-add-circle =
     .title = Masques : ajouter un cercle au centre de la vue
@@ -419,6 +425,9 @@ command-view-network =
 
 command-viewport-compare =
     .title = Image : avant et après côte à côte
+
+command-viewport-copyImage =
+    .title = Copier l’image : l’image retouchée rendue en entier, pour une autre application (en PNG)
 
 command-viewport-mask-display =
     .title = Image : afficher le masque (alterne superposition, gris, désactivé ; ou `mode`)

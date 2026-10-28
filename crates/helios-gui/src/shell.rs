@@ -134,6 +134,15 @@ enum Action {
     CopyParam(String, crate::clipboard::param::Text, Origin),
     /// The clipboard pasted onto a parameter (or only said, a dry run).
     PasteParam(String, bool, Origin),
+    /// The files of the images the library acts on, copied for other
+    /// applications, as whom (the user only).
+    CopyFiles(Origin),
+    /// Files or an image another application copied, pasted into the
+    /// library (or only said, a dry run), as whom.
+    PasteFiles(bool, Origin),
+    /// The image the viewport shows, rendered and copied for other
+    /// applications, as whom (the user only).
+    CopyImage(Origin),
     SystemMenu,
     /// A command, its arguments, as whom.
     Run(String, Value, Origin),
@@ -421,6 +430,11 @@ pub struct Shell {
     params: Rc<RefCell<crate::params::Params>>,
     /// The clipboard's endpoints (`crate::clipboard`).
     clip: crate::clipboard::Endpoints,
+    /// The system clipboard beyond text: files and images
+    /// (`crate::clipboard::system`).
+    system: crate::clipboard::system::Shared,
+    /// The image being rendered for the system clipboard.
+    copying: Option<std::sync::mpsc::Receiver<Result<image::RgbaImage, String>>>,
     /// The Masks panel: the selected module's mask network as a tree.
     mask_tree: Rc<RefCell<crate::mask_tree::MaskTree>>,
     /// The Graph panel: the workspace's network in egui-pop's editor.
@@ -676,11 +690,15 @@ impl Shell {
         }
         let viewport: Rc<RefCell<crate::viewport::Viewport>> = Rc::default();
         let library: Rc<RefCell<crate::library::Library>> = Rc::default();
+        let system: crate::clipboard::system::Shared = Rc::new(RefCell::new(Box::new(
+            crate::clipboard::system::Arboard::default(),
+        )));
         let clip = crate::clipboard::Endpoints::register(
             app.handle(),
             values.clone(),
             viewport.clone(),
             library.clone(),
+            system.clone(),
         );
         let preview = Rc::new(crate::preview::Preview::new(
             viewport.borrow().engine().clone(),
@@ -733,6 +751,8 @@ impl Shell {
             image_surface: crate::display::ImageSurfaceSwitch::default(),
             params: Rc::default(),
             clip,
+            system,
+            copying: None,
             mask_tree: Rc::default(),
             graph: Rc::default(),
             values,
@@ -997,6 +1017,83 @@ impl Shell {
     /// The masks' clipboard endpoint.
     pub fn clip_masks(&self) -> &crate::clipboard::mask::Endpoint {
         &self.clip.masks
+    }
+
+    /// Replaces the system clipboard's files and images (a test's
+    /// [`crate::clipboard::system::Memory`]).
+    pub fn set_system_clipboard(
+        &mut self,
+        backend: Box<dyn crate::clipboard::system::SystemClipboard>,
+    ) {
+        *self.system.borrow_mut() = backend;
+    }
+
+    /// Waits for the image "Copy the image" renders and puts it on the
+    /// system clipboard (`None`: none was being rendered); a test's.
+    pub fn finish_copying(&mut self, timeout: std::time::Duration) -> Option<Result<(), String>> {
+        let rx = self.copying.take()?;
+        let got = rx.recv_timeout(timeout).map_err(|e| e.to_string());
+        Some(
+            got.and_then(|r| r)
+                .and_then(|image| self.put_copied(&image)),
+        )
+    }
+
+    /// The rendered image, once it came: put on the system clipboard.
+    fn copied_image(&mut self) {
+        let Some(rx) = &self.copying else { return };
+        let got = match rx.try_recv() {
+            Ok(r) => r,
+            Err(std::sync::mpsc::TryRecvError::Empty) => return,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                Err("the render stopped".to_string())
+            }
+        };
+        self.copying = None;
+        if let Err(e) = got.and_then(|image| self.put_copied(&image)) {
+            self.warn(
+                Message::new(
+                    "gui-copy-image-failed",
+                    "the image was not copied: { $error }",
+                )
+                .with("error", e),
+            );
+        }
+    }
+
+    fn put_copied(&mut self, image: &image::RgbaImage) -> Result<(), String> {
+        self.system.borrow_mut().set_image(image)?;
+        self.note(
+            Message::new(
+                "gui-copied-image",
+                "copied the image ({ $width } × { $height })",
+            )
+            .with("width", image.width())
+            .with("height", image.height()),
+        );
+        Ok(())
+    }
+
+    /// Renders the image the viewport shows on a thread of its own, for
+    /// the system clipboard: the frame that sees it done puts it there.
+    fn copy_image(&mut self) -> Result<Value, String> {
+        if self.copying.is_some() {
+            return Err("the image is being copied already".into());
+        }
+        let (engine, shown) = {
+            let v = self.viewport.borrow();
+            (v.engine().clone(), v.shown().ok_or("no image is open")?)
+        };
+        let size = [shown.extent.width, shown.extent.height];
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::Builder::new()
+            .name("helios-copy-image".into())
+            .spawn(move || {
+                let _ = tx.send(crate::clipboard::rendered(&engine, &shown));
+            })
+            .map_err(|e| e.to_string())?;
+        self.copying = Some(rx);
+        Ok(json!({ "rendering": size }))
     }
 
     /// Saves the interface's settings and the user's keys (when built
@@ -2388,6 +2485,35 @@ impl Shell {
             CommandSpec::new("vault.previous", "Select the previous image", "Vault"),
             Box::new(|_, _| Ok(Action::Step(-1))),
         );
+        // The system clipboard beyond text: files and images with other
+        // applications (`crate::clipboard::system`).
+        add(
+            CommandSpec::new(
+                "library.copyFiles",
+                "Copy files: the selected images' files, for a file manager or another application",
+                "Vault",
+            ),
+            Box::new(|_, origin| Ok(Action::CopyFiles(origin.clone()))),
+        );
+        add(
+            CommandSpec::new(
+                "library.pasteFiles",
+                "Paste files or an image another application copied into the library, imported once confirmed (`dry_run`: only say what would be imported)",
+                "Vault",
+            ),
+            Box::new(|a, origin| {
+                let dry_run = a.get("dry_run").and_then(Value::as_bool).unwrap_or(false);
+                Ok(Action::PasteFiles(dry_run, origin.clone()))
+            }),
+        );
+        add(
+            CommandSpec::new(
+                "viewport.copyImage",
+                "Copy the image: the edited image rendered whole, for another application (as PNG)",
+                "View",
+            ),
+            Box::new(|_, origin| Ok(Action::CopyImage(origin.clone()))),
+        );
         // A parameter copied: the item is the parameter with its type,
         // its text the value as shown (`+0.30 EV`) or the path; either
         // pastes back (`param.paste`).
@@ -2900,7 +3026,7 @@ impl Shell {
     /// egui-pop's menu bar.
     fn declare_menus(w: &Wiring<'_>) {
         use crate::mask_tree::{ROW_MENU, ROW_MENU_ADD};
-        use egui_pop::api::app::{MENU_FILE, MENU_HELP};
+        use egui_pop::api::app::{MENU_EDIT, MENU_FILE, MENU_HELP};
         // No label: egui-pop shows the command's title in the interface's
         // language, without its argument hint.
         let command = |menu: MenuId, group: &str, order: i32, id: &str| {
@@ -2935,6 +3061,11 @@ impl Shell {
             command(MENU_FILE, "2_edit", 2, "workspace.importParts"),
             command(MENU_FILE, "2_edit", 3, "workspace.saveAsTemplate"),
             command(MENU_FILE, "2_edit", 4, "workspace.reset"),
+            // With other applications, after egui-pop's Cut, Copy, Paste
+            // and Paste special.
+            command(MENU_EDIT, "1_clipboard", 10, "library.copyFiles"),
+            command(MENU_EDIT, "1_clipboard", 11, "viewport.copyImage"),
+            command(MENU_EDIT, "1_clipboard", 12, "library.pasteFiles"),
             command(MENU_HELP, "4_about", 0, "workbench.about"),
         ];
         // A row's context menu in the Masks panel: its commands act on
@@ -3977,6 +4108,40 @@ impl Shell {
                 }
                 return Ok(out);
             }
+            Action::CopyFiles(origin) => {
+                user_only(&origin)?;
+                let out = crate::clipboard::copy_files(&self.clip.images, &self.system)?;
+                let count = out["files"].as_array().map_or(0, Vec::len);
+                let missing = out["missing"].as_array().map_or(0, Vec::len);
+                if missing == 0 {
+                    self.note(
+                        Message::new("gui-copied-files", "copied { $count } files")
+                            .with("count", count),
+                    );
+                } else {
+                    self.warn(
+                        Message::new(
+                            "gui-copied-files-missing",
+                            "copied { $count } files; { $missing } without a file left out",
+                        )
+                        .with("count", count)
+                        .with("missing", missing),
+                    );
+                }
+                return Ok(out);
+            }
+            Action::PasteFiles(dry_run, origin) => {
+                return crate::clipboard::paste_from_system(
+                    self.app.handle(),
+                    &self.system,
+                    dry_run,
+                    &to_pop(&origin),
+                );
+            }
+            Action::CopyImage(origin) => {
+                user_only(&origin)?;
+                return self.copy_image();
+            }
             Action::PasteParam(path, dry_run, origin) => {
                 return crate::clipboard::paste_param(
                     self.app.handle(),
@@ -4259,6 +4424,7 @@ impl Shell {
         self.workbench_refusals();
         self.save_layout_on_change(&ctx);
         self.engine_notices();
+        self.copied_image();
         self.job_notices();
         self.follow_queue(&ctx);
         self.menus_ui(&ctx);
@@ -4600,6 +4766,15 @@ fn panel_id(id: &str) -> Result<PanelId, String> {
 }
 
 /// A workbench step's outcome as a command's result.
+/// The system clipboard is the user's: an agent or a script neither
+/// reads it nor writes over what the user copied there.
+fn user_only(origin: &Origin) -> Result<(), String> {
+    match origin {
+        Origin::User => Ok(()),
+        _ => Err("only the user copies to other applications".into()),
+    }
+}
+
 fn workbench_outcome(out: Option<egui_pop::api::steps::Outcome>) -> Result<Value, String> {
     use egui_pop::api::steps::Outcome;
     match out {

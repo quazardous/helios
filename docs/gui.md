@@ -1036,6 +1036,12 @@ and the colour (`helios-gui/src/viewport.rs`).
   opened (not decided: the unedited image, or a snapshot taken by hand).
 - **Mask display** (2026-10-21, see "The mask display" below). `M`
   with the image focused shows the selected mask over the image.
+- **Copy the image** (2026-10-28). Edit › Copy the image
+  (`viewport.copyImage`) renders the edited image whole, at full
+  resolution, on a thread of its own and puts it on the system clipboard
+  as 8-bit sRGB, as an 8-bit PNG export holds it (other applications read
+  it as PNG on Linux, as a bitmap on Windows, as an image on macOS),
+  without the mask display; a toast says when it is there.
 - **Readout.** The working-space R, G, B of the pixel under the pointer
   show in the bottom left corner, and the mask's value while the mask
   display is on.

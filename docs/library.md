@@ -280,6 +280,21 @@ paste special (Ctrl+Shift+V) chooses **Import the files where they
 are** or **Copy the files into the library folder**. An import is not an
 undo step.
 
+**Files and images with other applications (2026-10-28).** Edit › Copy
+files (`library.copyFiles`) puts the files of the images selected on the
+system clipboard as a file manager copies them (`text/uri-list` on Linux,
+a file list on Windows and macOS), paths whole: the user asked for the
+files, where a plain copy gives their names only. Images without a file
+at hand are left out and said. Edit › Paste from other applications
+(`library.pasteFiles`, with a dry run) reads what another application
+copied: files a file manager copied are imported as above; an image (a
+browser's or an editor's "Copy image") is saved as a PNG file and
+imported, copied into the library folder. Both are asked first. A text
+pasted with Ctrl+V that names no file (a file manager that gives names
+only) takes the files the system clipboard holds beside it. Only the
+user copies to and pastes from other applications: an agent neither
+reads the system clipboard nor writes over it.
+
 **Search.** The search field's rating, labels, flags and tags become a
 vault query (several labels: any of them; several tags: all of them);
 its words (in the name or a tag) and dates (the file's day) are matched
@@ -295,7 +310,11 @@ on what the library holds. A filter shows stacks flattened.
 - Burst identifiers from maker notes; capture times of pictures (JPEG,
   TIFF) from their EXIF, which fall back to the file's date.
 - Cancelling an import halfway (the job runs to its end).
-- Copying the files themselves to other applications (`text/uri-list`)
-  and pasting files they offer only as `text/uri-list`: both wait for
-  egui-pop's system clipboard backend, which carries formats other than
-  text. Collections, projects and stacks are not paste targets yet.
+- Ctrl+V with files or an image only on the system clipboard (no text
+  beside them, as Windows' Explorer and browsers copy): egui-winit
+  reads text only on the key and drops it when there is none, so
+  nothing reaches Helios; Edit › Paste from other applications does it.
+  Copy files gives the files only, no text beside them, and egui-pop's
+  own copy still writes text only: both wait for egui-pop's system
+  clipboard backend, which writes several formats at once. Collections,
+  projects and stacks are not paste targets yet.
