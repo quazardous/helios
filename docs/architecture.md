@@ -138,6 +138,43 @@ which the GUI's window draws with as well (see
 makes a second one dangerous). After a rebuild the engine computes on the
 new device, but the window still holds the lost one.
 
+### Raw Vulkan: the same device for foreign code
+
+(2026-10-28) vkdt's modules are ported to WGSL, but some Vulkan code is
+better run as it is beside Helios's: vkdt's own SPIR-V kernels for a
+parity check on the GPU, a module not ported yet. A device of its own
+would cost a host copy at every crossing and break the one-device rule,
+so `helios_gpu::vulkan` opens the process's device to it through
+wgpu-hal (no external memory: the memory is shared because the device
+is):
+
+- `Gpu::vulkan` gives the raw handles (instance, physical device, device,
+  queue, queue family and index, the extensions wgpu enabled) with
+  `ash`'s function tables (the `ash` wgpu-hal uses, re-exported). The
+  handles are plain Vulkan handles, ready for C. Getting them is safe;
+  every use is `unsafe`, as any Vulkan call.
+- `Gpu::export_buffer` gives an engine image's `VkBuffer`, read-only (the
+  cache shares it); `Gpu::import_buffer` turns a `VkBuffer` made on the
+  device into an engine image, counted in the memory budget, whose
+  release callback frees it once wgpu is done with it. Both are the same
+  memory: nothing is copied.
+- `Gpu::export_texture` and `Gpu::import_texture` do the same for a
+  `VkImage` and a `wgpu::Texture` (vkdt's images are storage images).
+- `Gpu::record` is the only way foreign code submits work: it records into
+  a command buffer that wgpu submits on its queue, between full memory
+  barriers, so it is ordered with Helios's work, and keeps the images it
+  names alive until the GPU is done. wgpu and the GUI submit from other
+  threads, and a `VkQueue` must not be used by two at once, so foreign
+  code never calls `vkQueueSubmit` itself.
+
+On a device of another API (Metal on macOS, DX12, OpenGL) each of these
+says so, and the caller goes the portable way: a readback and an upload.
+This module is the one place in the crate allowed `unsafe` code. The
+tests (`crates/helios-gpu/tests/vulkan.rs`) check the handles against
+wgpu's adapter, send an image to foreign code and back on the device and
+run an engine kernel on it, and pass a texture both ways; they skip,
+saying why, without a Vulkan device.
+
 ### Commands: to the owner
 
 Every piece of state has one owner (the vault for catalog data, the edit for

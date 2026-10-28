@@ -20,10 +20,15 @@
 //! at most [`MAX_REBUILDS`] times. [`Gpu::inject`] provokes each failure,
 //! for tests.
 //!
+//! On Vulkan, [`vulkan`] opens the same device to raw Vulkan code (vkdt's
+//! kernels): its handles, and images exchanged both ways without a copy.
+//!
 //! [`check`] runs a module on both backends and compares: a GPU variant is
 //! only trusted within its tolerance of the CPU reference.
 
 pub mod shared;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod vulkan;
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};

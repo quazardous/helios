@@ -13,6 +13,11 @@ wgpu = "30"
 bytemuck = "1"
 pollster = "0.4"
 
+# MIT OR Apache-2.0; the Vulkan bindings wgpu-hal 30 uses (already in the
+# tree through it), named by the raw Vulkan interop (`vulkan`).
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+ash = "0.38"
+
 [dev-dependencies]
 helios-module-exposure = { path = "../../modules/exposure" }
 helios-module-blur = { path = "../../modules/blur" }

@@ -221,6 +221,11 @@ used while the first is open (not decided: whether to allow one device
 per adapter once the loader fix is widespread). A failing GPU falls back
 to the CPU per step, and a lost device is rebuilt once, else the session
 continues on the CPU (see docs/architecture.md, "GPU failures").
+The raw Vulkan access (2026-10-28, done) opens that one device to foreign
+Vulkan code through wgpu-hal: its handles, buffers and images exchanged
+both ways without a copy, and foreign commands submitted by wgpu between
+barriers; on Metal, DX12 or OpenGL it says so and the copy path stays
+(see docs/architecture.md, "Raw Vulkan").
 **One window is one workspace** (2026-10-11, decided), as in VS Code:
 opening another project opens another window, never a project tab.
 Auxiliary windows (panels detached to another screen) belong to their

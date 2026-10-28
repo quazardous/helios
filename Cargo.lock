@@ -2121,6 +2121,7 @@ dependencies = [
 name = "helios-gpu"
 version = "0.35.0"
 dependencies = [
+ "ash",
  "bytemuck",
  "helios-core",
  "helios-module-blur",
