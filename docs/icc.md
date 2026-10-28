@@ -276,10 +276,12 @@ What the third step built (`helios-colour`'s `GamutMap`, used by
 - **Method: chroma reduction toward the neutral axis in Oklab**, the way
   CSS Color 4 maps colours for the web. A colour inside the output space is
   left exactly as it is (the mapping is colorimetric wherever it can be:
-  exports keep matching their profile). A colour outside moves along a
-  straight line in Oklab toward the grey of its own lightness, keeping its
-  Oklab hue, to the last point of the line inside the space; what the
-  search leaves outside (a few parts in a billion) is clipped. A colour
+  exports keep matching their profile); so is one less than 5e-4 of its
+  largest channel outside, but for that small clip (see below). A colour
+  outside moves along a straight line in Oklab toward the grey of its own
+  lightness, keeping its Oklab hue, to the last point of the line within
+  that same margin of the space, then clipped, so that one just past the
+  margin lands where one just inside it is clipped. A colour
   lighter than white goes to white, one darker than black to black. NaN
   counts as 0 and infinities as very large, so the result is always finite.
 - Why this one: per-channel clipping, what exports did until now, shifts
@@ -287,10 +289,43 @@ What the third step built (`helios-colour`'s `GamutMap`, used by
   starts inside the gamut (ACES-style) would also move colours the file can
   hold, so an export would no longer say exactly what its profile tags. A
   constant-lightness, constant-hue reduction keeps both, is monotonic (more
-  chroma in never gives less out; CSS's "close enough, clip" shortcut is
-  left out for that reason), and is a published, widely used method.
+  chroma in never gives less out), and is a published, widely used method.
   Oklab rather than CIELAB: its hue lines stay straight in the blues,
   where CIELAB turns them purple.
+- A "close enough, clip" margin, far narrower than CSS's: a colour whose
+  channels are less than 5e-4 of its largest channel outside [0, 1] is
+  clipped, not mapped. ICC profiles round their colorants (s15Fixed16) and
+  many state sRGB's primaries a little off, so a picture's edge colours
+  come in up to 4e-4 outside its space (2e-5 from Helios's own v2
+  profiles, 3.7e-4 from the common IEC 61966-2.1 sRGB one). The edge is
+  hollow in Oklab around sRGB's blue: the straight line from grey to that
+  blue leaves the space and only comes back at the blue itself, so a blue
+  a hair outside was mapped to the line's first exit, and a loaded sRGB
+  blue (0, 0, 254) was exported as (0, 48, 229). The margin keeps such
+  colours where they are, and the search, which counts the same margin as
+  inside, crosses that shallow hollow too.
+- The margin is in proportion to the colour, because the profiles' error
+  is: it is in their matrix. A fixed 5e-4 is a quarter of a dark blue's
+  channels; the clip that ends its mapping then turned its hue by 0.07 rad
+  and moved its lightness by 2e-3.
+- What the margin costs, and why it cannot be avoided. Every mapped colour
+  lands within the margin of the space and is clipped, so its lightness
+  and hue move by what that clip moves them: under 5e-4 in lightness and
+  3e-3 rad in hue on the unit tests' grid, instead of the line's exact
+  values. A colour just inside the margin is clipped, and its clip has
+  more chroma than the space holds at its exact lightness and hue (up to
+  2e-4 more on the tests' chroma ramps). A colour just past the margin
+  must have at least that chroma for the mapping to stay monotonic, so it
+  cannot keep its exact lightness and hue either; nor can colours further
+  out, since bringing them back to the exact line would lower their chroma
+  again. Three other ways were measured and each breaks a rule: mapping
+  strictly past the margin drops chroma at its edge (by 3e-3 with a fixed
+  margin, 2e-4 with the proportional one); blending the
+  clipped and the mapped colour across the margin drops it by up to 8e-4 and
+  turns the reloaded blue to (0, 4, 253), the IEC profile's to
+  (0, 43, 233); walking the line from the colour inward finds no inside
+  point near the blue, which is inside only at its corner, and exports
+  (0, 49, 228).
 - Oklab's first matrix is scaled so that the D65 white Helios derives from
   its xy lands on the neutral axis exactly (a 1e-4 change from the
   published matrix, fitted to a white rounded differently).
@@ -304,6 +339,6 @@ What the third step built (`helios-colour`'s `GamutMap`, used by
   per-window display target, and then takes the same `GamutMap` with that
   display's space as its destination.
 - Tests: colours inside unchanged, colours outside land inside, Oklab hue
-  within 0.01 rad and lightness within 1e-4, chroma monotonic along ramps
+  within 0.01 rad and lightness within 5e-4, chroma monotonic along ramps
   of constant lightness and hue, finite results for NaN, infinities and
   huge values, and every export format holding the same mapped values.

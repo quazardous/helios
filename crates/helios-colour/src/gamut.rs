@@ -7,17 +7,25 @@
 //! Helios does it everywhere a colour leaves the working space:
 //!
 //! - A colour inside the space is left as it is, exactly: the mapping is
-//!   colorimetric where it can be.
+//!   colorimetric where it can be. So is one within `NEAR` of it, a few
+//!   parts in ten thousand of its largest channel, but for that small
+//!   clip: the rounding of ICC profiles puts a picture's edge colours
+//!   there, and they must not move.
 //! - A colour outside is moved in Oklab, a perceptual space, along a
 //!   straight line toward the neutral axis, keeping its Oklab hue, to the
 //!   last point of that line inside the space. The line aims at the grey
 //!   of the colour's own lightness, so the lightness stays too; a colour
 //!   lighter than white aims at white, one darker than black at black.
-//! - What the search leaves outside (a few parts in a billion) is clipped.
+//!   The search counts a point within `NEAR` of the space as inside, as
+//!   the first rule does, and what it leaves outside is clipped: so a
+//!   colour just past the margin lands where one just inside it is
+//!   clipped, and more chroma in never gives less chroma out. The price is
+//!   that clip, on every mapped colour: lightness and hue move by as much
+//!   as the margin allows (under 5e-4 in lightness), and no mapping that
+//!   keeps edge colours and stays monotonic can avoid it (`docs/icc.md`).
 //!
-//! It is the chroma reduction CSS Color 4 specifies for the web, without
-//! its "close enough, clip" shortcut, so that more chroma in gives never
-//! less chroma out. See `docs/icc.md`.
+//! It is the chroma reduction CSS Color 4 specifies for the web, with a far
+//! narrower "close enough, clip" margin than CSS's. See `docs/icc.md`.
 
 use crate::{Mat3, OutputSpace, apply, inverse, mul};
 
@@ -35,9 +43,21 @@ const XYZ_TO_LMS: Mat3 = [
 /// too (the two differ by a matrix), where they are walked.
 const LMS_TO_L: [f64; 3] = [0.210_454_255_3, 0.793_617_785_0, -0.004_072_046_8];
 
-/// How far outside [0, 1] a channel may be and still count as inside: the
-/// rounding of the matrices, far below a 16-bit step.
-const SLACK: f64 = 1e-9;
+/// How far outside [0, 1] a channel may be, in parts of the colour's
+/// largest channel, for the colour to be clipped rather than mapped, and
+/// for the search to count a point as inside. ICC profiles round their
+/// colorants (s15Fixed16) and many state sRGB's primaries a little off: a
+/// picture's colour on the edge of its space comes in up to 4e-4 outside
+/// it (2e-5 from Helios's own v2 profiles, 3.7e-4 from the common
+/// IEC 61966-2.1 sRGB one). The error is in the profile's matrix, so it is
+/// in proportion to the colour, and so is the margin: a fixed one would be
+/// huge next to a dark colour, whose mapping would then end in a clip that
+/// moves its hue by 0.07 rad. Mapped rather than clipped, an edge colour
+/// can move far: where the gamut's edge is hollow in Oklab, around sRGB's
+/// blue, whose line toward grey leaves the space and only comes back at the
+/// blue itself, the search stops at the line's first exit, and a loaded
+/// sRGB blue (0, 0, 254) was exported as (0, 48, 229).
+const NEAR: f64 = 5e-4;
 
 /// Beyond this, a channel is taken as this: an infinite value is brighter
 /// than any white, and the cube roots stay finite.
@@ -131,8 +151,11 @@ impl GamutMap {
     }
 }
 
+/// Whether a colour is inside the space, give or take `NEAR` of its
+/// largest channel.
 fn inside(rgb: [f64; 3]) -> bool {
-    rgb.iter().all(|v| (-SLACK..=1.0 + SLACK).contains(v))
+    let margin = NEAR * rgb.iter().fold(0.0, |m: f64, v| m.max(v.abs()));
+    rgb.iter().all(|v| (-margin..=1.0 + margin).contains(v))
 }
 
 impl OutputSpace {
@@ -232,8 +255,12 @@ mod tests {
     fn hue_and_lightness_are_kept() {
         // Out-of-gamut colours of lightness inside (0, 1) keep their Oklab
         // hue within 0.01 rad (about half a degree; the published matrices
-        // put white 1e-4 off the axis) and their lightness within 1e-4, as
-        // long as some chroma is left to carry a hue.
+        // put white 1e-4 off the axis), as long as some chroma is left to
+        // carry a hue, and their lightness within `NEAR`: they land within
+        // `NEAR` of the space and are clipped, the way edge colours are,
+        // and that clip moves the lightness by up to 4.7e-4 on this grid
+        // (see the margin in `docs/icc.md` for why no mapping that keeps
+        // edge colours and is monotonic can avoid it).
         for space in [
             OutputSpace::Srgb,
             OutputSpace::DisplayP3,
@@ -253,7 +280,7 @@ mod tests {
                 }
                 let after = oklab(space, map.map(rgb));
                 assert!(
-                    (after[0] - before[0]).abs() < 1e-4,
+                    (after[0] - before[0]).abs() < NEAR,
                     "{space:?}, {rgb:?}: lightness {} for {}",
                     after[0],
                     before[0]
@@ -341,6 +368,45 @@ mod tests {
             assert_eq!(map.map([-1.0, -1.0, -1.0]), [0.0, 0.0, 0.0]);
             assert_eq!(map.map([f64::NAN; 3]), [0.0, 0.0, 0.0]);
         }
+    }
+
+    #[test]
+    fn edge_colours_a_little_outside_are_clipped() {
+        // Colours on each space's edge (one channel at 0 or 1, the others
+        // at 8-bit steps), moved outside by less than `NEAR` of their
+        // largest channel the way ICC profiles' rounding moves them (an
+        // error in the matrix, so in proportion to the colour) and stored
+        // as f32 the way images hold them: they come back as they were,
+        // not mapped.
+        for space in OutputSpace::ALL {
+            let map = space.gamut_map();
+            let to_working = inverse(&space.from_rec2020()).unwrap();
+            for (edge, off) in [(0.0, -4e-4), (1.0, 4e-4), (0.0, -2e-5), (1.0, 2e-5)] {
+                for channel in 0..3 {
+                    for a in (0..=255).step_by(3) {
+                        for b in (0..=255).step_by(5) {
+                            let mut rgb = [edge; 3];
+                            rgb[(channel + 1) % 3] = f64::from(a) / 255.0;
+                            rgb[(channel + 2) % 3] = f64::from(b) / 255.0;
+                            let mut moved = rgb;
+                            moved[channel] += off * rgb.iter().fold(0.0, |m: f64, v| m.max(*v));
+                            let stored = apply(&to_working, moved).map(|v| f64::from(v as f32));
+                            let got = map.map(stored);
+                            assert!(
+                                got.iter().zip(rgb).all(|(g, w)| (g - w).abs() < 1e-6),
+                                "{space:?}, {moved:?}: {got:?}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        // Further out, the colour is mapped: sRGB's blue past the margin
+        // is not clipped back to itself.
+        let map = OutputSpace::Srgb.gamut_map();
+        let to_working = inverse(&OutputSpace::Srgb.from_rec2020()).unwrap();
+        let got = map.map(apply(&to_working, [-1e-3, 0.0, 1.0]));
+        assert!(got[1] > 1e-3, "{got:?}");
     }
 
     #[test]
