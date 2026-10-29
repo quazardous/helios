@@ -24,6 +24,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.45.0] - 2026-10-29
+
+### Changed
+
+- `helios import-darktable` now keeps a darktable sidecar whose photo is
+  missing from its folder, instead of only listing it: the vault keeps its
+  whole text and what the import made of it, so nothing a darktable user had
+  is lost.
+- A darktable edit set to a mode Helios does not have yet (highlights
+  reconstruction other than clip, a demosaic method other than RCD or
+  Markesteijn, sigmoid's RGB ratio) is still applied with the closest mode
+  Helios has, and now says so: the import report lists it under
+  `substituted`, with the mode asked and the mode used, the history step
+  records it, and the import's warning names it.
+
 ## [0.44.0] - 2026-10-29
 
 ### Added
