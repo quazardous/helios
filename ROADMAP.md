@@ -411,10 +411,15 @@ driver, not a rewrite.
   a first-edit version of the one image, side by side as heads, never
   merged; only the base gives the rating. A history item Helios cannot
   apply is kept raw in the version, reported as not applied, and never
-  applied to the whole image when it was masked. Not decided: whether
-  duplicates should be a notion of their own (named variants) rather than
-  heads, and whether an orphan sidecar (its image gone) should be kept
-  somewhere instead of only listed.
+  applied to the whole image when it was masked. (2026-10-29, decided)
+  Duplicates stay plain heads; a notion of named variants can come later if
+  users ask for it. An orphan sidecar (its image gone) is kept in the
+  vault's import record with its import report, not only listed. A step
+  set to a mode Helios does not have is applied with the mode Helios has
+  and reported as substituted (asked, run), never silently. Real old
+  sidecars for the tests are fetched from darktable's test repository at a
+  pinned commit, never committed here (no stated licence, personal
+  metadata in one of them).
   Near-duplicates (RAW+JPEG pair, burst, re-encode) have different hashes and
   are relations, also data.
   (2026-10-13, implemented; open to revision) Import is a library
