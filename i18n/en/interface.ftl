@@ -15,6 +15,18 @@ category-vault = Vault
 
 category-workspace = Workspace
 
+clip-application-x-helios-images-json =
+    .title = images
+
+clip-application-x-helios-mask-json =
+    .title = shapes
+
+clip-application-x-helios-nodes-json =
+    .title = nodes
+
+clip-application-x-helios-param-json =
+    .title = a parameter
+
 command-graph-edit =
     .description = Asks a node editor for an edit, done at its next frame as the user's (a connection type-checked, then its graph.* step): `edit` is `connect` (`from`, `to`), `disconnect` (`edges`), `move` (`moves`), `delete` (`nodes`, `edges`) or `add` (`nodes`).
 

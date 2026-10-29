@@ -14,6 +14,18 @@ category-vault = Coffre
 
 category-workspace = Espace de travail
 
+clip-application-x-helios-images-json =
+    .title = images
+
+clip-application-x-helios-mask-json =
+    .title = formes
+
+clip-application-x-helios-nodes-json =
+    .title = nœuds
+
+clip-application-x-helios-param-json =
+    .title = un paramètre
+
 command-graph-edit =
     .description = Demande une modification à un éditeur de nœuds, faite à sa prochaine image comme celle de l’utilisateur (une connexion vérifiée par type, puis son étape graph.*) : `edit` vaut `connect` (`from`, `to`), `disconnect` (`edges`), `move` (`moves`), `delete` (`nodes`, `edges`) ou `add` (`nodes`).
 
