@@ -271,7 +271,13 @@ thread or in the code is marked *(guess)*.
   reason, and summed up in one warning per import; it never aborts the
   import, never moves `history_end`, and a masked item is never applied to
   the whole image. Not done: rejecting NaN or out-of-range params after a
-  migration.
+  migration. A corpus of seven real sidecars written by darktable 3.1 to
+  5.7 (`helios_testkit::darktable_sidecars`, fetched from darktable's test
+  repository at a pinned commit when the tests run, skipped offline) checks
+  what each import keeps, the pipe order against the order darktable-cli
+  runs (its pipe debug output), and the render against darktable's where
+  Helios has the modules. No 2.6 sidecar yet (`xmp_version` 2 and 3 are
+  covered by synthetic tests only).
 - **Recommendation**: keep the byte-for-byte legacy tests and add render
   tests on real old sidecars (2.6, 3.x, 4.x) through the parity bench;
   read darktable's `iop_order_version` / `iop_order_list` and test a

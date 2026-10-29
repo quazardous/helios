@@ -4,6 +4,10 @@
 //! - [`check_contract`] / [`assert_contract`]: tests generated from a module's
 //!   manifest, run on every module the same way (see `docs/module-contract.md`,
 //!   "How a module is tested").
+//! - [`darktable_sidecars`]: real darktable sidecars from several eras,
+//!   fetched when a test runs.
+
+pub mod darktable_sidecars;
 
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 

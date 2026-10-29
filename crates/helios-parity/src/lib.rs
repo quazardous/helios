@@ -76,44 +76,15 @@ pub enum Input {
 /// applied so it adds nothing. Modules darktable enables by default and
 /// `items` leave out (rawprepare, white balance) keep their defaults.
 pub fn sidecar(items: &[Item], input: Input, layouts: &Layouts) -> Result<String, String> {
-    let profile = match input {
-        Input::LinearRec2020 => LIN_REC2020,
-        Input::Camera => STANDARD_MATRIX,
-    };
-    let mut history = vec![Item::new(
-        "colorin",
-        serde_json::json!({"type": profile, "type_work": LIN_REC2020}),
-    )];
+    let (colorin, colorout) = linear_ends(input);
+    let mut history = vec![colorin];
     for item in items {
         history.push(Item::new(&item.module, item.values.clone()).instance(item.instance));
     }
-    history.push(Item::new(
-        "colorout",
-        serde_json::json!({"type": LIN_REC2020}),
-    ));
+    history.push(colorout);
     let mut lines = Vec::new();
     for (i, item) in history.iter().enumerate() {
-        let version = *layouts
-            .versions(&item.module)
-            .iter()
-            .max()
-            .ok_or_else(|| format!("no layout for `{}`", item.module))?;
-        let layout = layouts.get(&item.module, version).expect("listed");
-        let params = encode(layout, &item.values)?
-            .iter()
-            .fold(String::new(), |mut hex, b| {
-                let _ = write!(hex, "{b:02x}");
-                hex
-            });
-        let name = if item.instance == 0 {
-            String::new()
-        } else {
-            item.instance.to_string()
-        };
-        lines.push(format!(
-            r#"<rdf:li darktable:num="{i}" darktable:operation="{}" darktable:enabled="1" darktable:modversion="{version}" darktable:params="{params}" darktable:multi_name="{name}" darktable:multi_priority="{}"/>"#,
-            item.module, item.instance
-        ));
+        lines.push(history_line(i, item, layouts)?);
     }
     Ok(format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -133,6 +104,49 @@ pub fn sidecar(items: &[Item], input: Input, layouts: &Layouts) -> Result<String
 "#,
         history.len(),
         lines.join("\n     ")
+    ))
+}
+
+/// colorin reading `input` into linear Rec.2020, and colorout writing
+/// linear Rec.2020: around a history, a pipe whose output is its working
+/// space, as Helios's colorin gives it.
+pub fn linear_ends(input: Input) -> (Item, Item) {
+    let profile = match input {
+        Input::LinearRec2020 => LIN_REC2020,
+        Input::Camera => STANDARD_MATRIX,
+    };
+    (
+        Item::new(
+            "colorin",
+            serde_json::json!({"type": profile, "type_work": LIN_REC2020}),
+        ),
+        Item::new("colorout", serde_json::json!({"type": LIN_REC2020})),
+    )
+}
+
+/// A history item of a sidecar, number `num`, at the newest version
+/// `layouts` knows for its module.
+pub fn history_line(num: usize, item: &Item, layouts: &Layouts) -> Result<String, String> {
+    let version = *layouts
+        .versions(&item.module)
+        .iter()
+        .max()
+        .ok_or_else(|| format!("no layout for `{}`", item.module))?;
+    let layout = layouts.get(&item.module, version).expect("listed");
+    let params = encode(layout, &item.values)?
+        .iter()
+        .fold(String::new(), |mut hex, b| {
+            let _ = write!(hex, "{b:02x}");
+            hex
+        });
+    let name = if item.instance == 0 {
+        String::new()
+    } else {
+        item.instance.to_string()
+    };
+    Ok(format!(
+        r#"<rdf:li darktable:num="{num}" darktable:operation="{}" darktable:enabled="1" darktable:modversion="{version}" darktable:params="{params}" darktable:multi_name="{name}" darktable:multi_priority="{}"/>"#,
+        item.module, item.instance
     ))
 }
 
@@ -264,11 +278,57 @@ impl Darktable {
         layouts: &Layouts,
         dir: &Path,
     ) -> Result<Image, String> {
+        self.render_raw_sidecar(raw, &sidecar(items, Input::Camera, layouts)?, dir)
+    }
+
+    /// The modules darktable runs for a raw with a sidecar's text, as is,
+    /// in the order it runs them: the `process` lines of its pipe debug
+    /// output for a small export, as `operation` then `.N` for instance N
+    /// (`dt_iop_get_instance_id`: `.x` from 7 on).
+    pub fn processed(&self, raw: &Path, xmp: &str, dir: &Path) -> Result<Vec<String>, String> {
         std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
         let name = raw.file_name().ok_or("a raw path without a name")?;
         let src = dir.join(name);
         std::fs::copy(raw, &src).map_err(|e| format!("{}: {e}", raw.display()))?;
-        self.run(&src, &sidecar(items, Input::Camera, layouts)?, dir)
+        let mut sidecar = src.as_os_str().to_owned();
+        sidecar.push(".xmp");
+        std::fs::write(&sidecar, xmp).map_err(|e| format!("{}: {e}", dir.display()))?;
+        let out = dir.join("small.jpg");
+        let _ = std::fs::remove_file(&out);
+        let run = Command::new(&self.cli)
+            .arg(&src)
+            .arg(&sidecar)
+            .arg(&out)
+            // Small, but not tiny: darktable 5.6.1 crashes in highlights at 64 px.
+            .args(["--width", "512", "--height", "512"])
+            .args(["--apply-custom-presets", "false", "--core", "--configdir"])
+            .arg(dir.join("config"))
+            .args(["--library", ":memory:"])
+            .args(["--conf", "plugins/darkroom/workflow=none"])
+            .args(["--conf", "plugins/darkroom/chromatic-adaptation=legacy"])
+            .args(["-d", "pipe"])
+            .output()
+            .map_err(|e| format!("darktable-cli: {e}"))?;
+        if !run.status.success() {
+            return Err(format!(
+                "darktable-cli failed ({}): {}",
+                run.status,
+                String::from_utf8_lossy(&run.stderr)
+            ));
+        }
+        let text = String::from_utf8_lossy(&run.stdout).into_owned()
+            + &String::from_utf8_lossy(&run.stderr);
+        Ok(text
+            .lines()
+            .filter_map(|line| {
+                let words: Vec<&str> = line.split_whitespace().collect();
+                let at = words.iter().position(|w| *w == "[export]")?;
+                if !words[..at].contains(&"process") {
+                    return None;
+                }
+                words.get(at + 1).map(|w| (*w).to_string())
+            })
+            .collect())
     }
 
     /// Renders a raw file with a sidecar's text, as is.

@@ -15,12 +15,14 @@ helios-xmp.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]
+helios-testkit.workspace = true
 helios-module-exposure = { path = "../../modules/exposure" }
 helios-module-rawprepare = { path = "../../modules/rawprepare" }
 helios-module-whitebalance = { path = "../../modules/whitebalance" }
 helios-module-highlights = { path = "../../modules/highlights" }
 helios-module-demosaic = { path = "../../modules/demosaic" }
 helios-module-colorin = { path = "../../modules/colorin" }
+helios-module-sigmoid = { path = "../../modules/sigmoid" }
 helios-module-vkdt = { path = "../../modules/vkdt" }
 
 [lints]

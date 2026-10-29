@@ -15,5 +15,8 @@ quick-xml = "0.42"
 flate2 = "1"
 base64 = "0.22"
 
+[dev-dependencies]
+helios-testkit.workspace = true
+
 [lints]
 workspace = true
