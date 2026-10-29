@@ -1,6 +1,7 @@
 //! darktable's sidecars kept in a vault: each photo's base sidecar and its
 //! duplicates (`IMG_0001_01.CR2.xmp`...) become versions of the one image,
-//! side by side, and sidecars whose image is missing are reported.
+//! side by side, and sidecars whose image is missing are kept in the vault
+//! as they are, with their import report ([`ORPHANS`]).
 //!
 //! A darktable duplicate is an edit variant of the same file, which is what
 //! a Helios version is: each sidecar becomes a first edit of the image
@@ -13,12 +14,20 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use helios_xmp::files::{Matched, SidecarFile};
+use helios_xmp::files::{Matched, Orphan, SidecarFile};
 use serde_json::{Value, json};
 
 /// Who imported a sidecar: the origin of its version and the author of
 /// its rating in the audit trail.
 pub const IMPORT_XMP: &str = "import:xmp";
+
+/// The library documents (`library/darktable-orphans`) keeping the
+/// sidecars whose image is missing, one per sidecar, by its path: its
+/// `path`, the `image` it is for and its `version`, its whole text
+/// (`sidecar`), what an import makes of it (`import`, the report; `error`
+/// when it cannot be read as a sidecar) and when it was kept (`kept_at`).
+/// Nothing a user had is lost when the image is not there.
+pub const ORPHANS: &str = "darktable-orphans";
 
 /// Reads and imports a sidecar's text once, for the network and the vault.
 pub fn read_sidecar(xml: &str) -> Result<(helios_xmp::Sidecar, helios_xmp::Imported), String> {
@@ -150,13 +159,57 @@ pub fn keep_file<S: helios_vault::Store>(
     out
 }
 
+/// Keeps a sidecar whose image is missing in the vault's [`ORPHANS`]
+/// documents; the JSON says whether it was `added` (false when the vault
+/// already has the same text for that path), or the error. A sidecar
+/// that cannot be read as one is kept too, with the `error`.
+pub fn keep_orphan<S: helios_vault::Store>(
+    vault: &helios_vault::Vault<S>,
+    orphan: &Orphan,
+    now: u64,
+) -> Value {
+    let mut out = json!({
+        "orphan": orphan.path,
+        "image": orphan.image,
+        "version": orphan.version,
+    });
+    let kept = std::fs::read_to_string(&orphan.path)
+        .map_err(|e| format!("cannot read {}: {e}", orphan.path.display()))
+        .and_then(|xml| {
+            let key = orphan.path.to_string_lossy();
+            let known = vault.library_document(ORPHANS, &key)?;
+            if known.is_some_and(|k| k["sidecar"] == xml.as_str()) {
+                return Ok(false);
+            }
+            let mut doc = json!({
+                "path": orphan.path,
+                "image": orphan.image,
+                "version": orphan.version,
+                "kept_at": now,
+            });
+            match read_sidecar(&xml) {
+                Ok((_, imported)) => doc["import"] = json!(imported.report),
+                Err(e) => doc["error"] = json!(e),
+            }
+            doc["sidecar"] = json!(xml);
+            vault.set_library_document(ORPHANS, &key, Some(&doc))?;
+            Ok(true)
+        });
+    match kept {
+        Ok(added) => out["added"] = json!(added),
+        Err(e) => out["error"] = json!(e),
+    }
+    out
+}
+
 /// Imports darktable sidecars into a vault: each path is a folder (its
 /// files, not its subfolders) or an image file. Every image file is
 /// imported, with a version per sidecar; one JSON line per image goes to
 /// `emit` (`image`, `sidecars`, each with its `version` and what was kept
-/// or the error), then one per sidecar whose image is missing
-/// (`orphan`, the `image` it is for, its `version`). Returns whether every
-/// sidecar was kept.
+/// or the error), then one per sidecar whose image is missing, kept in
+/// the vault (see [`keep_orphan`]): `orphan`, the `image` it is for, its
+/// `version`, and `added` or the `error`. Returns whether every sidecar
+/// was kept.
 pub fn import<S: helios_vault::Store>(
     vault: &helios_vault::Vault<S>,
     paths: &[PathBuf],
@@ -215,11 +268,9 @@ pub fn import<S: helios_vault::Store>(
         }
         if only.is_none() {
             for orphan in &matched.orphans {
-                emit(&json!({
-                    "orphan": orphan.path,
-                    "image": orphan.image,
-                    "version": orphan.version,
-                }));
+                let line = keep_orphan(vault, orphan, now);
+                all_kept &= line["error"].is_null();
+                emit(&line);
             }
         }
     }

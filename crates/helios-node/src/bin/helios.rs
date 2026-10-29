@@ -70,7 +70,8 @@
 //!
 //! `import-darktable` keeps a folder's darktable edits in a vault: every
 //! image file, and a version per sidecar, duplicates (`IMG_0001_01.CR2.xmp`)
-//! included; sidecars whose image is missing are listed as orphans. One
+//! included; sidecars whose image is missing are kept in the vault as
+//! they are, with their import report, and listed as orphans. One
 //! JSON line per image and per orphan; exit 1 when a sidecar could not be
 //! kept.
 //!

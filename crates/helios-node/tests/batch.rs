@@ -500,9 +500,29 @@ fn a_darktable_folder_imports_with_its_duplicates_orphans_and_bare_raws() {
     let orphan = lines.iter().find(|l| l["orphan"].is_string()).unwrap();
     assert_eq!(orphan["orphan"], json!(dir.join("gone.png.xmp")));
     assert_eq!(orphan["image"], "gone.png");
+    assert_eq!(orphan["added"], true, "{orphan}");
     let kept = kept_versions(&p.join("vault.db"), &edited);
     assert_eq!(kept.len(), 3, "{kept:?}");
     assert!(kept.contains(&("import:xmp duplicate 01".to_string(), 2.0)));
+    // The orphan is kept as it was, with its import report.
+    {
+        use helios_vault::Vault;
+        use helios_vault_sqlite::SqliteStore;
+        let vault = Vault::new(SqliteStore::open(&p.join("vault.db")).unwrap());
+        let docs = vault
+            .library_documents(helios_node::darktable::ORPHANS)
+            .unwrap();
+        assert_eq!(docs.len(), 1, "{docs:?}");
+        let (key, doc) = &docs[0];
+        assert_eq!(Path::new(key), dir.join("gone.png.xmp"));
+        assert_eq!(doc["sidecar"], sidecar(4.0));
+        assert_eq!(doc["image"], "gone.png");
+        assert!(doc["import"]["not_applied"].is_array(), "{doc}");
+    }
+    // Again: the orphan is not added twice.
+    let (_, again, _) = import_darktable(&["--vault", &p.s("vault.db"), dir.to_str().unwrap()]);
+    let orphan = again.iter().find(|l| l["orphan"].is_string()).unwrap();
+    assert_eq!(orphan["added"], false, "{orphan}");
 
     // Again: nothing new, and the bare raw is still known.
     let (_, again, _) = import_darktable(&["--vault", &p.s("vault.db"), edited.to_str().unwrap()]);

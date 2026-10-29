@@ -238,13 +238,18 @@ whose image is not in the folder:
 ```json
 {"image":"/trip/IMG_0001.CR2","id":"…","sidecars":[{"path":"/trip/IMG_0001.CR2.xmp","version":0,"exact":true,"vault":{…}}],"conflicts":[]}
 {"image":"/trip/IMG_0002.CR2","id":"…","sidecars":[],"conflicts":[]}
-{"orphan":"/trip/IMG_0003.CR2.xmp","image":"IMG_0003.CR2","version":0}
+{"orphan":"/trip/IMG_0003.CR2.xmp","image":"IMG_0003.CR2","version":0,"added":true}
 ```
 
-An image without a sidecar is imported with no version. An orphan is
-listed, not imported (the vault keeps images, and its image is not
-there); its `image` comes from its `xmpMM:DerivedFrom`, else from its
-name. Importing again adds nothing new. A sidecar that cannot be read
+An image without a sidecar is imported with no version. An orphan has no
+image to be a version of, so the vault keeps it as it is, in its import
+record (the library documents `darktable-orphans`, one per sidecar, by its
+path): its whole text, the `image` it is for, its `version`, and its
+import report under `import` (or the `error` when it cannot be read as a
+sidecar), so nothing a user had is lost. Its `image` comes from its
+`xmpMM:DerivedFrom`, else from its name. Importing again adds nothing
+new: an orphan's line says `"added":false` when the vault already has
+the same text for it. A sidecar that cannot be read
 does not stop the others: it gets an `error`, and the exit code is 1.
 
 On the node, the run is a job people follow (kind `batch`, its exports
