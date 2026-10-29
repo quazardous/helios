@@ -70,9 +70,9 @@ fn run_as(
     origin: Origin,
 ) -> Result<Value, String> {
     let out = h.state_mut().run(id, args, origin);
-    for _ in 0..3 {
-        h.run();
-    }
+    // Fixed steps, not `run`: a refusal's toast keeps asking for a
+    // repaint until it expires.
+    h.run_steps(12);
     out
 }
 

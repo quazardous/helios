@@ -410,8 +410,12 @@ fn current(h: &mut egui_kittest::Harness<'static, Shell>) -> serde_json::Value {
 fn click(h: &mut egui_kittest::Harness<'static, Shell>, label: &str) {
     // By its accessibility action: the dialog grows with the picker and
     // is placed again, so a pointer aimed at last frame's place may land
-    // on the next entry.
-    h.get_by_label(label).click_accesskit();
+    // on the next entry. The list's entry comes first: the picker's
+    // preview pane repeats the highlighted file's name.
+    h.query_all_by_label(label)
+        .next()
+        .unwrap_or_else(|| panic!("no {label:?}"))
+        .click_accesskit();
     for _ in 0..3 {
         h.run();
     }
