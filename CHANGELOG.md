@@ -24,6 +24,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.44.0] - 2026-10-29
+
+### Added
+
+- The file picker shows a preview of the selected file: images, text,
+  Markdown and folders, and the system's thumbnails for other files, RAWs
+  included where the system has a thumbnailer for them.
+
+### Changed
+
+- When the History panel cannot undo, redo or jump to a step (a drag still in
+  progress, a step that is not yours), it now says why in a short notice.
+
 ## [0.43.0] - 2026-10-29
 
 ### Added
