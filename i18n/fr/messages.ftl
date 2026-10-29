@@ -658,6 +658,15 @@ xmp-not-applied = { $count ->
 
 xmp-not-applied-group = { $labels } ({ $reason })
 
+xmp-not-applied-and-substituted = { $not_applied } ; { $substituted }
+
+xmp-substituted = { $count ->
+    [one] { $count } élément appliqué avec un mode de remplacement : { $items }
+   *[other] { $count } éléments appliqués avec un mode de remplacement : { $items }
+}
+
+xmp-substituted-item = { $label } ({ $to } à la place de { $from })
+
 xmp-reason-blend = fusion non prise en charge : { $what }
 
 xmp-reason-blending = fusion non prise en charge

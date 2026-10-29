@@ -23,7 +23,12 @@ struct Case {
     not_applied: &'static [(&'static str, &'static str)],
     disabled: &'static [&'static str],
     inserted: &'static [&'static str],
+    /// Items applied with a substitute: the mode asked, by darktable's
+    /// name, in place of which Helios runs the one it has.
+    substituted: &'static [(&'static str, &'static str)],
 }
+
+const OPPOSED: &str = "DT_IOP_HIGHLIGHTS_OPPOSED";
 
 const UNKNOWN: &str = "unknown_module";
 const BLENDING: &str = "blending";
@@ -59,6 +64,7 @@ const CASES: &[Case] = &[
         ],
         disabled: &[],
         inserted: &[],
+        substituted: &[],
     },
     Case {
         name: "0004-masks",
@@ -94,6 +100,7 @@ const CASES: &[Case] = &[
         ],
         disabled: &[],
         inserted: &["highlights v4"],
+        substituted: &[],
     },
     Case {
         name: "0033-blending-modes-uniform",
@@ -138,6 +145,7 @@ const CASES: &[Case] = &[
         ],
         disabled: &[],
         inserted: &["highlights v4"],
+        substituted: &[],
     },
     Case {
         name: "0035-multiple-modules",
@@ -190,6 +198,7 @@ const CASES: &[Case] = &[
         ],
         disabled: &["mask_manager"],
         inserted: &[],
+        substituted: &[],
     },
     Case {
         name: "0097-sigmoid",
@@ -230,6 +239,7 @@ const CASES: &[Case] = &[
         ],
         disabled: &["filmicrgb"],
         inserted: &[],
+        substituted: &[("highlights v4", OPPOSED)],
     },
     Case {
         name: "0151-sigmoid-no-hue-preservation",
@@ -270,6 +280,7 @@ const CASES: &[Case] = &[
         ],
         disabled: &["filmicrgb"],
         inserted: &[],
+        substituted: &[("highlights v4", OPPOSED)],
     },
     Case {
         name: "0180-spektrafilm-simple",
@@ -306,6 +317,7 @@ const CASES: &[Case] = &[
         ],
         disabled: &["sigmoid"],
         inserted: &[],
+        substituted: &[("highlights v5", OPPOSED)],
     },
 ];
 
@@ -363,6 +375,12 @@ fn every_era_imports_its_history_order_and_modules() {
         assert_eq!(not, case.not_applied, "{name}");
         assert_eq!(r.disabled, case.disabled, "{name}");
         assert_eq!(r.inserted, case.inserted, "{name}");
+        let substituted: Vec<(&str, &str)> = r
+            .substituted
+            .iter()
+            .map(|s| (s.label.as_str(), s.swap.from.as_str()))
+            .collect();
+        assert_eq!(substituted, case.substituted, "{name}");
         assert!(r.unordered.is_empty(), "{name}: {:?}", r.unordered);
         // Nothing is lost: every item of the file is kept, as written.
         let kept = imported.darktable["history"].as_array().unwrap();

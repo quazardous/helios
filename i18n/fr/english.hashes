@@ -876,6 +876,7 @@ xmp-mask-unknown-type fc88a0d92bb18c66
 xmp-mask-unsupported 668bb8d29e1858da
 xmp-mask-version 6edc7c8db7b468ed
 xmp-not-applied 34d009edcb281846
+xmp-not-applied-and-substituted 6e94ee643be2e601
 xmp-not-applied-group 2ac027136c2be46b
 xmp-reason-blend e4f7224a1bb770bb
 xmp-reason-blending 5cdd3d5cf57393f7
@@ -886,3 +887,5 @@ xmp-reason-unknown-blend-version 94422d1024c1787b
 xmp-reason-unknown-module b1f8d26c8cdf9306
 xmp-reason-unreadable 5b30e8c03de32bec
 xmp-reason-unsupported-version dd6488ea46d2d39f
+xmp-substituted 0024ed7bcd6a106a
+xmp-substituted-item 8196213fcd306dc2

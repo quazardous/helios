@@ -8,6 +8,12 @@
 //! with its raw params in the edit ([`Imported::darktable`]), so a later
 //! Helios can apply it and the sidecar can be written back as it was.
 //!
+//! An item asking for a mode Helios does not have (a highlights
+//! reconstruction, a demosaic method, sigmoid's RGB ratio) is applied with
+//! the mode Helios has in its place, and reported in
+//! [`Report::substituted`] and in its history item: the picture stays
+//! close to darktable's, and the difference is never silent.
+//!
 //! A module blending through a drawn mask gets its mask as a sub-network
 //! ([`NodeMask`]): the shapes and groups of its form, its inversion and
 //! refinement, and a `mask_blend` with its opacity. That needs the image's
@@ -194,11 +200,53 @@ pub struct NotApplied {
     pub reason: Reason,
 }
 
+/// A mode darktable's module was set to, which Helios does not have,
+/// and the one Helios runs in its place, both by darktable's names.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Swap {
+    /// The darktable field holding the mode.
+    pub field: String,
+    pub from: String,
+    pub to: String,
+}
+
+impl Swap {
+    /// A darktable mode's name for people: `DT_IOP_HIGHLIGHTS_OPPOSED`
+    /// reads `opposed`.
+    fn short(name: &str) -> String {
+        let rest = [
+            "DT_IOP_HIGHLIGHTS_",
+            "DT_IOP_DEMOSAIC_",
+            "DT_SIGMOID_METHOD_",
+        ]
+        .iter()
+        .find_map(|prefix| name.strip_prefix(prefix))
+        .unwrap_or(name);
+        rest.to_lowercase().replace('_', " ")
+    }
+}
+
+/// A history item applied with a mode Helios has in place of the one the
+/// sidecar asks for.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct Substituted {
+    pub operation: String,
+    /// darktable's instance number (`multi_priority`).
+    pub instance: u32,
+    /// Its name for people: operation, instance and version.
+    pub label: String,
+    #[serde(flatten)]
+    pub swap: Swap,
+}
+
 /// What was not carried over, and why.
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct Report {
     /// Items in force that Helios kept but did not apply, in pipe order.
     pub not_applied: Vec<NotApplied>,
+    /// Items applied with a substitute for a mode Helios does not have,
+    /// in pipe order.
+    pub substituted: Vec<Substituted>,
     /// Older versions of modules taken for their presence only: their
     /// params were not read. `(operation, version)`.
     pub params_not_read: Vec<(String, u32)>,
@@ -223,10 +271,49 @@ pub struct Report {
 }
 
 impl Report {
-    /// One line saying what was not applied, grouped by reason, or `None`
-    /// when everything in force was applied: what an import warns once.
-    /// By key (`xmp-not-applied`), each reason too.
+    /// One line saying what was not applied, grouped by reason, and what
+    /// was applied with a substitute, or `None` when everything in force
+    /// was applied as asked: what an import warns once. By key
+    /// (`xmp-not-applied`, `xmp-substituted`, both joined by
+    /// `xmp-not-applied-and-substituted`), each reason too.
     pub fn summary(&self) -> Option<Message> {
+        match (self.not_applied_summary(), self.substituted_summary()) {
+            (Some(not_applied), Some(substituted)) => Some(
+                Message::new(
+                    "xmp-not-applied-and-substituted",
+                    "{ $not_applied }; { $substituted }",
+                )
+                .with("not_applied", not_applied)
+                .with("substituted", substituted),
+            ),
+            (one, other) => one.or(other),
+        }
+    }
+
+    fn substituted_summary(&self) -> Option<Message> {
+        if self.substituted.is_empty() {
+            return None;
+        }
+        let items = self.substituted.iter().map(|s| {
+            Message::new(
+                "xmp-substituted-item",
+                "{ $label } ({ $to } in place of { $from })",
+            )
+            .with("label", s.label.clone())
+            .with("from", Swap::short(&s.swap.from))
+            .with("to", Swap::short(&s.swap.to))
+        });
+        Some(
+            Message::new(
+                "xmp-substituted",
+                "{ $count } applied with a substitute: { $items }",
+            )
+            .with("count", self.substituted.len())
+            .with("items", Arg::list(items, "; ")),
+        )
+    }
+
+    fn not_applied_summary(&self) -> Option<Message> {
         if self.not_applied.is_empty() {
             return None;
         }
@@ -271,10 +358,6 @@ fn float(fields: &Map<String, Value>, name: &str) -> Option<f64> {
     fields.get(name).and_then(Value::as_f64)
 }
 
-fn text<'a>(fields: &'a Map<String, Value>, name: &str) -> Option<&'a str> {
-    fields.get(name).and_then(Value::as_str)
-}
-
 fn set(p: &mut Params, name: &str, v: Option<f64>) {
     if let Some(v) = v {
         p.set(name, Param::Float(v));
@@ -288,6 +371,50 @@ struct Mapped {
     /// Fields read into `params`, or knowingly replaced by something else
     /// (the camera's description).
     used: Vec<&'static str>,
+    /// Modes Helios does not have, run with the one it has.
+    swaps: Vec<Swap>,
+}
+
+/// The darktable modes Helios has.
+const CLIP: &str = "DT_IOP_HIGHLIGHTS_CLIP";
+const RCD: &str = "DT_IOP_DEMOSAIC_RCD";
+const MARKESTEIJN: &str = "DT_IOP_DEMOSAIC_MARKESTEIJN";
+const PER_CHANNEL: &str = "DT_SIGMOID_METHOD_PER_CHANNEL";
+
+/// darktable's demosaic methods for X-Trans sensors
+/// (`DT_DEMOSAIC_XTRANS` in their value).
+const XTRANS_METHODS: &[&str] = &[
+    "DT_IOP_DEMOSAIC_VNG",
+    "DT_IOP_DEMOSAIC_MARKESTEIJN",
+    "DT_IOP_DEMOSAIC_MARKESTEIJN_3",
+    "DT_IOP_DEMOSAIC_FDC",
+    "DT_IOP_DEMOSAIC_MARKEST3_DUAL",
+    "DT_IOP_DEMOSAIC_PASSTHR_MONOX",
+    "DT_IOP_DEMOSAIC_PASSTHR_COLORX",
+];
+
+/// The mode Helios runs for darktable's mode `field` of `fields`, when it
+/// is not the one asked: `has` says which darktable modes Helios has,
+/// `instead` which it runs in place of another. Nothing when the field is
+/// absent (params not read).
+fn swap(
+    fields: &Map<String, Value>,
+    field: &str,
+    has: impl Fn(&str) -> bool,
+    instead: impl Fn(&str) -> &'static str,
+) -> Option<Swap> {
+    let from = match fields.get(field)? {
+        Value::String(name) => name.clone(),
+        other => other.to_string(),
+    };
+    if has(&from) {
+        return None;
+    }
+    Some(Swap {
+        field: field.into(),
+        to: instead(&from).into(),
+        from,
+    })
 }
 
 /// Fields whose value carries nothing when it is its default.
@@ -301,8 +428,9 @@ fn is_neutral(value: &Value) -> bool {
     }
 }
 
-fn map(operation: &str, f: &Map<String, Value>, report: &mut Report) -> Option<Mapped> {
+fn map(operation: &str, f: &Map<String, Value>) -> Option<Mapped> {
     let mut p = Params::new();
+    let mut swaps = Vec::new();
     let (module, used): (&'static str, Vec<&'static str>) = match operation {
         "rawprepare" => (
             "rawprepare",
@@ -327,17 +455,27 @@ fn map(operation: &str, f: &Map<String, Value>, report: &mut Report) -> Option<M
             )
         }
         "highlights" => {
-            if text(f, "mode") != Some("DT_IOP_HIGHLIGHTS_CLIP") {
-                report.dropped_fields.push((
-                    operation.into(),
-                    "mode".into(),
-                    f.get("mode").cloned().unwrap_or(Value::Null),
-                ));
-            }
+            swaps.extend(swap(f, "mode", |m| m == CLIP, |_| CLIP));
             set(&mut p, "clip", float(f, "clip"));
             ("highlights", vec!["mode", "clip"])
         }
-        "demosaic" => ("demosaic", vec![]),
+        "demosaic" => {
+            // Helios picks RCD on Bayer sensors, Markesteijn (one pass) on
+            // X-Trans: the method asked tells which sensor it was for.
+            swaps.extend(swap(
+                f,
+                "demosaicing_method",
+                |m| m == RCD || m == MARKESTEIJN,
+                |m| {
+                    if XTRANS_METHODS.contains(&m) {
+                        MARKESTEIJN
+                    } else {
+                        RCD
+                    }
+                },
+            ));
+            ("demosaic", vec!["demosaicing_method"])
+        }
         "colorin" => ("colorin", vec!["type_work", "filename_work"]),
         "exposure" => {
             set(&mut p, "exposure", float(f, "exposure"));
@@ -356,13 +494,12 @@ fn map(operation: &str, f: &Map<String, Value>, report: &mut Report) -> Option<M
             set(&mut p, "white_target", float(f, "display_white_target"));
             set(&mut p, "black_target", float(f, "display_black_target"));
             set(&mut p, "preserve_hue", float(f, "hue_preservation"));
-            if text(f, "color_processing") != Some("DT_SIGMOID_METHOD_PER_CHANNEL") {
-                report.dropped_fields.push((
-                    operation.into(),
-                    "color_processing".into(),
-                    f.get("color_processing").cloned().unwrap_or(Value::Null),
-                ));
-            }
+            swaps.extend(swap(
+                f,
+                "color_processing",
+                |m| m == PER_CHANNEL,
+                |_| PER_CHANNEL,
+            ));
             (
                 "sigmoid",
                 vec![
@@ -381,6 +518,7 @@ fn map(operation: &str, f: &Map<String, Value>, report: &mut Report) -> Option<M
         module,
         params: p,
         used,
+        swaps,
     })
 }
 
@@ -538,7 +676,7 @@ fn apply(
     let Some(&current) = known.iter().max() else {
         return Err(Reason::UnknownModule);
     };
-    if map(&item.operation, &Map::new(), &mut Report::default()).is_none() {
+    if map(&item.operation, &Map::new()).is_none() {
         return Err(Reason::UnknownModule);
     }
     if item.multi_priority > 0 && single_instance(&item.operation) {
@@ -555,10 +693,7 @@ fn apply(
             .params_not_read
             .push((item.operation.clone(), item.modversion));
         // An empty decode: the mapping reads nothing from these modules.
-        return Ok((
-            map(&item.operation, &Map::new(), report).expect("mapped"),
-            blend,
-        ));
+        return Ok((map(&item.operation, &Map::new()).expect("mapped"), blend));
     } else {
         match legacy::upgrade(&item.operation, item.modversion, &item.params, current) {
             Some(Ok(bytes)) => {
@@ -580,13 +715,9 @@ fn apply(
         }
         Err(error) => return Err(Reason::Unreadable { error }),
     };
-    let mapped = map(&item.operation, &decoded, report).expect("mapped");
+    let mapped = map(&item.operation, &decoded).expect("mapped");
     for (name, value) in &decoded {
-        let reported = report
-            .dropped_fields
-            .iter()
-            .any(|(o, f, _)| o == &item.operation && f == name);
-        if !mapped.used.contains(&name.as_str()) && !reported && !is_neutral(value) {
+        if !mapped.used.contains(&name.as_str()) && !is_neutral(value) {
             report
                 .dropped_fields
                 .push((item.operation.clone(), name.clone(), value.clone()));
@@ -752,6 +883,17 @@ pub fn import_with(sidecar: &Sidecar, layouts: &Layouts, frame: Option<&Frame>) 
         match applied {
             Ok((mapped, mask)) => {
                 status[at] = json!({ "status": "applied", "node": name });
+                if !mapped.swaps.is_empty() {
+                    status[at]["substituted"] = json!(mapped.swaps);
+                }
+                out.report
+                    .substituted
+                    .extend(mapped.swaps.iter().map(|swap| Substituted {
+                        operation: item.operation.clone(),
+                        instance: item.multi_priority,
+                        label: item.label(),
+                        swap: swap.clone(),
+                    }));
                 out.nodes.push(Node {
                     name,
                     operation: item.operation.clone(),

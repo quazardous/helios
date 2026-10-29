@@ -497,3 +497,126 @@ fn everything_applied_says_nothing() {
     );
     assert_eq!(imported.report.summary(), None);
 }
+
+/// An item of `op` with `values`, at its newest version.
+fn item(num: u32, op: &str, values: &Value) -> String {
+    let (hex, version) = params(op, values);
+    li(
+        num,
+        op,
+        &format!(r#"darktable:modversion="{version}" darktable:params="{hex}""#),
+    )
+}
+
+#[test]
+fn a_mode_helios_lacks_is_run_with_its_substitute_and_said() {
+    let items = [
+        item(
+            0,
+            "highlights",
+            &json!({ "mode": "DT_IOP_HIGHLIGHTS_OPPOSED", "clip": 0.9 }),
+        ),
+        item(
+            1,
+            "demosaic",
+            &json!({ "demosaicing_method": "DT_IOP_DEMOSAIC_MARKESTEIJN_3" }),
+        ),
+        item(
+            2,
+            "sigmoid",
+            &json!({ "color_processing": "DT_SIGMOID_METHOD_PER_CHANNEL" }),
+        ),
+    ];
+    let imported = import(
+        &Sidecar::parse(&xmp(&items, 3)).unwrap(),
+        &Layouts::built_in(),
+    );
+    let r = &imported.report;
+    // Applied, all three: the picture stays close to darktable's.
+    let nodes: Vec<&str> = imported.nodes.iter().map(|n| n.name.as_str()).collect();
+    assert_eq!(nodes, ["highlights", "demosaic", "sigmoid"], "{r:#?}");
+    assert!(r.not_applied.is_empty(), "{r:#?}");
+    let swaps: Vec<(&str, &str, &str, &str)> = r
+        .substituted
+        .iter()
+        .map(|s| {
+            (
+                s.operation.as_str(),
+                s.swap.field.as_str(),
+                s.swap.from.as_str(),
+                s.swap.to.as_str(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        swaps,
+        [
+            (
+                "highlights",
+                "mode",
+                "DT_IOP_HIGHLIGHTS_OPPOSED",
+                "DT_IOP_HIGHLIGHTS_CLIP"
+            ),
+            // An X-Trans method: Helios's one-pass Markesteijn.
+            (
+                "demosaic",
+                "demosaicing_method",
+                "DT_IOP_DEMOSAIC_MARKESTEIJN_3",
+                "DT_IOP_DEMOSAIC_MARKESTEIJN"
+            ),
+        ]
+    );
+    // A substituted mode is not also a dropped field.
+    assert!(
+        r.dropped_fields.iter().all(|(_, f, _)| f != "mode"),
+        "{r:#?}"
+    );
+    // The history item says it too.
+    let history = imported.darktable["history"].as_array().unwrap();
+    assert_eq!(history[0]["status"], "applied");
+    assert_eq!(
+        history[0]["substituted"],
+        json!([{ "field": "mode", "from": "DT_IOP_HIGHLIGHTS_OPPOSED", "to": "DT_IOP_HIGHLIGHTS_CLIP" }])
+    );
+    assert!(history[2].get("substituted").is_none());
+    // And the import's warning, by key.
+    let message = r.summary().unwrap();
+    assert_eq!(message.key, "xmp-substituted");
+    assert_eq!(
+        message.english,
+        "2 applied with a substitute: highlights v5 (clip in place of opposed); \
+         demosaic v7 (markesteijn in place of markesteijn 3)"
+    );
+
+    // A Bayer method gets RCD; with an item not applied, both are said.
+    let items = [
+        item(
+            0,
+            "demosaic",
+            &json!({ "demosaicing_method": "DT_IOP_DEMOSAIC_AMAZE" }),
+        ),
+        li(
+            1,
+            "frobnicate",
+            r#"darktable:modversion="1" darktable:params="00""#,
+        ),
+    ];
+    let imported = import(
+        &Sidecar::parse(&xmp(&items, 2)).unwrap(),
+        &Layouts::built_in(),
+    );
+    let r = &imported.report;
+    assert_eq!(r.substituted[0].swap.to, "DT_IOP_DEMOSAIC_RCD");
+    let message = r.summary().unwrap();
+    assert_eq!(message.key, "xmp-not-applied-and-substituted");
+    assert!(
+        message
+            .english
+            .starts_with("1 of 2 history items not applied")
+            && message
+                .english
+                .ends_with("; 1 applied with a substitute: demosaic v7 (rcd in place of amaze)"),
+        "{}",
+        message.english
+    );
+}

@@ -761,6 +761,8 @@ xmp-mask-version = masks version { $version } not supported (reads 4 to 7)
 
 xmp-not-applied = { $count } of { $items } history items not applied, kept for later: { $groups }
 
+xmp-not-applied-and-substituted = { $not_applied }; { $substituted }
+
 xmp-not-applied-group = { $labels } ({ $reason })
 
 xmp-reason-blend = blending not supported: { $what }
@@ -780,3 +782,7 @@ xmp-reason-unknown-module = no Helios module
 xmp-reason-unreadable = unreadable: { $error }
 
 xmp-reason-unsupported-version = version not supported (reads { $known })
+
+xmp-substituted = { $count } applied with a substitute: { $items }
+
+xmp-substituted-item = { $label } ({ $to } in place of { $from })

@@ -167,13 +167,28 @@ helios batch: /photos/IMG_0001.CR2.xmp: 4 of 9 history items not applied, kept f
 `sidecar.warning_message` holds the same line by key (`xmp-not-applied`,
 each reason with its own key), for a client to show it translated.
 
+A step set to a mode Helios does not have yet (a highlights reconstruction
+other than clip, a demosaic method other than RCD or one-pass Markesteijn,
+sigmoid's RGB ratio) is applied with the mode Helios has in its place, so
+the picture stays close to darktable's. It is listed in
+`sidecar.import.substituted` with its operation, instance, the `field`
+holding the mode, and the mode asked (`from`) and run (`to`), by
+darktable's names; its history item says it too, and the warning line
+names it (`xmp-substituted`, or `xmp-not-applied-and-substituted` with
+steps not applied):
+
+```text
+helios batch: /photos/IMG_0001.CR2.xmp: 1 applied with a substitute: highlights v4 (clip in place of opposed)
+```
+
 With `--vault FILE` as well, each sidecar applied is kept in that vault:
 the image is imported, its darktable edit becomes a version with origin
 `import:xmp` (the modules in darktable's pipe order, the import report
 under `import`, and under `darktable` the sidecar's text and each of its
 history items with its raw params and what became of it: `applied` to a
-node, `not_applied` with the reason, `disabled`, `replaced` by a later
-item, or `undone` past the history end), and its rating is written only when the vault has none
+node, with what was `substituted` if anything, `not_applied` with the
+reason, `disabled`, `replaced` by a later item, or `undone` past the
+history end), and its rating is written only when the vault has none
 (darktable's `-1` is a reject), so a sidecar never overwrites a rating
 chosen in Helios. The version is a first edit: importing the same sidecar
 again adds nothing, and an image already edited keeps its edit beside the
