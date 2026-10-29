@@ -16,7 +16,7 @@ helios-shell.workspace = true
 # vt100) for the jobs centre's log consoles; the Phosphor icon font
 # (egui-phosphor, MIT OR Apache-2.0; the icons MIT) for the commands' and
 # panels' icons, named `phosphor:<name>`.
-egui-pop = { workspace = true, features = ["phosphor", "viewport", "imaging", "i18n", "views", "editors", "platform-instance", "platform-notify", "platform-logs", "platform-crash", "platform-text-scale"] }
+egui-pop = { workspace = true, features = ["phosphor", "viewport", "imaging", "i18n", "views", "editors", "platform-instance", "platform-notify", "platform-logs", "platform-crash", "platform-text-scale", "image-previews", "platform-thumbnails"] }
 helios-i18n.workspace = true
 # The settings the desktop reads (the Queue panel's when empty).
 helios-config.workspace = true
