@@ -24,6 +24,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.43.0] - 2026-10-29
+
+### Added
+
+- Agents can hold the places and modes of the desktop that has a workspace
+  open, with the new `helios_context_hold` and `helios_context_release`
+  MCP tools: while held, moving to another place or mode is refused with
+  the agent's reason. `helios_context_read` lists the holds.
+- Sub-workspaces can be entered: a double click on one in the graph, `I`
+  with the graph focused, quick open or `subworkspace.enter` shows its
+  nodes only, in the Graph, Modules and Parameters panels, its name in the
+  breadcrumb and a layout of its own. Inside, a value of a node outside
+  it cannot be changed, by the user or an agent; `U` goes back up. A
+  sub-workspace deleted while shown, or gone when the workspace opens
+  again, is left with a notice.
+- Tips: on the desktop, a small card now and then teaches one thing about
+  Helios (the command palette, full screen, the zoom keys, typed values,
+  ratings and picks, the mask display, profiles...), showing the keys as
+  you bound them. A tip for a command you already use never shows, and
+  none comes twice in a day; "Got it" dismisses one for good and "No more
+  tips" all of them. Help > Tips… lists every tip. In English and French.
+
 ## [0.42.0] - 2026-10-28
 
 ### Added
