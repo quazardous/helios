@@ -541,6 +541,10 @@ pub fn node_of(path: &str) -> Option<&str> {
 /// One undo step.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Step {
+    /// Unique within the store, given when the step is made and kept
+    /// while it is undone and redone; never 0 (0 is "before the first
+    /// step").
+    pub id: u64,
     pub label: String,
     pub origin: Origin,
     /// Path, old value, new value, in the order written.
@@ -609,6 +613,8 @@ pub struct Store {
     request: Option<Request>,
     /// The last group number given.
     next_group: u64,
+    /// The last step id given.
+    next_step: u64,
     /// The groups named by their origin (a request id an agent gives),
     /// by origin and name.
     named: BTreeMap<(String, String), u64>,
@@ -907,6 +913,7 @@ impl Store {
             }
             None if transient => {}
             None => self.push_step(Step {
+                id: 0,
                 label: format!("set {}", set.path),
                 origin: set.origin,
                 changes: vec![change],
@@ -946,7 +953,11 @@ impl Store {
             {
                 last.changes.append(&mut step.changes);
             }
-            _ => self.undo.push(step),
+            _ => {
+                self.next_step += 1;
+                step.id = self.next_step;
+                self.undo.push(step);
+            }
         }
     }
 
@@ -1125,6 +1136,7 @@ impl Store {
             && !g.changes.is_empty()
         {
             self.push_step(Step {
+                id: 0,
                 label: g.label,
                 origin: g.origin,
                 changes: g.changes,

@@ -9,11 +9,10 @@
 //! Edit menu from its steps, and runs `edit.undo`, `edit.redo` and
 //! `edit.jump` on it.
 //!
-//! - **Steps** are numbered by their place in the scope's line, from 1
-//!   (the oldest undo step) to the newest redo step: a step keeps its id
-//!   while it is undone and redone, and [`Line::rev`] (the store's
-//!   [`helios_values::Store::history_rev`]) says when the numbering moved
-//!   on.
+//! - **Steps** keep the id the store gave them
+//!   ([`helios_values::Step::id`]) while they are undone, redone or
+//!   replaced; [`Line::rev`] (the store's
+//!   [`helios_values::Store::history_rev`]) says when the line moved on.
 //! - **A gesture in progress** (a drag) refuses undo, redo and jump until
 //!   it ends; a value held by another origin's gesture refuses them too.
 //! - **Groups** are the store's groups: what an origin writes in one is a
@@ -114,9 +113,9 @@ impl HeliosHistory {
     }
 }
 
-/// A step of the store as egui-pop sees it, numbered `id`.
-fn step_info(id: u64, step: &Step) -> StepInfo {
-    let mut info = StepInfo::new(id, EDIT, label_of(step), to_pop(&step.origin));
+/// A step of the store as egui-pop sees it.
+fn step_info(step: &Step) -> StepInfo {
+    let mut info = StepInfo::new(step.id, EDIT, label_of(step), to_pop(&step.origin));
     info.group = step.group;
     info.place = step
         .place
@@ -153,25 +152,11 @@ fn label_of(step: &Step) -> Label {
     }
 }
 
-/// The store's steps as a line: undo steps numbered from 1, oldest
-/// first, then the redo steps on from the newest undo step.
+/// The store's steps as a line.
 fn line_of(store: &Store) -> Line {
-    let undo = store.undo_steps();
-    let redo = store.redo_steps();
-    let n = undo.len() as u64;
-    let m = redo.len() as u64;
     Line {
-        undo: undo
-            .iter()
-            .zip(1..)
-            .map(|(s, id)| step_info(id, s))
-            .collect(),
-        // The next redo (the last) is n + 1; the one after it n + 2...
-        redo: redo
-            .iter()
-            .zip((n + 1..=n + m).rev())
-            .map(|(s, id)| step_info(id, s))
-            .collect(),
+        undo: store.undo_steps().iter().map(step_info).collect(),
+        redo: store.redo_steps().iter().map(step_info).collect(),
         rev: store.history_rev(),
     }
 }

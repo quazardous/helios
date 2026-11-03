@@ -821,3 +821,28 @@ fn a_path_is_a_text_that_says_what_it_names() {
     let text = serde_json::to_value(Descriptor::text("name", "")).unwrap();
     assert!(text.get("path").is_none());
 }
+
+#[test]
+fn a_step_keeps_its_id_and_a_new_step_never_reuses_one() {
+    let (_, _, mut store, _) = exposure();
+    let path = "node/exposure/exposure";
+    let to = |v: f64| Change::To(Value::Float(v));
+    store.set(Set::new(path, to(1.0), Origin::User)).unwrap();
+    store.set(Set::new(path, to(2.0), Origin::User)).unwrap();
+    let ids: Vec<u64> = store.undo_steps().iter().map(|s| s.id).collect();
+    assert_eq!(ids, [1, 2]);
+    store.undo(&Origin::User).unwrap();
+    assert_eq!(store.redo_steps()[0].id, 2, "undone, it keeps its id");
+    // A new step drops the redo list: it gets an id of its own.
+    store.set(Set::new(path, to(3.0), Origin::User)).unwrap();
+    assert_eq!(store.undo_steps().last().unwrap().id, 3);
+    // An agent's batch that goes on is still one step, its first id.
+    let g = store.begin_request(agent(), None);
+    store.set(Set::new(path, to(1.5), agent())).unwrap();
+    store
+        .set(Set::new("node/exposure/black", to(-0.01), agent()))
+        .unwrap();
+    store.end_request();
+    let last = store.undo_steps().last().unwrap();
+    assert_eq!((last.id, last.group), (4, Some(g)));
+}
