@@ -32,6 +32,11 @@
 //!   `edit.undo_step`, `history.undo_step` for an agent) undoes one step
 //!   alone by the same rule (the store's
 //!   [`helios_values::Store::undo_step`]); it goes on the redo list.
+//! - **Replaced steps**: the redo list a new step drops stays in the
+//!   store as a line leaving from the step it came after; the History
+//!   panel shows it behind its "replaced" toggle and a jump reaches it
+//!   (back to where the line left, then along it; the redo list there
+//!   becomes a replaced line in turn).
 //! - **The place** of each step is the context stack's place it was made
 //!   in (the store's [`helios_values::Store::set_place`], which
 //!   `crate::contexts::follow_place` keeps on the place shown): an undo,
@@ -42,8 +47,8 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use egui_pop::api::contexts::Entry;
 use egui_pop::api::history::{
-    Answer, Features, History, Label, Line, Refusal, RefusalKind, Request, ScopeId, ScopeInfo,
-    StepInfo, Walked, plan_jump,
+    Answer, Features, History, Label, Line, Refusal, RefusalKind, Replaced, Request, ScopeId,
+    ScopeInfo, StepInfo, Walked, plan_jump,
 };
 use egui_pop::model::commands::Origin as PopOrigin;
 use egui_pop::model::ids::FrameId;
@@ -236,6 +241,42 @@ fn walk(
     Ok(vec![info])
 }
 
+/// A jump to a replaced step `to`: back to where its line left, then
+/// along it, all or nothing; `None` when `to` is no replaced step.
+fn jump_replaced(
+    store: &mut Store,
+    to: u64,
+    origin: &PopOrigin,
+    dry_run: bool,
+) -> Option<Result<Vec<StepInfo>, Refusal>> {
+    let o = to_helios(origin);
+    let walked = match store.jump_replaced(to, &o, true) {
+        Ok(Some(w)) => w,
+        Ok(None) => {
+            return store
+                .replaced_steps()
+                .iter()
+                .any(|(_, s)| s.id == to)
+                .then(|| {
+                    Err(Refusal::new(
+                        RefusalKind::Owner,
+                        "its line left from a step that is replaced too: go to that line first",
+                    ))
+                });
+        }
+        Err(e) => return Some(Err(refused(&e))),
+    };
+    let steps: Vec<StepInfo> = walked.iter().map(step_info).collect();
+    Some(lane(origin, &steps).and_then(|()| {
+        if !dry_run {
+            store
+                .jump_replaced(to, &o, false)
+                .map_err(|e| refused(&e))?;
+        }
+        Ok(steps)
+    }))
+}
+
 impl HeliosHistory {
     /// Undoes the steps of `group` (an agent's batch) alone, newest
     /// first, even under later steps (the answer to "undo only the
@@ -309,7 +350,10 @@ impl History for HeliosHistory {
     fn jump(&mut self, request: &Request, to: u64, origin: &PopOrigin) -> Answer {
         self.answer(request, |s| {
             let line = line_of(s);
-            let jump = plan_jump(&line, to)?;
+            let jump = match plan_jump(&line, to) {
+                Ok(j) => j,
+                Err(e) => return jump_replaced(s, to, origin, request.dry_run).unwrap_or(Err(e)),
+            };
             let list = if jump.redo { &line.redo } else { &line.undo };
             let walked: Vec<StepInfo> = list.iter().rev().take(jump.count).cloned().collect();
             lane(origin, &walked)?;
@@ -362,6 +406,20 @@ impl History for HeliosHistory {
             return None;
         }
         self.lock().open_gesture().map(Label::text)
+    }
+
+    fn replaced(&self, scope: &ScopeId) -> Vec<Replaced> {
+        if *scope != EDIT {
+            return Vec::new();
+        }
+        self.lock()
+            .replaced_steps()
+            .into_iter()
+            .map(|(after, s)| Replaced {
+                step: step_info(s),
+                after,
+            })
+            .collect()
     }
 
     fn features(&self, scope: &ScopeId) -> Features {
@@ -648,6 +706,53 @@ mod tests {
             panic!("refused");
         };
         assert_eq!(r.kind, RefusalKind::Owner);
+    }
+
+    #[test]
+    fn a_replaced_step_is_listed_and_a_jump_reaches_it() {
+        let values = store();
+        for v in [1.0, 2.0] {
+            set(&values, v);
+        }
+        let mut h = HeliosHistory::new(values.clone());
+        let Answer::Done(Ok(_)) = h.undo(&Request::new(EDIT), &PopOrigin::User) else {
+            panic!("undone");
+        };
+        // A new step drops the redo list: step 2 is replaced, after 1.
+        set(&values, 3.0);
+        let replaced = h.replaced(&EDIT);
+        assert_eq!(replaced.len(), 1);
+        assert_eq!((replaced[0].step.id, replaced[0].after), (2, 1));
+        assert!(h.line(&EDIT).unwrap().redo.is_empty());
+        // A dry run says the walk: step 3 undone, step 2 redone.
+        let rev = h.rev(&EDIT);
+        let Answer::Done(Ok(w)) = h.jump(&Request::new(EDIT).dry_run(), 2, &PopOrigin::User) else {
+            panic!("allowed");
+        };
+        assert_eq!(w.steps.iter().map(|s| s.id).collect::<Vec<_>>(), [3, 2]);
+        assert_eq!((h.rev(&EDIT), value(&values)), (rev, Value::Float(3.0)));
+        // The jump: step 2 is the head again, and step 3 replaced in turn.
+        let Answer::Done(Ok(w)) = h.jump(&Request::new(EDIT), 2, &PopOrigin::User) else {
+            panic!("jumped");
+        };
+        assert_eq!(w.head, 2);
+        assert_eq!(value(&values), Value::Float(2.0));
+        let line = h.line(&EDIT).unwrap();
+        assert_eq!(line.undo.iter().map(|s| s.id).collect::<Vec<_>>(), [1, 2]);
+        let replaced = h.replaced(&EDIT);
+        assert_eq!(replaced.len(), 1);
+        assert_eq!((replaced[0].step.id, replaced[0].after), (3, 1));
+        // An agent may not walk the user's steps there.
+        let agent = PopOrigin::Agent("retouch".into());
+        let Answer::Done(Err(r)) = h.jump(&Request::new(EDIT), 3, &agent) else {
+            panic!("refused");
+        };
+        assert_eq!(r.kind, RefusalKind::Owner);
+        // A step that never was refuses as before.
+        let Answer::Done(Err(r)) = h.jump(&Request::new(EDIT), 9, &PopOrigin::User) else {
+            panic!("refused");
+        };
+        assert_eq!(r.kind, RefusalKind::Nothing);
     }
 
     #[test]

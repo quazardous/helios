@@ -28,7 +28,10 @@
 //!   request's group (under the name it gave, if any), and steps of one group
 //!   that follow each other are one step. A group can be undone alone,
 //!   out of order, when no later step touched its values
-//!   ([`Store::undo_group`]).
+//!   ([`Store::undo_group`]); so can one step ([`Store::undo_step`]).
+//! - Replaced steps: the redo list a new step drops is kept as a line
+//!   leaving from the step it came after ([`Store::replaced_steps`]), and
+//!   a jump reaches it ([`Store::jump_replaced`]).
 //! - A scope ([`Store::set_scope`]): while the user is inside a
 //!   sub-workspace, a write to a node outside it (`node/…`, `bypass/…`)
 //!   is refused, whoever writes; an undo or a redo still puts back what
@@ -616,6 +619,9 @@ pub struct Store {
     next_group: u64,
     /// The last step id given.
     next_step: u64,
+    /// The redo lists new steps dropped, oldest first: kept so a jump
+    /// reaches them.
+    replaced: Vec<points::Branch>,
     /// The groups named by their origin (a request id an agent gives),
     /// by origin and name.
     named: BTreeMap<(String, String), u64>,
@@ -944,7 +950,7 @@ impl Store {
             step.group = Some(self.next_group);
         }
         self.commit(step.label.clone(), &step.origin);
-        self.redo.clear();
+        self.drop_redo();
         // A group's steps that follow each other are one step.
         match self.undo.last_mut() {
             Some(last)
@@ -1028,6 +1034,7 @@ impl Store {
     pub fn clear_history(&mut self) {
         self.undo.clear();
         self.redo.clear();
+        self.replaced.clear();
         self.named.clear();
         self.history_rev += 1;
     }

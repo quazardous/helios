@@ -269,6 +269,13 @@ egui-pop's `HistoryPlugin` is on in Helios, over `HeliosHistory`:
   (egui-pop's `edit.undo_step`) undoes that step alone by the same rule
   (`Store::undo_step`); an agent by `helios_history_undo_step {step}`,
   in its lane. The step goes on the redo list, as a group does.
+- **Replaced steps** (2026-11-03). The redo list a new step drops is
+  kept in the value store as a line leaving from the head
+  (`Store::replaced_steps`), shown by the panel's "replaced" toggle
+  (decision 5 below); a jump reaches one (`Store::jump_replaced`: back
+  to where its line left, then along it, the redo list there replaced
+  in turn), in the agent's lane. Session only, cleared with the rest
+  when another image opens.
 - **The agents' lane.** An agent's `history.undo`, `history.redo` and
   `history.jump` walk only its own steps; one of the user's or of
   another origin refuses them (`HeliosHistory`), as the workspace's undo

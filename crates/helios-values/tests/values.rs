@@ -875,3 +875,49 @@ fn one_step_is_undone_alone_unless_a_later_step_touched_it() {
     assert_eq!(since, ["set node/exposure/exposure"]);
     assert_eq!((ev(&store), store.history_rev()), (2.0, rev));
 }
+
+#[test]
+fn a_dropped_redo_list_is_kept_and_a_jump_brings_it_back() {
+    let (_, _, mut store, _) = exposure();
+    let path = "node/exposure/exposure";
+    let to = |v: f64| Change::To(Value::Float(v));
+    for v in [1.0, 2.0, 3.0] {
+        store.set(Set::new(path, to(v), Origin::User)).unwrap();
+    }
+    store.undo(&Origin::User).unwrap();
+    store.undo(&Origin::User).unwrap();
+    store.set(Set::new(path, to(3.5), Origin::User)).unwrap();
+    let replaced: Vec<(u64, u64)> = store
+        .replaced_steps()
+        .iter()
+        .map(|(after, s)| (*after, s.id))
+        .collect();
+    assert_eq!(replaced, [(1, 2), (1, 3)], "in the order they were made");
+    // A dry run changes nothing.
+    let rev = store.history_rev();
+    let walked = store
+        .jump_replaced(3, &Origin::User, true)
+        .unwrap()
+        .unwrap();
+    let ids: Vec<u64> = walked.iter().map(|s| s.id).collect();
+    assert_eq!(ids, [4, 2, 3]);
+    assert_eq!((ev(&store), store.history_rev()), (3.5, rev));
+    // To step 2: its line's next step waits on the redo list, the line
+    // left behind is replaced in turn.
+    store
+        .jump_replaced(2, &Origin::User, false)
+        .unwrap()
+        .unwrap();
+    assert_eq!(ev(&store), 2.0);
+    assert_eq!(store.redo_steps().last().unwrap().id, 3);
+    let replaced: Vec<(u64, u64)> = store
+        .replaced_steps()
+        .iter()
+        .map(|(after, s)| (*after, s.id))
+        .collect();
+    assert_eq!(replaced, [(1, 4)]);
+    assert_eq!(store.jump_replaced(2, &Origin::User, false).unwrap(), None);
+    // Another image: its replaced steps go with the rest.
+    store.clear_history();
+    assert!(store.replaced_steps().is_empty());
+}

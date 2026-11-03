@@ -300,6 +300,13 @@ them); the step goes on the redo list, so Redo makes it again. An agent
 reaches it with `history.undo_step` (`helios_history_undo_step`), for
 its own steps only.
 
+**Replaced steps.** A new step made after an undo drops what Redo would
+have made again, but the panel keeps it: its "replaced" toggle shows
+those steps under the step their line left from, and a click on one
+brings the edit there (back to where the line left, then along it),
+all or nothing; the line left behind is replaced in turn. They live for
+the session, as the undo list does, and go when another image opens.
+
 ## Settings pages
 
 Settings pages are generated, never laid out by hand: a setting named
