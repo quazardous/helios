@@ -24,6 +24,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.48.0] - 2026-11-03
+
+### Added
+
+- What Redo would have made again is no longer lost when a new step
+  follows an undo: the History panel's "replaced" toggle shows those
+  steps, and a click on one brings the edit back there.
+- The History panel's "Undo this step" takes back one step of an image's
+  edit alone, even under later steps, as long as none of them changed the
+  same values; it is then on the redo list. Agents reach it as
+  `history.undo_step`.
+
 ## [0.47.0] - 2026-11-03
 
 ### Added
