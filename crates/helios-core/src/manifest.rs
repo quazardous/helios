@@ -63,7 +63,7 @@ impl ParamKind {
     }
 
     /// Checks a value against the kind; `Err` says why it does not fit.
-    fn check(&self, value: &Value) -> Result<(), String> {
+    pub(crate) fn check(&self, value: &Value) -> Result<(), String> {
         match (self, value) {
             (ParamKind::Float { min, max, .. }, Value::Float(v)) => {
                 if !v.is_finite() {
@@ -181,6 +181,10 @@ pub struct ParamHint {
     /// colour wheel (see [`ParamWidget`]).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub widget: Option<ParamWidget>,
+    /// The section it is shown under, a heading of its own (a macro's
+    /// exposed parameters, grouped by its author); ungrouped otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
 }
 
 /// An image tool a list of floats is edited with, instead of its values
@@ -247,6 +251,12 @@ impl ParamHint {
     /// Drawn by an image tool: a curve or a colour wheel.
     pub fn widget(mut self, widget: ParamWidget) -> Self {
         self.widget = Some(widget);
+        self
+    }
+
+    /// Shown under the section `group`.
+    pub fn group(mut self, group: &str) -> Self {
+        self.group = Some(group.into());
         self
     }
 }

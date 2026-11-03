@@ -240,7 +240,7 @@ pub fn build(file: &CompositeFile, catalogue: &Catalogue, depth: usize) -> Resul
     for (i, x) in file.exposed.iter().enumerate() {
         let inner = node(&x.node).map_err(|e| format!("exposed[{i}]: {e}"))?;
         built = built
-            .expose(&x.name, inner, &x.param)
+            .expose_as(&x.name, inner, &x.param, &x.exposure())
             .map_err(|e| format!("exposed[{i}]: {e}"))?;
     }
     Ok(built)

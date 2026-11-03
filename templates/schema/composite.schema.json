@@ -93,14 +93,37 @@
       }
     },
     "exposed": {
-      "description": "An inner parameter made the composite's own; one name on several inner nodes links them.",
+      "description": "An inner parameter made the composite's own, in the order shown; one name on several inner nodes links them, its interface given on the first entry. The fields after 'param' are optional: the inner parameter's own otherwise.",
       "type": "object",
       "additionalProperties": false,
       "required": ["name", "node", "param"],
       "properties": {
         "name": { "type": "string" },
         "node": { "type": "string" },
-        "param": { "type": "string" }
+        "param": { "type": "string" },
+        "label": { "description": "A short label, in English; the name otherwise.", "type": "string" },
+        "description": { "type": "string" },
+        "unit": { "description": "The unit shown: EV, %, px.", "type": "string" },
+        "group": { "description": "The section it is shown under; sections keep the order of their first parameter.", "type": "string" },
+        "min": { "description": "Narrows the inner hard range of a number or a list of numbers, never widens it.", "type": "number" },
+        "max": { "description": "Narrows the inner hard range of a number or a list of numbers, never widens it.", "type": "number" },
+        "soft": {
+          "description": "The range a slider spans by default, within the hard range: [low, high].",
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": { "type": "number" }
+        },
+        "options": {
+          "description": "The options a choice keeps, in the order shown: a subset of the inner ones.",
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string" }
+        },
+        "default": {
+          "description": "The default, tagged by kind as a node's parameters ({ \"float\": 0.5 }); the inner node's value otherwise.",
+          "type": "object"
+        }
       }
     },
     "panel_hint": {

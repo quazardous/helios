@@ -1,8 +1,8 @@
 # Macros on the desktop: making, exposing, folding and saving them
 
-Status: **proposed** (2026-10-27), not decided. Nothing in it is built.
-Each choice below has a default; the open questions at the end are for
-the owner to settle.
+Status: **decided** (2026-10-30): the owner accepted every default
+below (the open questions at the end keep their reasoning). Built so
+far: step 1, the interface in the format (see "Build steps").
 
 A macro is a network of modules packaged as one node, showing only the
 parameters chosen for it (AVS's macro, Helios's workshop). The engine
@@ -26,11 +26,12 @@ it and changing it later. This note proposes that side.
   content key, GPU variant, cache and tiles, so a macro and the flat
   network it packages share their content (see
   [module-contract.md](../module-contract.md), "Composites").
-- **What a macro does not carry yet.** `Exposed` keeps the inner
-  parameter's whole kind (its hard range, its options): there is no
-  label, no narrowed range, no soft range, no group. `Macro` gives no
-  `param_hints`, so an exposed slider loses the inner module's unit,
-  step, soft range and widget.
+- **What a macro carries since step 1.** `Macro::expose_as` takes an
+  `Exposure` (label, description, unit, group, narrowed range, soft
+  range, options kept, default), and `Macro` gives `param_hints`: each
+  exposed parameter's inner hint, renamed, with the macro's own fields
+  over it. Before step 1, an exposed slider lost the inner module's
+  unit, step, soft range and widget.
 - **Composite files** (`helios-template/src/format.rs`, `CompositeFile`;
   schema `templates/schema/composite.schema.json`; see
   [templates.md](../templates.md), "Composites as files"). A composite
@@ -285,7 +286,8 @@ schema:
 "exposed": [
   { "name": "strength", "node": "blend", "param": "opacity",
     "label": "Strength", "group": "Look",
-    "min": 0.2, "max": 0.8, "soft": [0.3, 0.7], "default": 0.5 },
+    "min": 0.2, "max": 0.8, "soft": [0.3, 0.7],
+    "default": { "float": 0.5 } },
   { "name": "feather", "node": "feather", "param": "radius",
     "unit": "px", "group": "Edges" }
 ]
@@ -293,9 +295,18 @@ schema:
 
 - The order of the list is the order shown. `group` names a section;
   sections keep the order of their first parameter.
-- `min`/`max` narrow the inner hard range and never widen it; values
-  outside are clamped when an older edit is read. `options` keeps a
-  subset of a choice.
+- `min`/`max` narrow the inner hard range and never widen it (whole
+  numbers for an integer); the inner default is clamped into what is
+  left. `options` keeps a subset of a choice, in the order given.
+  `default` is tagged by kind, as a node's parameters are. A file whose
+  interface does not fit its inner parameters is refused when it is
+  built, the entry named (`exposed[0]: …`).
+- A linked name takes its interface from its first entry (a later
+  entry with one is refused), and accepts what all its inner parameters
+  accept: the ranges' intersection, the options in common.
+- Values outside a narrowed range come only from an older version's
+  edits, since a file never changes once written: `macro.upgrade`
+  (step 5) clamps them and says which.
 - Hints not given are the inner module's (`Macro` forwards each
   exposed parameter's `ParamHint`, renamed), so the slider keeps its
   unit, step, logarithmic bar and widget.
@@ -449,7 +460,8 @@ One branch each, in order; each ships its commands, MCP verbs, tests
 and the docs it changes (`docs/gui.md`, `docs/templates.md`,
 `docs/module-contract.md`, `docs/cli.md`).
 
-1. **The interface in the format** (`helios-core`, `helios-template`):
+1. **The interface in the format** (`helios-core`, `helios-template`;
+   built):
    `exposed` gains `label`, `description`, `unit`, `group`, `min`,
    `max`, `soft`, `options`, `default`; the schema follows; `Macro`
    narrows the kind and forwards the inner `ParamHint`s; tests on

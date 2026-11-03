@@ -46,7 +46,7 @@ pub use module::{
     Accelerator, AcceleratorError, Context, DeviceImage, Extent, Failure, GpuJob, GpuKernel,
     Memory, Module, ModuleRef,
 };
-pub use network::{Composite, Expansion, Inner, InnerNode, Macro, Network, Wire};
+pub use network::{Composite, Expansion, Exposure, Inner, InnerNode, Macro, Network, Wire};
 pub use params::{Params, Value};
 pub use scheduler::{CancelToken, JobId, JobSpec, JobState, Priority, Scheduler};
 pub use status::{Load, NodeState, NodeStatus, NodeType};

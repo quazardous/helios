@@ -347,8 +347,38 @@ pub trait Composite: Send + Sync + 'static {
 #[derive(Clone, Debug, PartialEq)]
 struct Exposed {
     spec: ParamSpec,
+    /// How it is shown: the first inner parameter's hint, renamed, with
+    /// the macro's own label, unit, soft range and group.
+    hint: ParamHint,
     /// The inner nodes and parameters it sets.
     targets: Vec<(Inner, String)>,
+}
+
+/// How a macro shows one exposed parameter, beyond the inner parameter it
+/// sets. Every field is optional: what is not given is the inner
+/// parameter's (its description, its range, its hint's unit and soft
+/// range, its saved value as default).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Exposure {
+    /// A short label; the exposed name otherwise.
+    pub label: Option<String>,
+    pub description: Option<String>,
+    /// The unit shown (`EV`, `%`, `px`).
+    pub unit: Option<String>,
+    /// The section it is shown under.
+    pub group: Option<String>,
+    /// A narrower hard range than the inner one, for a number or a list of
+    /// numbers: never wider, a whole number for an integer.
+    pub min: Option<f64>,
+    pub max: Option<f64>,
+    /// The range a slider spans by default, within the hard range.
+    pub soft: Option<(f64, f64)>,
+    /// The options a choice keeps, in the order shown: a subset of the
+    /// inner ones.
+    pub options: Option<Vec<String>>,
+    /// The default, within the narrowed range; the inner node's saved
+    /// value otherwise (clamped into the narrowed range).
+    pub default: Option<Value>,
 }
 
 /// A sub-network a user saved, packaged as one node exposing a few chosen
@@ -397,8 +427,28 @@ impl Macro {
     /// Exposes parameter `param` of inner node `node` as the macro's
     /// parameter `name`, with the inner node's saved value as default.
     /// Exposing one name on several inner nodes links them: one value sets
-    /// them all (their kinds must agree).
-    pub fn expose(mut self, name: &str, node: Inner, param: &str) -> Result<Self, Error> {
+    /// them all (their kinds must agree, and the range is what all of them
+    /// accept).
+    pub fn expose(self, name: &str, node: Inner, param: &str) -> Result<Self, Error> {
+        self.expose_as(name, node, param, &Exposure::default())
+    }
+
+    /// [`Macro::expose`], shown as `how` says: a label, a unit, a group, a
+    /// narrower range, a soft range, the options kept, a default. A linked
+    /// parameter takes its interface from its first entry: a later entry
+    /// with one is refused.
+    pub fn expose_as(
+        mut self,
+        name: &str,
+        node: Inner,
+        param: &str,
+        how: &Exposure,
+    ) -> Result<Self, Error> {
+        let refused = |reason: String| Error::Param {
+            module: self.manifest.name.clone(),
+            param: name.into(),
+            reason,
+        };
         let inner = self.network.node(node)?;
         let m = inner.module.manifest();
         let mut spec = m.param(param).cloned().ok_or_else(|| Error::Param {
@@ -410,25 +460,75 @@ impl Macro {
         if let Some(value) = inner.params.get(param) {
             spec.kind = with_default(&spec.kind, value);
         }
-        match self.exposed.iter_mut().find(|e| e.spec.name == name) {
-            Some(e)
-                if std::mem::discriminant(&e.spec.kind) != std::mem::discriminant(&spec.kind) =>
-            {
-                return Err(Error::Param {
-                    module: self.manifest.name.clone(),
-                    param: name.into(),
-                    reason: "linked to parameters of another kind".into(),
-                });
+        if let Some(i) = self.exposed.iter().position(|e| e.spec.name == name) {
+            if *how != Exposure::default() {
+                return Err(refused(
+                    "a linked parameter's interface is given on its first entry".into(),
+                ));
             }
-            Some(e) => e.targets.push((node, param.into())),
-            None => {
-                self.manifest.params.push(spec.clone());
-                self.exposed.push(Exposed {
-                    spec,
-                    targets: vec![(node, param.into())],
-                });
+            let e = &mut self.exposed[i];
+            if std::mem::discriminant(&e.spec.kind) != std::mem::discriminant(&spec.kind) {
+                return Err(refused("linked to parameters of another kind".into()));
             }
+            e.spec.kind = linked(&e.spec.kind, &spec.kind).map_err(refused)?;
+            e.hint.soft = within(e.hint.soft, &e.spec.kind);
+            e.targets.push((node, param.into()));
+            let kind = e.spec.kind.clone();
+            if let Some(p) = self.manifest.params.iter_mut().find(|p| p.name == name) {
+                p.kind = kind;
+            }
+            return Ok(self);
         }
+        let mut hint = inner
+            .module
+            .param_hints()
+            .into_iter()
+            .find(|h| h.name == param)
+            .unwrap_or_default();
+        if name != param {
+            // The inner label names the inner parameter, not this one.
+            hint.label = None;
+        }
+        hint.name = name.into();
+        narrow(&mut spec.kind, how).map_err(refused)?;
+        if let Some(d) = &how.description {
+            spec.description.clone_from(d);
+        }
+        if let Some(v) = &how.default {
+            spec.kind
+                .check(v)
+                .map_err(|e| refused(format!("default: {e}")))?;
+            spec.kind = with_default(&spec.kind, v);
+        }
+        if how.label.is_some() {
+            hint.label.clone_from(&how.label);
+        }
+        if how.unit.is_some() {
+            hint.unit.clone_from(&how.unit);
+        }
+        if how.group.is_some() {
+            hint.group.clone_from(&how.group);
+        }
+        hint.soft = match how.soft {
+            Some((lo, hi)) => {
+                let Some((min, max)) = hard(&spec.kind) else {
+                    return Err(refused("a soft range is for numbers".into()));
+                };
+                if !(lo.is_finite() && hi.is_finite() && min <= lo && lo < hi && hi <= max) {
+                    return Err(refused(format!(
+                        "soft range [{lo}, {hi}] not within [{min}, {max}]"
+                    )));
+                }
+                Some((lo, hi))
+            }
+            None => within(hint.soft, &spec.kind),
+        };
+        self.manifest.params.push(spec.clone());
+        self.exposed.push(Exposed {
+            spec,
+            hint,
+            targets: vec![(node, param.into())],
+        });
         Ok(self)
     }
 
@@ -436,6 +536,148 @@ impl Macro {
     pub fn network(&self) -> &Network {
         &self.network
     }
+}
+
+/// The hard range of a number or a list of numbers.
+#[allow(clippy::cast_precision_loss)]
+fn hard(kind: &crate::manifest::ParamKind) -> Option<(f64, f64)> {
+    use crate::manifest::ParamKind as K;
+    match kind {
+        K::Float { min, max, .. } | K::Floats { min, max, .. } => Some((*min, *max)),
+        K::Int { min, max, .. } | K::Ints { min, max, .. } => Some((*min as f64, *max as f64)),
+        _ => None,
+    }
+}
+
+/// An inherited soft range kept within the hard one; dropped when nothing
+/// of it is left.
+fn within(soft: Option<(f64, f64)>, kind: &crate::manifest::ParamKind) -> Option<(f64, f64)> {
+    let (lo, hi) = soft?;
+    let Some((min, max)) = hard(kind) else {
+        return Some((lo, hi));
+    };
+    let (lo, hi) = (lo.max(min), hi.min(max));
+    (lo < hi).then_some((lo, hi))
+}
+
+/// `kind` narrowed as `how` says (its range, its options), its default
+/// clamped into what is left. A range wider than the inner one, or given
+/// to a kind it does not fit, is refused.
+fn narrow(kind: &mut crate::manifest::ParamKind, how: &Exposure) -> Result<(), String> {
+    use crate::manifest::ParamKind as K;
+    if how.min.is_some() || how.max.is_some() {
+        let Some((min, max)) = hard(kind) else {
+            return Err("a range is for numbers".into());
+        };
+        let lo = how.min.unwrap_or(min);
+        let hi = how.max.unwrap_or(max);
+        if !(lo.is_finite() && hi.is_finite() && min <= lo && lo <= hi && hi <= max) {
+            return Err(format!(
+                "range [{lo}, {hi}] not within the inner [{min}, {max}]"
+            ));
+        }
+        set_range(kind, lo, hi)?;
+    }
+    if let Some(kept) = &how.options {
+        let K::Choice { options, default } = kind else {
+            return Err("options are for a choice".into());
+        };
+        if kept.is_empty() {
+            return Err("no option kept".into());
+        }
+        for (i, o) in kept.iter().enumerate() {
+            if !options.contains(o) {
+                return Err(format!("`{o}` is not one of {options:?}"));
+            }
+            if kept[..i].contains(o) {
+                return Err(format!("`{o}` kept twice"));
+            }
+        }
+        options.clone_from(kept);
+        if !options.contains(default) {
+            default.clone_from(&options[0]);
+        }
+    }
+    Ok(())
+}
+
+/// Sets a number kind's hard range to `[lo, hi]` (within the old one),
+/// clamping its default.
+fn set_range(kind: &mut crate::manifest::ParamKind, lo: f64, hi: f64) -> Result<(), String> {
+    use crate::manifest::ParamKind as K;
+    #[allow(clippy::cast_possible_truncation)]
+    let whole = |x: f64| {
+        if x.fract() == 0.0 {
+            Ok(x as i64)
+        } else {
+            Err(format!("{x} is not a whole number"))
+        }
+    };
+    match kind {
+        K::Float { min, max, default } => {
+            (*min, *max) = (lo, hi);
+            *default = default.clamp(lo, hi);
+        }
+        K::Floats {
+            min, max, default, ..
+        } => {
+            (*min, *max) = (lo, hi);
+            for d in default {
+                *d = d.clamp(lo, hi);
+            }
+        }
+        K::Int { min, max, default } => {
+            (*min, *max) = (whole(lo)?, whole(hi)?);
+            *default = (*default).clamp(*min, *max);
+        }
+        K::Ints {
+            min, max, default, ..
+        } => {
+            (*min, *max) = (whole(lo)?, whole(hi)?);
+            for d in default {
+                *d = (*d).clamp(*min, *max);
+            }
+        }
+        _ => return Err("a range is for numbers".into()),
+    }
+    Ok(())
+}
+
+/// What a linked parameter accepts: the range both kinds accept, the
+/// options both keep (in the first one's order), the first one's default
+/// clamped into that. Refused when nothing is left.
+fn linked(
+    first: &crate::manifest::ParamKind,
+    other: &crate::manifest::ParamKind,
+) -> Result<crate::manifest::ParamKind, String> {
+    use crate::manifest::ParamKind as K;
+    let mut kind = first.clone();
+    if let (
+        K::Choice { options, default },
+        K::Choice {
+            options: theirs, ..
+        },
+    ) = (&mut kind, other)
+    {
+        options.retain(|o| theirs.contains(o));
+        if options.is_empty() {
+            return Err("linked to a choice with no option in common".into());
+        }
+        if !options.contains(default) {
+            default.clone_from(&options[0]);
+        }
+        return Ok(kind);
+    }
+    if let (Some((a, b)), Some((c, d))) = (hard(first), hard(other)) {
+        let (lo, hi) = (a.max(c), b.min(d));
+        if lo > hi {
+            return Err(format!(
+                "linked to a parameter whose range [{c}, {d}] misses [{a}, {b}]"
+            ));
+        }
+        set_range(&mut kind, lo, hi)?;
+    }
+    Ok(kind)
 }
 
 /// `kind` with `value` as its default, when they agree.
@@ -460,6 +702,10 @@ fn with_default(kind: &crate::manifest::ParamKind, value: &Value) -> crate::mani
 impl Composite for Macro {
     fn manifest(&self) -> Manifest {
         self.manifest.clone()
+    }
+
+    fn param_hints(&self) -> Vec<ParamHint> {
+        self.exposed.iter().map(|e| e.hint.clone()).collect()
     }
 
     fn expand(&self, params: &Params, _: &Context, _: &Expansion) -> Result<Network, String> {

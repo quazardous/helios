@@ -218,7 +218,13 @@ since the key is built from the manifest's name, version and parameters.
 **Macros.** `Macro::new(manifest, network)` packages a network;
 `expose(name, inner, param)` turns an inner parameter into one of the
 macro's, its saved value the default; exposing one name on several inner
-nodes links them. The other parameters keep their saved values.
+nodes links them, with the range all of them accept. The other
+parameters keep their saved values. `expose_as` adds how it is shown (an
+`Exposure`: a label, a description, a unit, a group, a narrower hard
+range, a soft range, the options a choice keeps, a default), and the
+macro's `param_hints` are each inner parameter's hint, renamed, under
+those fields (`ParamHint::group` names the section a parameter is shown
+under).
 
 **First port: vkdt's `contrast`** (`helios-module-vkdt`). It builds the
 network vkdt's `create_nodes` does: `guided1`, a blur, `guided2`, a blur,

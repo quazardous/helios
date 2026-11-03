@@ -524,13 +524,61 @@ pub struct Exit {
     pub output: String,
 }
 
-/// An inner parameter made the composite's own.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+/// An inner parameter made the composite's own, and how it is shown:
+/// every field after `param` is optional, the inner parameter's own
+/// otherwise. A name repeated on several inner nodes links them; the
+/// interface is given on its first entry.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Exposed {
     pub name: String,
     pub node: String,
     pub param: String,
+    /// A short label, in English; the name otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// The unit shown (`EV`, `%`, `px`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unit: Option<String>,
+    /// The section it is shown under; sections keep the order of their
+    /// first parameter.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
+    /// A narrower hard range than the inner one (a number or a list of
+    /// numbers), never wider.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max: Option<f64>,
+    /// The range a slider spans by default, within the hard range.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub soft: Option<[f64; 2]>,
+    /// The options a choice keeps, in the order shown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub options: Option<Vec<String>>,
+    /// The default, tagged by kind as a node's parameters; the inner
+    /// node's value otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default: Option<helios_core::Value>,
+}
+
+impl Exposed {
+    /// How the macro shows it.
+    pub fn exposure(&self) -> helios_core::Exposure {
+        helios_core::Exposure {
+            label: self.label.clone(),
+            description: self.description.clone(),
+            unit: self.unit.clone(),
+            group: self.group.clone(),
+            min: self.min,
+            max: self.max,
+            soft: self.soft.map(|[lo, hi]| (lo, hi)),
+            options: self.options.clone(),
+            default: self.default.clone(),
+        }
+    }
 }
 
 /// Whether `id` is a template's or a composite's id: lowercase words of

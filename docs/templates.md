@@ -292,7 +292,12 @@ A composite (a macro, see [module-contract.md](module-contract.md),
     …
   ],
   "exits": [{ "from": "blend", "port": "output", "output": "output" }],
-  "exposed": [{ "name": "opacity", "node": "blend", "param": "opacity" }],
+  "exposed": [
+    { "name": "operator", "node": "mask", "param": "operator" },
+    { "name": "opacity", "node": "blend", "param": "opacity",
+      "label": "Strength", "group": "Blend", "min": 0.2, "max": 1.0,
+      "soft": [0.3, 0.9], "default": { "float": 0.8 } }
+  ],
   "panel": { "panel": "helios.masks", "area": "start_side" }
 }
 ```
@@ -300,8 +305,20 @@ A composite (a macro, see [module-contract.md](module-contract.md),
 - The sub-network is inner nodes in order (a node reads only the
   composite's inputs, written `@`, and nodes before it: no cycle by
   construction), their wiring and the exits.
-- `exposed` turns inner parameters into the composite's own (one name on
-  several inner nodes links them), each with its inner value as default.
+- `exposed` turns inner parameters into the composite's own, in the
+  order shown (one name on several inner nodes links them; the link
+  accepts what all of them accept), each with its inner value as
+  default.
+- Each exposed parameter may say how it is shown, all optional: a
+  `label`, a `description`, a `unit`, a `group` (a section heading;
+  sections keep the order of their first parameter), `min` and `max`
+  narrowing the inner hard range (never widening it), a `soft` range
+  inside that, the `options` a choice keeps, and a `default` tagged by
+  kind. What is not given is the inner parameter's: its hints (unit,
+  steps, soft range, widget) follow it under the exposed name. A linked
+  name gives these on its first entry. An interface that does not fit
+  its inner parameter is refused when the composite is built; an older
+  Helios refuses the fields it does not know.
 - An inner node may itself be a composite, by id and version.
 - **Version pinning.** A template keeps the composite version it was made
   with. When the catalogue holds a newer one, validation reports it as an
