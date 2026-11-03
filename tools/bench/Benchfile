@@ -36,9 +36,11 @@ run = [
  && dnf clean all""",
   # what wbox's headless labwc needs to start and to shoot: Xwayland
   # (Fedora's labwc stops without it), the capture and input tools, and
-  # fixed fonts so screenshots are reproducible
+  # fixed fonts so screenshots are reproducible; PipeWire for wbox's private
+  # audio server (headless sessions default to `audio: null` from wbox-mcp 0.13)
   """dnf -y install --setopt=install_weak_deps=False mesa-dri-drivers grim wlr-randr xdotool wlrctl \
       xorg-x11-server-Xwayland setxkbmap google-noto-sans-fonts dejavu-sans-fonts fontconfig \
+      pipewire wireplumber pipewire-pulseaudio pipewire-alsa \
  && dnf clean all""",
   # every download is pinned and checked: rustup-init 1.29.1 (its published
   # sha256), cargo-nextest 0.9.148, wbox-mcp at a commit
@@ -67,7 +69,7 @@ run = [
   # wbox drives a headless labwc (egui-pop-screenshots)
   """python3 -m venv /opt/wbox \
  && /opt/wbox/bin/pip install --quiet \
-      "git+https://github.com/quazardous/wbox-mcp.git@a2f3eab914e7d1db142f98887a3be623a6821402\"""",
+      "git+https://github.com/quazardous/wbox-mcp.git@1383aee1a0e0ccbe4903f997a85bdf4368346159\"""",
 ]
 # CARGO_HOME is the registry cache; the toolchain lives in /opt. Line
 # tables only and no incremental state keep the per-branch target small.
