@@ -467,3 +467,143 @@ fn an_upgraded_macro_carries_its_values_by_name() {
         .unwrap_err();
     assert!(e.contains("newest"), "{e}");
 }
+
+/// The made macro's interface, `exposure` renamed `brightness` (its
+/// range narrowed to `[min, max]`, in a group), `contrast` no longer
+/// exposed and `white_target` exposed as `white`.
+fn reshaped(min: f64, max: f64) -> Vec<Exposed> {
+    vec![
+        Exposed {
+            name: "brightness".into(),
+            node: "exp".into(),
+            param: "exposure".into(),
+            group: Some("Light".into()),
+            min: Some(min),
+            max: Some(max),
+            ..Exposed::default()
+        },
+        Exposed {
+            name: "white".into(),
+            node: "tone".into(),
+            param: "white_target".into(),
+            group: Some("Light".into()),
+            ..Exposed::default()
+        },
+    ]
+}
+
+#[test]
+fn an_interface_edited_is_a_new_version_and_the_image_renders_the_same() {
+    let (made, values) = made();
+    let values = moved(&values, &made.values);
+    let interface = made
+        .state
+        .macro_interface(&catalogue(), "warm_look")
+        .unwrap();
+    assert_eq!(interface.exposed.len(), 2);
+    assert_eq!(interface.next.version, 2);
+    assert!(
+        interface
+            .inner
+            .iter()
+            .any(|p| p.node == "tone" && p.spec.name == "white_target"),
+        "every inner parameter is offered"
+    );
+    let step = made
+        .state
+        .macro_interfaced(&catalogue(), "warm_look", &reshaped(-2.0, 2.0), &values)
+        .unwrap();
+    assert_eq!(
+        step.answer["to"],
+        json!({ "id": "user.warm-look", "version": 2 })
+    );
+    assert_eq!(step.answer["renamed"], json!({ "exposure": "brightness" }));
+    assert_eq!(step.answer["unexposed"], json!(["contrast"]));
+    assert_eq!(step.answer["clamped"], json!([]));
+    assert_eq!(
+        step.values,
+        Moves::from([
+            ("node/warm_look/exposure".into(), None),
+            ("node/warm_look/brightness".into(), Some(Value::Float(1.25))),
+            ("node/warm_look/contrast".into(), None),
+        ])
+    );
+    // Version 1 stays for its other users; the node is on version 2,
+    // whose file holds the value no longer exposed.
+    let files: Vec<u32> = step
+        .state
+        .bundle
+        .composites
+        .iter()
+        .filter(|f| f.id == "user.warm-look")
+        .map(|f| f.version)
+        .collect();
+    assert_eq!(files, [1, 2]);
+    let v2 = step.state.bundle.composites.last().unwrap();
+    let tone = v2.nodes.iter().find(|n| n.name == "tone").unwrap();
+    assert_eq!(tone.params.get("contrast"), Some(&Value::Float(2.5)));
+    let after = moved(&values, &step.values);
+    assert_eq!(
+        render(&made.state, &values),
+        render(&step.state, &after),
+        "the same image, the same content key"
+    );
+    // The group reaches the macro's hints.
+    let cat = step.state.bundle.catalogue(&catalogue());
+    let built = cat
+        .build_composite(
+            &CompositeRef {
+                id: "user.warm-look".into(),
+                version: 2,
+            },
+            0,
+        )
+        .unwrap();
+    let hints = helios_core::Composite::param_hints(&built);
+    assert!(
+        hints.iter().all(|h| h.group.as_deref() == Some("Light")),
+        "{hints:?}"
+    );
+    // Narrowed again: the value clamped, version 3.
+    let again = step
+        .state
+        .macro_interfaced(&catalogue(), "warm_look", &reshaped(-1.0, 1.0), &after)
+        .unwrap();
+    assert_eq!(again.answer["to"]["version"], 3);
+    assert_eq!(again.answer["clamped"], json!(["brightness"]));
+    assert_eq!(
+        again.values,
+        Moves::from([("node/warm_look/brightness".into(), Some(Value::Float(1.0)))])
+    );
+}
+
+#[test]
+fn an_interface_that_does_not_fit_is_refused_with_its_reason() {
+    let (made, values) = made();
+    let values = moved(&values, &made.values);
+    let file = made.state.bundle.composites.last().unwrap();
+    let e = made
+        .state
+        .macro_interfaced(&catalogue(), "warm_look", &file.exposed, &values)
+        .unwrap_err();
+    assert!(e.contains("unchanged"), "{e}");
+    let e = made
+        .state
+        .macro_interfaced(&catalogue(), "warm_look", &reshaped(-40.0, 2.0), &values)
+        .unwrap_err();
+    assert!(e.contains("exposed[0]"), "{e}");
+    let opened = made
+        .state
+        .macro_opened(&catalogue(), "warm_look", &values)
+        .unwrap();
+    let e = opened
+        .state
+        .macro_interfaced(
+            &catalogue(),
+            "warm_look",
+            &reshaped(-2.0, 2.0),
+            &moved(&values, &opened.values),
+        )
+        .unwrap_err();
+    assert!(e.contains("fold it first"), "{e}");
+}

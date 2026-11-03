@@ -633,6 +633,27 @@ pub const TOOLS: &[Tool] = &[
         ],
     },
     Tool {
+        name: "helios_macro_interface",
+        endpoint: Endpoint::Workspace,
+        cmd: "macro.interface",
+        description: "Gives a macro the parameters it shows, as one undoable step: `exposed` is the whole interface, in the order shown. The interface is saved as the next version of the macro's file (a shipped macro becomes a user's copy), this node pinned to it, other nodes keeping theirs. Values follow the inner parameters: a renamed one keeps its value, one no longer exposed is written into the file. Refused while the macro is open, or when an entry does not fit its inner parameter (a range wider than the inner one, options not among its own)",
+        params: &[
+            WORKSPACE,
+            MACRO_NODE,
+            Param {
+                name: "exposed",
+                schema: objects,
+                description: "The parameters shown: each `name`, `node` (an inner node), `param`, and optionally `label`, `description`, `unit`, `group` (a section), `min`, `max` (within the inner range), `soft` ([lo, hi]), `options` (a subset of a choice's), `default` (tagged by kind: {\"float\": 0.5}); one name on several entries links them",
+                default: None,
+            },
+            MACRO_IMAGE,
+            MACRO_VAULT,
+            GROUP,
+            DRY_RUN,
+            CONFIG,
+        ],
+    },
+    Tool {
         name: "helios_network_connect",
         endpoint: Endpoint::Workspace,
         cmd: "network.connect",

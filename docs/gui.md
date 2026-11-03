@@ -501,6 +501,20 @@ network.
   (`<macro>.<inner>`) are drawn in a group `macro:<macro>` titled with
   its name and version, wired as inside; a double click on its title
   folds it.
+- **A macro's interface** (`macro.interface`, from the Modules panel's
+  Interface… or the palette, and next after a macro made through the
+  name's form): a dialog lists the macro's inner parameters by inner
+  node, each with a check box (shown or not) and a filter, and beside
+  them the parameters shown, in their order (arrows move one, a cross
+  takes it out; the same name on two rows links them). Below, the row
+  selected: its name, label, description, unit and group; for a number
+  the range it keeps within the inner one, a soft range and its own
+  default; for a choice the options kept and its default. The problem
+  with the list as it stands shows as one edits; saving writes the next
+  version of the macro's file and pins the node to it, as one undo step
+  that carries the image's values (see
+  [design/macros.md](design/macros.md)). Agents answer the dialog as a
+  form with `exposed`, or run the command with it.
 - **Sub-workspaces.** A double click on a sub-workspace's title (its
   stack in the overview) enters it (see "Sub-workspaces as places");
   inside, the graph shows its nodes only, the wires between them, and
@@ -1383,8 +1397,9 @@ the order they were added (2026-10-21):
   out one (`view/graph/selected`), and **Make macro…** packages the rows
   selected (`macro.make`).
 - **Macros.** A folded macro is one row, `macro <version>` beside it,
-  with an arrow that opens it (`macro.open`); opened, its modules are
-  indented under a heading row whose arrow folds it (`macro.fold`).
+  with an arrow that opens it (`macro.open`) and **Interface…**, which
+  opens its interface editor (`macro.interface`); opened, its modules
+  are indented under a heading row whose arrow folds it (`macro.fold`).
 - **Bypass.** Each module with an input to pass through has a Bypass
   toggle: bypassed, it keeps its parameters and the image renders as if
   it were absent (see module-contract.md, "Bypass"); its name is struck

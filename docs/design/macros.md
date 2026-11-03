@@ -3,7 +3,8 @@
 Status: **decided** (2026-10-30): the owner accepted every default
 below (the open questions at the end keep their reasoning). Built so
 far: step 1, the interface in the format, step 2, the pure operations
-on a workspace, and step 3, the desktop's steps (see "Build steps").
+on a workspace, step 3, the desktop's steps, and step 4, the interface
+editor (see "Build steps").
 
 A macro is a network of modules packaged as one node, showing only the
 parameters chosen for it (AVS's macro, Helios's workshop). The engine
@@ -411,7 +412,7 @@ MCP server:
 | Verb | Command | Arguments |
 |---|---|---|
 | `helios_macro_make` | `macro.make` | `nodes`, `name`, `id`, `expose`, `open`, `dry_run` |
-| `helios_macro_interface` | `macro.interface` | `node`, `exposed`, `dry_run` |
+| `helios_macro_interface` | `macro.interface` | `node`, `exposed`, `dry_run` (built) |
 | `helios_macro_open`, `helios_macro_fold` | `macro.open`, `macro.fold` | `node`, `changes` (`version`, `expose`, `discard`) |
 | `helios_macro_dissolve` | `macro.dissolve` | `node`, `dry_run` |
 | `helios_macro_upgrade` | `macro.upgrade` | `node`, `version`, `dry_run` |
@@ -510,7 +511,39 @@ and the docs it changes (`docs/gui.md`, `docs/templates.md`,
 4. **The interface editor** (`helios-gui`, egui-pop's dialog, tree and
    range slider): `macro.interface`, and sections by group in the
    Parameters panel. Anything egui-pop lacks (a tree drop between two
-   trees) goes there first, as its own change.
+   trees) goes there first, as its own change. Built (2026-11-03,
+   `State::macro_interface` and `macro_interfaced`, the
+   `macro_interface` dialog body), with these changes:
+   - No egui-pop change: the dialog is a custom dialog whose body uses
+     plain lists rather than two trees. Left, the inner parameters with
+     check boxes and a filter; right, the parameters shown, moved by
+     arrows (no drag between trees), taken out by a cross; groups are a
+     field of the row, not branches; a link is made by giving two rows
+     the same name, not by a drop. The range and the soft range are
+     egui-pop's `RangeSlider`s, the default its `Slider`.
+   - Accept writes the next version of the file at once (section 5's
+     rule, a file never rewritten), the node pinned to it, as one undo
+     step; the older version stays in the bundle for its other users.
+     A shipped macro (`helios.`) edited becomes a user's copy,
+     `user.<slug>@1`, since `helios.` stays the shipped files'.
+   - Values follow the inner parameters, not the names: a renamed
+     parameter keeps its value (clamped into a narrower range), and one
+     no longer exposed is written into the new file as its inner value
+     (the image's, else the workspace's), so the image renders the
+     same. Presets follow the same way.
+   - Refused while the macro is open (fold it first), as upgrading is,
+     and for an unchanged interface.
+   - The dialog's primary button is always enabled: the problem with the
+     list as it stands shows as one edits, and the step refuses what
+     does not fit, with its reason; agents answer the dialog as a form
+     with their own `exposed`.
+   - The editor opens next after a macro made through the name's form
+     (`macro.make` with `interface: true`), not after one made with a
+     name given (agents, scripts). It is reached from the Modules
+     panel's Interface… and the palette; egui-pop's groups still have
+     no title menu.
+   - The Parameters panel shows the ungrouped parameters first, then a
+     heading per group, folded and unfolded by a click.
 5. **Versions**: folding a changed macro, the dialog and its
    `changes`; updates on offer in the workspace; `macro.upgrade`.
 6. **Publishing**: `<config>/composites/` in the catalogue, the Add

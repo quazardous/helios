@@ -1104,6 +1104,266 @@ impl State {
     }
 }
 
+/// One inner parameter of a macro, as its interface editor lists it.
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+pub struct InnerParam {
+    /// The inner node.
+    pub node: String,
+    pub spec: helios_core::ParamSpec,
+    /// Its module's hint, if any.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hint: Option<helios_core::ParamHint>,
+    /// The inner node's value in the macro's file.
+    pub value: Value,
+}
+
+/// What a macro's interface editor starts from (`State::macro_interface`).
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+pub struct Interface {
+    pub node: String,
+    /// The macro's file, as pinned.
+    pub composite: CompositeRef,
+    /// The macro's name, in the user's words.
+    pub name: String,
+    pub exposed: Vec<Exposed>,
+    /// Every inner parameter, by inner node in the file's order.
+    pub inner: Vec<InnerParam>,
+    /// The file a new interface is saved as.
+    pub next: CompositeRef,
+}
+
+/// The file a changed interface of `r` is saved as: the next version of
+/// a user's macro; a copy of its own for a shipped one, whose id stays
+/// the shipped files'.
+fn next_ref(cat: &Catalogue, r: &CompositeRef, name: &str) -> CompositeRef {
+    if r.id.starts_with(USER_PREFIX) {
+        let newest = cat
+            .composite_files()
+            .filter(|f| f.id == r.id)
+            .map(|f| f.version)
+            .max()
+            .unwrap_or(r.version);
+        CompositeRef {
+            id: r.id.clone(),
+            version: newest.max(r.version) + 1,
+        }
+    } else {
+        CompositeRef {
+            id: free_id(cat, name),
+            version: 1,
+        }
+    }
+}
+
+impl State {
+    /// The interface of the macro `node` and every inner parameter it
+    /// could expose: what the interface editor shows.
+    pub fn macro_interface(&self, catalogue: &Catalogue, node: &str) -> Result<Interface, String> {
+        let cat = self.bundle.catalogue(catalogue);
+        let (_, _, r) = self.macro_node(node)?;
+        let file = cat
+            .get_composite(&r)
+            .ok_or_else(|| format!("unknown composite `{r}`"))?;
+        let mut inner = Vec::new();
+        for n in &file.nodes {
+            let m = cat
+                .resolve(n.module.as_deref(), n.composite.as_ref(), 1)
+                .map_err(|e| format!("`{}`: {e}", n.name))?;
+            let hints = m.param_hints();
+            for spec in &m.manifest().params {
+                inner.push(InnerParam {
+                    node: n.name.clone(),
+                    spec: spec.clone(),
+                    hint: hints.iter().find(|h| h.name == spec.name).cloned(),
+                    value: n
+                        .params
+                        .get(&spec.name)
+                        .cloned()
+                        .unwrap_or_else(|| spec.kind.default_value()),
+                });
+            }
+        }
+        Ok(Interface {
+            node: node.to_string(),
+            composite: r.clone(),
+            name: file.name.clone(),
+            exposed: file.exposed.clone(),
+            inner,
+            next: next_ref(&cat, &r, &file.name),
+        })
+    }
+
+    /// Gives the macro `node` the interface `exposed` (`macro.interface`):
+    /// a file is never rewritten, so the interface is saved as a new
+    /// version of the macro's file (a user's copy of a shipped one,
+    /// `user.<slug>@1`), the node pinned to it; other nodes keep theirs.
+    ///
+    /// Values follow the inner parameters, not the names: a parameter
+    /// renamed keeps its value under its new name (clamped into a
+    /// narrower range), and one no longer exposed is written into the new
+    /// file as its inner value (the image's, else the workspace's), so the
+    /// image renders the same. Presets' values follow the same way. The
+    /// answer says what was renamed, unexposed, clamped and dropped (a
+    /// value that no longer fits: an option no longer kept). Refused while
+    /// the macro is open, for an unchanged interface, and for one the
+    /// inner parameters do not fit (the entry named, `exposed[0]: …`).
+    pub fn macro_interfaced(
+        &self,
+        catalogue: &Catalogue,
+        node: &str,
+        exposed: &[Exposed],
+        values: &Values,
+    ) -> Result<Step, String> {
+        let cat = self.bundle.catalogue(catalogue);
+        let (i, desc, r) = self.macro_node(node)?;
+        if desc.open {
+            return Err(format!("`{node}` is open: fold it first"));
+        }
+        let file = cat
+            .get_composite(&r)
+            .ok_or_else(|| format!("unknown composite `{r}`"))?;
+        if file.exposed == exposed {
+            return Err(format!("the interface of `{node}` is unchanged"));
+        }
+        let to = next_ref(&cat, &r, &file.name);
+        // Each name exposed before, followed to its inner parameters'
+        // name now (the first that shares one of them).
+        let mut follows: BTreeMap<&str, &str> = BTreeMap::new();
+        for old in &file.exposed {
+            if follows.contains_key(old.name.as_str()) {
+                continue;
+            }
+            let entries: Vec<(&str, &str)> = file
+                .exposed
+                .iter()
+                .filter(|x| x.name == old.name)
+                .map(|x| (x.node.as_str(), x.param.as_str()))
+                .collect();
+            if let Some(new) = exposed
+                .iter()
+                .find(|x| entries.contains(&(x.node.as_str(), x.param.as_str())))
+            {
+                follows.insert(old.name.as_str(), new.name.as_str());
+            }
+        }
+        let mut next_file = file.clone();
+        next_file.id.clone_from(&to.id);
+        next_file.version = to.version;
+        next_file.exposed = exposed.to_vec();
+        // What is no longer exposed keeps the value it renders with.
+        for old in &file.exposed {
+            if follows.contains_key(old.name.as_str()) {
+                continue;
+            }
+            let held = values
+                .get(&node_path(node, &old.name))
+                .or_else(|| desc.params.get(&old.name));
+            if let Some(v) = held
+                && let Some(n) = next_file.nodes.iter_mut().find(|n| n.name == old.node)
+            {
+                n.params.set(&old.param, v.clone());
+            }
+        }
+        let built = crate::catalogue::build(&next_file, &cat, 0)?;
+        let manifest = helios_core::Composite::manifest(&built).clone();
+        let mut dropped: Vec<String> = Vec::new();
+        let mut clamped: Vec<String> = Vec::new();
+        let mut carry = |name: &str, v: &Value| -> Option<(String, Value)> {
+            // What is no longer exposed is in the file now.
+            let new = follows.get(name)?;
+            let spec = manifest.param(new)?;
+            let Some((v, c)) = fit(&spec.kind, v) else {
+                dropped.push(name.to_string());
+                return None;
+            };
+            if c {
+                clamped.push((*new).to_string());
+            }
+            Some(((*new).to_string(), v))
+        };
+        let mut params = helios_core::Params::new();
+        for (name, v) in desc.params.iter() {
+            if let Some((name, v)) = carry(name, v) {
+                params.set(&name, v);
+            }
+        }
+        let mut moves = Moves::new();
+        for (name, v) in values_of(values, node) {
+            let to = carry(name, v);
+            if to.as_ref().is_some_and(|(n, c)| n == name && c == v) {
+                continue;
+            }
+            moves.insert(node_path(node, name), None);
+            if let Some((n, c)) = to {
+                moves.insert(node_path(node, &n), Some(c));
+            }
+        }
+        dropped.sort();
+        dropped.dedup();
+        clamped.sort();
+        clamped.dedup();
+        let mut next = self.clone();
+        let mut preset_dropped = Vec::new();
+        for p in &mut next.bundle.template.network.presets {
+            let Some(held) = p.values.get_mut(node) else {
+                continue;
+            };
+            let mut kept = helios_core::Params::new();
+            for (name, v) in held.iter() {
+                let fitted = follows.get(name).and_then(|new| {
+                    let spec = manifest.param(new)?;
+                    fit(&spec.kind, v).map(|(v, _)| (*new, v))
+                });
+                match fitted {
+                    Some((new, v)) => kept.set(new, v),
+                    None => preset_dropped.push(format!("{}: {name}", p.id)),
+                }
+            }
+            *held = kept;
+        }
+        let n = &mut next.bundle.template.network.nodes[i];
+        n.composite = Some(to.clone());
+        n.params = params;
+        next.bundle.composites.push(next_file);
+        let next = State::checked(next, catalogue)?;
+        let unexposed: Vec<&str> = names_of(&file.exposed)
+            .into_iter()
+            .filter(|n| !follows.contains_key(n))
+            .collect();
+        let renamed: BTreeMap<&str, &str> = follows
+            .iter()
+            .filter(|(o, n)| o != n)
+            .map(|(o, n)| (*o, *n))
+            .collect();
+        Ok(Step {
+            state: next,
+            values: moves,
+            answer: json!({
+                "node": node,
+                "from": r,
+                "to": to,
+                "exposed": names_of(exposed),
+                "renamed": renamed,
+                "unexposed": unexposed,
+                "dropped": dropped,
+                "clamped": clamped,
+                "preset_values_dropped": preset_dropped,
+            }),
+        })
+    }
+}
+
+/// The names exposed, each once, in the order shown.
+fn names_of(exposed: &[Exposed]) -> Vec<&str> {
+    let mut names: Vec<&str> = Vec::new();
+    for x in exposed {
+        if !names.contains(&x.name.as_str()) {
+            names.push(&x.name);
+        }
+    }
+    names
+}
+
 /// The names of a bundled composite's inputs or outputs.
 fn next_ports(state: &State, r: &CompositeRef, inputs: bool) -> Vec<String> {
     state

@@ -350,6 +350,13 @@ answer:
   exposed values written to them; the file stays in the bundle.
 - `macro_upgraded`: the pin moved to a newer version, values carried
   by name.
+- `macro_interface` and `macro_interfaced`: the interface a macro
+  shows (its `exposed` list) and every inner parameter it could show;
+  a new interface is saved as the next version of the file (a shipped
+  macro becomes a user's copy, `user.<slug>@1`), the node pinned to it.
+  Values follow the inner parameters, not the names: a renamed one keeps
+  its value (clamped into a narrower range), one no longer exposed is
+  written into the new file. Refused while the macro is open.
 
 Each keeps the content of every inner step, so nothing renders again.
 
@@ -541,7 +548,7 @@ places"): its nodes only shown and edited, its own layout and keys.
 `helios_subworkspace_delete`, the network edited node by node as the
 graph view does it (`helios_network_connect`, `_disconnect`, `_move`,
 `_add`, `_remove`, `_paste`), the macros (`helios_macro_make`,
-`_open`, `_fold`, `_dissolve`, `_upgrade`; on the files, with an
+`_open`, `_fold`, `_dissolve`, `_upgrade`, `_interface`; on the files, with an
 `image` and its `vault` whose values move with the step, saved as a
 version of its edit), each with `dry_run`, and
 `helios_workspace_undo`); each answer says where it was made (`via`):

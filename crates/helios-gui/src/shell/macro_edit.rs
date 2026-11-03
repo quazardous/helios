@@ -1,6 +1,6 @@
 //! Macros on the desktop (`macro.*`, see `docs/design/macros.md`): a
-//! macro made from nodes, opened in place, folded, dissolved and moved to
-//! a newer version, each one undo step that moves the open image's values
+//! macro made from nodes, opened in place, folded, dissolved, moved to a
+//! newer version and given another interface, each one undo step that moves the open image's values
 //! with the network (`Shell::workspace_step_moving`), so Ctrl+Z gives back
 //! the nodes, the files and the image's sliders at once. The steps
 //! themselves are `helios_template::macros`', the same for agents on the
@@ -45,6 +45,10 @@ pub(super) const COMMANDS: &[(&str, &str)] = &[
     (
         "macro.upgrade",
         "Move a macro to a newer version of its file (`node`, `version`; `dry_run`)",
+    ),
+    (
+        "macro.interface",
+        "Choose the parameters a macro shows, saved as a new version (`node`, the selected one by default; `exposed`; `dry_run`)",
     ),
 ];
 
@@ -151,11 +155,15 @@ impl Shell {
                 let answer = self.macro_step(&label, args, origin, |now, values| {
                     now.macro_made(&catalogue, &nodes, &name, expose.as_deref(), values)
                 })?;
-                // The macro is what one looks at now.
+                // The macro is what one looks at now; made from the
+                // name's form, its interface editor comes next.
                 if let Some(node) = answer["node"].as_str()
                     && !args["dry_run"].as_bool().unwrap_or(false)
                 {
                     self.select_node(node);
+                    if args["interface"].as_bool().unwrap_or(false) {
+                        self.interface_editor(node)?;
+                    }
                 }
                 Ok(answer)
             }
@@ -207,6 +215,22 @@ impl Shell {
                 self.macro_step(&format!("upgrade {node}"), args, origin, |now, values| {
                     now.macro_upgraded(&catalogue, &node, version, values)
                 })
+            }
+            "macro.interface" => {
+                let node = self.macro_target(args)?;
+                // A node of an opened macro names it.
+                let node = node.split('.').next().unwrap_or(&node).to_string();
+                let exposed: Vec<Exposed> = match &args["exposed"] {
+                    // Without one, the editor asks for it.
+                    Value::Null => return self.interface_editor(&node).map(|()| Value::Null),
+                    v => serde_json::from_value(v.clone()).map_err(|e| format!("exposed: {e}"))?,
+                };
+                self.macro_step(
+                    &format!("edit the interface of {node}"),
+                    args,
+                    origin,
+                    |now, values| now.macro_interfaced(&catalogue, &node, &exposed, values),
+                )
             }
             other => Err(format!("no macro command `{other}`")),
         }
@@ -268,6 +292,51 @@ impl Shell {
             verb: self.text(Message::new("gui-macro-make-verb", "Make")),
             command: "macro.make".into(),
         };
-        self.form_with(f, json!({ "nodes": nodes }))
+        self.form_with(f, json!({ "nodes": nodes, "interface": true }))
+    }
+
+    /// The interface editor on the macro `node` (see `macro_interface`):
+    /// a custom dialog whose answer runs `macro.interface` with the list
+    /// edited as `exposed`.
+    fn interface_editor(&mut self, node: &str) -> Result<(), String> {
+        let catalogue = self.workspace_catalogue();
+        let state = self.workspace_state().ok_or("no workspace is open")?;
+        let open = state
+            .bundle
+            .template
+            .network
+            .nodes
+            .iter()
+            .any(|n| n.name == node && n.open);
+        if open {
+            return Err(format!("`{node}` is open: fold it first"));
+        }
+        let interface = state.macro_interface(&catalogue, node)?;
+        let values = self.image_values(&state)?;
+        let target = node.to_string();
+        let check: crate::macro_interface::Check = Box::new(move |exposed| {
+            state
+                .macro_interfaced(&catalogue, &target, exposed, &values)
+                .map(|_| ())
+        });
+        let title = self.text(
+            Message::new("gui-macro-iface-title", "Interface of { $node }").with("node", node),
+        );
+        let verb = self.text(
+            Message::new("gui-macro-iface-verb", "Save as { $file }")
+                .with("file", interface.next.to_string()),
+        );
+        let command =
+            egui_pop::model::ids::CommandId::new("macro.interface").map_err(|e| e.to_string())?;
+        let spec = egui_pop::api::dialogs::Custom::new(&title, &verb, command)
+            .args(json!({ "node": node }))
+            .share(0.8);
+        let mut editor =
+            crate::macro_interface::Editor::new(interface.inner, interface.exposed, check);
+        let dialogs = self.dialogs.get().ok_or("no dialogs to show this in")?;
+        dialogs.open_custom(self.app.handle(), spec, move |ui, _, pass| {
+            editor.ui(ui, pass);
+        })?;
+        Ok(())
     }
 }

@@ -833,6 +833,54 @@ gui-queue-title = File d’attente de { $node }
 
 gui-macro-make-title = Faire une macro
 
+gui-macro-iface-title = Interface de { $node }
+
+gui-macro-iface-verb = Enregistrer comme { $file }
+
+gui-macro-iface-filter = Filtrer
+
+gui-macro-iface-inner = Paramètres internes
+
+gui-macro-iface-shown = Montrés par la macro
+
+gui-macro-iface-unchanged = Rien n’a encore changé
+
+gui-macro-iface-none = Rien n’est montré : cochez des paramètres internes à gauche
+
+gui-macro-iface-up = Monter
+
+gui-macro-iface-down = Descendre
+
+gui-macro-iface-remove = Ne plus le montrer
+
+gui-macro-iface-pick = Sélectionnez un paramètre montré pour régler son nom, sa plage et sa valeur par défaut
+
+gui-macro-iface-name = Nom
+
+gui-macro-iface-name-hint = Le même nom sur deux lignes les lie : une valeur règle les deux
+
+gui-macro-iface-linked = Lié à la première ligne de ce nom : il est montré comme elle
+
+gui-macro-iface-label = Libellé
+
+gui-macro-iface-description = Description
+
+gui-macro-iface-unit = Unité
+
+gui-macro-iface-group = Groupe
+
+gui-macro-iface-default = Sa propre valeur par défaut
+
+gui-macro-iface-range = Plage
+
+gui-macro-iface-soft = Une plage souple
+
+gui-macro-iface-soft-range = Plage souple
+
+gui-macro-iface-default-value = Valeur par défaut
+
+gui-macro-iface-options = Options gardées
+
 gui-macro-make-verb = Faire
 
 gui-macro-name = nom
@@ -846,3 +894,7 @@ gui-modules-open-hint = Ouvrir { $node } : ses modules affichés
 gui-modules-make-macro = Faire une macro…
 
 gui-modules-make-macro-hint = Regrouper les modules sélectionnés en un seul nœud (Ctrl+G dans le graphe)
+
+gui-modules-macro-interface = Interface…
+
+gui-modules-macro-interface-hint = Choisir les paramètres que { $node } montre, enregistrés comme une nouvelle version

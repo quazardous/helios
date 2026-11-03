@@ -249,3 +249,118 @@ fn the_selected_nodes_are_made_a_macro_by_default() {
     assert!(dialog.to_string().contains("name"), "{dialog}");
     let _ = std::fs::remove_dir_all(&root);
 }
+
+#[test]
+fn a_macro_s_interface_edited_is_one_step_and_keeps_the_image() {
+    let root = temp("interface");
+    let mut h = window(&root);
+    set(&mut h, "node/exposure/exposure", 1.0);
+    run(
+        &mut h,
+        "macro.make",
+        json!({ "nodes": ["exposure"], "name": "Look" }),
+    );
+    let before = steps(&h);
+    let exposed = json!([{
+        "name": "brightness", "node": "exposure", "param": "exposure",
+        "label": "Brightness", "group": "Light", "min": -2.0, "max": 2.0,
+    }]);
+    let dry = run(
+        &mut h,
+        "macro.interface",
+        json!({ "node": "look", "exposed": exposed, "dry_run": true }),
+    );
+    assert_eq!(
+        dry["to"],
+        json!({ "id": "user.look", "version": 2 }),
+        "{dry}"
+    );
+    assert_eq!(steps(&h), before, "a dry run changes nothing");
+    let done = run(
+        &mut h,
+        "macro.interface",
+        json!({ "node": "look", "exposed": exposed }),
+    );
+    assert_eq!(
+        done["renamed"],
+        json!({ "exposure": "brightness" }),
+        "{done}"
+    );
+    assert_eq!(steps(&h), before + 1, "one step");
+    assert_eq!(shown(&h, "look", "brightness"), Some(1.0), "the value kept");
+    // The Parameters panel's descriptor carries the group.
+    let group = h
+        .state()
+        .values
+        .lock()
+        .unwrap()
+        .get("node/look/brightness")
+        .and_then(|e| e.descriptor.group.clone());
+    assert_eq!(group.as_deref(), Some("Light"));
+    // A range wider than the inner one is refused, the entry named.
+    let e = answer(
+        &mut h,
+        "macro.interface",
+        json!({ "node": "look", "exposed": [{
+            "name": "brightness", "node": "exposure", "param": "exposure", "min": -40.0,
+        }] }),
+    )
+    .unwrap_err();
+    assert!(e.contains("exposed[0]"), "{e}");
+    undo(&mut h);
+    assert_eq!(
+        shown(&h, "look", "exposure"),
+        Some(1.0),
+        "back to version 1"
+    );
+    assert_eq!(shown(&h, "look", "brightness"), None);
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn a_macro_made_from_the_form_opens_its_interface_editor_answered_as_a_form() {
+    let root = temp("editor");
+    let mut h = window(&root);
+    set(&mut h, "node/exposure/exposure", 1.0);
+    // The name asked, then the editor on the macro made.
+    run(&mut h, "macro.make", json!({ "nodes": ["exposure"] }));
+    run(
+        &mut h,
+        "dialog.answer",
+        json!({ "values": { "name": "Look" } }),
+    );
+    follow(&mut h);
+    assert!(network(&h).iter().any(|(n, _)| n == "look"));
+    let current = run(&mut h, "dialog.current", json!(null));
+    let text = current.to_string();
+    assert!(text.contains("Interface of look"), "{current}");
+    assert!(
+        text.contains("user.look@2"),
+        "the file it saves as: {current}"
+    );
+    // An agent answers it as a form, with the list.
+    run(
+        &mut h,
+        "dialog.answer",
+        json!({ "values": { "exposed": [{
+            "name": "brightness", "node": "exposure", "param": "exposure",
+            "group": "Light",
+        }] } }),
+    );
+    follow(&mut h);
+    assert_eq!(shown(&h, "look", "brightness"), Some(1.0), "the value kept");
+    let pinned = h
+        .state()
+        .workspace_state()
+        .unwrap()
+        .bundle
+        .template
+        .network
+        .nodes
+        .iter()
+        .find(|n| n.name == "look")
+        .and_then(|n| n.composite.clone())
+        .unwrap();
+    assert_eq!(pinned.version, 2);
+    let _ = std::fs::remove_dir_all(&root);
+}

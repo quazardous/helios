@@ -1987,9 +1987,10 @@ pub mod tools {
         step(&files, &before, &next, answer, args, catalogue, &label)
     }
 
-    /// `{workspace, node | nodes, name, expose, version, dry_run}`: one
-    /// of the macros' steps (`macro.make`, `macro.open`, `macro.fold`,
-    /// `macro.dissolve`, `macro.upgrade`) on the files, `values` being an
+    /// `{workspace, node | nodes, name, expose, exposed, version,
+    /// dry_run}`: one of the macros' steps (`macro.make`, `macro.open`,
+    /// `macro.fold`, `macro.dissolve`, `macro.upgrade`,
+    /// `macro.interface`) on the files, `values` being an
     /// image's values that differ from the network (none without an
     /// image). Answers it, with the step itself, for the caller to move
     /// the image's values: `None` for a dry run.
@@ -2053,6 +2054,16 @@ pub mod tools {
                 (
                     format!("upgrade {node}"),
                     before.macro_upgraded(catalogue, &node, version, values)?,
+                )
+            }
+            "macro.interface" => {
+                let node = node()?;
+                let exposed: Vec<crate::format::Exposed> =
+                    serde_json::from_value(args["exposed"].clone())
+                        .map_err(|e| format!("exposed: {e}"))?;
+                (
+                    format!("edit the interface of {node}"),
+                    before.macro_interfaced(catalogue, &node, &exposed, values)?,
                 )
             }
             other => return Err(format!("no macro tool `{other}`")),

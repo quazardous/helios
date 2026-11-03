@@ -20,7 +20,8 @@
 //!   then listed under a heading row whose arrow folds it
 //!   (`macro.fold`). Shift+click selects a run of rows, Ctrl+click one
 //!   more (`view/graph/selected`), and "Make macro…" packages the rows
-//!   selected (`macro.make`).
+//!   selected (`macro.make`). A folded macro's "Interface…" opens its
+//!   interface editor (`macro.interface`).
 
 use std::cell::RefCell;
 use std::sync::{Mutex, PoisonError};
@@ -273,6 +274,23 @@ pub fn ui(ui: &mut Ui, viewport: &RefCell<crate::viewport::Viewport>, values: &M
                         Some((version, false)) => {
                             ui.weak(tr(Message::new("gui-modules-macro", "macro { $version }")
                                 .with("version", *version)));
+                            if ui
+                                .small_button(tr(Message::new(
+                                    "gui-modules-macro-interface",
+                                    "Interface…",
+                                )))
+                                .on_hover_text(tr(Message::new(
+                                    "gui-modules-macro-interface-hint",
+                                    "Choose the parameters { $node } shows, saved as a new version",
+                                )
+                                .with("node", &row.node)))
+                                .clicked()
+                            {
+                                run = Some((
+                                    "macro.interface",
+                                    serde_json::json!({ "node": row.node }),
+                                ));
+                            }
                         }
                         _ => {
                             ui.weak(&row.module);

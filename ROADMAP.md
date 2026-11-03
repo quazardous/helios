@@ -577,8 +577,10 @@ hash) is part of Helios; deploying a NAS is not.
   composite file in the workspace then published, each action one undo
   step and an MCP verb; the ten defaults of
   [docs/design/macros.md](docs/design/macros.md) accepted, built in six
-  steps. Step 1, the exposed parameters' interface in the composite
-  format, is built.
+  steps. Steps 1 to 4 are built: the exposed parameters' interface in
+  the composite format, the pure steps on a workspace, the desktop's
+  steps (2026-11-03) and the interface editor with groups in the
+  Parameters panel (2026-11-03); versions and publishing remain.
 - (2026-10-13) **Workspace templates**: a ready-to-use combination of
   tools, network and panel layout for one known scenario, shared as a
   `.helios-template` bundle like a plugin, schema-checked and built

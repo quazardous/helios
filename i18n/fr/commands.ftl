@@ -536,3 +536,6 @@ command-macro-dissolve =
 
 command-macro-upgrade =
     .title = Passer une macro à une version plus récente de son fichier (`node`, `version` ; `dry_run`)
+
+command-macro-interface =
+    .title = Choisir les paramètres qu’une macro montre, enregistrés comme une nouvelle version (`node`, le nœud sélectionné par défaut ; `exposed` ; `dry_run`)

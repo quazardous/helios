@@ -243,6 +243,54 @@ gui-library-sync = Sync zoom and pan
 
 gui-library-tags = Tags
 
+gui-macro-iface-default = Its own default
+
+gui-macro-iface-default-value = Default
+
+gui-macro-iface-description = Description
+
+gui-macro-iface-down = Move down
+
+gui-macro-iface-filter = Filter
+
+gui-macro-iface-group = Group
+
+gui-macro-iface-inner = Inner parameters
+
+gui-macro-iface-label = Label
+
+gui-macro-iface-linked = Linked to the first row named so: it is shown as that one is
+
+gui-macro-iface-name = Name
+
+gui-macro-iface-name-hint = The same name on two rows links them: one value sets both
+
+gui-macro-iface-none = Nothing shown: tick inner parameters on the left
+
+gui-macro-iface-options = Options kept
+
+gui-macro-iface-pick = Select a parameter shown to set its name, range and default
+
+gui-macro-iface-range = Range
+
+gui-macro-iface-remove = Stop showing it
+
+gui-macro-iface-shown = Shown by the macro
+
+gui-macro-iface-soft = A soft range
+
+gui-macro-iface-soft-range = Soft range
+
+gui-macro-iface-title = Interface of { $node }
+
+gui-macro-iface-unchanged = Nothing changed yet
+
+gui-macro-iface-unit = Unit
+
+gui-macro-iface-up = Move up
+
+gui-macro-iface-verb = Save as { $file }
+
 gui-macro-make-title = Make a macro
 
 gui-macro-make-verb = Make
@@ -385,6 +433,10 @@ gui-modules-fold-hint = Fold { $node } back into one node
 
 gui-modules-macro = macro { $version }
 
+gui-modules-macro-interface = Interface…
+
+gui-modules-macro-interface-hint = Choose the parameters { $node } shows, saved as a new version
+
 gui-modules-make-macro = Make macro…
 
 gui-modules-make-macro-hint = Package the modules selected as one node (Ctrl+G in the graph)
@@ -439,8 +491,6 @@ gui-param-picker = Pick { $label } from the image
 
 gui-params-fold-section = Fold { $group }
 
-gui-params-unfold-section = Unfold { $group }
-
 gui-params-hide-values = Hide the values
 
 gui-params-no-members = no members yet
@@ -452,6 +502,8 @@ gui-params-port-hint = Port { $port } of the group; the Masks panel edits it on 
 gui-params-port-member = { $member }: { $value }
 
 gui-params-show-values = Show the values
+
+gui-params-unfold-section = Unfold { $group }
 
 gui-params-values = { $count } values
 

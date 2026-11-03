@@ -18,6 +18,7 @@ pub mod jobs;
 pub mod keymaps;
 pub mod keys;
 pub mod library;
+pub mod macro_interface;
 pub mod mask_display;
 pub mod mask_tree;
 pub mod masks;
