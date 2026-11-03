@@ -74,8 +74,9 @@ pub struct Persist<S: Store> {
 /// The edit of the image shown.
 struct Editing {
     session: EditSession,
-    /// The module each node of the shown network runs, by node name.
-    modules: BTreeMap<String, String>,
+    /// The module each node of the shown network runs, and the
+    /// parameters it has, by node name: what an edit saves.
+    modules: BTreeMap<String, (String, BTreeSet<String>)>,
     /// The value store's committed steps when last saved.
     committed: u64,
     /// When the gesture going on was last saved (or started).
@@ -283,13 +284,7 @@ impl<S: Store> Persist<S> {
                 );
             }
         }
-        let modules = graph
-            .ids()
-            .filter_map(|id| {
-                let manifest = graph.manifest(id).ok()??;
-                Some((graph.name(id).ok()?.to_string(), manifest.name))
-            })
-            .collect();
+        let modules = modules_of(&graph);
         shell.set_view_source(graph, node, port)?;
         let committed = {
             let mut store = shell.values.lock().expect("value store lock");
@@ -306,6 +301,22 @@ impl<S: Store> Persist<S> {
             gesture: None,
         });
         Ok(head)
+    }
+
+    /// Follows the network shown after it changed in place (see
+    /// `Shell::keep_image_open`): its nodes are what an edit saves from
+    /// now on, and the edit is saved at the next frame, the image's
+    /// session going on.
+    pub fn follow_graph(&mut self, shell: &Shell) {
+        let Some(e) = &mut self.editing else {
+            return;
+        };
+        if let Some(graph) = shell.viewport().graph() {
+            e.modules = modules_of(graph);
+            // Saved at the next frame, under the step that changed it (an
+            // edit the same as the last one saved is not saved again).
+            e.committed = u64::MAX;
+        }
     }
 
     /// The edit being saved, if an image is open.
@@ -380,7 +391,11 @@ impl<S: Store> Persist<S> {
                 else {
                     continue;
                 };
-                if let Some(module) = e.modules.get(node) {
+                // A node or a parameter the network no longer has is kept
+                // in the store for an undo, never saved.
+                if let Some((module, params)) = e.modules.get(node)
+                    && params.contains(param)
+                {
                     modules
                         .entry(node.to_string())
                         .or_insert_with(|| (module.clone(), Params::new()))
@@ -395,6 +410,7 @@ impl<S: Store> Persist<S> {
                 .into_iter()
                 .filter(|(_, e)| e.value.as_bool() == Some(true))
                 .filter_map(|(p, _)| p.strip_prefix(helios_values::BYPASS).map(String::from))
+                .filter(|n| e.modules.contains_key(n))
                 .collect();
             edit::mark_bypassed(&mut current, &bypassed);
             // The Masks panel's labels and locks, kept with the edit.
@@ -502,4 +518,17 @@ impl<S: Store> Persist<S> {
         }
         Ok(())
     }
+}
+
+/// The module each module node of `graph` runs, and its parameters, by
+/// node name.
+fn modules_of(graph: &Graph) -> BTreeMap<String, (String, BTreeSet<String>)> {
+    graph
+        .ids()
+        .filter_map(|id| {
+            let manifest = graph.manifest(id).ok()??;
+            let params = manifest.params.iter().map(|p| p.name.clone()).collect();
+            Some((graph.name(id).ok()?.to_string(), (manifest.name, params)))
+        })
+        .collect()
 }

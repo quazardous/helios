@@ -26,6 +26,10 @@ use helios_template::{Bundle, ImportDesc, LibraryDesc, QueryDesc};
 use serde_json::{Value, json};
 
 use super::{Shell, lock};
+
+/// What a step does to the open image's values: each path set, or taken
+/// out (`None`).
+pub type Moves = BTreeMap<String, Option<helios_core::Value>>;
 use crate::dialogs::{Choice, Field, Picker};
 
 /// The value the workspace's state is kept in.
@@ -80,9 +84,12 @@ pub(super) struct Edited {
     applied: String,
     /// The template it was made from, if it was.
     origin: Option<Bundle>,
-    /// Its network changed since it was last taken: the image is opened
-    /// again through it.
+    /// Its network changed since it was last taken: the image shown goes
+    /// through it, in place.
     network_changed: bool,
+    /// The value paths the last step set for nodes it brought: the image
+    /// keeps them when it goes through the new network.
+    kept: BTreeSet<String>,
     /// What its files held when the desktop last wrote or read them
     /// (`State::to_json`, read as `Files::load_on_disk` reads it): a
     /// difference is a change made outside the desktop.
@@ -152,6 +159,7 @@ impl Shell {
             applied: text,
             origin,
             network_changed: false,
+            kept: BTreeSet::new(),
             disk,
             live: Some(live),
             keys_loaded: Vec::new(),
@@ -298,6 +306,86 @@ impl Shell {
             .is_some_and(|e| std::mem::take(&mut e.network_changed))
     }
 
+    /// After the workspace's network changed (an edit, an undo, a redo):
+    /// the image shown goes through the new network in place, the same
+    /// source image, its values and its history kept (see
+    /// `helios_values::rebind`). A node it had keeps the image's values;
+    /// a new one starts from the network's, except for what the step
+    /// moved to it, or everything after an undo or a redo. `Ok(false)`
+    /// when no image is shown; an error when the new network cannot take
+    /// the image (a raw network for a picture): the host opens it again.
+    pub fn keep_image_open(&mut self) -> Result<bool, String> {
+        use helios_template::Source;
+        let kept = self
+            .edit
+            .as_mut()
+            .map(|e| std::mem::take(&mut e.kept))
+            .unwrap_or_default();
+        let Some(bundle) = self.workspace_bundle() else {
+            return Ok(false);
+        };
+        let Some(before) = self.viewport.borrow().graph().cloned() else {
+            return Ok(false);
+        };
+        let e = |e: helios_core::Error| e.to_string();
+        let mut image = None;
+        let mut camera = None;
+        for id in before.ids() {
+            if image.is_none() {
+                image = before.source_image(id).map_err(e)?.cloned();
+            }
+            if camera.is_none() {
+                camera = before
+                    .context(id)
+                    .map_err(e)?
+                    .filter(|c| !c.is_empty())
+                    .cloned();
+            }
+        }
+        let image = image.ok_or("the image shown has no source")?;
+        let catalogue = crate::templates::modules();
+        let built = if bundle.template.network.reads_raw() {
+            let camera = camera.ok_or("the image shown has no camera to develop it with")?;
+            bundle.build_with(
+                &catalogue,
+                Source::Raw {
+                    mosaic: &image,
+                    camera: &camera,
+                },
+                None,
+            )?
+        } else {
+            bundle.build_with(&catalogue, Source::Picture(&image), None)?
+        };
+        let mut graph = built.graph;
+        let (node, port) = built.view;
+        let rebound = {
+            let mut store = lock(&self.values);
+            let keep = helios_values::Keep {
+                all: store.last_replayed(),
+                paths: kept,
+            };
+            helios_values::rebind(&mut store, &before, &mut graph, &keep)?
+        };
+        for refused in rebound.refused {
+            self.notes
+                .push(format!("a value does not fit the new network: {refused}"));
+        }
+        let mut viewport = self.viewport.borrow_mut();
+        viewport.set_source(graph, node, &port)?;
+        // Its decisions stay; the new network's decision nodes take the
+        // book's answers.
+        let mut decisions = self.decisions.borrow_mut();
+        if let Some(replayed) = viewport.edit_graph(|graph| {
+            decisions.adopt(graph);
+            decisions.book().replay(graph).map(|_| ())
+        }) {
+            replayed?;
+        }
+        decisions.refresh(viewport.graph());
+        Ok(true)
+    }
+
     pub(super) fn workspace_catalogue(&self) -> helios_template::Catalogue {
         crate::templates::catalogue(&self.template_panels(), self.specs())
     }
@@ -425,11 +513,45 @@ impl Shell {
         origin: &Origin,
         make: impl FnOnce(&State) -> Result<State, String>,
     ) -> Result<State, String> {
+        self.workspace_step_moving(label, origin, |now| {
+            make(now).map(|next| (next, Moves::new()))
+        })
+    }
+
+    /// One undoable step on the workspace that also moves the open
+    /// image's values: `make` gives the next state and the values to move
+    /// (a path set, or `None` for one its node no longer needs). The
+    /// paths set are declared first, as the next network describes them,
+    /// and written in the same undo group as the state, so one undo gives
+    /// back the network and the image's values together; the image then
+    /// goes through the new network in place, keeping them (see
+    /// [`Shell::keep_image_open`]). A path taken out stays in the store
+    /// for an undo, unsaved while its node is not in the network.
+    pub fn workspace_step_moving(
+        &mut self,
+        label: &str,
+        origin: &Origin,
+        make: impl FnOnce(&State) -> Result<(State, Moves), String>,
+    ) -> Result<State, String> {
         let now = self.workspace_state().ok_or_else(no_workspace)?;
-        let next = make(&now)?;
+        let (next, moves) = make(&now)?;
+        let set: Vec<(String, helios_core::Value)> = moves
+            .into_iter()
+            .filter_map(|(p, v)| v.map(|v| (p, v)))
+            .collect();
+        let descriptors = if set.is_empty() {
+            BTreeMap::new()
+        } else {
+            self.descriptors_in(&next, set.iter().map(|(p, _)| p.as_str()))?
+        };
         let now_text = now.to_json().to_string();
         {
             let mut store = lock(&self.values);
+            for (path, (descriptor, value)) in descriptors {
+                if store.get(&path).is_none() {
+                    store.declare_with(&path, descriptor, value);
+                }
+            }
             // The layout shown, so that an undo gives it back as it was.
             store.declare_with(
                 STATE,
@@ -437,7 +559,7 @@ impl Shell {
                 helios_core::Value::Text(now_text.clone()),
             );
             let group = store.begin_group(origin.clone(), label);
-            let set = store.set(
+            let state_set = store.set(
                 helios_values::Set::new(
                     STATE,
                     helios_values::Change::To(helios_core::Value::Text(next.to_json().to_string())),
@@ -445,14 +567,59 @@ impl Shell {
                 )
                 .gesture(group),
             );
+            let mut moved = Ok(());
+            for (path, value) in &set {
+                if moved.is_err() {
+                    break;
+                }
+                moved = store
+                    .set(
+                        helios_values::Set::new(
+                            path,
+                            helios_values::Change::To(value.clone()),
+                            origin.clone(),
+                        )
+                        .gesture(group),
+                    )
+                    .map(|_| ())
+                    .map_err(|e| format!("{path}: {e}"));
+            }
             store.end(group);
-            set.map_err(|e| e.to_string())?;
+            state_set.map_err(|e| e.to_string())?;
+            moved?;
         }
         if let Some(edit) = &mut self.edit {
             edit.applied = now_text;
+            edit.kept.extend(set.into_iter().map(|(p, _)| p));
         }
         self.sync_workspace();
         Ok(next)
+    }
+
+    /// The descriptors of value paths (`node/<node>/<param>`,
+    /// `bypass/<node>`) as `state`'s network describes them, with each
+    /// node's value there: what a step declares before it sets them.
+    fn descriptors_in<'a>(
+        &self,
+        state: &State,
+        paths: impl Iterator<Item = &'a str>,
+    ) -> Result<BTreeMap<String, (helios_values::Descriptor, helios_core::Value)>, String> {
+        let built = state.bundle.build(&self.workspace_catalogue())?;
+        let mut scratch = helios_values::Store::new();
+        for id in built.graph.ids() {
+            helios_values::bind_node(&mut scratch, &built.graph, id)?;
+        }
+        paths
+            .map(|p| {
+                let entry = scratch
+                    .get(p)
+                    .ok_or_else(|| format!("`{p}`: the new network has no such value"))?;
+                Ok((
+                    p.to_string(),
+                    (entry.descriptor.clone(), entry.value.clone()),
+                ))
+            })
+            .collect()
     }
 
     /// Edits the workspace (`name`, `description`, `icon`, `network`,

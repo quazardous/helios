@@ -668,3 +668,81 @@ fn a_long_drag_cancelled_saves_the_values_it_put_back() {
     drop((shell, persist));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_network_changed_in_place_is_saved_with_its_new_nodes_and_without_the_old() {
+    let dir = scratch("in-place");
+    let path = vault_file(&dir);
+    let mut shell = Shell::new(helios_panels(), None);
+    let mut persist = Persist::new(SqliteStore::open(&path).unwrap(), Arc::new(Bus::new()));
+    let (graph, exp) = network();
+    persist
+        .open_image(&mut shell, id(1), graph.clone(), exp, "output")
+        .unwrap();
+    set(&shell, 1.0, None);
+    persist.frame(&mut shell, 10.0);
+    // The network changed in place: `exposure` kept, `lift` added after
+    // it.
+    let mut next = graph.clone();
+    let lift = next
+        .add_module(
+            "lift",
+            helios_core::ModuleRef::new(helios_module_exposure::Exposure),
+            &helios_core::Params::new(),
+        )
+        .unwrap();
+    next.connect(exp, "output", lift, "input").unwrap();
+    {
+        let mut store = shell.values.lock().unwrap();
+        let before = shell.viewport().graph().unwrap().clone();
+        let rebound = helios_values::rebind(
+            &mut store,
+            &before,
+            &mut next,
+            &helios_values::Keep::default(),
+        )
+        .unwrap();
+        assert_eq!(rebound.bound, ["lift"], "only the new node bound");
+    }
+    shell
+        .viewport_mut()
+        .set_source(next, lift, "output")
+        .unwrap();
+    persist.follow_graph(&shell);
+    persist.frame(&mut shell, 11.0);
+    let head = persist.vault().heads(&id(1)).unwrap().remove(0);
+    let names: Vec<&str> = head.edit["modules"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| m["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["exposure", "lift"], "saved with the new node");
+    assert_eq!(
+        head.edit["modules"][0]["params"]["exposure"],
+        json!({ "float": 1.0 }),
+        "the image's value kept"
+    );
+    // Back to the network without `lift`: its values stay in the store
+    // for an undo, and are not saved.
+    let (back, exp) = network();
+    shell
+        .viewport_mut()
+        .set_source(back, exp, "output")
+        .unwrap();
+    persist.follow_graph(&shell);
+    set(&shell, 1.5, None);
+    persist.frame(&mut shell, 12.0);
+    assert!(
+        shell
+            .values
+            .lock()
+            .unwrap()
+            .get("node/lift/exposure")
+            .is_some()
+    );
+    let head = persist.vault().heads(&id(1)).unwrap().remove(0);
+    assert_eq!(head.edit["modules"].as_array().unwrap().len(), 1);
+    drop((shell, persist));
+    let _ = std::fs::remove_dir_all(&dir);
+}

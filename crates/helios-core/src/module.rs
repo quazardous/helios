@@ -30,6 +30,11 @@ impl Context {
         self.0.get(name)
     }
 
+    /// Whether it holds no field.
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
     /// Only the declared fields, so a module cannot read what it did not declare.
     pub(crate) fn restricted_to(&self, fields: &[String]) -> Context {
         Context(

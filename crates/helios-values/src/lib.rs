@@ -42,7 +42,7 @@ mod graph;
 mod points;
 
 pub use commands::{register, value_from_json, value_to_json};
-pub use graph::{BYPASS, bind_node, bypass_path, node_path, sync};
+pub use graph::{BYPASS, Keep, Rebound, bind_node, bypass_path, node_path, rebind, sync};
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -611,6 +611,8 @@ pub struct Store {
     last_origin: Option<Origin>,
     /// Moves on with every change of the undo or redo steps.
     history_rev: u64,
+    /// The last committed step was an undo or a redo.
+    replayed: bool,
     /// The place new steps are made in.
     place: Vec<Place>,
     /// The request open, if one is.
@@ -1020,6 +1022,13 @@ impl Store {
         self.history_rev += 1;
         self.last_committed = label;
         self.last_origin = Some(origin.clone());
+        self.replayed = false;
+    }
+
+    /// Whether the last committed step was an undo or a redo (a jump in
+    /// the history included): the values it wrote are the history's.
+    pub fn last_replayed(&self) -> bool {
+        self.replayed
     }
 
     /// Who made the last committed step: the writer, the gesture's or the
@@ -1235,6 +1244,7 @@ impl Store {
         }
         let label = step.label.clone();
         self.commit(format!("undo {label}"), origin);
+        self.replayed = true;
         self.redo.push(step);
         Ok(Some(label))
     }
@@ -1250,6 +1260,7 @@ impl Store {
         }
         let label = step.label.clone();
         self.commit(format!("redo {label}"), origin);
+        self.replayed = true;
         self.undo.push(step);
         Ok(Some(label))
     }
@@ -1330,6 +1341,7 @@ impl Store {
                 return Err(e);
             }
             self.commit(format!("undo {}", step.label), origin);
+            self.replayed = true;
             label = Some(step.label.clone());
             self.redo.push(step);
         }

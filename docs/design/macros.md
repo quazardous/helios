@@ -394,8 +394,11 @@ Each of `macro.make`, `macro.interface`, `macro.open`, `macro.fold`,
 ("make macro look", "fold look"). A step changes two things together:
 the workspace's state (network, positions, composites) and the open
 image's values that move. `Shell::workspace_step` writes the first as
-one store group; it gains the values to move in the same group, so
-Ctrl+Z gives back the nodes, the files and the image's sliders at once.
+one store group; `Shell::workspace_step_moving` adds the values to move
+in the same group (built: the paths set are declared first, as the next
+network describes them), and the image goes through the new network in
+place, its history kept, so Ctrl+Z gives back the nodes, the files and
+the image's sliders at once.
 Undoing `macro.make` removes the composite file it added (it is part of
 the workspace's state); a published file is never removed by undo.
 

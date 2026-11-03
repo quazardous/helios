@@ -463,8 +463,17 @@ survival`). The File menu has:
 - **Reset to template** (`workspace.reset`): the template's network,
   tools, library and layout, built; the workspace's name stays.
 
-When the network changes (a reset, an import, an undo of either), the
-image shown is opened again through it.
+When the network changes (a graph edit, a reset, an import, an undo or
+a redo of any), the image shown goes through it in place: the same
+source image, its values and its undo history kept, so the step that
+changed the network is undone with the image open. A node it had keeps
+the image's values; a new node starts from the network's, except for
+values the step moved to it (`Shell::workspace_step_moving`, which
+sets them in the same undo group as the network), or all of them after
+an undo or a redo. The values of a node no longer in the network stay
+in the value store for an undo that brings it back, and are not saved
+with the edit. A network that cannot take the image shown (a raw
+network for a picture) opens it again instead.
 
 **Save as template.** A review says what goes in (the network and the
 layout always; the keys, tools and library unless left out), what is

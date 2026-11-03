@@ -662,12 +662,23 @@ impl eframe::App for App {
                 self.shell.notify(helios_gui::dialogs::Level::Error, e);
             }
         }
-        // The workspace's network changed (a reset, an import, an undo):
-        // the image goes through it again.
-        if self.shell.take_network_changed()
-            && let Err(e) = self.reopen()
-        {
-            self.shell.notify(helios_gui::dialogs::Level::Error, e);
+        // The workspace's network changed (an edit, a reset, an import,
+        // an undo): the image goes through it in place, its values and
+        // history kept; opened again when the new network cannot take it.
+        if self.shell.take_network_changed() {
+            match self.shell.keep_image_open() {
+                Ok(true) => {
+                    if let Some(persist) = &mut self.persist {
+                        persist.follow_graph(&self.shell);
+                    }
+                }
+                Ok(false) => {}
+                Err(_) => {
+                    if let Err(e) = self.reopen() {
+                        self.shell.notify(helios_gui::dialogs::Level::Error, e);
+                    }
+                }
+            }
         }
         let reading = self.show_library_read();
         if self.open_prepared() || reading {

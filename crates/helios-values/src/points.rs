@@ -148,6 +148,7 @@ impl Store {
         }
         let label = step.label.clone();
         self.commit(format!("undo {label}"), origin);
+        self.replayed = true;
         self.redo.push(step);
         Ok(Some(label))
     }

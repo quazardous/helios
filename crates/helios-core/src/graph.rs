@@ -379,6 +379,23 @@ impl Graph {
         })
     }
 
+    /// The image a source node holds; `None` for a module node.
+    pub fn source_image(&self, id: NodeId) -> Result<Option<&Image>, Error> {
+        Ok(match &self.node(id)?.kind {
+            Kind::Source { image, .. } => Some(image),
+            Kind::Module { .. } => None,
+        })
+    }
+
+    /// The context a module node is evaluated with (see
+    /// [`Graph::set_context`]); `None` for a source.
+    pub fn context(&self, id: NodeId) -> Result<Option<&Context>, Error> {
+        Ok(match &self.node(id)?.kind {
+            Kind::Source { .. } => None,
+            Kind::Module { context, .. } => Some(context),
+        })
+    }
+
     /// The parameters of a module node, completed with defaults; `None`
     /// for a source.
     pub fn params(&self, id: NodeId) -> Result<Option<Params>, Error> {
