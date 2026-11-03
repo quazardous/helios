@@ -1,0 +1,33 @@
+{
+  "format": 1,
+  "id": "helios.develop",
+  "version": 1,
+  "meta": {
+    "name": "Develop one image",
+    "scenario": "Develop a raw file from its sensor data: its levels, white balance, highlights, demosaicing and camera colours, then exposure and a sigmoid tone curve, the image large, its parameters and scopes beside.",
+    "tags": ["develop", "raw", "tone"]
+  },
+  "network": {
+    "sources": ["raw"],
+    "raw_sources": ["raw"],
+    "nodes": [
+      { "name": "rawprepare", "module": "rawprepare" },
+      { "name": "whitebalance", "module": "whitebalance" },
+      { "name": "highlights", "module": "highlights" },
+      { "name": "demosaic", "module": "demosaic" },
+      { "name": "colorin", "module": "colorin" },
+      { "name": "exposure", "module": "exposure" },
+      { "name": "sigmoid", "module": "sigmoid" }
+    ],
+    "connections": [
+      { "from": "raw", "port": "image", "to": "rawprepare", "input": "input" },
+      { "from": "rawprepare", "port": "output", "to": "whitebalance", "input": "input" },
+      { "from": "whitebalance", "port": "output", "to": "highlights", "input": "input" },
+      { "from": "highlights", "port": "output", "to": "demosaic", "input": "input" },
+      { "from": "demosaic", "port": "output", "to": "colorin", "input": "input" },
+      { "from": "colorin", "port": "output", "to": "exposure", "input": "input" },
+      { "from": "exposure", "port": "output", "to": "sigmoid", "input": "input" }
+    ],
+    "view": { "node": "sigmoid", "port": "output" }
+  }
+}

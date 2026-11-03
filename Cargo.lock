@@ -2504,10 +2504,14 @@ version = "0.45.0"
 dependencies = [
  "egui-pop-model",
  "helios-core",
+ "helios-module-colorin",
+ "helios-module-demosaic",
  "helios-module-exposure",
+ "helios-module-highlights",
  "helios-module-masks",
  "helios-module-rawprepare",
  "helios-module-sigmoid",
+ "helios-module-whitebalance",
  "serde",
  "serde_json",
 ]

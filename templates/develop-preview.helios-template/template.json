@@ -4,7 +4,7 @@
   "version": 1,
   "meta": {
     "name": "Develop (preview)",
-    "scenario": "Develop the picture with exposure and a sigmoid tone curve, the image large, its parameters and scopes beside. A raw file is developed from its embedded preview, not from its sensor data.",
+    "scenario": "Develop the picture with exposure and a sigmoid tone curve, the image large, its parameters and scopes beside. A raw file is developed from its embedded preview here; “Develop one image” develops it from its sensor data.",
     "tags": ["develop", "tone"]
   },
   "network": {

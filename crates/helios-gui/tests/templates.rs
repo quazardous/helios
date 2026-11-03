@@ -371,3 +371,118 @@ fn the_develop_template_speaks_french() {
     assert_eq!(i.t(&develop.name_key(), &[]), "Développer (aperçu)");
     assert!(i.t(&develop.scenario_key(), &[]).contains("aperçu intégré"));
 }
+
+#[test]
+fn a_workspace_from_develop_one_image_reads_a_raw_through_the_raw_chain() {
+    let root = temp("develop-raw");
+    let (config, dir) = (root.join("config"), root.join("develop"));
+    let develop = templates::find("helios.develop").unwrap();
+    let created = templates::create_workspace(&develop, &desktop(), &dir, &config).unwrap();
+    let kept = templates::workspace_template(&config, &created.workspace)
+        .unwrap()
+        .unwrap();
+    assert_eq!(kept.template, develop.template);
+    // The node's raw path, then exposure into sigmoid, on the desktop's
+    // own modules; its image a raw's sensor data.
+    assert!(kept.template.network.reads_raw());
+    let built = kept.build(&templates::modules()).unwrap();
+    let names: Vec<&str> = built.nodes.keys().map(String::as_str).collect();
+    assert_eq!(
+        names,
+        [
+            "colorin",
+            "demosaic",
+            "exposure",
+            "highlights",
+            "raw",
+            "rawprepare",
+            "sigmoid",
+            "whitebalance"
+        ]
+    );
+    assert_eq!(built.view.0, built.nodes["sigmoid"]);
+    let mut shell = Shell::builder(helios_panels(), Some(config.join("ui")))
+        .workspace(&created.workspace)
+        .build();
+    shell.load_layout().unwrap();
+    shell.apply_template_tools(&kept.template.meta.name, &kept.template.tools);
+    shell.apply_template_library(kept.template.library.as_ref());
+    let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+    h.run();
+    let shown = h.state().layout();
+    assert_eq!(shown.area_of(&panel("helios.viewport")), Some(Area::Center));
+    assert_eq!(shown.area_of(&panel("helios.params")), Some(Area::EndSide));
+    assert_eq!(shown.area_of(&panel("helios.scopes")), Some(Area::EndSide));
+    assert_eq!(
+        shown.area_of(&panel("helios.filmstrip")),
+        Some(Area::Bottom)
+    );
+    for p in ["helios.graph", "helios.masks"] {
+        assert!(shown.hidden.contains(&panel(p)), "{p}");
+    }
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn develop_one_image_speaks_french() {
+    let i = I18n::with_egui_pop("fr");
+    i.add_catalogues(helios_i18n::CATALOGUES).unwrap();
+    templates::add_texts(&i, &templates::builtin()).unwrap();
+    let develop = templates::find("helios.develop").unwrap();
+    assert_eq!(i.t(&develop.name_key(), &[]), "Développer une image");
+    assert!(
+        i.t(&develop.scenario_key(), &[])
+            .contains("données de capteur")
+    );
+}
+
+/// Every built-in template's arrangement, as a window on a workspace made
+/// from it shows it, under both pointer profiles: Helios's default
+/// (Photoshop's) and darktable's.
+#[test]
+fn each_template_keeps_its_arrangement_under_both_pointer_profiles() {
+    for template in templates::builtin() {
+        let id = template.template.id.clone();
+        for profile in [
+            helios_gui::pointer_choice::DEFAULT_PROFILE,
+            helios_gui::pointer_choice::DARKTABLE_PROFILE,
+        ] {
+            let root = temp(&format!("arrangement-{}-{profile}", id.replace('.', "-")));
+            let (config, dir) = (root.join("config"), root.join("workspace"));
+            let created = templates::create_workspace(&template, &desktop(), &dir, &config)
+                .unwrap_or_else(|e| panic!("{id}: {e}"));
+            let mut shell = Shell::builder(helios_panels(), Some(config.join("ui")))
+                .workspace(&created.workspace)
+                .build();
+            shell.load_layout().unwrap();
+            shell.apply_template_tools(&template.template.meta.name, &template.template.tools);
+            shell.apply_template_library(template.template.library.as_ref());
+            let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+            egui_pop::api::pointer::set_profile(h.state().app().handle(), profile).unwrap();
+            h.run();
+            assert_eq!(
+                egui_pop::api::pointer::profile_id(h.state().app().handle()),
+                profile
+            );
+            let wanted = &created.built.layout;
+            let shown = h.state().layout();
+            for p in wanted.placed() {
+                assert_eq!(
+                    shown.area_of(p),
+                    wanted.area_of(p),
+                    "{id}, {profile}: {}",
+                    p.as_str()
+                );
+            }
+            for p in &wanted.hidden {
+                assert!(
+                    shown.hidden.contains(p),
+                    "{id}, {profile}: {} shown",
+                    p.as_str()
+                );
+            }
+            drop(h);
+            std::fs::remove_dir_all(&root).unwrap();
+        }
+    }
+}

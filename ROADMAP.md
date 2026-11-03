@@ -583,7 +583,10 @@ hash) is part of Helios; deploying a NAS is not.
   headless so an AI can later design one on demand (a `template.design`
   decision). Composites are saved as their own versioned files; a
   template pins a composite's version and a newer one is offered, never
-  taken silently. First built-in: "Portrait retouch". Design in
+  taken silently. First built-in: "Portrait retouch". A template's
+  source may take a raw file's sensor data with its camera (2026-11-03);
+  "Develop one image" develops a raw through the node's raw chain on the
+  desktop, "Develop (preview)" stays for pictures. Design in
   [docs/templates.md](docs/templates.md). The Masks panel, the Scopes and
   the Navigator open as floating palettes by default (2026-10-28).
   Not decided: the toolbox's

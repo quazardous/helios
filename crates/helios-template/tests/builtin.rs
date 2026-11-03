@@ -17,6 +17,11 @@ fn root() -> PathBuf {
 fn catalogue() -> Catalogue {
     use helios_module_masks as m;
     let mut c = Catalogue::new()
+        .module(ModuleRef::new(helios_module_rawprepare::RawPrepare))
+        .module(ModuleRef::new(helios_module_whitebalance::WhiteBalance))
+        .module(ModuleRef::new(helios_module_highlights::Highlights))
+        .module(ModuleRef::new(helios_module_demosaic::Demosaic))
+        .module(ModuleRef::new(helios_module_colorin::ColorIn))
         .module(ModuleRef::new(helios_module_exposure::Exposure))
         .module(ModuleRef::new(helios_module_sigmoid::Sigmoid))
         .module(ModuleRef::new(m::MaskCombine))
@@ -257,6 +262,83 @@ fn develop_preview_is_valid_and_builds_exposure_into_sigmoid_beside_the_image() 
 #[test]
 fn develop_preview_speaks_english_and_french() {
     let bundle = develop();
+    for locale in ["en", "fr"] {
+        let text = bundle
+            .texts
+            .iter()
+            .find(|t| t.locale == locale)
+            .unwrap_or_else(|| panic!("no {locale} text"));
+        for key in [bundle.name_key(), bundle.scenario_key()] {
+            assert!(
+                text.source.contains(&format!("{key} = ")),
+                "{locale}: {key}"
+            );
+        }
+    }
+    let en = &bundle
+        .texts
+        .iter()
+        .find(|t| t.locale == "en")
+        .unwrap()
+        .source;
+    assert!(en.contains(&format!("= {}\n", bundle.template.meta.name)));
+    assert!(en.contains(&format!("= {}\n", bundle.template.meta.scenario)));
+}
+
+fn develop_raw() -> Bundle {
+    Bundle::load(&root().join("develop.helios-template")).unwrap()
+}
+
+#[test]
+fn develop_one_image_reads_a_raw_through_the_raw_chain_beside_the_image() {
+    let bundle = develop_raw();
+    assert_eq!(bundle.template.id, "helios.develop");
+    let report = bundle.validate(&catalogue());
+    assert!(report.is_ok(), "{:?}", report.problems);
+    let json = serde_json::to_value(&bundle.template).unwrap();
+    assert_eq!(
+        schema::check(&schema::template(), &json),
+        Vec::<String>::new()
+    );
+    // Its image is a raw's sensor data, through the node's raw path,
+    // then exposure into sigmoid, the sigmoid shown.
+    let net = &bundle.template.network;
+    assert_eq!(net.raw_sources, ["raw"]);
+    assert!(net.reads_raw());
+    let chain: Vec<&str> = net.nodes.iter().map(|n| n.name.as_str()).collect();
+    assert_eq!(
+        chain,
+        [
+            "rawprepare",
+            "whitebalance",
+            "highlights",
+            "demosaic",
+            "colorin",
+            "exposure",
+            "sigmoid"
+        ]
+    );
+    let mut from = "raw";
+    for to in &chain {
+        assert!(
+            net.connections
+                .iter()
+                .any(|c| c.from == from && c.to == *to),
+            "{from} -> {to}"
+        );
+        from = to;
+    }
+    let built = bundle.build(&catalogue()).unwrap();
+    assert_eq!(built.view.0, built.nodes["sigmoid"]);
+    // Laid out as the preview template: the image large, the parameters
+    // and the scopes beside, the filmstrip under.
+    let area = |p: &str| built.layout.area_of(&PanelId::new(p).unwrap());
+    assert_eq!(area("helios.viewport"), Some(Area::Center));
+    assert_eq!(area("helios.params"), Some(Area::EndSide));
+    assert_eq!(area("helios.scopes"), Some(Area::EndSide));
+    assert_eq!(area("helios.filmstrip"), Some(Area::Bottom));
+    assert!(bundle.template.meta.scenario.contains("sensor data"));
+    // Its text in English and French.
     for locale in ["en", "fr"] {
         let text = bundle
             .texts

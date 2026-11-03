@@ -16,6 +16,11 @@ use serde_json::{Value as Json, json};
 fn catalogue() -> Catalogue {
     use helios_module_masks as m;
     let mut c = Catalogue::new()
+        .module(ModuleRef::new(helios_module_rawprepare::RawPrepare))
+        .module(ModuleRef::new(helios_module_whitebalance::WhiteBalance))
+        .module(ModuleRef::new(helios_module_highlights::Highlights))
+        .module(ModuleRef::new(helios_module_demosaic::Demosaic))
+        .module(ModuleRef::new(helios_module_colorin::ColorIn))
         .module(ModuleRef::new(helios_module_exposure::Exposure))
         .module(ModuleRef::new(helios_module_sigmoid::Sigmoid))
         .module(ModuleRef::new(m::MaskCombine))
