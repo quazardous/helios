@@ -603,6 +603,24 @@ env = { CARGO_NET_OFFLINE = "true" }
 mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", raw-corpus = "/corpus", sccache = "/sccache" }
 timeout = "30m"
 
+# raws developed as the desktop develops them: a few files of the raw
+# corpus and darktable's integration images opened in "Develop one image"
+# (helios-gui's develop_raw tests), the middle of each rendered and
+# compared with the node's raw path; what each gave in the log, JUnit in
+# /out
+[jobs.raw-develop]
+about = "corpus raws developed through Develop one image, against the node's raw path"
+cores = 5
+memory = "6g"
+cwd = "/work/${src:-helios}"
+command = """mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && \
+HELIOS_RAW_CORPUS=/corpus HELIOS_TEST_IMAGES=/work/darktable/src/tests/integration/images \
+cargo nextest run --locked --profile ci --no-capture -p helios-gui --test develop_raw; rc=$?; \
+cp target/nextest/ci/junit.xml /out/; exit $rc"""
+env = { CARGO_NET_OFFLINE = "true" }
+mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", raw-corpus = "/corpus", sccache = "/sccache" }
+timeout = "45m"
+
 # ---------------------------------------------------------------- mask parity
 # Drawn masks against darktable (docs/masks.md, "Parity with darktable"):
 # builds darktable-cli from both pinned checkouts once (kept in the

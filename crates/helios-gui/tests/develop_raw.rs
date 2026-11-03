@@ -1,0 +1,198 @@
+//! Raws developed on the desktop: a file opened in a workspace made from
+//! "Develop one image" goes through its sensor data, the same chain and
+//! the same pixels as the node's raw path, and a picture is refused there.
+//!
+//! The raws are found as the other render tests find them: a few files
+//! of the raw corpus (`HELIOS_RAW_CORPUS`, a directory filled by
+//! `tools/bench/fill-corpus.sh`), and darktable's integration images
+//! (`HELIOS_TEST_IMAGES`, else a darktable checkout next to Helios's).
+//! A file missing is skipped, saying so.
+
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use helios_core::{Bus, Engine, Graph, Image, NodeId, Region};
+use helios_gui::templates;
+
+/// Corpus raws, by manifest id: a Bayer CR2, a Bayer NEF and an X-Trans
+/// RAF.
+const CORPUS: [&str; 3] = [
+    "canon-eos-350d-cr2-raw-3-2",
+    "nikon-d300-nef-12bit-lossless-compression",
+    "fujifilm-x-pro1-raf-12bit-12bit-uncompressed-3-2",
+];
+
+/// A corpus raw that is not a mosaic: the loader refuses it.
+const NOT_A_MOSAIC: &str = "canon-eos-5d-mark-iv-cr2-sraw";
+
+/// darktable's integration images: a Bayer CR2 and an X-Trans RAF.
+const DARKTABLE: [&str; 2] = ["mire1.cr2", "mire1-xtrans.raf"];
+
+fn corpus() -> Option<PathBuf> {
+    let dir = std::env::var_os("HELIOS_RAW_CORPUS").map(PathBuf::from);
+    if dir.is_none() {
+        eprintln!("skipped: HELIOS_RAW_CORPUS is not set");
+    }
+    dir
+}
+
+/// A corpus file by id, whatever its extension.
+fn corpus_file(dir: &Path, id: &str) -> Option<PathBuf> {
+    let found = std::fs::read_dir(dir)
+        .ok()?
+        .filter_map(Result::ok)
+        .map(|e| e.path())
+        .find(|p| p.file_stem().and_then(|s| s.to_str()) == Some(id));
+    if found.is_none() {
+        eprintln!("skipped: no {id} in {}", dir.display());
+    }
+    found
+}
+
+fn darktable_images() -> PathBuf {
+    std::env::var_os("HELIOS_TEST_IMAGES").map_or_else(
+        || {
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../../darktable/src/tests/integration/images")
+        },
+        PathBuf::from,
+    )
+}
+
+fn develop() -> helios_template::Bundle {
+    templates::find("helios.develop").expect("Develop one image is built in")
+}
+
+/// A square of `side` pixels at the middle of `extent`.
+fn middle(extent: Region, side: u32) -> Region {
+    let (w, h) = (extent.width.min(side), extent.height.min(side));
+    Region::new(
+        extent.x + i64::from((extent.width - w) / 2),
+        extent.y + i64::from((extent.height - h) / 2),
+        w,
+        h,
+    )
+}
+
+fn render(graph: &Graph, node: NodeId, port: &str, region: Region) -> Image {
+    Engine::new(Arc::new(Bus::new()))
+        .render(graph, node, port, region)
+        .unwrap()
+}
+
+/// The node's raw path on the same file, its modules at their defaults:
+/// the chain "Develop one image" wires.
+fn node_render(raw: &Path, region: Region) -> Image {
+    let network = serde_json::json!({
+        "sources": [{ "name": "raw", "file": raw }],
+        "modules": [
+            { "name": "rawprepare", "module": "rawprepare" },
+            { "name": "whitebalance", "module": "whitebalance" },
+            { "name": "highlights", "module": "highlights" },
+            { "name": "demosaic", "module": "demosaic" },
+            { "name": "colorin", "module": "colorin" },
+            { "name": "exposure", "module": "exposure" },
+            { "name": "sigmoid", "module": "sigmoid" }
+        ],
+        "connections": [
+            { "from": "raw", "port": "image", "to": "rawprepare", "input": "input" },
+            { "from": "rawprepare", "port": "output", "to": "whitebalance", "input": "input" },
+            { "from": "whitebalance", "port": "output", "to": "highlights", "input": "input" },
+            { "from": "highlights", "port": "output", "to": "demosaic", "input": "input" },
+            { "from": "demosaic", "port": "output", "to": "colorin", "input": "input" },
+            { "from": "colorin", "port": "output", "to": "exposure", "input": "input" },
+            { "from": "exposure", "port": "output", "to": "sigmoid", "input": "input" }
+        ]
+    });
+    let loaded = helios_node::load(serde_json::from_value(network).unwrap()).unwrap();
+    let tone = loaded.node("sigmoid").unwrap();
+    render(&loaded.graph, tone, "output", region)
+}
+
+/// Opens `raw` in "Develop one image" as the desktop does and renders the
+/// middle of the image: real light, in colour, and the node's pixels.
+fn develops(raw: &Path) {
+    let name = raw.display();
+    let (graph, node) = templates::open_file(raw, &develop()).unwrap();
+    let extent = graph.extent(node).unwrap().expect("a source feeds it");
+    // The sensor's data, not a preview: as large as the loader's crop.
+    let loaded = helios_load::load(raw).unwrap();
+    assert_eq!(extent, loaded.image.region(), "{name}");
+    let region = middle(extent, 256);
+    let out = render(&graph, node, "output", region);
+    assert_eq!(out.channels(), 4, "{name}");
+    let px = out.to_vec();
+    assert!(px.iter().all(|v| v.is_finite()), "{name}: not finite");
+    let mut mean = [0.0f64; 3];
+    for p in px.chunks(4) {
+        for c in 0..3 {
+            mean[c] += f64::from(p[c]);
+        }
+    }
+    let n = (px.len() / 4) as f64;
+    let mean = mean.map(|m| m / n);
+    let grey = (mean[0] + mean[1] + mean[2]) / 3.0;
+    eprintln!("{name}: {extent:?}, the middle's mean RGB {mean:?}");
+    assert!(grey > 0.02 && grey < 0.98, "{name}: mean {mean:?}");
+    // The node's raw path gives the same pixels.
+    let theirs = node_render(raw, region).to_vec();
+    let worst = px
+        .iter()
+        .zip(&theirs)
+        .map(|(a, b)| (a - b).abs())
+        .fold(0.0f32, f32::max);
+    assert!(worst < 1e-5, "{name}: differs from the node's by {worst}");
+}
+
+#[test]
+fn corpus_raws_develop_from_their_sensor_data() {
+    let Some(dir) = corpus() else { return };
+    for id in CORPUS {
+        if let Some(raw) = corpus_file(&dir, id) {
+            develops(&raw);
+        }
+    }
+}
+
+#[test]
+fn darktable_test_raws_develop_from_their_sensor_data() {
+    let dir = darktable_images();
+    for file in DARKTABLE {
+        let raw = dir.join(file);
+        if raw.is_file() {
+            develops(&raw);
+        } else {
+            eprintln!("skipped: no {}", raw.display());
+        }
+    }
+}
+
+#[test]
+fn a_raw_that_is_not_a_mosaic_is_refused_by_develop_and_previewed_elsewhere() {
+    let Some(dir) = corpus() else { return };
+    let Some(raw) = corpus_file(&dir, NOT_A_MOSAIC) else {
+        return;
+    };
+    let e = templates::open_file(&raw, &develop()).err().unwrap();
+    assert!(e.contains("not a mosaic"), "{e}");
+    // The preview template shows its embedded preview.
+    let preview = templates::find("helios.develop-preview").unwrap();
+    let (graph, node) = templates::open_file(&raw, &preview).unwrap();
+    assert!(graph.extent(node).unwrap().is_some());
+}
+
+#[test]
+fn a_picture_is_refused_by_develop_and_opens_in_the_preview_template() {
+    let dir = std::env::temp_dir().join(format!("helios-develop-raw-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let png = dir.join("grey.png");
+    image::RgbImage::from_pixel(16, 8, image::Rgb([120, 120, 120]))
+        .save(&png)
+        .unwrap();
+    let e = templates::open_file(&png, &develop()).err().unwrap();
+    assert!(e.contains("develops raw files"), "{e}");
+    let preview = templates::find("helios.develop-preview").unwrap();
+    let (graph, node) = templates::open_file(&png, &preview).unwrap();
+    assert_eq!(graph.extent(node).unwrap(), Some(Region::sized(16, 8)));
+    std::fs::remove_dir_all(&dir).unwrap();
+}
