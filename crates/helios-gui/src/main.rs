@@ -313,25 +313,15 @@ fn library_commands(
     Ok(())
 }
 
-/// A picture (or a raw file's embedded preview) through the
-/// workspace's network (its template's, as edited; an exposure through a
-/// mask for a workspace not made from one): the network and the node the
-/// viewport shows.
+/// A file through the workspace's network (its template's, as edited;
+/// an exposure through a mask for a workspace not made from one): the
+/// network and the node the viewport shows. A raw's sensor data when the
+/// network reads a raw, else a picture or a raw's embedded preview.
 fn image_graph(
     path: &Path,
     bundle: &helios_template::Bundle,
 ) -> Result<(helios_core::Graph, helios_core::NodeId), String> {
-    let image = match helios_load::Kind::of(path) {
-        helios_load::Kind::Picture => helios_load::load(path)?.image,
-        helios_load::Kind::Raw => helios_load::preview(path)?
-            .ok_or_else(|| format!("{}: no preview to show", path.display()))?,
-    };
-    let built = bundle.build_with(
-        &helios_gui::templates::modules(),
-        helios_template::Source::Picture(&image),
-        None,
-    )?;
-    Ok((built.graph, built.view.0))
+    helios_gui::templates::open_file(path, bundle)
 }
 
 /// What the viewport shows, to open again when the workspace's network

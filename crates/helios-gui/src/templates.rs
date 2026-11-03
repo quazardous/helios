@@ -14,9 +14,10 @@ use std::path::{Path, PathBuf};
 
 use egui_pop::i18n::I18n;
 use egui_pop::model::panels::PanelSpec;
-use helios_core::ModuleRef;
+use helios_core::{Graph, ModuleRef, NodeId};
+use helios_load::Kind;
 use helios_shell::commands::CommandSpec;
-use helios_template::{Built, Bundle, Catalogue};
+use helios_template::{Built, Bundle, Catalogue, Source};
 use serde_json::{Value as Json, json};
 
 /// Where a workspace keeps the template it was made from.
@@ -44,10 +45,17 @@ pub fn find(id: &str) -> Option<Bundle> {
     builtin().into_iter().find(|b| b.template.id == id)
 }
 
-/// The modules the desktop links and the composites Helios ships.
+/// The modules the desktop links and the composites Helios ships: the
+/// raw chain the node runs on a raw (levels, white balance, highlights,
+/// demosaicing, camera colours), the tools on a picture, the masks.
 pub fn modules() -> Catalogue {
     use helios_module_masks as m;
     let mut c = Catalogue::new()
+        .module(ModuleRef::new(helios_module_rawprepare::RawPrepare))
+        .module(ModuleRef::new(helios_module_whitebalance::WhiteBalance))
+        .module(ModuleRef::new(helios_module_highlights::Highlights))
+        .module(ModuleRef::new(helios_module_demosaic::Demosaic))
+        .module(ModuleRef::new(helios_module_colorin::ColorIn))
         .module(ModuleRef::new(helios_module_exposure::Exposure))
         .module(ModuleRef::new(helios_module_sigmoid::Sigmoid))
         .module(ModuleRef::new(m::MaskCombine))
@@ -67,6 +75,45 @@ pub fn modules() -> Catalogue {
         c.add_composite(file);
     }
     c
+}
+
+/// A file through a workspace's network (`bundle`'s): the graph and the
+/// node the viewport shows. A network reading a raw (its `raw_sources`)
+/// is given the file's sensor mosaic with its camera, and refuses a
+/// picture; any other network a picture, a raw file's embedded preview
+/// for a raw.
+pub fn open_file(path: &Path, bundle: &Bundle) -> Result<(Graph, NodeId), String> {
+    let catalogue = modules();
+    let built = if bundle.template.network.reads_raw() {
+        if Kind::of(path) == Kind::Picture {
+            return Err(format!(
+                "{}: “{}” develops raw files; open this picture in a workspace for pictures",
+                path.display(),
+                bundle.template.meta.name
+            ));
+        }
+        let loaded = helios_load::load(path)?;
+        let camera = loaded
+            .camera
+            .ok_or_else(|| format!("{}: no camera to develop it with", path.display()))?
+            .to_context();
+        bundle.build_with(
+            &catalogue,
+            Source::Raw {
+                mosaic: &loaded.image,
+                camera: &camera,
+            },
+            None,
+        )?
+    } else {
+        let image = match Kind::of(path) {
+            Kind::Picture => helios_load::load(path)?.image,
+            Kind::Raw => helios_load::preview(path)?
+                .ok_or_else(|| format!("{}: no preview to show", path.display()))?,
+        };
+        bundle.build_with(&catalogue, Source::Picture(&image), None)?
+    };
+    Ok((built.graph, built.view.0))
 }
 
 /// What a template may name on this desktop: [`modules`], and the panels

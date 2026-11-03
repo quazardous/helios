@@ -43,8 +43,15 @@ helios-library.workspace = true
 helios-module-exposure = { path = "../../modules/exposure" }
 # The drawn mask shapes the viewport edits (their outlines and handles).
 helios-module-masks = { path = "../../modules/masks" }
-# The tone mapper a workspace template may name (the Develop template's).
+# The tone mapper a workspace template may name (the Develop templates').
 helios-module-sigmoid = { path = "../../modules/sigmoid" }
+# The raw chain a workspace reading a raw names (the node's raw path):
+# levels, white balance, highlights, demosaicing, camera colours.
+helios-module-rawprepare = { path = "../../modules/rawprepare" }
+helios-module-whitebalance = { path = "../../modules/whitebalance" }
+helios-module-highlights = { path = "../../modules/highlights" }
+helios-module-demosaic = { path = "../../modules/demosaic" }
+helios-module-colorin = { path = "../../modules/colorin" }
 # MIT OR Apache-2.0: the system's time zone, for the days the library
 # shows (already in the tree through rawler).
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
