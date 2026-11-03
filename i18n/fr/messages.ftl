@@ -347,6 +347,10 @@ gui-open-workspace-verb = Ouvrir
 
 gui-opening = ouverture de { $path }
 
+gui-params-fold-section = Replier { $group }
+
+gui-params-unfold-section = Déplier { $group }
+
 gui-params-hide-values = Masquer les valeurs
 
 gui-params-no-members = aucun membre pour l’instant

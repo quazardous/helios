@@ -146,6 +146,11 @@ pub struct Descriptor {
     /// for every other value.
     #[serde(skip)]
     pub module: Option<String>,
+    /// The section a panel shows it under, a heading of its own (a
+    /// macro's exposed parameters, grouped by its author); `None`:
+    /// ungrouped.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
 }
 
 /// Decimals enough to show one step.
@@ -180,6 +185,7 @@ impl Descriptor {
             picker: false,
             widget: None,
             module: None,
+            group: None,
         }
     }
 
@@ -304,6 +310,7 @@ impl Descriptor {
             d.logarithmic = h.logarithmic;
             d.picker = h.picker;
             d.widget = h.widget;
+            d.group.clone_from(&h.group);
         }
         d
     }

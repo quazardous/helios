@@ -705,7 +705,9 @@ impl Params {
 
     /// The Parameters panel: the selected node's values, or every node's,
     /// grouped by node in the manifest's order; inside a sub-workspace
-    /// (the store's scope), its nodes' only.
+    /// (the store's scope), its nodes' only. A node whose parameters name
+    /// groups (a macro's exposed ones) shows them by section, a heading
+    /// per group that folds as a list does (see [`sections`]).
     /// A mask group's per-port lists say which member each value is for,
     /// from `members`.
     pub fn panel_ui(
@@ -716,20 +718,20 @@ impl Params {
         members: &Members,
     ) {
         self.end_steps(store, ui.input(|i| i.time));
-        let paths: Vec<(String, String)> = {
+        let paths: Vec<(String, String, Option<String>)> = {
             let s = store.lock().expect("value store lock");
             let mut entries = s.list("node/");
             // In the order the manifests declare them.
             entries.sort_by_key(|(_, e)| e.order);
             entries
                 .into_iter()
-                .filter_map(|(p, _)| {
+                .filter_map(|(p, e)| {
                     let rest = p.strip_prefix("node/")?;
                     let (node, _) = rest.rsplit_once('/')?;
-                    Some((node.to_string(), p.to_string()))
+                    Some((node.to_string(), p.to_string(), e.descriptor.group.clone()))
                 })
-                .filter(|(node, _)| selection.is_none_or(|s| s == node))
-                .filter(|(node, _)| s.in_scope(node))
+                .filter(|(node, _, _)| selection.is_none_or(|s| s == node))
+                .filter(|(node, _, _)| s.in_scope(node))
                 .collect()
         };
         if paths.is_empty() {
@@ -739,17 +741,88 @@ impl Params {
         egui::ScrollArea::vertical()
             .id_salt("helios.params")
             .show(ui, |ui| {
-                let mut current = None;
-                for (node, path) in &paths {
-                    if current != Some(node) {
-                        ui.add_space(4.0);
-                        ui.strong(node);
-                        current = Some(node);
+                let mut start = 0;
+                while start < paths.len() {
+                    let node = &paths[start].0;
+                    let end = paths[start..]
+                        .iter()
+                        .position(|(n, _, _)| n != node)
+                        .map_or(paths.len(), |i| start + i);
+                    ui.add_space(4.0);
+                    ui.strong(node);
+                    let rows: Vec<(&str, Option<&str>)> = paths[start..end]
+                        .iter()
+                        .map(|(_, p, g)| (p.as_str(), g.as_deref()))
+                        .collect();
+                    for (group, paths) in sections(&rows) {
+                        if let Some(group) = group
+                            && !section_row(ui, node, group)
+                        {
+                            continue;
+                        }
+                        for path in paths {
+                            self.param_ui_with(ui, store, path, members);
+                        }
                     }
-                    self.param_ui_with(ui, store, path, members);
+                    start = end;
                 }
             });
     }
+}
+
+/// A node's parameters by section: the ungrouped ones first, then each
+/// group in the order of its first parameter, its parameters in their
+/// order (`docs/design/macros.md`, "The exposed-parameter editor").
+pub fn sections<'a>(rows: &[(&'a str, Option<&'a str>)]) -> Vec<(Option<&'a str>, Vec<&'a str>)> {
+    let mut out: Vec<(Option<&str>, Vec<&str>)> = Vec::new();
+    if rows.iter().any(|(_, g)| g.is_none()) {
+        out.push((None, Vec::new()));
+    }
+    for (path, group) in rows {
+        match out.iter_mut().find(|(g, _)| g == group) {
+            Some((_, paths)) => paths.push(path),
+            None => out.push((*group, vec![path])),
+        }
+    }
+    out
+}
+
+/// A section's heading: a chevron and the group's name, a click on
+/// either folds or unfolds it (open at first). Returns whether it is
+/// open.
+fn section_row(ui: &mut Ui, node: &str, group: &str) -> bool {
+    let ctx = ui.ctx().clone();
+    let id = egui::Id::new(("helios.params.section", node, group));
+    let open = ctx.data(|m| m.get_temp::<bool>(id)).unwrap_or(true);
+    let hint = crate::i18n::text(
+        &ctx,
+        if open {
+            Message::new("gui-params-fold-section", "Fold { $group }")
+        } else {
+            Message::new("gui-params-unfold-section", "Unfold { $group }")
+        }
+        .with("group", group),
+    );
+    let icon = if open {
+        Icon::ChevronDown
+    } else {
+        Icon::ChevronRight
+    };
+    let clicked = ui
+        .horizontal(|ui| {
+            let chevron = ui
+                .add(icon.tone(Tone::Muted).label(&hint).sense_click())
+                .on_hover_text(&hint);
+            let title = ui
+                .add(egui::Label::new(egui::RichText::new(group).strong()).sense(Sense::click()))
+                .on_hover_text(&hint);
+            chevron.clicked() || title.clicked()
+        })
+        .inner;
+    if clicked {
+        ctx.data_mut(|m| m.insert_temp(id, !open));
+    }
+    open
 }
 
 /// A mask group's operator: a list of the operators by their effect

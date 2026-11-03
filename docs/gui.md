@@ -1048,7 +1048,10 @@ palette) opens the folder.
 
 Parameter widgets are generated from value descriptors and bound to the
 value store (see [widgets.md](widgets.md)); a widget never holds its
-value. A number is egui-pop's slider (`egui_pop::core::slider`, see its
+value. A node whose parameters name groups (a macro's exposed ones,
+grouped in its interface) shows them by section: the ungrouped ones
+first, then a heading per group in the order of its first parameter,
+which a click folds and unfolds as a list's row does (2026-11-03). A number is egui-pop's slider (`egui_pop::core::slider`, see its
 guide `docs/sliders.md`) built from the descriptor: soft and hard
 ranges, steps, unit, precision, the default to reset to, a logarithmic
 bar when the module's hint asks for one, and a picker button at the

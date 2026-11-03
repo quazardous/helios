@@ -520,3 +520,21 @@ fn a_choice_s_list_opens_and_picks() {
         .clone();
     assert_eq!(profile, Value::Choice("sigmoid".into()));
 }
+
+#[test]
+fn a_node_s_parameters_show_by_section_in_the_order_of_their_first() {
+    let rows = [
+        ("node/look/a", Some("Light")),
+        ("node/look/b", None),
+        ("node/look/c", Some("Edges")),
+        ("node/look/d", Some("Light")),
+    ];
+    assert_eq!(
+        helios_gui::params::sections(&rows),
+        vec![
+            (None, vec!["node/look/b"]),
+            (Some("Light"), vec!["node/look/a", "node/look/d"]),
+            (Some("Edges"), vec!["node/look/c"]),
+        ]
+    );
+}

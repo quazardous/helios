@@ -437,6 +437,10 @@ gui-param-past-range = { $label }: past its usual range
 
 gui-param-picker = Pick { $label } from the image
 
+gui-params-fold-section = Fold { $group }
+
+gui-params-unfold-section = Unfold { $group }
+
 gui-params-hide-values = Hide the values
 
 gui-params-no-members = no members yet
