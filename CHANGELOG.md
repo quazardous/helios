@@ -24,6 +24,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.49.1] - 2026-11-03
+
+### Fixed
+
+- Editing the workspace's network with an image open (adding or removing
+  a node, a reset, an import) no longer clears the image's undo history:
+  the image stays open through the new network with its values, and the
+  edit can be undone like any other step.
+
 ## [0.49.0] - 2026-11-03
 
 ### Added
