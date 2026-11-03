@@ -518,3 +518,21 @@ command-workspace-reset =
 
 command-workspace-saveAsTemplate =
     .title = Enregistrer l’espace de travail comme modèle (`id`, `name`, `description`, `icon`, `dry_run`)
+
+command-macro-make =
+    .title = Faire une macro de nœuds (`nodes`, les nœuds sélectionnés par défaut ; `name`, `expose`, `dry_run`)
+
+command-macro-open =
+    .title = Ouvrir une macro sur place, ses nœuds affichés (`node`, le nœud sélectionné par défaut ; `dry_run`)
+
+command-macro-fold =
+    .title = Replier une macro ouverte en un seul nœud (`node` ; `dry_run`)
+
+command-macro-toggle =
+    .title = Ouvrir la macro sélectionnée, ou replier celle qui contient le nœud sélectionné
+
+command-macro-dissolve =
+    .title = Défaire une macro en ses nœuds, devenus ordinaires (`node` ; `dry_run`)
+
+command-macro-upgrade =
+    .title = Passer une macro à une version plus récente de son fichier (`node`, `version` ; `dry_run`)

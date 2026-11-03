@@ -826,3 +826,19 @@ gui-queue-state-waiting = En attente
 gui-queue-summary = { $waiting } en attente, { $running } en cours, { $done } terminés, { $failed } échoués
 
 gui-queue-title = File d’attente de { $node }
+
+gui-macro-make-title = Faire une macro
+
+gui-macro-make-verb = Faire
+
+gui-macro-name = nom
+
+gui-modules-fold-hint = Replier { $node } en un seul nœud
+
+gui-modules-macro = macro { $version }
+
+gui-modules-open-hint = Ouvrir { $node } : ses modules affichés
+
+gui-modules-make-macro = Faire une macro…
+
+gui-modules-make-macro-hint = Regrouper les modules sélectionnés en un seul nœud (Ctrl+G dans le graphe)

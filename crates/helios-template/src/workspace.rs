@@ -1798,7 +1798,7 @@ pub mod tools {
             .ok_or_else(|| format!("`{key}` is missing"))
     }
 
-    fn files(config: &Path, args: &Json) -> Result<Files, String> {
+    pub fn files(config: &Path, args: &Json) -> Result<Files, String> {
         let dir = PathBuf::from(text(args, "workspace")?);
         if !dir.is_absolute() {
             return Err("`workspace` is an absolute path".into());
@@ -1985,6 +1985,89 @@ pub mod tools {
         let label = crate::network::label(id, args)?;
         let (next, answer) = crate::network::edited(&before, catalogue, id, args)?;
         step(&files, &before, &next, answer, args, catalogue, &label)
+    }
+
+    /// `{workspace, node | nodes, name, expose, version, dry_run}`: one
+    /// of the macros' steps (`macro.make`, `macro.open`, `macro.fold`,
+    /// `macro.dissolve`, `macro.upgrade`) on the files, `values` being an
+    /// image's values that differ from the network (none without an
+    /// image). Answers it, with the step itself, for the caller to move
+    /// the image's values: `None` for a dry run.
+    pub fn macro_step(
+        config: &Path,
+        id: &str,
+        args: &Json,
+        catalogue: &Catalogue,
+        values: &crate::macros::Values,
+    ) -> Result<(Json, Option<crate::macros::Step>), String> {
+        let files = files(config, args)?;
+        let before = files.load()?;
+        let node = || text(args, "node").map(String::from);
+        let (label, made) = match id {
+            "macro.make" => {
+                let nodes: Vec<String> = serde_json::from_value(args["nodes"].clone())
+                    .map_err(|e| format!("nodes: {e}"))?;
+                let name = text(args, "name")?;
+                let expose: Option<Vec<crate::format::Exposed>> = match &args["expose"] {
+                    Json::Null => None,
+                    v => Some(
+                        serde_json::from_value(v.clone()).map_err(|e| format!("expose: {e}"))?,
+                    ),
+                };
+                (
+                    format!("make macro {name}"),
+                    before.macro_made(catalogue, &nodes, name, expose.as_deref(), values)?,
+                )
+            }
+            "macro.open" => {
+                let node = node()?;
+                (
+                    format!("open {node}"),
+                    before.macro_opened(catalogue, &node, values)?,
+                )
+            }
+            "macro.fold" => {
+                let node = node()?;
+                (
+                    format!("fold {node}"),
+                    before.macro_folded(catalogue, &node, values)?,
+                )
+            }
+            "macro.dissolve" => {
+                let node = node()?;
+                (
+                    format!("dissolve {node}"),
+                    before.macro_dissolved(catalogue, &node, values)?,
+                )
+            }
+            "macro.upgrade" => {
+                let node = node()?;
+                let version = match &args["version"] {
+                    Json::Null => None,
+                    v => Some(
+                        v.as_u64()
+                            .and_then(|v| u32::try_from(v).ok())
+                            .ok_or("version: a whole number")?,
+                    ),
+                };
+                (
+                    format!("upgrade {node}"),
+                    before.macro_upgraded(catalogue, &node, version, values)?,
+                )
+            }
+            other => return Err(format!("no macro tool `{other}`")),
+        };
+        let answer = step(
+            &files,
+            &before,
+            &made.state,
+            made.answer.clone(),
+            args,
+            catalogue,
+            &label,
+        )?;
+        let done = (!dry(args)).then_some(made);
+        Ok((answer, done))
     }
 
     /// Answers a step worked out (with its `problems` and `dry_run`),

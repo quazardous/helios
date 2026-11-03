@@ -295,9 +295,19 @@ fn a_macro_opens_and_folds_without_rendering_anything_new() {
         .state
         .macro_opened(&catalogue(), "warm_look", &values)
         .unwrap();
-    assert!(
-        opened.values.is_empty(),
-        "the exposed values keep their paths"
+    assert_eq!(
+        opened.values,
+        Moves::from([
+            (
+                "node/warm_look.exp/exposure".into(),
+                Some(Value::Float(1.25))
+            ),
+            (
+                "node/warm_look.tone/contrast".into(),
+                Some(Value::Float(2.5))
+            ),
+        ]),
+        "the exposed values onto the inner nodes showing them"
     );
     assert!(opened.state.bundle.template.network.nodes[0].open);
     // Opened: the inner nodes are in the graph; the exposed values are
@@ -320,7 +330,10 @@ fn a_macro_opens_and_folds_without_rendering_anything_new() {
     // A change to an inner node while open is a change to the macro:
     // folding refuses it for now.
     let mut changed = values.clone();
-    changed.insert("node/warm_look.tone/contrast".into(), Value::Float(3.0));
+    changed.insert(
+        "node/warm_look.tone/white_target".into(),
+        Value::Float(300.0),
+    );
     let e = opened
         .state
         .macro_folded(&catalogue(), "warm_look", &changed)
@@ -331,6 +344,17 @@ fn a_macro_opens_and_folds_without_rendering_anything_new() {
         .macro_folded(&catalogue(), "warm_look", &values)
         .unwrap();
     assert_eq!(folded.state, made.state);
+    // An exposed value changed on its inner node goes back to the macro.
+    let mut moved = values.clone();
+    moved.insert("node/warm_look.tone/contrast".into(), Value::Float(3.0));
+    let folded = opened
+        .state
+        .macro_folded(&catalogue(), "warm_look", &moved)
+        .unwrap();
+    assert_eq!(
+        folded.values.get("node/warm_look/contrast"),
+        Some(&Some(Value::Float(3.0)))
+    );
     // A module does not open; a bypassed macro does not either.
     assert!(
         made.state

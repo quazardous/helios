@@ -50,8 +50,10 @@ use crate::viewport::ZoomTo;
 use crate::workbench::Contents;
 
 pub use crate::workbench::Content;
+pub use macro_edit::{SELECTED as GRAPH_SELECTED, selected_nodes};
 pub use workspace_edit::STATE as WORKSPACE_STATE;
 
+mod macro_edit;
 mod network_edit;
 mod workspace_edit;
 mod workspace_live;
@@ -864,6 +866,11 @@ impl Shell {
                 crate::params::SELECTION,
                 // Which node one looks at is not an edit: never undone.
                 helios_values::Descriptor::text("selected node", "").transient(),
+            );
+            store.declare(
+                macro_edit::SELECTED,
+                // The nodes selected, several at once: never undone.
+                helios_values::Descriptor::text("selected nodes", "[]").transient(),
             );
         }
         let has = |shell: &Shell, panel: &str| shell.panels.iter().any(|p| p.id.as_str() == panel);
@@ -2160,6 +2167,7 @@ impl Shell {
         for (id, title) in workspace_edit::COMMANDS
             .iter()
             .chain(network_edit::COMMANDS)
+            .chain(macro_edit::COMMANDS)
         {
             let id = *id;
             add(

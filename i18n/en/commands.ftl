@@ -193,6 +193,24 @@ command-library-importSource =
 command-library-pasteFiles =
     .title = Paste files or an image another application copied into the library, imported once confirmed (`dry_run`: only say what would be imported)
 
+command-macro-dissolve =
+    .title = Give a macro way to its nodes, as ordinary ones (`node`; `dry_run`)
+
+command-macro-fold =
+    .title = Fold an opened macro back into one node (`node`; `dry_run`)
+
+command-macro-make =
+    .title = Make a macro of nodes (`nodes`, the selected ones by default; `name`, `expose`, `dry_run`)
+
+command-macro-open =
+    .title = Open a macro in place, its nodes shown (`node`, the selected one by default; `dry_run`)
+
+command-macro-toggle =
+    .title = Open the selected macro, or fold the one the selected node is in
+
+command-macro-upgrade =
+    .title = Move a macro to a newer version of its file (`node`, `version`; `dry_run`)
+
 command-mask-add-circle =
     .title = Masks: add a circle at the view's centre
 

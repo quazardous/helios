@@ -540,7 +540,10 @@ places"): its nodes only shown and edited, its own layout and keys.
 `_import_parts`, `_save_as_template`, `helios_network_delegate`,
 `helios_subworkspace_delete`, the network edited node by node as the
 graph view does it (`helios_network_connect`, `_disconnect`, `_move`,
-`_add`, `_remove`, `_paste`), each with `dry_run`, and
+`_add`, `_remove`, `_paste`), the macros (`helios_macro_make`,
+`_open`, `_fold`, `_dissolve`, `_upgrade`; on the files, with an
+`image` and its `vault` whose values move with the step, saved as a
+version of its edit), each with `dry_run`, and
 `helios_workspace_undo`); each answer says where it was made (`via`):
 
 - **Through the desktop** (`via: desktop`), when a desktop holds the

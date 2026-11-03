@@ -2,8 +2,8 @@
 
 Status: **decided** (2026-10-30): the owner accepted every default
 below (the open questions at the end keep their reasoning). Built so
-far: step 1, the interface in the format, and step 2, the pure
-operations on a workspace (see "Build steps").
+far: step 1, the interface in the format, step 2, the pure operations
+on a workspace, and step 3, the desktop's steps (see "Build steps").
 
 A macro is a network of modules packaged as one node, showing only the
 parameters chosen for it (AVS's macro, Helios's workshop). The engine
@@ -489,7 +489,24 @@ and the docs it changes (`docs/gui.md`, `docs/templates.md`,
    the `macro.*` commands as workspace steps carrying the image's
    values in the same undo group; Ctrl+G, Ctrl+Alt+G, Ctrl+Enter; the
    graph's `macro:<name>` group and title menu; the Modules panel's
-   multi-selection, heading rows and disclosure; the MCP verbs.
+   multi-selection, heading rows and disclosure; the MCP verbs. Built,
+   with these changes:
+   - Ctrl+Enter runs `macro.toggle`: it opens the selected macro, or
+     folds the one the selected node is in.
+   - Opening moves the image's exposed values onto the inner
+     parameters they set (`node/<macro>.<inner>/<param>`), where the
+     opened macro's nodes show them; folding moves them back to
+     `node/<macro>/<exposed>`, so an exposed value changed on its inner
+     node is kept. Only other inner parameters changed while open
+     refuse the fold (step 5).
+   - egui-pop's groups have no title menu: a double click on an opened
+     macro's title folds it; Interface… and Dissolve are the commands
+     and keys.
+   - The image's values a step moves are those that differ from the
+     workspace's network. On the files (no desktop), the MCP verbs take
+     an `image` and its `vault`: the step reads that image's edit, and
+     saves its moved values as a new version of it, which no undo
+     takes back.
 4. **The interface editor** (`helios-gui`, egui-pop's dialog, tree and
    range slider): `macro.interface`, and sections by group in the
    Parameters panel. Anything egui-pop lacks (a tree drop between two

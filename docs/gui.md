@@ -491,6 +491,16 @@ network.
   kept in `view/graph/wires` (`param.set` for agents), and between
   sessions with the interface's settings
   (`settings/helios.graph_wires`, not shown in the settings window).
+- **Macros (2026-11-03).** Ctrl+G makes a macro of the selected nodes
+  (`macro.make`; their names in `view/graph/selected`, the name asked
+  in a form), Ctrl+Alt+G dissolves the selected macro
+  (`macro.dissolve`), Ctrl+Enter opens it or folds the one the selected
+  node is in (`macro.toggle`, `macro.open`, `macro.fold`); each is one
+  undo step that moves the open image's values with the network (see
+  [design/macros.md](design/macros.md)). An opened macro's nodes
+  (`<macro>.<inner>`) are drawn in a group `macro:<macro>` titled with
+  its name and version, wired as inside; a double click on its title
+  folds it.
 - **Sub-workspaces.** A double click on a sub-workspace's title (its
   stack in the overview) enters it (see "Sub-workspaces as places");
   inside, the graph shows its nodes only, the wires between them, and
@@ -1366,7 +1376,12 @@ the order they were added (2026-10-21):
 
 - **A row selects its module** (`view/graph/selection`, which the
   Parameters and Masks panels follow); the module it runs is named
-  beside it.
+  beside it. Shift+click selects a run of rows, Ctrl+click adds or takes
+  out one (`view/graph/selected`), and **Make macro…** packages the rows
+  selected (`macro.make`).
+- **Macros.** A folded macro is one row, `macro <version>` beside it,
+  with an arrow that opens it (`macro.open`); opened, its modules are
+  indented under a heading row whose arrow folds it (`macro.fold`).
 - **Bypass.** Each module with an input to pass through has a Bypass
   toggle: bypassed, it keeps its parameters and the image renders as if
   it were absent (see module-contract.md, "Bypass"); its name is struck

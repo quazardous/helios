@@ -95,6 +95,12 @@ command-library-copyFiles.title 47994437a8a0f5ba
 command-library-importFiles.title 2ae7b0b7cb69e013
 command-library-importSource.title 1cb6337694fcbe70
 command-library-pasteFiles.title 409587651f782f9a
+command-macro-dissolve.title e472cc526f105a70
+command-macro-fold.title 2b688b51faf5198e
+command-macro-make.title 607effc9999f8608
+command-macro-open.title 8e7ea4733df069ff
+command-macro-toggle.title 232ae7a906ca9da1
+command-macro-upgrade.title 1cde5d2276f9cf2e
 command-mask-add-circle.title 853e800a379c3a26
 command-mask-add-ellipse.title 369f2cd0736ffec6
 command-mask-add-gradient.title a0410f60ded15dd6
@@ -317,6 +323,9 @@ gui-library-reading 86a6bd85ffd7fbf5
 gui-library-search fddceff6dbd31d81
 gui-library-sync 0b5c87b7f38a10af
 gui-library-tags d8aadaa7f12dec16
+gui-macro-make-title c7440a253b10643e
+gui-macro-make-verb f16294f903896fd7
+gui-macro-name 23e46144529fec9c
 gui-mask-display e386310422b43af2
 gui-mask-display-grey a3252d1873c23889
 gui-mask-display-hint 08a963e3e539c9a9
@@ -383,8 +392,13 @@ gui-masks-tree-hint f297ce6a2372d366
 gui-masks-unlock 52d38f3a80ff723a
 gui-modules-bypass 90c419da8337da4d
 gui-modules-bypass-hint b821d3b701af9968
+gui-modules-fold-hint e819be3423c95479
+gui-modules-macro ba5fb00f7c9f1105
+gui-modules-make-macro 2d087321a3180165
+gui-modules-make-macro-hint bf09d3d22c4b5ffc
 gui-modules-none 5314405d4be22513
 gui-modules-none-in-scope b1dde6f86d2f89f2
+gui-modules-open-hint f040da17abef89f9
 gui-modules-restore-hint c8974d4a6ead1982
 gui-new-workspace-created 6ffa8013c877eae5
 gui-new-workspace-directory 790976655fc2525e

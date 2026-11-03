@@ -227,6 +227,8 @@ pub struct NetworkModel {
     /// The sub-workspaces shown as groups (the top ones, or those right
     /// under the one shown): their ids by group id.
     subworkspaces: BTreeMap<String, String>,
+    /// The opened macros shown as groups: their nodes by group id.
+    macros: BTreeMap<String, String>,
 }
 
 impl NetworkModel {
@@ -310,12 +312,17 @@ impl NetworkModel {
                 .into_iter()
                 .map(|principal| Group::new(stack_group(&principal), principal)),
         );
-        let edges = net
+        let mut edges: Vec<Edge> = net
             .connections
             .iter()
             .filter(|k| shown(&k.from) && shown(&k.to))
             .map(edge_of)
             .collect();
+        let mut macros = BTreeMap::new();
+        for n in net.nodes.iter().filter(|n| n.open && shown(&n.name)) {
+            open_macro(n, net, catalogue, &mut nodes, &mut edges, &mut groups);
+            macros.insert(macro_group(&n.name), n.name.clone());
+        }
         // The add menu: every module, then every composite at its newest
         // version (added by `id@version`, shown by its name).
         let kinds = catalogue
@@ -334,6 +341,7 @@ impl NetworkModel {
             kinds,
             params: BTreeMap::new(),
             subworkspaces,
+            macros,
         }
     }
 
@@ -388,7 +396,23 @@ impl NetworkModel {
     /// The sub-workspace whose title (or, in the overview, whose stack)
     /// holds a point of the graph.
     fn subworkspace_at(&self, at: egui::Pos2, level: Level) -> Option<String> {
-        for (group, id) in &self.subworkspaces {
+        self.group_at(&self.subworkspaces, at, level)
+    }
+
+    /// The opened macro whose title holds a point of the graph.
+    fn macro_at(&self, at: egui::Pos2, level: Level) -> Option<String> {
+        self.group_at(&self.macros, at, level)
+    }
+
+    /// Among `groups` (an id by group id), the one whose title (or, in
+    /// the overview, whose stack) holds a point of the graph.
+    fn group_at(
+        &self,
+        groups: &BTreeMap<String, String>,
+        at: egui::Pos2,
+        level: Level,
+    ) -> Option<String> {
+        for (group, id) in groups {
             let members: Vec<&Node> = self
                 .nodes
                 .iter()
@@ -421,6 +445,104 @@ impl NetworkModel {
 }
 
 /// What a node is: its module, or its composite (`id@version`).
+/// The group id of an opened macro.
+pub fn macro_group(node: &str) -> String {
+    format!("macro:{node}")
+}
+
+/// An opened macro drawn as its inner nodes (`<node>.<inner>`), framed
+/// in a group titled with its name and version: they take the place of
+/// its node, wired as inside, the wires reaching the macro moved to the
+/// inner ports they feed and from the inner outputs it gives.
+fn open_macro(
+    n: &NodeDesc,
+    net: &NetworkDesc,
+    catalogue: &Catalogue,
+    nodes: &mut Vec<Node>,
+    edges: &mut Vec<Edge>,
+    groups: &mut Vec<Group>,
+) {
+    use helios_template::format::PORTS;
+    let Some(r) = &n.composite else { return };
+    let Some(file) = catalogue.get_composite(r) else {
+        return;
+    };
+    let Some(at) = nodes.iter().position(|x| x.id == n.name) else {
+        return;
+    };
+    let folded = nodes.remove(at);
+    let group = macro_group(&n.name);
+    groups.push(Group::new(
+        group.clone(),
+        format!("{} · {} {}", n.name, file.name, r.version),
+    ));
+    let inner = |name: &str| format!("{}.{name}", n.name);
+    for (i, x) in file.nodes.iter().enumerate() {
+        let Ok(m) = catalogue.resolve(x.module.as_deref(), x.composite.as_ref(), 0) else {
+            continue;
+        };
+        let manifest = m.manifest();
+        let kind = x
+            .module
+            .clone()
+            .or_else(|| x.composite.as_ref().map(ToString::to_string))
+            .unwrap_or_default();
+        #[allow(clippy::cast_precision_loss)]
+        let pos = [folded.pos[0] + i as f32 * RANK_STEP, folded.pos[1]];
+        let mut node = Node::new(inner(&x.name), kind, inner(&x.name), pos);
+        let port = |p: &helios_core::PortSpec| {
+            let info = PortInfo::of_spec(p);
+            Port::new(&info.name, &info.name, PortType::new(&info.ty))
+        };
+        node.inputs = manifest.inputs.iter().map(port).collect();
+        node.outputs = manifest.outputs.iter().map(port).collect();
+        node.group = Some(group.clone());
+        nodes.insert(at + i, node);
+    }
+    let mut out: Vec<Edge> = Vec::new();
+    for e in edges.drain(..) {
+        if e.to.node == n.name {
+            // Into the macro: to each inner input its port feeds.
+            for c in file
+                .connections
+                .iter()
+                .filter(|c| c.from == PORTS && c.port == e.to.port)
+            {
+                out.push(Edge::new(
+                    e.from.clone(),
+                    PortRef::new(inner(&c.to), &c.input),
+                ));
+            }
+        } else if e.from.node == n.name {
+            // Out of it: from the inner output its exit gives.
+            if let Some(x) = file.exits.iter().find(|x| x.output == e.from.port) {
+                let from = if x.from == PORTS {
+                    match net
+                        .connections
+                        .iter()
+                        .find(|c| c.to == n.name && c.input == x.port)
+                    {
+                        Some(f) => PortRef::new(&f.from, &f.port),
+                        None => continue,
+                    }
+                } else {
+                    PortRef::new(inner(&x.from), &x.port)
+                };
+                out.push(Edge::new(from, e.to.clone()));
+            }
+        } else {
+            out.push(e);
+        }
+    }
+    for c in file.connections.iter().filter(|c| c.from != PORTS) {
+        out.push(Edge::new(
+            PortRef::new(inner(&c.from), &c.port),
+            PortRef::new(inner(&c.to), &c.input),
+        ));
+    }
+    *edges = out;
+}
+
 fn kind_of(n: &NodeDesc) -> String {
     match (&n.module, &n.composite) {
         (Some(m), _) => m.clone(),
@@ -790,12 +912,24 @@ impl GraphPanel {
         }
         self.seen = seq;
         self.moved.clear();
-        self.template = entry.and_then(|e| match &e.value {
-            helios_core::Value::Text(t) => serde_json::from_str::<Json>(t)
-                .ok()
-                .and_then(|j| serde_json::from_value(j["template"].clone()).ok()),
+        let json = entry.and_then(|e| match &e.value {
+            helios_core::Value::Text(t) => serde_json::from_str::<Json>(t).ok(),
             _ => None,
         });
+        self.template = json
+            .as_ref()
+            .and_then(|j| serde_json::from_value(j["template"].clone()).ok());
+        // The workspace's own composites (its macros) join the modules.
+        self.catalogue = crate::templates::modules();
+        let composites: Vec<helios_template::CompositeFile> = json
+            .as_ref()
+            .and_then(|j| serde_json::from_value(j["composites"].clone()).ok())
+            .unwrap_or_default();
+        for f in composites {
+            if self.catalogue.get_composite(&f.reference()).is_none() {
+                self.catalogue.add_composite(f);
+            }
+        }
     }
 
     /// The headers, read again a few times a second.
@@ -985,6 +1119,21 @@ impl GraphPanel {
     /// selected before when it still is, else the first. A node newly
     /// selected brings up the Parameters panel.
     fn select(&mut self, values: &Arc<Mutex<Store>>, nodes: &[String]) {
+        // Every node selected, for the commands taking several (a macro
+        // made of them).
+        {
+            let mut store = lock(values);
+            let all = json!(nodes).to_string();
+            if store.get(crate::shell::GRAPH_SELECTED).map(|e| &e.value)
+                != Some(&helios_core::Value::Text(all.clone()))
+            {
+                let _ = store.set(Set::new(
+                    crate::shell::GRAPH_SELECTED,
+                    Change::To(helios_core::Value::Text(all)),
+                    Origin::User,
+                ));
+            }
+        }
         let keep = self
             .selection
             .as_ref()
@@ -1063,6 +1212,10 @@ impl GraphPanel {
         let graph_at = view.center() + (at - rect.center()) / out.zoom;
         if let Some(id) = model.subworkspace_at(graph_at, out.level) {
             self.enter_subworkspace(&id);
+        } else if let Some(node) = model.macro_at(graph_at, out.level) {
+            // An opened macro's title folds it.
+            self.commands
+                .push(("macro.fold".into(), json!({ "node": node })));
         }
     }
 

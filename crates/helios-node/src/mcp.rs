@@ -259,6 +259,10 @@ fn optional_object() -> Value {
     json!({ "type": ["object", "null"] })
 }
 
+fn optional_objects() -> Value {
+    json!({ "type": ["array", "null"], "items": { "type": "object" } })
+}
+
 fn objects() -> Value {
     json!({ "type": "array", "items": { "type": "object" } })
 }
@@ -392,6 +396,21 @@ const SLOT: Param = optional(
     "The clipboard slot: the agent's own (`agent:mcp`) when null; `user` is refused unless the user allows it",
 );
 
+const MACRO_NODE: Param = Param {
+    name: "node",
+    schema: string,
+    description: "The macro's node in the network",
+    default: None,
+};
+
+const MACRO_IMAGE: Param = optional(
+    "image",
+    optional_string,
+    "With no desktop holding the workspace: the image (its id in the vault) whose values move with the step, saved as a version of its edit; with `vault`",
+);
+
+const MACRO_VAULT: Param = optional("vault", optional_string, "The vault file holding `image`");
+
 const ENDPOINTS: &str = "helios.param (the focused parameter), helios.graph (the graph view's selection, the workspace's network), helios.masks (the mask edited), helios.library (the grid's selection, the library)";
 
 const HISTORY_SCOPE: Param = optional(
@@ -512,6 +531,102 @@ pub const TOOLS: &[Tool] = &[
                 description: "Nodes of the network (a node's name, or an opened composite's inner node: retouch.mask)",
                 default: None,
             },
+            GROUP,
+            DRY_RUN,
+            CONFIG,
+        ],
+    },
+    Tool {
+        name: "helios_macro_make",
+        endpoint: Endpoint::Workspace,
+        cmd: "macro.make",
+        description: "Packages nodes of a workspace's network as one macro node, as one undoable step: a composite file `user.<slug of the name>@1` joins the workspace, its inputs the wires reaching the nodes, its outputs those read outside or shown; the parameters the image changed are exposed (or those in `expose`), their values moved to the macro. Refused for a source, a bypassed node, a node outside that reads the nodes and feeds them, nodes crossing a sub-workspace's edge. Through the desktop, the open image's values move in the same undo step; on the files, those of `image` in `vault`, saved as a version of its edit",
+        params: &[
+            WORKSPACE,
+            Param {
+                name: "nodes",
+                schema: strings,
+                description: "The nodes to package; through the desktop, the ones selected in the graph when empty",
+                default: Some(empty_list),
+            },
+            Param {
+                name: "name",
+                schema: string,
+                description: "The macro's name, in the user's words",
+                default: None,
+            },
+            optional(
+                "expose",
+                optional_objects,
+                "The parameters exposed: each `name`, `node`, `param`, and optionally `label`, `description`, `unit`, `group`, `min`, `max`, `soft`, `options`, `default`; the ones the image changed when null",
+            ),
+            MACRO_IMAGE,
+            MACRO_VAULT,
+            GROUP,
+            DRY_RUN,
+            CONFIG,
+        ],
+    },
+    Tool {
+        name: "helios_macro_open",
+        endpoint: Endpoint::Workspace,
+        cmd: "macro.open",
+        description: "Opens a macro in place, as one undoable step: its inner nodes join the network as `<node>.<inner>`, wired as inside; its exposed values keep their paths. Refused for a module, a macro already open or bypassed",
+        params: &[
+            WORKSPACE,
+            MACRO_NODE,
+            MACRO_IMAGE,
+            MACRO_VAULT,
+            GROUP,
+            DRY_RUN,
+            CONFIG,
+        ],
+    },
+    Tool {
+        name: "helios_macro_fold",
+        endpoint: Endpoint::Workspace,
+        cmd: "macro.fold",
+        description: "Folds an opened macro back into one node, as one undoable step. Refused while the image changed its inner nodes (a change to the macro itself)",
+        params: &[
+            WORKSPACE,
+            MACRO_NODE,
+            MACRO_IMAGE,
+            MACRO_VAULT,
+            GROUP,
+            DRY_RUN,
+            CONFIG,
+        ],
+    },
+    Tool {
+        name: "helios_macro_dissolve",
+        endpoint: Endpoint::Workspace,
+        cmd: "macro.dissolve",
+        description: "Gives a macro way to its inner nodes as ordinary ones, as one undoable step: named as inside when free, wired as the macro was, its exposed values written to them; its file stays in the workspace",
+        params: &[
+            WORKSPACE,
+            MACRO_NODE,
+            MACRO_IMAGE,
+            MACRO_VAULT,
+            GROUP,
+            DRY_RUN,
+            CONFIG,
+        ],
+    },
+    Tool {
+        name: "helios_macro_upgrade",
+        endpoint: Endpoint::Workspace,
+        cmd: "macro.upgrade",
+        description: "Moves a macro to another version of its file (the newest when `version` is null), as one undoable step: its values carried by name, clamped into a narrower range or dropped, the answer says which. Refused while it is open",
+        params: &[
+            WORKSPACE,
+            MACRO_NODE,
+            optional(
+                "version",
+                optional_integer,
+                "The version to move to; the newest the catalogue has when null",
+            ),
+            MACRO_IMAGE,
+            MACRO_VAULT,
             GROUP,
             DRY_RUN,
             CONFIG,
@@ -2048,6 +2163,7 @@ fn workspace_call(request: &Value) -> Result<Value, String> {
         "workspace.import_parts" => tools::import_parts(&config, &args, &catalogue),
         "workspace.save_as_template" => tools::save_as_template(&config, &args, &catalogue),
         "network.delegate" => tools::delegate(&config, &args, &catalogue),
+        cmd if cmd.starts_with("macro.") => macro_on_files(&config, cmd, &args, &catalogue),
         cmd if helios_template::network::is_command(cmd) => {
             tools::network(&config, cmd, &args, &catalogue)
         }
@@ -2069,6 +2185,118 @@ fn workspace_call(request: &Value) -> Result<Value, String> {
         o.insert("via".into(), json!("files"));
     }
     Ok(answer)
+}
+
+/// A macro step on a workspace's files (no desktop holds it). With an
+/// `image` of the vault at `vault`, its values move with the step: the
+/// step is worked out from the values its edit holds that differ from the
+/// network, and a version of its edit is saved through the new network
+/// (labelled after the step, made by the agent). No undo: the files'
+/// step undoes the workspace, not the image.
+fn macro_on_files(
+    config: &std::path::Path,
+    cmd: &str,
+    args: &Value,
+    catalogue: &helios_template::Catalogue,
+) -> Result<Value, String> {
+    use helios_template::workspace::tools;
+    let image = args["image"].as_str().filter(|s| !s.is_empty());
+    let vault = args["vault"].as_str().filter(|s| !s.is_empty());
+    let opened = match (image, vault) {
+        (Some(image), Some(vault)) => {
+            let store = helios_vault_sqlite::SqliteStore::open(std::path::Path::new(vault))
+                .map_err(|e| format!("{vault}: {e}"))?;
+            let vault = helios_vault::Vault::new(store);
+            let image = helios_vault::ImageId::from_hex(image)?;
+            let (session, head) = helios_vault::EditSession::open(&vault, image)?;
+            Some((vault, session, head))
+        }
+        (None, None) => None,
+        _ => {
+            return Err(
+                "`image` and `vault` go together: the image's values move with the step".into(),
+            );
+        }
+    };
+    let head_edit = opened
+        .as_ref()
+        .and_then(|(_, _, head)| head.as_ref().map(|h| h.edit.clone()));
+    let before = tools::files(config, args)?.load()?;
+    let values = match &head_edit {
+        Some(edit) => edit_values(&before, catalogue, edit)?,
+        None => helios_template::macros::Values::new(),
+    };
+    let (mut answer, step) = tools::macro_step(config, cmd, args, catalogue, &values)?;
+    if let (Some((vault, mut session, _)), Some(step)) = (opened, step) {
+        let mut graph = step.state.bundle.build(catalogue)?.graph;
+        if let Some(edit) = &head_edit {
+            // What does not fit the new network (a node gone) is left.
+            let _ = helios_vault::edit::apply_to_graph(&mut graph, edit);
+        }
+        for (path, value) in step
+            .values
+            .iter()
+            .filter_map(|(p, v)| Some((p, v.clone()?)))
+        {
+            if let Some((node, param)) = path
+                .strip_prefix("node/")
+                .and_then(|rest| rest.rsplit_once('/'))
+                && let Some(id) = graph.find(node)
+            {
+                graph
+                    .set_param(id, param, value)
+                    .map_err(|e| format!("{path}: {e}"))?;
+            } else if let Some(node) = path.strip_prefix("bypass/")
+                && let Some(id) = graph.find(node)
+            {
+                graph
+                    .set_bypass(id, value.as_bool() == Some(true))
+                    .map_err(|e| format!("{path}: {e}"))?;
+            }
+        }
+        let mut edit = helios_vault::edit::of_graph(&graph);
+        if let Some(head) = &head_edit {
+            for key in ["decisions", "marks"] {
+                if !head[key].is_null() {
+                    edit[key] = head[key].clone();
+                }
+            }
+        }
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs());
+        let saved = session.save(&vault, edit, cmd, "agent:mcp", now)?;
+        answer["image_version"] = json!(saved.map(|v| v.id.hex()));
+    }
+    Ok(answer)
+}
+
+/// The values an image's edit holds that differ from a workspace's
+/// network (`node/<node>/<param>`, `bypass/<node>`).
+fn edit_values(
+    state: &helios_template::workspace::State,
+    catalogue: &helios_template::Catalogue,
+    edit: &Value,
+) -> Result<helios_template::macros::Values, String> {
+    let graph = state.bundle.build(catalogue)?.graph;
+    let mut values = helios_template::macros::Values::new();
+    let bypassed = helios_vault::edit::bypassed(edit);
+    for (node, (_, params)) in helios_vault::edit::modules(edit)? {
+        let Some(id) = graph.find(&node) else {
+            continue;
+        };
+        let network = graph.params(id).ok().flatten().unwrap_or_default();
+        for (param, v) in params.iter() {
+            if network.get(param).is_some_and(|n| n != v) {
+                values.insert(format!("node/{node}/{param}"), v.clone());
+            }
+        }
+        let on = bypassed.contains(&node);
+        if on != graph.is_bypassed(id).unwrap_or(false) {
+            values.insert(format!("bypass/{node}"), helios_core::Value::Bool(on));
+        }
+    }
+    Ok(values)
 }
 
 /// Answers one JSON-RPC message; `None` for notifications.
@@ -2770,5 +2998,76 @@ mod tests {
             true
         );
         let _ = std::fs::remove_file(card);
+    }
+    #[test]
+    fn a_macro_made_on_the_files_moves_an_image_s_values_into_a_version() {
+        use helios_vault::Store as _;
+        let root = std::env::temp_dir().join(format!("helios-mcp-macro-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let (config, ws) = (root.join("config"), root.join("photos"));
+        std::fs::create_dir_all(&ws).unwrap();
+        // An image whose edit sets the blank network's exposure.
+        let path = root.join("vault.db");
+        let id = helios_vault::ImageId(helios_core::ContentHash([7; 32]));
+        let mut store = helios_vault_sqlite::SqliteStore::open(&path).unwrap();
+        store
+            .add_image(&helios_vault::Image {
+                id,
+                size: 10,
+                partial: helios_core::ContentHash([7; 32]),
+            })
+            .unwrap();
+        let vault = helios_vault::Vault::new(store);
+        let (mut session, _) = helios_vault::EditSession::open(&vault, id).unwrap();
+        let edit = json!({ "modules": [{ "name": "exposure", "module": "exposure",
+            "params": { "exposure": { "float": 1.0 } } }] });
+        session
+            .save(&vault, edit, "set exposure", "user", 1)
+            .unwrap();
+        drop(vault);
+        let args = json!({
+            "workspace": ws,
+            "nodes": ["exposure"],
+            "name": "Look",
+            "image": id.hex(),
+            "vault": path,
+        });
+        let answer = macro_on_files(&config, "macro.make", &args, &workspace_catalogue()).unwrap();
+        assert_eq!(answer["node"], "look", "{answer}");
+        assert!(answer["image_version"].is_string(), "{answer}");
+        // The workspace's files hold the macro.
+        let files = helios_template::workspace::tools::files(&config, &args).unwrap();
+        let state = files.load().unwrap();
+        assert!(
+            state
+                .bundle
+                .template
+                .network
+                .nodes
+                .iter()
+                .any(|n| n.name == "look")
+        );
+        // The image's head: its value on the macro, the exposure gone.
+        let vault =
+            helios_vault::Vault::new(helios_vault_sqlite::SqliteStore::open(&path).unwrap());
+        let head = vault.heads(&id).unwrap().remove(0);
+        let modules = helios_vault::edit::modules(&head.edit).unwrap();
+        assert!(!modules.contains_key("exposure"), "{}", head.edit);
+        assert_eq!(
+            modules["look"].1.get("exposure"),
+            Some(&helios_core::Value::Float(1.0)),
+            "{}",
+            head.edit
+        );
+        // Without its vault, an image is refused.
+        let e = macro_on_files(
+            &config,
+            "macro.open",
+            &json!({ "workspace": ws, "node": "look", "image": id.hex() }),
+            &workspace_catalogue(),
+        )
+        .unwrap_err();
+        assert!(e.contains("go together"), "{e}");
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

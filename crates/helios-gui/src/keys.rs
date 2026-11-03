@@ -137,6 +137,12 @@ pub fn defaults() -> Vec<(String, String, String)> {
     // network: I enters the one holding the selected node, U goes up
     // (inside one only: its own layer).
     bind("I", "subworkspace.enter", &graph());
+    // Macros, in the graph, as Blender's and Nuke's groups: Ctrl+G makes
+    // one of the selected nodes, Ctrl+Alt+G dissolves the selected one,
+    // Ctrl+Enter opens it or folds the one the selected node is in.
+    bind("Ctrl+G", "macro.make", &graph());
+    bind("Ctrl+Alt+G", "macro.dissolve", &graph());
+    bind("Ctrl+Enter", "macro.toggle", &graph());
     bind("U", "nav.up", &subworkspace());
     // Navigation, everywhere (egui-pop adds the palette, settings, back,
     // full screen, undo and quit).

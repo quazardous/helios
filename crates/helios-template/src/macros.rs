@@ -666,6 +666,12 @@ impl State {
                 "`{node}` is bypassed: an opened macro is bypassed node by node, turn it on first"
             ));
         }
+        let file = self
+            .bundle
+            .catalogue(catalogue)
+            .get_composite(&r)
+            .ok_or_else(|| format!("unknown composite `{r}`"))?
+            .clone();
         let mut next = self.clone();
         next.bundle.template.network.nodes[i].open = true;
         next.bundle.template.network.nodes[i].bypassed = false;
@@ -673,6 +679,16 @@ impl State {
         let mut moves = Moves::new();
         if values.contains_key(&bypass_path(node)) {
             moves.insert(bypass_path(node), None);
+        }
+        // The image's exposed values onto the inner parameters they set,
+        // where the opened macro's nodes show them.
+        for (name, v) in values_of(values, node) {
+            for x in file.exposed.iter().filter(|x| x.name == name) {
+                moves.insert(
+                    node_path(&format!("{node}.{}", x.node), &x.param),
+                    Some(v.clone()),
+                );
+            }
         }
         Ok(Step {
             state: next,
@@ -682,8 +698,10 @@ impl State {
     }
 
     /// Folds the opened macro `node` back into one node (`macro.fold`).
-    /// Refused while the image holds values of its inner nodes: those are
-    /// changes to the macro itself, which a new version settles.
+    /// The image's values of exposed inner parameters go back to the
+    /// macro's (`node/<node>/<exposed>`). Refused while the image holds
+    /// values of other inner parameters: those are changes to the macro
+    /// itself, which a new version settles.
     pub fn macro_folded(
         &self,
         catalogue: &Catalogue,
@@ -694,7 +712,30 @@ impl State {
         if !desc.open {
             return Err(format!("`{node}` is not open"));
         }
-        let changed = inner_paths(values, node);
+        let file = self
+            .bundle
+            .catalogue(catalogue)
+            .get_composite(&r)
+            .ok_or_else(|| format!("unknown composite `{r}`"))?
+            .clone();
+        let prefix = format!("node/{node}.");
+        let mut moves = Moves::new();
+        let mut changed = Vec::new();
+        for path in inner_paths(values, node) {
+            let exposed = path[prefix.len()..]
+                .split_once('/')
+                .and_then(|(inner, param)| {
+                    file.exposed
+                        .iter()
+                        .find(|x| x.node == inner && x.param == param)
+                });
+            match exposed {
+                Some(x) => {
+                    moves.insert(node_path(node, &x.name), values.get(&path).cloned());
+                }
+                None => changed.push(path),
+            }
+        }
         if !changed.is_empty() {
             return Err(format!(
                 "`{node}` changed while open ({}): keep it open, or dissolve it",
@@ -706,7 +747,7 @@ impl State {
         let next = State::checked(next, catalogue)?;
         Ok(Step {
             state: next,
-            values: Moves::new(),
+            values: moves,
             answer: json!({ "node": node, "composite": r, "open": false }),
         })
     }

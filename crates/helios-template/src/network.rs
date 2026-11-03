@@ -66,7 +66,8 @@ pub struct PortInfo {
 }
 
 impl PortInfo {
-    fn of(spec: &PortSpec) -> PortInfo {
+    /// A port as the graph view types it.
+    pub fn of_spec(spec: &PortSpec) -> PortInfo {
         let ty = match &spec.kind {
             PortKind::Image { channels: 4 } => "image".to_string(),
             PortKind::Image { channels: 1 } => "mask".to_string(),
@@ -114,13 +115,14 @@ pub fn ports_of(
     if let Some(m) = &n.module {
         let manifest = catalogue.get_module(m)?.manifest();
         return Some((
-            manifest.inputs.iter().map(PortInfo::of).collect(),
-            manifest.outputs.iter().map(PortInfo::of).collect(),
+            manifest.inputs.iter().map(PortInfo::of_spec).collect(),
+            manifest.outputs.iter().map(PortInfo::of_spec).collect(),
         ));
     }
     let file = catalogue.get_composite(n.composite.as_ref()?)?;
-    let of =
-        |ports: &[crate::format::Port]| ports.iter().map(|p| PortInfo::of(&p.spec())).collect();
+    let of = |ports: &[crate::format::Port]| {
+        ports.iter().map(|p| PortInfo::of_spec(&p.spec())).collect()
+    };
     Some((of(&file.inputs), of(&file.outputs)))
 }
 

@@ -134,7 +134,7 @@ impl Catalogue {
 
     /// The module or composite a node names, a composite built as a
     /// macro.
-    pub(crate) fn resolve(
+    pub fn resolve(
         &self,
         module: Option<&str>,
         composite: Option<&CompositeRef>,

@@ -896,6 +896,7 @@ impl Shell {
             }
             "network.delegate" => self.delegate_nodes(args, origin),
             "subworkspace.delete" => self.delete_subworkspace(args, origin),
+            m if m.starts_with("macro.") => self.macro_command(m, args, origin),
             network if network.starts_with("network.") => {
                 self.network_command(network, args, origin)
             }
@@ -904,7 +905,7 @@ impl Shell {
     }
 
     /// A form whose answer runs `command` with `args` and its values.
-    fn form_with(&mut self, f: crate::dialogs::Form, args: Value) -> Result<(), String> {
+    pub(super) fn form_with(&mut self, f: crate::dialogs::Form, args: Value) -> Result<(), String> {
         let command = CommandId::new(f.command.as_str()).map_err(|e| e.to_string())?;
         let mut form = dialogs::Form::new(&f.title, &f.verb, command);
         form.args = args;

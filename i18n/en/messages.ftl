@@ -243,6 +243,12 @@ gui-library-sync = Sync zoom and pan
 
 gui-library-tags = Tags
 
+gui-macro-make-title = Make a macro
+
+gui-macro-make-verb = Make
+
+gui-macro-name = name
+
 gui-mask-display = Show mask
 
 gui-mask-display-grey = the mask alone in grey
@@ -375,9 +381,19 @@ gui-modules-bypass = Bypass
 
 gui-modules-bypass-hint = Bypass { $node }: the image renders as if it were absent, its parameters kept ({ $key })
 
+gui-modules-fold-hint = Fold { $node } back into one node
+
+gui-modules-macro = macro { $version }
+
+gui-modules-make-macro = Make macro…
+
+gui-modules-make-macro-hint = Package the modules selected as one node (Ctrl+G in the graph)
+
 gui-modules-none = No module: open an image to see its network's modules
 
 gui-modules-none-in-scope = No module of the sub-workspace { $name } in the image's network
+
+gui-modules-open-hint = Open { $node }: its modules shown
 
 gui-modules-restore-hint = Bring { $node } back: the image renders it again ({ $key })
 
