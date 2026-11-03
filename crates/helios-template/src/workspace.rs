@@ -35,7 +35,7 @@ use crate::bundle::{Bundle, EXTENSION, Text};
 use crate::catalogue::Catalogue;
 use crate::format::{
     Binding, CompositeFile, Connection, Endpoint, Exit, FORMAT, InnerDesc, NetworkDesc, NodeDesc,
-    PORTS, Parameter, ParameterKind, Port, Template, slug, valid_id, valid_name,
+    PORTS, Parameter, ParameterKind, Port, SourceKind, Template, slug, valid_id, valid_name,
 };
 
 /// Where a workspace keeps the template it was made from.
@@ -970,11 +970,19 @@ fn network_composite(
         inputs: net
             .sources
             .iter()
-            .map(|s| Port {
-                name: s.clone(),
-                channels: 4,
-                layout: Some("rgba".into()),
-                optional: false,
+            .map(|s| match net.source_kind(s) {
+                SourceKind::Picture => Port {
+                    name: s.clone(),
+                    channels: 4,
+                    layout: Some("rgba".into()),
+                    optional: false,
+                },
+                SourceKind::Raw => Port {
+                    name: s.clone(),
+                    channels: 1,
+                    layout: None,
+                    optional: false,
+                },
             })
             .collect(),
         outputs: vec![out],
@@ -1067,6 +1075,25 @@ pub fn import(
             .first()
             .cloned()
             .ok_or("the workspace has no image to wire the network to")?;
+        // Its sources all read the workspace's first image: of the kind
+        // that image is.
+        let kind = t.network.source_kind(&first);
+        if src
+            .network
+            .sources
+            .iter()
+            .any(|s| src.network.source_kind(s) != kind)
+        {
+            return Err(match kind {
+                SourceKind::Picture => {
+                    "the network reads a raw file's sensor data; this workspace's image is a picture"
+                }
+                SourceKind::Raw => {
+                    "the network reads a picture; this workspace's image is a raw file's sensor data"
+                }
+            }
+            .into());
+        }
         let mut taken: BTreeSet<String> = t.network.sources.iter().cloned().collect();
         taken.extend(t.network.nodes.iter().map(|n| n.name.clone()));
         let name = free_name(&src.id, &taken);

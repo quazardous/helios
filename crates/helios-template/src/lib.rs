@@ -35,10 +35,10 @@ pub mod shipped;
 pub mod subworkspace;
 pub mod workspace;
 
-pub use build::{Built, SOURCE_PORT, placeholder};
+pub use build::{Built, SOURCE_PORT, Source, placeholder, raw_placeholder};
 pub use bundle::{Bundle, Report, Text, Update, parse_composite, parse_template};
 pub use catalogue::Catalogue;
 pub use format::{
     CompositeFile, CompositeRef, FORMAT, ImportDesc, LibraryDesc, Parameter, ParameterKind,
-    SubWorkspace, Template,
+    SourceKind, SubWorkspace, Template,
 };

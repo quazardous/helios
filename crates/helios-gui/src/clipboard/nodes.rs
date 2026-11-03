@@ -242,6 +242,7 @@ mod tests {
     fn net() -> (NetworkDesc, BTreeMap<String, [f32; 2]>) {
         let net = NetworkDesc {
             sources: vec!["source".into()],
+            raw_sources: Vec::new(),
             nodes: vec![
                 node("exposure", "exposure"),
                 node("sigmoid", "sigmoid"),

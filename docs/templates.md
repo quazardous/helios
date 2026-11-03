@@ -100,7 +100,18 @@ The starting graph, written like a node's network description
 ```
 
 - `sources` are the images the workspace is given (the image opened in
-  it); their output port is `image`.
+  it); their output port is `image`. A source is given a picture in the
+  working space, four channels (RGBA): a JPEG, PNG or TIFF, or a raw
+  file's embedded preview. A source named in `raw_sources` (2026-11-03)
+  is given a raw file's sensor data instead: its mosaic, one channel in
+  raw units, and the camera's description (black and white levels,
+  filter pattern, white balance coefficients, matrix) as the context of
+  every node reading it, directly or not, as the node gives a raw
+  source (`rawprepare` → `whitebalance` → `highlights` → `demosaic` →
+  `colorin` turn it into the working space). A raw source refuses a
+  picture and a picture source a raw: the desktop opens a raw's mosaic
+  in a workspace whose network reads one, its embedded preview
+  elsewhere, and refuses a picture in a network that reads a raw.
 - A node is a `module` (by its manifest name) or a `composite` (by id and
   version), never both. A composite is placed folded (one node, the
   engine expands it when it renders) or, with `open`, opened: its inner
@@ -322,7 +333,7 @@ window:
    every problem with where it is (`network.nodes[1] (retouch)`), and the
    composite updates on offer.
 2. **Build** (`Bundle::build`): the network as a `helios_core::Graph`
-   (sources filled with a placeholder image, composites folded or
+   (sources filled with a placeholder of their kind, composites folded or
    opened, the view found, every required input connected on the render
    paths: the nodes the view and every sink read from) and the layout
    with the composites' panel hints applied. A test renders the result.

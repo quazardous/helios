@@ -92,6 +92,11 @@
           "type": "array",
           "items": { "$ref": "#/$defs/name" }
         },
+        "raw_sources": {
+          "description": "The sources given a raw file's sensor data: its mosaic, one channel in raw units, the camera's description (levels, filter pattern, white balance, matrix) the context of every node reading it. The other sources are given a picture, four channels (RGBA).",
+          "type": "array",
+          "items": { "$ref": "#/$defs/name" }
+        },
         "nodes": { "type": "array", "items": { "$ref": "#/$defs/node" } },
         "connections": { "type": "array", "items": { "$ref": "#/$defs/connection" } },
         "view": { "$ref": "#/$defs/endpoint" },

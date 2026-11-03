@@ -2501,6 +2501,7 @@ dependencies = [
  "helios-core",
  "helios-module-exposure",
  "helios-module-masks",
+ "helios-module-rawprepare",
  "helios-module-sigmoid",
  "serde",
  "serde_json",

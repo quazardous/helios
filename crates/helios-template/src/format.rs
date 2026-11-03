@@ -230,6 +230,10 @@ pub struct NetworkDesc {
     /// The images the workspace is given, by node name; each one's output
     /// port is `image`.
     pub sources: Vec<String>,
+    /// The sources given a raw file's sensor data (see [`SourceKind`]);
+    /// the others are given a picture.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub raw_sources: Vec<String>,
     pub nodes: Vec<NodeDesc>,
     #[serde(default)]
     pub connections: Vec<Connection>,
@@ -237,6 +241,37 @@ pub struct NetworkDesc {
     pub view: Endpoint,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub presets: Vec<Preset>,
+}
+
+impl NetworkDesc {
+    /// What the source `name` is given.
+    pub fn source_kind(&self, name: &str) -> SourceKind {
+        if self.raw_sources.iter().any(|s| s == name) {
+            SourceKind::Raw
+        } else {
+            SourceKind::Picture
+        }
+    }
+
+    /// Whether a source is given a raw file's sensor data.
+    pub fn reads_raw(&self) -> bool {
+        self.sources
+            .iter()
+            .any(|s| self.source_kind(s) == SourceKind::Raw)
+    }
+}
+
+/// What a source of a template's network is given.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SourceKind {
+    /// A picture in the working space, four channels (RGBA): a JPEG, a
+    /// PNG, a TIFF, or a raw file's embedded preview.
+    Picture,
+    /// A raw file's sensor mosaic, one channel in raw units, with the
+    /// camera's description (black and white levels, filter pattern,
+    /// white balance coefficients, matrix) as the context of every node
+    /// reading it, directly or not.
+    Raw,
 }
 
 /// A node of a template's network: a module or a composite.

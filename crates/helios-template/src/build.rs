@@ -8,7 +8,7 @@ use egui_pop_model::layout::Layout;
 use helios_core::{Context, Expansion, Graph, Image, ModuleRef, NodeId, Params, Region, Wire};
 
 use crate::catalogue::Catalogue;
-use crate::format::{NodeDesc, PanelHint, Template};
+use crate::format::{NodeDesc, PanelHint, SourceKind, Template};
 
 /// The output port of a source node.
 pub const SOURCE_PORT: &str = "image";
@@ -41,6 +41,46 @@ pub fn placeholder() -> Image {
     )
 }
 
+/// A small grey mosaic, for building a raw source without a raw at hand.
+pub fn raw_placeholder() -> Image {
+    Image::from_fn(Region::sized(8, 8), 1, |_, _, _| 0.18)
+}
+
+/// What a template's sources are given (see [`SourceKind`]).
+#[derive(Clone, Copy, Debug)]
+pub enum Source<'a> {
+    /// A picture in the working space, four channels.
+    Picture(&'a Image),
+    /// A raw file's sensor mosaic, one channel, and its camera's
+    /// description as context (`helios_photo::CameraInfo::to_context`):
+    /// every node reading the source, directly or not, is given it.
+    Raw {
+        mosaic: &'a Image,
+        camera: &'a Context,
+    },
+}
+
+impl Source<'_> {
+    pub fn kind(&self) -> SourceKind {
+        match self {
+            Source::Picture(_) => SourceKind::Picture,
+            Source::Raw { .. } => SourceKind::Raw,
+        }
+    }
+}
+
+/// Why a source of `kind` refuses what it was given.
+fn mismatch(name: &str, kind: SourceKind) -> String {
+    match kind {
+        SourceKind::Raw => {
+            format!("network.sources: `{name}` takes a raw file's sensor data, not a picture")
+        }
+        SourceKind::Picture => {
+            format!("network.sources: `{name}` takes a picture, not a raw file's sensor data")
+        }
+    }
+}
+
 /// Where a node's ports are in the graph.
 #[derive(Default)]
 struct Placed {
@@ -68,14 +108,15 @@ impl Placed {
     }
 }
 
-/// Builds `template`'s network, each source given `source`, with
-/// `preset`'s values over the nodes' own, and `layout` with the panel
-/// hints of its composites.
+/// Builds `template`'s network, each source given `source` (without
+/// one, a placeholder of the kind it takes), with `preset`'s values over
+/// the nodes' own, and `layout` with the panel hints of its composites.
+/// A source given what it does not take is refused.
 pub fn build(
     template: &Template,
     layout: &Layout,
     catalogue: &Catalogue,
-    source: &Image,
+    source: Option<Source<'_>>,
     preset: Option<&str>,
 ) -> Result<Built, String> {
     let net = &template.network;
@@ -92,8 +133,24 @@ pub fn build(
     let mut nodes = BTreeMap::new();
     let mut sources = BTreeMap::new();
     let mut placed: BTreeMap<String, Placed> = BTreeMap::new();
+    let mut camera = None;
+    let mut raws = Vec::new();
     for name in &net.sources {
-        let id = graph.add_source(name, source.clone());
+        let kind = net.source_kind(name);
+        let image = match (kind, source) {
+            (SourceKind::Picture, None) => placeholder(),
+            (SourceKind::Raw, None) => raw_placeholder(),
+            (SourceKind::Picture, Some(Source::Picture(image))) => image.clone(),
+            (SourceKind::Raw, Some(Source::Raw { mosaic, camera: c })) => {
+                camera = Some(c);
+                mosaic.clone()
+            }
+            (kind, Some(_)) => return Err(mismatch(name, kind)),
+        };
+        let id = graph.add_source(name, image);
+        if kind == SourceKind::Raw {
+            raws.push(id);
+        }
         nodes.insert(name.clone(), id);
         sources.insert(name.clone(), id);
         let mut p = Placed::default();
@@ -175,6 +232,9 @@ pub fn build(
             )
         })?;
     unconnected(&graph, view.0)?;
+    if let Some(camera) = camera {
+        give_camera(&mut graph, &raws, camera)?;
+    }
     let (layout, notes) = hinted(layout, &hints)?;
     Ok(Built {
         graph,
@@ -260,6 +320,34 @@ fn open(
         }
     }
     Ok(placed)
+}
+
+/// Gives every node reading one of the raw sources `raws`, directly or
+/// not, the camera's description as context.
+fn give_camera(graph: &mut Graph, raws: &[NodeId], camera: &Context) -> Result<(), String> {
+    let ids: Vec<NodeId> = graph.ids().collect();
+    for id in ids {
+        let mut seen = std::collections::BTreeSet::new();
+        let mut todo = vec![id];
+        while let Some(n) = todo.pop() {
+            for from in graph
+                .input_nodes(n)
+                .map_err(|e| e.to_string())?
+                .into_iter()
+                .flatten()
+            {
+                if seen.insert(from) {
+                    todo.push(from);
+                }
+            }
+        }
+        if raws.iter().any(|r| seen.contains(r)) {
+            graph
+                .set_context(id, camera.clone())
+                .map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
 }
 
 /// Every required input is connected on the network's render paths: the

@@ -6,10 +6,9 @@ use std::path::Path;
 
 use egui_pop_model::ids::PanelId;
 use egui_pop_model::layout::Layout;
-use helios_core::Image;
 use serde_json::Value as Json;
 
-use crate::build::{self, Built};
+use crate::build::{self, Built, Source};
 use crate::catalogue::Catalogue;
 use crate::format::{
     COMPOSITE_EXTENSION, CompositeFile, CompositeRef, FORMAT, Template, slug, valid_id, valid_name,
@@ -326,6 +325,14 @@ impl Bundle {
                 ));
             }
         }
+        let mut raw = BTreeSet::new();
+        for (i, s) in net.raw_sources.iter().enumerate() {
+            if !net.sources.contains(s) || !raw.insert(s.as_str()) {
+                p.push(format!(
+                    "network.raw_sources[{i}]: `{s}` is not a source, or named twice"
+                ));
+            }
+        }
         for (i, n) in net.nodes.iter().enumerate() {
             let at = format!("network.nodes[{i}] ({})", n.name);
             if !valid_name(&n.name) || !names.insert(n.name.as_str()) {
@@ -468,19 +475,13 @@ impl Bundle {
             }
         }
         if r.problems.is_empty() {
-            let source = build::placeholder();
-            match build::build(t, &self.layout, &catalogue, &source, None) {
+            match build::build(t, &self.layout, &catalogue, None, None) {
                 Ok(built) => r.notes = built.notes,
                 Err(e) => r.problems.push(e),
             }
             for preset in &net.presets {
-                let built = build::build(
-                    t,
-                    &self.layout,
-                    &catalogue,
-                    &source,
-                    Some(preset.id.as_str()),
-                );
+                let built =
+                    build::build(t, &self.layout, &catalogue, None, Some(preset.id.as_str()));
                 if let Err(e) = built {
                     r.problems.push(format!("preset `{}`: {e}", preset.id));
                 }
@@ -489,24 +490,32 @@ impl Bundle {
         r
     }
 
-    /// Builds the template headless, its sources a small placeholder.
+    /// Builds the template headless, its sources small placeholders of
+    /// the kind each takes.
     pub fn build(&self, catalogue: &Catalogue) -> Result<Built, String> {
-        self.build_with(catalogue, &build::placeholder(), None)
+        build::build(
+            &self.template,
+            &self.layout,
+            &self.catalogue(catalogue),
+            None,
+            None,
+        )
     }
 
-    /// Builds the template, each source given `source`, with a preset's
-    /// values over the nodes' own.
+    /// Builds the template, each source given `source` (a picture, or a
+    /// raw's mosaic with its camera: refused by a source that takes the
+    /// other), with a preset's values over the nodes' own.
     pub fn build_with(
         &self,
         catalogue: &Catalogue,
-        source: &Image,
+        source: Source<'_>,
         preset: Option<&str>,
     ) -> Result<Built, String> {
         build::build(
             &self.template,
             &self.layout,
             &self.catalogue(catalogue),
-            source,
+            Some(source),
             preset,
         )
     }

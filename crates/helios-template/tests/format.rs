@@ -136,7 +136,11 @@ fn a_template_is_checked_and_built_headless() {
     assert_eq!(folded.to_vec(), opened.to_vec());
     // A preset's values go over the nodes' own.
     let more = b
-        .build_with(&catalogue(), &helios_template::placeholder(), Some("more"))
+        .build_with(
+            &catalogue(),
+            helios_template::Source::Picture(&helios_template::placeholder()),
+            Some("more"),
+        )
         .unwrap();
     let params = more.graph.params(more.nodes["opened.a"]).unwrap().unwrap();
     assert_eq!(params.float("exposure"), 1.0);
@@ -313,5 +317,115 @@ fn a_node_placed_bypassed_renders_as_its_input() {
     match bundle(&t).build(&catalogue()) {
         Err(e) => assert!(e.contains("opened composite"), "{e}"),
         Ok(_) => panic!("an opened composite was bypassed whole"),
+    }
+}
+
+/// A raw source: a mosaic straight into rawprepare, whose levels come
+/// from the camera the source is given.
+fn raw_template() -> Json {
+    json!({
+        "format": 1,
+        "id": "test.raw",
+        "version": 1,
+        "meta": { "name": "Raw", "scenario": "A raw's levels." },
+        "network": {
+            "sources": ["raw"],
+            "raw_sources": ["raw"],
+            "nodes": [
+                { "name": "prep", "module": "rawprepare" },
+                { "name": "exp", "module": "exposure" }
+            ],
+            "connections": [
+                { "from": "raw", "port": "image", "to": "prep", "input": "input" }
+            ],
+            "view": { "node": "prep", "port": "output" }
+        }
+    })
+}
+
+fn raw_catalogue() -> Catalogue {
+    catalogue().module(ModuleRef::new(helios_module_rawprepare::RawPrepare))
+}
+
+#[test]
+fn a_raw_source_takes_a_mosaic_and_gives_its_camera_to_what_reads_it() {
+    use helios_core::{Context, Image, Value};
+    let t = raw_template();
+    assert_eq!(schema::check(&schema::template(), &t), Vec::<String>::new());
+    let b = bundle(&t);
+    assert_eq!(
+        b.template.network.source_kind("raw"),
+        helios_template::SourceKind::Raw
+    );
+    assert!(b.template.network.reads_raw());
+    // Checked and built headless on a one-channel placeholder.
+    let report = b.validate(&raw_catalogue());
+    assert!(report.is_ok(), "{:?}", report.problems);
+    // Given a mosaic and its camera: rawprepare reads the levels.
+    let mosaic = Image::from_fn(Region::sized(4, 4), 1, |_, _, _| 0.6);
+    let camera = Context::new()
+        .with("photo.black", Value::List(vec![0.1; 4]))
+        .with("photo.white", Value::Float(1.1));
+    let built = b
+        .build_with(
+            &raw_catalogue(),
+            helios_template::Source::Raw {
+                mosaic: &mosaic,
+                camera: &camera,
+            },
+            None,
+        )
+        .unwrap();
+    let out = Engine::new(Arc::new(Bus::new()))
+        .render(
+            &built.graph,
+            built.view.0,
+            &built.view.1,
+            Region::sized(4, 4),
+        )
+        .unwrap();
+    assert!(
+        out.to_vec().iter().all(|v| (v - 0.5).abs() < 1e-6),
+        "{:?}",
+        out.to_vec()
+    );
+    // A raw source refuses a picture, a picture source a raw.
+    let e = b
+        .build_with(
+            &raw_catalogue(),
+            helios_template::Source::Picture(&helios_template::placeholder()),
+            None,
+        )
+        .err()
+        .unwrap();
+    assert!(e.contains("takes a raw file's sensor data"), "{e}");
+    let picture = bundle(&template());
+    let e = picture
+        .build_with(
+            &catalogue(),
+            helios_template::Source::Raw {
+                mosaic: &mosaic,
+                camera: &camera,
+            },
+            None,
+        )
+        .err()
+        .unwrap();
+    assert!(e.contains("takes a picture"), "{e}");
+}
+
+#[test]
+fn a_raw_source_is_one_of_the_sources() {
+    let mut t = raw_template();
+    t["network"]["raw_sources"] = json!(["prep", "raw", "raw"]);
+    let problems = bundle(&t).validate(&raw_catalogue()).problems;
+    for expected in [
+        "network.raw_sources[0]: `prep` is not a source",
+        "network.raw_sources[2]: `raw` is not a source, or named twice",
+    ] {
+        assert!(
+            problems.iter().any(|p| p.starts_with(expected)),
+            "{expected}: {problems:?}"
+        );
     }
 }

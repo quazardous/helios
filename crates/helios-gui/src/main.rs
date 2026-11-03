@@ -326,7 +326,11 @@ fn image_graph(
         helios_load::Kind::Raw => helios_load::preview(path)?
             .ok_or_else(|| format!("{}: no preview to show", path.display()))?,
     };
-    let built = bundle.build_with(&helios_gui::templates::modules(), &image, None)?;
+    let built = bundle.build_with(
+        &helios_gui::templates::modules(),
+        helios_template::Source::Picture(&image),
+        None,
+    )?;
     Ok((built.graph, built.view.0))
 }
 

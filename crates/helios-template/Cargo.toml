@@ -17,6 +17,8 @@ serde_json.workspace = true
 helios-module-exposure = { path = "../../modules/exposure" }
 helios-module-masks = { path = "../../modules/masks" }
 helios-module-sigmoid = { path = "../../modules/sigmoid" }
+# A module reading a raw's camera, for the raw sources' context.
+helios-module-rawprepare = { path = "../../modules/rawprepare" }
 
 [lints]
 workspace = true
