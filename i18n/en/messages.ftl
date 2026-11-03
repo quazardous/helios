@@ -647,6 +647,8 @@ gui-workspace-library-duplicates = exact duplicates
 
 gui-workspace-library-placement = placement
 
+gui-workspace-library-query = opens on (as searched: flag:pick rating:3)
+
 gui-workspace-library-rename = rename copies as
 
 gui-workspace-library-source = import source

@@ -3677,7 +3677,8 @@ impl Shell {
     }
 
     /// What a template sets for the library: its import source (the
-    /// Vault panel then offers to import from it) and culling's
+    /// Vault panel then offers to import from it), the images it opens
+    /// on (its query, as the search field's filter) and culling's
     /// auto-advance.
     pub fn apply_template_library(&mut self, library: Option<&helios_template::LibraryDesc>) {
         let Some(l) = library else {
@@ -3687,6 +3688,9 @@ impl Shell {
         let mut lib = self.library.borrow_mut();
         lib.auto_advance = l.auto_advance;
         lib.import_offered = l.import.is_some();
+        if let Some(q) = &l.query {
+            lib.set_filter(crate::library::filter_of(q));
+        }
     }
 
     /// The workspace's import source, as its template set it.

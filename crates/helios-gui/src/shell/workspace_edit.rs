@@ -22,7 +22,7 @@ use egui_pop::model::layout::Layout;
 use helios_core::Message;
 use helios_shell::commands::Origin;
 use helios_template::workspace::{self, Extract, Files, Part, Side, State, Translation};
-use helios_template::{Bundle, ImportDesc, LibraryDesc};
+use helios_template::{Bundle, ImportDesc, LibraryDesc, QueryDesc};
 use serde_json::{Value, json};
 
 use super::{Shell, lock};
@@ -375,6 +375,23 @@ impl Shell {
             let mut lib = self.library.borrow_mut();
             lib.auto_advance = t.library.as_ref().is_some_and(|l| l.auto_advance);
             lib.import_offered = self.import_source.is_some();
+            // The images shown change with the query only: a typed
+            // search stays while the other settings change.
+            let query = |s: &State| {
+                s.bundle
+                    .template
+                    .library
+                    .as_ref()
+                    .and_then(|l| l.query.clone())
+            };
+            if changed(&|b| query(b) != query(next)) {
+                lib.set_filter(
+                    query(next)
+                        .as_ref()
+                        .map(crate::library::filter_of)
+                        .unwrap_or_default(),
+                );
+            }
         }
         if let Some(b) = before
             && b.bundle.layout != next.bundle.layout
@@ -666,7 +683,7 @@ impl Shell {
                     self.library_form()?;
                     return Ok(Value::Null);
                 }
-                let library = library_of(args);
+                let library = library_of(args)?;
                 self.edit_workspace(&json!({ "library": library }), origin)
             }
             "workspace.reset" => {
@@ -835,6 +852,18 @@ impl Shell {
                     "suggest stacks after an import",
                 )),
                 stacks,
+            ),
+            text_field(
+                "query",
+                &self.text(Message::new(
+                    "gui-workspace-library-query",
+                    "opens on (as searched: flag:pick rating:3)",
+                )),
+                &library
+                    .query
+                    .as_ref()
+                    .map(helios_template::QueryDesc::search_text)
+                    .unwrap_or_default(),
             ),
             boolean(
                 "auto_advance",
@@ -1122,8 +1151,9 @@ fn text_field(key: &str, label: &str, value: &str) -> Field {
     }
 }
 
-/// The library settings a form or an agent gives.
-fn library_of(args: &Value) -> Value {
+/// The library settings a form or an agent gives; the query as the
+/// search field takes it (`flag:pick`) or written as in a template.
+fn library_of(args: &Value) -> Result<Value, String> {
     let t = |k: &str, default: &str| text(args, k).unwrap_or(default).to_string();
     let source = t("source", "none");
     let import = (source != "none").then(|| ImportDesc {
@@ -1136,14 +1166,24 @@ fn library_of(args: &Value) -> Value {
         duplicates: t("duplicates", "skip"),
         suggest_stacks: args["suggest_stacks"].as_bool().unwrap_or(false),
     });
+    let query = match &args["query"] {
+        Value::Null => None,
+        Value::String(typed) => crate::library::query_typed(typed)?,
+        written => Some(
+            serde_json::from_value::<QueryDesc>(written.clone())
+                .map_err(|e| format!("query: {e}"))?,
+        )
+        .filter(|q| !q.is_empty()),
+    };
     let auto_advance = args["auto_advance"].as_bool().unwrap_or(false);
-    if import.is_none() && !auto_advance {
-        return Value::Null;
+    if import.is_none() && query.is_none() && !auto_advance {
+        return Ok(Value::Null);
     }
-    json!(LibraryDesc {
+    Ok(json!(LibraryDesc {
         import,
+        query,
         auto_advance
-    })
+    }))
 }
 
 /// What "Save as template" is asked, from an agent's arguments or the

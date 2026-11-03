@@ -220,6 +220,57 @@ fn an_import_source_names_known_words() {
     }
 }
 
+#[test]
+fn a_library_query_names_known_criteria_and_fits_the_schema() {
+    let mut bundle = intake();
+    let query = helios_template::QueryDesc {
+        min_rating: Some(2),
+        labels: vec!["red".into()],
+        flags: vec!["pick".into()],
+        tags: vec!["sea".into()],
+    };
+    assert_eq!(query.search_text(), "rating:2 label:red flag:pick tag:sea");
+    bundle.template.library.as_mut().unwrap().query = Some(query);
+    let report = bundle.validate(&catalogue());
+    assert!(report.is_ok(), "{:?}", report.problems);
+    let written = serde_json::to_value(&bundle.template).unwrap();
+    assert_eq!(written["library"]["query"]["flags"][0], "pick");
+    assert_eq!(
+        schema::check(&schema::template(), &written),
+        Vec::<String>::new()
+    );
+    // Words it does not know, too many stars, a tag the search field
+    // cannot show, and a query asking nothing are refused.
+    bundle.template.library.as_mut().unwrap().query = Some(helios_template::QueryDesc {
+        min_rating: Some(6),
+        labels: vec!["pink".into()],
+        flags: vec!["picked".into()],
+        tags: vec!["two words".into()],
+    });
+    let problems = bundle.validate(&catalogue()).problems;
+    for expected in [
+        "library.query.min_rating: 6",
+        "library.query.labels: `pink`",
+        "library.query.flags: `picked`",
+        "library.query.tags: `two words`",
+    ] {
+        assert!(
+            problems.iter().any(|p| p.starts_with(expected)),
+            "{expected}: {problems:?}"
+        );
+    }
+    let written = serde_json::to_value(&bundle.template).unwrap();
+    assert!(!schema::check(&schema::template(), &written).is_empty());
+    bundle.template.library.as_mut().unwrap().query = Some(helios_template::QueryDesc::default());
+    let problems = bundle.validate(&catalogue()).problems;
+    assert!(
+        problems
+            .iter()
+            .any(|p| p.starts_with("library.query: no criterion")),
+        "{problems:?}"
+    );
+}
+
 fn develop() -> Bundle {
     Bundle::load(&root().join("develop-preview.helios-template")).unwrap()
 }

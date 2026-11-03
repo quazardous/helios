@@ -207,6 +207,7 @@ What the workspace sets for the library (optional):
     "duplicates": "ask",
     "suggest_stacks": true
   },
+  "query": { "flags": ["pick"], "min_rating": 2 },
   "auto_advance": true
 }
 ```
@@ -221,6 +222,16 @@ What the workspace sets for the library (optional):
   **Import…**, and `library.importSource` asks for the card or folder and
   imports it so. Validation refuses a word it does not know, and a
   renaming without a copy.
+- `query` (2026-11-03) is what the library opens on, as the search
+  field's criteria: `min_rating` (0 to 5 stars), `labels` (`red`,
+  `yellow`, `green`, `blue`, `purple`: any of them), `flags` (`pick`,
+  `reject`, `none`: any of them) and `tags` (all of them); all must hold.
+  The workspace opens with them as the search field's filter, which the
+  user may then change; words and dates are not kept. A query changed in
+  the workspace (an edit, an undo, a reset) filters the library again;
+  its other settings changing keep the search typed. Validation refuses
+  a query with no criterion, a word it does not know, more than 5 stars
+  and a tag with a space (the search field could not show it).
 - `auto_advance` starts culling with auto-advance on.
 
 ### `parameters`
@@ -401,7 +412,9 @@ survival`). The File menu has:
   it). Each key says where it comes from: `template` (the template the
   workspace was made from set it), `workspace` or `user`.
 - **The workspace's library** (`workspace.library`): the import source
-  (or none), placement, renaming, duplicates, suggested stacks and
+  (or none), placement, renaming, duplicates, suggested stacks, the
+  query it opens on (typed as in the search field, `flag:pick
+  rating:3`; an agent may also pass it written as in a template) and
   culling's auto-advance, in a form.
 - **Add from a workspace or a template…** (`workspace.importParts`):
   the source picked (a built-in or user template, a recent workspace),

@@ -306,6 +306,41 @@ pub fn query_of(filter: &Filter) -> Query {
     }
 }
 
+/// The search filter a workspace's library query makes (see
+/// `helios_template::QueryDesc`): the library opens on it.
+pub fn filter_of(query: &helios_template::QueryDesc) -> Filter {
+    Filter {
+        min_rating: query.min_rating,
+        labels: query
+            .labels
+            .iter()
+            .filter_map(|l| ColorLabel::parse(l))
+            .collect(),
+        flags: query.flags.iter().filter_map(|f| Flag::parse(f)).collect(),
+        tags: query.tags.clone(),
+        ..Filter::default()
+    }
+}
+
+/// A library query typed as in the search field (`flag:pick rating:3`):
+/// its words and dates are refused, a workspace keeps criteria only;
+/// nothing typed is no query.
+pub fn query_typed(text: &str) -> Result<Option<helios_template::QueryDesc>, String> {
+    let f = Filter::parse(text);
+    if !f.text.is_empty() || f.from.is_some() || f.to.is_some() {
+        return Err(format!(
+            "the library's query keeps a rating, labels, flags and tags only, not `{text}`"
+        ));
+    }
+    let q = helios_template::QueryDesc {
+        min_rating: f.min_rating,
+        labels: f.labels.iter().map(|l| l.name().to_string()).collect(),
+        flags: f.flags.iter().map(|f| f.name().to_string()).collect(),
+        tags: f.tags,
+    };
+    Ok((!q.is_empty()).then_some(q))
+}
+
 /// The longest side of a thumbnail, in pixels.
 pub const THUMB: u32 = 256;
 

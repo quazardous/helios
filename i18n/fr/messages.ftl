@@ -539,6 +539,8 @@ gui-workspace-library-duplicates = doublons exacts
 
 gui-workspace-library-placement = emplacement
 
+gui-workspace-library-query = s’ouvre sur (comme une recherche : flag:pick rating:3)
+
 gui-workspace-library-rename = renommer les copies en
 
 gui-workspace-library-source = source d’import

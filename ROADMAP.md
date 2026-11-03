@@ -586,7 +586,8 @@ hash) is part of Helios; deploying a NAS is not.
   taken silently. First built-in: "Portrait retouch". A template's
   source may take a raw file's sensor data with its camera (2026-11-03);
   "Develop one image" develops a raw through the node's raw chain on the
-  desktop, "Develop (preview)" stays for pictures. Design in
+  desktop, "Develop (preview)" stays for pictures. A template's library
+  may open on a query, the picks only for instance (2026-11-03). Design in
   [docs/templates.md](docs/templates.md). The Masks panel, the Scopes and
   the Navigator open as floating palettes by default (2026-10-28).
   Not decided: the toolbox's

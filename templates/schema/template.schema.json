@@ -215,14 +215,42 @@
       }
     },
     "library": {
-      "description": "The library the workspace works with: an import source, how culling goes.",
+      "description": "The library the workspace works with: an import source, the images it shows, how culling goes.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
         "import": { "$ref": "#/$defs/import" },
+        "query": { "$ref": "#/$defs/query" },
         "auto_advance": {
           "description": "Culling moves to the next image after each mark.",
           "type": "boolean"
+        }
+      }
+    },
+    "query": {
+      "description": "The images the library opens on, as the search field's criteria: all must hold (labels and flags: any of them; tags: all of them).",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "min_rating": {
+          "description": "At least this many stars, 0 to 5.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "labels": {
+          "description": "One of these colour labels.",
+          "type": "array",
+          "items": { "enum": ["red", "yellow", "green", "blue", "purple"] }
+        },
+        "flags": {
+          "description": "One of these flags: picked, rejected, or neither.",
+          "type": "array",
+          "items": { "enum": ["pick", "reject", "none"] }
+        },
+        "tags": {
+          "description": "All of these tags.",
+          "type": "array",
+          "items": { "type": "string" }
         }
       }
     },

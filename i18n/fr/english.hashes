@@ -519,6 +519,7 @@ gui-workspace-import-verb ea5be6af4dfc4a82
 gui-workspace-library-advance 51ff94aa04085efc
 gui-workspace-library-duplicates 2b7e809279d6ff08
 gui-workspace-library-placement 14eec52a7fc1b9d6
+gui-workspace-library-query e9f47d1d142eaaa4
 gui-workspace-library-rename c5fb99edd219faea
 gui-workspace-library-source b69ec797c25cdb41
 gui-workspace-library-stacks 6760c8455f27e6aa

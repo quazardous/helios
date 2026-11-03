@@ -135,6 +135,7 @@ fn the_library_settings_are_edited_after_creation() {
             "rename",
             "duplicates",
             "suggest_stacks",
+            "query",
             "auto_advance"
         ]
     );
@@ -161,6 +162,70 @@ fn the_library_settings_are_edited_after_creation() {
     );
     assert!(refused.unwrap_err().contains("only a copy is renamed"));
     assert!(h.state().library().auto_advance);
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn the_library_opens_on_the_workspace_s_query_and_an_undo_takes_it_back() {
+    use egui_pop::views::library::{Flag, filter::Filter};
+    let root = temp("query");
+    let (mut h, _, files) = window(&root, "helios.portrait-retouch");
+    assert!(h.state().library().filter().is_empty());
+    // Typed as in the search field.
+    run(
+        &mut h,
+        "workspace.library",
+        json!({ "source": "none", "query": "flag:pick rating:2" }),
+    );
+    let filter = h.state().library().filter().clone();
+    assert_eq!(filter.flags, [Flag::Pick]);
+    assert_eq!(filter.min_rating, Some(2));
+    let kept = files.load().unwrap().bundle.template.library.unwrap();
+    assert_eq!(kept.query.unwrap().search_text(), "rating:2 flag:pick");
+    // The form shows it as typed.
+    run(&mut h, "workspace.library", json!(null));
+    let form = dialog(&mut h);
+    let query = form["fields"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|f| f["key"] == "query")
+        .unwrap()
+        .clone();
+    assert_eq!(
+        query["value"]["text"],
+        json!("rating:2 flag:pick"),
+        "{query}"
+    );
+    run(&mut h, "dialog.answer", json!({ "answer": "cancel" }));
+    // Words and dates are not a workspace's query; nothing changed.
+    let refused = helios_gui::library::query_typed("harbour date:2026-01-01..");
+    assert!(refused.unwrap_err().contains("not `harbour"));
+    let before = steps(&h);
+    run(
+        &mut h,
+        "workspace.library",
+        json!({ "source": "none", "query": "harbour" }),
+    );
+    assert_eq!(steps(&h), before, "a refused query is no step");
+    assert_eq!(h.state().library().filter().flags, [Flag::Pick]);
+    // Changing auto-advance keeps a typed search.
+    let typed = Filter::parse("label:red");
+    h.state_mut().library_mut().set_filter(typed.clone());
+    run(
+        &mut h,
+        "workspace.library",
+        json!({ "source": "none", "query": "flag:pick rating:2", "auto_advance": true }),
+    );
+    assert_eq!(h.state().library().filter(), &typed);
+    // Undone twice: no query, every image shown again.
+    undo(&mut h);
+    undo(&mut h);
+    assert!(h.state().library().filter().is_empty());
+    assert!(
+        files.load().unwrap().bundle.template.library.is_none(),
+        "the template's library came back"
+    );
     std::fs::remove_dir_all(&root).unwrap();
 }
 

@@ -152,18 +152,71 @@ impl Template {
     }
 }
 
-/// The library a template works with: where it imports from, and how
-/// culling goes.
+/// The library a template works with: where it imports from, which
+/// images it shows, and how culling goes.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LibraryDesc {
     /// The import source the workspace offers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub import: Option<ImportDesc>,
+    /// The library opens filtered on these images (the picks only, say).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub query: Option<QueryDesc>,
     /// Culling moves to the next image after each mark.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub auto_advance: bool,
 }
+
+/// Which images of the library a workspace shows, as the search field's
+/// criteria: all must hold (labels and flags: any of them; tags: all of
+/// them).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct QueryDesc {
+    /// At least this many stars (0 to 5).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_rating: Option<u8>,
+    /// One of these colour labels ([`LABELS`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub labels: Vec<String>,
+    /// One of these flags ([`FLAGS`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub flags: Vec<String>,
+    /// All of these tags.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
+}
+
+impl QueryDesc {
+    /// Whether it filters nothing.
+    pub fn is_empty(&self) -> bool {
+        self.min_rating.is_none()
+            && self.labels.is_empty()
+            && self.flags.is_empty()
+            && self.tags.is_empty()
+    }
+
+    /// As typed in the search field: `rating:3 label:red flag:pick
+    /// tag:sea`.
+    pub fn search_text(&self) -> String {
+        let mut words = Vec::new();
+        if let Some(r) = self.min_rating {
+            words.push(format!("rating:{r}"));
+        }
+        words.extend(self.labels.iter().map(|l| format!("label:{l}")));
+        words.extend(self.flags.iter().map(|f| format!("flag:{f}")));
+        words.extend(self.tags.iter().map(|t| format!("tag:{t}")));
+        words.join(" ")
+    }
+}
+
+/// The most stars a query may ask for.
+pub const MAX_RATING: u8 = 5;
+/// The colour labels a query may name.
+pub const LABELS: [&str; 5] = ["red", "yellow", "green", "blue", "purple"];
+/// The flags a query may name: picked, rejected, or neither.
+pub const FLAGS: [&str; 3] = ["pick", "reject", "none"];
 
 /// An import source, written as `library.import`'s arguments are.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

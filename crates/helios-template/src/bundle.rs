@@ -436,6 +436,9 @@ impl Bundle {
         if let Some(import) = t.library.as_ref().and_then(|l| l.import.as_ref()) {
             check_import(import, p);
         }
+        if let Some(query) = t.library.as_ref().and_then(|l| l.query.as_ref()) {
+            check_query(query, p);
+        }
         check_parameters(t, p);
         crate::subworkspace::problems(t, &catalogue, p);
         for (area, node) in &self.layout.areas {
@@ -605,6 +608,41 @@ fn check_parameters(t: &Template, p: &mut Vec<String>) {
             p.push(format!(
                 "{at}: only a choice has choices, and it needs some"
             ));
+        }
+    }
+}
+
+/// A library query's criteria: a rating in range, labels and flags it
+/// knows, tags with no space (the search field could not show them), and
+/// at least one criterion.
+fn check_query(query: &crate::format::QueryDesc, p: &mut Vec<String>) {
+    use crate::format::{FLAGS, LABELS, MAX_RATING};
+    if query.is_empty() {
+        p.push("library.query: no criterion (leave the query out to show every image)".into());
+    }
+    if let Some(r) = query.min_rating
+        && r > MAX_RATING
+    {
+        p.push(format!(
+            "library.query.min_rating: {r} is more than {MAX_RATING} stars"
+        ));
+    }
+    for (field, values, known) in [
+        ("labels", &query.labels, &LABELS[..]),
+        ("flags", &query.flags, &FLAGS[..]),
+    ] {
+        for v in values {
+            if !known.contains(&v.as_str()) {
+                p.push(format!(
+                    "library.query.{field}: `{v}` is not one of {}",
+                    known.join(", ")
+                ));
+            }
+        }
+    }
+    for t in &query.tags {
+        if t.is_empty() || t.contains(char::is_whitespace) {
+            p.push(format!("library.query.tags: `{t}` is not a tag"));
         }
     }
 }
