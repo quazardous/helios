@@ -28,6 +28,10 @@
 //!   agents does. [`HeliosHistory::undo_group`] undoes one of its batches
 //!   alone, even under later steps, unless one of them changed the same
 //!   values (the store's [`helios_values::Store::undo_group`]).
+//! - **Undo this step**: the History panel's context menu (egui-pop's
+//!   `edit.undo_step`, `history.undo_step` for an agent) undoes one step
+//!   alone by the same rule (the store's
+//!   [`helios_values::Store::undo_step`]); it goes on the redo list.
 //! - **The place** of each step is the context stack's place it was made
 //!   in (the store's [`helios_values::Store::set_place`], which
 //!   `crate::contexts::follow_place` keeps on the place shown): an undo,
@@ -38,8 +42,8 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use egui_pop::api::contexts::Entry;
 use egui_pop::api::history::{
-    Answer, History, Label, Line, Refusal, RefusalKind, Request, ScopeId, ScopeInfo, StepInfo,
-    Walked, plan_jump,
+    Answer, Features, History, Label, Line, Refusal, RefusalKind, Request, ScopeId, ScopeInfo,
+    StepInfo, Walked, plan_jump,
 };
 use egui_pop::model::commands::Origin as PopOrigin;
 use egui_pop::model::ids::FrameId;
@@ -359,6 +363,35 @@ impl History for HeliosHistory {
         }
         self.lock().open_gesture().map(Label::text)
     }
+
+    fn features(&self, scope: &ScopeId) -> Features {
+        let mut f = Features::default();
+        if *scope == EDIT {
+            f.undo_step = true;
+        }
+        f
+    }
+
+    fn undo_step(&mut self, request: &Request, step: u64, origin: &PopOrigin) -> Answer {
+        self.answer(request, |s| {
+            let line = line_of(s);
+            let Some(info) = line.undo.iter().find(|x| x.id == step).cloned() else {
+                let why = if line.redo.iter().any(|x| x.id == step) {
+                    format!("step {step} is undone already")
+                } else {
+                    format!("no step {step} in `{EDIT}`")
+                };
+                return Err(Refusal::new(RefusalKind::Nothing, why));
+            };
+            lane(origin, std::slice::from_ref(&info))?;
+            let o = to_helios(origin);
+            s.check_undo_step(step, &o).map_err(|e| refused(&e))?;
+            if !request.dry_run {
+                s.undo_step(step, &o).map_err(|e| refused(&e))?;
+            }
+            Ok(vec![info])
+        })
+    }
 }
 
 #[cfg(test)]
@@ -559,6 +592,62 @@ mod tests {
                 .kind,
             RefusalKind::Owner
         );
+    }
+
+    #[test]
+    fn one_step_is_undone_alone_unless_a_later_step_changed_its_values() {
+        let values = store();
+        values
+            .lock()
+            .unwrap()
+            .declare("node/black", Descriptor::float("Black", -1.0, 1.0, 0.0));
+        set(&values, 1.0);
+        values
+            .lock()
+            .unwrap()
+            .set(Set::new(
+                "node/black",
+                Change::To(Value::Float(-0.1)),
+                helios_shell::commands::Origin::User,
+            ))
+            .unwrap();
+        let mut h = HeliosHistory::new(values.clone());
+        assert!(h.features(&EDIT).undo_step);
+        // The exposure, under the black: a dry run changes nothing, then
+        // it goes alone and waits on the redo list.
+        let rev = h.rev(&EDIT);
+        let Answer::Done(Ok(w)) = h.undo_step(&Request::new(EDIT).dry_run(), 1, &PopOrigin::User)
+        else {
+            panic!("allowed");
+        };
+        assert_eq!((w.steps[0].id, h.rev(&EDIT)), (1, rev));
+        let Answer::Done(Ok(_)) = h.undo_step(&Request::new(EDIT), 1, &PopOrigin::User) else {
+            panic!("undone");
+        };
+        assert_eq!(value(&values), Value::Float(0.0));
+        let line = h.line(&EDIT).unwrap();
+        assert_eq!(line.undo.iter().map(|s| s.id).collect::<Vec<_>>(), [2]);
+        assert_eq!(line.next().unwrap().id, 1);
+        let Answer::Done(Err(r)) = h.undo_step(&Request::new(EDIT), 1, &PopOrigin::User) else {
+            panic!("refused");
+        };
+        assert_eq!(r.kind, RefusalKind::Nothing);
+        // A later step on the same value refuses it.
+        let Answer::Done(Ok(_)) = h.redo(&Request::new(EDIT), &PopOrigin::User) else {
+            panic!("redone");
+        };
+        set(&values, 2.0);
+        let Answer::Done(Err(r)) = h.undo_step(&Request::new(EDIT), 1, &PopOrigin::User) else {
+            panic!("refused");
+        };
+        assert_eq!(r.kind, RefusalKind::Owner);
+        assert_eq!(value(&values), Value::Float(2.0));
+        // An agent may not undo the user's step.
+        let agent = PopOrigin::Agent("retouch".into());
+        let Answer::Done(Err(r)) = h.undo_step(&Request::new(EDIT), 2, &agent) else {
+            panic!("refused");
+        };
+        assert_eq!(r.kind, RefusalKind::Owner);
     }
 
     #[test]

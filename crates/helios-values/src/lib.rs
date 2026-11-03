@@ -36,6 +36,7 @@
 
 mod commands;
 mod graph;
+mod points;
 
 pub use commands::{register, value_from_json, value_to_json};
 pub use graph::{BYPASS, bind_node, bypass_path, node_path, sync};
@@ -1255,12 +1256,25 @@ impl Store {
         let at: Vec<usize> = (0..self.undo.len())
             .filter(|i| self.undo[*i].group == Some(group))
             .collect();
+        self.check_alone(&at, Some(group), origin)?;
+        Ok(at)
+    }
+
+    /// Whether the undo steps at `at` (their places, oldest first) can be
+    /// undone alone: no later step (outside `group`, when given) changed
+    /// one of their values, and no gesture of another origin holds one.
+    fn check_alone(
+        &self,
+        at: &[usize],
+        group: Option<u64>,
+        origin: &Origin,
+    ) -> Result<(), Refused> {
         let Some(&first) = at.first() else {
-            return Ok(at);
+            return Ok(());
         };
         let mut since: Vec<String> = Vec::new();
         for later in &self.undo[first + 1..] {
-            if later.group == Some(group) {
+            if group.is_some() && later.group == group {
                 continue;
             }
             let touched = at.iter().any(|i| {
@@ -1276,7 +1290,7 @@ impl Store {
         if !since.is_empty() {
             return Err(Refused::Touched { since });
         }
-        for i in &at {
+        for i in at {
             for (path, _, _) in &self.undo[*i].changes {
                 let current = self
                     .entries
@@ -1291,7 +1305,7 @@ impl Store {
                 }
             }
         }
-        Ok(at)
+        Ok(())
     }
 
     /// Undoes the steps of `group` alone, newest first, even under later

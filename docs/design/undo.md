@@ -264,8 +264,11 @@ egui-pop's `HistoryPlugin` is on in Helios, over `HeliosHistory`:
   values, otherwise refused with those steps' labels; each step undone
   goes on the redo list. The user reaches it by "Undo an agent's last
   changes alone" (`param.undoAgent`); an agent by `helios_history_undo
-  {group}`. The panel's own "Undo this" on a row waits on egui-pop (its
-  rows only jump).
+  {group}`.
+- **Undo this step** (2026-11-03). The panel's context menu on a row
+  (egui-pop's `edit.undo_step`) undoes that step alone by the same rule
+  (`Store::undo_step`); an agent by `helios_history_undo_step {step}`,
+  in its lane. The step goes on the redo list, as a group does.
 - **The agents' lane.** An agent's `history.undo`, `history.redo` and
   `history.jump` walk only its own steps; one of the user's or of
   another origin refuses them (`HeliosHistory`), as the workspace's undo

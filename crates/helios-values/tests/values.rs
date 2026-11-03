@@ -846,3 +846,32 @@ fn a_step_keeps_its_id_and_a_new_step_never_reuses_one() {
     let last = store.undo_steps().last().unwrap();
     assert_eq!((last.id, last.group), (4, Some(g)));
 }
+
+#[test]
+fn one_step_is_undone_alone_unless_a_later_step_touched_it() {
+    let (_, _, mut store, _) = exposure();
+    let path = "node/exposure/exposure";
+    let black = "node/exposure/black";
+    let to = |v: f64| Change::To(Value::Float(v));
+    store.set(Set::new(path, to(1.0), Origin::User)).unwrap();
+    store.set(Set::new(black, to(-0.02), Origin::User)).unwrap();
+    // The exposure, under the black: undone alone, on the redo list.
+    assert_eq!(store.check_undo_step(1, &Origin::User).unwrap(), Some(0));
+    assert_eq!(
+        store.undo_step(1, &Origin::User).unwrap().as_deref(),
+        Some("set node/exposure/exposure")
+    );
+    assert_eq!(ev(&store), 0.0);
+    assert_eq!(store.get(black).unwrap().value, Value::Float(-0.02));
+    assert_eq!(store.redo_steps().last().unwrap().id, 1);
+    assert_eq!(store.undo_step(1, &Origin::User).unwrap(), None);
+    store.redo(&Origin::User).unwrap();
+    // A later step on the same value refuses it, and nothing changes.
+    store.set(Set::new(path, to(2.0), Origin::User)).unwrap();
+    let rev = store.history_rev();
+    let Err(Refused::Touched { since }) = store.undo_step(1, &Origin::User) else {
+        panic!("refused");
+    };
+    assert_eq!(since, ["set node/exposure/exposure"]);
+    assert_eq!((ev(&store), store.history_rev()), (2.0, rev));
+}

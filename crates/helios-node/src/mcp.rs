@@ -995,6 +995,25 @@ pub const TOOLS: &[Tool] = &[
         ],
     },
     Tool {
+        name: "helios_history_undo_step",
+        endpoint: Endpoint::Workspace,
+        cmd: "history.undo_step",
+        description: "Undoes one step of a history on the desktop holding a workspace open alone, even under later steps (`step`, a step's id from helios_history_read; egui-pop's history.undo_step, the History panel's \"Undo this step\"), when it is this agent's own; refused when a later step changed the same values, and unless the history is still at `if_rev`; the step goes on the redo list; a dry run says whether it would go",
+        params: &[
+            WORKSPACE,
+            HISTORY_SCOPE,
+            Param {
+                name: "step",
+                schema: integer,
+                description: "The step's id",
+                default: None,
+            },
+            HISTORY_IF_REV,
+            DRY_RUN,
+            CONFIG,
+        ],
+    },
+    Tool {
         name: "helios_sandbox_start",
         endpoint: Endpoint::Sandbox,
         cmd: "start",

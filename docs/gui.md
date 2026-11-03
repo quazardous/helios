@@ -293,6 +293,13 @@ own steps (the user's or another's refuses them), and
 `helios_history_undo` with a `group` undoes one of its batches alone,
 by the same rule.
 
+**Undo this step.** A step's context menu in the History panel undoes
+that step alone, even under later steps, as long as none of them
+changed the same values (otherwise it is refused with what changed
+them); the step goes on the redo list, so Redo makes it again. An agent
+reaches it with `history.undo_step` (`helios_history_undo_step`), for
+its own steps only.
+
 ## Settings pages
 
 Settings pages are generated, never laid out by hand: a setting named
