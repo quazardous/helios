@@ -24,6 +24,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.47.0] - 2026-11-03
+
+### Added
+
+- A workspace template may say which images its library opens on: a
+  `library.query` with a minimum rating, colour labels, flags and tags (the
+  picks only, for instance), checked against its schema. The workspace's
+  library settings (File › The workspace's library) take it as typed in the
+  search field, `flag:pick rating:3`, and an undo takes it back.
+
 ## [0.46.0] - 2026-11-03
 
 ### Added
