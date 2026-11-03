@@ -24,6 +24,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.46.0] - 2026-11-03
+
+### Added
+
+- A new built-in workspace template, "Develop one image", develops a raw file
+  from its sensor data rather than from its embedded preview: its levels,
+  white balance, highlights, demosaicing and camera colours, then exposure
+  and a tone curve. "Develop (preview)" stays for JPEG, PNG and TIFF pictures.
+- A workspace template can now say that its image is a raw file's sensor
+  data rather than a picture: its network then starts from the raw itself,
+  with the camera's levels, colour filter, white balance and colours handed
+  to the modules that develop it.
+
 ## [0.45.0] - 2026-10-29
 
 ### Changed
