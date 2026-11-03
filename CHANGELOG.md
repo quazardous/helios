@@ -24,6 +24,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.50.0] - 2026-11-03
+
+### Added
+
+- Macros: Ctrl+G in the graph (or Make macro… in the Modules panel) packages
+  the selected nodes as one node, keeping the image's look; Ctrl+Enter opens
+  it in place or folds it, Ctrl+Alt+G dissolves it. Each is one undo step,
+  and agents have the same as MCP tools.
+
 ## [0.49.1] - 2026-11-03
 
 ### Fixed
