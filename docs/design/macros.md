@@ -2,7 +2,8 @@
 
 Status: **decided** (2026-10-30): the owner accepted every default
 below (the open questions at the end keep their reasoning). Built so
-far: step 1, the interface in the format (see "Build steps").
+far: step 1, the interface in the format, and step 2, the pure
+operations on a workspace (see "Build steps").
 
 A macro is a network of modules packaged as one node, showing only the
 parameters chosen for it (AVS's macro, Helios's workshop). The engine
@@ -244,9 +245,9 @@ What `macro.make` does (`nodes`, `name`, `id`, `expose`, `open`,
 - **The image's values.** Values the open image's edit holds on the
   selected nodes move: an exposed one to `node/<macro>/<exposed>`, the
   others become the file's inner values (they are the macro's now).
-  Bypassed nodes stay bypassed inside (their `bypass/<node>` becomes the
-  inner node's saved bypass); a bypassed node cannot be the only node of
-  a macro.
+  A bypassed node is refused, with the reason (turn it on or leave it
+  out): a macro's inner network has no bypass of its own, and giving it
+  one is a change to the core's networks for a later step.
 - **Exposed at first** (default): the parameters the open image changed
   from their defaults, by inner node, named `<node> <param>` when two
   would clash; the editor of section 2 opens next on the same step.
@@ -471,7 +472,16 @@ and the docs it changes (`docs/gui.md`, `docs/templates.md`,
    composite file and the values to move; `macro_dissolved`,
    `macro_opened`, `macro_folded`, `macro_upgraded`; refusals (sources,
    paths leaving and coming back); headless tests that render before
-   and after the same, with the same content keys.
+   and after the same, with the same content keys. Built
+   (`helios_template::macros`), on the workspace's `State` rather than
+   the `Template`, since the composite file joins the workspace's
+   bundle. Each operation takes the open image's values and gives back
+   a `Step`: the next state, the values to move (a path set or taken
+   out) and an answer. Until steps 4 and 5: folding refuses a macro
+   whose inner nodes the image changed while it was open, and an
+   opened macro is not upgraded (fold it first); upgrading carries
+   values by name, clamped into a narrower range or dropped, and says
+   which.
 3. **Desktop steps and undo** (`helios-gui`): `view/graph/selected`;
    the `macro.*` commands as workspace steps carrying the image's
    values in the same undo group; Ctrl+G, Ctrl+Alt+G, Ctrl+Enter; the

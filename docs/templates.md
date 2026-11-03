@@ -331,6 +331,28 @@ A composite (a macro, see [module-contract.md](module-contract.md),
   layout does not show it. A template's node may override the hint (its
   own `panel`), for instance to dock the Masks panel at the end side.
 
+**Macros on a workspace** (`helios_template::macros`). A user's
+composites are made from a workspace's nodes and live in its bundle,
+as pure steps on the workspace's state, each given the open image's
+values and giving back the next state, the values to move and an
+answer:
+
+- `macro_made`: nodes packaged as one node pinning a new file,
+  `user.<slug of its name>@1`; the wires reaching them become its
+  inputs, what is read outside or shown its outputs, and the
+  parameters the image changed are exposed (or those named), their
+  values moved to `node/<macro>/<exposed>`. Refused for a source, a
+  bypassed node, a node outside reading the selection and feeding it,
+  or nodes crossing a sub-workspace's edge.
+- `macro_opened` and `macro_folded`: the node's `open` flag; values
+  keep their paths.
+- `macro_dissolved`: the inner nodes back as ordinary ones, the
+  exposed values written to them; the file stays in the bundle.
+- `macro_upgraded`: the pin moved to a newer version, values carried
+  by name.
+
+Each keeps the content of every inner step, so nothing renders again.
+
 The first composite file is `helios.masked-adjustment` (version 1): a
 mask group (`mask_combine`), feathered along the image's edges
 (`mask_feather`) and blended (`mask_blend`), exposing the group's
