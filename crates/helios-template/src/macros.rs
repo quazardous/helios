@@ -1223,6 +1223,79 @@ impl State {
             }),
         })
     }
+
+    /// The files `macro.publish` copies into the user's library: the
+    /// macro's file at the version `node` pins (its current version), or
+    /// the composite `id` of the workspace (`id@version`, else its newest
+    /// version), then the composites it nests that Helios does not ship.
+    /// Refused for a module, a macro open (fold it first: what changed
+    /// inside is not in its file yet) and a composite Helios ships.
+    pub fn macro_publishable(
+        &self,
+        catalogue: &Catalogue,
+        node: Option<&str>,
+        id: Option<&str>,
+    ) -> Result<Vec<CompositeFile>, String> {
+        let cat = self.bundle.catalogue(catalogue);
+        let r = match (node, id) {
+            (Some(node), _) => {
+                let (_, desc, r) = self.macro_node(node)?;
+                if desc.open {
+                    return Err(format!(
+                        "`{node}` is open: fold it first, what changed inside is not in its file yet"
+                    ));
+                }
+                r
+            }
+            (None, Some(id)) => {
+                if let Some((id, v)) = id.rsplit_once('@') {
+                    CompositeRef {
+                        id: id.to_string(),
+                        version: v
+                            .parse()
+                            .map_err(|_| format!("`{id}@{v}`: the version is a whole number"))?,
+                    }
+                } else {
+                    let version = self
+                        .bundle
+                        .composites
+                        .iter()
+                        .filter(|f| f.id == id)
+                        .map(|f| f.version)
+                        .max()
+                        .ok_or_else(|| format!("the workspace has no macro `{id}`"))?;
+                    CompositeRef {
+                        id: id.to_string(),
+                        version,
+                    }
+                }
+            }
+            (None, None) => return Err("name the macro: `node` or `id`".into()),
+        };
+        let shipped: BTreeSet<CompositeRef> = crate::shipped::composites()
+            .iter()
+            .map(CompositeFile::reference)
+            .collect();
+        if shipped.contains(&r) {
+            return Err(format!(
+                "`{r}` is shipped with Helios: every workspace has it already"
+            ));
+        }
+        let mut out: Vec<CompositeFile> = Vec::new();
+        let mut wanted = vec![r];
+        while let Some(r) = wanted.pop() {
+            if shipped.contains(&r) || out.iter().any(|f| f.reference() == r) {
+                continue;
+            }
+            let file = cat
+                .get_composite(&r)
+                .ok_or_else(|| format!("unknown composite `{r}`"))?
+                .clone();
+            wanted.extend(file.nodes.iter().filter_map(|n| n.composite.clone()));
+            out.push(file);
+        }
+        Ok(out)
+    }
 }
 
 /// One inner parameter of a macro, as its interface editor lists it.

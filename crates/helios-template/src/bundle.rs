@@ -234,15 +234,49 @@ impl Bundle {
         format!("{}-parameter-{}", slug(&self.template.id), slug(id))
     }
 
-    /// `base` with the bundled composites a catalogue lacks.
+    /// `base` with the bundled composites: a bundled file stands for its
+    /// id and version over the catalogue's (a user's library may hold
+    /// another macro made under the same id elsewhere).
     pub fn catalogue(&self, base: &Catalogue) -> Catalogue {
         let mut c = base.clone();
         for file in &self.composites {
-            if c.get_composite(&file.reference()).is_none() {
+            if c.get_composite(&file.reference()) != Some(file) {
                 c.add_composite(file.clone());
             }
         }
         c
+    }
+
+    /// Bundles the composites its network pins that it lacks and that
+    /// Helios does not ship (a macro added from the user's library), inner
+    /// ones included, as the catalogue has them: the workspace then builds
+    /// without that library. What it holds already stays as it is.
+    pub fn carry_composites(&mut self, catalogue: &Catalogue) {
+        let shipped: BTreeSet<CompositeRef> = crate::shipped::composites()
+            .iter()
+            .map(CompositeFile::reference)
+            .collect();
+        let mut wanted: Vec<CompositeRef> = self
+            .template
+            .network
+            .nodes
+            .iter()
+            .filter_map(|n| n.composite.clone())
+            .collect();
+        let mut seen = BTreeSet::new();
+        while let Some(r) = wanted.pop() {
+            if !seen.insert(r.clone()) || shipped.contains(&r) {
+                continue;
+            }
+            let held = self.composites.iter().find(|f| f.reference() == r).cloned();
+            let Some(file) = held.or_else(|| catalogue.get_composite(&r).cloned()) else {
+                continue;
+            };
+            wanted.extend(file.nodes.iter().filter_map(|n| n.composite.clone()));
+            if !self.composites.iter().any(|f| f.reference() == r) {
+                self.composites.push(file);
+            }
+        }
     }
 
     /// Bundles every composite its network uses, inner ones included, as

@@ -21,6 +21,8 @@
 //! - [`macros`]: macros made, opened, folded, dissolved and upgraded on
 //!   a workspace, as pure steps giving the next state and the image's
 //!   values to move.
+//! - [`library`]: the user's library of composites
+//!   (`<config>/composites/`), the macros published from a workspace.
 //! - [`subworkspace`]: sub-workspaces as data, named scopes over nodes
 //!   of a workspace's network, delegated, deleted, checked and copied.
 //! - [`contexts`]: Helios's places and modes on egui-pop's context
@@ -32,6 +34,7 @@ pub mod bundle;
 pub mod catalogue;
 pub mod contexts;
 pub mod format;
+pub mod library;
 pub mod macros;
 pub mod network;
 pub mod schema;

@@ -362,8 +362,23 @@ answer:
   Values follow the inner parameters, not the names: a renamed one keeps
   its value (clamped into a narrower range), one no longer exposed is
   written into the new file. Refused while the macro is open.
+- `macro_publishable`: the files `macro.publish` copies into the user's
+  library, the node's pinned version (or a composite by `id`) with the
+  macros it nests that Helios does not ship.
 
 Each keeps the content of every inner step, so nothing renders again.
+
+**The user's library of composites** (`helios_template::library`,
+`<config>/composites/<id>@<version>.helios-composite.json`): the macros
+published from a workspace. It joins the catalogue after the shipped
+composites (a shipped file is never replaced), and a workspace's own
+bundled file stands over a library file of the same id and version. A
+library file is never rewritten: publishing a version it holds is
+refused, and a change is published as the next version. A macro added
+to a workspace from the library is copied into its bundle
+(`Bundle::carry_composites`), so the workspace builds without it.
+Publishing is outside the workspace's undo; removing the file
+unpublishes it.
 
 The first composite file is `helios.masked-adjustment` (version 1): a
 mask group (`mask_combine`), feathered along the image's edges

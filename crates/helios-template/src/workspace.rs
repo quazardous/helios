@@ -2113,6 +2113,27 @@ pub mod tools {
         Ok(answer)
     }
 
+    /// `{workspace, node | id, dry_run}`: `macro.publish` on the files.
+    /// Publishing writes into the user's library, outside the workspace
+    /// and beyond any undo, so it needs the user's confirmation in a
+    /// session of theirs (the desktop asks it); on the files, with no
+    /// one to ask, only a dry run answers, saying what would be written.
+    pub fn publish(config: &Path, args: &Json, catalogue: &Catalogue) -> Result<Json, String> {
+        let state = files(config, args)?.load()?;
+        let with = crate::library::with_library(catalogue.clone(), &crate::library::files(config));
+        let node = args["node"].as_str().filter(|s| !s.is_empty());
+        let id = args["id"].as_str().filter(|s| !s.is_empty());
+        let published = state.macro_publishable(&with, node, id)?;
+        let answer = crate::library::publish(config, &published, true)?;
+        if dry(args) {
+            return Ok(answer);
+        }
+        Err(format!(
+            "publishing `{}` to the user's library needs their confirmation, asked on the desktop: no desktop holds this workspace open (a dry run says what would be written)",
+            published[0].reference()
+        ))
+    }
+
     /// `{workspace}`: the last step an agent made undone.
     pub fn undo(config: &Path, args: &Json) -> Result<Json, String> {
         let label = files(config, args)?.undo()?;

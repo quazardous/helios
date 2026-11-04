@@ -768,3 +768,72 @@ fn an_interface_that_does_not_fit_is_refused_with_its_reason() {
         .unwrap_err();
     assert!(e.contains("fold it first"), "{e}");
 }
+
+#[test]
+fn a_published_macro_is_added_by_another_workspace_which_keeps_a_copy() {
+    let config = std::env::temp_dir().join(format!("helios-publish-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&config);
+    let (made, _) = made();
+    let files = made
+        .state
+        .macro_publishable(&catalogue(), Some("warm_look"), None)
+        .unwrap();
+    assert_eq!(files[0].id, "user.warm-look");
+    // By id too, its newest version; a module or nothing named is refused.
+    let by_id = made
+        .state
+        .macro_publishable(&catalogue(), None, Some("user.warm-look"))
+        .unwrap();
+    assert_eq!(by_id, files);
+    let e = made
+        .state
+        .macro_publishable(&catalogue(), Some("lift"), None)
+        .unwrap_err();
+    assert!(e.contains("is a module"), "{e}");
+    helios_template::library::publish(&config, &files, false).unwrap();
+    // Another workspace: the library joins its catalogue, the macro is
+    // added from it and copied into its files.
+    let with = helios_template::library::with_library(
+        catalogue(),
+        &helios_template::library::files(&config),
+    );
+    let other = state();
+    assert!(
+        helios_template::network::addable_composites(&with)
+            .iter()
+            .any(|(id, _)| id == "user.warm-look@1")
+    );
+    let (added, _) = helios_template::network::edited(
+        &other,
+        &with,
+        "network.add",
+        &json!({ "nodes": [{ "composite": "user.warm-look@1" }] }),
+    )
+    .unwrap();
+    assert!(
+        added
+            .bundle
+            .composites
+            .iter()
+            .any(|f| f.id == "user.warm-look")
+    );
+    // Without the library, it still builds: the copy is the workspace's.
+    added.bundle.build(&catalogue()).unwrap();
+    let _ = std::fs::remove_dir_all(&config);
+}
+
+#[test]
+fn a_workspace_s_own_file_stands_over_a_library_file_of_the_same_version() {
+    let (made, _) = made();
+    let mut other = made.state.bundle.composites[0].clone();
+    other.description = "made elsewhere".into();
+    let with = helios_template::library::with_library(catalogue(), &[other]);
+    let own = &made.state.bundle.composites[0];
+    assert_eq!(
+        made.state
+            .bundle
+            .catalogue(&with)
+            .get_composite(&own.reference()),
+        Some(own)
+    );
+}

@@ -610,7 +610,9 @@ pub fn edited(
         }
         other => return Err(format!("no network command `{other}`")),
     }
-    let next = now.edited(&json!({ "network": net, "positions": positions }))?;
+    let mut next = now.edited(&json!({ "network": net, "positions": positions }))?;
+    // A macro added from the user's library joins the workspace's files.
+    next.bundle.carry_composites(catalogue);
     Ok((next, answer))
 }
 
