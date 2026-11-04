@@ -307,10 +307,34 @@ egui-pop's `HistoryPlugin` is on in Helios, over `HeliosHistory`:
   sub-workspace entered, and the shell shows a toast with Undo. An
   agent takes and restores with `helios_history_snapshot` and
   `helios_history_restore` (its restore is its own step), and reads
-  them with `helios_history_read`. Not yet: the hover preview of a
-  snapshot, the comparison's "before" from a snapshot, and a
+  them with `helios_history_read`. Not yet: the comparison's "before"
+  from a snapshot, and a
   `pending` flag of egui-pop's own (the name carries the mark until
   Helios moves to an egui-pop that has it).
+- **The hover preview** (2026-11-04). `HeliosHistory` answers egui-pop's
+  `History::preview`: the pointer on a row of the History panel (a step,
+  a replaced step, a snapshot) shows the image as it was there, and the
+  panel lists what differs ("exposure: +1.00 EV (now +0.30 EV)"; a
+  parameter of a node not named after its module says the node:
+  "exposure (exposure_1)"). The values there (`Store::values_at`, what a
+  jump would write, nothing walked; a snapshot's differing values) are
+  an overlay of the value store that only the graph renders from
+  (`Store::set_preview`, read by `sync` through `Store::shown`). It is
+  never a write: no step, no commit, no sequence number, no event, so
+  the edit is not saved, the vault is not written, and widgets, agents
+  and the save keep reading the live values; ending it marks its paths
+  dirty and the graph comes back to the live values, bit for bit.
+  egui-pop asks once per row entered (none while the pointer rests), and
+  the owner wakes the window only when what is shown changed: one render
+  per row crossed, as a slider's step costs. A drag going on gets no
+  preview (its values stay on screen), a write to a previewed value
+  shows through, and another image opening ends it. A replaced step
+  whose line left from a replaced step gets no preview (no jump reaches
+  it either); values of nodes the network no longer has are listed but
+  not rendered (the graph has no node to show them on); a snapshot's
+  labels and locks the store does not hold are left out. No MCP tool:
+  egui-pop has no preview verb, and an agent compares states with
+  `helios_history_read`.
 - **Not yet:** the group in the saved version (versions name the agent,
   not the request), and a paste into the graph or the masks, applied at
   the next frame, is a step of its own outside the request.

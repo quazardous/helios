@@ -322,6 +322,15 @@ sub-workspace entered is refused. Agents have `helios_history_snapshot`
 and `helios_history_restore`, and read the snapshots with
 `helios_history_read`.
 
+**Hover preview.** Resting the pointer on a row of the History panel (a
+step, a replaced step, a snapshot) shows the image as it was there, and
+the row's tooltip lists what differs, with the value now. Nothing is
+changed: no step, no save, the sliders keep the live values; moving the
+pointer off the panel shows the live image again, exactly. A drag going
+on gets no preview, and a value changed while previewing shows through.
+A replaced step that no click could reach shows no preview either, and
+a value of a node the network no longer has is listed but not drawn.
+
 ## Settings pages
 
 Settings pages are generated, never laid out by hand: a setting named

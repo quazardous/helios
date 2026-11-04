@@ -48,17 +48,28 @@
 //!   "not saved yet", and lost if the app quits first. Restoring one
 //!   writes its values back as one new step, which an undo takes back;
 //!   egui-pop's `edit.restore` step, vetoed like an undo during a drag.
+//! - **The hover preview**: the pointer on a row of the History panel
+//!   (a step, a replaced step, a snapshot) shows the image as it was
+//!   there, and the panel lists what differs (egui-pop's
+//!   [`History::preview`]). The values there are an overlay of the store
+//!   the graph renders from ([`helios_values::Store::set_preview`]):
+//!   nothing is written, so no step, no save and no vault write, and the
+//!   live values come back exactly when the pointer leaves. Asked once
+//!   per row entered, it costs one render per row, none while the
+//!   pointer rests. A drag going on gets no preview.
 
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use egui_pop::api::contexts::Entry;
 use egui_pop::api::history::{
-    Answer, Features, History, Label, Line, Refusal, RefusalKind, Replaced, Request, ScopeId,
-    ScopeInfo, Snapshot, StepInfo, Walked, plan_jump,
+    Answer, At, Features, History, Label, Line, Preview, PreviewChange, Refusal, RefusalKind,
+    Replaced, Request, ScopeId, ScopeInfo, Snapshot, StepInfo, Walked, plan_jump,
 };
+use egui_pop::api::host::Waker;
+use egui_pop::i18n::I18n;
 use egui_pop::model::commands::Origin as PopOrigin;
 use egui_pop::model::ids::FrameId;
-use helios_core::Message;
+use helios_core::{Message, Value};
 use helios_values::{GestureId, Refused, Set, Step, Store};
 
 use crate::edit_snapshots::{self, Shared, Taken};
@@ -73,6 +84,10 @@ pub struct HeliosHistory {
     values: Arc<Mutex<Store>>,
     /// The open image's snapshots, shared with the vault's link.
     snapshots: Shared,
+    /// Wakes the window when a preview changes what the image shows.
+    waker: Option<Arc<Mutex<Waker>>>,
+    /// The catalogues a preview's list is said through.
+    i18n: Option<I18n>,
 }
 
 impl std::fmt::Debug for HeliosHistory {
@@ -87,7 +102,22 @@ impl HeliosHistory {
         Self {
             values,
             snapshots: Shared::default(),
+            waker: None,
+            i18n: None,
         }
+    }
+
+    /// Wakes the window through `waker` when a preview changes what the
+    /// image shows (the host's: the graph follows at the next frame).
+    pub fn with_waker(mut self, waker: Arc<Mutex<Waker>>) -> Self {
+        self.waker = Some(waker);
+        self
+    }
+
+    /// Says a preview's list through `i18n` (English without).
+    pub fn with_i18n(mut self, i18n: I18n) -> Self {
+        self.i18n = Some(i18n);
+        self
     }
 
     /// Keeps its snapshots in `book` (the shell's, which the vault's link
@@ -380,6 +410,76 @@ fn restore(
         .collect())
 }
 
+/// A message through `i18n`, else its English.
+fn say(i18n: Option<&I18n>, m: &Message) -> String {
+    i18n.map_or_else(|| m.english.clone(), |i| helios_i18n::message(i, m))
+}
+
+/// One value that differs at the point previewed, as the History panel
+/// lists it: a parameter by its label (and its node, when that is not
+/// named after its module), a bypass by its node.
+fn preview_change(store: &Store, i18n: Option<&I18n>, path: &str, then: &Value) -> PreviewChange {
+    let entry = store.get(path);
+    let now = entry.map_or(Value::Bool(false), |e| e.value.clone());
+    if let Some(node) = path.strip_prefix(helios_values::BYPASS) {
+        let state = |v: &Value| {
+            say(
+                i18n,
+                &if v.as_bool() == Some(true) {
+                    Message::new("gui-history-preview-bypassed", "bypassed")
+                } else {
+                    Message::new("gui-history-preview-applied", "applied")
+                },
+            )
+        };
+        return PreviewChange {
+            what: node.to_string(),
+            then: state(then),
+            now: state(&now),
+        };
+    }
+    let Some(d) = entry.map(|e| &e.descriptor) else {
+        return PreviewChange {
+            what: path.to_string(),
+            then: format!("{then:?}"),
+            now: format!("{now:?}"),
+        };
+    };
+    let locale = i18n.map_or_else(|| "en".to_string(), I18n::locale);
+    let shown = |v: &Value| crate::params::shown_in(&locale, d, v);
+    let what = match (
+        path.strip_prefix("node/").and_then(|r| r.rsplit_once('/')),
+        &d.module,
+    ) {
+        (Some((node, param)), Some(module)) => {
+            let key = helios_i18n::ids::param_label(module, param);
+            let label = i18n
+                .and_then(|i| i.get(&key.key(), &[]))
+                .unwrap_or_else(|| d.label.clone());
+            // The node named only when it is not the module's only one.
+            if node == module {
+                return PreviewChange {
+                    what: label,
+                    then: shown(then),
+                    now: shown(&now),
+                };
+            }
+            say(
+                i18n,
+                &Message::new("gui-history-preview-param", "{ $label } ({ $node })")
+                    .with("label", label)
+                    .with("node", node.to_string()),
+            )
+        }
+        _ => d.label.clone(),
+    };
+    PreviewChange {
+        what,
+        then: shown(then),
+        now: shown(&now),
+    }
+}
+
 impl HeliosHistory {
     /// Undoes the steps of `group` (an agent's batch) alone, newest
     /// first, even under later steps (the answer to "undo only the
@@ -617,6 +717,41 @@ impl History for HeliosHistory {
                 s.undo_step(step, &o).map_err(|e| refused(&e))?;
             }
             Ok(vec![info])
+        })
+    }
+
+    fn preview(&mut self, scope: &ScopeId, at: Option<At>) -> Option<Preview> {
+        if *scope != EDIT {
+            return None;
+        }
+        let mut store = self.lock();
+        // The values there, where they differ from now; `None`: nothing
+        // to show (the pointer left, a drag goes on, a point no jump
+        // reaches).
+        let values = match at {
+            None => None,
+            // A drag shows its own values: they stay what the image shows.
+            Some(_) if store.open_gesture().is_some() => None,
+            Some(At::Step(id)) => store.values_at(id),
+            Some(At::Snapshot(id)) => edit_snapshots::lock(&self.snapshots)
+                .get(id)
+                .map(|t| edit_snapshots::restore_writes(&store, &t.values)),
+        };
+        if store.set_preview(values.clone().unwrap_or_default())
+            && let Some(w) = &self.waker
+        {
+            w.lock().unwrap_or_else(PoisonError::into_inner).wake();
+        }
+        let values = values?;
+        let i18n = self.i18n.as_ref();
+        Some(Preview {
+            shown: !store.previewed().is_empty(),
+            // Labels and locks the store does not hold are not shown.
+            changes: values
+                .iter()
+                .filter(|(p, _)| store.previewed().contains_key(p))
+                .map(|(p, v)| preview_change(&store, i18n, p, v))
+                .collect(),
         })
     }
 }

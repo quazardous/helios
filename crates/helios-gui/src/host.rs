@@ -181,8 +181,18 @@ impl HeliosHost {
         values: Arc<Mutex<helios_values::Store>>,
         snapshots: crate::edit_snapshots::Shared,
     ) -> Self {
-        self.history = Some(HeliosHistory::new(values.clone()).with_snapshots(snapshots));
+        self.history = Some(
+            HeliosHistory::new(values.clone())
+                .with_snapshots(snapshots)
+                .with_waker(self.waker.clone()),
+        );
         self.values = Some(values);
+        self
+    }
+
+    /// The history's hover preview lists what differs through `i18n`.
+    pub fn with_i18n(mut self, i18n: egui_pop::i18n::I18n) -> Self {
+        self.history = self.history.map(|h| h.with_i18n(i18n));
         self
     }
 

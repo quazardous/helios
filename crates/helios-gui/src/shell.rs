@@ -568,8 +568,21 @@ impl Shell {
         // The open image's history snapshots: taken through the history
         // owner, pinned and kept by the vault's link (`persist`).
         let snapshots = crate::edit_snapshots::Shared::default();
+        let i18n_plugin = egui_pop::i18n::I18nPlugin::new()
+            .catalogues(helios_i18n::CATALOGUES)
+            .env(helios_i18n::ENV)
+            // A shell without the user's settings (tests, pictures,
+            // tools) speaks English; the desktop follows the language
+            // setting, the system's by default.
+            .language(if ui_settings.is_some() {
+                egui_pop::i18n::plugin::SYSTEM
+            } else {
+                "en"
+            });
+        let i18n = i18n_plugin.i18n();
         let host = HeliosHost::new(registry.clone(), bus, Arc::default())
-            .with_values(values.clone(), snapshots.clone());
+            .with_values(values.clone(), snapshots.clone())
+            .with_i18n(i18n.clone());
         let later = host.later();
         let workspace = host.workspace();
         let images = crate::contexts::Images::default();
@@ -597,18 +610,6 @@ impl Shell {
         helios_values::register(&mut lock(&registry), wiring.values.clone())
             .expect("param commands are declared once");
         Shell::declare_menus(&wiring);
-        let i18n_plugin = egui_pop::i18n::I18nPlugin::new()
-            .catalogues(helios_i18n::CATALOGUES)
-            .env(helios_i18n::ENV)
-            // A shell without the user's settings (tests, pictures,
-            // tools) speaks English; the desktop follows the language
-            // setting, the system's by default.
-            .language(if ui_settings.is_some() {
-                egui_pop::i18n::plugin::SYSTEM
-            } else {
-                "en"
-            });
-        let i18n = i18n_plugin.i18n();
         let opens = crate::platform::Opens::default();
         let Wiring {
             queue,
