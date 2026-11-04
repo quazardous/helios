@@ -41,7 +41,7 @@ Built on egui-pop's workbench (2026-10-12, `helios-gui/src/workbench.rs`):
 Helios declares its panels with their rules (the areas each may be in,
 the size it opens at, whether it detaches), and egui-pop docks them in
 the centre, the start and end side bars and the bottom panel over
-`egui_dock`, as tabs and splits, with auxiliary windows and tabs
+`egui_stack` (egui_dock's continuation), as tabs and splits, with auxiliary windows and tabs
 dragged between areas; a drop the rules refuse is said where it
 happens and in the status bar. The layout changes only through
 egui-pop's steps (`workbench.move`, `workbench.focus`, `workbench.show`,

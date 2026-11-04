@@ -218,7 +218,7 @@ and macOS, as close to Vulkan as possible, so the viewport can show buffers
 the engine computed on the GPU without copying them back. wgpu is
 the shared GPU layer for the GUI and the engine's GPU modules (2026-10-11,
 decided with egui: Vulkan on Linux and Windows, Metal on macOS, raw Vulkan
-access for vkdt interop), at the version egui uses (wgpu 30 with egui 0.36).
+access for vkdt interop), at the version egui uses (wgpu 30 with egui 0.37).
 A process has one wgpu instance and one device (2026-10-12), which the
 window is handed by the engine's side, against a Vulkan loader crash (see
 docs/testing-strategy.md); a second GPU of the same machine is then not

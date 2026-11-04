@@ -29,7 +29,7 @@ and keyboard work.
 | Menus | egui `MenuBar` / `MenuButton` / `SubMenuButton`; muda (native, GTK on Linux) | **Own declaration layer, drawn with egui's menu primitives**; muda only for a macOS global menu later |
 | Command palette, fuzzy search | no egui crate; re_ui's palette (tied to Rerun); nucleo-matcher (MPL-2.0) | **Own**; nucleo-matcher if ranking is needed |
 | File and folder dialogs | rfd 0.17 (native, XDG portal); egui-file-dialog 0.15 (drawn in egui, testable) | **Adopt rfd** as the default, **wrap egui-file-dialog** as the in-app fallback that tests can drive, both behind one Browse path |
-| Docking | egui_dock 0.21 (in use); egui_tiles 0.17 (rerun) | **Keep egui_dock**; neither vetoes a drop by destination, so area rules stay a check of our own; an upstream `allowed_destination` hook is worth proposing |
+| Docking | egui_stack 0.22 (in use through egui-pop, egui_dock's continuation); egui_tiles 0.17 (rerun) | **Keep egui_stack**; neither vetoes a drop by destination, so area rules stay a check of our own; an upstream `allowed_destination` hook is worth proposing |
 | Tables, grids | egui_table 0.10 (rerun, virtualized); egui_extras `TableBuilder`; egui_virtual_list | **Adopt egui_table** for metadata tables; thumbnail grid on `ScrollArea::show_viewport` (own) |
 | Icons | egui-phosphor 0.14 (0.36, font merged as a fallback family); egui_material_icons | **Adopt egui-phosphor**: it fixes the missing glyphs (✓ ▸ ◆ ●) without painting them by hand |
 | UI kits, themes | re_ui (Rerun's, too coupled), catppuccin-egui (0.33), egui-aesthetix (0.28) | **Ideas only** from re_ui (tokens, list items, palette); design our tokens to map onto egui 0.37's `StyleProvider` |
