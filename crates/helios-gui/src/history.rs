@@ -628,12 +628,13 @@ mod tests {
 
     use super::*;
 
+    /// A parameter, as an edit saves it (`node/<node>/<param>`): only
+    /// those are in a snapshot.
+    const EV: &str = "node/exposure/exposure";
+
     fn store() -> Arc<Mutex<Store>> {
         let mut s = Store::new();
-        s.declare(
-            "node/exposure",
-            Descriptor::float("Exposure", -3.0, 3.0, 0.0),
-        );
+        s.declare(EV, Descriptor::float("Exposure", -3.0, 3.0, 0.0));
         Arc::new(Mutex::new(s))
     }
 
@@ -642,7 +643,7 @@ mod tests {
             .lock()
             .unwrap()
             .set(Set::new(
-                "node/exposure",
+                EV,
                 Change::To(Value::Float(v)),
                 helios_shell::commands::Origin::User,
             ))
@@ -650,13 +651,7 @@ mod tests {
     }
 
     fn value(values: &Arc<Mutex<Store>>) -> Value {
-        values
-            .lock()
-            .unwrap()
-            .get("node/exposure")
-            .unwrap()
-            .value
-            .clone()
+        values.lock().unwrap().get(EV).unwrap().value.clone()
     }
 
     #[test]
@@ -729,7 +724,7 @@ mod tests {
         let g = {
             let mut s = values.lock().unwrap();
             let g = s.begin_request(agent.clone(), Some("Retouch skin"));
-            for (path, v) in [("node/exposure", 0.5), ("node/black", -0.1)] {
+            for (path, v) in [(EV, 0.5), ("node/black", -0.1)] {
                 s.set(Set::new(path, Change::To(Value::Float(v)), agent.clone()))
                     .unwrap();
             }
@@ -983,7 +978,7 @@ mod tests {
             .unwrap()
             .set(
                 Set::new(
-                    "node/exposure",
+                    EV,
                     Change::To(Value::Float(2.5)),
                     helios_shell::commands::Origin::User,
                 )
