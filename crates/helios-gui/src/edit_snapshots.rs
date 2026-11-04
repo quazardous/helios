@@ -192,11 +192,6 @@ impl Book {
         std::mem::take(&mut self.dirty)
     }
 
-    /// Asks for the pinned snapshots to be kept again (a write failed).
-    pub fn mark_dirty(&mut self) {
-        self.dirty = true;
-    }
-
     /// A restore was made: the toast's to say.
     pub fn restored(&mut self, name: &str) {
         self.restored.push(name.to_string());

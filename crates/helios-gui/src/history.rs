@@ -553,6 +553,10 @@ impl History for HeliosHistory {
     ) -> Result<Snapshot, Refusal> {
         let store = self.lock();
         Self::check(&store, request)?;
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(Refusal::new(RefusalKind::Owner, "a snapshot needs a name"));
+        }
         let mut book = edit_snapshots::lock(&self.snapshots);
         let taken = book.take(&store, name, to_helios(origin), now(), request.dry_run);
         Ok(snapshot_info(&taken, book.shown_name(&taken)))
@@ -915,6 +919,45 @@ mod tests {
         assert_eq!(r.kind, RefusalKind::Owner);
         // A step that never was refuses as before.
         let Answer::Done(Err(r)) = h.jump(&Request::new(EDIT), 9, &PopOrigin::User) else {
+            panic!("refused");
+        };
+        assert_eq!(r.kind, RefusalKind::Nothing);
+    }
+
+    #[test]
+    fn a_snapshot_is_pending_and_its_restore_is_one_step() {
+        let values = store();
+        set(&values, 1.0);
+        let mut h = HeliosHistory::new(values.clone());
+        assert!(h.features(&EDIT).snapshots);
+        let empty = h.snapshot(&Request::new(EDIT), "  ", &PopOrigin::User);
+        assert_eq!(empty.unwrap_err().kind, RefusalKind::Owner);
+        let snap = h
+            .snapshot(&Request::new(EDIT), "Bright", &PopOrigin::User)
+            .unwrap();
+        assert_eq!(
+            (snap.step, snap.name.as_str()),
+            (1, "Bright (not saved yet)")
+        );
+        set(&values, 2.0);
+        let Answer::Done(Ok(w)) = h.restore(&Request::new(EDIT), snap.id, &PopOrigin::User) else {
+            panic!("restored");
+        };
+        assert_eq!(w.steps[0].label.text, "Restore “Bright”");
+        assert_eq!(value(&values), Value::Float(1.0));
+        assert_eq!(h.line(&EDIT).unwrap().undo.len(), 3);
+        // Already there: nothing to do, no step.
+        let Answer::Done(Ok(w)) = h.restore(&Request::new(EDIT), snap.id, &PopOrigin::User) else {
+            panic!("nothing");
+        };
+        assert!(w.steps.is_empty());
+        let Answer::Done(Ok(_)) = h.undo(&Request::new(EDIT), &PopOrigin::User) else {
+            panic!("undone");
+        };
+        assert_eq!(value(&values), Value::Float(2.0));
+        h.forget(&Request::new(EDIT), snap.id).unwrap();
+        assert!(h.snapshots(&EDIT).is_empty());
+        let Answer::Done(Err(r)) = h.restore(&Request::new(EDIT), snap.id, &PopOrigin::User) else {
             panic!("refused");
         };
         assert_eq!(r.kind, RefusalKind::Nothing);

@@ -399,8 +399,8 @@ impl<S: Store> Persist<S> {
             }
             (book.pinned(), book.take_dirty())
         };
+        // Said once: the next change writes the whole list again.
         if write && let Err(err) = self.vault.set_snapshots(&image, &pinned) {
-            crate::edit_snapshots::lock(&shell.snapshots).mark_dirty();
             shell.notify(
                 Level::Error,
                 Message::new(
