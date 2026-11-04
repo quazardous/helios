@@ -24,6 +24,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.53.0] - 2026-11-04
+
+### Added
+
+- Macros: folding a macro changed while open asks what to do with the
+  changes: save them as the macro's next version (the default), expose
+  them, discard them, or keep it open; each is one undo step that keeps
+  the image's look. Other nodes on the macro keep their version, and the
+  Modules panel offers them the newer one ("Update to 2"), carrying their
+  values by name. Agents pass `changes` to `helios_macro_fold`.
+
+### Fixed
+
+- The graph's edits (add, connect) know the workspace's own macros: a
+  second node of a macro made in the workspace can be added and wired.
+- Macros: moving a macro to another version (Update, or a new interface)
+  keeps the image's values that did not need to change; they went back to
+  the macro's defaults on the desktop.
+
 ## [0.52.0] - 2026-11-04
 
 ### Added
