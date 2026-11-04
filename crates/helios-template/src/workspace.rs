@@ -1987,7 +1987,7 @@ pub mod tools {
         step(&files, &before, &next, answer, args, catalogue, &label)
     }
 
-    /// `{workspace, node | nodes, name, expose, exposed, version,
+    /// `{workspace, node | nodes, name, expose, exposed, version, changes,
     /// dry_run}`: one of the macros' steps (`macro.make`, `macro.open`,
     /// `macro.fold`, `macro.dissolve`, `macro.upgrade`,
     /// `macro.interface`) on the files, `values` being an
@@ -2029,9 +2029,15 @@ pub mod tools {
             }
             "macro.fold" => {
                 let node = node()?;
+                let changes = crate::macros::Changes::from_arg(&args["changes"])?;
+                if changes == Some(crate::macros::Changes::Keep) {
+                    // Kept open: nothing to write.
+                    before.macro_node_open(&node)?;
+                    return Ok((json!({ "node": node, "open": true, "kept": true }), None));
+                }
                 (
-                    format!("fold {node}"),
-                    before.macro_folded(catalogue, &node, values)?,
+                    crate::macros::fold_label(&node, changes),
+                    before.macro_folded(catalogue, &node, changes, values)?,
                 )
             }
             "macro.dissolve" => {
@@ -2068,6 +2074,8 @@ pub mod tools {
             }
             other => return Err(format!("no macro tool `{other}`")),
         };
+        let mut made = made;
+        made.answer["updates"] = json!(made.state.bundle.updates(catalogue));
         let answer = step(
             &files,
             &before,

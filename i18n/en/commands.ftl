@@ -197,7 +197,7 @@ command-macro-dissolve =
     .title = Give a macro way to its nodes, as ordinary ones (`node`; `dry_run`)
 
 command-macro-fold =
-    .title = Fold an opened macro back into one node (`node`; `dry_run`)
+    .title = Fold an opened macro back into one node (`node`; `changes`: `version`, `expose`, `discard` or `keep`, asked when it changed while open; `dry_run`)
 
 command-macro-interface =
     .title = Choose the parameters a macro shows, saved as a new version (`node`, the selected one by default; `exposed`; `dry_run`)

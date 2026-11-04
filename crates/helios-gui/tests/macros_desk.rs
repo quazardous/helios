@@ -364,3 +364,199 @@ fn a_macro_made_from_the_form_opens_its_interface_editor_answered_as_a_form() {
     assert_eq!(pinned.version, 2);
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// The version `node` is pinned to, and whether it is open.
+fn pinned(h: &Harness<'static, Shell>, node: &str) -> (u32, bool) {
+    let state = h.state().workspace_state().unwrap();
+    let n = state
+        .bundle
+        .template
+        .network
+        .nodes
+        .iter()
+        .find(|n| n.name == node)
+        .unwrap_or_else(|| panic!("no node {node}"))
+        .clone();
+    (n.composite.unwrap().version, n.open)
+}
+
+/// The answer of the last `id` run, from the history.
+fn last_answer(h: &Harness<'static, Shell>, id: &str) -> Json {
+    h.state()
+        .history()
+        .into_iter()
+        .rev()
+        .find(|r| r.id == id)
+        .unwrap_or_else(|| panic!("{id} never ran"))
+        .result
+        .unwrap_or_else(|e| panic!("{id}: {e}"))
+}
+
+/// A macro `look` of the exposure (its exposure set to 1 and exposed, or
+/// those in `expose`), and a second node `look_2` on the same file, fed
+/// by the source.
+fn two_looks(h: &mut Harness<'static, Shell>, expose: Json) {
+    set(h, "node/exposure/exposure", 1.0);
+    run(
+        h,
+        "macro.make",
+        json!({ "nodes": ["exposure"], "name": "Look", "expose": expose }),
+    );
+    let added = run(
+        h,
+        "network.add",
+        json!({ "nodes": [{ "composite": "user.look@1" }] }),
+    );
+    assert!(added.to_string().contains("look_2"), "{added}");
+    run(
+        h,
+        "network.connect",
+        json!({ "from": "source", "port": "image", "to": "look_2", "input": "input" }),
+    );
+    assert_eq!(pinned(h, "look_2"), (1, false));
+}
+
+#[test]
+fn a_macro_changed_while_open_folds_by_the_answer_given_each_one_undo_step() {
+    let root = temp("fold-changed");
+    let mut h = window(&root);
+    two_looks(&mut h, Json::Null);
+    run(&mut h, "macro.open", json!({ "node": "look" }));
+    // An inner parameter it does not expose, changed on the image.
+    set(&mut h, "node/look.exposure/black", 0.1);
+    let before = steps(&h);
+    // Folded without an answer: asked, nothing done yet.
+    let asked = run(&mut h, "macro.fold", json!({ "node": "look" }));
+    assert_eq!(asked["asked"], true, "{asked}");
+    assert_eq!(asked["changed"], json!(["node/look.exposure/black"]));
+    let dialog = run(&mut h, "dialog.current", json!(null)).to_string();
+    for label in [
+        "Save as version 2",
+        "Expose them",
+        "Discard",
+        "Keep it opened",
+    ] {
+        assert!(dialog.contains(label), "{label} in {dialog}");
+    }
+    // Kept open: nothing changes.
+    run(&mut h, "dialog.answer", json!({ "choice": "keep" }));
+    follow(&mut h);
+    assert_eq!(pinned(&h, "look"), (1, true));
+    assert_eq!(steps(&h), before);
+    // Discarded: back to version 1's inside, one step.
+    run(
+        &mut h,
+        "macro.fold",
+        json!({ "node": "look", "changes": "discard" }),
+    );
+    assert_eq!(pinned(&h, "look"), (1, false));
+    assert_eq!(steps(&h), before + 1);
+    undo(&mut h);
+    assert_eq!(pinned(&h, "look"), (1, true));
+    assert_eq!(shown(&h, "look.exposure", "black"), Some(0.1), "undone");
+    // Exposed: version 2 shows it, its value kept on the image.
+    let exposed = run(
+        &mut h,
+        "macro.fold",
+        json!({ "node": "look", "changes": "expose" }),
+    );
+    assert_eq!(exposed["exposed"], json!(["black"]), "{exposed}");
+    assert_eq!(pinned(&h, "look"), (2, false));
+    assert_eq!(shown(&h, "look", "black"), Some(0.1));
+    assert_eq!(shown(&h, "look", "exposure"), Some(1.0));
+    undo(&mut h);
+    assert_eq!(pinned(&h, "look"), (1, true));
+    assert_eq!(shown(&h, "look.exposure", "black"), Some(0.1), "undone");
+    // Saved as version 2, the dialog's default, answered as a person
+    // would: the change is the file's; the other node keeps version 1,
+    // offered version 2 as an update.
+    run(&mut h, "macro.fold", json!({ "node": "look" }));
+    run(&mut h, "dialog.answer", json!({ "choice": "version" }));
+    follow(&mut h);
+    let saved = last_answer(&h, "macro.fold");
+    assert_eq!(
+        saved["composite"],
+        json!({ "id": "user.look", "version": 2 }),
+        "{saved}"
+    );
+    assert_eq!(pinned(&h, "look"), (2, false));
+    assert_eq!(
+        pinned(&h, "look_2"),
+        (1, false),
+        "the other node keeps its version"
+    );
+    assert_eq!(
+        saved["updates"],
+        json!([{ "node": "look_2", "composite": { "id": "user.look", "version": 1 }, "available": 2 }])
+    );
+    let state = h.state().workspace_state().unwrap();
+    let black = |version: u32| {
+        state
+            .bundle
+            .composites
+            .iter()
+            .find(|f| f.id == "user.look" && f.version == version)
+            .and_then(|f| f.nodes[0].params.get("black").cloned())
+    };
+    assert_eq!(black(2), Some(Value::Float(0.1)));
+    assert_eq!(black(1), None, "version 1's file unchanged");
+    assert_eq!(steps(&h), before + 1);
+    undo(&mut h);
+    assert_eq!(pinned(&h, "look"), (1, true));
+    assert_eq!(shown(&h, "look.exposure", "black"), Some(0.1), "undone");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn an_update_on_offer_carries_values_by_name_and_says_what_it_dropped() {
+    let root = temp("upgrade");
+    let mut h = window(&root);
+    two_looks(
+        &mut h,
+        json!([
+            { "name": "exposure", "node": "exposure", "param": "exposure" },
+            { "name": "black", "node": "exposure", "param": "black" }
+        ]),
+    );
+    set(&mut h, "node/look_2/exposure", 0.5);
+    set(&mut h, "node/look_2/black", -0.1);
+    // Version 2 no longer exposes `black`: offered to the other node.
+    let edited = run(
+        &mut h,
+        "macro.interface",
+        json!({ "node": "look", "exposed": [
+            { "name": "exposure", "node": "exposure", "param": "exposure" }
+        ] }),
+    );
+    assert_eq!(pinned(&h, "look"), (2, false));
+    assert_eq!(
+        edited["updates"],
+        json!([{ "node": "look_2", "composite": { "id": "user.look", "version": 1 }, "available": 2 }]),
+        "{edited}"
+    );
+    let before = steps(&h);
+    let dry = run(
+        &mut h,
+        "macro.upgrade",
+        json!({ "node": "look_2", "dry_run": true }),
+    );
+    assert_eq!(dry["dropped"], json!(["black"]), "{dry}");
+    assert_eq!(steps(&h), before);
+    let up = run(&mut h, "macro.upgrade", json!({ "node": "look_2" }));
+    assert_eq!(up["to"], json!({ "id": "user.look", "version": 2 }), "{up}");
+    assert_eq!(up["dropped"], json!(["black"]));
+    assert_eq!(up["updates"], json!([]));
+    assert_eq!(pinned(&h, "look_2"), (2, false));
+    assert_eq!(
+        shown(&h, "look_2", "exposure"),
+        Some(0.5),
+        "carried by name"
+    );
+    assert_eq!(shown(&h, "look_2", "black"), None, "dropped");
+    assert_eq!(steps(&h), before + 1, "one step");
+    undo(&mut h);
+    assert_eq!(pinned(&h, "look_2"), (1, false));
+    assert_eq!(shown(&h, "look_2", "black"), Some(-0.1), "undone");
+    assert_eq!(shown(&h, "look_2", "exposure"), Some(0.5));
+    let _ = std::fs::remove_dir_all(&root);
+}

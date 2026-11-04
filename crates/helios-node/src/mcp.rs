@@ -586,10 +586,15 @@ pub const TOOLS: &[Tool] = &[
         name: "helios_macro_fold",
         endpoint: Endpoint::Workspace,
         cmd: "macro.fold",
-        description: "Folds an opened macro back into one node, as one undoable step. Refused while the image changed its inner nodes (a change to the macro itself)",
+        description: "Folds an opened macro back into one node, as one undoable step. What the image changed inside that the macro's file does not hold (an inner parameter it does not expose, an inner node bypassed) is a change to the macro itself, settled by `changes`: `version` saves it as the file's next version (a file is never rewritten), this node pinned to it while the macro's other nodes keep theirs, offered as `updates`; `expose` makes the changed parameters exposed ones of that next version, their values kept on the image; `discard` takes them out; `keep` leaves it open. Without `changes`, a changed macro is refused on the files and asked in a dialog on the desktop",
         params: &[
             WORKSPACE,
             MACRO_NODE,
+            optional(
+                "changes",
+                optional_string,
+                "What to do with the changes made while open: `version`, `expose`, `discard` or `keep`; asked (desktop) or refused (files) when null and the macro changed",
+            ),
             MACRO_IMAGE,
             MACRO_VAULT,
             GROUP,
@@ -616,7 +621,7 @@ pub const TOOLS: &[Tool] = &[
         name: "helios_macro_upgrade",
         endpoint: Endpoint::Workspace,
         cmd: "macro.upgrade",
-        description: "Moves a macro to another version of its file (the newest when `version` is null), as one undoable step: its values carried by name, clamped into a narrower range or dropped, the answer says which. Refused while it is open",
+        description: "Moves a macro to another version of its file (the newest when `version` is null), as one undoable step: its values carried by name, clamped into a narrower range or dropped, the answer says which. Refused while it is open. Every macro step's answer lists the `updates` on offer: the nodes pinned at an older version than the newest",
         params: &[
             WORKSPACE,
             MACRO_NODE,

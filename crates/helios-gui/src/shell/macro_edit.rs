@@ -9,7 +9,7 @@
 use helios_core::Message;
 use helios_shell::commands::Origin;
 use helios_template::format::Exposed;
-use helios_template::macros::{Step, Values};
+use helios_template::macros::{Changes, Step, Values};
 use helios_template::workspace::State;
 use serde_json::{Value, json};
 
@@ -32,7 +32,7 @@ pub(super) const COMMANDS: &[(&str, &str)] = &[
     ),
     (
         "macro.fold",
-        "Fold an opened macro back into one node (`node`; `dry_run`)",
+        "Fold an opened macro back into one node (`node`; `changes`: `version`, `expose`, `discard` or `keep`, asked when it changed while open; `dry_run`)",
     ),
     (
         "macro.toggle",
@@ -177,9 +177,29 @@ impl Shell {
                 let node = self.macro_target(args)?;
                 // A node of an opened macro folds it.
                 let node = node.split('.').next().unwrap_or(&node).to_string();
-                self.macro_step(&format!("fold {node}"), args, origin, |now, values| {
-                    now.macro_folded(&catalogue, &node, values)
-                })
+                let changes = Changes::from_arg(&args["changes"])?;
+                let state = self.workspace_state().ok_or("no workspace is open")?;
+                if changes == Some(Changes::Keep) {
+                    state.macro_node_open(&node)?;
+                    return Ok(json!({ "node": node, "open": true, "kept": true }));
+                }
+                if changes.is_none() && !args["dry_run"].as_bool().unwrap_or(false) {
+                    // Changed while open: what to do with it is asked (a
+                    // dry run says it changed instead).
+                    let values = self.image_values(&state)?;
+                    let changed = state.macro_changes(&catalogue, &node, &values)?;
+                    if !changed.is_empty() {
+                        let next = state.macro_interface(&catalogue, &node)?.next;
+                        self.fold_dialog(&node, &next, &changed)?;
+                        return Ok(json!({ "node": node, "changed": changed, "asked": true }));
+                    }
+                }
+                self.macro_step(
+                    &helios_template::macros::fold_label(&node, changes),
+                    args,
+                    origin,
+                    |now, values| now.macro_folded(&catalogue, &node, changes, values),
+                )
             }
             "macro.toggle" => {
                 let node = self.macro_target(args)?;
@@ -253,13 +273,85 @@ impl Shell {
             return Ok(answer);
         }
         let mut answer = Value::Null;
+        let catalogue = self.workspace_catalogue();
         self.workspace_step_moving(label, origin, |now| {
             let step = make(now, &values)?;
             answer = step.answer;
+            // The macros pinned at an older version: updates on offer.
+            answer["updates"] = json!(step.state.bundle.updates(&catalogue));
             Ok((step.state, step.values))
         })?;
         answer["dry_run"] = json!(false);
         Ok(answer)
+    }
+
+    /// Asks what folding the opened macro `node`, changed while open,
+    /// does with its changes: saved as `next` (the default), exposed,
+    /// discarded, or the macro kept open. The answer runs `macro.fold`
+    /// with `changes`.
+    fn fold_dialog(
+        &mut self,
+        node: &str,
+        next: &helios_template::CompositeRef,
+        changed: &[String],
+    ) -> Result<(), String> {
+        use egui_pop::api::dialogs::{Choose, ChooseOption};
+        let option = |s: &Self, value: &str, label: Message, hint: Message| {
+            ChooseOption::new(&s.text(label), json!(value)).hint(&s.text(hint))
+        };
+        let options = vec![
+            option(
+                self,
+                "version",
+                Message::new("gui-macro-fold-version", "Save as version { $version }")
+                    .with("version", next.version),
+                Message::new(
+                    "gui-macro-fold-version-hint",
+                    "The changes become the macro's, in { $file }; its other nodes keep their version",
+                )
+                .with("file", next.to_string()),
+            ),
+            option(
+                self,
+                "expose",
+                Message::new("gui-macro-fold-expose", "Expose them"),
+                Message::new(
+                    "gui-macro-fold-expose-hint",
+                    "The parameters changed become the macro's own, their values kept on this image",
+                ),
+            ),
+            option(
+                self,
+                "discard",
+                Message::new("gui-macro-fold-discard", "Discard"),
+                Message::new(
+                    "gui-macro-fold-discard-hint",
+                    "Back to the macro's inside as it was",
+                ),
+            ),
+            option(
+                self,
+                "keep",
+                Message::new("gui-macro-fold-keep", "Keep it opened"),
+                Message::new("gui-macro-fold-keep-hint", "Fold it later"),
+            ),
+        ];
+        let title = self.text(
+            Message::new("gui-macro-fold-title", "{ $node } changed while open").with("node", node),
+        );
+        let detail = self.text(
+            Message::new("gui-macro-fold-detail", "Changed: { $changes }")
+                .with("changes", changed.join(", ")),
+        );
+        let command =
+            egui_pop::model::ids::CommandId::new("macro.fold").map_err(|e| e.to_string())?;
+        self.open_dialog(
+            Choose::with_options(&title, options, command)
+                .detail(&detail)
+                .args(json!({ "node": node }))
+                .value_key("changes"),
+        );
+        Ok(())
     }
 
     /// Selects one node (`view/graph/selection` and [`SELECTED`]).

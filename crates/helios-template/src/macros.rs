@@ -697,31 +697,90 @@ impl State {
         })
     }
 
-    /// Folds the opened macro `node` back into one node (`macro.fold`).
-    /// The image's values of exposed inner parameters go back to the
-    /// macro's (`node/<node>/<exposed>`). Refused while the image holds
-    /// values of other inner parameters: those are changes to the macro
-    /// itself, which a new version settles.
-    pub fn macro_folded(
+    /// Checks `node` is an opened macro.
+    pub fn macro_node_open(&self, node: &str) -> Result<(), String> {
+        let (_, desc, _) = self.macro_node(node)?;
+        if desc.open {
+            Ok(())
+        } else {
+            Err(format!("`{node}` is not open"))
+        }
+    }
+
+    /// What the image changed inside the opened macro `node` that its
+    /// file does not hold: values of inner parameters it does not expose
+    /// (`node/<node>.<inner>/<param>`) and inner nodes bypassed
+    /// (`bypass/<node>.<inner>`), by path. Folding asks what to do with
+    /// them (`Changes`); empty for a folded macro.
+    pub fn macro_changes(
         &self,
         catalogue: &Catalogue,
         node: &str,
         values: &Values,
+    ) -> Result<Vec<String>, String> {
+        let (_, desc, r) = self.macro_node(node)?;
+        if !desc.open {
+            return Ok(Vec::new());
+        }
+        let cat = self.bundle.catalogue(catalogue);
+        let file = cat
+            .get_composite(&r)
+            .ok_or_else(|| format!("unknown composite `{r}`"))?;
+        Ok(changed_inside(file, node, values))
+    }
+
+    /// Folds the opened macro `node` back into one node (`macro.fold`).
+    /// The image's values of exposed inner parameters go back to the
+    /// macro's (`node/<node>/<exposed>`).
+    ///
+    /// What the image changed inside that the file does not hold
+    /// (`macro_changes`) is a change to the macro itself, settled by
+    /// `changes`; without it, the fold is refused with the list:
+    /// - [`Changes::Version`]: the file's next version holds the changed
+    ///   values as its inner ones, this node pinned to it;
+    /// - [`Changes::Expose`]: the next version exposes the changed
+    ///   parameters (named after the parameter, `<inner>_<param>` when
+    ///   the name is taken), their values kept on this image under the
+    ///   macro;
+    /// - [`Changes::Discard`]: the changes are taken out, the macro back to
+    ///   its file's inside.
+    ///
+    /// A file is never rewritten, and the macro's other nodes keep their
+    /// version (offered the new one as an update). A bypassed inner node
+    /// cannot be saved (a macro's inner nodes are never bypassed): only
+    /// discarded.
+    pub fn macro_folded(
+        &self,
+        catalogue: &Catalogue,
+        node: &str,
+        changes: Option<Changes>,
+        values: &Values,
     ) -> Result<Step, String> {
+        let cat = self.bundle.catalogue(catalogue);
         let (i, desc, r) = self.macro_node(node)?;
         if !desc.open {
             return Err(format!("`{node}` is not open"));
         }
-        let file = self
-            .bundle
-            .catalogue(catalogue)
+        if changes == Some(Changes::Keep) {
+            return Err(format!("`{node}` is kept open"));
+        }
+        let file = cat
             .get_composite(&r)
             .ok_or_else(|| format!("unknown composite `{r}`"))?
             .clone();
         let prefix = format!("node/{node}.");
+        let changed = changed_inside(&file, node, values);
         let mut moves = Moves::new();
-        let mut changed = Vec::new();
+        // Inner nodes' bypasses mean nothing once folded.
+        let inner_bypass = format!("{BYPASS_PREFIX}{node}.");
+        for path in values.keys().filter(|k| k.starts_with(&inner_bypass)) {
+            moves.insert(path.clone(), None);
+        }
+        // Exposed values set on their inner nodes go back to the macro.
         for path in inner_paths(values, node) {
+            if changed.contains(&path) {
+                continue;
+            }
             let exposed = path[prefix.len()..]
                 .split_once('/')
                 .and_then(|(inner, param)| {
@@ -729,26 +788,94 @@ impl State {
                         .iter()
                         .find(|x| x.node == inner && x.param == param)
                 });
-            match exposed {
-                Some(x) => {
-                    moves.insert(node_path(node, &x.name), values.get(&path).cloned());
-                }
-                None => changed.push(path),
+            if let Some(x) = exposed {
+                moves.insert(node_path(node, &x.name), values.get(&path).cloned());
             }
-        }
-        if !changed.is_empty() {
-            return Err(format!(
-                "`{node}` changed while open ({}): keep it open, or dissolve it",
-                changed.join(", ")
-            ));
         }
         let mut next = self.clone();
         next.bundle.template.network.nodes[i].open = false;
+        let mut answer = json!({ "node": node, "composite": r, "open": false });
+        if !changed.is_empty() {
+            let Some(changes) = changes else {
+                return Err(format!(
+                    "`{node}` changed while open ({}): give `changes`, `version`, `expose` or `discard`, or keep it open",
+                    changed.join(", ")
+                ));
+            };
+            let bypassed: Vec<&String> = changed
+                .iter()
+                .filter(|p| p.starts_with(BYPASS_PREFIX))
+                .collect();
+            if changes != Changes::Discard
+                && let Some(b) = bypassed.first()
+            {
+                let inner = &b[BYPASS_PREFIX.len()..];
+                return Err(format!(
+                    "`{inner}` is bypassed: a macro's inner nodes are never bypassed, turn it on or discard the changes"
+                ));
+            }
+            // Each changed inner parameter: `(path, inner, param, value)`.
+            let params: Vec<(&String, &str, &str, &Value)> = changed
+                .iter()
+                .filter_map(|p| {
+                    let (inner, param) = p.strip_prefix(&prefix)?.split_once('/')?;
+                    Some((p, inner, param, values.get(p)?))
+                })
+                .collect();
+            for p in &changed {
+                moves.insert(p.clone(), None);
+            }
+            if changes == Changes::Discard {
+                answer["discarded"] = json!(changed);
+            } else {
+                let to = next_ref(&cat, &r, &file.name);
+                let mut next_file = file.clone();
+                next_file.id.clone_from(&to.id);
+                next_file.version = to.version;
+                let mut exposed_now = Vec::new();
+                for (_, inner, param, v) in &params {
+                    if changes == Changes::Version {
+                        let n = next_file
+                            .nodes
+                            .iter_mut()
+                            .find(|n| n.name == *inner)
+                            .ok_or_else(|| format!("`{r}` has no inner node `{inner}`"))?;
+                        n.params.set(param, (*v).clone());
+                        continue;
+                    }
+                    let taken: BTreeSet<String> =
+                        next_file.exposed.iter().map(|x| x.name.clone()).collect();
+                    let name = if taken.contains(*param) {
+                        free_among(&taken, &format!("{inner}_{param}"))
+                    } else {
+                        (*param).to_string()
+                    };
+                    next_file.exposed.push(Exposed {
+                        name: name.clone(),
+                        node: (*inner).to_string(),
+                        param: (*param).to_string(),
+                        ..Exposed::default()
+                    });
+                    moves.insert(node_path(node, &name), Some((*v).clone()));
+                    exposed_now.push(name);
+                }
+                crate::catalogue::build(&next_file, &cat, 0)?;
+                next.bundle.template.network.nodes[i].composite = Some(to.clone());
+                next.bundle.composites.push(next_file);
+                answer["composite"] = json!(to);
+                answer["from"] = json!(r);
+                if changes == Changes::Version {
+                    answer["saved"] = json!(changed);
+                } else {
+                    answer["exposed"] = json!(exposed_now);
+                }
+            }
+        }
         let next = State::checked(next, catalogue)?;
         Ok(Step {
             state: next,
             values: moves,
-            answer: json!({ "node": node, "composite": r, "open": false }),
+            answer,
         })
     }
 
@@ -1355,6 +1482,82 @@ fn names_of(exposed: &[Exposed]) -> Vec<&str> {
         }
     }
     names
+}
+
+/// What folding an opened macro settles: the answer to "it changed while
+/// open" (`macro.fold`'s `changes`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Changes {
+    /// Saved as the file's next version, this node pinned to it.
+    Version,
+    /// Exposed by the next version, their values kept on the image.
+    Expose,
+    /// Taken out: back to the file's inside.
+    Discard,
+    /// Not folded: the macro stays open (the dialog's fourth answer).
+    Keep,
+}
+
+impl Changes {
+    /// `version`, `expose`, `discard` or `keep`; `None` for null.
+    pub fn from_arg(v: &Json) -> Result<Option<Changes>, String> {
+        match v {
+            Json::Null => Ok(None),
+            Json::String(s) => match s.as_str() {
+                "version" => Ok(Some(Changes::Version)),
+                "expose" => Ok(Some(Changes::Expose)),
+                "discard" => Ok(Some(Changes::Discard)),
+                "keep" => Ok(Some(Changes::Keep)),
+                other => Err(format!(
+                    "changes: `{other}` is not `version`, `expose`, `discard` or `keep`"
+                )),
+            },
+            _ => Err("changes: `version`, `expose`, `discard` or `keep`".into()),
+        }
+    }
+}
+
+/// The undo label of `macro.fold` with `changes`: "fold look", "fold
+/// look as a new version", "fold look, its changes exposed", "fold look,
+/// its changes discarded".
+pub fn fold_label(node: &str, changes: Option<Changes>) -> String {
+    match changes {
+        Some(Changes::Version) => format!("fold {node} as a new version"),
+        Some(Changes::Expose) => format!("fold {node}, its changes exposed"),
+        Some(Changes::Discard) => format!("fold {node}, its changes discarded"),
+        None | Some(Changes::Keep) => format!("fold {node}"),
+    }
+}
+
+const BYPASS_PREFIX: &str = "bypass/";
+
+/// What the image changed inside the opened macro `node` beyond its file:
+/// values of inner parameters `file` does not expose, inner nodes
+/// bypassed. Sorted paths.
+fn changed_inside(file: &CompositeFile, node: &str, values: &Values) -> Vec<String> {
+    let prefix = format!("node/{node}.");
+    let mut out: Vec<String> = inner_paths(values, node)
+        .into_iter()
+        .filter(|path| {
+            path[prefix.len()..]
+                .split_once('/')
+                .is_none_or(|(inner, param)| {
+                    !file
+                        .exposed
+                        .iter()
+                        .any(|x| x.node == inner && x.param == param)
+                })
+        })
+        .collect();
+    let bypass = format!("{BYPASS_PREFIX}{node}.");
+    out.extend(
+        values
+            .iter()
+            .filter(|(k, v)| k.starts_with(&bypass) && **v == Value::Bool(true))
+            .map(|(k, _)| k.clone()),
+    );
+    out.sort();
+    out
 }
 
 /// The names of a bundled composite's inputs or outputs.

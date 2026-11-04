@@ -9,7 +9,7 @@ use std::sync::Arc;
 use egui_pop_model::layout::Layout;
 use helios_core::{Bus, Engine, Image, ModuleRef, Region, Value};
 use helios_template::format::Exposed;
-use helios_template::macros::{Moves, Step, Values};
+use helios_template::macros::{Changes, Moves, Step, Values};
 use helios_template::workspace::{self, State};
 use helios_template::{Bundle, Catalogue, CompositeRef, Source, parse_template};
 use serde_json::json;
@@ -328,7 +328,7 @@ fn a_macro_opens_and_folds_without_rendering_anything_new() {
             .contains("already open")
     );
     // A change to an inner node while open is a change to the macro:
-    // folding refuses it for now.
+    // folding asks what to do with it.
     let mut changed = values.clone();
     changed.insert(
         "node/warm_look.tone/white_target".into(),
@@ -336,12 +336,12 @@ fn a_macro_opens_and_folds_without_rendering_anything_new() {
     );
     let e = opened
         .state
-        .macro_folded(&catalogue(), "warm_look", &changed)
+        .macro_folded(&catalogue(), "warm_look", None, &changed)
         .unwrap_err();
     assert!(e.contains("changed while open"), "{e}");
     let folded = opened
         .state
-        .macro_folded(&catalogue(), "warm_look", &values)
+        .macro_folded(&catalogue(), "warm_look", None, &values)
         .unwrap();
     assert_eq!(folded.state, made.state);
     // An exposed value changed on its inner node goes back to the macro.
@@ -349,7 +349,7 @@ fn a_macro_opens_and_folds_without_rendering_anything_new() {
     moved.insert("node/warm_look.tone/contrast".into(), Value::Float(3.0));
     let folded = opened
         .state
-        .macro_folded(&catalogue(), "warm_look", &moved)
+        .macro_folded(&catalogue(), "warm_look", None, &moved)
         .unwrap();
     assert_eq!(
         folded.values.get("node/warm_look/contrast"),
@@ -370,6 +370,146 @@ fn a_macro_opens_and_folds_without_rendering_anything_new() {
             .unwrap_err()
             .contains("bypassed")
     );
+}
+
+/// The made macro opened, the image's values moved, and `white_target`
+/// of its inner `tone` (not exposed) changed on the image.
+fn opened_and_changed() -> (State, Values) {
+    let (made, values) = made();
+    let values = moved(&values, &made.values);
+    let opened = made
+        .state
+        .macro_opened(&catalogue(), "warm_look", &values)
+        .unwrap();
+    let mut values = moved(&values, &opened.values);
+    values.insert(
+        "node/warm_look.tone/white_target".into(),
+        Value::Float(300.0),
+    );
+    (opened.state, values)
+}
+
+/// The values a folded network renders with: moved, those on inner
+/// nodes of a macro left out (the graph no longer has them).
+fn folded_values(values: &Values, moves: &Moves) -> Values {
+    moved(values, moves)
+        .into_iter()
+        .filter(|(k, _)| {
+            k.strip_prefix("node/")
+                .and_then(|r| r.rsplit_once('/'))
+                .is_some_and(|(node, _)| !node.contains('.'))
+        })
+        .collect()
+}
+
+#[test]
+fn a_macro_changed_while_open_folds_as_a_new_version_exposed_or_discarded() {
+    let (opened, values) = opened_and_changed();
+    let cat = catalogue();
+    assert_eq!(
+        opened.macro_changes(&cat, "warm_look", &values).unwrap(),
+        vec!["node/warm_look.tone/white_target".to_string()]
+    );
+    let v1 = CompositeRef {
+        id: "user.warm-look".into(),
+        version: 1,
+    };
+    let v2 = CompositeRef {
+        id: "user.warm-look".into(),
+        version: 2,
+    };
+    let pinned = |s: &State| s.bundle.template.network.nodes[0].composite.clone();
+    // Saved as version 2: the change is the file's, this node pinned to
+    // it, version 1 kept for its other users.
+    let saved = opened
+        .macro_folded(&cat, "warm_look", Some(Changes::Version), &values)
+        .unwrap();
+    assert_eq!(saved.answer["composite"], json!(v2), "{}", saved.answer);
+    assert_eq!(
+        saved.answer["saved"],
+        json!(["node/warm_look.tone/white_target"])
+    );
+    assert_eq!(pinned(&saved.state), Some(v2.clone()));
+    assert!(!saved.state.bundle.template.network.nodes[0].open);
+    let file = |s: &State, r: &CompositeRef| {
+        s.bundle
+            .composites
+            .iter()
+            .find(|f| f.reference() == *r)
+            .cloned()
+            .unwrap_or_else(|| panic!("no {r}"))
+    };
+    let tone = |f: &helios_template::format::CompositeFile| {
+        f.nodes.iter().find(|n| n.name == "tone").unwrap().clone()
+    };
+    assert_eq!(
+        tone(&file(&saved.state, &v2)).params.get("white_target"),
+        Some(&Value::Float(300.0))
+    );
+    assert_eq!(
+        tone(&file(&saved.state, &v1)).params.get("white_target"),
+        None,
+        "a file is never rewritten"
+    );
+    assert_eq!(
+        saved.values.get("node/warm_look.tone/white_target"),
+        Some(&None)
+    );
+    // Exposed: the next version exposes it, its value on the macro.
+    let exposed = opened
+        .macro_folded(&cat, "warm_look", Some(Changes::Expose), &values)
+        .unwrap();
+    assert_eq!(exposed.answer["exposed"], json!(["white_target"]));
+    assert_eq!(pinned(&exposed.state), Some(v2.clone()));
+    assert!(
+        file(&exposed.state, &v2)
+            .exposed
+            .iter()
+            .any(|x| x.name == "white_target" && x.node == "tone")
+    );
+    assert_eq!(
+        exposed.values.get("node/warm_look/white_target"),
+        Some(&Some(Value::Float(300.0)))
+    );
+    // Both render the image as it was changed.
+    assert_eq!(
+        render(&saved.state, &folded_values(&values, &saved.values)),
+        render(&exposed.state, &folded_values(&values, &exposed.values)),
+    );
+    // Discarded: back to version 1's inside.
+    let discarded = opened
+        .macro_folded(&cat, "warm_look", Some(Changes::Discard), &values)
+        .unwrap();
+    assert_eq!(pinned(&discarded.state), Some(v1.clone()));
+    assert_eq!(discarded.state.bundle.composites.len(), 1);
+    assert_eq!(
+        discarded.values.get("node/warm_look.tone/white_target"),
+        Some(&None)
+    );
+    // Kept open, or no answer: not folded.
+    for changes in [None, Some(Changes::Keep)] {
+        assert!(
+            opened
+                .macro_folded(&cat, "warm_look", changes, &values)
+                .is_err()
+        );
+    }
+    // A bypassed inner node cannot be saved, only discarded.
+    let mut bypassed = values.clone();
+    bypassed.insert("bypass/warm_look.tone".into(), Value::Bool(true));
+    let e = opened
+        .macro_folded(&cat, "warm_look", Some(Changes::Version), &bypassed)
+        .unwrap_err();
+    assert!(e.contains("bypassed"), "{e}");
+    let d = opened
+        .macro_folded(&cat, "warm_look", Some(Changes::Discard), &bypassed)
+        .unwrap();
+    assert_eq!(d.values.get("bypass/warm_look.tone"), Some(&None));
+    assert_eq!(
+        Changes::from_arg(&json!("expose")).unwrap(),
+        Some(Changes::Expose)
+    );
+    assert!(Changes::from_arg(&json!("later")).is_err());
 }
 
 #[test]

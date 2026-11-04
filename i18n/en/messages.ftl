@@ -249,6 +249,26 @@ gui-library-sync = Sync zoom and pan
 
 gui-library-tags = Tags
 
+gui-macro-fold-detail = Changed: { $changes }
+
+gui-macro-fold-discard = Discard
+
+gui-macro-fold-discard-hint = Back to the macro's inside as it was
+
+gui-macro-fold-expose = Expose them
+
+gui-macro-fold-expose-hint = The parameters changed become the macro's own, their values kept on this image
+
+gui-macro-fold-keep = Keep it opened
+
+gui-macro-fold-keep-hint = Fold it later
+
+gui-macro-fold-title = { $node } changed while open
+
+gui-macro-fold-version = Save as version { $version }
+
+gui-macro-fold-version-hint = The changes become the macro's, in { $file }; its other nodes keep their version
+
 gui-macro-iface-default = Its own default
 
 gui-macro-iface-default-value = Default
@@ -442,6 +462,10 @@ gui-modules-macro = macro { $version }
 gui-modules-macro-interface = Interface…
 
 gui-modules-macro-interface-hint = Choose the parameters { $node } shows, saved as a new version
+
+gui-modules-macro-update = Update to { $version }
+
+gui-modules-macro-update-hint = Move { $node } to version { $version } of its macro, its values carried by name
 
 gui-modules-make-macro = Make macro…
 

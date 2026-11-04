@@ -843,6 +843,26 @@ gui-queue-title = File d’attente de { $node }
 
 gui-macro-make-title = Faire une macro
 
+gui-macro-fold-detail = Modifié : { $changes }
+
+gui-macro-fold-discard = Abandonner
+
+gui-macro-fold-discard-hint = Revenir à l'intérieur de la macro tel qu'il était
+
+gui-macro-fold-expose = Les exposer
+
+gui-macro-fold-expose-hint = Les paramètres modifiés deviennent ceux de la macro, leurs valeurs gardées sur cette image
+
+gui-macro-fold-keep = La garder ouverte
+
+gui-macro-fold-keep-hint = La replier plus tard
+
+gui-macro-fold-title = { $node } a changé pendant qu'elle était ouverte
+
+gui-macro-fold-version = Enregistrer comme version { $version }
+
+gui-macro-fold-version-hint = Les modifications deviennent celles de la macro, dans { $file } ; ses autres nœuds gardent leur version
+
 gui-macro-iface-title = Interface de { $node }
 
 gui-macro-iface-verb = Enregistrer comme { $file }
@@ -908,3 +928,8 @@ gui-modules-make-macro-hint = Regrouper les modules sélectionnés en un seul n�
 gui-modules-macro-interface = Interface…
 
 gui-modules-macro-interface-hint = Choisir les paramètres que { $node } montre, enregistrés comme une nouvelle version
+
+gui-modules-macro-update = Passer à la version { $version }
+
+gui-modules-macro-update-hint = Passer { $node } à la version { $version } de sa macro, ses valeurs reprises par nom
+

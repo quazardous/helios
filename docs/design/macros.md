@@ -3,8 +3,8 @@
 Status: **decided** (2026-10-30): the owner accepted every default
 below (the open questions at the end keep their reasoning). Built so
 far: step 1, the interface in the format, step 2, the pure operations
-on a workspace, step 3, the desktop's steps, and step 4, the interface
-editor (see "Build steps").
+on a workspace, step 3, the desktop's steps, step 4, the interface
+editor, and step 5, versions (see "Build steps").
 
 A macro is a network of modules packaged as one node, showing only the
 parameters chosen for it (AVS's macro, Helios's workshop). The engine
@@ -413,7 +413,7 @@ MCP server:
 |---|---|---|
 | `helios_macro_make` | `macro.make` | `nodes`, `name`, `id`, `expose`, `open`, `dry_run` |
 | `helios_macro_interface` | `macro.interface` | `node`, `exposed`, `dry_run` (built) |
-| `helios_macro_open`, `helios_macro_fold` | `macro.open`, `macro.fold` | `node`, `changes` (`version`, `expose`, `discard`) |
+| `helios_macro_open`, `helios_macro_fold` | `macro.open`, `macro.fold` | `node`, `changes` (`version`, `expose`, `discard`, `keep`; built) |
 | `helios_macro_dissolve` | `macro.dissolve` | `node`, `dry_run` |
 | `helios_macro_upgrade` | `macro.upgrade` | `node`, `version`, `dry_run` |
 | `helios_macro_publish` | `macro.publish` | `node` or `id` |
@@ -546,5 +546,35 @@ and the docs it changes (`docs/gui.md`, `docs/templates.md`,
      heading per group, folded and unfolded by a click.
 5. **Versions**: folding a changed macro, the dialog and its
    `changes`; updates on offer in the workspace; `macro.upgrade`.
+   Built (2026-11-04, `State::macro_changes`, `macro_folded` with
+   `Changes`, `Bundle::updates`), with these changes:
+   - `macro.upgrade` was already built by steps 2 and 3 (values carried
+     by name, clamped or dropped, the answer saying which; refused while
+     open); this step adds what offers it.
+   - What changes a macro while open is narrower than section 5 says:
+     the network's edits name only the network's nodes, so an opened
+     macro's inner wiring cannot change. A change is a value of an inner
+     parameter the macro does not expose (`node/<macro>.<inner>/<param>`)
+     or an inner node bypassed (`bypass/<macro>.<inner>`). A bypass
+     cannot be saved (a macro's inner nodes are never bypassed, as
+     `macro.make` already rules): Save and Expose refuse it with the
+     node named, Discard takes it out.
+   - The dialog is egui-pop's choice dialog, not a new one: four
+     options in order, the first (Save as version N, the file it writes
+     in its hint) highlighted; its answer runs `macro.fold` with
+     `changes`. `keep` is also an agent's answer (nothing written).
+     Without `changes`, a changed macro is asked on the desktop and
+     refused on the files with the list of changes.
+   - Save and Expose write the next version as the interface editor
+     does: a shipped macro saved becomes a user's copy, `user.<slug>@1`.
+     Expose names each parameter after itself, `<inner>_<param>` when
+     the name is taken; its default is the file's inner value.
+   - Undo labels: "fold look as a new version", "fold look, its changes
+     exposed", "fold look, its changes discarded".
+   - Updates on offer: validation already reported them (as for
+     templates). Every macro step's answer now lists them (`updates`:
+     node, composite, version available), and the Modules panel's row of
+     a folded macro offers "Update to N", which runs `macro.upgrade`.
+     `helios_describe` does not list them yet: the answers carry them.
 6. **Publishing**: `<config>/composites/` in the catalogue, the Add
    menu's Macros section, `macro.publish`.

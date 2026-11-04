@@ -516,6 +516,18 @@ network.
   (`<macro>.<inner>`) are drawn in a group `macro:<macro>` titled with
   its name and version, wired as inside; a double click on its title
   folds it.
+- **A macro changed while open** (2026-11-04): an inner parameter it
+  does not expose set on the image, or an inner node bypassed, is a
+  change to the macro itself. Folding it asks what to do with it: **Save
+  as version 2** (the default: the change written into the file's next
+  version, the node pinned to it), **Expose them** (the changed
+  parameters become the macro's own in that next version, their values
+  kept on the image), **Discard** (back to the file's inside) or **Keep
+  it opened**. A file is never rewritten, so the macro's other nodes
+  keep their version and are offered the new one (see "Modules panel").
+  Each answer is one undo step carrying the image's values; agents pass
+  it as `changes` (`version`, `expose`, `discard`, `keep`) or answer the
+  dialog.
 - **A macro's interface** (`macro.interface`, from the Modules panel's
   Interface… or the palette, and next after a macro made through the
   name's form): a dialog lists the macro's inner parameters by inner
@@ -1415,6 +1427,9 @@ the order they were added (2026-10-21):
   with an arrow that opens it (`macro.open`) and **Interface…**, which
   opens its interface editor (`macro.interface`); opened, its modules
   are indented under a heading row whose arrow folds it (`macro.fold`).
+  A macro pinned at an older version than the workspace or Helios has
+  offers **Update to 2** (`macro.upgrade`, one undo step): its values
+  carried by name, those the newer version no longer shows dropped.
 - **Bypass.** Each module with an input to pass through has a Bypass
   toggle: bypassed, it keeps its parameters and the image renders as if
   it were absent (see module-contract.md, "Bypass"); its name is struck

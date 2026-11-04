@@ -48,7 +48,7 @@ pub struct Bundle {
 
 /// A composite pinned at a version older than the catalogue's newest:
 /// offered, never taken silently.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct Update {
     /// The template's node that pins it.
     pub node: String,
@@ -271,6 +271,26 @@ impl Bundle {
         files.sort_by_key(CompositeFile::reference);
         self.composites = files;
         Ok(())
+    }
+
+    /// The composites pinned at an older version than the newest the
+    /// catalogue has (its bundled composites added): the updates on offer
+    /// that `validate` reports, without building anything.
+    pub fn updates(&self, catalogue: &Catalogue) -> Vec<Update> {
+        let catalogue = self.catalogue(catalogue);
+        self.template
+            .network
+            .nodes
+            .iter()
+            .filter_map(|n| {
+                let r = n.composite.as_ref()?;
+                Some(Update {
+                    node: n.name.clone(),
+                    composite: r.clone(),
+                    available: catalogue.newer(r)?,
+                })
+            })
+            .collect()
     }
 
     /// Pins every composite to the catalogue's newest version: what the

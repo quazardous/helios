@@ -21,7 +21,9 @@
 //!   (`macro.fold`). Shift+click selects a run of rows, Ctrl+click one
 //!   more (`view/graph/selected`), and "Make macro…" packages the rows
 //!   selected (`macro.make`). A folded macro's "Interface…" opens its
-//!   interface editor (`macro.interface`).
+//!   interface editor (`macro.interface`); one pinned at an older version
+//!   than the workspace or Helios has offers "Update to 2"
+//!   (`macro.upgrade`).
 
 use std::cell::RefCell;
 use std::sync::{Mutex, PoisonError};
@@ -118,27 +120,65 @@ pub fn bypass(
     Ok((node, on))
 }
 
-/// The workspace's macros, by node: their version, and whether each is
-/// opened.
-fn macros(store: &Store) -> std::collections::BTreeMap<String, (u32, bool)> {
+/// A macro of the workspace's network: its version, whether it is
+/// opened, and a newer version on offer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct MacroRow {
+    version: u32,
+    open: bool,
+    newer: Option<u32>,
+}
+
+/// The newest version of each composite Helios ships, by id.
+fn shipped_newest() -> &'static std::collections::BTreeMap<String, u32> {
+    static NEWEST: std::sync::OnceLock<std::collections::BTreeMap<String, u32>> =
+        std::sync::OnceLock::new();
+    NEWEST.get_or_init(|| {
+        let mut out = std::collections::BTreeMap::new();
+        for f in helios_template::shipped::composites() {
+            let v: &mut u32 = out.entry(f.id).or_default();
+            *v = (*v).max(f.version);
+        }
+        out
+    })
+}
+
+/// The workspace's macros, by node: their version, whether each is
+/// opened, and the newer version the workspace's composites or the
+/// shipped ones offer.
+fn macros(store: &Store) -> std::collections::BTreeMap<String, MacroRow> {
     let Some(Value::Text(t)) = store.get(crate::shell::WORKSPACE_STATE).map(|e| &e.value) else {
         return std::collections::BTreeMap::new();
     };
     let Ok(json) = serde_json::from_str::<serde_json::Value>(t) else {
         return std::collections::BTreeMap::new();
     };
+    let mut newest = shipped_newest().clone();
+    for f in json["composites"].as_array().into_iter().flatten() {
+        if let (Some(id), Some(v)) = (f["id"].as_str(), f["version"].as_u64()) {
+            let v = u32::try_from(v).unwrap_or_default();
+            let at: &mut u32 = newest.entry(id.to_string()).or_default();
+            *at = (*at).max(v);
+        }
+    }
     json["template"]["network"]["nodes"]
         .as_array()
         .into_iter()
         .flatten()
         .filter_map(|n| {
-            let version = n["composite"]["version"].as_u64()?;
+            let version = u32::try_from(n["composite"]["version"].as_u64()?).unwrap_or_default();
+            let newer = n["composite"]["id"]
+                .as_str()
+                .and_then(|id| newest.get(id))
+                .copied()
+                .filter(|v| *v > version);
             Some((
                 n["name"].as_str()?.to_string(),
-                (
-                    u32::try_from(version).unwrap_or_default(),
-                    n["open"].as_bool().unwrap_or(false),
-                ),
+                MacroRow {
+                    version,
+                    open: n["open"].as_bool().unwrap_or(false),
+                    newer,
+                },
             ))
         })
         .collect()
@@ -194,11 +234,11 @@ pub fn ui(ui: &mut Ui, viewport: &RefCell<crate::viewport::Viewport>, values: &M
                 let inside = row
                     .node
                     .split_once('.')
-                    .filter(|(m, _)| macros.get(*m).is_some_and(|(_, open)| *open))
+                    .filter(|(m, _)| macros.get(*m).is_some_and(|r| r.open))
                     .map(|(m, _)| m.to_string());
                 if inside != heading {
                     if let Some(m) = &inside {
-                        let version = macros.get(m).map_or(0, |(v, _)| *v);
+                        let version = macros.get(m).map_or(0, |r| r.version);
                         ui.horizontal(|ui| {
                             if ui
                                 .small_button("⏷")
@@ -222,8 +262,8 @@ pub fn ui(ui: &mut Ui, viewport: &RefCell<crate::viewport::Viewport>, values: &M
                     if inside.is_some() {
                         ui.add_space(16.0);
                     }
-                    if let Some((version, false)) = macros.get(&row.node) {
-                        if ui
+                    if macros.get(&row.node).is_some_and(|r| !r.open)
+                        && ui
                             .small_button("⏵")
                             .on_hover_text(tr(Message::new(
                                 "gui-modules-open-hint",
@@ -231,10 +271,8 @@ pub fn ui(ui: &mut Ui, viewport: &RefCell<crate::viewport::Viewport>, values: &M
                             )
                             .with("node", &row.node)))
                             .clicked()
-                        {
-                            run = Some(("macro.open", serde_json::json!({ "node": row.node })));
-                        }
-                        let _ = version;
+                    {
+                        run = Some(("macro.open", serde_json::json!({ "node": row.node })));
                     }
                     let bypassed = row.bypassed == Some(true);
                     if let Some(b) = row.bypassed {
@@ -271,9 +309,29 @@ pub fn ui(ui: &mut Ui, viewport: &RefCell<crate::viewport::Viewport>, values: &M
                         select = Some(row.node.clone());
                     }
                     match macros.get(&row.node) {
-                        Some((version, false)) => {
+                        Some(m) if !m.open => {
                             ui.weak(tr(Message::new("gui-modules-macro", "macro { $version }")
-                                .with("version", *version)));
+                                .with("version", m.version)));
+                            if let Some(newer) = m.newer
+                                && ui
+                                    .small_button(tr(Message::new(
+                                        "gui-modules-macro-update",
+                                        "Update to { $version }",
+                                    )
+                                    .with("version", newer)))
+                                    .on_hover_text(tr(Message::new(
+                                        "gui-modules-macro-update-hint",
+                                        "Move { $node } to version { $version } of its macro, its values carried by name",
+                                    )
+                                    .with("node", &row.node)
+                                    .with("version", newer)))
+                                    .clicked()
+                            {
+                                run = Some((
+                                    "macro.upgrade",
+                                    serde_json::json!({ "node": row.node, "version": newer }),
+                                ));
+                            }
                             if ui
                                 .small_button(tr(Message::new(
                                     "gui-modules-macro-interface",

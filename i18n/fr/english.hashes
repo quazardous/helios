@@ -96,7 +96,7 @@ command-library-importFiles.title 2ae7b0b7cb69e013
 command-library-importSource.title 1cb6337694fcbe70
 command-library-pasteFiles.title 409587651f782f9a
 command-macro-dissolve.title e472cc526f105a70
-command-macro-fold.title 2b688b51faf5198e
+command-macro-fold.title 33ae65c670fa307a
 command-macro-interface.title 9339d37c74694ea4
 command-macro-make.title 607effc9999f8608
 command-macro-open.title 8e7ea4733df069ff
@@ -327,6 +327,16 @@ gui-library-reading 86a6bd85ffd7fbf5
 gui-library-search fddceff6dbd31d81
 gui-library-sync 0b5c87b7f38a10af
 gui-library-tags d8aadaa7f12dec16
+gui-macro-fold-detail d63939bfb0cb05f6
+gui-macro-fold-discard b8d533c186819cc9
+gui-macro-fold-discard-hint f6c2cea0052fa938
+gui-macro-fold-expose 1c43f319c44882b5
+gui-macro-fold-expose-hint dca662dca062ebe2
+gui-macro-fold-keep 18e8256fff3f5ac0
+gui-macro-fold-keep-hint da91f605c45b1f3d
+gui-macro-fold-title 8ee435fbf2e6465a
+gui-macro-fold-version 3310b17bc5261cc2
+gui-macro-fold-version-hint 058b5f2dad4b29ed
 gui-macro-iface-default 31e9449aa617d4e6
 gui-macro-iface-default-value e7a4eba68fcaf9d4
 gui-macro-iface-description 8f890bb4923460e1
@@ -424,6 +434,8 @@ gui-modules-fold-hint e819be3423c95479
 gui-modules-macro ba5fb00f7c9f1105
 gui-modules-macro-interface 26c6cf94d372328a
 gui-modules-macro-interface-hint 8b5bcc100dec0a35
+gui-modules-macro-update d3d4baed26ce08ab
+gui-modules-macro-update-hint 10ad0e39b24a0c54
 gui-modules-make-macro 2d087321a3180165
 gui-modules-make-macro-hint bf09d3d22c4b5ffc
 gui-modules-none 5314405d4be22513

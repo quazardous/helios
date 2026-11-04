@@ -345,11 +345,16 @@ answer:
   bypassed node, a node outside reading the selection and feeding it,
   or nodes crossing a sub-workspace's edge.
 - `macro_opened` and `macro_folded`: the node's `open` flag; values
-  keep their paths.
+  keep their paths. What the image changed inside that the file does not
+  hold (`macro_changes`: inner parameters not exposed, inner nodes
+  bypassed) is settled by folding's `Changes`: saved as the file's next
+  version, exposed by that next version, or discarded; never written
+  into the file pinned.
 - `macro_dissolved`: the inner nodes back as ordinary ones, the
   exposed values written to them; the file stays in the bundle.
 - `macro_upgraded`: the pin moved to a newer version, values carried
-  by name.
+  by name. `Bundle::updates` lists the nodes pinned at an older version
+  (what `validate` reports as updates on offer), without building.
 - `macro_interface` and `macro_interfaced`: the interface a macro
   shows (its `exposed` list) and every inner parameter it could show;
   a new interface is saved as the next version of the file (a shipped

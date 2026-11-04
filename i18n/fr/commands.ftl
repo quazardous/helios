@@ -526,7 +526,7 @@ command-macro-open =
     .title = Ouvrir une macro sur place, ses nœuds affichés (`node`, le nœud sélectionné par défaut ; `dry_run`)
 
 command-macro-fold =
-    .title = Replier une macro ouverte en un seul nœud (`node` ; `dry_run`)
+    .title = Replier une macro ouverte en un seul nœud (`node` ; `changes` : `version`, `expose`, `discard` ou `keep`, demandé quand elle a changé pendant qu'elle était ouverte ; `dry_run`)
 
 command-macro-toggle =
     .title = Ouvrir la macro sélectionnée, ou replier celle qui contient le nœud sélectionné
