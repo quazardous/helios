@@ -73,11 +73,15 @@ fn about_description() -> Message {
 /// What Help > About Helios shows (egui-pop's `about::AboutPlugin`):
 /// Cargo's version, licence, authors and repository, and the logo. The
 /// description is translated once the shell runs (`follow_language`).
+/// The repository's issue list turns on egui-pop's `help.report` (Help >
+/// Report a problem): a new issue, prefilled with the version and the
+/// platform.
 fn about_info() -> egui_pop::api::about::AppInfo {
     let mut info = egui_pop::api::about::AppInfo::new("Helios", env!("CARGO_PKG_VERSION"))
         .description(&about_description().english)
         .licence(env!("CARGO_PKG_LICENSE"))
         .repository(env!("CARGO_PKG_REPOSITORY"))
+        .issues(concat!(env!("CARGO_PKG_REPOSITORY"), "/issues"))
         .icon(|ui, side| {
             let logo = crate::plugins::logo(ui.ctx());
             ui.add(egui::Image::new((logo.id(), egui::vec2(side, side))));
