@@ -1051,16 +1051,10 @@ impl State {
             }
         }
         let mut moves = Moves::new();
+        // Every value carried is set again, unchanged ones too: the node
+        // on another version starts from the network's values.
         for (name, v) in values_of(values, node) {
-            match carry(name, v) {
-                Some(c) if c == *v => {}
-                Some(c) => {
-                    moves.insert(node_path(node, name), Some(c));
-                }
-                None => {
-                    moves.insert(node_path(node, name), None);
-                }
-            }
+            moves.insert(node_path(node, name), carry(name, v));
         }
         dropped.sort();
         dropped.dedup();
@@ -1288,11 +1282,10 @@ impl State {
             }
         }
         let mut moves = Moves::new();
+        // Every value carried is set again, unchanged ones too: the node
+        // on another version starts from the network's values.
         for (name, v) in values_of(values, node) {
             let to = carry(name, v);
-            if to.as_ref().is_some_and(|(n, c)| n == name && c == v) {
-                continue;
-            }
             moves.insert(node_path(node, name), None);
             if let Some((n, c)) = to {
                 moves.insert(node_path(node, &n), Some(c));
