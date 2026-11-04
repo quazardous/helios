@@ -174,9 +174,14 @@ impl HeliosHost {
         }
     }
 
-    /// Undo and redo walk the steps of these values.
-    pub fn with_values(mut self, values: Arc<Mutex<helios_values::Store>>) -> Self {
-        self.history = Some(HeliosHistory::new(values.clone()));
+    /// Undo and redo walk the steps of these values; the history's
+    /// snapshots are kept in `snapshots`.
+    pub fn with_values(
+        mut self,
+        values: Arc<Mutex<helios_values::Store>>,
+        snapshots: crate::edit_snapshots::Shared,
+    ) -> Self {
+        self.history = Some(HeliosHistory::new(values.clone()).with_snapshots(snapshots));
         self.values = Some(values);
         self
     }

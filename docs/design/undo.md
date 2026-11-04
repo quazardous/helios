@@ -238,8 +238,8 @@ egui-pop's `HistoryPlugin` is on in Helios, over `HeliosHistory`:
   go to the desktop holding the workspace open (as the workspace and
   context tools do) and run these commands there as the agent; without
   such a desktop they are refused. Not built yet from the plan above:
-  snapshots, the image, library and workspace scopes, and the node's
-  own history service.
+  the image, library and workspace scopes, and the node's own history
+  service (snapshots: see below).
 
 ### Built: agents' groups and attribution (2026-10-28)
 
@@ -280,6 +280,34 @@ egui-pop's `HistoryPlugin` is on in Helios, over `HeliosHistory`:
   `history.jump` walk only its own steps; one of the user's or of
   another origin refuses them (`HeliosHistory`), as the workspace's undo
   for agents already did.
+- **Snapshots** (2026-11-04, the owner's option A): a snapshot is the
+  vault document pinned at the next save, not a ref on a version
+  written at once. Taking one (egui-pop's `history.snapshot`, the
+  panel's "Take a snapshot") saves nothing: `HeliosHistory` records its
+  name, the value store's head step and the values there in a book it
+  shares with `Persist` (`crate::edit_snapshots`). Each frame, once
+  everything committed is saved and no gesture goes on, `Persist` pins
+  the pending snapshots taken at the step the saved edit holds to the
+  session's head version (to no version for an image never edited: the
+  image with no edit), and writes the image's pinned snapshots as one
+  vault document (namespace `snapshots`, keyed by the image;
+  `Vault::set_snapshots`, a document of the existing store, so no
+  schema change). Pending ones are shown "(not saved yet)" and are not
+  in the vault: a quit, a kill or another image opening loses them; one
+  whose step the history left before a save stays pending for the
+  session. On open, the image's snapshots are read back with the values
+  of their versions. A restore (`history.restore`, `edit.restore`)
+  writes the values that differ (parameters, bypasses, labels and
+  locks) as one group step, "Restore “<name>”", which the next frame
+  saves as a version and an undo takes back; it waits for a drag like
+  an undo, refuses before writing when a node it changes is outside the
+  sub-workspace entered, and the shell shows a toast with Undo. An
+  agent takes and restores with `helios_history_snapshot` and
+  `helios_history_restore` (its restore is its own step), and reads
+  them with `helios_history_read`. Not yet: the hover preview of a
+  snapshot, the comparison's "before" from a snapshot, and a
+  `pending` flag of egui-pop's own (the name carries the mark until
+  Helios moves to an egui-pop that has it).
 - **Not yet:** the group in the saved version (versions name the agent,
   not the request), and a paste into the graph or the masks, applied at
   the next frame, is a step of its own outside the request.

@@ -144,11 +144,11 @@ pub fn is_locked(store: &Store, node: &str) -> bool {
     store.get(&lock_path(node)).and_then(|e| e.value.as_bool()) == Some(true)
 }
 
-fn label_descriptor(node: &str) -> Descriptor {
+pub(crate) fn label_descriptor(node: &str) -> Descriptor {
     Descriptor::text(&format!("label of {node}"), "")
 }
 
-fn lock_descriptor(node: &str) -> Descriptor {
+pub(crate) fn lock_descriptor(node: &str) -> Descriptor {
     Descriptor::bool(&format!("{node} locked"), false)
 }
 

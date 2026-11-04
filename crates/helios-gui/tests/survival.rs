@@ -7,7 +7,8 @@
 //! workspace's layout, changed then killed, is kept too, and so are its
 //! places and modes (the darkroom on an image, culling, compare); so is
 //! an agent's edit made through the desktop (the node's MCP tools), with
-//! the desktop's own step after it.
+//! the desktop's own step after it. A history snapshot pinned by a save
+//! survives a kill; one taken after the last save does not.
 //!
 //! The child says what it saved on stdout from the `edit.saved` events of
 //! the bus: the parent reads those lines, it never sleeps. These scenarios
@@ -180,6 +181,22 @@ fn survival_child() {
         }
         out.flush().unwrap();
     };
+    if scenario == "snapshot" {
+        // A snapshot pinned by the save after it, a step, then one taken
+        // with no save after it, then killed.
+        set(&shell, 1.0, None);
+        frame(&mut shell, &mut persist, 100.0);
+        take_snapshot(&shell, "Before");
+        frame(&mut shell, &mut persist, 101.0);
+        set(&shell, 2.0, None);
+        frame(&mut shell, &mut persist, 102.0);
+        take_snapshot(&shell, "Pending");
+        writeln!(std::io::stdout(), "ready").unwrap();
+        std::io::stdout().flush().unwrap();
+        let mut line = String::new();
+        let _ = std::io::stdin().read_line(&mut line);
+        return;
+    }
     // The library: three stars, a label.
     shell.library_mut().rate(3).unwrap();
     shell.library_mut().toggle_label("green").unwrap();
@@ -216,6 +233,19 @@ fn survival_child() {
     frame(&mut shell, &mut persist, 106.0);
     writeln!(std::io::stdout(), "ready").unwrap();
     // Quits: everything dropped, nothing more to save.
+}
+
+/// Takes a snapshot of the edit, as the History panel does.
+fn take_snapshot(shell: &Shell, name: &str) -> egui_pop::api::history::Snapshot {
+    egui_pop::api::history::take_snapshot(
+        shell.app().handle(),
+        Some(&helios_gui::history::EDIT),
+        name,
+        None,
+        false,
+        &egui_pop::model::commands::Origin::User,
+    )
+    .unwrap()
 }
 
 /// A window on the scenario's workspace (`photos`), its interface
@@ -433,6 +463,36 @@ fn survival_killed_in_the_middle_of_a_drag_keeps_the_last_saved_step() {
     drop(vault);
     let (shell, _persist, _) = open(&dir.join("vault.db"), &dir.join("photo.png"));
     assert!((shown(&shell) - 1.7).abs() < 1e-9, "{}", shown(&shell));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn survival_killed_after_a_save_keeps_the_snapshot_it_pinned() {
+    let (dir, image) = place("snapshot");
+    run_child(&dir, "snapshot", true);
+    let vault = Vault::new(SqliteStore::open(&dir.join("vault.db")).unwrap());
+    // The pinned one only: the one taken after the last save is lost.
+    let kept = vault.snapshots(&image).unwrap();
+    assert_eq!(kept.len(), 1, "{kept:?}");
+    assert_eq!(kept[0].name, "Before");
+    let pinned = vault.version(&kept[0].version.unwrap()).unwrap().unwrap();
+    assert!((ev_of(&pinned.edit) - 1.0).abs() < 1e-9, "{}", pinned.edit);
+    drop(vault);
+    // Reopened: listed, and restored as one step an undo takes back.
+    let (shell, _persist, _) = open(&dir.join("vault.db"), &dir.join("photo.png"));
+    let handle = shell.app().handle();
+    let listed = egui_pop::api::history::snapshots(handle, &helios_gui::history::EDIT);
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].name, "Before");
+    assert!((shown(&shell) - 2.0).abs() < 1e-9, "{}", shown(&shell));
+    let user = egui_pop::model::commands::Origin::User;
+    assert!(
+        egui_pop::api::history::restore(handle, &helios_gui::history::EDIT, listed[0].id, &user)
+            .ok()
+    );
+    assert!((shown(&shell) - 1.0).abs() < 1e-9, "{}", shown(&shell));
+    assert!(egui_pop::api::history::undo(handle, &user).ok());
+    assert!((shown(&shell) - 2.0).abs() < 1e-9, "{}", shown(&shell));
     let _ = std::fs::remove_dir_all(&dir);
 }
 

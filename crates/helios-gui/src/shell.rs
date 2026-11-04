@@ -275,6 +275,7 @@ struct Parts {
     resolved_view: Arc<Mutex<Value>>,
     dialogs: Arc<OnceLock<Dialogs>>,
     values: Arc<Mutex<helios_values::Store>>,
+    snapshots: crate::edit_snapshots::Shared,
     workspace: Workspace,
     /// The catalogues of the application's translation plugin.
     i18n: egui_pop::i18n::I18n,
@@ -476,6 +477,8 @@ pub struct Shell {
     graph: Rc<RefCell<crate::graph::GraphPanel>>,
     /// Every value widgets and agents edit (`param.*` commands).
     pub values: Arc<Mutex<helios_values::Store>>,
+    /// The open image's history snapshots (`crate::edit_snapshots`).
+    pub snapshots: crate::edit_snapshots::Shared,
     /// Headless runs: no cursor blink and no animation, so a frame settles
     /// and a test's `run` ends.
     still: bool,
@@ -562,8 +565,11 @@ impl Shell {
         // Helios's values: what widgets and agents edit, and what Edit >
         // Undo walks back through the host.
         let values: Arc<Mutex<helios_values::Store>> = Arc::default();
-        let host =
-            HeliosHost::new(registry.clone(), bus, Arc::default()).with_values(values.clone());
+        // The open image's history snapshots: taken through the history
+        // owner, pinned and kept by the vault's link (`persist`).
+        let snapshots = crate::edit_snapshots::Shared::default();
+        let host = HeliosHost::new(registry.clone(), bus, Arc::default())
+            .with_values(values.clone(), snapshots.clone());
         let later = host.later();
         let workspace = host.workspace();
         let images = crate::contexts::Images::default();
@@ -715,6 +721,7 @@ impl Shell {
                 resolved_view,
                 dialogs,
                 values,
+                snapshots,
                 workspace,
                 i18n,
                 opens,
@@ -740,6 +747,7 @@ impl Shell {
             resolved_view,
             dialogs,
             values,
+            snapshots,
             workspace,
             i18n,
             opens,
@@ -820,6 +828,7 @@ impl Shell {
             mask_tree: Rc::default(),
             graph: Rc::default(),
             values,
+            snapshots,
             workspace,
             layout_saved: None,
             edit: None,
@@ -1338,8 +1347,10 @@ impl Shell {
         {
             let mut store = lock(&self.values);
             // Another image: its values take the paths of the one before,
-            // so that one's steps must not be undone into them.
+            // so that one's steps must not be undone into them, nor its
+            // snapshots restored into them.
             store.clear_history();
+            crate::edit_snapshots::lock(&self.snapshots).clear();
             for id in graph.ids() {
                 helios_values::bind_node(&mut store, &graph, id)?;
             }
@@ -3236,6 +3247,46 @@ impl Shell {
         });
     }
 
+    /// Keeps how the History panel names a pending snapshot in the
+    /// interface's language, and says each snapshot restored since the
+    /// last frame: in the status bar and as a toast offering Undo (the
+    /// restore is one step).
+    pub fn follow_snapshots(&mut self) {
+        let pending = self.text(
+            Message::new("gui-history-snapshot-pending", "{ $name } (not saved yet)")
+                .with("name", "{name}"),
+        );
+        let restored = {
+            let mut book = crate::edit_snapshots::lock(&self.snapshots);
+            book.set_pending_pattern(&pending);
+            book.take_restored()
+        };
+        if restored.is_empty() {
+            return;
+        }
+        let undo = self.text(Message::new("gui-history-undo", "Undo"));
+        for name in restored {
+            let message = Message::new("gui-history-snapshot-restored", "Restored “{ $name }”")
+                .with("name", name);
+            let text = self.text(message.clone());
+            if let Some(toasts) = self.app.handle().service(&TOASTS) {
+                toasts.notify(Toast::success(&text).action(
+                    &undo,
+                    egui_pop::api::app::CMD_UNDO,
+                    Value::Null,
+                ));
+            }
+            self.notes.push(text.clone());
+            self.notices.push(Notice {
+                level: Level::Info,
+                text,
+                key: message.key,
+                action: Some((undo.clone(), egui_pop::api::app::CMD_UNDO.to_string())),
+                at: self.now,
+            });
+        }
+    }
+
     fn note(&mut self, text: impl Into<Message>) {
         self.notify(Level::Info, text);
     }
@@ -4542,6 +4593,9 @@ impl Shell {
             &mut lock(&self.values),
             &self.subworkspaces,
         );
+        // The History panel's snapshots: pending ones said in the
+        // interface's language, a toast for each restore.
+        self.follow_snapshots();
         self.apply_queue(&ctx);
         // The workspace's files changed outside, and agents' requests.
         self.follow_workspace(&ctx);

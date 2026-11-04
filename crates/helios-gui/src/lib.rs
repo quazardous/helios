@@ -9,6 +9,7 @@ pub mod decisions;
 pub mod dialogs;
 pub mod display;
 pub mod duplicates;
+pub mod edit_snapshots;
 pub mod engine_source;
 pub mod graph;
 pub mod history;

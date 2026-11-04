@@ -171,6 +171,12 @@ gui-graph-wires-straight = Droites
 
 gui-history-batch = { $label } ({ $count } valeurs)
 
+gui-history-snapshot-pending = { $name } (pas encore enregistré)
+
+gui-history-snapshot-restored = « { $name } » restauré
+
+gui-history-undo = Annuler
+
 gui-job-batch-done = Lot terminé
 
 gui-job-batch-failed = Échec du lot
@@ -438,7 +444,11 @@ gui-scopes-red = Rouge
 
 gui-snapshot-failed = capture échouée : { $error }
 
+gui-snapshot-unreadable = L’instantané « { $name } » ne peut pas être lu : { $error }
+
 gui-snapshot-saved = { $target } capturé dans { $path }
+
+gui-snapshots-not-saved = Les instantanés n’ont pas été enregistrés : { $error }
 
 gui-status-culled = { $picked ->
     [one] { $picked } retenue

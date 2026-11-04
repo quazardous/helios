@@ -187,6 +187,12 @@ gui-graph-wires-straight = Straight
 
 gui-history-batch = { $label } ({ $count } values)
 
+gui-history-snapshot-pending = { $name } (not saved yet)
+
+gui-history-snapshot-restored = Restored “{ $name }”
+
+gui-history-undo = Undo
+
 gui-image-not-reopened = The image left open could not be opened again: { $error }
 
 gui-image-opened = { $name } is open
@@ -632,6 +638,10 @@ gui-size-mib = { $size } MiB
 gui-snapshot-failed = snapshot failed: { $error }
 
 gui-snapshot-saved = { $target } pictured to { $path }
+
+gui-snapshot-unreadable = Snapshot “{ $name }” cannot be read: { $error }
+
+gui-snapshots-not-saved = The snapshots were not saved: { $error }
 
 gui-stacks-accept-all = Accept all
 

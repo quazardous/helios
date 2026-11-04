@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use egui_pop::api::app::{STEP_REDO, STEP_UNDO};
 use egui_pop::api::frame::{self, FramePlugin, STEP_SYSTEM_MENU};
-use egui_pop::api::history::{STEP_JUMP, STEP_UNDO_STEP};
+use egui_pop::api::history::{STEP_JUMP, STEP_RESTORE, STEP_UNDO_STEP};
 use egui_pop::api::menus::{ListItem, popup_at};
 use egui_pop::api::steps::Before;
 use egui_pop::api::zones::{self, Block};
@@ -287,8 +287,8 @@ fn labelled<C: AsRef<str>>(entries: Vec<(String, C)>) -> Vec<ListItem> {
 
 /// Undo, redo and a jump wait for a change in progress: while a gesture
 /// (a drag) holds values, egui-pop's `edit.undo`, `edit.redo`,
-/// `edit.jump` and `edit.undo_step` steps (the keys, the History panel, the agents'
-/// `history.*`) are vetoed, with the reason, rather than undoing under
+/// `edit.jump`, `edit.undo_step` and `edit.restore` steps (the keys, the
+/// History panel, the agents' `history.*`) are vetoed, with the reason, rather than undoing under
 /// the user's hand.
 pub struct History {
     pub values: Arc<Mutex<helios_values::Store>>,
@@ -306,7 +306,13 @@ impl Plugin for History {
     }
 
     fn connect(&mut self, ctx: &mut Ctx<'_>) -> Result<(), PluginError> {
-        for step in [STEP_UNDO, STEP_REDO, STEP_JUMP, STEP_UNDO_STEP] {
+        for step in [
+            STEP_UNDO,
+            STEP_REDO,
+            STEP_JUMP,
+            STEP_UNDO_STEP,
+            STEP_RESTORE,
+        ] {
             let (values, i18n) = (self.values.clone(), self.i18n.clone());
             ctx.before(step, move |_, _| {
                 let v = values.lock().unwrap_or_else(PoisonError::into_inner);

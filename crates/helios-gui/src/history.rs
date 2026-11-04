@@ -42,19 +42,26 @@
 //!   `crate::contexts::follow_place` keeps on the place shown): an undo,
 //!   a redo or a jump that walks a step made out of sight makes egui-pop
 //!   say "Undone in <place>", with Go there.
+//! - **Snapshots** (`crate::edit_snapshots`): taking one saves nothing,
+//!   it records a name and the head step; the next save of the edit pins
+//!   it to that version, which the vault keeps. Until then it is shown
+//!   "not saved yet", and lost if the app quits first. Restoring one
+//!   writes its values back as one new step, which an undo takes back;
+//!   egui-pop's `edit.restore` step, vetoed like an undo during a drag.
 
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use egui_pop::api::contexts::Entry;
 use egui_pop::api::history::{
     Answer, Features, History, Label, Line, Refusal, RefusalKind, Replaced, Request, ScopeId,
-    ScopeInfo, StepInfo, Walked, plan_jump,
+    ScopeInfo, Snapshot, StepInfo, Walked, plan_jump,
 };
 use egui_pop::model::commands::Origin as PopOrigin;
 use egui_pop::model::ids::FrameId;
 use helios_core::Message;
-use helios_values::{GestureId, Refused, Step, Store};
+use helios_values::{GestureId, Refused, Set, Step, Store};
 
+use crate::edit_snapshots::{self, Shared, Taken};
 use crate::host::{to_helios, to_pop};
 
 /// The scope of Helios's value store: the open image's edit.
@@ -64,6 +71,8 @@ pub const EDIT: ScopeId = ScopeId::from_static("edit");
 #[derive(Clone)]
 pub struct HeliosHistory {
     values: Arc<Mutex<Store>>,
+    /// The open image's snapshots, shared with the vault's link.
+    snapshots: Shared,
 }
 
 impl std::fmt::Debug for HeliosHistory {
@@ -75,7 +84,17 @@ impl std::fmt::Debug for HeliosHistory {
 impl HeliosHistory {
     /// The history of `values`.
     pub fn new(values: Arc<Mutex<Store>>) -> Self {
-        Self { values }
+        Self {
+            values,
+            snapshots: Shared::default(),
+        }
+    }
+
+    /// Keeps its snapshots in `book` (the shell's, which the vault's link
+    /// pins and keeps).
+    pub fn with_snapshots(mut self, book: Shared) -> Self {
+        self.snapshots = book;
+        self
     }
 
     fn lock(&self) -> MutexGuard<'_, Store> {
@@ -277,6 +296,90 @@ fn jump_replaced(
     }))
 }
 
+/// A snapshot as egui-pop sees it, under the name the panel shows.
+fn snapshot_info(t: &Taken, name: String) -> Snapshot {
+    Snapshot {
+        id: t.id,
+        scope: EDIT,
+        name,
+        step: t.step,
+        origin: to_pop(&t.origin),
+        at: t.at,
+    }
+}
+
+/// Seconds since the epoch: when a snapshot is taken.
+fn now() -> f64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0.0, |d| d.as_secs_f64())
+}
+
+/// Brings the store back to a snapshot's values as one new step, as
+/// `origin`: the step made (none: nothing differed). All or nothing: a
+/// value it may not write (outside the sub-workspace entered) refuses
+/// it before anything is written.
+fn restore(
+    store: &mut Store,
+    taken: &Taken,
+    origin: &PopOrigin,
+    dry_run: bool,
+) -> Result<Vec<StepInfo>, Refusal> {
+    let writes = edit_snapshots::restore_writes(store, &taken.values);
+    if writes.is_empty() {
+        return Ok(Vec::new());
+    }
+    if let Some(node) = writes
+        .iter()
+        .filter_map(|(p, _)| helios_values::node_of(p))
+        .find(|n| !store.in_scope(n))
+    {
+        return Err(Refusal::new(
+            RefusalKind::Owner,
+            format!(
+                "“{}” sets `{node}`, outside the sub-workspace entered: leave it first",
+                taken.name
+            ),
+        ));
+    }
+    let label = format!("Restore “{}”", taken.name);
+    let o = to_helios(origin);
+    if dry_run {
+        return Ok(vec![StepInfo::new(
+            0,
+            EDIT,
+            Label::text(&label),
+            origin.clone(),
+        )]);
+    }
+    let g = store.begin_group(o.clone(), &label);
+    for (path, value) in writes {
+        if store.get(&path).is_none() {
+            // A label or a lock the network's nodes do not have yet.
+            let node = path.split_once('/').map_or("", |(_, n)| n);
+            let d = if path.starts_with("label/") {
+                crate::mask_tree::label_descriptor(node)
+            } else {
+                crate::mask_tree::lock_descriptor(node)
+            };
+            store.declare(&path, d);
+        }
+        if let Err(e) =
+            store.set(Set::new(&path, helios_values::Change::To(value), o.clone()).gesture(g))
+        {
+            store.cancel(g);
+            return Err(refused(&e));
+        }
+    }
+    store.end(g);
+    Ok(store
+        .undo_steps()
+        .last()
+        .map(step_info)
+        .into_iter()
+        .collect())
+}
+
 impl HeliosHistory {
     /// Undoes the steps of `group` (an agent's batch) alone, newest
     /// first, even under later steps (the answer to "undo only the
@@ -426,8 +529,70 @@ impl History for HeliosHistory {
         let mut f = Features::default();
         if *scope == EDIT {
             f.undo_step = true;
+            f.snapshots = true;
         }
         f
+    }
+
+    fn snapshots(&self, scope: &ScopeId) -> Vec<Snapshot> {
+        if *scope != EDIT {
+            return Vec::new();
+        }
+        let book = edit_snapshots::lock(&self.snapshots);
+        book.list()
+            .iter()
+            .map(|t| snapshot_info(t, book.shown_name(t)))
+            .collect()
+    }
+
+    fn snapshot(
+        &mut self,
+        request: &Request,
+        name: &str,
+        origin: &PopOrigin,
+    ) -> Result<Snapshot, Refusal> {
+        let store = self.lock();
+        Self::check(&store, request)?;
+        let mut book = edit_snapshots::lock(&self.snapshots);
+        let taken = book.take(&store, name, to_helios(origin), now(), request.dry_run);
+        Ok(snapshot_info(&taken, book.shown_name(&taken)))
+    }
+
+    fn restore(&mut self, request: &Request, snapshot: u64, origin: &PopOrigin) -> Answer {
+        let Some(taken) = edit_snapshots::lock(&self.snapshots).get(snapshot).cloned() else {
+            return Answer::Done(Err(Refusal::new(
+                RefusalKind::Nothing,
+                format!("no snapshot {snapshot} in `{EDIT}`"),
+            )));
+        };
+        let answer = self.answer(request, |s| restore(s, &taken, origin, request.dry_run));
+        if let Answer::Done(Ok(w)) = &answer
+            && !w.dry_run
+        {
+            edit_snapshots::lock(&self.snapshots).restored(&taken.name);
+        }
+        answer
+    }
+
+    fn forget(&mut self, request: &Request, snapshot: u64) -> Result<(), Refusal> {
+        if request.scope != EDIT {
+            return Err(Refusal::new(
+                RefusalKind::Unknown,
+                format!("no history `{}`", request.scope),
+            ));
+        }
+        request.check(self.lock().history_rev())?;
+        let mut book = edit_snapshots::lock(&self.snapshots);
+        if book.get(snapshot).is_none() {
+            return Err(Refusal::new(
+                RefusalKind::Nothing,
+                format!("no snapshot {snapshot} in `{EDIT}`"),
+            ));
+        }
+        if !request.dry_run {
+            book.forget(snapshot);
+        }
+        Ok(())
     }
 
     fn undo_step(&mut self, request: &Request, step: u64, origin: &PopOrigin) -> Answer {

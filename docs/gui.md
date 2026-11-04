@@ -307,6 +307,21 @@ brings the edit there (back to where the line left, then along it),
 all or nothing; the line left behind is replaced in turn. They live for
 the session, as the undo list does, and go when another image opens.
 
+**Snapshots.** "Take a snapshot" in the History panel names the edit as
+it is (a context menu deletes one). Taking one saves nothing: the next
+save of the edit, at the next frame, pins it to the version it holds,
+and from then on it is kept with the image's edit in the vault,
+surviving a quit and a `kill -9`. Until then the panel shows it "(not
+saved yet)"; if the desktop quits or another image opens first, it is
+lost, and one whose state the history left before a save stays pending
+for the session. A snapshot of an image never edited is the image with
+no edit. A click on a snapshot restores it as one new step, which a
+toast says, with Undo: Ctrl+Z takes it back. A drag in progress vetoes
+it like an undo, and a restore that would change a node outside the
+sub-workspace entered is refused. Agents have `helios_history_snapshot`
+and `helios_history_restore`, and read the snapshots with
+`helios_history_read`.
+
 ## Settings pages
 
 Settings pages are generated, never laid out by hand: a setting named

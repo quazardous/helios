@@ -1083,7 +1083,7 @@ pub const TOOLS: &[Tool] = &[
         name: "helios_history_read",
         endpoint: Endpoint::Workspace,
         cmd: "history.read",
-        description: "A history's steps on the desktop holding a workspace open (egui-pop's history.read): `undo`, oldest first, and `redo`, the next one last, each with its id, label, text, origin and place; the revision and head",
+        description: "A history's steps on the desktop holding a workspace open (egui-pop's history.read): `undo`, oldest first, and `redo`, the next one last, each with its id, label, text, origin and place; the revision and head; its `snapshots` (id, name, the step it was taken at; a name ending \"(not saved yet)\" is pending: kept at the edit's next save, lost if the desktop quits first)",
         params: &[WORKSPACE, HISTORY_SCOPE, CONFIG],
     },
     Tool {
@@ -1142,6 +1142,43 @@ pub const TOOLS: &[Tool] = &[
                 name: "step",
                 schema: integer,
                 description: "The step's id",
+                default: None,
+            },
+            HISTORY_IF_REV,
+            DRY_RUN,
+            CONFIG,
+        ],
+    },
+    Tool {
+        name: "helios_history_snapshot",
+        endpoint: Endpoint::Workspace,
+        cmd: "history.snapshot",
+        description: "Takes a snapshot of a history on the desktop holding a workspace open (egui-pop's history.snapshot): its current state under `name` (none: numbered). Nothing is saved for it: the image's edit, at its next save, pins it to that version, after which it survives a quit; until then it is pending. Refused during a drag and unless the history is still at `if_rev`; a dry run says what it would take",
+        params: &[
+            WORKSPACE,
+            HISTORY_SCOPE,
+            optional(
+                "name",
+                optional_string,
+                "The snapshot's name; none: \"Snapshot <n>\"",
+            ),
+            HISTORY_IF_REV,
+            DRY_RUN,
+            CONFIG,
+        ],
+    },
+    Tool {
+        name: "helios_history_restore",
+        endpoint: Endpoint::Workspace,
+        cmd: "history.restore",
+        description: "Brings a history on the desktop holding a workspace open back to one of its snapshots (`snapshot`, its id from helios_history_read; egui-pop's history.restore) as one new step of this agent's, which an undo takes back. Refused during a drag and unless the history is still at `if_rev`; a dry run says the step it would make",
+        params: &[
+            WORKSPACE,
+            HISTORY_SCOPE,
+            Param {
+                name: "snapshot",
+                schema: integer,
+                description: "The snapshot's id",
                 default: None,
             },
             HISTORY_IF_REV,
@@ -2653,6 +2690,8 @@ mod tests {
             "helios_history_read",
             "helios_history_undo",
             "helios_history_redo",
+            "helios_history_snapshot",
+            "helios_history_restore",
             "helios_context_hold",
             "helios_context_release",
         ] {
@@ -2662,6 +2701,9 @@ mod tests {
             }
             if name == "helios_context_release" {
                 args["token"] = json!(1);
+            }
+            if name == "helios_history_restore" {
+                args["snapshot"] = json!(1);
             }
             let (failed, answer) = tool(&mut s, name, args);
             assert!(failed, "{name}: {answer}");

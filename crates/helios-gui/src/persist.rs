@@ -26,7 +26,12 @@
 //!   it; a drag saved that way and then cancelled saves the values it put
 //!   back, so the given-up values never stay the latest edit. Each
 //!   version names who made its step (the user, an agent, a script), and
-//!   each save is announced on the bus as `edit.saved`.
+//!   each save is announced on the bus as `edit.saved`;
+//! - pins the image's history snapshots taken since (see
+//!   `crate::edit_snapshots`): once the edit is saved, a snapshot taken
+//!   at the step it holds is pinned to that version, and the image's
+//!   pinned snapshots are kept in the vault; they are read back, with
+//!   the values of their versions, when the image opens.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -83,6 +88,8 @@ struct Editing {
     flushed_at: Option<f64>,
     /// The gesture going on, by label, and who makes it.
     gesture: Option<(String, String)>,
+    /// The last save failed: the head is not the edit shown.
+    unsaved: bool,
 }
 
 /// The library as the vault holds it: its entries, and where each image
@@ -272,6 +279,9 @@ impl<S: Store> Persist<S> {
         port: &str,
     ) -> Result<Option<Version>, String> {
         let (session, head) = EditSession::open(&self.vault, image)?;
+        // The image with no edit: what a snapshot pinned to no version
+        // restores.
+        let unedited = edit::of_graph(&graph);
         if let Some(head) = &head {
             for skipped in edit::apply_to_graph(&mut graph, &head.edit)? {
                 shell.notify(
@@ -286,6 +296,12 @@ impl<S: Store> Persist<S> {
         }
         let modules = modules_of(&graph);
         shell.set_view_source(graph, node, port)?;
+        let snapshots = self.read_snapshots(shell, image, &unedited);
+        {
+            let mut book = crate::edit_snapshots::lock(&shell.snapshots);
+            book.load(image, snapshots);
+            book.set_saved(saved_params(&modules));
+        }
         let committed = {
             let mut store = shell.values.lock().expect("value store lock");
             // The labels and locks it was saved with; another image's go.
@@ -299,8 +315,101 @@ impl<S: Store> Persist<S> {
             committed,
             flushed_at: None,
             gesture: None,
+            unsaved: false,
         });
         Ok(head)
+    }
+
+    /// An image's pinned snapshots, each with the values of its version
+    /// (`unedited`: the edit of one pinned to no version). One whose
+    /// version cannot be read is left out, and said.
+    fn read_snapshots(
+        &self,
+        shell: &mut Shell,
+        image: ImageId,
+        unedited: &Value,
+    ) -> Vec<crate::edit_snapshots::Taken> {
+        use crate::edit_snapshots::{Pin, Taken, origin_of, values_of_edit};
+        let kept = match self.vault.snapshots(&image) {
+            Ok(k) => k,
+            Err(e) => {
+                shell.notify(Level::Warning, e);
+                return Vec::new();
+            }
+        };
+        let mut out = Vec::new();
+        for s in kept {
+            let edit = match &s.version {
+                None => Ok(unedited.clone()),
+                Some(v) => self
+                    .vault
+                    .version(v)
+                    .and_then(|found| found.ok_or_else(|| format!("no version {}", v.hex())))
+                    .map(|found| found.edit),
+            };
+            match edit.and_then(|e| values_of_edit(&e)) {
+                Ok(values) => out.push(Taken {
+                    id: s.id,
+                    name: s.name,
+                    // Taken in an earlier session: no step of this one
+                    // (0; only a pending snapshot is pinned by its step).
+                    step: 0,
+                    origin: origin_of(&s.origin),
+                    at: s.at as f64,
+                    pin: Some(s.version.map_or(Pin::Unedited, Pin::Version)),
+                    values,
+                }),
+                Err(e) => shell.notify(
+                    Level::Warning,
+                    Message::new(
+                        "gui-snapshot-unreadable",
+                        "Snapshot “{ $name }” cannot be read: { $error }",
+                    )
+                    .with("name", s.name)
+                    .with("error", e),
+                ),
+            }
+        }
+        out
+    }
+
+    /// Pins the snapshots taken at the step the saved edit holds, once
+    /// everything committed is saved and no gesture goes on, then keeps
+    /// the image's pinned snapshots in the vault when they changed.
+    fn pin_snapshots(&mut self, shell: &mut Shell) {
+        use crate::edit_snapshots::{Pin, head_step};
+        let Some(e) = &self.editing else {
+            return;
+        };
+        let image = e.session.image();
+        let (step, settled) = {
+            let store = shell.values.lock().expect("value store lock");
+            let settled =
+                !e.unsaved && store.open_gesture().is_none() && store.committed() == e.committed;
+            (head_step(&store), settled)
+        };
+        let (pinned, write) = {
+            let mut book = crate::edit_snapshots::lock(&shell.snapshots);
+            if book.image() != Some(image) {
+                return;
+            }
+            if settled {
+                let pin = e.session.head().map_or(Pin::Unedited, Pin::Version);
+                book.pin_at(step, pin);
+            }
+            (book.pinned(), book.take_dirty())
+        };
+        if write && let Err(err) = self.vault.set_snapshots(&image, &pinned) {
+            crate::edit_snapshots::lock(&shell.snapshots).mark_dirty();
+            shell.notify(
+                Level::Error,
+                Message::new(
+                    "gui-snapshots-not-saved",
+                    "The snapshots were not saved: { $error }",
+                )
+                .with("error", err),
+            );
+        }
     }
 
     /// Follows the network shown after it changed in place (see
@@ -313,6 +422,7 @@ impl<S: Store> Persist<S> {
         };
         if let Some(graph) = shell.viewport().graph() {
             e.modules = modules_of(graph);
+            crate::edit_snapshots::lock(&shell.snapshots).set_saved(saved_params(&e.modules));
             // Saved at the next frame, under the step that changed it (an
             // edit the same as the last one saved is not saved again).
             e.committed = u64::MAX;
@@ -333,6 +443,7 @@ impl<S: Store> Persist<S> {
             self.write(shell, changes, at);
         }
         self.save_edit(shell, now);
+        self.pin_snapshots(shell);
         self.answer_stacks(shell, at);
         let expansions = shell.library_mut().take_expansions();
         for (stack, expanded) in expansions {
@@ -464,6 +575,7 @@ impl<S: Store> Persist<S> {
             e.gesture = None;
             e.session.save(&self.vault, current, &label, &origin, at)
         };
+        e.unsaved = saved.is_err();
         if let Err(err) = saved {
             shell.notify(
                 Level::Error,
@@ -518,6 +630,16 @@ impl<S: Store> Persist<S> {
         }
         Ok(())
     }
+}
+
+/// The parameters an edit saves, by node name.
+fn saved_params(
+    modules: &BTreeMap<String, (String, BTreeSet<String>)>,
+) -> BTreeMap<String, BTreeSet<String>> {
+    modules
+        .iter()
+        .map(|(node, (_, params))| (node.clone(), params.clone()))
+        .collect()
 }
 
 /// The module each module node of `graph` runs, and its parameters, by

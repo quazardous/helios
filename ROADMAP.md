@@ -208,6 +208,11 @@ it. Each scope keeps 500 steps in memory, a number the host can change.
 No "compress history" for now. The history panel hides the redo states a
 new step dropped, with a toggle that shows them as "replaced". Undoing a
 copy-import removes the catalogue entries it added, never the files.
+Snapshots (2026-11-04, decided: option A): taking one forces no save;
+it is pinned to the version the edit's next save leaves, kept with the
+image in the vault from then on, shown pending until then and lost if
+the app quits first; restoring one is a new step an undo takes back
+(built: docs/design/undo.md).
 Hard requirement (2026-10-11, decided): GPU acceleration on Linux, Windows
 and macOS, as close to Vulkan as possible, so the viewport can show buffers
 the engine computed on the GPU without copying them back. wgpu is
