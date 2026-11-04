@@ -34,6 +34,7 @@ pub mod edit;
 pub mod fields;
 pub mod journal;
 pub mod settings;
+pub mod snapshots;
 pub mod stacks;
 pub mod versions;
 pub mod workflow;
