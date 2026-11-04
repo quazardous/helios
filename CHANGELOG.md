@@ -24,6 +24,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.51.0] - 2026-11-04
+
+### Added
+
+- Macros: Interface… in the Modules panel (and next after making a macro)
+  chooses the parameters a macro shows, with their names, labels, groups,
+  ranges and defaults, saved as a new version of the macro as one undo
+  step that keeps the image's look. Agents have
+  `helios_macro_interface`.
+- The Parameters panel shows a macro's parameters under the groups its
+  author gave them, each heading folded and unfolded by a click.
+
 ## [0.50.0] - 2026-11-03
 
 ### Added
