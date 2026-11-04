@@ -574,6 +574,8 @@ pub fn edited(
     id: &str,
     args: &Json,
 ) -> Result<(State, Json), String> {
+    // The workspace's own composites (its macros) are known too.
+    let catalogue = &now.bundle.catalogue(catalogue);
     let t = &now.bundle.template;
     let mut net = t.network.clone();
     let mut positions = t.positions.clone();

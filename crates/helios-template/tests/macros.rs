@@ -373,6 +373,27 @@ fn a_macro_opens_and_folds_without_rendering_anything_new() {
 }
 
 #[test]
+fn a_workspace_s_own_macro_is_added_and_wired_as_another_node() {
+    let (made, _) = made();
+    let (added, answer) = helios_template::network::edited(
+        &made.state,
+        &catalogue(),
+        "network.add",
+        &json!({ "nodes": [{ "composite": "user.warm-look@1" }] }),
+    )
+    .unwrap();
+    assert_eq!(answer["added"], json!(["warm_look_2"]), "{answer}");
+    let (wired, _) = helios_template::network::edited(
+        &added,
+        &catalogue(),
+        "network.connect",
+        &json!({ "from": "source", "port": "image", "to": "warm_look_2", "input": "input" }),
+    )
+    .unwrap();
+    assert!(wired.problems(&catalogue()).is_empty());
+}
+
+#[test]
 fn a_dissolved_macro_gives_back_its_nodes_and_renders_the_same() {
     let (made, values) = made();
     let values = moved(&values, &made.values);
