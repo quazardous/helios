@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
-use egui::{Context as Egui, Event, Id, Rect, Ui};
+use egui::{Context as Egui, Id, Rect, Ui};
 use egui_pop::api::app::OverlayKind;
 use egui_pop::api::dialogs::{self, Choose, ChooseOption, DIALOGS, Dialogs};
 use egui_pop::api::frame::{self, FramePlugin, SETTING_FRAME};
@@ -242,7 +242,7 @@ pub fn wgpu_setup(gpu: &helios_gpu::Gpu) -> eframe::egui_wgpu::WgpuSetup {
 pub fn name_rect(ctx: &Egui, name: &str, rect: Rect) {
     let window = ctx.viewport_id();
     ctx.data_mut(|d| {
-        d.get_temp_mut_or_default::<BTreeMap<String, (Rect, egui::ViewportId)>>(Id::new(
+        d.get_temp_mut_or_default::<BTreeMap<String, (Rect, egui::ViewportId)>>(Id::unique(
             "helios.named",
         ))
         .insert(name.to_string(), (rect, window));
@@ -404,6 +404,9 @@ pub struct Shell {
     /// The screen's own scale, as of the last frame (none before it).
     native_scale: Option<f32>,
     shots: VecDeque<Shot>,
+    /// The screenshots asked for, as the window hands them back, oldest
+    /// first: each answers the oldest of `shots`.
+    screenshots: Arc<Mutex<VecDeque<Arc<egui::ColorImage>>>>,
     recording: Option<(String, Recorder)>,
     /// What the shell has to say: command results, layout repairs.
     pub notes: Vec<String>,
@@ -790,6 +793,7 @@ impl Shell {
             pixels_per_point: 1.0,
             native_scale: None,
             shots: VecDeque::new(),
+            screenshots: Arc::default(),
             recording: None,
             notes: Vec::new(),
             title: String::new(),
@@ -4435,7 +4439,7 @@ impl Shell {
             }
             Action::Snapshot { target, path } => {
                 self.shots.push_back(Shot::Save { target, path });
-                ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::default()));
+                self.request_screenshot(ctx);
             }
             Action::RecordStart { target, path, fps } => {
                 self.recording = Some((target, Recorder::new(path, fps)));
@@ -4484,6 +4488,17 @@ impl Shell {
             ));
         }
         self.target_rect(target)
+    }
+
+    /// Asks the window for a screenshot of its next frame; it comes back
+    /// through `screenshots`, read at the start of a frame.
+    fn request_screenshot(&self, ctx: &Egui) {
+        let screenshots = Arc::clone(&self.screenshots);
+        let repaint = ctx.clone();
+        ctx.request_screenshot(move |image| {
+            lock(&screenshots).push_back(image);
+            repaint.request_repaint();
+        });
     }
 
     fn on_screenshot(&mut self, image: &egui::ColorImage) {
@@ -4562,10 +4577,9 @@ impl Shell {
         }
         self.follow_scale(&ctx);
         self.now = ctx.input(|i| i.time);
-        for event in ctx.input(|i| i.events.clone()) {
-            if let Event::Screenshot { image, .. } = event {
-                self.on_screenshot(&image);
-            }
+        let screenshots = std::mem::take(&mut *lock(&self.screenshots));
+        for image in screenshots {
+            self.on_screenshot(&image);
         }
         // What panels asked for during the last frame.
         for r in crate::dialogs::take_requests(&ctx) {
@@ -4626,7 +4640,7 @@ impl Shell {
         self.rects.clear();
         self.rect_windows.clear();
         ctx.data_mut(|d| {
-            d.remove::<BTreeMap<String, (Rect, egui::ViewportId)>>(Id::new("helios.named"));
+            d.remove::<BTreeMap<String, (Rect, egui::ViewportId)>>(Id::unique("helios.named"));
         });
         self.rects.insert("window".into(), ctx.content_rect());
 
@@ -4669,7 +4683,7 @@ impl Shell {
         self.pointer_choice_ui(&ctx);
 
         let named = ctx.data(|d| {
-            d.get_temp::<BTreeMap<String, (Rect, egui::ViewportId)>>(Id::new("helios.named"))
+            d.get_temp::<BTreeMap<String, (Rect, egui::ViewportId)>>(Id::unique("helios.named"))
         });
         for (name, (rect, window)) in named.unwrap_or_default() {
             if window != egui::ViewportId::ROOT {
@@ -4681,7 +4695,7 @@ impl Shell {
 
         if self.recording.is_some() {
             self.shots.push_back(Shot::Frame);
-            ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::default()));
+            self.request_screenshot(&ctx);
             ctx.request_repaint();
         }
     }
@@ -4828,7 +4842,7 @@ impl Shell {
         if !self.pointer_choice || !crate::pointer_choice::wanted(&h) {
             return;
         }
-        let shown = egui::Area::new(Id::new(crate::pointer_choice::RECT))
+        let shown = egui::Area::new(Id::unique(crate::pointer_choice::RECT))
             .order(egui::Order::Foreground)
             .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -48.0))
             .show(ctx, |ui| {
@@ -4849,7 +4863,7 @@ impl Shell {
             let mut open = true;
             let mut chosen = None;
             let cx = h.when_context();
-            let shown = egui::Popup::new(Id::new("helios.menu"), ctx.clone(), at, layer)
+            let shown = egui::Popup::new(Id::unique("helios.menu"), ctx.clone(), at, layer)
                 .kind(egui::PopupKind::Menu)
                 .open_bool(&mut open)
                 .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)

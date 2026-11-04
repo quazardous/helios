@@ -157,11 +157,13 @@ impl Items {
             "text": t(Message::new("gui-status-images", "{ $count } images")
                 .with("count", m.images)),
         });
+        // No image shown yet: a dash, so the item is never an empty
+        // button without a name.
         let zoom = json!({
-            "text": m.zoom.map(|z| format!(
+            "text": m.zoom.map_or_else(|| "—".to_string(), |z| format!(
                 "{} %",
                 egui_pop::viewport::navigator::percent_text(ctx, z * 100.0)
-            )).unwrap_or_default(),
+            )),
             "detail": t(Message::new("gui-status-zoom", "Zoom")),
         });
         let history = json!({

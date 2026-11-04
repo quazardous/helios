@@ -66,9 +66,13 @@ fn free_name(exposed: &[Exposed], node: &str, param: &str) -> String {
 /// An optional text field: empty is `None`.
 fn text_field(ui: &mut Ui, label: &str, value: &mut Option<String>) {
     ui.horizontal(|ui| {
-        ui.label(label);
+        let l = ui.label(label);
         let mut text = value.clone().unwrap_or_default();
-        if ui.text_edit_singleline(&mut text).changed() {
+        if ui
+            .text_edit_singleline(&mut text)
+            .labelled_by(l.id)
+            .changed()
+        {
             *value = (!text.trim().is_empty()).then(|| text.trim().to_string());
         }
     });
@@ -107,8 +111,8 @@ impl Editor {
     /// One pass of the dialog's body.
     pub fn ui(&mut self, ui: &mut Ui, pass: &mut CustomPass) {
         ui.horizontal(|ui| {
-            ui.label(tr(ui, Message::new("gui-macro-iface-filter", "Filter")));
-            ui.text_edit_singleline(&mut self.filter);
+            let l = ui.label(tr(ui, Message::new("gui-macro-iface-filter", "Filter")));
+            ui.text_edit_singleline(&mut self.filter).labelled_by(l.id);
         });
         let height = (ui.available_height() * 0.5).max(120.0);
         ui.columns(2, |cols| {
@@ -259,7 +263,7 @@ impl Editor {
                 {
                     action = Some((i, 1));
                 }
-                if ui.small_button("✕").on_hover_text(&remove).clicked() {
+                if ui.small_button("×").on_hover_text(&remove).clicked() {
                     action = Some((i, 0));
                 }
             });
@@ -300,14 +304,16 @@ impl Editor {
             .unwrap_or(i);
         let x = &mut self.exposed[i];
         ui.horizontal(|ui| {
-            ui.label(tr(ui, Message::new("gui-macro-iface-name", "Name")));
-            ui.text_edit_singleline(&mut x.name).on_hover_text(tr(
-                ui,
-                Message::new(
-                    "gui-macro-iface-name-hint",
-                    "The same name on two rows links them: one value sets both",
-                ),
-            ));
+            let l = ui.label(tr(ui, Message::new("gui-macro-iface-name", "Name")));
+            ui.text_edit_singleline(&mut x.name)
+                .labelled_by(l.id)
+                .on_hover_text(tr(
+                    ui,
+                    Message::new(
+                        "gui-macro-iface-name-hint",
+                        "The same name on two rows links them: one value sets both",
+                    ),
+                ));
         });
         if first != i {
             ui.weak(tr(
@@ -350,16 +356,16 @@ impl Editor {
             }
             ParamKind::Choice { options, .. } => choice_ui(ui, x, &inner, options),
             ParamKind::Bool { .. } => {
-                own_default(ui, x, &inner, |ui, v| {
+                own_default(ui, x, &inner, |ui, v, by| {
                     if let Value::Bool(b) = v {
-                        ui.checkbox(b, "");
+                        ui.checkbox(b, "").labelled_by(by);
                     }
                 });
             }
             ParamKind::Text { .. } => {
-                own_default(ui, x, &inner, |ui, v| {
+                own_default(ui, x, &inner, |ui, v, by| {
                     if let Value::Text(t) = v {
-                        ui.text_edit_singleline(t);
+                        ui.text_edit_singleline(t).labelled_by(by);
                     }
                 });
             }
@@ -373,18 +379,20 @@ fn own_default(
     ui: &mut Ui,
     x: &mut Exposed,
     inner: &InnerParam,
-    widget: impl FnOnce(&mut Ui, &mut Value),
+    widget: impl FnOnce(&mut Ui, &mut Value, egui::Id),
 ) {
     let mut on = x.default.is_some();
     let label = tr(
         ui,
         Message::new("gui-macro-iface-default", "Its own default"),
     );
-    if ui.checkbox(&mut on, label).changed() {
+    let check = ui.checkbox(&mut on, label);
+    if check.changed() {
         x.default = on.then(|| inner.value.clone());
     }
+    // The value's widget is named by the check box.
     if let Some(v) = &mut x.default {
-        widget(ui, v);
+        widget(ui, v, check.id);
     }
 }
 
@@ -411,7 +419,7 @@ fn number_ui(ui: &mut Ui, x: &mut Exposed, inner: &InnerParam, lo: f64, hi: f64,
             .default(low, high)
             .show(ui);
     }
-    own_default(ui, x, inner, |ui, v| {
+    own_default(ui, x, inner, |ui, v, _| {
         let label = tr(ui, Message::new("gui-macro-iface-default-value", "Default"));
         match v {
             Value::Float(f) => {
@@ -449,7 +457,7 @@ fn choice_ui(ui: &mut Ui, x: &mut Exposed, inner: &InnerParam, options: &[String
         }
     });
     x.options = (kept.len() < options.len()).then_some(kept.clone());
-    own_default(ui, x, inner, |ui, v| {
+    own_default(ui, x, inner, |ui, v, _| {
         if let Value::Choice(c) = v {
             ui.horizontal_wrapped(|ui| {
                 for o in &kept {

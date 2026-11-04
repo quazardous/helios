@@ -19,7 +19,10 @@
 //! - the first run offers darktable's profile once, without blocking the
 //!   window.
 
-use egui::{Event, Key, Modifiers, MouseWheelUnit, PointerButton, Pos2, TouchPhase, Vec2, vec2};
+use egui::{
+    Event, Key, Modifiers, MouseWheelSource, MouseWheelUnit, PointerButton, Pos2, TouchPhase, Vec2,
+    vec2,
+};
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 use helios_core::{Graph, Image, ModuleRef, Params, Region, Value};
@@ -201,6 +204,8 @@ fn wheel(h: &mut Harness<'_, Shell>, at: Pos2, unit: MouseWheelUnit, delta: Vec2
         delta,
         phase: TouchPhase::Move,
         modifiers: m,
+        // Linux does not say what drives a wheel.
+        source: MouseWheelSource::Unknown,
     });
     h.step();
     for _ in 0..6 {
@@ -469,6 +474,7 @@ fn a_pan_that_ends_over_the_parameters_moves_only_the_view() {
         delta: vec2(0.0, 1.0),
         phase: TouchPhase::Move,
         modifiers: Modifiers::NONE,
+        source: MouseWheelSource::Unknown,
     });
     h.step();
     button(&mut h, PointerButton::Primary, to, false, Modifiers::NONE);

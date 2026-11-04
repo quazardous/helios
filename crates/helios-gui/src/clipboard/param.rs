@@ -250,7 +250,7 @@ impl Endpoint {
         }
         let path = app
             .egui()
-            .data(|d| d.get_temp::<String>(egui::Id::new(FOCUS)))?;
+            .data(|d| d.get_temp::<String>(egui::Id::unique(FOCUS)))?;
         Some((path, Text::Value))
     }
 }
@@ -259,7 +259,7 @@ impl Endpoint {
 /// and paste onto it. Called each pass while it has the focus.
 pub fn focus(app: &AppHandle, path: &str, widget: egui::Id) {
     app.egui()
-        .data_mut(|d| d.insert_temp(egui::Id::new(FOCUS), path.to_string()));
+        .data_mut(|d| d.insert_temp(egui::Id::unique(FOCUS), path.to_string()));
     egui_pop::api::clipboard::bind(app, super::PARAM_ENDPOINT, widget);
 }
 

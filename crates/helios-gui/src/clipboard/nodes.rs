@@ -127,7 +127,7 @@ pub fn network(store: &Store) -> Option<(NetworkDesc, BTreeMap<String, [f32; 2]>
 /// copy those nodes and paste into the network.
 pub fn focus(app: &AppHandle, selection: Vec<String>, widget: egui::Id) {
     app.egui()
-        .data_mut(|d| d.insert_temp(egui::Id::new(SELECTION), selection));
+        .data_mut(|d| d.insert_temp(egui::Id::unique(SELECTION), selection));
     egui_pop::api::clipboard::bind(app, super::GRAPH_ENDPOINT, widget);
 }
 
@@ -161,7 +161,7 @@ impl Endpoint {
             return p;
         }
         app.egui()
-            .data(|d| d.get_temp::<Vec<String>>(egui::Id::new(SELECTION)))
+            .data(|d| d.get_temp::<Vec<String>>(egui::Id::unique(SELECTION)))
             .unwrap_or_default()
     }
 

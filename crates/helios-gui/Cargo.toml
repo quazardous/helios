@@ -60,9 +60,9 @@ serde_json.workspace = true
 # MIT OR Apache-2.0: the `log` facade egui-pop's log file reads.
 log = "0.4"
 # MIT OR Apache-2.0 (egui, eframe, egui_kittest).
-egui = "0.36"
-eframe = { version = "0.36", default-features = false, features = ["default_fonts", "wgpu", "wayland", "x11", "accesskit"] }
-egui_kittest = { version = "0.36", features = ["eframe", "wgpu"] }
+egui = { version = "0.37", features = ["monochrome_emoji_fonts"] }
+eframe = { version = "0.37", default-features = false, features = ["default_fonts", "wgpu", "wayland", "x11", "accesskit"] }
+egui_kittest = { version = "0.37", features = ["eframe", "wgpu"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
 # MIT OR Apache-2.0: the system clipboard beyond text (files and images),
 # already in the tree through egui-winit. On Linux it speaks X11, which

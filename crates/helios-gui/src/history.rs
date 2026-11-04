@@ -335,6 +335,7 @@ fn snapshot_info(t: &Taken, name: String) -> Snapshot {
         step: t.step,
         origin: to_pop(&t.origin),
         at: t.at,
+        pending: false,
     }
 }
 

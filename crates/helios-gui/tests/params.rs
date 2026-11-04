@@ -228,6 +228,7 @@ fn the_wheel_steps_a_slider_only_once_focused() {
             phase: egui::TouchPhase::Move,
             delta: vec2(0.0, 1.0),
             modifiers,
+            source: egui::MouseWheelSource::Unknown,
         });
         for _ in 0..4 {
             h.step();

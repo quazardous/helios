@@ -467,11 +467,7 @@ impl QueuePanel {
                                 let r = ui.button(&label);
                                 let described = format!("{label} {}", item.title);
                                 r.widget_info(|| {
-                                    egui::WidgetInfo::labeled(
-                                        egui::WidgetType::Button,
-                                        true,
-                                        &described,
-                                    )
+                                    egui::WidgetInfo::labeled(egui::Role::Button, true, &described)
                                 });
                                 crate::name_rect(ui.ctx(), &format!("{PANEL}.{i}.cancel"), r.rect);
                                 if r.clicked() {

@@ -129,8 +129,8 @@ pub fn body(ui: &mut egui::Ui, app: &AppHandle) {
     ui.horizontal(|ui| {
         ui.strong(&title);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let r = ui.small_button("✕").on_hover_text(&close);
-            egui_pop::core::a11y::name(&r, egui::WidgetType::Button, &close);
+            let r = ui.small_button("×").on_hover_text(&close);
+            egui_pop::core::a11y::name(&r, egui::Role::Button, &close);
             closed = r.clicked();
         });
     });

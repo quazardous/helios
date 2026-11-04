@@ -353,7 +353,7 @@ pub const BLOCK_LOGO: BlockId = BlockId::from_static("helios.frame.logo");
 
 /// The logo, decoded once per context.
 pub(crate) fn logo(ctx: &egui::Context) -> egui::TextureHandle {
-    let id = egui::Id::new("helios.logo");
+    let id = egui::Id::unique("helios.logo");
     if let Some(t) = ctx.data(|d| d.get_temp::<egui::TextureHandle>(id)) {
         return t;
     }

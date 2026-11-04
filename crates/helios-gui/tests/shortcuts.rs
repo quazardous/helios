@@ -61,7 +61,7 @@ fn run(h: &mut Harness<'_, Shell>, command: &str, args: Value) {
 
 /// The culling keys of the default map: those bound in the library.
 fn culling_keys() -> Vec<(String, String)> {
-    let library = keys::library();
+    let library = keys::behind_no_picker(&keys::library());
     keys::defaults()
         .into_iter()
         .filter(|(_, _, when)| *when == library)

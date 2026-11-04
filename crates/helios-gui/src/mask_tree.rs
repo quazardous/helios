@@ -1605,7 +1605,7 @@ impl MaskTree {
                 cycle_display = true;
             }
         });
-        let id = egui::Id::new(("egui_pop_views::tree", TREE));
+        let id = egui::Id::unique(("egui_pop_views::tree", TREE));
         let focused = ui.memory(|m| m.has_focus(id));
         // Delete in the tree takes the selected member out. Not a key
         // binding: egui-pop's keymap counts two bindings of one key as a
@@ -1810,7 +1810,7 @@ pub fn operator_glyph(ui: &mut Ui, operator: &str, hint: &str) -> egui::Response
             );
         }
     }
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Image, true, hint));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Image, true, hint));
     response.on_hover_text(hint)
 }
 

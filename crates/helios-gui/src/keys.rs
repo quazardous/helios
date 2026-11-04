@@ -25,6 +25,12 @@ pub fn image() -> String {
     format!("focusedPanel == 'helios.viewport' && mode.{ORIENTATION} != '{CULLING}'")
 }
 
+/// `when`, while egui-pop's in-app file picker is not open (its context
+/// key `filePickerEditPath`): the vault's plain keys rest behind it.
+pub fn behind_no_picker(when: &str) -> String {
+    format!("({when}) && !filePickerEditPath")
+}
+
 /// In the darkroom.
 pub fn darkroom() -> String {
     format!("place == '{DARKROOM}'")
@@ -81,9 +87,12 @@ pub fn defaults() -> Vec<(String, String, String)> {
     ] {
         culling_keys.push((k.into(), command.into()));
     }
+    // Not while egui-pop's in-app file picker is open (its context key
+    // `filePickerEditPath`): its own keys (F5 reads the folder again)
+    // win there, and an image is not rated behind it.
     for (k, command) in &culling_keys {
         for when in [&library, &culling] {
-            bind(k, command, when);
+            bind(k, command, &behind_no_picker(when));
         }
     }
     // Next and previous image while culling; in the grid Space selects.

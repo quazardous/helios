@@ -141,7 +141,7 @@ pub enum Request {
 }
 
 fn requests_id() -> Id {
-    Id::new("helios.requests")
+    Id::unique("helios.requests")
 }
 
 /// Asks the shell for a dialog, a menu or a notice from inside a panel;

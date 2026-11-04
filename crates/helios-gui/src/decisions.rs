@@ -682,6 +682,8 @@ fn field(ui: &mut Ui, card: &Card, spec: &ParamSpec, value: Value, shown: &str) 
                     }
                 })
                 .response;
+            let name = crate::params::label(&ctx, &path, &d);
+            egui_pop::core::a11y::name(&r, egui::Role::ComboBox, &name);
             (r, picked)
         }
         (ParamKind::Text { .. }, Value::Text(mut t)) if t.len() <= 64 => {

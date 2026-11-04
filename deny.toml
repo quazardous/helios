@@ -66,8 +66,12 @@ wildcards = "allow"
 
 [sources]
 # crates.io, and egui-pop from its repository: Helios pins a commit of it
-# until egui-pop 0.1 is published on crates.io.
+# until egui-pop is published on crates.io. egui-phosphor comes from a fork
+# on egui 0.37, patched as egui-pop patches it, until its release.
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
-allow-git = ["https://github.com/quazardous/egui-pop"]
+allow-git = [
+    "https://github.com/quazardous/egui-pop",
+    "https://github.com/quazardous/egui-phosphor",
+]

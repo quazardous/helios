@@ -318,6 +318,7 @@ impl Params {
                                 }
                             })
                             .response;
+                        egui_pop::core::a11y::name(&r, egui::Role::ComboBox, &label);
                         // The list's own response keeps its popup: a
                         // context menu on it shares the popup's id and
                         // closes the list on the click that opens it.
@@ -330,8 +331,8 @@ impl Params {
                     }
                     (Type::Text, Value::Text(t)) => {
                         let mut text = t.clone();
-                        ui.label(&label);
-                        let r = ui.text_edit_singleline(&mut text);
+                        let l = ui.label(&label);
+                        let r = ui.text_edit_singleline(&mut text).labelled_by(l.id);
                         if r.lost_focus() && text != *t {
                             let mut s = store.lock().expect("value store lock");
                             write(&mut s, path, Change::To(Value::Text(text)), None, false);
@@ -792,7 +793,7 @@ pub fn sections<'a>(rows: &[(&'a str, Option<&'a str>)]) -> Vec<(Option<&'a str>
 /// open.
 fn section_row(ui: &mut Ui, node: &str, group: &str) -> bool {
     let ctx = ui.ctx().clone();
-    let id = egui::Id::new(("helios.params.section", node, group));
+    let id = egui::Id::unique(("helios.params.section", node, group));
     let open = ctx.data(|m| m.get_temp::<bool>(id)).unwrap_or(true);
     let hint = crate::i18n::text(
         &ctx,
@@ -854,6 +855,7 @@ fn operator_choice(
         })
         .response
         .on_hover_text(operator_hint(&ctx, current));
+    egui_pop::core::a11y::name(&r, egui::Role::ComboBox, label);
     let l = ui.label(label);
     if picked != current {
         let mut s = store.lock().expect("value store lock");
@@ -963,7 +965,7 @@ fn list_row(
     let (summary, per_line) = list_items(d, path, len);
     let ctx = ui.ctx().clone();
     let summary = crate::i18n::text(&ctx, summary);
-    let id = egui::Id::new(("helios.params.open", path));
+    let id = egui::Id::unique(("helios.params.open", path));
     let open = ctx.data(|m| m.get_temp::<bool>(id)).unwrap_or(false);
     let (icon, hint) = if open {
         (

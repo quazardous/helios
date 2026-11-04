@@ -1122,18 +1122,18 @@ impl GraphPanel {
             )
         };
         ui.horizontal(|ui| {
-            ui.label(crate::i18n::text(
-                &ctx,
-                Message::new("gui-graph-wires", "Wires"),
-            ));
+            let label = crate::i18n::text(&ctx, Message::new("gui-graph-wires", "Wires"));
+            ui.label(&label);
             let mut picked = wires;
-            egui::ComboBox::from_id_salt("helios.graph.wires")
+            let r = egui::ComboBox::from_id_salt("helios.graph.wires")
                 .selected_text(name(wires))
                 .show_ui(ui, |ui| {
                     for s in WireStyle::ALL {
                         ui.selectable_value(&mut picked, s, name(s));
                     }
-                });
+                })
+                .response;
+            egui_pop::core::a11y::name(&r, egui::Role::ComboBox, &label);
             if picked != wires {
                 let _ = lock(values).set(Set::new(
                     WIRES,

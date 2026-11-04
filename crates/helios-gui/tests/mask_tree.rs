@@ -145,18 +145,15 @@ fn steps(h: &Harness<'_, Shell>) -> Vec<String> {
 }
 
 /// A row of the tree, by its label (the Parameters panel may show the
-/// same name).
+/// same name): in the panel, the widest node so named, the row's parts
+/// that repeat its name being narrower.
 fn row(h: &Harness<'_, Shell>, label: &str) -> egui::Rect {
     let panel = h.state().target_rect(mask_tree::PANEL).unwrap();
-    let rows: Vec<egui::Rect> = h
-        .query_all_by_label(label)
+    h.query_all_by_label(label)
         .map(|n| n.rect())
         .filter(|r| panel.contains(r.center()))
-        .collect();
-    match rows[..] {
-        [r] => r,
-        _ => panic!("{} rows labelled `{label}`", rows.len()),
-    }
+        .max_by(|a, b| a.width().total_cmp(&b.width()))
+        .unwrap_or_else(|| panic!("no row labelled `{label}`"))
 }
 
 fn button(h: &mut Harness<'_, Shell>, pos: Pos2, pressed: bool) {

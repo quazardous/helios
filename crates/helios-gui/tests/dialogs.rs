@@ -421,6 +421,33 @@ fn click(h: &mut egui_kittest::Harness<'static, Shell>, label: &str) {
     }
 }
 
+/// Goes into a folder of the picker's list: a click only highlights an
+/// entry there, a double click (in one frame, at the entry's place this
+/// frame) goes in.
+fn go_into(h: &mut egui_kittest::Harness<'static, Shell>, label: &str) {
+    let pos = h
+        .query_all_by_label(label)
+        .next()
+        .unwrap_or_else(|| panic!("no {label:?}"))
+        .rect()
+        .center();
+    let events = &mut h.input_mut().events;
+    events.push(egui::Event::PointerMoved(pos));
+    for _ in 0..2 {
+        for pressed in [true, false] {
+            events.push(egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+        }
+    }
+    for _ in 0..3 {
+        h.run();
+    }
+}
+
 fn path_form(key: &str, descriptor: Descriptor, value: &std::path::Path) -> Form {
     Form {
         title: "Choose".into(),
@@ -448,10 +475,10 @@ fn browse_walks_folders_in_the_own_picker_and_fills_the_field() {
     // The folder's subfolders, no files when choosing a folder.
     assert!(h.query_by_label("a/").is_some() && h.query_by_label("b/").is_some());
     assert!(h.query_by_label("notes.txt").is_none());
-    click(&mut h, "a/");
+    go_into(&mut h, "a/");
     assert!(h.query_by_label("inner/").is_some(), "in a");
     click(&mut h, "Up");
-    click(&mut h, "b/");
+    go_into(&mut h, "b/");
     click(&mut h, "Choose this folder");
     let form = current(&mut h);
     assert_eq!(form["kind"], json!("form"));

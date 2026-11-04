@@ -96,7 +96,7 @@ impl Plugin for Panels {
 }
 
 fn focus_taken_id() -> egui::Id {
-    egui::Id::new("helios.focus_taken")
+    egui::Id::unique("helios.focus_taken")
 }
 
 /// Gives the keyboard back to the widget of a panel that took it this
