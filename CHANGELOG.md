@@ -24,6 +24,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.55.0] - 2026-11-04
+
+### Added
+
+- The file picker lists the system's folders (Desktop, Documents, Pictures...)
+  and the mounted drives in its side bar, lets a bookmark be renamed or moved,
+  and has more keys: Alt+Left and Alt+Right for back and forward, Ctrl+H for
+  hidden files, F5 to read the folder again.
+- Help > Report a problem (also in the command palette and the About dialog)
+  opens a new issue on Helios's GitHub repository in the browser, already
+  filled with the version and the platform.
+
+### Changed
+
+- The keyboard goes further: the widget the keyboard focuses shows a ring,
+  toolbars, the activity bar and the status bar are each one Tab stop whose
+  tools the arrows go through, Shift+F10 or the Menu key opens the focused
+  widget's context menu, F10 opens the menu bar, and Ctrl+Page Down and
+  Ctrl+Page Up go to the next and previous tab of a panel group.
+- In the History panel, a snapshot not saved yet keeps its own name, followed
+  by "(not saved yet)" in italics, and its tooltip says it is kept at the
+  edit's next save. Agents reading the history get a `pending` flag on each
+  snapshot instead of a name to parse.
+
 ## [0.54.0] - 2026-11-04
 
 ### Added
