@@ -349,6 +349,23 @@ pub fn ui(ui: &mut Ui, viewport: &RefCell<crate::viewport::Viewport>, values: &M
                                     serde_json::json!({ "node": row.node }),
                                 ));
                             }
+                            if ui
+                                .small_button(tr(Message::new(
+                                    "gui-modules-macro-publish",
+                                    "Publish…",
+                                )))
+                                .on_hover_text(tr(Message::new(
+                                    "gui-modules-macro-publish-hint",
+                                    "Copy this version of { $node } into your library, for every workspace's Add menu; asked first, and not undone",
+                                )
+                                .with("node", &row.node)))
+                                .clicked()
+                            {
+                                run = Some((
+                                    "macro.publish",
+                                    serde_json::json!({ "node": row.node }),
+                                ));
+                            }
                         }
                         _ => {
                             ui.weak(&row.module);

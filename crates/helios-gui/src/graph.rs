@@ -324,7 +324,8 @@ impl NetworkModel {
             macros.insert(macro_group(&n.name), n.name.clone());
         }
         // The add menu: every module, then every composite at its newest
-        // version (added by `id@version`, shown by its name).
+        // version (added by `id@version`, shown by its name), the shipped
+        // ones and the user's library: its Macros section.
         let kinds = catalogue
             .module_names()
             .map(|m| Kind::new(m, m))
@@ -343,6 +344,15 @@ impl NetworkModel {
             subworkspaces,
             macros,
         }
+    }
+
+    /// The add menu's composites titled as its Macros section: egui-pop's
+    /// menu has no headings, so each says it (`Macros › Look`).
+    pub fn macros_titled(mut self, title: impl Fn(&str) -> String) -> NetworkModel {
+        for k in self.kinds.iter_mut().filter(|k| k.id.contains('@')) {
+            k.title = title(&k.title);
+        }
+        self
     }
 
     /// The nodes' number parameters, from the value store (an image's
@@ -805,6 +815,9 @@ pub struct GraphPanel {
     kept_wires: Option<String>,
     /// What the panel has to say.
     pub notes: Vec<Message>,
+    /// The user's library of composites, offered in the add menu after
+    /// the shipped ones (the shell reads it).
+    library: Vec<helios_template::CompositeFile>,
 }
 
 impl Default for GraphPanel {
@@ -824,6 +837,7 @@ impl Default for GraphPanel {
             reveal: false,
             kept_wires: None,
             notes: Vec::new(),
+            library: Vec::new(),
         }
     }
 }
@@ -919,17 +933,25 @@ impl GraphPanel {
         self.template = json
             .as_ref()
             .and_then(|j| serde_json::from_value(j["template"].clone()).ok());
-        // The workspace's own composites (its macros) join the modules.
-        self.catalogue = crate::templates::modules();
+        // The user's library, then the workspace's own composites (its
+        // macros, standing over a library file of the same version), join
+        // the modules.
+        self.catalogue =
+            helios_template::library::with_library(crate::templates::modules(), &self.library);
         let composites: Vec<helios_template::CompositeFile> = json
             .as_ref()
             .and_then(|j| serde_json::from_value(j["composites"].clone()).ok())
             .unwrap_or_default();
         for f in composites {
-            if self.catalogue.get_composite(&f.reference()).is_none() {
-                self.catalogue.add_composite(f);
-            }
+            self.catalogue.add_composite(f);
         }
+    }
+
+    /// The user's library of composites, read again by the shell: the add
+    /// menu offers it from the next frame.
+    pub fn set_library(&mut self, library: Vec<helios_template::CompositeFile>) {
+        self.library = library;
+        self.seen = None;
     }
 
     /// The headers, read again a few times a second.
@@ -990,6 +1012,13 @@ impl GraphPanel {
                 .as_ref()
                 .and_then(crate::contexts::subworkspace_shown);
             let model = NetworkModel::new(t, &self.catalogue, &self.moved, inside.as_deref())
+                .macros_titled(|name| {
+                    crate::i18n::text(
+                        &ctx,
+                        Message::new("gui-graph-add-macro", "Macros › { $name }")
+                            .with("name", name),
+                    )
+                })
                 .with_params(&ctx, &store);
             let wires = match store.get(WIRES).map(|e| &e.value) {
                 Some(helios_core::Value::Choice(c)) => wire_style(c),

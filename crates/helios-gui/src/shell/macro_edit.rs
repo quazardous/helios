@@ -50,6 +50,10 @@ pub(super) const COMMANDS: &[(&str, &str)] = &[
         "macro.interface",
         "Choose the parameters a macro shows, saved as a new version (`node`, the selected one by default; `exposed`; `dry_run`)",
     ),
+    (
+        "macro.publish",
+        "Publish a macro to your library, for every workspace; not undone (`node`, the selected one by default, or `id`; `dry_run`)",
+    ),
 ];
 
 /// The nodes selected in the graph, as [`SELECTED`] holds them.
@@ -252,8 +256,98 @@ impl Shell {
                     |now, values| now.macro_interfaced(&catalogue, &node, &exposed, values),
                 )
             }
+            "macro.publish" => self.publish_macro(args, origin),
             other => Err(format!("no macro command `{other}`")),
         }
+    }
+
+    /// `macro.publish`: the macro's file copied into the user's library
+    /// (`<config>/composites/`), outside the workspace, so no undo step:
+    /// it is asked first, in a dialog that says so, and written only on
+    /// the user's own answer. An agent's call, or a dialog an agent
+    /// answers, asks the user again (`docs/design/macros.md`, open
+    /// question 9).
+    fn publish_macro(&mut self, args: &Value, origin: &Origin) -> Result<Value, String> {
+        let state = self.workspace_state().ok_or("no workspace is open")?;
+        let config = self
+            .edit
+            .as_ref()
+            .map(|e| e.config.clone())
+            .ok_or("no workspace is open")?;
+        let id = args["id"].as_str().filter(|s| !s.is_empty());
+        let node = match id {
+            Some(_) => args["node"]
+                .as_str()
+                .filter(|s| !s.is_empty())
+                .map(String::from),
+            None => Some(self.macro_target(args)?),
+        };
+        let files = state.macro_publishable(&self.workspace_catalogue(), node.as_deref(), id)?;
+        let dry = args["dry_run"].as_bool().unwrap_or(false);
+        // Checked first: a refusal is said before anything is asked.
+        let mut answer = helios_template::library::publish(&config, &files, true)?;
+        if dry {
+            return Ok(answer);
+        }
+        let confirmed = args["confirmed"].as_bool().unwrap_or(false);
+        if !confirmed || *origin != Origin::User {
+            self.publish_dialog(node.as_deref(), &files[0], &answer)?;
+            answer["dry_run"] = json!(false);
+            answer["asked"] = json!(true);
+            answer["written"] = json!([]);
+            return Ok(answer);
+        }
+        let answer = helios_template::library::publish(&config, &files, false)?;
+        self.read_library();
+        self.notify(
+            crate::dialogs::Level::Info,
+            Message::new(
+                "gui-macro-published",
+                "{ $composite } published to { $file }: undo does not take it back",
+            )
+            .with("composite", files[0].reference().to_string())
+            .with("file", answer["file"].as_str().unwrap_or_default()),
+        );
+        Ok(answer)
+    }
+
+    /// Asks the user to publish `file`: where it goes, and that no undo
+    /// takes it back. Accept runs `macro.publish` again, confirmed.
+    fn publish_dialog(
+        &mut self,
+        node: Option<&str>,
+        file: &helios_template::CompositeFile,
+        planned: &Value,
+    ) -> Result<(), String> {
+        let title = self.text(
+            Message::new(
+                "gui-macro-publish-title",
+                "Publish { $name } to your library?",
+            )
+            .with("name", &file.name),
+        );
+        let detail = self.text(
+            Message::new(
+                "gui-macro-publish-detail",
+                "Writes { $composite } into { $library }, where every workspace adds it from the graph's Add menu. Publishing is not undone: Ctrl+Z leaves the file; remove it from that folder to take it back. A later change is published as a new version.",
+            )
+            .with("composite", file.reference().to_string())
+            .with("library", planned["library"].as_str().unwrap_or_default()),
+        );
+        let verb = self.text(Message::new("gui-macro-publish-verb", "Publish"));
+        let command =
+            egui_pop::model::ids::CommandId::new("macro.publish").map_err(|e| e.to_string())?;
+        let args = match node {
+            Some(node) => json!({ "node": node, "confirmed": true }),
+            None => json!({ "id": file.reference().to_string(), "confirmed": true }),
+        };
+        // Never answered by the yes policy: an agent may set it.
+        self.open_dialog(
+            egui_pop::api::dialogs::Confirm::new(&title, &verb, command)
+                .detail(&detail)
+                .args(args),
+        );
+        Ok(())
     }
 
     /// A macro step as one undo step moving the image's values; a dry run

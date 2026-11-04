@@ -99,6 +99,9 @@ pub(super) struct Edited {
     /// egui-pop's workspace keymap layer as the workspace's keys last
     /// loaded it: a difference is a change made in the shortcuts editor.
     keys_loaded: Vec<(String, String, String)>,
+    /// The user's library of composites (`<config>/composites/`) as last
+    /// read: when the workspace opened, and after a macro published.
+    pub(super) library: Vec<helios_template::CompositeFile>,
 }
 
 impl Edited {
@@ -163,7 +166,9 @@ impl Shell {
             disk,
             live: Some(live),
             keys_loaded: Vec::new(),
+            library: Vec::new(),
         });
+        self.read_library();
         self.offer_workspace_keys();
         self.keys_loaded();
         Ok(())
@@ -386,8 +391,36 @@ impl Shell {
         Ok(true)
     }
 
+    /// What the workspace may name: the modules, the composites Helios
+    /// ships, then the user's library, and the panels and commands.
     pub(super) fn workspace_catalogue(&self) -> helios_template::Catalogue {
-        crate::templates::catalogue(&self.template_panels(), self.specs())
+        let c = crate::templates::catalogue(&self.template_panels(), self.specs());
+        match &self.edit {
+            Some(e) => helios_template::library::with_library(c, &e.library),
+            None => c,
+        }
+    }
+
+    /// Reads the user's library of composites again, for the catalogue
+    /// and the graph's Add menu; a file that does not read is said once.
+    pub(super) fn read_library(&mut self) {
+        let Some(edit) = &mut self.edit else {
+            return;
+        };
+        let mut library = Vec::new();
+        let mut unread = Vec::new();
+        for f in helios_template::library::read(&edit.config) {
+            match f {
+                Ok(f) => library.push(f),
+                Err(e) => unread.push(e),
+            }
+        }
+        edit.library.clone_from(&library);
+        self.graph.borrow_mut().set_library(library);
+        for e in unread {
+            self.notes
+                .push(format!("a macro of your library does not read: {e}"));
+        }
     }
 
     /// Applies the state the value store holds when it is not the one

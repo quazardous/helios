@@ -159,6 +159,8 @@ gui-edit-not-saved = The edit was not saved: { $error }
 
 gui-gesture-in-progress = { $gesture } is in progress
 
+gui-graph-add-macro = Macros › { $name }
+
 gui-graph-label = The workspace's network
 
 gui-graph-no-workspace = No workspace is open: its network shows here.
@@ -329,6 +331,14 @@ gui-macro-make-verb = Make
 
 gui-macro-name = name
 
+gui-macro-publish-detail = Writes { $composite } into { $library }, where every workspace adds it from the graph's Add menu. Publishing is not undone: Ctrl+Z leaves the file; remove it from that folder to take it back. A later change is published as a new version.
+
+gui-macro-publish-title = Publish { $name } to your library?
+
+gui-macro-publish-verb = Publish
+
+gui-macro-published = { $composite } published to { $file }: undo does not take it back
+
 gui-mask-display = Show mask
 
 gui-mask-display-grey = the mask alone in grey
@@ -468,6 +478,10 @@ gui-modules-macro = macro { $version }
 gui-modules-macro-interface = Interface…
 
 gui-modules-macro-interface-hint = Choose the parameters { $node } shows, saved as a new version
+
+gui-modules-macro-publish = Publish…
+
+gui-modules-macro-publish-hint = Copy this version of { $node } into your library, for every workspace's Add menu; asked first, and not undone
 
 gui-modules-macro-update = Update to { $version }
 

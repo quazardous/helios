@@ -560,3 +560,121 @@ fn an_update_on_offer_carries_values_by_name_and_says_what_it_dropped() {
     assert_eq!(shown(&h, "look_2", "exposure"), Some(0.5));
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// Runs a command as `origin` and answers its result (see [`answer`]).
+fn answer_as(
+    h: &mut Harness<'static, Shell>,
+    id: &str,
+    args: Json,
+    origin: Origin,
+) -> Result<Json, String> {
+    let before = h.state().history().len();
+    let out = h.state_mut().run(id, args, origin);
+    follow(h);
+    match out {
+        Ok(v) if v == json!({ "queued": true }) => {
+            h.state()
+                .history()
+                .into_iter()
+                .skip(before)
+                .rev()
+                .find(|r| r.id == id)
+                .unwrap_or_else(|| panic!("{id} never ran"))
+                .result
+        }
+        other => other,
+    }
+}
+
+#[test]
+fn a_macro_published_with_the_user_s_answer_is_offered_to_every_workspace_and_never_undone() {
+    let root = temp("publish");
+    let mut h = window(&root);
+    let config = root.join("config");
+    let file = config.join("composites/user.look@1.helios-composite.json");
+    set(&mut h, "node/exposure/exposure", 1.0);
+    run(
+        &mut h,
+        "macro.make",
+        json!({ "nodes": ["exposure"], "name": "Look" }),
+    );
+    let steps_made = steps(&h);
+    // A dry run says where it would write.
+    let dry = run(
+        &mut h,
+        "macro.publish",
+        json!({ "node": "look", "dry_run": true }),
+    );
+    assert_eq!(dry["file"], json!(file.display().to_string()), "{dry}");
+    assert!(!file.exists());
+    // An agent's call asks the user: nothing written.
+    let asked = answer_as(
+        &mut h,
+        "macro.publish",
+        json!({ "node": "look", "confirmed": true }),
+        Origin::Agent("test".into()),
+    )
+    .unwrap();
+    assert_eq!(asked["asked"], true, "{asked}");
+    assert!(!file.exists());
+    let dialog = run(&mut h, "dialog.current", json!(null));
+    assert!(dialog.to_string().contains("not undone"), "{dialog}");
+    // The agent answering it is asked again; the user's answer writes.
+    answer_as(
+        &mut h,
+        "dialog.answer",
+        json!({ "answer": "primary" }),
+        Origin::Agent("test".into()),
+    )
+    .unwrap();
+    assert!(!file.exists(), "an agent never confirms it");
+    run(&mut h, "dialog.answer", json!({ "answer": "primary" }));
+    assert!(file.exists(), "published on the user's answer");
+    let published = last_answer(&h, "macro.publish");
+    assert_eq!(published["undoable"], false, "{published}");
+    // Not an undo step.
+    assert_eq!(steps(&h), steps_made);
+    // Twice: refused, the file kept.
+    let e = answer(&mut h, "macro.publish", json!({ "node": "look" })).unwrap_err();
+    assert!(e.contains("in your library already"), "{e}");
+    // The graph's Add menu offers it, in its Macros section.
+    run(&mut h, "helios.graph.focus", json!(null));
+    let g = run(
+        &mut h,
+        "graph.read",
+        json!({ "graph": helios_gui::graph::GRAPH }),
+    );
+    let kind = g["kinds"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|k| k["id"] == "user.look@1")
+        .unwrap_or_else(|| panic!("not offered: {g}"))
+        .clone();
+    assert_eq!(kind["title"], "Macros › Look", "{kind}");
+    // Undone back past the macro: the published file stays.
+    undo(&mut h);
+    assert!(!network(&h).iter().any(|(n, _)| n == "look"));
+    assert!(file.exists(), "undo never removes a published file");
+    // Another workspace adds it from the library, and keeps a copy.
+    let other = root.join("other");
+    std::fs::create_dir_all(&other).unwrap();
+    h.state_mut().open_workspace(&config, &other).unwrap();
+    follow(&mut h);
+    let added = run(
+        &mut h,
+        "network.add",
+        json!({ "nodes": [{ "composite": "user.look@1" }] }),
+    );
+    assert!(added.to_string().contains("look"), "{added}");
+    let state = h.state().workspace_state().unwrap();
+    assert!(
+        state
+            .bundle
+            .composites
+            .iter()
+            .any(|f| f.id == "user.look" && f.version == 1),
+        "copied into the workspace"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}

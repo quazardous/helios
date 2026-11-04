@@ -143,6 +143,8 @@ gui-edit-not-saved = La retouche n’a pas été enregistrée : { $error }
 
 gui-gesture-in-progress = { $gesture } est en cours
 
+gui-graph-add-macro = Macros › { $name }
+
 gui-graph-label = Le réseau de l’espace de travail
 
 gui-graph-no-workspace = Aucun espace de travail n’est ouvert : son réseau s’affiche ici.
@@ -921,6 +923,14 @@ gui-macro-make-verb = Faire
 
 gui-macro-name = nom
 
+gui-macro-publish-detail = Écrit { $composite } dans { $library }, d’où chaque espace de travail l’ajoute depuis le menu Ajouter du graphe. La publication n’est pas annulée : Ctrl+Z laisse le fichier ; supprimez-le de ce dossier pour la retirer. Une modification ultérieure est publiée comme une nouvelle version.
+
+gui-macro-publish-title = Publier { $name } dans votre bibliothèque ?
+
+gui-macro-publish-verb = Publier
+
+gui-macro-published = { $composite } publiée dans { $file } : l’annulation ne la retire pas
+
 gui-modules-fold-hint = Replier { $node } en un seul nœud
 
 gui-modules-macro = macro { $version }
@@ -934,6 +944,10 @@ gui-modules-make-macro-hint = Regrouper les modules sélectionnés en un seul n�
 gui-modules-macro-interface = Interface…
 
 gui-modules-macro-interface-hint = Choisir les paramètres que { $node } montre, enregistrés comme une nouvelle version
+
+gui-modules-macro-publish = Publier…
+
+gui-modules-macro-publish-hint = Copier cette version de { $node } dans votre bibliothèque, pour le menu Ajouter de chaque espace de travail ; demandé d’abord, et non annulable
 
 gui-modules-macro-update = Passer à la version { $version }
 

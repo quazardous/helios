@@ -208,6 +208,9 @@ command-macro-make =
 command-macro-open =
     .title = Open a macro in place, its nodes shown (`node`, the selected one by default; `dry_run`)
 
+command-macro-publish =
+    .title = Publish a macro to your library, for every workspace; not undone (`node`, the selected one by default, or `id`; `dry_run`)
+
 command-macro-toggle =
     .title = Open the selected macro, or fold the one the selected node is in
 

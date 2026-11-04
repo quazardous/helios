@@ -479,7 +479,8 @@ network.
   `input`, `replaces`), `network.disconnect` (`connections`),
   `network.move` (`moves`), `network.add` (`nodes`: a `module`, a
   `composite` as `id@version`, or a `copy_of`, `at`; the editor's add
-  menu offers every module, then every composite at its newest version) and `network.remove` (`nodes`; a source and the node
+  menu offers every module, then every composite at its newest version,
+  the user's library included) and `network.remove` (`nodes`; a source and the node
   the viewport shows stay). They are checked as any edit of the
   workspace (types, loops, the template's validation: a node added may
   wait for its wires, a node the view reads from has every input
@@ -551,6 +552,23 @@ network.
   that carries the image's values (see
   [design/macros.md](design/macros.md)). Agents answer the dialog as a
   form with `exposed`, or run the command with it.
+- **Publishing a macro** (2026-11-04, `macro.publish`, from the Modules
+  panel's Publish… or the palette): the macro's file at the version its
+  node pins is copied into the user's library, `<config>/composites/`,
+  with the macros it nests. A confirmation dialog asks first: it names
+  the file and the folder, and says that publishing is not undone
+  (Ctrl+Z leaves the file; removing it from the folder takes it back)
+  and that a later change is published as a new version. Once written,
+  a toast says where. A version the library holds already is refused,
+  since a library file is never rewritten. An agent's call
+  (`helios_macro_publish`) opens the same dialog for the user and
+  answers `asked`: the file is written only on the user's own answer,
+  never on an agent's or on the yes policy's.
+- **The Add menu** (the canvas's context menu) offers every module,
+  then the macros, each titled `Macros › <name>` at its newest version:
+  the composites Helios ships and the user's library. A macro added
+  from the library is copied into the workspace's files, so the
+  workspace builds without that library.
 - **Sub-workspaces.** A double click on a sub-workspace's title (its
   stack in the overview) enters it (see "Sub-workspaces as places");
   inside, the graph shows its nodes only, the wires between them, and
@@ -1433,8 +1451,9 @@ the order they were added (2026-10-21):
   out one (`view/graph/selected`), and **Make macro…** packages the rows
   selected (`macro.make`).
 - **Macros.** A folded macro is one row, `macro <version>` beside it,
-  with an arrow that opens it (`macro.open`) and **Interface…**, which
-  opens its interface editor (`macro.interface`); opened, its modules
+  with an arrow that opens it (`macro.open`), **Interface…**, which
+  opens its interface editor (`macro.interface`), and **Publish…**
+  (`macro.publish`, see "Graph view"); opened, its modules
   are indented under a heading row whose arrow folds it (`macro.fold`).
   A macro pinned at an older version than the workspace or Helios has
   offers **Update to 2** (`macro.upgrade`, one undo step): its values

@@ -528,6 +528,9 @@ command-macro-open =
 command-macro-fold =
     .title = Replier une macro ouverte en un seul nœud (`node` ; `changes` : `version`, `expose`, `discard` ou `keep`, demandé quand elle a changé pendant qu'elle était ouverte ; `dry_run`)
 
+command-macro-publish =
+    .title = Publier une macro dans votre bibliothèque, pour tous les espaces de travail ; non annulable (`node`, le nœud sélectionné par défaut, ou `id` ; `dry_run`)
+
 command-macro-toggle =
     .title = Ouvrir la macro sélectionnée, ou replier celle qui contient le nœud sélectionné
 

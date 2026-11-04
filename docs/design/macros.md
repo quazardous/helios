@@ -4,7 +4,7 @@ Status: **decided** (2026-10-30): the owner accepted every default
 below (the open questions at the end keep their reasoning). Built so
 far: step 1, the interface in the format, step 2, the pure operations
 on a workspace, step 3, the desktop's steps, step 4, the interface
-editor, and step 5, versions (see "Build steps").
+editor, step 5, versions, and step 6, publishing (see "Build steps").
 
 A macro is a network of modules packaged as one node, showing only the
 parameters chosen for it (AVS's macro, Helios's workshop). The engine
@@ -60,7 +60,8 @@ it and changing it later. This note proposes that side.
   `<config>/workspaces/<key>/template.helios-template/composites/`);
   they join the catalogue the workspace is checked against. The
   catalogue the desktop builds (`helios-gui/src/templates.rs`) holds
-  the shipped composites; there is no user library of composites.
+  the shipped composites; there is no user library of composites
+  (built by step 6: `helios_template::library`).
 
 ### On the desktop
 
@@ -416,7 +417,7 @@ MCP server:
 | `helios_macro_open`, `helios_macro_fold` | `macro.open`, `macro.fold` | `node`, `changes` (`version`, `expose`, `discard`, `keep`; built) |
 | `helios_macro_dissolve` | `macro.dissolve` | `node`, `dry_run` |
 | `helios_macro_upgrade` | `macro.upgrade` | `node`, `version`, `dry_run` |
-| `helios_macro_publish` | `macro.publish` | `node` or `id` |
+| `helios_macro_publish` | `macro.publish` | `node` or `id`, `dry_run` (built) |
 
 `helios_describe` already lists the catalogue's composites; it gains
 each one's exposed parameters with their ranges and groups, and the
@@ -577,4 +578,49 @@ and the docs it changes (`docs/gui.md`, `docs/templates.md`,
      a folded macro offers "Update to N", which runs `macro.upgrade`.
      `helios_describe` does not list them yet: the answers carry them.
 6. **Publishing**: `<config>/composites/` in the catalogue, the Add
-   menu's Macros section, `macro.publish`.
+   menu's Macros section, `macro.publish`. Built (2026-11-04,
+   `helios_template::library`, `State::macro_publishable`,
+   `Bundle::carry_composites`), with these changes:
+   - What is published is the file at the version the node pins (or
+     the composite `id`, `id@version`), with the macros it nests that
+     Helios does not ship. Refused for a module, a macro open (what
+     changed inside is not in its file yet: fold it first) and a shipped
+     composite.
+   - A library file is never rewritten, so publishing a version twice
+     is refused ("in your library already"), and so is a version the
+     library holds with other contents (a macro made under the same id
+     in another workspace before either was published). A change to
+     the macro is published as its next version, a new file beside the
+     first.
+   - Open question 9's default is applied: an agent may publish only
+     with the user's confirmation in that session. `macro.publish`
+     always asks first, in a confirmation dialog that names the file
+     and the folder and says that undo does not take it back (remove
+     the file to unpublish); it writes only on the user's own answer.
+     An agent's call, or the dialog answered by an agent, asks again
+     (the answer says `asked`), and the yes policy (`dialog.assumeYes`,
+     which an agent may set) does not answer it. On the files, with no
+     desktop to ask, only a dry run answers.
+   - Undo: publishing is not a step of the undo history; a toast says
+     where the file went and that undo does not take it back. Undoing
+     the `macro.make` before it leaves the library file.
+   - The library joins the catalogue after the shipped composites (a
+     shipped file is never replaced by a library one); a workspace's own
+     file stands over a library file of the same id and version
+     (`Bundle::catalogue`). The desktop reads the library when a
+     workspace opens and after publishing; the node's MCP server reads
+     it at each workspace call.
+   - A macro added from the library is copied into the workspace's
+     bundle (`Bundle::carry_composites`, after any network edit), so the
+     workspace still builds without that library.
+   - The Add menu's Macros section: egui-pop's canvas menu is a flat
+     list without headings, so each composite entry is titled
+     `Macros › <name>` after the modules (shipped ones and the library
+     together). A real heading needs egui-pop's `Kind` to carry a
+     section, a later change there.
+   - The Modules panel's row of a folded macro gains Publish…; the
+     panel has no Add list (modules are added from the graph), so the
+     library is reached from the graph's Add menu only.
+   - The Modules panel's "Update to N" still looks at the shipped and
+     the workspace's composites only; a newer version in the library is
+     offered through the steps' `updates` and `macro.upgrade`.

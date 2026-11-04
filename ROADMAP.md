@@ -587,7 +587,11 @@ hash) is part of Helios; deploying a NAS is not.
   steps (2026-11-03), the interface editor with groups in the
   Parameters panel (2026-11-03) and versions: a macro changed while
   open saved, exposed or discarded on folding, updates offered to its
-  other nodes (2026-11-04); publishing remains.
+  other nodes (2026-11-04). Step 6, publishing, is built (2026-11-04):
+  `macro.publish` copies a macro's version into the user's library
+  (`<config>/composites/`), which the graph's Add menu offers to every
+  workspace; never undone, asked first, and an agent publishes only
+  with the user's confirmation (open question 9's default).
 - (2026-10-13) **Workspace templates**: a ready-to-use combination of
   tools, network and panel layout for one known scenario, shared as a
   `.helios-template` bundle like a plugin, schema-checked and built
