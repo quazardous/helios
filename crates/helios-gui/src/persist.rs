@@ -382,21 +382,19 @@ impl<S: Store> Persist<S> {
             return;
         };
         let image = e.session.image();
-        let (step, settled) = {
+        let (step, committed, settled) = {
             let store = shell.values.lock().expect("value store lock");
             let settled =
                 !e.unsaved && store.open_gesture().is_none() && store.committed() == e.committed;
-            (head_step(&store), settled)
+            (head_step(&store), store.committed(), settled)
         };
         let (pinned, write) = {
             let mut book = crate::edit_snapshots::lock(&shell.snapshots);
             if book.image() != Some(image) {
                 return;
             }
-            if settled {
-                let pin = e.session.head().map_or(Pin::Unedited, Pin::Version);
-                book.pin_at(step, pin);
-            }
+            let pin = e.session.head().map_or(Pin::Unedited, Pin::Version);
+            book.settle(settled.then_some((step, committed, pin)));
             (book.pinned(), book.take_dirty())
         };
         // Said once: the next change writes the whole list again.

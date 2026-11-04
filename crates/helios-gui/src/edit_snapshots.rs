@@ -7,8 +7,9 @@
 //!   (`crate::persist`), a snapshot taken at the step the saved edit
 //!   holds is pinned to that version (to no version for an image never
 //!   edited), and the image's pinned snapshots are kept in the vault
-//!   (`helios_vault::snapshots`). A pinned snapshot survives a quit and a
-//!   `kill -9`.
+//!   (`helios_vault::snapshots`). One taken at a state already saved is
+//!   pinned at once, kept in the vault at the next frame. A pinned
+//!   snapshot kept there survives a quit and a `kill -9`.
 //! - **Pending until then.** A snapshot not pinned yet is shown "not
 //!   saved yet"; if the app quits (or another image opens) first, it is
 //!   lost. One whose step the history left before a save stays pending
@@ -75,6 +76,10 @@ pub struct Book {
     saved: Option<BTreeMap<String, BTreeSet<String>>>,
     /// The pinned snapshots changed since the vault last kept them.
     dirty: bool,
+    /// The state last saved, as the last frame found it: the value
+    /// store's head step and committed count, and where it is kept. A
+    /// snapshot taken there is pinned at once.
+    settled: Option<(u64, u64, Pin)>,
     /// The snapshots restored since last asked, by name (the toast).
     restored: Vec<String>,
     /// How a pending snapshot's name is shown, `{name}` standing for it,
@@ -130,11 +135,25 @@ impl Book {
         self.image = Some(image);
         self.list = list;
         self.dirty = false;
+        self.settled = None;
     }
 
-    /// The nodes and their parameters an edit saves, by node name.
+    /// The nodes and their parameters an edit saves, by node name. What
+    /// was saved under the old ones no longer holds a snapshot's state.
     pub fn set_saved(&mut self, saved: BTreeMap<String, BTreeSet<String>>) {
         self.saved = Some(saved);
+        self.settled = None;
+    }
+
+    /// The saved edit holds the value store at head `step` with
+    /// `committed` steps committed, kept at `pin` (none: not saved yet).
+    /// Pins the pending snapshots taken at `step`; how many.
+    pub fn settle(&mut self, saved: Option<(u64, u64, Pin)>) -> usize {
+        self.settled = saved;
+        match saved {
+            Some((step, _, pin)) => self.pin_at(step, pin),
+            None => 0,
+        }
     }
 
     /// Takes a snapshot of `store` at its head (`dry_run`: the one it
@@ -147,17 +166,25 @@ impl Book {
         at: f64,
         dry_run: bool,
     ) -> Taken {
+        let step = head_step(store);
+        // Already saved: no gesture going on and nothing committed since.
+        let pin = self.settled.and_then(|(s, committed, pin)| {
+            let saved =
+                s == step && committed == store.committed() && store.open_gesture().is_none();
+            saved.then_some(pin)
+        });
         let taken = Taken {
             id: self.next + 1,
             name: name.to_string(),
-            step: head_step(store),
+            step,
             origin,
             at,
-            pin: None,
+            pin,
             values: self.values_of(store),
         };
         if !dry_run {
             self.next += 1;
+            self.dirty |= pin.is_some();
             self.list.push(taken.clone());
         }
         taken
@@ -377,6 +404,36 @@ mod tests {
         assert!(book.forget(1));
         assert!(book.take_dirty());
         assert!(!book.forget(1));
+    }
+
+    #[test]
+    fn a_snapshot_of_a_saved_state_is_pinned_at_once() {
+        let mut store = Store::new();
+        store.declare("node/exp/exposure", Descriptor::float("EV", -3.0, 3.0, 0.0));
+        let mut book = Book::default();
+        let set = |store: &mut Store, v: f64| {
+            store
+                .set(Set::new(
+                    "node/exp/exposure",
+                    Change::To(Value::Float(v)),
+                    Origin::User,
+                ))
+                .unwrap();
+        };
+        set(&mut store, 1.0);
+        book.settle(Some((head_step(&store), store.committed(), Pin::Unedited)));
+        let t = book.take(&store, "Saved", Origin::User, 1.0, false);
+        assert_eq!(t.pin, Some(Pin::Unedited));
+        assert!(book.take_dirty());
+        // A step since the save: pending until the next one.
+        set(&mut store, 2.0);
+        let t = book.take(&store, "Moved", Origin::User, 1.0, false);
+        assert_eq!(t.pin, None);
+        // Not saved (a frame found it unsettled): pending too.
+        book.settle(None);
+        let t = book.take(&store, "Unsaved", Origin::User, 1.0, false);
+        assert_eq!(t.pin, None);
+        assert!(!book.take_dirty());
     }
 
     #[test]

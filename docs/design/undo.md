@@ -292,7 +292,10 @@ egui-pop's `HistoryPlugin` is on in Helios, over `HeliosHistory`:
   image with no edit), and writes the image's pinned snapshots as one
   vault document (namespace `snapshots`, keyed by the image;
   `Vault::set_snapshots`, a document of the existing store, so no
-  schema change). Pending ones are shown "(not saved yet)" and are not
+  schema change). The book remembers the state that frame found saved
+  (head step, committed count, version): a snapshot taken there, before
+  any new step, is pinned at once and written at the next frame, even
+  if the history moves on in between. Pending ones are shown "(not saved yet)" and are not
   in the vault: a quit, a kill or another image opening loses them; one
   whose step the history left before a save stays pending for the
   session. On open, the image's snapshots are read back with the values
