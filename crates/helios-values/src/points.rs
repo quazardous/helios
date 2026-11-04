@@ -37,7 +37,7 @@ impl Store {
 
     /// How to bring the line to step `to` (0: the start): redos or undos,
     /// and how many; `None` when `to` is not on the line.
-    fn plan_walk(&self, to: u64) -> Option<(bool, usize)> {
+    pub(crate) fn plan_walk(&self, to: u64) -> Option<(bool, usize)> {
         if to == 0 {
             return Some((false, self.undo.len()));
         }

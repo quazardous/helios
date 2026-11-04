@@ -32,6 +32,9 @@
 //! - Replaced steps: the redo list a new step drops is kept as a line
 //!   leaving from the step it came after ([`Store::replaced_steps`]), and
 //!   a jump reaches it ([`Store::jump_replaced`]).
+//! - A preview ([`Store::set_preview`]): the values at a point of the
+//!   history ([`Store::values_at`]) shown by the graph in place of the
+//!   store's own, nothing written; ending it shows the live values again.
 //! - A scope ([`Store::set_scope`]): while the user is inside a
 //!   sub-workspace, a write to a node outside it (`node/…`, `bypass/…`)
 //!   is refused, whoever writes; an undo or a redo still puts back what
@@ -40,6 +43,7 @@
 mod commands;
 mod graph;
 mod points;
+mod preview;
 
 pub use commands::{register, value_from_json, value_to_json};
 pub use graph::{BYPASS, Keep, Rebound, bind_node, bypass_path, node_path, rebind, sync};
@@ -636,6 +640,9 @@ pub struct Store {
     named: BTreeMap<(String, String), u64>,
     /// The nodes that may be written, when a scope is set.
     scope: Option<Scope>,
+    /// The values the graph shows in place of the store's own, while a
+    /// point of the history is previewed.
+    preview: BTreeMap<String, Value>,
 }
 
 fn clamp(v: f64, range: Option<(f64, f64)>, soft: bool) -> (f64, Clamped) {
@@ -852,6 +859,8 @@ impl Store {
         if path.starts_with("node/") || path.starts_with(graph::BYPASS) {
             self.dirty.insert(path.into());
         }
+        // A write shows through a preview.
+        self.preview.remove(path);
         if let Some(bus) = &self.bus {
             let event = ParamChanged {
                 path: path.into(),
@@ -1052,6 +1061,7 @@ impl Store {
         self.redo.clear();
         self.replaced.clear();
         self.named.clear();
+        self.preview.clear();
         self.history_rev += 1;
     }
 

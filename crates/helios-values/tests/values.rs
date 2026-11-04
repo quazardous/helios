@@ -921,3 +921,85 @@ fn a_dropped_redo_list_is_kept_and_a_jump_brings_it_back() {
     store.clear_history();
     assert!(store.replaced_steps().is_empty());
 }
+
+#[test]
+fn a_preview_shows_a_step_s_values_on_the_graph_and_writes_nothing() {
+    let (mut g, exp, mut store, bus) = exposure();
+    let path = "node/exposure/exposure";
+    let bypass = bypass_path("exposure");
+    let to = |v: f64| Change::To(Value::Float(v));
+    for v in [1.0, 2.0, 3.0] {
+        store.set(Set::new(path, to(v), Origin::User)).unwrap();
+    }
+    store
+        .set(Set::new(
+            &bypass,
+            Change::To(Value::Bool(true)),
+            Origin::User,
+        ))
+        .unwrap();
+    // A value no float sums back to bit for bit, to see it come back.
+    let live = 0.1 + 0.2;
+    store.set(Set::new(path, to(live), Origin::User)).unwrap();
+    store.undo(&Origin::User).unwrap();
+    store.undo(&Origin::User).unwrap();
+    store.redo(&Origin::User).unwrap();
+    store.redo(&Origin::User).unwrap();
+    sync(&mut store, &mut g).unwrap();
+    let param = |g: &Graph| g.params(exp).unwrap().unwrap().get("exposure").cloned();
+    // Step 2: the exposure then, and the bypass off.
+    let at = store.values_at(2).unwrap();
+    assert_eq!(
+        at,
+        [
+            (bypass.clone(), Value::Bool(false)),
+            (path.to_string(), Value::Float(2.0)),
+        ]
+    );
+    let (events, seq, rev, committed) = (
+        bus.since(0).len(),
+        store.seq(),
+        store.history_rev(),
+        store.committed(),
+    );
+    assert!(store.set_preview(at.clone()));
+    assert!(!store.set_preview(at), "the same preview changes nothing");
+    sync(&mut store, &mut g).unwrap();
+    assert_eq!(param(&g), Some(Value::Float(2.0)));
+    assert!(!g.is_bypassed(exp).unwrap());
+    // Nothing written: the store's own values, its counters, no event.
+    assert_eq!(ev(&store), live);
+    assert_eq!(
+        (bus.since(0).len(), store.seq(), store.history_rev()),
+        (events, seq, rev)
+    );
+    assert_eq!(store.committed(), committed);
+    // Ended: the graph has the live values again, bit for bit.
+    assert!(store.set_preview(Vec::new()));
+    sync(&mut store, &mut g).unwrap();
+    let Some(Value::Float(back)) = param(&g) else {
+        panic!("a float");
+    };
+    assert_eq!(back.to_bits(), live.to_bits());
+    assert!(g.is_bypassed(exp).unwrap());
+    // The start, a step undone and a replaced one.
+    assert_eq!(store.values_at(0).unwrap().len(), 2);
+    store.undo(&Origin::User).unwrap();
+    assert_eq!(
+        store.values_at(5).unwrap(),
+        [(path.to_string(), Value::Float(live))]
+    );
+    store.set(Set::new(path, to(-1.0), Origin::User)).unwrap();
+    assert_eq!(
+        store.values_at(5).unwrap(),
+        [(path.to_string(), Value::Float(live))]
+    );
+    assert_eq!(store.values_at(9), None);
+    // A write shows through the preview; another image ends it.
+    store.set_preview(store.values_at(0).unwrap());
+    store.set(Set::new(path, to(0.5), Origin::User)).unwrap();
+    assert!(!store.previewed().contains_key(path));
+    assert!(!store.previewed().is_empty());
+    store.clear_history();
+    assert!(store.previewed().is_empty());
+}

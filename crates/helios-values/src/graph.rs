@@ -72,7 +72,8 @@ pub fn bind_node(store: &mut Store, graph: &Graph, id: NodeId) -> Result<usize, 
     Ok(declared)
 }
 
-/// Brings the graph's parameters and bypasses up to the store's; returns
+/// Brings the graph's parameters and bypasses up to the store's (a
+/// preview's values, while one is shown: [`Store::shown`]); returns
 /// how many were set. A path of a node the graph does not have, or of a
 /// parameter its node no longer has, is left: it stays in the store for
 /// an undo that brings the node back (see [`rebind`]).
@@ -83,7 +84,7 @@ pub fn sync(store: &mut Store, graph: &mut Graph) -> Result<usize, String> {
             let Some(id) = graph.find(node) else {
                 continue;
             };
-            let on = store.get(&path).and_then(|e| e.value.as_bool()) == Some(true);
+            let on = store.shown(&path).and_then(Value::as_bool) == Some(true);
             graph
                 .set_bypass(id, on)
                 .map_err(|e| format!("`{path}`: {e}"))?;
@@ -103,9 +104,8 @@ pub fn sync(store: &mut Store, graph: &mut Graph) -> Result<usize, String> {
             continue;
         }
         let value = store
-            .get(&path)
+            .shown(&path)
             .expect("a dirty path is declared")
-            .value
             .clone();
         graph
             .set_param(id, param, value)
