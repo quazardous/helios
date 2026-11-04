@@ -659,6 +659,27 @@ pub const TOOLS: &[Tool] = &[
         ],
     },
     Tool {
+        name: "helios_macro_publish",
+        endpoint: Endpoint::Workspace,
+        cmd: "macro.publish",
+        description: "Publishes a workspace's macro into the user's library (`<config>/composites/`), where every workspace adds it from the graph's Add menu: its file at the version its node pins (or the composite `id`, `id@version`), with the macros it nests. Never undone (the file stays; removing it from the folder takes it back) and never rewritten: a version already there is refused, a change to the macro is published as its next version. Needs the user's confirmation: through the desktop, a dialog asks them and the answer says `asked` (nothing is written until they accept); on the files, only a dry run answers. Refused for a module, a macro open, a composite Helios ships",
+        params: &[
+            WORKSPACE,
+            optional(
+                "node",
+                optional_string,
+                "The macro node whose version is published; the selected one on the desktop when null and `id` is null",
+            ),
+            optional(
+                "id",
+                optional_string,
+                "Or a composite of the workspace by id (its newest version) or `id@version`",
+            ),
+            DRY_RUN,
+            CONFIG,
+        ],
+    },
+    Tool {
         name: "helios_network_connect",
         endpoint: Endpoint::Workspace,
         cmd: "network.connect",
@@ -2147,6 +2168,16 @@ pub fn workspace_catalogue() -> helios_template::Catalogue {
     c
 }
 
+/// [`workspace_catalogue`] with the user's library of composites
+/// (`<config>/composites/`, the macros published), after the shipped
+/// ones.
+pub fn workspace_catalogue_in(config: &std::path::Path) -> helios_template::Catalogue {
+    helios_template::library::with_library(
+        workspace_catalogue(),
+        &helios_template::library::files(config),
+    )
+}
+
 /// How long a workspace request waits for the desktop holding it: its
 /// own deadline (it answers when it has not run the request by then)
 /// and a margin.
@@ -2217,7 +2248,7 @@ fn workspace_call(request: &Value) -> Result<Value, String> {
         o.remove("cmd");
         o.remove("config");
     }
-    let catalogue = workspace_catalogue();
+    let catalogue = workspace_catalogue_in(&config);
     let mut answer = match cmd {
         "workspace.parts" => tools::parts_of(&config, &args),
         "workspace.state" => tools::state(&config, &args),
@@ -2226,6 +2257,7 @@ fn workspace_call(request: &Value) -> Result<Value, String> {
         "workspace.import_parts" => tools::import_parts(&config, &args, &catalogue),
         "workspace.save_as_template" => tools::save_as_template(&config, &args, &catalogue),
         "network.delegate" => tools::delegate(&config, &args, &catalogue),
+        "macro.publish" => tools::publish(&config, &args, &catalogue),
         cmd if cmd.starts_with("macro.") => macro_on_files(&config, cmd, &args, &catalogue),
         cmd if helios_template::network::is_command(cmd) => {
             tools::network(&config, cmd, &args, &catalogue)
@@ -3136,6 +3168,60 @@ mod tests {
         )
         .unwrap_err();
         assert!(e.contains("go together"), "{e}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_macro_is_published_only_with_the_user_s_confirmation() {
+        let root = std::env::temp_dir().join(format!("helios-mcp-publish-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let (config, ws) = (root.join("config"), root.join("photos"));
+        std::fs::create_dir_all(&ws).unwrap();
+        let call = |cmd: &str, args: Value| {
+            let mut request = args;
+            request["cmd"] = json!(cmd);
+            request["config"] = json!(config);
+            request["workspace"] = json!(ws);
+            workspace_call(&request)
+        };
+        call(
+            "macro.make",
+            json!({ "nodes": ["exposure"], "name": "Look" }),
+        )
+        .unwrap();
+        let file = helios_template::library::dir(&config).join("user.look@1.helios-composite.json");
+        // A dry run says where it would write, and writes nothing.
+        let dry = call("macro.publish", json!({ "node": "look", "dry_run": true })).unwrap();
+        assert_eq!(dry["composite"]["id"], "user.look", "{dry}");
+        assert_eq!(dry["file"], json!(file.display().to_string()));
+        assert_eq!(dry["undoable"], false);
+        assert!(!file.exists());
+        // On the files, no one is there to confirm it: refused.
+        let e = call("macro.publish", json!({ "node": "look" })).unwrap_err();
+        assert!(e.contains("confirmation"), "{e}");
+        assert!(!file.exists());
+        // Once in the library (the desktop wrote it), the workspace's
+        // catalogue offers it, and publishing it again is refused.
+        let state = helios_template::workspace::tools::files(&config, &json!({ "workspace": ws }))
+            .unwrap()
+            .load()
+            .unwrap();
+        let files = state
+            .macro_publishable(&workspace_catalogue(), Some("look"), None)
+            .unwrap();
+        helios_template::library::publish(&config, &files, false).unwrap();
+        assert!(file.exists());
+        assert!(
+            workspace_catalogue_in(&config)
+                .get_composite(&files[0].reference())
+                .is_some()
+        );
+        let e = call(
+            "macro.publish",
+            json!({ "id": "user.look", "dry_run": true }),
+        )
+        .unwrap_err();
+        assert!(e.contains("in your library already"), "{e}");
         let _ = std::fs::remove_dir_all(&root);
     }
 }
