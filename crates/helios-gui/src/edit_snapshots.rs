@@ -82,33 +82,12 @@ pub struct Book {
     settled: Option<(u64, u64, Pin)>,
     /// The snapshots restored since last asked, by name (the toast).
     restored: Vec<String>,
-    /// How a pending snapshot's name is shown, `{name}` standing for it,
-    /// in the interface's language (the shell keeps it so).
-    pending: Option<String>,
 }
 
 impl Book {
     /// The image whose snapshots these are (none: no vault behind).
     pub fn image(&self) -> Option<ImageId> {
         self.image
-    }
-
-    /// Shows a pending snapshot's name through `pattern`, `{name}`
-    /// standing for it ("{name} (not saved yet)").
-    pub fn set_pending_pattern(&mut self, pattern: &str) {
-        self.pending = Some(pattern.to_string());
-    }
-
-    /// A snapshot's name as the History panel shows it: a pending one
-    /// says it is not saved yet.
-    pub fn shown_name(&self, t: &Taken) -> String {
-        if t.pin.is_some() {
-            return t.name.clone();
-        }
-        match &self.pending {
-            Some(p) => p.replace("{name}", &t.name),
-            None => format!("{} (not saved yet)", t.name),
-        }
     }
 
     /// Every snapshot, oldest first.
@@ -124,7 +103,6 @@ impl Book {
     pub fn clear(&mut self) {
         *self = Book {
             saved: self.saved.take(),
-            pending: self.pending.take(),
             ..Book::default()
         };
     }

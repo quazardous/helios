@@ -195,8 +195,6 @@ gui-history-preview-bypassed = bypassed
 
 gui-history-preview-param = { $label } ({ $node })
 
-gui-history-snapshot-pending = { $name } (not saved yet)
-
 gui-history-snapshot-restored = Restored “{ $name }”
 
 gui-history-undo = Undo

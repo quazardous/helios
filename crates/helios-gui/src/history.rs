@@ -44,8 +44,9 @@
 //!   say "Undone in <place>", with Go there.
 //! - **Snapshots** (`crate::edit_snapshots`): taking one saves nothing,
 //!   it records a name and the head step; the next save of the edit pins
-//!   it to that version, which the vault keeps. Until then it is shown
-//!   "not saved yet", and lost if the app quits first. Restoring one
+//!   it to that version, which the vault keeps. Until then it is
+//!   pending (egui-pop's `Snapshot::pending`: the History panel says "not
+//!   saved yet"), and lost if the app quits first. Restoring one
 //!   writes its values back as one new step, which an undo takes back;
 //!   egui-pop's `edit.restore` step, vetoed like an undo during a drag.
 //! - **The hover preview**: the pointer on a row of the History panel
@@ -326,16 +327,17 @@ fn jump_replaced(
     }))
 }
 
-/// A snapshot as egui-pop sees it, under the name the panel shows.
-fn snapshot_info(t: &Taken, name: String) -> Snapshot {
+/// A snapshot as egui-pop sees it: one the next save has not pinned yet
+/// is pending, which the History panel says beside its name.
+fn snapshot_info(t: &Taken) -> Snapshot {
     Snapshot {
         id: t.id,
         scope: EDIT,
-        name,
+        name: t.name.clone(),
         step: t.step,
         origin: to_pop(&t.origin),
         at: t.at,
-        pending: false,
+        pending: t.pin.is_none(),
     }
 }
 
@@ -640,10 +642,7 @@ impl History for HeliosHistory {
             return Vec::new();
         }
         let book = edit_snapshots::lock(&self.snapshots);
-        book.list()
-            .iter()
-            .map(|t| snapshot_info(t, book.shown_name(t)))
-            .collect()
+        book.list().iter().map(snapshot_info).collect()
     }
 
     fn snapshot(
@@ -660,7 +659,7 @@ impl History for HeliosHistory {
         }
         let mut book = edit_snapshots::lock(&self.snapshots);
         let taken = book.take(&store, name, to_helios(origin), now(), request.dry_run);
-        Ok(snapshot_info(&taken, book.shown_name(&taken)))
+        Ok(snapshot_info(&taken))
     }
 
     fn restore(&mut self, request: &Request, snapshot: u64, origin: &PopOrigin) -> Answer {
@@ -1067,8 +1066,8 @@ mod tests {
             .snapshot(&Request::new(EDIT), "Bright", &PopOrigin::User)
             .unwrap();
         assert_eq!(
-            (snap.step, snap.name.as_str()),
-            (1, "Bright (not saved yet)")
+            (snap.step, snap.name.as_str(), snap.pending),
+            (1, "Bright", true)
         );
         set(&values, 2.0);
         let Answer::Done(Ok(w)) = h.restore(&Request::new(EDIT), snap.id, &PopOrigin::User) else {

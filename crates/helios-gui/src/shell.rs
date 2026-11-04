@@ -3252,20 +3252,10 @@ impl Shell {
         });
     }
 
-    /// Keeps how the History panel names a pending snapshot in the
-    /// interface's language, and says each snapshot restored since the
-    /// last frame: in the status bar and as a toast offering Undo (the
-    /// restore is one step).
+    /// Says each snapshot restored since the last frame: in the status
+    /// bar and as a toast offering Undo (the restore is one step).
     pub fn follow_snapshots(&mut self) {
-        let pending = self.text(
-            Message::new("gui-history-snapshot-pending", "{ $name } (not saved yet)")
-                .with("name", "{name}"),
-        );
-        let restored = {
-            let mut book = crate::edit_snapshots::lock(&self.snapshots);
-            book.set_pending_pattern(&pending);
-            book.take_restored()
-        };
+        let restored = crate::edit_snapshots::lock(&self.snapshots).take_restored();
         if restored.is_empty() {
             return;
         }
@@ -4608,8 +4598,7 @@ impl Shell {
             &mut lock(&self.values),
             &self.subworkspaces,
         );
-        // The History panel's snapshots: pending ones said in the
-        // interface's language, a toast for each restore.
+        // The History panel's snapshots: a toast for each restore.
         self.follow_snapshots();
         self.apply_queue(&ctx);
         // The workspace's files changed outside, and agents' requests.

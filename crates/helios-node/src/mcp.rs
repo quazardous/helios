@@ -1109,7 +1109,7 @@ pub const TOOLS: &[Tool] = &[
         name: "helios_history_read",
         endpoint: Endpoint::Workspace,
         cmd: "history.read",
-        description: "A history's steps on the desktop holding a workspace open (egui-pop's history.read): `undo`, oldest first, and `redo`, the next one last, each with its id, label, text, origin and place; the revision and head; its `snapshots` (id, name, the step it was taken at; a name ending \"(not saved yet)\" is pending: kept at the edit's next save, lost if the desktop quits first)",
+        description: "A history's steps on the desktop holding a workspace open (egui-pop's history.read): `undo`, oldest first, and `redo`, the next one last, each with its id, label, text, origin and place; the revision and head; its `snapshots` (id, name, the step it was taken at, and `pending`: true for one kept only at the edit's next save, lost if the desktop quits first)",
         params: &[WORKSPACE, HISTORY_SCOPE, CONFIG],
     },
     Tool {

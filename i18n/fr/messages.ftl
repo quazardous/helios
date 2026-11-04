@@ -179,8 +179,6 @@ gui-history-preview-bypassed = contourné
 
 gui-history-preview-param = { $label } ({ $node })
 
-gui-history-snapshot-pending = { $name } (pas encore enregistré)
-
 gui-history-snapshot-restored = « { $name } » restauré
 
 gui-history-undo = Annuler

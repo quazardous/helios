@@ -109,10 +109,11 @@ fn take(shell: &Shell, name: &str) -> Snapshot {
     .unwrap()
 }
 
+/// The snapshots' names, a pending one's followed by `*`.
 fn listed(shell: &Shell) -> Vec<String> {
     history::snapshots(shell.app().handle(), &EDIT)
         .into_iter()
-        .map(|s| s.name)
+        .map(|s| if s.pending { s.name + "*" } else { s.name })
         .collect()
 }
 
@@ -129,7 +130,7 @@ fn a_snapshot_is_pinned_to_the_version_of_the_next_save() {
     set(&shell, 1.0);
     // Taken before the step is saved: nothing is written for it.
     let snap = take(&shell, "Bright");
-    assert_eq!(listed(&shell), ["Bright (not saved yet)"]);
+    assert_eq!(listed(&shell), ["Bright*"]);
     assert!(kept(&dir, image).is_empty());
     persist.frame(&mut shell, 1.0);
     // The save of that step pins it.
@@ -168,7 +169,7 @@ fn a_snapshot_never_saved_is_lost_when_the_desktop_quits() {
     take(&shell, "Passed");
     set(&shell, 2.0);
     persist.frame(&mut shell, 3.0);
-    assert_eq!(listed(&shell), ["Kept", "Passed (not saved yet)"]);
+    assert_eq!(listed(&shell), ["Kept", "Passed*"]);
     // And one taken after the last save, the desktop quitting first.
     take(&shell, "Late");
     drop((shell, persist));
