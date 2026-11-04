@@ -24,6 +24,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.52.0] - 2026-11-04
+
+### Added
+
+- History snapshots: "Take a snapshot" in the History panel names the
+  edit as it is, kept with the image once the edit is next saved (shown
+  "not saved yet" until then). A click restores it as one step that Undo
+  takes back, with a toast saying so. Agents have
+  `helios_history_snapshot` and `helios_history_restore`.
+
 ## [0.51.0] - 2026-11-04
 
 ### Added
