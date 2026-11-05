@@ -500,8 +500,9 @@ pub struct Shell {
     pub values: Arc<Mutex<helios_values::Store>>,
     /// The open image's history snapshots (`crate::edit_snapshots`).
     pub snapshots: crate::edit_snapshots::Shared,
-    /// Headless runs: no cursor blink and no animation, so a frame settles
-    /// and a test's `run` ends.
+    /// Headless runs: no cursor blink, no animation and no repaint asked
+    /// by the workspace's watcher, so a frame settles and a test's `run`
+    /// ends.
     still: bool,
     /// The workspace open, whose layout egui-pop keeps.
     workspace: Workspace,

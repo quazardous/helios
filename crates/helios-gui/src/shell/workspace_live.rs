@@ -333,7 +333,11 @@ impl Shell {
             return;
         };
         let shared = live.shared.clone();
-        {
+        // A headless shell (a test's) is never woken by the watcher or
+        // the endpoint: what they bring is taken at the next frame the
+        // test draws, so the files settling after the window is set up
+        // ask no frames of their own and a test's `run` ends.
+        if !self.still {
             let mut waker = lock(&shared.waker);
             if waker.is_none() {
                 *waker = Some(ctx.clone());

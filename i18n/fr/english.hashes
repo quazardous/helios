@@ -104,6 +104,7 @@ command-macro-fold.title 33ae65c670fa307a
 command-macro-interface.title 9339d37c74694ea4
 command-macro-make.title 607effc9999f8608
 command-macro-open.title 8e7ea4733df069ff
+command-macro-publish.title 3f841b2cb7422815
 command-macro-toggle.title 232ae7a906ca9da1
 command-macro-upgrade.title 1cde5d2276f9cf2e
 command-mask-add-circle.title 853e800a379c3a26
@@ -290,6 +291,7 @@ gui-duplicates-waiting-note 8415f0fbd08021d1
 gui-edit-does-not-fit b270477011039ced
 gui-edit-not-saved 988fbabe3acbb2ab
 gui-gesture-in-progress c25ee937ebc97642
+gui-graph-add-macro db3acd4cacf311c5
 gui-graph-label 117a61ee1d524de1
 gui-graph-no-workspace c6ee2aff900a23c5
 gui-graph-state-cached a316415459a6c9e3
@@ -304,6 +306,9 @@ gui-graph-wires-curves e0bf0953320fe655
 gui-graph-wires-orthogonal 1f12e5c062151690
 gui-graph-wires-straight 63b336c8aa9ba34f
 gui-history-batch 0f7640b2ba0044d9
+gui-history-preview-applied e4ec2cb3e00f5ea8
+gui-history-preview-bypassed 02942dd0aa53a222
+gui-history-preview-param e503ef0b7a4a3ed8
 gui-history-snapshot-restored 2d32618201a21647
 gui-history-undo cc7022a2d9050a57
 gui-image-not-reopened 422cb049e7d6fe52
@@ -371,6 +376,10 @@ gui-macro-iface-verb 9c77c5240e2100c2
 gui-macro-make-title c7440a253b10643e
 gui-macro-make-verb f16294f903896fd7
 gui-macro-name 23e46144529fec9c
+gui-macro-publish-detail 8248d31001dcd165
+gui-macro-publish-title a77ca22465e4b2e3
+gui-macro-publish-verb 4cc33eb9cfcb9b7e
+gui-macro-published 9430c838aa4fd954
 gui-mask-display e386310422b43af2
 gui-mask-display-grey a3252d1873c23889
 gui-mask-display-hint 08a963e3e539c9a9
@@ -441,6 +450,8 @@ gui-modules-fold-hint e819be3423c95479
 gui-modules-macro ba5fb00f7c9f1105
 gui-modules-macro-interface 26c6cf94d372328a
 gui-modules-macro-interface-hint 8b5bcc100dec0a35
+gui-modules-macro-publish 96d920212cb00082
+gui-modules-macro-publish-hint 1486c01e40ee6150
 gui-modules-macro-update d3d4baed26ce08ab
 gui-modules-macro-update-hint 10ad0e39b24a0c54
 gui-modules-make-macro 2d087321a3180165
