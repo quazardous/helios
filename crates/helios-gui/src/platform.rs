@@ -418,7 +418,9 @@ impl Plugin for Platform {
     }
 }
 
-/// egui-pop's platform services for the desktop window: the single
+/// egui-pop's platform services for the desktop window: Helios's id
+/// ([`APP_ID`], which egui-pop gives the services that name the
+/// application, as the `Referer` of the viewer's videos), the single
 /// instance (its launches handed to [`Platform`]), the desktop's
 /// notifications, tied to Helios's desktop file, the log file and crash
 /// reports in the user's state directory, the cache of compiled kit
@@ -435,7 +437,8 @@ pub fn desktop(app: AppBuilder, instance: Instance) -> AppBuilder {
     }
     // User kits and themes read from disk are compiled once into the
     // user's cache directory, under Helios's id.
-    app.cache(egui_pop::tokens::cache::Cache::for_app(APP_ID))
+    app.app_id(APP_ID)
+        .cache(egui_pop::tokens::cache::Cache::for_app(APP_ID))
         .system_text_scale(egui_pop::platform::text_scale::read())
         .plugin(logs)
         .plugin(crashes)

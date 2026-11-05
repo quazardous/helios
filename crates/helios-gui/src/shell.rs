@@ -75,7 +75,7 @@ fn about_description() -> Message {
 /// description is translated once the shell runs (`follow_language`).
 /// The repository's issue list turns on egui-pop's `help.report` (Help >
 /// Report a problem): a new issue, prefilled with the version and the
-/// platform.
+/// platform; and `help.suggest` (Help > Suggest an idea) beside it.
 fn about_info() -> egui_pop::api::about::AppInfo {
     let mut info = egui_pop::api::about::AppInfo::new("Helios", env!("CARGO_PKG_VERSION"))
         .description(&about_description().english)
