@@ -297,10 +297,20 @@ struct Parts {
 /// harness's context, or in a window by egui-pop's `run_native_with`.
 pub struct ShellBuilder {
     app: AppBuilder,
+    /// The language plugin, added last as the application is built.
+    i18n: egui_pop::i18n::I18nPlugin,
     parts: Parts,
 }
 
 impl ShellBuilder {
+    /// The language setting's default is the system's (`HELIOS_LANG`
+    /// first), as on the desktop; otherwise the shell speaks English.
+    #[must_use]
+    pub fn system_language(mut self) -> Self {
+        self.i18n = self.i18n.language(egui_pop::i18n::plugin::SYSTEM);
+        self
+    }
+
     /// Opens a workspace directory: its layout is the one egui-pop loads
     /// as the application starts and saves as it closes, under the
     /// interface's settings (`workspaces/<key>/layout`).
@@ -352,6 +362,7 @@ impl ShellBuilder {
     pub fn build(self) -> Shell {
         let app = self
             .app
+            .plugin(self.i18n)
             .build(&Egui::default())
             .unwrap_or_else(|e| panic!("Helios's application builds: {e}"));
         Shell::assemble(self.parts, app)
@@ -368,9 +379,11 @@ impl ShellBuilder {
         make: impl FnOnce(Shell, &eframe::CreationContext<'_>) -> Box<dyn eframe::App> + 'static,
     ) -> eframe::Result {
         let parts = self.parts;
-        self.app.run_native_with(title, options, move |app, cc| {
-            Ok(make(Shell::assemble(parts, app), cc))
-        })
+        self.app
+            .plugin(self.i18n)
+            .run_native_with(title, options, move |app, cc| {
+                Ok(make(Shell::assemble(parts, app), cc))
+            })
     }
 }
 
@@ -578,14 +591,11 @@ impl Shell {
         let i18n_plugin = egui_pop::i18n::I18nPlugin::new()
             .catalogues(helios_i18n::CATALOGUES)
             .env(helios_i18n::ENV)
-            // A shell without the user's settings (tests, pictures,
-            // tools) speaks English; the desktop follows the language
-            // setting, the system's by default.
-            .language(if ui_settings.is_some() {
-                egui_pop::i18n::plugin::SYSTEM
-            } else {
-                "en"
-            });
+            // English unless the desktop asks for the system's language
+            // (`ShellBuilder::system_language`): tests, pictures and
+            // tools read the same labels on any machine, with or
+            // without the user's settings.
+            .language("en");
         let i18n = i18n_plugin.i18n();
         let host = HeliosHost::new(registry.clone(), bus, Arc::default())
             .with_values(values.clone(), snapshots.clone())
@@ -711,13 +721,13 @@ impl Shell {
             // tips; they come by themselves once the desktop asks
             // (`Shell::tips_by_themselves`).
             .plugin(egui_pop::api::tips::TipsPlugin)
-            .plugin(crate::tips::Tips)
-            .plugin(i18n_plugin);
+            .plugin(crate::tips::Tips);
         if let Some(dir) = ui_settings {
             builder = builder.persist(dir);
         }
         ShellBuilder {
             app: builder,
+            i18n: i18n_plugin,
             parts: Parts {
                 registry,
                 lists,

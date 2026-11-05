@@ -975,6 +975,8 @@ fn main() -> Result<(), String> {
         .workspace(&workspace)
         .on_exit(move |app| save_workspace(&dir, app))
         .desktop(instance)
+        // The desktop speaks the system's language by default.
+        .system_language()
         .system_focus(focus_mode(&focus_reading));
     // A darkroom left on an image the vault no longer has is not
     // restored.
