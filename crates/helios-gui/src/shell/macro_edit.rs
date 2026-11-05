@@ -449,7 +449,7 @@ impl Shell {
     }
 
     /// Selects one node (`view/graph/selection` and [`SELECTED`]).
-    fn select_node(&self, node: &str) {
+    pub(super) fn select_node(&self, node: &str) {
         let mut store = lock(&self.values);
         for (path, value) in [
             (crate::params::SELECTION, node.to_string()),

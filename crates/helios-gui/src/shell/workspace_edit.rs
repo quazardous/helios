@@ -930,6 +930,7 @@ impl Shell {
             "network.delegate" => self.delegate_nodes(args, origin),
             "subworkspace.delete" => self.delete_subworkspace(args, origin),
             m if m.starts_with("macro.") => self.macro_command(m, args, origin),
+            w if w.starts_with("workshop.") => self.workshop_command(w, args, origin),
             network if network.starts_with("network.") => {
                 self.network_command(network, args, origin)
             }

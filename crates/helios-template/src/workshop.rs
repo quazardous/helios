@@ -22,10 +22,21 @@
 use std::cell::Cell;
 use std::collections::BTreeMap;
 
-use helios_core::{Composite, Image, Macro, ParamHint, ParamKind, ParamSpec, Params, Value};
+use helios_core::{
+    Composite, Engine, Graph, Image, Macro, ModuleRef, ParamHint, ParamKind, ParamSpec, Params,
+    Region, Value,
+};
 use helios_scopes::Scale;
+use serde_json::json;
 
-use crate::format::{At, Measure, Target};
+use crate::build::SOURCE_PORT;
+use crate::catalogue::Catalogue;
+use crate::format::{
+    At, CompositeFile, CompositeRef, Connection, Endpoint, Measure, NetworkDesc, NodeDesc, Target,
+};
+use crate::macros::{Moves, Step};
+use crate::network::{PortInfo, fresh_name, ports_of, types_fit};
+use crate::workspace::State;
 
 /// At most this many renders per target, its two ends included.
 pub const MAX_PROBES: usize = 12;
@@ -156,7 +167,7 @@ pub fn ranges(m: &Macro) -> BTreeMap<String, Range> {
 }
 
 /// How one target was aimed.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub struct Aimed {
     /// The exposed parameter.
     pub param: String,
@@ -322,6 +333,209 @@ where
     };
     Ok(answer(range.round(v.clamp(lo, hi)), Some(nearest), None))
 }
+
+/// [`aim`] through `engine`: `built` rendered alone on `input` (what
+/// enters it, a small proxy of the image: the desktop's is 256 px on its
+/// long side), its exposed parameters at their defaults overridden by
+/// `current`, its targets searched over [`ranges`]. The input is a
+/// source of its own, so a probe renders only the workshop's steps.
+pub fn aim_rendered(
+    engine: &Engine,
+    built: &Macro,
+    input: &Image,
+    current: &Params,
+    targets: &[Target],
+) -> Result<(Vec<Aimed>, Params), String> {
+    let r = input.region();
+    let region = Region::sized(r.width, r.height);
+    let input = Image::new(region, input.channels(), input.to_vec());
+    let module = ModuleRef::composite(built.clone());
+    let manifest = module.manifest().clone();
+    let (Some(entry), Some(exit)) = (manifest.inputs.first(), manifest.outputs.first()) else {
+        return Err(format!("`{}` has no input or no output", manifest.name));
+    };
+    let mut graph = Graph::new();
+    let src = graph.add_source("input", input.clone());
+    let node = graph
+        .add_module("workshop", module, current)
+        .map_err(|e| e.to_string())?;
+    graph
+        .connect(src, SOURCE_PORT, node, &entry.name)
+        .map_err(|e| e.to_string())?;
+    let params = graph
+        .params(node)
+        .map_err(|e| e.to_string())?
+        .unwrap_or_default();
+    let exit = exit.name.clone();
+    aim(
+        |p: &Params| {
+            for (name, value) in p.iter() {
+                graph
+                    .set_param(node, name, value.clone())
+                    .map_err(|e| e.to_string())?;
+            }
+            engine
+                .render(&graph, node, &exit, region)
+                .map_err(|e| e.to_string())
+        },
+        &input,
+        &params,
+        targets,
+        &ranges(built),
+    )
+}
+
+/// The output a workshop applied after `after` reads: the port the
+/// viewport shows when it shows `after`, else `after`'s first output
+/// whose type fits the workshop's input (a source's image).
+fn insertion_port(
+    net: &NetworkDesc,
+    catalogue: &Catalogue,
+    after: &str,
+    input_ty: &str,
+) -> Result<String, String> {
+    if net.view.node == after {
+        return Ok(net.view.port.clone());
+    }
+    let (_, outputs) =
+        ports_of(net, catalogue, after).ok_or_else(|| format!("no node `{after}`"))?;
+    outputs
+        .iter()
+        .find(|p| types_fit(&p.ty, input_ty))
+        .map(|p| p.name.clone())
+        .ok_or_else(|| format!("`{after}` has no output the workshop can read"))
+}
+
+impl State {
+    /// Where `workshop.apply` inserts a workshop: `after` (a node), by
+    /// default the node the viewport shows the image from, and the port
+    /// of it the workshop reads. Refused for a composite without a
+    /// workshop block, one with other than one input and one output
+    /// ("add it from the graph"), and an `after` the network lacks.
+    pub fn workshop_insertion(
+        &self,
+        catalogue: &Catalogue,
+        workshop: &CompositeRef,
+        after: Option<&str>,
+    ) -> Result<(CompositeFile, Endpoint), String> {
+        let cat = self.bundle.catalogue(catalogue);
+        let file = cat
+            .get_composite(workshop)
+            .ok_or_else(|| format!("unknown composite `{workshop}`"))?
+            .clone();
+        if file.workshop.is_none() {
+            return Err(format!(
+                "`{workshop}` is a macro without a workshop block: add it from the graph"
+            ));
+        }
+        if file.inputs.len() != 1 || file.outputs.len() != 1 {
+            return Err(format!(
+                "`{workshop}` has {} inputs and {} outputs: a workshop applied after a node has one of each; add it from the graph",
+                file.inputs.len(),
+                file.outputs.len()
+            ));
+        }
+        let net = &self.bundle.template.network;
+        let after = after.unwrap_or(&net.view.node).to_string();
+        let input_ty = PortInfo::of_spec(&file.inputs[0].spec()).ty;
+        let port = insertion_port(net, &cat, &after, &input_ty)?;
+        Ok((file, Endpoint { node: after, port }))
+    }
+
+    /// Applies a workshop (`workshop.apply`): its macro's node, named
+    /// after the workshop (a free name), is inserted on the wires leaving
+    /// `after`'s output ([`State::workshop_insertion`]): it reads that
+    /// output, and every reader of it whose input its output fits reads
+    /// the workshop instead, the viewport too when it showed that output.
+    /// It joins `after`'s sub-workspaces and is placed beside it.
+    /// `values` (the aimed ones, by exposed name) are the step's values
+    /// for the open image, under `node/<workshop node>/<exposed>`; the
+    /// network keeps the workshop's defaults, as for any macro.
+    pub fn workshop_applied(
+        &self,
+        catalogue: &Catalogue,
+        workshop: &CompositeRef,
+        after: Option<&str>,
+        values: &Params,
+    ) -> Result<Step, String> {
+        let (file, at) = self.workshop_insertion(catalogue, workshop, after)?;
+        let cat = self.bundle.catalogue(catalogue);
+        let mut next = self.clone();
+        let t = &mut next.bundle.template;
+        let node = fresh_name(&t.network, &file.name);
+        let output = file.outputs[0].name.clone();
+        let output_ty = PortInfo::of_spec(&file.outputs[0].spec()).ty;
+        // The readers of `after`'s output its output fits.
+        let mut rewired = Vec::new();
+        for c in &mut t.network.connections {
+            if c.from != at.node || c.port != at.port {
+                continue;
+            }
+            let fits =
+                ports_of(&self.bundle.template.network, &cat, &c.to).is_some_and(|(ins, _)| {
+                    ins.iter()
+                        .any(|p| p.name == c.input && types_fit(&output_ty, &p.ty))
+                });
+            if fits {
+                c.from.clone_from(&node);
+                c.port.clone_from(&output);
+                rewired.push(format!("{}.{}", c.to, c.input));
+            }
+        }
+        t.network.connections.push(Connection {
+            from: at.node.clone(),
+            port: at.port.clone(),
+            to: node.clone(),
+            input: file.inputs[0].name.clone(),
+        });
+        let view = t.network.view == at;
+        if view {
+            t.network.view = Endpoint {
+                node: node.clone(),
+                port: output.clone(),
+            };
+        }
+        t.network.nodes.push(NodeDesc {
+            name: node.clone(),
+            composite: Some(workshop.clone()),
+            ..NodeDesc::default()
+        });
+        if let Some([x, y]) = t.positions.get(&at.node).copied() {
+            t.positions.insert(node.clone(), [x + PLACE, y + PLACE]);
+        }
+        for s in &mut t.subworkspaces {
+            if let Some(i) = s.nodes.iter().position(|n| *n == at.node) {
+                s.nodes.insert(i + 1, node.clone());
+            }
+        }
+        next.bundle.carry_composites(&cat);
+        let next = State::checked(next, catalogue)?;
+        let moves: Moves = values
+            .iter()
+            .map(|(p, v)| (format!("node/{node}/{p}"), Some(v.clone())))
+            .collect();
+        // Numbers as numbers, for whoever reads the answer.
+        let values: BTreeMap<&str, serde_json::Value> = values
+            .iter()
+            .map(|(p, v)| (p, v.as_f64().map_or_else(|| json!(v), |f| json!(f))))
+            .collect();
+        Ok(Step {
+            state: next,
+            values: moves,
+            answer: json!({
+                "node": node,
+                "workshop": workshop.to_string(),
+                "after": { "node": at.node, "port": at.port },
+                "rewired": rewired,
+                "view": view,
+                "values": values,
+            }),
+        })
+    }
+}
+
+/// How far from `after` an applied workshop is placed, across and down.
+const PLACE: f32 = 90.0;
 
 #[cfg(test)]
 mod tests {

@@ -283,6 +283,10 @@ fn no() -> Value {
     json!(false)
 }
 
+fn yes() -> Value {
+    json!(true)
+}
+
 fn one() -> Value {
     json!(1)
 }
@@ -675,6 +679,35 @@ pub const TOOLS: &[Tool] = &[
                 optional_string,
                 "Or a composite of the workspace by id (its newest version) or `id@version`",
             ),
+            DRY_RUN,
+            CONFIG,
+        ],
+    },
+    Tool {
+        name: "helios_workshop_apply",
+        endpoint: Endpoint::Workspace,
+        cmd: "workshop.apply",
+        description: "Experimental (interface.experimental.workshops, refused with that key when off): applies a workshop, a macro whose file carries an intent and relative targets, after a node of the workspace's network, as one undoable step: its node (named after it) reads that node's output and every reader of it the workshop's output fits reads the workshop instead, the view too when it showed that output; its targets (a median brightness, highlights, clipping) are aimed on a 256 px proxy of the open image and their values are the image's, in the same step. Refused for a macro without a workshop block, a workshop with other than one input and one output, and on the files: it needs the desktop holding the workspace, with an image open to aim",
+        params: &[
+            WORKSPACE,
+            Param {
+                name: "workshop",
+                schema: string,
+                description: "The workshop, `id@version` (helios.lift-midtones@1)",
+                default: None,
+            },
+            optional(
+                "after",
+                optional_string,
+                "The node whose output it reads; the node the image is shown from when null",
+            ),
+            Param {
+                name: "aim",
+                schema: boolean,
+                description: "Aim its targets on the open image; false applies it at its defaults",
+                default: Some(yes),
+            },
+            GROUP,
             DRY_RUN,
             CONFIG,
         ],
@@ -2259,6 +2292,9 @@ fn workspace_call(request: &Value) -> Result<Value, String> {
         "network.delegate" => tools::delegate(&config, &args, &catalogue),
         "macro.publish" => tools::publish(&config, &args, &catalogue),
         cmd if cmd.starts_with("macro.") => macro_on_files(&config, cmd, &args, &catalogue),
+        cmd if cmd.starts_with("workshop.") => Err(format!(
+            "{cmd} is experimental and runs on the desktop holding the workspace (with interface.experimental.workshops on, an image open): no desktop holds it"
+        )),
         cmd if helios_template::network::is_command(cmd) => {
             tools::network(&config, cmd, &args, &catalogue)
         }

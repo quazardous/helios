@@ -55,6 +55,7 @@ pub use workspace_edit::STATE as WORKSPACE_STATE;
 
 mod macro_edit;
 mod network_edit;
+mod workshop_edit;
 mod workspace_edit;
 mod workspace_live;
 
@@ -548,6 +549,8 @@ pub struct Shell {
     /// (their group's first panel), moved off the end side bar once the
     /// areas are drawn ([`Shell::place_palettes`]).
     palettes_to_place: Option<PanelId>,
+    /// The workshops' aims this session (see `workshop_edit`).
+    workshop_aims: workshop_edit::Aims,
 }
 
 impl Shell {
@@ -869,6 +872,7 @@ impl Shell {
             status_items: crate::status_items::Items::default(),
             pointer_choice: false,
             palettes_to_place: None,
+            workshop_aims: workshop_edit::Aims::new(),
         };
         if let Err(e) = crate::pointer_choice::declare(shell.app.handle()) {
             shell.notes.push(format!("pointer choice: {e}"));
@@ -2209,6 +2213,21 @@ impl Shell {
                     Ok(Action::WorkspaceEdit(id.into(), a.clone(), origin.clone()))
                 }),
             );
+        }
+        // Experimental: only with their panel (the switch on).
+        if panels
+            .iter()
+            .any(|p| p.id.as_str() == crate::workshops::PANEL)
+        {
+            for (id, title) in workshop_edit::COMMANDS {
+                let id = *id;
+                add(
+                    CommandSpec::new(id, title, crate::workshops::CATEGORY),
+                    Box::new(move |a, origin| {
+                        Ok(Action::WorkspaceEdit(id.into(), a.clone(), origin.clone()))
+                    }),
+                );
+            }
         }
         add(
             CommandSpec::new("workbench.palette", "Show all commands", "View"),

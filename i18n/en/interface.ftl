@@ -5,6 +5,8 @@ category-decisions = Decisions
 
 category-developer = Developer
 
+category-experimental = Experimental
+
 category-masks = Masks
 
 category-node-graph = Node graph

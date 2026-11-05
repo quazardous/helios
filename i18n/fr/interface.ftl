@@ -4,6 +4,8 @@ category-decisions = Décisions
 
 category-developer = Développement
 
+category-experimental = Expérimental
+
 category-masks = Masques
 
 category-node-graph = Graphe de nœuds

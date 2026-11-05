@@ -258,7 +258,7 @@ fn fit(kind: &ParamKind, value: &Value) -> Option<(Value, bool)> {
 impl State {
     /// The next state checked: refused with its problems when it does not
     /// validate against `catalogue` (the bundle's composites added).
-    fn checked(next: State, catalogue: &Catalogue) -> Result<State, String> {
+    pub(crate) fn checked(next: State, catalogue: &Catalogue) -> Result<State, String> {
         let problems = next.bundle.validate(catalogue).problems;
         if problems.is_empty() {
             Ok(next)

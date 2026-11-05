@@ -551,3 +551,6 @@ command-helios-workshops-dock =
 
 command-helios-workshops-moveTo =
     .title = Déplacer Ateliers vers une zone (`area`)
+
+command-workshop-apply =
+    .title = Expérimental : appliquer un atelier après un nœud, réglé sur l’image ouverte (`workshop` : id@version ; `after` : le nœud d’où l’image est montrée par défaut ; `aim` : vrai par défaut ; `dry_run`)

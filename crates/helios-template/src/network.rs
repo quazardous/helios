@@ -160,7 +160,7 @@ pub fn addable_composites(catalogue: &Catalogue) -> Vec<(String, String)> {
 }
 
 /// A composite named `id@version`.
-fn composite_ref(kind: &str) -> Option<CompositeRef> {
+pub fn composite_ref(kind: &str) -> Option<CompositeRef> {
     let (id, version) = kind.rsplit_once('@')?;
     Some(CompositeRef {
         id: id.to_string(),

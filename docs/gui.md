@@ -347,7 +347,12 @@ starts: switching one takes effect at the next start. The desktop's
 `interface.experimental.workshops` declares the Workshops panel
 (`helios.workshops`, end side, closed until opened; its header says it
 is experimental) and, as they land, the `workshop.*` commands in the
-palette's "Experimental" category; off, neither exists. See
+palette's "Experimental" category; off, neither exists (an agent's
+`helios_workshop_*` call is refused with the setting's key). Built:
+`workshop.apply` (`workshop`: `id@version`, `after`, `aim`, `dry_run`)
+inserts a workshop after the node the image is shown from (or `after`),
+its targets aimed on a 256 px proxy of the open image (the aims cached
+for the session), as one undo step with the aimed values. See
 [design/workshops.md](design/workshops.md).
 
 ## Node header

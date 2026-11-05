@@ -4,8 +4,9 @@ Status: **accepted, being built** (2026-11-05). The owner decided on
 2026-11-05 to build workshops v1 as an **experimental** feature,
 without the mockup test with photographers that ROADMAP section 2.5 and
 [NEEDS.md](../NEEDS.md) planned first, and accepted this plan with its
-defaults. Built: steps 1 to 4 of the plan (the switch and the empty
-panel, the workshop block in the format, aiming, the shipped workshop). Each choice has a
+defaults. Built: steps 1 to 5 of the plan (the switch and the empty
+panel, the workshop block in the format, aiming, the shipped workshop,
+applying). Each choice has a
 default; the open questions at the end are for the owner to settle.
 
 ## What a workshop is
@@ -357,7 +358,14 @@ included.
 5. **Apply** (M). `State::workshop_applied` (insertion after a node,
    the refusals), `workshop.apply` as a desktop step carrying the aimed
    values, the engine-backed render closure on a proxy, the MCP verb,
-   undo tests.
+   undo tests. As built (2026-11-05): the step lives in
+   `helios_template::workshop` (`State::workshop_insertion`, then
+   `State::workshop_applied`) rather than in `macros`; a composite
+   without a workshop block is refused (`macro` steps and the graph's
+   Add menu add plain macros); the aim on the proxy is
+   `workshop::aim_rendered`, the session's cache the desktop's; on the
+   files (no desktop holding the workspace) the verb is refused, since
+   aiming needs the open image.
 6. **The panel** (M). Find, the list, the applied workshop's sliders
    and targets, Aim again (`workshop.aim`, its value step and verb),
    `workshop.suggest` and its verb; wbox screenshot.

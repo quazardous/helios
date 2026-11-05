@@ -48,3 +48,227 @@ fn on_the_panel_opens_and_says_it_is_experimental() {
     assert!(h.state().app().handle().panel_visible(&id));
     h.get_by_label_contains("Experimental: may change");
 }
+
+// ---------------------------------------------------------------------
+// workshop.apply, with a workspace and an image open
+// ---------------------------------------------------------------------
+
+use std::path::{Path, PathBuf};
+
+use helios_core::{Image, Region};
+use helios_gui::templates;
+use helios_template::Source;
+use serde_json::Value as Json;
+
+fn temp(name: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("helios-workshops-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+/// A window on a blank workspace with a grey image open through it,
+/// workshops `on` or off.
+fn window(root: &Path, on: bool) -> Harness<'static, Shell> {
+    let config = root.join("config");
+    let dir = root.join("photos");
+    std::fs::create_dir_all(&dir).unwrap();
+    let panels = helios_panels_with(Experimental { workshops: on });
+    let mut shell = Shell::builder(panels, Some(config.join("ui")))
+        .workspace(&dir)
+        .build();
+    shell.load_layout().unwrap();
+    shell.open_workspace(&config, &dir).unwrap();
+    let image = Image::from_fn(Region::sized(16, 12), 4, |x, _, c| {
+        if c == 3 {
+            1.0
+        } else {
+            #[allow(clippy::cast_precision_loss)]
+            let v = 0.05 + x as f32 / 40.0;
+            v
+        }
+    });
+    let built = shell
+        .workspace_bundle()
+        .unwrap()
+        .build_with(&templates::modules(), Source::Picture(&image), None)
+        .unwrap();
+    shell
+        .set_view_source(built.graph, built.view.0, &built.view.1)
+        .unwrap();
+    let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+    h.run();
+    h
+}
+
+/// The frames a step takes, the image kept open through a network change.
+fn follow(h: &mut Harness<'static, Shell>) {
+    for _ in 0..3 {
+        h.run();
+    }
+    if h.state_mut().take_network_changed() {
+        assert!(h.state_mut().keep_image_open().unwrap(), "kept in place");
+    }
+    for _ in 0..2 {
+        h.run();
+    }
+}
+
+/// Runs a command as a person would; its answer from the history.
+fn answer(h: &mut Harness<'static, Shell>, id: &str, args: Json) -> Result<Json, String> {
+    let out = h.state_mut().run(id, args, Origin::User);
+    follow(h);
+    match out {
+        Ok(v) if v == json!({ "queued": true }) => {
+            h.state()
+                .history()
+                .into_iter()
+                .rev()
+                .find(|r| r.id == id)
+                .unwrap_or_else(|| panic!("{id} never ran"))
+                .result
+        }
+        other => other,
+    }
+}
+
+fn nodes(h: &Harness<'static, Shell>) -> Vec<String> {
+    h.state()
+        .workspace_state()
+        .unwrap()
+        .bundle
+        .template
+        .network
+        .nodes
+        .iter()
+        .map(|n| n.name.clone())
+        .collect()
+}
+
+/// A parameter of a node of the graph shown; `None` without that node.
+fn shown(h: &Harness<'static, Shell>, node: &str, param: &str) -> Option<f64> {
+    let viewport = h.state().viewport();
+    let g = viewport.graph()?;
+    let id = g.find(node)?;
+    g.params(id).unwrap()?.get(param)?.as_f64()
+}
+
+const LIFT: &str = "helios.lift-midtones@1";
+
+#[test]
+fn applying_a_workshop_is_one_undo_step_carrying_its_aimed_value() {
+    let root = temp("apply");
+    let mut h = window(&root, true);
+    let before = nodes(&h);
+    let view = h
+        .state()
+        .workspace_state()
+        .unwrap()
+        .bundle
+        .template
+        .network
+        .view
+        .node;
+    let steps = h.state().values.lock().unwrap().undo_steps().len();
+    // A dry run changes nothing and says what would.
+    let dry = answer(
+        &mut h,
+        "workshop.apply",
+        json!({ "workshop": LIFT, "dry_run": true }),
+    )
+    .unwrap();
+    assert_eq!(dry["dry_run"], json!(true));
+    assert_eq!(nodes(&h), before);
+    let a = answer(&mut h, "workshop.apply", json!({ "workshop": LIFT })).unwrap();
+    let node = a["node"].as_str().unwrap().to_string();
+    assert_eq!(node, "lift_midtones");
+    assert_eq!(a["after"]["node"], json!(view));
+    assert_eq!(a["view"], json!(true));
+    let aimed = &a["aimed"][0];
+    assert_eq!(aimed["param"], json!("brightness"));
+    assert_eq!(aimed["reached"], json!(true), "{a}");
+    let value = aimed["value"].as_f64().unwrap();
+    assert_eq!(a["values"]["brightness"].as_f64(), Some(value));
+    assert_eq!(
+        dry["aimed"], a["aimed"],
+        "the same aim, from the session's cache"
+    );
+    // One step: the node in the network, its aimed value on the image.
+    assert_eq!(
+        h.state().values.lock().unwrap().undo_steps().len(),
+        steps + 1
+    );
+    assert!(nodes(&h).contains(&node));
+    assert_eq!(shown(&h, &node, "brightness"), Some(value));
+    let store_value = h
+        .state()
+        .values
+        .lock()
+        .unwrap()
+        .get(&format!("node/{node}/brightness"))
+        .and_then(|e| e.value.as_f64());
+    assert_eq!(store_value, Some(value));
+    // One undo gives back the network and the image together.
+    h.state()
+        .values
+        .lock()
+        .unwrap()
+        .undo(&Origin::User)
+        .unwrap()
+        .expect("a step to undo");
+    follow(&mut h);
+    assert_eq!(nodes(&h), before);
+    assert_eq!(shown(&h, &node, "brightness"), None);
+    let state = h.state().workspace_state().unwrap();
+    assert_eq!(state.bundle.template.network.view.node, view);
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn applying_refuses_what_is_not_a_workshop() {
+    let root = temp("refused");
+    let mut h = window(&root, true);
+    let e = answer(
+        &mut h,
+        "workshop.apply",
+        json!({ "workshop": "helios.masked-adjustment@1" }),
+    )
+    .unwrap_err();
+    assert!(e.contains("without a workshop block"), "{e}");
+    let e = answer(&mut h, "workshop.apply", json!({ "workshop": "lift" })).unwrap_err();
+    assert!(e.contains("id@version"), "{e}");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn off_the_command_is_unknown_and_an_agent_is_refused_with_the_key() {
+    let root = temp("off");
+    let mut h = window(&root, false);
+    assert!(
+        h.state_mut()
+            .run("workshop.apply", json!({ "workshop": LIFT }), Origin::User)
+            .is_err()
+    );
+    let request = json!({
+        "workspace": root.join("photos"),
+        "cmd": "workshop.apply",
+        "workshop": LIFT,
+    });
+    let out = h.state_mut().workspace_request(&request);
+    assert_eq!(out["ok"], json!(false), "{out}");
+    let e = out["error"].as_str().unwrap();
+    assert!(e.contains(workshops::SETTING), "{e}");
+    // On, the agent's call goes through, as one step.
+    let root_on = temp("agent");
+    let mut h = window(&root_on, true);
+    let request = json!({
+        "workspace": root_on.join("photos"),
+        "cmd": "workshop.apply",
+        "workshop": LIFT,
+    });
+    let out = h.state_mut().workspace_request(&request);
+    assert_eq!(out["ok"], json!(true), "{out}");
+    assert_eq!(out["answer"]["node"], json!("lift_midtones"));
+    let _ = std::fs::remove_dir_all(&root);
+    let _ = std::fs::remove_dir_all(&root_on);
+}
