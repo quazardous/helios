@@ -208,8 +208,7 @@ def main() -> int:
                 f.write(json.dumps(entry, default=str) + "\n")
                 print(json.dumps(entry, default=str), flush=True)
             shots = [
-                args.out / f"{theme}-{n}.png"
-                for n in ("1-empty", "2-mask", "3-overlay", "4-grey")
+                args.out / f"{theme}-{n}.png" for n in ("1-empty", "2-mask", "3-overlay", "4-grey")
             ]
             failed |= not all(s.exists() for s in shots)
     return 1 if failed else 0

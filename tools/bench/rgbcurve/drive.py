@@ -56,22 +56,23 @@ def warm_up(comp):
 def shot(comp, name):
     r = comp.screenshot(name)
     if "error" in r:
-        raise SystemExit("screenshot failed: %s" % r["error"])
+        raise SystemExit("screenshot failed: {}".format(r["error"]))
     return r["path"]
 
 
 # --------------------------------------------------------------------------
 # PNG decode (grim writes 8-bit RGB or RGBA, not interlaced), pure Python
 
+
 def read_png(path):
     """Return (width, height, channels, rows); rows are bytes, unfiltered."""
     data = Path(path).read_bytes()
     if data[:8] != b"\x89PNG\r\n\x1a\n":
-        raise ValueError("%s: not a PNG" % path)
+        raise ValueError(f"{path}: not a PNG")
     pos, idat, ihdr = 8, [], None
     while pos < len(data):
         length, kind = struct.unpack_from(">I4s", data, pos)
-        body = data[pos + 8:pos + 8 + length]
+        body = data[pos + 8 : pos + 8 + length]
         pos += 12 + length
         if kind == b"IHDR":
             ihdr = struct.unpack(">IIBBBBB", body)
@@ -81,8 +82,9 @@ def read_png(path):
             break
     w, h, depth, ctype, _, _, interlace = ihdr
     if depth != 8 or ctype not in (2, 6) or interlace:
-        raise ValueError("%s: unsupported PNG (depth %d, type %d, interlace %d)"
-                         % (path, depth, ctype, interlace))
+        raise ValueError(
+            f"{path}: unsupported PNG (depth {depth}, type {ctype}, interlace {interlace})"
+        )
     bpp = 3 if ctype == 2 else 4
     raw = zlib.decompress(b"".join(idat))
     stride = w * bpp
@@ -90,7 +92,7 @@ def read_png(path):
     for y in range(h):
         off = y * (stride + 1)
         ftype = raw[off]
-        cur = bytearray(raw[off + 1:off + 1 + stride])
+        cur = bytearray(raw[off + 1 : off + 1 + stride])
         if ftype == 1:
             for i in range(bpp, stride):
                 cur[i] = (cur[i] + cur[i - bpp]) & 0xFF
@@ -111,7 +113,7 @@ def read_png(path):
                 pred = a if (pa <= pb and pa <= pc) else (b if pb <= pc else c)
                 cur[i] = (cur[i] + pred) & 0xFF
         elif ftype != 0:
-            raise ValueError("%s: bad filter %d on row %d" % (path, ftype, y))
+            raise ValueError(f"{path}: bad filter {ftype} on row {y}")
         rows.append(bytes(cur))
         prev = cur
     return w, h, bpp, rows
@@ -128,11 +130,11 @@ def read_png(path):
 # nearly top to bottom, then its rows nearly side to side; the identity line
 # and the grid only thin them.
 
-FILL = 77          # .3 * 255
-FILL_TOL = 8       # per channel
-RUN_GAP = 4        # columns or rows short of fill tolerated inside the graph (grid lines)
-EDGE_TOL = 2       # px short of square still counted as the full height
-MIN_WIDTH = 100    # px
+FILL = 77  # .3 * 255
+FILL_TOL = 8  # per channel
+RUN_GAP = 4  # columns or rows short of fill tolerated inside the graph (grid lines)
+EDGE_TOL = 2  # px short of square still counted as the full height
+MIN_WIDTH = 100  # px
 
 
 def _is_fill(row, i):
@@ -184,6 +186,7 @@ def detect_graph(png_path):
 # --------------------------------------------------------------------------
 # Steps
 
+
 def _graph(outdir):
     return json.loads((Path(outdir) / "graph.json").read_text())
 
@@ -194,7 +197,7 @@ def _settle(seconds):
 
 def _check(result, what):
     if isinstance(result, dict) and result.get("error"):
-        raise RuntimeError("%s: %s" % (what, result["error"]))
+        raise RuntimeError("{}: {}".format(what, result["error"]))
     return result
 
 
@@ -206,8 +209,15 @@ def _to_screen(comp, png_size, graph):
     if not sw or not sh or (sw, sh) == (pw, ph):
         return graph, [sw, sh]
     fx, fy = sw / pw, sh / ph
-    return ({"x0": round(graph["x0"] * fx), "y0": round(graph["y0"] * fy),
-             "x1": round(graph["x1"] * fx), "y1": round(graph["y1"] * fy)}, [sw, sh])
+    return (
+        {
+            "x0": round(graph["x0"] * fx),
+            "y0": round(graph["y0"] * fy),
+            "x1": round(graph["x1"] * fx),
+            "y1": round(graph["y1"] * fy),
+        },
+        [sw, sh],
+    )
 
 
 def step_locate(comp, outdir):
@@ -224,12 +234,12 @@ def step_locate(comp, outdir):
         found, info = detect_graph(png)
         info.update(source="detected", png=png)
         if found is None:
-            raise RuntimeError("rgb curve graph not found in %s (%s)" % (png, info))
+            raise RuntimeError(f"rgb curve graph not found in {png} ({info})")
         graph, info["pointer_extent"] = _to_screen(comp, info["png_size"], found)
         if graph != found:
             info["png_graph"] = found
     if graph["x1"] - graph["x0"] < 20 or graph["y1"] - graph["y0"] < 20:
-        raise RuntimeError("graph too small: %s" % graph)
+        raise RuntimeError(f"graph too small: {graph}")
     (Path(outdir) / "graph.json").write_text(json.dumps(graph) + "\n")
     return dict(graph, **info)
 
@@ -289,8 +299,13 @@ def step_case_c(comp, outdir):
         client.roundtrip()
     _settle(1.0)
     png = shot(comp, "caseC-after")
-    return {"point": [x, y], "notches_up": notches, "held": "a",
-            "png_selected": png_selected, "png": png}
+    return {
+        "point": [x, y],
+        "notches_up": notches,
+        "held": "a",
+        "png_selected": png_selected,
+        "png": png,
+    }
 
 
 def main():
@@ -320,8 +335,7 @@ def main():
                 raise RuntimeError("compositor is not running")
             # screenshots land in the case's output folder
             comp.state.screenshot_dir = outdir
-            step = {"locate": step_locate, "caseB": step_case_b,
-                    "caseC": step_case_c}[command]
+            step = {"locate": step_locate, "caseB": step_case_b, "caseC": step_case_c}[command]
             result = dict(step(comp, outdir), ok=True)
         else:
             sys.exit(usage)

@@ -143,12 +143,14 @@ if dt_running; then
 fi
 [ -f "$work/config/library.db" ] && readback final > /dev/null || true
 
-asan_files=$(ls "$out"/asan.* 2> /dev/null || true)
+shopt -s nullglob
+asan_files=("$out"/asan.*)
+shopt -u nullglob
 asan_reports=0
 move_point=0
-if [ -n "$asan_files" ]; then
-  asan_reports=$(grep -h -c "ERROR: AddressSanitizer" $asan_files | awk "{ s += \$1 } END { print s + 0 }")
-  move_point=$(grep -h -c "_move_point_internal" $asan_files | awk "{ s += \$1 } END { print s + 0 }")
+if [ ${#asan_files[@]} -gt 0 ]; then
+  asan_reports=$(grep -h -c "ERROR: AddressSanitizer" "${asan_files[@]}" | awk "{ s += \$1 } END { print s + 0 }")
+  move_point=$(grep -h -c "_move_point_internal" "${asan_files[@]}" | awk "{ s += \$1 } END { print s + 0 }")
 fi
 {
   echo "case=$case_id prefix=$prefix commit=$(cat "$prefix/.commit" 2> /dev/null || echo unknown)"
