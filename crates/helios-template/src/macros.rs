@@ -518,6 +518,7 @@ impl State {
             exits,
             exposed: exposed.clone(),
             panel: None,
+            workshop: None,
         };
         let r = file.reference();
         // The network: one node in the selection's place.

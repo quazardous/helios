@@ -429,3 +429,137 @@ fn a_raw_source_is_one_of_the_sources() {
         );
     }
 }
+
+/// A one-exposure macro with a workshop block (experimental).
+fn workshop(targets: Json) -> Json {
+    json!({
+        "format": 1,
+        "id": "test.lift",
+        "version": 1,
+        "name": "Lift",
+        "inputs": [{ "name": "input", "channels": 4 }],
+        "outputs": [{ "name": "output", "channels": 4 }],
+        "nodes": [{ "name": "a", "module": "exposure" }],
+        "connections": [{ "from": "@", "port": "input", "to": "a", "input": "input" }],
+        "exits": [{ "from": "a", "port": "output", "output": "output" }],
+        "exposed": [
+            { "name": "brightness", "node": "a", "param": "exposure", "unit": "EV",
+              "min": -3.0, "max": 3.0 },
+            { "name": "black", "node": "a", "param": "black" },
+            { "name": "bias", "node": "a", "param": "compensate_bias" }
+        ],
+        "workshop": {
+            "intent": "Brighter midtones",
+            "keywords": ["brighten", "midtones"],
+            "targets": targets
+        }
+    })
+}
+
+/// Built against a catalogue with the exposure module.
+fn built(file: &Json) -> Result<(), String> {
+    let file = parse_composite(&file.to_string())?;
+    let catalogue = Catalogue::new()
+        .module(ModuleRef::new(helios_module_exposure::Exposure))
+        .composite(file.clone());
+    catalogue.build_composite(&file.reference(), 0).map(|_| ())
+}
+
+#[test]
+fn a_workshop_block_round_trips_and_fits_the_schema() {
+    let j = workshop(json!([
+        { "param": "brightness", "measure": "luma.median", "value": -2.5 },
+        { "param": "black", "measure": "clip.high", "value": 1.0, "at": "input" }
+    ]));
+    assert_eq!(
+        schema::check(&schema::composite(), &j),
+        Vec::<String>::new()
+    );
+    let file = parse_composite(&j.to_string()).unwrap();
+    let w = file.workshop.as_ref().unwrap();
+    assert_eq!(w.targets[0].measure, helios_template::Measure::LumaMedian);
+    assert_eq!(w.targets[1].at, helios_template::format::At::Input);
+    // Written as read: `at: output` is the default, left out.
+    let written = serde_json::to_value(&file).unwrap();
+    assert_eq!(written["workshop"], j["workshop"]);
+    assert_eq!(parse_composite(&written.to_string()).unwrap(), file);
+    assert_eq!(
+        schema::check(&schema::composite(), &written),
+        Vec::<String>::new()
+    );
+    let mut back = j.clone();
+    back["workshop"]["targets"][0]["at"] = json!("output");
+    assert_eq!(parse_composite(&back.to_string()).unwrap(), file);
+    built(&j).unwrap();
+    // Without the block, the file is the macro it was.
+    let mut plain = j.clone();
+    plain.as_object_mut().unwrap().remove("workshop");
+    assert!(
+        parse_composite(&plain.to_string())
+            .unwrap()
+            .workshop
+            .is_none()
+    );
+    // The catalogue's description, which agents read, carries it.
+    let catalogue = Catalogue::new().composite(file);
+    assert_eq!(
+        catalogue.describe()["composites"][0]["workshop"]["intent"],
+        "Brighter midtones"
+    );
+}
+
+#[test]
+fn the_schema_and_the_types_refuse_the_same_blocks() {
+    let bad = [
+        json!([{ "param": "brightness", "measure": "luma.mean", "value": 0.0 }]),
+        json!([{ "param": "brightness", "measure": "luma.median" }]),
+        json!([{ "param": "brightness", "measure": "luma.median", "value": 0.0, "at": "mask" }]),
+        json!([{ "param": "brightness", "measure": "luma.median", "value": 0.0, "zone": "sky" }]),
+    ];
+    for targets in bad {
+        let j = workshop(targets.clone());
+        assert!(
+            !schema::check(&schema::composite(), &j).is_empty(),
+            "the schema takes {targets}"
+        );
+        assert!(
+            parse_composite(&j.to_string()).is_err(),
+            "serde takes {targets}"
+        );
+    }
+    let mut no_intent = workshop(json!([]));
+    no_intent["workshop"]
+        .as_object_mut()
+        .unwrap()
+        .remove("intent");
+    assert!(!schema::check(&schema::composite(), &no_intent).is_empty());
+    assert!(parse_composite(&no_intent.to_string()).is_err());
+}
+
+#[test]
+fn a_workshop_target_is_on_one_exposed_number() {
+    let refused = |targets: Json, why: &str| {
+        let e = built(&workshop(targets.clone())).unwrap_err();
+        assert!(e.contains(why), "{targets}: {e}");
+        assert!(e.contains("workshop: targets["), "{e}");
+    };
+    refused(
+        json!([{ "param": "exposure", "measure": "luma.median", "value": 0.0 }]),
+        "not an exposed parameter",
+    );
+    refused(
+        json!([{ "param": "bias", "measure": "luma.median", "value": 0.0 }]),
+        "for a number parameter",
+    );
+    refused(
+        json!([
+            { "param": "brightness", "measure": "luma.median", "value": 0.0 },
+            { "param": "brightness", "measure": "luma.high", "value": 1.0 }
+        ]),
+        "a second target",
+    );
+    refused(
+        json!([{ "param": "brightness", "measure": "clip.high", "value": 120.0 }]),
+        "between 0 and 100",
+    );
+}

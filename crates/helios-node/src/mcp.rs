@@ -1241,7 +1241,7 @@ pub const TOOLS: &[Tool] = &[
         params: &[Param {
             name: "entity",
             schema: string,
-            description: "graph, engine, scheduler, node, config, modules or bus",
+            description: "graph, engine, scheduler, node, config, modules (with the shipped composites and their workshop blocks) or bus",
             default: None,
         }],
     },

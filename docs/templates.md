@@ -330,6 +330,19 @@ A composite (a macro, see [module-contract.md](module-contract.md),
   panel docks (`panel`): building a template docks that panel when its
   layout does not show it. A template's node may override the hint (its
   own `panel`), for instance to dock the Masks panel at the end side.
+- **Workshop block** (experimental, 2026-11-05, see
+  [design/workshops.md](design/workshops.md)). A composite may carry a
+  `workshop`: its `intent` (English), `keywords`, and `targets`, each a
+  relative target on one exposed number parameter (`param`, `measure`:
+  `luma.median` or `luma.high` in stops around 1.0, `clip.high` in %,
+  `value`, `at`: `output` by default or `input`, an offset from what the
+  input measures). The file stays `format: 1`: an older Helios refuses
+  the field. A target on a parameter that is not exposed, on one that is
+  not a number, a second target on one parameter, or a `clip.high`
+  outside 0 to 100 % is refused when the composite is built. With
+  workshops switched off the composite is the macro it is.
+  `helios_describe modules` lists the shipped composites with their
+  blocks.
 
 **Macros on a workspace** (`helios_template::macros`). A user's
 composites are made from a workspace's nodes and live in its bundle,

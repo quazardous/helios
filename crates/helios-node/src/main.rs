@@ -120,8 +120,9 @@ impl Event for Idle {
     const KIND: &'static str = "node.idle";
 }
 
-/// The modules this node knows, with their manifests: what a surface or an
-/// agent needs to build and edit a network.
+/// The modules this node knows, with their manifests, and the composite
+/// files Helios ships (a workshop's block included): what a surface or
+/// an agent needs to build and edit a network.
 struct Modules;
 
 impl Describe for Modules {
@@ -135,7 +136,9 @@ impl Describe for Modules {
                 )
             })
             .collect();
-        json!({ "modules": modules })
+        let mut catalogue = helios_node::mcp::workspace_catalogue().describe();
+        let composites = catalogue["composites"].take();
+        json!({ "modules": modules, "composites": composites })
     }
 }
 

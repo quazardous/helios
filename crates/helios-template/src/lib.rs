@@ -46,6 +46,6 @@ pub use build::{Built, SOURCE_PORT, Source, placeholder, raw_placeholder};
 pub use bundle::{Bundle, Report, Text, Update, parse_composite, parse_template};
 pub use catalogue::Catalogue;
 pub use format::{
-    CompositeFile, CompositeRef, FORMAT, ImportDesc, LibraryDesc, Parameter, ParameterKind,
-    QueryDesc, SourceKind, SubWorkspace, Template,
+    CompositeFile, CompositeRef, FORMAT, ImportDesc, LibraryDesc, Measure, Parameter,
+    ParameterKind, QueryDesc, SourceKind, SubWorkspace, Target, Template, Workshop,
 };

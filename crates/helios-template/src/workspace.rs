@@ -1018,6 +1018,7 @@ fn network_composite(
         }],
         exposed: Vec::new(),
         panel: None,
+        workshop: None,
     })
 }
 

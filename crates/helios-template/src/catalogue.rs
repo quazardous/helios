@@ -6,10 +6,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use egui_pop_model::panels::PanelSpec;
-use helios_core::{Macro, Manifest, ModuleKind, ModuleRef, Network};
+use helios_core::{Composite, Macro, Manifest, ModuleKind, ModuleRef, Network, ParamKind};
 use serde_json::{Value as Json, json};
 
-use crate::format::{CompositeFile, CompositeRef, InnerDesc, PORTS};
+use crate::format::{At, CompositeFile, CompositeRef, InnerDesc, Measure, PORTS, Workshop};
 
 /// How deep composites may nest in one another.
 pub const MAX_DEPTH: usize = 8;
@@ -243,5 +243,36 @@ pub fn build(file: &CompositeFile, catalogue: &Catalogue, depth: usize) -> Resul
             .expose_as(&x.name, inner, &x.param, &x.exposure())
             .map_err(|e| format!("exposed[{i}]: {e}"))?;
     }
+    if let Some(w) = &file.workshop {
+        check_workshop(w, &built).map_err(|e| format!("workshop: {e}"))?;
+    }
     Ok(built)
+}
+
+/// A workshop's targets: each on an exposed number parameter, one per
+/// parameter, at a value its measure can take.
+fn check_workshop(w: &Workshop, built: &Macro) -> Result<(), String> {
+    let params = Composite::manifest(built).params;
+    let mut seen = BTreeSet::new();
+    for (i, t) in w.targets.iter().enumerate() {
+        let at = |e: &str| format!("targets[{i}] ({}): {e}", t.param);
+        let p = params
+            .iter()
+            .find(|p| p.name == t.param)
+            .ok_or_else(|| at("not an exposed parameter"))?;
+        if !matches!(p.kind, ParamKind::Float { .. } | ParamKind::Int { .. }) {
+            return Err(at("a target is for a number parameter"));
+        }
+        if !seen.insert(t.param.as_str()) {
+            return Err(at("a second target on that parameter"));
+        }
+        if !t.value.is_finite() {
+            return Err(at("the value is not a number"));
+        }
+        if t.measure == Measure::ClipHigh && t.at == At::Output && !(0.0..=100.0).contains(&t.value)
+        {
+            return Err(at("a share of pixels is between 0 and 100 %"));
+        }
+    }
+    Ok(())
 }

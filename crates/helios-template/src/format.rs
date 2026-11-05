@@ -459,6 +459,11 @@ pub struct CompositeFile {
     pub exposed: Vec<Exposed>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub panel: Option<PanelHint>,
+    /// What makes it a workshop (experimental): its intent and the
+    /// relative targets of its exposed parameters. Read whether
+    /// workshops are switched on or not; off, it is the macro it is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workshop: Option<Workshop>,
 }
 
 impl CompositeFile {
@@ -473,6 +478,94 @@ impl CompositeFile {
     /// Its file name: `<id>@<version>.helios-composite.json`.
     pub fn file_name(&self) -> String {
         format!("{}{COMPOSITE_EXTENSION}", self.reference())
+    }
+}
+
+/// What makes a macro a workshop (experimental, see
+/// `docs/design/workshops.md`): what it is for, in the user's words, and
+/// the relative targets its parameters are aimed at on each image.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Workshop {
+    /// What it is for, in English ("Brighter midtones without losing the
+    /// highlights").
+    pub intent: String,
+    /// English words it is found by.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub keywords: Vec<String>,
+    /// At most one per exposed number parameter, solved in this order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub targets: Vec<Target>,
+}
+
+/// What the image should measure, and which exposed parameter is moved
+/// to get there.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Target {
+    /// The exposed parameter's name.
+    pub param: String,
+    pub measure: Measure,
+    /// In the measure's unit ([`Measure::unit`]); with `at: input`, an
+    /// offset from what the input measures.
+    pub value: f64,
+    #[serde(default, skip_serializing_if = "At::is_output")]
+    pub at: At,
+}
+
+/// What a target measures, on the luminance of the working data (linear
+/// Rec.2020).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Measure {
+    /// The median luminance, in stops around 1.0.
+    #[serde(rename = "luma.median")]
+    LumaMedian,
+    /// The 99th percentile of luminance, in stops around 1.0.
+    #[serde(rename = "luma.high")]
+    LumaHigh,
+    /// The share of pixels above 1.0, in %.
+    #[serde(rename = "clip.high")]
+    ClipHigh,
+}
+
+impl Measure {
+    /// Every measure.
+    pub const ALL: [Measure; 3] = [Measure::LumaMedian, Measure::LumaHigh, Measure::ClipHigh];
+
+    /// Its name in a file.
+    pub fn name(self) -> &'static str {
+        match self {
+            Measure::LumaMedian => "luma.median",
+            Measure::LumaHigh => "luma.high",
+            Measure::ClipHigh => "clip.high",
+        }
+    }
+
+    /// The unit of a target's value.
+    pub fn unit(self) -> &'static str {
+        match self {
+            Measure::LumaMedian | Measure::LumaHigh => "stops",
+            Measure::ClipHigh => "%",
+        }
+    }
+}
+
+/// Where a target is measured.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum At {
+    /// The workshop's output.
+    #[default]
+    Output,
+    /// What enters it: the target is an offset from what the input
+    /// measures.
+    Input,
+}
+
+impl At {
+    #[allow(clippy::trivially_copy_pass_by_ref)] // serde's skip_serializing_if
+    fn is_output(&self) -> bool {
+        *self == At::Output
     }
 }
 
