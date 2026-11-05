@@ -616,6 +616,14 @@ hash) is part of Helios; deploying a NAS is not.
   zone detection), not absolute values.
 - Hypothesis to validate before building: mockup, a few photographers,
   measured time saved. "AI that learns your style" is already commoditized.
+- (2026-11-05, decided) **Workshops v1 built as an experimental
+  feature**, without the mockup test first. A workshop is a macro whose
+  file carries an intent, keywords and relative targets (measures solved
+  per image on a proxy render); a Workshops panel behind the
+  `interface.experimental.workshops` switch finds, applies and re-aims
+  them, each one undo step; the AI designing a workshop, zones and
+  series come later. Design and plan, not decided in their details:
+  [docs/design/workshops.md](docs/design/workshops.md).
 
 ### 2.6 Collaboration
 
@@ -780,7 +788,7 @@ Checked against darktable issues, discuss.pixls.us and competitors
 | Client/server catalog, NAS, multi-workstation | the best-supported need, but outside upstream |
 | Self-describing modules, headless / cloud engine | an architectural means, not an expressed need |
 | Parallel batches | a real need on one machine; nobody asks for multi-machine |
-| AI-first, intent -> workshop | a hypothesis to validate |
+| AI-first, intent -> workshop | a hypothesis to validate; v1 built as experimental first (2026-11-05) |
 | Collaboration, roles | a real need of a different audience (studios) |
 | Plugins | secondary (Lua already serves) |
 
