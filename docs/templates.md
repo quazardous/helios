@@ -399,6 +399,11 @@ mask group (`mask_combine`), feathered along the image's edges
 operator, the feather's radius and the blend's opacity. Its hint is the
 Masks panel.
 
+The shipped workshop (experimental) is `helios.lift-midtones` (version
+1): an exposure then a sigmoid, exposing `brightness` (-3 to 3 EV) and
+`contrast` (1 to 3), its `brightness` aimed so that the output's median
+luminance sits at -2.5 stops. With workshops off it is a plain macro.
+
 ## Sharing like plugins
 
 A template travels as its bundle, never as code: it references modules

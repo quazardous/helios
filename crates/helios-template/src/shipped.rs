@@ -89,9 +89,11 @@ const BUILTIN: &[&[(&str, &str)]] = &[
 ];
 
 /// The composite files Helios ships.
-const COMPOSITES: &[&str] = &[include_str!(
-    "../../../templates/composites/helios.masked-adjustment@1.helios-composite.json"
-)];
+const COMPOSITES: &[&str] = &[
+    include_str!("../../../templates/composites/helios.masked-adjustment@1.helios-composite.json"),
+    // The shipped workshop (experimental): a plain macro when they are off.
+    include_str!("../../../templates/composites/helios.lift-midtones@1.helios-composite.json"),
+];
 
 /// The built-in templates.
 pub fn templates() -> Vec<Bundle> {

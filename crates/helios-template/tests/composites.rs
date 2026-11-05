@@ -6,7 +6,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use egui_pop_model::layout::Layout;
-use helios_core::{Bus, Engine, ModuleRef, Region};
+use helios_core::{Bus, Engine, Graph, Image, ModuleRef, Params, Region};
+use helios_template::format::Measure;
+use helios_template::workshop;
 use helios_template::{Bundle, Catalogue, CompositeFile, CompositeRef, parse_composite, schema};
 use serde_json::json;
 
@@ -33,6 +35,7 @@ fn catalogue() -> Catalogue {
     use helios_module_masks as m;
     let mut c = Catalogue::new()
         .module(ModuleRef::new(helios_module_exposure::Exposure))
+        .module(ModuleRef::new(helios_module_sigmoid::Sigmoid))
         .module(ModuleRef::new(m::MaskCombine))
         .module(ModuleRef::new(m::MaskFeather))
         .module(ModuleRef::new(m::MaskBlur))
@@ -226,4 +229,81 @@ fn an_interface_that_widens_the_inner_range_is_refused_by_entry() {
     ]));
     let e = parse_composite(&text).unwrap_err();
     assert!(e.contains("colour"), "{e}");
+}
+
+/// A grey ramp whose luminance median sits at `median` stops around 1.0.
+fn ramp(median: f64) -> Image {
+    let (w, h) = (32u32, 32u32);
+    let mut data = Vec::with_capacity((w * h * 4) as usize);
+    let mid = 2f64.powf(median);
+    for i in 0..w * h {
+        // From a quarter to twice the median, evenly.
+        let v = mid * (0.25 + 1.75 * f64::from(i) / f64::from(w * h - 1));
+        #[allow(clippy::cast_possible_truncation)]
+        let v = v as f32;
+        data.extend_from_slice(&[v, v, v, 1.0]);
+    }
+    Image::new(Region::sized(w, h), 4, data)
+}
+
+/// Aims the shipped workshop on `input`, rendered by the engine.
+fn aim_lift_midtones(input: Image) -> workshop::Aimed {
+    let catalogue = catalogue();
+    let r = CompositeRef {
+        id: "helios.lift-midtones".into(),
+        version: 1,
+    };
+    let file = catalogue.get_composite(&r).unwrap();
+    let block = file.workshop.as_ref().expect("a workshop");
+    assert!(!block.intent.is_empty() && !block.keywords.is_empty());
+    let built = catalogue.build_composite(&r, 0).unwrap();
+    let ranges = workshop::ranges(&built);
+    let b = &ranges["brightness"];
+    assert_eq!((b.min, b.max, b.unit.as_deref()), (-3.0, 3.0, Some("EV")));
+    assert_eq!(b.step, Some(0.02), "the exposure's fine step");
+    assert_eq!((ranges["contrast"].min, ranges["contrast"].max), (1.0, 3.0));
+    let mut graph = Graph::new();
+    let region = input.region();
+    let src = graph.add_source("source", input.clone());
+    let node = graph
+        .add_module("lift", ModuleRef::composite(built), &Params::new())
+        .unwrap();
+    graph.connect(src, "image", node, "input").unwrap();
+    let engine = Engine::new(Arc::new(Bus::new()));
+    let params = graph.params(node).unwrap().unwrap();
+    let (answers, after) = workshop::aim(
+        |p: &Params| {
+            for (name, value) in p.iter() {
+                graph
+                    .set_param(node, name, value.clone())
+                    .map_err(|e| e.to_string())?;
+            }
+            engine
+                .render(&graph, node, "output", region)
+                .map_err(|e| e.to_string())
+        },
+        &input,
+        &params,
+        &block.targets,
+        &ranges,
+    )
+    .unwrap();
+    let a = answers.into_iter().next().unwrap();
+    assert_eq!(after.float("brightness"), a.value);
+    a
+}
+
+#[test]
+fn the_lift_midtones_workshop_builds_and_aims_each_image_at_its_own_value() {
+    let dark = aim_lift_midtones(ramp(-4.5));
+    let bright = aim_lift_midtones(ramp(-3.5));
+    for a in [&dark, &bright] {
+        assert_eq!(a.measure, Measure::LumaMedian);
+        assert!(a.reached && a.note.is_none(), "{a:?}");
+        let measured = a.measured.unwrap();
+        assert!((measured + 2.5).abs() < 0.05, "{a:?}");
+        assert!(a.probes <= workshop::MAX_PROBES, "{a:?}");
+    }
+    // The darker image is lifted more.
+    assert!(dark.value > bright.value + 0.5, "{dark:?} {bright:?}");
 }

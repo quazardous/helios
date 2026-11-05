@@ -4,8 +4,8 @@ Status: **accepted, being built** (2026-11-05). The owner decided on
 2026-11-05 to build workshops v1 as an **experimental** feature,
 without the mockup test with photographers that ROADMAP section 2.5 and
 [NEEDS.md](../NEEDS.md) planned first, and accepted this plan with its
-defaults. Built: steps 1 to 3 of the plan (the switch and the empty
-panel, the workshop block in the format, aiming). Each choice has a
+defaults. Built: steps 1 to 4 of the plan (the switch and the empty
+panel, the workshop block in the format, aiming, the shipped workshop). Each choice has a
 default; the open questions at the end are for the owner to settle.
 
 ## What a workshop is
@@ -352,7 +352,8 @@ included.
    ends tested first, the notes; synthetic-image tests.
 4. **The shipped workshop** (S). `helios.lift-midtones@1` in
    `templates/composites/`, in the desktop's catalogue; a test that it
-   builds and aims.
+   builds and aims. `workshop::ranges` reads each target's range from
+   the macro's exposed parameters (hard range, fine step, unit).
 5. **Apply** (M). `State::workshop_applied` (insertion after a node,
    the refusals), `workshop.apply` as a desktop step carrying the aimed
    values, the engine-backed render closure on a proxy, the MCP verb,

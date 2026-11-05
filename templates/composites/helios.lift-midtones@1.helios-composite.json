@@ -1,0 +1,37 @@
+{
+  "format": 1,
+  "id": "helios.lift-midtones",
+  "version": 1,
+  "name": "Lift midtones",
+  "description": "Brighter midtones, highlights kept",
+  "inputs": [
+    { "name": "input", "channels": 4, "layout": "rgba" }
+  ],
+  "outputs": [
+    { "name": "output", "channels": 4, "layout": "rgba" }
+  ],
+  "nodes": [
+    { "name": "exposure", "module": "exposure" },
+    { "name": "tone", "module": "sigmoid" }
+  ],
+  "connections": [
+    { "from": "@", "port": "input", "to": "exposure", "input": "input" },
+    { "from": "exposure", "port": "output", "to": "tone", "input": "input" }
+  ],
+  "exits": [
+    { "from": "tone", "port": "output", "output": "output" }
+  ],
+  "exposed": [
+    { "name": "brightness", "node": "exposure", "param": "exposure",
+      "label": "Brightness", "unit": "EV", "min": -3.0, "max": 3.0 },
+    { "name": "contrast", "node": "tone", "param": "contrast",
+      "label": "Contrast", "min": 1.0, "max": 3.0, "soft": [1.2, 2.2] }
+  ],
+  "workshop": {
+    "intent": "Brighter midtones without losing the highlights",
+    "keywords": ["brighten", "lift", "midtones", "underexposed"],
+    "targets": [
+      { "param": "brightness", "measure": "luma.median", "value": -2.5, "at": "output" }
+    ]
+  }
+}

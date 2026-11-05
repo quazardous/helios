@@ -22,7 +22,7 @@
 use std::cell::Cell;
 use std::collections::BTreeMap;
 
-use helios_core::{Image, Params, Value};
+use helios_core::{Composite, Image, Macro, ParamHint, ParamKind, ParamSpec, Params, Value};
 use helios_scopes::Scale;
 
 use crate::format::{At, Measure, Target};
@@ -121,6 +121,38 @@ impl Range {
             None => format!("{v}"),
         }
     }
+}
+
+/// Each exposed number parameter's [`Range`]: its (narrowed) hard range
+/// from `params`, its fine step and unit from `hints`. A module's or a
+/// macro's manifest and hints, as the graph holds them.
+#[allow(clippy::cast_precision_loss)]
+pub fn ranges_of(params: &[ParamSpec], hints: &[ParamHint]) -> BTreeMap<String, Range> {
+    params
+        .iter()
+        .filter_map(|p| {
+            let (min, max, integer) = match p.kind {
+                ParamKind::Float { min, max, .. } => (min, max, false),
+                ParamKind::Int { min, max, .. } => (min as f64, max as f64, true),
+                _ => return None,
+            };
+            let hint = hints.iter().find(|h| h.name == p.name);
+            let range = Range {
+                min,
+                max,
+                step: hint.and_then(|h| h.step),
+                integer,
+                unit: hint.and_then(|h| h.unit.clone()),
+            };
+            Some((p.name.clone(), range))
+        })
+        .collect()
+}
+
+/// A macro's exposed number parameters' ranges ([`ranges_of`]): what
+/// [`aim`] searches a workshop's targets over.
+pub fn ranges(m: &Macro) -> BTreeMap<String, Range> {
+    ranges_of(&Composite::manifest(m).params, &Composite::param_hints(m))
 }
 
 /// How one target was aimed.
