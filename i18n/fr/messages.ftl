@@ -951,3 +951,7 @@ gui-modules-macro-update = Passer à la version { $version }
 
 gui-modules-macro-update-hint = Passer { $node } à la version { $version } de sa macro, ses valeurs reprises par nom
 
+
+gui-workshops-experimental = Expérimental : peut changer ; ce qu’il enregistre reste une macro
+
+gui-workshops-none = Aucun atelier dans cet espace de travail pour l’instant

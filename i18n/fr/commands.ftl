@@ -542,3 +542,12 @@ command-macro-upgrade =
 
 command-macro-interface =
     .title = Choisir les paramètres qu’une macro montre, enregistrés comme une nouvelle version (`node`, le nœud sélectionné par défaut ; `exposed` ; `dry_run`)
+
+command-helios-workshops-detach =
+    .title = Déplacer Ateliers dans une nouvelle fenêtre
+
+command-helios-workshops-dock =
+    .title = Remettre Ateliers dans sa zone
+
+command-helios-workshops-moveTo =
+    .title = Déplacer Ateliers vers une zone (`area`)

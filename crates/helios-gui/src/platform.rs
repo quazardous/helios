@@ -226,11 +226,12 @@ impl Opens {
 }
 
 /// Flags of `helios-gui` followed by a value that is not something to open.
-const VALUED: [&str; 4] = [
+const VALUED: [&str; 5] = [
     "--vault",
     "--node",
     "--token-file",
     crate::mask_display::FLAG,
+    crate::workshops::SET_FLAG,
 ];
 
 /// What a launch's arguments ask to open: paths (relative ones from

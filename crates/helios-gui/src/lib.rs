@@ -48,6 +48,7 @@ pub mod tips;
 pub mod viewport;
 mod windows;
 mod workbench;
+pub mod workshops;
 
 pub use shell::{Shell, headless, name_rect};
 pub use workbench::{IMAGE_FIRST, area_named, beside_the_end_side, gather_palettes, image_first};
@@ -81,6 +82,7 @@ pub const PANEL_ICONS: &[(&str, &str)] = &[
     ("helios.stacks", "phosphor:stack"),
     ("helios.duplicates", "copy"),
     ("helios.decisions", "phosphor:seal-question"),
+    (workshops::PANEL, "phosphor:flask"),
 ];
 
 /// The panels Helios declares today, with the areas each may be moved to
@@ -90,6 +92,21 @@ pub const PANEL_ICONS: &[(&str, &str)] = &[
 /// The culling panels (Compare, Stacks, Duplicates) and the Navigator
 /// start closed: a template's layout, or the user, opens them.
 pub fn helios_panels() -> Vec<PanelSpec> {
+    helios_panels_with(Experimental::default())
+}
+
+/// The experimental features switched on for this run (read once, when
+/// the desktop starts): each declares its panel only when on.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Experimental {
+    /// Workshops (`interface.experimental.workshops`, see
+    /// [`workshops`]).
+    pub workshops: bool,
+}
+
+/// [`helios_panels`], with the panels of the experimental features
+/// switched on: the Workshops panel (end side, closed until opened).
+pub fn helios_panels_with(experimental: Experimental) -> Vec<PanelSpec> {
     use Area::{Bottom, Center, EndSide, StartSide};
     let sides = [StartSide, EndSide, Bottom];
     let anywhere = [Center, StartSide, EndSide, Bottom];
@@ -121,8 +138,10 @@ pub fn helios_panels() -> Vec<PanelSpec> {
             false,
         ),
         ("helios.decisions", "Decisions", EndSide, &sides[..], false),
+        (workshops::PANEL, "Workshops", EndSide, &sides[..], false),
     ]
     .into_iter()
+    .filter(|(id, ..)| *id != workshops::PANEL || experimental.workshops)
     .map(|(id, title, area, areas, open)| {
         let id = PanelId::new(id).expect("Helios's panel ids are valid");
         let floats = FLOATABLE.contains(&id.as_str());

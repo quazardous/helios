@@ -28,7 +28,7 @@ use egui_pop::platform::instance::{self, Instance, Launch, Single};
 use helios_core::Message;
 use helios_gui::contexts::{self, Opened};
 use helios_gui::platform::{self, Open};
-use helios_gui::{Shell, headless, helios_panels};
+use helios_gui::{Shell, headless, helios_panels, helios_panels_with};
 use helios_gui::{quit, start};
 
 /// Where a workspace's own files are kept (the profile it uses): in the
@@ -883,6 +883,8 @@ fn main() -> Result<(), String> {
         Open::Workspace(_) => None,
     });
     let nodes = node_links(&args)?;
+    // One invocation's settings (`--set KEY=VALUE`, the run layer).
+    let run_settings = helios_gui::workshops::run_layer(&args)?;
     let vault_file = args
         .iter()
         .position(|a| a == "--vault")
@@ -944,6 +946,18 @@ fn main() -> Result<(), String> {
             warn(&format!("the user's settings: {e}"));
             true
         });
+    // The experimental features, read once: on, their panels are
+    // declared (and their commands registered) for the whole session.
+    let experimental = helios_gui::Experimental {
+        workshops: vault
+            .as_ref()
+            .map_or(Ok(None), |v| v.config_layer("user"))
+            .and_then(|layer| helios_gui::workshops::enabled(layer.as_deref(), &run_settings))
+            .unwrap_or_else(|e| {
+                warn(&format!("the user's settings: {e}"));
+                false
+            }),
+    };
     // The workspace as it stands: its template's network, as edited.
     let config = helios_gui::shell::config_dir();
     let bundle = match helios_template::workspace::Files::new(&config, &workspace).load() {
@@ -957,7 +971,7 @@ fn main() -> Result<(), String> {
     // The image asked for is made ready while the window opens.
     let preparing = image_file.map(|path| prepare(path, bundle, vault.clone()));
     let earlier = earlier_layout(&workspace, &ui_settings);
-    let mut builder = Shell::builder(helios_panels(), Some(ui_settings))
+    let mut builder = Shell::builder(helios_panels_with(experimental), Some(ui_settings))
         .workspace(&workspace)
         .on_exit(move |app| save_workspace(&dir, app))
         .desktop(instance)

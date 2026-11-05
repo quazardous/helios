@@ -926,6 +926,9 @@ impl Shell {
                     .panel_ui(ui, &values, selection.as_deref(), &members);
             });
         }
+        if has(&shell, crate::workshops::PANEL) {
+            shell.set_content(crate::workshops::PANEL, crate::workshops::panel_ui);
+        }
         if has(&shell, crate::queue::PANEL) {
             let (panel, app) = (shell.queue_panel.clone(), shell.app.handle().clone());
             shell.set_content(crate::queue::PANEL, move |ui| {

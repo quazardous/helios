@@ -458,7 +458,9 @@ mod tests {
     fn every_panel_has_an_icon_that_resolves() {
         // The folded side bars and the activity bar show it instead of
         // the title's first letter.
-        for spec in crate::helios_panels() {
+        // The experimental panels included.
+        let all = crate::Experimental { workshops: true };
+        for spec in crate::helios_panels_with(all) {
             let id = spec.id.as_str();
             assert!(!spec.icon.is_empty(), "panel {id} has no icon");
             assert!(
@@ -468,7 +470,7 @@ mod tests {
             );
         }
         // Every icon names a panel Helios declares.
-        let ids: Vec<String> = crate::helios_panels()
+        let ids: Vec<String> = crate::helios_panels_with(all)
             .iter()
             .map(|p| p.id.as_str().to_string())
             .collect();

@@ -340,6 +340,16 @@ its normalized input, the same description a module parameter has, so one
 widget library draws both, and each widget shows where the effective value
 comes from (default, global, project, user, run).
 
+**Experimental features** (2026-11-05) sit under the `interface` page's
+`experimental` group, off by default, and are read once when the desktop
+starts: switching one takes effect at the next start. The desktop's
+`--set KEY=VALUE` gives a setting for one run (the run layer).
+`interface.experimental.workshops` declares the Workshops panel
+(`helios.workshops`, end side, closed until opened; its header says it
+is experimental) and, as they land, the `workshop.*` commands in the
+palette's "Experimental" category; off, neither exists. See
+[design/workshops.md](design/workshops.md).
+
 ## Node header
 
 Every node of a network shows the same header, whatever surface draws it.

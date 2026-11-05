@@ -26,7 +26,10 @@ const MENUS: [MenuId; 3] = [
 /// Helios's declarations, from a headless desktop shell and the node's
 /// module registry.
 pub fn collect() -> Declarations {
-    let shell = helios_gui::Shell::new(helios_gui::helios_panels(), None);
+    // Every panel, the experimental ones included: their texts are
+    // translated before anyone switches them on.
+    let all = helios_gui::Experimental { workshops: true };
+    let shell = helios_gui::Shell::new(helios_gui::helios_panels_with(all), None);
     let panels = shell.panels().iter().map(|p| helios_i18n::extract::Panel {
         id: p.id.to_string(),
         title: p.title.clone(),

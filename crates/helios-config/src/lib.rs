@@ -310,6 +310,17 @@ pub const SETTINGS: &[Setting] = &[
             default: "detail",
         },
     },
+    Setting {
+        key: "interface.experimental.workshops",
+        concern: Concern::User,
+        label: "Workshops",
+        about: "Experimental: the Workshops panel and commands, to find, apply and aim macros by what they are for. May change; what it saves stays a macro. Takes effect at the next start.",
+        kind: Kind::Toggle {
+            default: false,
+            on: "on",
+            off: "off",
+        },
+    },
 ];
 
 /// The declared settings a program knows.

@@ -745,6 +745,10 @@ gui-vault-unreadable = Cannot read the vault: { $error }
 
 gui-window-frame-error = window frame: { $error }
 
+gui-workshops-experimental = Experimental: may change; what it saves stays a macro
+
+gui-workshops-none = No workshops in this workspace yet
+
 gui-workspace-description = description
 
 gui-workspace-edit-title = Edit the workspace

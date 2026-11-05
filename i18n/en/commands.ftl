@@ -175,6 +175,15 @@ command-helios-viewport-dock =
 command-helios-viewport-moveTo =
     .title = Move Image to an area (`area`)
 
+command-helios-workshops-detach =
+    .title = Move Workshops to a new window
+
+command-helios-workshops-dock =
+    .title = Dock Workshops back in its area
+
+command-helios-workshops-moveTo =
+    .title = Move Workshops to an area (`area`)
+
 command-keymap-package =
     .title = Add a keymap package's keys over the defaults (`name`: darktable-classic)
 

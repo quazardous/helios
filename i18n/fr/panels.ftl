@@ -44,3 +44,6 @@ panel-helios-vault =
 
 panel-helios-viewport =
     .title = Image
+
+panel-helios-workshops =
+    .title = Ateliers
