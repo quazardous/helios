@@ -352,7 +352,7 @@ impl Shell {
 
     /// A macro step as one undo step moving the image's values; a dry run
     /// answers what it would do and changes nothing.
-    fn macro_step(
+    pub(super) fn macro_step(
         &mut self,
         label: &str,
         args: &Value,

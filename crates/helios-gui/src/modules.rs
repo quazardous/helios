@@ -127,6 +127,8 @@ struct MacroRow {
     version: u32,
     open: bool,
     newer: Option<u32>,
+    /// Its file carries a workshop block.
+    workshop: bool,
 }
 
 /// The newest version of each composite Helios ships, by id.
@@ -154,7 +156,18 @@ fn macros(store: &Store) -> std::collections::BTreeMap<String, MacroRow> {
         return std::collections::BTreeMap::new();
     };
     let mut newest = shipped_newest().clone();
+    // The files with a workshop block, `id@version`.
+    let mut workshops: std::collections::BTreeSet<String> = helios_template::shipped::composites()
+        .into_iter()
+        .filter(|f| f.workshop.is_some())
+        .map(|f| f.reference().to_string())
+        .collect();
     for f in json["composites"].as_array().into_iter().flatten() {
+        if !f["workshop"].is_null()
+            && let (Some(id), Some(v)) = (f["id"].as_str(), f["version"].as_u64())
+        {
+            workshops.insert(format!("{id}@{v}"));
+        }
         if let (Some(id), Some(v)) = (f["id"].as_str(), f["version"].as_u64()) {
             let v = u32::try_from(v).unwrap_or_default();
             let at: &mut u32 = newest.entry(id.to_string()).or_default();
@@ -172,20 +185,31 @@ fn macros(store: &Store) -> std::collections::BTreeMap<String, MacroRow> {
                 .and_then(|id| newest.get(id))
                 .copied()
                 .filter(|v| *v > version);
+            let workshop = n["composite"]["id"]
+                .as_str()
+                .is_some_and(|id| workshops.contains(&format!("{id}@{version}")));
             Some((
                 n["name"].as_str()?.to_string(),
                 MacroRow {
                     version,
                     open: n["open"].as_bool().unwrap_or(false),
                     newer,
+                    workshop,
                 },
             ))
         })
         .collect()
 }
 
-/// Draws the panel: one row per module of the viewport's network.
-pub fn ui(ui: &mut Ui, viewport: &RefCell<crate::viewport::Viewport>, values: &Mutex<Store>) {
+/// Draws the panel: one row per module of the viewport's network; with
+/// `workshops` on (the experimental switch), a macro without a workshop
+/// block offers "Save as workshop…" (`workshop.save`).
+pub fn ui(
+    ui: &mut Ui,
+    viewport: &RefCell<crate::viewport::Viewport>,
+    values: &Mutex<Store>,
+    workshops: bool,
+) {
     let ctx = ui.ctx().clone();
     // Named, to be pictured and found by tests.
     crate::name_rect(&ctx, PANEL, ui.max_rect());
@@ -346,6 +370,25 @@ pub fn ui(ui: &mut Ui, viewport: &RefCell<crate::viewport::Viewport>, values: &M
                             {
                                 run = Some((
                                     "macro.interface",
+                                    serde_json::json!({ "node": row.node }),
+                                ));
+                            }
+                            if workshops
+                                && !m.workshop
+                                && ui
+                                    .small_button(tr(Message::new(
+                                        "gui-modules-save-workshop",
+                                        "Save as workshop…",
+                                    )))
+                                    .on_hover_text(tr(Message::new(
+                                        "gui-modules-save-workshop-hint",
+                                        "Give { $node } an intent and targets aimed per image, saved as a new version (experimental)",
+                                    )
+                                    .with("node", &row.node)))
+                                    .clicked()
+                            {
+                                run = Some((
+                                    "workshop.save",
                                     serde_json::json!({ "node": row.node }),
                                 ));
                             }

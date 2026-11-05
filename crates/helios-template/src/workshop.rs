@@ -33,8 +33,9 @@ use crate::build::SOURCE_PORT;
 use crate::catalogue::Catalogue;
 use crate::format::{
     At, CompositeFile, CompositeRef, Connection, Endpoint, Measure, NetworkDesc, NodeDesc, Target,
+    Workshop,
 };
-use crate::macros::{Moves, Step};
+use crate::macros::{Moves, Step, Values, next_ref, node_path, values_of};
 use crate::network::{PortInfo, fresh_name, ports_of, types_fit};
 use crate::workspace::State;
 
@@ -529,6 +530,65 @@ impl State {
                 "rewired": rewired,
                 "view": view,
                 "values": values,
+            }),
+        })
+    }
+}
+
+impl State {
+    /// Saves the macro `node` as a workshop (`workshop.save`): a file is
+    /// never rewritten, so the block is saved in the macro's next version
+    /// (a user's macro gets version n+1, a shipped one a copy of its own
+    /// under `user.`), the node pinned to it, as the interface editor
+    /// does. The exposed parameters are the same, so every value the image
+    /// holds on the node is carried as it is (`values`). Refused while the
+    /// macro is open, for a block the macro already has, and for one its
+    /// parameters do not fit (`workshop: targets[0] (…): …`).
+    pub fn workshop_saved(
+        &self,
+        catalogue: &Catalogue,
+        node: &str,
+        workshop: &Workshop,
+        values: &Values,
+    ) -> Result<Step, String> {
+        let cat = self.bundle.catalogue(catalogue);
+        let (i, desc, r) = self.macro_node(node)?;
+        if desc.open {
+            return Err(format!("`{node}` is open: fold it first"));
+        }
+        let file = cat
+            .get_composite(&r)
+            .ok_or_else(|| format!("unknown composite `{r}`"))?;
+        if file.workshop.as_ref() == Some(workshop) {
+            return Err(format!("`{node}` is already this workshop"));
+        }
+        if workshop.intent.trim().is_empty() {
+            return Err("a workshop says what it is for: the intent is empty".into());
+        }
+        let to = next_ref(&cat, &r, &file.name);
+        let mut next_file = file.clone();
+        next_file.id.clone_from(&to.id);
+        next_file.version = to.version;
+        next_file.workshop = Some(workshop.clone());
+        crate::catalogue::build(&next_file, &cat, 0)?;
+        let mut next = self.clone();
+        next.bundle.template.network.nodes[i].composite = Some(to.clone());
+        next.bundle.composites.push(next_file);
+        let next = State::checked(next, catalogue)?;
+        // Set again on the node pinned to another version, which starts
+        // from the network's values.
+        let moves: Moves = values_of(values, node)
+            .into_iter()
+            .map(|(p, v)| (node_path(node, p), Some(v.clone())))
+            .collect();
+        Ok(Step {
+            state: next,
+            values: moves,
+            answer: json!({
+                "node": node,
+                "from": r,
+                "to": to,
+                "workshop": workshop,
             }),
         })
     }

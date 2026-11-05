@@ -1,12 +1,12 @@
 # Workshops v1: an experimental surface on macros
 
-Status: **accepted, being built** (2026-11-05). The owner decided on
+Status: **accepted, v1 built** (2026-11-05). The owner decided on
 2026-11-05 to build workshops v1 as an **experimental** feature,
 without the mockup test with photographers that ROADMAP section 2.5 and
 [NEEDS.md](../NEEDS.md) planned first, and accepted this plan with its
-defaults. Built: steps 1 to 6 of the plan (the switch and the empty
+defaults. Built: the seven steps of the plan (the switch and the empty
 panel, the workshop block in the format, aiming, the shipped workshop,
-applying, the panel). Each choice has a
+applying, the panel, saving as a workshop): v1 is in. Each choice has a
 default; the open questions at the end are for the owner to settle.
 
 ## What a workshop is
@@ -382,7 +382,18 @@ included.
 7. **Save as workshop** (M). `workshop.save` as the macro's next
    version, the form dialog from the Modules panel and the graph's node
    menu, the target prefilled from the open image's measure, the verb,
-   undo tests.
+   undo tests. As built (2026-11-05): the step is
+   `State::workshop_saved` in `helios_template::workshop`; the form
+   (egui-pop's `Form`) has the intent (the macro's description at
+   first), the keywords as one text separated by commas, and per exposed
+   number parameter a measure (none by default) and a value, prefilled
+   with the median the open image measures now at the macro's output
+   (the field's label gives all three measures, since one value field
+   serves the three); "Save as workshop…" is in the Modules panel only:
+   the graph's node menu is egui-pop's (Duplicate, Delete) and takes no
+   items from the application yet, so from the graph the command
+   palette runs `workshop.save` on the selected node; the verb is
+   refused on the files, as the other workshop verbs are.
 
 Steps 1 to 4 need no GUI beyond the empty panel and can land in any
 order after 1; 5 to 7 in order. Total: about three S and four M.

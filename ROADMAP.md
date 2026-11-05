@@ -623,7 +623,9 @@ hash) is part of Helios; deploying a NAS is not.
   `interface.experimental.workshops` switch finds, applies and re-aims
   them, each one undo step; the AI designing a workshop, zones and
   series come later. Design and plan, not decided in their details:
-  [docs/design/workshops.md](docs/design/workshops.md).
+  [docs/design/workshops.md](docs/design/workshops.md). v1 built
+  (2026-11-05): the switch, the format's block, aiming, Lift midtones,
+  applying, the panel, saving a macro as a workshop.
 
 ### 2.6 Collaboration
 

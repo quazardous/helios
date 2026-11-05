@@ -497,6 +497,10 @@ gui-modules-open-hint = Open { $node }: its modules shown
 
 gui-modules-restore-hint = Bring { $node } back: the image renders it again ({ $key })
 
+gui-modules-save-workshop = Save as workshop…
+
+gui-modules-save-workshop-hint = Give { $node } an intent and targets aimed per image, saved as a new version (experimental)
+
 gui-new-workspace-created = workspace { $path } created from { $template }
 
 gui-new-workspace-directory = directory
@@ -780,6 +784,20 @@ gui-workshops-none = No workshops in this workspace yet
 gui-workshops-none-found = No workshop found for these words
 
 gui-workshops-open = Open in graph
+
+gui-workshops-save-intent = what it is for
+
+gui-workshops-save-keywords = keywords, separated by commas
+
+gui-workshops-save-target = { $param }: target
+
+gui-workshops-save-target-now = { $param }: target (the image now: { $now })
+
+gui-workshops-save-title = Save { $node } as a workshop
+
+gui-workshops-save-value = { $param }: value (stops, or % for clip.high)
+
+gui-workshops-save-verb = Save as { $file }
 
 gui-workshops-shipped = Shipped with Helios
 

@@ -997,8 +997,9 @@ impl Shell {
         }
         if has(&shell, crate::modules::PANEL) {
             let (viewport, values) = (shell.viewport.clone(), shell.values.clone());
+            let workshops = has(&shell, crate::workshops::PANEL);
             shell.set_content(crate::modules::PANEL, move |ui| {
-                crate::modules::ui(ui, &viewport, &values);
+                crate::modules::ui(ui, &viewport, &values, workshops);
             });
         }
         if has(&shell, crate::mask_tree::PANEL) {

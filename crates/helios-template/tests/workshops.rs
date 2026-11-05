@@ -368,3 +368,103 @@ fn suggest_ranks_the_name_then_the_keywords_then_the_intent() {
         1
     );
 }
+
+fn block(intent: &str, value: f64) -> helios_template::format::Workshop {
+    serde_json::from_value(json!({
+        "intent": intent,
+        "keywords": ["mine"],
+        "targets": [ { "param": "brightness", "measure": "luma.median", "value": value } ]
+    }))
+    .unwrap()
+}
+
+#[test]
+fn saved_as_a_workshop_a_macro_gets_its_next_version_with_the_block() {
+    let c = catalogue();
+    let now = state();
+    let expose: Vec<helios_template::format::Exposed> = serde_json::from_value(
+        json!([{ "name": "brightness", "node": "exp", "param": "exposure" }]),
+    )
+    .unwrap();
+    let made = now
+        .macro_made(&c, &["exp".into()], "Look", Some(&expose), &Values::new())
+        .unwrap()
+        .state;
+    let node = "look";
+    let r = |s: &State| {
+        s.bundle
+            .template
+            .network
+            .nodes
+            .iter()
+            .find(|n| n.name == node)
+            .and_then(|n| n.composite.clone())
+            .unwrap()
+    };
+    assert_eq!(r(&made).to_string(), "user.look@1");
+    let exposed = made.macro_interface(&c, node).unwrap().exposed;
+    let param = exposed
+        .iter()
+        .find(|x| x.param == "exposure")
+        .map(|x| x.name.clone())
+        .unwrap();
+    let mut w = block("Darker", -3.0);
+    w.targets[0].param.clone_from(&param);
+    let mut values = Values::new();
+    values.insert(format!("node/{node}/{param}"), Value::Float(0.5));
+    let step = made.workshop_saved(&c, node, &w, &values).unwrap();
+    assert_eq!(r(&step.state).to_string(), "user.look@2");
+    let saved = step
+        .state
+        .bundle
+        .composites
+        .iter()
+        .find(|f| f.reference().to_string() == "user.look@2")
+        .unwrap();
+    assert_eq!(saved.workshop.as_ref(), Some(&w));
+    // The image's values follow the node to its new version.
+    assert_eq!(
+        step.values.get(&format!("node/{node}/{param}")),
+        Some(&Some(Value::Float(0.5)))
+    );
+    assert_eq!(
+        step.answer["to"],
+        json!({ "id": "user.look", "version": 2 })
+    );
+    // The same block again, a target on what is not exposed, no intent.
+    let e = step
+        .state
+        .workshop_saved(&c, node, &w, &Values::new())
+        .unwrap_err();
+    assert!(e.contains("already"), "{e}");
+    let mut bad = w.clone();
+    bad.targets[0].param = "nothing".into();
+    let e = made
+        .workshop_saved(&c, node, &bad, &Values::new())
+        .unwrap_err();
+    assert!(e.contains("not an exposed parameter"), "{e}");
+    let e = made
+        .workshop_saved(&c, node, &block(" ", 0.0), &Values::new())
+        .unwrap_err();
+    assert!(e.contains("intent"), "{e}");
+    let e = made
+        .workshop_saved(&c, "tone", &w, &Values::new())
+        .unwrap_err();
+    assert!(e.contains("not a macro"), "{e}");
+}
+
+#[test]
+fn a_shipped_workshop_saved_again_is_a_users_copy() {
+    let c = catalogue();
+    let applied = state()
+        .workshop_applied(&c, &lift(), Some("exp"), &Params::new())
+        .unwrap()
+        .state;
+    let step = applied
+        .workshop_saved(&c, "lift_midtones", &block("Mine", -2.0), &Values::new())
+        .unwrap();
+    assert_eq!(
+        step.answer["to"],
+        json!({ "id": "user.lift-midtones", "version": 1 })
+    );
+}

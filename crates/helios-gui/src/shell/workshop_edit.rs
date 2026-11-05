@@ -7,9 +7,10 @@
 //! experimental switch is on, and an agent's call is refused with the
 //! switch's key when it is off.
 
-use helios_core::Params;
+use helios_core::{Message, Params};
 use helios_shell::commands::Origin;
 use helios_template::CompositeRef;
+use helios_template::format::{At, Exposed, Measure, Target, Workshop};
 use helios_template::workshop::Aimed;
 use helios_template::workspace::State;
 use serde_json::{Value, json};
@@ -27,6 +28,10 @@ pub(super) const COMMANDS: &[(&str, &str)] = &[
     (
         "workshop.aim",
         "Experimental: aim an applied workshop's targets again on the open image, one value step (`node`, the selected one by default; `dry_run`)",
+    ),
+    (
+        "workshop.save",
+        "Experimental: save a macro as a workshop, its next version with an intent, keywords and targets (`node`, the selected one by default; `intent`, `keywords`, `targets`; `dry_run`); without `intent`, a form asks",
     ),
     (
         "workshop.suggest",
@@ -63,6 +68,7 @@ impl Shell {
             "workshop.apply" => self.apply_workshop(args, origin),
             "workshop.aim" => self.aim_workshop(args, origin),
             "workshop.suggest" => self.suggest_workshops(args),
+            "workshop.save" => self.save_workshop(args, origin),
             other => Err(format!("no workshop command `{other}`")),
         }
     }
@@ -292,6 +298,202 @@ impl Shell {
         }))
     }
 
+    /// `workshop.save`: the macro `node` saved as a workshop, its next
+    /// version carrying the block (`intent`, `keywords`, `targets`), the
+    /// node pinned to it, as one workspace step that undo takes back
+    /// (`State::workshop_saved`). Without `intent`, a form asks for the
+    /// block, each target prefilled from what the open image measures
+    /// now. Publishing stays `macro.publish`, asked first.
+    fn save_workshop(&mut self, args: &Value, origin: &Origin) -> Result<Value, String> {
+        let node = match args["node"].as_str().filter(|s| !s.is_empty()) {
+            Some(n) => n.to_string(),
+            None => crate::modules::selected(&super::lock(&self.values))
+                .ok_or("no macro is selected")?,
+        };
+        // A node of an opened macro names it.
+        let node = node.split('.').next().unwrap_or(&node).to_string();
+        let Some(intent) = args["intent"].as_str() else {
+            self.workshop_form(&node)?;
+            return Ok(json!({ "node": node, "asked": true }));
+        };
+        let catalogue = self.workspace_catalogue();
+        let state = self.workspace_state().ok_or("no workspace is open")?;
+        let interface = state.macro_interface(&catalogue, &node)?;
+        let keywords: Vec<String> = match &args["keywords"] {
+            Value::Null => Vec::new(),
+            Value::String(s) => s
+                .split(',')
+                .map(str::trim)
+                .filter(|k| !k.is_empty())
+                .map(String::from)
+                .collect(),
+            v => serde_json::from_value(v.clone()).map_err(|e| format!("keywords: {e}"))?,
+        };
+        let targets: Vec<Target> = match &args["targets"] {
+            Value::Null => form_targets(args, &interface.exposed)?,
+            v => serde_json::from_value(v.clone()).map_err(|e| format!("targets: {e}"))?,
+        };
+        let workshop = Workshop {
+            intent: intent.trim().to_string(),
+            keywords,
+            targets,
+        };
+        let label = format!("save {node} as a workshop");
+        self.macro_step(&label, args, origin, |now, values| {
+            now.workshop_saved(&catalogue, &node, &workshop, values)
+        })
+    }
+
+    /// What the macro `node`'s output measures on the open image now, by
+    /// measure; `None` without an image open.
+    fn measures_now(&self, node: &str, port: &str) -> Option<Vec<(Measure, f64)>> {
+        let viewport = self.viewport.borrow();
+        let graph = viewport.graph()?;
+        let id = graph.find(node)?;
+        let image = proxy(&viewport, graph, id, port).ok()?;
+        Some(
+            Measure::ALL
+                .into_iter()
+                .filter_map(|m| Some((m, helios_template::workshop::measure(&image, m)?)))
+                .collect(),
+        )
+    }
+
+    /// The form of `workshop.save` on the macro `node`: its intent, its
+    /// keywords, and per exposed number parameter a target (none by
+    /// default, the value prefilled with what the open image measures
+    /// now at the macro's output). The answer runs `workshop.save`.
+    fn workshop_form(&mut self, node: &str) -> Result<(), String> {
+        use crate::dialogs::Field;
+        use helios_values::Descriptor;
+        let catalogue = self.workspace_catalogue();
+        let state = self.workspace_state().ok_or("no workspace is open")?;
+        let interface = state.macro_interface(&catalogue, node)?;
+        let file = state
+            .bundle
+            .catalogue(&catalogue)
+            .get_composite(&interface.composite)
+            .cloned()
+            .ok_or_else(|| format!("unknown composite `{}`", interface.composite))?;
+        let block = file.workshop.clone().unwrap_or_else(|| Workshop {
+            intent: file.description.clone(),
+            keywords: Vec::new(),
+            targets: Vec::new(),
+        });
+        let port = file
+            .outputs
+            .first()
+            .map(|o| o.name.clone())
+            .unwrap_or_default();
+        let now = self.measures_now(node, &port);
+        let text_field = |key: &str, label: String, value: String| Field {
+            key: key.into(),
+            descriptor: Descriptor::text(&label, ""),
+            value: helios_core::Value::Text(value),
+        };
+        let mut fields = vec![
+            text_field(
+                "intent",
+                self.text(Message::new("gui-workshops-save-intent", "what it is for")),
+                block.intent.clone(),
+            ),
+            text_field(
+                "keywords",
+                self.text(Message::new(
+                    "gui-workshops-save-keywords",
+                    "keywords, separated by commas",
+                )),
+                block.keywords.join(", "),
+            ),
+        ];
+        let now_text = now.as_ref().map(|now| {
+            now.iter()
+                .map(|(m, v)| {
+                    let (what, unit) = crate::workshops::measure_words(*m);
+                    format!("{} {v:.2} {}", self.text(what), self.text(unit))
+                })
+                .collect::<Vec<_>>()
+                .join(", ")
+        });
+        let mut seen: Vec<&str> = Vec::new();
+        for x in &interface.exposed {
+            if seen.contains(&x.name.as_str()) {
+                continue;
+            }
+            seen.push(&x.name);
+            let number = interface.inner.iter().any(|p| {
+                p.node == x.node
+                    && p.spec.name == x.param
+                    && matches!(
+                        p.spec.kind,
+                        helios_core::ParamKind::Float { .. } | helios_core::ParamKind::Int { .. }
+                    )
+            });
+            if !number {
+                continue;
+            }
+            let shown = x.label.clone().unwrap_or_else(|| x.name.clone());
+            let target = block.targets.iter().find(|t| t.param == x.name);
+            let measure = target.map_or(NONE, |t| t.measure.name());
+            let value = target.map(|t| t.value).or_else(|| {
+                now.as_ref()?
+                    .iter()
+                    .find(|(m, _)| *m == Measure::LumaMedian)
+                    .map(|(_, v)| (v * 100.0).round() / 100.0)
+            });
+            let label = match &now_text {
+                Some(now) => self.text(
+                    Message::new(
+                        "gui-workshops-save-target-now",
+                        "{ $param }: target (the image now: { $now })",
+                    )
+                    .with("param", &shown)
+                    .with("now", now),
+                ),
+                None => self.text(
+                    Message::new("gui-workshops-save-target", "{ $param }: target")
+                        .with("param", &shown),
+                ),
+            };
+            let mut choices = vec![NONE];
+            choices.extend(Measure::ALL.iter().map(|m| m.name()));
+            fields.push(Field {
+                key: format!("{MEASURE_KEY}{}", x.name),
+                descriptor: Descriptor::choice(&label, &choices, NONE),
+                value: helios_core::Value::Choice(measure.into()),
+            });
+            fields.push(Field {
+                key: format!("{VALUE_KEY}{}", x.name),
+                descriptor: Descriptor::float(
+                    &self.text(
+                        Message::new(
+                            "gui-workshops-save-value",
+                            "{ $param }: value (stops, or % for clip.high)",
+                        )
+                        .with("param", &shown),
+                    ),
+                    -100.0,
+                    100.0,
+                    0.0,
+                ),
+                value: helios_core::Value::Float(value.unwrap_or_default()),
+            });
+        }
+        let f = crate::dialogs::Form {
+            title: self.text(
+                Message::new("gui-workshops-save-title", "Save { $node } as a workshop")
+                    .with("node", node),
+            ),
+            fields,
+            verb: self.text(
+                Message::new("gui-workshops-save-verb", "Save as { $file }")
+                    .with("file", interface.next.to_string()),
+            ),
+            command: "workshop.save".into(),
+        };
+        self.form_with(f, json!({ "node": node }))
+    }
+
     /// `workshop.suggest`: the workshops of the workspace's catalogue the
     /// user's words find (`helios_template::workshop::suggest`), each with
     /// where it comes from and the node it is applied as, if it is.
@@ -361,4 +563,41 @@ fn proxy(
         .engine()
         .render_at(graph, node, port, region, scale)
         .map_err(|e| e.to_string())
+}
+
+/// The form's choice of no target.
+const NONE: &str = "none";
+/// The form's keys: per exposed parameter, its target's measure and value.
+const MEASURE_KEY: &str = "measure_";
+const VALUE_KEY: &str = "value_";
+
+/// The targets the form of `workshop.save` answered, in the order the
+/// parameters are exposed: a measure other than [`NONE`] and its value.
+fn form_targets(args: &Value, exposed: &[Exposed]) -> Result<Vec<Target>, String> {
+    let mut targets: Vec<Target> = Vec::new();
+    for x in exposed {
+        if targets.iter().any(|t| t.param == x.name) {
+            continue;
+        }
+        let Some(m) = args[format!("{MEASURE_KEY}{}", x.name)]
+            .as_str()
+            .filter(|m| *m != NONE)
+        else {
+            continue;
+        };
+        let measure = Measure::ALL
+            .into_iter()
+            .find(|k| k.name() == m)
+            .ok_or_else(|| format!("{}: `{m}` is not a measure", x.name))?;
+        let value = args[format!("{VALUE_KEY}{}", x.name)]
+            .as_f64()
+            .ok_or_else(|| format!("{}: the target's value is not a number", x.name))?;
+        targets.push(Target {
+            param: x.name.clone(),
+            measure,
+            value,
+            at: At::Output,
+        });
+    }
+    Ok(targets)
 }

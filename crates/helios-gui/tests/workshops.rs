@@ -414,3 +414,179 @@ fn suggest_ranks_the_name_then_the_keywords_then_the_intent() {
     assert_eq!(a["workshops"][0]["applied"], json!(["lift_midtones"]));
     let _ = std::fs::remove_dir_all(&root);
 }
+
+// ---------------------------------------------------------------------
+// Save as workshop
+// ---------------------------------------------------------------------
+
+fn pinned(h: &Harness<'static, Shell>, node: &str) -> Option<String> {
+    h.state()
+        .workspace_state()
+        .unwrap()
+        .bundle
+        .template
+        .network
+        .nodes
+        .iter()
+        .find(|n| n.name == node)
+        .and_then(|n| n.composite.as_ref())
+        .map(ToString::to_string)
+}
+
+fn composite_file(h: &Harness<'static, Shell>, r: &str) -> Option<helios_template::CompositeFile> {
+    h.state()
+        .workspace_state()
+        .unwrap()
+        .bundle
+        .composites
+        .into_iter()
+        .find(|f| f.reference().to_string() == r)
+}
+
+/// The window with the exposure made a macro, `look` (`user.look@1`),
+/// its exposure exposed.
+fn with_a_macro(root: &Path, on: bool) -> Harness<'static, Shell> {
+    let mut h = window(root, on);
+    answer(
+        &mut h,
+        "macro.make",
+        json!({
+            "nodes": ["exposure"],
+            "name": "Look",
+            "expose": [ { "name": "brightness", "node": "exposure", "param": "exposure" } ],
+        }),
+    )
+    .unwrap();
+    assert_eq!(pinned(&h, "look").as_deref(), Some("user.look@1"));
+    h
+}
+
+#[test]
+fn saving_a_macro_as_a_workshop_is_its_next_version_and_one_undo_step() {
+    let root = temp("save");
+    let mut h = with_a_macro(&root, true);
+    let steps = h.state().values.lock().unwrap().undo_steps().len();
+    let dry = answer(
+        &mut h,
+        "workshop.save",
+        json!({ "node": "look", "intent": "Darker", "dry_run": true }),
+    )
+    .unwrap();
+    assert_eq!(dry["dry_run"], json!(true));
+    assert_eq!(pinned(&h, "look").as_deref(), Some("user.look@1"));
+    let a = answer(
+        &mut h,
+        "workshop.save",
+        json!({
+            "node": "look",
+            "intent": "Darker, for moody shots",
+            "keywords": ["dark", "moody"],
+            "targets": [ { "param": "brightness", "measure": "luma.median", "value": -3.0 } ],
+        }),
+    )
+    .unwrap();
+    assert_eq!(a["to"], json!({ "id": "user.look", "version": 2 }), "{a}");
+    assert_eq!(pinned(&h, "look").as_deref(), Some("user.look@2"));
+    let w = composite_file(&h, "user.look@2").unwrap().workshop.unwrap();
+    assert_eq!(w.intent, "Darker, for moody shots");
+    assert_eq!(w.keywords, ["dark", "moody"]);
+    assert_eq!(w.targets[0].param, "brightness");
+    assert_eq!(
+        h.state().values.lock().unwrap().undo_steps().len(),
+        steps + 1
+    );
+    // A workshop now: suggested, and aimed again on the image.
+    let found = answer(&mut h, "workshop.suggest", json!({ "intent": "moody" })).unwrap();
+    assert_eq!(found["workshops"][0]["workshop"], json!("user.look@2"));
+    assert_eq!(found["workshops"][0]["from"], json!("workspace"));
+    let aimed = answer(&mut h, "workshop.aim", json!({ "node": "look" })).unwrap();
+    assert_eq!(aimed["aimed"][0]["param"], json!("brightness"), "{aimed}");
+    // Undo the aim, then the save: the node back on version 1, the file gone.
+    for _ in 0..2 {
+        h.state()
+            .values
+            .lock()
+            .unwrap()
+            .undo(&Origin::User)
+            .unwrap()
+            .expect("a step to undo");
+        follow(&mut h);
+    }
+    assert_eq!(pinned(&h, "look").as_deref(), Some("user.look@1"));
+    assert!(composite_file(&h, "user.look@2").is_none());
+    // Publishing stays macro.publish's, asked first.
+    let asked = answer(&mut h, "macro.publish", json!({ "node": "look" })).unwrap();
+    assert_eq!(asked["asked"], json!(true), "{asked}");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn the_save_form_asks_with_the_target_prefilled_from_the_image() {
+    let root = temp("save-form");
+    let mut h = with_a_macro(&root, true);
+    // The Modules panel offers it on a macro without a block.
+    h.state_mut()
+        .run("helios.modules.focus", json!(null), Origin::User)
+        .unwrap();
+    for _ in 0..3 {
+        h.run();
+    }
+    h.get_by_label("Save as workshop…");
+    let asked = answer(&mut h, "workshop.save", json!({ "node": "look" })).unwrap();
+    assert_eq!(asked["asked"], json!(true), "{asked}");
+    let dialog = h
+        .state_mut()
+        .run("dialog.current", json!(null), Origin::User)
+        .unwrap();
+    let text = dialog.to_string();
+    assert!(text.contains("Save look as a workshop"), "{text}");
+    assert!(text.contains("the image now: midtones"), "{text}");
+    assert!(text.contains("measure_brightness"), "{text}");
+    // What the form answers: the measure chosen, the value given.
+    let a = answer(
+        &mut h,
+        "workshop.save",
+        json!({
+            "node": "look",
+            "intent": "Darker",
+            "keywords": "dark, moody ,",
+            "measure_brightness": "luma.high",
+            "value_brightness": -0.5,
+        }),
+    )
+    .unwrap();
+    assert_eq!(a["workshop"]["keywords"], json!(["dark", "moody"]), "{a}");
+    assert_eq!(
+        a["workshop"]["targets"],
+        json!([ { "param": "brightness", "measure": "luma.high", "value": -0.5 } ])
+    );
+    // A workshop now: the panel no longer offers it.
+    for _ in 0..3 {
+        h.run();
+    }
+    assert!(h.query_by_label("Save as workshop…").is_none());
+    // No target chosen: a workshop without targets.
+    let a = answer(
+        &mut h,
+        "workshop.save",
+        json!({ "node": "look", "intent": "Just darker", "measure_brightness": "none" }),
+    )
+    .unwrap();
+    assert_eq!(a["workshop"]["targets"], json!(null), "{a}");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn off_save_as_workshop_is_not_offered() {
+    let root = temp("save-off");
+    let mut h = with_a_macro(&root, false);
+    h.state_mut()
+        .run("helios.modules.focus", json!(null), Origin::User)
+        .unwrap();
+    for _ in 0..3 {
+        h.run();
+    }
+    h.get_by_label("Publish…");
+    assert!(h.query_by_label("Save as workshop…").is_none());
+    let _ = std::fs::remove_dir_all(&root);
+}

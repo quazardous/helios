@@ -730,6 +730,35 @@ pub const TOOLS: &[Tool] = &[
         ],
     },
     Tool {
+        name: "helios_workshop_save",
+        endpoint: Endpoint::Workspace,
+        cmd: "workshop.save",
+        description: "Experimental (interface.experimental.workshops, refused with that key when off): saves a macro as a workshop, as one undoable step: its next version (a user's macro n+1, a copy under `user.` for a shipped one) carries the intent, keywords and relative targets, the node pinned to it, the image's values kept. Each target is on an exposed number parameter: a measure (luma.median and luma.high in stops around 1.0, clip.high in %) and the value the image should measure at the workshop's output. Publishing it to the library stays helios_macro_publish, which asks the user. Refused on the files: it needs the desktop holding the workspace",
+        params: &[
+            WORKSPACE,
+            optional(
+                "node",
+                optional_string,
+                "The macro's node; the selected one when null",
+            ),
+            Param {
+                name: "intent",
+                schema: string,
+                description: "What it is for, in English (Darker, for moody shots)",
+                default: None,
+            },
+            optional("keywords", optional_strings, "English words it is found by"),
+            optional(
+                "targets",
+                optional_objects,
+                "The relative targets, in the order they are aimed: [{\"param\": \"brightness\", \"measure\": \"luma.median\", \"value\": -2.5}]",
+            ),
+            GROUP,
+            DRY_RUN,
+            CONFIG,
+        ],
+    },
+    Tool {
         name: "helios_workshop_suggest",
         endpoint: Endpoint::Workspace,
         cmd: "workshop.suggest",
@@ -3305,6 +3334,7 @@ mod tests {
             ("helios_workshop_apply", "workshop.apply"),
             ("helios_workshop_aim", "workshop.aim"),
             ("helios_workshop_suggest", "workshop.suggest"),
+            ("helios_workshop_save", "workshop.save"),
         ] {
             let tool = TOOLS.iter().find(|t| t.name == verb).unwrap();
             assert_eq!(tool.cmd, cmd);

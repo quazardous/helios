@@ -364,7 +364,13 @@ user's library and the workspace's own; typed, ranked as
 row (an applied one selects its node instead), and, for the selected
 node when it is a workshop, its sliders as the Parameters panel draws
 them, each targeted one marked with its target, with Aim again and Open
-in graph. See [design/workshops.md](design/workshops.md).
+in graph. `workshop.save` (`node`, `intent`, `keywords`, `targets`,
+`dry_run`) saves a macro as a workshop: its next version carries the
+block, the node pinned to it, as one undo step; without `intent` a form
+asks (the Modules panel's "Save as workshop…" on a macro without a
+block), each target's value prefilled from what the open image measures
+at the macro's output. Publishing stays `macro.publish`, asked first.
+See [design/workshops.md](design/workshops.md).
 
 ## Node header
 

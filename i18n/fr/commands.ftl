@@ -558,5 +558,8 @@ command-workshop-apply =
 command-workshop-aim =
     .title = Expérimental : régler à nouveau les cibles d’un atelier appliqué sur l’image ouverte, une étape de valeurs (`node` : le nœud sélectionné par défaut ; `dry_run`)
 
+command-workshop-save =
+    .title = Expérimental : enregistrer une macro comme atelier, sa version suivante avec une intention, des mots-clés et des cibles (`node` : le nœud sélectionné par défaut ; `intent`, `keywords`, `targets` ; `dry_run`) ; sans `intent`, un formulaire les demande
+
 command-workshop-suggest =
     .title = Expérimental : trouver des ateliers d’après ce que vous voulez, classés par nom, mots-clés puis intention (`intent`)

@@ -529,6 +529,9 @@ command-workshop-aim =
 command-workshop-apply =
     .title = Experimental: apply a workshop after a node, aimed on the open image (`workshop`: id@version; `after`: the node the image is shown from by default; `aim`: true by default; `dry_run`)
 
+command-workshop-save =
+    .title = Experimental: save a macro as a workshop, its next version with an intent, keywords and targets (`node`, the selected one by default; `intent`, `keywords`, `targets`; `dry_run`); without `intent`, a form asks
+
 command-workshop-suggest =
     .title = Experimental: find workshops by what you want, ranked by name, keywords, then intent (`intent`)
 

@@ -43,7 +43,7 @@ pub struct Step {
 /// The id prefix of a user's macros; `helios.` is the shipped ones'.
 pub const USER_PREFIX: &str = "user.";
 
-fn node_path(node: &str, param: &str) -> String {
+pub(crate) fn node_path(node: &str, param: &str) -> String {
     format!("node/{node}/{param}")
 }
 
@@ -52,7 +52,7 @@ fn bypass_path(node: &str) -> String {
 }
 
 /// The values held on `node`: `(param, value)`.
-fn values_of<'a>(values: &'a Values, node: &str) -> Vec<(&'a str, &'a Value)> {
+pub(crate) fn values_of<'a>(values: &'a Values, node: &str) -> Vec<(&'a str, &'a Value)> {
     let prefix = format!("node/{node}/");
     values
         .iter()
@@ -268,7 +268,10 @@ impl State {
     }
 
     /// A composite node of the network, by name.
-    fn macro_node(&self, node: &str) -> Result<(usize, &NodeDesc, CompositeRef), String> {
+    pub(crate) fn macro_node(
+        &self,
+        node: &str,
+    ) -> Result<(usize, &NodeDesc, CompositeRef), String> {
         let net = &self.bundle.template.network;
         let (i, desc) = net
             .nodes
@@ -1330,7 +1333,7 @@ pub struct Interface {
 /// The file a changed interface of `r` is saved as: the next version of
 /// a user's macro; a copy of its own for a shipped one, whose id stays
 /// the shipped files'.
-fn next_ref(cat: &Catalogue, r: &CompositeRef, name: &str) -> CompositeRef {
+pub(crate) fn next_ref(cat: &Catalogue, r: &CompositeRef, name: &str) -> CompositeRef {
     if r.id.starts_with(USER_PREFIX) {
         let newest = cat
             .composite_files()

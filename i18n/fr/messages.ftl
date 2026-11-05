@@ -947,6 +947,10 @@ gui-modules-macro-publish = Publier…
 
 gui-modules-macro-publish-hint = Copier cette version de { $node } dans votre bibliothèque, pour le menu Ajouter de chaque espace de travail ; demandé d’abord, et non annulable
 
+gui-modules-save-workshop = Enregistrer comme atelier…
+
+gui-modules-save-workshop-hint = Donner à { $node } une intention et des cibles réglées par image, enregistrées comme nouvelle version (expérimental)
+
 gui-modules-macro-update = Passer à la version { $version }
 
 gui-modules-macro-update-hint = Passer { $node } à la version { $version } de sa macro, ses valeurs reprises par nom
@@ -989,6 +993,20 @@ gui-workshops-none-found = Aucun atelier trouvé pour ces mots
 gui-workshops-open = Ouvrir dans le graphe
 
 gui-workshops-shipped = Fournis avec Helios
+
+gui-workshops-save-intent = à quoi il sert
+
+gui-workshops-save-keywords = mots-clés, séparés par des virgules
+
+gui-workshops-save-target = { $param } : cible
+
+gui-workshops-save-target-now = { $param } : cible (l’image maintenant : { $now })
+
+gui-workshops-save-title = Enregistrer { $node } comme atelier
+
+gui-workshops-save-value = { $param } : valeur (IL, ou % pour clip.high)
+
+gui-workshops-save-verb = Enregistrer sous { $file }
 
 gui-workshops-unit-percent = %
 
