@@ -24,6 +24,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.56.0] - 2026-11-05
+
+### Added
+
+- Experimental: with workshops on, the `workshop.apply` command (and the
+  `helios_workshop_apply` tool for agents) inserts a workshop after the node
+  the image is shown from, its sliders aimed on the open image, as one step
+  that Ctrl+Z takes back whole; with workshops off, agents are told which
+  setting turns them on.
+- Experimental: a macro's file may carry a workshop block, what it is for and
+  the brightness or clipping each of its sliders aims at, so a workshop gives
+  each image its own values. Agents see it in the description of the shipped
+  composites.
+- Experimental: Helios ships a first workshop, Lift midtones (an exposure then
+  a tone curve), whose brightness is aimed so that the image's midtones land
+  at the same level whatever the photo; with workshops off it is a plain
+  macro in the graph's Add menu.
+- Experimental: a Workshops setting (Interface, Experimental, off by default)
+  adds a Workshops panel, empty for now, at the next start; it will find,
+  apply and aim macros by what they are for. `helios-gui --set KEY=VALUE`
+  gives a setting for one run, such as `--set interface.experimental.workshops=true`.
+
 ## [0.55.0] - 2026-11-04
 
 ### Added
