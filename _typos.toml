@@ -11,7 +11,13 @@ extend-exclude = [
     "templates/*/i18n/fr/",
     # Hashes of the English text, in hex.
     "i18n/*/english.hashes",
+    # Thumbnails of the raw corpus: binary PPM pictures, not text.
+    "tests/raw-corpus-thumbs/",
 ]
+
+[default]
+# "PNGs": the plural of PNG, split as PN + Gs by typos.
+extend-ignore-re = ["PNGs"]
 
 [default.extend-words]
 # Integer pixel coordinates next to `ix`, as in vkdt's shaders.
@@ -29,5 +35,19 @@ hilights = "hilights"
 monochrom = "monochrom"
 efficency = "efficency"
 compres = "compres"
-# French, in the tests that read translated text.
+# French, in the tests that read translated text and their samples.
 sur = "sur"
+espace = "espace"
+commandes = "commandes"
+mariage = "mariage"
+chambre = "chambre"
+# A parametric coordinate next to `iy`, as `ix` and `iy` elsewhere.
+iz = "iz"
+# Houdini's digital assets (HDA), in the macro design note.
+hda = "hda"
+# HDR metadata: maximum content light level (CLL).
+cll = "cll"
+# The ergonomics notes quote apps that spell it this way.
+togglable = "togglable"
+# The zlib crate `flate2`.
+flate = "flate"
