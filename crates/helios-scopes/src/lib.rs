@@ -92,6 +92,42 @@ impl Counts {
     pub fn peak(&self) -> u32 {
         self.bins.iter().copied().max().unwrap_or(0)
     }
+
+    /// Everything counted, outside the scale included.
+    pub fn total(&self) -> u64 {
+        self.bins.iter().map(|&c| u64::from(c)).sum::<u64>()
+            + u64::from(self.below)
+            + u64::from(self.above)
+    }
+
+    /// The value under which a share `q` (0 to 1) of what was counted
+    /// falls, in the scale's unit (stops for [`Scale::Stops`]), linear
+    /// within a bin; what fell outside the scale counts at its ends. None
+    /// when nothing was counted.
+    pub fn quantile(&self, scale: Scale, q: f64) -> Option<f64> {
+        let total = self.total();
+        if total == 0 {
+            return None;
+        }
+        let (min, max) = match scale {
+            Scale::Linear { max } => (0.0, f64::from(max)),
+            Scale::Stops { min, max } => (f64::from(min), f64::from(max)),
+        };
+        let width = (max - min) / self.bins.len().max(1) as f64;
+        let rank = q.clamp(0.0, 1.0) * total as f64;
+        let mut below = f64::from(self.below);
+        if rank < below {
+            return Some(min);
+        }
+        for (i, &count) in self.bins.iter().enumerate() {
+            let count = f64::from(count);
+            if count > 0.0 && rank < below + count {
+                return Some(min + (i as f64 + (rank - below) / count) * width);
+            }
+            below += count;
+        }
+        Some(max)
+    }
 }
 
 /// A histogram of the red, green and blue channels.
@@ -110,6 +146,25 @@ pub fn histogram(image: &Image, bins: usize, scale: Scale) -> Histogram {
         }
     }
     Histogram { scale, channels }
+}
+
+/// The luminance (Rec.2020 weights; a one- or two-channel image's first
+/// channel) of every pixel, counted.
+pub fn luminance(image: &Image, bins: usize, scale: Scale) -> Counts {
+    let mut counts = Counts::new(bins);
+    let n = image.channels() as usize;
+    for pixel in image.data().chunks_exact(n) {
+        counts.add(scale.bin(luma(pixel), bins));
+    }
+    counts
+}
+
+fn luma(p: &[f32]) -> f32 {
+    if p.len() < 3 {
+        p[0]
+    } else {
+        LUMA[0] * p[0] + LUMA[1] * p[1] + LUMA[2] * p[2]
+    }
 }
 
 /// For each column band, the counts of its levels: `columns[x].bins[level]`.
@@ -142,14 +197,7 @@ fn columns_of(
 
 /// Luminance over `columns` bands and `levels` levels.
 pub fn waveform(image: &Image, columns: usize, levels: usize, scale: Scale) -> Waveform {
-    let n = image.channels() as usize;
-    columns_of(image, columns, levels, scale, |p| {
-        if n < 3 {
-            p[0]
-        } else {
-            LUMA[0] * p[0] + LUMA[1] * p[1] + LUMA[2] * p[2]
-        }
-    })
+    columns_of(image, columns, levels, scale, luma)
 }
 
 /// Red, green and blue waveforms, each over `columns` bands.

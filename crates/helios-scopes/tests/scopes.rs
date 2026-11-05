@@ -56,3 +56,31 @@ fn a_parade_separates_the_channels() {
     assert_eq!(g.columns[1].bins[5], 4);
     assert_eq!(b.columns[0].bins[1], 4);
 }
+
+#[test]
+fn luminance_counts_and_its_quantiles() {
+    // Four greys, one above 1.0: 0.25, 0.5, 1.0 (the top of the scale's
+    // last bin) and 4.0.
+    let image = Image::new(
+        Region::sized(4, 1),
+        4,
+        [0.25f32, 0.5, 1.0, 4.0]
+            .iter()
+            .flat_map(|&v| [v, v, v, 1.0])
+            .collect(),
+    );
+    let s = Scale::Stops {
+        min: -4.0,
+        max: 0.0,
+    };
+    let counts = luminance(&image, 4, s);
+    assert_eq!(counts.bins, [0, 0, 1, 2]);
+    assert_eq!((counts.above, counts.total()), (1, 4));
+    // Half the pixels are under the middle of the last bin, linear in it.
+    assert_eq!(counts.quantile(s, 0.5), Some(-0.5));
+    assert_eq!(counts.quantile(s, 0.0), Some(-2.0));
+    // Above the scale counts at its top.
+    assert_eq!(counts.quantile(s, 0.99), Some(0.0));
+    let empty = luminance(&Image::new(Region::sized(0, 0), 4, Vec::new()), 4, s);
+    assert_eq!(empty.quantile(s, 0.5), None);
+}

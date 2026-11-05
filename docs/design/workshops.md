@@ -1,11 +1,12 @@
 # Workshops v1: an experimental surface on macros
 
-Status: **proposed** (2026-11-05). The owner decided on 2026-11-05 to
-build workshops v1 as an **experimental** feature, without the mockup
-test with photographers that ROADMAP section 2.5 and
-[NEEDS.md](../NEEDS.md) planned first. Nothing in this note is built.
-Each choice has a default; the open questions at the end are for the
-owner to settle.
+Status: **accepted, being built** (2026-11-05). The owner decided on
+2026-11-05 to build workshops v1 as an **experimental** feature,
+without the mockup test with photographers that ROADMAP section 2.5 and
+[NEEDS.md](../NEEDS.md) planned first, and accepted this plan with its
+defaults. Built: steps 1 to 3 of the plan (the switch and the empty
+panel, the workshop block in the format, aiming). Each choice has a
+default; the open questions at the end are for the owner to settle.
 
 ## What a workshop is
 

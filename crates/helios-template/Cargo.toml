@@ -8,6 +8,8 @@ repository.workspace = true
 
 [dependencies]
 helios-core.workspace = true
+# Workshops' measures: the scopes' luminance counts.
+helios-scopes.workspace = true
 # MIT: egui-pop's logic without egui (the layout document, panel specs).
 egui-pop-model.workspace = true
 serde.workspace = true

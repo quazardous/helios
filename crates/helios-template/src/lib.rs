@@ -40,6 +40,7 @@ pub mod network;
 pub mod schema;
 pub mod shipped;
 pub mod subworkspace;
+pub mod workshop;
 pub mod workspace;
 
 pub use build::{Built, SOURCE_PORT, Source, placeholder, raw_placeholder};
