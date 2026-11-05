@@ -554,3 +554,9 @@ command-helios-workshops-moveTo =
 
 command-workshop-apply =
     .title = Expérimental : appliquer un atelier après un nœud, réglé sur l’image ouverte (`workshop` : id@version ; `after` : le nœud d’où l’image est montrée par défaut ; `aim` : vrai par défaut ; `dry_run`)
+
+command-workshop-aim =
+    .title = Expérimental : régler à nouveau les cibles d’un atelier appliqué sur l’image ouverte, une étape de valeurs (`node` : le nœud sélectionné par défaut ; `dry_run`)
+
+command-workshop-suggest =
+    .title = Expérimental : trouver des ateliers d’après ce que vous voulez, classés par nom, mots-clés puis intention (`intent`)

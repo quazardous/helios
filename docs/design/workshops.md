@@ -4,9 +4,9 @@ Status: **accepted, being built** (2026-11-05). The owner decided on
 2026-11-05 to build workshops v1 as an **experimental** feature,
 without the mockup test with photographers that ROADMAP section 2.5 and
 [NEEDS.md](../NEEDS.md) planned first, and accepted this plan with its
-defaults. Built: steps 1 to 5 of the plan (the switch and the empty
+defaults. Built: steps 1 to 6 of the plan (the switch and the empty
 panel, the workshop block in the format, aiming, the shipped workshop,
-applying). Each choice has a
+applying, the panel). Each choice has a
 default; the open questions at the end are for the owner to settle.
 
 ## What a workshop is
@@ -368,7 +368,17 @@ included.
    aiming needs the open image.
 6. **The panel** (M). Find, the list, the applied workshop's sliders
    and targets, Aim again (`workshop.aim`, its value step and verb),
-   `workshop.suggest` and its verb; wbox screenshot.
+   `workshop.suggest` and its verb; wbox screenshot. As built
+   (2026-11-05): the ranking is `helios_template::workshop::suggest`
+   (a word matches a word of a workshop that starts with it, common
+   English words left out; the newest version of each id); typed words
+   list the workshops ranked, not grouped; `workshop.aim` aims from the
+   values the node holds now (part of the session cache's key); the
+   applied workshop has Aim again and Open in graph but no Remove
+   (`network.remove` does not rewire the node's readers, and refuses the
+   node the image is shown from: Ctrl+Z or the graph take it out); the
+   verbs are refused on the files, as `workshop.apply` is; no wbox
+   screenshot yet.
 7. **Save as workshop** (M). `workshop.save` as the macro's next
    version, the form dialog from the Modules panel and the graph's node
    menu, the target prefilled from the open image's measure, the verb,

@@ -523,8 +523,14 @@ command-workbench-run =
 command-workbench-systemMenu =
     .title = Show the Helios menu
 
+command-workshop-aim =
+    .title = Experimental: aim an applied workshop's targets again on the open image, one value step (`node`, the selected one by default; `dry_run`)
+
 command-workshop-apply =
     .title = Experimental: apply a workshop after a node, aimed on the open image (`workshop`: id@version; `after`: the node the image is shown from by default; `aim`: true by default; `dry_run`)
+
+command-workshop-suggest =
+    .title = Experimental: find workshops by what you want, ranked by name, keywords, then intent (`intent`)
 
 command-workspace-edit =
     .title = Edit the workspace (`name`, `description`, `icon`, `changes`)

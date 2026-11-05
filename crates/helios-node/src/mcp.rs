@@ -713,6 +713,39 @@ pub const TOOLS: &[Tool] = &[
         ],
     },
     Tool {
+        name: "helios_workshop_aim",
+        endpoint: Endpoint::Workspace,
+        cmd: "workshop.aim",
+        description: "Experimental (interface.experimental.workshops, refused with that key when off): aims an applied workshop's targets again on the open image, as one value step on the image's edit (nothing in the workspace changes): what feeds the workshop's node is rendered on a 256 px proxy and each target's parameter is solved there, the node's other values as they are now. Answers the values and, per target, whether it was reached. Refused for a node that is not a workshop, without an image open, and on the files: it needs the desktop holding the workspace",
+        params: &[
+            WORKSPACE,
+            optional(
+                "node",
+                optional_string,
+                "The workshop's node; the selected one when null",
+            ),
+            GROUP,
+            DRY_RUN,
+            CONFIG,
+        ],
+    },
+    Tool {
+        name: "helios_workshop_suggest",
+        endpoint: Endpoint::Workspace,
+        cmd: "workshop.suggest",
+        description: "Experimental (interface.experimental.workshops, refused with that key when off): finds workshops (macros with an intent and relative targets) in the workspace's catalogue, shipped, the user's library and the workspace's own, by what the user wants: a word matches a word of a workshop that starts with it; ranked by where the first match is (the name, then the keywords, then the intent), then by how many words matched. Each with `matched`, where it comes `from` and the nodes it is `applied` as. Refused on the files: it needs the desktop holding the workspace",
+        params: &[
+            WORKSPACE,
+            Param {
+                name: "intent",
+                schema: string,
+                description: "What the user wants, in English words (brighter midtones); empty lists every workshop",
+                default: None,
+            },
+            CONFIG,
+        ],
+    },
+    Tool {
         name: "helios_network_connect",
         endpoint: Endpoint::Workspace,
         cmd: "network.connect",
@@ -3258,6 +3291,35 @@ mod tests {
         )
         .unwrap_err();
         assert!(e.contains("in your library already"), "{e}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_workshop_verbs_need_the_desktop() {
+        let root =
+            std::env::temp_dir().join(format!("helios-mcp-workshops-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let (config, ws) = (root.join("config"), root.join("photos"));
+        std::fs::create_dir_all(&ws).unwrap();
+        for (verb, cmd) in [
+            ("helios_workshop_apply", "workshop.apply"),
+            ("helios_workshop_aim", "workshop.aim"),
+            ("helios_workshop_suggest", "workshop.suggest"),
+        ] {
+            let tool = TOOLS.iter().find(|t| t.name == verb).unwrap();
+            assert_eq!(tool.cmd, cmd);
+            assert!(tool.description.starts_with("Experimental"), "{verb}");
+            let e = workspace_call(&json!({
+                "cmd": cmd,
+                "config": config,
+                "workspace": ws,
+                "intent": "brighter",
+                "workshop": "helios.lift-midtones@1",
+            }))
+            .unwrap_err();
+            assert!(e.contains("interface.experimental.workshops"), "{e}");
+            assert!(e.contains("no desktop holds it"), "{e}");
+        }
         let _ = std::fs::remove_dir_all(&root);
     }
 }

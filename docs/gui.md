@@ -352,8 +352,19 @@ palette's "Experimental" category; off, neither exists (an agent's
 `workshop.apply` (`workshop`: `id@version`, `after`, `aim`, `dry_run`)
 inserts a workshop after the node the image is shown from (or `after`),
 its targets aimed on a 256 px proxy of the open image (the aims cached
-for the session), as one undo step with the aimed values. See
-[design/workshops.md](design/workshops.md).
+for the session), as one undo step with the aimed values.
+`workshop.aim` (`node`, the selected one by default; `dry_run`) solves an
+applied workshop's targets again on what feeds its node, its other values
+as they are, as one value step on the image (the workspace unchanged).
+`workshop.suggest` (`intent`) ranks the catalogue's workshops by the
+user's words: the name first, then the keywords, then the intent. The
+panel has a Find field (empty, the workshops grouped as shipped, the
+user's library and the workspace's own; typed, ranked as
+`workshop.suggest` ranks them; Enter applies the first), Apply on each
+row (an applied one selects its node instead), and, for the selected
+node when it is a workshop, its sliders as the Parameters panel draws
+them, each targeted one marked with its target, with Aim again and Open
+in graph. See [design/workshops.md](design/workshops.md).
 
 ## Node header
 

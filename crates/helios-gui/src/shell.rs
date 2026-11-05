@@ -551,6 +551,8 @@ pub struct Shell {
     palettes_to_place: Option<PanelId>,
     /// The workshops' aims this session (see `workshop_edit`).
     workshop_aims: workshop_edit::Aims,
+    /// The Workshops panel (experimental).
+    workshops: Rc<RefCell<crate::workshops::Panel>>,
 }
 
 impl Shell {
@@ -873,6 +875,7 @@ impl Shell {
             pointer_choice: false,
             palettes_to_place: None,
             workshop_aims: workshop_edit::Aims::new(),
+            workshops: Rc::default(),
         };
         if let Err(e) = crate::pointer_choice::declare(shell.app.handle()) {
             shell.notes.push(format!("pointer choice: {e}"));
@@ -941,7 +944,14 @@ impl Shell {
             });
         }
         if has(&shell, crate::workshops::PANEL) {
-            shell.set_content(crate::workshops::PANEL, crate::workshops::panel_ui);
+            let (panel, params, values) = (
+                shell.workshops.clone(),
+                shell.params.clone(),
+                shell.values.clone(),
+            );
+            shell.set_content(crate::workshops::PANEL, move |ui| {
+                panel.borrow_mut().ui(ui, &values, &mut params.borrow_mut());
+            });
         }
         if has(&shell, crate::queue::PANEL) {
             let (panel, app) = (shell.queue_panel.clone(), shell.app.handle().clone());

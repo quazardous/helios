@@ -292,3 +292,79 @@ fn aimed_through_the_engine_then_applied_the_median_lands_on_the_target() {
     let median = workshop::measure(&out, helios_template::format::Measure::LumaMedian).unwrap();
     assert!((median + 2.5).abs() < 0.1, "{median}");
 }
+
+/// A one-node macro of `exposure` named `name`, a workshop when `w` is
+/// given.
+fn tiny(id: &str, name: &str, w: Option<Json>) -> helios_template::CompositeFile {
+    let mut file = json!({
+        "format": 1,
+        "id": id,
+        "version": 1,
+        "name": name,
+        "inputs": [ { "name": "input", "channels": 4, "layout": "rgba" } ],
+        "outputs": [ { "name": "output", "channels": 4, "layout": "rgba" } ],
+        "nodes": [ { "name": "exposure", "module": "exposure" } ],
+        "connections": [ { "from": "@", "port": "input", "to": "exposure", "input": "input" } ],
+        "exits": [ { "from": "exposure", "port": "output", "output": "output" } ],
+        "exposed": [ { "name": "brightness", "node": "exposure", "param": "exposure" } ]
+    });
+    if let Some(w) = w {
+        file["workshop"] = w;
+    }
+    parse_composite(&file.to_string()).unwrap()
+}
+
+#[test]
+fn suggest_ranks_the_name_then_the_keywords_then_the_intent() {
+    let files = [
+        tiny(
+            "user.a",
+            "Warm skin",
+            Some(json!({ "intent": "Faces glowing in shade", "keywords": ["portrait"] })),
+        ),
+        tiny(
+            "user.b",
+            "Night city",
+            Some(json!({ "intent": "Neon without noise", "keywords": ["glow", "street"] })),
+        ),
+        tiny(
+            "user.c",
+            "Glow",
+            Some(json!({ "intent": "A soft halo", "keywords": ["dreamy"] })),
+        ),
+        // A plain macro is never suggested.
+        tiny("user.d", "Glowing", None),
+    ];
+    let found = workshop::suggest(&files, "the glow");
+    let ids: Vec<&str> = found.iter().map(|s| s.workshop.id.as_str()).collect();
+    assert_eq!(ids, ["user.c", "user.b", "user.a"]);
+    let matched: Vec<workshop::Matched> = found.iter().map(|s| s.matched).collect();
+    assert_eq!(
+        matched,
+        [
+            workshop::Matched::Name,
+            workshop::Matched::Keyword,
+            workshop::Matched::Intent
+        ]
+    );
+    // More words matched rank first within a kind; a word's start finds it.
+    let found = workshop::suggest(&files, "neon stre");
+    assert_eq!(found[0].workshop.id, "user.b");
+    assert_eq!(found[0].words, 2);
+    assert!(workshop::suggest(&files, "landscape").is_empty());
+    // Nothing asked: every workshop, by name.
+    let all: Vec<String> = workshop::suggest(&files, " ")
+        .into_iter()
+        .map(|s| s.name)
+        .collect();
+    assert_eq!(all, ["Glow", "Night city", "Warm skin"]);
+    // The newest version of an id only.
+    let mut newer = files[2].clone();
+    newer.version = 2;
+    let found = workshop::suggest(files.iter().chain([&newer]), "glow");
+    assert_eq!(found[0].workshop.version, 2);
+    assert_eq!(
+        found.iter().filter(|s| s.workshop.id == "user.c").count(),
+        1
+    );
+}

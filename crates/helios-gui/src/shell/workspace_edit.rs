@@ -416,6 +416,7 @@ impl Shell {
             }
         }
         edit.library.clone_from(&library);
+        self.workshops.borrow_mut().set_library(library.clone());
         self.graph.borrow_mut().set_library(library);
         for e in unread {
             self.notes

@@ -955,3 +955,43 @@ gui-modules-macro-update-hint = Passer { $node } à la version { $version } de s
 gui-workshops-experimental = Expérimental : peut changer ; ce qu’il enregistre reste une macro
 
 gui-workshops-none = Aucun atelier dans cet espace de travail pour l’instant
+
+gui-workshops-aim = Régler à nouveau
+
+gui-workshops-aim-hint = Résoudre à nouveau ses cibles sur l’image ouverte (une étape d’annulation)
+
+gui-workshops-aimed = cible : { $measure } à { $value } { $unit }
+
+gui-workshops-applied = Appliqué : { $node }
+
+gui-workshops-applied-hint = Sélectionner son nœud, pour le régler ci-dessous
+
+gui-workshops-apply = Appliquer
+
+gui-workshops-apply-hint = Insérer { $name } après le nœud d’où l’image est montrée, réglé sur l’image ouverte (une étape d’annulation)
+
+gui-workshops-find = Chercher
+
+gui-workshops-find-hint = ce que vous voulez : plus clair, moins de contraste…
+
+gui-workshops-library = Votre bibliothèque
+
+gui-workshops-measure-clip = écrêtage
+
+gui-workshops-measure-high = hautes lumières
+
+gui-workshops-measure-median = tons moyens
+
+gui-workshops-no-image = Ouvrez une image pour le régler
+
+gui-workshops-none-found = Aucun atelier trouvé pour ces mots
+
+gui-workshops-open = Ouvrir dans le graphe
+
+gui-workshops-shipped = Fournis avec Helios
+
+gui-workshops-unit-percent = %
+
+gui-workshops-unit-stops = IL
+
+gui-workshops-workspace = Cet espace de travail

@@ -534,6 +534,117 @@ impl State {
     }
 }
 
+/// Where a workshop is ranked by [`suggest`]: what the user's words
+/// matched first.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Matched {
+    /// Its name.
+    Name,
+    /// One of its keywords.
+    Keyword,
+    /// A word of its intent.
+    Intent,
+    /// Nothing asked: every workshop, by name.
+    All,
+}
+
+/// A workshop found by [`suggest`].
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+pub struct Suggestion {
+    pub workshop: CompositeRef,
+    pub name: String,
+    pub intent: String,
+    pub matched: Matched,
+    /// How many of the user's words it matched, anywhere.
+    pub words: usize,
+}
+
+/// Words too common to find anything by.
+const STOP_WORDS: &[&str] = &[
+    "a", "an", "and", "at", "by", "for", "from", "i", "in", "is", "it", "my", "of", "on", "or",
+    "the", "this", "to", "too", "with", "without",
+];
+
+/// The words of `text`, lower case, common ones left out.
+fn words(text: &str) -> Vec<String> {
+    text.split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .map(str::to_lowercase)
+        .filter(|w| !STOP_WORDS.contains(&w.as_str()))
+        .collect()
+}
+
+/// The workshops among `files` the user's words (`intent`) find, the
+/// stub where an AI will later find them (`workshop.suggest`): a word
+/// matches a word of a workshop that starts with it ("bright" finds
+/// "brighten"). Ranked by where the first match is (the name, then the
+/// keywords, then the intent's words), then by how many words matched,
+/// then by name; files without a workshop block are left out. Empty
+/// words: every workshop, by name. The newest version of each id only.
+pub fn suggest<'a>(
+    files: impl IntoIterator<Item = &'a CompositeFile>,
+    intent: &str,
+) -> Vec<Suggestion> {
+    let mut newest: BTreeMap<&str, &CompositeFile> = BTreeMap::new();
+    for f in files {
+        if f.workshop.is_none() {
+            continue;
+        }
+        let at = newest.entry(f.id.as_str()).or_insert(f);
+        if f.version > at.version {
+            *at = f;
+        }
+    }
+    let asked = words(intent);
+    let hits = |of: &[String]| -> Vec<&String> {
+        asked
+            .iter()
+            .filter(|w| of.iter().any(|x| x.starts_with(w.as_str())))
+            .collect()
+    };
+    let mut out: Vec<Suggestion> = newest
+        .into_values()
+        .filter_map(|f| {
+            let w = f.workshop.as_ref()?;
+            let suggestion = |matched, words| Suggestion {
+                workshop: f.reference(),
+                name: f.name.clone(),
+                intent: w.intent.clone(),
+                matched,
+                words,
+            };
+            if asked.is_empty() {
+                return Some(suggestion(Matched::All, 0));
+            }
+            let name = hits(&words(&f.name));
+            let keywords = hits(&words(&w.keywords.join(" ")));
+            let intent = hits(&words(&w.intent));
+            let matched = if !name.is_empty() {
+                Matched::Name
+            } else if !keywords.is_empty() {
+                Matched::Keyword
+            } else if !intent.is_empty() {
+                Matched::Intent
+            } else {
+                return None;
+            };
+            let mut all: Vec<&String> = name.into_iter().chain(keywords).chain(intent).collect();
+            all.sort();
+            all.dedup();
+            Some(suggestion(matched, all.len()))
+        })
+        .collect();
+    out.sort_by(|a, b| {
+        a.matched
+            .cmp(&b.matched)
+            .then(b.words.cmp(&a.words))
+            .then_with(|| a.name.cmp(&b.name))
+            .then_with(|| a.workshop.id.cmp(&b.workshop.id))
+    });
+    out
+}
+
 /// How far from `after` an applied workshop is placed, across and down.
 const PLACE: f32 = 90.0;
 

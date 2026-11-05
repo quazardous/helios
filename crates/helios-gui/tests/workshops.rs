@@ -272,3 +272,145 @@ fn off_the_command_is_unknown_and_an_agent_is_refused_with_the_key() {
     let _ = std::fs::remove_dir_all(&root);
     let _ = std::fs::remove_dir_all(&root_on);
 }
+
+// ---------------------------------------------------------------------
+// The panel: the list, find, apply, the applied workshop, aim again
+// ---------------------------------------------------------------------
+
+fn open_panel(h: &mut Harness<'static, Shell>) {
+    h.state_mut()
+        .run("helios.workshops.focus", json!(null), Origin::User)
+        .unwrap();
+    for _ in 0..3 {
+        h.run();
+    }
+}
+
+#[test]
+fn the_panel_lists_the_shipped_workshop_and_applies_it() {
+    let root = temp("panel");
+    let mut h = window(&root, true);
+    open_panel(&mut h);
+    h.get_by_label_contains("Shipped with Helios");
+    h.get_by_label("Lift midtones");
+    h.get_by_label("Brighter midtones without losing the highlights");
+    // Words found nowhere: nothing listed.
+    h.get_by_label("Find").focus();
+    h.run();
+    h.get_by_label("Find").type_text("landscape");
+    h.run();
+    h.get_by_label_contains("No workshop found");
+    assert!(h.query_by_label("Lift midtones").is_none());
+    // A keyword finds it again.
+    h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    h.run();
+    h.get_by_label("Find").type_text("underexposed");
+    h.run();
+    h.get_by_label("Lift midtones");
+    // Apply, from its row: one undo step, its node selected.
+    let steps = h.state().values.lock().unwrap().undo_steps().len();
+    h.get_by_label("Apply").click();
+    follow(&mut h);
+    follow(&mut h);
+    assert!(nodes(&h).contains(&"lift_midtones".to_string()));
+    assert_eq!(
+        h.state().values.lock().unwrap().undo_steps().len(),
+        steps + 1
+    );
+    // Applied: the row says so, and the workshop's sliders show, the
+    // targeted one marked with its target.
+    h.get_by_label_contains("Applied: lift_midtones");
+    h.get_by_label_contains("aimed: midtones at -2.50 stops");
+    h.get_by_label("Aim again");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+fn brightness(h: &Harness<'static, Shell>) -> Option<f64> {
+    h.state()
+        .values
+        .lock()
+        .unwrap()
+        .get("node/lift_midtones/brightness")
+        .and_then(|e| e.value.as_f64())
+}
+
+#[test]
+fn aiming_again_is_one_value_step_that_undo_takes_back() {
+    let root = temp("aim");
+    let mut h = window(&root, true);
+    answer(&mut h, "workshop.apply", json!({ "workshop": LIFT })).unwrap();
+    let aimed = brightness(&h).unwrap();
+    // Moved by hand: the user's value now.
+    {
+        let mut store = h.state().values.lock().unwrap();
+        store
+            .set(helios_values::Set::new(
+                "node/lift_midtones/brightness",
+                helios_values::Change::To(helios_core::Value::Float(0.0)),
+                Origin::User,
+            ))
+            .unwrap();
+    }
+    follow(&mut h);
+    assert_eq!(brightness(&h), Some(0.0));
+    let state = h.state().workspace_state().unwrap();
+    let steps = h.state().values.lock().unwrap().undo_steps().len();
+    // A dry run says the value, sets nothing.
+    let dry = answer(
+        &mut h,
+        "workshop.aim",
+        json!({ "node": "lift_midtones", "dry_run": true }),
+    )
+    .unwrap();
+    assert_eq!(dry["values"]["brightness"].as_f64(), Some(aimed));
+    assert_eq!(brightness(&h), Some(0.0));
+    // Aimed again, the selected workshop by default: one value step.
+    let a = answer(&mut h, "workshop.aim", json!({})).unwrap();
+    assert_eq!(a["node"], json!("lift_midtones"));
+    assert_eq!(a["aimed"][0]["reached"], json!(true), "{a}");
+    assert_eq!(brightness(&h), Some(aimed));
+    let store_steps = h.state().values.lock().unwrap().undo_steps().len();
+    assert_eq!(store_steps, steps + 1);
+    assert_eq!(
+        h.state().workspace_state().unwrap().to_json(),
+        state.to_json(),
+        "the workspace does not change"
+    );
+    h.state()
+        .values
+        .lock()
+        .unwrap()
+        .undo(&Origin::User)
+        .unwrap()
+        .expect("a step to undo");
+    follow(&mut h);
+    assert_eq!(brightness(&h), Some(0.0));
+    // A module is not a workshop.
+    let e = answer(&mut h, "workshop.aim", json!({ "node": "exposure" })).unwrap_err();
+    assert!(e.contains("no node") || e.contains("not a workshop"), "{e}");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn suggest_ranks_the_name_then_the_keywords_then_the_intent() {
+    let root = temp("suggest");
+    let mut h = window(&root, true);
+    for (words, matched) in [
+        ("lift", "name"),
+        ("underexposed", "keyword"),
+        ("keep highlights", "intent"),
+    ] {
+        let a = answer(&mut h, "workshop.suggest", json!({ "intent": words })).unwrap();
+        let first = &a["workshops"][0];
+        assert_eq!(first["workshop"], json!(LIFT), "{a}");
+        assert_eq!(first["matched"], json!(matched), "{words}: {a}");
+        assert_eq!(first["from"], json!("shipped"));
+    }
+    let a = answer(&mut h, "workshop.suggest", json!({ "intent": "landscape" })).unwrap();
+    assert_eq!(a["workshops"], json!([]));
+    // Applied, it says as which node.
+    answer(&mut h, "workshop.apply", json!({ "workshop": LIFT })).unwrap();
+    let a = answer(&mut h, "workshop.suggest", json!({ "intent": "lift" })).unwrap();
+    assert_eq!(a["workshops"][0]["applied"], json!(["lift_midtones"]));
+    let _ = std::fs::remove_dir_all(&root);
+}

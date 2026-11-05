@@ -745,9 +745,49 @@ gui-vault-unreadable = Cannot read the vault: { $error }
 
 gui-window-frame-error = window frame: { $error }
 
+gui-workshops-aim = Aim again
+
+gui-workshops-aim-hint = Solve its targets again on the open image (one undo step)
+
+gui-workshops-aimed = aimed: { $measure } at { $value } { $unit }
+
+gui-workshops-applied = Applied: { $node }
+
+gui-workshops-applied-hint = Select its node, to tune it below
+
+gui-workshops-apply = Apply
+
+gui-workshops-apply-hint = Insert { $name } after the node the image is shown from, aimed on the open image (one undo step)
+
 gui-workshops-experimental = Experimental: may change; what it saves stays a macro
 
+gui-workshops-find = Find
+
+gui-workshops-find-hint = what you want: brighter, less contrast…
+
+gui-workshops-library = Your library
+
+gui-workshops-measure-clip = clipping
+
+gui-workshops-measure-high = highlights
+
+gui-workshops-measure-median = midtones
+
+gui-workshops-no-image = Open an image to tune it
+
 gui-workshops-none = No workshops in this workspace yet
+
+gui-workshops-none-found = No workshop found for these words
+
+gui-workshops-open = Open in graph
+
+gui-workshops-shipped = Shipped with Helios
+
+gui-workshops-unit-percent = %
+
+gui-workshops-unit-stops = stops
+
+gui-workshops-workspace = This workspace
 
 gui-workspace-description = description
 
