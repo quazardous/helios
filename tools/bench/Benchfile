@@ -477,7 +477,7 @@ cores = 5
 memory = "7g"
 cwd = "/work/${src:-egui-pop}"
 command = """mkdir -p /tmp/w/egui-pop && cp -r --preserve=mode . /tmp/w/egui-pop/ && cd /tmp/w/egui-pop && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/egui-pop ] || { rm -rf /target/* && echo /tmp/w/egui-pop > /target/.built-at; }; } && \
-UPDATE_SNAPSHOTS=1 cargo test --locked -p egui-pop-gallery --test gallery; rc=$?; \
+UPDATE_SNAPSHOTS=1 cargo test --locked -p egui-pop-gallery --test gallery --test rerun_like; rc=$?; \
 mkdir -p /out/snapshots && find crates/egui-pop-gallery/tests/snapshots -name '*.png' ! -name '*.new.png' ! -name '*.old.png' ! -name '*.diff.png' -exec cp -t /out/snapshots/ {} + ; \
 exit $rc"""
 env = { CARGO_NET_OFFLINE = "true" }

@@ -331,9 +331,16 @@ pub fn classify(code: Option<i32>) -> Outcome {
     }
 }
 
-/// The id in `bench-job: job <id> (job build branch=main) queued`.
+/// A line from the box's job runner, without its prefix: `mcu-job: ` since
+/// the box was renamed, `bench-job: ` before (and on older logins).
+fn job_line(line: &str) -> Option<&str> {
+    line.strip_prefix("mcu-job: ")
+        .or_else(|| line.strip_prefix("bench-job: "))
+}
+
+/// The id in `mcu-job: job <id> (job build branch=main) queued`.
 pub fn queued_id(line: &str) -> Option<&str> {
-    let rest = line.strip_prefix("bench-job: job ")?;
+    let rest = job_line(line)?.strip_prefix("job ")?;
     let id = rest.split_whitespace().next()?;
     valid_id(id).then_some(id)
 }
@@ -342,9 +349,9 @@ fn valid_id(id: &str) -> bool {
     !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
 }
 
-/// The job's exit code in its last line, `bench-job: <id> exit <n>`.
+/// The job's exit code in its last line, `mcu-job: <id> exit <n>`.
 pub fn final_exit(line: &str, id: &str) -> Option<i32> {
-    line.strip_prefix("bench-job: ")?
+    job_line(line)?
         .strip_prefix(id)?
         .trim()
         .strip_prefix("exit ")?
@@ -359,7 +366,7 @@ pub fn unavailable_reason(lines: &[String]) -> String {
     let unavailable = lines
         .iter()
         .rev()
-        .find_map(|l| l.strip_prefix("bench-job: unavailable: "));
+        .find_map(|l| job_line(l)?.strip_prefix("unavailable: "));
     let last = || {
         lines
             .iter()
@@ -1020,12 +1027,12 @@ pub fn chain_text(steps: &[Step]) -> String {
 }
 
 /// The ids the box gave a chain's steps, from its line
-/// `bench-job: chain: <name>=<id> ...`.
+/// `mcu-job: chain: <name>=<id> ...`.
 pub fn chain_ids(lines: &[String]) -> Option<Vec<(String, String)>> {
     let line = lines
         .iter()
         .rev()
-        .find_map(|l| l.strip_prefix("bench-job: chain: "))?;
+        .find_map(|l| job_line(l)?.strip_prefix("chain: "))?;
     line.split_whitespace()
         .map(|w| {
             let (name, id) = w.split_once('=')?;
@@ -1922,6 +1929,11 @@ mod tests {
             Some(75)
         );
         assert_eq!(final_exit("bench-job: other-id exit 0", id), None);
+        assert_eq!(final_exit(&format!("mcu-job: {id} exit 0"), id), Some(0));
+        assert_eq!(
+            queued_id("mcu-job: job 20261012-133225-3878 (job build branch=main) queued"),
+            Some("20261012-133225-3878")
+        );
         assert_eq!(final_exit(&format!("bench-job: {id} running"), id), None);
     }
 
