@@ -5,9 +5,12 @@
 //! never literal colors.
 //!
 //! Each Helios theme `$extends` an egui-pop base (`pop-dark`, `pop-light`,
-//! `pop-high-contrast`) and keeps only what is Helios's own: its component
-//! tokens ([`HELIOS_TOKENS`]), which egui-pop's contract does not have,
-//! among them a neutral surround behind photos. A theme without them (a user's
+//! `pop-high-contrast`) and adds Helios's own component tokens
+//! ([`HELIOS_TOKENS`]), which egui-pop's contract does not have, among them
+//! a neutral surround behind photos. Helios Dark and Helios Light, the
+//! default pair, carry the Rerun viewer's look too: the values of
+//! egui-pop's Rerun-like kit (from Rerun's `re_ui`, MIT OR Apache-2.0).
+//! Helios Classic Dark and Light keep egui-pop's own look. A theme without them (a user's
 //! theme extending an egui-pop base directly) still works: [`Extra`] falls
 //! back to the nearest egui-pop token, and its number tokens
 //! ([`HELIOS_NUMBERS`]) to their defaults.
@@ -18,7 +21,9 @@ use egui::Color32;
 pub use egui_pop::theme::{ThemeSpec, Themes, Tokens};
 use serde_json::Value as Json;
 
-/// The theme Helios starts with, and falls back to.
+/// The theme Helios starts with, and falls back to. Helios Light is its
+/// counterpart: which of the two shows follows the light or dark
+/// preference, the system's by default.
 pub const DEFAULT: &str = "helios-dark";
 
 /// Helios's built-in themes, in the order they are offered.
@@ -34,6 +39,14 @@ const BUILT_IN: &[(&str, &str)] = &[
     (
         "helios-high-contrast",
         include_str!("../themes/helios-high-contrast.tokens.json"),
+    ),
+    (
+        "helios-classic-dark",
+        include_str!("../themes/helios-classic-dark.tokens.json"),
+    ),
+    (
+        "helios-classic-light",
+        include_str!("../themes/helios-classic-light.tokens.json"),
     ),
 ];
 

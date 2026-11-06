@@ -140,3 +140,9 @@ The modules ported from [vkdt](https://github.com/hanatos/vkdt)
 (`modules/vkdt`) are also under vkdt's BSD-2-Clause licence: its copyright
 notice and licence are in [modules/vkdt/LICENSE-vkdt](./modules/vkdt/LICENSE-vkdt),
 and each ported file names the vkdt sources it comes from.
+
+The default themes, Helios Dark and Helios Light, take their colours and
+sizes from the design tokens of the [Rerun](https://github.com/rerun-io/rerun)
+viewer's `re_ui` crate (MIT OR Apache-2.0, Copyright (c) Rerun Technologies
+AB), through the Rerun-like kit of egui-pop; Helios is not affiliated with
+or endorsed by Rerun.

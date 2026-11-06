@@ -1,0 +1,35 @@
+{
+  "$extends": "pop-light",
+  "$description": "Helios Classic Light, Helios's light theme up to 0.56: egui-pop's light theme, a neutral mid-grey surround to judge photos on, and Helios's own tokens.",
+  "$extensions": { "org.egui-pop.variant-of": "helios-classic-dark" },
+  "viewport": {
+    "surround": {"$type": "color", "$value": "#808080", "$description": "Helios component token: behind the photo being edited. Neutral mid grey: a white surround would make a photo look darker than it is."},
+    "background": {"$type": "color", "$value": "{viewport.surround}", "$description": "egui-pop's viewport: around the image, the surround."},
+    "backdrop": {"$type": "color", "$value": "{viewport.surround}", "$description": "egui-pop's viewport: under the image until its tiles arrive, the surround too."}
+  },
+  "state": {
+    "$type": "color",
+    "$description": "Helios component tokens: the state of a node in the graph.",
+    "done": {"$value": "{success}", "$description": "A node computed and current."},
+    "running": {"$value": "{info}", "$description": "A node being computed."},
+    "stale": {"$value": "{text.muted}", "$description": "A node whose content is out of date."},
+    "failed": {"$value": "{danger}", "$description": "A node whose computation failed."},
+    "pending": {"$value": "{accent.default}", "$description": "A decision waiting for an answer."}
+  },
+  "mask": {
+    "overlay": {
+      "$description": "Helios component tokens: a mask shown over the image (the mask display's overlay).",
+      "color": {"$type": "color", "$value": "{accent.default}", "$description": "Laid over the image where the mask applies, by the mask's value."},
+      "opacity": {"$type": "number", "$value": 0.6, "$description": "How much of the colour where the mask is full (0 to 1)."},
+      "desaturate": {"$type": "number", "$value": 1.0, "$description": "How far the image under the overlay turns grey (0 its colours, 1 grey, as darktable shows it), so the colour reads on any photo."}
+    }
+  },
+  "button": {
+    "danger": {
+      "$type": "color",
+      "$description": "Helios component tokens: the primary button of a destructive dialog.",
+      "background": {"$value": "{red.9}"},
+      "text": {"$value": "{red.contrast}"}
+    }
+  }
+}

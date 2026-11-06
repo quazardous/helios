@@ -157,6 +157,8 @@ command-scopes-waveform.title 6ca90b9ea2b78819
 command-subworkspace-delete.title f18d10f55bcd71ef
 command-subworkspace-enter.title 18429e3375834f38
 command-theme-exportMerged.title eb8d2597662ec3be
+command-theme-helios-classic-dark.title ea02d3899e9620e2
+command-theme-helios-classic-light.title 0cc0d8e4a4bac99a
 command-theme-helios-dark.title b97def08319c69a2
 command-theme-helios-high-contrast.title 2ada4a7e31241f64
 command-theme-helios-light.title 9d842680126e445a

@@ -7,7 +7,13 @@ use egui_pop::tokens::contrast::{self, Level};
 use helios_gui::theme::{self, Extra, HELIOS_NUMBERS, HELIOS_TOKENS};
 use serde_json::json;
 
-const HELIOS: [&str; 3] = ["helios-dark", "helios-light", "helios-high-contrast"];
+const HELIOS: [&str; 5] = [
+    "helios-dark",
+    "helios-light",
+    "helios-high-contrast",
+    "helios-classic-dark",
+    "helios-classic-light",
+];
 
 #[test]
 fn built_in_themes_resolve_cleanly_with_helios_tokens() {
@@ -114,4 +120,37 @@ fn the_mask_overlay_is_the_accent_by_default_and_a_theme_can_change_it() {
     let extra = Extra::of(&t);
     assert_eq!(extra.mask_overlay, t.accent.default);
     assert!((extra.mask_overlay_opacity - 0.6).abs() < 1e-6);
+}
+
+#[test]
+fn the_default_pair_has_reruns_look_and_follows_the_light_or_dark_mode() {
+    let themes = theme::themes();
+    let rgb = |s: &str| {
+        let v = u32::from_str_radix(s, 16).unwrap();
+        egui::Color32::from_rgb((v >> 16) as u8, (v >> 8) as u8, v as u8)
+    };
+    for (name, other, panel, accent, critical) in [
+        ("helios-dark", "helios-light", "0d0d0d", "5a81ff", "ffeff0"),
+        ("helios-light", "helios-dark", "ffffff", "186add", "480012"),
+    ] {
+        let t = theme::resolve(&themes, name, &BTreeMap::new());
+        assert_eq!(t.surface.panel, rgb(panel), "{name}");
+        assert_eq!(t.accent.default, rgb(accent), "{name}");
+        // The kit's view tokens come along, the critical log level too.
+        assert_eq!(
+            t.color("palette.log.critical"),
+            Some(rgb(critical)),
+            "{name}"
+        );
+        assert!(t.color("plot-cursor.rest.fill").is_some(), "{name}");
+        let counterpart = themes
+            .resolve_counterpart(&theme::ThemeSpec::new(name))
+            .map(|c| c.spec().base.clone());
+        assert_eq!(counterpart.as_deref(), Some(other), "{name}");
+    }
+    assert_eq!(theme::DEFAULT, "helios-dark");
+    let classic = themes
+        .resolve_counterpart(&theme::ThemeSpec::new("helios-classic-dark"))
+        .map(|c| c.spec().base.clone());
+    assert_eq!(classic.as_deref(), Some("helios-classic-light"));
 }

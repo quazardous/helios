@@ -376,6 +376,12 @@ command-subworkspace-enter =
 command-theme-exportMerged =
     .title = Export the theme in use, overrides merged
 
+command-theme-helios-classic-dark =
+    .title = Theme: Classic Dark
+
+command-theme-helios-classic-light =
+    .title = Theme: Classic Light
+
 command-theme-helios-dark =
     .title = Theme: Dark
 

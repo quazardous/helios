@@ -674,11 +674,27 @@ sync through the vault.
   theme. Unknown data goes under `$extensions` with the key
   `io.github.quazardous.helios`.
 - **Inheritance.** A theme `$extends` a base. Helios Dark, Helios Light
-  and Helios High Contrast are thin overlays of egui-pop's `pop-dark`,
-  `pop-light` and `pop-high-contrast`. A plugin's theme may extend any
-  installed theme. When a theme is missing, Helios falls back to Helios
-  Dark and says so. Aliases (`{accent.default}`) let a theme change one
-  colour and keep the rest consistent.
+  and Helios High Contrast extend egui-pop's `pop-dark`, `pop-light` and
+  `pop-high-contrast`. A plugin's theme may extend any installed theme.
+  When a theme is missing, Helios falls back to Helios Dark and says so.
+  Aliases (`{accent.default}`) let a theme change one colour and keep the
+  rest consistent.
+- **The default look is Rerun's** (decided 2026-11-06). Helios Dark, the
+  default, and Helios Light carry the values of egui-pop's Rerun-like kit,
+  taken from the Rerun viewer's re_ui crate (MIT OR Apache-2.0, Copyright
+  (c) Rerun Technologies AB; each file's `$description` and
+  `org.egui-pop.source` say so): its greys, blue accent, borders, radii,
+  sizes and type, the tab bar, list rows, table headers, the plot and its
+  time cursor, and the log levels (the plot, the cursor and the log
+  levels apply once Helios moves to an egui-pop that reads them). Helios keeps its own tokens on top: the
+  photo's surround stays neutral (Rerun's near black in the dark theme, a
+  mid grey rather than Rerun's white in the light one), the mask overlay
+  is the accent, and the destructive button's red is a step darker than
+  Rerun's so its white label reads at 4.5:1. The two are a pair
+  (`org.egui-pop.variant-of`): which one shows follows the light/dark
+  preference, the system's by default. The look Helios had up to 0.56
+  (egui-pop's warm greys, the sun gold accent) stays as the Helios
+  Classic Dark and Helios Classic Light pair.
 - **Overrides.** User overrides are a token file per theme, or for every
   theme, in the user's settings: the counterpart of VS Code's `[Theme]`
   keys and darktable's `user.css`. They are applied last and validated;
