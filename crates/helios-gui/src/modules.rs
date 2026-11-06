@@ -265,7 +265,7 @@ pub fn ui(
                 if inside != heading {
                     if let Some(m) = &inside {
                         let version = macros.get(m).map_or(0, |r| r.version);
-                        ui.horizontal(|ui| {
+                        ui.horizontal_wrapped(|ui| {
                             if ui
                                 .small_button("⏷")
                                 .on_hover_text(tr(Message::new(
@@ -284,7 +284,9 @@ pub fn ui(
                     }
                     heading.clone_from(&inside);
                 }
-                ui.horizontal(|ui| {
+                // Wrapped: a macro's buttons go under its name in a narrow
+                // panel rather than past its edge.
+                ui.horizontal_wrapped(|ui| {
                     if inside.is_some() {
                         ui.add_space(16.0);
                     }

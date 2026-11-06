@@ -827,6 +827,56 @@ fn a_row_s_eye_and_lock_act_on_that_row() {
     assert_eq!(wired(&h, "mask"), ["inner", "oval", "spot"]);
 }
 
+/// Whether `inner` lies within `outer`, give or take a rounding.
+fn within(inner: egui::Rect, outer: egui::Rect) -> bool {
+    outer.expand(0.5).contains_rect(inner)
+}
+
+#[test]
+fn every_row_keeps_its_eye_and_lock_whole_in_a_narrow_panel() {
+    let mut h = harness();
+    // A name longer than the panel is wide: the row's text gives way,
+    // not its controls.
+    run(
+        &mut h,
+        "mask.member.rename",
+        json!({ "member": "oval", "label": "an oval whose name is longer than the side bar" }),
+    );
+    let panel = h.state().target_rect(mask_tree::PANEL).unwrap();
+    assert!(panel.width() < 320.0, "a side bar, narrow: {panel:?}");
+    let net = h.state().mask_tree().network();
+    let members: Vec<_> = net
+        .items
+        .values()
+        .filter(|i| !i.is_refinement())
+        .map(|i| (i.name().to_string(), i.text()))
+        .collect();
+    assert_eq!(members.len(), 5, "{members:?}");
+    for (name, text) in &members {
+        let row = row(&h, text);
+        assert!(within(row, panel), "row `{text}` {row:?} in {panel:?}");
+        for control in [
+            format!("Hide {name}: its opacity off"),
+            format!("Lock {name} against moves and edits"),
+        ] {
+            let r = h.get_by_label(&control).rect();
+            assert!(within(r, panel), "`{control}` {r:?} in {panel:?}");
+            assert!(within(r, row), "`{control}` {r:?} on its row {row:?}");
+        }
+    }
+    // The actions above the tree wrap rather than widen the panel.
+    for action in ["Invert", "Opacity", "Take out", "Add…"] {
+        // The one that starts in the panel (another panel may say the
+        // same word).
+        let r = h
+            .query_all_by_label(action)
+            .map(|n| n.rect())
+            .find(|r| panel.contains(r.min))
+            .unwrap_or_else(|| panic!("no `{action}` in the panel"));
+        assert!(within(r, panel), "`{action}` {r:?} in {panel:?}");
+    }
+}
+
 /// The network of [`graph`] with refinements: a blur between the module's
 /// mask and its blend, a feather between the spot and its group.
 fn refined() -> (Graph, NodeId) {

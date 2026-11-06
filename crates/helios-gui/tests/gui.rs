@@ -146,6 +146,30 @@ fn draws_every_area_and_pictures_a_panel() {
 }
 
 #[test]
+fn the_vault_s_bar_and_empty_text_stay_in_its_narrow_panel() {
+    let mut h = headless::harness(Shell::new(helios_panels(), None), vec2(1280.0, 800.0));
+    h.run();
+    let panel = h.state().target_rect("helios.vault").unwrap();
+    assert!(panel.width() < 320.0, "a side bar, narrow: {panel:?}");
+    let inside = |r: egui::Rect| panel.expand(0.5).contains_rect(r);
+    // The text is wider than the panel: it wraps onto lines, all inside.
+    let text = h
+        .get_by_label("No images: import a folder into the vault")
+        .rect();
+    assert!(inside(text), "{text:?} in {panel:?}");
+    let line = h.get_by_label("No images").rect().height();
+    assert!(text.height() > 1.5 * line, "wrapped: {text:?}");
+    // The search bar above it wraps rather than widen the panel.
+    for part in ["Search images", "Auto-advance"] {
+        let parts: Vec<egui::Rect> = h.query_all_by_label(part).map(|n| n.rect()).collect();
+        assert!(!parts.is_empty(), "no `{part}`");
+        for r in parts {
+            assert!(inside(r), "`{part}` {r:?} in {panel:?}");
+        }
+    }
+}
+
+#[test]
 fn a_named_widget_can_be_pictured() {
     let mut shell = Shell::new(helios_panels(), None);
     shell.set_content("helios.params", |ui| {

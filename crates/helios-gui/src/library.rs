@@ -53,6 +53,10 @@ use serde_json::Value;
 /// their arguments).
 pub const LIBRARY: &str = "helios.library";
 
+/// What the search field's box holds beside its text (its icon, its "+"
+/// and their spacing), so the bar can give the text what is left.
+const SEARCH_BESIDE: f32 = 72.0;
+
 /// The labels, in the order darktable gives them F1 to F5.
 /// The keys the grid and the filmstrip read themselves: the thumbnails'
 /// size only. The culling keys are the keymap's alone (`crate::keys`),
@@ -1118,13 +1122,18 @@ impl Library {
             .import_offered
             .then(|| crate::i18n::text(&ctx, Message::new("gui-library-import", "Import…")));
         let mut asked = None;
-        ui.horizontal(|ui| {
+        // Wrapped, the field no wider than what is left of the line: a
+        // narrow panel takes the bar on several lines rather than widen
+        // its content past its edge (and cut what comes under it).
+        ui.horizontal_wrapped(|ui| {
             if let Some(import) = import
                 && ui.button(import).clicked()
             {
                 self.import_asked = true;
             }
-            let mut field = SearchField::new(LIBRARY).label(search).width(220.0);
+            // The field's box holds its icon and its "+" beside the text.
+            let width = (ui.available_width() - SEARCH_BESIDE).clamp(80.0, 220.0);
+            let mut field = SearchField::new(LIBRARY).label(search).width(width);
             if let Some(app) = &self.app {
                 field = field.app(app);
             }
@@ -1152,7 +1161,7 @@ impl Library {
         };
         let marks = entry.marks();
         let mut asked = Vec::new();
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.label(&entry.name);
             if let Some(rating) = RatingStars::new(marks.rating).show(ui).changed {
                 asked.push(Mark::Rate {
@@ -1206,13 +1215,14 @@ impl Library {
         self.toolbar(ui);
         self.marks_bar(ui);
         if self.entries.is_empty() {
-            ui.weak(crate::i18n::text(
+            let text = crate::i18n::text(
                 ui.ctx(),
                 Message::new(
                     "gui-library-empty",
                     "No images: import a folder into the vault",
                 ),
-            ));
+            );
+            ui.add(egui::Label::new(egui::RichText::new(text).weak()).wrap());
             return;
         }
         let label = crate::i18n::text(ui.ctx(), Message::new("gui-library-images", "Images"));

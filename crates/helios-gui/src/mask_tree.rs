@@ -1519,55 +1519,69 @@ impl MaskTree {
             .and_then(|k| net.items.get(k))
             .filter(|i| !i.is_refinement())
             .cloned();
-        ui.horizontal(|ui| {
-            ui.add_enabled_ui(current.is_some(), |ui| {
-                let (inverted, visible) = current
-                    .as_ref()
-                    .map_or((false, true), |c| (c.invert, c.opacity > 0.0));
-                let member = current.as_ref().map(|c| c.key.clone());
-                if ui
-                    .selectable_label(inverted, tr(Message::new("gui-masks-invert", "Invert")))
-                    .on_hover_text(tr(Message::new(
-                        "gui-masks-invert-hint",
-                        "Invert the selected member: it then covers everything except what it covered (for the module's mask, the whole mask)",
-                    )))
-                    .clicked()
-                {
-                    commands.push(Command::MemberInvert {
-                        member: member.clone(),
-                    });
-                }
-                if ui
-                    .selectable_label(visible, tr(Message::new("gui-masks-opacity", "Opacity")))
-                    .on_hover_text(tr(Message::new(
-                        "gui-masks-opacity-hint",
-                        "Turn the selected member's opacity off, or back to full (its row's eye does the same)",
-                    )))
-                    .clicked()
-                {
-                    commands.push(Command::MemberOpacity {
-                        member: member.clone(),
-                        opacity: None,
-                    });
-                }
-                let deletable = current.as_ref().is_some_and(|c| c.group.is_some());
-                if ui
-                    .add_enabled(
-                        deletable,
-                        egui::Button::new(tr(Message::new("gui-masks-take-out", "Take out"))),
-                    )
-                    .on_hover_text(tr(Message::new(
-                        "gui-masks-take-out-hint",
-                        "Take the selected member out of the mask (Delete, the tree focused). Not an undo step yet.",
-                    )))
-                    .clicked()
-                {
-                    commands.push(Command::MemberDelete {
-                        member: member.clone(),
-                        confirmed: false,
-                    });
-                }
-            });
+        // Wrapped: a narrow panel puts the actions on two lines rather
+        // than widen the panel's content past its edge (and the rows'
+        // controls with it).
+        ui.horizontal_wrapped(|ui| {
+            let on = current.is_some();
+            let (inverted, visible) = current
+                .as_ref()
+                .map_or((false, true), |c| (c.invert, c.opacity > 0.0));
+            let member = current.as_ref().map(|c| c.key.clone());
+            if ui
+                .add_enabled(
+                    on,
+                    egui::Button::selectable(
+                        inverted,
+                        tr(Message::new("gui-masks-invert", "Invert")),
+                    ),
+                )
+                .on_hover_text(tr(Message::new(
+                    "gui-masks-invert-hint",
+                    "Invert the selected member: it then covers everything except what it covered (for the module's mask, the whole mask)",
+                )))
+                .clicked()
+            {
+                commands.push(Command::MemberInvert {
+                    member: member.clone(),
+                });
+            }
+            if ui
+                .add_enabled(
+                    on,
+                    egui::Button::selectable(
+                        visible,
+                        tr(Message::new("gui-masks-opacity", "Opacity")),
+                    ),
+                )
+                .on_hover_text(tr(Message::new(
+                    "gui-masks-opacity-hint",
+                    "Turn the selected member's opacity off, or back to full (its row's eye does the same)",
+                )))
+                .clicked()
+            {
+                commands.push(Command::MemberOpacity {
+                    member: member.clone(),
+                    opacity: None,
+                });
+            }
+            let deletable = current.as_ref().is_some_and(|c| c.group.is_some());
+            if ui
+                .add_enabled(
+                    deletable,
+                    egui::Button::new(tr(Message::new("gui-masks-take-out", "Take out"))),
+                )
+                .on_hover_text(tr(Message::new(
+                    "gui-masks-take-out-hint",
+                    "Take the selected member out of the mask (Delete, the tree focused). Not an undo step yet.",
+                )))
+                .clicked()
+            {
+                commands.push(Command::MemberDelete {
+                    member: member.clone(),
+                    confirmed: false,
+                });
+            }
             let add = ui
                 .button(tr(Message::new("gui-masks-add", "Add…")))
                 .on_hover_text(tr(Message::new(
