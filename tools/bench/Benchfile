@@ -254,7 +254,9 @@ timeout = "1h"
 # through wbox at 1920x1080, on the raw corpus's first image, driven
 # through the command palette in each theme (`themes=`, comma separated):
 # the empty mask, then two parametric members and two shapes; the PNG
-# files and what each step answered in /out (tools/bench/masks-shots.py)
+# files and what each step answered in /out (tools/bench/masks-shots.py).
+# `doc=yes` draws docs/gui.md's two masks pictures instead, at 1280x800 on
+# a synthetic picture: masks-wbox.png and mask-tree-wbox.png in /out
 [jobs.masks-shots]
 about = "helios-gui screenshots of the masks panel and mask display, per theme, in a headless labwc"
 checkouts = ["helios", "vkdt", "egui-pop"]
@@ -264,8 +266,9 @@ cwd = "/work/${src:-helios}"
 command = """mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && \
 cargo build --locked --release -p helios-gui && \
 mkdir -p "$XDG_RUNTIME_DIR" "$HOME" && chmod 700 "$XDG_RUNTIME_DIR" && \
+flag=; [ "${doc:-no}" = yes ] && flag=--doc; \
 "$WBOX_PYTHON" -I tools/bench/masks-shots.py --gui /target/release/helios-gui \
-  --corpus /corpus --out /out --themes ${themes:-helios-dark,helios-light}"""
+  --corpus /corpus --out /out --themes ${themes:-helios-dark,helios-light} $flag"""
 env = { CARGO_NET_OFFLINE = "true", WLR_RENDERER = "pixman" }
 mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", raw-corpus = "/corpus", sccache = "/sccache" }
 timeout = "1h"
