@@ -56,6 +56,12 @@ run = [
       https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-0.9.148/cargo-nextest-0.9.148-x86_64-unknown-linux-gnu.tar.gz \
  && echo "223ba936714cc861a9cdedad5a8eb664dfdd69d6fbdf6cea6aa8184f523290dc  /tmp/nextest.tar.gz" | sha256sum -c - \
  && tar -xzf /tmp/nextest.tar.gz -C /usr/local/bin && rm /tmp/nextest.tar.gz""",
+  # mdBook 0.5.4 (its release digest), for egui-pop's docs site check in the
+  # gate, as in egui-pop's CI
+  """curl -sSfL -o /tmp/mdbook.tar.gz \
+      https://github.com/rust-lang/mdBook/releases/download/v0.5.4/mdbook-v0.5.4-x86_64-unknown-linux-gnu.tar.gz \
+ && echo "3f28de05dafca9d0f2eab99c662116b0e37b89b1d96a08f8f430b9eeae958cd7  /tmp/mdbook.tar.gz" | sha256sum -c - \
+ && tar -xzf /tmp/mdbook.tar.gz -C /usr/local/bin && rm /tmp/mdbook.tar.gz""",
   # darktable's build dependencies (Fedora's own list), for the
   # darktable-cli the mask-parity job builds
   """dnf -y install dnf-plugins-core \
@@ -452,7 +458,7 @@ timeout = "30m"
 
 # egui-pop's gate: fmt, clippy, the workspace tests with the doctests, docs
 [jobs.egui-pop-gate]
-about = "egui-pop's gate: fmt, clippy, the workspace tests with the doctests, and the docs build"
+about = "egui-pop's gate: fmt, clippy, the workspace tests with the doctests, the docs build, and the docs site's links"
 checkouts = ["egui-pop"]
 cores = 5
 memory = "8g"
@@ -460,7 +466,8 @@ cwd = "/work/${src:-egui-pop}"
 command = """mkdir -p /tmp/w/egui-pop && cp -r --preserve=mode . /tmp/w/egui-pop/ && cd /tmp/w/egui-pop && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/egui-pop ] || { rm -rf /target/* && echo /tmp/w/egui-pop > /target/.built-at; }; } && cargo fmt --all --check \
  && cargo clippy --workspace --all-targets --locked -- -D warnings \
  && cargo test --workspace --locked \
- && RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps --locked"""
+ && RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps --locked \
+ && python3 tools/book/summary.py && mdbook build && python3 tools/book/links.py target/book"""
 # parallelism capped: the gate peaked at 10 GB with five rustc and linker
 # processes and every test thread rendering at once
 env = { CARGO_NET_OFFLINE = "true", CARGO_BUILD_JOBS = "3", RUST_TEST_THREADS = "3" }
