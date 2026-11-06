@@ -1445,10 +1445,12 @@ the `--image` network has one mask (on its exposure).
 
 ![A circle and a path edited on the viewport](gui/masks-wbox.png)
 
-The picture is a run of `helios-gui --image` in wbox, driven by its
-keys and pointer: `C` for a circle, then `P`, five clicks and Enter for
-a path. The path, selected, shows its edge and its handles; the circle
-is drawn faint, its feather dashed.
+The picture is a run of `helios-gui --image` on a synthetic picture in
+wbox, driven by its command palette and pointer: a circle at the view's
+centre, then a path of five clicks, closed. The path, selected, shows
+its edge and its handles; the circle is drawn faint, its feather dashed.
+The bench box's `masks-shots doc=yes` draws it again (see
+[bench.md](bench.md)).
 
 ### The mask display
 
@@ -1610,10 +1612,11 @@ not shown in the tree, only its group's for it.
 
 ![The Masks panel beside the image](gui/mask-tree-wbox.png)
 
-The picture is a run of `helios-gui --image` in wbox: `C`, `E` and `G`
-on the image, then in the Masks panel the ellipse inverted (Invert) and
-locked (its row's lock), the circle hidden (its row's eye) and the
-gradient selected.
+The picture is a run of `helios-gui --image` in wbox, driven by its
+command palette: a circle, an ellipse and a gradient added, the circle
+hidden (as its row's eye does), the ellipse inverted and locked (as
+Invert and its row's lock do), and the gradient selected. The bench
+box's `masks-shots doc=yes` draws it again (see [bench.md](bench.md)).
 
 The picture is a run of `helios-gui --image` in wbox (a headless nested
 compositor). Beside the same run of the viewport it replaced, the image's
