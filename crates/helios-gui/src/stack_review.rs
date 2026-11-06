@@ -13,6 +13,7 @@
 //! ([`Review::set_decisions`]) and runs what the user asked
 //! ([`Review::take_requests`]), as the library's marks are.
 
+use egui_pop::core::ui::UiPop as _;
 use std::collections::{BTreeMap, BTreeSet};
 
 use egui::Ui;
@@ -176,9 +177,9 @@ impl Review {
                 .map_or_else(|| id.chars().take(12).collect(), |e| e.name.clone())
         };
         let decisions = self.decisions.clone();
-        egui::ScrollArea::vertical()
-            .id_salt("helios.stacks.scroll")
-            .show(ui, |ui| {
+        ui.scroll_area(
+            egui::ScrollArea::vertical().id_salt("helios.stacks.scroll"),
+            |ui| {
                 for d in &decisions {
                     ui.separator();
                     ui.strong(text(
@@ -282,7 +283,8 @@ impl Review {
                         }
                     });
                 }
-            });
+            },
+        );
         show
     }
 }

@@ -5307,5 +5307,6 @@ fn tabs_holding<'a>(
             .contains(panel)
             .then_some((panels.as_slice(), *active)),
         Node::Split { a, b, .. } => tabs_holding(a, panel).or_else(|| tabs_holding(b, panel)),
+        Node::Grid { children, .. } => children.iter().find_map(|c| tabs_holding(c, panel)),
     }
 }

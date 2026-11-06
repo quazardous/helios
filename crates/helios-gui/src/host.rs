@@ -25,7 +25,8 @@
 //!   steps, their labels ("Undo drag exposure"), and an undo or redo as a
 //!   step of its own, which the vault saves as a version (`persist`). The history groups egui-pop
 //!   opens around a paste or a cut are groups of that store too, so a
-//!   paste is one of its steps. The interface settings keep their own
+//!   paste is one of its steps, and so are the groups a command opens
+//!   (`Call::group`, through `Host::groups`). The interface settings keep their own
 //!   undo, in the settings window;
 //! - **the waker**: a thread follows the bus and asks for a frame when an
 //!   event comes from elsewhere (a render done, a node's status);
@@ -34,10 +35,11 @@
 //!   named by the [`Workspace`] the shell switches; egui-pop loads and
 //!   saves it.
 
+use std::rc::Rc;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use egui_pop::api::history::History;
-use egui_pop::api::host::{self, Dispatch, Event, Host, Reply, Resolver, Seq, Waker};
+use egui_pop::api::host::{self, Dispatch, Event, Groups as _, Host, Reply, Resolver, Seq, Waker};
 use egui_pop::core::binding::SharedStore;
 use egui_pop::model::commands::Origin as PopOrigin;
 use egui_pop::model::values::GestureId as PopGestureId;
@@ -196,12 +198,6 @@ impl HeliosHost {
         self
     }
 
-    fn values(&self) -> Option<std::sync::MutexGuard<'_, helios_values::Store>> {
-        self.values
-            .as_ref()
-            .map(|v| v.lock().unwrap_or_else(PoisonError::into_inner))
-    }
-
     /// The workspace whose layout egui-pop keeps (shared: the shell
     /// switches it).
     pub fn workspace(&self) -> Workspace {
@@ -332,19 +328,47 @@ impl Host for HeliosHost {
     // A paste or a cut is one step of Helios's values, the steps undo
     // walks: egui-pop's group is a group of that store, and a target's
     // writes carry it (`helios_values::GestureId` of the same number).
+    // Without values, nothing is grouped.
     fn begin_group(&mut self, origin: &PopOrigin, label: &str) -> Option<PopGestureId> {
-        let g = self.values()?.begin_group(to_helios(origin), label);
-        Some(PopGestureId(g.0))
+        ValueGroups(self.values.clone()?).begin(origin, label)
     }
 
     fn end_group(&mut self, group: PopGestureId, keep: bool) {
-        if let Some(mut v) = self.values() {
-            let g = helios_values::GestureId(group.0);
-            if keep {
-                v.end(g);
-            } else {
-                v.cancel(g);
-            }
+        if let Some(values) = self.values.clone() {
+            ValueGroups(values).end(group, keep);
+        }
+    }
+
+    // The same groups for a command's `Call::group`, opened while the
+    // host dispatches it (and is out of reach): one step of Helios's
+    // values as well, so it reaches the history undo walks.
+    fn groups(&self) -> Option<Rc<dyn host::Groups>> {
+        let values = self.values.clone()?;
+        Some(Rc::new(ValueGroups(values)))
+    }
+}
+
+/// History groups of Helios's values: what is written in one is one step
+/// of the history undo walks.
+struct ValueGroups(Arc<Mutex<helios_values::Store>>);
+
+impl host::Groups for ValueGroups {
+    fn begin(&self, origin: &PopOrigin, label: &str) -> Option<PopGestureId> {
+        let g = self
+            .0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .begin_group(to_helios(origin), label);
+        Some(PopGestureId(g.0))
+    }
+
+    fn end(&self, group: PopGestureId, keep: bool) {
+        let mut v = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let g = helios_values::GestureId(group.0);
+        if keep {
+            v.end(g);
+        } else {
+            v.cancel(g);
         }
     }
 }
@@ -480,5 +504,40 @@ mod tests {
             .recv_timeout(std::time::Duration::from_secs(30))
             .expect("woken by the engine's event");
         assert!(woken.try_recv().is_err(), "woken once");
+    }
+
+    #[test]
+    fn a_command_s_groups_are_steps_of_helios_s_values() {
+        let host = HeliosHost::new(Arc::default(), Arc::new(Bus::new()), Arc::default());
+        assert!(host.groups().is_none(), "no values, nothing grouped");
+
+        let values = Arc::new(Mutex::new(helios_values::Store::new()));
+        values.lock().unwrap().declare(
+            "exposure.ev",
+            helios_values::Descriptor::float("Exposure", -3.0, 3.0, 0.0),
+        );
+        let host = host.with_values(values.clone(), Arc::default());
+        let groups = host.groups().expect("groups of Helios's values");
+        let g = groups.begin(&PopOrigin::User, "Two steps").unwrap();
+        for _ in 0..2 {
+            values
+                .lock()
+                .unwrap()
+                .set(
+                    helios_values::Set::new(
+                        "exposure.ev",
+                        helios_values::Change::Step(1),
+                        Origin::User,
+                    )
+                    .gesture(helios_values::GestureId(g.0)),
+                )
+                .unwrap();
+        }
+        assert_eq!(values.lock().unwrap().open_gesture(), Some("Two steps"));
+        groups.end(g, true);
+        let v = values.lock().unwrap();
+        assert_eq!(v.open_gesture(), None);
+        assert_eq!(v.undo_steps().len(), 1, "one undo step");
+        assert_eq!(v.undo_steps()[0].label, "Two steps");
     }
 }

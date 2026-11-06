@@ -666,7 +666,9 @@ pub fn command_of(edit: &Edit) -> Option<(&'static str, Json)> {
                     .collect::<Vec<_>>(),
             }),
         ),
-        Edit::Param { .. } => return None,
+        // A parameter, or an edit Helios does not know yet (the enum
+        // grows): ignored.
+        _ => return None,
     })
 }
 

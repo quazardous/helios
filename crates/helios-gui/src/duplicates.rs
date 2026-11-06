@@ -13,6 +13,7 @@
 //! Nothing is ever deleted. The host sends each import's lines here, from
 //! the thread the import runs on ([`Duplicates::sink`]).
 
+use egui_pop::core::ui::UiPop as _;
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, Sender, channel};
 
@@ -240,9 +241,9 @@ impl Duplicates {
             }
         });
         let mut answers = Vec::new();
-        egui::ScrollArea::vertical()
-            .id_salt("helios.duplicates.scroll")
-            .show(ui, |ui| {
+        ui.scroll_area(
+            egui::ScrollArea::vertical().id_salt("helios.duplicates.scroll"),
+            |ui| {
                 for (i, f) in self.found.iter().enumerate() {
                     ui.separator();
                     let name = f.path.file_name().map_or_else(
@@ -325,7 +326,8 @@ impl Duplicates {
                         }
                     }
                 }
-            });
+            },
+        );
         for (i, keep) in answers {
             let _ = if keep { self.keep(i) } else { self.skip(i) };
         }

@@ -25,6 +25,7 @@ use egui::Ui;
 use egui_pop::api::AppHandle;
 use egui_pop::api::host::Seq;
 use egui_pop::api::jobs::JOBS;
+use egui_pop::core::ui::UiPop as _;
 use egui_pop::model::ids::PanelId;
 use egui_pop::model::jobs::{Job, JobState, Request};
 use helios_core::Message;
@@ -428,9 +429,9 @@ impl QueuePanel {
         }
         ui.separator();
         let mut asked = Vec::new();
-        egui::ScrollArea::vertical()
-            .id_salt("helios.queue.scroll")
-            .show(ui, |ui| {
+        ui.scroll_area(
+            egui::ScrollArea::vertical().id_salt("helios.queue.scroll"),
+            |ui| {
                 egui::Grid::new("helios.queue.items")
                     .striped(true)
                     .num_columns(6)
@@ -479,7 +480,8 @@ impl QueuePanel {
                             ui.end_row();
                         }
                     });
-            });
+            },
+        );
         self.asked.extend(asked);
         self.run_asked(app);
     }

@@ -1089,17 +1089,9 @@ dependencies = [
 ]
 
 [[package]]
-name = "egui-phosphor"
-version = "0.14.0"
-source = "git+https://github.com/quazardous/egui-phosphor?rev=01e8c1144cac3f551ceb834b6d26ddf36ba502cd#01e8c1144cac3f551ceb834b6d26ddf36ba502cd"
-dependencies = [
- "egui",
-]
-
-[[package]]
 name = "egui-pop"
-version = "0.3.0"
-source = "git+https://github.com/quazardous/egui-pop?rev=93023502#930235022fc2c7051097244c47ebe826b925b80c"
+version = "0.7.0"
+source = "git+https://github.com/quazardous/egui-pop?rev=2e4b92ce#2e4b92ce4daf0b9fe1e7ccd31141b4173a622c84"
 dependencies = [
  "egui",
  "egui-pop-api",
@@ -1116,8 +1108,8 @@ dependencies = [
 
 [[package]]
 name = "egui-pop-api"
-version = "0.3.0"
-source = "git+https://github.com/quazardous/egui-pop?rev=93023502#930235022fc2c7051097244c47ebe826b925b80c"
+version = "0.7.0"
+source = "git+https://github.com/quazardous/egui-pop?rev=2e4b92ce#2e4b92ce4daf0b9fe1e7ccd31141b4173a622c84"
 dependencies = [
  "eframe",
  "egui",
@@ -1136,13 +1128,14 @@ dependencies = [
 
 [[package]]
 name = "egui-pop-core"
-version = "0.3.0"
-source = "git+https://github.com/quazardous/egui-pop?rev=93023502#930235022fc2c7051097244c47ebe826b925b80c"
+version = "0.7.0"
+source = "git+https://github.com/quazardous/egui-pop?rev=2e4b92ce#2e4b92ce4daf0b9fe1e7ccd31141b4173a622c84"
 dependencies = [
  "egui",
- "egui-phosphor",
  "egui-pop-model",
+ "egui-pop-phosphor",
  "egui-pop-tokens",
+ "egui_stack",
  "log",
  "serde",
  "serde_json",
@@ -1151,8 +1144,8 @@ dependencies = [
 
 [[package]]
 name = "egui-pop-editors"
-version = "0.3.0"
-source = "git+https://github.com/quazardous/egui-pop?rev=93023502#930235022fc2c7051097244c47ebe826b925b80c"
+version = "0.7.0"
+source = "git+https://github.com/quazardous/egui-pop?rev=2e4b92ce#2e4b92ce4daf0b9fe1e7ccd31141b4173a622c84"
 dependencies = [
  "egui",
  "egui-pop-api",
@@ -1168,8 +1161,8 @@ dependencies = [
 
 [[package]]
 name = "egui-pop-i18n"
-version = "0.3.0"
-source = "git+https://github.com/quazardous/egui-pop?rev=93023502#930235022fc2c7051097244c47ebe826b925b80c"
+version = "0.7.0"
+source = "git+https://github.com/quazardous/egui-pop?rev=2e4b92ce#2e4b92ce4daf0b9fe1e7ccd31141b4173a622c84"
 dependencies = [
  "egui",
  "egui-pop-api",
@@ -1188,8 +1181,8 @@ dependencies = [
 
 [[package]]
 name = "egui-pop-imaging"
-version = "0.3.0"
-source = "git+https://github.com/quazardous/egui-pop?rev=93023502#930235022fc2c7051097244c47ebe826b925b80c"
+version = "0.7.0"
+source = "git+https://github.com/quazardous/egui-pop?rev=2e4b92ce#2e4b92ce4daf0b9fe1e7ccd31141b4173a622c84"
 dependencies = [
  "egui",
  "egui-pop-api",
@@ -1200,8 +1193,8 @@ dependencies = [
 
 [[package]]
 name = "egui-pop-model"
-version = "0.3.0"
-source = "git+https://github.com/quazardous/egui-pop?rev=93023502#930235022fc2c7051097244c47ebe826b925b80c"
+version = "0.5.0"
+source = "git+https://github.com/quazardous/egui-pop?rev=2e4b92ce#2e4b92ce4daf0b9fe1e7ccd31141b4173a622c84"
 dependencies = [
  "idna",
  "log",
@@ -1211,9 +1204,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "egui-pop-phosphor"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "508f4928508368b3b78ccd06ada328c79b50484a2071c6478f223b9d05cbc327"
+dependencies = [
+ "egui",
+]
+
+[[package]]
 name = "egui-pop-platform"
-version = "0.3.0"
-source = "git+https://github.com/quazardous/egui-pop?rev=93023502#930235022fc2c7051097244c47ebe826b925b80c"
+version = "0.7.0"
+source = "git+https://github.com/quazardous/egui-pop?rev=2e4b92ce#2e4b92ce4daf0b9fe1e7ccd31141b4173a622c84"
 dependencies = [
  "ashpd",
  "async-io",
@@ -1234,8 +1236,8 @@ dependencies = [
 
 [[package]]
 name = "egui-pop-test"
-version = "0.3.0"
-source = "git+https://github.com/quazardous/egui-pop?rev=93023502#930235022fc2c7051097244c47ebe826b925b80c"
+version = "0.7.0"
+source = "git+https://github.com/quazardous/egui-pop?rev=2e4b92ce#2e4b92ce4daf0b9fe1e7ccd31141b4173a622c84"
 dependencies = [
  "egui",
  "egui-pop-api",
@@ -1249,12 +1251,12 @@ dependencies = [
 [[package]]
 name = "egui-pop-test-macros"
 version = "0.1.0"
-source = "git+https://github.com/quazardous/egui-pop?rev=93023502#930235022fc2c7051097244c47ebe826b925b80c"
+source = "git+https://github.com/quazardous/egui-pop?rev=2e4b92ce#2e4b92ce4daf0b9fe1e7ccd31141b4173a622c84"
 
 [[package]]
 name = "egui-pop-tokens"
-version = "0.2.1"
-source = "git+https://github.com/quazardous/egui-pop?rev=93023502#930235022fc2c7051097244c47ebe826b925b80c"
+version = "0.2.3"
+source = "git+https://github.com/quazardous/egui-pop?rev=2e4b92ce#2e4b92ce4daf0b9fe1e7ccd31141b4173a622c84"
 dependencies = [
  "serde-saphyr",
  "serde_json",
@@ -1262,8 +1264,8 @@ dependencies = [
 
 [[package]]
 name = "egui-pop-viewport"
-version = "0.3.0"
-source = "git+https://github.com/quazardous/egui-pop?rev=93023502#930235022fc2c7051097244c47ebe826b925b80c"
+version = "0.7.0"
+source = "git+https://github.com/quazardous/egui-pop?rev=2e4b92ce#2e4b92ce4daf0b9fe1e7ccd31141b4173a622c84"
 dependencies = [
  "egui",
  "egui-pop-core",
@@ -1277,13 +1279,14 @@ dependencies = [
 
 [[package]]
 name = "egui-pop-views"
-version = "0.3.0"
-source = "git+https://github.com/quazardous/egui-pop?rev=93023502#930235022fc2c7051097244c47ebe826b925b80c"
+version = "0.7.0"
+source = "git+https://github.com/quazardous/egui-pop?rev=2e4b92ce#2e4b92ce4daf0b9fe1e7ccd31141b4173a622c84"
 dependencies = [
  "egui",
  "egui-pop-api",
  "egui-pop-core",
  "egui-pop-model",
+ "egui_plot",
  "egui_table",
  "serde",
  "serde_json",
@@ -1292,7 +1295,7 @@ dependencies = [
 [[package]]
 name = "egui-pop-wayland"
 version = "0.2.0"
-source = "git+https://github.com/quazardous/egui-pop?rev=93023502#930235022fc2c7051097244c47ebe826b925b80c"
+source = "git+https://github.com/quazardous/egui-pop?rev=2e4b92ce#2e4b92ce4daf0b9fe1e7ccd31141b4173a622c84"
 dependencies = [
  "raw-window-handle",
  "wayland-backend",
@@ -1303,7 +1306,7 @@ dependencies = [
 [[package]]
 name = "egui-pop-win32"
 version = "0.2.1"
-source = "git+https://github.com/quazardous/egui-pop?rev=93023502#930235022fc2c7051097244c47ebe826b925b80c"
+source = "git+https://github.com/quazardous/egui-pop?rev=2e4b92ce#2e4b92ce4daf0b9fe1e7ccd31141b4173a622c84"
 dependencies = [
  "windows-sys 0.61.2",
 ]
@@ -1386,14 +1389,27 @@ dependencies = [
 ]
 
 [[package]]
-name = "egui_stack"
-version = "0.22.0"
+name = "egui_plot"
+version = "0.38.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "097775e7cb7a117adf222b7fe05f746b7e1c8ae05d4078ee9ff05b69c4f07a1e"
+checksum = "3c34f8fe086d7e69ce558dcc85f7c7be593092525d01cb30caa560044bc2bbaa"
+dependencies = [
+ "ahash",
+ "egui",
+ "emath",
+ "nohash-hasher",
+]
+
+[[package]]
+name = "egui_stack"
+version = "0.24.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b9e2355986c024477484ee6ab8052172263e53fafcdc1a8533aa1b30bd19d331"
 dependencies = [
  "duplicate",
  "egui",
  "paste",
+ "serde",
  "thiserror 2.0.21",
 ]
 
@@ -3925,7 +3941,7 @@ dependencies = [
 [[package]]
 name = "ortho-router"
 version = "0.1.0"
-source = "git+https://github.com/quazardous/egui-pop?rev=93023502#930235022fc2c7051097244c47ebe826b925b80c"
+source = "git+https://github.com/quazardous/egui-pop?rev=2e4b92ce#2e4b92ce4daf0b9fe1e7ccd31141b4173a622c84"
 
 [[package]]
 name = "os_pipe"
@@ -4969,7 +4985,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.5",
  "windows-sys 0.61.2",

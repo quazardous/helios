@@ -66,6 +66,8 @@
   },
   "plot": {
     "shape": {"$type": "string", "$value": "plain", "$description": "No frame: Rerun's plots fill their view."},
+    "grid-color": {"$type": "color", "$value": "{gray.4}", "$description": "plot_grid_color: Gray.200 in dark, Gray.850 in light, step 4 of either scale"},
+    "grid-fade": {"$type": "number", "$value": 0.3, "$description": "plot_grid_fade"},
     "rest": {
       "border-width": {"$type": "dimension", "$value": {"value": 0, "unit": "px"}},
       "radius": {"$type": "dimension", "$value": {"value": 0, "unit": "px"}},
@@ -74,8 +76,26 @@
   },
   "plot-cursor": {
     "width": {"$type": "dimension", "$value": {"value": 1.5, "unit": "px"}, "$description": "1.5 times the widgets' stroke, as re_ui's paint_time_cursor draws it"},
+    "head": {"$type": "string", "$value": "triangle", "$description": "paint_time_cursor's triangle at the top"},
+    "head-size": {"$type": "dimension", "$value": {"value": 10, "unit": "px"}, "$description": "The triangle's width"},
     "rest": {
       "fill": {"$type": "color", "$value": "{text.default}", "$description": "The widgets' foreground stroke: text_default"}
+    },
+    "hover": {
+      "fill": {"$type": "color", "$value": "{text.strong}", "$description": "Under the pointer or dragged: the strong text"}
+    }
+  },
+  "graph": {
+    "wire-hover": {
+      "color": {"$type": "color", "$value": "{text.strong}", "$description": "Rerun highlights what is hovered toward the strong text"},
+      "width": {"$type": "dimension", "$value": {"value": 3, "unit": "px"}}
+    },
+    "wire-selected": {
+      "color": {"$type": "color", "$value": "{blue.9}", "$description": "The selection's blue"},
+      "width": {"$type": "dimension", "$value": {"value": 3, "unit": "px"}},
+      "glow": {"$type": "color", "$value": "{blue.9}"},
+      "glow-width": {"$type": "dimension", "$value": {"value": 10, "unit": "px"}},
+      "glow-opacity": {"$type": "number", "$value": 0.3}
     }
   },
   "table-header-cell": {

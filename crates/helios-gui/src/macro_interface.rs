@@ -22,6 +22,7 @@
 use egui::{RichText, Ui};
 use egui_pop::api::dialogs::CustomPass;
 use egui_pop::core::slider::{RangeSlider, Slider};
+use egui_pop::core::ui::UiPop as _;
 use helios_core::{Message, ParamKind, Value};
 use helios_template::format::Exposed;
 use helios_template::macros::InnerParam;
@@ -120,23 +121,28 @@ impl Editor {
                 &cols[0],
                 Message::new("gui-macro-iface-inner", "Inner parameters"),
             ));
-            egui::ScrollArea::vertical()
-                .id_salt("helios.macro.iface.inner")
-                .max_height(height)
-                .show(&mut cols[0], |ui| self.inner_ui(ui));
+            cols[0].scroll_area(
+                egui::ScrollArea::vertical()
+                    .id_salt("helios.macro.iface.inner")
+                    .max_height(height),
+                |ui| self.inner_ui(ui),
+            );
             cols[1].strong(tr(
                 &cols[1],
                 Message::new("gui-macro-iface-shown", "Shown by the macro"),
             ));
-            egui::ScrollArea::vertical()
-                .id_salt("helios.macro.iface.shown")
-                .max_height(height)
-                .show(&mut cols[1], |ui| self.shown_ui(ui));
+            cols[1].scroll_area(
+                egui::ScrollArea::vertical()
+                    .id_salt("helios.macro.iface.shown")
+                    .max_height(height),
+                |ui| self.shown_ui(ui),
+            );
         });
         ui.separator();
-        egui::ScrollArea::vertical()
-            .id_salt("helios.macro.iface.row")
-            .show(ui, |ui| self.row_ui(ui));
+        ui.scroll_area(
+            egui::ScrollArea::vertical().id_salt("helios.macro.iface.row"),
+            |ui| self.row_ui(ui),
+        );
         // Checked as the step would be, once per change.
         if self
             .verdict

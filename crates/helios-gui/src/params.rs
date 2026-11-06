@@ -36,6 +36,7 @@ use egui::{Sense, Ui};
 use egui_pop::api::sliders;
 use egui_pop::core::icon::{Icon, Tone};
 use egui_pop::core::slider::{Cause, Slider, SliderOutput};
+use egui_pop::core::ui::UiPop as _;
 use egui_pop::viewport::change::{Cause as ToolCause, Change as ToolChange};
 use egui_pop::viewport::curve::CurveEditor;
 use egui_pop::viewport::wheel::{ColorWheel, WheelValue};
@@ -739,9 +740,9 @@ impl Params {
             ui.weak("No parameters: nothing is shown yet");
             return;
         }
-        egui::ScrollArea::vertical()
-            .id_salt("helios.params")
-            .show(ui, |ui| {
+        ui.scroll_area(
+            egui::ScrollArea::vertical().id_salt("helios.params"),
+            |ui| {
                 let mut start = 0;
                 while start < paths.len() {
                     let node = &paths[start].0;
@@ -767,7 +768,8 @@ impl Params {
                     }
                     start = end;
                 }
-            });
+            },
+        );
     }
 }
 

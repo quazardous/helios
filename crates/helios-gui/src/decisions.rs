@@ -22,6 +22,7 @@
 //! [`Decisions::card_ui`] draws one card on its own, for the graph view
 //! to show next to its node once it exists.
 
+use egui_pop::core::ui::UiPop as _;
 use std::collections::BTreeMap;
 
 use egui::Ui;
@@ -426,14 +427,15 @@ impl Decisions {
             });
         }
         let cards = self.cards.clone();
-        egui::ScrollArea::vertical()
-            .id_salt("helios.decisions.scroll")
-            .show(ui, |ui| {
+        ui.scroll_area(
+            egui::ScrollArea::vertical().id_salt("helios.decisions.scroll"),
+            |ui| {
                 for card in &cards {
                     ui.separator();
                     self.card_ui(ui, card);
                 }
-            });
+            },
+        );
     }
 
     /// One card: what the decision asks, the proposal, Accept and

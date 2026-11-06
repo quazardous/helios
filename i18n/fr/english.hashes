@@ -34,10 +34,10 @@ command-decision-list.title 6600b2fe720b4aad
 command-dialog-answer.title eafe9e4e2e36ad73
 command-dialog-assumeYes.title 6f49391f70e668f3
 command-dialog-current.title 6ccc78624dd76c64
-command-graph-edit.description b63d754457ea4f8f
+command-graph-edit.description 5fff2a07d51e9a0b
 command-graph-export.description 57102c77a80a4198
-command-graph-read.description d4172960d73723e3
-command-graph-select.description d3abf79d4e949b6d
+command-graph-read.description 0fc7303e09432ec5
+command-graph-select.description ae5100b19432c815
 command-graph-view.description 8da7b338fb66a8b7
 command-gui-record-start.title f3ddcd32ecfa4d0a
 command-gui-record-stop.title 8d3aad9304f56ea8

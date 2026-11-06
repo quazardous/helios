@@ -13,6 +13,7 @@
 //!   is the macro it is.
 //! - The panel says it is experimental in its header.
 
+use egui_pop::core::ui::UiPop as _;
 use std::collections::BTreeMap;
 use std::sync::{Mutex, PoisonError};
 
@@ -312,10 +313,11 @@ impl Panel {
                 .is_some()
                 .then(|| (node.to_string(), file.clone()))
         });
-        egui::ScrollArea::vertical()
-            .id_salt(PANEL)
-            .auto_shrink([false, true])
-            .show(ui, |ui| {
+        ui.scroll_area(
+            egui::ScrollArea::vertical()
+                .id_salt(PANEL)
+                .auto_shrink([false, true]),
+            |ui| {
                 let mut group = None;
                 for (e, matched) in &shown {
                     if matched.is_none() && group != Some(e.origin) {
@@ -339,7 +341,8 @@ impl Panel {
                     ui.separator();
                     applied_ui(ui, values, params, node, file, &mut run);
                 }
-            });
+            },
+        );
         if let Some((id, args)) = run {
             request(ui.ctx(), Request::Run(id.into(), args, CommandOrigin::User));
         }

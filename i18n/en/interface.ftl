@@ -30,16 +30,16 @@ clip-application-x-helios-param-json =
     .title = a parameter
 
 command-graph-edit =
-    .description = Asks a node editor for an edit, done at its next frame as the user's (a connection type-checked, then its graph.* step): `edit` is `connect` (`from`, `to`), `disconnect` (`edges`), `move` (`moves`), `delete` (`nodes`, `edges`) or `add` (`nodes`).
+    .description = Asks a node editor for an edit, done at its next frame as the user's (a connection type-checked, then its graph.* step): `edit` is `connect` (`from`, `to`, and `replaces`: wires whose end it moves, one edit), `disconnect` (`edges`), `move` (`moves`), `delete` (`nodes`, `edges`) or `add` (`nodes`).
 
 command-graph-export =
     .description = A node editor's graph as an image, drawn from the graph and its layout as the editor drew it last: `format` (svg by default; png or pdf when built with them), `selection` (true: only the selected nodes), `level` (overview, ports or detail; ports by default), `wires` (curves, orthogonal or straight; the editor's by default), `background` (false: transparent), `title`, `scale` (a PNG's pixels per point, 1 by default). Gives `svg` as text, or `png` or `pdf` base64-encoded.
 
 command-graph-read =
-    .description = The graph a node editor drew last: nodes (place, ports, group, parameters), wires, groups, the kinds it can add, the selection, the level and the part in view.
+    .description = The graph a node editor drew last: nodes (place, ports, group, parameters), wires, groups, the kinds it can add, the selection (`selection`: nodes, `selected_edges`: wires), the level and the part in view.
 
 command-graph-select =
-    .description = Selects nodes of a node editor (`nodes`, their ids) at its next frame.
+    .description = Selects nodes (`nodes`, their ids) and wires (`edges`: [{"{"}from, to{"}"}]) of a node editor at its next frame: what is named is the selection, nodes and wires; give one of them or both.
 
 command-graph-view =
     .description = Fits a node editor's graph (`fit`: true), zooms to a level (`level`: overview, ports or detail) or focuses a node (`focus`), at its next frame.

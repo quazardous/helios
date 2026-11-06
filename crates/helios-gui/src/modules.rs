@@ -25,6 +25,7 @@
 //!   than the workspace or Helios has offers "Update to 2"
 //!   (`macro.upgrade`).
 
+use egui_pop::core::ui::UiPop as _;
 use std::cell::RefCell;
 use std::sync::{Mutex, PoisonError};
 
@@ -249,10 +250,11 @@ pub fn ui(
     let mut heading: Option<String> = None;
     let names: Vec<String> = rows.iter().map(|r| r.node.clone()).collect();
     let many_before = many.clone();
-    egui::ScrollArea::vertical()
-        .id_salt(PANEL)
-        .auto_shrink([false, true])
-        .show(ui, |ui| {
+    ui.scroll_area(
+        egui::ScrollArea::vertical()
+            .id_salt(PANEL)
+            .auto_shrink([false, true]),
+        |ui| {
             for row in &rows {
                 // An opened macro's modules, under a heading row.
                 let inside = row

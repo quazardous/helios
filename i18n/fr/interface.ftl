@@ -29,16 +29,16 @@ clip-application-x-helios-param-json =
     .title = un paramètre
 
 command-graph-edit =
-    .description = Demande une modification à un éditeur de nœuds, faite à sa prochaine image comme celle de l’utilisateur (une connexion vérifiée par type, puis son étape graph.*) : `edit` vaut `connect` (`from`, `to`), `disconnect` (`edges`), `move` (`moves`), `delete` (`nodes`, `edges`) ou `add` (`nodes`).
+    .description = Demande une modification à un éditeur de nœuds, faite à sa prochaine image comme celle de l’utilisateur (une connexion vérifiée par type, puis son étape graph.*) : `edit` vaut `connect` (`from`, `to`, et `replaces` : les liens dont elle déplace un bout, en une seule modification), `disconnect` (`edges`), `move` (`moves`), `delete` (`nodes`, `edges`) ou `add` (`nodes`).
 
 command-graph-export =
     .description = Le graphe d’un éditeur de nœuds en image, tiré du graphe et de sa disposition tels que l’éditeur les a dessinés en dernier : `format` (svg par défaut ; png ou pdf s’ils sont compilés), `selection` (true : seulement les nœuds sélectionnés), `level` (overview, ports ou detail ; ports par défaut), `wires` (curves, orthogonal ou straight ; ceux de l’éditeur par défaut), `background` (false : transparent), `title`, `scale` (les pixels par point d’un PNG, 1 par défaut). Donne `svg` en texte, ou `png` ou `pdf` en base64.
 
 command-graph-read =
-    .description = Le graphe qu’un éditeur de nœuds a dessiné en dernier : nœuds (place, ports, groupe, paramètres), liens, groupes, les sortes qu’il peut ajouter, la sélection, le niveau et la partie visible.
+    .description = Le graphe qu’un éditeur de nœuds a dessiné en dernier : nœuds (place, ports, groupe, paramètres), liens, groupes, les sortes qu’il peut ajouter, la sélection (`selection` : les nœuds, `selected_edges` : les liens), le niveau et la partie visible.
 
 command-graph-select =
-    .description = Sélectionne des nœuds d’un éditeur de nœuds (`nodes`, leurs ids) à sa prochaine image.
+    .description = Sélectionne des nœuds (`nodes`, leurs ids) et des liens (`edges` : [{"{"}from, to{"}"}]) d’un éditeur de nœuds à sa prochaine image : ce qui est nommé devient la sélection, nœuds et liens ; donnez l’un des deux ou les deux.
 
 command-graph-view =
     .description = Ajuste le graphe d’un éditeur de nœuds (`fit` : true), zoome à un niveau (`level` : overview, ports ou detail) ou cible un nœud (`focus`), à sa prochaine image.
