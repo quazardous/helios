@@ -24,6 +24,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.57.0] - 2026-11-06
+
+### Added
+
+- Experimental: with workshops on, the Workshops panel lists the workshops
+  Helios ships, your library's and the workspace's, finds them by what you
+  want (the name first, then the keywords, then the intent), applies one
+  from its row, and shows an applied workshop's sliders with their targets
+  and an "Aim again" button that aims it on the open image as one undo
+  step. Agents get `helios_workshop_suggest` and `helios_workshop_aim`.
+- Experimental: with workshops on, "Save as workshop…" in the Modules panel
+  turns a macro into a workshop: a form asks what it is for, its keywords
+  and, per slider, a target the image should measure (prefilled with what
+  the open image measures now), saved as the macro's next version in one
+  step that Ctrl+Z takes back. Publishing it to your library still asks
+  first. Agents get `helios_workshop_save`.
+
+### Changed
+
+- Helios looks like Rerun by default: Helios Dark and Helios Light take the
+  Rerun viewer's colours, corners and sizes (near-black or white neutral
+  greys, Rerun's blue as accent; values from its re_ui, MIT OR Apache-2.0),
+  and which one shows still follows the system's light or dark mode. The
+  previous look, warm greys with the sun gold accent, stays available as the
+  Helios Classic Dark and Helios Classic Light themes (System › Themes, or
+  "Theme: Classic Dark" in the command palette).
+
 ## [0.56.0] - 2026-11-05
 
 ### Added
