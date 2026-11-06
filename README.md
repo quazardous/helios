@@ -19,6 +19,16 @@ module. Meanwhile, a catalog SDK inside darktable itself is built in the
 [darktable fork](https://github.com/quazardous/darktable) on the
 `helios/phase0-catalog-sdk` branch, with its design in `doc/helios/PHASE0.md`.
 
+The desktop interface is built on
+[egui-pop](https://github.com/quazardous/egui-pop), an application framework
+for [egui](https://github.com/emilk/egui) developed alongside Helios: its
+workbench, commands, themes and kits, node graph, timeline and agent bridge
+are what Helios's GUI is made of. Its
+[web gallery](https://quazardous.github.io/egui-pop/gallery/) shows the
+components live, and its
+[first-app guide](https://github.com/quazardous/egui-pop/blob/main/docs/first-app.md)
+follows the path Helios took.
+
 ## Documentation
 
 - [ROADMAP.md](./ROADMAP.md): vision, concepts, phases and open questions.
