@@ -566,7 +566,7 @@ impl App {
             .vault()
             .locations(&image)?
             .into_iter()
-            .find(|l| l.present)
+            .find(helios_vault::Location::present)
             .map(|l| l.path)
             .ok_or_else(|| format!("no copy of image {id} is present"))?;
         // A newer opening replaces one still being made ready.
@@ -1227,7 +1227,7 @@ fn main() -> Result<(), String> {
             helios_vault::ImageId::from_hex(id)
                 .ok()
                 .and_then(|image| vault.locations(&image).ok())
-                .is_some_and(|l| l.iter().any(|l| l.present))
+                .is_some_and(|l| l.iter().any(helios_vault::Location::present))
         }));
     }
     start::mark("shell declared (commands, themes, translations)");
@@ -1274,6 +1274,28 @@ fn main() -> Result<(), String> {
             // The import window's cards, polled off the interface thread,
             // and its recent folders and favourites.
             shell.watch_cards(helios_storage::system());
+            // The volumes and where each photo is: present, offline or
+            // missing, scanned at start, when a volume comes or goes and
+            // every five minutes.
+            if let Some(vault) = known_vault.clone() {
+                let library = vault.clone();
+                let scanner = helios_storage::scan::Scanner::start(
+                    vault,
+                    helios_storage::system(),
+                    helios_storage::node(),
+                    move || {
+                        helios_library::import::library_root(&library)
+                            .ok()
+                            .flatten()
+                    },
+                    std::time::Duration::from_mins(5),
+                    |outcome| match outcome {
+                        Ok(report) => log::debug!("volumes scanned: {report:?}"),
+                        Err(e) => log::warn!("volumes: the scan failed: {e}"),
+                    },
+                );
+                shell.on_volumes_changed(move || scanner.poke());
+            }
             // What the vault holds, for its "in your Library" prefilter.
             if let Some(vault) = known_vault.clone() {
                 shell.set_import_known(Arc::new(move || {

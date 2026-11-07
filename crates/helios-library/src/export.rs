@@ -15,7 +15,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use helios_export::batch::{BatchRequest, Clash, Item, Settings, extension};
-use helios_vault::{EditSession, ImageId, Store, Vault};
+use helios_vault::{EditSession, ImageId, Location, Store, Vault};
 
 use crate::rename::{Naming, Pattern};
 use crate::signals::Signals;
@@ -67,7 +67,7 @@ pub fn plan<S: Store>(
         let source = vault
             .locations(image)?
             .into_iter()
-            .find(|l| l.present)
+            .find(Location::present)
             .map(|l| l.path);
         let Some(source) = source else {
             items.push(Item {

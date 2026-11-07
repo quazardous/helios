@@ -9,9 +9,30 @@
 //! an older one to [`VOLUME_FORMAT`] when it is read (the documents table
 //! needs no schema step), and refuses one written by a newer Helios.
 
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{Store, Vault};
+
+/// A volume's id: a UUID, a share's address, a marker's id or a weak
+/// label-and-size, prefixed by how it was found (`uuid:…`, `share:…`,
+/// `marker:…`, `weak:…`). It lives here, below `helios-storage`, because
+/// a [`Location`](crate::Location) names the volume it is on.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct VolumeId(pub String);
+
+impl VolumeId {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for VolumeId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
 
 /// The documents' namespace.
 pub const VOLUMES: &str = "storage/volumes";

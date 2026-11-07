@@ -440,6 +440,27 @@ not mounted stays known, offline, never dropped. The marker file is read
 whenever present and written only when the user asks for it, never by a
 scan.
 
+Each location (a copy of a photo) names the **volume** it is on and its
+path inside it, beside its absolute path. A background scan, at start,
+when a volume is plugged in or out and every five minutes, records the
+volumes and puts each location on its volume (one recorded before
+volumes existed keeps its absolute path until then). The path inside the
+volume is what counts: a disk mounted at another place, or given another
+drive letter, still finds every photo on it.
+
+## Missing files
+
+A location is **present** (its file is there), **offline** (its volume
+is not plugged in, or is an internal disk of another computer sharing
+the vault) or **missing** (its volume is online, or it is on none, and
+the file is not there). A photo is present when one copy is, offline
+when none is but one is offline, missing otherwise. An offline photo is
+not missing: its marks, tags and edits stay, and nothing is removed or
+relinked because a disk is unplugged; plugging it in makes it present
+again. `repair` (relinking moved files by content) checks present copies
+only and never looks for an offline photo elsewhere. The Library reads
+each photo's presence; its "offline" badge comes with the preview cache.
+
 ## Not yet
 
 - Phones over MTP as a source (mount them as folders).

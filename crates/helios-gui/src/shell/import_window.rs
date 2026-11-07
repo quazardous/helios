@@ -238,6 +238,15 @@ impl Shell {
         }));
     }
 
+    /// Calls `f` (off the interface thread) when a volume appears or goes,
+    /// once [`Shell::watch_cards`] watches them: the background volume
+    /// scan's cue.
+    pub fn on_volumes_changed(&self, f: impl Fn() + Send + 'static) {
+        if let Some(watch) = &self.import_window.watch {
+            watch.on_volumes(f);
+        }
+    }
+
     /// Keeps the import window's recent folders, favourites and last
     /// source in `file` (JSON), read now.
     pub fn remember_import_sources_in(&mut self, file: PathBuf) {

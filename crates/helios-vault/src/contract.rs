@@ -14,7 +14,8 @@ use helios_core::{Bus, ContentHash};
 use serde_json::json;
 
 use crate::fields::{Command, LABELS, Op, Order, PICKED, Query, RATING, REJECTED, TAGS};
-use crate::{Image, ImageId, Location, Store, Vault};
+use crate::storage::VolumeId;
+use crate::{Image, ImageId, Location, Presence, Store, Vault};
 
 /// Runs every scenario against fresh stores made by `make`.
 pub fn check<S: Store>(make: impl Fn() -> S) {
@@ -22,6 +23,7 @@ pub fn check<S: Store>(make: impl Fn() -> S) {
     locations_belong_to_one_image_and_round_trip(make());
     import_reads_only_what_changed(make(), &scratch("import"));
     repair_relinks_by_content_reading_as_little_as_possible(make(), &scratch("repair"));
+    repair_leaves_offline_locations_alone(make(), &scratch("offline"));
     fields_round_trip_and_come_in_one_batch(make());
     queries_filter_and_order(make());
     queries_filter_by_labels_flags_and_tags(make());
@@ -625,13 +627,7 @@ fn image(n: u8) -> Image {
 }
 
 fn location(path: &str) -> Location {
-    Location {
-        path: PathBuf::from(path),
-        size: 101,
-        modified: 5,
-        last_verified: 7,
-        present: true,
-    }
+    Location::seen(PathBuf::from(path), 101, 5, 7)
 }
 
 fn images_are_added_once<S: Store>(mut s: S) {
@@ -652,14 +648,30 @@ fn locations_belong_to_one_image_and_round_trip<S: Store>(mut s: S) {
     s.add_image(&image(1)).unwrap();
     s.add_image(&image(2)).unwrap();
     let lost = Location {
-        present: false,
+        presence: Presence::Missing,
         ..location("/b.nef")
+    };
+    // On a volume, unplugged: its volume and path there round-trip too.
+    let away = Location {
+        volume: Some(VolumeId("uuid:backup".into())),
+        rel_path: Some(PathBuf::from("2024/c.nef")),
+        presence: Presence::Offline,
+        ..location("/media/backup/2024/c.nef")
     };
     s.put_location(&image(1).id, &location("/a.nef")).unwrap();
     s.put_location(&image(1).id, &lost).unwrap();
+    s.put_location(&image(1).id, &away).unwrap();
     assert_eq!(
         s.locations(&image(1).id).unwrap(),
-        vec![location("/a.nef"), lost.clone()]
+        vec![location("/a.nef"), lost.clone(), away.clone()]
+    );
+    assert_eq!(
+        s.at_path(Path::new("/media/backup/2024/c.nef")).unwrap(),
+        Some((image(1).id, away))
+    );
+    assert!(
+        s.remove_location(Path::new("/media/backup/2024/c.nef"))
+            .unwrap()
     );
     assert_eq!(
         s.at_path(Path::new("/b.nef")).unwrap(),
@@ -713,6 +725,32 @@ fn import_reads_only_what_changed<S: Store>(s: S, dir: &Path) {
     assert_eq!(v.images().unwrap().len(), 2);
 }
 
+/// A copy on an unplugged disk is offline: repair neither marks it
+/// missing nor looks for its image elsewhere, and the scan alone brings
+/// it back.
+fn repair_leaves_offline_locations_alone<S: Store>(s: S, dir: &Path) {
+    let v = Vault::new(s);
+    write(&dir.join("disk/away.raf"), &content(4, 5_000));
+    v.import(&dir.join("disk"), 10).unwrap();
+    let (id, at) = v.all_locations().unwrap().remove(0);
+    let offline = Location {
+        volume: Some(VolumeId("uuid:backup".into())),
+        rel_path: Some(PathBuf::from("away.raf")),
+        presence: Presence::Offline,
+        ..at.clone()
+    };
+    v.update_locations(&[(id, at.path.clone(), offline.clone())])
+        .unwrap();
+    // The disk is unplugged: its file is not there.
+    std::fs::remove_dir_all(dir.join("disk")).unwrap();
+    let before = v.reads();
+    let report = v.repair(&[dir], 20).unwrap();
+    assert_eq!((report.lost, report.relinked, report.missing), (0, 0, 0));
+    assert_eq!(v.reads(), before, "nothing is looked for");
+    assert_eq!(v.locations(&id).unwrap(), vec![offline]);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 fn repair_relinks_by_content_reading_as_little_as_possible<S: Store>(s: S, dir: &Path) {
     let v = Vault::new(s);
     write(&dir.join("shoot/kept.raf"), &content(1, 300_000));
@@ -750,7 +788,7 @@ fn repair_relinks_by_content_reading_as_little_as_possible<S: Store>(s: S, dir: 
         .locations(&moved)
         .unwrap()
         .into_iter()
-        .filter(|l| l.present)
+        .filter(Location::present)
         .map(|l| l.path)
         .collect();
     assert_eq!(present, vec![dir.join("elsewhere.raf")]);

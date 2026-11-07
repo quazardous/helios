@@ -208,6 +208,9 @@ pub struct Entry {
     /// Its day (`YYYY-MM-DD`), for the search field's dates.
     pub day: Option<String>,
     pub stack: Option<StackOf>,
+    /// Whether a copy of its file is at hand: present, offline (on a
+    /// volume not plugged in) or missing. Read, not drawn yet.
+    pub presence: helios_vault::Presence,
 }
 
 /// A file size as the interface's language writes it: `12.3 MiB`,

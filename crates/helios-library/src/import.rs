@@ -61,7 +61,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use helios_core::jobs::{Jobs, Progress, Start};
 use helios_vault::fields::{self as vault_fields, Command, Op};
-use helios_vault::{Change, Changes, IMAGE_EXTENSIONS, ImageId, ImageRows, Store, Vault};
+use helios_vault::{Change, Changes, IMAGE_EXTENSIONS, ImageId, ImageRows, Location, Store, Vault};
 use helios_xmp::files::Matched;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -718,7 +718,7 @@ impl<S: Store> Run<'_, S> {
             && self
                 .vault
                 .at_path(path)?
-                .is_some_and(|(known, l)| known == id && l.present)
+                .is_some_and(|(known, l)| known == id && l.present())
         {
             self.vault.import_hashed(path, id, self.now)?;
             self.seen.entry(id).or_insert_with(|| path.to_path_buf());
@@ -733,7 +733,7 @@ impl<S: Store> Run<'_, S> {
                 .vault
                 .locations(&id)?
                 .into_iter()
-                .filter(|l| l.present)
+                .filter(Location::present)
                 .map(|l| l.path)
                 .collect();
             Some(json!({ "of": "library", "at": places }))
@@ -833,7 +833,7 @@ impl<S: Store> Run<'_, S> {
                     .vault
                     .locations(id)?
                     .iter()
-                    .any(|l| l.present && l.path.starts_with(root) && l.path.is_file()),
+                    .any(|l| l.present() && l.path.starts_with(root) && l.path.is_file()),
                 None => false,
             };
             if !copied {

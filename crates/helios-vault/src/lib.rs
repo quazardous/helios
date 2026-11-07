@@ -4,12 +4,14 @@
 //!
 //! - an image **is its content**: its id is the BLAKE3 hash of the file;
 //! - where a file sits is **data**: an image has any number of locations
-//!   (path, size, modification time, last verified, present or not);
+//!   (path, size, modification time, last verified, the volume it is on
+//!   and its path there, and whether it is present, offline or missing);
 //! - **import** walks folders and records what it finds; a file already
 //!   known at the same path, size and modification time is not read again;
 //! - **repair** marks vanished locations and relinks moved or renamed files
 //!   by content, reading as little as it can: same size first, then a
-//!   partial hash, then the full hash only for the remaining candidates;
+//!   partial hash, then the full hash only for the remaining candidates.
+//!   An offline location (its volume unplugged) is left alone;
 //! - **stacks** group images shown as one, and each image's import
 //!   **signals** are kept beside it ([`stacks`]).
 //!
@@ -84,16 +86,85 @@ pub struct Image {
     pub partial: ContentHash,
 }
 
+/// Whether a location's file can be read now.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Presence {
+    /// The file is there.
+    #[default]
+    Present,
+    /// Its volume is not at hand (unplugged, or a fixed disk of another
+    /// node): the file is not known to be gone.
+    Offline,
+    /// Its volume is online (or it has none) and the file is not there.
+    Missing,
+}
+
+impl Presence {
+    /// As stored: `present`, `offline` or `missing`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Present => "present",
+            Self::Offline => "offline",
+            Self::Missing => "missing",
+        }
+    }
+
+    /// The stored word read back; an unknown one is missing.
+    pub fn parse(word: &str) -> Self {
+        match word {
+            "present" => Self::Present,
+            "offline" => Self::Offline,
+            _ => Self::Missing,
+        }
+    }
+
+    /// An image's presence from its locations': present when one copy is,
+    /// else offline when one is, else missing (no location at all too).
+    pub fn of<'a>(locations: impl IntoIterator<Item = &'a Location>) -> Self {
+        locations
+            .into_iter()
+            .map(|l| l.presence)
+            .min()
+            .unwrap_or(Self::Missing)
+    }
+}
+
 /// Where a copy of an image was seen.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Location {
+    /// Its absolute path, as last resolved: on a volume, the volume's
+    /// mount point joined with [`Location::rel_path`].
     pub path: PathBuf,
     pub size: u64,
     /// Modification time when last seen, in seconds since the epoch.
     pub modified: u64,
     pub last_verified: u64,
-    /// False once the file is no longer found there.
-    pub present: bool,
+    /// The volume it is on; `None` until a scan links it.
+    pub volume: Option<storage::VolumeId>,
+    /// Its path inside that volume (relative to the volume's root).
+    pub rel_path: Option<PathBuf>,
+    pub presence: Presence,
+}
+
+impl Location {
+    /// A file just seen at `path`: present, on no volume yet.
+    pub fn seen(path: PathBuf, size: u64, modified: u64, now: u64) -> Self {
+        Self {
+            path,
+            size,
+            modified,
+            last_verified: now,
+            volume: None,
+            rel_path: None,
+            presence: Presence::Present,
+        }
+    }
+
+    /// Whether its file is there.
+    pub fn present(&self) -> bool {
+        self.presence == Presence::Present
+    }
 }
 
 /// Where rows are kept. A store only stores: every rule is the vault's.
@@ -460,7 +531,8 @@ pub struct RepairReport {
     pub lost: u64,
     /// Images found again elsewhere, by content.
     pub relinked: u64,
-    /// Images left with no present location.
+    /// Images left with every location missing (an offline copy is not
+    /// missing).
     pub missing: u64,
 }
 
@@ -588,7 +660,7 @@ impl<S: Store> Vault<S> {
             {
                 let verified = Location {
                     last_verified: now,
-                    present: true,
+                    presence: Presence::Present,
                     ..location.clone()
                 };
                 self.store
@@ -603,16 +675,7 @@ impl<S: Store> Vault<S> {
             // The image and its location go in together, or not at all.
             let new = self.transaction(|store| {
                 let new = store.add_image(&Image { id, size, partial })?;
-                store.put_location(
-                    &id,
-                    &Location {
-                        path,
-                        size,
-                        modified,
-                        last_verified: now,
-                        present: true,
-                    },
-                )?;
+                store.put_location(&id, &Location::seen(path, size, modified, now))?;
                 Ok(new)
             })?;
             if new {
@@ -634,7 +697,7 @@ impl<S: Store> Vault<S> {
         if let Some((id, location)) = known
             && location.size == size
             && location.modified == modified
-            && location.present
+            && location.present()
         {
             return Ok(id);
         }
@@ -642,16 +705,7 @@ impl<S: Store> Vault<S> {
         let partial = self.partial_hash(&path, size)?;
         let new = self.transaction(|store| {
             let new = store.add_image(&Image { id, size, partial })?;
-            store.put_location(
-                &id,
-                &Location {
-                    path,
-                    size,
-                    modified,
-                    last_verified: now,
-                    present: true,
-                },
-            )?;
+            store.put_location(&id, &Location::seen(path, size, modified, now))?;
             Ok(new)
         })?;
         if new {
@@ -674,16 +728,7 @@ impl<S: Store> Vault<S> {
         let partial = self.partial_hash(&path, size)?;
         let new = self.transaction(|store| {
             let new = store.add_image(&Image { id, size, partial })?;
-            store.put_location(
-                &id,
-                &Location {
-                    path,
-                    size,
-                    modified,
-                    last_verified: now,
-                    present: true,
-                },
-            )?;
+            store.put_location(&id, &Location::seen(path, size, modified, now))?;
             Ok(new)
         })?;
         if new {
@@ -692,17 +737,48 @@ impl<S: Store> Vault<S> {
         Ok(new)
     }
 
+    /// Every location, with its image.
+    pub fn all_locations(&self) -> Result<Vec<(ImageId, Location)>, String> {
+        self.store.lock().expect("store lock").all_locations()
+    }
+
+    /// Writes locations a scan changed (their volume, path inside it,
+    /// presence, or the absolute path a moved mount point gives), in one
+    /// transaction. Each is `(image, the path it was stored at, the
+    /// location now)`: a new path replaces the old row.
+    pub fn update_locations(&self, updates: &[(ImageId, PathBuf, Location)]) -> Result<(), String> {
+        if updates.is_empty() {
+            return Ok(());
+        }
+        self.transaction(|store| {
+            for (id, old, location) in updates {
+                if *old != location.path {
+                    store.remove_location(old)?;
+                }
+                store.put_location(id, location)?;
+            }
+            Ok(())
+        })?;
+        self.catalog.lock().expect("catalog lock").version += 1;
+        Ok(())
+    }
+
     /// Marks locations whose file is gone, then looks under `roots` for the
     /// images left with no present location, relinking them by content.
+    /// An offline location (its volume unplugged, see `helios-storage`'s
+    /// scan) is never marked missing, and an image with one is not looked
+    /// for.
     pub fn repair(&self, roots: &[&Path], now: u64) -> Result<RepairReport, String> {
         let mut report = RepairReport::default();
         let locations = self.store.lock().expect("store lock").all_locations()?;
         for (id, location) in &locations {
-            let still = location.present
-                && stat(&location.path).is_ok_and(|(size, _)| size == location.size);
-            if location.present && !still {
+            if !location.present() {
+                continue;
+            }
+            let still = stat(&location.path).is_ok_and(|(size, _)| size == location.size);
+            if !still {
                 let lost = Location {
-                    present: false,
+                    presence: Presence::Missing,
                     last_verified: now,
                     ..location.clone()
                 };
@@ -717,7 +793,11 @@ impl<S: Store> Vault<S> {
             let store = self.store.lock().expect("store lock");
             let mut missing = Vec::new();
             for image in store.images()? {
-                if !store.locations(&image.id)?.iter().any(|l| l.present) {
+                if store
+                    .locations(&image.id)?
+                    .iter()
+                    .all(|l| l.presence == Presence::Missing)
+                {
                     missing.push(image);
                 }
             }
@@ -729,7 +809,7 @@ impl<S: Store> Vault<S> {
                     break;
                 }
                 let known = self.store.lock().expect("store lock").at_path(&path)?;
-                if known.is_some_and(|(_, l)| l.present) {
+                if known.is_some_and(|(_, l)| l.presence != Presence::Missing) {
                     continue;
                 }
                 let (size, modified) = stat(&path)?;
@@ -745,13 +825,7 @@ impl<S: Store> Vault<S> {
                 }
                 let id = ImageId(self.full_hash(&path)?);
                 if let Some(i) = missing.iter().position(|m| m.id == id) {
-                    let location = Location {
-                        path,
-                        size,
-                        modified,
-                        last_verified: now,
-                        present: true,
-                    };
+                    let location = Location::seen(path, size, modified, now);
                     self.store
                         .lock()
                         .expect("store lock")
@@ -771,10 +845,14 @@ impl<S: Store> Describe for Vault<S> {
         let store = self.store.lock().expect("store lock");
         let images = store.images().map_or(0, |i| i.len());
         let locations = store.all_locations().unwrap_or_default();
-        let present = locations.iter().filter(|(_, l)| l.present).count();
+        let count = |p: Presence| locations.iter().filter(|(_, l)| l.presence == p).count();
         json!({
             "images": images,
-            "locations": { "all": locations.len(), "present": present },
+            "locations": {
+                "all": locations.len(),
+                "present": count(Presence::Present),
+                "offline": count(Presence::Offline),
+            },
             "reads": self.reads(),
             "catalog": self.catalog.lock().expect("catalog lock").describe(),
         })

@@ -417,6 +417,23 @@ instead of `/media/DISK`), every location on it is found again without a
 repair scan. This is Lightroom's "Find Missing Folder" done by the
 machine.
 
+**Built (phase 2, 2026-11-07).** `Location` has `volume` (a
+`VolumeId`, which moved down into `helios_vault::storage` so the vault
+names it without depending on `helios-storage`), `rel_path` and
+`presence`. Schema step 4 adds the columns `volume`, `rel_path` and
+`presence` to `locations` (the old `present` flag becomes `present` or
+`missing`, then is dropped); old rows keep their absolute path and wait,
+volume and `rel_path` empty, for the next scan. The scan
+(`helios_storage::scan`) runs on a thread of its own at start, when the
+import window's `Watch` sees a volume come, go or change mount point, and
+every five minutes. It records the volumes (`registry::record`), then
+links each location on no volume: to the volume with the deepest mount
+point above its path, an online one only when the file is there (so a
+path under `/` whose disk is unplugged is not given to the system disk),
+an offline one known to have been mounted there on this node as is. On
+an online volume the absolute path is rebuilt from the volume's mount
+point and `rel_path`, so a changed mount point loses nothing.
+
 ### 2.3 Online, offline, missing
 
 A location has three states instead of `present` true or false:
@@ -440,6 +457,17 @@ What the library does with a photo whose locations are all offline:
   for a pulled card);
 - `repair` never touches locations on offline volumes, and nothing is
   ever removed from the library because a volume is absent.
+
+**Built (phase 2, 2026-11-07).** `helios_vault::Presence` is `Present`,
+`Offline` or `Missing`; the scan sets it. A location is offline when its
+volume is not mounted, when it is a fixed (internal) disk whose node is
+not this one, or when the registry no longer knows its volume; present
+when its file is there; missing when its volume is online (or it is on
+none) and the file is not there. `repair` checks present locations only:
+an offline one is never marked missing, and an image with an offline
+copy is not searched for. The Library's entries carry the image's
+presence (present when a copy is, else offline when one is, else
+missing); nothing draws it yet (phase 3's badge).
 
 ### 2.4 Roles
 
@@ -665,7 +693,9 @@ none and no override applies):
   (or simply: `last_verified` set only when the bytes read back match
   the image's id, which is already what a copy-import does).
 - `repair` must skip offline volumes and use volume-relative paths; it
-  then relinks only what really moved.
+  then relinks only what really moved. (Built in phase 2: `repair` skips
+  offline locations, and the volume scan, not `repair`, follows a moved
+  mount point through `rel_path`.)
 - Strategies, assignments, volumes and their roles are vault documents
   (namespaces `storage/volumes`, `storage/strategies`,
   `storage/assignments`), so they travel with the library and its

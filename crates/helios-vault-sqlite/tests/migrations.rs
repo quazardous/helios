@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use helios_vault::Store;
+use helios_vault::{Location, Presence, Store};
 use helios_vault_sqlite::{OpenError, Options, Progress, SCHEMA_VERSION, SqliteStore, snapshot};
 use rusqlite::Connection;
 
@@ -242,6 +242,62 @@ fn a_reject_kept_as_a_rating_becomes_its_own_field() {
     assert_eq!(
         store.field(&rejected, "rejected").unwrap(),
         Some(serde_json::json!(true))
+    );
+    drop(store);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Version 4 puts locations on volumes: an old row keeps its absolute
+/// path, has no volume nor path inside one until a scan relinks it, and
+/// its `present` flag becomes a presence.
+#[test]
+fn old_locations_keep_their_path_and_wait_for_a_volume() {
+    let dir = scratch("volumes");
+    let path = dir.join("vault.db");
+    let image = "01".repeat(32);
+    old_database(
+        &path,
+        3,
+        &format!(
+            "CREATE TABLE vault_state (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+             INSERT INTO locations VALUES ('/photos/here.nef', '{image}', 100, 5, 7, 1);
+             INSERT INTO locations VALUES ('/photos/gone.nef', '{image}', 100, 5, 7, 0);"
+        ),
+    );
+    let store = SqliteStore::open(&path).unwrap();
+    let migrated = store.report().migrated.clone().unwrap();
+    assert_eq!((migrated.from, migrated.to), (3, SCHEMA_VERSION));
+    let id = helios_vault::ImageId::from_hex(&image).unwrap();
+    let locations = store.locations(&id).unwrap();
+    let seen: Vec<_> = locations
+        .iter()
+        .map(|l| {
+            (
+                l.path.to_str().unwrap(),
+                l.presence,
+                l.volume.clone(),
+                l.rel_path.clone(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        seen,
+        [
+            ("/photos/gone.nef", Presence::Missing, None, None),
+            ("/photos/here.nef", Presence::Present, None, None),
+        ]
+    );
+    // A relinked row round-trips.
+    let mut store = store;
+    let relinked = Location {
+        volume: Some(helios_vault::storage::VolumeId("uuid:photos".into())),
+        rel_path: Some("here.nef".into()),
+        ..locations[1].clone()
+    };
+    store.put_location(&id, &relinked).unwrap();
+    assert_eq!(
+        store.at_path(Path::new("/photos/here.nef")).unwrap(),
+        Some((id, relinked))
     );
     drop(store);
     let _ = std::fs::remove_dir_all(&dir);

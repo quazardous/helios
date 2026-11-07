@@ -40,7 +40,7 @@ use std::sync::mpsc::Receiver;
 
 use helios_core::{Bus, Envelope, Graph, Message, NodeId, Params};
 use helios_vault::fields::{Command, LABELS, PICKED, Query, RATING, REJECTED, TAGS};
-use helios_vault::{EditSession, ImageId, Store, Vault, Version, edit};
+use helios_vault::{EditSession, ImageId, Location, Presence, Store, Vault, Version, edit};
 use serde_json::Value;
 
 use crate::Shell;
@@ -92,8 +92,9 @@ struct Editing {
     unsaved: bool,
 }
 
-/// The library as the vault holds it: its entries, and where each image
-/// can be read (its first present copy), for thumbnails.
+/// The library as the vault holds it: its entries (each with its
+/// presence: present, offline or missing), and where each image can be
+/// read (its first present copy), for thumbnails.
 pub struct LibraryRows {
     entries: Vec<Entry>,
     files: Vec<(String, PathBuf)>,
@@ -120,14 +121,16 @@ pub fn read_library<S: Store>(vault: &Vault<S>) -> Result<LibraryRows, String> {
     let mut entries = Vec::new();
     let mut files = Vec::new();
     for row in rows? {
-        let path = vault
-            .locations(&row.id)?
+        let locations = vault.locations(&row.id)?;
+        let presence = Presence::of(&locations);
+        let path = locations
             .into_iter()
-            .find(|l| l.present)
+            .find(Location::present)
             .map(|l| l.path);
         let id = row.id.hex();
         let mut entry = Entry {
             id: id.clone(),
+            presence,
             name: path
                 .as_ref()
                 .and_then(|p| p.file_name())

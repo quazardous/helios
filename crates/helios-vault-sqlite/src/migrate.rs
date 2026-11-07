@@ -116,6 +116,21 @@ INSERT OR IGNORE INTO fields (image, name, value, number)
 DELETE FROM fields WHERE name = 'rating' AND number = -1;
 ",
     },
+    Migration {
+        version: 4,
+        name: "locations on volumes",
+        // A location names the volume it is on and its path there (empty
+        // until a scan relinks it; the absolute path stays), and is
+        // present, offline (its volume not at hand) or missing.
+        sql: "
+ALTER TABLE locations ADD COLUMN volume TEXT;
+ALTER TABLE locations ADD COLUMN rel_path TEXT;
+ALTER TABLE locations ADD COLUMN presence TEXT NOT NULL DEFAULT 'present';
+UPDATE locations SET presence = CASE WHEN present THEN 'present' ELSE 'missing' END;
+ALTER TABLE locations DROP COLUMN present;
+CREATE INDEX locations_volume ON locations (volume);
+",
+    },
 ];
 
 /// The views and triggers of the current schema (none yet), created again

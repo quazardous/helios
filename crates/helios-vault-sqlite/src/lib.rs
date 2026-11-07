@@ -35,7 +35,8 @@ use serde::Serialize;
 use serde_json::Value;
 
 use helios_vault::fields::{AuditEntry, LABELS, Order, PICKED, Query, RATING, REJECTED, TAGS};
-use helios_vault::{Image, ImageId, Location, Store, Version, VersionId, parse_hash};
+use helios_vault::storage::VolumeId;
+use helios_vault::{Image, ImageId, Location, Presence, Store, Version, VersionId, parse_hash};
 
 mod migrate;
 pub mod snapshot;
@@ -513,7 +514,16 @@ impl SqliteStore {
     }
 }
 
-type LocationRow = (String, String, i64, i64, i64, bool);
+type LocationRow = (
+    String,
+    String,
+    i64,
+    i64,
+    i64,
+    Option<String>,
+    Option<String>,
+    String,
+);
 
 fn location(row: &rusqlite::Row) -> rusqlite::Result<LocationRow> {
     Ok((
@@ -523,11 +533,13 @@ fn location(row: &rusqlite::Row) -> rusqlite::Result<LocationRow> {
         row.get(3)?,
         row.get(4)?,
         row.get(5)?,
+        row.get(6)?,
+        row.get(7)?,
     ))
 }
 
 fn to_location(
-    (image, path, size, modified, verified, present): LocationRow,
+    (image, path, size, modified, verified, volume, rel_path, presence): LocationRow,
 ) -> Result<(ImageId, Location), String> {
     Ok((
         ImageId::from_hex(&image)?,
@@ -536,12 +548,15 @@ fn to_location(
             size: size as u64,
             modified: modified as u64,
             last_verified: verified as u64,
-            present,
+            volume: volume.map(VolumeId),
+            rel_path: rel_path.map(PathBuf::from),
+            presence: Presence::parse(&presence),
         },
     ))
 }
 
-const LOCATION_COLUMNS: &str = "image, path, size, modified, last_verified, present";
+const LOCATION_COLUMNS: &str =
+    "image, path, size, modified, last_verified, volume, rel_path, presence";
 
 impl Store for SqliteStore {
     fn add_image(&mut self, image: &Image) -> Result<bool, String> {
@@ -588,17 +603,20 @@ impl Store for SqliteStore {
         self.writable()?;
         self.db
             .execute(
-                "INSERT INTO locations (path, image, size, modified, last_verified, present)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                "INSERT INTO locations
+                     (path, image, size, modified, last_verified, volume, rel_path, presence)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
                  ON CONFLICT (path) DO UPDATE SET image = ?2, size = ?3, modified = ?4,
-                     last_verified = ?5, present = ?6",
+                     last_verified = ?5, volume = ?6, rel_path = ?7, presence = ?8",
                 params![
                     location.path.to_string_lossy(),
                     id.hex(),
                     location.size as i64,
                     location.modified as i64,
                     location.last_verified as i64,
-                    location.present
+                    location.volume.as_ref().map(VolumeId::as_str),
+                    location.rel_path.as_ref().map(|p| p.to_string_lossy()),
+                    location.presence.as_str()
                 ],
             )
             .map_err(|e| match e {
