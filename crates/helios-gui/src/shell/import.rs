@@ -2,9 +2,11 @@
 //! `docs/library.md`, "Importing from the desktop"):
 //!
 //! - **Where from.** File > Import… (Ctrl+Shift+I) and the empty
-//!   library's "Import photos…" ask for a card or a folder
-//!   (`library.importSource`); files and folders dropped on the window are
-//!   imported (`library.importFiles`, `ask`); a paste of files too.
+//!   library's "Import photos…" open the import window
+//!   (`library.importWindow`, `super::import_window`); files and folders
+//!   dropped on the window, or pasted, open it with them as its sources.
+//!   `library.importSource` and `library.importFiles` stay for scripts and
+//!   plugins: run without their arguments, the import dialog asks.
 //! - **Where to.** As the workspace's import source says. Without one,
 //!   the import dialog asks: referenced in place (the default) or copied
 //!   into the library folder, and "Remember for this workspace" makes the
@@ -356,8 +358,23 @@ impl Shell {
         let mut asked = self.duplicates.borrow_mut().receive();
         while let Ok((import, line)) = self.import_lines.1.try_recv() {
             if line.get("ended").is_some() || line.get("failed").is_some() {
+                // The photos it brought are selected once the Library
+                // shows them.
+                let ids = std::mem::take(&mut self.imported_ids);
+                if line.get("ended").is_some() && !ids.is_empty() {
+                    self.select_imported = ids;
+                }
                 self.import_ended(&line);
                 continue;
+            }
+            if let Some(id) = line["id"].as_str()
+                && matches!(
+                    line["status"].as_str(),
+                    Some("added" | "located" | "unchanged")
+                )
+                && !self.imported_ids.iter().any(|i| i == id)
+            {
+                self.imported_ids.push(id.to_string());
             }
             if let Some(scan) = line.get("scanned") {
                 self.log_scan(scan);
@@ -371,6 +388,19 @@ impl Shell {
             self.log_edits(&line);
         }
         asked
+    }
+
+    /// The photos the last import brought, selected as soon as the
+    /// Library holds them.
+    pub(super) fn select_imported_photos(&mut self) {
+        if self.select_imported.is_empty() {
+            return;
+        }
+        let mut library = self.library.borrow_mut();
+        if self.select_imported.iter().any(|id| library.holds(id)) {
+            library.select_ids(&self.select_imported);
+            self.select_imported.clear();
+        }
     }
 
     /// What an importer plugin found, left out and warned about: in the
@@ -534,8 +564,9 @@ impl Shell {
         });
     }
 
-    /// Files and folders dropped on the window are imported; while they
-    /// are dragged over it, it says so.
+    /// Files and folders dropped on the window open the import window
+    /// with them as its sources; while they are dragged over it, it says
+    /// so.
     pub(super) fn take_dropped_files(&mut self, ctx: &Egui) {
         let (hovered, dropped): (bool, Vec<PathBuf>) = ctx.input(|i| {
             (
@@ -572,8 +603,8 @@ impl Shell {
             return;
         }
         if let Err(e) = self.run(
-            "library.importFiles",
-            json!({ "paths": dropped, "ask": true }),
+            super::import_window::COMMAND,
+            json!({ "paths": dropped }),
             Origin::User,
         ) {
             self.warn(e);

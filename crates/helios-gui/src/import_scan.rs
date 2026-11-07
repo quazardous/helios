@@ -291,8 +291,9 @@ pub struct Counts {
     pub photos: usize,
     pub new: usize,
     pub bytes: u64,
-    /// The cells an Import takes.
+    /// The cells an Import takes, and their size.
     pub selected: usize,
+    pub selected_bytes: u64,
 }
 
 impl Contents {
@@ -315,7 +316,8 @@ impl Contents {
         }
     }
 
-    pub fn add(&mut self, found: Found) {
+    /// Takes in a file found: the cell it went to.
+    pub fn add(&mut self, found: Found) -> usize {
         let key = Self::key(&found.path);
         let raw = is_raw(&found.path);
         // A cell of the same stem waiting for this kind of file, else a
@@ -339,6 +341,7 @@ impl Contents {
             self.cells.len() - 1
         });
         self.fill(at, found);
+        at
     }
 
     fn fill(&mut self, at: usize, found: Found) {
@@ -461,6 +464,7 @@ impl Contents {
             }
             if c.ticked && self.importable(i) {
                 n.selected += 1;
+                n.selected_bytes += c.bytes;
             }
         }
         n

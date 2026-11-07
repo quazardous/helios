@@ -1,6 +1,6 @@
 //! Importing from the desktop, always within reach: File > Import… and
 //! Ctrl+Shift+I, the empty library's "Import photos…", files dropped on
-//! the window; without an import source the import dialog asks where the
+//! the window, all through the import window; for scripts, without an import source the import dialog asks where the
 //! photos go and may remember it for the workspace; darktable sidecars
 //! come in as versions, their reports in the Log panel. The library is
 //! called the Library, never the vault.
@@ -18,7 +18,6 @@ use helios_library::import::{Options, import};
 use helios_shell::commands::Origin;
 use helios_storage::Card as Volume;
 use helios_template::workspace::Files;
-use helios_template::{ImportDesc, LibraryDesc};
 use helios_vault::{ImageId, MemoryStore, Vault};
 use serde_json::{Value, json};
 
@@ -165,8 +164,18 @@ fn card_window(
     dir: &Path,
     known: Option<helios_gui::import_scan::Known>,
 ) -> Harness<'static, Shell> {
+    card_window_with(dir, known, |_| {})
+}
+
+/// [`card_window`], the shell set up by `setup` first.
+fn card_window_with(
+    dir: &Path,
+    known: Option<helios_gui::import_scan::Known>,
+    setup: impl FnOnce(&mut Shell),
+) -> Harness<'static, Shell> {
     let card = dir.join("EOS_DIGITAL");
     let mut shell = Shell::new(helios_panels(), None);
+    setup(&mut shell);
     shell.watch_cards(Arc::new(vec![Volume {
         label: "EOS_DIGITAL".into(),
         root: card,
@@ -415,35 +424,161 @@ fn the_interface_says_library_never_vault() {
 }
 
 #[test]
-fn a_folder_dropped_on_the_window_is_imported() {
+fn files_and_folders_dropped_on_the_window_open_the_import_window_on_them() {
     let dir = temp("drop");
+    let (dcim, _) = fake_card(&dir);
     let mut h = headless::harness(Shell::new(helios_panels(), None), vec2(1280.0, 800.0));
     h.run();
-    // Without an import source, where the photos go is asked first.
-    drop_on(&mut h, &dir);
+    // A folder: it is the source, every photo of it ticked.
+    drop_on(&mut h, &dcim);
+    assert!(h.state().import_window_open());
+    assert!(h.state_mut().take_imports().is_empty(), "nothing yet");
+    assert_eq!(h.state().import_ticked(), std::slice::from_ref(&dcim));
+    read_through(&mut h);
+    assert_eq!(h.state().import_counts().selected, 3);
+    // A file: its folder is the source, that file alone ticked.
+    h.get_by_label("Cancel").click();
+    h.run_steps(3);
+    drop_on(&mut h, &dcim.join("IMG_0002.JPG"));
+    assert_eq!(h.state().import_ticked(), std::slice::from_ref(&dcim));
+    read_through(&mut h);
+    let ticked: Vec<String> = h
+        .state()
+        .import_cells()
+        .into_iter()
+        .filter(|c| c.4)
+        .map(|c| c.0)
+        .collect();
+    assert_eq!(ticked, ["IMG_0002.JPG"]);
+    let _ = h.get_by_label("Import 1");
+    // A folder's photos are added where they are, by default.
+    assert!(!h.state().import_copies());
+    h.get_by_label("Import 1").click();
+    h.run_steps(3);
+    assert_eq!(
+        h.state_mut().take_imports(),
+        [json!({
+            "paths": [dcim.join("IMG_0002.JPG")],
+            "copy": false,
+            "duplicates": "skip"
+        })]
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn import_files_run_with_ask_still_asks_with_the_form() {
+    let dir = temp("ask");
+    let mut h = headless::harness(Shell::new(helios_panels(), None), vec2(1280.0, 800.0));
+    h.run();
+    // A script's import without an import source nor `copy`: the form.
+    run(
+        &mut h,
+        "library.importFiles",
+        json!({ "paths": [dir], "ask": true }),
+    );
     let form = dialog(&mut h);
     assert_eq!(form["command"], json!("library.importFiles"), "{form}");
     assert_eq!(field_keys(&form), ["copy", "darktable"]);
-    assert!(h.state_mut().take_imports().is_empty());
     answer(&mut h, json!({ "copy": false }));
     assert_eq!(h.state_mut().take_imports(), [json!({ "paths": [dir] })]);
-    // With one, the drop imports at once, as it says.
-    h.state_mut().apply_template_library(Some(&LibraryDesc {
-        import: Some(ImportDesc {
-            source: "folder".into(),
-            placement: "reference".into(),
-            rename: None,
-            duplicates: "skip".into(),
-            suggest_stacks: false,
-            darktable: true,
-        }),
-        ..LibraryDesc::default()
-    }));
-    drop_on(&mut h, &dir);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Steps frames until the import window's sources are read through.
+fn read_through(h: &mut Harness<'static, Shell>) {
+    let deadline = Instant::now() + Duration::from_secs(20);
+    h.step();
+    while !h.state().import_read() {
+        assert!(Instant::now() < deadline, "the sources not read in 20 s");
+        std::thread::sleep(Duration::from_millis(20));
+        h.step();
+    }
+    for _ in 0..3 {
+        h.run();
+    }
+}
+
+#[test]
+fn the_footer_totals_the_photos_ticked() {
+    let dir = temp("totals");
+    let (dcim, known) = fake_card(&dir);
+    let h = card_window(&dir, Some(known));
+    let size = |names: &[&str]| -> u64 {
+        names
+            .iter()
+            .map(|n| std::fs::metadata(dcim.join(n)).unwrap().len())
+            .sum()
+    };
+    let counts = h.state().import_counts();
+    assert_eq!(counts.selected, 2);
     assert_eq!(
-        h.state_mut().take_imports(),
-        [json!({ "paths": [dir], "duplicates": "skip" })]
+        counts.selected_bytes,
+        size(&["IMG_0001.JPG", "IMG_0003.CR2", "IMG_0003.JPG"])
     );
+    let _ = h.get_by_label_contains("2 photos, ");
+    let _ = h.get_by_label("Import 2");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn presets_are_named_choices_saved_applied_and_deleted() {
+    let dir = temp("presets");
+    let (_, known) = fake_card(&dir);
+    let mut h = card_window(&dir, Some(known));
+    h.state_mut()
+        .remember_import_choices_in(dir.join("lib/import-choices.json"));
+    h.run_steps(3);
+    let _ = h.get_by_value("Default");
+    // A monthly preset, saved from the menu under a name asked in place.
+    h.get_by_label("By month").click();
+    h.run_steps(3);
+    h.get_by_value("Last used").click();
+    h.run_steps(3);
+    h.get_by_label("Save as preset…").click();
+    h.run_steps(3);
+    h.get_by_role(egui::accesskit::Role::TextInput)
+        .type_text("Monthly");
+    h.run_steps(3);
+    h.get_by_label("Save").click();
+    h.run_steps(3);
+    assert_eq!(h.state().import_presets(), ["Monthly"]);
+    let kept: Value = serde_json::from_str(
+        &std::fs::read_to_string(dir.join("lib/import-presets.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(kept["Monthly"]["layout"], json!("month"), "{kept}");
+    // Default sets the Choices column back; the preset sets it again.
+    h.get_by_value("Monthly").click();
+    h.run_steps(3);
+    h.get_by_label("Default").click();
+    h.run_steps(3);
+    assert_eq!(
+        h.state().import_choices(),
+        helios_gui::shell::Choices::default()
+    );
+    h.state_mut().apply_import_preset(Some("Monthly"));
+    h.run_steps(3);
+    let _ = h.get_by_label("e.g. 2026/2026-11/");
+    // Copy or add for folders is part of a preset; a card is still
+    // copied.
+    let mut add = h.state().import_choices();
+    add.copy_folders = false;
+    h.state_mut().set_import_choices(add);
+    h.state_mut().save_import_preset("Monthly");
+    h.state_mut().apply_import_preset(Some("Monthly"));
+    assert!(h.state().import_copies(), "a card is copied");
+    // Deleted from the menu: the choices stay as they are.
+    h.run_steps(3);
+    h.get_by_value("Monthly").click();
+    h.run_steps(3);
+    h.get_by_label("Delete preset").click();
+    h.run_steps(3);
+    assert!(h.state().import_presets().is_empty());
+    assert_eq!(h.state().import_choices().layout.as_str(), "month");
+    let mut again = Shell::new(helios_panels(), None);
+    again.remember_import_choices_in(dir.join("lib/import-choices.json"));
+    assert!(again.import_presets().is_empty());
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -666,5 +801,128 @@ fn an_import_is_one_undo_step_and_ctrl_z_on_the_library_takes_it_back() {
     assert!(dir.join("a.png").is_file() && dir.join("b.png").is_file());
     let line = history.line();
     assert_eq!((line.undo.len(), line.redo.len()), (0, 1));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The whole path, as the desktop runs it: the window opened on a card,
+/// Import, the host's job (`library.import`, as `main.rs` registers it),
+/// then the photos in the Library, selected, and Ctrl+Z taking the import
+/// back as one step.
+#[test]
+fn a_card_imported_from_the_window_lands_in_the_library_selected_as_one_undo_step() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let dir = temp("end-to-end");
+    let dcim = dir.join("EOS_DIGITAL/DCIM/100CANON");
+    std::fs::create_dir_all(&dcim).unwrap();
+    put(&dcim.join("IMG_0001.JPG"), Ok(&jpeg("a")), 2);
+    put(&dcim.join("IMG_0002.JPG"), Ok(&jpeg("c")), 3);
+    let vault = Arc::new(Vault::new(MemoryStore::default()));
+    let done = Arc::new(AtomicBool::new(false));
+    let mut h = card_window_with(&dir, None, |shell| {
+        let history = shell.library_history();
+        let v = vault.clone();
+        history.set_apply(Arc::new(move |changes, forward| {
+            if forward {
+                v.replay(changes)
+            } else {
+                v.revert(changes)
+            }
+        }));
+        let (v, done, lines) = (vault.clone(), done.clone(), shell.import_sink());
+        let jobs = shell.jobs();
+        shell
+            .register(
+                helios_shell::commands::CommandSpec::new("library.import", "Import", "Library"),
+                move |args, _| {
+                    let options = helios_gui::importers::options(args)?;
+                    let sources: Vec<PathBuf> = args["paths"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(Value::as_str)
+                        .map(PathBuf::from)
+                        .collect();
+                    let (v, jobs, done, lines, history, asked) = (
+                        v.clone(),
+                        jobs.clone(),
+                        done.clone(),
+                        lines.clone(),
+                        history.clone(),
+                        args.clone(),
+                    );
+                    std::thread::spawn(move || {
+                        let mut emit = |line: &Value| {
+                            let _ = lines.send((asked.clone(), line.clone()));
+                        };
+                        let end = match import(&v, &jobs, &sources, &options, 1, &mut emit) {
+                            Ok(mut report) => {
+                                let label = helios_gui::library_history::import_label(
+                                    report.added + report.located,
+                                );
+                                history.record(label, std::mem::take(&mut report.changes), 1.0);
+                                json!({ "ended": report })
+                            }
+                            Err(e) => json!({ "failed": e }),
+                        };
+                        let _ = lines.send((asked, end));
+                        done.store(true, Ordering::Relaxed);
+                    });
+                    Ok(json!({ "queued": true }))
+                },
+            )
+            .unwrap();
+    });
+    // Copies go to a folder of the test's.
+    let mut choices = h.state().import_choices();
+    choices.into = Some(dir.join("photos"));
+    h.state_mut().set_import_choices(choices);
+    h.run_steps(3);
+    h.get_by_label("Import 2").click();
+    h.run_steps(3);
+    assert!(!h.state().import_window_open());
+    // The host takes the import asked for and runs it as a job.
+    for args in h.state_mut().take_imports() {
+        h.state_mut()
+            .run("library.import", args, Origin::User)
+            .unwrap();
+    }
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while !done.load(Ordering::Relaxed) {
+        assert!(Instant::now() < deadline, "the import not done in 30 s");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    // The desktop fills the Library again once the job is done.
+    let ids: Vec<String> = vault
+        .images()
+        .unwrap()
+        .into_iter()
+        .map(|i| i.id.hex())
+        .collect();
+    assert_eq!(ids.len(), 2, "{ids:?}");
+    h.state_mut().set_library(
+        ids.iter()
+            .map(|id| helios_gui::library::Entry {
+                id: id.clone(),
+                name: format!("{id}.jpg"),
+                ..helios_gui::library::Entry::default()
+            })
+            .collect(),
+    );
+    h.run_steps(3);
+    let mut selected = h.state().library().selection();
+    selected.sort();
+    let mut expected = ids.clone();
+    expected.sort();
+    assert_eq!(selected, expected, "the photos imported are selected");
+    assert!(dir.join("photos/2026/2026-11-02/IMG_0001.JPG").is_file());
+    // One undo step: Ctrl+Z with the Library shown takes it back.
+    let scope = helios_gui::library_history::LIBRARY;
+    let line = egui_pop::api::history::line(h.state().app().handle(), &scope).unwrap();
+    assert_eq!(line.undo.len(), 1, "{line:?}");
+    assert_eq!(line.undo[0].label.text, "Import 2 photos");
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    h.run_steps(3);
+    assert!(vault.images().unwrap().is_empty(), "the entries are gone");
+    assert!(dcim.join("IMG_0001.JPG").is_file(), "the card untouched");
     let _ = std::fs::remove_dir_all(&dir);
 }

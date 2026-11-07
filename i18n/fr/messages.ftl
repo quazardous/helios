@@ -380,21 +380,6 @@ gui-params-show-values = Afficher les valeurs
 
 gui-params-values = { $count } valeurs
 
-gui-paste-import-copy = Les fichiers sont copiés dans le dossier de la bibliothèque.
-
-gui-paste-import-image = L’image est enregistrée en fichier PNG et copiée dans le dossier de la bibliothèque.
-
-gui-paste-import-reference = Les fichiers restent où ils sont.
-
-gui-paste-import-source = Les fichiers sont placés comme le dit la source d’import de l’espace de travail.
-
-gui-paste-import-title = { $count ->
-    [one] Importer le fichier collé ?
-   *[other] Importer les { $count } fichiers collés ?
-}
-
-gui-paste-import-verb = Importer
-
 gui-pointer-choice-close = Fermer l’avis du profil de pointeur
 
 gui-pointer-choice-darktable = Utiliser ceux de darktable
@@ -1375,3 +1360,22 @@ gui-storage-mark-cancel = Annuler
 gui-storage-mark = Marquer ce disque…
 
 gui-storage-mark-hint = Connu seulement par son nom de volume et sa taille : un fichier d’identité le distingue
+
+gui-import-window-delete-preset = Supprimer le préréglage
+
+gui-import-window-preset = Préréglage
+
+gui-import-window-preset-default = Par défaut
+
+gui-import-window-preset-last-used = Dernier utilisé
+
+gui-import-window-preset-name = Nom du préréglage
+
+gui-import-window-preset-save = Enregistrer
+
+gui-import-window-save-preset = Enregistrer comme préréglage…
+
+gui-import-window-totals = { $photos ->
+    [one] { $photos } photo, { $size }
+   *[other] { $photos } photos, { $size }
+}

@@ -34,7 +34,6 @@ use egui_pop::api::clipboard::{
     ClipItem, ClipSource, ClipTarget, FormatId, PNG, Part, Paste, TEXT, URI_LIST,
 };
 use egui_pop::model::commands::Origin;
-use helios_core::Message;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value as Json, json};
 
@@ -50,8 +49,8 @@ pub const REFERENCE: &str = "reference";
 /// Paste special's part that copies the files into the library folder.
 pub const FILE: &str = "file";
 
-/// The command a paste asks to run once confirmed.
-pub const IMPORT: &str = "library.importFiles";
+/// The command a paste of files runs: the import window, opened on them.
+pub const WINDOW: &str = "library.importWindow";
 
 /// One image copied.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -369,43 +368,16 @@ impl ClipTarget for Endpoint {
         if p.dry_run {
             return Ok(json!(plan.describe()));
         }
-        // An import writes the vault and may copy files: asked first,
-        // then run as a job.
+        // The import window opens on the files, their folders as its
+        // sources: what is imported, and how, is chosen there.
         let ctx = app.egui();
-        let tr = |m: Message| crate::i18n::text(&ctx, m);
-        let count = plan.import.len();
-        let detail = match plan.copy {
-            Some(true) if p.repr.format == PNG => Message::new(
-                "gui-paste-import-image",
-                "The image is saved as a PNG file and copied into the library folder.",
-            ),
-            Some(true) => Message::new(
-                "gui-paste-import-copy",
-                "The files are copied into the library folder.",
-            ),
-            Some(false) => Message::new(
-                "gui-paste-import-reference",
-                "The files stay where they are.",
-            ),
-            None => Message::new(
-                "gui-paste-import-source",
-                "The files are placed as the workspace's import source says.",
-            ),
-        };
         crate::dialogs::request(
             &ctx,
-            crate::dialogs::Request::Confirm(crate::dialogs::Confirm {
-                title: tr(Message::new(
-                    "gui-paste-import-title",
-                    "Import the pasted files ({ $count })?",
-                )
-                .with("count", count)),
-                detail: tr(detail),
-                verb: tr(Message::new("gui-paste-import-verb", "Import")),
-                danger: false,
-                command: IMPORT.into(),
-                args: plan.import_args(),
-            }),
+            crate::dialogs::Request::Run(
+                WINDOW.into(),
+                plan.import_args(),
+                helios_shell::commands::Origin::User,
+            ),
         );
         ctx.request_repaint();
         Ok(serde_json::to_value(&plan).unwrap_or_default())

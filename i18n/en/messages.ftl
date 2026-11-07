@@ -347,6 +347,8 @@ gui-import-window-darktable = Read darktable edits
 
 gui-import-window-darktable-help = Each .xmp sidecar, duplicates included, becomes a version of its photo
 
+gui-import-window-delete-preset = Delete preset
+
 gui-import-window-duplicates = Duplicates
 
 gui-import-window-duplicates-ask = Ask
@@ -413,6 +415,16 @@ gui-import-window-open = Import photos…
 
 gui-import-window-pair = RAW+JPG
 
+gui-import-window-preset = Preset
+
+gui-import-window-preset-default = Default
+
+gui-import-window-preset-last-used = Last used
+
+gui-import-window-preset-name = Preset name
+
+gui-import-window-preset-save = Save
+
 gui-import-window-raw-only = Raw only
 
 gui-import-window-reading = Reading…
@@ -420,6 +432,8 @@ gui-import-window-reading = Reading…
 gui-import-window-recent = Recent
 
 gui-import-window-remove-favourite = Remove from favourites
+
+gui-import-window-save-preset = Save as preset…
 
 gui-import-window-select = Select:
 
@@ -432,6 +446,8 @@ gui-import-window-select-none = none
 gui-import-window-sources = Sources
 
 gui-import-window-title = Import photos
+
+gui-import-window-totals = { $photos } photos, { $size }
 
 gui-import-window-types = Types
 
@@ -812,18 +828,6 @@ gui-params-show-values = Show the values
 gui-params-unfold-section = Unfold { $group }
 
 gui-params-values = { $count } values
-
-gui-paste-import-copy = The files are copied into the library folder.
-
-gui-paste-import-image = The image is saved as a PNG file and copied into the library folder.
-
-gui-paste-import-reference = The files stay where they are.
-
-gui-paste-import-source = The files are placed as the workspace's import source says.
-
-gui-paste-import-title = Import the pasted files ({ $count })?
-
-gui-paste-import-verb = Import
 
 gui-pointer-choice-close = Close the pointer profile notice
 

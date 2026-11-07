@@ -1193,6 +1193,11 @@ impl Library {
         }
     }
 
+    /// Whether the Library holds the image `id`.
+    pub fn holds(&self, id: &str) -> bool {
+        self.index.contains_key(id)
+    }
+
     /// Selects images by id, the cursor on the last.
     pub fn select_ids(&mut self, ids: &[String]) {
         let known: Vec<String> = ids

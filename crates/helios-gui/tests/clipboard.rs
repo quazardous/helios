@@ -163,10 +163,11 @@ fn an_agent_does_not_paste_the_user_s_copy() {
 }
 
 /// Images of the library: a copy names them; pasted into a library that
-/// lacks them, or as files from another application, they are imported
-/// once the user confirms; those it holds stay references.
+/// lacks them, or as files from another application, they open the import
+/// window on their folder, those files ticked; those it holds stay
+/// references.
 #[test]
-fn images_copied_or_files_pasted_are_imported_once_confirmed() {
+fn images_copied_or_files_pasted_open_the_import_window_on_them() {
     use egui_pop::api::clipboard::CopyRequest;
     use egui_pop::model::commands::Origin as PopOrigin;
     use helios_gui::clipboard::{IMAGES, LIBRARY_ENDPOINT};
@@ -201,7 +202,8 @@ fn images_copied_or_files_pasted_are_imported_once_confirmed() {
     // The same library holds both: nothing to import.
     let out = clipboard::paste(&app, PasteRequest::new(LIBRARY_ENDPOINT), &PopOrigin::User);
     assert!(!out.ok(), "{out:?}");
-    // Another library, without `b`: its file is imported, asked first.
+    // Another library, without `b`: its file is imported, through the
+    // import window.
     h.state_mut().set_library(vec![Entry {
         id: "a".into(),
         name: "a.jpg".into(),
@@ -222,21 +224,10 @@ fn images_copied_or_files_pasted_are_imported_once_confirmed() {
     let out = clipboard::paste(&app, PasteRequest::new(LIBRARY_ENDPOINT), &PopOrigin::User);
     assert!(out.ok(), "{out:?}");
     h.run();
-    assert!(
-        h.state_mut().take_imports().is_empty(),
-        "nothing before the answer"
-    );
-    let current = h
-        .state_mut()
-        .run("dialog.current", json!(null), Origin::User)
-        .unwrap();
-    assert_eq!(current["kind"], json!("confirm"));
-    h.key_press(egui::Key::Enter);
-    h.run();
-    let imports = h.state_mut().take_imports();
-    assert_eq!(imports.len(), 1, "{imports:?}");
-    assert_eq!(imports[0]["paths"], json!([file]));
-    // Files named by another application's text: the same import.
+    assert!(h.state_mut().take_imports().is_empty(), "nothing yet");
+    assert!(h.state().import_window_open());
+    assert_eq!(h.state().import_ticked(), std::slice::from_ref(&dir));
+    // Files named by another application's text: the same window.
     let text = format!("file://{}\n/nowhere/c.jpg", file.display());
     let out = clipboard::paste(
         &app,
@@ -245,11 +236,8 @@ fn images_copied_or_files_pasted_are_imported_once_confirmed() {
     );
     assert!(out.ok(), "{out:?}");
     h.run();
-    h.key_press(egui::Key::Enter);
-    h.run();
-    let imports = h.state_mut().take_imports();
-    assert_eq!(imports.len(), 1, "{imports:?}");
-    assert_eq!(imports[0]["paths"], json!([file]));
+    assert!(h.state_mut().take_imports().is_empty(), "nothing yet");
+    assert_eq!(h.state().import_ticked(), std::slice::from_ref(&dir));
     let _ = std::fs::remove_dir_all(&dir);
 }
 

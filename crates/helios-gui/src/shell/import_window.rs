@@ -17,13 +17,20 @@
 //! - **Choices**, the right column ([`super::import_choices`]): copy or
 //!   add where they are, where copies go and how they are named, with
 //!   examples from the first photo ticked; duplicates; darktable edits.
+//! - **The footer**: the preset menu (Default, the presets saved, "Save
+//!   as preset…", "Delete preset"), the totals of the photos ticked,
+//!   Cancel and Import.
 //! - **A card inserted** while the window is closed: a toast whose action
 //!   opens the window on it.
+//! - **Files or folders dropped** on Helios, or pasted: the window opens
+//!   with them as its sources, a file's folder with that file ticked
+//!   (`paths`).
 //!
 //! The recent folders, the favourites and the last source are kept in a
 //! small JSON file when the desktop gives one
 //! ([`Shell::remember_import_sources_in`]).
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -90,6 +97,14 @@ pub(crate) struct ImportWindow {
     /// The cell a Shift+click extends from, and the one Space toggles.
     anchor: Option<usize>,
     focus: Option<usize>,
+    /// The files dropped or pasted: in their folder, only they are ticked.
+    picked: Vec<PathBuf>,
+    /// The presets, by name, and where they are kept.
+    pub(super) presets: BTreeMap<String, Choices>,
+    pub(super) presets_file: Option<PathBuf>,
+    /// The name of the preset being saved, while it is typed, and
+    /// whether its field is to take the focus.
+    naming: Option<(String, bool)>,
 }
 
 impl ImportWindow {
@@ -138,7 +153,21 @@ impl ImportWindow {
         for (_, scan, done) in &mut self.scans {
             for sent in scan.take() {
                 match sent {
-                    Scanned::Found(found) => self.contents.add(found),
+                    Scanned::Found(found) => {
+                        let at = self.contents.add(found);
+                        let cell = &mut self.contents.cells[at];
+                        let picked = &self.picked;
+                        if picked
+                            .iter()
+                            .any(|p| p.parent() == Some(cell.source.as_path()))
+                        {
+                            cell.ticked = cell
+                                .raw
+                                .iter()
+                                .chain(&cell.picture)
+                                .any(|f| picked.contains(f));
+                        }
+                    }
                     Scanned::Glance {
                         path,
                         taken,
@@ -187,6 +216,10 @@ impl ImportWindow {
 enum Event {
     Cancel,
     Import,
+    /// A preset applied (`None`: Default).
+    Preset(Option<String>),
+    SavePreset(String),
+    DeletePreset(String),
     Choose,
     ChooseInto,
     Favourite(PathBuf, bool),
@@ -228,6 +261,14 @@ struct Words {
     choices: ChoiceWords,
     cancel: String,
     import_count: String,
+    totals: String,
+    preset: String,
+    default_preset: String,
+    last_used: String,
+    save_preset: String,
+    preset_name: String,
+    save: String,
+    delete_preset: String,
     nothing: String,
     none_ticked: String,
 }
@@ -322,7 +363,9 @@ impl Shell {
     }
 
     /// `library.importWindow`: opens the import window, on `source` when
-    /// given, else on the first card, else on the last source used.
+    /// given, or on the files and folders of `paths` (a folder a source,
+    /// a file its folder with only the files given ticked; `copy` sets
+    /// copy or add), else on the first card, else on the last source used.
     pub(super) fn open_import_window(&mut self, args: &Value) {
         let w = &mut self.import_window;
         w.follow_cards();
@@ -331,8 +374,38 @@ impl Shell {
         w.touched = false;
         w.copy = None;
         w.custom = false;
+        w.naming = None;
         w.ticked.clear();
-        if let Some(source) = args
+        w.picked.clear();
+        let paths: Vec<PathBuf> = args
+            .get("paths")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .filter(|s| !s.is_empty())
+            .map(PathBuf::from)
+            .collect();
+        if let Some(copy) = args.get("copy").and_then(Value::as_bool) {
+            w.copy = Some(copy);
+        }
+        if !paths.is_empty() {
+            for path in paths {
+                let source = if path.is_dir() {
+                    path
+                } else {
+                    let Some(dir) = path.parent().map(Path::to_path_buf) else {
+                        continue;
+                    };
+                    w.picked.push(path);
+                    dir
+                };
+                if !w.ticked.contains(&source) {
+                    w.ticked.push(source);
+                }
+            }
+            w.touched = true;
+        } else if let Some(source) = args
             .get("source")
             .and_then(Value::as_str)
             .filter(|s| !s.is_empty())
@@ -343,6 +416,20 @@ impl Shell {
             w.ticked.push(card.root.clone());
         } else if let Some(last) = w.memory.last.clone().filter(|p| p.exists()) {
             w.ticked.push(last);
+        }
+        // A folder given is listed with the recent ones, to show it ticked.
+        let given: Vec<PathBuf> = w
+            .ticked
+            .iter()
+            .filter(|p| !w.is_card(p) && !w.memory.recent.contains(p))
+            .cloned()
+            .collect();
+        if !given.is_empty() {
+            for p in given.into_iter().rev() {
+                w.memory.recent.insert(0, p);
+            }
+            w.memory.recent.truncate(8);
+            w.save();
         }
     }
 
@@ -457,6 +544,30 @@ impl Shell {
                 Message::new("gui-import-window-import", "Import { $count }")
                     .with("count", self.import_window.contents.counts().selected),
             ),
+            totals: {
+                let counts = self.import_window.contents.counts();
+                t(
+                    Message::new("gui-import-window-totals", "{ $photos } photos, { $size }")
+                        .with("photos", counts.selected)
+                        .with("size", self.import_size_text(counts.selected_bytes)),
+                )
+            },
+            preset: t(Message::new("gui-import-window-preset", "Preset")),
+            default_preset: t(Message::new("gui-import-window-preset-default", "Default")),
+            last_used: t(Message::new(
+                "gui-import-window-preset-last-used",
+                "Last used",
+            )),
+            save_preset: t(Message::new(
+                "gui-import-window-save-preset",
+                "Save as preset…",
+            )),
+            preset_name: t(Message::new("gui-import-window-preset-name", "Preset name")),
+            save: t(Message::new("gui-import-window-preset-save", "Save")),
+            delete_preset: t(Message::new(
+                "gui-import-window-delete-preset",
+                "Delete preset",
+            )),
             nothing: t(Message::new(
                 "gui-import-window-nothing",
                 "Tick a card or a folder to import",
@@ -468,19 +579,23 @@ impl Shell {
         }
     }
 
-    fn grid_words(&self) -> GridWords {
-        let t = |m: Message| self.text(m);
-        let counts = self.import_window.contents.counts();
-        let size = self
-            .import_window
+    /// A size, as the Library says it.
+    fn import_size_text(&self, bytes: u64) -> String {
+        self.import_window
             .ctx
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .as_ref()
             .map_or_else(
-                || helios_storage::capacity_text(counts.bytes),
-                |ctx| crate::library::size_text(ctx, counts.bytes),
-            );
+                || helios_storage::capacity_text(bytes),
+                |ctx| crate::library::size_text(ctx, bytes),
+            )
+    }
+
+    fn grid_words(&self) -> GridWords {
+        let t = |m: Message| self.text(m);
+        let counts = self.import_window.contents.counts();
+        let size = self.import_size_text(counts.bytes);
         GridWords {
             counts: t(Message::new(
                 "gui-import-window-counts",
@@ -532,42 +647,75 @@ impl Shell {
                 let layout = DialogLayout::new(ui, "helios.import.window").fill(true);
                 layout.body(ui, |ui, height| {
                     ui.set_min_height(height);
-                    ui.columns(3, |cols| {
-                        sources_ui(&mut cols[0], w, &words, &mut event);
-                        cols[1].heading(&words.contents);
-                        let reading = w.scans.iter().any(|(_, _, done)| !done);
-                        contents_ui(&mut cols[1], w, &words.grid, reading);
-                        if let Some(Asked::Into) =
-                            import_choices::choices_ui(&mut cols[2], w, &words.choices)
-                        {
-                            event = Some(Event::ChooseInto);
-                        }
+                    // Sources and Choices keep their widths; Contents
+                    // takes the rest.
+                    let gap = ui.spacing().item_spacing.x * 2.0 + 2.0;
+                    let total = ui.available_width();
+                    let side = |w: f32| w.min((total - 2.0 * gap) / 4.0).max(0.0);
+                    let (left, right) = (side(SOURCES_WIDTH), side(CHOICES_WIDTH));
+                    let middle = (total - left - right - 2.0 * gap).max(0.0);
+                    let column =
+                        |ui: &mut egui::Ui, width: f32, add: &mut dyn FnMut(&mut egui::Ui)| {
+                            ui.allocate_ui_with_layout(
+                                egui::vec2(width, height),
+                                egui::Layout::top_down(egui::Align::Min),
+                                |ui| {
+                                    ui.set_width(width);
+                                    ui.set_min_height(height);
+                                    add(ui);
+                                },
+                            );
+                        };
+                    ui.horizontal_top(|ui| {
+                        column(ui, left, &mut |ui| sources_ui(ui, w, &words, &mut event));
+                        ui.separator();
+                        column(ui, middle, &mut |ui| {
+                            ui.heading(&words.contents);
+                            let reading = w.scans.iter().any(|(_, _, done)| !done);
+                            contents_ui(ui, w, &words.grid, reading);
+                        });
+                        ui.separator();
+                        column(ui, right, &mut |ui| {
+                            if let Some(Asked::Into) =
+                                import_choices::choices_ui(ui, w, &words.choices)
+                            {
+                                event = Some(Event::ChooseInto);
+                            }
+                        });
                     });
                 });
                 layout.footer(ui, |ui| {
                     ui.separator();
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let count = w.contents.counts().selected;
-                        let bad_name = words.choices.bad_name.as_ref().filter(|_| w.copies());
-                        let why = if w.ticked.is_empty() {
-                            &words.nothing
-                        } else if let Some(e) = bad_name {
-                            e
-                        } else {
-                            &words.none_ticked
-                        };
-                        let import = ui
-                            .add_enabled(
-                                count > 0 && bad_name.is_none(),
-                                egui::Button::new(&words.import_count),
-                            )
-                            .on_disabled_hover_text(why);
-                        if import.clicked() {
-                            event = Some(Event::Import);
+                    ui.horizontal(|ui| {
+                        if let Some(e) = presets_ui(ui, w, &words) {
+                            event = Some(e);
                         }
-                        if ui.button(&words.cancel).clicked() {
-                            event = Some(Event::Cancel);
-                        }
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let count = w.contents.counts().selected;
+                            let bad_name = words.choices.bad_name.as_ref().filter(|_| w.copies());
+                            let why = if w.ticked.is_empty() {
+                                &words.nothing
+                            } else if let Some(e) = bad_name {
+                                e
+                            } else {
+                                &words.none_ticked
+                            };
+                            let import = ui
+                                .add_enabled(
+                                    count > 0 && bad_name.is_none(),
+                                    egui::Button::new(&words.import_count),
+                                )
+                                .on_disabled_hover_text(why);
+                            if import.clicked() {
+                                event = Some(Event::Import);
+                            }
+                            if ui.button(&words.cancel).clicked() {
+                                event = Some(Event::Cancel);
+                            }
+                            if count > 0 {
+                                ui.label(&words.totals);
+                            }
+                        });
                     });
                 });
             });
@@ -602,6 +750,9 @@ impl Shell {
                 w.save();
             }
             Some(Event::Import) => self.import_ticked_sources(),
+            Some(Event::Preset(name)) => self.apply_import_preset(name.as_deref()),
+            Some(Event::SavePreset(name)) => self.save_import_preset(&name),
+            Some(Event::DeletePreset(name)) => self.delete_import_preset(&name),
         }
     }
 
@@ -719,6 +870,78 @@ fn source_row(
             }
         }
     });
+    event
+}
+
+/// The widths of the Sources and Choices columns, in points (at most a
+/// quarter of the window each); Contents takes the rest.
+const SOURCES_WIDTH: f32 = 220.0;
+const CHOICES_WIDTH: f32 = 300.0;
+
+/// The footer's preset menu: Default, the presets saved, "Save as
+/// preset…" (a name asked in place) and "Delete preset" (the one the
+/// choices are).
+fn presets_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &Words) -> Option<Event> {
+    let mut event = None;
+    let current = w.preset_of_choices();
+    let shown = match &current {
+        Some(name) => name.clone(),
+        None if w.choices == Choices::default() => words.default_preset.clone(),
+        None => words.last_used.clone(),
+    };
+    ui.label(&words.preset);
+    egui::ComboBox::from_id_salt("helios.import.preset")
+        .selected_text(shown)
+        .show_ui(ui, |ui| {
+            let default = current.is_none() && w.choices == Choices::default();
+            if ui
+                .selectable_label(default, &words.default_preset)
+                .clicked()
+            {
+                event = Some(Event::Preset(None));
+            }
+            for name in w.presets.keys() {
+                if ui
+                    .selectable_label(current.as_ref() == Some(name), name)
+                    .clicked()
+                {
+                    event = Some(Event::Preset(Some(name.clone())));
+                }
+            }
+            ui.separator();
+            if ui.selectable_label(false, &words.save_preset).clicked() {
+                w.naming = Some((current.clone().unwrap_or_default(), true));
+            }
+            if ui
+                .add_enabled(
+                    current.is_some(),
+                    egui::Button::selectable(false, &words.delete_preset),
+                )
+                .clicked()
+                && let Some(name) = &current
+            {
+                event = Some(Event::DeletePreset(name.clone()));
+            }
+        });
+    if let Some((name, focus)) = &mut w.naming {
+        let edit = ui.add(
+            egui::TextEdit::singleline(name)
+                .hint_text(&words.preset_name)
+                .desired_width(140.0),
+        );
+        if std::mem::take(focus) {
+            edit.request_focus();
+        }
+        let entered = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+        let name = name.trim().to_string();
+        let save = ui.add_enabled(!name.is_empty(), egui::Button::new(&words.save));
+        if (save.clicked() || entered) && !name.is_empty() {
+            event = Some(Event::SavePreset(name));
+            w.naming = None;
+        } else if ui.small_button("✕").on_hover_text(&words.cancel).clicked() {
+            w.naming = None;
+        }
+    }
     event
 }
 

@@ -518,6 +518,10 @@ pub struct Shell {
     import_source: Option<helios_template::ImportDesc>,
     /// Imports asked for (`library.import`'s arguments), for the host.
     imports: Vec<Value>,
+    /// The photos the imports running brought so far, and those the last
+    /// one brought, to select once the Library shows them.
+    imported_ids: Vec<String>,
+    select_imported: Vec<String>,
     /// The import window, its sources and the cards watched.
     import_window: import_window::ImportWindow,
     health: health::HealthPage,
@@ -917,6 +921,8 @@ impl Shell {
             duplicates: Rc::default(),
             import_source: None,
             imports: Vec::new(),
+            imported_ids: Vec::new(),
+            select_imported: Vec::new(),
             import_window: import_window::ImportWindow::default(),
             health: health::HealthPage::default(),
             storage: storage::StoragePage::default(),
@@ -4805,6 +4811,7 @@ impl Shell {
         // Duplicates an import asks about: said once, answered in the
         // Duplicates panel.
         let asked = self.receive_imports();
+        self.select_imported_photos();
         self.receive_exports();
         if asked > 0 {
             self.note(
