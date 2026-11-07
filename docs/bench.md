@@ -380,9 +380,13 @@ from incidents on the box; every agent prompt points here.
   `egui-pop-test`.
 - The box does not repeat what CI runs. egui-pop and egui_stack pull
   requests go to their `next` branch, whose CI runs every test; the box
-  serves what CI cannot: a fix loop's narrow runs, snapshots regenerated to
-  commit (`egui-pop-snapshots`), the GPU and timing jobs. `egui-pop-gate`
-  stays for a release or a by-hand check, not for each branch. Helios's own
+  serves what CI cannot: a fix loop's narrow runs and snapshots regenerated
+  to commit (`egui-pop-snapshots`). `egui-pop-gate` stays for a release or a
+  by-hand check, not for each branch.
+- The GPU and timing jobs (`gpu`, `gpu-intel`, `egui-pop-gpu-tiles`,
+  `egui-pop-threading`, `start-timing`, `quit-timing`, `test-times`, the
+  parity and bench jobs) run before a release only, queued by one agent
+  given that job, never by the agents writing code. Helios's own
   suite still runs on the box (`test-affected`, `test`): its GitHub CI runs
   format and clippy only.
 - A new test has a deadline on every wait (a child process, a window, a
