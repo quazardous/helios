@@ -243,6 +243,7 @@ mod tests {
         let net = NetworkDesc {
             sources: vec!["source".into()],
             raw_sources: Vec::new(),
+            image_sources: Vec::new(),
             nodes: vec![
                 node("exposure", "exposure"),
                 node("sigmoid", "sigmoid"),

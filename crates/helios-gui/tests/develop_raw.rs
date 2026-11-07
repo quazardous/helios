@@ -1,6 +1,8 @@
 //! Raws developed on the desktop: a file opened in a workspace made from
 //! "Develop one image" goes through its sensor data, the same chain and
 //! the same pixels as the node's raw path, and a picture is refused there.
+//! A network whose source takes an image (a picture or a raw) develops a
+//! raw through the raw front: the same pixels as "Develop one image".
 //!
 //! The raws are found as the other render tests find them: a few files
 //! of the raw corpus (`HELIOS_RAW_CORPUS`, a directory filled by
@@ -142,6 +144,71 @@ fn develops(raw: &Path) {
         .map(|(a, b)| (a - b).abs())
         .fold(0.0f32, f32::max);
     assert!(worst < 1e-5, "{name}: differs from the node's by {worst}");
+}
+
+/// "Batch export" with its source taking an image: a picture, or a raw
+/// through the raw front.
+fn image_network() -> helios_template::Bundle {
+    let mut b = templates::find("helios.batch-export").expect("Batch export is built in");
+    let net = &mut b.template.network;
+    net.image_sources = net.sources.clone();
+    b
+}
+
+/// Opens `raw` in a network taking an image: its sensor data through the
+/// raw front, the same pixels as "Develop one image".
+fn develops_in_an_image_network(raw: &Path) {
+    let name = raw.display();
+    let (graph, node) = templates::open_file(raw, &image_network()).unwrap();
+    assert!(graph.find("demosaic").is_some(), "{name}: no raw front");
+    let extent = graph.extent(node).unwrap().expect("a source feeds it");
+    let region = middle(extent, 128);
+    let ours = render(&graph, node, "output", region).to_vec();
+    let (graph, node) = templates::open_file(raw, &develop()).unwrap();
+    let theirs = render(&graph, node, "output", region).to_vec();
+    let worst = ours
+        .iter()
+        .zip(&theirs)
+        .map(|(a, b)| (a - b).abs())
+        .fold(0.0f32, f32::max);
+    assert!(worst < 1e-5, "{name}: differs from Develop's by {worst}");
+}
+
+#[test]
+fn corpus_raws_develop_through_the_raw_front_of_an_image_network() {
+    let Some(dir) = corpus() else { return };
+    for id in CORPUS {
+        if let Some(raw) = corpus_file(&dir, id) {
+            develops_in_an_image_network(&raw);
+        }
+    }
+}
+
+#[test]
+fn darktable_test_raws_develop_through_the_raw_front_of_an_image_network() {
+    let dir = darktable_images();
+    for file in DARKTABLE {
+        let raw = dir.join(file);
+        if raw.is_file() {
+            develops_in_an_image_network(&raw);
+        } else {
+            eprintln!("skipped: no {}", raw.display());
+        }
+    }
+}
+
+#[test]
+fn a_picture_goes_straight_through_an_image_network() {
+    let dir = std::env::temp_dir().join(format!("helios-image-network-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let png = dir.join("grey.png");
+    image::RgbImage::from_pixel(16, 8, image::Rgb([120, 120, 120]))
+        .save(&png)
+        .unwrap();
+    let (graph, node) = templates::open_file(&png, &image_network()).unwrap();
+    assert_eq!(graph.extent(node).unwrap(), Some(Region::sized(16, 8)));
+    assert!(graph.find("rawprepare").is_none());
+    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 #[test]

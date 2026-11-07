@@ -147,11 +147,9 @@ fn output_spec(
     port: &str,
 ) -> Option<PortSpec> {
     if net.sources.iter().any(|s| s == from) {
-        let mut spec = match net.source_kind(from) {
-            SourceKind::Picture => PortSpec::image(SOURCE_PORT, 4),
-            SourceKind::Raw => PortSpec::image(SOURCE_PORT, 1),
-        };
-        if net.source_kind(from) == SourceKind::Picture {
+        let kind = net.source_kind(from);
+        let mut spec = PortSpec::image(SOURCE_PORT, kind.channels());
+        if kind != SourceKind::Raw {
             spec.layout = Some("rgba".into());
         }
         return Some(spec);

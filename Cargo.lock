@@ -2566,6 +2566,7 @@ dependencies = [
  "helios-module-rawprepare",
  "helios-module-sigmoid",
  "helios-module-whitebalance",
+ "helios-photo",
  "helios-scopes",
  "serde",
  "serde_json",

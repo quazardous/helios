@@ -387,6 +387,14 @@ impl Bundle {
                 ));
             }
         }
+        let mut image = BTreeSet::new();
+        for (i, s) in net.image_sources.iter().enumerate() {
+            if !net.sources.contains(s) || raw.contains(s.as_str()) || !image.insert(s.as_str()) {
+                p.push(format!(
+                    "network.image_sources[{i}]: `{s}` is not a source, or named twice"
+                ));
+            }
+        }
         for (i, n) in net.nodes.iter().enumerate() {
             let at = format!("network.nodes[{i}] ({})", n.name);
             if !valid_name(&n.name) || !names.insert(n.name.as_str()) {

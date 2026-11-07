@@ -971,7 +971,7 @@ fn network_composite(
             .sources
             .iter()
             .map(|s| match net.source_kind(s) {
-                SourceKind::Picture => Port {
+                SourceKind::Picture | SourceKind::Image => Port {
                     name: s.clone(),
                     channels: 4,
                     layout: Some("rgba".into()),
@@ -1076,17 +1076,18 @@ pub fn import(
             .first()
             .cloned()
             .ok_or("the workspace has no image to wire the network to")?;
-        // Its sources all read the workspace's first image: of the kind
-        // that image is.
+        // Its sources all read the workspace's first image: what that
+        // image gives them (a picture or an image both give four
+        // channels, a raw image source through its raw front).
         let kind = t.network.source_kind(&first);
         if src
             .network
             .sources
             .iter()
-            .any(|s| src.network.source_kind(s) != kind)
+            .any(|s| src.network.source_kind(s).channels() != kind.channels())
         {
             return Err(match kind {
-                SourceKind::Picture => {
+                SourceKind::Picture | SourceKind::Image => {
                     "the network reads a raw file's sensor data; this workspace's image is a picture"
                 }
                 SourceKind::Raw => {

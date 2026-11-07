@@ -40,7 +40,13 @@ fn catalogue() -> Catalogue {
         .module(ModuleRef::new(m::MaskFeather))
         .module(ModuleRef::new(m::MaskBlur))
         .module(ModuleRef::new(m::MaskLevels))
-        .module(ModuleRef::new(m::MaskBlend));
+        .module(ModuleRef::new(m::MaskBlend))
+        // The raw front's chain.
+        .module(ModuleRef::new(helios_module_rawprepare::RawPrepare))
+        .module(ModuleRef::new(helios_module_whitebalance::WhiteBalance))
+        .module(ModuleRef::new(helios_module_highlights::Highlights))
+        .module(ModuleRef::new(helios_module_demosaic::Demosaic))
+        .module(ModuleRef::new(helios_module_colorin::ColorIn));
     for (_, text) in files() {
         c.add_composite(parse_composite(&text).unwrap());
     }

@@ -349,7 +349,10 @@ impl Shell {
         }
         let image = image.ok_or("the image shown has no source")?;
         let catalogue = crate::templates::modules();
-        let built = if bundle.template.network.reads_raw() {
+        // A raw's mosaic comes with its camera; a picture (or a raw's
+        // preview) without.
+        let network = &bundle.template.network;
+        let built = if network.reads_raw() || (camera.is_some() && network.takes_raw()) {
             let camera = camera.ok_or("the image shown has no camera to develop it with")?;
             bundle.build_with(
                 &catalogue,
@@ -359,6 +362,10 @@ impl Shell {
                 },
                 None,
             )?
+        } else if camera.is_some() {
+            // A raw's mosaic is no picture: the host opens the file again,
+            // from its preview.
+            return Err("the new network takes pictures only, not a raw's sensor data".into());
         } else {
             bundle.build_with(&catalogue, Source::Picture(&image), None)?
         };

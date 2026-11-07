@@ -77,43 +77,77 @@ pub fn modules() -> Catalogue {
     c
 }
 
-/// A file through a workspace's network (`bundle`'s): the graph and the
-/// node the viewport shows. A network reading a raw (its `raw_sources`)
-/// is given the file's sensor mosaic with its camera, and refuses a
-/// picture; any other network a picture, a raw file's embedded preview
-/// for a raw.
+/// A file through a workspace's network (`bundle`'s), to show: the graph
+/// and the node the viewport shows. A network taking a raw (a raw or an
+/// image source) is given a raw file's sensor mosaic with its camera; a
+/// network reading only a raw refuses a picture. A raw the network cannot
+/// develop (a picture network, a raw that is not a mosaic) shows its
+/// embedded preview: exports go through [`develop_file`], which never
+/// takes it.
 pub fn open_file(path: &Path, bundle: &Bundle) -> Result<(Graph, NodeId), String> {
+    through(path, bundle, true)
+}
+
+/// As [`open_file`], for an export: a raw goes through the raw chain or
+/// is refused with the reason, never through its embedded preview.
+pub fn develop_file(path: &Path, bundle: &Bundle) -> Result<(Graph, NodeId), String> {
+    through(path, bundle, false)
+}
+
+fn through(path: &Path, bundle: &Bundle, preview: bool) -> Result<(Graph, NodeId), String> {
     let catalogue = modules();
-    let built = if bundle.template.network.reads_raw() {
-        if Kind::of(path) == Kind::Picture {
+    let network = &bundle.template.network;
+    let name = &bundle.template.meta.name;
+    let raw = Kind::of(path) == Kind::Raw;
+    if network.reads_raw() && !raw {
+        return Err(format!(
+            "{}: “{name}” develops raw files; open this picture in a workspace for pictures",
+            path.display(),
+        ));
+    }
+    let built = if raw && network.takes_raw() {
+        let developed = helios_load::load(path).and_then(|loaded| {
+            let camera = loaded
+                .camera
+                .ok_or_else(|| format!("{}: no camera to develop it with", path.display()))?
+                .to_context();
+            bundle.build_with(
+                &catalogue,
+                Source::Raw {
+                    mosaic: &loaded.image,
+                    camera: &camera,
+                },
+                None,
+            )
+        });
+        match developed {
+            Ok(built) => built,
+            // A raw that is not a mosaic (sRAW, a linear DNG) is shown from
+            // its preview where the network takes a picture too.
+            Err(_) if preview && !network.reads_raw() => embedded(path, bundle)?,
+            Err(e) => return Err(e),
+        }
+    } else if raw {
+        if !preview {
             return Err(format!(
-                "{}: “{}” develops raw files; open this picture in a workspace for pictures",
+                "{}: “{name}” takes pictures only, its network cannot develop a raw; \
+                 update the workspace from its template, or export from a workspace for raws",
                 path.display(),
-                bundle.template.meta.name
             ));
         }
-        let loaded = helios_load::load(path)?;
-        let camera = loaded
-            .camera
-            .ok_or_else(|| format!("{}: no camera to develop it with", path.display()))?
-            .to_context();
-        bundle.build_with(
-            &catalogue,
-            Source::Raw {
-                mosaic: &loaded.image,
-                camera: &camera,
-            },
-            None,
-        )?
+        embedded(path, bundle)?
     } else {
-        let image = match Kind::of(path) {
-            Kind::Picture => helios_load::load(path)?.image,
-            Kind::Raw => helios_load::preview(path)?
-                .ok_or_else(|| format!("{}: no preview to show", path.display()))?,
-        };
+        let image = helios_load::load(path)?.image;
         bundle.build_with(&catalogue, Source::Picture(&image), None)?
     };
     Ok((built.graph, built.view.0))
+}
+
+/// A raw's embedded preview through `bundle`'s network, as a picture.
+fn embedded(path: &Path, bundle: &Bundle) -> Result<Built, String> {
+    let image = helios_load::preview(path)?
+        .ok_or_else(|| format!("{}: no preview to show", path.display()))?;
+    bundle.build_with(&modules(), Source::Picture(&image), None)
 }
 
 /// What a template may name on this desktop: [`modules`], and the panels

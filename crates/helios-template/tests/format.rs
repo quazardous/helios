@@ -430,6 +430,146 @@ fn a_raw_source_is_one_of_the_sources() {
     }
 }
 
+/// An image source: a picture straight into exposure, a raw through the
+/// raw front first; the network has a `demosaic` node of its own.
+fn image_template() -> Json {
+    json!({
+        "format": 1,
+        "id": "test.image",
+        "version": 1,
+        "meta": { "name": "Image", "scenario": "A picture or a raw, brighter." },
+        "network": {
+            "sources": ["source"],
+            "image_sources": ["source"],
+            "nodes": [
+                { "name": "exp", "module": "exposure" },
+                { "name": "demosaic", "module": "exposure" }
+            ],
+            "connections": [
+                { "from": "source", "port": "image", "to": "exp", "input": "input" },
+                { "from": "exp", "port": "output", "to": "demosaic", "input": "input" }
+            ],
+            "view": { "node": "demosaic", "port": "output" }
+        }
+    })
+}
+
+/// The raw modules and the raw front Helios ships.
+fn image_catalogue() -> Catalogue {
+    let mut c = raw_catalogue()
+        .module(ModuleRef::new(helios_module_whitebalance::WhiteBalance))
+        .module(ModuleRef::new(helios_module_highlights::Highlights))
+        .module(ModuleRef::new(helios_module_demosaic::Demosaic))
+        .module(ModuleRef::new(helios_module_colorin::ColorIn));
+    for file in helios_template::shipped::composites() {
+        c.add_composite(file);
+    }
+    c
+}
+
+#[test]
+fn an_image_source_takes_a_picture_as_it_is_and_a_raw_through_the_raw_front() {
+    use helios_core::Image;
+    let t = image_template();
+    assert_eq!(schema::check(&schema::template(), &t), Vec::<String>::new());
+    let b = bundle(&t);
+    let net = &b.template.network;
+    assert_eq!(
+        net.source_kind("source"),
+        helios_template::SourceKind::Image
+    );
+    assert!(net.takes_raw() && !net.reads_raw());
+    let report = b.validate(&image_catalogue());
+    assert!(report.is_ok(), "{:?}", report.problems);
+    // A picture goes straight on: no raw node.
+    let picture = Image::from_fn(Region::sized(4, 4), 4, |_, _, _| 0.25);
+    let built = b
+        .build_with(
+            &image_catalogue(),
+            helios_template::Source::Picture(&picture),
+            None,
+        )
+        .unwrap();
+    assert!(built.graph.find("rawprepare").is_none());
+    assert_eq!(
+        built.nodes.keys().collect::<Vec<_>>(),
+        ["demosaic", "exp", "source"]
+    );
+    // A raw: the mosaic, then the raw front under the names a darktable
+    // edit's items take, `demosaic` renamed where the network has one.
+    let camera = helios_photo::CameraInfo {
+        maker: "Test".into(),
+        model: "Bayer".into(),
+        iso: 100.0,
+        exposure_bias: 0.0,
+        exposure_time: 0.01,
+        aperture: 4.0,
+        focal_length: 50.0,
+        black: [0.0; 4],
+        white: 1.0,
+        white_balance: [2.0, 1.0, 1.5, 1.0],
+        xyz_to_camera: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+        cfa: helios_photo::Cfa::parse("RGGB").unwrap(),
+    }
+    .to_context();
+    let mosaic = Image::from_fn(Region::sized(8, 8), 1, |_, _, _| 0.3);
+    let built = b
+        .build_with(
+            &image_catalogue(),
+            helios_template::Source::Raw {
+                mosaic: &mosaic,
+                camera: &camera,
+            },
+            None,
+        )
+        .unwrap();
+    for name in [
+        "rawprepare",
+        "whitebalance",
+        "highlights",
+        "source.demosaic",
+        "colorin",
+    ] {
+        let id = built.graph.find(name).unwrap_or_else(|| panic!("{name}"));
+        // Each reads the raw: it is given the camera.
+        assert!(
+            built
+                .graph
+                .context(id)
+                .unwrap()
+                .is_some_and(|c| !c.is_empty()),
+            "{name}"
+        );
+    }
+    let exp = built.graph.find("exp").unwrap();
+    let colorin = built.graph.find("colorin").unwrap();
+    assert_eq!(built.graph.input_nodes(exp).unwrap(), [Some(colorin)]);
+    let out = Engine::new(Arc::new(Bus::new()))
+        .render(
+            &built.graph,
+            built.view.0,
+            &built.view.1,
+            Region::sized(8, 8),
+        )
+        .unwrap();
+    assert_eq!(out.channels(), 4);
+    assert!(out.to_vec().iter().all(|v| v.is_finite()));
+    // Not a source, a raw source too, or named twice: refused.
+    let mut t = image_template();
+    t["network"]["raw_sources"] = json!(["source"]);
+    t["network"]["image_sources"] = json!(["source", "exp"]);
+    let problems = bundle(&t).validate(&image_catalogue()).problems;
+    for expected in [
+        "network.image_sources[0]: `source` is not a source, or named twice",
+        "network.image_sources[1]: `exp` is not a source",
+    ] {
+        assert!(
+            problems.iter().any(|p| p.starts_with(expected)),
+            "{expected}: {problems:?}"
+        );
+    }
+}
+
 /// A one-exposure macro with a workshop block (experimental).
 fn workshop(targets: Json) -> Json {
     json!({

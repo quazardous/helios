@@ -8,7 +8,7 @@ use egui_pop_model::layout::Layout;
 use helios_core::{Context, Expansion, Graph, Image, ModuleRef, NodeId, Params, Region, Wire};
 
 use crate::catalogue::Catalogue;
-use crate::format::{NodeDesc, PanelHint, SourceKind, Template};
+use crate::format::{CompositeRef, NodeDesc, PanelHint, RAW_FRONT, SourceKind, Template};
 
 /// The output port of a source node.
 pub const SOURCE_PORT: &str = "image";
@@ -46,7 +46,9 @@ pub fn raw_placeholder() -> Image {
     Image::from_fn(Region::sized(8, 8), 1, |_, _, _| 0.18)
 }
 
-/// What a template's sources are given (see [`SourceKind`]).
+/// What a template's sources are given (see [`SourceKind`]): a raw
+/// source takes a raw, a picture source a picture, an image source
+/// either.
 #[derive(Clone, Copy, Debug)]
 pub enum Source<'a> {
     /// A picture in the working space, four channels.
@@ -78,6 +80,7 @@ fn mismatch(name: &str, kind: SourceKind) -> String {
         SourceKind::Picture => {
             format!("network.sources: `{name}` takes a picture, not a raw file's sensor data")
         }
+        SourceKind::Image => format!("network.sources: `{name}` takes a picture or a raw"),
     }
 }
 
@@ -112,6 +115,13 @@ impl Placed {
 /// one, a placeholder of the kind it takes), with `preset`'s values over
 /// the nodes' own, and `layout` with the panel hints of its composites.
 /// A source given what it does not take is refused.
+///
+/// An image source given a raw is its mosaic followed by the raw front
+/// ([`RAW_FRONT`]), opened: its nodes go in the graph under their own
+/// names (`rawprepare`, `whitebalance`, `highlights`, `demosaic`,
+/// `colorin`, the names a darktable edit's items take), or as
+/// `<source>.<inner>` where the network already has that name, and what
+/// reads the source reads the raw front's output.
 pub fn build(
     template: &Template,
     layout: &Layout,
@@ -135,20 +145,29 @@ pub fn build(
     let mut placed: BTreeMap<String, Placed> = BTreeMap::new();
     let mut camera = None;
     let mut raws = Vec::new();
+    // The names the network gives: a raw front's node takes another.
+    let mut taken: std::collections::BTreeSet<String> = net
+        .sources
+        .iter()
+        .chain(net.nodes.iter().map(|n| &n.name))
+        .cloned()
+        .collect();
     for name in &net.sources {
         let kind = net.source_kind(name);
-        let image = match (kind, source) {
-            (SourceKind::Picture, None) => placeholder(),
-            (SourceKind::Raw, None) => raw_placeholder(),
-            (SourceKind::Picture, Some(Source::Picture(image))) => image.clone(),
-            (SourceKind::Raw, Some(Source::Raw { mosaic, camera: c })) => {
+        let (image, raw) = match (kind, source) {
+            (SourceKind::Picture | SourceKind::Image, None) => (placeholder(), false),
+            (SourceKind::Raw, None) => (raw_placeholder(), true),
+            (SourceKind::Picture | SourceKind::Image, Some(Source::Picture(image))) => {
+                (image.clone(), false)
+            }
+            (SourceKind::Raw | SourceKind::Image, Some(Source::Raw { mosaic, camera: c })) => {
                 camera = Some(c);
-                mosaic.clone()
+                (mosaic.clone(), true)
             }
             (kind, Some(_)) => return Err(mismatch(name, kind)),
         };
         let id = graph.add_source(name, image);
-        if kind == SourceKind::Raw {
+        if raw {
             raws.push(id);
         }
         nodes.insert(name.clone(), id);
@@ -156,6 +175,10 @@ pub fn build(
         let mut p = Placed::default();
         p.outputs
             .insert(SOURCE_PORT.into(), (id, SOURCE_PORT.into()));
+        if raw && kind == SourceKind::Image {
+            p = raw_front(&mut graph, &mut nodes, &mut taken, catalogue, name, id)
+                .map_err(|e| format!("network.sources: `{name}`: {e}"))?;
+        }
         placed.insert(name.clone(), p);
     }
     let mut hints: Vec<PanelHint> = Vec::new();
@@ -267,10 +290,85 @@ fn open(
         .expand(&params, &Context::new(), &Expansion::new(1.0, None))
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("`{r}` is not a composite"))?;
+    place_network(graph, nodes, &r.to_string(), &network, |inner| {
+        format!("{}.{inner}", n.name)
+    })
+}
+
+/// The raw front after the source `source` (`id`), given a raw: its
+/// nodes opened in the graph under their own names where `taken` does
+/// not hold them, the source wired to its input. Returns where what
+/// reads the source reads.
+fn raw_front(
+    graph: &mut Graph,
+    nodes: &mut BTreeMap<String, NodeId>,
+    taken: &mut std::collections::BTreeSet<String>,
+    catalogue: &Catalogue,
+    source: &str,
+    id: NodeId,
+) -> Result<Placed, String> {
+    let r = CompositeRef {
+        id: RAW_FRONT.0.into(),
+        version: RAW_FRONT.1,
+    };
+    let module = catalogue
+        .resolve(None, Some(&r), 0)
+        .map_err(|e| format!("no raw front to develop a raw with: {e}"))?;
+    let params = module
+        .manifest()
+        .resolve(&Params::new())
+        .map_err(|e| e.to_string())?;
+    let network = module
+        .expand(&params, &Context::new(), &Expansion::new(1.0, None))
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("`{r}` is not a composite"))?;
+    let names: BTreeMap<String, String> = network
+        .nodes()
+        .iter()
+        .map(|inner| {
+            let name = if taken.contains(&inner.name) {
+                format!("{source}.{}", inner.name)
+            } else {
+                inner.name.clone()
+            };
+            taken.insert(name.clone());
+            (inner.name.clone(), name)
+        })
+        .collect();
+    let placed = place_network(graph, nodes, &r.to_string(), &network, |inner| {
+        names[inner].clone()
+    })?;
+    for (port, targets) in &placed.inputs {
+        for (to, input) in targets {
+            graph
+                .connect(id, SOURCE_PORT, *to, input)
+                .map_err(|e| format!("`{r}`'s input `{port}`: {e}"))?;
+        }
+    }
+    let output = placed
+        .outputs
+        .values()
+        .next()
+        .cloned()
+        .ok_or_else(|| format!("`{r}` has no output"))?;
+    let mut p = Placed::default();
+    p.outputs.insert(SOURCE_PORT.into(), output);
+    Ok(p)
+}
+
+/// A composite's network (`r`'s) put in the graph as ordinary nodes,
+/// each named by `name_of` from its inner name, wired as inside.
+fn place_network(
+    graph: &mut Graph,
+    nodes: &mut BTreeMap<String, NodeId>,
+    r: &str,
+    network: &helios_core::Network,
+    name_of: impl Fn(&str) -> String,
+) -> Result<Placed, String> {
     let mut ids = Vec::with_capacity(network.nodes().len());
     let mut placed = Placed::default();
     for inner in network.nodes() {
-        let name = format!("{}.{}", n.name, inner.name);
+        let name = name_of(&inner.name);
         let id = graph
             .add_module(&name, inner.module.clone(), &inner.params)
             .map_err(|e| e.to_string())?;

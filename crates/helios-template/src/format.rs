@@ -371,10 +371,15 @@ pub struct NetworkDesc {
     /// The images the workspace is given, by node name; each one's output
     /// port is `image`.
     pub sources: Vec<String>,
-    /// The sources given a raw file's sensor data (see [`SourceKind`]);
-    /// the others are given a picture.
+    /// The sources given a raw file's sensor data only (see
+    /// [`SourceKind::Raw`]).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub raw_sources: Vec<String>,
+    /// The sources given an image, a picture or a raw (see
+    /// [`SourceKind::Image`]); the sources in neither list are given a
+    /// picture.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub image_sources: Vec<String>,
     pub nodes: Vec<NodeDesc>,
     #[serde(default)]
     pub connections: Vec<Connection>,
@@ -389,16 +394,28 @@ impl NetworkDesc {
     pub fn source_kind(&self, name: &str) -> SourceKind {
         if self.raw_sources.iter().any(|s| s == name) {
             SourceKind::Raw
+        } else if self.image_sources.iter().any(|s| s == name) {
+            SourceKind::Image
         } else {
             SourceKind::Picture
         }
     }
 
-    /// Whether a source is given a raw file's sensor data.
+    /// Whether a source takes a raw file's sensor data only: the network
+    /// refuses a picture.
     pub fn reads_raw(&self) -> bool {
         self.sources
             .iter()
             .any(|s| self.source_kind(s) == SourceKind::Raw)
+    }
+
+    /// Whether a raw file goes through the network as its sensor data:
+    /// a source takes a raw (a raw source, or an image source, which
+    /// puts the raw front before it).
+    pub fn takes_raw(&self) -> bool {
+        self.sources
+            .iter()
+            .any(|s| self.source_kind(s) != SourceKind::Picture)
     }
 }
 
@@ -413,7 +430,28 @@ pub enum SourceKind {
     /// white balance coefficients, matrix) as the context of every node
     /// reading it, directly or not.
     Raw,
+    /// An image: a picture goes on as a picture source's; a raw file's
+    /// mosaic, with its camera, goes through the raw front
+    /// ([`RAW_FRONT`]: levels, white balance, highlights, demosaicing,
+    /// camera colours) first, so the nodes reading the source get a
+    /// picture in the working space either way.
+    Image,
 }
+
+impl SourceKind {
+    /// The channels the nodes reading such a source get: one for a
+    /// raw's mosaic, four (RGBA) for a picture or an image.
+    pub fn channels(self) -> u32 {
+        match self {
+            SourceKind::Raw => 1,
+            SourceKind::Picture | SourceKind::Image => 4,
+        }
+    }
+}
+
+/// The composite an image source puts before what reads it when it is
+/// given a raw: the raw chain up to the working space.
+pub const RAW_FRONT: (&str, u32) = ("helios.raw-front", 1);
 
 /// A node of a template's network: a module or a composite.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]

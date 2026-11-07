@@ -1,0 +1,30 @@
+{
+  "format": 1,
+  "id": "helios.raw-front",
+  "version": 1,
+  "name": "Raw front",
+  "description": "A raw file's sensor data to the working space: black and white levels, white balance, highlights, demosaicing and the camera's colours",
+  "inputs": [
+    { "name": "input", "channels": 1 }
+  ],
+  "outputs": [
+    { "name": "output", "channels": 4, "layout": "rgba" }
+  ],
+  "nodes": [
+    { "name": "rawprepare", "module": "rawprepare" },
+    { "name": "whitebalance", "module": "whitebalance" },
+    { "name": "highlights", "module": "highlights" },
+    { "name": "demosaic", "module": "demosaic" },
+    { "name": "colorin", "module": "colorin" }
+  ],
+  "connections": [
+    { "from": "@", "port": "input", "to": "rawprepare", "input": "input" },
+    { "from": "rawprepare", "port": "output", "to": "whitebalance", "input": "input" },
+    { "from": "whitebalance", "port": "output", "to": "highlights", "input": "input" },
+    { "from": "highlights", "port": "output", "to": "demosaic", "input": "input" },
+    { "from": "demosaic", "port": "output", "to": "colorin", "input": "input" }
+  ],
+  "exits": [
+    { "from": "colorin", "port": "output", "output": "output" }
+  ]
+}

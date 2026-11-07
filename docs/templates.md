@@ -109,10 +109,20 @@ The starting graph, written like a node's network description
   filter pattern, white balance coefficients, matrix) as the context of
   every node reading it, directly or not, as the node gives a raw
   source (`rawprepare` → `whitebalance` → `highlights` → `demosaic` →
-  `colorin` turn it into the working space). A raw source refuses a
-  picture and a picture source a raw: the desktop opens a raw's mosaic
-  in a workspace whose network reads one, its embedded preview
-  elsewhere, and refuses a picture in a network that reads a raw.
+  `colorin` turn it into the working space). A source named in
+  `image_sources` (2026-11-07) takes either: a picture goes on as it
+  is; a raw file's mosaic, with its camera, goes through the **raw
+  front** first, the shipped composite `helios.raw-front@1`
+  (`rawprepare` → `whitebalance` → `highlights` → `demosaic` →
+  `colorin`), opened in the graph under those names (`<source>.<inner>`
+  where the network already has one), so what reads the source gets a
+  picture in the working space either way, and a darktable edit's raw
+  items land on those nodes. A raw source refuses a picture and a
+  picture source a raw: the desktop opens a raw's mosaic in a workspace
+  whose network takes one (a raw or an image source), its embedded
+  preview elsewhere (to show it; an export refuses it, see
+  [export.md](export.md)), and refuses a picture in a network that
+  reads a raw only.
 - A node is a `module` (by its manifest name) or a `composite` (by id and
   version), never both. A composite is placed folded (one node, the
   engine expands it when it renders) or, with `open`, opened: its inner

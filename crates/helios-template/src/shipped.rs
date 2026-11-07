@@ -109,6 +109,8 @@ const BUILTIN: &[&[(&str, &str)]] = &[
 /// The composite files Helios ships.
 const COMPOSITES: &[&str] = &[
     include_str!("../../../templates/composites/helios.masked-adjustment@1.helios-composite.json"),
+    // The raw chain an image source puts before what reads it, given a raw.
+    include_str!("../../../templates/composites/helios.raw-front@1.helios-composite.json"),
     // The shipped workshop (experimental): a plain macro when they are off.
     include_str!("../../../templates/composites/helios.lift-midtones@1.helios-composite.json"),
 ];

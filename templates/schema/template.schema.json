@@ -97,6 +97,11 @@
           "type": "array",
           "items": { "$ref": "#/$defs/name" }
         },
+        "image_sources": {
+          "description": "The sources given an image: a picture as it is, a raw file's mosaic with its camera followed by the raw front (helios.raw-front@1: levels, white balance, highlights, demosaicing, camera colours), so what reads them gets a picture, four channels (RGBA), either way. A source is in raw_sources or image_sources, not both.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/name" }
+        },
         "nodes": { "type": "array", "items": { "$ref": "#/$defs/node" } },
         "connections": { "type": "array", "items": { "$ref": "#/$defs/connection" } },
         "view": { "$ref": "#/$defs/endpoint" },
