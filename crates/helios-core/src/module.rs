@@ -347,6 +347,17 @@ pub trait Module: Send + Sync + 'static {
         None
     }
 
+    /// The extent of its outputs given its first input's, both in pixels
+    /// at the render's scale. Read only for a module declaring
+    /// [`Needs::geometry`](crate::Needs::geometry); the default keeps the
+    /// input's. Regions are absolute coordinates of the plane: a geometric
+    /// step maps the plane (a quarter turn about the origin, a crop keeping
+    /// its coordinates), so its output may start off the origin, and
+    /// `input_region` is the inverse map of a region asked of it.
+    fn output_extent(&self, _plan: &Self::Plan, input: Region) -> Region {
+        input
+    }
+
     /// The region of each input needed to compute `output`. The default reads
     /// the output region grown by the declared overlap.
     fn input_region(&self, _plan: &Self::Plan, output: Region, overlap: u32) -> Region {
@@ -458,6 +469,16 @@ impl ModuleRef {
 
     pub(crate) fn extent(&self, plan: &Plan) -> Option<Extent> {
         self.0.extent(plan)
+    }
+
+    /// The extent of its outputs given its first input's (see
+    /// [`Module::output_extent`]).
+    pub(crate) fn output_extent(&self, plan: &Plan, input: Region) -> Region {
+        if self.manifest().needs.geometry {
+            self.0.output_extent(plan, input)
+        } else {
+            input
+        }
     }
 
     /// The region of its inputs it reads to compute `output` with these
@@ -653,6 +674,7 @@ trait Erased: Send + Sync {
     }
     fn prepare(&self, params: &Params, context: &Context, scale: f64) -> Result<Plan, String>;
     fn input_region(&self, plan: &Plan, output: Region) -> Region;
+    fn output_extent(&self, plan: &Plan, input: Region) -> Region;
     fn extent(&self, plan: &Plan) -> Option<Extent>;
     fn gpu_kernel(&self) -> Option<GpuKernel>;
     fn gpu_uniforms(&self, plan: &Plan) -> Vec<f32>;
@@ -688,6 +710,10 @@ impl<C: Composite> Erased for CompositeAdapter<C> {
 
     fn input_region(&self, _: &Plan, output: Region) -> Region {
         output
+    }
+
+    fn output_extent(&self, _: &Plan, input: Region) -> Region {
+        input
     }
 
     fn extent(&self, _: &Plan) -> Option<Extent> {
@@ -752,6 +778,10 @@ impl<M: Module> Erased for Adapter<M> {
     fn input_region(&self, plan: &Plan, output: Region) -> Region {
         self.module
             .input_region(Self::plan(plan), output, self.manifest.needs.overlap)
+    }
+
+    fn output_extent(&self, plan: &Plan, input: Region) -> Region {
+        self.module.output_extent(Self::plan(plan), input)
     }
 
     fn extent(&self, plan: &Plan) -> Option<Extent> {

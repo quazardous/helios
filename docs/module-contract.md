@@ -132,6 +132,7 @@ the scheduler, the AI or a test generator can use it.
 prepare(params, context) -> plan          pure, cheap, no pixels
 prepare_at(params, context, scale) -> plan     the same, for a render at a scale
 input_region(plan, output_region) -> input_region
+output_extent(plan, input_extent) -> output_extent     optional, with Needs::geometry
 extent(plan) -> region and fill, or none     optional
 process(plan, inputs, output_region) -> outputs     pure, no IO, no globals
 ```
@@ -156,6 +157,18 @@ process(plan, inputs, output_region) -> outputs     pure, no IO, no globals
   the engine runs it, and everything it reads, at full resolution over
   the pixels the render covers, then reduces its output, as darktable
   scales after demosaic.
+- **Geometry** (2026-11-07). A module whose output covers another region
+  of the plane than its input (a quarter turn, later a crop or a
+  rotation) declares `Needs::geometry` and gives `output_extent`: the
+  extent of its output from its first input's. `Graph::extent` follows
+  it from the source down (a bypassed node keeps its input's), and
+  `input_region` is its inverse, mapping a region asked of the output
+  back to the input's. Regions stay absolute coordinates of the plane: a
+  geometric step maps the plane without knowing the image's size, so its
+  output may start off the origin (`flip` turns a `W x H` image
+  clockwise onto `(-H, 0)` to `(0, W)`); whoever shows or writes a node's
+  output takes its extent as it is, origin included. A composite node is
+  not expanded by `Graph::extent`: it keeps its input's extent.
 - **Extent.** A module whose outputs are one constant away from a region
   (a drawn shape is 0 away from it) declares that region and constant in
   `extent`, in pixels at the render's scale. The engine then plans a step

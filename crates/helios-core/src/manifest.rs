@@ -380,6 +380,13 @@ pub struct Needs {
     /// computes the module, and what it reads, at full resolution over the
     /// pixels the render covers, then reduces its output.
     pub full_resolution: bool,
+    /// Its outputs cover another region of the plane than its first
+    /// input (a quarter turn, a flip off the origin, later a crop): the
+    /// engine and [`crate::Graph::extent`] ask its plan for the output's
+    /// extent ([`crate::Module::output_extent`]), and `input_region` maps
+    /// an output region back to the input's.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub geometry: bool,
 }
 
 /// What kind of node a module makes in a network.

@@ -325,21 +325,42 @@ impl Graph {
         })
     }
 
-    /// The extent of what a node outputs: its source's image region,
-    /// followed up the first connected inputs (modules keep the geometry
-    /// they are given). `None` when no source feeds it.
+    /// The extent of what a node outputs, at full resolution: its source's
+    /// image region, followed down the first connected inputs, each module
+    /// declaring [`Needs::geometry`](crate::Needs::geometry) mapping it
+    /// (a quarter turn swaps width and height; see
+    /// [`Module::output_extent`](crate::Module::output_extent)). A bypassed
+    /// node, and a composite node (not expanded here), keep their input's.
+    /// `None` when no source feeds it.
     pub fn extent(&self, id: NodeId) -> Result<Option<Region>, Error> {
+        // The geometric steps between the node and its source, downstream first.
+        let mut steps = Vec::new();
         let mut at = id;
-        loop {
+        let mut extent = loop {
             let node = self.node(at)?;
             match &node.kind {
-                Kind::Source { image, .. } => return Ok(Some(image.region())),
-                Kind::Module { .. } => match node.inputs.iter().flatten().next().copied() {
-                    Some((from, _)) => at = from,
-                    None => return Ok(None),
-                },
+                Kind::Source { image, .. } => break image.region(),
+                Kind::Module {
+                    module,
+                    params,
+                    context,
+                    ..
+                } => {
+                    if module.manifest().needs.geometry && !node.bypassed {
+                        steps.push((module, params, context));
+                    }
+                    match node.inputs.iter().flatten().next().copied() {
+                        Some((from, _)) => at = from,
+                        None => return Ok(None),
+                    }
+                }
             }
+        };
+        for (module, params, context) in steps.into_iter().rev() {
+            let plan = module.prepare(params, context, 1.0)?;
+            extent = module.output_extent(&plan, extent);
         }
+        Ok(Some(extent))
     }
 
     /// The node feeding each input of a node (`None` when unconnected).

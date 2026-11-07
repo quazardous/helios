@@ -93,6 +93,7 @@ impl Module for Demosaic {
             needs: Needs {
                 overlap: 2,
                 full_resolution: true,
+                ..Needs::default()
             },
             kind: ModuleKind::Process,
             family: Family::Detail,
