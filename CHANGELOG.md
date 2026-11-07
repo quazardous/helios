@@ -24,6 +24,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.59.0] - 2026-11-07
+
+### Added
+
+- Importing photos is always within reach: File > Import… (Ctrl+Shift+I),
+  an "Import photos…" button in the empty Library and Filmstrip, and files
+  or folders dropped on the window. A workspace without an import source
+  asks where the photos go (referenced in place, or copied into the library
+  folder) and can remember the answer. Imports also bring each photo's
+  darktable edits (its `.xmp` sidecars, duplicates included) in as versions,
+  on by default; what darktable had that could not be applied is listed in
+  the Log panel, which now shows import reports. The Vault panel is now
+  called Library.
+
+### Fixed
+
+- In a narrow side bar, the Masks panel keeps each row's eye and lock in
+  view, and the Vault's search bar and empty-library text wrap instead of
+  running past the panel's edge. A macro's buttons in the Modules panel wrap
+  under its name the same way.
+
 ## [0.58.0] - 2026-11-06
 
 ### Changed
