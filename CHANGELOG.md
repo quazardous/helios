@@ -24,6 +24,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.62.0] - 2026-11-07
+
+### Added
+
+- File > Import from → darktable library brings in the photos of a darktable
+  library (darktable 4.0 to 5.6): pick darktable's configuration folder, and
+  each photo comes with its stars, reject, colour labels, tags, title and
+  description, its edits through its sidecars as before. The library is only
+  read, from a copy while darktable is running; photos on a drive not plugged
+  in are counted in the Log panel.
+
 ## [0.61.0] - 2026-11-07
 
 ### Changed
