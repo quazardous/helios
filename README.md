@@ -43,6 +43,8 @@ follows the path Helios took.
   is tested and sandboxed, designed so that an AI agent can build it.
 - [docs/bench.md](./docs/bench.md): the bench box, a remote runner for full
   builds, the test suite, timings and GPU tests (`cargo xtask bench-remote`).
+- [docs/performance.md](./docs/performance.md): the performance budgets
+  (thumbnails first) and the dated measurements against them.
 - [docs/gui.md](./docs/gui.md): GUI design notes: dockable panels, the node
   header, the queue panel, the graph view.
 - [docs/ux-research.md](./docs/ux-research.md): what users ask of darktable's
