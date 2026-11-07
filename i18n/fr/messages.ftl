@@ -862,6 +862,8 @@ gui-import-window-sources = Sources
 
 gui-import-window-title = Importer des photos
 
+gui-import-window-types = Types
+
 gui-library-import = Importer…
 
 gui-image-not-reopened = L’image laissée ouverte n’a pas pu être rouverte : { $error }

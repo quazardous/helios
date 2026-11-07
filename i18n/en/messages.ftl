@@ -363,6 +363,8 @@ gui-import-window-sources = Sources
 
 gui-import-window-title = Import photos
 
+gui-import-window-types = Types
+
 gui-importer-file = file
 
 gui-importer-folder = folder

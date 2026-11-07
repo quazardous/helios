@@ -185,13 +185,14 @@ fn card_window(
         h.run();
     }
     h.key_press_modifiers(Modifiers::CTRL | Modifiers::SHIFT, Key::I);
-    h.run();
-    // The card is read on a thread of its own too.
+    // The card is read on a thread of its own too; a spinner turns
+    // meanwhile, so frames are stepped, not run to rest.
+    h.step();
     let deadline = Instant::now() + Duration::from_secs(20);
     while !h.state().import_read() {
         assert!(Instant::now() < deadline, "the card not read in 20 s");
         std::thread::sleep(Duration::from_millis(20));
-        h.run();
+        h.step();
     }
     for _ in 0..3 {
         h.run();
@@ -291,14 +292,10 @@ fn import_passes_exactly_the_photos_ticked() {
     let mut h = card_window(&dir, Some(known));
     // A click unticks a photo.
     h.get_by_label("IMG_0001.JPG").click();
-    for _ in 0..3 {
-        h.run();
-    }
+    h.run_steps(3);
     assert_eq!(h.state().import_counts().selected, 1);
     h.get_by_label("Import 1").click();
-    for _ in 0..3 {
-        h.run();
-    }
+    h.run_steps(3);
     // The pair's two files, neither the photo unticked nor the one the
     // Library holds.
     assert_eq!(

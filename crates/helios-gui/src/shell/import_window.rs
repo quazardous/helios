@@ -182,6 +182,7 @@ struct GridWords {
     reading: String,
     empty: String,
     new_only: String,
+    types: String,
     all_types: String,
     raw_only: String,
     jpeg_only: String,
@@ -459,6 +460,7 @@ impl Shell {
                 "No photos in the sources ticked",
             )),
             new_only: t(Message::new("gui-import-window-new-only", "New only")),
+            types: t(Message::new("gui-import-window-types", "Types")),
             all_types: t(Message::new("gui-import-window-all-types", "All types")),
             raw_only: t(Message::new("gui-import-window-raw-only", "Raw only")),
             jpeg_only: t(Message::new("gui-import-window-jpeg-only", "JPEG only")),
@@ -678,7 +680,7 @@ fn contents_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &GridWords, readi
             Types::Raw => &words.raw_only,
             Types::Jpeg => &words.jpeg_only,
         };
-        egui::ComboBox::from_id_salt("helios.import.types")
+        egui::ComboBox::new("helios.import.types", &words.types)
             .selected_text(name(types))
             .show_ui(ui, |ui| {
                 for t in [Types::All, Types::Raw, Types::Jpeg] {
