@@ -157,6 +157,17 @@ A first run with a 24-pixel alignment reach failed the RAF (its shift is
 
 ### B: raws through the raw chain by default
 
+Status (2026-11-07): steps 1 to 4 are done. The raw front is
+`templates/composites/helios.raw-front@1.helios-composite.json`; a
+template's `image_sources` take a picture or a raw (see
+[templates.md](templates.md)); the built-in templates (at version 2) and
+the blank workspace use them; the batch exporter renders through
+`helios_gui::templates::develop_file`, which never takes a preview; and
+`edit::apply_to_graph` maps darktable's `temperature` item onto the
+`whitebalance` node (the import names items after darktable's operations,
+so that item was skipped even in "Develop one image"). Step 5 is larger
+than sized (see its entry).
+
 Each step is one branch, built and tested on its own. Sizes: S a day or
 less, M a few days, L a week or more.
 
@@ -198,6 +209,15 @@ less, M a few days, L a week or more.
    (`crates/helios-load/src/lib.rs`, `Loaded`), a `flip` step (a module or
    the raw front's last node) applies it, masks follow it
    (`helios_xmp::drawn::Frame`). darktable applies it by default.
+   **Re-sized M to L (2026-11-07)**: the engine assumes every module
+   keeps the geometry it is given (`Graph::extent` follows the first
+   input up to the source), so a quarter turn needs a geometry hook in
+   `helios-core` (a module's output extent from its input's, and
+   `input_region` mapping back), a flip module whose regions may start
+   off the origin, the viewport and the export taking such an extent,
+   and `Frame` gaining the orientation for darktable's masks. Rotating
+   the mosaic at load time (with its filter pattern and per-position
+   black levels) is the cheaper route, but gives no step to override.
 6. **A loupe from the raw chain** (M). The viewport opened from the
    library already renders the workspace's network (`main.rs:467`); the
    Compare panel (`crates/helios-gui/src/library.rs:1334`) draws
