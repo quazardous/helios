@@ -164,6 +164,13 @@ crate, used by the library (`helios_gui::thumbnails`):
   (`--start warm`, every entry cached), and its `decode` part times the
   fast read and a cache hit per raw (`fast_ms`, `cache_hit_ms`). Not run
   yet: `thumb-bench` is a timing job, run before a release.
+  Indicative numbers, from `helios-thumbs`'s `times` tests in a
+  `test-affected` run (box job 20261107-235936-c906, flagged not
+  comparable: throttled, other jobs running; test build, its JPEG crates
+  optimised): on a raw-like file with a 160 px thumbnail, a 1620 px
+  preview and a 6000 px one, a fast read (a cache miss, the file in the
+  page cache) took about 19 ms, against 360 ms on average for the old
+  read in the baseline; a cache hit about 0.8 ms.
 
 Still open: textures are never freed (step 3, the virtualised grids, with
 the texture budget), and thumbnails are still the embedded previews, not
