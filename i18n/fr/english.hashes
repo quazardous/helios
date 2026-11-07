@@ -1008,8 +1008,9 @@ param-whitebalance-blue.label 89d3dea5a4c9712d
 param-whitebalance-green.description 94a40df319b7c7ea
 param-whitebalance-green.label a319ec35a5fe6f1a
 param-whitebalance-mode-choice-as-shot e83e9b40fbee1844
+param-whitebalance-mode-choice-camera-reference cc41f23de06b268e
 param-whitebalance-mode-choice-user 7c1015e324534020
-param-whitebalance-mode.description 9bfa0a6049a88c92
+param-whitebalance-mode.description 77db9e6e2dc50b71
 param-whitebalance-mode.label fb7fa70993198320
 param-whitebalance-red.description 722fa3ef16bb771a
 param-whitebalance-red.label c52ebe3823cca04a

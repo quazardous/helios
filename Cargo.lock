@@ -2343,6 +2343,8 @@ version = "0.69.0"
 dependencies = [
  "helios-colour",
  "helios-core",
+ "helios-module-whitebalance",
+ "helios-photo",
  "helios-testkit",
 ]
 

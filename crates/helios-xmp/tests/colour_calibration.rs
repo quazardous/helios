@@ -90,6 +90,32 @@ fn a_cat16_item_maps_with_darktables_names_and_units() {
 }
 
 #[test]
+fn the_camera_illuminant_darktables_default_maps() {
+    // darktable's scene-referred default: CAT16, illuminant as shot in
+    // camera, its found chromaticity and temperature saved beside.
+    let imported = import(json!({
+        "illuminant": "DT_ILLUMINANT_CAMERA",
+        "x": 0.3648,
+        "y": 0.3773,
+        "temperature": 4447.0,
+    }));
+    let report = &imported.report;
+    assert!(report.not_applied.is_empty(), "{report:#?}");
+    let [node] = imported.nodes.as_slice() else {
+        panic!("{:#?}", imported.nodes)
+    };
+    assert_eq!(node.module, "channelmixerrgb");
+    assert_eq!(
+        node.params.get("illuminant"),
+        Some(&Param::Choice("camera".into()))
+    );
+    assert_eq!(
+        node.params.get("adaptation"),
+        Some(&Param::Choice("cat16".into()))
+    );
+}
+
+#[test]
 fn a_custom_illuminant_keeps_its_chromaticity() {
     let imported = import(json!({
         "illuminant": "DT_ILLUMINANT_CUSTOM",
@@ -106,7 +132,7 @@ fn a_custom_illuminant_keeps_its_chromaticity() {
 fn the_parts_not_ported_keep_the_item_out_by_name() {
     for (values, part) in [
         (
-            json!({ "illuminant": "DT_ILLUMINANT_CAMERA" }),
+            json!({ "illuminant": "DT_ILLUMINANT_DETECT_EDGES" }),
             "illuminant",
         ),
         (

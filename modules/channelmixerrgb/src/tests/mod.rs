@@ -3,6 +3,10 @@ use super::*;
 /// darktable's results, from `dt_cat16.c`: its CAT16 path copied from its
 /// sources, run with the same working space matrix.
 mod golden;
+/// darktable's "as shot in camera" illuminants, from `dt_as_shot.c`: its
+/// code copied from its sources, run on four cameras' matrices and a few
+/// as-shot coefficients.
+mod golden_as_shot;
 
 fn params(case: &golden::Case) -> Params {
     Params::new()
@@ -37,8 +41,11 @@ fn close(a: f32, b: f32, tolerance: f32) -> bool {
 #[test]
 fn the_illuminants_match_darktables_chromaticities() {
     for case in golden::CASES {
-        let xy =
-            illuminant_xy(&ChannelMixerRgb.manifest().resolve(&params(case)).unwrap()).unwrap();
+        let xy = illuminant_xy(
+            &ChannelMixerRgb.manifest().resolve(&params(case)).unwrap(),
+            &Context::new(),
+        )
+        .unwrap();
         for c in 0..2 {
             assert!(
                 (xy[c] - case.xy[c]).abs() < 1e-6,
@@ -120,8 +127,117 @@ fn unknown_parts_are_refused_by_name() {
     assert!(err.contains("red"), "{err}");
     let err = plan(Params::new().with("adaptation", Value::Choice("bradford".into()))).unwrap_err();
     assert!(err.contains("adaptation"), "{err}");
-    let err = plan(Params::new().with("illuminant", Value::Choice("camera".into()))).unwrap_err();
+    let err =
+        plan(Params::new().with("illuminant", Value::Choice("detect_edges".into()))).unwrap_err();
     assert!(err.contains("illuminant"), "{err}");
+}
+
+fn camera_context(camera: &golden_as_shot::Camera, wb: [f64; 3]) -> Context {
+    use helios_photo::camera::fields;
+    Context::new()
+        .with(
+            fields::XYZ_TO_CAMERA,
+            Value::List(camera.xyz_to_camera.to_vec()),
+        )
+        .with(
+            fields::WHITE_BALANCE,
+            Value::List(vec![wb[0], wb[1], wb[2], wb[1]]),
+        )
+}
+
+#[test]
+fn the_as_shot_illuminant_matches_darktables() {
+    let mut worst = 0.0f32;
+    let mut worst_t = 0.0f32;
+    for camera in &golden_as_shot::CAMERAS {
+        // The white balance's camera reference, darktable's multipliers.
+        let d65 = helios_module_whitebalance::d65_coefficients(&camera.xyz_to_camera).unwrap();
+        for c in 0..3 {
+            assert!(
+                (d65[c] - camera.d65[c]).abs() < 1e-6,
+                "{}: {d65:?} against {:?}",
+                camera.name,
+                camera.d65
+            );
+        }
+        for shot in &camera.shots {
+            let got = as_shot_illuminant_xy(&camera.xyz_to_camera, &shot.wb);
+            let ctx = camera_context(camera, shot.wb);
+            assert_eq!(camera_illuminant_xy(&ctx), got, "{}", camera.name);
+            match (got, shot.xy) {
+                (None, None) => {}
+                (Some(xy), Some(want)) => {
+                    for c in 0..2 {
+                        worst = worst.max((xy[c] - want[c]).abs());
+                    }
+                    let (t, kind) = close_to_daylight(xy);
+                    worst_t = worst_t.max((t - shot.temperature).abs() / shot.temperature);
+                    assert_eq!(kind, shot.kind, "{} {:?}", camera.name, shot.wb);
+                }
+                other => panic!("{} {:?}: {other:?}", camera.name, shot.wb),
+            }
+        }
+    }
+    // The bounds the parity holds today, to see them move.
+    assert!(worst < 1e-6, "worst chromaticity difference {worst}");
+    assert!(
+        worst_t < 1e-4,
+        "worst relative temperature difference {worst_t}"
+    );
+}
+
+#[test]
+fn the_camera_illuminant_adapts_from_the_shots_white() {
+    let camera = &golden_as_shot::CAMERAS[0];
+    // A tungsten shot: the illuminant is warm, and its adaptation is the
+    // custom illuminant's at darktable's chromaticity.
+    let shot = &camera.shots[1];
+    let p = ChannelMixerRgb
+        .manifest()
+        .resolve(&Params::new().with("illuminant", Value::Choice(CAMERA.into())))
+        .unwrap();
+    let got = ChannelMixerRgb
+        .prepare(&p, &camera_context(camera, shot.wb))
+        .unwrap();
+    let want = shot.xy.unwrap();
+    let custom = plan(
+        Params::new()
+            .with("illuminant", Value::Choice("custom".into()))
+            .with("x", Value::Float(f64::from(want[0])))
+            .with("y", Value::Float(f64::from(want[1]))),
+    )
+    .unwrap();
+    for c in 0..3 {
+        assert!(
+            (got.illuminant[c] - custom.illuminant[c]).abs() < 1e-5,
+            "{:?} against {:?}",
+            got.illuminant,
+            custom.illuminant
+        );
+    }
+    // The camera's own D65 coefficients give D50: next to nothing to adapt.
+    let d65 = camera.d65;
+    let plan = ChannelMixerRgb
+        .prepare(&p, &camera_context(camera, d65))
+        .unwrap();
+    let out = run(&plan, &[[0.18, 0.18, 0.18, 1.0]]);
+    for v in &out[..3] {
+        assert!((v - 0.18).abs() < 1e-3, "{out:?}");
+    }
+}
+
+#[test]
+fn a_camera_illuminant_not_found_is_d50() {
+    let p = ChannelMixerRgb
+        .manifest()
+        .resolve(&Params::new().with("illuminant", Value::Choice(CAMERA.into())))
+        .unwrap();
+    let pipe = plan(Params::new().with("illuminant", Value::Choice("pipe".into()))).unwrap();
+    // No camera in the context, or a coefficient of zero.
+    let camera = &golden_as_shot::CAMERAS[0];
+    for ctx in [Context::new(), camera_context(camera, [0.0, 1.0, 1.5])] {
+        assert_eq!(ChannelMixerRgb.prepare(&p, &ctx).unwrap(), pipe);
+    }
 }
 
 #[test]

@@ -599,10 +599,11 @@ const COLOUR_CALIBRATION: &[&str] = &[
 ];
 
 /// darktable's colour calibration (`channelmixerrgb`) into `p`: its CAT16
-/// adaptation from a given illuminant. The first part Helios does not
-/// port yet, if any: the channel mixer (rows other than the identity,
+/// adaptation from a given illuminant or the camera's ("as shot in
+/// camera", darktable's default). The first part Helios does not port
+/// yet, if any: the channel mixer (rows other than the identity,
 /// colourfulness, brightness, grey), another adaptation, or an illuminant
-/// read from the image (as shot, from the white balance, detected).
+/// read otherwise from the image (from the white balance, detected).
 fn colour_calibration(f: &Map<String, Value>, p: &mut Params) -> Option<String> {
     let name = |field: &str| f.get(field).and_then(Value::as_str).unwrap_or_default();
     let row = |field: &str| -> Vec<f64> {
@@ -641,7 +642,8 @@ fn colour_calibration(f: &Map<String, Value>, p: &mut Params) -> Option<String> 
     if f.contains_key("illuminant") {
         match lower("DT_ILLUMINANT_", "illuminant") {
             Some(i)
-                if ["pipe", "a", "d", "e", "f", "led", "bb", "custom"].contains(&i.as_str()) =>
+                if ["pipe", "a", "d", "e", "f", "led", "bb", "custom", "camera"]
+                    .contains(&i.as_str()) =>
             {
                 p.set("illuminant", Param::Choice(i));
             }

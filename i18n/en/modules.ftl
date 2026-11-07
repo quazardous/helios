@@ -70,12 +70,14 @@ param-channelmixerrgb-illum-led-choice-v1 = v1
 param-channelmixerrgb-illum-led-choice-v2 = v2
 
 param-channelmixerrgb-illuminant =
-    .description = the scene's illuminant: D50 (pipe), a standard one, daylight or black body at a temperature, or custom x and y
+    .description = the scene's illuminant: D50 (pipe), a standard one, daylight or black body at a temperature, custom x and y, or as shot in camera (camera)
     .label = illuminant
 
 param-channelmixerrgb-illuminant-choice-a = a
 
 param-channelmixerrgb-illuminant-choice-bb = bb
+
+param-channelmixerrgb-illuminant-choice-camera = camera
 
 param-channelmixerrgb-illuminant-choice-custom = custom
 
@@ -568,10 +570,12 @@ param-whitebalance-green =
     .label = green
 
 param-whitebalance-mode =
-    .description = the camera's coefficients, or the user's
+    .description = the camera's as-shot coefficients, its D65 reference (camera_reference, for colour calibration to adapt), or the user's
     .label = mode
 
 param-whitebalance-mode-choice-as-shot = as_shot
+
+param-whitebalance-mode-choice-camera-reference = camera_reference
 
 param-whitebalance-mode-choice-user = user
 

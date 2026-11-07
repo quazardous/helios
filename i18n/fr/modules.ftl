@@ -471,10 +471,12 @@ param-whitebalance-green =
     .label = vert
 
 param-whitebalance-mode =
-    .description = les coefficients de l’appareil, ou ceux de l’utilisateur
+    .description = les coefficients de l’appareil tels que pris, sa référence D65 (camera_reference, pour que la calibration des couleurs adapte), ou ceux de l’utilisateur
     .label = mode
 
 param-whitebalance-mode-choice-as-shot = tel que pris
+
+param-whitebalance-mode-choice-camera-reference = référence de l’appareil
 
 param-whitebalance-mode-choice-user = utilisateur
 

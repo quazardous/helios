@@ -9,9 +9,12 @@ repository.workspace = true
 [dependencies]
 helios-core.workspace = true
 helios-colour.workspace = true
+helios-photo.workspace = true
 
 [dev-dependencies]
 helios-testkit.workspace = true
+# The camera reference coefficients, against darktable's.
+helios-module-whitebalance = { path = "../whitebalance" }
 
 [lints]
 workspace = true

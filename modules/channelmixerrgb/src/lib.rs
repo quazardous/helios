@@ -17,10 +17,21 @@
 //!   black body, as in darktable);
 //! - `f` and `led`: a fluorescent (`illum_fluo`) or LED (`illum_led`)
 //!   standard illuminant;
-//! - `custom`: the chromaticity `x`, `y` as given.
+//! - `custom`: the chromaticity `x`, `y` as given;
+//! - `camera` ("as shot in camera"): found from the camera's as-shot white
+//!   balance coefficients and its matrix (both declared context inputs),
+//!   with darktable's `find_illuminant_xy_from_as_shot_coeffs` and
+//!   `WB_coeffs_to_illuminant_xy`. It is darktable's scene-referred
+//!   default, with the white balance in "camera reference" (D65) mode
+//!   (`modules/whitebalance`), so that the white balance's D65
+//!   coefficients need no correction ratios. When it cannot be found (no
+//!   matrix, a coefficient not normal, a chromaticity out of the locus), the
+//!   illuminant is D50: nothing is adapted, as darktable's "as set in white
+//!   balance" fallback.
 //!
-//! Not ported yet: the camera illuminant ("as shot in camera"), read from
-//! the white balance or detected; the other adaptations (Bradford, XYZ,
+//! Not ported yet: the illuminant from the white balance's own
+//! coefficients ("as set in white balance") or detected from the image;
+//! the other adaptations (Bradford, XYZ,
 //! RGB); and the channel mixer itself (the red, green and blue rows,
 //! colourfulness, brightness, grey). The plan already carries the mixer
 //! as an identity matrix, so it slots in later; a parameter Helios does
@@ -30,11 +41,15 @@ use helios_core::{
     Context, Family, Image, Manifest, Module, ModuleKind, Needs, ParamKind, ParamSpec, Params,
     PortSpec, Region, Role, Value,
 };
+use helios_photo::camera::fields;
 
 pub struct ChannelMixerRgb;
 
 /// The illuminants, by darktable's names (`dt_illuminant_t`).
-pub const ILLUMINANTS: [&str; 8] = ["pipe", "a", "d", "e", "f", "led", "bb", "custom"];
+pub const ILLUMINANTS: [&str; 9] = ["pipe", "a", "d", "e", "f", "led", "bb", "custom", CAMERA];
+/// The illuminant found from the camera's as-shot coefficients
+/// (`DT_ILLUMINANT_CAMERA`).
+pub const CAMERA: &str = "camera";
 /// darktable's fluorescent illuminants, F1 to F12 (`dt_illuminant_fluo_t`).
 pub const FLUORESCENTS: [&str; 12] = [
     "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12",
@@ -166,8 +181,9 @@ pub fn blackbody_xy(t: f32) -> [f32; 2] {
 }
 
 /// The illuminant's chromaticity, as darktable's `illuminant_to_xy` finds
-/// it (`custom` takes `x` and `y`).
-pub fn illuminant_xy(params: &Params) -> Result<[f32; 2], String> {
+/// it (`custom` takes `x` and `y`; `camera` reads the context, D50 when it
+/// finds nothing).
+pub fn illuminant_xy(params: &Params, context: &Context) -> Result<[f32; 2], String> {
     let pick = |name: &str| params.get(name).and_then(Value::as_choice).unwrap_or("");
     let t = params.float("temperature") as f32;
     let index = |list: &[&str], name: &str| {
@@ -187,6 +203,7 @@ pub fn illuminant_xy(params: &Params) -> Result<[f32; 2], String> {
             .unwrap_or_else(|| blackbody_xy(t)),
         "bb" => blackbody_xy(t),
         "custom" => [params.float("x") as f32, params.float("y") as f32],
+        CAMERA => camera_illuminant_xy(context).unwrap_or(D50_XY),
         other => return Err(format!("illuminant `{other}` is not supported")),
     };
     if xy[0] == 0.0 || xy[1] == 0.0 || !xy.iter().all(|v| v.is_finite()) {
@@ -330,6 +347,185 @@ pub fn gamut_mapping(xyz: [f32; 3], compression: f32, clip: bool) -> [f32; 3] {
     ]
 }
 
+/// darktable's `matrice_pseudoinverse` for a 3 x 3 matrix, in single
+/// precision as darktable computes it: through the normal equations. Its
+/// loops kept as darktable writes them, for the same rounding.
+#[allow(clippy::needless_range_loop)]
+fn pseudoinverse(m: &M3) -> M3 {
+    let mut work = [[0.0f32; 6]; 3];
+    for i in 0..3 {
+        for j in 0..6 {
+            work[i][j] = if j == i + 3 { 1.0 } else { 0.0 };
+        }
+        for j in 0..3 {
+            for row in m {
+                work[i][j] += row[i] * row[j];
+            }
+        }
+    }
+    for i in 0..3 {
+        let num = work[i][i];
+        for v in &mut work[i] {
+            *v /= num;
+        }
+        for k in 0..3 {
+            if k == i {
+                continue;
+            }
+            let num = work[k][i];
+            for j in 0..6 {
+                work[k][j] -= work[i][j] * num;
+            }
+        }
+    }
+    let mut out = [[0.0f32; 3]; 3];
+    for (i, row) in out.iter_mut().enumerate() {
+        for (j, cell) in row.iter_mut().enumerate() {
+            for k in 0..3 {
+                *cell += work[j][k + 3] * m[i][k];
+            }
+        }
+    }
+    out
+}
+
+/// XYZ to Bradford LMS, as darktable writes it.
+const XYZ_TO_BRADFORD_LMS: M3 = [
+    [0.8951, 0.2664, -0.1614],
+    [-0.7502, 1.7135, 0.0367],
+    [0.0389, -0.0685, 1.0296],
+];
+
+/// Bradford LMS to XYZ, as darktable writes it.
+const BRADFORD_LMS_TO_XYZ: M3 = [
+    [0.9870, -0.1471, 0.1600],
+    [0.4323, 0.5184, 0.0493],
+    [-0.0085, 0.0400, 0.9685],
+];
+
+/// D65 in Bradford LMS, as darktable precomputes it.
+const BRADFORD_D65: [f32; 3] = [0.941238, 1.040633, 1.088932];
+
+/// D50 in Bradford LMS, as darktable precomputes it.
+const BRADFORD_D50: [f32; 3] = [0.996078, 1.020646, 0.818155];
+
+/// darktable's `WB_coeffs_to_illuminant_xy`: the chromaticity of camera
+/// white seen through coefficients `wb`, the matrix's D65 white taken to
+/// D50 (linear Bradford). `cam_to_xyz` is as darktable's pseudo-inverse
+/// gives it (indexed `[camera channel][XYZ]`).
+pub fn wb_coeffs_to_illuminant_xy(cam_to_xyz: &M3, wb: [f32; 3]) -> [f32; 2] {
+    let xyz = [0, 1, 2]
+        .map(|c| cam_to_xyz[0][c] / wb[0] + cam_to_xyz[1][c] / wb[1] + cam_to_xyz[2][c] / wb[2]);
+    let lms = apply(&XYZ_TO_BRADFORD_LMS, xyz);
+    let lms = [0, 1, 2].map(|c| BRADFORD_D50[c] * (lms[c] / BRADFORD_D65[c]));
+    let mut xyz = apply(&BRADFORD_LMS_TO_XYZ, lms);
+    xyz[0] /= xyz[1];
+    xyz[2] /= xyz[1];
+    xyz[1] /= xyz[1];
+    let sum = xyz[0] + xyz[1] + xyz[2];
+    [xyz[0] / sum, xyz[1] / sum]
+}
+
+/// darktable's `_is_usable_illuminant_xy`: inside the triangle, and every
+/// CAT16 cone response positive.
+fn usable([x, y]: [f32; 2]) -> bool {
+    let z = 1.0 - x - y;
+    if !(x > 0.0 && y > 0.0 && z > 0.0) {
+        return false;
+    }
+    illuminant_lms([x, y]).iter().all(|v| *v > 0.0)
+}
+
+/// The illuminant "as shot in camera": darktable's
+/// `find_illuminant_xy_from_as_shot_coeffs` with no correction ratios (the
+/// white balance in camera reference mode), for a camera whose XYZ (D65)
+/// to camera matrix is `xyz_to_camera` (row by row) and as-shot
+/// coefficients `wb` (any scale). `None` where darktable finds none.
+pub fn as_shot_illuminant_xy(xyz_to_camera: &[f64], wb: &[f64]) -> Option<[f32; 2]> {
+    let wb: [f32; 3] = [wb.first()?, wb.get(1)?, wb.get(2)?].map(|c| *c as f32);
+    if !wb.iter().all(|c| c.is_normal()) || xyz_to_camera.len() < 9 {
+        return None;
+    }
+    let m: M3 = [0, 1, 2].map(|i| [0, 1, 2].map(|j| xyz_to_camera[i * 3 + j] as f32));
+    let cam_to_xyz = pseudoinverse(&m);
+    if !cam_to_xyz.iter().flatten().all(|v| v.is_finite()) {
+        return None;
+    }
+    Some(wb_coeffs_to_illuminant_xy(&cam_to_xyz, wb)).filter(|xy| usable(*xy))
+}
+
+/// The illuminant "as shot in camera" from the context: the camera's
+/// as-shot coefficients and its matrix.
+pub fn camera_illuminant_xy(context: &Context) -> Option<[f32; 2]> {
+    let list = |field: &str| context.get(field).and_then(|v| v.as_list());
+    as_shot_illuminant_xy(list(fields::XYZ_TO_CAMERA)?, list(fields::WHITE_BALANCE)?)
+}
+
+/// darktable's `xy_to_CCT` (after Lee's paper): valid in 3000 to 50000 K.
+/// Its constants as darktable writes them.
+#[allow(clippy::excessive_precision)]
+pub fn xy_to_cct([x, y]: [f32; 2]) -> f32 {
+    let n = (x - 0.3366) / (y - 0.1735);
+    -949.86315
+        + 6253.80338 * (-n / 0.92159).exp()
+        + 28.70599 * (-n / 0.20039).exp()
+        + 0.00004 * (-n / 0.07125).exp()
+}
+
+/// darktable's `CCT_reverse_lookup`: the temperature on the daylight
+/// (above 4000 K) or black body locus closest to `xy`.
+pub fn cct_reverse_lookup([x, y]: [f32; 2]) -> f32 {
+    const SAMPLES: usize = 1 << 16;
+    let (t_min, t_max) = (1667.0f32, 25000.0f32);
+    let mut best = (f32::MAX, 0.0f32);
+    for i in 0..SAMPLES {
+        let step = (i as f32 / (SAMPLES - 1) as f32).powf(4.0);
+        let t = t_min + step * (t_max - t_min);
+        let [xb, yb] = if t >= 4000.0 {
+            daylight_xy(t)
+        } else {
+            blackbody_xy(t)
+        };
+        let r = ((xb - x) * (xb - x) + (yb - y) * (yb - y)).sqrt();
+        if r < best.0 {
+            best = (r, t);
+        }
+    }
+    best.1
+}
+
+/// darktable's `xy_to_uv`, CIE 1960 (its one double-precision term kept).
+fn xy_to_uv([x, y]: [f32; 2]) -> [f32; 2] {
+    let denom = 12.0 * y - 1.882 * x + 2.9088;
+    let u = (f64::from(5.5932f32 * x) + 1.9116 * f64::from(y)) as f32;
+    [u / denom, 7.8972 * y / denom]
+}
+
+/// darktable's `_check_if_close_to_daylight`: the illuminant's correlated
+/// temperature, and `d` or `bb` when the daylight or black body locus at
+/// that temperature is within 0.005 in CIE 1960 uv, `custom` otherwise.
+pub fn close_to_daylight(xy: [f32; 2]) -> (f32, &'static str) {
+    let mut t = xy_to_cct(xy);
+    if t < 3000.0 && t > 1667.0 {
+        t = cct_reverse_lookup(xy);
+    }
+    let uv = xy_to_uv(xy);
+    let delta = |test: [f32; 2]| {
+        let test = xy_to_uv(test);
+        ((test[0] - uv[0]).powi(2) + (test[1] - uv[1]).powi(2)).sqrt()
+    };
+    let daylight = Some(daylight_xy(t))
+        .filter(|xy| xy[0] != 0.0 && xy[1] != 0.0)
+        .unwrap_or_else(|| blackbody_xy(t));
+    let (delta_daylight, delta_bb) = (delta(daylight), delta(blackbody_xy(t)));
+    let kind = if delta_bb < 0.005 || delta_daylight < 0.005 {
+        if delta_bb < delta_daylight { "bb" } else { "d" }
+    } else {
+        "custom"
+    };
+    (t, kind)
+}
+
 impl Module for ChannelMixerRgb {
     type Plan = Plan;
 
@@ -343,7 +539,7 @@ impl Module for ChannelMixerRgb {
             params: vec![
                 choice(
                     "illuminant",
-                    "the scene's illuminant: D50 (pipe), a standard one, daylight or black body at a temperature, or custom x and y",
+                    "the scene's illuminant: D50 (pipe), a standard one, daylight or black body at a temperature, custom x and y, or as shot in camera (camera)",
                     &ILLUMINANTS,
                     "d",
                 ),
@@ -390,7 +586,7 @@ impl Module for ChannelMixerRgb {
             ],
             inputs: vec![PortSpec::image("input", 4)],
             outputs: vec![PortSpec::image("output", 4)],
-            context: vec![],
+            context: vec![fields::WHITE_BALANCE.into(), fields::XYZ_TO_CAMERA.into()],
             needs: Needs::default(),
             kind: ModuleKind::Process,
             family: Family::Color,
@@ -398,12 +594,12 @@ impl Module for ChannelMixerRgb {
         }
     }
 
-    fn prepare(&self, params: &Params, _: &Context) -> Result<Plan, String> {
+    fn prepare(&self, params: &Params, context: &Context) -> Result<Plan, String> {
         match params.get("adaptation").and_then(Value::as_choice) {
             Some(CAT16) | None => {}
             Some(other) => return Err(format!("adaptation `{other}` is not supported")),
         }
-        let xy = illuminant_xy(params)?;
+        let xy = illuminant_xy(params, context)?;
         let clip = params.get("clip").and_then(Value::as_bool).unwrap_or(true);
         Plan::new(
             xy,
