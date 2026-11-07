@@ -24,6 +24,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.72.0] - 2026-11-07
+
+### Added
+
+- The import window's Choices column: copy into the Library (the default for a card) or add where they are, a destination with its folder layout (by day, month, year or one folder) and a naming pattern, each with a live example, plus duplicates and darktable edits. The choices are remembered per library, and `helios import --layout` picks the layout from the command line.
+
+### Changed
+
+- A photo on a disk that is unplugged is now offline, not missing: Helios
+  knows which volume each copy is on and its path there, keeps the photo,
+  its marks and its edits, and finds it again when the disk comes back,
+  even at another mount point or drive letter. The volumes are scanned in
+  the background at start, when a disk is plugged in or out, and every
+  five minutes. Repair never marks an offline photo missing.
+
 ## [0.71.0] - 2026-11-07
 
 ### Changed
