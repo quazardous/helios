@@ -26,8 +26,17 @@ workflow (`.github/workflows/release.yml`) on GitHub Actions, which:
    says its version, imports a picture into a new vault and exports it as
    a JPEG through a network on the CPU; the AppImage starts and says its
    version;
-4. creates the GitHub Release, titled "Helios X.Y.Z", with that version's
-   CHANGELOG.md section as its notes, and attaches the files.
+4. builds the same programs for Windows x86_64 (MSVC, `windows-latest`)
+   and zips them (`packaging/windows/release.ps1`):
+   `helios-X.Y.Z-windows-x86_64.zip`, a folder that runs where it is
+   unpacked, with `COPYING`, `THIRD-PARTY-LICENSES.txt` and `README.md`;
+5. tests the zip (`packaging/windows/smoke.ps1`) on a Windows runner,
+   which has no GPU: `helios.exe` and `helios-gui.exe` say their version,
+   `helios.exe` imports a picture into a new vault and exports it as a
+   JPEG on the CPU;
+6. creates the GitHub Release, titled "Helios X.Y.Z", with that version's
+   CHANGELOG.md section as its notes, and attaches the files, with one
+   `SHA256SUMS` for all of them.
 
 Nothing else is needed at run time: the catalogues, templates, module
 declarations and the shipped plugins' manifests are compiled into the
@@ -49,5 +58,12 @@ Download `SHA256SUMS` beside the files, then:
 sha256sum --ignore-missing -c SHA256SUMS
 ```
 
-Each file downloaded should say `OK`: it is the file the release workflow
+On Windows, in PowerShell, compare the line of `SHA256SUMS` for the zip
+with:
+
+```powershell
+(Get-FileHash helios-X.Y.Z-windows-x86_64.zip).Hash.ToLower()
+```
+
+Each file downloaded should say `OK` (or match): it is the file the release workflow
 built and attached.

@@ -41,12 +41,23 @@ its changelog. For Linux on x86_64:
 - `helios-<version>-linux-x86_64.tar.gz`: a folder that runs where it is
   unpacked: `bin/helios-gui` (the window), `bin/helios` (the command line),
   with a desktop entry and icons under `share/`.
-- `SHA256SUMS`: the checksums of both (see [docs/releases.md](./docs/releases.md)).
+- `SHA256SUMS`: the checksums of every file (see [docs/releases.md](./docs/releases.md)).
 
 Requirements: Linux x86_64 with glibc 2.35 or newer (Ubuntu 22.04, Debian
 12, Fedora 36 and later), a Wayland or X11 desktop for the window. A GPU
 with a Vulkan driver speeds the processing up; without one it runs on the
-CPU. Building from source: see [CONTRIBUTING.md](./CONTRIBUTING.md).
+CPU.
+
+For Windows on x86_64, `helios-<version>-windows-x86_64.zip` is a folder
+that runs where it is unpacked: `helios-gui.exe` (the window), `helios.exe`
+(the command line). It needs Windows 10 or 11 (64-bit); a GPU with a
+Vulkan or DirectX 12 driver speeds the processing up, without one it runs
+on the CPU. The programs are not signed yet, so SmartScreen may warn on
+first start, and there is no installer: see
+[docs/windows-port.md](./docs/windows-port.md) for what Windows still
+lacks.
+
+Building from source: see [CONTRIBUTING.md](./CONTRIBUTING.md).
 
 ## Documentation
 

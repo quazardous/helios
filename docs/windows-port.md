@@ -10,6 +10,68 @@ Windows machine before anyone relies on them.
 Paths are relative to the Helios repository unless they start with
 `egui-pop/` (the egui-pop repository) or `darktable/` (the darktable fork).
 
+## Where it stands (2026-11-08)
+
+Helios now builds and ships for Windows x86_64 (MSVC). The rest of this
+document is the original study; this section says what was done since.
+
+Done:
+
+- **CI.** `.github/workflows/ci.yml` has a `windows` job on
+  `windows-latest`: `cargo build --locked --workspace --all-targets`, then
+  `cargo test --workspace`. It checks out with `core.autocrlf false`, so
+  text fixtures keep their LF.
+- **`helios batch` works on Windows.** Where Unix sockets do not exist,
+  the sandbox starts its node on loopback TCP (`tcp://127.0.0.1:0`) for
+  the inspection and batch endpoints, with the session token in the
+  sandbox directory (`token`), and records the addresses the node bound
+  in `sandbox.json` (`tcp`). The batch endpoint accepts TCP there, behind
+  the token; on Linux it still takes a Unix socket only. The node is
+  checked by asking it (`state` over its endpoint) instead of `ps`, and
+  stopped with `taskkill /F` instead of `kill`. It starts with
+  `CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP`.
+- **Release.** `.github/workflows/release.yml` builds the five programs
+  on `windows-latest`, zips them with `COPYING`,
+  `THIRD-PARTY-LICENSES.txt` and `README.md`
+  (`packaging/windows/release.ps1`), and smoke-tests the zip on a runner
+  without a GPU (`packaging/windows/smoke.ps1`: both versions, an import,
+  a `helios batch` JPEG export on the CPU). The zip goes into the Release
+  and its line into `SHA256SUMS`. See `docs/releases.md`.
+
+Gated on Unix, still (the test files are `#![cfg(unix)]`, see §1.9): the
+node's system, sandbox, batch and workflow tests, the inspection protocol
+tests, the GUI's node-jobs and survival tests, the fake gphoto2 camera.
+They drive Unix sockets, `kill` and shell scripts directly; the Windows
+path of `helios batch` is covered by the release smoke test only.
+
+Left, in rough order:
+
+- **Volume detection.** `helios-storage` lists mounted volumes on Linux
+  only (`/proc/self/mountinfo`); on Windows it returns an empty list, so
+  the import window shows no removable drives. Needs
+  `GetLogicalDriveStringsW`, `GetDriveTypeW` and `GetVolumeInformationW`.
+- **The file chooser.** egui-pop's file chooser (the files plugin, used
+  to open and save files such as theme tokens) starts from a Unix-shaped
+  home and root: on Windows it needs the drive list as its root and the
+  known folders (Pictures, Documents) as places. Not checked on Windows
+  yet.
+- **Directories.** Some settings are still found from `HOME` and
+  `XDG_CONFIG_HOME` read by hand (`helios-compute` settings, the plugin
+  broker, workspace templates, the AI store, the GUI's snapshot folder):
+  on Windows, where `HOME` is usually unset, they fall back to the
+  current directory. The GUI's log and state folders already use
+  `%LOCALAPPDATA%`, and the bundled plugins' cache too.
+- **The window's program** is a console program: a console opens beside
+  the window, and children may flash one (§1.4, §5). It needs
+  `windows_subsystem = "windows"` with a console attach for `--version`.
+- **An installer.** The zip runs in place, unsigned. Next: an MSI or
+  NSIS per-user install (`cargo-packager` or `cargo-wix`) with a Start
+  menu entry, the icon embedded in the `.exe` (a resource file),
+  `longPathAware` in the manifest, then code signing (§6.3) and a winget
+  manifest (§6.2).
+- **Graceful stop and Ctrl-C.** The batch's node is ended, not asked to
+  stop, and `helios batch` does not catch Ctrl-C on Windows (§1.1).
+
 ---
 
 ## 0. Summary
