@@ -24,6 +24,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.65.0] - 2026-11-07
+
+### Added
+
+- After copying photos from a card, the import says whether the card is
+  safe to format: every photo on it is in the Library with a checked copy,
+  or how many are not. Helios never formats the card itself.
+
+### Changed
+
+- A card or folder taken out during an import no longer fails every photo
+  left: the import pauses, says "Reinsert EOS_DIGITAL to go on" (with the
+  card's name), and goes on by itself once it is back. It can still be
+  cancelled while it waits.
+- Copying photos into the library reads each one from the card only once:
+  the copy is checked against what was read, then takes its name. Imports
+  from slow cards are faster for it.
+
 ## [0.64.0] - 2026-11-07
 
 ### Added
