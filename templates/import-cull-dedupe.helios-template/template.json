@@ -1,7 +1,7 @@
 {
   "format": 1,
   "id": "helios.import-cull-dedupe",
-  "version": 1,
+  "version": 2,
   "meta": {
     "name": "Import, cull, de-duplicate",
     "scenario": "The first step of every shoot: copy a card into the library, answer for its exact duplicates, review the suggested stacks of bursts and brackets, then cull fast with ratings, picks and labels.",
@@ -9,6 +9,7 @@
   },
   "network": {
     "sources": ["source"],
+    "image_sources": ["source"],
     "nodes": [{ "name": "exposure", "module": "exposure" }],
     "connections": [
       { "from": "source", "port": "image", "to": "exposure", "input": "input" }

@@ -369,7 +369,10 @@ fn the_develop_template_speaks_french() {
     templates::add_texts(&i, &templates::builtin()).unwrap();
     let develop = templates::find("helios.develop-preview").unwrap();
     assert_eq!(i.t(&develop.name_key(), &[]), "Développer (aperçu)");
-    assert!(i.t(&develop.scenario_key(), &[]).contains("aperçu intégré"));
+    assert!(
+        i.t(&develop.scenario_key(), &[])
+            .contains("données de capteur")
+    );
 }
 
 #[test]

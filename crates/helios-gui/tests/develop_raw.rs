@@ -146,12 +146,11 @@ fn develops(raw: &Path) {
     assert!(worst < 1e-5, "{name}: differs from the node's by {worst}");
 }
 
-/// "Batch export" with its source taking an image: a picture, or a raw
+/// "Batch export", whose source takes an image: a picture, or a raw
 /// through the raw front.
 fn image_network() -> helios_template::Bundle {
-    let mut b = templates::find("helios.batch-export").expect("Batch export is built in");
-    let net = &mut b.template.network;
-    net.image_sources = net.sources.clone();
+    let b = templates::find("helios.batch-export").expect("Batch export is built in");
+    assert!(b.template.network.takes_raw());
     b
 }
 
@@ -242,7 +241,8 @@ fn a_raw_that_is_not_a_mosaic_is_refused_by_develop_and_previewed_elsewhere() {
     };
     let e = templates::open_file(&raw, &develop()).err().unwrap();
     assert!(e.contains("not a mosaic"), "{e}");
-    // The preview template shows its embedded preview.
+    // The preview template, which takes a picture too, shows its
+    // embedded preview.
     let preview = templates::find("helios.develop-preview").unwrap();
     let (graph, node) = templates::open_file(&raw, &preview).unwrap();
     assert!(graph.extent(node).unwrap().is_some());

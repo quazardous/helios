@@ -570,9 +570,11 @@ impl State {
 /// The network of a workspace not made from a template: an exposure
 /// mixed into the image through a mask the viewport draws in (with no
 /// shape yet the mask is 1 everywhere, so the exposure applies fully).
+/// Its source takes an image: a raw goes through the raw front.
 pub fn blank_network() -> NetworkDesc {
     serde_json::from_value(json!({
         "sources": ["source"],
+        "image_sources": ["source"],
         "nodes": [
             { "name": "exposure", "module": "exposure" },
             { "name": "mask", "module": "mask_combine" },

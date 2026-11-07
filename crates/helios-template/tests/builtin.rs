@@ -305,9 +305,9 @@ fn develop_preview_is_valid_and_builds_exposure_into_sigmoid_beside_the_image() 
             "{p}"
         );
     }
-    // It says what it develops: the picture, or a raw's embedded preview.
+    // It says what it develops: the picture, or a raw's sensor data.
     assert!(bundle.template.meta.name.contains("preview"));
-    assert!(bundle.template.meta.scenario.contains("embedded preview"));
+    assert!(bundle.template.meta.scenario.contains("sensor data"));
 }
 
 #[test]
@@ -481,4 +481,21 @@ fn an_export_s_settings_are_checked() {
             "{field}: {problems:?}"
         );
     }
+}
+
+#[test]
+fn the_picture_templates_and_the_blank_workspace_take_a_picture_or_a_raw() {
+    // Every built-in template but "Develop one image" (a raw only), and
+    // the blank workspace: a raw goes through the raw front.
+    for b in helios_template::shipped::templates() {
+        let net = &b.template.network;
+        if b.template.id == "helios.develop" {
+            assert!(net.reads_raw());
+            continue;
+        }
+        assert_eq!(net.image_sources, net.sources, "{}", b.template.id);
+        assert!(net.takes_raw() && !net.reads_raw(), "{}", b.template.id);
+    }
+    let blank = helios_template::workspace::blank_network();
+    assert_eq!(blank.image_sources, blank.sources);
 }

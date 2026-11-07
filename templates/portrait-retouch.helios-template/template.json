@@ -1,7 +1,7 @@
 {
   "format": 1,
   "id": "helios.portrait-retouch",
-  "version": 1,
+  "version": 2,
   "meta": {
     "name": "Portrait retouch",
     "scenario": "Retouch a portrait: brighten the face through a feathered mask drawn on the image, with the Masks panel and the parameters at hand.",
@@ -9,6 +9,7 @@
   },
   "network": {
     "sources": ["source"],
+    "image_sources": ["source"],
     "nodes": [
       {
         "name": "exposure",
