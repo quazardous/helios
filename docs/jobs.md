@@ -52,6 +52,9 @@ fn import(jobs: &Jobs, files: &[std::path::PathBuf]) {
   overall percentage and the time left from them.
 - **Log lines** (`log`) go to the job's console; a failed item
   (`item_failed`) is listed under the job, which goes on.
+- **Paused.** A job waiting on something outside it (an import whose
+  card was taken out) says `paused(reason)`, the reason also a log line,
+  then `resumed` when it goes on; a paused job can still be cancelled.
 - **Its end**, once: `finished` (or `finished_with` actions such as
   "Show in folder", `[{title, command, args}]`), `failed(why)` or
   `cancelled`. Later ends are ignored; a report dropped without an end
@@ -77,6 +80,8 @@ fn import(jobs: &Jobs, files: &[std::path::PathBuf]) {
 | `job.item_failed` | `id`, `item`, `error` |
 | `job.log` | `id`, `text` |
 | `job.cancelling` | `id` |
+| `job.paused` | `id`, `reason` |
+| `job.resumed` | `id` |
 | `job.finished`, `job.failed`, `job.cancelled` | `id`, `kind`, `seconds`; `error` when failed; `actions` when finished with some |
 
 They are egui-pop's jobs events (its `docs/progress.md`), so its jobs
@@ -108,7 +113,8 @@ whose images are jobs of their own.
 - **The library import** (`helios_library::import::import`, the
   desktop's `library.import`, `helios import`): each file as an item, a
   log line per file brought in, a file that failed as a failed item;
-  cancelled before its next file, a copy under way removed (see
+  paused while its card or folder is gone ("Reinsert EOS_DIGITAL to go
+  on"), resumed when it is back; cancelled before its next file, a copy under way removed (see
   [library.md](library.md)).
 
 `helios_core::jobs` is the only way a job reports: the older

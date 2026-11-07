@@ -772,3 +772,118 @@ fn an_export_is_planned_with_each_image_s_head_and_its_name() {
     };
     assert!(helios_library::export::plan(&v, &[ia], bad, None).is_err());
 }
+
+/// Waits up to `seconds` for an event `kind` on `bus`: its payload.
+fn event(bus: &Bus, kind: &str, seconds: u64) -> Option<Value> {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(seconds);
+    while std::time::Instant::now() < deadline {
+        if let Some(e) = bus.since(0).into_iter().find(|e| e.kind == kind) {
+            return Some(e.payload.clone());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    None
+}
+
+/// A card taken out mid-import pauses the job, saying to reinsert it;
+/// put back, the import goes on and every file comes in.
+#[test]
+fn a_card_taken_out_pauses_the_import_until_it_is_back() {
+    let p = Place::new("lost-card");
+    let card = p.join("EOS_DIGITAL");
+    let away = p.join("away");
+    for (name, kind, gain) in [("a.png", 0, 1.0), ("b.png", 1, 1.25), ("c.png", 0, 1.5)] {
+        picture(&card.join("DCIM/100CANON").join(name), kind, gain, 0);
+    }
+    let bus = Arc::new(Bus::new());
+    let jobs = Jobs::new(bus.clone());
+    let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let options = Options {
+        placement: Placement::Copy {
+            into: Some(p.join("library")),
+        },
+        cancel: Some(cancel.clone()),
+        ..Options::default()
+    };
+    let vault = vault();
+    let (report, paused) = std::thread::scope(|scope| {
+        let importing = scope.spawn(|| {
+            let mut lines = 0;
+            import::import(
+                &vault,
+                &jobs,
+                std::slice::from_ref(&card),
+                &options,
+                1000,
+                &mut |_: &Value| {
+                    lines += 1;
+                    if lines == 1 {
+                        // Taken out after its first file.
+                        std::fs::rename(&card, &away).unwrap();
+                    }
+                },
+            )
+        });
+        let paused = event(&bus, "job.paused", 30);
+        if paused.is_some() {
+            std::fs::rename(&away, &card).unwrap();
+        }
+        if paused.is_none() || event(&bus, "job.finished", 30).is_none() {
+            // Never hang: a job that did not pause or end is stopped.
+            cancel.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+        (importing.join().unwrap(), paused)
+    });
+    let paused = paused.expect("the import paused");
+    assert_eq!(paused["reason"], "Reinsert EOS_DIGITAL to go on");
+    let report = report.unwrap();
+    assert!(!report.cancelled, "{report:?}");
+    assert_eq!((report.added, report.failed), (3, 0), "{report:?}");
+    let kinds: Vec<&str> = bus
+        .since(0)
+        .iter()
+        .map(|e| e.kind)
+        .filter(|k| ["job.paused", "job.resumed", "job.finished"].contains(k))
+        .collect();
+    assert_eq!(kinds, ["job.paused", "job.resumed", "job.finished"]);
+}
+
+/// A paused import can still be cancelled.
+#[test]
+fn a_paused_import_can_be_cancelled() {
+    let p = Place::new("lost-cancel");
+    let card = p.join("EOS_DIGITAL");
+    for (name, kind) in [("a.png", 0), ("b.png", 1)] {
+        picture(&card.join("DCIM").join(name), kind, 1.0, 0);
+    }
+    let bus = Arc::new(Bus::new());
+    let jobs = Jobs::new(bus.clone());
+    let options = Options::default();
+    let vault = vault();
+    let report = std::thread::scope(|scope| {
+        let importing = scope.spawn(|| {
+            import::import(
+                &vault,
+                &jobs,
+                std::slice::from_ref(&card),
+                &options,
+                1000,
+                &mut |_: &Value| {
+                    let _ = std::fs::remove_dir_all(card.join("DCIM"));
+                },
+            )
+        });
+        let started = event(&bus, "job.started", 30).expect("started");
+        let id = started["id"].as_str().unwrap().to_string();
+        // Cancelled whether it paused or not: never left waiting.
+        let paused = event(&bus, "job.paused", 30);
+        jobs.cancel(&id).unwrap();
+        (importing.join().unwrap(), paused)
+    });
+    let (report, paused) = report;
+    assert!(paused.is_some(), "the import paused");
+    let report = report.unwrap();
+    assert!(report.cancelled, "{report:?}");
+    assert_eq!(report.added, 1);
+    assert!(event(&bus, "job.cancelled", 1).is_some());
+}

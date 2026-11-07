@@ -31,7 +31,7 @@ use std::time::{Duration, Instant};
 
 use helios_core::Bus;
 use helios_core::jobs::{
-    CANCELLED, CANCELLING, FAILED, FINISHED, ITEM_FAILED, LOG, PROGRESS, STARTED,
+    CANCELLED, CANCELLING, FAILED, FINISHED, ITEM_FAILED, LOG, PAUSED, PROGRESS, RESUMED, STARTED,
 };
 use helios_inspect::control::ControlRequest;
 use helios_inspect::{Address, Client, Closer, Request};
@@ -43,9 +43,6 @@ pub const PREFIX: &str = "node:";
 pub const FORGOTTEN: &str = "node.jobs_forgotten";
 /// The bus event saying a link went up or down (`node`, `up`, `error`).
 pub const LINK: &str = "node.link";
-/// egui-pop's jobs events Helios's own jobs never send.
-const PAUSED: &str = "job.paused";
-const RESUMED: &str = "job.resumed";
 /// The source of the events a relay publishes.
 const SOURCE: &str = "relay";
 /// How long a cancel waits for the node's answer.

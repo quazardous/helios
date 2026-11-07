@@ -73,6 +73,14 @@ and skipped so far), a `job.log` line per file brought in, a
 `job.failed` when it cannot start (a missing source, no library folder for
 a copy). A file that fails does not stop the others.
 
+**A lost source pauses.** A card taken out or unmounted (its `DCIM`
+gone), or a folder moved away, mid-import does not fail every file left:
+the job pauses (`job.paused`, its reason also a log line: "Reinsert
+EOS_DIGITAL to go on", the card's name being its mount folder's), looks
+for the source again every quarter of a second, and resumes
+(`job.resumed`) once it is back, the file under way tried again. A paused
+import can still be cancelled.
+
 **Cancel.** The jobs centre's Cancel (`job.cancel` with the job's id), or
 Ctrl-C for `helios import`, stops the import before its next file. A copy
 under way stops too, and its hidden part (in `.helios-part/`) is removed: no

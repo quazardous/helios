@@ -807,13 +807,14 @@ pub fn import<S: Store>(
     );
     let id = format!("import-{}", NEXT.fetch_add(1, Ordering::Relaxed));
     let prepared = prepare(vault, sources, options);
-    let (root, files) = match prepared {
+    let (root, sources) = match prepared {
         Ok(p) => p,
         Err(e) => {
             jobs.start(Start::new(&id, &title, KIND)).failed(&e);
             return Err(e);
         }
     };
+    let files = Files(sources);
     let total = files.len() as u64;
     let job = jobs.start(Start::new(&id, &title, KIND).total(total));
     let stop = Arc::new(AtomicBool::new(false));
@@ -847,7 +848,7 @@ pub fn import<S: Store>(
         report: Report::default(),
         stop,
     };
-    for (done, path) in files.iter().enumerate() {
+    for (done, (source, path)) in files.iter().enumerate() {
         if run.stopped() {
             break;
         }
@@ -862,7 +863,27 @@ pub fn import<S: Store>(
                 .failed(run.report.failed)
                 .skipped(run.report.skipped + run.report.asked),
         );
-        let outcome = run.file(path);
+        let mut outcome = Err(String::new());
+        while !run.stopped() {
+            if !source.present() {
+                // The card or folder went away: wait for it rather than
+                // fail every file left.
+                job.paused(&source.lost());
+                while !source.present() && !run.stopped() {
+                    std::thread::sleep(POLL);
+                }
+                if run.stopped() {
+                    break;
+                }
+                job.resumed();
+                job.log(format!("{} is back", source.label()));
+            }
+            outcome = run.file(path);
+            // A file that failed as its source went away is tried again.
+            if outcome.is_ok() || source.present() {
+                break;
+            }
+        }
         if run.stopped() && outcome.is_err() {
             // Stopped during this file: it is not imported, its copy
             // removed.
@@ -938,13 +959,71 @@ pub fn import<S: Store>(
     Ok(run.report)
 }
 
-/// The library folder for copies (remembered when given) and the files
-/// to import.
+/// How often a paused import looks for its source again.
+const POLL: std::time::Duration = std::time::Duration::from_millis(250);
+
+/// A source of an import and its files.
+struct Source {
+    /// As given, absolute.
+    path: PathBuf,
+    /// `card`, `folder` or `file` ([`source_kind`]).
+    kind: &'static str,
+    /// What is read: `DCIM` for a card. Gone, the source is lost.
+    root: PathBuf,
+    files: Vec<PathBuf>,
+}
+
+impl Source {
+    /// Whether it is there to be read: a card unmounted may leave its
+    /// mount point behind, never its `DCIM`.
+    fn present(&self) -> bool {
+        if self.kind == "file" {
+            self.root.is_file()
+        } else {
+            self.root.is_dir()
+        }
+    }
+
+    /// Its name for people: the card's label, the folder's name.
+    fn label(&self) -> String {
+        self.path.file_name().map_or_else(
+            || self.path.display().to_string(),
+            |n| n.to_string_lossy().into(),
+        )
+    }
+
+    /// Why an import waits for it.
+    fn lost(&self) -> String {
+        match self.kind {
+            "card" => format!("Reinsert {} to go on", self.label()),
+            _ => format!("{} is gone: bring it back to go on", self.path.display()),
+        }
+    }
+}
+
+/// The files of an import, by source.
+struct Files(Vec<Source>);
+
+impl Files {
+    fn len(&self) -> usize {
+        self.0.iter().map(|s| s.files.len()).sum()
+    }
+
+    /// Each file with the source it was listed from.
+    fn iter(&self) -> impl Iterator<Item = (&Source, &PathBuf)> {
+        self.0
+            .iter()
+            .flat_map(|s| s.files.iter().map(move |f| (s, f)))
+    }
+}
+
+/// The library folder for copies (remembered when given) and the sources
+/// with their files to import.
 fn prepare<S: Store>(
     vault: &Vault<S>,
     sources: &[PathBuf],
     options: &Options,
-) -> Result<(Option<PathBuf>, Vec<PathBuf>), String> {
+) -> Result<(Option<PathBuf>, Vec<Source>), String> {
     if sources.is_empty() {
         return Err("nothing to import".into());
     }
@@ -965,16 +1044,23 @@ fn prepare<S: Store>(
             "copying needs the library folder: give it once (`--into DIR`) and it is remembered",
         )?),
     };
-    let mut files = Vec::new();
+    let mut listed = Vec::new();
     for source in sources {
         let source =
             std::path::absolute(source).map_err(|e| format!("{}: {e}", source.display()))?;
         if !source.exists() {
             return Err(format!("{}: no such file or folder", source.display()));
         }
-        files.extend(files_of(&source)?);
+        let files = files_of(&source)?;
+        let (kind, root) = source_kind(&source);
+        listed.push(Source {
+            path: source,
+            kind,
+            root,
+            files,
+        });
     }
-    Ok((root, files))
+    Ok((root, listed))
 }
 
 #[cfg(test)]

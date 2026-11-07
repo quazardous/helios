@@ -15,6 +15,8 @@
 //! | `job.item_failed` | `id`, `item`, `error` |
 //! | `job.log` | `id`, `text` |
 //! | `job.cancelling` | `id` |
+//! | `job.paused` | `id`, `reason` |
+//! | `job.resumed` | `id` |
 //! | `job.finished`, `job.failed`, `job.cancelled` | `id`, `kind`, `seconds`; `error` when failed |
 //!
 //! A job may name the graph node it works for (`node`, [`Start::node`]):
@@ -58,6 +60,10 @@ pub const PROGRESS: &str = "job.progress";
 pub const ITEM_FAILED: &str = "job.item_failed";
 pub const LOG: &str = "job.log";
 pub const CANCELLING: &str = "job.cancelling";
+/// Waiting on something outside it (a card taken out): egui-pop shows the
+/// job paused.
+pub const PAUSED: &str = "job.paused";
+pub const RESUMED: &str = "job.resumed";
 pub const FINISHED: &str = "job.finished";
 pub const FAILED: &str = "job.failed";
 pub const CANCELLED: &str = "job.cancelled";
@@ -336,6 +342,18 @@ impl Report {
     /// An item failed; the job goes on.
     pub fn item_failed(&self, item: &str, error: &str) {
         self.publish(ITEM_FAILED, json!({ "item": item, "error": error }));
+    }
+
+    /// Waits on something outside it, saying what (`reason`, also a log
+    /// line): "Reinsert `EOS_DIGITAL` to go on". It can still be cancelled.
+    pub fn paused(&self, reason: &str) {
+        self.log(reason);
+        self.publish(PAUSED, json!({ "reason": reason }));
+    }
+
+    /// Goes on after [`Report::paused`].
+    pub fn resumed(&self) {
+        self.publish(RESUMED, json!({}));
     }
 
     /// The seconds since the job started.
