@@ -2174,11 +2174,14 @@ fn sandbox(sockets: &mut Sockets, tool: &Tool, request: &Value) -> Value {
             };
             created
                 .and_then(|()| crate::sandbox::start(&dir, &sockets.node_bin))
-                .map(|state| {
-                    sockets.inspect = Some(Address::Unix(state.inspect.clone()));
-                    sockets.control =
-                        cfg!(debug_assertions).then(|| Address::Unix(state.control.clone()));
-                    serde_json::to_value(state).expect("state serializes")
+                .and_then(|state| {
+                    sockets.inspect = Some(state.inspect_address()?);
+                    sockets.control = if cfg!(debug_assertions) {
+                        Some(state.control_address()?)
+                    } else {
+                        None
+                    };
+                    Ok(serde_json::to_value(state).expect("state serializes"))
                 })
         }
         _ => crate::sandbox::stop(&dir).map(|ran| json!({ "stopped": ran })),

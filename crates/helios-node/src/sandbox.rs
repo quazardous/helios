@@ -7,12 +7,17 @@
 //! socket paths are limited to about 108 bytes. A sandbox is never created
 //! over a directory that already holds something else, and is only removed
 //! when it carries its marker: tools never point at real data.
+//!
+//! Where Unix sockets do not exist (Windows), the node serves loopback TCP
+//! instead, its session token in the sandbox directory; `sandbox.json`
+//! then records the addresses it bound (`tcp`).
 
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use helios_core::ContentHash;
+use helios_inspect::Address;
 use serde::{Deserialize, Serialize};
 
 const MARKER: &str = "sandbox.json";
@@ -35,6 +40,47 @@ pub struct State {
     pub control: PathBuf,
     /// The node's process while it runs.
     pub pid: Option<u32>,
+    /// The loopback TCP endpoints the node bound, where Unix sockets do
+    /// not exist: they replace `inspect` and `control`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tcp: Option<Tcp>,
+}
+
+/// A node's TCP endpoints (`tcp://127.0.0.1:PORT`) and its session token's file.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Tcp {
+    pub inspect: String,
+    pub control: Option<String>,
+    pub token_file: PathBuf,
+}
+
+impl State {
+    /// How a client reaches the node's inspection endpoint.
+    pub fn inspect_address(&self) -> Result<Address, String> {
+        match &self.tcp {
+            None => Ok(Address::Unix(self.inspect.clone())),
+            Some(tcp) => tcp_address(&tcp.inspect, &tcp.token_file),
+        }
+    }
+
+    /// How a client reaches the node's control (or batch) endpoint.
+    pub fn control_address(&self) -> Result<Address, String> {
+        match &self.tcp {
+            None => Ok(Address::Unix(self.control.clone())),
+            Some(Tcp {
+                control: Some(control),
+                token_file,
+                ..
+            }) => tcp_address(control, token_file),
+            Some(_) => Err("the sandbox node serves no control endpoint".into()),
+        }
+    }
+}
+
+fn tcp_address(address: &str, token_file: &Path) -> Result<Address, String> {
+    let token = std::fs::read_to_string(token_file)
+        .map_err(|e| format!("{}: {e}", token_file.display()))?;
+    Address::parse(address, Some(token.trim().to_string()))
 }
 
 fn read_state(dir: &Path) -> Result<State, String> {
@@ -78,13 +124,14 @@ pub fn create(dir: &Path, network: Option<&str>) -> Result<State, String> {
         inspect: runtime.join("node.sock"),
         control: runtime.join("control.sock"),
         pid: None,
+        tcp: None,
     };
     let longest = state
         .inspect
         .as_os_str()
         .len()
         .max(state.control.as_os_str().len());
-    if longest > MAX_SOCKET_PATH {
+    if cfg!(unix) && longest > MAX_SOCKET_PATH {
         return Err(format!(
             "socket path {} is too long for a Unix socket ({longest} bytes, at most {MAX_SOCKET_PATH}): set XDG_RUNTIME_DIR to a shorter directory",
             state.inspect.display()
@@ -105,6 +152,7 @@ pub fn create(dir: &Path, network: Option<&str>) -> Result<State, String> {
 
 /// Whether a process runs and is the node of this sandbox (its command
 /// line names the sandbox's socket): a reused pid is never mistaken for it.
+#[cfg(unix)]
 fn is_our_node(pid: u32, state: &State) -> bool {
     Command::new("ps")
         .args(["-p", &pid.to_string(), "-o", "args="])
@@ -114,6 +162,29 @@ fn is_our_node(pid: u32, state: &State) -> bool {
         .is_some_and(|o| {
             String::from_utf8_lossy(&o.stdout).contains(&*state.inspect.to_string_lossy())
         })
+}
+
+/// Whether the node of this sandbox runs: it answers on its endpoint with
+/// the session token (a reused port or pid is never mistaken for it).
+#[cfg(not(unix))]
+fn is_our_node(_pid: u32, state: &State) -> bool {
+    state.inspect_address().is_ok_and(|address| {
+        helios_inspect::request_within(
+            &address,
+            &serde_json::json!({ "cmd": "state" }),
+            std::time::Duration::from_secs(2),
+        )
+        .is_ok_and(|answer| answer["ok"] == true)
+    })
+}
+
+/// Whether a process still runs (Windows: `tasklist` lists it).
+#[cfg(not(unix))]
+fn process_runs(pid: u32) -> bool {
+    Command::new("tasklist")
+        .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
+        .output()
+        .is_ok_and(|o| String::from_utf8_lossy(&o.stdout).contains(&format!("\"{pid}\"")))
 }
 
 /// Starts the sandbox's node (`node_bin` is the `helios-node` executable)
@@ -165,12 +236,23 @@ fn launch(
         return Err(format!("the sandbox node already runs (pid {pid})"));
     }
     private_dir(&runtime_dir(&dir))?;
+    // Unix sockets, or loopback TCP (ports picked by the node) with a
+    // session token where they do not exist.
+    let tcp = !cfg!(unix);
+    let token_file = dir.join("token");
+    let endpoint = |path: &Path| -> std::ffi::OsString {
+        if tcp {
+            "tcp://127.0.0.1:0".into()
+        } else {
+            path.as_os_str().to_owned()
+        }
+    };
     let mut command = Command::new(node_bin);
     command
         .arg("--graph")
         .arg(dir.join("network.json"))
         .arg("--socket")
-        .arg(&state.inspect)
+        .arg(endpoint(&state.inspect))
         .arg("--global")
         .arg(dir.join("global.toml"))
         .arg("--project")
@@ -191,25 +273,58 @@ fn launch(
         let vault = std::path::absolute(vault).map_err(|e| format!("{}: {e}", vault.display()))?;
         command.arg("--runs-vault").arg(vault);
     }
+    if tcp {
+        command.arg("--token-file").arg(&token_file);
+    }
+    let control = batch || cfg!(debug_assertions);
     if batch {
-        command.arg("--batch-control").arg(&state.control);
-    } else if cfg!(debug_assertions) {
+        command.arg("--batch-control").arg(endpoint(&state.control));
+    } else if control {
         command
             .arg("--control")
-            .arg(&state.control)
+            .arg(endpoint(&state.control))
             .env("HELIOS_DEBUG_CONTROL", "1");
+    }
+    // No console window of its own on Windows (the node is a console
+    // program started from a window or a terminal), and its own process
+    // group: a Ctrl-C in the terminal is not for it.
+    #[cfg(windows)]
+    {
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        std::os::windows::process::CommandExt::creation_flags(
+            &mut command,
+            CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW,
+        );
     }
     let mut child = command
         .spawn()
         .map_err(|e| format!("cannot start {}: {e}", node_bin.display()))?;
+    let mut reader = BufReader::new(child.stdout.take().expect("piped"));
     let mut line = String::new();
-    BufReader::new(child.stdout.take().expect("piped"))
-        .read_line(&mut line)
-        .map_err(|e| e.to_string())?;
-    if !line.starts_with("ready ") {
+    reader.read_line(&mut line).map_err(|e| e.to_string())?;
+    let Some(inspect) = line.trim().strip_prefix("ready ").map(str::to_string) else {
         let _ = child.wait();
         let log = std::fs::read_to_string(dir.join("node.log")).unwrap_or_default();
         return Err(format!("the node did not start: {}", log.trim()));
+    };
+    if tcp {
+        // Then the control endpoint's address, `control ADDRESS` or
+        // `batch-control ADDRESS`.
+        let mut control_address = None;
+        if control {
+            let mut line = String::new();
+            reader.read_line(&mut line).map_err(|e| e.to_string())?;
+            control_address = line
+                .trim()
+                .split_once(' ')
+                .map(|(_, address)| address.to_string());
+        }
+        state.tcp = Some(Tcp {
+            inspect,
+            control: control_address,
+            token_file,
+        });
     }
     state.pid = Some(child.id());
     write_state(&dir, &state)?;
@@ -229,13 +344,26 @@ pub fn stop(dir: &Path) -> Result<bool, String> {
     };
     let ran = is_our_node(pid, &state);
     if ran {
-        Command::new("kill")
-            .arg(pid.to_string())
+        // SIGTERM; Windows has none for a program without a window: the
+        // process is ended.
+        #[cfg(unix)]
+        let mut kill = Command::new("kill");
+        #[cfg(unix)]
+        kill.arg(pid.to_string());
+        #[cfg(not(unix))]
+        let mut kill = Command::new("taskkill");
+        #[cfg(not(unix))]
+        kill.args(["/F", "/PID", &pid.to_string()]);
+        kill.stdout(Stdio::null())
             .status()
             .map_err(|e| e.to_string())?;
         // The node is not our child: watch it go, bounded.
         for _ in 0..200 {
-            if !is_our_node(pid, &state) {
+            #[cfg(unix)]
+            let runs = is_our_node(pid, &state);
+            #[cfg(not(unix))]
+            let runs = process_runs(pid);
+            if !runs {
                 break;
             }
             std::thread::sleep(std::time::Duration::from_millis(10));
@@ -243,6 +371,7 @@ pub fn stop(dir: &Path) -> Result<bool, String> {
     }
     let _ = std::fs::remove_file(&state.inspect);
     let _ = std::fs::remove_file(&state.control);
+    state.tcp = None;
     write_state(&dir, &state)?;
     Ok(ran)
 }

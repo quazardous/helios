@@ -278,11 +278,13 @@ fn own_node(
     )
     .map_err(|e| e.to_string())
     .and_then(|()| crate::sandbox::start_batch(&dir, node_bin, runs_vault));
-    match started {
-        Ok(state) => Ok((
+    let reached =
+        started.and_then(|state| Ok((state.inspect_address()?, state.control_address()?)));
+    match reached {
+        Ok((inspect, control)) => Ok((
             Node {
-                inspect: Address::Unix(state.inspect),
-                control: Address::Unix(state.control),
+                inspect,
+                control,
                 sandbox: Some(dir),
             },
             first_export,

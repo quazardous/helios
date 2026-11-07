@@ -1107,21 +1107,26 @@ fn control_handler(
 }
 
 /// Serves the batch endpoint: `load-source`, `export` and `cancel` only,
-/// in every build. A Unix socket only, readable and writable by this user
-/// alone: whoever reaches it can read and write the user's files through
+/// in every build. A Unix socket readable and writable by this user alone,
+/// or, where Unix sockets do not exist, loopback TCP behind the session
+/// token: whoever reaches it can read and write the user's files through
 /// the node, as the user could anyway.
-fn serve_batch_control(node: &Arc<Node>, listen: &Listen) -> Result<String, String> {
-    let Listen::Unix(path) = listen else {
+fn serve_batch_control(
+    node: &Arc<Node>,
+    listen: &Listen,
+    token: Option<&str>,
+) -> Result<String, String> {
+    if matches!(listen, Listen::Tcp(_)) && cfg!(unix) {
         return Err("--batch-control takes a Unix socket path, not a TCP address".into());
-    };
+    }
     let bound = helios_inspect::serve_connections_at(
         listen,
-        None,
+        token,
         control_handler(node.clone(), control::Scope::Batch),
     )
-    .map_err(|e| format!("cannot serve the batch endpoint on {}: {e}", path.display()))?;
+    .map_err(|e| format!("cannot serve the batch endpoint on {listen:?}: {e}"))?;
     #[cfg(unix)]
-    {
+    if let Listen::Unix(path) = listen {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
             .map_err(|e| format!("{}: {e}", path.display()))?;
@@ -1442,10 +1447,14 @@ fn main() -> ExitCode {
         .with_jobs()
         .with_scheduler(node.scheduler.clone());
     // A TCP endpoint needs a session token, written where only this user reads it.
-    let tcp = [Some(&args.socket), args.control.as_ref()]
-        .into_iter()
-        .flatten()
-        .any(|l| matches!(l, Listen::Tcp(_)));
+    let tcp = [
+        Some(&args.socket),
+        args.control.as_ref(),
+        args.batch_control.as_ref(),
+    ]
+    .into_iter()
+    .flatten()
+    .any(|l| matches!(l, Listen::Tcp(_)));
     let token = tcp.then(new_token);
     if let Some(token) = &token {
         let Some(file) = &args.token_file else {
@@ -1476,7 +1485,7 @@ fn main() -> ExitCode {
     };
     let batch_address = match &args.batch_control {
         None => None,
-        Some(listen) => match serve_batch_control(&node, listen) {
+        Some(listen) => match serve_batch_control(&node, listen, token.as_deref()) {
             Ok(address) => Some(address),
             Err(e) => {
                 eprintln!("helios-node: {e}");
