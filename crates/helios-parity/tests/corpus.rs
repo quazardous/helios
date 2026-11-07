@@ -239,6 +239,7 @@ fn module(name: &str) -> ModuleRef {
         "colorin" => ModuleRef::new(helios_module_colorin::ColorIn),
         "exposure" => ModuleRef::new(helios_module_exposure::Exposure),
         "sigmoid" => ModuleRef::new(helios_module_sigmoid::Sigmoid),
+        "channelmixerrgb" => ModuleRef::new(helios_module_channelmixerrgb::ChannelMixerRgb),
         other => panic!("the import gave a module Helios has not: {other}"),
     }
 }

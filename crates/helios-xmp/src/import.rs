@@ -140,6 +140,10 @@ pub enum Reason {
     Mask { problem: Problem },
     /// A drawn mask, and the import was not given the image's size.
     MaskWithoutImage,
+    /// A part of a module Helios has, that its port does not do yet (a
+    /// mode, an option or a set of values): `part` names it, in
+    /// darktable's terms.
+    Unsupported { part: String },
 }
 
 impl Reason {
@@ -182,6 +186,11 @@ impl Reason {
                 "xmp-reason-mask-without-image",
                 "a drawn mask, read without its image",
             ),
+            Reason::Unsupported { part } => Message::new(
+                "xmp-reason-unsupported-part",
+                "not supported yet: { $part }",
+            )
+            .with("part", part),
         }
     }
 }
@@ -373,6 +382,8 @@ struct Mapped {
     used: Vec<&'static str>,
     /// Modes Helios does not have, run with the one it has.
     swaps: Vec<Swap>,
+    /// A part Helios cannot run at all: the item is not applied.
+    unsupported: Option<String>,
 }
 
 /// darktable's orientation names (`dt_image_orientation_t`), as its
@@ -448,6 +459,7 @@ fn is_neutral(value: &Value) -> bool {
 fn map(operation: &str, f: &Map<String, Value>) -> Option<Mapped> {
     let mut p = Params::new();
     let mut swaps = Vec::new();
+    let mut unsupported = None;
     let (module, used): (&'static str, Vec<&'static str>) = match operation {
         "rawprepare" => (
             "rawprepare",
@@ -544,6 +556,10 @@ fn map(operation: &str, f: &Map<String, Value>) -> Option<Mapped> {
                 ],
             )
         }
+        "channelmixerrgb" => {
+            unsupported = colour_calibration(f, &mut p);
+            ("channelmixerrgb", COLOUR_CALIBRATION.to_vec())
+        }
         _ => return None,
     };
     Some(Mapped {
@@ -551,7 +567,114 @@ fn map(operation: &str, f: &Map<String, Value>) -> Option<Mapped> {
         params: p,
         used,
         swaps,
+        unsupported,
     })
+}
+
+/// Every field of darktable's colour calibration: each is mapped, or
+/// checked to be neutral.
+const COLOUR_CALIBRATION: &[&str] = &[
+    "red",
+    "green",
+    "blue",
+    "saturation",
+    "lightness",
+    "grey",
+    "normalize_R",
+    "normalize_G",
+    "normalize_B",
+    "normalize_sat",
+    "normalize_light",
+    "normalize_grey",
+    "illuminant",
+    "illum_fluo",
+    "illum_led",
+    "adaptation",
+    "x",
+    "y",
+    "temperature",
+    "gamut",
+    "clip",
+    "version",
+];
+
+/// darktable's colour calibration (`channelmixerrgb`) into `p`: its CAT16
+/// adaptation from a given illuminant. The first part Helios does not
+/// port yet, if any: the channel mixer (rows other than the identity,
+/// colourfulness, brightness, grey), another adaptation, or an illuminant
+/// read from the image (as shot, from the white balance, detected).
+fn colour_calibration(f: &Map<String, Value>, p: &mut Params) -> Option<String> {
+    let name = |field: &str| f.get(field).and_then(Value::as_str).unwrap_or_default();
+    let row = |field: &str| -> Vec<f64> {
+        f.get(field)
+            .and_then(Value::as_array)
+            .map(|a| a.iter().take(3).filter_map(Value::as_f64).collect())
+            .unwrap_or_default()
+    };
+    let mut unsupported = None;
+    let mut refuse = |part: String| {
+        unsupported.get_or_insert(part);
+    };
+    for (field, identity) in [
+        ("red", [1.0, 0.0, 0.0]),
+        ("green", [0.0, 1.0, 0.0]),
+        ("blue", [0.0, 0.0, 1.0]),
+        ("saturation", [0.0; 3]),
+        ("lightness", [0.0; 3]),
+        ("grey", [0.0; 3]),
+    ] {
+        let values = row(field);
+        if f.contains_key(field) && values != identity {
+            refuse(format!("{field} {values:?}"));
+        }
+    }
+    let lower = |prefix: &str, field: &str| {
+        let n = name(field);
+        n.strip_prefix(prefix).map(str::to_ascii_lowercase)
+    };
+    if f.contains_key("adaptation") {
+        match lower("DT_ADAPTATION_", "adaptation").as_deref() {
+            Some("cat16") => p.set("adaptation", Param::Choice("cat16".into())),
+            _ => refuse(format!("adaptation {}", name("adaptation"))),
+        }
+    }
+    if f.contains_key("illuminant") {
+        match lower("DT_ILLUMINANT_", "illuminant") {
+            Some(i)
+                if ["pipe", "a", "d", "e", "f", "led", "bb", "custom"].contains(&i.as_str()) =>
+            {
+                p.set("illuminant", Param::Choice(i));
+            }
+            _ => refuse(format!("illuminant {}", name("illuminant"))),
+        }
+    }
+    let illuminant = p
+        .get("illuminant")
+        .and_then(|v| v.as_choice())
+        .unwrap_or("")
+        .to_string();
+    // The sub-types count only for their illuminant; a stale one is kept
+    // when valid, left out otherwise.
+    for (field, prefix, own) in [
+        ("illum_fluo", "DT_ILLUMINANT_FLUO_", "f"),
+        ("illum_led", "DT_ILLUMINANT_LED_", "led"),
+    ] {
+        match lower(prefix, field) {
+            Some(v) if v != "last" => p.set(field, Param::Choice(v)),
+            _ if f.contains_key(field) && illuminant == own => {
+                refuse(format!("{field} {}", name(field)));
+            }
+            _ => {}
+        }
+    }
+    set(p, "x", float(f, "x"));
+    set(p, "y", float(f, "y"));
+    set(p, "temperature", float(f, "temperature"));
+    set(p, "gamut", float(f, "gamut"));
+    if let Some(b) = f.get("clip").and_then(Value::as_bool) {
+        p.set("clip", Param::Bool(b));
+    }
+    unsupported
 }
 
 /// The mapped modules darktable runs once (`IOP_FLAGS_ONE_INSTANCE`).
@@ -565,7 +688,10 @@ fn single_instance(operation: &str) -> bool {
 /// The mapped modules whose output darktable blends
 /// (`IOP_FLAGS_SUPPORTS_BLENDING`); the others ignore their blend params.
 fn blends(operation: &str) -> bool {
-    matches!(operation, "highlights" | "exposure" | "sigmoid")
+    matches!(
+        operation,
+        "highlights" | "exposure" | "sigmoid" | "channelmixerrgb"
+    )
 }
 
 /// An item's blend params: `None` when they leave its output as it is,
@@ -748,6 +874,9 @@ fn apply(
         Err(error) => return Err(Reason::Unreadable { error }),
     };
     let mapped = map(&item.operation, &decoded).expect("mapped");
+    if let Some(part) = &mapped.unsupported {
+        return Err(Reason::Unsupported { part: part.clone() });
+    }
     for (name, value) in &decoded {
         if !mapped.used.contains(&name.as_str()) && !is_neutral(value) {
             report

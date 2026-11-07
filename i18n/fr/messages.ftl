@@ -708,6 +708,8 @@ xmp-reason-unknown-module = pas de module Helios
 
 xmp-reason-unreadable = illisible : { $error }
 
+xmp-reason-unsupported-part = pas encore pris en charge : { $part }
+
 xmp-reason-unsupported-version = version non prise en charge (lit { $known })
 
 gui-library-auto-advance = Avance automatique
