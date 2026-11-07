@@ -197,7 +197,7 @@ command-library-export =
     .title = Export… (`images`: ids, else `scope`: `selected` or `shown`, the selection by default, else every image shown; `format`: jpeg, png or tiff; `quality`, `bits`, `long_edge`, `space`, `folder`, `pattern`, `clash`: number, overwrite or skip; `remember`; asked when `folder` is absent or `ask` is true)
 
 command-library-importFiles =
-    .title = Import files and folders (`paths`), placed as the workspace's import source says (`copy`: into the library folder or not; `ask`: asked without an import source; `darktable`)
+    .title = Import files and folders (`paths`), placed as the workspace's import source says (`copy`: into the library folder or not, `into`, `layout`, `rename`; `duplicates`; `ask`: asked without an import source; `darktable`)
 
 command-library-importSource =
     .title = Import photos… (`path`: a card or folder, asked when absent; `copy`, `darktable`, `remember` when the workspace has no import source)

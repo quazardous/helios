@@ -13,9 +13,10 @@
 //!   comes, by capture day; each photo ticked by default, those probably
 //!   in the Library already greyed while "New only" is on, a RAW+JPEG
 //!   pair one cell. Import takes the files ticked (`library.importFiles`
-//!   with `paths`), a card's copied into the Library, a folder's added
-//!   where they are.
-//! - **Choices**: to come.
+//!   with `paths` and the choices).
+//! - **Choices**, the right column ([`super::import_choices`]): copy or
+//!   add where they are, where copies go and how they are named, with
+//!   examples from the first photo ticked; duplicates; darktable edits.
 //! - **A card inserted** while the window is closed: a toast whose action
 //!   opens the window on it.
 //!
@@ -38,6 +39,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use super::Shell;
+use super::import_choices::{self, Asked, ChoiceWords, Choices};
 use crate::import_scan::{Contents, Counts, Known, Scan, Scanned, Types};
 use helios_storage::{Card, Volumes, Watch};
 
@@ -67,16 +69,24 @@ pub(crate) struct ImportWindow {
     memory: Memory,
     file: Option<PathBuf>,
     /// The sources ticked, in the order ticked.
-    ticked: Vec<PathBuf>,
+    pub(super) ticked: Vec<PathBuf>,
     /// Whether the person ticked or unticked a source since it opened.
     touched: bool,
-    /// The folder chooser, while it is open.
+    /// The folder chooser, while it is open: for a source, or for Into.
     choosing: Option<Pending>,
+    choosing_into: Option<Pending>,
     /// What the vault holds, for the "in your Library" prefilter.
     known: Option<Known>,
     /// Each source ticked being read, and whether it is read through.
     scans: Vec<(PathBuf, Scan, bool)>,
-    contents: Contents,
+    pub(super) contents: Contents,
+    /// The choices, the last used until changed, and where they are kept.
+    pub(super) choices: Choices,
+    pub(super) choices_file: Option<PathBuf>,
+    /// Copy or add as the person switched it since the window opened.
+    pub(super) copy: Option<bool>,
+    /// The custom rename pattern is being edited.
+    pub(super) custom: bool,
     /// The cell a Shift+click extends from, and the one Space toggles.
     anchor: Option<usize>,
     focus: Option<usize>,
@@ -129,8 +139,13 @@ impl ImportWindow {
             for sent in scan.take() {
                 match sent {
                     Scanned::Found(found) => self.contents.add(found),
-                    Scanned::Glance { path, taken, thumb } => {
-                        self.contents.glance(&path, taken, thumb);
+                    Scanned::Glance {
+                        path,
+                        taken,
+                        camera,
+                        thumb,
+                    } => {
+                        self.contents.glance(&path, taken, camera, thumb);
                     }
                     Scanned::Done => *done = true,
                 }
@@ -138,7 +153,7 @@ impl ImportWindow {
         }
     }
 
-    fn is_card(&self, path: &Path) -> bool {
+    pub(super) fn is_card(&self, path: &Path) -> bool {
         self.cards.iter().any(|c| c.root == path)
     }
 
@@ -173,6 +188,7 @@ enum Event {
     Cancel,
     Import,
     Choose,
+    ChooseInto,
     Favourite(PathBuf, bool),
 }
 
@@ -209,9 +225,7 @@ struct Words {
     remove_favourite: String,
     contents: String,
     grid: GridWords,
-    choices: String,
-    choices_card: String,
-    choices_folder: String,
+    choices: ChoiceWords,
     cancel: String,
     import_count: String,
     nothing: String,
@@ -310,6 +324,8 @@ impl Shell {
         w.clear_contents();
         w.open = true;
         w.touched = false;
+        w.copy = None;
+        w.custom = false;
         w.ticked.clear();
         if let Some(source) = args
             .get("source")
@@ -376,6 +392,19 @@ impl Shell {
 
     /// The folder the chooser gave: a recent source, ticked.
     fn receive_chosen_folder(&mut self) {
+        if let Some(result) = self
+            .import_window
+            .choosing_into
+            .as_ref()
+            .and_then(Pending::take)
+        {
+            self.import_window.choosing_into = None;
+            if let Ok(files::Chosen::Paths(paths)) = files::chosen(&result)
+                && let Some(p) = paths.into_iter().next()
+            {
+                self.import_window.choices.into = Some(p);
+            }
+        }
         let Some(result) = self.import_window.choosing.as_ref().and_then(Pending::take) else {
             return;
         };
@@ -393,7 +422,7 @@ impl Shell {
         }
     }
 
-    fn import_words(&self) -> Words {
+    fn import_words(&self, sample: Option<&import_choices::Sample>) -> Words {
         let t = |m: Message| self.text(m);
         Words {
             title: t(Message::new("gui-import-window-title", "Import photos")),
@@ -417,15 +446,7 @@ impl Shell {
             )),
             contents: t(Message::new("gui-import-window-contents", "Contents")),
             grid: self.grid_words(),
-            choices: t(Message::new("gui-import-window-choices", "Choices")),
-            choices_card: t(Message::new(
-                "gui-import-window-choices-card",
-                "A card is copied into the Library.",
-            )),
-            choices_folder: t(Message::new(
-                "gui-import-window-choices-folder",
-                "A folder is added where it is.",
-            )),
+            choices: self.choice_words(sample),
             cancel: t(Message::new("gui-import-window-cancel", "Cancel")),
             import_count: t(
                 Message::new("gui-import-window-import", "Import { $count }")
@@ -487,7 +508,8 @@ impl Shell {
     }
 
     fn import_window_ui(&mut self, ctx: &Egui) {
-        let words = self.import_words();
+        let sample = self.import_window.sample();
+        let words = self.import_words(sample.as_ref());
         let mut open = true;
         let mut event = None;
         let w = &mut self.import_window;
@@ -510,22 +532,30 @@ impl Shell {
                         cols[1].heading(&words.contents);
                         let reading = w.scans.iter().any(|(_, _, done)| !done);
                         contents_ui(&mut cols[1], w, &words.grid, reading);
-                        cols[2].heading(&words.choices);
-                        cols[2].label(&words.choices_card);
-                        cols[2].label(&words.choices_folder);
+                        if let Some(Asked::Into) =
+                            import_choices::choices_ui(&mut cols[2], w, &words.choices)
+                        {
+                            event = Some(Event::ChooseInto);
+                        }
                     });
                 });
                 layout.footer(ui, |ui| {
                     ui.separator();
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let count = w.contents.counts().selected;
+                        let bad_name = words.choices.bad_name.as_ref().filter(|_| w.copies());
                         let why = if w.ticked.is_empty() {
                             &words.nothing
+                        } else if let Some(e) = bad_name {
+                            e
                         } else {
                             &words.none_ticked
                         };
                         let import = ui
-                            .add_enabled(count > 0, egui::Button::new(&words.import_count))
+                            .add_enabled(
+                                count > 0 && bad_name.is_none(),
+                                egui::Button::new(&words.import_count),
+                            )
                             .on_disabled_hover_text(why);
                         if import.clicked() {
                             event = Some(Event::Import);
@@ -551,6 +581,13 @@ impl Shell {
                     self.import_window.choosing = Some(f.choose(self.app.handle(), request));
                 }
             }
+            Some(Event::ChooseInto) => {
+                if let Some(f) = self.app.handle().service(&FILES) {
+                    let request =
+                        FileRequest::folder(&words.choices.change).purpose("helios.import.into");
+                    self.import_window.choosing_into = Some(f.choose(self.app.handle(), request));
+                }
+            }
             Some(Event::Favourite(path, on)) => {
                 let w = &mut self.import_window;
                 w.memory.favourites.retain(|p| p != &path);
@@ -564,9 +601,22 @@ impl Shell {
     }
 
     /// Imports the photos ticked of each source ticked, as
-    /// `library.importFiles` does with their `paths`: a card's copied, a
-    /// folder's added where they are; the window closes at once.
+    /// `library.importFiles` does with their `paths` and the choices
+    /// (copied or added where they are, filed, named, duplicates,
+    /// darktable edits), kept as the last used; the window closes at
+    /// once.
     fn import_ticked_sources(&mut self) {
+        let copy = self.import_window.copies();
+        let any_card = self
+            .import_window
+            .ticked
+            .iter()
+            .any(|p| self.import_window.is_card(p));
+        if !any_card {
+            self.import_window.choices.copy_folders = copy;
+        }
+        self.import_window.save_choices();
+        let choices = self.import_window.choices.clone();
         let ticked = std::mem::take(&mut self.import_window.ticked);
         for path in &ticked {
             let files = self.import_window.contents.selected_files(path);
@@ -574,7 +624,7 @@ impl Shell {
                 continue;
             }
             let card = self.import_window.is_card(path);
-            let args = json!({ "paths": files, "copy": card });
+            let args = choices.args(&files, copy);
             if let Err(e) = self.import_files(&args, &Origin::User) {
                 self.warn(e);
             }

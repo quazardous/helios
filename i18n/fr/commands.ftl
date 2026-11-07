@@ -184,7 +184,7 @@ command-library-copyFiles =
     .title = Copier les fichiers : ceux des images sélectionnées, pour un gestionnaire de fichiers ou une autre application
 
 command-library-importFiles =
-    .title = Importer des fichiers et des dossiers (`paths`), placés comme le dit la source d’import de l’espace de travail (`copy` : dans le dossier de la bibliothèque ou non ; `ask` : demandé sans source d’import ; `darktable`)
+    .title = Importer des fichiers et des dossiers (`paths`), placés comme le dit la source d’import de l’espace de travail (`copy` : dans le dossier de la bibliothèque ou non, `into`, `layout`, `rename` ; `duplicates` ; `ask` : demandé sans source d’import ; `darktable`)
 
 command-library-export =
     .title = Exporter… (`images` : des identifiants, sinon `scope` : `selected` ou `shown`, la sélection par défaut, sinon toutes les images montrées ; `format` : jpeg, png ou tiff ; `quality`, `bits`, `long_edge`, `space`, `folder`, `pattern`, `clash` : number, overwrite ou skip ; `remember` ; demandé si `folder` manque ou si `ask` vaut true)

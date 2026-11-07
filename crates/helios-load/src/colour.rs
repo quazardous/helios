@@ -307,10 +307,11 @@ impl<'a> Ifds<'a> {
 
 /// What an Exif block says of a picture at a glance: when it was taken
 /// (`DateTimeOriginal`, else `DateTime`, as written: `YYYY:MM:DD
-/// HH:MM:SS`), and its thumbnail (the JPEG of the second directory).
-pub(crate) fn exif_glance(block: &[u8]) -> (Option<String>, Option<Vec<u8>>) {
+/// HH:MM:SS`), the camera's model (`Model`), and its thumbnail (the JPEG
+/// of the second directory).
+pub(crate) fn exif_glance(block: &[u8]) -> (Option<String>, Option<String>, Option<Vec<u8>>) {
     let Some(t) = Ifds::new(block) else {
-        return (None, None);
+        return (None, None, None);
     };
     let ascii = |ifd: usize, tag: u16| -> Option<String> {
         let (kind, count, at) = t.entry(ifd, tag)?;
@@ -324,8 +325,9 @@ pub(crate) fn exif_glance(block: &[u8]) -> (Option<String>, Option<Vec<u8>>) {
         (!text.is_empty()).then(|| text.to_string())
     };
     let Some(ifd0) = t.u32(4).map(|v| v as usize) else {
-        return (None, None);
+        return (None, None, None);
     };
+    let camera = ascii(ifd0, 0x0110);
     let taken = t
         .pointer(ifd0, 0x8769)
         .and_then(|exif| ascii(exif, 0x9003))
@@ -340,7 +342,7 @@ pub(crate) fn exif_glance(block: &[u8]) -> (Option<String>, Option<Vec<u8>>) {
         let len = t.u32(at)? as usize;
         t.b.get(start..start + len).map(<[u8]>::to_vec)
     })();
-    (taken, thumb)
+    (taken, camera, thumb)
 }
 
 /// Exif `ColorSpace` (tag 0xA001) and the interoperability index (tag 1 of

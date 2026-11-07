@@ -246,7 +246,13 @@ fn the_import_window_lists_a_card_first_ticks_it_and_imports_it() {
     // once.
     assert_eq!(
         h.state_mut().take_imports(),
-        [json!({ "paths": [dcim.join("IMG_0001.JPG")], "copy": true })]
+        [json!({
+            "paths": [dcim.join("IMG_0001.JPG")],
+            "copy": true,
+            "layout": "day",
+            "rename": "{stem}",
+            "duplicates": "skip"
+        })]
     );
     assert!(!h.state().import_window_open());
     let _ = std::fs::remove_dir_all(&dir);
@@ -302,9 +308,86 @@ fn import_passes_exactly_the_photos_ticked() {
         h.state_mut().take_imports(),
         [json!({
             "paths": [dcim.join("IMG_0003.CR2"), dcim.join("IMG_0003.JPG")],
-            "copy": true
+            "copy": true,
+            "layout": "day",
+            "rename": "{stem}",
+            "duplicates": "skip"
         })]
     );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn the_import_choices_show_live_examples_and_reach_the_import() {
+    let dir = temp("choices");
+    let (dcim, known) = fake_card(&dir);
+    let mut h = card_window(&dir, Some(known));
+    let kept = dir.join("choices.json");
+    h.state_mut().remember_import_choices_in(kept.clone());
+    h.run_steps(3);
+    // A card is copied, with a note on why.
+    assert!(h.state().import_copies());
+    let _ = h.get_by_label_contains("the card is formatted later");
+    // The examples come from the first photo ticked, of 2 November.
+    let _ = h.get_by_label("e.g. 2026/2026-11-02/");
+    let _ = h.get_by_label("e.g. IMG_0001.JPG");
+    // Into's layout and the Name change them.
+    h.get_by_label("By month").click();
+    h.run_steps(3);
+    let _ = h.get_by_label("e.g. 2026/2026-11/");
+    h.get_by_label("Date and number").click();
+    h.run_steps(3);
+    let _ = h.get_by_label("e.g. 20261102-0001.JPG");
+    h.get_by_label("Keep").click();
+    h.get_by_label("Read darktable edits").click();
+    h.run_steps(3);
+    // Added where they are, the photos are neither filed nor renamed:
+    // Into and Name go away.
+    h.get_by_label("Add where they are").click();
+    h.run_steps(3);
+    assert!(!h.state().import_copies());
+    assert!(h.query_by_label("Into").is_none());
+    assert!(h.query_by_label_contains("e.g.").is_none());
+    // Back to a copy: Import passes every choice.
+    h.get_by_label("Copy into the Library").click();
+    h.run_steps(3);
+    let _ = h.get_by_label("Into");
+    h.get_by_label("Import 2").click();
+    h.run_steps(3);
+    assert_eq!(
+        h.state_mut().take_imports(),
+        [json!({
+            "paths": [
+                dcim.join("IMG_0001.JPG"),
+                dcim.join("IMG_0003.CR2"),
+                dcim.join("IMG_0003.JPG")
+            ],
+            "copy": true,
+            "layout": "month",
+            "rename": "{date}-{seq}",
+            "duplicates": "keep",
+            "darktable": false
+        })]
+    );
+    // They are kept as the last used.
+    let saved: Value = serde_json::from_str(&std::fs::read_to_string(&kept).unwrap()).unwrap();
+    assert_eq!(
+        (
+            &saved["layout"],
+            &saved["rename"],
+            &saved["duplicates"],
+            &saved["darktable"]
+        ),
+        (
+            &json!("month"),
+            &json!("{date}-{seq}"),
+            &json!("keep"),
+            &json!(false)
+        )
+    );
+    let mut again = Shell::new(helios_panels(), None);
+    again.remember_import_choices_in(kept);
+    assert_eq!(again.import_choices(), h.state().import_choices());
     let _ = std::fs::remove_dir_all(&dir);
 }
 

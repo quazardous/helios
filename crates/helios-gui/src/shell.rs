@@ -51,11 +51,13 @@ use crate::workbench::Contents;
 
 pub use crate::workbench::Content;
 pub use export::{ExportAsk, OPEN_FOLDER, folder_path, settings_of};
+pub use import_choices::Choices;
 pub use macro_edit::{SELECTED as GRAPH_SELECTED, selected_nodes};
 pub use workspace_edit::STATE as WORKSPACE_STATE;
 
 mod export;
 mod import;
+mod import_choices;
 mod import_window;
 
 /// Where an import's lines are sent: its arguments and a line.
@@ -2726,7 +2728,7 @@ impl Shell {
         add(
             CommandSpec::new(
                 "library.importFiles",
-                "Import files and folders (`paths`), placed as the workspace's import source says (`copy`: into the library folder or not; `ask`: asked without an import source; `darktable`)",
+                "Import files and folders (`paths`), placed as the workspace's import source says (`copy`: into the library folder or not, `into`, `layout`, `rename`; `duplicates`; `ask`: asked without an import source; `darktable`)",
                 "Library",
             ),
             Box::new(|a, origin| Ok(Action::ImportFiles(a.clone(), origin.clone()))),

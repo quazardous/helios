@@ -263,7 +263,8 @@ impl Shell {
     }
 
     /// Queues an import of `target` (`path` or `paths`) with the choices of
-    /// `args`, remembered first when asked.
+    /// `args` (`copy`, `into`, `layout`, `rename`, `duplicates`,
+    /// `darktable`), remembered first when asked.
     fn import_now(
         &mut self,
         mut target: Value,
@@ -281,7 +282,7 @@ impl Shell {
         if !darktable {
             target["darktable"] = json!(false);
         }
-        Ok(self.queue_import(target, copy))
+        Ok(self.queue_import(target, copy, args))
     }
 
     /// Makes the import dialog's answer the workspace's import source:
@@ -309,19 +310,40 @@ impl Shell {
     }
 
     /// Queues an import (`library.import`'s arguments) for the host,
-    /// placed, renamed and with duplicates handled as the workspace's
-    /// import source says; `copy` overrides its placement (a reference
-    /// is never renamed).
-    pub(super) fn queue_import(&mut self, mut args: Value, copy: Option<bool>) -> Value {
+    /// placed, renamed and with duplicates handled as `choices` say
+    /// (`into`, `layout`, `rename`, `duplicates`), else as the
+    /// workspace's import source says; `copy` overrides its placement (a
+    /// reference is never renamed nor filed).
+    pub(super) fn queue_import(
+        &mut self,
+        mut args: Value,
+        copy: Option<bool>,
+        choices: &Value,
+    ) -> Value {
         let source = self.import_source.as_ref();
+        let given = |key: &str| {
+            choices
+                .get(key)
+                .filter(|v| v.as_str().is_some_and(|s| !s.is_empty()))
+                .cloned()
+        };
         if copy.unwrap_or_else(|| source.is_some_and(|s| s.placement == "copy")) {
             args["copy"] = json!(true);
-            if let Some(rename) = source.and_then(|s| s.rename.as_ref()) {
-                args["rename"] = json!(rename);
+            for key in ["into", "layout"] {
+                if let Some(value) = given(key) {
+                    args[key] = value;
+                }
+            }
+            if let Some(rename) =
+                given("rename").or_else(|| source.and_then(|s| s.rename.as_ref()).map(|r| json!(r)))
+            {
+                args["rename"] = rename;
             }
         }
-        if let Some(source) = source {
-            args["duplicates"] = json!(source.duplicates);
+        if let Some(duplicates) =
+            given("duplicates").or_else(|| source.map(|s| json!(s.duplicates)))
+        {
+            args["duplicates"] = duplicates;
         }
         self.imports.push(args.clone());
         json!({ "queued": args })

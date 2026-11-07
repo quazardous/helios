@@ -136,6 +136,8 @@ pub struct Glance {
     pub preview: Option<Image>,
     /// When it was taken, as the camera wrote it (`YYYY:MM:DD HH:MM:SS`).
     pub taken: Option<String>,
+    /// The camera's model, as it wrote it.
+    pub camera: Option<String>,
 }
 
 /// A file at a glance, for a grid of what a card holds: its smallest
@@ -160,25 +162,33 @@ pub fn glance(path: &Path) -> Result<Glance, String> {
         .into_iter()
         .find_map(|r| r.ok().flatten())
         .map(|img| working(&img));
-        let taken = decoder.raw_metadata(&source, &params).ok().and_then(|m| {
+        let metadata = decoder.raw_metadata(&source, &params).ok();
+        let taken = metadata.as_ref().and_then(|m| {
             m.exif
                 .date_time_original
                 .clone()
                 .or_else(|| m.exif.create_date.clone())
         });
-        return Ok(Glance { preview, taken });
+        let camera = metadata
+            .map(|m| m.model.trim().to_string())
+            .filter(|m| !m.is_empty());
+        return Ok(Glance {
+            preview,
+            taken,
+            camera,
+        });
     }
     let reader = image::ImageReader::new(Cursor::new(&bytes[..]))
         .with_guessed_format()
         .map_err(|e| named(e.to_string()))?;
-    let (taken, thumb) = if reader.format() == Some(image::ImageFormat::Jpeg) {
+    let (taken, camera, thumb) = if reader.format() == Some(image::ImageFormat::Jpeg) {
         use image::ImageDecoder as _;
         image::codecs::jpeg::JpegDecoder::new(Cursor::new(&bytes[..]))
             .ok()
             .and_then(|mut d| d.exif_metadata().ok().flatten())
-            .map_or((None, None), |block| colour::exif_glance(&block))
+            .map_or((None, None, None), |block| colour::exif_glance(&block))
     } else {
-        (None, None)
+        (None, None, None)
     };
     let preview = match thumb.and_then(|t| image::load_from_memory(&t).ok()) {
         Some(img) => working(&img),
@@ -187,6 +197,7 @@ pub fn glance(path: &Path) -> Result<Glance, String> {
     Ok(Glance {
         preview: Some(preview),
         taken,
+        camera,
     })
 }
 

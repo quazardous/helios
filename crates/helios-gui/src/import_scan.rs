@@ -66,10 +66,12 @@ pub struct Found {
 /// What a scan sends.
 pub enum Scanned {
     Found(Found),
-    /// A file's glance: when it was taken, and a small preview.
+    /// A file's glance: when it was taken, by which camera, and a small
+    /// preview.
     Glance {
         path: PathBuf,
         taken: Option<NaiveDateTime>,
+        camera: Option<String>,
         thumb: Option<Image>,
     },
     /// Every file listed and glanced at.
@@ -126,17 +128,24 @@ impl Scan {
                     if stopped.load(Ordering::Relaxed) {
                         return;
                     }
-                    let (taken, thumb) = match helios_load::glance(&path) {
+                    let (taken, camera, thumb) = match helios_load::glance(&path) {
                         Ok(g) => (
                             g.taken.as_deref().and_then(exif_time),
+                            g.camera,
                             g.preview.as_ref().map(crate::library::small),
                         ),
                         Err(e) => {
                             log::debug!("import scan: {e}");
-                            (None, None)
+                            (None, None, None)
                         }
                     };
-                    if sender.send(Scanned::Glance { path, taken, thumb }).is_err() {
+                    let glance = Scanned::Glance {
+                        path,
+                        taken,
+                        camera,
+                        thumb,
+                    };
+                    if sender.send(glance).is_err() {
                         return;
                     }
                     wake();
@@ -196,6 +205,8 @@ pub struct Cell {
     pub bytes: u64,
     pub modified: Option<i64>,
     pub taken: Option<NaiveDateTime>,
+    /// The camera's model, when a glance found it.
+    pub camera: Option<String>,
     known: [bool; 2],
     pub ticked: bool,
     /// The preview read, until it becomes a texture.
@@ -348,13 +359,23 @@ impl Contents {
         self.order = None;
     }
 
-    /// A file's glance: its time and, the raw's first, its preview.
-    pub fn glance(&mut self, path: &Path, taken: Option<NaiveDateTime>, thumb: Option<Image>) {
+    /// A file's glance: its time, its camera and, the raw's first, its
+    /// preview.
+    pub fn glance(
+        &mut self,
+        path: &Path,
+        taken: Option<NaiveDateTime>,
+        camera: Option<String>,
+        thumb: Option<Image>,
+    ) {
         let Some(&at) = self.by_path.get(path) else {
             return;
         };
         let cell = &mut self.cells[at];
         let raw = is_raw(path);
+        if camera.is_some() && (raw || cell.camera.is_none()) {
+            cell.camera = camera;
+        }
         if taken.is_some() && (raw || cell.taken.is_none()) {
             cell.taken = taken;
             self.order = None;

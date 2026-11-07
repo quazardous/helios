@@ -295,6 +295,8 @@ gui-import-remember-help = The workspace's import source: the next import does n
 
 gui-import-verb = Import
 
+gui-import-window-add = Add where they are
+
 gui-import-window-add-favourite = Add to favourites
 
 gui-import-window-all-types = All types
@@ -303,21 +305,37 @@ gui-import-window-cancel = Cancel
 
 gui-import-window-card-inserted = { $card } inserted
 
+gui-import-window-card-note = A card's photos are copied: the card is formatted later, the copies stay.
+
 gui-import-window-cards = Cards and cameras
 
+gui-import-window-change-into = Choose where copies go
+
 gui-import-window-choices = Choices
-
-gui-import-window-choices-card = A card is copied into the Library.
-
-gui-import-window-choices-folder = A folder is added where it is.
 
 gui-import-window-choose = Choose a folder…
 
 gui-import-window-contents = Contents
 
+gui-import-window-copy = Copy into the Library
+
 gui-import-window-counts = { $photos } photos, { $new } new, { $size }
 
+gui-import-window-darktable = Read darktable edits
+
+gui-import-window-darktable-help = Each .xmp sidecar, duplicates included, becomes a version of its photo
+
+gui-import-window-duplicates = Duplicates
+
+gui-import-window-duplicates-ask = Ask
+
+gui-import-window-duplicates-keep = Keep
+
+gui-import-window-duplicates-skip = Skip
+
 gui-import-window-empty = No photos in the sources ticked
+
+gui-import-window-example = e.g. { $example }
 
 gui-import-window-favourites = Favourites
 
@@ -325,7 +343,35 @@ gui-import-window-import = Import { $count }
 
 gui-import-window-in-library = in your Library
 
+gui-import-window-into = Into
+
 gui-import-window-jpeg-only = JPEG only
+
+gui-import-window-layout-day = By day
+
+gui-import-window-layout-flat = One folder
+
+gui-import-window-layout-month = By month
+
+gui-import-window-layout-year = By year
+
+gui-import-window-library-folder = The Library folder
+
+gui-import-window-more = More
+
+gui-import-window-more-note = Metadata templates and time offsets come later.
+
+gui-import-window-name = Name
+
+gui-import-window-name-custom = Custom
+
+gui-import-window-name-date-camera = Date, time and camera
+
+gui-import-window-name-date-seq = Date and number
+
+gui-import-window-name-date-stem = Date and name
+
+gui-import-window-name-original = Original name
 
 gui-import-window-new-only = New only
 
@@ -334,6 +380,8 @@ gui-import-window-no-cards = No card inserted
 gui-import-window-no-date = No date
 
 gui-import-window-no-favourites = None yet
+
+gui-import-window-no-sample = Tick a photo to see an example
 
 gui-import-window-none-ticked = Tick the photos to import
 

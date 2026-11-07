@@ -76,6 +76,10 @@ or folders on Helios (the window opens with them as its source).
   - **Read darktable edits** (sidecars as versions).
   - **More** (folded): metadata template and time offset, once they
     exist.
+
+  Built (2026-11-07): the choices reach the import as
+  `library.importFiles`'s arguments (`copy`, `into`, `layout`, `rename`,
+  `duplicates`, `darktable`) and are kept, as the last used, per library.
 - **Footer:**
   - a preset menu, which replaces the "remember for this workspace" box
     (Default, plus any the person saved; "Save as preset…");

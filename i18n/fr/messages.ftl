@@ -794,6 +794,8 @@ gui-import-path = carte ou dossier
 
 gui-import-verb = Importer
 
+gui-import-window-add = Ajouter là où elles sont
+
 gui-import-window-add-favourite = Ajouter aux favoris
 
 gui-import-window-all-types = Tous les types
@@ -802,21 +804,37 @@ gui-import-window-cancel = Annuler
 
 gui-import-window-card-inserted = { $card } insérée
 
+gui-import-window-card-note = Les photos d’une carte sont copiées : la carte sera formatée, les copies restent.
+
 gui-import-window-cards = Cartes et appareils
 
+gui-import-window-change-into = Choisir où vont les copies
+
 gui-import-window-choices = Choix
-
-gui-import-window-choices-card = Une carte est copiée dans la bibliothèque.
-
-gui-import-window-choices-folder = Un dossier est ajouté là où il est.
 
 gui-import-window-choose = Choisir un dossier…
 
 gui-import-window-contents = Contenu
 
+gui-import-window-copy = Copier dans la bibliothèque
+
 gui-import-window-counts = { $photos } photos, { $new } nouvelles, { $size }
 
+gui-import-window-darktable = Lire les retouches darktable
+
+gui-import-window-darktable-help = Chaque fichier .xmp, duplicata compris, devient une version de sa photo
+
+gui-import-window-duplicates = Doublons
+
+gui-import-window-duplicates-ask = Demander
+
+gui-import-window-duplicates-keep = Garder
+
+gui-import-window-duplicates-skip = Ignorer
+
 gui-import-window-empty = Aucune photo dans les sources cochées
+
+gui-import-window-example = ex. { $example }
 
 gui-import-window-favourites = Favoris
 
@@ -824,7 +842,35 @@ gui-import-window-import = Importer { $count }
 
 gui-import-window-in-library = dans votre bibliothèque
 
+gui-import-window-into = Dans
+
 gui-import-window-jpeg-only = JPEG seulement
+
+gui-import-window-layout-day = Par jour
+
+gui-import-window-layout-flat = Un seul dossier
+
+gui-import-window-layout-month = Par mois
+
+gui-import-window-layout-year = Par année
+
+gui-import-window-library-folder = Le dossier de la bibliothèque
+
+gui-import-window-more = Plus
+
+gui-import-window-more-note = Les modèles de métadonnées et les décalages horaires viendront plus tard.
+
+gui-import-window-name = Nom
+
+gui-import-window-name-custom = Personnalisé
+
+gui-import-window-name-date-camera = Date, heure et appareil
+
+gui-import-window-name-date-seq = Date et numéro
+
+gui-import-window-name-date-stem = Date et nom
+
+gui-import-window-name-original = Nom d’origine
 
 gui-import-window-new-only = Nouvelles seulement
 
@@ -833,6 +879,8 @@ gui-import-window-no-cards = Aucune carte insérée
 gui-import-window-no-date = Sans date
 
 gui-import-window-no-favourites = Aucun pour l’instant
+
+gui-import-window-no-sample = Cochez une photo pour voir un exemple
 
 gui-import-window-none-ticked = Cochez les photos à importer
 

@@ -184,7 +184,7 @@ fn library_commands(
     shell.register(
         CommandSpec::new(
             "library.import",
-            "Import a folder or a card (`path`, or `paths` for several files and folders; `importer`: `plugin`, `importer` and `source` to import through an importer plugin; `copy`, `into`, `rename`, `duplicates`; `darktable`: false leaves the .xmp sidecars out)",
+            "Import a folder or a card (`path`, or `paths` for several files and folders; `importer`: `plugin`, `importer` and `source` to import through an importer plugin; `copy`, `into`, `rename`, `layout`, `duplicates`; `darktable`: false leaves the .xmp sidecars out)",
             "Library",
         ),
         move |args, _| {
@@ -1099,6 +1099,27 @@ fn main() -> Result<(), String> {
                 .ok_or("--vault takes a FILE")
         })
         .transpose()?;
+    // The import window's choices are kept per library: a file named
+    // after the vault's path.
+    let import_choices = {
+        let library = vault_file
+            .as_ref()
+            .map(|f| std::path::absolute(f).unwrap_or_else(|_| f.clone()))
+            .map_or_else(
+                || "default".to_string(),
+                |f| {
+                    f.to_string_lossy()
+                        .chars()
+                        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+                        .collect::<String>()
+                        .trim_matches('-')
+                        .to_string()
+                },
+            );
+        helios_gui::shell::config_dir()
+            .join("import-choices")
+            .join(format!("{library}.json"))
+    };
     let workspace = asked
         .iter()
         .find_map(|o| match o {
@@ -1308,6 +1329,7 @@ fn main() -> Result<(), String> {
             shell.remember_import_sources_in(
                 helios_gui::shell::config_dir().join("import-sources.json"),
             );
+            shell.remember_import_choices_in(import_choices);
             if let Err(e) = shell.use_profile(&profile) {
                 shell.notes.push(format!("profile {profile}: {e}"));
             }
