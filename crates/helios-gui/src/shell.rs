@@ -2712,7 +2712,7 @@ impl Shell {
         add(
             CommandSpec::new(
                 import_window::COMMAND,
-                "Import photos… (the import window; `source`: the card or folder it opens on)",
+                "Import photos… (`source`: the card or folder the import window opens on)",
                 "Library",
             ),
             Box::new(|a, _| Ok(Action::ImportWindow(a.clone()))),

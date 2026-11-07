@@ -203,7 +203,7 @@ command-library-importSource =
     .title = Import photos… (`path`: a card or folder, asked when absent; `copy`, `darktable`, `remember` when the workspace has no import source)
 
 command-library-importWindow =
-    .title = Import photos… (the import window; `source`: the card or folder it opens on)
+    .title = Import photos… (`source`: the card or folder the import window opens on)
 
 command-library-importWith =
     .title = Import with an importer plugin (`plugin`, `importer`; `source`: the file or folder it reads, asked when absent; `copy`, `darktable`)

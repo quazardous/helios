@@ -24,6 +24,8 @@ const SHELL: &[&str] = &[
     "crates/helios-gui/src/shell.rs",
     "crates/helios-gui/src/workbench.rs",
     "crates/helios-gui/src/plugins.rs",
+    // The import window, the shell's own (`library.importWindow`).
+    "crates/helios-gui/src/shell/import_window.rs",
 ];
 
 /// Declared menus, allowed outside the shell: a view of egui-pop's given
