@@ -8,9 +8,14 @@
 //!   "Choose a folder…" (egui-pop's folder chooser). Several can be
 //!   ticked. As it opens, the window ticks the first card, else the last
 //!   source used.
-//! - **Contents** and **Choices**: to come; for now Import imports each
-//!   source ticked through `library.importSource`, a card copied into the
-//!   Library, a folder added where it is.
+//! - **Contents**, the middle column: what the sources ticked hold, read
+//!   off the interface thread ([`crate::import_scan`]) and shown as it
+//!   comes, by capture day; each photo ticked by default, those probably
+//!   in the Library already greyed while "New only" is on, a RAW+JPEG
+//!   pair one cell. Import takes the files ticked (`library.importFiles`
+//!   with `paths`), a card's copied into the Library, a folder's added
+//!   where they are.
+//! - **Choices**: to come.
 //! - **A card inserted** while the window is closed: a toast whose action
 //!   opens the window on it.
 //!
@@ -33,6 +38,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use super::Shell;
+use crate::import_scan::{Contents, Counts, Known, Scan, Scanned, Types};
 use crate::volumes::{self, Volume, Volumes, Watch};
 
 /// The command that opens the window (`source`: the card or folder to
@@ -66,6 +72,14 @@ pub(crate) struct ImportWindow {
     touched: bool,
     /// The folder chooser, while it is open.
     choosing: Option<Pending>,
+    /// What the vault holds, for the "in your Library" prefilter.
+    known: Option<Known>,
+    /// Each source ticked being read, and whether it is read through.
+    scans: Vec<(PathBuf, Scan, bool)>,
+    contents: Contents,
+    /// The cell a Shift+click extends from, and the one Space toggles.
+    anchor: Option<usize>,
+    focus: Option<usize>,
 }
 
 impl ImportWindow {
@@ -77,6 +91,50 @@ impl ImportWindow {
         let text = serde_json::to_string_pretty(&self.memory).unwrap_or_default();
         if let Err(e) = std::fs::write(file, text) {
             log::warn!("import sources: {}: {e}", file.display());
+        }
+    }
+
+    /// Stops reading and forgets what was read.
+    fn clear_contents(&mut self) {
+        self.scans.clear();
+        self.contents = Contents::new();
+        self.anchor = None;
+        self.focus = None;
+    }
+
+    /// Reads the sources ticked (each on a thread of its own), forgets
+    /// the ones unticked, and takes in what the reads sent.
+    fn follow_scans(&mut self) {
+        let ticked = self.ticked.clone();
+        let before = self.scans.len();
+        self.scans.retain(|(p, _, _)| ticked.contains(p));
+        if self.scans.len() != before {
+            self.contents.keep_sources(&ticked);
+            self.anchor = None;
+            self.focus = None;
+        }
+        for path in &ticked {
+            if self.scans.iter().any(|(p, _, _)| p == path) {
+                continue;
+            }
+            let ctx = self.ctx.clone();
+            let scan = Scan::start(path.clone(), self.known.clone(), move || {
+                if let Some(ctx) = ctx.lock().unwrap_or_else(PoisonError::into_inner).as_ref() {
+                    ctx.request_repaint();
+                }
+            });
+            self.scans.push((path.clone(), scan, false));
+        }
+        for (_, scan, done) in &mut self.scans {
+            for sent in scan.take() {
+                match sent {
+                    Scanned::Found(found) => self.contents.add(found),
+                    Scanned::Glance { path, taken, thumb } => {
+                        self.contents.glance(&path, taken, thumb);
+                    }
+                    Scanned::Done => *done = true,
+                }
+            }
         }
     }
 
@@ -118,6 +176,24 @@ enum Event {
     Favourite(PathBuf, bool),
 }
 
+/// The Contents column's words.
+struct GridWords {
+    counts: String,
+    reading: String,
+    empty: String,
+    new_only: String,
+    all_types: String,
+    raw_only: String,
+    jpeg_only: String,
+    select: String,
+    all: String,
+    none: String,
+    day: String,
+    no_date: String,
+    in_library: String,
+    pair: String,
+}
+
 /// The window's words, in the shell's language.
 struct Words {
     title: String,
@@ -131,13 +207,14 @@ struct Words {
     add_favourite: String,
     remove_favourite: String,
     contents: String,
-    contents_soon: String,
+    grid: GridWords,
     choices: String,
     choices_card: String,
     choices_folder: String,
     cancel: String,
-    import: String,
+    import_count: String,
     nothing: String,
+    none_ticked: String,
 }
 
 fn name_of(p: &Path) -> String {
@@ -180,6 +257,36 @@ impl Shell {
         self.import_window.cards.clone()
     }
 
+    /// What the vault holds (size, partial hash), for the import window's
+    /// "in your Library" prefilter; called once per source read, off the
+    /// interface thread.
+    pub fn set_import_known(&mut self, known: Known) {
+        self.import_window.known = Some(known);
+    }
+
+    /// The import window's counts: photos shown, new, their size, and the
+    /// ones an Import takes.
+    pub fn import_counts(&self) -> Counts {
+        self.import_window.contents.counts()
+    }
+
+    /// Whether every source ticked in the import window is read through.
+    pub fn import_read(&self) -> bool {
+        let w = &self.import_window;
+        w.scans.len() == w.ticked.len() && w.scans.iter().all(|(_, _, done)| *done)
+    }
+
+    /// The import window's cells: name, day, probably in the Library, a
+    /// RAW+JPEG pair, ticked.
+    pub fn import_cells(&self) -> Vec<(String, Option<chrono::NaiveDate>, bool, bool, bool)> {
+        self.import_window
+            .contents
+            .cells
+            .iter()
+            .map(|c| (c.name(), c.day(), c.known(), c.is_pair(), c.ticked))
+            .collect()
+    }
+
     /// The sources ticked in the import window.
     pub fn import_ticked(&self) -> Vec<PathBuf> {
         self.import_window.ticked.clone()
@@ -190,6 +297,7 @@ impl Shell {
     pub(super) fn open_import_window(&mut self, args: &Value) {
         let w = &mut self.import_window;
         w.follow_cards();
+        w.clear_contents();
         w.open = true;
         w.touched = false;
         w.ticked.clear();
@@ -234,6 +342,7 @@ impl Shell {
         }
         self.receive_chosen_folder();
         if self.import_window.open {
+            self.import_window.follow_scans();
             self.import_window_ui(ctx);
         }
     }
@@ -297,10 +406,7 @@ impl Shell {
                 "Remove from favourites",
             )),
             contents: t(Message::new("gui-import-window-contents", "Contents")),
-            contents_soon: t(Message::new(
-                "gui-import-window-contents-soon",
-                "The photos of the sources ticked will show here.",
-            )),
+            grid: self.grid_words(),
             choices: t(Message::new("gui-import-window-choices", "Choices")),
             choices_card: t(Message::new(
                 "gui-import-window-choices-card",
@@ -311,11 +417,61 @@ impl Shell {
                 "A folder is added where it is.",
             )),
             cancel: t(Message::new("gui-import-window-cancel", "Cancel")),
-            import: t(Message::new("gui-import-verb", "Import")),
+            import_count: t(
+                Message::new("gui-import-window-import", "Import { $count }")
+                    .with("count", self.import_window.contents.counts().selected),
+            ),
             nothing: t(Message::new(
                 "gui-import-window-nothing",
                 "Tick a card or a folder to import",
             )),
+            none_ticked: t(Message::new(
+                "gui-import-window-none-ticked",
+                "Tick the photos to import",
+            )),
+        }
+    }
+
+    fn grid_words(&self) -> GridWords {
+        let t = |m: Message| self.text(m);
+        let counts = self.import_window.contents.counts();
+        let size = self
+            .import_window
+            .ctx
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+            .map_or_else(
+                || volumes::capacity_text(counts.bytes),
+                |ctx| crate::library::size_text(ctx, counts.bytes),
+            );
+        GridWords {
+            counts: t(Message::new(
+                "gui-import-window-counts",
+                "{ $photos } photos, { $new } new, { $size }",
+            )
+            .with("photos", counts.photos)
+            .with("new", counts.new)
+            .with("size", size)),
+            reading: t(Message::new("gui-import-window-reading", "Reading…")),
+            empty: t(Message::new(
+                "gui-import-window-empty",
+                "No photos in the sources ticked",
+            )),
+            new_only: t(Message::new("gui-import-window-new-only", "New only")),
+            all_types: t(Message::new("gui-import-window-all-types", "All types")),
+            raw_only: t(Message::new("gui-import-window-raw-only", "Raw only")),
+            jpeg_only: t(Message::new("gui-import-window-jpeg-only", "JPEG only")),
+            select: t(Message::new("gui-import-window-select", "Select:")),
+            all: t(Message::new("gui-import-window-select-all", "all")),
+            none: t(Message::new("gui-import-window-select-none", "none")),
+            day: t(Message::new("gui-import-window-select-day", "day")),
+            no_date: t(Message::new("gui-import-window-no-date", "No date")),
+            in_library: t(Message::new(
+                "gui-import-window-in-library",
+                "in your Library",
+            )),
+            pair: t(Message::new("gui-import-window-pair", "RAW+JPG")),
         }
     }
 
@@ -341,7 +497,8 @@ impl Shell {
                     ui.columns(3, |cols| {
                         sources_ui(&mut cols[0], w, &words, &mut event);
                         cols[1].heading(&words.contents);
-                        cols[1].weak(&words.contents_soon);
+                        let reading = w.scans.iter().any(|(_, _, done)| !done);
+                        contents_ui(&mut cols[1], w, &words.grid, reading);
                         cols[2].heading(&words.choices);
                         cols[2].label(&words.choices_card);
                         cols[2].label(&words.choices_folder);
@@ -350,10 +507,15 @@ impl Shell {
                 layout.footer(ui, |ui| {
                     ui.separator();
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let can = !w.ticked.is_empty();
+                        let count = w.contents.counts().selected;
+                        let why = if w.ticked.is_empty() {
+                            &words.nothing
+                        } else {
+                            &words.none_ticked
+                        };
                         let import = ui
-                            .add_enabled(can, egui::Button::new(&words.import))
-                            .on_disabled_hover_text(&words.nothing);
+                            .add_enabled(count > 0, egui::Button::new(&words.import_count))
+                            .on_disabled_hover_text(why);
                         if import.clicked() {
                             event = Some(Event::Import);
                         }
@@ -368,7 +530,10 @@ impl Shell {
         }
         match event {
             None => {}
-            Some(Event::Cancel) => self.import_window.open = false,
+            Some(Event::Cancel) => {
+                self.import_window.open = false;
+                self.import_window.clear_contents();
+            }
             Some(Event::Choose) => {
                 if let Some(f) = self.app.handle().service(&FILES) {
                     let request = FileRequest::folder(&words.choose).purpose("helios.import");
@@ -387,14 +552,19 @@ impl Shell {
         }
     }
 
-    /// Imports each source ticked as `library.importSource` does, a card
-    /// copied, a folder added where it is; the window closes at once.
+    /// Imports the photos ticked of each source ticked, as
+    /// `library.importFiles` does with their `paths`: a card's copied, a
+    /// folder's added where they are; the window closes at once.
     fn import_ticked_sources(&mut self) {
         let ticked = std::mem::take(&mut self.import_window.ticked);
         for path in &ticked {
+            let files = self.import_window.contents.selected_files(path);
+            if files.is_empty() {
+                continue;
+            }
             let card = self.import_window.is_card(path);
-            let args = json!({ "path": path, "copy": card });
-            if let Err(e) = self.import_from_source(&args, &Origin::User) {
+            let args = json!({ "paths": files, "copy": card });
+            if let Err(e) = self.import_files(&args, &Origin::User) {
                 self.warn(e);
             }
             let w = &mut self.import_window;
@@ -407,6 +577,7 @@ impl Shell {
         }
         self.import_window.save();
         self.import_window.open = false;
+        self.import_window.clear_contents();
     }
 }
 
@@ -483,4 +654,229 @@ fn source_row(
         }
     });
     event
+}
+
+/// The side of a cell of the grid, in points.
+const CELL: f32 = 88.0;
+
+/// The Contents column: the count line, the filters and selection, then
+/// the grid by day.
+fn contents_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &GridWords, reading: bool) {
+    let c = &mut w.contents;
+    ui.horizontal(|ui| {
+        ui.label(&words.counts);
+        if reading {
+            ui.spinner();
+            ui.weak(&words.reading);
+        }
+    });
+    ui.horizontal_wrapped(|ui| {
+        ui.checkbox(&mut c.new_only, &words.new_only);
+        let mut types = c.types;
+        let name = |t: Types| match t {
+            Types::All => &words.all_types,
+            Types::Raw => &words.raw_only,
+            Types::Jpeg => &words.jpeg_only,
+        };
+        egui::ComboBox::from_id_salt("helios.import.types")
+            .selected_text(name(types))
+            .show_ui(ui, |ui| {
+                for t in [Types::All, Types::Raw, Types::Jpeg] {
+                    ui.selectable_value(&mut types, t, name(t));
+                }
+            });
+        c.set_types(types);
+        ui.label(&words.select);
+        if ui.small_button(&words.all).clicked() {
+            c.tick_all(true);
+        }
+        if ui.small_button(&words.none).clicked() {
+            c.tick_all(false);
+        }
+        // The focused photo's day, alone.
+        let day = w.focus.map(|i| c.cells[i].day());
+        if ui
+            .add_enabled(day.is_some(), egui::Button::new(&words.day).small())
+            .clicked()
+            && let Some(day) = day
+        {
+            let types = c.types;
+            for cell in &mut c.cells {
+                cell.ticked = cell.day() == day || !cell.passes(types);
+            }
+        }
+    });
+    ui.separator();
+    // The previews read become textures, a few each frame.
+    let mut made = 0;
+    for (i, cell) in c.cells.iter_mut().enumerate() {
+        if made == 48 {
+            ui.ctx().request_repaint();
+            break;
+        }
+        if let Some(thumb) = cell.thumb.take() {
+            cell.texture = Some(ui.ctx().load_texture(
+                format!("helios.import.thumb.{i}"),
+                crate::library::thumbnail(&thumb),
+                egui::TextureOptions::LINEAR,
+            ));
+            made += 1;
+        }
+    }
+    if c.cells.is_empty() && !reading {
+        ui.weak(&words.empty);
+        return;
+    }
+    let shown = c.shown();
+    let days = c.days().to_vec();
+    let mut clicked = None;
+    egui::ScrollArea::vertical()
+        .id_salt("helios.import.grid")
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            for (day, cells) in &days {
+                let day_text = day.map_or_else(|| words.no_date.clone(), |d| d.to_string());
+                let mut all = cells.iter().all(|&i| c.cells[i].ticked || !c.importable(i));
+                if ui
+                    .checkbox(&mut all, format!("{day_text} · {}", cells.len()))
+                    .changed()
+                {
+                    for &i in cells {
+                        c.cells[i].ticked = all;
+                    }
+                }
+                ui.horizontal_wrapped(|ui| {
+                    for &i in cells {
+                        if cell_ui(ui, c, i, w.focus == Some(i), words) {
+                            clicked = Some(i);
+                        }
+                    }
+                });
+            }
+        });
+    let shift = ui.input(|i| i.modifiers.shift);
+    if let Some(i) = clicked {
+        // Shift extends the anchor's tick to every cell between.
+        if let Some(anchor) = w.anchor.filter(|_| shift) {
+            let on = c.cells[anchor].ticked;
+            let (a, b) = (
+                shown.iter().position(|&x| x == anchor),
+                shown.iter().position(|&x| x == i),
+            );
+            if let (Some(a), Some(b)) = (a, b) {
+                for &x in &shown[a.min(b)..=a.max(b)] {
+                    c.cells[x].ticked = on;
+                }
+            }
+        } else {
+            c.cells[i].ticked = !c.cells[i].ticked;
+            w.anchor = Some(i);
+        }
+        w.focus = Some(i);
+    }
+    if let Some(i) = w.focus
+        && !ui.ctx().egui_wants_keyboard_input()
+        && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Space))
+    {
+        c.cells[i].ticked = !c.cells[i].ticked;
+        w.anchor = Some(i);
+    }
+}
+
+/// A cell: its preview, its tick, greyed with "in your Library" when New
+/// only leaves it out, "RAW+JPG" on a pair; its name, time and size on
+/// hover. Whether it was clicked.
+fn cell_ui(ui: &mut egui::Ui, c: &Contents, i: usize, focused: bool, words: &GridWords) -> bool {
+    let cell = &c.cells[i];
+    let importable = c.importable(i);
+    let greyed = c.new_only && cell.known();
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(CELL, CELL), egui::Sense::click());
+    let mut label = cell.name();
+    if greyed {
+        label = format!("{label} · {}", words.in_library);
+    }
+    if cell.is_pair() {
+        label = format!("{label} · {}", words.pair);
+    }
+    let ticked = cell.ticked && importable;
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(egui::Role::CheckBox, importable, ticked, &label)
+    });
+    if ui.is_rect_visible(rect) {
+        let visuals = ui.visuals();
+        let painter = ui.painter_at(rect);
+        painter.rect_filled(rect, 4.0, visuals.extreme_bg_color);
+        if let Some(texture) = &cell.texture {
+            let size = texture.size_vec2();
+            let inner = rect.shrink(4.0);
+            let scale = (inner.width() / size.x).min(inner.height() / size.y);
+            let image = egui::Rect::from_center_size(inner.center(), size * scale);
+            let tint = if greyed {
+                egui::Color32::from_gray(90)
+            } else {
+                egui::Color32::WHITE
+            };
+            painter.image(
+                texture.id(),
+                image,
+                egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                tint,
+            );
+        }
+        let small = egui::FontId::proportional(10.0);
+        if greyed {
+            painter.text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                &words.in_library,
+                small.clone(),
+                visuals.strong_text_color(),
+            );
+        }
+        if cell.is_pair() {
+            let text =
+                painter.layout_no_wrap(words.pair.clone(), small, visuals.strong_text_color());
+            let at = rect.left_bottom() + egui::vec2(4.0, -4.0 - text.size().y);
+            painter.rect_filled(
+                egui::Rect::from_min_size(at, text.size()).expand(2.0),
+                2.0,
+                visuals.widgets.inactive.bg_fill,
+            );
+            painter.galley(at, text, visuals.strong_text_color());
+        }
+        if importable {
+            let tick =
+                egui::Rect::from_min_size(rect.min + egui::vec2(4.0, 4.0), egui::vec2(14.0, 14.0));
+            let fill = if ticked {
+                visuals.selection.bg_fill
+            } else {
+                visuals.widgets.inactive.bg_fill
+            };
+            painter.rect_filled(tick, 2.0, fill);
+            if ticked {
+                painter.text(
+                    tick.center(),
+                    egui::Align2::CENTER_CENTER,
+                    "✔",
+                    egui::FontId::proportional(11.0),
+                    visuals.selection.stroke.color,
+                );
+            }
+        }
+        let stroke = if focused {
+            visuals.selection.stroke
+        } else if response.hovered() {
+            visuals.widgets.hovered.bg_stroke
+        } else {
+            egui::Stroke::NONE
+        };
+        painter.rect_stroke(rect.shrink(0.5), 4.0, stroke, egui::StrokeKind::Inside);
+    }
+    let size = crate::library::size_text(ui.ctx(), cell.bytes);
+    let time = cell.time().map_or_else(
+        || words.no_date.clone(),
+        |t| t.format("%Y-%m-%d %H:%M:%S").to_string(),
+    );
+    let response = response.on_hover_text(format!("{}\n{time}\n{size}", cell.name()));
+    response.clicked() && importable
 }

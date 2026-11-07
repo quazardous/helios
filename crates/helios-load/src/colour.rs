@@ -305,6 +305,44 @@ impl<'a> Ifds<'a> {
     }
 }
 
+/// What an Exif block says of a picture at a glance: when it was taken
+/// (`DateTimeOriginal`, else `DateTime`, as written: `YYYY:MM:DD
+/// HH:MM:SS`), and its thumbnail (the JPEG of the second directory).
+pub(crate) fn exif_glance(block: &[u8]) -> (Option<String>, Option<Vec<u8>>) {
+    let Some(t) = Ifds::new(block) else {
+        return (None, None);
+    };
+    let ascii = |ifd: usize, tag: u16| -> Option<String> {
+        let (kind, count, at) = t.entry(ifd, tag)?;
+        (kind == 2 && count > 4).then_some(())?;
+        let start = t.u32(at)? as usize;
+        let bytes = t.b.get(start..start + count as usize)?;
+        let text = std::str::from_utf8(bytes)
+            .ok()?
+            .trim_end_matches('\0')
+            .trim();
+        (!text.is_empty()).then(|| text.to_string())
+    };
+    let Some(ifd0) = t.u32(4).map(|v| v as usize) else {
+        return (None, None);
+    };
+    let taken = t
+        .pointer(ifd0, 0x8769)
+        .and_then(|exif| ascii(exif, 0x9003))
+        .or_else(|| ascii(ifd0, 0x0132));
+    let thumb = (|| {
+        let count = t.u16(ifd0)? as usize;
+        let ifd1 = t.u32(ifd0 + 2 + 12 * count)? as usize;
+        (ifd1 != 0).then_some(())?;
+        let (_, _, at) = t.entry(ifd1, 0x0201)?;
+        let start = t.u32(at)? as usize;
+        let (_, _, at) = t.entry(ifd1, 0x0202)?;
+        let len = t.u32(at)? as usize;
+        t.b.get(start..start + len).map(<[u8]>::to_vec)
+    })();
+    (taken, thumb)
+}
+
 /// Exif `ColorSpace` (tag 0xA001) and the interoperability index (tag 1 of
 /// the interoperability directory, "R98" or "R03"), when there.
 fn exif_colour(block: &[u8]) -> Option<(u16, Option<[u8; 3]>)> {

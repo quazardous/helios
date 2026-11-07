@@ -128,6 +128,68 @@ pub fn preview(path: &Path) -> Result<Option<Image>, String> {
     Ok(found.map(|img| working(&img)))
 }
 
+/// What [`glance`] found: a small picture and when it was taken.
+pub struct Glance {
+    /// The smallest preview the file carries (a raw's thumbnail or
+    /// preview, a JPEG's Exif thumbnail), else the picture itself, in the
+    /// working space; `None` when there is none.
+    pub preview: Option<Image>,
+    /// When it was taken, as the camera wrote it (`YYYY:MM:DD HH:MM:SS`).
+    pub taken: Option<String>,
+}
+
+/// A file at a glance, for a grid of what a card holds: its smallest
+/// embedded preview and its capture time, never a raw's mosaic decoded.
+/// A picture without an Exif thumbnail is decoded whole.
+///
+/// # Errors
+/// The file cannot be read, or a raw's format is unknown.
+pub fn glance(path: &Path) -> Result<Glance, String> {
+    // Not hashed: a glance identifies nothing.
+    let bytes =
+        Arc::new(std::fs::read(path).map_err(|e| format!("cannot read {}: {e}", path.display()))?);
+    let named = |e: String| format!("{}: {e}", path.display());
+    if Kind::of(path) == Kind::Raw {
+        let source = RawSource::new_from_shared_vec(bytes);
+        let decoder = rawler::get_decoder(&source).map_err(|e| named(e.to_string()))?;
+        let params = RawDecodeParams::default();
+        let preview = [
+            decoder.thumbnail_image(&source, &params),
+            decoder.preview_image(&source, &params),
+        ]
+        .into_iter()
+        .find_map(|r| r.ok().flatten())
+        .map(|img| working(&img));
+        let taken = decoder.raw_metadata(&source, &params).ok().and_then(|m| {
+            m.exif
+                .date_time_original
+                .clone()
+                .or_else(|| m.exif.create_date.clone())
+        });
+        return Ok(Glance { preview, taken });
+    }
+    let reader = image::ImageReader::new(Cursor::new(&bytes[..]))
+        .with_guessed_format()
+        .map_err(|e| named(e.to_string()))?;
+    let (taken, thumb) = if reader.format() == Some(image::ImageFormat::Jpeg) {
+        use image::ImageDecoder as _;
+        image::codecs::jpeg::JpegDecoder::new(Cursor::new(&bytes[..]))
+            .ok()
+            .and_then(|mut d| d.exif_metadata().ok().flatten())
+            .map_or((None, None), |block| colour::exif_glance(&block))
+    } else {
+        (None, None)
+    };
+    let preview = match thumb.and_then(|t| image::load_from_memory(&t).ok()) {
+        Some(img) => working(&img),
+        None => load(path)?.image,
+    };
+    Ok(Glance {
+        preview: Some(preview),
+        taken,
+    })
+}
+
 /// How a raw file was shot, as its EXIF says.
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct Shot {
