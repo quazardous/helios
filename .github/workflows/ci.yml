@@ -76,6 +76,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: windows
+          # A failing test must not cost the next run a full build.
+          cache-on-failure: true
       - run: cargo build --locked --workspace --all-targets
       - run: cargo test --locked --workspace --no-fail-fast
 
