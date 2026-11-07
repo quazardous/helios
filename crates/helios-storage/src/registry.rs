@@ -5,8 +5,9 @@
 //! detected facts (kind, size, free space, drive, mount point) and
 //! `last_seen` (when, on which node, where); a new one starts with its
 //! label as name and its kind's roles, plus the library role when it holds
-//! the library folder. What the user set (name, roles) is kept. A volume
-//! not seen stays as it was: offline, never dropped.
+//! the library folder. What the user set (name, roles, off site, RAID) is
+//! kept, and [`save`] writes it (the Storage page). A volume not seen
+//! stays as it was: offline, never dropped.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -75,9 +76,11 @@ pub fn record<S: Store>(
                 mount: seen.mount.clone(),
             });
             if let Some(old) = known.remove(&seen.id) {
-                // The user's: its name and roles.
+                // The user's: its name, roles and flags.
                 volume.name = old.name;
                 volume.roles = old.roles;
+                volume.off_site = old.off_site;
+                volume.raid = old.raid;
             } else {
                 volume.roles = seen.default_roles();
                 if holder.as_ref() == Some(&seen.id) {
@@ -92,6 +95,30 @@ pub fn record<S: Store>(
         offline.sort_by(|a, b| a.name.cmp(&b.name).then(a.id.cmp(&b.id)));
         online.extend(offline);
         Ok(online)
+    })
+}
+
+/// Saves what the user set on a known volume: its name (its label when
+/// left blank), roles, off site and RAID flags. What a scan detects
+/// (kind, size, last seen) stays as recorded. Returns the volume as
+/// stored.
+pub fn save<S: Store>(vault: &Vault<S>, volume: &Volume) -> Result<Volume, String> {
+    vault.storage_transaction(|tx| {
+        let mut record = match tx.volume(volume.id.as_str())? {
+            Some(doc) => decode(volume.id.as_str(), doc)?,
+            None => return Err(format!("no volume {}", volume.id)),
+        };
+        let name = volume.name.trim();
+        record.name = if name.is_empty() {
+            record.label.clone().unwrap_or_else(|| record.name.clone())
+        } else {
+            name.to_string()
+        };
+        record.roles.clone_from(&volume.roles);
+        record.off_site = volume.off_site;
+        record.raid = volume.raid;
+        tx.set_volume(record.id.as_str(), Some(&encode(&record)?))?;
+        Ok(record)
     })
 }
 
@@ -214,6 +241,32 @@ mod tests {
         let photos_now = all.iter().find(|v| v.id.as_str() == "uuid:photos").unwrap();
         assert_eq!(photos_now.node.as_deref(), Some("studio"));
         assert_eq!(known(&vault).unwrap().len(), 4);
+    }
+
+    #[test]
+    fn saving_keeps_what_the_user_set_across_scans() {
+        let vault = Vault::new(MemoryStore::default());
+        let backup = disk("uuid:backup", "/media/Backup", VolumeKind::External);
+        record(&vault, std::slice::from_ref(&backup), "studio", 1, None).unwrap();
+        let mut edited = backup.clone();
+        edited.name = "  Backup-2 ".into();
+        edited.roles = BTreeSet::from([Role::Backup]);
+        edited.off_site = true;
+        edited.raid = true;
+        // A save does not take the detected facts it is given.
+        edited.free = Some(1);
+        let saved = save(&vault, &edited).unwrap();
+        assert_eq!(saved.name, "Backup-2");
+        assert_eq!(saved.free, backup.free);
+        let all = record(&vault, std::slice::from_ref(&backup), "studio", 2, None).unwrap();
+        assert_eq!(all[0].name, "Backup-2");
+        assert_eq!(all[0].roles, BTreeSet::from([Role::Backup]));
+        assert!(all[0].off_site && all[0].raid);
+        // A blank name is its label again.
+        edited.name = " ".into();
+        assert_eq!(save(&vault, &edited).unwrap().name, "uuid:backup");
+        let unknown = disk("uuid:other", "/media/Other", VolumeKind::External);
+        assert!(save(&vault, &unknown).is_err());
     }
 
     #[test]

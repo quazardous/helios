@@ -361,6 +361,8 @@ pub fn weak(label: &str, capacity: Option<u64>) -> Volume {
         node: None,
         last_seen: None,
         has_dcim: false,
+        off_site: false,
+        raid: false,
     }
 }
 

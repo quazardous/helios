@@ -86,6 +86,10 @@ pub struct Image {
     pub partial: ContentHash,
 }
 
+/// The bus event a scan's location changes are announced as
+/// ([`Vault::update_locations`]).
+pub const LOCATIONS_CHANGED: &str = "vault.locations_changed";
+
 /// Whether a location's file can be read now.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -745,7 +749,9 @@ impl<S: Store> Vault<S> {
     /// Writes locations a scan changed (their volume, path inside it,
     /// presence, or the absolute path a moved mount point gives), in one
     /// transaction. Each is `(image, the path it was stored at, the
-    /// location now)`: a new path replaces the old row.
+    /// location now)`: a new path replaces the old row. Announced on the
+    /// bus as [`LOCATIONS_CHANGED`] (`count`: how many changed), so a
+    /// library shown reads its photos' presence again.
     pub fn update_locations(&self, updates: &[(ImageId, PathBuf, Location)]) -> Result<(), String> {
         if updates.is_empty() {
             return Ok(());
@@ -760,6 +766,14 @@ impl<S: Store> Vault<S> {
             Ok(())
         })?;
         self.catalog.lock().expect("catalog lock").version += 1;
+        if let Some(bus) = &self.bus {
+            bus.publish_value(
+                "vault",
+                None,
+                LOCATIONS_CHANGED,
+                serde_json::json!({ "count": updates.len() }),
+            );
+        }
         Ok(())
     }
 

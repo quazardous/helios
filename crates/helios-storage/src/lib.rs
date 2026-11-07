@@ -80,6 +80,17 @@ pub enum Role {
     Scratch,
 }
 
+impl Role {
+    /// Every role, in the order the Storage page shows them.
+    pub const ALL: [Role; 5] = [
+        Role::Library,
+        Role::Archive,
+        Role::Backup,
+        Role::Ingest,
+        Role::Scratch,
+    ];
+}
+
 /// When and on which node a volume was last seen, and where it was
 /// mounted then.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -126,6 +137,15 @@ pub struct Volume {
     /// Whether it holds a `DCIM` folder: a card or a camera.
     #[serde(default)]
     pub has_dcim: bool,
+    /// Kept away from the others (the user says): what an off-site copy
+    /// needs.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub off_site: bool,
+    /// A RAID array (the user says; Helios cannot always tell). It still
+    /// counts as one copy: its redundancy guards against a dead disk, not
+    /// against deletion, corruption or theft.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub raid: bool,
 }
 
 impl Volume {

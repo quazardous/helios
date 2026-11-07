@@ -112,13 +112,15 @@ impl Check for FreeSpace {
                 .with("capacity", capacity_text(capacity))
                 .with("percent", percent);
                 let mut finding = Finding::new(FREE_SPACE, v.id.as_str(), level, message, detail);
-                if level > Level::Ok
-                    && let Some(mount) = &v.mount
-                {
+                if level > Level::Ok {
+                    // The Storage page, on this volume.
                     finding = finding.fix(Fix {
-                        command: "library.openFolder".into(),
-                        args: json!({ "path": mount }),
-                        label: Message::new("health-fix-open-volume", "Open the volume"),
+                        command: "library.storage".into(),
+                        args: json!({ "volume": v.id.as_str() }),
+                        label: Message::new(
+                            "health-fix-show-volume",
+                            "Show it on the Storage page",
+                        ),
                     });
                 }
                 Some(finding)
@@ -244,6 +246,8 @@ mod tests {
             node: None,
             last_seen: None,
             has_dcim: false,
+            off_site: false,
+            raid: false,
         }
     }
 
@@ -269,8 +273,8 @@ mod tests {
             ]
         );
         let fix = found[1].fix.as_ref().unwrap();
-        assert_eq!(fix.command, "library.openFolder");
-        assert_eq!(fix.args["path"], "/mnt/b");
+        assert_eq!(fix.command, "library.storage");
+        assert_eq!(fix.args["volume"], "backup");
     }
 
     #[test]
