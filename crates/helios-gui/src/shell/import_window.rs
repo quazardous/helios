@@ -271,6 +271,8 @@ struct Words {
     delete_preset: String,
     nothing: String,
     none_ticked: String,
+    /// Why nothing can be imported: no library open.
+    no_library: Option<String>,
 }
 
 fn name_of(p: &Path) -> String {
@@ -576,6 +578,7 @@ impl Shell {
                 "gui-import-window-none-ticked",
                 "Tick the photos to import",
             )),
+            no_library: self.no_library.clone().map(t),
         }
     }
 
@@ -712,7 +715,9 @@ impl Shell {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             let count = w.contents.counts().selected;
                             let bad_name = words.choices.bad_name.as_ref().filter(|_| w.copies());
-                            let why = if w.ticked.is_empty() {
+                            let why = if let Some(e) = &words.no_library {
+                                e
+                            } else if w.ticked.is_empty() {
                                 &words.nothing
                             } else if let Some(e) = bad_name {
                                 e
@@ -721,7 +726,7 @@ impl Shell {
                             };
                             let import = ui
                                 .add_enabled(
-                                    count > 0 && bad_name.is_none(),
+                                    count > 0 && bad_name.is_none() && words.no_library.is_none(),
                                     egui::Button::new(&words.import_count),
                                 )
                                 .on_disabled_hover_text(why);
@@ -731,7 +736,9 @@ impl Shell {
                             if ui.button(&words.cancel).clicked() {
                                 event = Some(Event::Cancel);
                             }
-                            if count > 0 {
+                            if let Some(e) = &words.no_library {
+                                ui.colored_label(ui.visuals().warn_fg_color, e);
+                            } else if count > 0 {
                                 ui.label(&words.totals);
                             }
                         });
@@ -779,8 +786,14 @@ impl Shell {
     /// `library.importFiles` does with their `paths` and the choices
     /// (copied or added where they are, filed, named, duplicates,
     /// darktable edits), kept as the last used; the window closes at
-    /// once.
+    /// once. Without a library open, nothing is imported: a toast says
+    /// why and the window stays.
     fn import_ticked_sources(&mut self) {
+        // No library to import into: said, the window left open.
+        if let Err(e) = self.can_import() {
+            self.warn(e);
+            return;
+        }
         let copy = self.import_window.copies();
         let any_card = self
             .import_window

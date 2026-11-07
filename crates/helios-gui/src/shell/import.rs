@@ -79,6 +79,15 @@ impl Shell {
         self.import_lines.0.clone()
     }
 
+    /// Whether an import can be queued: not without a library open, the
+    /// error then saying so (rather than the host's missing command).
+    pub(super) fn can_import(&self) -> Result<(), String> {
+        match &self.no_library {
+            None => Ok(()),
+            Some(why) => Err(self.text(why.clone())),
+        }
+    }
+
     /// The Log panel's entries, to read.
     pub fn log(&self) -> std::cell::Ref<'_, crate::log_panel::Log> {
         self.log.borrow()
@@ -93,6 +102,7 @@ impl Shell {
         args: &Value,
         origin: &Origin,
     ) -> Result<Value, String> {
+        self.can_import()?;
         let Some(path) = args
             .get("path")
             .and_then(Value::as_str)
@@ -123,6 +133,7 @@ impl Shell {
     /// import. With `ask` (a drop on the window), a workspace without an
     /// import source asks where they go first, unless `copy` says it.
     pub(super) fn import_files(&mut self, args: &Value, origin: &Origin) -> Result<Value, String> {
+        self.can_import()?;
         let paths = paths_of(&json!({ "paths": args["paths"] }));
         if paths.is_empty() {
             return Err("`paths` is missing".into());
@@ -156,6 +167,7 @@ impl Shell {
                 .and_then(Value::as_str)
                 .filter(|s| !s.is_empty())
         };
+        self.can_import()?;
         let (plugin, importer) = (
             text("plugin").ok_or("`plugin` is missing")?,
             text("importer").ok_or("`importer` is missing")?,
@@ -266,13 +278,15 @@ impl Shell {
 
     /// Queues an import of `target` (`path` or `paths`) with the choices of
     /// `args` (`copy`, `into`, `layout`, `rename`, `duplicates`,
-    /// `darktable`), remembered first when asked.
+    /// `darktable`), remembered first when asked. Without a library open,
+    /// nothing is queued: the error says so.
     fn import_now(
         &mut self,
         mut target: Value,
         args: &Value,
         origin: &Origin,
     ) -> Result<Value, String> {
+        self.can_import()?;
         let copy = args.get("copy").and_then(Value::as_bool);
         let darktable = args
             .get("darktable")
@@ -610,4 +624,13 @@ impl Shell {
             self.warn(e);
         }
     }
+}
+
+/// Why nothing is imported without a library open: the host runs imports
+/// as `library.import`, which it has only with one (`--vault FILE`).
+pub(crate) fn no_library() -> Message {
+    Message::new(
+        "gui-import-no-library",
+        "No library is open: start Helios with one (--vault FILE) to import photos",
+    )
 }

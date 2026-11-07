@@ -74,6 +74,10 @@ mod workshop_edit;
 mod workspace_edit;
 mod workspace_live;
 
+/// The command the host registers to run the imports the shell hands
+/// over ([`Shell::take_imports`]); only with a library open.
+pub const IMPORT_COMMAND: &str = "library.import";
+
 /// The screen's own scale (physical pixels per point, the interface zoom
 /// left out) from which it is `hidpi` for profile variants.
 const HIDPI: f32 = 1.5;
@@ -520,6 +524,10 @@ pub struct Shell {
     import_source: Option<helios_template::ImportDesc>,
     /// Imports asked for (`library.import`'s arguments), for the host.
     imports: Vec<Value>,
+    /// Why the host has no library to import into (no `library.import`
+    /// registered), else none: imports then say so instead of being
+    /// queued.
+    no_library: Option<Message>,
     /// The photos the imports running brought so far, and those the last
     /// one brought, to select once the Library shows them.
     imported_ids: Vec<String>,
@@ -923,6 +931,7 @@ impl Shell {
             duplicates: Rc::default(),
             import_source: None,
             imports: Vec::new(),
+            no_library: None,
             imported_ids: Vec::new(),
             select_imported: Vec::new(),
             import_window: import_window::ImportWindow::default(),
@@ -3965,10 +3974,29 @@ impl Shell {
             .is_some_and(|i| i.suggest_stacks)
     }
 
-    /// The imports asked for since the last call (`library.import`'s
+    /// The imports asked for since the last call ([`IMPORT_COMMAND`]'s
     /// arguments), for the host to run.
     pub fn take_imports(&mut self) -> Vec<Value> {
         std::mem::take(&mut self.imports)
+    }
+
+    /// Says whether the host has a library to import into: it runs the
+    /// imports asked for as `library.import`, which it registers only
+    /// with a library open. Without one, the import window's Import
+    /// button is off and every import says why. Open by default (an
+    /// embedder or a test running the imports itself).
+    pub fn set_library_open(&mut self, open: bool) {
+        self.no_library = (!open).then(import::no_library);
+    }
+
+    /// Whether a library is open to import into ([`Shell::set_library_open`]).
+    pub fn library_open(&self) -> bool {
+        self.no_library.is_none()
+    }
+
+    /// Whether a command of that id is registered.
+    pub fn has_command(&self, id: &str) -> bool {
+        lock(&self.registry).specs().any(|s| s.id == id)
     }
 
     /// A workspace from a template: the templates to pick from (the

@@ -309,6 +309,8 @@ gui-import-form-title = Import photos
 
 gui-import-metadata = { $photos } photos took their ratings, labels or tags from the importer
 
+gui-import-no-library = No library is open: start Helios with one (--vault FILE) to import photos
+
 gui-import-path = card or folder
 
 gui-import-remember = Remember for this workspace

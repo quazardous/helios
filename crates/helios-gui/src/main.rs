@@ -257,7 +257,7 @@ fn library_commands(
     let plugins = plugins.clone();
     shell.register(
         CommandSpec::new(
-            "library.import",
+            helios_gui::shell::IMPORT_COMMAND,
             "Import a folder or a card (`path`, or `paths` for several files and folders; `importer`: `plugin`, `importer` and `source` to import through an importer plugin; `copy`, `into`, `rename`, `layout`, `duplicates`; `darktable`: false leaves the .xmp sidecars out)",
             "Library",
         ),
@@ -997,9 +997,11 @@ impl eframe::App for App {
         let mut imports = self.shell.take_imports();
         imports.extend(self.shell.duplicates_mut().take_imports());
         for args in imports {
-            let _ = self
-                .shell
-                .run("library.import", args, helios_shell::commands::Origin::User);
+            let _ = self.shell.run(
+                helios_gui::shell::IMPORT_COMMAND,
+                args,
+                helios_shell::commands::Origin::User,
+            );
         }
         // Exports asked for: planned over the library and run as jobs.
         for ask in self.shell.take_exports() {
@@ -1557,6 +1559,10 @@ fn main() -> Result<(), String> {
             {
                 shell.notes.push(format!("library commands: {e}"));
             }
+            // Without a library (no `--vault`), nothing registers the
+            // import the shell hands over: its imports say so instead.
+            let can_import = shell.has_command(helios_gui::shell::IMPORT_COMMAND);
+            shell.set_library_open(can_import);
             let exporter = persist.as_ref().map(|p| {
                 let ctx = cc.egui_ctx.clone();
                 helios_gui::export::Exporter::new(

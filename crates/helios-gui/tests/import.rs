@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use egui::{Key, Modifiers, vec2};
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable as _;
+use egui_kittest::kittest::{NodeT as _, Queryable as _};
 use helios_gui::dialogs::Level;
 use helios_gui::{Shell, headless, helios_panels, templates};
 use helios_library::import::{Options, import};
@@ -985,4 +985,89 @@ fn the_import_window_keeps_its_size() {
     h.run_steps(3);
     headless::assert_window_stable(&mut h, "Choose a folder…", 60);
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+const NO_LIBRARY: &str =
+    "No library is open: start Helios with one (--vault FILE) to import photos";
+
+/// No toast nor note says a command is missing (the host's
+/// `library.import` without a library, as it was).
+fn no_missing_command(shell: &Shell) {
+    assert!(
+        !shell.notes.iter().any(|n| n.contains("no command")),
+        "{:?}",
+        shell.notes
+    );
+}
+
+/// Helios started without a library (no `--vault`): the window opens on a
+/// card and says why nothing can be imported, its Import button off;
+/// nothing is queued for a command the host does not have.
+#[test]
+fn without_a_library_the_import_window_says_so_and_its_import_button_is_off() {
+    let dir = temp("no-library");
+    let dcim = dir.join("EOS_DIGITAL/DCIM/100CANON");
+    std::fs::create_dir_all(&dcim).unwrap();
+    put(&dcim.join("IMG_0001.JPG"), Ok(&jpeg("a")), 2);
+    let mut h = card_window_with(&dir, None, |shell| shell.set_library_open(false));
+    assert!(h.state().import_window_open());
+    let _ = h.get_by_label(NO_LIBRARY);
+    let import = h.get_by_label("Import 1");
+    assert!(import.accesskit_node().is_disabled());
+    import.click();
+    h.run_steps(3);
+    assert!(h.state_mut().take_imports().is_empty());
+    assert!(h.state().import_window_open(), "the window stays");
+    no_missing_command(h.state());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A folder dropped without a library: the window opens on it and says
+/// so; the scripted imports refuse with the same reason.
+#[test]
+fn without_a_library_a_drop_and_every_import_command_say_why() {
+    let dir = temp("no-library-drop");
+    put(&dir.join("a.jpg"), Ok(&jpeg("a")), 2);
+    put(&dir.join("c.jpg"), Ok(&jpeg("c")), 2);
+    let mut shell = Shell::new(helios_panels(), None);
+    shell.set_library_open(false);
+    let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+    h.run();
+    drop_on(&mut h, &dir);
+    assert!(h.state().import_window_open());
+    read_through(&mut h);
+    let _ = h.get_by_label(NO_LIBRARY);
+    assert!(h.get_by_label("Import 2").accesskit_node().is_disabled());
+    for (id, args) in [
+        ("library.importFiles", json!({ "paths": [dir] })),
+        ("library.importSource", json!({ "path": dir })),
+    ] {
+        let e = h.state_mut().run(id, args, Origin::User).unwrap_err();
+        assert_eq!(e, NO_LIBRARY, "{id}");
+    }
+    assert!(h.state_mut().take_imports().is_empty());
+    no_missing_command(h.state());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The commands the import path dispatches: the shell's own are
+/// registered; the one it hands imports to (`library.import`) is the
+/// host's, registered only with a library open, so a shell whose host
+/// has none never queues one.
+#[test]
+fn the_commands_the_import_path_dispatches_are_registered() {
+    let shell = Shell::new(helios_panels(), None);
+    for id in [
+        "library.importWindow",
+        "library.importFiles",
+        "library.importSource",
+        "library.importWith",
+    ] {
+        assert!(shell.has_command(id), "{id} is not registered");
+    }
+    assert!(
+        !shell.has_command(helios_gui::shell::IMPORT_COMMAND),
+        "the host's command, not the shell's"
+    );
+    assert!(shell.library_open(), "open unless the host says otherwise");
 }
