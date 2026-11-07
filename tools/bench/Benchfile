@@ -466,7 +466,7 @@ timeout = "30m"
 about = "egui-pop's gate: fmt, clippy, the workspace tests with the doctests, the docs build, and the docs site's links"
 checkouts = ["egui-pop"]
 cores = 5
-memory = "4g"
+memory = "5g"
 cwd = "/work/${src:-egui-pop}"
 command = """mkdir -p /tmp/w/egui-pop && cp -r --preserve=mode . /tmp/w/egui-pop/ && cd /tmp/w/egui-pop && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/egui-pop ] || { rm -rf /target/* && echo /tmp/w/egui-pop > /target/.built-at; }; } && cargo fmt --all --check \
  && cargo clippy --workspace --all-targets --locked -- -D warnings \
