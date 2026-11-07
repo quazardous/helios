@@ -5444,6 +5444,44 @@ pub mod headless {
         }
         Ok(())
     }
+
+    /// Where the window or modal titled `title` is drawn now, frame and
+    /// title bar included: an `egui::Window` by its accessibility node,
+    /// an egui-pop modal (the file chooser) by its overlay.
+    pub fn window_rect(harness: &Harness<'_, Shell>, title: &str) -> Option<egui::Rect> {
+        use egui_kittest::kittest::Queryable as _;
+        let window = harness
+            .query_by_role_and_label(egui::accesskit::Role::Window, title)
+            .map(|n| n.rect());
+        window.or_else(|| {
+            egui_pop::core::overlay::rects(&harness.ctx)
+                .into_iter()
+                .find(|(spec, _)| spec.label == title)
+                .map(|(_, rect)| rect)
+        })
+    }
+
+    /// Steps `frames` frames (six at least) and asserts that the window
+    /// titled `title` keeps, every frame after the fifth, the rect it had
+    /// at the fifth: a window never grows on its own, frame after frame,
+    /// through a spacing or a margin its content counts twice.
+    pub fn assert_window_stable(harness: &mut Harness<'_, Shell>, title: &str, frames: usize) {
+        assert!(frames > 5, "{frames} frames: six at least");
+        let mut first = None;
+        for frame in 1..=frames {
+            harness.step();
+            let rect = window_rect(harness, title)
+                .unwrap_or_else(|| panic!("no window titled {title:?} at frame {frame}"));
+            match first {
+                None if frame == 5 => first = Some(rect),
+                Some(first) => assert_eq!(
+                    rect, first,
+                    "the window {title:?} changed between frame 5 and frame {frame}"
+                ),
+                None => {}
+            }
+        }
+    }
 }
 
 /// The tabs holding a panel, with the index of the one in front.

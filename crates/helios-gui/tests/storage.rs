@@ -277,3 +277,20 @@ fn an_offline_photo_shows_its_badge_and_plugging_its_disk_in_clears_it() {
     world2.persist.fill_library(h.state_mut()).unwrap();
     assert_eq!(badges(&h), ["missing"]);
 }
+
+/// The Storage page keeps the size it opened at, frame after frame, in a
+/// 960x640 main window.
+#[test]
+fn the_storage_page_keeps_its_size() {
+    let (mut world, shell) = World::new("stable");
+    let mut h = headless::harness(shell, vec2(960.0, 640.0));
+    let studio = world.studio.clone();
+    world.plug(&mut h, &[&studio], FIRST + DAY);
+    h.state_mut()
+        .run(STORAGE_COMMAND, json!(null), Origin::User)
+        .unwrap();
+    until(&mut h, "the page", |h| {
+        h.query_by_label("Storage").is_some()
+    });
+    headless::assert_window_stable(&mut h, "Storage", 120);
+}

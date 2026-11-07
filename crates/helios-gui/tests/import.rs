@@ -172,6 +172,16 @@ fn card_window_with(
     known: Option<helios_gui::import_scan::Known>,
     setup: impl FnOnce(&mut Shell),
 ) -> Harness<'static, Shell> {
+    card_window_at(dir, known, setup, vec2(1280.0, 800.0))
+}
+
+/// [`card_window_with`], in a main window of `size`.
+fn card_window_at(
+    dir: &Path,
+    known: Option<helios_gui::import_scan::Known>,
+    setup: impl FnOnce(&mut Shell),
+    size: egui::Vec2,
+) -> Harness<'static, Shell> {
     let card = dir.join("EOS_DIGITAL");
     let mut shell = Shell::new(helios_panels(), None);
     setup(&mut shell);
@@ -183,7 +193,7 @@ fn card_window_with(
     if let Some(known) = known {
         shell.set_import_known(known);
     }
-    let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+    let mut h = headless::harness(shell, size);
     // The cards are polled on a thread of their own: the first list
     // comes within a few frames.
     let deadline = Instant::now() + Duration::from_secs(10);
@@ -931,5 +941,46 @@ fn a_card_imported_from_the_window_lands_in_the_library_selected_as_one_undo_ste
     h.run_steps(3);
     assert!(vault.images().unwrap().is_empty(), "the entries are gone");
     assert!(dcim.join("IMG_0001.JPG").is_file(), "the card untouched");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The import window keeps the size it opened at, frame after frame, in
+/// a 960x640 main window: on a card, on a folder and with no source. Its
+/// content lays out in the room it is given and never asks for more.
+#[test]
+fn the_import_window_keeps_its_size() {
+    const TITLE: &str = "Import photos";
+    let size = vec2(960.0, 640.0);
+    let dir = temp("stable");
+    let (dcim, known) = fake_card(&dir);
+    // A card, ticked, with its grid.
+    let mut h = card_window_at(&dir, Some(known), |_| {}, size);
+    headless::assert_window_stable(&mut h, TITLE, 120);
+    let rect = headless::window_rect(&h, TITLE).unwrap();
+    assert!(
+        rect.width() <= 0.9 * size.x && rect.height() <= 0.9 * size.y,
+        "smaller than the main window: {rect:?}"
+    );
+    // A folder.
+    let mut h = headless::harness(Shell::new(helios_panels(), None), size);
+    h.run();
+    h.state_mut()
+        .run(
+            "library.importWindow",
+            json!({ "paths": [dcim] }),
+            Origin::User,
+        )
+        .unwrap();
+    read_through(&mut h);
+    headless::assert_window_stable(&mut h, TITLE, 120);
+    // No source.
+    let mut h = headless::harness(Shell::new(helios_panels(), None), size);
+    h.run();
+    run(&mut h, "library.importWindow", json!(null));
+    headless::assert_window_stable(&mut h, TITLE, 120);
+    // egui-pop's folder chooser, opened from it.
+    h.get_by_label("Choose a folder…").click();
+    h.run_steps(3);
+    headless::assert_window_stable(&mut h, "Choose a folder…", 60);
     let _ = std::fs::remove_dir_all(&dir);
 }

@@ -140,3 +140,26 @@ fn the_health_page_is_a_command_and_check_now_runs_again() {
         h.state().health().is_some_and(|r| r.runs() == 2)
     });
 }
+
+/// The Health page keeps the size it opened at, frame after frame, in a
+/// 960x640 main window.
+#[test]
+fn the_health_page_keeps_its_size() {
+    let mut h = headless::harness(shell(), vec2(960.0, 640.0));
+    until(&mut h, "a first run", |h| {
+        h.state()
+            .health()
+            .is_some_and(|r| r.findings().ran() && !r.running())
+    });
+    h.state_mut()
+        .run(
+            helios_gui::shell::HEALTH_COMMAND,
+            serde_json::Value::Null,
+            helios_shell::commands::Origin::User,
+        )
+        .unwrap();
+    until(&mut h, "the page", |h| {
+        h.query_by_label("Check now").is_some()
+    });
+    headless::assert_window_stable(&mut h, "Health check", 120);
+}
