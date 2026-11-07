@@ -451,6 +451,8 @@ struct App {
     library_reading: Option<LibraryReading>,
     /// Images being made ready, opened in the viewport as each is.
     preparing: Vec<Preparing>,
+    /// Runs the exports the shell asks for, with a vault.
+    exporter: Option<helios_gui::export::Exporter<helios_vault_sqlite::SqliteStore>>,
 }
 
 impl Drop for App {
@@ -703,6 +705,20 @@ impl eframe::App for App {
             let _ = self
                 .shell
                 .run("library.import", args, helios_shell::commands::Origin::User);
+        }
+        // Exports asked for: planned over the library and run as jobs.
+        for ask in self.shell.take_exports() {
+            let ran = match &self.exporter {
+                Some(exporter) => exporter.run(&self.bundle(), &ask),
+                None => Err("no library open: exports take their images from one".into()),
+            };
+            if let Err(e) = ran {
+                self.shell.notify(
+                    helios_gui::dialogs::Level::Error,
+                    Message::new("gui-export-failed", "The export did not start: { $error }")
+                        .with("error", e),
+                );
+            }
         }
         let activated = self.shell.library_mut().take_activated();
         if let Some(id) = activated
@@ -1124,7 +1140,17 @@ fn main() -> Result<(), String> {
             {
                 shell.notes.push(format!("library commands: {e}"));
             }
+            let exporter = persist.as_ref().map(|p| {
+                let ctx = cc.egui_ctx.clone();
+                helios_gui::export::Exporter::new(
+                    p.vault().clone(),
+                    shell.jobs(),
+                    shell.export_sink(),
+                    move || ctx.request_repaint(),
+                )
+            });
             let mut app = App {
+                exporter,
                 persist,
                 _persist_dropped: quit::MarkOnDrop("vault link dropped"),
                 shell,

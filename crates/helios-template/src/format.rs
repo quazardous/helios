@@ -166,7 +166,82 @@ pub struct LibraryDesc {
     /// Culling moves to the next image after each mark.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub auto_advance: bool,
+    /// The export's settings, ready in the export dialog.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub export: Option<ExportDesc>,
 }
+
+/// How the workspace exports its images, written as `library.export`
+/// takes its arguments: what the export dialog starts from.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExportDesc {
+    /// `jpeg`, `png` or `tiff` ([`EXPORT_FORMATS`]).
+    #[serde(default = "jpeg")]
+    pub format: String,
+    /// JPEG's quality, 1 to 100 (92 when absent).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quality: Option<u8>,
+    /// PNG's bits per channel, 8 or 16 (8 when absent).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bits: Option<u8>,
+    /// The longer side at most, in pixels; the full size when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub long_edge: Option<u32>,
+    /// The colour space written ([`EXPORT_SPACES`]).
+    #[serde(default = "srgb")]
+    pub space: String,
+    /// The folder written to: absolute, or under the home folder
+    /// (`~/Pictures/Export`); asked when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder: Option<String>,
+    /// The file names, as an import's renaming writes them (`{stem}`,
+    /// `{date}-{seq}`); the extension follows the format.
+    #[serde(default = "stem")]
+    pub pattern: String,
+    /// A name taken already: `number` (another name), `overwrite` or
+    /// `skip` ([`CLASHES`]).
+    #[serde(default = "number")]
+    pub clash: String,
+}
+
+impl Default for ExportDesc {
+    fn default() -> Self {
+        ExportDesc {
+            format: jpeg(),
+            quality: None,
+            bits: None,
+            long_edge: None,
+            space: srgb(),
+            folder: None,
+            pattern: stem(),
+            clash: number(),
+        }
+    }
+}
+
+fn jpeg() -> String {
+    "jpeg".into()
+}
+
+fn srgb() -> String {
+    "srgb".into()
+}
+
+fn stem() -> String {
+    "{stem}".into()
+}
+
+fn number() -> String {
+    "number".into()
+}
+
+/// The formats an export may write.
+pub const EXPORT_FORMATS: [&str; 3] = ["jpeg", "png", "tiff"];
+/// The colour spaces an export may write in.
+pub const EXPORT_SPACES: [&str; 4] = ["srgb", "display-p3", "adobe-rgb", "rec2020"];
+/// What an export may do when a file name is taken.
+pub const CLASHES: [&str; 3] = ["number", "overwrite", "skip"];
 
 /// Which images of the library a workspace shows, as the search field's
 /// criteria: all must hold (labels and flags: any of them; tags: all of

@@ -1039,7 +1039,8 @@ where they collide with nothing. The default map already holds `0`–`5`,
 `Ctrl+,`; the package adds `F1` for red (taken from the palette, which
 keeps `Ctrl+Shift+P`), `L` for the library, and `Ctrl+Shift+L`,
 `Ctrl+Shift+R`, `Ctrl+Shift+B` for the start and end side bars and the
-bottom panel. What it leaves out, and why (listed in the package too):
+bottom panel, and `Ctrl+E` for the export (`library.export`, which
+`Ctrl+Shift+E` runs too, as in Lightroom). What it leaves out, and why (listed in the package too):
 
 | darktable | What | Why not |
 |---|---|---|
@@ -1052,7 +1053,7 @@ bottom panel. What it leaves out, and why (listed in the package too):
 | `s`, `p`, `t`, `m` | slideshow, print, tethering, map | global letters, and views Helios does not have |
 | `Ctrl+S`, `Ctrl+W`, `Ctrl+F`, `Ctrl+H` | softproof, focus detection, filmstrip, header | save, close, find, replace |
 | `Ctrl+K`, `Ctrl+B`, `Ctrl+G` | collection history, colour assessment, gamut | the chord prefix, the side bar, group |
-| `Ctrl+E`, `Ctrl+D`, `Ctrl+T`, `Ctrl+C`, `Ctrl+V` | export, duplicate, tag, copy and paste edits | no such commands yet |
+| `Ctrl+D`, `Ctrl+T`, `Ctrl+C`, `Ctrl+V` | duplicate, tag, copy and paste edits | no such commands yet |
 
 ## Jobs
 
@@ -1069,7 +1070,9 @@ Helios's work reports through `helios_core::jobs` as `job.*` events on
 the shell's bus, which egui-pop reads as its journal (see
 [jobs.md](jobs.md)): an export (its render, encode and write steps, the
 file written in its log), the library import (`library.import`: each
-file as an item, a log line per file). Cancel runs `job.cancel` in the
+file as an item, a log line per file), a batch export (`library.export`,
+File > Export…, `Ctrl+Shift+E`: a parent "Export N photos" with an
+export per image under it, see [export.md](export.md)). Cancel runs `job.cancel` in the
 desktop, which stops the job the way it gave when it started: an export
 queued never runs, an export rendering writes nothing, an import stops
 before its next file and removes a copy under way. The GPU calibration
@@ -1145,8 +1148,8 @@ palette) opens the folder.
 
 **Not wired yet:**
 
-- no export or batch runs in the window yet, so nothing calls
-  `Shell::job_finished` today;
+- the window's batch exports (`library.export`) end with a toast in the
+  window, not through `Shell::job_finished`: nothing calls it today;
 - the tray icon (egui-pop's `TrayPlugin`): off by default would need a
   setting read before the application is built, a tray menu and hiding
   to the tray on close, more than a few lines;

@@ -2,9 +2,9 @@
 
 Status: **design note, format in code** (2026-10-13). The format, its
 schema, validation, the headless build check and composite files live in
-`crates/helios-template`; four built-in templates ("Portrait retouch",
-"Import, cull, de-duplicate", "Develop one image" and "Develop
-(preview)") ship as data under
+`crates/helios-template`; five built-in templates ("Portrait retouch",
+"Import, cull, de-duplicate", "Develop one image", "Develop
+(preview)" and "Batch export") ship as data under
 `templates/`, and the desktop's "New workspace from template" creates a
 workspace from them or from the user's own. A workspace is then edited, saved back as a
 template, reset to its template, and given parts of another (see
@@ -208,7 +208,9 @@ What the workspace sets for the library (optional):
     "suggest_stacks": true
   },
   "query": { "flags": ["pick"], "min_rating": 2 },
-  "auto_advance": true
+  "auto_advance": true,
+  "export": { "format": "jpeg", "quality": 92, "folder": "~/Pictures/Export",
+              "pattern": "{date}-{seq}", "clash": "number" }
 }
 ```
 
@@ -235,6 +237,18 @@ What the workspace sets for the library (optional):
   a query with no criterion, a word it does not know, more than 5 stars
   and a tag with a space (the search field could not show it).
 - `auto_advance` starts culling with auto-advance on.
+- `export` (2026-11-07) is what the export dialog (`library.export`,
+  File > Export…) starts from, written as `library.export` takes its
+  arguments: `format` (`jpeg`, `png`, `tiff`), `quality` (JPEG, 1 to
+  100), `bits` (PNG, 8 or 16), `long_edge` (pixels, the full size when
+  absent), `space` (`srgb`, `display-p3`, `adobe-rgb`, `rec2020`),
+  `folder` (absolute or under `~/`; asked when absent), `pattern` (an
+  import's renaming fields, `{stem}` by default; the extension follows
+  the format) and `clash` (`number`, `overwrite`, `skip`). The dialog's
+  "Remember for this workspace" writes it (one undo step); the library
+  settings' form keeps it. Validation refuses a word it does not know, a
+  quality or bits for another format, fewer than 16 pixels, a relative
+  folder and a pattern with a path separator. See [export.md](export.md).
 
 ### `parameters`
 

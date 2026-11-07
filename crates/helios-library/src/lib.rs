@@ -11,11 +11,15 @@
 //! - [`signals`]: what an import measures of each image to find near
 //!   duplicates (a perceptual hash, the capture time and exposure, frame
 //!   numbers, a sharpness);
+//! - [`export`]: a batch export over library images planned as a
+//!   request: each image's file and head version, its output name
+//!   decided once;
 //! - [`stacks`]: the `stacks.suggest` decision, which proposes stacks over
 //!   a selection through a resolver picked by name, and applies them only
 //!   when accepted.
 
 pub mod darktable;
+pub mod export;
 pub mod import;
 pub mod rename;
 pub mod signals;

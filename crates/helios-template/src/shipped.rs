@@ -86,6 +86,24 @@ const BUILTIN: &[&[(&str, &str)]] = &[
             include_str!("../../../templates/develop.helios-template/i18n/fr/template.ftl"),
         ),
     ],
+    &[
+        (
+            "template.json",
+            include_str!("../../../templates/batch-export.helios-template/template.json"),
+        ),
+        (
+            "layout.json",
+            include_str!("../../../templates/batch-export.helios-template/layout.json"),
+        ),
+        (
+            "i18n/en/template.ftl",
+            include_str!("../../../templates/batch-export.helios-template/i18n/en/template.ftl"),
+        ),
+        (
+            "i18n/fr/template.ftl",
+            include_str!("../../../templates/batch-export.helios-template/i18n/fr/template.ftl"),
+        ),
+    ],
 ];
 
 /// The composite files Helios ships.

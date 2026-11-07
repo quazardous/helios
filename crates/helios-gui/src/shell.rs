@@ -50,9 +50,11 @@ use crate::viewport::ZoomTo;
 use crate::workbench::Contents;
 
 pub use crate::workbench::Content;
+pub use export::{ExportAsk, OPEN_FOLDER, folder_path, settings_of};
 pub use macro_edit::{SELECTED as GRAPH_SELECTED, selected_nodes};
 pub use workspace_edit::STATE as WORKSPACE_STATE;
 
+mod export;
 mod import;
 
 /// Where an import's lines are sent: its arguments and a line.
@@ -143,6 +145,11 @@ enum Action {
     /// Import through an importer plugin (`library.importWith`'s
     /// arguments).
     ImportWith(Value, Origin),
+    /// Export photos (`library.export`'s arguments), as whom.
+    Export(Value, Origin),
+    /// Show a folder in the file manager (`library.openFolder`'s
+    /// arguments).
+    OpenFolder(Value),
     Fullscreen,
     Minimize,
     Maximize,
@@ -494,6 +501,13 @@ pub struct Shell {
     imports: Vec<Value>,
     /// The lines of the imports the host runs (`import_sink`).
     import_lines: (ImportLines, std::sync::mpsc::Receiver<(Value, Value)>),
+    /// Exports asked for, for the host.
+    exports: Vec<ExportAsk>,
+    /// What the exports the host runs say (`export_sink`).
+    export_lines: (
+        std::sync::mpsc::Sender<helios_export::batch::Line>,
+        std::sync::mpsc::Receiver<helios_export::batch::Line>,
+    ),
     /// The Log panel's entries.
     log: Rc<RefCell<crate::log_panel::Log>>,
     /// The library's images on disk, by id, for quick open.
@@ -874,6 +888,8 @@ impl Shell {
             import_source: None,
             imports: Vec::new(),
             import_lines: std::sync::mpsc::channel(),
+            exports: Vec::new(),
+            export_lines: std::sync::mpsc::channel(),
             log: Rc::default(),
             image_files: BTreeMap::new(),
             dialogs,
@@ -2692,6 +2708,22 @@ impl Shell {
             Box::new(|a, origin| Ok(Action::ImportWith(a.clone(), origin.clone()))),
         );
         add(
+            CommandSpec::new(
+                "library.export",
+                "Export… (`images`: ids, else `scope`: `selected` or `shown`, the selection by default, else every image shown; `format`: jpeg, png or tiff; `quality`, `bits`, `long_edge`, `space`, `folder`, `pattern`, `clash`: number, overwrite or skip; `remember`; asked when `folder` is absent or `ask` is true)",
+                "Library",
+            ),
+            Box::new(|a, origin| Ok(Action::Export(a.clone(), origin.clone()))),
+        );
+        add(
+            CommandSpec::new(
+                export::OPEN_FOLDER,
+                "Open a folder in the file manager (`path`)",
+                "Library",
+            ),
+            Box::new(|a, _| Ok(Action::OpenFolder(a.clone()))),
+        );
+        add(
             CommandSpec::new("vault.next", "Select the next image", "Library"),
             Box::new(|_, _| Ok(Action::Step(1))),
         );
@@ -3281,6 +3313,8 @@ impl Shell {
                 "Import from",
             )
             .when(crate::importers::CONTEXT, false),
+            // Exporting, beside it (Ctrl+Shift+E, as Lightroom).
+            command(MENU_FILE, "1_import", 2, "library.export"),
             command(MENU_FILE, "1_workspace", 0, "workspace.open"),
             // The workspace's own edits.
             command(MENU_FILE, "2_edit", 0, "workspace.edit"),
@@ -4261,6 +4295,8 @@ impl Shell {
             Action::ImportSource(args, origin) => return self.import_from_source(&args, &origin),
             Action::ImportFiles(args, origin) => return self.import_files(&args, &origin),
             Action::ImportWith(args, origin) => return self.import_with(&args, &origin),
+            Action::Export(args, origin) => return self.export(&args, &origin),
+            Action::OpenFolder(args) => return Self::open_folder(&args),
             Action::ToggleStack => self
                 .library
                 .borrow_mut()
@@ -4680,6 +4716,7 @@ impl Shell {
         // Duplicates an import asks about: said once, answered in the
         // Duplicates panel.
         let asked = self.receive_imports();
+        self.receive_exports();
         if asked > 0 {
             self.note(
                 Message::new(

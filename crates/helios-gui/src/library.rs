@@ -1246,6 +1246,25 @@ impl Library {
             grid.show(ui, &mut self.state, &items, &thumbs)
         };
         crate::name_rect(ui.ctx(), "helios.library.grid", out.response.rect);
+        // Its context menu, a secondary click anywhere on it (a cell
+        // takes the click, the grid only its focus): what acts on the
+        // images, the selection else what the library shows.
+        let area = out.response.rect;
+        if ui.rect_contains_pointer(area) && ui.input(|i| i.pointer.secondary_clicked()) {
+            let at = ui
+                .input(|i| i.pointer.interact_pos())
+                .unwrap_or(area.center());
+            crate::dialogs::request(
+                ui.ctx(),
+                crate::dialogs::Request::Menu {
+                    at,
+                    items: vec![
+                        crate::dialogs::MenuItem::command("library.export"),
+                        crate::dialogs::MenuItem::command("library.copyFiles"),
+                    ],
+                },
+            );
+        }
         self.bind_clipboard(ui.ctx(), out.response.rect);
         self.handle(out.signals);
     }

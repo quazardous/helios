@@ -186,6 +186,12 @@ command-library-copyFiles =
 command-library-importFiles =
     .title = Importer des fichiers et des dossiers (`paths`), placés comme le dit la source d’import de l’espace de travail (`copy` : dans le dossier de la bibliothèque ou non ; `ask` : demandé sans source d’import ; `darktable`)
 
+command-library-export =
+    .title = Exporter… (`images` : des identifiants, sinon `scope` : `selected` ou `shown`, la sélection par défaut, sinon toutes les images montrées ; `format` : jpeg, png ou tiff ; `quality`, `bits`, `long_edge`, `space`, `folder`, `pattern`, `clash` : number, overwrite ou skip ; `remember` ; demandé si `folder` manque ou si `ask` vaut true)
+
+command-library-openFolder =
+    .title = Ouvrir un dossier dans le gestionnaire de fichiers (`path`)
+
 command-library-importWith =
     .title = Importer avec un greffon d’import (`plugin`, `importer` ; `source` : le fichier ou dossier qu’il lit, demandé s’il manque ; `copy`, `darktable`)
 

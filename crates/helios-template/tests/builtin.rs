@@ -412,3 +412,73 @@ fn develop_one_image_reads_a_raw_through_the_raw_chain_beside_the_image() {
     assert!(en.contains(&format!("= {}\n", bundle.template.meta.name)));
     assert!(en.contains(&format!("= {}\n", bundle.template.meta.scenario)));
 }
+
+fn batch_export() -> Bundle {
+    Bundle::load(&root().join("batch-export.helios-template")).unwrap()
+}
+
+#[test]
+fn batch_export_opens_on_the_picks_with_the_export_ready() {
+    let bundle = batch_export();
+    assert_eq!(bundle.template.id, "helios.batch-export");
+    let report = bundle.validate(&catalogue());
+    assert!(report.is_ok(), "{:?}", report.problems);
+    let json = serde_json::to_value(&bundle.template).unwrap();
+    assert_eq!(
+        schema::check(&schema::template(), &json),
+        Vec::<String>::new()
+    );
+    let built = bundle.build(&catalogue()).unwrap();
+    let area = |p: &str| built.layout.area_of(&PanelId::new(p).unwrap());
+    // The library central; the queue of the node exported and the log
+    // beside; the jobs under.
+    assert_eq!(area("helios.vault"), Some(Area::Center));
+    assert_eq!(area("helios.queue"), Some(Area::EndSide));
+    assert_eq!(area("helios.log"), Some(Area::EndSide));
+    assert_eq!(area("egui_pop.jobs"), Some(Area::Bottom));
+    assert_eq!(built.view.0, built.nodes["sigmoid"]);
+    let library = bundle.template.library.as_ref().unwrap();
+    assert_eq!(library.query.as_ref().unwrap().flags, ["pick"]);
+    let export = library.export.as_ref().unwrap();
+    assert_eq!(
+        (
+            export.format.as_str(),
+            export.space.as_str(),
+            export.pattern.as_str()
+        ),
+        ("jpeg", "srgb", "{stem}")
+    );
+    assert_eq!(export.folder.as_deref(), Some("~/Pictures/Helios export"));
+    // Its text in both languages.
+    for locale in ["en", "fr"] {
+        let text = bundle.texts.iter().find(|t| t.locale == locale).unwrap();
+        assert!(text.source.contains(&format!("{} = ", bundle.name_key())));
+    }
+}
+
+#[test]
+fn an_export_s_settings_are_checked() {
+    let mut bundle = batch_export();
+    let export = bundle
+        .template
+        .library
+        .as_mut()
+        .unwrap()
+        .export
+        .as_mut()
+        .unwrap();
+    export.format = "webp".into();
+    export.bits = Some(16);
+    export.folder = Some("relative/out".into());
+    export.pattern = "a/{stem}".into();
+    export.long_edge = Some(8);
+    let problems = bundle.validate(&catalogue()).problems;
+    for field in ["format", "bits", "folder", "pattern", "long_edge"] {
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.starts_with(&format!("library.export.{field}"))),
+            "{field}: {problems:?}"
+        );
+    }
+}

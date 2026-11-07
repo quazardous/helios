@@ -224,6 +224,49 @@
         "auto_advance": {
           "description": "Culling moves to the next image after each mark.",
           "type": "boolean"
+        },
+        "export": { "$ref": "#/$defs/export" }
+      }
+    },
+    "export": {
+      "description": "How the workspace exports its images, as library.export takes them: what the export dialog starts from.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "format": {
+          "description": "The file format; jpeg when absent.",
+          "enum": ["jpeg", "png", "tiff"]
+        },
+        "quality": {
+          "description": "JPEG's quality, 1 to 100 (92 when absent).",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "bits": {
+          "description": "PNG's bits per channel (8 when absent).",
+          "enum": [8, 16]
+        },
+        "long_edge": {
+          "description": "The longer side at most, in pixels; the full size when absent.",
+          "type": "integer",
+          "minimum": 16
+        },
+        "space": {
+          "description": "The colour space written; srgb when absent.",
+          "enum": ["srgb", "display-p3", "adobe-rgb", "rec2020"]
+        },
+        "folder": {
+          "description": "The folder written to: absolute, or under the home folder (~/Pictures/Export); asked when absent.",
+          "type": "string"
+        },
+        "pattern": {
+          "description": "The file names without extension, as an import's renaming writes them: {stem}, {date}-{seq}.",
+          "type": "string"
+        },
+        "clash": {
+          "description": "A file name taken already: another name, the file replaced, or the image left out.",
+          "enum": ["number", "overwrite", "skip"]
         }
       }
     },

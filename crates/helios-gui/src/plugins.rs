@@ -75,6 +75,8 @@ pub const COMMAND_ICONS: &[(&str, &str)] = &[
     ("library.importFiles", "phosphor:tray-arrow-down"),
     ("library.importSource", "phosphor:tray-arrow-down"),
     ("library.importWith", "phosphor:tray-arrow-down"),
+    ("library.export", "phosphor:export"),
+    ("library.openFolder", "folder"),
     ("profile.import", "phosphor:tray-arrow-down"),
     ("profile.export", "phosphor:export"),
     ("theme.exportMerged", "phosphor:export"),

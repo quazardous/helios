@@ -1,6 +1,6 @@
 [package]
 name = "helios-export"
-description = "Helios exports: render a node, convert it to an output color space, encode it with its colour tags and write it atomically"
+description = "Helios exports: render a node, convert it to an output color space, encode it with its colour tags and write it atomically; batches of them from a serialisable request"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -11,6 +11,8 @@ helios-core.workspace = true
 helios-photo.workspace = true
 helios-colour.workspace = true
 serde.workspace = true
+# A batch request read and written as JSON, a batch's end actions.
+serde_json.workspace = true
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "tiff"] }
 # MIT OR Apache-2.0: PNG is written through `png` directly, already in the
 # tree through `image`, since `image` cannot write the cICP chunk.

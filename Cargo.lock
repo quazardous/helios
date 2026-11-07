@@ -2199,6 +2199,7 @@ dependencies = [
  "moxcms",
  "png",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -2301,6 +2302,7 @@ dependencies = [
  "egui-pop-model",
  "helios-core",
  "helios-decision",
+ "helios-export",
  "helios-load",
  "helios-vault",
  "helios-xmp",

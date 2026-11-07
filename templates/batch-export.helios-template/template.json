@@ -1,0 +1,36 @@
+{
+  "format": 1,
+  "id": "helios.batch-export",
+  "version": 1,
+  "meta": {
+    "name": "Batch export",
+    "scenario": "Export the picks of a shoot in one go: the library opens on the picked photos, the export is ready (full-size JPEG in sRGB, named after the originals), and each photo's export shows in the queue, the failures in the log.",
+    "tags": ["export", "batch", "delivery"]
+  },
+  "network": {
+    "sources": ["source"],
+    "nodes": [
+      { "name": "exposure", "module": "exposure" },
+      { "name": "sigmoid", "module": "sigmoid" }
+    ],
+    "connections": [
+      { "from": "source", "port": "image", "to": "exposure", "input": "input" },
+      { "from": "exposure", "port": "output", "to": "sigmoid", "input": "input" }
+    ],
+    "view": { "node": "sigmoid", "port": "output" }
+  },
+  "tools": {
+    "toolbox": ["library.export", "vault.flag.pick", "vault.flag.none"]
+  },
+  "library": {
+    "query": { "flags": ["pick"] },
+    "export": {
+      "format": "jpeg",
+      "quality": 92,
+      "space": "srgb",
+      "folder": "~/Pictures/Helios export",
+      "pattern": "{stem}",
+      "clash": "number"
+    }
+  }
+}

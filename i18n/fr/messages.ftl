@@ -52,6 +52,8 @@ export-cancelled = annulé
 
 export-channels = impossible d’exporter une image à { $channels } canaux
 
+export-folder-failed = impossible de créer le dossier { $folder } : { $error }
+
 export-encode-failed = impossible d’encoder l’image : { $error }
 
 export-no-format = aucun format pour { $path }
@@ -1066,3 +1068,53 @@ gui-log-empty = Rien à signaler pour l’instant
 gui-log-clear = Effacer
 
 gui-workspace-library-darktable = lire les retouches darktable (fichiers .xmp) à l’import
+
+gui-export-open-folder = Ouvrir le dossier
+
+gui-export-queued = Export de { $count } photos vers { $folder }
+
+gui-export-scope = photos
+
+gui-export-scope-help = selected : les { $selected } sélectionnées ; shown : les { $shown } que montre la bibliothèque
+
+gui-export-format = format
+
+gui-export-quality = qualité JPEG
+
+gui-export-quality-help = de 1 à 100, pour le JPEG seulement
+
+gui-export-bits = bits par canal du PNG
+
+gui-export-long-edge = grand côté (pixels)
+
+gui-export-long-edge-help = Le plus grand côté au plus ; 0 garde la pleine taille
+
+gui-export-space = espace colorimétrique
+
+gui-export-folder = dossier
+
+gui-export-pattern = noms des fichiers
+
+gui-export-pattern-help = Comme un import renomme : { $fields } ; l’extension suit le format
+
+gui-export-clash = quand un nom de fichier est déjà pris
+
+gui-export-remember = Retenir pour cet espace de travail
+
+gui-export-remember-help = Les réglages d’export de l’espace de travail : le prochain export part d’eux
+
+gui-export-form-title = Exporter des photos
+
+gui-export-verb = Exporter
+
+gui-export-image-failed = { $image } : non exportée : { $error }
+
+gui-export-cancelled = L’export a été annulé : { $written } photos écrites dans { $folder }
+
+gui-export-ended-failed = { $written } photos exportées dans { $folder } ; { $failed } en échec : voir le panneau Journal
+
+gui-export-ended = { $written } photos exportées dans { $folder }
+
+gui-export-ended-skipped = { $outcome } ({ $skipped } laissées de côté : leur fichier existe)
+
+gui-export-failed = L’export n’a pas démarré : { $error }

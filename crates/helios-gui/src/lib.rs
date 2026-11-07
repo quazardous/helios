@@ -11,6 +11,7 @@ pub mod display;
 pub mod duplicates;
 pub mod edit_snapshots;
 pub mod engine_source;
+pub mod export;
 pub mod graph;
 pub mod history;
 pub mod host;

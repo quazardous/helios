@@ -9,6 +9,8 @@ repository.workspace = true
 [dependencies]
 helios-core.workspace = true
 helios-decision.workspace = true
+# Batch exports planned over library images.
+helios-export.workspace = true
 helios-load.workspace = true
 helios-vault.workspace = true
 helios-xmp.workspace = true

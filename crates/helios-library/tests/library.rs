@@ -702,3 +702,73 @@ fn files_an_importer_listed_take_its_values_without_overwriting_the_library() {
     assert_eq!(fields[0]["rating"], json!(1));
     assert_eq!(fields[0]["labels"], json!(["blue", "red"]));
 }
+
+/// A batch export planned over library images: each image's file and
+/// head version, names from the import's renaming fields with the
+/// format's extension, a name taken on disk numbered, an image without a
+/// copy refused in the request.
+#[test]
+fn an_export_is_planned_with_each_image_s_head_and_its_name() {
+    use helios_export::batch::{Clash, Settings};
+    use helios_export::{Format, Output};
+    use helios_vault::EditSession;
+
+    let place = Place::new("export-plan");
+    let (a, b) = (place.join("in/IMG_0001.png"), place.join("in/IMG_0002.png"));
+    picture(&a, 0, 1.0, 0);
+    picture(&b, 1, 1.0, 1);
+    let v = vault();
+    let ia = v.import_file(&a, 10).unwrap();
+    let ib = v.import_file(&b, 10).unwrap();
+    // `a` was edited: its head goes in the request.
+    let (mut session, _) = EditSession::open(&v, ia).unwrap();
+    let saved = session
+        .save(
+            &v,
+            serde_json::json!({ "nodes": {} }),
+            "exposure",
+            "user",
+            11,
+        )
+        .unwrap()
+        .expect("a version");
+    let out = place.join("out");
+    std::fs::create_dir_all(&out).unwrap();
+    std::fs::write(out.join("IMG_0001-x.jpg"), b"taken").unwrap();
+    let missing = ImageId::from_hex(&"ee".repeat(32)).unwrap();
+    let settings = Settings {
+        output: Output::from(Format::Jpeg { quality: 90 }),
+        folder: out.clone(),
+        pattern: "{stem}-x".into(),
+        clash: Clash::Number,
+    };
+    let request =
+        helios_library::export::plan(&v, &[ia, ib, missing], settings, Some("exposure".into()))
+            .unwrap();
+    assert_eq!(request.node.as_deref(), Some("exposure"));
+    let items = &request.items;
+    assert_eq!(items.len(), 3);
+    assert_eq!(items[0].source, a);
+    assert_eq!(items[0].version, Some(saved.id.hex()));
+    assert_eq!(items[0].output, out.join("IMG_0001-x-2.jpg"), "numbered");
+    assert_eq!(items[1].version, None, "never edited");
+    assert_eq!(items[1].output, out.join("IMG_0002-x.jpg"));
+    assert!(items[2].error.as_deref().unwrap().contains("no copy"));
+    // `{seq}` is the image's place in the batch; a bad pattern is refused.
+    let numbered = Settings {
+        output: Output::from(Format::Png { bits: 8 }),
+        folder: out.clone(),
+        pattern: "trip-{seq:3}".into(),
+        clash: Clash::Number,
+    };
+    let request = helios_library::export::plan(&v, &[ib, ia], numbered, None).unwrap();
+    assert_eq!(request.items[0].output, out.join("trip-001.png"));
+    assert_eq!(request.items[1].output, out.join("trip-002.png"));
+    let bad = Settings {
+        output: Output::from(Format::Tiff),
+        folder: out,
+        pattern: "{nope}".into(),
+        clash: Clash::Number,
+    };
+    assert!(helios_library::export::plan(&v, &[ia], bad, None).is_err());
+}

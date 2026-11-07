@@ -377,6 +377,16 @@ separated, as the catalog SDK does.
   and relayed to the desktop's Queue panel; a crashed node resumes its
   runs. Single exports and one-off renders stay jobs. Design note and
   open questions: [docs/workflow-level.md](docs/workflow-level.md).
+- (2026-11-07, decided: option A) **Batch export on the desktop, as
+  local jobs.** `library.export` (File > Export…, `Ctrl+Shift+E`, the
+  Library's context menu) exports the selection or what the library
+  shows: a parent job and an export per image on the desktop's own
+  scheduler, in the jobs centre and the Queue panel, from a serialisable
+  batch request (`helios_export::batch::BatchRequest`: settings, and each
+  image with its head version and its output path decided when asked).
+  Built (2026-11-07), with the "Batch export" template. Not decided:
+  sending the same request to a node as a workflow run, which the request
+  is shaped for ([docs/export.md](docs/export.md), "Remote later").
 
 ### 2.3 Vault: the catalog as an API
 
@@ -619,7 +629,9 @@ hash) is part of Helios; deploying a NAS is not.
   source may take a raw file's sensor data with its camera (2026-11-03);
   "Develop one image" develops a raw through the node's raw chain on the
   desktop, "Develop (preview)" stays for pictures. A template's library
-  may open on a query, the picks only for instance (2026-11-03). Design in
+  may open on a query, the picks only for instance (2026-11-03), and
+  keep its export's settings: "Batch export" opens on the picks with the
+  export ready (2026-11-07). Design in
   [docs/templates.md](docs/templates.md). The Masks panel, the Scopes and
   the Navigator open as floating palettes by default (2026-10-28).
   Not decided: the toolbox's

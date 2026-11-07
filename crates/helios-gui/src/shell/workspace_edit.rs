@@ -22,7 +22,7 @@ use egui_pop::model::layout::Layout;
 use helios_core::Message;
 use helios_shell::commands::Origin;
 use helios_template::workspace::{self, Extract, Files, Part, Side, State, Translation};
-use helios_template::{Bundle, ImportDesc, LibraryDesc, QueryDesc};
+use helios_template::{Bundle, ExportDesc, ImportDesc, LibraryDesc, QueryDesc};
 use serde_json::{Value, json};
 
 use super::{Shell, lock};
@@ -884,7 +884,19 @@ impl Shell {
                     self.library_form()?;
                     return Ok(Value::Null);
                 }
-                let library = library_of(args)?;
+                // The export's settings are the export dialog's: kept
+                // unless given (as a template writes them).
+                let export = match &args["export"] {
+                    Value::Null => self
+                        .workspace_state()
+                        .and_then(|s| s.bundle.template.library)
+                        .and_then(|l| l.export),
+                    written => Some(
+                        serde_json::from_value::<ExportDesc>(written.clone())
+                            .map_err(|e| format!("export: {e}"))?,
+                    ),
+                };
+                let library = library_of(args, export)?;
                 self.edit_workspace(&json!({ "library": library }), origin)
             }
             "workspace.reset" => {
@@ -1365,7 +1377,7 @@ fn text_field(key: &str, label: &str, value: &str) -> Field {
 
 /// The library settings a form or an agent gives; the query as the
 /// search field takes it (`flag:pick`) or written as in a template.
-fn library_of(args: &Value) -> Result<Value, String> {
+fn library_of(args: &Value, export: Option<ExportDesc>) -> Result<Value, String> {
     let t = |k: &str, default: &str| text(args, k).unwrap_or(default).to_string();
     let source = t("source", "none");
     let import = (source != "none").then(|| ImportDesc {
@@ -1389,13 +1401,14 @@ fn library_of(args: &Value) -> Result<Value, String> {
         .filter(|q| !q.is_empty()),
     };
     let auto_advance = args["auto_advance"].as_bool().unwrap_or(false);
-    if import.is_none() && query.is_none() && !auto_advance {
+    if import.is_none() && query.is_none() && !auto_advance && export.is_none() {
         return Ok(Value::Null);
     }
     Ok(json!(LibraryDesc {
         import,
         query,
-        auto_advance
+        auto_advance,
+        export,
     }))
 }
 

@@ -493,6 +493,9 @@ impl Bundle {
         if let Some(query) = t.library.as_ref().and_then(|l| l.query.as_ref()) {
             check_query(query, p);
         }
+        if let Some(export) = t.library.as_ref().and_then(|l| l.export.as_ref()) {
+            check_export(export, p);
+        }
         check_parameters(t, p);
         crate::subworkspace::problems(t, &catalogue, p);
         for (area, node) in &self.layout.areas {
@@ -698,6 +701,58 @@ fn check_query(query: &crate::format::QueryDesc, p: &mut Vec<String>) {
         if t.is_empty() || t.contains(char::is_whitespace) {
             p.push(format!("library.query.tags: `{t}` is not a tag"));
         }
+    }
+}
+
+/// An export's settings: words it knows, a quality and bits each format
+/// takes, a size, a folder that is not relative, and a name pattern.
+fn check_export(export: &crate::format::ExportDesc, p: &mut Vec<String>) {
+    use crate::format::{CLASHES, EXPORT_FORMATS, EXPORT_SPACES};
+    for (field, value, known) in [
+        ("format", &export.format, &EXPORT_FORMATS[..]),
+        ("space", &export.space, &EXPORT_SPACES[..]),
+        ("clash", &export.clash, &CLASHES[..]),
+    ] {
+        if !known.contains(&value.as_str()) {
+            p.push(format!(
+                "library.export.{field}: `{value}` is not one of {}",
+                known.join(", ")
+            ));
+        }
+    }
+    if let Some(q) = export.quality
+        && (export.format != "jpeg" || !(1..=100).contains(&q))
+    {
+        p.push(format!(
+            "library.export.quality: {q} is not a JPEG quality (1 to 100)"
+        ));
+    }
+    if let Some(b) = export.bits
+        && (export.format != "png" || !matches!(b, 8 | 16))
+    {
+        p.push(format!(
+            "library.export.bits: {b} is not a PNG's bits (8 or 16)"
+        ));
+    }
+    if export.long_edge.is_some_and(|e| e < 16) {
+        p.push("library.export.long_edge: fewer than 16 pixels".into());
+    }
+    if let Some(folder) = &export.folder {
+        let path = std::path::Path::new(folder);
+        if !(path.is_absolute() || folder == "~" || folder.starts_with("~/")) {
+            p.push(format!(
+                "library.export.folder: `{folder}` is neither absolute nor under ~/"
+            ));
+        }
+    }
+    let pattern = &export.pattern;
+    if pattern.trim().is_empty()
+        || pattern.contains(['/', '\\'])
+        || pattern.matches('{').count() != pattern.matches('}').count()
+    {
+        p.push(format!(
+            "library.export.pattern: `{pattern}` is not a file name pattern"
+        ));
     }
 }
 

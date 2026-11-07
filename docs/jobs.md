@@ -95,6 +95,16 @@ whose images are jobs of their own.
   device's reference modules as items, its speeds as log lines, a device
   that failed as a failed item; cancelled between two modules.
 
+- **The desktop's batch exports** (`helios_export::batch::run`, the
+  desktop's `library.export`): a parent job of kind `batch`
+  (`batch-export-<n>`, "Export N photos", its total the number of
+  images) and an export per image under it (`submit_counted`: a child of
+  weight 1 naming the node rendered, whose end the batch counts). An
+  image that fails is a failed item of the batch, with its reason; an
+  image left out (its file exists and clashes skip) counts as skipped.
+  The batch ends finished with an "Open folder" action, failed when an
+  image failed, or cancelled; cancelling it cancels its exports queued or
+  running. See [export.md](export.md).
 - **The library import** (`helios_library::import::import`, the
   desktop's `library.import`, `helios import`): each file as an item, a
   log line per file brought in, a file that failed as a failed item;

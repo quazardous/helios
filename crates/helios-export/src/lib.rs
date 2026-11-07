@@ -30,6 +30,8 @@ use image::codecs::tiff::TiffEncoder;
 use image::{DynamicImage, ImageBuffer, ImageEncoder, Rgb};
 use serde::{Deserialize, Serialize};
 
+pub mod batch;
+
 /// An output format.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "format", rename_all = "lowercase")]
@@ -358,12 +360,15 @@ pub const STEPS: [(&str, &str, f64); 3] = [
 
 /// Says the job's end when its work never ran: the scheduler dropped it,
 /// cancelled before it started.
-struct Unstarted(Option<Arc<Report>>);
+struct Unstarted(Option<(Arc<Report>, Option<OnEnd>)>);
 
 impl Drop for Unstarted {
     fn drop(&mut self) {
-        if let Some(report) = self.0.take() {
+        if let Some((report, ended)) = self.0.take() {
             report.cancelled();
+            if let Some(ended) = ended {
+                ended(End::Cancelled);
+            }
         }
     }
 }
@@ -373,7 +378,7 @@ impl Drop for Unstarted {
 fn run(
     stopped: &dyn Fn() -> bool,
     render: impl FnOnce() -> Result<Image, String>,
-    format: &Format,
+    output: &Output,
     path: &Path,
     step: &dyn Fn(&str),
 ) -> Result<Exported, Message> {
@@ -382,9 +387,12 @@ fn run(
         return Err(cancelled());
     }
     step("render");
-    let image = render().map_err(Message::plain)?;
+    let mut image = render().map_err(Message::plain)?;
+    if let Some(long_edge) = output.long_edge {
+        image = fit(&image, long_edge);
+    }
     step("encode");
-    let bytes = encode(&image, format)?;
+    let bytes = encode_in(&image, &output.format, output.space)?;
     // Cancelled while rendering: nothing is written.
     if stopped() {
         return Err(cancelled());
@@ -397,6 +405,65 @@ fn run(
         path: path.to_path_buf(),
     })
 }
+
+/// An image scaled down so its longer side is at most `long_edge` pixels
+/// (each pixel the mean of those it covers); a smaller one is kept as it
+/// is, never enlarged.
+pub fn fit(image: &Image, long_edge: u32) -> Image {
+    let r = image.region();
+    let longer = r.width.max(r.height);
+    if long_edge == 0 || longer <= long_edge || r.is_empty() {
+        return image.clone();
+    }
+    let scale = f64::from(long_edge) / f64::from(longer);
+    let w = ((f64::from(r.width) * scale).round() as u32).max(1);
+    let h = ((f64::from(r.height) * scale).round() as u32).max(1);
+    let at = |v: i64| (v as f64 * scale).floor() as i64;
+    image.sample_at(
+        Region {
+            x: at(r.x),
+            y: at(r.y),
+            width: w,
+            height: h,
+        },
+        scale,
+    )
+}
+
+/// How an export writes its file: its format, the colour space it is
+/// encoded in, and how large it may be.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Output {
+    #[serde(flatten)]
+    pub format: Format,
+    /// sRGB unless said otherwise.
+    #[serde(default)]
+    pub space: OutputSpace,
+    /// The longer side at most, in pixels: a larger image is scaled down.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub long_edge: Option<u32>,
+}
+
+impl From<Format> for Output {
+    fn from(format: Format) -> Self {
+        Output {
+            format,
+            space: OutputSpace::Srgb,
+            long_edge: None,
+        }
+    }
+}
+
+/// How an export job ended, for whoever follows it (a batch).
+#[derive(Clone, Debug)]
+pub enum End {
+    Written(Exported),
+    Failed(Message),
+    Cancelled,
+}
+
+/// What a job calls once it ended.
+pub type OnEnd = Box<dyn FnOnce(End) + Send>;
 
 /// The exports' job ids in this process: `export-1`, `export-2`...
 static NEXT: AtomicU64 = AtomicU64::new(1);
@@ -415,7 +482,13 @@ pub fn submit_reported(
     render: impl FnOnce() -> Result<Image, String> + Send + 'static,
 ) -> Result<JobId, Message> {
     Ok(submit_job(
-        scheduler, jobs, None, node, path, format, render,
+        scheduler,
+        jobs,
+        Child::default(),
+        node,
+        path,
+        format.into(),
+        render,
     ))
 }
 
@@ -433,21 +506,64 @@ pub fn submit_child(
     Ok(submit_job(
         scheduler,
         jobs,
-        Some(parent),
+        Child {
+            parent: Some(parent),
+            ended: None,
+        },
         node,
         path,
-        format,
+        format.into(),
         render,
     ))
+}
+
+/// The batch an export belongs to, and who hears of its end.
+pub struct InBatch<'a> {
+    /// The batch's job.
+    pub parent: &'a str,
+    /// Called once the export ended, whichever way.
+    pub ended: OnEnd,
+}
+
+/// [`submit_child`] writing `output` (its space, its size), the batch
+/// told of its end: what a batch counts its images by.
+pub fn submit_counted(
+    scheduler: &Scheduler,
+    jobs: &Jobs,
+    batch: InBatch<'_>,
+    node: Option<&str>,
+    path: &Path,
+    output: Output,
+    render: impl FnOnce() -> Result<Image, String> + Send + 'static,
+) -> JobId {
+    submit_job(
+        scheduler,
+        jobs,
+        Child {
+            parent: Some(batch.parent),
+            ended: Some(batch.ended),
+        },
+        node,
+        path,
+        output,
+        render,
+    )
+}
+
+/// The batch a job belongs to, and who hears of its end.
+#[derive(Default)]
+struct Child<'a> {
+    parent: Option<&'a str>,
+    ended: Option<OnEnd>,
 }
 
 fn submit_job(
     scheduler: &Scheduler,
     jobs: &Jobs,
-    parent: Option<&str>,
+    child: Child<'_>,
     node: Option<&str>,
     path: &Path,
-    format: Format,
+    output: Output,
     render: impl FnOnce() -> Result<Image, String> + Send + 'static,
 ) -> JobId {
     let dest = destination(path);
@@ -469,14 +585,14 @@ fn submit_job(
     for (id, title, weight) in STEPS {
         start = start.step(id, title, weight);
     }
-    if let Some(parent) = parent {
+    if let Some(parent) = child.parent {
         start = start.parent(parent, 1.0);
     }
     if let Some(node) = node {
         start = start.node(node);
     }
     let report = Arc::new(jobs.start(start));
-    let mut unstarted = Unstarted(Some(report.clone()));
+    let mut unstarted = Unstarted(Some((report.clone(), child.ended)));
     let bus = jobs.bus().clone();
     let id: Arc<OnceLock<JobId>> = Arc::new(OnceLock::new());
     let job_id = id.clone();
@@ -496,10 +612,10 @@ fn submit_job(
     }
     let job = scheduler.submit_message(spec, move |cancel| {
         // It runs: its end is said here, not by the guard.
-        let report = unstarted.0.take().expect("the work runs once");
+        let (report, ended) = unstarted.0.take().expect("the work runs once");
         let stopped = || cancel.is_cancelled() || asked.load(Ordering::SeqCst);
         let step = |s: &str| report.progress(Progress::new().done(0).item(&item).step(s));
-        let outcome = run(&stopped, render, &format, &path, &step);
+        let outcome = run(&stopped, render, &output, &path, &step);
         match &outcome {
             Ok(exported) => {
                 report.progress(Progress::new().counts(1, 1));
@@ -526,6 +642,13 @@ fn submit_job(
                 report.log(&why.english);
                 report.failed(&why.english);
             }
+        }
+        if let Some(ended) = ended {
+            ended(match &outcome {
+                Ok(exported) => End::Written(exported.clone()),
+                Err(_) if stopped() => End::Cancelled,
+                Err(why) => End::Failed(why.clone()),
+            });
         }
         outcome.map(|_| ())
     });
