@@ -348,6 +348,11 @@ fn the_import_choices_show_live_examples_and_reach_the_import() {
     let _ = h.get_by_label("e.g. 20261102-0001.JPG");
     h.get_by_label("Keep").click();
     h.run_steps(3);
+    assert_eq!(
+        h.state().import_choices().duplicates.as_str(),
+        "keep",
+        "Keep clicked"
+    );
     h.get_by_label("Read darktable edits").click();
     h.run_steps(3);
     // Added where they are, the photos are neither filed nor renamed:
@@ -459,7 +464,6 @@ fn files_and_folders_dropped_on_the_window_open_the_import_window_on_them() {
         h.state_mut().take_imports(),
         [json!({
             "paths": [dcim.join("IMG_0002.JPG")],
-            "copy": false,
             "duplicates": "skip"
         })]
     );
@@ -537,7 +541,10 @@ fn presets_are_named_choices_saved_applied_and_deleted() {
     h.run_steps(3);
     h.get_by_label("Save as preset…").click();
     h.run_steps(3);
-    h.get_by_role(egui::accesskit::Role::TextInput)
+    // The name field takes the focus (the Library's search is another).
+    h.query_all_by_role(egui::accesskit::Role::TextInput)
+        .find(egui_kittest::Node::is_focused)
+        .expect("the preset name field focused")
         .type_text("Monthly");
     h.run_steps(3);
     h.get_by_label("Save").click();
