@@ -150,6 +150,7 @@ fn a_workspace_from_portrait_retouch_has_its_network_layout_and_keys() {
     assert_eq!(
         names,
         [
+            "base",
             "exposure",
             "retouch.blend",
             "retouch.feather",

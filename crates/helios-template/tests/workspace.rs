@@ -434,7 +434,7 @@ fn parts_are_imported_as_a_copy_and_conflicts_are_picked() {
     );
     let t = &s.bundle.template;
     let names: Vec<&str> = t.network.nodes.iter().map(|n| n.name.as_str()).collect();
-    assert_eq!(names, ["exposure", "retouch", "import_cull_dedupe"]);
+    assert_eq!(names, ["base", "exposure", "retouch", "import_cull_dedupe"]);
     assert_eq!(t.network.view.node, "retouch");
     assert!(
         t.tools

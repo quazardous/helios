@@ -138,7 +138,9 @@ The starting graph, written like a node's network description
   raw darktable's scene-referred exposure this way (+0.7 EV, black
   -0.000244, the camera's exposure bias taken back), a picture keeping
   exposure's identity; "Develop one image", for raws only, has them as
-  its `params`.
+  its `params`. Where the template's exposure is a masked adjustment
+  ("Portrait retouch" from version 3, the blank network), a `base`
+  exposure node before it carries them, so the whole image gets them.
 - `bypassed: true` places a node bypassed: it keeps its parameters and
   renders as if absent (see module-contract.md, "Bypass"). An opened
   composite is not bypassed whole: its inner nodes are, one by one.
@@ -507,8 +509,9 @@ workspace as it stands, written as a bundle once it is edited (network,
 tools, library, a copy of its layout); `workspace.json` holds its
 profile, the template it came from, and its own name, description and
 icon. Its live layout is egui-pop's document, saved as it changes. A
-workspace not made from a template starts from the blank network (an
-exposure through a mask).
+workspace not made from a template starts from the blank network (a
+base exposure, darktable's default for a raw, then an exposure through
+a mask).
 
 **On the desktop.** The state is one value of the value store
 (`workspace/state`), so each edit, reset or import is one step of

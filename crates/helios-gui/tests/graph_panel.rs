@@ -100,13 +100,13 @@ fn the_panel_shows_the_workspace_network() {
     let root = temp("shows");
     let (mut h, _) = window(&root);
     let g = read(&mut h);
-    for id in ["source", "exposure", "mask", "blend"] {
+    for id in ["source", "base", "exposure", "mask", "blend"] {
         node(&g, id);
     }
     assert_eq!(node(&g, "exposure")["kind"], "exposure");
     assert_eq!(node(&g, "exposure")["inputs"][0]["id"], "input");
     let wire = json!({
-        "from": { "node": "source", "port": "image" },
+        "from": { "node": "base", "port": "output" },
         "to": { "node": "exposure", "port": "input" },
     });
     assert!(g["edges"].as_array().unwrap().contains(&wire), "{g}");
@@ -378,7 +378,7 @@ fn copied_nodes_paste_renamed_and_wired_as_one_undo_step() {
     assert!(
         n.connections
             .iter()
-            .any(|c| c.from == "source" && c.to == "exposure_2" && c.input == "input"),
+            .any(|c| c.from == "base" && c.to == "exposure_2" && c.input == "input"),
         "{n:?}"
     );
     assert_eq!(steps(&h), before + 1, "one undo step");

@@ -2896,7 +2896,7 @@ mod tests {
         let (failed, diff) = tool(&mut s, "helios_workspace_import_parts", args(dry));
         assert!(!failed, "{diff}");
         assert_eq!(diff["unresolved"], json!(["view"]));
-        assert_eq!(nodes(&mut s), 2);
+        assert_eq!(nodes(&mut s), 3);
         let (failed, _) = tool(
             &mut s,
             "helios_workspace_import_parts",
@@ -2907,7 +2907,7 @@ mod tests {
         picked["picks"] = json!({ "view": "ours" });
         let (failed, done) = tool(&mut s, "helios_workspace_import_parts", args(picked));
         assert!(!failed, "{done}");
-        assert_eq!(nodes(&mut s), 3);
+        assert_eq!(nodes(&mut s), 4);
         // Saved as a template: reviewed first, then written.
         let template =
             json!({ "id": "user.agent", "name": "Agent's", "description": "Made by an agent" });
@@ -2927,13 +2927,13 @@ mod tests {
             args(json!({ "dry_run": true })),
         );
         assert!(!failed && dry["changed"] == true, "{dry}");
-        assert_eq!(nodes(&mut s), 3);
+        assert_eq!(nodes(&mut s), 4);
         let (failed, _) = tool(&mut s, "helios_workspace_reset", args(json!({})));
         assert!(!failed);
-        assert_eq!(nodes(&mut s), 2);
+        assert_eq!(nodes(&mut s), 3);
         let (failed, undone) = tool(&mut s, "helios_workspace_undo", args(json!({})));
         assert!(!failed, "{undone}");
-        assert_eq!(nodes(&mut s), 3);
+        assert_eq!(nodes(&mut s), 4);
         let _ = std::fs::remove_dir_all(&root);
     }
 

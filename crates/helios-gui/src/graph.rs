@@ -1277,8 +1277,9 @@ mod tests {
         assert!(!of("exposure").principal);
         assert_eq!(of("exposure").stack, "blend");
         assert_eq!(of("source").rank, 0);
-        assert_eq!(of("exposure").rank, 1);
-        assert_eq!(of("blend").rank, 2);
+        assert_eq!(of("base").rank, 1);
+        assert_eq!(of("exposure").rank, 2);
+        assert_eq!(of("blend").rank, 3);
     }
 
     #[test]
