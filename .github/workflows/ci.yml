@@ -2,7 +2,7 @@ name: ci
 
 on:
   push:
-    branches: [main]
+    branches: [main, ship/windows]
   pull_request:
 
 jobs:
@@ -61,6 +61,23 @@ jobs:
           else
             cargo xtask check
           fi
+
+  # The workspace on Windows (MSVC): it builds, and its tests pass. No GPU
+  # on the runner: the GPU tests skip or run on WARP, the CPU backend runs.
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      # Text fixtures (JSON, TOML, catalogues) are compared byte for byte:
+      # check them out as they are committed, with LF.
+      - run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.95
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: windows
+      - run: cargo build --locked --workspace --all-targets
+      - run: cargo test --locked --workspace --no-fail-fast
 
   # Every commit of the push or pull request but its head (the test job
   # gates the head) builds, passes clippy and the tests it touches (the
