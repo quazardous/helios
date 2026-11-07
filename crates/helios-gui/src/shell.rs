@@ -1417,6 +1417,12 @@ impl Shell {
         self.library.borrow_mut().take_changes()
     }
 
+    /// The viewport's engine and its cache, for renders made beside it
+    /// (the Compare panel's head versions).
+    pub fn render_engine(&self) -> Arc<helios_core::Engine> {
+        self.viewport.borrow().engine().clone()
+    }
+
     /// The library's state, to read.
     pub fn library(&self) -> std::cell::Ref<'_, crate::library::Library> {
         self.library.borrow()

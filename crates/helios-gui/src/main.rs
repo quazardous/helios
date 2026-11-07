@@ -375,12 +375,74 @@ struct Prepared {
     node: helios_core::NodeId,
 }
 
+/// What a thread making an image ready sends.
+enum Ready {
+    /// A raw's embedded preview, alone in its graph: the first paint
+    /// while the raw is developed.
+    First(helios_core::Graph, helios_core::NodeId),
+    /// The image through the workspace's network, or why it is not.
+    Done(Result<Prepared, String>),
+}
+
 /// An image being made ready off the window's thread: the window opens it
 /// in the first frame after it is (decoding a raw's preview takes long
 /// enough to hold the window up).
 struct Preparing {
     path: PathBuf,
-    ready: std::sync::mpsc::Receiver<Result<Prepared, String>>,
+    /// The library's image, by id, when it was opened from there.
+    library: Option<String>,
+    ready: std::sync::mpsc::Receiver<Ready>,
+}
+
+/// A raw's embedded preview alone in a graph (its source's `image`
+/// port), to draw while the raw is developed; none for a picture or a
+/// raw without one.
+fn first_paint(path: &Path) -> Option<(helios_core::Graph, helios_core::NodeId)> {
+    if helios_load::Kind::of(path) != helios_load::Kind::Raw {
+        return None;
+    }
+    let preview = helios_load::preview(path).ok().flatten()?;
+    let mut graph = helios_core::Graph::new();
+    let node = graph.add_source("source", preview);
+    Some((graph, node))
+}
+
+/// Starts making an image of the library ready, off the window's thread:
+/// a raw's embedded preview first, then the image through `bundle`'s
+/// network (the darkroom applies its head version's edit).
+fn prepare_library(
+    id: &str,
+    image: helios_vault::ImageId,
+    path: PathBuf,
+    bundle: helios_template::Bundle,
+) -> Preparing {
+    let (tx, ready) = std::sync::mpsc::channel();
+    let file = path.clone();
+    let sender = tx.clone();
+    let spawned = std::thread::Builder::new()
+        .name("helios-image-open".into())
+        .spawn(move || {
+            if let Some((graph, node)) = first_paint(&file) {
+                let _ = sender.send(Ready::First(graph, node));
+            }
+            let prepared = image_graph(&file, &bundle).map(|(graph, node)| Prepared {
+                path: file,
+                image: Some(image),
+                graph,
+                node,
+            });
+            let _ = sender.send(Ready::Done(prepared));
+        });
+    if let Err(e) = spawned {
+        let _ = tx.send(Ready::Done(Err(format!(
+            "no thread to open the image: {e}"
+        ))));
+    }
+    Preparing {
+        path,
+        library: Some(id.to_string()),
+        ready,
+    }
 }
 
 /// Starts making `path` ready: decoded through `bundle`'s network, and
@@ -405,12 +467,18 @@ fn prepare(
                     node,
                 })
             });
-            let _ = sender.send(prepared);
+            let _ = sender.send(Ready::Done(prepared));
         });
     if let Err(e) = spawned {
-        let _ = tx.send(Err(format!("no thread to open the image: {e}")));
+        let _ = tx.send(Ready::Done(Err(format!(
+            "no thread to open the image: {e}"
+        ))));
     }
-    Preparing { path, ready }
+    Preparing {
+        path,
+        library: None,
+        ready,
+    }
 }
 
 /// A file's name, as notices show it.
@@ -487,7 +555,9 @@ impl Drop for App {
 
 impl App {
     /// Opens an image the library activated (Enter, a double click) in
-    /// the viewport, from its first copy still present.
+    /// the viewport, from its first copy still present: made ready off
+    /// the window's thread, a raw's embedded preview drawn until it is
+    /// developed ([`App::open_prepared`]).
     fn open_from_library(&mut self, id: &str) -> Result<(), String> {
         let bundle = self.bundle();
         let persist = self.persist.as_mut().ok_or("no vault open")?;
@@ -499,14 +569,10 @@ impl App {
             .find(|l| l.present)
             .map(|l| l.path)
             .ok_or_else(|| format!("no copy of image {id} is present"))?;
-        let (graph, node) = image_graph(&path, &bundle)?;
-        persist.open_image(&mut self.shell, image, graph, node, "output")?;
-        self.shown = Some(Shown::Library(id.to_string()));
-        contexts::open(
-            self.shell.app().handle(),
-            &Opened::Image(id.to_string()),
-            &egui_pop::model::commands::Origin::User,
-        );
+        // A newer opening replaces one still being made ready.
+        self.preparing.retain(|p| p.library.is_none());
+        self.preparing
+            .push(prepare_library(id, image, path, bundle));
         Ok(())
     }
 
@@ -535,6 +601,55 @@ impl App {
         self.shell
             .workspace_bundle()
             .unwrap_or_else(helios_template::workspace::blank)
+    }
+
+    /// Renders the head versions the library asked for (the Compare
+    /// panel's raws), each on a thread of its own through the viewport's
+    /// engine, sent back to the library.
+    fn render_heads(&mut self) {
+        let asked = self.shell.library_mut().take_head_requests();
+        if asked.is_empty() {
+            return;
+        }
+        let sink = self.shell.library().head_sink();
+        let Some(persist) = &self.persist else {
+            return;
+        };
+        let (vault, engine, bundle) = (
+            persist.vault().clone(),
+            self.shell.render_engine(),
+            self.bundle(),
+        );
+        for (id, size) in asked {
+            let path = self.shell.library().file(&id).map(Path::to_path_buf);
+            let Some(path) = path else {
+                sink.send(helios_gui::head_render::HeadRender {
+                    id: id.clone(),
+                    version: None,
+                    size,
+                    image: Err(format!("no copy of image {id} is present")),
+                });
+                continue;
+            };
+            let to = sink.clone();
+            let spawned = helios_gui::head_render::spawn(
+                vault.clone(),
+                engine.clone(),
+                bundle.clone(),
+                path,
+                id.clone(),
+                size,
+                move |r| to.send(r),
+            );
+            if let Err(e) = spawned {
+                sink.send(helios_gui::head_render::HeadRender {
+                    id,
+                    version: None,
+                    size,
+                    image: Err(e),
+                });
+            }
+        }
     }
 
     /// Opens what the viewport shows again, through the workspace's
@@ -593,12 +708,24 @@ impl App {
         let mut i = 0;
         while i < self.preparing.len() {
             let done = match self.preparing[i].ready.try_recv() {
-                Ok(Ok(prepared)) => {
+                Ok(Ready::First(graph, node)) => {
+                    // The image open before is closed first: what is
+                    // drawn now is not saved into its edit.
+                    if let Some(persist) = self.persist.as_mut() {
+                        persist.close_image(&mut self.shell, seconds_f64());
+                    }
+                    if let Err(e) = self.shell.set_view_source(graph, node, "image") {
+                        warn(&format!("no first paint: {e}"));
+                    }
+                    i += 1;
+                    continue;
+                }
+                Ok(Ready::Done(Ok(prepared))) => {
                     let path = prepared.path.clone();
                     show_prepared(&mut self.shell, self.persist.as_mut(), prepared)
                         .map_err(|e| format!("{}: {e}", path.display()))
                 }
-                Ok(Err(e)) => Err(e),
+                Ok(Ready::Done(Err(e))) => Err(e),
                 Err(TryRecvError::Empty) => {
                     i += 1;
                     continue;
@@ -608,7 +735,11 @@ impl App {
                     self.preparing[i].path.display()
                 )),
             };
-            let path = self.preparing.remove(i).path;
+            let Preparing { path, library, .. } = self.preparing.remove(i);
+            if let Some(id) = library {
+                self.library_opened(&id, done);
+                continue;
+            }
             match done {
                 Ok(()) => {
                     start::mark("image opened");
@@ -638,6 +769,28 @@ impl App {
             }
         }
         !self.preparing.is_empty()
+    }
+
+    /// An image of the library made ready: shown in the darkroom, or the
+    /// error said (a darkroom restored on it is left).
+    fn library_opened(&mut self, id: &str, done: Result<(), String>) {
+        let handle = self.shell.app().handle();
+        let opened = Opened::Image(id.to_string());
+        match done {
+            Ok(()) => {
+                self.shown = Some(Shown::Library(id.to_string()));
+                contexts::open(handle, &opened, &egui_pop::model::commands::Origin::User);
+            }
+            Err(e) => {
+                if contexts::darkroom(handle) == Some(opened) {
+                    contexts::leave_darkroom(handle, &egui_pop::model::commands::Origin::User);
+                    self.shell
+                        .notify(helios_gui::dialogs::Level::Warning, not_reopened(&e));
+                } else {
+                    self.shell.notify(helios_gui::dialogs::Level::Error, e);
+                }
+            }
+        }
     }
 
     /// Opens what a later launch or a link asked for: an image in the
@@ -701,6 +854,8 @@ impl eframe::App for App {
         // an undo): the image goes through it in place, its values and
         // history kept; opened again when the new network cannot take it.
         if self.shell.take_network_changed() {
+            // The Compare panel's renders went through the old network.
+            self.shell.library_mut().network_changed();
             match self.shell.keep_image_open() {
                 Ok(true) => {
                     if let Some(persist) = &mut self.persist {
@@ -744,6 +899,7 @@ impl eframe::App for App {
                 );
             }
         }
+        self.render_heads();
         let activated = self.shell.library_mut().take_activated();
         if let Some(id) = activated
             && let Err(e) = self.open_from_library(&id)
