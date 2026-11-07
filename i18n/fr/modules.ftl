@@ -32,6 +32,10 @@ param-exposure-exposure =
     .description = réglage d’exposition, en IL
     .label = exposition
 
+param-flip-orientation =
+    .description = l’orientation de darktable : -1 celle de l’appareil (EXIF), 0 aucune, 2 miroir, 1 retourner verticalement, 3 rotation de 180 degrés, 5 rotation de 90 degrés dans le sens horaire, 6 antihoraire, 4 transposer, 7 transverse
+    .label = orientation
+
 param-highlights-clip =
     .description = seuil d’écrêtage, relatif au blanc du capteur
     .label = écrêtage

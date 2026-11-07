@@ -33,6 +33,10 @@ param-exposure-exposure =
     .description = exposure adjustment, in EV
     .label = exposure
 
+param-flip-orientation =
+    .description = darktable's orientation: -1 from the camera (EXIF), 0 none, 2 mirror, 1 flip vertically, 3 rotate 180 degrees, 5 rotate 90 degrees clockwise, 6 counter-clockwise, 4 transpose, 7 transverse
+    .label = orientation
+
 param-highlights-clip =
     .description = clipping threshold, relative to the sensor's white
     .label = clip
