@@ -831,6 +831,17 @@ pub struct BackupStatus { pub have: u8, pub want: u8, pub off_site: bool, pub st
   set roles, mark off site or RAID, "Show its photos" (the `on:` filter),
   "Verify now", "Forget" (only when it holds no location). Under it, the
   catalogue backups: where, when, how many.
+  **Built (phase 4, 2026-11-07).** File > Storage… (`library.storage`,
+  `{"volume": id}` to put one first): name, kind, free space bar, roles,
+  off site and RAID (`Volume.off_site`, `Volume.raid`, saved by
+  `registry::save` and kept by scans), node, last seen, photo count, and
+  "Mark this disk…" for a weak identity (never a card), confirmed by the
+  user. The Library badges offline and missing photos, opening an
+  offline one says which disk to plug in, and the library is read again
+  on `vault.locations_changed` (published by `update_locations`). The
+  health check's free-space fix opens the page. Not yet: last verified,
+  "Show its photos", "Verify now", "Forget", the amber "not seen for
+  long", and write permission enforced in copy code.
 - **Strategy editor** (from the Storage page and the import's reminder):
   name, destinations (role or volume pickers, remote ones from
   plugins), copies, off site, when, re-check; a live sentence ("Each

@@ -429,7 +429,11 @@ remote store through a plugin. Each volume has:
   and when and on which node it was **last seen**;
 - whether it holds `DCIM` (a card or a camera), and its **roles**:
   library, archive, backup, ingest, scratch. A card starts as ingest, the
-  disk holding the library folder as library; the user will set them.
+  disk holding the library folder as library; the user sets them on the
+  Storage page;
+- whether it is **off site** and whether it is a **RAID**, both set by
+  the user. A RAID counts as one copy: it survives a dead disk, not a
+  deletion, corruption or theft.
 
 On Linux the volumes are read from `/proc/mounts`, `/dev/disk/by-uuid`,
 `/dev/disk/by-label`, `/dev/disk/by-id` and `/sys/block`, with free space
@@ -460,8 +464,38 @@ when none is but one is offline, missing otherwise. An offline photo is
 not missing: its marks, tags and edits stay, and nothing is removed or
 relinked because a disk is unplugged; plugging it in makes it present
 again. `repair` (relinking moved files by content) checks present copies
-only and never looks for an offline photo elsewhere. The Library reads
-each photo's presence; its "offline" badge comes with the preview cache.
+only and never looks for an offline photo elsewhere.
+
+In the Library, an offline photo's thumbnail carries an **offline**
+badge; hovering it says "On Backup-2, last seen 2026-10-28 on studio".
+A missing photo carries a **missing** badge. Opening an offline photo
+(or the darkroom reopening one at start) says "Plug in Backup-2 to open
+this photo", with the day and the computer it was last seen on, instead
+of a bare "no copy present". When a scan changes where copies are (a disk
+plugged in or out), the Library reads its photos again, so the badges
+follow at once.
+
+### The Storage page
+
+File > Storage… (`library.storage`) lists every volume the vault knows,
+those online first, then the offline ones. Each shows:
+
+- its **name**, edited in place (Enter or leaving the field saves it; a
+  blank name gives back its label);
+- its kind and icon, and a bar of its capacity and free space;
+- its **roles** as toggles: Library, Archive, Backup, Ingest, Scratch;
+- **Off site** and **RAID**, the user's flags;
+- the computer an internal disk belongs to, and for an offline volume
+  when and on which computer it was last seen;
+- how many copies of photos the library holds on it.
+
+Every change is saved to the vault at once and kept by later scans. A
+volume known only by its label and size (a weak identity) offers **Mark
+this disk…**: it explains what will be written, and only on the user's
+confirmation writes the identity file `.helios/volume.json` at its root.
+A card is never offered it: Helios never writes to a card.
+`library.storage` takes `{"volume": id}` to put that volume first, as
+the health check's free-space fix does.
 
 ## Not yet
 

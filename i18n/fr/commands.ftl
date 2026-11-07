@@ -195,6 +195,9 @@ command-library-openFolder =
 command-library-importWindow =
     .title = Importer des photos… (`source` : la carte ou le dossier sur lequel la fenêtre d’import s’ouvre)
 
+command-library-storage =
+    .title = Stockage… (`volume` : le volume à montrer en premier)
+
 command-library-importWith =
     .title = Importer avec un greffon d’import (`plugin`, `importer` ; `source` : le fichier ou dossier qu’il lit, demandé s’il manque ; `copy`, `darktable`)
 

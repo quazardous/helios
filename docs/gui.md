@@ -1107,7 +1107,8 @@ own. The first two:
 - **Free space** on the library's volume (the one holding the vault's
   folder) and on every volume with a library, archive, backup or
   scratch role: a warning under 10 % or 20 GB free, a problem under 3 %
-  or 5 GB.
+  or 5 GB. Its fix opens the Storage page on that volume (see
+  [library.md](library.md#the-storage-page)).
 - **Catalogue integrity**: SQLite's `PRAGMA quick_check` on the vault,
   read-only; anything but `ok` is a problem.
 

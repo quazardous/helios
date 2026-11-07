@@ -1288,7 +1288,7 @@ health-free-space-full = { $volume } est presque plein
 
 health-free-space-detail = { $free } libres sur { $capacity } ({ $percent } %)
 
-health-fix-open-volume = Ouvrir le volume
+health-fix-show-volume = Le montrer dans la page Stockage
 
 health-vault-integrity = Intégrité du catalogue
 
@@ -1303,3 +1303,75 @@ health-vault-damaged-detail = { $file } : { $first } ({ $count } erreurs). Resta
 health-vault-unreadable = Le catalogue ne peut pas être vérifié
 
 health-vault-unreadable-detail = { $file } : { $error }
+
+gui-library-offline-on = Sur { $volume }, vu pour la dernière fois le { $date } sur { $node }
+
+gui-library-offline-unknown = Sur un disque qui n’est pas branché
+
+gui-library-missing-note = Manquante : son fichier n’est plus où il était, et aucune autre copie n’est connue
+
+gui-library-plug-in = Branchez { $volume } pour ouvrir cette photo (vu pour la dernière fois le { $date } sur { $node })
+
+gui-library-badge-offline = hors ligne
+
+gui-library-badge-missing = manquante
+
+gui-storage-title = Stockage
+
+gui-storage-intro = Les disques que Helios a vus. Nommez-les et dites à quoi sert chacun : Helios n’écrit que sur les disques de bibliothèque, d’archive, de sauvegarde et de travail.
+
+gui-storage-none = Aucun disque connu pour l’instant : l’analyse tourne en arrière-plan.
+
+gui-storage-kind-internal = Disque interne
+
+gui-storage-kind-external = Disque externe
+
+gui-storage-kind-removable = Carte ou clé
+
+gui-storage-kind-share = Partage réseau
+
+gui-storage-kind-remote = Stockage distant
+
+gui-storage-role-library = Bibliothèque
+
+gui-storage-role-archive = Archive
+
+gui-storage-role-backup = Sauvegarde
+
+gui-storage-role-ingest = Source
+
+gui-storage-role-scratch = Travail
+
+gui-storage-name-hint = Son nom ; Entrée l’enregistre
+
+gui-storage-online = en ligne
+
+gui-storage-offline = hors ligne
+
+gui-storage-free = { $free } libres sur { $capacity }
+
+gui-storage-roles = Pour :
+
+gui-storage-off-site = Hors site
+
+gui-storage-off-site-hint = Gardé loin des autres disques (un autre bâtiment)
+
+gui-storage-raid = RAID
+
+gui-storage-raid-note = Un RAID compte pour une seule copie : il survit à un disque mort, pas à une suppression ni à un vol.
+
+gui-storage-node = Dans { $node }
+
+gui-storage-last-seen = Vu pour la dernière fois le { $date } sur { $node }
+
+gui-storage-photos = Photos dessus : { $count }
+
+gui-storage-mark-explain = Ce disque n’est connu que par son nom de volume et sa taille : Helios pourrait le confondre avec un autre. Le marquer écrit un petit fichier, .helios/volume.json, à sa racine : rien d’autre ne change sur le disque.
+
+gui-storage-mark-confirm = Écrire le fichier d’identité
+
+gui-storage-mark-cancel = Annuler
+
+gui-storage-mark = Marquer ce disque…
+
+gui-storage-mark-hint = Connu seulement par son nom de volume et sa taille : un fichier d’identité le distingue

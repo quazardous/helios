@@ -220,6 +220,9 @@ command-library-openFolder =
 command-library-pasteFiles =
     .title = Paste files or an image another application copied into the library, imported once confirmed (`dry_run`: only say what would be imported)
 
+command-library-storage =
+    .title = Storage… (`volume`: the volume to show first)
+
 command-macro-dissolve =
     .title = Give a macro way to its nodes, as ordinary ones (`node`; `dry_run`)
 

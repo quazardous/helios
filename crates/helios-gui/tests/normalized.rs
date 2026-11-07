@@ -28,6 +28,8 @@ const SHELL: &[&str] = &[
     "crates/helios-gui/src/shell/import_window.rs",
     // The Health page, the shell's own (`help.health`).
     "crates/helios-gui/src/shell/health.rs",
+    // The Storage page, the shell's own (`library.storage`).
+    "crates/helios-gui/src/shell/storage.rs",
 ];
 
 /// Declared menus, allowed outside the shell: a view of egui-pop's given

@@ -43,7 +43,7 @@ use egui_pop::views::library::marks::{ColorLabels, FlagToggle, RatingStars};
 use egui_pop::views::library::tags::{TagInput, TagInputState};
 use egui_pop::views::library::{
     Badge, Change as Mark, ColorLabel, CullAction, CullKeymap, Flag, LibraryItems, LibraryState,
-    Marks, Signal, Stack, Thumb, ThumbGrid, ThumbSource, change,
+    Marks, Signal, Stack, Thumb, ThumbGrid, ThumbSource, Tone as BadgeTone, change,
 };
 use helios_core::{Image, Message, Region};
 
@@ -210,8 +210,38 @@ pub struct Entry {
     pub day: Option<String>,
     pub stack: Option<StackOf>,
     /// Whether a copy of its file is at hand: present, offline (on a
-    /// volume not plugged in) or missing. Read, not drawn yet.
+    /// volume not plugged in) or missing: an offline or missing photo
+    /// shows a badge in the grid.
     pub presence: helios_vault::Presence,
+    /// The volume an offline copy is on (its id), to say which one to
+    /// plug in.
+    pub offline_on: Option<String>,
+}
+
+/// A volume as the library names it: its name, and when and on which
+/// node it was last seen (seconds since the epoch).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct VolumeNote {
+    pub name: String,
+    pub last_seen: Option<(u64, String)>,
+}
+
+impl VolumeNote {
+    /// Its last-seen day and node, as the messages say them.
+    fn seen(&self) -> (String, String) {
+        self.last_seen.as_ref().map_or_else(
+            || ("?".to_string(), "?".to_string()),
+            |(at, node)| {
+                (
+                    i64::try_from(*at)
+                        .ok()
+                        .and_then(day_text)
+                        .unwrap_or_else(|| "?".into()),
+                    node.clone(),
+                )
+            },
+        )
+    }
 }
 
 /// A file size as the interface's language writes it: `12.3 MiB`,
@@ -468,6 +498,8 @@ pub struct Library {
     heads: Heads,
     /// Where each image's file is, by id: what a copy of images names.
     files: HashMap<String, PathBuf>,
+    /// The volumes the vault knows, by id: what an offline photo names.
+    volumes: HashMap<String, VolumeNote>,
 }
 
 impl Default for Library {
@@ -508,6 +540,7 @@ impl Default for Library {
             in_view: RefCell::default(),
             heads: Heads::default(),
             files: HashMap::new(),
+            volumes: HashMap::new(),
         }
     }
 }
@@ -567,6 +600,21 @@ struct Comparison {
     synced: bool,
 }
 
+/// The badges' words for an image not at hand, translated.
+struct PresenceWords {
+    offline: String,
+    missing: String,
+}
+
+impl PresenceWords {
+    fn of(ctx: &egui::Context) -> Self {
+        Self {
+            offline: crate::i18n::text(ctx, Message::new("gui-library-badge-offline", "offline")),
+            missing: crate::i18n::text(ctx, Message::new("gui-library-badge-missing", "missing")),
+        }
+    }
+}
+
 /// The images the views show.
 struct Items<'a> {
     entries: &'a [Entry],
@@ -574,6 +622,7 @@ struct Items<'a> {
     /// Stacks shown (a filter flattens them).
     stacks: bool,
     revision: u64,
+    words: &'a PresenceWords,
 }
 
 impl Items<'_> {
@@ -608,12 +657,23 @@ impl LibraryItems<String> for Items<'_> {
     }
 
     fn badges(&self, index: usize) -> Vec<Badge> {
-        let path = std::path::Path::new(&self.entry(index).name);
+        let entry = self.entry(index);
+        let path = std::path::Path::new(&entry.name);
+        let mut badges = Vec::new();
         if path.extension().is_some() && helios_load::Kind::of(path) == helios_load::Kind::Raw {
-            vec![Badge::new("RAW")]
-        } else {
-            Vec::new()
+            badges.push(Badge::new("RAW"));
         }
+        // Not at hand: on a disk not plugged in, or gone.
+        match entry.presence {
+            helios_vault::Presence::Present => {}
+            helios_vault::Presence::Offline => {
+                badges.push(Badge::new(self.words.offline.clone()).tone(BadgeTone::Warning));
+            }
+            helios_vault::Presence::Missing => {
+                badges.push(Badge::new(self.words.missing.clone()).tone(BadgeTone::Danger));
+            }
+        }
+        badges
     }
 
     fn revision(&self) -> u64 {
@@ -685,6 +745,124 @@ impl Library {
     /// Where an image's file is, when it is on disk.
     pub fn file(&self, id: &str) -> Option<&Path> {
         self.files.get(id).map(PathBuf::as_path)
+    }
+
+    /// The volumes the vault knows: what an offline photo names.
+    pub fn set_volumes(&mut self, volumes: &[helios_storage::Volume]) {
+        self.volumes = volumes
+            .iter()
+            .map(|v| {
+                (
+                    v.id.as_str().to_string(),
+                    VolumeNote {
+                        name: v.name.clone(),
+                        last_seen: v.last_seen.as_ref().map(|s| (s.at, s.node.clone())),
+                    },
+                )
+            })
+            .collect();
+    }
+
+    /// The volume an offline image is on, as the library names it.
+    pub fn offline_volume(&self, id: &str) -> Option<VolumeNote> {
+        let entry = self.entry(id)?;
+        if entry.presence != helios_vault::Presence::Offline {
+            return None;
+        }
+        let volume = entry.offline_on.as_deref()?;
+        Some(
+            self.volumes
+                .get(volume)
+                .cloned()
+                .unwrap_or_else(|| VolumeNote {
+                    name: volume.to_string(),
+                    last_seen: None,
+                }),
+        )
+    }
+
+    /// What hovering an offline or missing image says: the volume it is
+    /// on and when that was last seen, or that it is missing.
+    pub fn presence_note(&self, id: &str) -> Option<Message> {
+        match self.entry(id)?.presence {
+            helios_vault::Presence::Present => None,
+            helios_vault::Presence::Offline => Some(match self.offline_volume(id) {
+                Some(v) => {
+                    let (date, node) = v.seen();
+                    Message::new(
+                        "gui-library-offline-on",
+                        "On { $volume }, last seen { $date } on { $node }",
+                    )
+                    .with("volume", v.name)
+                    .with("date", date)
+                    .with("node", node)
+                }
+                None => Message::new(
+                    "gui-library-offline-unknown",
+                    "On a disk that is not plugged in",
+                ),
+            }),
+            helios_vault::Presence::Missing => Some(Message::new(
+                "gui-library-missing-note",
+                "Missing: its file is not where it was, and no other copy is known",
+            )),
+        }
+    }
+
+    /// Why an image cannot be opened, when a disk would help: "Plug in
+    /// <volume> to open this photo", with its last-seen date. `None` for
+    /// a present or missing image.
+    pub fn unavailable(&self, id: &str) -> Option<Message> {
+        let v = self.offline_volume(id)?;
+        let (date, node) = v.seen();
+        Some(
+            Message::new(
+                "gui-library-plug-in",
+                "Plug in { $volume } to open this photo (last seen { $date } on { $node })",
+            )
+            .with("volume", v.name)
+            .with("date", date)
+            .with("node", node),
+        )
+    }
+
+    /// The badges an image shows in the grid, in the interface's
+    /// language: RAW, offline, missing.
+    pub fn badges_of(&self, ctx: &egui::Context, id: &str) -> Vec<String> {
+        let Some(&i) = self.index.get(id) else {
+            return Vec::new();
+        };
+        let words = PresenceWords::of(ctx);
+        let order = [i];
+        let items = Items {
+            entries: &self.entries,
+            order: &order,
+            stacks: false,
+            revision: 0,
+            words: &words,
+        };
+        items.badges(0).into_iter().map(|b| b.text).collect()
+    }
+
+    /// Hovering an offline or missing image in a view says why: the
+    /// volume it is on, or that it is missing. (A cell's id is the view's
+    /// own: egui-pop's library views name them so.)
+    fn presence_hover(&self, ui: &Ui, view: &str) {
+        let grid = egui::Id::unique(("egui_pop_views::library", LIBRARY, view));
+        for e in &self.entries {
+            if e.presence == helios_vault::Presence::Present {
+                continue;
+            }
+            let Some(r) = ui.ctx().read_response(grid.with(("cell", &e.id))) else {
+                continue;
+            };
+            if r.hovered()
+                && let Some(note) = self.presence_note(&e.id)
+            {
+                r.on_hover_text(crate::i18n::text(ui.ctx(), note));
+                return;
+            }
+        }
     }
 
     /// An image the library holds, by id.
@@ -1461,12 +1639,14 @@ impl Library {
         }
         let label = crate::i18n::text(ui.ctx(), Message::new("gui-library-images", "Images"));
         let keymap = grid_keys();
+        let words = PresenceWords::of(ui.ctx());
         let out = {
             let items = Items {
                 entries: &self.entries,
                 order: &self.order,
                 stacks: self.filter.is_empty(),
                 revision: self.revision,
+                words: &words,
             };
             let thumbs = Thumbs {
                 textures: &self.textures,
@@ -1479,6 +1659,7 @@ impl Library {
             grid.show(ui, &mut self.state, &items, &thumbs)
         };
         crate::name_rect(ui.ctx(), "helios.library.grid", out.response.rect);
+        self.presence_hover(ui, "grid");
         // Its context menu, a secondary click anywhere on it (a cell
         // takes the click, the grid only its focus): what acts on the
         // images, the selection else what the library shows.
@@ -1540,12 +1721,14 @@ impl Library {
         }
         let keymap = grid_keys();
         let height = ui.available_height().clamp(64.0, 200.0);
+        let words = PresenceWords::of(ui.ctx());
         let out = {
             let items = Items {
                 entries: &self.entries,
                 order: &self.order,
                 stacks: self.filter.is_empty(),
                 revision: self.revision,
+                words: &words,
             };
             let thumbs = Thumbs {
                 textures: &self.textures,
@@ -1558,6 +1741,7 @@ impl Library {
             strip.show(ui, &mut self.state, &items, &thumbs)
         };
         crate::name_rect(ui.ctx(), "helios.library.strip", out.response.rect);
+        self.presence_hover(ui, "strip");
         self.bind_clipboard(ui.ctx(), out.response.rect);
         self.handle(out.signals);
     }

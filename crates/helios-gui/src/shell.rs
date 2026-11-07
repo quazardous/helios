@@ -54,6 +54,7 @@ pub use export::{ExportAsk, OPEN_FOLDER, folder_path, settings_of};
 pub use health::{BADGE as HEALTH_BADGE, CHECK_NOW as HEALTH_CHECK_NOW, COMMAND as HEALTH_COMMAND};
 pub use import_choices::Choices;
 pub use macro_edit::{SELECTED as GRAPH_SELECTED, selected_nodes};
+pub use storage::{COMMAND as STORAGE_COMMAND, StorageLink, VaultStorage};
 pub use workspace_edit::STATE as WORKSPACE_STATE;
 
 mod export;
@@ -61,6 +62,7 @@ mod health;
 mod import;
 mod import_choices;
 mod import_window;
+mod storage;
 
 /// Where an import's lines are sent: its arguments and a line.
 type ImportLines = std::sync::mpsc::Sender<(Value, Value)>;
@@ -150,6 +152,8 @@ enum Action {
     Health,
     /// Run the health checks now (`health.checkNow`).
     HealthCheckNow,
+    /// Open the Storage page (`library.storage`'s arguments).
+    Storage(Value),
     /// Files and folders to import (`library.importFiles`'s arguments: a
     /// paste of files, a drop on the window).
     ImportFiles(Value, Origin),
@@ -517,6 +521,7 @@ pub struct Shell {
     /// The import window, its sources and the cards watched.
     import_window: import_window::ImportWindow,
     health: health::HealthPage,
+    storage: storage::StoragePage,
     /// The lines of the imports the host runs (`import_sink`).
     import_lines: (ImportLines, std::sync::mpsc::Receiver<(Value, Value)>),
     /// Exports asked for, for the host.
@@ -914,6 +919,7 @@ impl Shell {
             imports: Vec::new(),
             import_window: import_window::ImportWindow::default(),
             health: health::HealthPage::default(),
+            storage: storage::StoragePage::default(),
             import_lines: std::sync::mpsc::channel(),
             exports: Vec::new(),
             export_lines: std::sync::mpsc::channel(),
@@ -2726,6 +2732,14 @@ impl Shell {
             Box::new(|a, origin| Ok(Action::ImportSource(a.clone(), origin.clone()))),
         );
         add(
+            CommandSpec::new(
+                storage::COMMAND,
+                "Storage… (`volume`: the volume to show first)",
+                "Library",
+            ),
+            Box::new(|a, _| Ok(Action::Storage(a.clone()))),
+        );
+        add(
             CommandSpec::new(health::COMMAND, "Health check…", "Help"),
             Box::new(|_, _| Ok(Action::Health)),
         );
@@ -3357,6 +3371,8 @@ impl Shell {
             // The same commands in the menu bar.
             // Importing, always within reach (Ctrl+Shift+I, as Lightroom).
             command(MENU_FILE, "1_import", 0, import_window::COMMAND),
+            // File > Storage: the disks and what each is for.
+            command(MENU_FILE, "1_import", 3, storage::COMMAND),
             // Help > Health check.
             command(MENU_HELP, "1_health", 0, health::COMMAND),
             // An entry per importer plugin, the submenu shown only when
@@ -4361,6 +4377,10 @@ impl Shell {
                 let started = self.health_check_now();
                 return Ok(serde_json::json!({ "started": started }));
             }
+            Action::Storage(args) => {
+                self.open_storage(&args);
+                return Ok(Value::Null);
+            }
             Action::ImportFiles(args, origin) => return self.import_files(&args, &origin),
             Action::ImportWith(args, origin) => return self.import_with(&args, &origin),
             Action::Export(args, origin) => return self.export(&args, &origin),
@@ -4807,6 +4827,7 @@ impl Shell {
         self.take_dropped_files(&ctx);
         self.import_window_frame(&ctx);
         self.health_window(&ctx);
+        self.storage_window(&ctx);
         let refused = std::mem::take(&mut self.library.borrow_mut().notes);
         for n in refused {
             self.warn(n);

@@ -74,6 +74,9 @@ pub struct Persist<S: Store> {
     bus: Arc<Bus>,
     events: Receiver<Envelope>,
     editing: Option<Editing>,
+    /// A scan changed where copies are (a disk plugged in or out): the
+    /// library is to be read again ([`Persist::take_locations_changed`]).
+    locations_changed: bool,
 }
 
 /// The edit of the image shown.
@@ -123,6 +126,12 @@ pub fn read_library<S: Store>(vault: &Vault<S>) -> Result<LibraryRows, String> {
     for row in rows? {
         let locations = vault.locations(&row.id)?;
         let presence = Presence::of(&locations);
+        // The volume to plug in, for an image with no copy at hand.
+        let offline_on = locations
+            .iter()
+            .find(|l| l.presence == Presence::Offline)
+            .and_then(|l| l.volume.as_ref())
+            .map(|v| v.as_str().to_string());
         let path = locations
             .into_iter()
             .find(Location::present)
@@ -131,6 +140,7 @@ pub fn read_library<S: Store>(vault: &Vault<S>) -> Result<LibraryRows, String> {
         let mut entry = Entry {
             id: id.clone(),
             presence,
+            offline_on,
             name: path
                 .as_ref()
                 .and_then(|p| p.file_name())
@@ -167,6 +177,7 @@ impl<S: Store> Persist<S> {
             bus,
             events,
             editing: None,
+            locations_changed: false,
         }
     }
 
@@ -176,6 +187,13 @@ impl<S: Store> Persist<S> {
 
     pub fn bus(&self) -> &Arc<Bus> {
         &self.bus
+    }
+
+    /// Whether a scan changed where copies are since the last call (a
+    /// disk plugged in or out): the host reads the library again, so
+    /// its offline badges follow.
+    pub fn take_locations_changed(&mut self) -> bool {
+        std::mem::take(&mut self.locations_changed)
     }
 
     /// Fills the library with the vault's images; returns where each one
@@ -481,6 +499,8 @@ impl<S: Store> Persist<S> {
                 stacks_changed = true;
             } else if event.kind == "library.decision" {
                 decided = true;
+            } else if event.kind == helios_vault::LOCATIONS_CHANGED {
+                self.locations_changed = true;
             } else if event.kind == "vault.field_changed" {
                 let p = &event.payload;
                 if let (Some(image), Some(field)) = (p["image"].as_str(), p["field"].as_str()) {

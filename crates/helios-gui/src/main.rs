@@ -609,7 +609,13 @@ impl App {
             .into_iter()
             .find(helios_vault::Location::present)
             .map(|l| l.path)
-            .ok_or_else(|| format!("no copy of image {id} is present"))?;
+            .ok_or_else(|| {
+                // On a disk not plugged in: say which one.
+                self.shell.library().unavailable(id).map_or_else(
+                    || format!("no copy of image {id} is present"),
+                    |m| self.shell.text(m),
+                )
+            })?;
         // A newer opening replaces one still being made ready.
         self.preparing.retain(|p| p.library.is_none());
         self.preparing
@@ -960,6 +966,14 @@ impl eframe::App for App {
         }
         if let Some(persist) = &mut self.persist {
             persist.frame(&mut self.shell, seconds_f64());
+            // A scan changed where copies are (a disk plugged in or
+            // out): the photos' badges and thumbnails follow.
+            if persist.take_locations_changed() {
+                self.shell.refresh_volumes();
+                if let Err(e) = fill_library(&mut self.shell, persist) {
+                    warn(&format!("cannot fill the library: {e}"));
+                }
+            }
             // While a gesture goes on, come back to save it in time.
             if self.shell.values.lock().is_ok_and(|v| v.uncommitted()) {
                 ui.ctx()
@@ -1344,7 +1358,7 @@ fn main() -> Result<(), String> {
             if let Some(vault) = known_vault.clone() {
                 let library = vault.clone();
                 let scanner = helios_storage::scan::Scanner::start(
-                    vault,
+                    vault.clone(),
                     helios_storage::system(),
                     helios_storage::node(),
                     move || {
@@ -1359,6 +1373,16 @@ fn main() -> Result<(), String> {
                     },
                 );
                 shell.on_volumes_changed(move || scanner.poke());
+                // The Storage page, and the volumes offline photos name.
+                let marker = helios_library::import::library_root(&vault)
+                    .ok()
+                    .flatten()
+                    .map_or_else(|| "helios".to_string(), |p| p.display().to_string());
+                shell.set_storage(Arc::new(helios_gui::shell::VaultStorage::new(
+                    vault,
+                    helios_storage::system(),
+                    marker,
+                )));
             }
             // What the vault holds, for its "in your Library" prefilter.
             if let Some(vault) = known_vault.clone() {

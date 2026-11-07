@@ -461,6 +461,10 @@ gui-layout-not-saved = The layout was not saved: { $error }
 
 gui-library-auto-advance = Auto-advance
 
+gui-library-badge-missing = missing
+
+gui-library-badge-offline = offline
+
 gui-library-compare-hint = Select two to four images to compare them
 
 gui-library-count = { $shown } of { $total }
@@ -477,11 +481,19 @@ gui-library-import-photos = Import photos…
 
 gui-library-keep-best = Keep the best: pick it, reject the others
 
+gui-library-missing-note = Missing: its file is not where it was, and no other copy is known
+
 gui-library-no-cursor = No image under the cursor
 
 gui-library-none = No images
 
 gui-library-not-saved = Not saved, the library shows what was saved last: { $error }
+
+gui-library-offline-on = On { $volume }, last seen { $date } on { $node }
+
+gui-library-offline-unknown = On a disk that is not plugged in
+
+gui-library-plug-in = Plug in { $volume } to open this photo (last seen { $date } on { $node })
 
 gui-library-read = { $count } images in the library
 
@@ -983,6 +995,66 @@ gui-status-zoom-fill = Fill
 
 gui-status-zoom-fit = Fit
 
+gui-storage-free = { $free } free of { $capacity }
+
+gui-storage-intro = The disks Helios has seen. Name them and say what each is for: Helios writes only to library, archive, backup and scratch disks.
+
+gui-storage-kind-external = External disk
+
+gui-storage-kind-internal = Internal disk
+
+gui-storage-kind-remote = Remote store
+
+gui-storage-kind-removable = Card or stick
+
+gui-storage-kind-share = Network share
+
+gui-storage-last-seen = Last seen { $date } on { $node }
+
+gui-storage-mark = Mark this disk…
+
+gui-storage-mark-cancel = Cancel
+
+gui-storage-mark-confirm = Write the identity file
+
+gui-storage-mark-explain = This disk is known only by its label and size, so Helios could take another disk for it. Marking it writes a small file, .helios/volume.json, at its root: nothing else on the disk changes.
+
+gui-storage-mark-hint = Known only by its label and size: an identity file tells it apart
+
+gui-storage-name-hint = Its name; Enter saves it
+
+gui-storage-node = In { $node }
+
+gui-storage-none = No disk known yet: the scan runs in the background.
+
+gui-storage-off-site = Off site
+
+gui-storage-off-site-hint = Kept away from the other disks (another building)
+
+gui-storage-offline = offline
+
+gui-storage-online = online
+
+gui-storage-photos = Photos on it: { $count }
+
+gui-storage-raid = RAID
+
+gui-storage-raid-note = A RAID counts as one copy: it survives a dead disk, not a deletion or a theft.
+
+gui-storage-role-archive = Archive
+
+gui-storage-role-backup = Backup
+
+gui-storage-role-ingest = Ingest
+
+gui-storage-role-library = Library
+
+gui-storage-role-scratch = Scratch
+
+gui-storage-roles = For:
+
+gui-storage-title = Storage
+
 gui-subworkspace-gone = The sub-workspace { $id } is gone: back to where it was entered from
 
 gui-template-keys-error = template { $name }: keys: { $error }
@@ -1131,7 +1203,7 @@ health-check-crashed = The check { $check } failed
 
 health-check-crashed-detail = It stopped before it could say anything.
 
-health-fix-open-volume = Open the volume
+health-fix-show-volume = Show it on the Storage page
 
 health-free-space = Free space
 
