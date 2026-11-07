@@ -1,0 +1,17 @@
+#!/bin/sh
+# The AppImage's entry point. Starts the window (helios-gui) by default;
+# `Helios.AppImage helios ARGS...` runs the command line instead, and
+# likewise helios-node and helios-mcp. The programs sit side by side in
+# usr/bin, where each finds the others (Helios looks beside its own
+# executable), so PATH only matters to what they start by name.
+here="$(dirname "$(readlink -f "$0")")"
+PATH="$here/usr/bin:$PATH"
+export PATH
+case "${1:-}" in
+  helios | helios-node | helios-mcp | helios-gui)
+    program="$1"
+    shift
+    exec "$here/usr/bin/$program" "$@"
+    ;;
+esac
+exec "$here/usr/bin/helios-gui" "$@"

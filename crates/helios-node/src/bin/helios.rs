@@ -1,5 +1,7 @@
 //! `helios`: the command line of Helios.
 //!
+//!     helios --version
+//!
 //!     helios inspect [--socket PATH|tcp://HOST:PORT --token-file FILE] state
 //!     helios inspect [--socket PATH|tcp://HOST:PORT --token-file FILE] describe ENTITY
 //!     helios inspect [--socket PATH|tcp://HOST:PORT --token-file FILE] events [--since SEQ]
@@ -103,6 +105,7 @@ use helios_inspect::{Address, Request, request_at};
 use helios_node::batch::{Options, Outcome};
 
 const USAGE: &str = "usage:
+  helios --version
   helios inspect [--socket PATH|tcp://HOST:PORT --token-file FILE] state
   helios inspect [--socket PATH|tcp://HOST:PORT --token-file FILE] describe ENTITY
   helios inspect [--socket PATH|tcp://HOST:PORT --token-file FILE] events [--since SEQ]
@@ -968,6 +971,12 @@ fn doctor(args: &[String]) -> ExitCode {
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if let [flag] = args.as_slice()
+        && (flag == "--version" || flag == "-V")
+    {
+        println!("helios {}", env!("CARGO_PKG_VERSION"));
+        return ExitCode::SUCCESS;
+    }
     if args.first().is_some_and(|a| a == "sandbox") {
         return sandbox(&args[1..]);
     }

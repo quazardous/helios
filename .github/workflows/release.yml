@@ -1,0 +1,158 @@
+name: release
+
+# Builds the Linux packages of a version and publishes them as a GitHub
+# Release (docs/releases.md). Runs on a `vX.Y.Z` tag pushed, or by hand:
+# with `publish: false` (the default by hand) it only builds, tests and
+# keeps the files as the run's artefacts, without creating a Release.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "The tag to build, vX.Y.Z (any name for a dry run)"
+        required: true
+        type: string
+      publish:
+        description: "Create the GitHub Release (the tag must exist on main)"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  TAG: ${{ inputs.tag || github.ref_name }}
+  # A tag pushed always publishes; by hand, only when asked.
+  PUBLISH: ${{ (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || inputs.publish == true }}
+  CARGO_TERM_COLOR: never
+
+jobs:
+  # The binaries in release, on the oldest glibc GitHub offers (Ubuntu
+  # 22.04, glibc 2.35), so they run on that and on anything newer.
+  build-linux:
+    runs-on: ubuntu-22.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Publishing builds the tag itself; a dry run builds the branch
+          # the workflow was started from.
+          ref: ${{ env.PUBLISH == 'true' && env.TAG || '' }}
+      - name: version
+        id: version
+        run: |
+          version="${TAG#v}"
+          cargo_version="$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n1)"
+          echo "tag $TAG, version $version, Cargo.toml $cargo_version"
+          if [ "$PUBLISH" = "true" ] && [ "$version" != "$cargo_version" ]; then
+            echo "::error::the tag $TAG does not match the workspace version $cargo_version"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "cargo_version=$cargo_version" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@1.95
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-linux
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+      # helios (the command line), helios-node and helios-mcp (which
+      # helios starts), helios-gui (the window) and the programs of the
+      # plugins Helios ships. Their runtime data (catalogues, templates,
+      # module declarations, the plugins' manifests) is compiled in.
+      - name: build
+        run: |
+          cargo build --release --locked \
+            -p helios-node -p helios-gui -p helios-plugin-darktable-library
+      - name: package
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: packaging/linux/release.sh "$VERSION" target/release dist
+      # The CHANGELOG.md section of the version: the Release's notes. A dry
+      # run takes the workspace version's section, so the cut is tested too.
+      - name: release notes
+        env:
+          NOTES_VERSION: ${{ env.PUBLISH == 'true' && steps.version.outputs.version || steps.version.outputs.cargo_version }}
+        run: |
+          awk -v v="$NOTES_VERSION" '
+            index($0, "## [" v "]") == 1 { on = 1; next }
+            on && /^## \[/ { exit }
+            on { print }
+          ' CHANGELOG.md > dist/release-notes.md
+          if ! grep -q '[^[:space:]]' dist/release-notes.md; then
+            echo "::error::no section for $NOTES_VERSION in CHANGELOG.md"
+            exit 1
+          fi
+          cat dist/release-notes.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: helios-${{ steps.version.outputs.version }}-linux-x86_64
+          path: dist/
+          if-no-files-found: error
+
+  # The packages as a user gets them: in a bare Ubuntu 22.04 container (no
+  # Vulkan loader, no GPU, no desktop libraries), the tarball's command line
+  # imports a picture and exports it; the AppImage starts and says its
+  # version on the runner.
+  smoke-linux:
+    needs: build-linux
+    runs-on: ubuntu-22.04
+    env:
+      VERSION: ${{ needs.build-linux.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.PUBLISH == 'true' && env.TAG || '' }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: helios-${{ needs.build-linux.outputs.version }}-linux-x86_64
+          path: dist
+      - name: checksums
+        working-directory: dist
+        run: sha256sum -c SHA256SUMS
+      - name: tarball, command line, no Vulkan
+        run: |
+          docker run --rm -v "$PWD:/work:ro" -e VERSION ubuntu:22.04 \
+            bash /work/packaging/linux/smoke.sh "/work/dist/helios-$VERSION-linux-x86_64.tar.gz" \
+              /work/crates/helios-plugin/tests/fixtures/rated-photos/a.jpg
+      - name: AppImage
+        run: |
+          app="dist/Helios-$VERSION-x86_64.AppImage"
+          chmod +x "$app"
+          # No FUSE needed: the runtime extracts itself and runs.
+          export APPIMAGE_EXTRACT_AND_RUN=1
+          "$app" --version | tee gui.txt
+          grep -q '^helios-gui [0-9]' gui.txt
+          "$app" helios --version | tee cli.txt
+          grep -q '^helios [0-9]' cli.txt
+
+  publish:
+    needs: [build-linux, smoke-linux]
+    if: ${{ (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || inputs.publish == true }}
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.build-linux.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: helios-${{ needs.build-linux.outputs.version }}-linux-x86_64
+          path: dist
+      - name: GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag \
+            --title "Helios $VERSION" --notes-file dist/release-notes.md \
+            dist/helios-"$VERSION"-linux-x86_64.tar.gz \
+            dist/Helios-"$VERSION"-x86_64.AppImage \
+            dist/SHA256SUMS

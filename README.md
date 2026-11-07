@@ -29,6 +29,25 @@ components live, and its
 [first-app guide](https://github.com/quazardous/egui-pop/blob/main/docs/first-app.md)
 follows the path Helios took.
 
+## Download
+
+Releases are published on the
+[Releases page](https://github.com/quazardous/helios/releases), each with
+its changelog. For Linux on x86_64:
+
+- `Helios-<version>-x86_64.AppImage`: one file. Make it executable
+  (`chmod +x`) and run it: it opens the window; `Helios-<version>-x86_64.AppImage
+  helios ...` runs the command line.
+- `helios-<version>-linux-x86_64.tar.gz`: a folder that runs where it is
+  unpacked: `bin/helios-gui` (the window), `bin/helios` (the command line),
+  with a desktop entry and icons under `share/`.
+- `SHA256SUMS`: the checksums of both (see [docs/releases.md](./docs/releases.md)).
+
+Requirements: Linux x86_64 with glibc 2.35 or newer (Ubuntu 22.04, Debian
+12, Fedora 36 and later), a Wayland or X11 desktop for the window. A GPU
+with a Vulkan driver speeds the processing up; without one it runs on the
+CPU. Building from source: see [CONTRIBUTING.md](./CONTRIBUTING.md).
+
 ## Documentation
 
 - [ROADMAP.md](./ROADMAP.md): vision, concepts, phases and open questions.
@@ -41,6 +60,8 @@ follows the path Helios took.
   for orchestration.
 - [docs/testing-strategy.md](./docs/testing-strategy.md): draft of how Helios
   is tested and sandboxed, designed so that an AI agent can build it.
+- [docs/releases.md](./docs/releases.md): where releases come from, what
+  they contain and how to check their checksums.
 - [docs/bench.md](./docs/bench.md): the bench box, a remote runner for full
   builds, the test suite, timings and GPU tests (`cargo xtask bench-remote`).
 - [docs/performance.md](./docs/performance.md): the performance budgets

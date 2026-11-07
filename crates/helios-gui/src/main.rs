@@ -1089,8 +1089,14 @@ fn node_links(args: &[String]) -> Result<Vec<helios_gui::relay::NodeLink>, Strin
 }
 
 fn main() -> Result<(), String> {
-    start::begin();
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if let [flag] = args.as_slice()
+        && (flag == "--version" || flag == "-V")
+    {
+        println!("helios-gui {}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
+    start::begin();
     if let [flag, target, out] = args.as_slice()
         && flag == "--snapshot"
     {
