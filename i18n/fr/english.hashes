@@ -97,6 +97,7 @@ command-keymap-package.title dafef66dd3b9bf88
 command-library-copyFiles.title 47994437a8a0f5ba
 command-library-importFiles.title ca381f2cf97c96e5
 command-library-importSource.title b212d23cfe694c9e
+command-library-importWith.title 8da42d005844e0c1
 command-library-pasteFiles.title 409587651f782f9a
 command-macro-dissolve.title e472cc526f105a70
 command-macro-fold.title 33ae65c670fa307a
@@ -315,6 +316,7 @@ gui-history-undo cc7022a2d9050a57
 gui-image-not-reopened 422cb049e7d6fe52
 gui-image-opened 8cddc04842c75210
 gui-image-opening 0a3761ae857369a4
+gui-import-cancelled ef0a315043a78d47
 gui-import-copy 6559bd9463867f74
 gui-import-copy-help 94e74fb4f9cc2bcf
 gui-import-darktable e80677a991ca5776
@@ -327,10 +329,17 @@ gui-import-ended c5137118d2a51aff
 gui-import-ended-reported 4a72175477f43d3b
 gui-import-failed dbdb6ddf097d8f5c
 gui-import-form-title 1bab6c9d205270b1
+gui-import-metadata 4527af2f3dee5442
 gui-import-path 54572ccc6f105c66
 gui-import-remember 75f1f4460d6a89ec
 gui-import-remember-help e20b1b9d5a401bc1
 gui-import-verb 809bb223e747d022
+gui-importer-file 585de9c42330e723
+gui-importer-folder c1be81aa1156c7cd
+gui-importer-form-title c057dbad928a7616
+gui-importer-refused 1e1ed0715ed2b65f
+gui-importer-scanned da651acfeeecce9b
+gui-importer-warning 48ec8d182f072be9
 gui-job-batch-done ccc1a6756b4cc887
 gui-job-batch-failed ca77875dcfbaac86
 gui-job-export-done 5fdda5b0fb93ec0f
@@ -668,6 +677,7 @@ gui-workspace-template-stripped bbfc3a853d7a9757
 gui-workspace-template-title f73fd29bfd36b300
 gui-workspace-template-toolbox 8a5a42e4d8bcf422
 gui-workspace-template-version 4eb4c308112904df
+menu-helios-file-importFrom.label 2605aaed9c91a322
 menu-helios-masks-row-add.label ea5be6af4dfc4a82
 menu-helios-system-profiles.label 493fa9da88311dbf
 menu-helios-system-recent.label 570a956d04ae773e

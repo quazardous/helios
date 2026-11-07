@@ -229,6 +229,20 @@ modes substituted, sidecars that could not be read) are listed in the
 **Log** panel, one line per sidecar with its report, and the toast then
 points there.
 
+**File > Import from →** lists the importers that plugins declare (the
+submenu is shown only when one is installed). Choosing one asks for what
+it reads, a folder or a file, and where the photos go as above; the
+plugin then lists the photos and what it knows of each (rating, reject,
+colour labels, tags, title, description), and Helios imports them itself,
+as any import: referenced or copied, duplicates and darktable sidecars as
+usual. The values the importer gives are applied before the sidecars and
+never overwrite what the library holds: a rating, reject, title or
+description is set only where the photo has none, labels and tags are
+added. What the plugin found, left out (a path outside the folder, a
+file that is not an image) and warned about goes to the **Log** panel.
+The scan is a job of its own in the jobs centre, cancelled there. See
+docs/extensions.md, "Importers", for the protocol.
+
 ## Culling on the desktop
 
 The library panels are egui-pop's photo library widgets (its

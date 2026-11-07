@@ -27,6 +27,14 @@
 //!   it again with skip or keep). Nothing is ever deleted.
 //! - **Signals.** Each image's near-duplicate [`Signals`] are measured and
 //!   kept with it.
+//! - **Listed files.** An importer plugin lists the files to import with
+//!   what it knows of each ([`Listed`]: rating, reject, labels, tags,
+//!   title, description). They are imported as any file, and their values
+//!   applied as field commands under the importer's name: the rating, the
+//!   reject, the title and the description only where the image has none
+//!   (what the library holds is never overwritten), labels and tags
+//!   added. A duplicate left out gets none. They are applied before the
+//!   file's darktable sidecars, so the importer's values come first.
 //! - **A job.** It reports through [`helios_core::jobs`] (kind `import`):
 //!   `job.started`, a `job.progress` per file (done, total, the file as
 //!   its item), a log line per file that was not skipped, then
@@ -45,9 +53,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use helios_core::jobs::{Jobs, Progress, Start};
+use helios_vault::fields::{self as vault_fields, Command, Op};
 use helios_vault::{IMAGE_EXTENSIONS, ImageId, Store, Vault};
 use helios_xmp::files::Matched;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::darktable;
@@ -99,6 +108,71 @@ impl Duplicates {
     }
 }
 
+/// What an importer knows of a file it lists, as the library's fields
+/// hold it (see [`Listed`]).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Metadata {
+    /// 0 to 5 stars.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rating: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rejected: Option<bool>,
+    /// Colour labels: `red`, `yellow`, `green`, `blue`, `purple`.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub labels: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+impl Metadata {
+    /// The field commands it makes for `image`: values set only where
+    /// the image has none, labels and tags added.
+    pub fn commands(&self, image: ImageId) -> Vec<Command> {
+        let mut out = Vec::new();
+        let mut absent = |field: &str, v: Value| {
+            out.push(Command::with(image, field, Op::SetIfAbsent(v)));
+        };
+        if let Some(r) = self.rating {
+            absent(vault_fields::RATING, json!(r));
+        }
+        if let Some(r) = self.rejected {
+            absent(vault_fields::REJECTED, json!(r));
+        }
+        if let Some(t) = &self.title {
+            absent("title", json!(t));
+        }
+        if let Some(d) = &self.description {
+            absent("description", json!(d));
+        }
+        out.extend(
+            self.labels
+                .iter()
+                .map(|l| Command::add(image, vault_fields::LABELS, l)),
+        );
+        out.extend(
+            self.tags
+                .iter()
+                .map(|t| Command::add(image, vault_fields::TAGS, t)),
+        );
+        out
+    }
+}
+
+/// Files an importer listed, each with what it knows of it, and who
+/// writes those values (`importer:<plugin>/<importer>`, as the audit
+/// trail says it).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Listed {
+    pub by: String,
+    /// By absolute path, as the import reads the file.
+    pub files: BTreeMap<PathBuf, Metadata>,
+}
+
 /// How an import runs.
 #[derive(Clone, Debug)]
 pub struct Options {
@@ -110,6 +184,8 @@ pub struct Options {
     pub signals: bool,
     /// Keep each file's darktable sidecars as versions of its image.
     pub darktable: bool,
+    /// The values an importer gives the files it listed.
+    pub listed: Option<Listed>,
     /// Set by the caller to stop the import (an interrupt): seen before
     /// each file and during a copy, as a cancel of its job is.
     pub cancel: Option<Arc<AtomicBool>>,
@@ -123,6 +199,7 @@ impl Default for Options {
             duplicates: Duplicates::Skip,
             signals: true,
             darktable: false,
+            listed: None,
             cancel: None,
         }
     }
@@ -169,6 +246,8 @@ pub struct Report {
     pub edits_reported: u64,
     /// darktable sidecars that could not be kept.
     pub edits_failed: u64,
+    /// Images whose fields took values an importer listed.
+    pub metadata: u64,
 }
 
 impl Report {
@@ -478,6 +557,7 @@ impl<S: Store> Run<'_, S> {
         {
             self.vault.import_hashed(path, id, self.now)?;
             self.seen.entry(id).or_insert_with(|| path.to_path_buf());
+            self.keep_metadata(path, id, &mut line)?;
             self.keep_edits(path, id, &mut line)?;
             return Ok((line, Status::Unchanged));
         }
@@ -559,8 +639,32 @@ impl<S: Store> Run<'_, S> {
             self.vault.set_signals(&id, Some(&doc))?;
             line["signals"] = doc;
         }
+        // An importer's values first: a catalogue is its application's
+        // truth, a sidecar may lag behind it.
+        self.keep_metadata(path, id, &mut line)?;
         self.keep_edits(path, id, &mut line)?;
         Ok((line, if new { Status::Added } else { Status::Located }))
+    }
+
+    /// Applies what an importer listed for the file at `path` to its image
+    /// `id`: the fields changed under the line's `metadata`.
+    fn keep_metadata(&mut self, path: &Path, id: ImageId, line: &mut Value) -> Result<(), String> {
+        let Some(listed) = &self.options.listed else {
+            return Ok(());
+        };
+        let Some(metadata) = listed.files.get(path) else {
+            return Ok(());
+        };
+        let commands = metadata.commands(id);
+        if commands.is_empty() {
+            return Ok(());
+        }
+        let applied = self.vault.apply(&commands, &listed.by, None, self.now)?;
+        line["metadata"] = json!({ "changed": applied.changed, "kept": applied.unchanged });
+        if applied.changed > 0 {
+            self.report.metadata += 1;
+        }
+        Ok(())
     }
 
     /// Keeps the darktable sidecars of the file at `path` (read where the
@@ -715,6 +819,12 @@ pub fn import<S: Store>(
         job.log(format!(
             "{} darktable edits kept, {} with a report, {} failed",
             run.report.edits, run.report.edits_reported, run.report.edits_failed
+        ));
+    }
+    if let Some(listed) = &options.listed {
+        job.log(format!(
+            "{} images took values from {}",
+            run.report.metadata, listed.by
         ));
     }
     job.finished();

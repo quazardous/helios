@@ -140,6 +140,9 @@ enum Action {
     /// Files and folders to import (`library.importFiles`'s arguments: a
     /// paste of files, a drop on the window).
     ImportFiles(Value, Origin),
+    /// Import through an importer plugin (`library.importWith`'s
+    /// arguments).
+    ImportWith(Value, Origin),
     Fullscreen,
     Minimize,
     Maximize,
@@ -350,6 +353,32 @@ impl ShellBuilder {
     pub fn desktop(mut self, instance: egui_pop::platform::instance::Instance) -> Self {
         self.parts.opens.listen();
         self.app = crate::platform::desktop(self.app, instance);
+        self
+    }
+
+    /// The plugins installed: each importer an entry under File > Import
+    /// from, each plugin's catalogues added to the interface's (its
+    /// importers' labels translated there). A catalogue refused is said
+    /// in the log and left out.
+    #[must_use]
+    pub fn plugins(self, broker: &helios_plugin::Broker) -> Self {
+        let entries = crate::importers::entries(broker);
+        for id in broker.ids() {
+            let Some(manifest) = broker.manifest(id) else {
+                continue;
+            };
+            let Some(dir) = broker.dir(id) else {
+                continue;
+            };
+            let commands: Vec<String> = manifest.commands.iter().map(|c| c.id.clone()).collect();
+            let added = helios_i18n::plugins::read(dir).and_then(|catalogues| {
+                helios_i18n::plugins::add(&self.parts.i18n, id, &commands, &catalogues)
+            });
+            if let Err(e) = added {
+                log::warn!("plugin `{id}`'s catalogues: {e}");
+            }
+        }
+        self.parts.lists.borrow_mut().importers = entries;
         self
     }
 
@@ -622,6 +651,7 @@ impl Shell {
         let declarations = Rc::new(RefCell::new(Declarations::default()));
         let lists = Rc::new(RefCell::new(ListSource {
             profiles_dir: config_dir().join("profiles"),
+            importers: Vec::new(),
         }));
         // Commands are declared before the application is built: its
         // plugins read the registry when they connect.
@@ -666,6 +696,7 @@ impl Shell {
             })
             .plugin(plugins::Lists {
                 source: lists.clone(),
+                i18n: i18n.clone(),
             })
             .plugin(plugins::History {
                 values: values.clone(),
@@ -2653,6 +2684,14 @@ impl Shell {
             Box::new(|a, origin| Ok(Action::ImportFiles(a.clone(), origin.clone()))),
         );
         add(
+            CommandSpec::new(
+                crate::importers::COMMAND,
+                "Import with an importer plugin (`plugin`, `importer`; `source`: the file or folder it reads, asked when absent; `copy`, `darktable`)",
+                "Library",
+            ),
+            Box::new(|a, origin| Ok(Action::ImportWith(a.clone(), origin.clone()))),
+        );
+        add(
             CommandSpec::new("vault.next", "Select the next image", "Library"),
             Box::new(|_, _| Ok(Action::Step(1))),
         );
@@ -3232,6 +3271,16 @@ impl Shell {
             // The same commands in the menu bar.
             // Importing, always within reach (Ctrl+Shift+I, as Lightroom).
             command(MENU_FILE, "1_import", 0, "library.importSource"),
+            // An entry per importer plugin, the submenu shown only when
+            // one is installed (`crate::importers`).
+            PopItem::submenu(
+                MENU_FILE,
+                "1_import",
+                1,
+                crate::importers::MENU,
+                "Import from",
+            )
+            .when(crate::importers::CONTEXT, false),
             command(MENU_FILE, "1_workspace", 0, "workspace.open"),
             // The workspace's own edits.
             command(MENU_FILE, "2_edit", 0, "workspace.edit"),
@@ -3707,6 +3756,10 @@ impl Shell {
         }
         h.set_context("heliosTheme", &self.theme_name);
         h.set_context("heliosProfile", &self.profile_name);
+        h.set_context(
+            crate::importers::CONTEXT,
+            flag(!self.lists.borrow().importers.is_empty()),
+        );
     }
 
     /// Adds a keymap package's keys to the user's layer, before the
@@ -4207,6 +4260,7 @@ impl Shell {
             }
             Action::ImportSource(args, origin) => return self.import_from_source(&args, &origin),
             Action::ImportFiles(args, origin) => return self.import_files(&args, &origin),
+            Action::ImportWith(args, origin) => return self.import_with(&args, &origin),
             Action::ToggleStack => self
                 .library
                 .borrow_mut()

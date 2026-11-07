@@ -3,7 +3,7 @@
 //! backoff when it crashes, stops it when idle or when Helios exits, and
 //! holds it to its capabilities where the broker controls the access.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
@@ -13,14 +13,19 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 use serde_json::{Value as Json, json};
 
-use crate::manifest::{Enforcement, INTERFACES, MANIFEST, Manifest, Version, capability};
-use crate::rpc::{CallError, Event, Listener, Process};
+use crate::importer::{self, Scan};
+use crate::manifest::{
+    Enforcement, INTERFACES, ImporterDecl, MANIFEST, Manifest, Version, capability,
+};
+use crate::rpc::{CallError, Cancel, Event, Listener, Process};
 
 /// How long things may take.
 #[derive(Clone, Debug)]
 pub struct Policy {
     /// The longest a call waits for its answer.
     pub timeout: Duration,
+    /// The longest an importer's scan may take (a large catalogue).
+    pub scan_timeout: Duration,
     /// The longest `initialize` may take.
     pub start_timeout: Duration,
     /// A plugin unused this long is stopped ([`Broker::stop_idle`]).
@@ -39,6 +44,7 @@ impl Default for Policy {
     fn default() -> Self {
         Policy {
             timeout: Duration::from_secs(30),
+            scan_timeout: Duration::from_mins(10),
             start_timeout: Duration::from_secs(10),
             idle: Duration::from_mins(5),
             backoff: Duration::from_secs(1),
@@ -139,6 +145,9 @@ struct Slot {
 
 type Listeners = Arc<Mutex<Vec<Sender<Notice>>>>;
 
+/// Who follows a call's `$/progress`, by its token.
+type Watchers = Arc<Mutex<HashMap<String, Arc<dyn Fn(&Json) + Send + Sync>>>>;
+
 fn announce(listeners: &Listeners, notice: Notice) {
     listeners
         .lock()
@@ -152,6 +161,7 @@ pub struct Broker {
     plugins: BTreeMap<String, Slot>,
     rejected: Vec<Rejected>,
     listeners: Listeners,
+    watchers: Watchers,
 }
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -164,6 +174,7 @@ impl Broker {
             plugins: BTreeMap::new(),
             rejected: Vec::new(),
             listeners: Arc::default(),
+            watchers: Arc::default(),
         }
     }
 
@@ -249,6 +260,11 @@ impl Broker {
         self.plugins.get(id).map(|s| &s.manifest)
     }
 
+    /// The directory a plugin was found in.
+    pub fn dir(&self, id: &str) -> Option<&Path> {
+        self.plugins.get(id).map(|s| s.dir.as_path())
+    }
+
     pub fn ids(&self) -> impl Iterator<Item = &str> {
         self.plugins.keys().map(String::as_str)
     }
@@ -290,6 +306,7 @@ impl Broker {
                     "services": m.services,
                     "activation": m.activation,
                     "commands": m.commands,
+                    "importers": m.importers,
                     "settings": m.settings,
                     "capabilities": m.capabilities.iter().map(|c| {
                         let (enforcement, about) = capability(&c.name).expect("checked");
@@ -487,13 +504,23 @@ impl Broker {
         };
         let plugin = id.to_string();
         let listeners = self.listeners.clone();
+        let watchers = self.watchers.clone();
         let listener: Listener = Arc::new(move |event| {
             let notice = match event {
                 Event::Notification { method, params } => match method.as_str() {
-                    "$/progress" => Notice::Progress {
-                        plugin: plugin.clone(),
-                        params,
-                    },
+                    "$/progress" => {
+                        let watcher = params
+                            .get("token")
+                            .and_then(Json::as_str)
+                            .and_then(|t| watchers.lock().expect("watchers lock").get(t).cloned());
+                        if let Some(w) = watcher {
+                            w(&params);
+                        }
+                        Notice::Progress {
+                            plugin: plugin.clone(),
+                            params,
+                        }
+                    }
                     "$/log" => Notice::Log {
                         plugin: plugin.clone(),
                         message: params
@@ -544,6 +571,20 @@ impl Broker {
 
     /// Calls `method` on a plugin, started for `event` if need be.
     pub fn call(&self, id: &str, event: &str, method: &str, params: Json) -> Result<Json, String> {
+        self.call_with(id, event, method, params, self.policy.timeout, None)
+    }
+
+    /// As [`Broker::call`], waiting at most `timeout`, given up early when
+    /// `cancel` says so.
+    pub fn call_with(
+        &self,
+        id: &str,
+        event: &str,
+        method: &str,
+        params: Json,
+        timeout: Duration,
+        cancel: Option<&Cancel>,
+    ) -> Result<Json, String> {
         self.stop_idle();
         let slot = self.slot(id)?;
         let process = {
@@ -553,7 +594,7 @@ impl Broker {
             st.last_used = Instant::now();
             p
         };
-        let result = process.call(method, params, self.policy.timeout);
+        let result = process.call_with(method, params, timeout, cancel);
         let mut st = slot.state.lock().expect("plugin lock");
         st.in_flight -= 1;
         st.last_used = Instant::now();
@@ -611,6 +652,79 @@ impl Broker {
             ));
         }
         Ok(())
+    }
+
+    /// The importers of the enabled plugins, with their plugin's id, in
+    /// the plugins' order.
+    pub fn importers(&self) -> Vec<(String, ImporterDecl)> {
+        self.plugins
+            .iter()
+            .filter(|(_, s)| s.state.lock().expect("plugin lock").enabled)
+            .flat_map(|(id, s)| {
+                s.manifest
+                    .importers
+                    .iter()
+                    .map(move |i| (id.clone(), i.clone()))
+            })
+            .collect()
+    }
+
+    /// Has a plugin's importer list what `source` holds (`importer.scan`),
+    /// and checks its answer ([`importer::checked`]). `source` is held to
+    /// what the importer reads before the plugin starts; it is the one
+    /// path the plugin is handed: picking it is the grant of
+    /// `source.read` for this call. The plugin's `$/progress` for this
+    /// scan goes to `progress`; `cancel` gives the scan up.
+    pub fn importer_scan(
+        &self,
+        plugin: &str,
+        importer: &str,
+        source: &Path,
+        is_image: &dyn Fn(&Path) -> bool,
+        cancel: Option<&Cancel>,
+        progress: impl Fn(&Json) + Send + Sync + 'static,
+    ) -> Result<Scan, String> {
+        let slot = self.slot(plugin)?;
+        let decl = slot
+            .manifest
+            .importer(importer)
+            .ok_or_else(|| format!("plugin `{plugin}` has no importer `{importer}`"))?
+            .clone();
+        if !slot.manifest.declares("source.read") {
+            return Err(format!(
+                "plugin `{plugin}` does not declare the capability `source.read`"
+            ));
+        }
+        let source = importer::check_source(&decl, source)?;
+        let own = format!("onImporter:{importer}");
+        let event = if slot.manifest.activation.contains(&own) {
+            own
+        } else {
+            "onService:importer".to_string()
+        };
+        let token = format!("{plugin}#scan-{}", NEXT.fetch_add(1, Ordering::Relaxed));
+        self.watchers
+            .lock()
+            .expect("watchers lock")
+            .insert(token.clone(), Arc::new(progress));
+        let answer = self.call_with(
+            plugin,
+            &event,
+            "importer.scan",
+            json!({
+                "importer": importer,
+                "source": source,
+                "kind": decl.source.as_str(),
+                "progress": token,
+            }),
+            self.policy.scan_timeout,
+            cancel,
+        );
+        self.watchers.lock().expect("watchers lock").remove(&token);
+        let mut scan = importer::checked(&answer?, &decl, &source, is_image)
+            .map_err(|e| format!("plugin `{plugin}`: {e}"))?;
+        scan.plugin = plugin.into();
+        Ok(scan)
     }
 
     /// Runs a command a plugin contributes.

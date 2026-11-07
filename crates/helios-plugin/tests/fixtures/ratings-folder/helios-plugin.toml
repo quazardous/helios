@@ -1,0 +1,23 @@
+id = "org.example.ratings-folder"
+name = "Rated folder importer"
+title = "Rated folder"
+description = "Imports a folder of JPEGs with the ratings its ratings.json gives (a test plugin)"
+version = "1.0.0"
+license = "GPL-3.0-or-later"
+command = ["python3", "ratings_folder.py"]
+services = ["importer"]
+activation = ["onImporter:ratings-folder"]
+
+[compat]
+helios = ">=0.0.1"
+interfaces = { protocol = 1, importer = 1 }
+
+[[importers]]
+id = "ratings-folder"
+label = "Folder with ratings.json"
+source = "folder"
+holds = ["ratings.json"]
+
+[[capabilities]]
+name = "source.read"
+reason = "Reads the JPEGs of the folder picked and its ratings.json"

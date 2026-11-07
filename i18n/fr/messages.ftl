@@ -1045,6 +1045,22 @@ gui-import-ended-reported = { $photos } photos importées, { $edits } retouches 
 
 gui-import-drop = Déposez pour importer dans la bibliothèque
 
+gui-import-cancelled = L’import a été annulé : { $photos } photos importées
+
+gui-import-metadata = { $photos } photos ont reçu leurs notes, étiquettes ou mots-clés de l’importateur
+
+gui-importer-folder = dossier
+
+gui-importer-file = fichier
+
+gui-importer-form-title = Importer depuis { $importer }
+
+gui-importer-scanned = { $importer } : { $found } photos trouvées dans { $source }, { $refused } écartées
+
+gui-importer-refused = { $importer } : { $path } écarté : { $why }
+
+gui-importer-warning = { $importer } : { $warning }
+
 gui-log-empty = Rien à signaler pour l’instant
 
 gui-log-clear = Effacer

@@ -199,6 +199,9 @@ command-library-importFiles =
 command-library-importSource =
     .title = Import photos… (`path`: a card or folder, asked when absent; `copy`, `darktable`, `remember` when the workspace has no import source)
 
+command-library-importWith =
+    .title = Import with an importer plugin (`plugin`, `importer`; `source`: the file or folder it reads, asked when absent; `copy`, `darktable`)
+
 command-library-pasteFiles =
     .title = Paste files or an image another application copied into the library, imported once confirmed (`dry_run`: only say what would be imported)
 

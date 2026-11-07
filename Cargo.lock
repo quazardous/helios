@@ -2250,6 +2250,7 @@ dependencies = [
  "helios-module-whitebalance",
  "helios-node",
  "helios-photo",
+ "helios-plugin",
  "helios-profile",
  "helios-scopes",
  "helios-shell",

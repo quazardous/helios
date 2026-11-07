@@ -205,6 +205,8 @@ gui-image-opened = { $name } is open
 
 gui-image-opening = Opening { $name }…
 
+gui-import-cancelled = The import was cancelled: { $photos } photos imported
+
 gui-import-copy = Copy the photos into the library folder
 
 gui-import-copy-help = Off: the photos stay where they are, referenced in place
@@ -229,6 +231,8 @@ gui-import-failed = The import failed: { $error }
 
 gui-import-form-title = Import photos
 
+gui-import-metadata = { $photos } photos took their ratings, labels or tags from the importer
+
 gui-import-path = card or folder
 
 gui-import-remember = Remember for this workspace
@@ -236,6 +240,18 @@ gui-import-remember = Remember for this workspace
 gui-import-remember-help = The workspace's import source: the next import does not ask
 
 gui-import-verb = Import
+
+gui-importer-file = file
+
+gui-importer-folder = folder
+
+gui-importer-form-title = Import from { $importer }
+
+gui-importer-refused = { $importer }: { $path } left out: { $why }
+
+gui-importer-scanned = { $importer }: { $found } photos found in { $source }, { $refused } left out
+
+gui-importer-warning = { $importer }: { $warning }
 
 gui-job-batch-done = Batch finished
 

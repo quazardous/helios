@@ -39,6 +39,8 @@ pub enum CallError {
     Stopped(String),
     /// The plugin answered with an error.
     Rpc { code: i64, message: String },
+    /// The caller gave up ([`Cancel`]); the plugin is told to cancel.
+    Cancelled,
 }
 
 impl std::fmt::Display for CallError {
@@ -47,6 +49,7 @@ impl std::fmt::Display for CallError {
             CallError::Timeout(d) => write!(f, "no answer within {} ms", d.as_millis()),
             CallError::Stopped(why) => write!(f, "the plugin stopped: {why}"),
             CallError::Rpc { code, message } => write!(f, "{message} (error {code})"),
+            CallError::Cancelled => write!(f, "cancelled"),
         }
     }
 }
@@ -55,6 +58,51 @@ type Reply = Result<Json, CallError>;
 pub type Listener = Arc<dyn Fn(Event) + Send + Sync>;
 
 const STDERR_LINES: usize = 20;
+
+/// Gives up a call from another thread: the waiting call fails at once
+/// with [`CallError::Cancelled`] and the plugin gets `$/cancelRequest`.
+/// Cancelled before the call starts, the call is never sent.
+#[derive(Clone, Default)]
+pub struct Cancel(Arc<Mutex<CancelState>>);
+
+#[derive(Default)]
+struct CancelState {
+    cancelled: bool,
+    waiting: Option<Sender<Reply>>,
+}
+
+impl Cancel {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn cancel(&self) {
+        let mut s = self.0.lock().expect("cancel lock");
+        s.cancelled = true;
+        if let Some(tx) = s.waiting.take() {
+            let _ = tx.send(Err(CallError::Cancelled));
+        }
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.0.lock().expect("cancel lock").cancelled
+    }
+
+    /// Hands the waiting call's channel over; false when already
+    /// cancelled.
+    fn arm(&self, tx: Sender<Reply>) -> bool {
+        let mut s = self.0.lock().expect("cancel lock");
+        if s.cancelled {
+            return false;
+        }
+        s.waiting = Some(tx);
+        true
+    }
+
+    fn disarm(&self) {
+        self.0.lock().expect("cancel lock").waiting = None;
+    }
+}
 
 pub struct Process {
     child: Mutex<Child>,
@@ -243,8 +291,40 @@ impl Process {
 
     /// Calls `method` and waits for its answer, at most `timeout`.
     pub fn call(&self, method: &str, params: Json, timeout: Duration) -> Reply {
+        self.call_with(method, params, timeout, None)
+    }
+
+    /// As [`Process::call`], given up early when `cancel` says so.
+    pub fn call_with(
+        &self,
+        method: &str,
+        params: Json,
+        timeout: Duration,
+        cancel: Option<&Cancel>,
+    ) -> Reply {
         let id = self.next.fetch_add(1, Ordering::Relaxed);
         let (tx, rx) = channel();
+        if let Some(c) = cancel
+            && !c.arm(tx.clone())
+        {
+            return Err(CallError::Cancelled);
+        }
+        let reply = self.wait(id, method, params, timeout, tx, &rx);
+        if let Some(c) = cancel {
+            c.disarm();
+        }
+        reply
+    }
+
+    fn wait(
+        &self,
+        id: u64,
+        method: &str,
+        params: Json,
+        timeout: Duration,
+        tx: Sender<Reply>,
+        rx: &std::sync::mpsc::Receiver<Reply>,
+    ) -> Reply {
         {
             let mut pending = self.pending.lock().expect("pending lock");
             // Checked under the lock the reader drains with: a call made
@@ -260,6 +340,11 @@ impl Process {
             return Err(CallError::Stopped(e));
         }
         match rx.recv_timeout(timeout) {
+            Ok(Err(CallError::Cancelled)) => {
+                self.pending.lock().expect("pending lock").remove(&id);
+                let _ = self.notify("$/cancelRequest", json!({"id": id}));
+                Err(CallError::Cancelled)
+            }
             Ok(reply) => reply,
             Err(RecvTimeoutError::Timeout) => {
                 self.pending.lock().expect("pending lock").remove(&id);

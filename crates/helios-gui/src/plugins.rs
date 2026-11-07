@@ -74,6 +74,7 @@ pub const COMMAND_ICONS: &[(&str, &str)] = &[
     ("workspace.importParts", "phosphor:tray-arrow-down"),
     ("library.importFiles", "phosphor:tray-arrow-down"),
     ("library.importSource", "phosphor:tray-arrow-down"),
+    ("library.importWith", "phosphor:tray-arrow-down"),
     ("profile.import", "phosphor:tray-arrow-down"),
     ("profile.export", "phosphor:export"),
     ("theme.exportMerged", "phosphor:export"),
@@ -181,6 +182,8 @@ impl Plugin for Commands {
 #[derive(Clone, Debug, Default)]
 pub struct ListSource {
     pub profiles_dir: PathBuf,
+    /// The importers installed, File > Import from's entries.
+    pub importers: Vec<crate::importers::Entry>,
 }
 
 /// The lists of the system menu, filled by egui-pop's list providers.
@@ -193,6 +196,8 @@ pub const RECENT_LIST: &str = "helios.recent";
 /// their short labels, in the interface's language.
 pub struct Lists {
     pub source: Rc<RefCell<ListSource>>,
+    /// The importers' labels are translated through it.
+    pub i18n: egui_pop::i18n::I18n,
 }
 
 impl Plugin for Lists {
@@ -253,6 +258,30 @@ impl Plugin for Lists {
         });
         ctx.list_provider(crate::mask_tree::ROW_ADD_LIST, |app, _| {
             labelled(crate::mask_tree::add_entries(&app.egui()))
+        });
+        // File > Import from: an entry per importer, its label in the
+        // interface's language (the plugin's catalogues).
+        ctx.menu_item(MenuItem::list(
+            crate::importers::MENU,
+            "1",
+            0,
+            crate::importers::LIST,
+        ))?;
+        let (source, i18n) = (self.source.clone(), self.i18n.clone());
+        let import_with = command_id(crate::importers::COMMAND)?;
+        ctx.list_provider(crate::importers::LIST, move |_, _| {
+            source
+                .borrow()
+                .importers
+                .iter()
+                .map(|e| {
+                    ListItem::new(
+                        &helios_i18n::message(&i18n, &e.message()),
+                        import_with.clone(),
+                        json!({ "plugin": e.plugin, "importer": e.importer }),
+                    )
+                })
+                .collect()
         });
         let open = command_id("workspace.open")?;
         ctx.list_provider(RECENT_LIST, move |_, _| {

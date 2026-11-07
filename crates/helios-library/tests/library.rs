@@ -627,3 +627,78 @@ fn darktable_edits_come_in_as_versions_with_the_import_when_asked() {
     assert_eq!(report.edits, 0);
     assert_eq!(vault.versions(&id).unwrap().len(), 2);
 }
+
+#[test]
+fn files_an_importer_listed_take_its_values_without_overwriting_the_library() {
+    use helios_library::import::{Listed, Metadata};
+    use helios_vault::fields::Command;
+    use serde_json::json;
+
+    let place = Place::new("listed");
+    let (a, b) = (place.join("a.png"), place.join("b.png"));
+    picture(&a, 0, 1.0, 0);
+    picture(&b, 1, 1.0, 0);
+    let vault = vault();
+    let listed = |rating: u8| Listed {
+        by: "importer:org.example/test".into(),
+        files: [
+            (
+                a.clone(),
+                Metadata {
+                    rating: Some(rating),
+                    labels: vec!["red".into()],
+                    tags: vec!["trip".into()],
+                    title: Some("Low tide".into()),
+                    ..Metadata::default()
+                },
+            ),
+            (
+                b.clone(),
+                Metadata {
+                    rejected: Some(true),
+                    ..Metadata::default()
+                },
+            ),
+        ]
+        .into(),
+    };
+    let options = Options {
+        signals: false,
+        listed: Some(listed(4)),
+        ..Options::default()
+    };
+    let (report, lines) = run(&vault, None, &[a.clone(), b.clone()], &options);
+    assert_eq!((report.added, report.metadata), (2, 2), "{lines:?}");
+    let id = |l: &Value| ImageId::from_hex(l["id"].as_str().unwrap()).unwrap();
+    let (ia, ib) = (id(&lines[0]), id(&lines[1]));
+    let fields = vault
+        .fields_of(
+            &[ia, ib],
+            &["rating", "rejected", "labels", "tags", "title"],
+        )
+        .unwrap();
+    assert_eq!(fields[0]["rating"], json!(4));
+    assert_eq!(fields[0]["labels"], json!(["red"]));
+    assert_eq!(fields[0]["tags"], json!(["trip"]));
+    assert_eq!(fields[0]["title"], json!("Low tide"));
+    assert_eq!(fields[1]["rejected"], json!(true));
+    assert!(fields[1].get("rating").is_none_or(Value::is_null));
+    // Written under the importer's name.
+    let audit = vault.audit(&ia).unwrap();
+    assert!(audit.iter().all(|e| e.who == "importer:org.example/test"));
+    // The user's own rating and labels stay: a second import only adds.
+    vault
+        .apply(&[Command::set(ia, "rating", json!(1))], "user", None, 1)
+        .unwrap();
+    let mut again = listed(5);
+    again.files.get_mut(&a).unwrap().labels = vec!["blue".into()];
+    let options = Options {
+        listed: Some(again),
+        ..options
+    };
+    let (report, lines) = run(&vault, None, std::slice::from_ref(&a), &options);
+    assert_eq!(report.unchanged, 1, "{lines:?}");
+    let fields = vault.fields_of(&[ia], &["rating", "labels"]).unwrap();
+    assert_eq!(fields[0]["rating"], json!(1));
+    assert_eq!(fields[0]["labels"], json!(["blue", "red"]));
+}

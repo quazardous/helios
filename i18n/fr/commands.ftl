@@ -186,6 +186,9 @@ command-library-copyFiles =
 command-library-importFiles =
     .title = Importer des fichiers et des dossiers (`paths`), placés comme le dit la source d’import de l’espace de travail (`copy` : dans le dossier de la bibliothèque ou non ; `ask` : demandé sans source d’import ; `darktable`)
 
+command-library-importWith =
+    .title = Importer avec un greffon d’import (`plugin`, `importer` ; `source` : le fichier ou dossier qu’il lit, demandé s’il manque ; `copy`, `darktable`)
+
 command-library-importSource =
     .title = Importer des photos… (`path` : une carte ou un dossier, demandé en son absence ; `copy`, `darktable`, `remember` quand l’espace de travail n’a pas de source d’import)
 

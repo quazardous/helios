@@ -124,7 +124,7 @@ A crash costs that plugin alone: the call in flight fails at once with the
 plugin's last line of standard error, a `Crashed` notice goes out, and the
 next call restarts it, after a wait that doubles with each crash in a row.
 
-Two services: `metadata.read` (an image path in, fields out, each with the
+Three services: `importer` (see "Importers" below), `metadata.read` (an image path in, fields out, each with the
 tag it came from: camera, lens, exposure, GPS, keywords…) and `device`
 (`device.list`, `device.info`, `device.capture`, `device.download`, with
 progress). The shell commands are `plugin.list`, `plugin.enable`,
@@ -141,6 +141,10 @@ own:
   it is asked about, after the broker resolved it; without the grant the
   call is refused and the plugin not even started. Read-only is what it is
   told, not yet what the system enforces.
+- `source.read` (brokered): an importer is handed only the file or
+  folder the user picked for it, checked first against what the importer
+  declares; picking it is the grant, for that one scan (a portal's
+  pattern), so no standing grant is kept.
 - `folder.write` (brokered): a download goes to a fresh staging folder;
   the broker keeps only the plain files the plugin reports inside it,
   moves them into the destination itself and removes the rest.
@@ -159,3 +163,149 @@ library alone, wraps `exiftool` for `metadata.read`) and `gphoto2-camera`
 (Rust, a workspace member, wraps `gphoto2` for `device`: list, info,
 capture, download with progress; its tests run against a fake `gphoto2`
 put first on the plugin's `PATH`, no camera needed).
+
+## Importers
+
+An importer lists what a source holds, a folder or a file such as
+another application's catalogue, with what it knows of each photo. Helios
+imports the files itself, through its library, so a plugin never writes
+the library. Each importer is an entry under **File > Import from →** on
+the desktop (the submenu shows only when one is installed); choosing it
+asks for the source with egui-pop's path field, and where the photos go
+as File > Import… does (see docs/library.md).
+
+**Manifest.** The plugin serves `importer` (interface version 1),
+declares `source.read`, and one `[[importers]]` table per entry:
+
+```toml
+services = ["importer"]
+activation = ["onImporter:ratings-folder"]   # or onService:importer
+
+[compat]
+helios = ">=0.58.0, <0.59.0"
+interfaces = { protocol = 1, importer = 1 }
+
+[[importers]]
+id = "ratings-folder"            # unique in the plugin
+label = "Folder with ratings.json"
+source = "folder"                # what the user picks: "folder" or "file"
+holds = ["ratings.json"]         # a folder: names it must hold
+# patterns = ["*.lrcat"]         # a file: the names it accepts (`*` globs)
+# anywhere = true                # a catalogue: images may lie outside the source
+
+[[capabilities]]
+name = "source.read"
+reason = "Reads the JPEGs of the folder picked and its ratings.json"
+```
+
+The manifest is refused when importers come without the service or the
+capability, two share an id, an id or a label is empty, `patterns` are
+given for a folder or `holds` for a file, or `onImporter:<id>` names no
+importer. The label is translated in the plugin's catalogues under
+`<plugin id>-importer-<importer id>` (both written with every character
+other than an ASCII letter or digit as `-`):
+
+```text
+org-example-ratings-folder-importer-ratings-folder = Dossier avec ratings.json
+```
+
+**Before the plugin starts**, the broker checks the source: it exists, is
+a folder holding each name of `holds`, or a file whose name matches one
+of `patterns`. A source that is not one the importer reads is refused
+without starting anything.
+
+**`importer.scan`** (Helios to the plugin), with the scan timeout
+(10 minutes by default, not the 30 s of other calls):
+
+```json
+{"jsonrpc": "2.0", "id": 7, "method": "importer.scan", "params": {
+  "importer": "ratings-folder",
+  "source": "/photos/trip",
+  "kind": "folder",
+  "progress": "org.example.ratings-folder#scan-3"
+}}
+```
+
+`source` is absolute, symbolic links resolved. The answer:
+
+```json
+{"jsonrpc": "2.0", "id": 7, "result": {
+  "images": [
+    {"path": "a.jpg", "rating": 5, "labels": ["red"], "tags": ["trip"], "title": "Low tide"},
+    {"path": "/photos/trip/b.jpg", "rating": 2, "rejected": true},
+    {"path": "c.jpg"}
+  ],
+  "warnings": ["ratings.json names gone.jpg, which the folder does not hold"]
+}}
+```
+
+| Key | Type | Applied as |
+|---|---|---|
+| `path` | text, required | absolute, or relative to the source folder (to the folder of a source file) |
+| `rating` | 0 to 5 | set where the photo has none |
+| `rejected` | true or false | set where the photo has none (stars kept beside it) |
+| `labels` | `red`, `yellow`, `green`, `blue`, `purple` | each added |
+| `tags` | non-empty texts | each added |
+| `title`, `description` | text | set where the photo has none |
+
+Other keys are ignored, so a later version can add some. Helios checks
+every image before importing anything:
+
+- **refused** (left out, listed with why): no path, a path that does not
+  exist, is not a plain file or not an image Helios reads, a path listed
+  twice, a path outside the source (a symbolic link is followed first),
+  unless the importer declares `anywhere`, as a catalogue naming photos
+  where they are must;
+- **dropped** (the image kept, a warning said): a value that does not fit
+  its field, such as a rating of 7 or an unknown label.
+
+Then Helios imports the files that passed as any import does (referenced
+or copied, duplicates by content, each photo's darktable sidecars as
+versions) and applies the values under the importer's name
+(`importer:<plugin>/<importer>` in the audit trail), before the
+sidecars: the plugin's values are its application's truth, a sidecar may
+lag behind. Nothing the library holds is overwritten. A duplicate left
+out gets no values.
+
+**Progress.** The plugin may send
+`{"method": "$/progress", "params": {"token": "<progress>", "done": 1, "total": 3, "message": "a.jpg"}}`;
+the scan is a job of its own (kind `importer.scan`) in the jobs centre,
+its progress the plugin's. The import that follows is the library's
+`import` job.
+
+**Errors.** A JSON-RPC error answers the scan:
+
+| Code | Meaning |
+|---|---|
+| -32001 | not a source this importer reads; the message is shown to the user |
+| -32602 | invalid parameters |
+| -32800 | the request was cancelled |
+| any other | the scan failed; the message is shown |
+
+A scan that fails imports nothing; the error goes to the Log panel and a
+toast.
+
+**Cancellation.** Cancelling the scan's job sends the plugin
+`{"method": "$/cancelRequest", "params": {"id": 7}}` and stops waiting at
+once: the import ends cancelled before its first file. The plugin should
+stop and may answer -32800; any later answer to that id is ignored, and
+the plugin stays running for the next call. Cancelling the import job
+afterwards stops it between two files, as for any import.
+
+**Report.** The scan's line goes to the Log panel: how many photos were
+found and left out, each one left out with why, and the plugin's
+warnings; then the import's end as usual, with how many photos took
+values from the importer.
+
+**What a plugin cannot do through it.** It never writes the library or
+the photos; it is handed one path, and what it names is checked. As
+other plugins it still runs with the user's rights (see "What is
+enforced" above). Not in version 1: views (another application's
+folders or film rolls), stacks, edits other than sidecars, and paging
+for very large catalogues; see docs/darktable-library-import.md for
+what darktable's catalogue would need.
+
+The test plugin `crates/helios-plugin/tests/fixtures/ratings-folder`
+(Python, standard library alone) reads a folder of JPEGs and the
+ratings, labels, tags and titles of its `ratings.json`; the broker's
+tests and the desktop's import tests run it.

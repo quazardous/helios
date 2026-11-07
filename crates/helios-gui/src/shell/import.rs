@@ -13,6 +13,11 @@
 //! - **darktable edits.** Each photo's darktable sidecars become versions
 //!   of it (`helios_library::darktable`), on by default; the dialog has
 //!   the checkbox, and an import source may turn it off.
+//! - **Importer plugins.** File > Import from lists an entry per
+//!   importer a plugin declares (`library.importWith`): it asks for the
+//!   file or folder the importer reads, then queues an import whose
+//!   `importer` the host runs through `crate::importers::run`; what the
+//!   plugin found, left out and warned about goes to the Log panel.
 //! - **What it did.** The host runs the import as a job and sends its
 //!   lines here ([`Shell::import_sink`]): duplicates go to the Duplicates
 //!   panel, the darktable edits not kept whole to the Log panel, and the
@@ -139,6 +144,75 @@ impl Shell {
         self.import_now(json!({ "paths": paths }), args, origin)
     }
 
+    /// `library.importWith`: an importer plugin's source (`source`)
+    /// imported as the import dialog or the workspace's import source
+    /// says; without a source, the dialog asks for it, a folder or a file
+    /// as the importer reads.
+    pub(super) fn import_with(&mut self, args: &Value, origin: &Origin) -> Result<Value, String> {
+        let text = |key: &str| {
+            args.get(key)
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty())
+        };
+        let (plugin, importer) = (
+            text("plugin").ok_or("`plugin` is missing")?,
+            text("importer").ok_or("`importer` is missing")?,
+        );
+        let entry = self
+            .lists
+            .borrow()
+            .importers
+            .iter()
+            .find(|e| e.plugin == plugin && e.importer == importer)
+            .cloned()
+            .ok_or_else(|| format!("no importer `{importer}` of plugin `{plugin}` is installed"))?;
+        let Some(source) = text("source") else {
+            let (label, kind) = match entry.kind {
+                helios_plugin::manifest::SourceKind::Folder => (
+                    Message::new("gui-importer-folder", "folder"),
+                    helios_values::PathKind::Dir,
+                ),
+                helios_plugin::manifest::SourceKind::File => (
+                    Message::new("gui-importer-file", "file"),
+                    helios_values::PathKind::File,
+                ),
+            };
+            let extensions: Vec<&str> = entry.extensions.iter().map(String::as_str).collect();
+            let mut fields = vec![Field {
+                key: "source".into(),
+                descriptor: Descriptor::path(&self.text(label), kind, &extensions),
+                value: helios_core::Value::Text(String::new()),
+            }];
+            // An import source is a folder of the workspace's: nothing to
+            // remember of an importer's.
+            fields.extend(
+                self.import_fields()
+                    .into_iter()
+                    .filter(|f| f.key != "remember"),
+            );
+            let title = self.text(
+                Message::new("gui-importer-form-title", "Import from { $importer }")
+                    .with("importer", entry.message()),
+            );
+            let form = Form {
+                title,
+                fields,
+                verb: self.text(Message::new("gui-import-verb", "Import")),
+                command: crate::importers::COMMAND.into(),
+            };
+            self.form_with(form, json!({ "plugin": plugin, "importer": importer }))?;
+            return Ok(Value::Null);
+        };
+        let target = json!({
+            "importer": { "plugin": plugin, "importer": importer, "source": source },
+        });
+        let mut choices = args.clone();
+        if let Some(o) = choices.as_object_mut() {
+            o.remove("remember");
+        }
+        self.import_now(target, &choices, origin)
+    }
+
     /// The import dialog's choices: where the photos go and whether to
     /// remember it, when the workspace has no import source (remembered
     /// only in a workspace); darktable edits always.
@@ -263,6 +337,10 @@ impl Shell {
                 self.import_ended(&line);
                 continue;
             }
+            if let Some(scan) = line.get("scanned") {
+                self.log_scan(scan);
+                continue;
+            }
             if self.duplicates.borrow_mut().add(&import, &line)
                 == Some(crate::duplicates::Fate::Asked)
             {
@@ -271,6 +349,59 @@ impl Shell {
             self.log_edits(&line);
         }
         asked
+    }
+
+    /// What an importer plugin found, left out and warned about: in the
+    /// Log panel, under the importer's label.
+    fn log_scan(&mut self, scan: &Value) {
+        let (plugin, importer) = (
+            scan["plugin"].as_str().unwrap_or_default(),
+            scan["importer"].as_str().unwrap_or_default(),
+        );
+        let label = self
+            .lists
+            .borrow()
+            .importers
+            .iter()
+            .find(|e| e.plugin == plugin && e.importer == importer)
+            .map_or_else(
+                || Message::new("", importer),
+                crate::importers::Entry::message,
+            );
+        let mut log = self.log.borrow_mut();
+        let found = scan["images"].as_array().map_or(0, Vec::len);
+        let refused = scan["refused"].as_array().cloned().unwrap_or_default();
+        log.push(
+            Level::Info,
+            Message::new(
+                "gui-importer-scanned",
+                "{ $importer }: { $found } photos found in { $source }, { $refused } left out",
+            )
+            .with("importer", label.clone())
+            .with("found", found)
+            .with("source", scan["source"].as_str().unwrap_or_default())
+            .with("refused", refused.len()),
+        );
+        for r in &refused {
+            log.push(
+                Level::Warning,
+                Message::new(
+                    "gui-importer-refused",
+                    "{ $importer }: { $path } left out: { $why }",
+                )
+                .with("importer", label.clone())
+                .with("path", r["path"].as_str().unwrap_or_default())
+                .with("why", r["why"].as_str().unwrap_or_default()),
+            );
+        }
+        for w in scan["warnings"].as_array().into_iter().flatten() {
+            log.push(
+                Level::Warning,
+                Message::new("gui-importer-warning", "{ $importer }: { $warning }")
+                    .with("importer", label.clone())
+                    .with("warning", w.as_str().unwrap_or_default()),
+            );
+        }
     }
 
     /// One file's darktable sidecars kept with reservations, or not kept:
@@ -316,6 +447,26 @@ impl Shell {
         let report = &line["ended"];
         let count = |k: &str| report[k].as_u64().unwrap_or(0);
         let photos = count("added") + count("located");
+        if report["cancelled"] == true {
+            let message = Message::new(
+                "gui-import-cancelled",
+                "The import was cancelled: { $photos } photos imported",
+            )
+            .with("photos", photos);
+            self.log.borrow_mut().push(Level::Info, message.clone());
+            self.notify(Level::Info, message);
+            return;
+        }
+        if count("metadata") > 0 {
+            self.log.borrow_mut().push(
+                Level::Info,
+                Message::new(
+                    "gui-import-metadata",
+                    "{ $photos } photos took their ratings, labels or tags from the importer",
+                )
+                .with("photos", count("metadata")),
+            );
+        }
         let (edits, reported) = (
             count("edits"),
             count("edits_reported") + count("edits_failed"),

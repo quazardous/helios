@@ -1,0 +1,5 @@
+{
+  "a.jpg": {"rating": 5, "labels": ["red"], "tags": ["trip", "beach"], "title": "Low tide"},
+  "b.jpg": {"rating": 2, "rejected": true},
+  "gone.jpg": {"rating": 3}
+}

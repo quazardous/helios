@@ -148,10 +148,10 @@ fn seconds() -> u64 {
 fn library_commands(
     shell: &mut Shell,
     persist: &Persist,
+    plugins: &Arc<helios_plugin::Broker>,
     refill: &Arc<AtomicBool>,
     ctx: &egui::Context,
 ) -> Result<(), String> {
-    use helios_library::import::{Duplicates, Options, Placement};
     use helios_library::stacks;
     use helios_shell::commands::CommandSpec;
     use serde_json::{Value, json};
@@ -163,55 +163,52 @@ fn library_commands(
     // Duplicates panel, so a duplicate kept is imported again the same
     // way; the Log panel), then the import's end.
     let lines = shell.import_sink();
+    let plugins = plugins.clone();
     shell.register(
         CommandSpec::new(
             "library.import",
-            "Import a folder or a card (`path`, or `paths` for several files and folders; `copy`, `into`, `rename`, `duplicates`; `darktable`: false leaves the .xmp sidecars out)",
+            "Import a folder or a card (`path`, or `paths` for several files and folders; `importer`: `plugin`, `importer` and `source` to import through an importer plugin; `copy`, `into`, `rename`, `duplicates`; `darktable`: false leaves the .xmp sidecars out)",
             "Library",
         ),
         move |args, _| {
+            let options = helios_gui::importers::options(args)?;
+            let through = args.get("importer").is_some().then(|| plugins.clone());
             let mut sources: Vec<std::path::PathBuf> = args
                 .get("paths")
                 .and_then(Value::as_array)
                 .map(|p| p.iter().filter_map(Value::as_str).map(Into::into).collect())
                 .unwrap_or_default();
             sources.extend(text(args, "path").map(Into::into));
-            if sources.is_empty() {
+            if sources.is_empty() && through.is_none() {
                 return Err("`path` is missing".into());
             }
-            let mut options = Options::default();
-            if args.get("copy").and_then(Value::as_bool).unwrap_or(false)
-                || args.get("into").is_some()
-            {
-                options.placement = Placement::Copy {
-                    into: text(args, "into").map(Into::into),
-                };
-            }
-            if let Some(pattern) = text(args, "rename") {
-                options.rename = Some(helios_library::rename::Pattern::parse(&pattern)?);
-            }
-            if let Some(policy) = text(args, "duplicates") {
-                options.duplicates = Duplicates::parse(&policy)?;
-            }
-            options.darktable = args
-                .get("darktable")
-                .and_then(Value::as_bool)
-                .unwrap_or(true);
             let (vault, jobs, done, ctx) = (vault.clone(), jobs.clone(), done.clone(), ctx.clone());
             let (lines, asked) = (lines.clone(), args.clone());
             std::thread::spawn(move || {
                 // The job's events say how it went; the lines feed the
                 // Duplicates panel.
-                let ended = helios_library::import::import(
-                    vault.as_ref(),
-                    &jobs,
-                    &sources,
-                    &options,
-                    seconds(),
-                    &mut |line: &Value| {
-                        let _ = lines.send((asked.clone(), line.clone()));
-                    },
-                );
+                let mut emit = |line: &Value| {
+                    let _ = lines.send((asked.clone(), line.clone()));
+                };
+                let ended = match &through {
+                    // The plugin lists, Helios imports.
+                    Some(plugins) => helios_gui::importers::run(
+                        plugins,
+                        vault.as_ref(),
+                        &jobs,
+                        &asked,
+                        seconds(),
+                        &mut emit,
+                    ),
+                    None => helios_library::import::import(
+                        vault.as_ref(),
+                        &jobs,
+                        &sources,
+                        &options,
+                        seconds(),
+                        &mut emit,
+                    ),
+                };
                 let end = match ended {
                     Ok(report) => json!({ "ended": report }),
                     Err(e) => {
@@ -983,13 +980,28 @@ fn main() -> Result<(), String> {
     // The image asked for is made ready while the window opens.
     let preparing = image_file.map(|path| prepare(path, bundle, vault.clone()));
     let earlier = earlier_layout(&workspace, &ui_settings);
+    // The plugins installed (built-in, the user's), read before anything
+    // of them runs: their importers are File > Import from's entries.
+    let plugins = {
+        let mut broker = helios_plugin::Broker::new(helios_plugin::Policy::default());
+        broker.discover(&helios_plugin::default_dirs(None));
+        for r in broker.rejected() {
+            warn(&format!(
+                "plugin {} refused: {}",
+                r.dir.display(),
+                r.problems.join("; ")
+            ));
+        }
+        Arc::new(broker)
+    };
     let mut builder = Shell::builder(helios_panels_with(experimental), Some(ui_settings))
         .workspace(&workspace)
         .on_exit(move |app| save_workspace(&dir, app))
         .desktop(instance)
         // The desktop speaks the system's language by default.
         .system_language()
-        .system_focus(focus_mode(&focus_reading));
+        .system_focus(focus_mode(&focus_reading))
+        .plugins(&plugins);
     // A darkroom left on an image the vault no longer has is not
     // restored.
     if let Some(vault) = vault.clone() {
@@ -1087,7 +1099,7 @@ fn main() -> Result<(), String> {
             }
             let refill = Arc::new(AtomicBool::new(false));
             if let Some(p) = &persist
-                && let Err(e) = library_commands(&mut shell, p, &refill, &cc.egui_ctx)
+                && let Err(e) = library_commands(&mut shell, p, &plugins, &refill, &cc.egui_ctx)
             {
                 shell.notes.push(format!("library commands: {e}"));
             }

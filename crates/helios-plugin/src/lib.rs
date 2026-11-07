@@ -19,13 +19,16 @@
 //! - [`manifest`]: the manifest and its checks;
 //! - [`rpc`]: one plugin process and its JSON-RPC line protocol;
 //! - [`broker`]: discovery, activation, routing, capabilities, services;
+//! - [`importer`]: the importer protocol's checks (`importer.scan`);
 //! - [`commands`]: the broker as shell commands.
 
 pub mod broker;
 pub mod commands;
+pub mod importer;
 pub mod manifest;
 pub mod rpc;
 
 pub use broker::{Broker, Notice, Policy, Scope, default_dirs};
 pub use commands::register;
 pub use manifest::{MANIFEST, Manifest};
+pub use rpc::Cancel;

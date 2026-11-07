@@ -62,6 +62,9 @@ frame-helios-sub-workspace =
 frame-helios-workspace =
     .title = Réseau
 
+menu-helios-file-importFrom =
+    .label = Importer depuis
+
 menu-helios-masks-row-add =
     .label = Ajouter
 

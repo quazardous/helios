@@ -48,10 +48,11 @@ pub const INTERFACES: &[(&str, &[u32])] = &[
     ("protocol", &[1]),
     ("metadata.read", &[1]),
     ("device", &[1]),
+    ("importer", &[1]),
 ];
 
 /// The services a plugin may provide; each is also an interface.
-pub const SERVICES: &[&str] = &["metadata.read", "device"];
+pub const SERVICES: &[&str] = &["metadata.read", "device", "importer"];
 
 /// How the broker holds a capability to its word.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -71,6 +72,11 @@ pub const CAPABILITIES: &[(&str, Enforcement, &str)] = &[
         "images.read",
         Enforcement::Brokered,
         "read the images Helios asks about, and only those",
+    ),
+    (
+        "source.read",
+        Enforcement::Brokered,
+        "read the file or folder the user picks for an import, and only that",
     ),
     (
         "folder.write",
@@ -175,6 +181,99 @@ pub struct CommandDecl {
     pub category: String,
 }
 
+/// What the user picks for an importer: a file or a folder.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum SourceKind {
+    #[default]
+    Folder,
+    File,
+}
+
+impl SourceKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SourceKind::Folder => "folder",
+            SourceKind::File => "file",
+        }
+    }
+}
+
+/// An importer a plugin contributes: an entry under File > Import from,
+/// which asks for a source and has the plugin list what to import there
+/// (`importer.scan`); Helios imports the files itself.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ImporterDecl {
+    /// Unique in the plugin: `ratings-folder`.
+    pub id: String,
+    /// The menu entry, in English; translated in the plugin's catalogues
+    /// as `<plugin id>-importer-<importer id>` (both slugged).
+    pub label: String,
+    /// What the user picks.
+    #[serde(default)]
+    pub source: SourceKind,
+    /// A file source: the names it accepts, `*` matching any run of
+    /// characters (`library.db`, `*.lrcat`); none: any file.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub patterns: Vec<String>,
+    /// A folder source: names the folder must hold, checked before the
+    /// plugin starts (`library.db`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub holds: Vec<String>,
+    /// The images may lie outside the source (a catalogue naming them
+    /// where they are); otherwise any outside it is refused.
+    #[serde(default)]
+    pub anywhere: bool,
+}
+
+/// Whether `name` matches a pattern whose `*` matches any run of
+/// characters, case ignored.
+pub fn glob(pattern: &str, name: &str) -> bool {
+    let (p, n) = (pattern.to_lowercase(), name.to_lowercase());
+    let parts: Vec<&str> = p.split('*').collect();
+    let [first, middle @ .., last] = parts.as_slice() else {
+        return p == n;
+    };
+    if parts.len() == 1 {
+        return p == n;
+    }
+    let Some(mut rest) = n.strip_prefix(first) else {
+        return false;
+    };
+    for m in middle {
+        match rest.find(m) {
+            Some(i) => rest = &rest[i + m.len()..],
+            None => return false,
+        }
+    }
+    rest.len() >= last.len() && rest.ends_with(last)
+}
+
+impl ImporterDecl {
+    /// Whether a file of this name is a source this importer reads.
+    pub fn accepts(&self, name: &str) -> bool {
+        self.patterns.is_empty() || self.patterns.iter().any(|p| glob(p, name))
+    }
+
+    /// The extensions its patterns give (`*.lrcat`: `lrcat`), for a
+    /// file picker; none when a pattern is not of that form.
+    pub fn extensions(&self) -> Vec<String> {
+        let ext: Vec<String> = self
+            .patterns
+            .iter()
+            .filter_map(|p| p.strip_prefix("*."))
+            .filter(|e| !e.contains('*') && !e.contains('.'))
+            .map(str::to_lowercase)
+            .collect();
+        if ext.len() == self.patterns.len() {
+            ext
+        } else {
+            Vec::new()
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum SettingType {
@@ -247,11 +346,15 @@ pub struct Manifest {
     pub compat: Compat,
     #[serde(default)]
     pub services: Vec<String>,
-    /// `onStartup`, `onService:<service>`, `onCommand:<command id>`.
+    /// `onStartup`, `onService:<service>`, `onCommand:<command id>`,
+    /// `onImporter:<importer id>`.
     #[serde(default)]
     pub activation: Vec<String>,
     #[serde(default)]
     pub commands: Vec<CommandDecl>,
+    /// Importers, under File > Import from (the `importer` service).
+    #[serde(default)]
+    pub importers: Vec<ImporterDecl>,
     /// Typed settings, each under the plugin's id (`<id>.<key>`).
     #[serde(default)]
     pub settings: BTreeMap<String, SettingDecl>,
@@ -346,11 +449,13 @@ impl Manifest {
                 p.push("a command needs an id and a title".into());
             }
         }
+        p.extend(self.importer_problems());
         for e in &self.activation {
             let ok = match e.split_once(':') {
                 None => e == "onStartup",
                 Some(("onService", s)) => self.services.iter().any(|x| x == s),
                 Some(("onCommand", c)) => self.commands.iter().any(|x| x.id == c),
+                Some(("onImporter", i)) => self.importers.iter().any(|x| x.id == i),
                 Some(_) => false,
             };
             if !ok {
@@ -381,6 +486,61 @@ impl Manifest {
             }
         }
         p
+    }
+
+    /// What keeps the importers from being offered: each needs the
+    /// `importer` service and the `source.read` capability, a unique id
+    /// and a label; patterns are for a file source, `holds` for a folder.
+    fn importer_problems(&self) -> Vec<String> {
+        let mut p = Vec::new();
+        if self.importers.is_empty() {
+            if self.services.iter().any(|s| s == "importer") {
+                p.push("service `importer` without any `[[importers]]`".into());
+            }
+            return p;
+        }
+        if !self.services.iter().any(|s| s == "importer") {
+            p.push("`[[importers]]` without the service `importer`".into());
+        }
+        if !self.declares("source.read") {
+            p.push("`[[importers]]` without the capability `source.read`".into());
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        for i in &self.importers {
+            if i.id.trim().is_empty() || i.label.trim().is_empty() {
+                p.push("an importer needs an id and a label".into());
+            }
+            if !seen.insert(i.id.as_str()) {
+                p.push(format!("importer `{}` is declared twice", i.id));
+            }
+            if i.source == SourceKind::Folder && !i.patterns.is_empty() {
+                p.push(format!(
+                    "importer `{}`: `patterns` are for a file source; a folder has `holds`",
+                    i.id
+                ));
+            }
+            if i.source == SourceKind::File && !i.holds.is_empty() {
+                p.push(format!(
+                    "importer `{}`: `holds` is for a folder source; a file has `patterns`",
+                    i.id
+                ));
+            }
+            if i.holds
+                .iter()
+                .any(|h| h.is_empty() || h.contains(['/', '\\']) || h == "..")
+            {
+                p.push(format!(
+                    "importer `{}`: `holds` names entries of the folder itself",
+                    i.id
+                ));
+            }
+        }
+        p
+    }
+
+    /// An importer it declares.
+    pub fn importer(&self, id: &str) -> Option<&ImporterDecl> {
+        self.importers.iter().find(|i| i.id == id)
     }
 
     /// What an interface calls the plugin, in English: its title, else its
@@ -421,5 +581,28 @@ mod tests {
                 .matches(Version(1, 2, 3))
         );
         assert!(VersionReq::parse(">=x").is_err());
+    }
+
+    #[test]
+    fn globs() {
+        assert!(glob("library.db", "library.db"));
+        assert!(glob("*.lrcat", "Photos.LRCAT"));
+        assert!(glob("lib*.db", "library.db"));
+        assert!(glob("*", "anything"));
+        assert!(glob("a*b*c", "a-b-c"));
+        assert!(!glob("*.lrcat", "photos.lrcat-wal"));
+        assert!(!glob("library.db", "data.db"));
+        assert!(!glob("ab*ba", "aba"));
+        let i = ImporterDecl {
+            id: "x".into(),
+            label: "X".into(),
+            source: SourceKind::File,
+            patterns: vec!["*.lrcat".into(), "*.JSON".into()],
+            holds: Vec::new(),
+            anywhere: false,
+        };
+        assert_eq!(i.extensions(), ["lrcat", "json"]);
+        assert!(i.accepts("a.json"));
+        assert!(!i.accepts("a.db"));
     }
 }
