@@ -281,11 +281,17 @@ fn a_backup_is_refused_on_a_card_or_a_volume_without_role() {
     assert!(backup::run(&w.vault, &w.jobs, &w.plugged, Trigger::ByHand, 500, None).is_err());
 }
 
-/// Waits up to `seconds` for an event `kind` on `bus`: its payload.
+/// Waits up to `seconds` for an event `kind` of a backup job on `bus` (not
+/// the import that set the test up): its payload.
 fn event(bus: &Bus, kind: &str, seconds: u64) -> Option<Value> {
     let deadline = std::time::Instant::now() + Duration::from_secs(seconds);
     while std::time::Instant::now() < deadline {
-        if let Some(e) = bus.since(0).into_iter().find(|e| e.kind == kind) {
+        if let Some(e) = bus.since(0).into_iter().find(|e| {
+            e.kind == kind
+                && e.payload["id"]
+                    .as_str()
+                    .is_some_and(|id| id.starts_with("backup-"))
+        }) {
             return Some(e.payload.clone());
         }
         std::thread::sleep(Duration::from_millis(20));
@@ -361,15 +367,33 @@ fn a_paused_backup_can_be_cancelled() {
         .map(|i| i.id)
         .collect();
     w.plugged.pull("uuid:a");
-    let report = std::thread::scope(|scope| {
-        let running = scope
-            .spawn(|| backup::backup(&w.vault, &w.jobs, &w.plugged, &w.backup.id, &ids, 500, None));
-        let started = event(&w.bus, "job.started", 30).expect("started");
+    let cancel = Arc::new(AtomicBool::new(false));
+    let (report, paused, by_job) = std::thread::scope(|scope| {
+        let running = scope.spawn(|| {
+            backup::backup(
+                &w.vault,
+                &w.jobs,
+                &w.plugged,
+                &w.backup.id,
+                &ids,
+                500,
+                Some(cancel.clone()),
+            )
+        });
         let paused = event(&w.bus, "job.paused", 30);
-        w.jobs.cancel(started["id"].as_str().unwrap()).unwrap();
-        assert!(paused.is_some());
-        running.join().unwrap()
+        // Cancelled through the job; the caller's flag stops it whatever
+        // happens, so the test never hangs.
+        let by_job = paused
+            .as_ref()
+            .and_then(|p| p["id"].as_str())
+            .map(|id| w.jobs.cancel(id));
+        if event(&w.bus, "job.cancelled", 30).is_none() {
+            cancel.store(true, Ordering::SeqCst);
+        }
+        (running.join().unwrap(), paused, by_job)
     });
+    assert!(paused.is_some(), "the backup paused");
+    assert_eq!(by_job, Some(Ok(())));
     assert!(report.unwrap().cancelled);
 }
 
