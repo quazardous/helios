@@ -11,7 +11,8 @@
     "sources": ["source"],
     "image_sources": ["source"],
     "nodes": [
-      { "name": "exposure", "module": "exposure" },
+      { "name": "exposure", "module": "exposure",
+        "raw_params": { "exposure": { "float": 0.7 }, "black": { "float": -0.000244140625 }, "compensate_bias": { "bool": true } } },
       { "name": "sigmoid", "module": "sigmoid" }
     ],
     "connections": [

@@ -82,20 +82,20 @@ fn render(graph: &Graph, node: NodeId, port: &str, region: Region) -> Image {
         .unwrap()
 }
 
-/// The node's raw path on the same file, its modules at their defaults:
-/// the chain "Develop one image" wires.
+/// The node's raw path on the same file: the chain "Develop one image"
+/// wires, with its parameters (its exposure darktable's default for a
+/// raw).
 fn node_render(raw: &Path, region: Region) -> Image {
+    let modules: Vec<serde_json::Value> = develop()
+        .template
+        .network
+        .nodes
+        .iter()
+        .map(|n| serde_json::json!({ "name": n.name, "module": n.module, "params": n.params }))
+        .collect();
     let network = serde_json::json!({
         "sources": [{ "name": "raw", "file": raw }],
-        "modules": [
-            { "name": "rawprepare", "module": "rawprepare" },
-            { "name": "whitebalance", "module": "whitebalance" },
-            { "name": "highlights", "module": "highlights" },
-            { "name": "demosaic", "module": "demosaic" },
-            { "name": "colorin", "module": "colorin" },
-            { "name": "exposure", "module": "exposure" },
-            { "name": "sigmoid", "module": "sigmoid" }
-        ],
+        "modules": modules,
         "connections": [
             { "from": "raw", "port": "image", "to": "rawprepare", "input": "input" },
             { "from": "rawprepare", "port": "output", "to": "whitebalance", "input": "input" },

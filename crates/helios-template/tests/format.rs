@@ -570,6 +570,50 @@ fn an_image_source_takes_a_picture_as_it_is_and_a_raw_through_the_raw_front() {
     }
 }
 
+#[test]
+fn raw_params_go_over_params_when_the_network_is_built_with_a_raw() {
+    use helios_core::{Image, Value};
+    let mut t = image_template();
+    t["network"]["nodes"][0]["params"] = json!({ "black": { "float": 0.01 } });
+    t["network"]["nodes"][0]["raw_params"] = json!({ "exposure": { "float": 0.7 } });
+    assert_eq!(schema::check(&schema::template(), &t), Vec::<String>::new());
+    let b = bundle(&t);
+    let param = |built: &helios_template::Built, k: &str| {
+        let id = built.graph.find("exp").unwrap();
+        built.graph.params(id).unwrap().unwrap().get(k).cloned()
+    };
+    // A picture: the node's own parameters.
+    let picture = Image::from_fn(Region::sized(4, 4), 4, |_, _, _| 0.25);
+    let built = b
+        .build_with(
+            &image_catalogue(),
+            helios_template::Source::Picture(&picture),
+            None,
+        )
+        .unwrap();
+    assert_eq!(param(&built, "exposure"), Some(Value::Float(0.0)));
+    assert_eq!(param(&built, "black"), Some(Value::Float(0.01)));
+    // A raw: the raw's defaults over them.
+    let mosaic = Image::from_fn(Region::sized(8, 8), 1, |_, _, _| 0.3);
+    let camera = helios_core::Context::new();
+    let built = b
+        .build_with(
+            &image_catalogue(),
+            helios_template::Source::Raw {
+                mosaic: &mosaic,
+                camera: &camera,
+            },
+            None,
+        )
+        .unwrap();
+    assert_eq!(param(&built, "exposure"), Some(Value::Float(0.7)));
+    assert_eq!(param(&built, "black"), Some(Value::Float(0.01)));
+    // Checked against the manifest, whatever the build is given.
+    t["network"]["nodes"][0]["raw_params"] = json!({ "loudness": { "float": 0.7 } });
+    let e = bundle(&t).build(&image_catalogue()).err().unwrap();
+    assert!(e.contains("raw_params"), "{e}");
+}
+
 /// A one-exposure macro with a workshop block (experimental).
 fn workshop(targets: Json) -> Json {
     json!({

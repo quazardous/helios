@@ -7,7 +7,9 @@
 //!
 //! With `compensate_bias`, the camera's exposure bias (from its description,
 //! a declared context input) is taken back, as darktable's "compensate
-//! camera exposure": a shot at +1 EV gets -1 EV.
+//! camera exposure": a shot at +1 EV gets -1 EV. As darktable
+//! (`dt_image_get_exposure_bias`), a bias outside -5 to +5 EV, or not a
+//! number, is not trusted: it counts as 0.
 //!
 //! Not ported yet: the deflicker mode (an analysis input: the raw
 //! histogram) and highlight preservation.
@@ -81,7 +83,9 @@ impl Module for Exposure {
                 .ok_or_else(|| {
                     format!("context field `{EXPOSURE_BIAS}`: the camera's bias needed")
                 })?;
-            exposure -= bias;
+            if bias.is_finite() && (-5.0..=5.0).contains(&bias) {
+                exposure -= bias;
+            }
         }
         let white = (-exposure as f32).exp2();
         let mut black = params.float("black") as f32;
@@ -253,6 +257,9 @@ mod tests {
         assert_eq!(apply(p, [0.4, 0.4, 0.4, 1.0]), [0.2, 0.2, 0.2, 1.0]);
         let err = Exposure.prepare(&params, &Context::new()).unwrap_err();
         assert!(err.contains(EXPOSURE_BIAS), "{err}");
+        // A bias out of reason is not trusted, as darktable.
+        let wild = Context::new().with(EXPOSURE_BIAS, Value::Float(12.0));
+        assert_eq!(Exposure.prepare(&params, &wild).unwrap(), plan(0.0, 0.0));
         // Off by default: the bias changes nothing.
         let off = Exposure.manifest().resolve(&Params::new()).unwrap();
         assert_eq!(Exposure.prepare(&off, &shot_over).unwrap(), plan(0.0, 0.0));

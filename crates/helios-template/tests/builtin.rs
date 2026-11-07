@@ -499,3 +499,40 @@ fn the_picture_templates_and_the_blank_workspace_take_a_picture_or_a_raw() {
     let blank = helios_template::workspace::blank_network();
     assert_eq!(blank.image_sources, blank.sources);
 }
+
+#[test]
+fn a_raw_is_exposed_as_darktable_exposes_it_by_default() {
+    use helios_core::Value;
+    // darktable's scene-referred default for a raw: +0.7 EV, black
+    // -0.000244, the camera's exposure bias taken back.
+    let templates = helios_template::shipped::templates();
+    let develop = templates
+        .iter()
+        .find(|b| b.template.id == "helios.develop")
+        .unwrap();
+    let exposure = |b: &Bundle| {
+        b.template
+            .network
+            .nodes
+            .iter()
+            .find(|n| n.name == "exposure")
+            .cloned()
+            .unwrap()
+    };
+    let raw = exposure(develop).params;
+    assert_eq!(raw.get("exposure"), Some(&Value::Float(0.7)));
+    assert_eq!(raw.get("black"), Some(&Value::Float(-0.000244140625)));
+    assert_eq!(raw.get("compensate_bias"), Some(&Value::Bool(true)));
+    // The templates whose exposure is the image's own give a raw the
+    // same; a picture keeps exposure's identity.
+    for id in [
+        "helios.develop-preview",
+        "helios.batch-export",
+        "helios.import-cull-dedupe",
+    ] {
+        let b = templates.iter().find(|b| b.template.id == id).unwrap();
+        let n = exposure(b);
+        assert_eq!(n.raw_params, raw, "{id}");
+        assert!(n.params.iter().next().is_none(), "{id}");
+    }
+}

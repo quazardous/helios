@@ -114,7 +114,8 @@ impl Placed {
 /// Builds `template`'s network, each source given `source` (without
 /// one, a placeholder of the kind it takes), with `preset`'s values over
 /// the nodes' own, and `layout` with the panel hints of its composites.
-/// A source given what it does not take is refused.
+/// A source given what it does not take is refused. Built with a raw,
+/// each node's `raw_params` go over its `params`.
 ///
 /// An image source given a raw is its mosaic followed by the raw front
 /// ([`RAW_FRONT`]), opened: its nodes go in the graph under their own
@@ -188,6 +189,23 @@ pub fn build(
             return Err(at("a second node of that name".into()));
         }
         let mut params = n.params.clone();
+        let mut with_raw = n.params.clone();
+        for (k, v) in n.raw_params.iter() {
+            with_raw.set(k, v.clone());
+        }
+        // A raw's defaults are checked whatever the build is given, and
+        // applied only with a raw.
+        if n.raw_params.iter().next().is_some() {
+            catalogue
+                .resolve(n.module.as_deref(), n.composite.as_ref(), 0)
+                .map_err(at)?
+                .manifest()
+                .resolve(&with_raw)
+                .map_err(|e| at(format!("raw_params: {e}")))?;
+            if !raws.is_empty() {
+                params = with_raw;
+            }
+        }
         if let Some(values) = preset.and_then(|p| p.values.get(&n.name)) {
             for (k, v) in values.iter() {
                 params.set(k, v.clone());

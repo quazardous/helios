@@ -132,7 +132,13 @@ The starting graph, written like a node's network description
   surface folds an opened composite back, and whether the graph keeps
   which nodes came from which composite.
 - `params` are checked against the module's (or the composite's)
-  manifest, completed with defaults.
+  manifest, completed with defaults. `raw_params` (2026-11-07) go over
+  them when the network is built with a raw (a raw source, or an image
+  source given one): a raw's defaults. The built-in templates give a
+  raw darktable's scene-referred exposure this way (+0.7 EV, black
+  -0.000244, the camera's exposure bias taken back), a picture keeping
+  exposure's identity; "Develop one image", for raws only, has them as
+  its `params`.
 - `bypassed: true` places a node bypassed: it keeps its parameters and
   renders as if absent (see module-contract.md, "Bypass"). An opened
   composite is not bypassed whole: its inner nodes are, one by one.

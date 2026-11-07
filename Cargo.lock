@@ -2473,6 +2473,7 @@ dependencies = [
  "helios-module-whitebalance",
  "helios-node",
  "helios-photo",
+ "helios-template",
  "helios-testkit",
  "helios-xmp",
  "serde_json",

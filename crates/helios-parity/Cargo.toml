@@ -12,6 +12,8 @@ helios-export.workspace = true
 helios-load.workspace = true
 helios-node = { path = "../helios-node" }
 helios-photo.workspace = true
+# "Develop one image" as Helios ships it: its nodes' parameters.
+helios-template.workspace = true
 helios-xmp.workspace = true
 serde_json.workspace = true
 

@@ -467,6 +467,12 @@ pub struct NodeDesc {
     /// Checked against the manifest, completed with defaults.
     #[serde(default, skip_serializing_if = "is_empty")]
     pub params: Params,
+    /// Put over `params` when the network is built with a raw (a raw
+    /// source, or an image source given one): a raw's defaults, as
+    /// darktable's for its exposure (+0.7 EV, the camera's bias taken
+    /// back). Checked against the manifest as `params` are.
+    #[serde(default, skip_serializing_if = "is_empty")]
+    pub raw_params: Params,
     /// A composite opened: its inner nodes in the graph as ordinary
     /// nodes (`<name>.<inner>`), which panels can edit.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]

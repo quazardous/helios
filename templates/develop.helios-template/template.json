@@ -1,7 +1,7 @@
 {
   "format": 1,
   "id": "helios.develop",
-  "version": 1,
+  "version": 2,
   "meta": {
     "name": "Develop one image",
     "scenario": "Develop a raw file from its sensor data: its levels, white balance, highlights, demosaicing and camera colours, then exposure and a sigmoid tone curve, the image large, its parameters and scopes beside.",
@@ -16,7 +16,8 @@
       { "name": "highlights", "module": "highlights" },
       { "name": "demosaic", "module": "demosaic" },
       { "name": "colorin", "module": "colorin" },
-      { "name": "exposure", "module": "exposure" },
+      { "name": "exposure", "module": "exposure",
+        "params": { "exposure": { "float": 0.7 }, "black": { "float": -0.000244140625 }, "compensate_bias": { "bool": true } } },
       { "name": "sigmoid", "module": "sigmoid" }
     ],
     "connections": [

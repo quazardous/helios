@@ -10,7 +10,8 @@
   "network": {
     "sources": ["source"],
     "image_sources": ["source"],
-    "nodes": [{ "name": "exposure", "module": "exposure" }],
+    "nodes": [{ "name": "exposure", "module": "exposure",
+        "raw_params": { "exposure": { "float": 0.7 }, "black": { "float": -0.000244140625 }, "compensate_bias": { "bool": true } } }],
     "connections": [
       { "from": "source", "port": "image", "to": "exposure", "input": "input" }
     ],

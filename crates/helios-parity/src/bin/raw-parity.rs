@@ -1,10 +1,13 @@
 //! Raw development parity with darktable (`docs/raw-development.md`): a
 //! few raws of the corpus developed by Helios's "Develop one image" chain
-//! at its defaults, against darktable-cli twice:
+//! with the parameters it ships (its exposure: darktable's default for a
+//! raw, +0.7 EV and the camera's bias taken back), against darktable-cli
+//! twice:
 //!
 //! - **chain**: darktable running the same modules as Helios (rawprepare,
 //!   white balance as shot, highlights clipped, its default demosaic,
-//!   colorin's standard matrix, sigmoid at its defaults), judged by
+//!   colorin's standard matrix, the template's exposure, sigmoid at its
+//!   defaults), judged by
 //!   [`helios_parity::AS_A_PORT`] away from the image's edges: whether the
 //!   ported modules match;
 //! - **defaults**: darktable developing the raw with no edit (its
@@ -41,7 +44,7 @@ const RAWS: [&str; 3] = [
     "fujifilm-x-pro1-raf-12bit-12bit-uncompressed-3-2",
 ];
 
-/// The modules of "Develop one image", in its order, at their defaults.
+/// The modules of "Develop one image", in its order.
 const DEVELOP: [&str; 7] = [
     "rawprepare",
     "whitebalance",
@@ -95,12 +98,30 @@ fn corpus_file(dir: &Path, id: &str) -> Result<PathBuf, String> {
         .ok_or_else(|| format!("no {id} in {}", dir.display()))
 }
 
-/// Helios's "Develop one image" chain at its defaults, the whole image.
-fn helios(raw: &Path) -> Result<Image, String> {
-    let modules: Vec<Value> = DEVELOP
+/// The parameters "Develop one image" gives the node `name`, as Helios
+/// ships it.
+fn develop_params(name: &str) -> Result<Value, String> {
+    let develop = helios_template::shipped::templates()
+        .into_iter()
+        .find(|b| b.template.id == "helios.develop")
+        .ok_or("no \"Develop one image\" among the built-in templates")?;
+    let node = develop
+        .template
+        .network
+        .nodes
         .iter()
-        .map(|m| json!({ "name": m, "module": m }))
-        .collect();
+        .find(|n| n.name == name)
+        .ok_or_else(|| format!("\"Develop one image\" has no `{name}`"))?;
+    serde_json::to_value(&node.params).map_err(|e| e.to_string())
+}
+
+/// Helios's "Develop one image" chain with its parameters, the whole
+/// image.
+fn helios(raw: &Path) -> Result<Image, String> {
+    let modules = DEVELOP
+        .iter()
+        .map(|m| Ok(json!({ "name": m, "module": m, "params": develop_params(m)? })))
+        .collect::<Result<Vec<Value>, String>>()?;
     let mut connections =
         vec![json!({ "from": "raw", "port": "image", "to": DEVELOP[0], "input": "input" })];
     for pair in DEVELOP.windows(2) {
@@ -125,15 +146,25 @@ fn helios(raw: &Path) -> Result<Image, String> {
 }
 
 /// darktable running Helios's chain: what Helios's modules default to,
-/// in darktable's terms (the rest are darktable's defaults with no
-/// workflow: white balance as shot, its default demosaic, sigmoid's own
-/// defaults, between colorin's standard matrix and a linear Rec.2020
-/// output).
+/// in darktable's terms, and the template's exposure (the rest are
+/// darktable's defaults with no workflow: white balance as shot, its
+/// default demosaic, sigmoid's own defaults, between colorin's standard
+/// matrix and a linear Rec.2020 output).
 fn darktable_chain(dt: &Darktable, raw: &Path, dir: &Path) -> Result<Image, String> {
+    let exposure = develop_params("exposure")?;
+    let float = |k: &str| exposure[k]["float"].as_f64().unwrap_or(0.0);
     let items = [
         Item::new(
             "highlights",
             json!({"mode": "DT_IOP_HIGHLIGHTS_CLIP", "clip": 1.0}),
+        ),
+        Item::new(
+            "exposure",
+            json!({
+                "exposure": float("exposure"),
+                "black": float("black"),
+                "compensate_exposure_bias": exposure["compensate_bias"]["bool"].as_bool().unwrap_or(false),
+            }),
         ),
         Item::new("sigmoid", json!({})),
     ];

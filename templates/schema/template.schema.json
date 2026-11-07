@@ -118,6 +118,10 @@
         "module": { "type": "string" },
         "composite": { "$ref": "#/$defs/composite_ref" },
         "params": { "$ref": "#/$defs/params" },
+        "raw_params": {
+          "description": "Put over params when the network is built with a raw (a raw source, or an image source given one): a raw's defaults, such as darktable's exposure for a raw (+0.7 EV, black -0.000244, the camera's exposure bias taken back).",
+          "$ref": "#/$defs/params"
+        },
         "open": {
           "description": "A composite opened: its inner nodes put in the graph as <name>.<inner>, which panels edit.",
           "type": "boolean"
