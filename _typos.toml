@@ -51,3 +51,5 @@ cll = "cll"
 togglable = "togglable"
 # The zlib crate `flate2`.
 flate = "flate"
+# A product name in the import study: Excire Foto.
+foto = "foto"
