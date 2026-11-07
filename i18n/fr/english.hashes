@@ -719,6 +719,17 @@ gui-status-images 4afec94fc4bb8812
 gui-status-zoom b7f0fac92d5ef120
 gui-status-zoom-fill 17ff0f2a952bf24e
 gui-status-zoom-fit d584f3a86901a72a
+gui-storage-backup 20d776af0fba6d57
+gui-storage-backup-copies 4a71374ffc0070f1
+gui-storage-backup-none 272f9aea1af7fd28
+gui-storage-backup-now 3c376e3ce76d8253
+gui-storage-backup-now-hint 80908a8c81b85e3b
+gui-storage-backup-off-site c16206a6a51e5330
+gui-storage-backup-on fb642d1a14e7c243
+gui-storage-backup-on-connect 92ef1f7b5efcc1d8
+gui-storage-backup-on-import 4f1098d1c2062d33
+gui-storage-dest-archive 682c314264c76df2
+gui-storage-dest-backup a15f2913d776321c
 gui-storage-free acb9b4a088648dc0
 gui-storage-intro 962af15992d7d261
 gui-storage-kind-external d3186ff36d482e4b

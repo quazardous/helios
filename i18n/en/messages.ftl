@@ -999,6 +999,28 @@ gui-status-zoom-fill = Fill
 
 gui-status-zoom-fit = Fit
 
+gui-storage-backup = Backup
+
+gui-storage-backup-copies = copies on
+
+gui-storage-backup-none = No backup set up: each photo has one copy, in the Library.
+
+gui-storage-backup-now = Back up now
+
+gui-storage-backup-now-hint = Copies the photos short of their backups to the disks plugged in, verified
+
+gui-storage-backup-off-site = One of them off site
+
+gui-storage-backup-on = Keep verified backup copies of every photo
+
+gui-storage-backup-on-connect = When a backup disk is plugged in
+
+gui-storage-backup-on-import = After each import
+
+gui-storage-dest-archive = Any archive disk
+
+gui-storage-dest-backup = Any backup disk
+
 gui-storage-free = { $free } free of { $capacity }
 
 gui-storage-intro = The disks Helios has seen. Name them and say what each is for: Helios writes only to library, archive, backup and scratch disks.

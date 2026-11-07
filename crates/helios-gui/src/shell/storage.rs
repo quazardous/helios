@@ -15,6 +15,12 @@
 //!
 //! `library.storage` takes `{"volume": id}` to open the page on one volume
 //! (the health check's free-space fix does).
+//!
+//! Above the volumes, the library's backup strategy
+//! (`helios_storage::strategy`): none, or how many verified copies, on
+//! which disks (any backup disk, any archive disk, or one disk), whether
+//! one must be off site and when copies are made; saved at once. "Back up
+//! now" runs `library.backupNow`.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -22,6 +28,8 @@ use std::sync::Arc;
 use egui::Context as Egui;
 use egui_pop::core::icon::Icon;
 use helios_core::Message;
+use helios_shell::commands::Origin;
+use helios_storage::strategy::{self, Destination, Scope, Strategy, Trigger};
 use helios_storage::{Identity, Role, Volume, VolumeId, VolumeKind, Volumes, registry};
 use helios_vault::{Store, Vault};
 use serde_json::Value;
@@ -30,6 +38,9 @@ use super::Shell;
 
 /// Opens the Storage page; `volume` (an id) puts that volume first.
 pub const COMMAND: &str = "library.storage";
+
+/// Backs up now what is below the library's strategy.
+pub const BACKUP_NOW: &str = "library.backupNow";
 
 /// What the Storage page reads and writes.
 pub trait StorageLink: Send + Sync {
@@ -42,6 +53,14 @@ pub trait StorageLink: Send + Sync {
     fn save(&self, volume: &Volume) -> Result<Volume, String>;
     /// Writes the identity file on a mounted volume (the user asked).
     fn mark(&self, volume: &Volume) -> Result<Volume, String>;
+    /// The library's backup strategy; `None` when there is none.
+    fn strategy(&self) -> Result<Option<Strategy>, String> {
+        Ok(None)
+    }
+    /// Keeps (or with `None` removes) the library's backup strategy.
+    fn set_strategy(&self, _strategy: Option<&Strategy>) -> Result<(), String> {
+        Err("no backup strategy here".into())
+    }
 }
 
 /// The link over a vault and the volumes mounted.
@@ -115,6 +134,14 @@ where
             .map_or(0, |d| d.as_secs());
         registry::mark(&self.vault, volume, &self.library, now)
     }
+
+    fn strategy(&self) -> Result<Option<Strategy>, String> {
+        strategy::load(&self.vault, &Scope::Library)
+    }
+
+    fn set_strategy(&self, strategy: Option<&Strategy>) -> Result<(), String> {
+        strategy::save(&self.vault, &Scope::Library, strategy)
+    }
 }
 
 /// The page's state, kept by the shell.
@@ -130,6 +157,8 @@ pub(crate) struct StoragePage {
     focus: Option<VolumeId>,
     /// The volume whose "Mark this disk" explanation is shown.
     marking: Option<VolumeId>,
+    /// The library's backup strategy, as last read.
+    strategy: Option<Strategy>,
     error: Option<String>,
 }
 
@@ -139,6 +168,8 @@ enum Asked {
     AskMark(VolumeId),
     Mark(Volume),
     CancelMark,
+    Strategy(Option<Strategy>),
+    BackupNow,
 }
 
 impl Shell {
@@ -168,6 +199,10 @@ impl Shell {
                 Ok(p) => self.storage.photos = p,
                 Err(e) => self.storage.error = Some(e),
             }
+            match link.strategy() {
+                Ok(s) => self.storage.strategy = s,
+                Err(e) => self.storage.error = Some(e),
+            }
         }
         let known: Vec<VolumeId> = self.storage.volumes.iter().map(|v| v.id.clone()).collect();
         self.storage.names.retain(|id, _| known.contains(id));
@@ -176,6 +211,11 @@ impl Shell {
     /// Whether the Storage page is open.
     pub fn storage_page_open(&self) -> bool {
         self.storage.open
+    }
+
+    /// The library's backup strategy, as the Storage page shows it.
+    pub fn storage_strategy(&self) -> Option<&Strategy> {
+        self.storage.strategy.as_ref()
     }
 
     /// The volumes the Storage page lists, in its order.
@@ -226,6 +266,8 @@ impl Shell {
                     ui.colored_label(ui.visuals().error_fg_color, e);
                 }
                 ui.separator();
+                strategy_ui(ui, &t, page.strategy.as_ref(), &page.volumes, &mut asked);
+                ui.separator();
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     if page.volumes.is_empty() {
                         ui.weak(t(Message::new(
@@ -258,6 +300,8 @@ impl Shell {
         };
         let done = match asked {
             Asked::Save(v) => link.save(&v).map(|_| ()),
+            Asked::Strategy(s) => link.set_strategy(s.as_ref()),
+            Asked::BackupNow => self.run(BACKUP_NOW, Value::Null, Origin::User).map(|_| ()),
             Asked::AskMark(id) => {
                 self.storage.marking = Some(id);
                 Ok(())
@@ -281,6 +325,130 @@ impl Shell {
             self.warn(format!("storage: {e}"));
         }
         self.refresh_volumes();
+    }
+}
+
+/// A destination's words: any disk of a role, or one disk by name.
+fn destination_text(t: &dyn Fn(Message) -> String, d: &Destination, volumes: &[Volume]) -> String {
+    match d {
+        Destination::Role(Role::Archive) => {
+            t(Message::new("gui-storage-dest-archive", "Any archive disk"))
+        }
+        Destination::Role(_) => t(Message::new("gui-storage-dest-backup", "Any backup disk")),
+        Destination::Volume(id) => volumes
+            .iter()
+            .find(|v| &v.id == id)
+            .map_or_else(|| id.to_string(), |v| v.name.clone()),
+    }
+}
+
+/// The library's backup strategy and its editor.
+fn strategy_ui(
+    ui: &mut egui::Ui,
+    t: &dyn Fn(Message) -> String,
+    strategy: Option<&Strategy>,
+    volumes: &[Volume],
+    asked: &mut Option<Asked>,
+) {
+    ui.strong(t(Message::new("gui-storage-backup", "Backup")));
+    let mut on = strategy.is_some();
+    if ui
+        .checkbox(
+            &mut on,
+            t(Message::new(
+                "gui-storage-backup-on",
+                "Keep verified backup copies of every photo",
+            )),
+        )
+        .changed()
+    {
+        *asked = Some(Asked::Strategy(on.then(Strategy::default)));
+    }
+    let Some(current) = strategy else {
+        ui.weak(t(Message::new(
+            "gui-storage-backup-none",
+            "No backup set up: each photo has one copy, in the Library.",
+        )));
+        return;
+    };
+    let mut edited = current.clone();
+    ui.horizontal_wrapped(|ui| {
+        let mut copies = u32::from(edited.copies);
+        ui.add(egui::DragValue::new(&mut copies).range(1..=5));
+        edited.copies = u8::try_from(copies).unwrap_or(1);
+        ui.label(t(Message::new("gui-storage-backup-copies", "copies on")));
+        // v1 edits one destination; a strategy may hold several.
+        let first = edited
+            .destinations
+            .first()
+            .cloned()
+            .unwrap_or(Destination::Role(Role::Backup));
+        let mut chosen = first.clone();
+        let mut choices = vec![
+            Destination::Role(Role::Backup),
+            Destination::Role(Role::Archive),
+        ];
+        choices.extend(
+            volumes
+                .iter()
+                .filter(|v| strategy::may_back_up_to(v).is_ok())
+                .map(|v| Destination::Volume(v.id.clone())),
+        );
+        egui::ComboBox::from_id_salt("helios.storage.backup.destination")
+            .selected_text(destination_text(t, &chosen, volumes))
+            .show_ui(ui, |ui| {
+                for c in choices {
+                    let text = destination_text(t, &c, volumes);
+                    ui.selectable_value(&mut chosen, c, text);
+                }
+            });
+        if chosen != first {
+            edited.destinations = vec![chosen];
+        }
+    });
+    ui.horizontal_wrapped(|ui| {
+        ui.checkbox(
+            &mut edited.off_site_required,
+            t(Message::new(
+                "gui-storage-backup-off-site",
+                "One of them off site",
+            )),
+        );
+        for (trigger, text) in [
+            (
+                Trigger::OnImport,
+                Message::new("gui-storage-backup-on-import", "After each import"),
+            ),
+            (
+                Trigger::OnConnect,
+                Message::new(
+                    "gui-storage-backup-on-connect",
+                    "When a backup disk is plugged in",
+                ),
+            ),
+        ] {
+            let mut on = edited.triggers.contains(&trigger);
+            if ui.checkbox(&mut on, t(text)).changed() {
+                if on {
+                    edited.triggers.insert(trigger);
+                } else {
+                    edited.triggers.remove(&trigger);
+                }
+            }
+        }
+    });
+    if edited != *current {
+        *asked = Some(Asked::Strategy(Some(edited)));
+    }
+    if ui
+        .button(t(Message::new("gui-storage-backup-now", "Back up now")))
+        .on_hover_text(t(Message::new(
+            "gui-storage-backup-now-hint",
+            "Copies the photos short of their backups to the disks plugged in, verified",
+        )))
+        .clicked()
+    {
+        *asked = Some(Asked::BackupNow);
     }
 }
 

@@ -545,6 +545,27 @@ questions), which makes the import's reminder appear.
   library photo removed by the user keeps its backup copies; reclaiming
   them is the ROADMAP's separate, confirmed "reclaiming space" step.
 
+**Built (phase 5, 2026-11-08).** `helios_storage::strategy`: a
+`Strategy` (`name`, `copies`, `destinations`, each a role or a volume,
+`off_site_required`, `triggers`: on import, on connect, by hand), the
+library default kept in the vault's documents (`storage/strategies`, key
+`library`; none by default), with a `Scope` to grow per-shoot, per-import
+and per-card overrides. `status` gives `BackupStatus { have, want,
+off_site_ok, unverified }`: locations on backup or archive volumes,
+present or offline, verified by hash (`storage/verified`, written by the
+backup job), one per drive (a RAID once), never a weak identity, never
+the library copy. `may_write` enforces the write permission (backup,
+archive or scratch role; never a card or ingest volume; only inside
+`Helios Backup/` or `Helios Archive/`). `helios_library::backup` is the
+job: from the library copy, a part file hashed while written, read back,
+renamed without overwriting, recorded as a location; it pauses while its
+destination is unplugged and stays cancellable. Triggers: after an
+import, on `Watch::on_volumes`, and `library.backupNow`. The import's
+cards are safe to format only once their photos meet the strategy. The
+Storage page shows and edits the strategy (one destination) with "Back up
+now". Not yet: re-check periods, sidecars copied along, per-photo badges,
+filters, the import's reminder and the toast when a backup ends (phase 6).
+
 ### 3.3 Overrides per shoot, import session or card
 
 Not every reportage is treated the same. A strategy can be assigned to:

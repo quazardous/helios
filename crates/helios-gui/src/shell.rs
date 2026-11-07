@@ -54,7 +54,9 @@ pub use export::{ExportAsk, OPEN_FOLDER, folder_path, settings_of};
 pub use health::{BADGE as HEALTH_BADGE, CHECK_NOW as HEALTH_CHECK_NOW, COMMAND as HEALTH_COMMAND};
 pub use import_choices::Choices;
 pub use macro_edit::{SELECTED as GRAPH_SELECTED, selected_nodes};
-pub use storage::{COMMAND as STORAGE_COMMAND, StorageLink, VaultStorage};
+pub use storage::{
+    BACKUP_NOW as BACKUP_NOW_COMMAND, COMMAND as STORAGE_COMMAND, StorageLink, VaultStorage,
+};
 pub use workspace_edit::STATE as WORKSPACE_STATE;
 
 mod export;

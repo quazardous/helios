@@ -68,6 +68,11 @@ pub struct Report {
 pub struct Gate(AtomicBool);
 
 impl Gate {
+    /// An open gate.
+    pub const fn new() -> Self {
+        Self(AtomicBool::new(false))
+    }
+
     /// Runs `f` unless a run holds the gate.
     pub fn run<T>(&self, f: impl FnOnce() -> T) -> Option<T> {
         struct Open<'a>(&'a AtomicBool);

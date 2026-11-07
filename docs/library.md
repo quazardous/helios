@@ -497,6 +497,44 @@ A card is never offered it: Helios never writes to a card.
 `library.storage` takes `{"volume": id}` to put that volume first, as
 the health check's free-space fix does.
 
+## Backups
+
+The library has one backup **strategy**, or none (a new library's
+default). It is kept in the vault (documents `storage/strategies`, key
+`library`) and set on the Storage page: how many verified **copies** each
+photo needs, the **destinations** (any backup disk, any archive disk, or
+one disk), whether one copy must be **off site**, and its **triggers**:
+after each import, when a destination disk is plugged in, and by hand
+("Back up now", `library.backupNow`). Per-shoot, per-import and per-card
+strategies come later.
+
+**How copies count** (`helios_storage::strategy::status`, giving `have`,
+`want`, `off_site_ok` and `unverified`): a photo's backup copies are its
+locations on volumes with the backup or archive role, present or offline,
+whose copy was read back and matched by hash (recorded in
+`storage/verified`). They count once per physical drive: two partitions
+of one disk, or a RAID, are one copy. A volume known only by its label
+and size never counts, and the library copy is not a backup copy.
+
+**The backup job** (`helios_library::backup`, kind `backup`) copies each
+photo short of its strategy from its library copy (never from a card) to
+`Helios Backup/` on the destination, under the photo's path in the
+library. Each copy is written to a hidden part file with its hash computed
+while copying, read back and checked, then given its name; a name taken
+by another file gets `-1`, `-2`..., nothing is overwritten, and a file
+there already holding the photo is verified and kept. The copy is recorded
+as a location (the disk, its path inside it, present, verified now).
+Helios writes only to disks with a backup, archive or scratch role, never
+to a card or an ingest disk, and only inside `Helios Backup/` or
+`Helios Archive/`. A destination unplugged mid-run pauses the job ("Plug
+in BACKUP_A to go on") until it is back, at any mount point; the job can
+be cancelled, its copy under way removed. One run goes at a time.
+
+**Safe to format**: with a strategy, a card is safe to format only when
+every photo on it is in the Library and has its verified backup copies;
+otherwise the import says "EOS_DIGITAL: in the Library, 3 photos short of
+their backups: keep the card".
+
 ## Not yet
 
 - Phones over MTP as a source (mount them as folders).

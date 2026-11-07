@@ -1335,6 +1335,28 @@ gui-storage-offline = hors ligne
 
 gui-storage-free = { $free } libres sur { $capacity }
 
+gui-storage-backup = Sauvegarde
+
+gui-storage-backup-copies = copies sur
+
+gui-storage-backup-none = Aucune sauvegarde en place : chaque photo n’a qu’une copie, dans la Bibliothèque.
+
+gui-storage-backup-now = Sauvegarder maintenant
+
+gui-storage-backup-now-hint = Copie les photos auxquelles il manque des sauvegardes sur les disques branchés, vérifiées
+
+gui-storage-backup-off-site = L’une d’elles hors site
+
+gui-storage-backup-on = Garder des copies de sauvegarde vérifiées de chaque photo
+
+gui-storage-backup-on-connect = Quand un disque de sauvegarde est branché
+
+gui-storage-backup-on-import = Après chaque import
+
+gui-storage-dest-archive = Tout disque d’archive
+
+gui-storage-dest-backup = Tout disque de sauvegarde
+
 gui-storage-roles = Pour :
 
 gui-storage-off-site = Hors site
