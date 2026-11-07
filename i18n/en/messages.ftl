@@ -297,6 +297,8 @@ gui-import-verb = Import
 
 gui-import-window-add-favourite = Add to favourites
 
+gui-import-window-all-types = All types
+
 gui-import-window-cancel = Cancel
 
 gui-import-window-card-inserted = { $card } inserted
@@ -313,21 +315,49 @@ gui-import-window-choose = Choose a folder…
 
 gui-import-window-contents = Contents
 
-gui-import-window-contents-soon = The photos of the sources ticked will show here.
+gui-import-window-counts = { $photos } photos, { $new } new, { $size }
+
+gui-import-window-empty = No photos in the sources ticked
 
 gui-import-window-favourites = Favourites
 
+gui-import-window-import = Import { $count }
+
+gui-import-window-in-library = in your Library
+
+gui-import-window-jpeg-only = JPEG only
+
+gui-import-window-new-only = New only
+
 gui-import-window-no-cards = No card inserted
 
+gui-import-window-no-date = No date
+
 gui-import-window-no-favourites = None yet
+
+gui-import-window-none-ticked = Tick the photos to import
 
 gui-import-window-nothing = Tick a card or a folder to import
 
 gui-import-window-open = Import photos…
 
+gui-import-window-pair = RAW+JPG
+
+gui-import-window-raw-only = Raw only
+
+gui-import-window-reading = Reading…
+
 gui-import-window-recent = Recent
 
 gui-import-window-remove-favourite = Remove from favourites
+
+gui-import-window-select = Select:
+
+gui-import-window-select-all = all
+
+gui-import-window-select-day = day
+
+gui-import-window-select-none = none
 
 gui-import-window-sources = Sources
 

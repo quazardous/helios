@@ -1211,6 +1211,7 @@ fn main() -> Result<(), String> {
         }
         Arc::new(broker)
     };
+    let known_vault = vault.clone();
     let mut builder = Shell::builder(helios_panels_with(experimental), Some(ui_settings))
         .workspace(&workspace)
         .on_exit(move |app| save_workspace(&dir, app))
@@ -1273,6 +1274,15 @@ fn main() -> Result<(), String> {
             // The import window's cards, polled off the interface thread,
             // and its recent folders and favourites.
             shell.watch_cards(helios_gui::volumes::system());
+            // What the vault holds, for its "in your Library" prefilter.
+            if let Some(vault) = known_vault.clone() {
+                shell.set_import_known(Arc::new(move || {
+                    vault
+                        .images()
+                        .map(|images| images.into_iter().map(|i| (i.size, i.partial)).collect())
+                        .unwrap_or_default()
+                }));
+            }
             shell.remember_import_sources_in(
                 helios_gui::shell::config_dir().join("import-sources.json"),
             );

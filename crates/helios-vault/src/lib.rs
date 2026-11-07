@@ -465,6 +465,37 @@ pub struct RepairReport {
 
 const PARTIAL: u64 = 64 * 1024;
 
+/// The partial hash of a file of `size` bytes, as [`Image::partial`] holds
+/// it (its beginning, its end and its size): a cheap first filter, which a
+/// full hash confirms.
+///
+/// # Errors
+/// The file cannot be read.
+pub fn partial_hash(path: &Path, size: u64) -> Result<ContentHash, String> {
+    partial_read(path, size).map(|(hash, _)| hash)
+}
+
+/// The partial hash of a file, and how many bytes it read.
+fn partial_read(path: &Path, size: u64) -> Result<(ContentHash, u64), String> {
+    let err = |e: std::io::Error| format!("{}: {e}", path.display());
+    let mut file = File::open(path).map_err(err)?;
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(&size.to_le_bytes());
+    let mut buffer = vec![0u8; PARTIAL.min(size) as usize];
+    file.read_exact(&mut buffer).map_err(err)?;
+    hasher.update(&buffer);
+    let mut read = buffer.len() as u64;
+    if size > PARTIAL {
+        let tail = PARTIAL.min(size - PARTIAL);
+        file.seek(SeekFrom::End(-(tail as i64))).map_err(err)?;
+        let mut end = vec![0u8; tail as usize];
+        file.read_exact(&mut end).map_err(err)?;
+        hasher.update(&end);
+        read += tail;
+    }
+    Ok((ContentHash(*hasher.finalize().as_bytes()), read))
+}
+
 pub struct Vault<S: Store> {
     store: Mutex<S>,
     reads: Mutex<Reads>,
@@ -537,26 +568,11 @@ impl<S: Store> Vault<S> {
     }
 
     fn partial_hash(&self, path: &Path, size: u64) -> Result<ContentHash, String> {
-        let err = |e: std::io::Error| format!("{}: {e}", path.display());
-        let mut file = File::open(path).map_err(err)?;
-        let mut hasher = blake3::Hasher::new();
-        hasher.update(&size.to_le_bytes());
-        let mut buffer = vec![0u8; PARTIAL.min(size) as usize];
-        file.read_exact(&mut buffer).map_err(err)?;
-        hasher.update(&buffer);
-        let mut read = buffer.len() as u64;
-        if size > PARTIAL {
-            let tail = PARTIAL.min(size - PARTIAL);
-            file.seek(SeekFrom::End(-(tail as i64))).map_err(err)?;
-            let mut end = vec![0u8; tail as usize];
-            file.read_exact(&mut end).map_err(err)?;
-            hasher.update(&end);
-            read += tail;
-        }
+        let (hash, read) = partial_read(path, size)?;
         let mut reads = self.reads.lock().expect("reads lock");
         reads.partial_hashes += 1;
         reads.bytes += read;
-        Ok(ContentHash(*hasher.finalize().as_bytes()))
+        Ok(hash)
     }
 
     /// Imports every image file under `root`.

@@ -131,17 +131,50 @@ fn an_empty_library_offers_import_photos_without_an_import_source() {
     assert!(h.state().import_window_open());
 }
 
-#[test]
-fn the_import_window_lists_a_card_first_ticks_it_and_imports_it() {
-    let dir = temp("card");
+/// A tiny JPEG of the fixtures (`a`, `b` or `c`, each its own content).
+fn jpeg(name: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../helios-plugin/tests/fixtures/rated-photos")
+        .join(format!("{name}.jpg"))
+}
+
+/// Writes `from` (a fixture) or `bytes` at `to`, last modified at noon of
+/// `day` of November 2026, local time.
+fn put(to: &Path, from: Result<&Path, &[u8]>, day: u32) {
+    use chrono::TimeZone as _;
+    match from {
+        Ok(f) => std::fs::copy(f, to).map(|_| ()).unwrap(),
+        Err(bytes) => std::fs::write(to, bytes).unwrap(),
+    }
+    let at = chrono::Local
+        .with_ymd_and_hms(2026, 11, day, 12, 0, 0)
+        .single()
+        .unwrap();
+    let time = std::time::UNIX_EPOCH + Duration::from_secs(at.timestamp() as u64);
+    std::fs::File::options()
+        .write(true)
+        .open(to)
+        .unwrap()
+        .set_modified(time)
+        .unwrap();
+}
+
+/// A shell watching one card, `EOS_DIGITAL` under `dir`, with the import
+/// window open on it once it is read through.
+fn card_window(
+    dir: &Path,
+    known: Option<helios_gui::import_scan::Known>,
+) -> Harness<'static, Shell> {
     let card = dir.join("EOS_DIGITAL");
-    std::fs::create_dir_all(card.join("DCIM/100CANON")).unwrap();
     let mut shell = Shell::new(helios_panels(), None);
     shell.watch_cards(Arc::new(vec![Volume {
         label: "EOS_DIGITAL".into(),
-        root: card.clone(),
+        root: card,
         capacity: Some(64_000_000_000),
     }]));
+    if let Some(known) = known {
+        shell.set_import_known(known);
+    }
     let mut h = headless::harness(shell, vec2(1280.0, 800.0));
     // The cards are polled on a thread of their own: the first list
     // comes within a few frames.
@@ -152,26 +185,129 @@ fn the_import_window_lists_a_card_first_ticks_it_and_imports_it() {
         h.run();
     }
     h.key_press_modifiers(Modifiers::CTRL | Modifiers::SHIFT, Key::I);
+    h.run();
+    // The card is read on a thread of its own too.
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while !h.state().import_read() {
+        assert!(Instant::now() < deadline, "the card not read in 20 s");
+        std::thread::sleep(Duration::from_millis(20));
+        h.run();
+    }
     for _ in 0..3 {
         h.run();
     }
+    h
+}
+
+/// A card holding two JPEGs on 2 November, one of them in the Library
+/// already, and a RAW+JPEG pair on 3 November.
+fn fake_card(dir: &Path) -> (PathBuf, helios_gui::import_scan::Known) {
+    let dcim = dir.join("EOS_DIGITAL/DCIM/100CANON");
+    std::fs::create_dir_all(&dcim).unwrap();
+    put(&dcim.join("IMG_0001.JPG"), Ok(&jpeg("a")), 2);
+    put(&dcim.join("IMG_0002.JPG"), Ok(&jpeg("b")), 2);
+    put(&dcim.join("IMG_0003.CR2"), Err(&b"not a real raw"[..]), 3);
+    put(&dcim.join("IMG_0003.JPG"), Ok(&jpeg("c")), 3);
+    // IMG_0002 is in the Library, from another folder.
+    let library = dir.join("library");
+    std::fs::create_dir_all(&library).unwrap();
+    std::fs::copy(jpeg("b"), library.join("b.jpg")).unwrap();
+    let vault = Arc::new(Vault::new(MemoryStore::default()));
+    vault.import_file(&library.join("b.jpg"), 0).unwrap();
+    let known: helios_gui::import_scan::Known = Arc::new(move || {
+        vault
+            .images()
+            .unwrap()
+            .into_iter()
+            .map(|i| (i.size, i.partial))
+            .collect()
+    });
+    (dcim, known)
+}
+
+#[test]
+fn the_import_window_lists_a_card_first_ticks_it_and_imports_it() {
+    let dir = temp("card");
+    let card = dir.join("EOS_DIGITAL");
+    let dcim = card.join("DCIM/100CANON");
+    std::fs::create_dir_all(&dcim).unwrap();
+    put(&dcim.join("IMG_0001.JPG"), Ok(&jpeg("a")), 2);
+    let mut h = card_window(&dir, None);
     assert!(h.state().import_window_open());
     // Listed by its label and capacity, and ticked first.
     let _ = h.get_by_label("EOS_DIGITAL · 64 GB");
     assert_eq!(h.state().import_ticked(), std::slice::from_ref(&card));
-    h.query_all_by_label("Import")
-        .last()
-        .expect("the Import button")
-        .click();
+    h.get_by_label("Import 1").click();
     for _ in 0..3 {
         h.run();
     }
-    // A card is copied into the Library; the window closes at once.
+    // A card's photos are copied into the Library; the window closes at
+    // once.
     assert_eq!(
         h.state_mut().take_imports(),
-        [json!({ "path": card, "copy": true })]
+        [json!({ "paths": [dcim.join("IMG_0001.JPG")], "copy": true })]
     );
     assert!(!h.state().import_window_open());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn the_import_grid_shows_a_card_by_day_greys_what_the_library_holds_and_pairs_raw_and_jpeg() {
+    let dir = temp("grid");
+    let (_, known) = fake_card(&dir);
+    let h = card_window(&dir, Some(known));
+    let cells = h.state().import_cells();
+    assert_eq!(cells.len(), 3, "{cells:?}");
+    let day = |d: u32| chrono::NaiveDate::from_ymd_opt(2026, 11, d);
+    let cell = |name: &str| {
+        cells
+            .iter()
+            .find(|c| c.0 == name)
+            .unwrap_or_else(|| panic!("{name}: {cells:?}"))
+    };
+    // Each day with its count.
+    assert_eq!(cell("IMG_0001.JPG").1, day(2));
+    assert_eq!(cell("IMG_0003.CR2 + IMG_0003.JPG").1, day(3));
+    let _ = h.get_by_label("2026-11-02 · 2");
+    let _ = h.get_by_label("2026-11-03 · 1");
+    // The one the Library holds is greyed, and left out.
+    assert!(cell("IMG_0002.JPG").2);
+    assert!(!cell("IMG_0001.JPG").2);
+    let _ = h.get_by_label("IMG_0002.JPG · in your Library");
+    // A RAW and its JPEG are one cell.
+    assert!(cell("IMG_0003.CR2 + IMG_0003.JPG").3);
+    let _ = h.get_by_label("IMG_0003.CR2 + IMG_0003.JPG · RAW+JPG");
+    let counts = h.state().import_counts();
+    assert_eq!((counts.photos, counts.new, counts.selected), (3, 2, 2));
+    let _ = h.get_by_label_contains("3 photos, 2 new");
+    let _ = h.get_by_label("Import 2");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn import_passes_exactly_the_photos_ticked() {
+    let dir = temp("ticked");
+    let (dcim, known) = fake_card(&dir);
+    let mut h = card_window(&dir, Some(known));
+    // A click unticks a photo.
+    h.get_by_label("IMG_0001.JPG").click();
+    for _ in 0..3 {
+        h.run();
+    }
+    assert_eq!(h.state().import_counts().selected, 1);
+    h.get_by_label("Import 1").click();
+    for _ in 0..3 {
+        h.run();
+    }
+    // The pair's two files, neither the photo unticked nor the one the
+    // Library holds.
+    assert_eq!(
+        h.state_mut().take_imports(),
+        [json!({
+            "paths": [dcim.join("IMG_0003.CR2"), dcim.join("IMG_0003.JPG")],
+            "copy": true
+        })]
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 

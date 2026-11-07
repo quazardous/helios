@@ -17,6 +17,7 @@ pub mod head_render;
 pub mod history;
 pub mod host;
 pub mod i18n;
+pub mod import_scan;
 pub mod importers;
 pub mod jobs;
 pub mod keymaps;
