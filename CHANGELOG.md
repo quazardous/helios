@@ -24,6 +24,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.64.0] - 2026-11-07
+
+### Added
+
+- A template's source can now take an image, a picture or a raw: a raw
+  file then goes through its sensor data (levels, white balance,
+  highlights, demosaicing and camera colours) before the rest of the
+  network, instead of its embedded preview.
+
+### Changed
+
+- A raw now opens brighter, as darktable develops it by default: +0.7 EV,
+  with the exposure compensation set on the camera taken back. Pictures
+  keep their exposure as they are.
+- "Develop (preview)", "Batch export", "Import, cull, de-duplicate",
+  "Portrait retouch" and a new blank workspace now show and edit a raw
+  from its sensor data, as "Develop one image" does, instead of its
+  embedded preview. A workspace made before keeps its network: make a new
+  one from the template to get this.
+
+### Fixed
+
+- A darktable edit imported with a raw now applies its white balance,
+  highlights, demosaicing and input colour settings in every workspace that
+  develops raws, not only in "Develop one image"; its white balance was
+  left out everywhere before.
+- Exporting a raw now always develops its sensor data, at its full size,
+  as the darkroom shows it. It is never exported from the small preview its
+  camera embedded: a workspace that cannot develop raws fails that photo
+  and says why.
+
 ## [0.63.0] - 2026-11-07
 
 ### Added

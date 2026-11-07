@@ -12,7 +12,7 @@ members = [
 exclude = ["proto"]
 
 [workspace.package]
-version = "0.63.0"
+version = "0.64.0"
 edition = "2024"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/quazardous/helios"
