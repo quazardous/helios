@@ -24,6 +24,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.61.0] - 2026-11-07
+
+### Changed
+
+- Helios Dark and Light draw far fewer lines: panels have no outline, so
+  where the image meets a side panel a single thin line is left. The line
+  between two panels of one area, and the scroll bars, show only under the
+  pointer.
+  
+  The drag cursor now shows on hover only where dragging is the only thing
+  to do (elsewhere it appears once the drag starts), splitters show a split
+  cursor, and a name too long for its row ends with "…" with the full name
+  under the pointer.
+
 ## [0.60.0] - 2026-11-07
 
 ### Added
