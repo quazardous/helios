@@ -311,6 +311,8 @@ gui-import-metadata = { $photos } photos took their ratings, labels or tags from
 
 gui-import-no-library = No library is open: start Helios with one (--vault FILE) to import photos
 
+gui-import-no-library-error = No library is open: { $error }
+
 gui-import-path = card or folder
 
 gui-import-remember = Remember for this workspace
@@ -482,6 +484,8 @@ gui-library-auto-advance = Auto-advance
 gui-library-badge-missing = missing
 
 gui-library-badge-offline = offline
+
+gui-library-cannot-open = The library cannot be opened: { $error }
 
 gui-library-compare-hint = Select two to four images to compare them
 

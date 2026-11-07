@@ -1142,8 +1142,9 @@ given:
   path percent-encoded. A link with a relative path or another verb opens
   nothing (it is logged).
 
-`--vault` in a later launch is ignored: the running window keeps its
-vault. `helios-gui --new-instance` opens a window of its own, which does
+Without `--vault`, the window opens the default library (see
+[library.md](library.md), "The default library"). `--vault` in a later
+launch is ignored: the running window keeps its vault. `helios-gui --new-instance` opens a window of its own, which does
 not listen; later launches still go to the first window. The desktop file
 (`packaging/linux`) passes URLs (`Exec=helios-gui %U`) and registers the
 scheme (`MimeType=...;x-scheme-handler/helios;`); `install.sh` refreshes

@@ -1,6 +1,8 @@
 //! `helios-gui [workspace] [--vault FILE] [--image FILE]`: opens a
-//! workspace (a directory, the current one by default) in a window; with a
-//! vault, its images fill the library, and what the user rates or labels
+//! workspace (a directory, the current one by default) in a window; the
+//! vault (`--vault FILE`, else the default library in Helios's data
+//! directory, see `platform::library_file`) fills the library with its
+//! images, and what the user rates or labels
 //! there is written back; with an image, the viewport shows it through an
 //! exposure node whose parameters are values (`node/exposure/*`), applied
 //! through a mask whose shapes the viewport draws (`node/mask/*`); with
@@ -204,6 +206,15 @@ fn back_up<S: helios_vault::Store + 'static>(
             warn(&format!("backup: {e}"));
         }
     });
+}
+
+/// Opens the vault at `path`, its folder made first (the default
+/// library's, on the first launch).
+fn open_vault(path: &Path) -> Result<helios_vault_sqlite::SqliteStore, String> {
+    if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
+        std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    }
+    helios_vault_sqlite::SqliteStore::open(path).map_err(|e| format!("{}: {e}", path.display()))
 }
 
 fn seconds() -> u64 {
@@ -1222,15 +1233,9 @@ fn main() -> Result<(), String> {
     let nodes = node_links(&args)?;
     // One invocation's settings (`--set KEY=VALUE`, the run layer).
     let run_settings = helios_gui::workshops::run_layer(&args)?;
-    let vault_file = args
-        .iter()
-        .position(|a| a == "--vault")
-        .map(|i| {
-            args.get(i + 1)
-                .map(PathBuf::from)
-                .ok_or("--vault takes a FILE")
-        })
-        .transpose()?;
+    // `--vault FILE`, else the default library in Helios's data
+    // directory, made on the first launch.
+    let vault_file = helios_gui::platform::library_file(&args)?;
     // The import window's choices are kept per library: a file named
     // after the vault's path.
     let import_choices = {
@@ -1283,12 +1288,15 @@ fn main() -> Result<(), String> {
     let bus = std::sync::Arc::new(helios_core::Bus::new());
     let health_file = vault_file.clone();
     let thumbs_file = vault_file.clone();
-    let persist = match vault_file {
-        Some(path) => Some(Persist::new(
-            helios_vault_sqlite::SqliteStore::open(&path)?,
-            bus,
-        )),
-        None => None,
+    // A library that cannot be opened leaves Helios without one: the
+    // reason is said, and imports refuse with it.
+    let (persist, no_library) = match vault_file.as_deref().map(open_vault) {
+        Some(Ok(store)) => (Some(Persist::new(store, bus)), None),
+        Some(Err(e)) => {
+            warn(&format!("the library: {e}"));
+            (None, Some(e))
+        }
+        None => (None, None),
     };
     start::mark("vault opened (and migrated)");
     // Held here, the vault outlives the window: it closes once the
@@ -1561,8 +1569,19 @@ fn main() -> Result<(), String> {
             }
             // Without a library (no `--vault`), nothing registers the
             // import the shell hands over: its imports say so instead.
-            let can_import = shell.has_command(helios_gui::shell::IMPORT_COMMAND);
-            shell.set_library_open(can_import);
+            if let Some(e) = &no_library {
+                shell.notify(
+                    helios_gui::dialogs::Level::Error,
+                    Message::new(
+                        "gui-library-cannot-open",
+                        "The library cannot be opened: { $error }",
+                    )
+                    .with("error", e.clone()),
+                );
+            }
+            if !shell.has_command(helios_gui::shell::IMPORT_COMMAND) {
+                shell.set_no_library(no_library.clone());
+            }
             let exporter = persist.as_ref().map(|p| {
                 let ctx = cc.egui_ctx.clone();
                 helios_gui::export::Exporter::new(

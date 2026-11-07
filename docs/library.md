@@ -8,6 +8,21 @@ near duplicates, and group photos into stacks. They run the same from the
 command line (`helios import`, `helios stacks`, see [cli.md](cli.md)) and
 from the desktop (the `library.*` commands).
 
+## The default library
+
+`helios-gui` opens a library at every launch: the vault file given with
+`--vault FILE`, else the default library, `library.db` in Helios's data
+directory (`$XDG_DATA_HOME/helios/library.db`, else
+`~/.local/share/helios/library.db`; `%LOCALAPPDATA%\helios\library.db`
+on Windows, `~/Library/Application Support/helios/library.db` on macOS),
+made with its folder on the first launch. The import window's choices
+are kept per library file.
+
+When the library cannot be opened (an error reading it, a read-only
+disk), a toast says why and Helios runs without one: the import window
+shows "No library is open" with the reason, its Import button is off,
+and the import commands refuse with the same reason.
+
 ## Import
 
 ```bash

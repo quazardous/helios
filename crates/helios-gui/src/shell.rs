@@ -3989,6 +3989,18 @@ impl Shell {
         self.no_library = (!open).then(import::no_library);
     }
 
+    /// No library to import into, for the reason `error` gives (it could
+    /// not be opened), else for want of one (`None`).
+    pub fn set_no_library(&mut self, error: Option<String>) {
+        self.no_library = Some(error.map_or_else(import::no_library, |e| {
+            Message::new(
+                "gui-import-no-library-error",
+                "No library is open: { $error }",
+            )
+            .with("error", e)
+        }));
+    }
+
     /// Whether a library is open to import into ([`Shell::set_library_open`]).
     pub fn library_open(&self) -> bool {
         self.no_library.is_none()

@@ -71,6 +71,50 @@ pub fn crash_dir_with(env: impl Fn(&str) -> Option<String>) -> Option<PathBuf> {
     dirs::state_dir_with(STATE_NAME, env).map(|d| d.join("crashes"))
 }
 
+/// Helios's data directory, from the environment `env` gives:
+/// `$XDG_DATA_HOME/helios`, else `~/.local/share/helios`;
+/// `%LOCALAPPDATA%\helios` on Windows, `~/Library/Application
+/// Support/helios` on macOS. None when the variables it needs are
+/// missing (or not absolute).
+pub fn data_dir_with(env: impl Fn(&str) -> Option<String>) -> Option<PathBuf> {
+    let absolute = |v: Option<String>| v.map(PathBuf::from).filter(|p| p.is_absolute());
+    let base = if cfg!(windows) {
+        absolute(env("LOCALAPPDATA"))?
+    } else if cfg!(target_os = "macos") {
+        absolute(env("HOME"))?.join("Library/Application Support")
+    } else {
+        match absolute(env("XDG_DATA_HOME")) {
+            Some(p) => p,
+            None => absolute(env("HOME"))?.join(".local/share"),
+        }
+    };
+    Some(base.join(STATE_NAME))
+}
+
+/// The default library's file name, in Helios's data directory.
+pub const LIBRARY_FILE: &str = "library.db";
+
+/// The library (vault file) a launch opens: `--vault FILE` when given,
+/// else the default library, `library.db` in Helios's data directory
+/// ([`data_dir_with`]); none when there is no data directory either.
+pub fn library_file_with(
+    args: &[String],
+    env: impl Fn(&str) -> Option<String>,
+) -> Result<Option<PathBuf>, String> {
+    if let Some(i) = args.iter().position(|a| a == "--vault") {
+        return args
+            .get(i + 1)
+            .map(|f| Some(PathBuf::from(f)))
+            .ok_or_else(|| "--vault takes a FILE".into());
+    }
+    Ok(data_dir_with(env).map(|d| d.join(LIBRARY_FILE)))
+}
+
+/// [`library_file_with`] from this process's environment.
+pub fn library_file(args: &[String]) -> Result<Option<PathBuf>, String> {
+    library_file_with(args, |name| std::env::var(name).ok())
+}
+
 /// [`log_dir_with`] from this process's environment.
 pub fn log_dir() -> Option<PathBuf> {
     log_dir_with(|name| std::env::var(name).ok())
@@ -450,6 +494,41 @@ mod tests {
 
     fn args(a: &[&str]) -> Vec<String> {
         a.iter().map(|s| (*s).to_string()).collect()
+    }
+
+    #[test]
+    fn without_vault_the_default_library_is_in_the_data_directory() {
+        let env = |name: &str| match name {
+            "XDG_DATA_HOME" => Some("/data".to_string()),
+            "HOME" => Some("/home/me".to_string()),
+            "LOCALAPPDATA" => Some("C:\\Users\\me\\AppData\\Local".to_string()),
+            _ => None,
+        };
+        let given = library_file_with(&args(&["--vault", "v.db", "a.jpg"]), env).unwrap();
+        assert_eq!(given, Some(PathBuf::from("v.db")));
+        assert!(library_file_with(&args(&["--vault"]), env).is_err());
+        let default = library_file_with(&args(&["a.jpg"]), env).unwrap().unwrap();
+        assert!(default.ends_with("helios/library.db"), "{default:?}");
+        if cfg!(all(unix, not(target_os = "macos"))) {
+            assert_eq!(default, PathBuf::from("/data/helios/library.db"));
+            // Without XDG_DATA_HOME, under the home's .local/share.
+            let home = |name: &str| (name == "HOME").then(|| "/home/me".to_string());
+            assert_eq!(
+                library_file_with(&[], home).unwrap(),
+                Some(PathBuf::from("/home/me/.local/share/helios/library.db"))
+            );
+            // A relative XDG_DATA_HOME is ignored, as the spec says.
+            let relative = |name: &str| match name {
+                "XDG_DATA_HOME" => Some("data".to_string()),
+                "HOME" => Some("/home/me".to_string()),
+                _ => None,
+            };
+            assert_eq!(
+                data_dir_with(relative),
+                Some(PathBuf::from("/home/me/.local/share/helios"))
+            );
+        }
+        assert_eq!(library_file_with(&[], |_| None).unwrap(), None);
     }
 
     #[cfg(unix)]

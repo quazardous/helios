@@ -1071,3 +1071,24 @@ fn the_commands_the_import_path_dispatches_are_registered() {
     );
     assert!(shell.library_open(), "open unless the host says otherwise");
 }
+
+/// A library that could not be opened: imports refuse with its reason.
+#[test]
+fn a_library_that_could_not_be_opened_gives_its_reason() {
+    let mut shell = Shell::new(helios_panels(), None);
+    shell.set_no_library(Some("library.db: read-only file system".into()));
+    assert!(!shell.library_open());
+    let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+    h.run();
+    let e = h
+        .state_mut()
+        .run(
+            "library.importFiles",
+            json!({ "paths": ["/x"] }),
+            Origin::User,
+        )
+        .unwrap_err();
+    assert_eq!(e, "No library is open: library.db: read-only file system");
+    assert!(h.state_mut().take_imports().is_empty());
+    no_missing_command(h.state());
+}
