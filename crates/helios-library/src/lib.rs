@@ -5,6 +5,8 @@
 //!   copied into the library folder, renamed by a [`rename::Pattern`],
 //!   their sidecars kept, exact duplicates found by content and handled
 //!   by a policy, run as a job announced on the bus;
+//! - [`backup`]: the verified backup job, copying library copies to the
+//!   backup volumes of the library's strategy, and its triggers;
 //! - [`darktable`]: darktable's sidecars kept as versions (each sidecar of
 //!   a photo, base and duplicates, a version of the one image), by an
 //!   import or alone (`helios import-darktable`);
@@ -18,6 +20,7 @@
 //!   a selection through a resolver picked by name, and applies them only
 //!   when accepted.
 
+pub mod backup;
 pub mod darktable;
 pub mod export;
 pub mod import;

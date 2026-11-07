@@ -42,6 +42,24 @@ pub fn known<S: Store>(vault: &Vault<S>) -> Result<Vec<Volume>, String> {
     Ok(all)
 }
 
+/// The volumes the vault knows, with what is mounted now: the mount point
+/// and fresh free space of those plugged in (online first, by name).
+pub fn merged<S: Store>(vault: &Vault<S>, mounted: &[Volume]) -> Result<Vec<Volume>, String> {
+    let (mut online, offline): (Vec<Volume>, Vec<Volume>) = known(vault)?
+        .into_iter()
+        .map(|mut v| {
+            if let Some(m) = mounted.iter().find(|m| m.id == v.id) {
+                v.mount.clone_from(&m.mount);
+                v.free = m.free.or(v.free);
+                v.capacity = m.capacity.or(v.capacity);
+            }
+            v
+        })
+        .partition(Volume::online);
+    online.extend(offline);
+    Ok(online)
+}
+
 /// The volume among `volumes` holding `path`: the deepest mount point
 /// above it.
 pub fn holding<'a>(volumes: &'a [Volume], path: &Path) -> Option<&'a Volume> {

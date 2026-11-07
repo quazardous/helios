@@ -2363,6 +2363,7 @@ dependencies = [
  "helios-decision",
  "helios-export",
  "helios-load",
+ "helios-storage",
  "helios-vault",
  "helios-xmp",
  "image",

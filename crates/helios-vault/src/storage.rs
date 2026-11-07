@@ -85,6 +85,62 @@ impl<S: Store> StorageTx<'_, S> {
         let doc = doc.map(|d| upgrade(id, d.clone())).transpose()?;
         self.store.set_document(VOLUMES, id, doc.as_ref())
     }
+
+    /// A backup strategy's document by its scope's key (`library` for the
+    /// library default).
+    pub fn strategy(&self, key: &str) -> Result<Option<Value>, String> {
+        self.store
+            .document(STRATEGIES, key)?
+            .map(|d| upgrade_strategy(key, d))
+            .transpose()
+    }
+
+    /// Keeps (or with `None` forgets) a strategy's document, stamped with
+    /// [`STRATEGY_FORMAT`].
+    pub fn set_strategy(&mut self, key: &str, doc: Option<&Value>) -> Result<(), String> {
+        let doc = doc.map(|d| upgrade_strategy(key, d.clone())).transpose()?;
+        self.store.set_document(STRATEGIES, key, doc.as_ref())
+    }
+
+    /// The copies of one image verified by hash (an image's hex id as the
+    /// key): `{"<volume id>\t<path inside it>": seconds}`.
+    pub fn verified(&self, image: &str) -> Result<Option<Value>, String> {
+        self.store.document(VERIFIED, image)
+    }
+
+    /// Every image's verified copies, by image.
+    pub fn all_verified(&self) -> Result<Vec<(String, Value)>, String> {
+        self.store.documents(VERIFIED)
+    }
+
+    /// Keeps (or with `None` forgets) an image's verified copies.
+    pub fn set_verified(&mut self, image: &str, doc: Option<&Value>) -> Result<(), String> {
+        self.store.set_document(VERIFIED, image, doc)
+    }
+}
+
+/// The backup strategies' namespace: one document per scope (`library`
+/// in v1; shoots, imports and cards later).
+pub const STRATEGIES: &str = "storage/strategies";
+
+/// The namespace of the copies verified by hash, one document per image.
+pub const VERIFIED: &str = "storage/verified";
+
+/// The strategy format this Helios writes.
+pub const STRATEGY_FORMAT: u64 = 1;
+
+/// A stored strategy document brought to [`STRATEGY_FORMAT`].
+pub fn upgrade_strategy(key: &str, mut doc: Value) -> Result<Value, String> {
+    let format = doc.get("format").and_then(Value::as_u64).unwrap_or(1);
+    if format > STRATEGY_FORMAT {
+        return Err(format!(
+            "strategy {key} has format {format}, written by a newer Helios (this one reads {STRATEGY_FORMAT})"
+        ));
+    }
+    if let Some(object) = doc.as_object_mut() {
+        object.insert("format".into(), STRATEGY_FORMAT.into());
+    }
+    Ok(doc)
 }
 
 impl<S: Store> Vault<S> {

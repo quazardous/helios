@@ -45,7 +45,9 @@
 //! - **Safe to format.** After a copy, each card read is checked by
 //!   content hash: every photo on it in the library with a copy in the
 //!   library folder ([`Card`] in the report, a log line "safe to format"
-//!   or "N photos not in the Library"). Helios never formats a card.
+//!   or "N photos not in the Library"); when the library has a backup
+//!   strategy, every photo must also have its verified backup copies
+//!   ([`Card::short`]). Helios never formats a card.
 //! - **A lost source** (a card taken out, a folder moved away) pauses the
 //!   job until it is back; it can still be cancelled.
 //! - **Cancel.** [`Jobs::cancel`] with the job's id, or the caller's
@@ -61,6 +63,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use helios_core::jobs::{Jobs, Progress, Start};
+use helios_storage::strategy::Scope;
 use helios_vault::fields::{self as vault_fields, Command, Op};
 use helios_vault::{Change, Changes, IMAGE_EXTENSIONS, ImageId, ImageRows, Location, Store, Vault};
 use helios_xmp::files::Matched;
@@ -357,17 +360,38 @@ pub struct Card {
     /// Photos on it the library holds no copy of (failed, left out as
     /// duplicates of a referenced file, not reached).
     pub missing: u64,
+    /// Backup copies each photo needs by the library's strategy (0
+    /// without one).
+    pub want: u8,
+    /// Photos on it in the Library but short of their strategy's backup
+    /// copies (a backup disk not plugged in yet).
+    pub short: u64,
     pub safe_to_format: bool,
 }
 
 impl Card {
-    /// What to tell a person: "`EOS_DIGITAL`: safe to format" or
-    /// "`EOS_DIGITAL`: 2 photos not in the Library".
+    /// What to tell a person: "`EOS_DIGITAL`: safe to format",
+    /// "`EOS_DIGITAL`: 2 photos not in the Library" or "`EOS_DIGITAL`: in
+    /// the Library, 3 photos short of their backups: keep the card".
     pub fn said(&self) -> String {
-        match self.missing {
-            0 => format!("{}: safe to format", self.label),
-            1 => format!("{}: 1 photo not in the Library", self.label),
-            n => format!("{}: {n} photos not in the Library", self.label),
+        match (self.missing, self.short) {
+            (0, 0) if self.want == 0 => format!("{}: safe to format", self.label),
+            (0, 0) => format!(
+                "{}: safe to format (library + {} backup{}, verified)",
+                self.label,
+                self.want,
+                if self.want == 1 { "" } else { "s" }
+            ),
+            (0, 1) => format!(
+                "{}: in the Library, 1 photo short of its backups: keep the card",
+                self.label
+            ),
+            (0, n) => format!(
+                "{}: in the Library, {n} photos short of their backups: keep the card",
+                self.label
+            ),
+            (1, _) => format!("{}: 1 photo not in the Library", self.label),
+            (n, _) => format!("{}: {n} photos not in the Library", self.label),
         }
     }
 }
@@ -521,7 +545,7 @@ fn write_hashed(
 /// goes, then reads the copy back to verify it: the source's content
 /// hash. The bytes read from the source are added to `read`. On an error
 /// (or stopped by `stopped`) the part is removed.
-fn stage(
+pub(crate) fn stage(
     src: &Path,
     part: &Path,
     read: &mut u64,
@@ -584,7 +608,7 @@ fn settle(part: &Path, dest: &Path) -> Result<bool, String> {
 /// `name.ext`, or `name-1.ext`... when the name is taken by another file.
 /// The path, and whether the copy took it (false when a file there
 /// already holds the image: the part is then removed).
-fn place(
+pub(crate) fn place(
     part: &Path,
     dir: &Path,
     name: &str,
@@ -663,7 +687,7 @@ fn copy_sidecars(
 
 /// A copy before it takes its name: removed when dropped, unless it
 /// took one.
-struct Part(PathBuf);
+pub(crate) struct Part(pub(crate) PathBuf);
 
 impl Drop for Part {
     fn drop(&mut self) {
@@ -884,23 +908,44 @@ impl<S: Store> Run<'_, S> {
     }
 
     /// Whether the card `source` is safe to format: each of its files
-    /// read, and its image held by a file in the library folder.
+    /// read, its image held by a file in the library folder and, when the
+    /// library has a backup strategy, its verified backup copies there.
     fn card(&self, source: &Source) -> Result<Card, String> {
         let Some(root) = &self.root else {
             return Err("only a copy makes a card safe to format".into());
         };
-        let mut missing = 0;
+        let strategy = helios_storage::strategy::load(self.vault, &Scope::Library)?;
+        let (volumes, verified) = match &strategy {
+            Some(_) => (
+                helios_storage::registry::known(self.vault)?,
+                helios_storage::strategy::verified(self.vault)?,
+            ),
+            None => Default::default(),
+        };
+        let (mut missing, mut short) = (0, 0);
         for file in &source.files {
-            let copied = match self.hashes.get(file) {
-                Some(id) => self
-                    .vault
-                    .locations(id)?
-                    .iter()
-                    .any(|l| l.present() && l.path.starts_with(root) && l.path.is_file()),
-                None => false,
-            };
-            if !copied {
+            let Some(id) = self.hashes.get(file) else {
                 missing += 1;
+                continue;
+            };
+            let locations = self.vault.locations(id)?;
+            if !locations
+                .iter()
+                .any(|l| l.present() && l.path.starts_with(root) && l.path.is_file())
+            {
+                missing += 1;
+                continue;
+            }
+            if let Some(s) = &strategy
+                && !helios_storage::strategy::status(
+                    &locations,
+                    &volumes,
+                    verified.get(id),
+                    Some(s),
+                )
+                .met()
+            {
+                short += 1;
             }
         }
         Ok(Card {
@@ -908,7 +953,9 @@ impl<S: Store> Run<'_, S> {
             label: source.label(),
             photos: source.files.len() as u64,
             missing,
-            safe_to_format: missing == 0,
+            want: strategy.as_ref().map_or(0, |s| s.copies),
+            short,
+            safe_to_format: missing == 0 && short == 0,
         })
     }
 
@@ -1157,7 +1204,7 @@ pub fn import<S: Store>(
 }
 
 /// How often a paused import looks for its source again.
-const POLL: std::time::Duration = std::time::Duration::from_millis(250);
+pub(crate) const POLL: std::time::Duration = std::time::Duration::from_millis(250);
 
 /// A source of an import and its files.
 struct Source {

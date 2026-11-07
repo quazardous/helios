@@ -19,11 +19,14 @@
 //! - [`scan`] records them, links each location to its volume and says
 //!   whether its file is present, offline or missing, on a thread of its
 //!   own ([`scan::Scanner`]).
+//! - [`strategy`] keeps the library's backup strategy, counts each photo's
+//!   verified backup copies and says where Helios may write them.
 
 pub mod detect;
 pub mod marker;
 pub mod registry;
 pub mod scan;
+pub mod strategy;
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;
