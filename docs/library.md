@@ -26,7 +26,9 @@ source yet; mount it as a folder first.
 - `--reference` (the default): files stay where they are, the vault records
   where it saw them. A file already known at that place is only verified.
 - `--copy`: files are copied into the library folder, as
-  `YYYY/YYYY-MM-DD/<name>` by capture date (`undated/` without one). The
+  `YYYY/YYYY-MM-DD/<name>` by capture date (`undated/` without one), or as
+  `--layout` says: `month` (`YYYY/YYYY-MM/`), `year` (`YYYY/`) or `flat`
+  (the library folder itself). The
   library folder is given once with `--into DIR` and remembered in the
   vault. The source is read once: the copy is hashed as it is written
   (the hash is the file's identity, so duplicates are found before the

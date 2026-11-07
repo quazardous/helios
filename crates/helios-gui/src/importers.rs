@@ -92,8 +92,8 @@ fn is_image(path: &Path) -> bool {
 }
 
 /// An import's options from `library.import`'s arguments: `copy` or
-/// `into` (copied into the library folder), `rename`, `duplicates`,
-/// `darktable` (true when absent).
+/// `into` (copied into the library folder), `rename`, `layout` (`day`,
+/// `month`, `year`, `flat`), `duplicates`, `darktable` (true when absent).
 pub fn options(args: &Value) -> Result<Options, String> {
     let text = |key: &str| args.get(key).and_then(Value::as_str).map(String::from);
     let mut options = Options::default();
@@ -104,6 +104,9 @@ pub fn options(args: &Value) -> Result<Options, String> {
     }
     if let Some(pattern) = text("rename") {
         options.rename = Some(helios_library::rename::Pattern::parse(&pattern)?);
+    }
+    if let Some(layout) = text("layout") {
+        options.layout = helios_library::import::Layout::parse(&layout)?;
     }
     if let Some(policy) = text("duplicates") {
         options.duplicates = Duplicates::parse(&policy)?;

@@ -7,7 +7,8 @@
 //!   yet: mount it as a folder first.
 //! - **Placement.** Referenced in place (the vault records where the file
 //!   is), or copied into the library folder as `YYYY/YYYY-MM-DD/<name>`,
-//!   by capture date. The source is read once: the copy is hashed as it
+//!   by capture date (or by month, by year, or all in one folder: a
+//!   [`Layout`]). The source is read once: the copy is hashed as it
 //!   is written (its identity, known before it takes a name), then read
 //!   back to verify it, and measured from there. Nothing is ever overwritten: a
 //!   name taken by another file gets `-1`, `-2`... Renaming by a
@@ -92,7 +93,7 @@ pub enum Placement {
 
 /// What to do with a file whose content the library already has, or that
 /// came earlier in the same import.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Duplicates {
     /// Leave it out.
@@ -111,6 +112,70 @@ impl Duplicates {
             "keep" => Ok(Duplicates::Keep),
             "ask" => Ok(Duplicates::Ask),
             other => Err(format!("`{other}`: duplicates are skip, keep or ask")),
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Duplicates::Skip => "skip",
+            Duplicates::Keep => "keep",
+            Duplicates::Ask => "ask",
+        }
+    }
+}
+
+/// How copies are filed in the library folder, by capture date.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Layout {
+    /// `YYYY/YYYY-MM-DD/`.
+    #[default]
+    Day,
+    /// `YYYY/YYYY-MM/`.
+    Month,
+    /// `YYYY/`.
+    Year,
+    /// All in the library folder itself.
+    Flat,
+}
+
+impl Layout {
+    pub const ALL: [Layout; 4] = [Layout::Day, Layout::Month, Layout::Year, Layout::Flat];
+
+    pub fn parse(text: &str) -> Result<Self, String> {
+        match text {
+            "day" => Ok(Layout::Day),
+            "month" => Ok(Layout::Month),
+            "year" => Ok(Layout::Year),
+            "flat" => Ok(Layout::Flat),
+            other => Err(format!("`{other}`: a layout is day, month, year or flat")),
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Layout::Day => "day",
+            Layout::Month => "month",
+            Layout::Year => "year",
+            Layout::Flat => "flat",
+        }
+    }
+
+    /// The folder, under the library folder, of a copy taken on `date`
+    /// (`year, month, day`); `undated` without a date, unless flat.
+    pub fn folder(self, date: Option<(i64, u32, u32)>) -> PathBuf {
+        let Some((y, m, d)) = date else {
+            return match self {
+                Layout::Flat => PathBuf::new(),
+                _ => PathBuf::from("undated"),
+            };
+        };
+        let year = PathBuf::from(format!("{y:04}"));
+        match self {
+            Layout::Day => year.join(format!("{y:04}-{m:02}-{d:02}")),
+            Layout::Month => year.join(format!("{y:04}-{m:02}")),
+            Layout::Year => year,
+            Layout::Flat => PathBuf::new(),
         }
     }
 }
@@ -186,6 +251,8 @@ pub struct Options {
     pub placement: Placement,
     /// New names for copies.
     pub rename: Option<Pattern>,
+    /// How copies are filed.
+    pub layout: Layout,
     pub duplicates: Duplicates,
     /// Measure and keep near-duplicate signals.
     pub signals: bool,
@@ -203,6 +270,7 @@ impl Default for Options {
         Options {
             placement: Placement::Reference,
             rename: None,
+            layout: Layout::Day,
             duplicates: Duplicates::Skip,
             signals: true,
             darktable: false,
@@ -765,12 +833,7 @@ impl<S: Store> Run<'_, S> {
         let new = if let Some(root) = &self.root {
             let none = Signals::default();
             let signals = measured.as_ref().unwrap_or(&none);
-            let folder = match signals.date() {
-                Some((y, m, d)) => root
-                    .join(format!("{y:04}"))
-                    .join(format!("{y:04}-{m:02}-{d:02}")),
-                None => root.join("undated"),
-            };
+            let folder = root.join(self.options.layout.folder(signals.date()));
             let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("image");
             let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
             let name = match &self.options.rename {

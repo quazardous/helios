@@ -31,7 +31,7 @@
 //!     helios import-darktable --vault FILE FOLDERS-OR-IMAGES...
 //!
 //!     helios import --vault FILE [--reference | --copy [--into DIR]] [--rename PATTERN]
-//!                   [--duplicates skip|keep|ask] [--no-signals] FOLDERS-CARDS-OR-FILES...
+//!                   [--layout day|month|year|flat] [--duplicates skip|keep|ask] [--no-signals] FOLDERS-CARDS-OR-FILES...
 //!     helios stacks --vault FILE list | create IMAGE... [--top IMAGE] | dissolve STACK
 //!                   | expand STACK | collapse STACK | top STACK IMAGE
 //!                   | suggest [IMAGE...] [--resolver NAME] [--window S] [--distance N]
@@ -129,7 +129,7 @@ const USAGE: &str = "usage:
                [--node NAME] [--socket ADDR --control ADDR [--token-file FILE]] IMAGES...
   helios import-darktable --vault FILE FOLDERS-OR-IMAGES...
   helios import --vault FILE [--reference | --copy [--into DIR]] [--rename PATTERN]
-                [--duplicates skip|keep|ask] [--no-signals] FOLDERS-CARDS-OR-FILES...
+                [--layout day|month|year|flat] [--duplicates skip|keep|ask] [--no-signals] FOLDERS-CARDS-OR-FILES...
   helios stacks --vault FILE list | create IMAGE... [--top IMAGE] | dissolve STACK
                 | expand STACK | collapse STACK | top STACK IMAGE
                 | suggest [IMAGE...] [--resolver NAME] [--window S] [--distance N]
@@ -680,6 +680,9 @@ fn import_options(
             }
             "--rename" => {
                 options.rename = Some(helios_library::rename::Pattern::parse(value()?)?);
+            }
+            "--layout" => {
+                options.layout = helios_library::import::Layout::parse(value()?)?;
             }
             "--duplicates" => options.duplicates = Duplicates::parse(value()?)?,
             "--no-signals" => options.signals = false,

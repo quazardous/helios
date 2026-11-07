@@ -286,7 +286,7 @@ drives a running node through either endpoint.
 
 ```bash
 helios import --vault library.db [--reference | --copy [--into DIR]] [--rename PATTERN]
-              [--duplicates skip|keep|ask] [--no-signals] FOLDERS-CARDS-OR-FILES...
+              [--layout day|month|year|flat] [--duplicates skip|keep|ask] [--no-signals] FOLDERS-CARDS-OR-FILES...
 helios stacks --vault library.db list | create IMAGE... [--top IMAGE] | dissolve STACK
               | expand STACK | collapse STACK | top STACK IMAGE
               | suggest [IMAGE...] [--resolver NAME] [--window S] [--distance N]

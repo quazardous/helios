@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use helios_core::Bus;
 use helios_core::jobs::Jobs;
-use helios_library::import::{self, Duplicates, Options, Placement};
+use helios_library::import::{self, Duplicates, Layout, Options, Placement};
 use helios_library::rename::Pattern;
 use helios_library::signals::{self, Signals, distance};
 use helios_library::stacks::{self, Resolvers, Status};
@@ -167,6 +167,46 @@ fn a_folder_with_duplicates_imports_each_content_once_and_deletes_nothing() {
         assert!(roll.join(f).exists(), "{f}");
     }
     assert!(copy.exists());
+}
+
+#[test]
+fn a_copy_is_filed_by_its_layout_and_named_by_its_pattern() {
+    let noon = signals::exif_time("2024:06:01 12:00:00", None).unwrap();
+    for (layout, folder) in [
+        (Layout::Day, "2024/2024-06-01"),
+        (Layout::Month, "2024/2024-06"),
+        (Layout::Year, "2024"),
+        (Layout::Flat, ""),
+    ] {
+        let p = Place::new(&format!("layout-{}", layout.as_str()));
+        let src = p.join("photos");
+        picture(&src.join("IMG_0042.png"), 0, 1.0, 0);
+        let when = std::time::UNIX_EPOCH + std::time::Duration::from_secs_f64(noon);
+        std::fs::File::options()
+            .write(true)
+            .open(src.join("IMG_0042.png"))
+            .unwrap()
+            .set_modified(when)
+            .unwrap();
+        let library = p.join("library");
+        let options = Options {
+            placement: Placement::Copy {
+                into: Some(library.clone()),
+            },
+            rename: Some(Pattern::parse("{date}_{stem}").unwrap()),
+            layout,
+            ..Options::default()
+        };
+        let vault = vault();
+        let (report, lines) = run(&vault, None, std::slice::from_ref(&src), &options);
+        assert_eq!(report.copied, 1, "{lines:?}");
+        let to = library.join(folder).join("20240601_IMG_0042.png");
+        assert!(to.exists(), "{layout:?}: {lines:?}");
+        assert_eq!(layout, Layout::parse(layout.as_str()).unwrap());
+    }
+    assert_eq!(Layout::Flat.folder(None), PathBuf::new());
+    assert_eq!(Layout::Month.folder(None), PathBuf::from("undated"));
+    assert!(Layout::parse("week").is_err());
 }
 
 #[test]
