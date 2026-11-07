@@ -80,6 +80,9 @@ helios-export.workspace = true
 
 [dev-dependencies]
 egui-pop-test.workspace = true
+# The import window's snapshots (tests/snapshots, thresholds in the
+# workspace's kittest.toml).
+egui_kittest = { version = "0.37", features = ["snapshot"] }
 # Helios's darktable library importer: its test libraries.
 helios-plugin-darktable-library = { path = "../../plugins/importers/darktable-library", features = ["fixture"] }
 egui-pop-wayland.workspace = true
