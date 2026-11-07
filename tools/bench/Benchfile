@@ -732,6 +732,30 @@ env = { CARGO_NET_OFFLINE = "true" }
 mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
 timeout = "1h"
 
+# the thumbnail benchmark (docs/performance.md): per corpus raw, its
+# embedded previews' cost, a 256 px cache entry's size and a 256 px render
+# of its edit; then the library grid with N images (the corpus repeated by
+# reference, never copied) for each of `sizes=` (comma separated), each in
+# a process of its own: first screen, scroll frame times, peak RSS,
+# textures. JSON lines in /out/thumb-bench.jsonl
+# (crates/helios-gui/examples/thumb_bench.rs)
+[jobs.thumb-bench]
+about = "the library's thumbnails measured on the raw corpus, scaled to 1,000, 10,000 and 50,000 images"
+checkouts = ["helios", "vkdt", "egui-pop"]
+cores = 8
+memory = "8g"
+exclusive = ["machine"]
+cwd = "/work/${src:-helios}"
+command = """mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && \
+cargo build --locked --release -p helios-gui --example thumb_bench && \
+/target/release/examples/thumb_bench --corpus /corpus --out /out --part decode --renders ${renders:-6} && \
+for n in $(echo ${sizes:-1000,10000,50000} | tr , ' '); do \
+  timeout 15m /target/release/examples/thumb_bench --corpus /corpus --out /out --part grid --n $n --frames ${frames:-240} || exit 1; \
+done"""
+env = { CARGO_NET_OFFLINE = "true" }
+mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", raw-corpus = "/corpus", sccache = "/sccache" }
+timeout = "1h"
+
 # the per-branch history (in the target cache) says which tests got slower
 [jobs.test-times]
 about = "the test suite's timings, the slowest tests listed"

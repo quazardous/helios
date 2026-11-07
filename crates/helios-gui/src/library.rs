@@ -28,6 +28,7 @@
 //! [`Library::set_matches`]); its words and dates are matched here, on the
 //! names, tags and days the library holds.
 
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -461,6 +462,9 @@ pub struct Library {
     sink: ThumbnailSink,
     receiver: Receiver<(String, Image)>,
     textures: HashMap<String, TextureHandle>,
+    /// The grid's cells in view at its last pass (the thumbnail benchmark
+    /// reads them: `examples/thumb_bench.rs`).
+    in_view: RefCell<Vec<String>>,
     heads: Heads,
     /// Where each image's file is, by id: what a copy of images names.
     files: HashMap<String, PathBuf>,
@@ -501,6 +505,7 @@ impl Default for Library {
             },
             receiver,
             textures: HashMap::new(),
+            in_view: RefCell::default(),
             heads: Heads::default(),
             files: HashMap::new(),
         }
@@ -641,6 +646,8 @@ impl ThumbSource<String> for CompareThumbs<'_> {
 /// The thumbnails received so far.
 struct Thumbs<'a> {
     textures: &'a HashMap<String, TextureHandle>,
+    /// Where the cells the grid builds are recorded, when it does.
+    in_view: Option<&'a RefCell<Vec<String>>>,
 }
 
 impl ThumbSource<String> for Thumbs<'_> {
@@ -654,6 +661,12 @@ impl ThumbSource<String> for Thumbs<'_> {
                 }
             }
             None => Thumb::Pending { average: None },
+        }
+    }
+
+    fn wanted(&self, keys: &[String], _size: u32) {
+        if let Some(in_view) = self.in_view {
+            *in_view.borrow_mut() = keys.to_vec();
         }
     }
 }
@@ -948,6 +961,17 @@ impl Library {
             .renders
             .get(id)
             .map(|r| (r.version.as_deref(), r.texture.size(), r.stale))
+    }
+
+    /// The grid's cells in view at its last pass, by id.
+    pub fn in_view(&self) -> Vec<String> {
+        self.in_view.borrow().clone()
+    }
+
+    /// The thumbnails' textures held, and their bytes.
+    pub fn thumbnail_textures(&self) -> (usize, u64) {
+        let bytes = self.textures.values().map(|t| t.byte_size() as u64).sum();
+        (self.textures.len(), bytes)
     }
 
     /// Whether the thumbnail of this image has been received.
@@ -1446,6 +1470,7 @@ impl Library {
             };
             let thumbs = Thumbs {
                 textures: &self.textures,
+                in_view: Some(&self.in_view),
             };
             let mut grid = ThumbGrid::new("grid").label(label).keymap(keymap);
             if let Some(app) = &self.app {
@@ -1524,6 +1549,7 @@ impl Library {
             };
             let thumbs = Thumbs {
                 textures: &self.textures,
+                in_view: None,
             };
             let mut strip = ThumbGrid::filmstrip("strip").keymap(keymap).height(height);
             if let Some(app) = &self.app {
@@ -1586,6 +1612,7 @@ impl Library {
                 heads: &self.heads.renders,
                 thumbs: Thumbs {
                     textures: &self.textures,
+                    in_view: None,
                 },
             };
             CompareView::new("helios.compare")
