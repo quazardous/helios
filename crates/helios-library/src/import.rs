@@ -61,7 +61,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use helios_core::jobs::{Jobs, Progress, Start};
 use helios_vault::fields::{self as vault_fields, Command, Op};
-use helios_vault::{IMAGE_EXTENSIONS, ImageId, Store, Vault};
+use helios_vault::{Change, Changes, IMAGE_EXTENSIONS, ImageId, ImageRows, Store, Vault};
 use helios_xmp::files::Matched;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -261,6 +261,18 @@ pub struct Report {
     /// For a copy, each card read: whether it is safe to format.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub cards: Vec<Card>,
+    /// What it changed in the library, image by image, for an undo to
+    /// take back ([`Vault::revert`]) and a redo to put again
+    /// ([`Vault::replay`]): the images it added with their locations,
+    /// fields, signals and versions, and the rows it changed on images
+    /// the library had. Files are not in it: an undo leaves every file
+    /// where it is, copies included.
+    #[serde(skip)]
+    pub changes: Changes,
+    /// The files it copied into the library folder, sidecars included:
+    /// they stay on disk when the import is undone.
+    #[serde(skip)]
+    pub copies: Vec<PathBuf>,
 }
 
 /// Whether a card can be formatted after a copy: every photo on it is in
@@ -611,9 +623,37 @@ struct Run<'a, S: Store> {
     report: Report,
     /// Asked to stop: by the job's cancel or the caller's flag.
     stop: Arc<AtomicBool>,
+    /// Each image this import touched, in order, with its rows before.
+    touched: Vec<(ImageId, Option<ImageRows>)>,
 }
 
 impl<S: Store> Run<'_, S> {
+    /// Notes the rows of image `id` before this import first writes them.
+    fn touch(&mut self, id: ImageId) -> Result<(), String> {
+        if !self.touched.iter().any(|(t, _)| *t == id) {
+            let before = self.vault.rows(&id)?;
+            self.touched.push((id, before));
+        }
+        Ok(())
+    }
+
+    /// What this import changed, image by image.
+    fn changes(&self) -> Changes {
+        let images = self
+            .touched
+            .iter()
+            .filter_map(|(id, before)| {
+                let change = Change {
+                    image: *id,
+                    before: before.clone(),
+                    after: self.vault.rows(id).ok()?,
+                };
+                change.changed().then_some(change)
+            })
+            .collect();
+        Changes { images }
+    }
+
     fn stopped(&self) -> bool {
         self.stop.load(Ordering::SeqCst)
             || self
@@ -671,6 +711,7 @@ impl<S: Store> Run<'_, S> {
             None => hash_counted(path, &mut self.report.read)?,
         };
         self.hashes.insert(path.to_path_buf(), id);
+        self.touch(id)?;
         let mut line = json!({ "path": path, "id": id.hex() });
         let copying = matches!(self.options.placement, Placement::Copy { .. });
         if !copying
@@ -749,6 +790,13 @@ impl<S: Store> Run<'_, S> {
             let sidecars = self.sidecars(path)?;
             let kept = copy_sidecars(&sidecars, &dest)?;
             self.report.sidecars += kept.iter().filter(|s| s["to"].is_string()).count() as u64;
+            if copied {
+                self.report.copies.push(dest.clone());
+            }
+            self.report.copies.extend(
+                kept.iter()
+                    .filter_map(|s| s["to"].as_str().map(PathBuf::from)),
+            );
             line["to"] = json!(dest);
             line["copied"] = json!(copied);
             line["sidecars"] = json!(kept);
@@ -918,6 +966,7 @@ pub fn import<S: Store>(
         placed: 0,
         report: Report::default(),
         stop,
+        touched: Vec::new(),
     };
     for (done, (source, path)) in files.iter().enumerate() {
         if run.stopped() {
@@ -1001,6 +1050,9 @@ pub fn import<S: Store>(
             let _ = std::fs::remove_dir(shared);
         }
     }
+    // What a cancelled import added is recorded too: its undo takes it
+    // back.
+    run.report.changes = run.changes();
     if run.stopped() && run.report.files < total {
         run.report.cancelled = true;
         job.log(format!(

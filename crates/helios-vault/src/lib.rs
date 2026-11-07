@@ -36,6 +36,7 @@ pub mod journal;
 pub mod settings;
 pub mod snapshots;
 pub mod stacks;
+pub mod undo;
 pub mod versions;
 pub mod workflow;
 
@@ -43,6 +44,7 @@ pub use catalog::{ApplyReport, CursorId, CursorInfo, Delta, Row};
 pub use edit::{EditSaved, EditSession};
 pub use fields::{AuditEntry, Command, Order, Query};
 pub use stacks::Stack;
+pub use undo::{Change, Changes, ImageRows, Replayed};
 pub use versions::{Version, VersionId};
 
 /// An image, identified by the hash of its file.
@@ -104,6 +106,13 @@ pub trait Store: Send {
     fn locations(&self, id: &ImageId) -> Result<Vec<Location>, String>;
     fn at_path(&self, path: &Path) -> Result<Option<(ImageId, Location)>, String>;
     fn all_locations(&self) -> Result<Vec<(ImageId, Location)>, String>;
+    /// Forgets the location at `path` (the file stays where it is); false
+    /// if none was recorded there.
+    fn remove_location(&mut self, path: &Path) -> Result<bool, String>;
+    /// Forgets an image with its fields; false if it was not known.
+    /// Refused while a location or a version still names it. Its audit
+    /// rows stay: they are a record.
+    fn remove_image(&mut self, id: &ImageId) -> Result<bool, String>;
 
     /// One field of an image.
     fn field(&self, id: &ImageId, name: &str) -> Result<Option<serde_json::Value>, String>;
@@ -131,6 +140,9 @@ pub trait Store: Send {
     fn version(&self, id: &VersionId) -> Result<Option<Version>, String>;
     /// An image's versions, in no particular order.
     fn versions(&self, image: &ImageId) -> Result<Vec<Version>, String>;
+    /// Forgets a version; false if it was not kept. Refused while another
+    /// version names it as a parent.
+    fn remove_version(&mut self, id: &VersionId) -> Result<bool, String>;
 
     /// A JSON document by namespace and key: what the vault keeps besides
     /// images (a workflow journal's rows, configuration layers).
@@ -203,6 +215,27 @@ impl Store for MemoryStore {
 
     fn all_locations(&self) -> Result<Vec<(ImageId, Location)>, String> {
         Ok(self.locations.values().cloned().collect())
+    }
+
+    fn remove_location(&mut self, path: &Path) -> Result<bool, String> {
+        Ok(self.locations.remove(path).is_some())
+    }
+
+    fn remove_image(&mut self, id: &ImageId) -> Result<bool, String> {
+        if !self.images.contains_key(id) {
+            return Ok(false);
+        }
+        if self.locations.values().any(|(i, _)| i == id)
+            || self.versions.values().any(|v| v.image == *id)
+        {
+            return Err(format!(
+                "image {} still has locations or versions",
+                id.hex()
+            ));
+        }
+        self.fields.retain(|(i, _), _| i != id);
+        self.images.remove(id);
+        Ok(true)
     }
 
     fn field(&self, id: &ImageId, name: &str) -> Result<Option<serde_json::Value>, String> {
@@ -329,6 +362,13 @@ impl Store for MemoryStore {
             .filter(|v| v.image == *image)
             .cloned()
             .collect())
+    }
+
+    fn remove_version(&mut self, id: &VersionId) -> Result<bool, String> {
+        if self.versions.values().any(|v| v.parents.contains(id)) {
+            return Err(format!("version {} is a parent", id.hex()));
+        }
+        Ok(self.versions.remove(id).is_some())
     }
 
     fn document(&self, ns: &str, key: &str) -> Result<Option<serde_json::Value>, String> {

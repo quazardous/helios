@@ -31,7 +31,7 @@ impl VersionId {
 }
 
 /// One version of an image's edit.
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Version {
     pub id: VersionId,
     pub image: ImageId,

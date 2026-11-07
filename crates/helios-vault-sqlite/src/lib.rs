@@ -645,6 +645,44 @@ impl Store for SqliteStore {
         rows.into_iter().map(to_location).collect()
     }
 
+    fn remove_location(&mut self, path: &Path) -> Result<bool, String> {
+        self.writable()?;
+        let removed = self
+            .db
+            .execute(
+                "DELETE FROM locations WHERE path = ?1",
+                params![path.to_string_lossy()],
+            )
+            .map_err(err)?;
+        Ok(removed == 1)
+    }
+
+    fn remove_image(&mut self, id: &ImageId) -> Result<bool, String> {
+        self.write(|db| {
+            let named = |table: &str| {
+                db.query_row(
+                    &format!("SELECT 1 FROM {table} WHERE image = ?1 LIMIT 1"),
+                    params![id.hex()],
+                    |_| Ok(()),
+                )
+                .optional()
+                .map_err(err)
+            };
+            if named("locations")?.is_some() || named("versions")?.is_some() {
+                return Err(format!(
+                    "image {} still has locations or versions",
+                    id.hex()
+                ));
+            }
+            db.execute("DELETE FROM fields WHERE image = ?1", params![id.hex()])
+                .map_err(err)?;
+            let removed = db
+                .execute("DELETE FROM images WHERE id = ?1", params![id.hex()])
+                .map_err(err)?;
+            Ok(removed == 1)
+        })
+    }
+
     fn field(&self, id: &ImageId, name: &str) -> Result<Option<Value>, String> {
         let text: Option<String> = self
             .db
@@ -890,6 +928,27 @@ impl Store for SqliteStore {
 
     fn versions(&self, image: &ImageId) -> Result<Vec<Version>, String> {
         self.versions_where("image = ?1", &image.hex())
+    }
+
+    fn remove_version(&mut self, id: &VersionId) -> Result<bool, String> {
+        self.write(|db| {
+            // Parents are a JSON array of ids: a child names this one.
+            let child = db
+                .query_row(
+                    "SELECT 1 FROM versions WHERE parents LIKE ?1 LIMIT 1",
+                    params![format!("%\"{}\"%", id.hex())],
+                    |_| Ok(()),
+                )
+                .optional()
+                .map_err(err)?;
+            if child.is_some() {
+                return Err(format!("version {} is a parent", id.hex()));
+            }
+            let removed = db
+                .execute("DELETE FROM versions WHERE id = ?1", params![id.hex()])
+                .map_err(err)?;
+            Ok(removed == 1)
+        })
     }
 
     fn document(&self, ns: &str, key: &str) -> Result<Option<Value>, String> {

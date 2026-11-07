@@ -37,6 +37,105 @@ pub fn check<S: Store>(make: impl Fn() -> S) {
     a_default_never_overwrites_a_choice(make());
     a_stale_writer_changes_only_its_own_fields(make());
     an_edit_is_saved_step_by_step_and_reopened_at_its_head(make());
+    removals_forget_rows_and_refuse_what_is_still_named(make());
+    a_step_is_reverted_and_replayed_keeping_the_files(make(), &scratch("undo"));
+}
+
+fn removals_forget_rows_and_refuse_what_is_still_named<S: Store>(mut s: S) {
+    let a = image(1);
+    s.add_image(&a).unwrap();
+    s.put_location(&a.id, &location("/a.nef")).unwrap();
+    s.set_field(&a.id, "rating", Some(&json!(3))).unwrap();
+    let base = crate::Version::new(a.id, vec![], json!({ "n": 1 }), "user", 1);
+    let child = crate::Version::new(a.id, vec![base.id], json!({ "n": 2 }), "user", 2);
+    s.put_version(&base).unwrap();
+    s.put_version(&child).unwrap();
+    assert!(s.remove_image(&a.id).unwrap_err().contains("still has"));
+    assert!(s.remove_version(&base.id).unwrap_err().contains("parent"));
+    assert!(s.remove_version(&child.id).unwrap());
+    assert!(s.remove_version(&base.id).unwrap());
+    assert!(!s.remove_version(&base.id).unwrap(), "removed twice");
+    assert!(s.remove_location(Path::new("/a.nef")).unwrap());
+    assert!(!s.remove_location(Path::new("/a.nef")).unwrap());
+    assert!(s.remove_image(&a.id).unwrap());
+    assert!(!s.remove_image(&a.id).unwrap());
+    assert_eq!(s.image(&a.id).unwrap(), None);
+    // Its fields went with it: added again, it holds none.
+    s.add_image(&a).unwrap();
+    assert_eq!(s.field(&a.id, "rating").unwrap(), None);
+}
+
+fn a_step_is_reverted_and_replayed_keeping_the_files<S: Store>(s: S, dir: &Path) {
+    use crate::{Change, Changes};
+    let v = Vault::new(s);
+    // One image known before the step, and one file it brings.
+    let (old_file, new_file) = (dir.join("old.nef"), dir.join("new.nef"));
+    write(&old_file, &content(1, 300));
+    write(&new_file, &content(2, 300));
+    let old = v.import_file(&old_file, 1).unwrap();
+    v.apply(&[Command::set(old, RATING, json!(2))], "user", None, 1)
+        .unwrap();
+    let old_before = v.rows(&old).unwrap();
+    // The step: a new image with its signals, a field and a version; the
+    // old one found at a second place, rated by an importer.
+    let new = v.import_file(&new_file, 2).unwrap();
+    v.set_signals(&new, Some(&json!({ "w": 10 }))).unwrap();
+    v.apply(&[Command::set(new, RATING, json!(5))], "importer", None, 2)
+        .unwrap();
+    let kept = crate::Version::new(new, vec![], json!({ "dt": 1 }), "import:xmp", 2);
+    v.add_version(&kept).unwrap();
+    let copy = dir.join("copy-of-old.nef");
+    std::fs::copy(&old_file, &copy).unwrap();
+    v.import_hashed(&copy, old, 2).unwrap();
+    v.apply(&[Command::set(old, RATING, json!(4))], "importer", None, 2)
+        .unwrap();
+    let changes = Changes {
+        images: vec![
+            Change {
+                image: old,
+                before: old_before.clone(),
+                after: v.rows(&old).unwrap(),
+            },
+            Change {
+                image: new,
+                before: None,
+                after: v.rows(&new).unwrap(),
+            },
+        ],
+    };
+    assert!(changes.images.iter().all(Change::changed));
+    let after: Vec<_> = changes.images.iter().map(|c| c.after.clone()).collect();
+
+    let undone = v.revert(&changes).unwrap();
+    assert_eq!((undone.removed, undone.changed, undone.kept), (1, 1, 0));
+    assert_eq!(v.image(&new).unwrap(), None, "the new image is forgotten");
+    assert_eq!(v.signals(&new).unwrap(), None);
+    assert!(v.versions(&new).unwrap().is_empty());
+    assert_eq!(v.rows(&old).unwrap(), old_before, "the old image as it was");
+    for f in [&old_file, &new_file, &copy] {
+        assert!(f.is_file(), "{} stays on disk", f.display());
+    }
+
+    let redone = v.replay(&changes).unwrap();
+    assert_eq!((redone.restored, redone.changed), (1, 1));
+    let now: Vec<_> = [old, new].iter().map(|i| v.rows(i).unwrap()).collect();
+    assert_eq!(now, after, "redo puts every row back");
+
+    // Changed since: a rating given after the redo stays, and an image
+    // edited since is kept by the next undo.
+    v.apply(&[Command::set(old, RATING, json!(1))], "user", None, 3)
+        .unwrap();
+    let edit = crate::Version::new(new, vec![kept.id], json!({ "dt": 2 }), "user", 3);
+    v.add_version(&edit).unwrap();
+    let again = v.revert(&changes).unwrap();
+    assert_eq!(again.kept, 1, "{again:?}");
+    assert!(v.image(&new).unwrap().is_some(), "an edited image stays");
+    let old_now = v.rows(&old).unwrap().unwrap();
+    assert_eq!(old_now.fields[RATING], json!(1), "a later rating stays");
+    assert_eq!(old_now.locations.len(), 1, "the second place is forgotten");
+    for f in [&old_file, &new_file, &copy] {
+        assert!(f.is_file(), "{} stays on disk", f.display());
+    }
 }
 
 fn an_edit_is_saved_step_by_step_and_reopened_at_its_head<S: Store>(s: S) {
@@ -320,6 +419,12 @@ impl<S: Store> Store for FailingAudit<S> {
     fn all_locations(&self) -> Result<Vec<(ImageId, Location)>, String> {
         self.0.all_locations()
     }
+    fn remove_location(&mut self, path: &Path) -> Result<bool, String> {
+        self.0.remove_location(path)
+    }
+    fn remove_image(&mut self, id: &ImageId) -> Result<bool, String> {
+        self.0.remove_image(id)
+    }
     fn field(&self, id: &ImageId, name: &str) -> Result<Option<serde_json::Value>, String> {
         self.0.field(id, name)
     }
@@ -355,6 +460,9 @@ impl<S: Store> Store for FailingAudit<S> {
     }
     fn versions(&self, image: &ImageId) -> Result<Vec<crate::Version>, String> {
         self.0.versions(image)
+    }
+    fn remove_version(&mut self, id: &crate::VersionId) -> Result<bool, String> {
+        self.0.remove_version(id)
     }
     fn document(&self, ns: &str, key: &str) -> Result<Option<serde_json::Value>, String> {
         self.0.document(ns, key)

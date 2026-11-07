@@ -945,3 +945,83 @@ fn a_card_is_safe_to_format_once_every_photo_is_copied() {
     let (report, _) = run(&vault, None, &[dcim], &copy(Duplicates::Skip));
     assert!(report.cards.is_empty());
 }
+
+#[test]
+fn an_import_is_undone_and_redone_its_files_kept() {
+    let p = Place::new("undo");
+    let roll = p.join("roll");
+    let (edited, bare) = (roll.join("edited.png"), roll.join("bare.png"));
+    picture(&edited, 0, 1.0, 0);
+    picture(&bare, 1, 1.0, 0);
+    std::fs::write(roll.join("edited.png.xmp"), darktable_sidecar(1.0)).unwrap();
+    let library = p.join("library");
+    let vault = vault();
+    // One image the library had before: its rows come back as they were.
+    let (first, _) = run(
+        &vault,
+        None,
+        std::slice::from_ref(&bare),
+        &Options::default(),
+    );
+    assert_eq!(first.added, 1);
+    let options = Options {
+        placement: Placement::Copy {
+            into: Some(library.clone()),
+        },
+        duplicates: Duplicates::Keep,
+        darktable: true,
+        ..Options::default()
+    };
+    let before: Vec<_> = vault.images().unwrap();
+    let (report, lines) = run(&vault, None, std::slice::from_ref(&roll), &options);
+    assert_eq!(
+        (report.added, report.located, report.edits),
+        (1, 1, 1),
+        "{lines:?}"
+    );
+    assert_eq!(report.changes.images.len(), 2, "{:?}", report.changes);
+    assert_eq!(report.changes.added(), 1);
+    assert!(!report.copies.is_empty());
+    let after: Vec<_> = vault
+        .images()
+        .unwrap()
+        .iter()
+        .map(|i| vault.rows(&i.id).unwrap())
+        .collect();
+    let mut files: Vec<PathBuf> = report.copies.clone();
+    files.extend([edited.clone(), bare.clone(), roll.join("edited.png.xmp")]);
+
+    // Undo: the entries go, the files stay.
+    let undone = vault.revert(&report.changes).unwrap();
+    assert_eq!((undone.removed, undone.changed, undone.kept), (1, 1, 0));
+    assert_eq!(vault.images().unwrap(), before);
+    let bare_id = before[0].id;
+    assert_eq!(
+        vault.locations(&bare_id).unwrap().len(),
+        1,
+        "the copy's location is forgotten"
+    );
+    for f in &files {
+        assert!(f.is_file(), "{} stays on disk", f.display());
+    }
+
+    // Redo: everything back, versions and signals included.
+    vault.replay(&report.changes).unwrap();
+    let redone: Vec<_> = vault
+        .images()
+        .unwrap()
+        .iter()
+        .map(|i| vault.rows(&i.id).unwrap())
+        .collect();
+    assert_eq!(redone, after);
+
+    // Undo again: the same import later finds its copies still in the
+    // library folder, by their hash, and copies nothing again.
+    vault.revert(&report.changes).unwrap();
+    assert_eq!(vault.images().unwrap(), before);
+    let (again, lines) = run(&vault, None, std::slice::from_ref(&roll), &options);
+    assert_eq!((again.added, again.copied), (1, 0), "{lines:?}");
+    for f in &files {
+        assert!(f.is_file(), "{} stays on disk", f.display());
+    }
+}

@@ -20,7 +20,7 @@ use helios_core::Event;
 use crate::{ImageId, Store, Vault};
 
 const STACKS: &str = "stacks";
-const SIGNALS: &str = "signals";
+pub(crate) const SIGNALS: &str = "signals";
 
 /// A group of images shown as one.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
