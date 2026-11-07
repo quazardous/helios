@@ -249,6 +249,69 @@ fn a_raw_exported_from_batch_export_has_develop_s_pixels() {
     }
 }
 
+/// darktable's exposure test: its sidecar (a full default history of a
+/// raw, exposure raised) and its raw.
+fn darktable_edit() -> Option<(PathBuf, serde_json::Value)> {
+    let dir = darktable_images();
+    let (xmp, raw) = (
+        dir.join("../0001-exposure/exposure.xmp"),
+        dir.join(DARKTABLE[0]),
+    );
+    if !xmp.is_file() || !raw.is_file() {
+        eprintln!("skipped: no {} or {}", xmp.display(), raw.display());
+        return None;
+    }
+    let text = std::fs::read_to_string(&xmp).unwrap();
+    let (_, imported) = helios_library::darktable::read_sidecar(&text).unwrap();
+    Some((raw, imported.edit()))
+}
+
+#[test]
+fn a_darktable_edit_lands_on_the_raw_front_as_on_develop() {
+    let Some((raw, edit)) = darktable_edit() else {
+        return;
+    };
+    let mut skipped = Vec::new();
+    let mut renders = Vec::new();
+    for bundle in [develop(), image_network()] {
+        let (mut graph, node) = templates::open_file(&raw, &bundle).unwrap();
+        let left = helios_vault::edit::apply_to_graph(&mut graph, &edit).unwrap();
+        // Every raw item has its node: only what neither network has is
+        // left out.
+        for item in [
+            "rawprepare",
+            "temperature",
+            "highlights",
+            "demosaic",
+            "colorin",
+        ] {
+            assert!(
+                !left.iter().any(|l| l.starts_with(&format!("`{item}`"))),
+                "{}: {item} left out: {left:?}",
+                bundle.template.id
+            );
+        }
+        // darktable's white balance is the user's own coefficients now.
+        let wb = graph.find("whitebalance").unwrap();
+        assert_eq!(
+            graph.params(wb).unwrap().unwrap().get("mode"),
+            Some(&helios_core::Value::Choice("user".into())),
+            "{}",
+            bundle.template.id
+        );
+        let extent = graph.extent(node).unwrap().unwrap();
+        renders.push(render(&graph, node, "output", middle(extent, 64)).to_vec());
+        skipped.push(left);
+    }
+    assert_eq!(skipped[0], skipped[1]);
+    let worst = renders[0]
+        .iter()
+        .zip(&renders[1])
+        .map(|(a, b)| (a - b).abs())
+        .fold(0.0f32, f32::max);
+    assert!(worst < 1e-5, "the same edit renders apart by {worst}");
+}
+
 #[test]
 fn a_picture_goes_straight_through_an_image_network() {
     let dir = std::env::temp_dir().join(format!("helios-image-network-{}", std::process::id()));

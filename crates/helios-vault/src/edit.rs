@@ -129,15 +129,34 @@ pub fn modules(edit: &Value) -> Result<BTreeMap<String, (Option<String>, Params)
     Ok(out)
 }
 
+/// The node names a darktable edit's items take (its operations) that
+/// Helios's raw chain calls otherwise, with the module running there:
+/// darktable's `temperature` is the `whitebalance` node.
+const DARKTABLE_NAMES: &[(&str, &str)] = &[("temperature", "whitebalance")];
+
+/// The node an edit's entry `name` (running `module`) lands on: the node
+/// of that name, else for a darktable item named after its operation,
+/// the raw chain's node for it (see [`DARKTABLE_NAMES`]).
+fn target(graph: &Graph, name: &str, module: Option<&str>) -> Option<helios_core::NodeId> {
+    graph.find(name).or_else(|| {
+        DARKTABLE_NAMES
+            .iter()
+            .find(|(dt, helios)| *dt == name && module == Some(*helios))
+            .and_then(|(_, helios)| graph.find(helios))
+    })
+}
+
 /// Sets a graph's parameters to an edit's, by node name, and bypasses the
 /// nodes it says are (the others it names are not); returns what was left
 /// out (a node the graph lacks, or runs another module in, or that cannot
-/// be bypassed).
+/// be bypassed). A darktable edit's raw items land on the raw chain's
+/// nodes (its `temperature` on `whitebalance`), wherever the network has
+/// them: in "Develop one image", or the raw front of an image source.
 pub fn apply_to_graph(graph: &mut Graph, edit: &Value) -> Result<Vec<String>, String> {
     let mut skipped = Vec::new();
     let bypassed = bypassed(edit);
     for (name, (module, params)) in modules(edit)? {
-        let Some(id) = graph.find(&name) else {
+        let Some(id) = target(graph, &name, module.as_deref()) else {
             skipped.push(format!("`{name}`: no such node"));
             continue;
         };
