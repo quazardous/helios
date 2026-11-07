@@ -28,9 +28,12 @@ source yet; mount it as a folder first.
 - `--copy`: files are copied into the library folder, as
   `YYYY/YYYY-MM-DD/<name>` by capture date (`undated/` without one). The
   library folder is given once with `--into DIR` and remembered in the
-  vault. A copy is hashed as it is written and takes its name only when it
-  holds the same content as the source; until then it is a hidden
-  `.<name>.helios-part`. Nothing is ever overwritten: a name taken by
+  vault. The source is read once: the copy is hashed as it is written
+  (the hash is the file's identity, so duplicates are found before the
+  copy takes a name), then read back and takes its name only when it
+  holds the same content; until then it waits in the library folder's
+  hidden `.helios-part/` folder, where its signals are measured too.
+  Nothing is ever overwritten: a name taken by
   another file gets `-1`, `-2`..., a name holding the same content is used
   as it is. The copy keeps the original's modification date. The source is
   left as it was.
@@ -72,7 +75,7 @@ a copy). A file that fails does not stop the others.
 
 **Cancel.** The jobs centre's Cancel (`job.cancel` with the job's id), or
 Ctrl-C for `helios import`, stops the import before its next file. A copy
-under way stops too, and its hidden `.helios-part` is removed: no
+under way stops too, and its hidden part (in `.helios-part/`) is removed: no
 half-written file is left. The files done stay imported; the job ends
 `job.cancelled` and the report says `"cancelled": true`.
 

@@ -7,8 +7,9 @@
 //!   yet: mount it as a folder first.
 //! - **Placement.** Referenced in place (the vault records where the file
 //!   is), or copied into the library folder as `YYYY/YYYY-MM-DD/<name>`,
-//!   by capture date, the copy hashed as it is written and checked against
-//!   the source before it takes its name. Nothing is ever overwritten: a
+//!   by capture date. The source is read once: the copy is hashed as it
+//!   is written (its identity, known before it takes a name), then read
+//!   back to verify it, and measured from there. Nothing is ever overwritten: a
 //!   name taken by another file gets `-1`, `-2`... Renaming by a
 //!   [`Pattern`] needs a copy: a referenced file stays as it is.
 //! - **Sidecars.** A copy takes its XMP sidecars along (darktable's base
@@ -248,6 +249,9 @@ pub struct Report {
     pub edits_failed: u64,
     /// Images whose fields took values an importer listed.
     pub metadata: u64,
+    /// Bytes read from the sources: a copied file is read once, hashed
+    /// as it is copied.
+    pub read: u64,
 }
 
 impl Report {
@@ -329,9 +333,15 @@ pub fn files_of(source: &Path) -> Result<Vec<PathBuf>, String> {
 
 /// The BLAKE3 hash of a file, streamed.
 pub fn hash_file(path: &Path) -> Result<ImageId, String> {
-    let mut file = File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    hash_counted(path, &mut 0)
+}
+
+/// The BLAKE3 hash of a file, streamed, the bytes read added to `read`.
+fn hash_counted(path: &Path, read: &mut u64) -> Result<ImageId, String> {
+    let file = File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let mut hasher = blake3::Hasher::new();
-    std::io::copy(&mut file, &mut hasher).map_err(|e| format!("{}: {e}", path.display()))?;
+    let mut from = Counting { inner: file, read };
+    std::io::copy(&mut from, &mut hasher).map_err(|e| format!("{}: {e}", path.display()))?;
     Ok(ImageId(helios_core::ContentHash(
         *hasher.finalize().as_bytes(),
     )))
@@ -342,16 +352,29 @@ fn holds(path: &Path, id: &ImageId) -> Result<bool, String> {
     Ok(hash_file(path)? == *id)
 }
 
-/// Writes `src` to `part`, hashing what it writes: an error message when
-/// what was written is not the image `id`. Stopped (an `Interrupted`
-/// error) between two chunks once `stopped` says so.
+/// A reader that counts the bytes it reads: what an import read of its
+/// sources.
+struct Counting<'a, R> {
+    inner: R,
+    read: &'a mut u64,
+}
+
+impl<R: Read> Read for Counting<'_, R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let n = self.inner.read(buf)?;
+        *self.read += n as u64;
+        Ok(n)
+    }
+}
+
+/// Copies `from` to `part`, hashing what it reads: the hash of the
+/// content written. Stopped (an `Interrupted` error) between two chunks
+/// once `stopped` says so.
 fn write_hashed(
-    src: &Path,
+    from: &mut impl Read,
     part: &Path,
-    id: &ImageId,
     stopped: &dyn Fn() -> bool,
-) -> std::io::Result<Option<String>> {
-    let mut from = File::open(src)?;
+) -> std::io::Result<ImageId> {
     let mut to = OpenOptions::new()
         .write(true)
         .create(true)
@@ -370,71 +393,92 @@ fn write_hashed(
         hasher.update(&buffer[..n]);
         to.write_all(&buffer[..n])?;
     }
-    if let Ok(modified) = from.metadata().and_then(|m| m.modified()) {
-        // The copy keeps the original's date; a file system that cannot
-        // set it still gets the copy.
-        let _ = to.set_modified(modified);
-    }
     to.sync_all()?;
-    Ok((*hasher.finalize().as_bytes() != id.0.0)
-        .then(|| format!("{} changed while it was copied", src.display())))
+    Ok(ImageId(helios_core::ContentHash(
+        *hasher.finalize().as_bytes(),
+    )))
 }
 
-/// Copies `src` to `dest`, hashing what it writes: the copy takes its
-/// name only when it holds `id`, and never replaces a file. False when
-/// `dest` was taken meanwhile (the copy is dropped). Stopped by
-/// `stopped`, the part written is removed.
-fn copy_verified(
+/// Copies `src` to `part`, reading the source once and hashing it as it
+/// goes, then reads the copy back to verify it: the source's content
+/// hash. The bytes read from the source are added to `read`. On an error
+/// (or stopped by `stopped`) the part is removed.
+fn stage(
     src: &Path,
-    dest: &Path,
-    id: &ImageId,
+    part: &Path,
+    read: &mut u64,
     stopped: &dyn Fn() -> bool,
-) -> Result<bool, String> {
-    let dir = dest.parent().ok_or("a copy needs a folder")?;
-    let name = dest
-        .file_name()
-        .and_then(|n| n.to_str())
-        .ok_or("a copy needs a name")?;
-    let part = dir.join(format!(".{name}.helios-part"));
-    let written = write_hashed(src, &part, id, stopped);
+) -> Result<ImageId, String> {
     let fail = |e: String| {
-        let _ = std::fs::remove_file(&part);
+        let _ = std::fs::remove_file(part);
         Err(e)
     };
-    match written {
-        Err(e) => return fail(format!("{} to {}: {e}", src.display(), dest.display())),
-        Ok(Some(e)) => return fail(e),
-        Ok(None) => {}
-    }
-    // A hard link never replaces a file; a file system without them gets
-    // a rename, after a last look.
-    let placed = match std::fs::hard_link(&part, dest) {
-        Ok(()) => true,
-        Err(e) if e.kind() == ErrorKind::AlreadyExists => false,
-        Err(_) if dest.exists() => false,
-        Err(_) => {
-            return std::fs::rename(&part, dest)
-                .map(|()| true)
-                .map_err(|e| format!("{}: {e}", dest.display()));
-        }
+    let mut file = match File::open(src) {
+        Ok(f) => f,
+        Err(e) => return Err(format!("{}: {e}", src.display())),
     };
-    let _ = std::fs::remove_file(&part);
-    Ok(placed)
+    let modified = file.metadata().and_then(|m| m.modified()).ok();
+    let mut from = Counting {
+        inner: &mut file,
+        read,
+    };
+    let id = match write_hashed(&mut from, part, stopped) {
+        Ok(id) => id,
+        Err(e) => return fail(format!("{} to {}: {e}", src.display(), part.display())),
+    };
+    if let Some(modified) = modified {
+        // The copy keeps the original's date; a file system that cannot
+        // set it still gets the copy.
+        let _ = File::options()
+            .write(true)
+            .open(part)
+            .and_then(|f| f.set_modified(modified));
+    }
+    match holds(part, &id) {
+        Ok(true) => Ok(id),
+        Ok(false) => fail(format!(
+            "{}: the copy differs from the source",
+            src.display()
+        )),
+        Err(e) => fail(e),
+    }
 }
 
-/// Copies `src` into `dir` as `name.ext`, or `name-1.ext`... when the
-/// name is taken by another file. The path, and whether a copy was made
-/// (false when a file there already holds the image).
+/// Gives the verified copy `part` the name `dest`, never replacing a
+/// file: false when `dest` was taken meanwhile (the part is kept).
+fn settle(part: &Path, dest: &Path) -> Result<bool, String> {
+    // A hard link never replaces a file; a file system without them gets
+    // a rename, after a last look.
+    match std::fs::hard_link(part, dest) {
+        Ok(()) => {
+            let _ = std::fs::remove_file(part);
+            Ok(true)
+        }
+        Err(e) if e.kind() == ErrorKind::AlreadyExists => Ok(false),
+        Err(_) if dest.exists() => Ok(false),
+        Err(_) => std::fs::rename(part, dest)
+            .map(|()| true)
+            .map_err(|e| format!("{}: {e}", dest.display())),
+    }
+}
+
+/// Places the verified copy `part` of the image `id` in `dir` as
+/// `name.ext`, or `name-1.ext`... when the name is taken by another file.
+/// The path, and whether the copy took it (false when a file there
+/// already holds the image: the part is then removed).
 fn place(
-    src: &Path,
+    part: &Path,
     dir: &Path,
     name: &str,
     ext: &str,
     id: &ImageId,
-    stopped: &dyn Fn() -> bool,
 ) -> Result<(PathBuf, bool), String> {
     std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let dot = if ext.is_empty() { "" } else { "." };
+    let held = |dest: PathBuf| {
+        let _ = std::fs::remove_file(part);
+        Ok((dest, false))
+    };
     for k in 0..10_000u32 {
         let file = if k == 0 {
             format!("{name}{dot}{ext}")
@@ -444,15 +488,15 @@ fn place(
         let dest = dir.join(file);
         if dest.exists() {
             if holds(&dest, id)? {
-                return Ok((dest, false));
+                return held(dest);
             }
             continue;
         }
-        if copy_verified(src, &dest, id, stopped)? {
+        if settle(part, &dest)? {
             return Ok((dest, true));
         }
         if holds(&dest, id)? {
-            return Ok((dest, false));
+            return held(dest);
         }
     }
     Err(format!("{}: no free name for {name}", dir.display()))
@@ -499,11 +543,24 @@ fn copy_sidecars(
     Ok(copied)
 }
 
+/// A copy before it takes its name: removed when dropped, unless it
+/// took one.
+struct Part(PathBuf);
+
+impl Drop for Part {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
 /// The state of one import.
 struct Run<'a, S: Store> {
     vault: &'a Vault<S>,
     options: &'a Options,
     root: Option<PathBuf>,
+    /// Where copies are written before they take their name: a hidden
+    /// folder of the library folder, this import's own.
+    staging: Option<PathBuf>,
     now: u64,
     /// The images seen so far in this import, with the first file of each.
     seen: HashMap<ImageId, PathBuf>,
@@ -526,6 +583,15 @@ impl<S: Store> Run<'_, S> {
                 .is_some_and(|c| c.load(Ordering::SeqCst))
     }
 
+    /// What says this import was asked to stop, owned.
+    fn stopper(&self) -> impl Fn() -> bool + use<S> {
+        let stop = self.stop.clone();
+        let cancel = self.options.cancel.clone();
+        move || {
+            stop.load(Ordering::SeqCst) || cancel.as_ref().is_some_and(|c| c.load(Ordering::SeqCst))
+        }
+    }
+
     fn sidecars(&mut self, path: &Path) -> Result<Vec<helios_xmp::files::SidecarFile>, String> {
         let dir = path.parent().unwrap_or(Path::new(".")).to_path_buf();
         let name = path
@@ -546,7 +612,24 @@ impl<S: Store> Run<'_, S> {
 
     /// Imports one file: its line, and what happened.
     fn file(&mut self, path: &Path) -> Result<(Value, Status), String> {
-        let id = hash_file(path)?;
+        // A copy reads the source once, hashing it as it is copied; its
+        // identity is known before the copy takes a name.
+        let staged = match &self.staging {
+            Some(staging) => {
+                let name = path
+                    .file_name()
+                    .ok_or_else(|| format!("{}: not a file name", path.display()))?;
+                let part = Part(staging.join(name));
+                let stopped = self.stopper();
+                let id = stage(path, &part.0, &mut self.report.read, &stopped)?;
+                Some((part, id))
+            }
+            None => None,
+        };
+        let id = match &staged {
+            Some((_, id)) => *id,
+            None => hash_counted(path, &mut self.report.read)?,
+        };
         let mut line = json!({ "path": path, "id": id.hex() });
         let copying = matches!(self.options.placement, Placement::Copy { .. });
         if !copying
@@ -585,7 +668,9 @@ impl<S: Store> Run<'_, S> {
             }
         }
         let measured = if self.options.signals || copying {
-            match signals::measure(path) {
+            // A copy is measured, not the source: the source is read once.
+            let at = staged.as_ref().map_or(path, |(part, _)| part.0.as_path());
+            match signals::measure(at) {
                 Ok(s) => Some(s),
                 Err(e) => {
                     line["signals_error"] = json!(e);
@@ -614,8 +699,8 @@ impl<S: Store> Run<'_, S> {
                 }),
                 None => stem.to_string(),
             };
-            let stopped = || self.stopped();
-            let (dest, copied) = place(path, &folder, &name, ext, &id, &stopped)?;
+            let part = staged.as_ref().map(|(part, _)| &part.0).ok_or("no copy")?;
+            let (dest, copied) = place(part, &folder, &name, ext, &id)?;
             self.placed += 1;
             if copied {
                 self.report.copied += 1;
@@ -736,10 +821,25 @@ pub fn import<S: Store>(
         let stop = stop.clone();
         job.on_cancel(move || stop.store(true, Ordering::SeqCst));
     }
+    let staging = match &root {
+        Some(root) => {
+            let dir = root
+                .join(".helios-part")
+                .join(format!("{}-{id}", std::process::id()));
+            if let Err(e) = std::fs::create_dir_all(&dir) {
+                let e = format!("{}: {e}", dir.display());
+                job.failed(&e);
+                return Err(e);
+            }
+            Some(dir)
+        }
+        None => None,
+    };
     let mut run = Run {
         vault,
         options,
         root,
+        staging,
         now,
         seen: HashMap::new(),
         folders: BTreeMap::new(),
@@ -790,6 +890,13 @@ pub fn import<S: Store>(
             Status::Skipped | Status::Asked => {}
         }
         emit(&line);
+    }
+    if let Some(staging) = &run.staging {
+        // This import's own folder, then the shared one when empty.
+        let _ = std::fs::remove_dir_all(staging);
+        if let Some(shared) = staging.parent() {
+            let _ = std::fs::remove_dir(shared);
+        }
     }
     if run.stopped() && run.report.files < total {
         run.report.cancelled = true;
@@ -874,22 +981,27 @@ fn prepare<S: Store>(
 mod tests {
     use super::*;
 
-    #[test]
-    fn a_copy_stopped_midway_leaves_no_part() {
-        let dir = std::env::temp_dir().join(format!("helios-import-stop-{}", std::process::id()));
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("helios-import-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn a_copy_stopped_midway_leaves_no_part() {
+        let dir = scratch("stop");
         let src = dir.join("big.raw");
         // Three chunks: stopped after the first.
         std::fs::write(&src, vec![7u8; 3 << 20]).unwrap();
         let id = hash_file(&src).unwrap();
-        let dest = dir.join("copy.raw");
+        let part = dir.join(".big.raw.helios-part");
         let asked = std::cell::Cell::new(0);
         let stopped = || {
             asked.set(asked.get() + 1);
             asked.get() > 1
         };
-        assert!(copy_verified(&src, &dest, &id, &stopped).is_err());
+        assert!(stage(&src, &part, &mut 0, &stopped).is_err());
         assert!(asked.get() > 1, "stopped while copying");
         let left: Vec<_> = std::fs::read_dir(&dir)
             .unwrap()
@@ -900,9 +1012,46 @@ mod tests {
             [std::ffi::OsString::from("big.raw")],
             "no part, no copy"
         );
-        // Not stopped, the copy is whole.
-        assert!(copy_verified(&src, &dest, &id, &|| false).unwrap());
+        // Not stopped, the copy is whole and takes its name.
+        assert_eq!(stage(&src, &part, &mut 0, &|| false).unwrap(), id);
+        let dest = dir.join("copy.raw");
+        assert!(settle(&part, &dest).unwrap());
+        assert!(!part.exists());
         assert_eq!(hash_file(&dest).unwrap(), id);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The source is read once: hashed while it is copied, the copy read
+    /// back to verify it, and measured from the copy.
+    #[test]
+    fn a_copy_reads_its_source_once() {
+        let dir = scratch("once");
+        let card = dir.join("card");
+        let dcim = card.join("DCIM/100CANON");
+        std::fs::create_dir_all(&dcim).unwrap();
+        let sizes = [(3 << 20) + 17, 1234];
+        for (n, size) in sizes.iter().enumerate() {
+            std::fs::write(dcim.join(format!("IMG_{n}.raw")), vec![n as u8 + 1; *size]).unwrap();
+        }
+        let vault = Vault::new(helios_vault::MemoryStore::default());
+        let jobs = Jobs::new(Arc::default());
+        let options = Options {
+            placement: Placement::Copy {
+                into: Some(dir.join("library")),
+            },
+            ..Options::default()
+        };
+        let report = import(&vault, &jobs, &[card], &options, 1000, &mut |_| {}).unwrap();
+        assert_eq!((report.added, report.copied), (2, 2), "{report:?}");
+        assert_eq!(report.read, sizes.iter().sum::<usize>() as u64, "read once");
+        // The same counter sees a second read: a source hashed apart.
+        let mut read = 0;
+        hash_counted(&dir.join("card/DCIM/100CANON/IMG_1.raw"), &mut read).unwrap();
+        assert_eq!(read, 1234);
+        assert!(
+            !dir.join("library/.helios-part").exists(),
+            "no staging left"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
