@@ -362,8 +362,8 @@ from incidents on the box; every agent prompt points here.
   `CARGO_INCREMENTAL=0` (incremental caches grew to 20 GB and more). These
   type-check and lint without generating code, so they are quick and light.
   Local tests are not run.
-- Once the code is finished and clean locally, finalise on the box: tests,
-  gate and snapshots. The box confirms; it is not where errors are first
+- Once the code is finished and clean locally, finalise on the box: tests
+  and snapshots (for egui-pop and egui_stack, CI on `next` runs the rest). The box confirms; it is not where errors are first
   looked for (a failing gate costs about seven minutes for what a local
   clippy shows in seconds).
 - Full runs (gate, snapshots, release, the daily full suite) are queued by
@@ -376,9 +376,15 @@ from incidents on the box; every agent prompt points here.
 - Run the narrowest job first: `test-affected` (or one test) before `test`,
   `survival` or `check-commits`. A full run is the last step, not the first.
   For egui-pop, a fix loop runs `egui-pop-test crate=<crate> test=<target>
-  filter=<name>` (minutes); `egui-pop-gate` (about twenty minutes) runs once,
-  when the branch is ready. A failure the gate shows is reproduced with
-  `egui-pop-test`, never by queuing the gate again.
+  filter=<name>` (minutes). A failure CI shows is reproduced with
+  `egui-pop-test`.
+- The box does not repeat what CI runs. egui-pop and egui_stack pull
+  requests go to their `next` branch, whose CI runs every test; the box
+  serves what CI cannot: a fix loop's narrow runs, snapshots regenerated to
+  commit (`egui-pop-snapshots`), the GPU and timing jobs. `egui-pop-gate`
+  stays for a release or a by-hand check, not for each branch. Helios's own
+  suite still runs on the box (`test-affected`, `test`): its GitHub CI runs
+  format and clippy only.
 - A new test has a deadline on every wait (a child process, a window, a
   file, a socket reply) and fails fast. Tests run under nextest, which stops
   a test after 120 s; `cargo survival` runs under nextest too.
