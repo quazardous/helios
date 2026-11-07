@@ -497,8 +497,14 @@ impl Broker {
         let m = &slot.manifest;
         let first = &m.command[0];
         let local = slot.dir.join(first);
+        // a program built for Windows carries `.exe`, the manifest not
+        let local_exe = slot
+            .dir
+            .join(format!("{first}{}", std::env::consts::EXE_SUFFIX));
         let program = if local.is_file() {
             local
+        } else if local_exe.is_file() {
+            local_exe
         } else {
             PathBuf::from(first)
         };

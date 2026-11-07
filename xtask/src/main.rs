@@ -488,10 +488,14 @@ fn main() -> ExitCode {
                     for f in files {
                         std::fs::remove_file(f).expect("remove a fragment");
                     }
-                    // the in-tree plugins follow the release, or the next
-                    // build refuses them as made for another Helios
-                    let examples = root.join("plugins/examples");
-                    for entry in std::fs::read_dir(&examples).into_iter().flatten().flatten() {
+                    // the in-tree plugins (examples, and the importers
+                    // Helios ships) follow the release, or the next build
+                    // refuses them as made for another Helios
+                    let in_tree = ["plugins/examples", "plugins/importers"]
+                        .iter()
+                        .flat_map(|d| std::fs::read_dir(root.join(d)).into_iter().flatten())
+                        .flatten();
+                    for entry in in_tree {
                         let manifest = entry.path().join("helios-plugin.toml");
                         if let Ok(text) = std::fs::read_to_string(&manifest) {
                             std::fs::write(&manifest, write_plugin_range(&text, new))

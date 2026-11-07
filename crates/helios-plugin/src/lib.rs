@@ -20,9 +20,11 @@
 //! - [`rpc`]: one plugin process and its JSON-RPC line protocol;
 //! - [`broker`]: discovery, activation, routing, capabilities, services;
 //! - [`importer`]: the importer protocol's checks (`importer.scan`);
-//! - [`commands`]: the broker as shell commands.
+//! - [`commands`]: the broker as shell commands;
+//! - [`bundled`]: the plugins Helios ships, built beside it.
 
 pub mod broker;
+pub mod bundled;
 pub mod commands;
 pub mod importer;
 pub mod manifest;

@@ -156,6 +156,17 @@ pub fn rules() -> &'static [(&'static str, Rule)] {
             "plugins/examples/",
             Crates(&["helios-plugin", "helios-i18n"]),
         ),
+        // the importers Helios ships: workspace members whose manifests
+        // and catalogues helios-plugin compiles in, run by the desktop's
+        // tests
+        (
+            "plugins/importers/",
+            Crates(&[
+                "helios-plugin-darktable-library",
+                "helios-plugin",
+                "helios-gui",
+            ]),
+        ),
         // read by no test
         ("docs/", Nothing),
         ("changelog.d/", Nothing),

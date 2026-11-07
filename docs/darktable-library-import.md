@@ -1,6 +1,7 @@
 # Importing darktable's library
 
-Status: study (2026-11-07), not implemented.
+Status: study (2026-11-07); version 1 implemented (2026-11-07), see
+"Status: implemented (v1)" at the end.
 
 This study asks what it takes to read darktable's catalogue (`library.db`,
 with `data.db` beside it) into the Helios library, as an importer plugin
@@ -21,8 +22,9 @@ In short:
   one worth doing first: an optional `darktable` block per image carrying
   the database rows faithfully, behind `importer` interface version 2,
   turned into versions by Helios (never by the plugin).
-- The plugin is best written in Python with the standard library alone
-  (`sqlite3`), as the in-tree `exif-exiftool` example.
+- The plugin was first recommended in Python with the standard library
+  alone (`sqlite3`); it is written in Rust (decided 2026-11-07), one
+  binary per system with nothing to install.
 
 ## 1. Where the catalogue is
 
@@ -438,6 +440,9 @@ build, as the `exif-exiftool` example. Rust would mean a workspace member
 and a bundled SQLite for a job that is a few queries. Python's `sqlite3`
 is built against the system's SQLite, which reads files from any SQLite 3.
 
+Superseded (2026-11-07): official plugins are written in Rust, one binary
+per system; see "Status: implemented (v1)".
+
 **Manifest sketch:**
 
 ```toml
@@ -575,3 +580,73 @@ holds paths, names and places.
   configuration folder.
 - Vault fields for creator, rights and geotags, which other importers
   (Lightroom, digiKam) would also fill.
+
+## Status: implemented (v1)
+
+The importer ships with Helios: `plugins/importers/darktable-library`,
+offered as **File > Import from → darktable library** (label translated,
+English and French). It follows sections 3, 7, 8 and 9, with these
+points settled:
+
+- **Language: Rust, not Python** (owner's decision, 2026-11-07, which
+  supersedes section 9's recommendation): official plugins are Rust
+  programs, one binary per system with nothing to install (Python is
+  not on Windows by default). The plugin is a workspace member, the
+  program `helios-darktable-library`, reading SQLite through `rusqlite`
+  with its `bundled` SQLite (MIT and public domain) and its `backup`
+  feature.
+- **Shipping.** The program is built beside Helios's (the bench box's
+  `build-gui` job keeps both, `tools/bench/fetch-gui.sh` fetches both).
+  Its manifest and catalogues are compiled into Helios
+  (`helios_plugin::bundled`), and the desktop writes them out once with
+  a copy of the program into a folder named by their contents under
+  Helios's cache folder (`~/.cache/helios/plugins`), read as built-in
+  after `<exe>/../share/helios/plugins` (a copy installed there wins). A
+  Helios built without the program does not offer the importer (said in
+  its log). `cargo xtask release` moves the manifest's `compat.helios`
+  range with each release, as the examples'.
+- **What it imports.** One entry per file (`film_rolls.folder` joined
+  with `images.filename`), its stars (`flags & 7`, 0 sent) and reject
+  (`flags & 8`, or the old rating 6) from the original (lowest
+  `version`), colour labels and tags of every duplicate (the whole tag
+  path, `darktable|…` left out), title and description (by `tagname`
+  from data schema 13, by darktable's fixed keys before; the original's,
+  else a duplicate's). Edits come through the photos' sidecars, by
+  Helios's ordinary import.
+- **Missing files.** Unlike section 9's sketch, the plugin checks each
+  file: only those on disk are listed, the others counted in one
+  warning naming their folders (the first three).
+- **Warnings.** darktable running (a copy read); no `data.db` (tags
+  skipped); missing files; duplicates whose stars or reject differ from
+  the original's; texts with no Helios field (creator, publisher,
+  rights, notes, user keys: a count per key); an empty library.
+- **Schemas.** Library 36 to 57 and data 9 to 13 (darktable 4.0 to 5.6),
+  the columns read checked with `PRAGMA table_info`; anything else is
+  refused with -32001 naming the version found and the range read.
+- **Reading.** `file:…?mode=ro` URIs only. A `library.db.lock` or
+  `data.db.lock` naming a live process (any lock on Windows, where a
+  process cannot be probed safely) makes the plugin copy both files with
+  SQLite's backup API into a private temporary folder, read the copy and
+  delete it; a stale lock is ignored. A failed copy refuses the scan
+  ("close darktable, then import again").
+- **Progress and cancel.** `$/progress` every 200 files; the scan runs
+  in a thread of its own, so `$/cancelRequest` is honoured between two
+  batches and answered -32800.
+
+Tests (`plugins/importers/darktable-library/tests/scan.rs`, the program
+run by the broker as Helios ships it, and
+`crates/helios-gui/tests/darktable_library.rs`) build darktable folders
+with the plugin's `fixture` module (a Rust test helper, feature
+`fixture`) from the `CREATE TABLE` statements of `release-4.6.0` (library 47,
+data 10) and `release-5.2.0` (library 57, data 13), committed as
+`fixtures/*.sql` beside the plugin, minimal tables only,
+over test JPEGs: both schemas scanned (marks, duplicates, a non-ASCII
+name, a missing folder), unknown schemas refused, a lock with a live pid
+read from a copy with the folder left byte for byte as it was, a stale
+lock read in place, a scan cancelled; on the desktop, the entry under
+File > Import from with the built-in plugins, and a library imported
+with its marks landing in the vault.
+
+Not in v1, as planned: edits from the database (duplicates without
+sidecars), film rolls as views, groups as stacks, geotags, paging, and a
+library outside the configuration folder.

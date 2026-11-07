@@ -1,0 +1,24 @@
+id = "io.github.quazardous.helios.darktable-library"
+name = "darktable library"
+title = "darktable library"
+description = "Imports the photos of a darktable library with their stars, rejects, colour labels, tags, titles and descriptions"
+version = "0.1.0"
+license = "GPL-3.0-or-later"
+command = ["helios-darktable-library"]
+services = ["importer"]
+activation = ["onImporter:darktable-library"]
+
+[compat]
+helios = ">=0.61.0, <0.62.0"
+interfaces = { protocol = 1, importer = 1 }
+
+[[importers]]
+id = "darktable-library"
+label = "darktable library"
+source = "folder"
+holds = ["library.db"]
+anywhere = true
+
+[[capabilities]]
+name = "source.read"
+reason = "Reads library.db and data.db in the darktable folder you pick, never writing them (while darktable runs, from a private temporary copy)"

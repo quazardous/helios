@@ -980,11 +980,32 @@ fn main() -> Result<(), String> {
     // The image asked for is made ready while the window opens.
     let preparing = image_file.map(|path| prepare(path, bundle, vault.clone()));
     let earlier = earlier_layout(&workspace, &ui_settings);
-    // The plugins installed (built-in, the user's), read before anything
-    // of them runs: their importers are File > Import from's entries.
+    // The plugins installed (built-in, the ones Helios ships beside its
+    // executable, the user's), read before anything of them runs: their
+    // importers are File > Import from's entries.
     let plugins = {
         let mut broker = helios_plugin::Broker::new(helios_plugin::Policy::default());
-        broker.discover(&helios_plugin::default_dirs(None));
+        let mut dirs = helios_plugin::default_dirs(None);
+        if let (Some(root), Some(programs)) = (
+            helios_plugin::bundled::default_root(),
+            helios_plugin::bundled::programs_dir(),
+        ) {
+            match helios_plugin::bundled::add_to(&mut dirs, &root, &programs) {
+                Ok(added) => {
+                    for name in added.without_program {
+                        log::info!(
+                            "the {name} plugin is not offered: its program is not beside Helios in {}",
+                            programs.display()
+                        );
+                    }
+                }
+                Err(e) => warn(&format!(
+                    "the plugins Helios ships could not be written to {}: {e}",
+                    root.display()
+                )),
+            }
+        }
+        broker.discover(&dirs);
         for r in broker.rejected() {
             warn(&format!(
                 "plugin {} refused: {}",

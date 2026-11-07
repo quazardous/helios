@@ -305,6 +305,20 @@ folders or film rolls), stacks, edits other than sidecars, and paging
 for very large catalogues; see docs/darktable-library-import.md for
 what darktable's catalogue would need.
 
+**Shipped importers.** Official importers live in the repository under
+`plugins/importers/` and are Rust programs, workspace members built
+beside Helios's own executable (one binary per system, nothing else to
+install; decided 2026-11-07). Their manifests and catalogues are
+compiled into Helios (`helios_plugin::bundled`); the desktop writes them
+out once, with a copy of each program found beside it, into Helios's
+cache folder (`~/.cache/helios/plugins/<version>-<digest>/`), read as
+built-in after `<exe>/../share/helios/plugins` (a copy installed there
+wins). A program built for Windows may carry `.exe` where the manifest's
+command does not. A test checks that every manifest and catalogue of
+their folders is bundled. `cargo xtask release` moves their
+`compat.helios` range with each release. The first is
+`darktable-library` (see docs/darktable-library-import.md).
+
 The test plugin `crates/helios-plugin/tests/fixtures/ratings-folder`
 (Python, standard library alone) reads a folder of JPEGs and the
 ratings, labels, tags and titles of its `ratings.json`; the broker's

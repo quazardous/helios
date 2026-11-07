@@ -1,0 +1,30 @@
+[package]
+name = "helios-plugin-darktable-library"
+description = "Helios importer plugin: the photos of a darktable library with their stars, rejects, labels, tags and texts"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "helios-darktable-library"
+path = "src/main.rs"
+
+[features]
+# Builds small darktable libraries for tests (`fixture`).
+fixture = []
+
+[dependencies]
+rusqlite = { version = "0.40", features = ["bundled", "backup"] }
+serde_json.workspace = true
+
+[dev-dependencies]
+helios-plugin.workspace = true
+# its own fixtures, for its tests
+helios-plugin-darktable-library = { path = ".", features = ["fixture"] }
+
+[lints]
+workspace = true

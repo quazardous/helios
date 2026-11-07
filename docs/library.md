@@ -243,6 +243,19 @@ file that is not an image) and warned about goes to the **Log** panel.
 The scan is a job of its own in the jobs centre, cancelled there. See
 docs/extensions.md, "Importers", for the protocol.
 
+Helios ships one importer: **File > Import from → darktable library**.
+Pick darktable's configuration folder (`~/.config/darktable` on Linux,
+the one holding `library.db` and `data.db`); every photo file the library
+holds comes in with its stars, reject, colour labels, tags (the whole
+`places|France|Lyon` path as one tag) and title and description, and its
+darktable sidecars as versions as for any import. The library is only
+read, never written, and while darktable is running it is read from a
+copy taken when the scan starts. Photos whose file is not on disk (a
+drive not plugged in) are left out and counted in the **Log** panel: run
+the import again once the drive is back. darktable 4.0 to 5.6 libraries
+are read; see docs/darktable-library-import.md, "Status: implemented
+(v1)".
+
 ## Culling on the desktop
 
 The library panels are egui-pop's photo library widgets (its

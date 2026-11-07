@@ -2251,6 +2251,7 @@ dependencies = [
  "helios-node",
  "helios-photo",
  "helios-plugin",
+ "helios-plugin-darktable-library",
  "helios-profile",
  "helios-scopes",
  "helios-shell",
@@ -2490,6 +2491,16 @@ dependencies = [
  "serde",
  "serde_json",
  "toml 1.1.8+spec-1.1.0",
+]
+
+[[package]]
+name = "helios-plugin-darktable-library"
+version = "0.61.0"
+dependencies = [
+ "helios-plugin",
+ "helios-plugin-darktable-library",
+ "rusqlite",
+ "serde_json",
 ]
 
 [[package]]
