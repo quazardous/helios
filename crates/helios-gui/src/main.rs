@@ -85,8 +85,8 @@ fn read_library(
     reading
 }
 
-/// Fills the library from the vault, and reads the thumbnails behind it,
-/// one image at a time, from the first copy still present.
+/// Fills the library from the vault, and reads the thumbnails behind it:
+/// from the thumbnail cache, else from the first copy still present.
 fn fill_library(shell: &mut Shell, persist: &Persist) -> Result<(), String> {
     let rows = helios_gui::persist::read_library(persist.vault())?;
     show_library(shell, persist, rows)
@@ -102,28 +102,23 @@ fn show_library(
     let files = persist.show_library(shell, rows)?;
     // Quick open opens them from there.
     shell.set_image_files(files.iter().cloned());
-    let sink = shell.library_thumbnails();
-    std::thread::spawn(move || {
-        for (id, path) in files {
-            let image = match helios_load::Kind::of(&path) {
-                helios_load::Kind::Picture => helios_load::load(&path).map(|l| Some(l.image)),
-                helios_load::Kind::Raw => helios_load::preview(&path),
-            };
-            match image {
-                Ok(Some(image)) => {
-                    // Scaled here: the window only converts a small one.
-                    let small = helios_gui::library::small(&image);
-                    if sink.send((id, small)).is_err() {
-                        return;
-                    }
-                }
-                Ok(None) => {}
-                Err(e) => warn(&format!("no thumbnail for {}: {e}", path.display())),
-            }
-        }
-    });
+    // A new pool replaces the last (an import filled the library again):
+    // the thumbnails already shown are not read again.
+    let cache = THUMB_CACHE.get().cloned().flatten();
+    let loader = helios_gui::thumbnails::start(shell, cache, &files, warn);
+    *THUMB_LOADER
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(loader);
     Ok(())
 }
+
+/// The thumbnail cache of the library opened (none without a vault, or
+/// when its folder cannot be made).
+static THUMB_CACHE: std::sync::OnceLock<Option<Arc<helios_thumbs::ThumbCache>>> =
+    std::sync::OnceLock::new();
+
+/// The pool filling the library's thumbnails.
+static THUMB_LOADER: std::sync::Mutex<Option<helios_thumbs::Loader>> = std::sync::Mutex::new(None);
 
 /// The time in seconds since the epoch, as the vault's link counts it.
 fn seconds_f64() -> f64 {
@@ -1211,6 +1206,7 @@ fn main() -> Result<(), String> {
     start::mark("workspace and settings read");
     let bus = std::sync::Arc::new(helios_core::Bus::new());
     let health_file = vault_file.clone();
+    let thumbs_file = vault_file.clone();
     let persist = match vault_file {
         Some(path) => Some(Persist::new(
             helios_vault_sqlite::SqliteStore::open(&path)?,
@@ -1342,6 +1338,25 @@ fn main() -> Result<(), String> {
     }));
     // egui-pop opens the window where it was last (repaired) and builds
     // the application on its context.
+    // The library's thumbnail cache, beside its catalogue.
+    let _ = THUMB_CACHE.set(
+        thumbs_file
+            .as_ref()
+            .filter(|_| vault.is_some())
+            .and_then(|file| {
+                let limit = vault
+                    .as_ref()
+                    .map_or(Ok(None), |v| v.config_layer("user"))
+                    .and_then(|layer| helios_gui::thumbnails::cache_limit(layer.as_deref()))
+                    .unwrap_or_else(|e| {
+                        warn(&format!("the user's settings: {e}"));
+                        helios_thumbs::DEFAULT_LIMIT
+                    });
+                helios_gui::thumbnails::open_cache(file, limit)
+                    .map_err(|e| warn(&e))
+                    .ok()
+            }),
+    );
     let ran = builder
         .run_native("helios-gui", options, move |mut shell, cc| {
             start::mark("window open, application built (plugins, fonts)");

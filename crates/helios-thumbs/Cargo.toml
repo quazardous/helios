@@ -1,0 +1,23 @@
+[package]
+name = "helios-thumbs"
+description = "Helios thumbnails: the fast first read of a file's embedded preview, straight to 8-bit sRGB, the on-disk thumbnail cache, and the pool that fills it"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+helios-load.workspace = true
+blake3.workspace = true
+# LGPL-2.1, compatible with GPL-3.0-or-later: the fallback for raws whose
+# previews are not JPEG streams.
+rawler = { version = "0.8", default-features = false }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "tiff"] }
+# MIT OR Apache-2.0: a JPEG decoder with DCT scaling (1/2, 1/4, 1/8), so a
+# large preview is decoded at a fraction of its size.
+jpeg-decoder = { version = "0.3", default-features = false }
+# MIT OR Unlicense, already in the tree: finding embedded JPEG streams.
+memchr = "2"
+
+[lints]
+workspace = true

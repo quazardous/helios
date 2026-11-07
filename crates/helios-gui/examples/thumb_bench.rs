@@ -3,18 +3,23 @@
 //!
 //! Two parts, each a process of its own so peak memory is its own:
 //!
-//! - `--part grid --n <N>`: a library of N images made by repeating the raw
-//!   corpus (entries that refer to its files: nothing is copied), shown in
-//!   the Library panel of a headless shell, with the thumbnails read as
-//!   `helios-gui` reads them (one thread, every image in order, its
-//!   embedded preview scaled down). Measured: the time to the first
-//!   screen of thumbnails, the frame times while the grid scrolls, the
-//!   previews read per second, peak RSS and the thumbnails' textures.
+//! - `--part grid --n <N> [--start cold|warm]`: a library of N images made
+//!   by repeating the raw corpus (entries that refer to its files: nothing
+//!   is copied), shown in the Library panel of a headless shell, with the
+//!   thumbnails read as `helios-gui` reads them (`helios_gui::thumbnails`:
+//!   the thumbnail cache, a pool of threads, the cells in view first).
+//!   A cold start empties the cache first (`<out>/thumb-cache`); a warm
+//!   one fills it first with every image's entry, as after a first run.
+//!   Measured: the time to the first screen of thumbnails, the frame
+//!   times while the grid scrolls, the thumbnails read per second, peak
+//!   RSS and the thumbnails' textures.
 //! - `--part decode`: per corpus raw, the cost of its embedded preview
-//!   (`helios_load::preview`, what the library reads, and `glance`, what
-//!   the import grid reads), the size of a 256 px JPEG of it (a disk
-//!   cache's entry), and the cost of a 256 px render of its edit through
-//!   the workspace's network (`head_render::render`).
+//!   (`helios_load::preview`, what the library read before the cache, and
+//!   `glance`, what the import grid reads), the fast read of the cache
+//!   (`helios_thumbs::read`: the smallest embedded JPEG at least 256 px,
+//!   DCT-scaled, 8-bit) and a cache hit, the size of a 256 px cache entry,
+//!   and the cost of a 256 px render of its edit through the workspace's
+//!   network (`head_render::render`).
 //!
 //! Each result is a JSON line appended to `<out>/thumb-bench.jsonl`.
 //!
@@ -23,17 +28,16 @@
 //!     --corpus <dir> --out <dir> --part grid --n 10000
 //! ```
 
-use std::collections::HashSet;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use egui::{Event, Modifiers, MouseWheelSource, MouseWheelUnit, TouchPhase, vec2};
 use helios_gui::library::Entry;
 use helios_gui::{Shell, headless, helios_panels};
 use helios_shell::commands::Origin;
+use helios_thumbs::{Key, SMALL, ThumbCache};
 use serde_json::{Value, json};
 
 /// The window the grid is drawn in.
@@ -48,6 +52,8 @@ struct Args {
     n: usize,
     frames: usize,
     renders: usize,
+    /// The grid's start: `cold` (an empty cache) or `warm` (filled).
+    start: String,
 }
 
 fn args() -> Result<Args, String> {
@@ -58,6 +64,7 @@ fn args() -> Result<Args, String> {
         n: 1000,
         frames: 240,
         renders: 6,
+        start: "cold".into(),
     };
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
@@ -69,6 +76,7 @@ fn args() -> Result<Args, String> {
             "--n" => a.n = value()?.parse().map_err(|e| format!("--n: {e}"))?,
             "--frames" => a.frames = value()?.parse().map_err(|e| format!("--frames: {e}"))?,
             "--renders" => a.renders = value()?.parse().map_err(|e| format!("--renders: {e}"))?,
+            "--start" => a.start = value()?,
             other => return Err(format!("unknown argument {other}")),
         }
     }
@@ -92,8 +100,14 @@ fn main() {
         std::process::exit(1);
     }
     let lines = match a.part.as_str() {
-        "grid" => vec![grid(&files, a.n, a.frames)],
-        "decode" => decode(&files, a.renders),
+        "grid" => vec![grid(
+            &files,
+            a.n,
+            a.frames,
+            &a.out.join("thumb-cache"),
+            &a.start,
+        )],
+        "decode" => decode(&files, a.renders, &a.out.join("thumb-cache-decode")),
         other => {
             eprintln!("thumb_bench: unknown part {other}");
             std::process::exit(2);
@@ -157,6 +171,15 @@ fn rss() -> (u64, u64) {
     (field("VmRSS:"), field("VmHWM:"))
 }
 
+/// How many images of the library have their thumbnail (or placeholder).
+fn shown(h: &egui_kittest::Harness<'_, Shell>) -> usize {
+    let lib = h.state().library();
+    lib.entries
+        .iter()
+        .filter(|e| lib.has_thumbnail(&e.id))
+        .count()
+}
+
 fn ms(d: Duration) -> f64 {
     (d.as_secs_f64() * 1e6).round() / 1e3
 }
@@ -183,8 +206,37 @@ fn stats(mut v: Vec<f64>) -> Value {
     })
 }
 
+/// The cache for the grid: emptied for a cold start, filled with every
+/// image's entry (its file's fast read, written once per entry) for a warm
+/// one.
+fn grid_cache(files: &[PathBuf], n: usize, dir: &Path, warm: bool) -> Arc<ThumbCache> {
+    let _ = std::fs::remove_dir_all(dir);
+    let cache = Arc::new(ThumbCache::open(dir, u64::MAX).expect("the thumbnail cache"));
+    if warm {
+        let jpegs: Vec<Option<Vec<u8>>> = files
+            .iter()
+            .map(|f| {
+                let rgb = helios_thumbs::read::read(f, SMALL).ok().flatten()?;
+                let key = Key::preview("probe");
+                cache.put(&key, SMALL, &rgb).ok()?;
+                std::fs::read(cache.dir().join(cache.file_of(&key, SMALL))).ok()
+            })
+            .collect();
+        for i in 0..n {
+            if let Some(jpeg) = &jpegs[i % files.len()] {
+                let _ = cache.put_jpeg(&Key::preview(format!("{i:016x}")), SMALL, jpeg);
+            }
+        }
+    }
+    cache
+}
+
 /// The library grid with N images.
-fn grid(files: &[PathBuf], n: usize, frames: usize) -> Value {
+fn grid(files: &[PathBuf], n: usize, frames: usize, cache_dir: &Path, start_kind: &str) -> Value {
+    let warm = start_kind == "warm";
+    let fill = Instant::now();
+    let cache = grid_cache(files, n, cache_dir, warm);
+    let filled = fill.elapsed();
     let start = Instant::now();
     let entries: Vec<Entry> = (0..n)
         .map(|i| {
@@ -205,35 +257,13 @@ fn grid(files: &[PathBuf], n: usize, frames: usize) -> Value {
     shell.set_library(entries);
     let set = start.elapsed().saturating_sub(built);
 
-    // The reader, as helios-gui's: every image in the library's order,
-    // its embedded preview scaled down on this thread.
-    let sink = shell.library_thumbnails();
-    let stop = Arc::new(AtomicBool::new(false));
-    let read = Arc::new(AtomicUsize::new(0));
-    // The images whose file gives no preview: their cells stay empty, so
-    // the first screen does not wait for them.
-    let none: Arc<Mutex<HashSet<String>>> = Arc::default();
-    let reader = {
-        let (stop, read, none) = (stop.clone(), read.clone(), none.clone());
-        let files: Vec<PathBuf> = files.to_vec();
-        std::thread::spawn(move || {
-            for i in 0..n {
-                if stop.load(Ordering::Relaxed) {
-                    return;
-                }
-                let path = &files[i % files.len()];
-                if let Ok(Some(image)) = helios_load::preview(path) {
-                    let small = helios_gui::library::small(&image);
-                    if sink.send((format!("{i:016x}"), small)).is_err() {
-                        return;
-                    }
-                } else {
-                    none.lock().expect("the set").insert(format!("{i:016x}"));
-                }
-                read.fetch_add(1, Ordering::Relaxed);
-            }
-        })
-    };
+    // The reader, as helios-gui's: the cache first, a pool of threads
+    // reading the misses, the cells in view first; a file with no preview
+    // shows its placeholder.
+    let paths: Vec<(String, PathBuf)> = (0..n)
+        .map(|i| (format!("{i:016x}"), files[i % files.len()].clone()))
+        .collect();
+    let loader = helios_gui::thumbnails::start(&shell, Some(cache.clone()), &paths, |_| {});
 
     let mut h = headless::harness(shell, vec2(WINDOW[0], WINDOW[1]));
     h.state_mut()
@@ -252,11 +282,7 @@ fn grid(files: &[PathBuf], n: usize, frames: usize) -> Value {
         if !in_view.is_empty() {
             first_frame.get_or_insert(start.elapsed());
             cells = in_view.len();
-            let none = none.lock().expect("the set");
-            if in_view
-                .iter()
-                .all(|id| lib.has_thumbnail(id) || none.contains(id))
-            {
+            if in_view.iter().all(|id| lib.has_thumbnail(id)) {
                 first_screen = Some(start.elapsed());
                 break;
             }
@@ -264,7 +290,7 @@ fn grid(files: &[PathBuf], n: usize, frames: usize) -> Value {
         drop(lib);
         std::thread::sleep(Duration::from_millis(2));
     }
-    let read_at_first_screen = read.load(Ordering::Relaxed);
+    let read_at_first_screen = shown(&h);
     // The picture once, so the renderer holds the textures uploaded.
     let t = Instant::now();
     let rendered = h.render().is_ok();
@@ -305,11 +331,11 @@ fn grid(files: &[PathBuf], n: usize, frames: usize) -> Value {
     }
     let scrolled = scroll_start.elapsed();
     let reading = start.elapsed();
-    stop.store(true, Ordering::Relaxed);
-    let previews = read.load(Ordering::Relaxed);
-    let _ = reader.join();
+    let (queued, _) = loader.queued();
+    drop(loader);
     // The last thumbnails sent taken in, as the window would.
     h.step();
+    let previews = n - queued;
     let (textures, texture_bytes) = h.state().library().thumbnail_textures();
     let all_textures: u64 = h
         .ctx
@@ -324,6 +350,10 @@ fn grid(files: &[PathBuf], n: usize, frames: usize) -> Value {
     json!({
         "part": "grid",
         "n": n,
+        "start": start_kind,
+        "cache_fill_ms": warm.then(|| ms(filled)),
+        "cache_bytes": cache.usage().0,
+        "threads": helios_thumbs::workers(),
         "corpus_files": files.len(),
         "window": WINDOW,
         "shell_ms": ms(built),
@@ -359,12 +389,15 @@ fn grid(files: &[PathBuf], n: usize, frames: usize) -> Value {
 
 /// Per corpus raw: its previews' costs, a cache entry's size, and a
 /// render of its edit at 256 px (the first `renders` raws).
-fn decode(files: &[PathBuf], renders: usize) -> Vec<Value> {
+fn decode(files: &[PathBuf], renders: usize, cache_dir: &Path) -> Vec<Value> {
     use helios_core::{Bus, Engine};
     use helios_vault::{MemoryStore, Vault};
     let mut lines = Vec::new();
     let (mut preview_ms, mut glance_ms, mut jpeg_bytes, mut render_ms) =
         (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    let (mut fast_ms, mut hit_ms, mut entry_bytes) = (Vec::new(), Vec::new(), Vec::new());
+    let _ = std::fs::remove_dir_all(cache_dir);
+    let cache = ThumbCache::open(cache_dir, u64::MAX).expect("the thumbnail cache");
     let vault = Vault::new(MemoryStore::default());
     let engine = Engine::new(Arc::new(Bus::new()));
     let bundle = helios_gui::templates::find("helios.develop-preview").expect("the template");
@@ -409,6 +442,32 @@ fn decode(files: &[PathBuf], renders: usize) -> Vec<Value> {
         if let Some(j) = jpeg {
             jpeg_bytes.push(j as f64);
         }
+        // The cache's fast read (a miss: the file in the page cache), then
+        // a hit.
+        let _ = helios_thumbs::read::read(path, SMALL);
+        let t = Instant::now();
+        let fast = helios_thumbs::read::read(path, SMALL).ok().flatten();
+        let f = t.elapsed();
+        let key = Key::preview(format!("{i:016x}"));
+        let (mut hit, mut entry) = (None, None);
+        if let Some(rgb) = &fast {
+            fast_ms.push(ms(f));
+            if cache.put(&key, SMALL, rgb).is_ok() {
+                entry = std::fs::metadata(cache.dir().join(cache.file_of(&key, SMALL)))
+                    .ok()
+                    .map(|m| m.len());
+                let t = Instant::now();
+                let got = cache.get(&key, SMALL);
+                let d = t.elapsed();
+                if got.is_some() {
+                    hit_ms.push(ms(d));
+                    hit = Some(ms(d));
+                }
+            }
+        }
+        if let Some(e) = entry {
+            entry_bytes.push(e as f64);
+        }
         let mut render = None;
         if i < renders {
             let t = Instant::now();
@@ -435,6 +494,10 @@ fn decode(files: &[PathBuf], renders: usize) -> Vec<Value> {
             "glance_size": glance_size,
             "glance_error": glance.err(),
             "jpeg256_bytes": jpeg,
+            "fast_ms": fast.as_ref().map(|_| ms(f)),
+            "fast_size": fast.as_ref().map(|r| [r.width, r.height]),
+            "cache_hit_ms": hit,
+            "cache_entry_bytes": entry,
             "render256": render,
         }));
     }
@@ -447,6 +510,9 @@ fn decode(files: &[PathBuf], renders: usize) -> Vec<Value> {
         "glance_ms": stats(glance_ms),
         "jpeg256_bytes": stats(jpeg_bytes),
         "cache_bytes_per_10000": (jpeg_mean * 10_000.0).round(),
+        "fast_ms": stats(fast_ms),
+        "cache_hit_ms": stats(hit_ms),
+        "cache_entry_bytes": stats(entry_bytes),
         "render256_ms": stats(render_ms),
         "rss_peak_bytes": rss_peak,
     }));

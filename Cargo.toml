@@ -27,6 +27,7 @@ helios-photo = { path = "crates/helios-photo" }
 helios-export = { path = "crates/helios-export" }
 helios-decision = { path = "crates/helios-decision" }
 helios-load = { path = "crates/helios-load" }
+helios-thumbs = { path = "crates/helios-thumbs" }
 helios-xmp = { path = "crates/helios-xmp" }
 helios-parity = { path = "crates/helios-parity" }
 helios-resolve = { path = "crates/helios-resolve" }
@@ -123,6 +124,17 @@ opt-level = 3
 
 [profile.dev.package.jxl-oxide]
 opt-level = 3
+
+# Thumbnails: the JPEG decoders, the scaling and the encoder of the cache
+# (`helios-thumbs`), whose tests time their reads.
+[profile.dev.package.jpeg-decoder]
+opt-level = 3
+
+[profile.dev.package.zune-jpeg]
+opt-level = 3
+
+[profile.dev.package.helios-thumbs]
+opt-level = 2
 
 # The engine samples, scales and caches every pixel a test renders, and the
 # test kit makes the noise the contract tests read: unoptimized, they took

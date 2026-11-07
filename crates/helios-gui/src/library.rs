@@ -78,8 +78,22 @@ pub const LABELS: [&str; 5] = ["red", "yellow", "green", "blue", "purple"];
 /// without waiting for an input, and a burst of them costs one repaint.
 #[derive(Clone)]
 pub struct ThumbnailSink {
-    sender: Sender<(String, Image)>,
+    sender: Sender<(String, Arrival)>,
     wake: Arc<Wake>,
+}
+
+/// What is told the grid's cells in view (see [`Library::set_on_view`]).
+type OnView = dyn Fn(&[String]);
+
+/// A thumbnail on its way to the window.
+enum Arrival {
+    /// In the working space, no larger than [`THUMB`] (see [`small`]).
+    Linear(Image),
+    /// 8-bit sRGB, as the thumbnail cache holds it.
+    Srgb(helios_thumbs::Rgb8),
+    /// The file has no readable preview (or no copy at hand and nothing
+    /// cached): its cell shows the placeholder.
+    NoPreview,
 }
 
 /// What a sink needs to wake the window.
@@ -99,7 +113,29 @@ impl ThumbnailSink {
     /// # Errors
     /// The thumbnail back when the library no longer exists.
     pub fn send(&self, thumb: (String, Image)) -> Result<(), SendError<(String, Image)>> {
-        self.sender.send(thumb)?;
+        let (id, image) = thumb;
+        self.arrive(id, Arrival::Linear(image))
+            .map_err(|SendError((id, a))| match a {
+                Arrival::Linear(image) => SendError((id, image)),
+                _ => unreachable!("sent as an image"),
+            })
+    }
+
+    /// Sends an 8-bit sRGB thumbnail (from the thumbnail cache or its
+    /// fast read); `false` once the library is gone.
+    pub fn send_srgb(&self, id: String, thumb: helios_thumbs::Rgb8) -> bool {
+        self.arrive(id, Arrival::Srgb(thumb)).is_ok()
+    }
+
+    /// Says an image has no thumbnail to show: its cell shows the
+    /// placeholder (its file's type, "no preview"); `false` once the
+    /// library is gone.
+    pub fn send_no_preview(&self, id: String) -> bool {
+        self.arrive(id, Arrival::NoPreview).is_ok()
+    }
+
+    fn arrive(&self, id: String, arrival: Arrival) -> Result<(), SendError<(String, Arrival)>> {
+        self.sender.send((id, arrival))?;
         if !self.wake.pending.swap(true, Ordering::SeqCst)
             && let Some(ctx) = self.wake.ctx.get()
         {
@@ -490,11 +526,16 @@ pub struct Library {
     /// An image opened (Enter, a double click), for the host.
     activated: Option<String>,
     sink: ThumbnailSink,
-    receiver: Receiver<(String, Image)>,
+    receiver: Receiver<(String, Arrival)>,
     textures: HashMap<String, TextureHandle>,
+    /// The placeholders' textures, by file type (`CR2`, `?`).
+    placeholders: HashMap<String, TextureHandle>,
     /// The grid's cells in view at its last pass (the thumbnail benchmark
     /// reads them: `examples/thumb_bench.rs`).
     in_view: RefCell<Vec<String>>,
+    /// Told the cells in view when they change: the thumbnail pool reads
+    /// those first.
+    on_view: Option<Box<OnView>>,
     heads: Heads,
     /// Where each image's file is, by id: what a copy of images names.
     files: HashMap<String, PathBuf>,
@@ -537,7 +578,9 @@ impl Default for Library {
             },
             receiver,
             textures: HashMap::new(),
+            placeholders: HashMap::new(),
             in_view: RefCell::default(),
+            on_view: None,
             heads: Heads::default(),
             files: HashMap::new(),
             volumes: HashMap::new(),
@@ -563,6 +606,11 @@ pub fn small(image: &Image) -> Image {
         },
         scale,
     )
+}
+
+/// An 8-bit sRGB thumbnail as a picture for a texture.
+pub fn rgb_image(rgb: &helios_thumbs::Rgb8) -> ColorImage {
+    ColorImage::from_rgb([rgb.width as usize, rgb.height as usize], &rgb.pixels)
 }
 
 /// An image in the working space (linear Rec.2020) as an sRGB picture no
@@ -708,6 +756,8 @@ struct Thumbs<'a> {
     textures: &'a HashMap<String, TextureHandle>,
     /// Where the cells the grid builds are recorded, when it does.
     in_view: Option<&'a RefCell<Vec<String>>>,
+    /// Told when the cells in view change.
+    on_view: Option<&'a OnView>,
 }
 
 impl ThumbSource<String> for Thumbs<'_> {
@@ -726,7 +776,13 @@ impl ThumbSource<String> for Thumbs<'_> {
 
     fn wanted(&self, keys: &[String], _size: u32) {
         if let Some(in_view) = self.in_view {
-            *in_view.borrow_mut() = keys.to_vec();
+            let mut in_view = in_view.borrow_mut();
+            if in_view.as_slice() != keys {
+                *in_view = keys.to_vec();
+                if let Some(on_view) = self.on_view {
+                    on_view(keys);
+                }
+            }
         }
     }
 }
@@ -1032,6 +1088,30 @@ impl Library {
     /// Where thumbnails are sent, by image id, from any thread.
     pub fn thumbnails(&self) -> ThumbnailSink {
         self.sink.clone()
+    }
+
+    /// Told the grid's cells in view each time they change (the
+    /// thumbnail pool reads those first).
+    pub fn set_on_view(&mut self, on_view: impl Fn(&[String]) + 'static) {
+        self.on_view = Some(Box::new(on_view));
+    }
+
+    /// An image's file type, for its placeholder: its file's extension,
+    /// upper case (`?` when unknown).
+    fn file_type(&self, id: &str) -> String {
+        let name = self.index.get(id).map(|&i| self.entries[i].name.as_str());
+        let from_file = self.files.get(id).and_then(|p| p.extension());
+        from_file
+            .or_else(|| name.and_then(|n| Path::new(n).extension()))
+            .and_then(|e| e.to_str())
+            .map_or_else(|| "?".to_string(), str::to_ascii_uppercase)
+    }
+
+    /// Whether this image's cell shows the placeholder (no preview).
+    pub fn has_placeholder(&self, id: &str) -> bool {
+        self.textures
+            .get(id)
+            .is_some_and(|t| self.placeholders.values().any(|p| p.id() == t.id()))
     }
 
     /// Where renders of images' head versions are sent, from any thread.
@@ -1505,10 +1585,31 @@ impl Library {
         // drain sets it again and wakes the window.
         wake.pending.store(false, Ordering::SeqCst);
         let mut any = false;
-        while let Ok((id, image)) = self.receiver.try_recv() {
+        while let Ok((id, arrival)) = self.receiver.try_recv() {
+            let picture = match arrival {
+                Arrival::Linear(image) => thumbnail(&image),
+                Arrival::Srgb(rgb) => rgb_image(&rgb),
+                Arrival::NoPreview => {
+                    let kind = self.file_type(&id);
+                    let texture = self
+                        .placeholders
+                        .entry(kind.clone())
+                        .or_insert_with(|| {
+                            ui.ctx().load_texture(
+                                format!("helios.library.placeholder.{kind}"),
+                                rgb_image(&helios_thumbs::placeholder(&kind)),
+                                egui::TextureOptions::LINEAR,
+                            )
+                        })
+                        .clone();
+                    self.textures.insert(id, texture);
+                    any = true;
+                    continue;
+                }
+            };
             let texture = ui.ctx().load_texture(
                 format!("helios.library.{id}"),
-                thumbnail(&image),
+                picture,
                 egui::TextureOptions::LINEAR,
             );
             self.textures.insert(id, texture);
@@ -1656,6 +1757,7 @@ impl Library {
             let thumbs = Thumbs {
                 textures: &self.textures,
                 in_view: Some(&self.in_view),
+                on_view: self.on_view.as_deref(),
             };
             let mut grid = ThumbGrid::new("grid").label(label).keymap(keymap);
             if let Some(app) = &self.app {
@@ -1738,6 +1840,7 @@ impl Library {
             let thumbs = Thumbs {
                 textures: &self.textures,
                 in_view: None,
+                on_view: None,
             };
             let mut strip = ThumbGrid::filmstrip("strip").keymap(keymap).height(height);
             if let Some(app) = &self.app {
@@ -1802,6 +1905,7 @@ impl Library {
                 thumbs: Thumbs {
                     textures: &self.textures,
                     in_view: None,
+                    on_view: None,
                 },
             };
             CompareView::new("helios.compare")
