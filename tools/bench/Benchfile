@@ -466,7 +466,7 @@ timeout = "30m"
 about = "egui-pop's gate: fmt, clippy, the workspace tests with the doctests, the docs build, and the docs site's links"
 checkouts = ["egui-pop"]
 cores = 5
-memory = "8g"
+memory = "4g"
 cwd = "/work/${src:-egui-pop}"
 command = """mkdir -p /tmp/w/egui-pop && cp -r --preserve=mode . /tmp/w/egui-pop/ && cd /tmp/w/egui-pop && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/egui-pop ] || { rm -rf /target/* && echo /tmp/w/egui-pop > /target/.built-at; }; } && cargo fmt --all --check \
  && cargo clippy --workspace --all-targets --locked -- -D warnings \
@@ -474,11 +474,12 @@ command = """mkdir -p /tmp/w/egui-pop && cp -r --preserve=mode . /tmp/w/egui-pop
  && cargo test --workspace --locked --doc \
  && RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps --locked \
  && python3 tools/book/summary.py && mdbook build && python3 tools/book/links.py target/book"""
-# parallelism capped: the gate peaked at 10 GB with five rustc and linker
-# processes and every test thread rendering at once
-env = { CARGO_NET_OFFLINE = "true", CARGO_BUILD_JOBS = "3", RUST_TEST_THREADS = "3" }
+# parallelism capped: the peak is the links, one rust-lld of a test
+# binary at about 1.5 GB each (docs/bench.md, "Capacity and the queue");
+# two cargo jobs keep it to two links at once
+env = { CARGO_NET_OFFLINE = "true", CARGO_BUILD_JOBS = "2", RUST_TEST_THREADS = "3" }
 mounts = { "egui-pop-target/${egui_pop:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
-timeout = "1h"
+timeout = "75m"
 
 # egui-pop's narrowest test run, for a fix loop: one crate (`crate=`), one
 # test target (`test=`, else the crate's lib and every test target), and a
@@ -488,11 +489,11 @@ timeout = "1h"
 about = "egui-pop: one crate's tests, one test target, a name filter (a fix loop's run)"
 checkouts = ["egui-pop"]
 cores = 4
-memory = "5g"
+memory = "4g"
 cwd = "/work/${src:-egui-pop}"
 command = """mkdir -p /tmp/w/egui-pop && cp -r --preserve=mode . /tmp/w/egui-pop/ && cd /tmp/w/egui-pop && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/egui-pop ] || { rm -rf /target/* && echo /tmp/w/egui-pop > /target/.built-at; }; } && \
 cargo nextest run --locked --fail-fast -p ${crate} ${test:+--test ${test}} ${filter:-}"""
-env = { CARGO_NET_OFFLINE = "true", CARGO_BUILD_JOBS = "3", RUST_TEST_THREADS = "3" }
+env = { CARGO_NET_OFFLINE = "true", CARGO_BUILD_JOBS = "2", RUST_TEST_THREADS = "3" }
 mounts = { "egui-pop-target/${egui_pop:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
 timeout = "30m"
 
@@ -519,13 +520,13 @@ timeout = "30m"
 about = "egui-pop's gallery snapshots regenerated, every PNG returned"
 checkouts = ["egui-pop"]
 cores = 5
-memory = "7g"
+memory = "4g"
 cwd = "/work/${src:-egui-pop}"
 command = """mkdir -p /tmp/w/egui-pop && cp -r --preserve=mode . /tmp/w/egui-pop/ && cd /tmp/w/egui-pop && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/egui-pop ] || { rm -rf /target/* && echo /tmp/w/egui-pop > /target/.built-at; }; } && \
 UPDATE_SNAPSHOTS=1 cargo test --locked -p egui-pop-gallery --test gallery --test rerun_like; rc=$?; \
 mkdir -p /out/snapshots && find crates/egui-pop-gallery/tests/snapshots -name '*.png' ! -name '*.new.png' ! -name '*.old.png' ! -name '*.diff.png' -exec cp -t /out/snapshots/ {} + ; \
 exit $rc"""
-env = { CARGO_NET_OFFLINE = "true" }
+env = { CARGO_NET_OFFLINE = "true", CARGO_BUILD_JOBS = "2" }
 mounts = { "egui-pop-target/${egui_pop:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
 timeout = "1h"
 

@@ -225,6 +225,35 @@ rebase or a new push is replaced when the job is submitted again under
 its name (above), or cancelled with `ssh … cancel <id>`, rather than left
 to run.
 
+A job's `memory =` is what the queue counts, so it follows the measured
+peak plus about 20 %; the container's hard limit is 2 GB above it. The
+`memory peak` line of a job's log understates the peak (it missed the
+links below); the figures here are the job cgroup's `memory.peak` (page
+cache included) and the summed RSS of the top processes sampled every
+2 s. What peaks is linking: each `rust-lld` of a test binary holds 1 to
+1.5 GB, while rustc stays under 0.6 GB and a gallery test process under
+1 GB. `CARGO_BUILD_JOBS` bounds how many link at once. Rust 1.95 already
+links with lld on x86_64 Linux. Debug info stays at line tables (it is
+already off for dependencies), since dropping it would rebuild every
+target for little gain.
+
+egui-pop's jobs, measured on 2026-11-07 (egui-pop `main`):
+
+| Job | Before: reserved | Before: peak | After: settings | After: reserved |
+| --- | --- | --- | --- | --- |
+| `egui-pop-test` (gallery, one filter) | 5g | cgroup 5.0 GB (the limit, 0.2 GB swapped), 4.5 GB RSS in three links at once; 270 to 360 s | 2 build jobs | 4g |
+| `egui-pop-snapshots` | 7g | cgroup 3.1 GB, 2.8 GB RSS in two links; 453 s (median 472 s) | 2 build jobs (at most two links already) | 4g |
+| `egui-pop-gate` | 8g | log line 2.0 to 2.5 GB over 23 runs (understated, see above); 23 to 44 min | 2 build jobs, timeout 75m | 4g |
+
+The "before" peaks were measured with the build jobs at 3 for the test and
+the gate, and at the default 5 for the snapshots. Two build jobs bound a
+job to two links (about 3 GB) plus rustc, about 3.5 GB. The new
+reservations have not been re-measured yet: if a job's `memory.peak` goes
+past its reservation, raise it again. The hard limit (6 GB) is above even
+the three-link peak. At 4g, `egui-pop-snapshots` and `egui-pop-test`
+(8 GB, 9 threads) run side by side, and so do either of them and a Helios
+`test-affected`.
+
 #### Where the time went, 2026-11-07
 
 The box's jobs that day, from `target/bench-remote/<id>/conditions.json`
