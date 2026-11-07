@@ -13,6 +13,7 @@ pub mod edit_snapshots;
 pub mod engine_source;
 pub mod export;
 pub mod graph;
+pub mod head_render;
 pub mod history;
 pub mod host;
 pub mod i18n;

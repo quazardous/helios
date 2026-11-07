@@ -427,6 +427,14 @@ impl<S: Store> Persist<S> {
         }
     }
 
+    /// Closes the image being edited, its last committed step saved:
+    /// what the viewport shows next (a raw's preview drawn while the raw
+    /// is made ready) is not saved into its edit.
+    pub fn close_image(&mut self, shell: &mut Shell, now: f64) {
+        self.save_edit(shell, now);
+        self.editing = None;
+    }
+
     /// The edit being saved, if an image is open.
     pub fn session(&self) -> Option<&EditSession> {
         self.editing.as_ref().map(|e| &e.session)
@@ -577,6 +585,10 @@ impl<S: Store> Persist<S> {
             e.session.save(&self.vault, current, &label, &origin, at)
         };
         e.unsaved = saved.is_err();
+        if saved.is_ok() {
+            // Renders of the image's head version are made again.
+            shell.library_mut().edit_changed(&e.session.image().hex());
+        }
         if let Err(err) = saved {
             shell.notify(
                 Level::Error,

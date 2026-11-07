@@ -45,6 +45,8 @@ use egui_pop::views::library::{
     Marks, Signal, Stack, Thumb, ThumbGrid, ThumbSource, change,
 };
 use helios_core::{Image, Message, Region};
+
+use crate::head_render::HeadRender;
 pub use helios_vault::fields::Op;
 use helios_vault::fields::{LABELS as LABELS_FIELD, PICKED, Query, RATING, REJECTED, TAGS};
 use serde_json::Value;
@@ -103,6 +105,72 @@ impl ThumbnailSink {
             ctx.request_repaint();
         }
         Ok(())
+    }
+}
+
+/// Where renders of images' head versions are sent, from any thread
+/// (see [`crate::head_render`]): each wakes the window as a thumbnail
+/// does.
+#[derive(Clone)]
+pub struct HeadSink {
+    sender: Sender<HeadRender>,
+    wake: Arc<Wake>,
+}
+
+impl HeadSink {
+    /// Sends a render; ignored once the library is gone.
+    pub fn send(&self, render: HeadRender) {
+        if self.sender.send(render).is_ok()
+            && !self.wake.pending.swap(true, Ordering::SeqCst)
+            && let Some(ctx) = self.wake.ctx.get()
+        {
+            ctx.request_repaint();
+        }
+    }
+}
+
+/// A render of an image's head version, as a texture.
+struct HeadTexture {
+    /// The version it shows (hex); none for an image never edited.
+    version: Option<String>,
+    /// The longest side it was asked at.
+    size: u32,
+    texture: TextureHandle,
+    /// The edit or the network changed since: rendered again, drawn
+    /// until the new one lands.
+    stale: bool,
+}
+
+/// The renders of images' head versions the Compare panel draws, in
+/// place of a raw's embedded preview once each lands.
+struct Heads {
+    renders: HashMap<String, HeadTexture>,
+    /// Renders asked and not back yet, by image: the generation asked at.
+    pending: HashMap<String, u64>,
+    /// Each image's generation, raised when its edit changes: a render
+    /// asked before is stale when it lands.
+    generations: HashMap<String, u64>,
+    /// Images whose render failed, not asked again until their edit or
+    /// the network changes.
+    failed: HashSet<String>,
+    /// What the host is to render: (image, longest side).
+    wanted: Vec<(String, u32)>,
+    sender: Sender<HeadRender>,
+    receiver: Receiver<HeadRender>,
+}
+
+impl Default for Heads {
+    fn default() -> Self {
+        let (sender, receiver) = channel();
+        Heads {
+            renders: HashMap::new(),
+            pending: HashMap::new(),
+            generations: HashMap::new(),
+            failed: HashSet::new(),
+            wanted: Vec::new(),
+            sender,
+            receiver,
+        }
     }
 }
 
@@ -390,6 +458,7 @@ pub struct Library {
     sink: ThumbnailSink,
     receiver: Receiver<(String, Image)>,
     textures: HashMap<String, TextureHandle>,
+    heads: Heads,
     /// Where each image's file is, by id: what a copy of images names.
     files: HashMap<String, PathBuf>,
 }
@@ -429,6 +498,7 @@ impl Default for Library {
             },
             receiver,
             textures: HashMap::new(),
+            heads: Heads::default(),
             files: HashMap::new(),
         }
     }
@@ -457,8 +527,13 @@ pub fn small(image: &Image) -> Image {
 /// An image in the working space (linear Rec.2020) as an sRGB picture no
 /// larger than [`THUMB`].
 pub fn thumbnail(image: &Image) -> ColorImage {
+    srgb(&small(image))
+}
+
+/// An image in the working space (linear Rec.2020) as an sRGB picture,
+/// at its size.
+pub fn srgb(small: &Image) -> ColorImage {
     use helios_photo::color;
-    let small = small(image);
     let (w, h) = (small.region().width, small.region().height);
     let to_srgb = color::mul(
         &color::inverse(&color::SRGB_TO_XYZ).expect("invertible primaries"),
@@ -535,6 +610,28 @@ impl LibraryItems<String> for Items<'_> {
 
     fn revision(&self) -> u64 {
         self.revision
+    }
+}
+
+/// What the Compare panel draws: an image's head version rendered once
+/// it is, its thumbnail (a raw's embedded preview) until then.
+struct CompareThumbs<'a> {
+    heads: &'a HashMap<String, HeadTexture>,
+    thumbs: Thumbs<'a>,
+}
+
+impl ThumbSource<String> for CompareThumbs<'_> {
+    fn thumb(&self, key: &String, size: u32) -> Thumb {
+        match self.heads.get(key) {
+            Some(h) => {
+                let [w, ht] = h.texture.size();
+                Thumb::Ready {
+                    texture: h.texture.id(),
+                    size: [w as u32, ht as u32],
+                }
+            }
+            None => self.thumbs.thumb(key, size),
+        }
     }
 }
 
@@ -741,6 +838,113 @@ impl Library {
     /// Where thumbnails are sent, by image id, from any thread.
     pub fn thumbnails(&self) -> ThumbnailSink {
         self.sink.clone()
+    }
+
+    /// Where renders of images' head versions are sent, from any thread.
+    pub fn head_sink(&self) -> HeadSink {
+        HeadSink {
+            sender: self.heads.sender.clone(),
+            wake: self.sink.wake.clone(),
+        }
+    }
+
+    /// The renders of head versions the library wants since the last
+    /// call: (image, longest side), for the host to run off the window's
+    /// thread ([`crate::head_render::spawn`]) and send to
+    /// [`Library::head_sink`].
+    pub fn take_head_requests(&mut self) -> Vec<(String, u32)> {
+        std::mem::take(&mut self.heads.wanted)
+    }
+
+    /// Asks a render of each raw among `keys` with no current one at
+    /// `size` (its longest side, kept between 256 and 4096), unless one
+    /// is on its way. A picture is drawn from its thumbnail, as before.
+    pub fn ask_heads(&mut self, keys: &[String], size: u32) {
+        let size = size.clamp(256, 4096);
+        for k in keys {
+            let raw = self.entry(k).is_some_and(|e| {
+                let path = Path::new(&e.name);
+                path.extension().is_some() && helios_load::Kind::of(path) == helios_load::Kind::Raw
+            });
+            let h = &mut self.heads;
+            if !raw || h.pending.contains_key(k) || h.failed.contains(k) {
+                continue;
+            }
+            let current = h.renders.get(k).is_some_and(|r| !r.stale && r.size >= size);
+            if current {
+                continue;
+            }
+            let generation = h.generations.get(k).copied().unwrap_or(0);
+            h.pending.insert(k.clone(), generation);
+            h.wanted.push((k.clone(), size));
+        }
+    }
+
+    /// Takes the renders that landed; whether any did.
+    pub fn receive_heads(&mut self, ctx: &egui::Context) -> bool {
+        let mut any = false;
+        while let Ok(r) = self.heads.receiver.try_recv() {
+            any = true;
+            let asked = self.heads.pending.remove(&r.id);
+            let now = self.heads.generations.get(&r.id).copied().unwrap_or(0);
+            match r.image {
+                Ok(image) => {
+                    let texture = ctx.load_texture(
+                        format!("helios.library.head.{}", r.id),
+                        srgb(&image),
+                        egui::TextureOptions::LINEAR,
+                    );
+                    self.heads.renders.insert(
+                        r.id,
+                        HeadTexture {
+                            version: r.version,
+                            size: r.size,
+                            texture,
+                            stale: asked != Some(now),
+                        },
+                    );
+                }
+                Err(e) => {
+                    self.notes.push(e);
+                    self.heads.failed.insert(r.id);
+                }
+            }
+        }
+        any
+    }
+
+    /// The image's edit changed: its render is drawn until a new one of
+    /// the new version lands.
+    pub fn edit_changed(&mut self, id: &str) {
+        *self.heads.generations.entry(id.to_string()).or_default() += 1;
+        self.heads.failed.remove(id);
+        if let Some(r) = self.heads.renders.get_mut(id) {
+            r.stale = true;
+        }
+    }
+
+    /// The workspace's network changed: every render is made again.
+    pub fn network_changed(&mut self) {
+        let ids: Vec<String> = self
+            .heads
+            .renders
+            .keys()
+            .chain(self.heads.pending.keys())
+            .cloned()
+            .collect();
+        for id in ids {
+            self.edit_changed(&id);
+        }
+        self.heads.failed.clear();
+    }
+
+    /// The render of an image's head version the Compare panel draws:
+    /// the version it shows and its size, and whether it is stale.
+    pub fn head_render(&self, id: &str) -> Option<(Option<&str>, [usize; 2], bool)> {
+        self.heads
+            .renders
+            .get(id)
+            .map(|r| (r.version.as_deref(), r.texture.size(), r.stale))
     }
 
     /// Whether the thumbnail of this image has been received.
@@ -1100,6 +1304,7 @@ impl Library {
             self.textures.insert(id, texture);
             any = true;
         }
+        any |= self.receive_heads(ui.ctx());
         if any {
             ui.ctx().request_repaint();
         }
@@ -1368,9 +1573,17 @@ impl Library {
                 Some(Pane::new(k.clone(), self.entries[i].name.clone()))
             })
             .collect();
+        // Each raw drawn from its head version, rendered at about the
+        // size of a pane.
+        let pane = ui.available_size() * ui.ctx().pixels_per_point();
+        let side = pane.x / keys.len() as f32;
+        self.ask_heads(&keys, side.max(pane.y).ceil() as u32);
         let out = {
-            let thumbs = Thumbs {
-                textures: &self.textures,
+            let thumbs = CompareThumbs {
+                heads: &self.heads.renders,
+                thumbs: Thumbs {
+                    textures: &self.textures,
+                },
             };
             CompareView::new("helios.compare")
                 .synced(self.compare.synced)

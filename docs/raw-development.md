@@ -157,7 +157,7 @@ A first run with a 24-pixel alignment reach failed the RAF (its shift is
 
 ### B: raws through the raw chain by default
 
-Status (2026-11-07): steps 1 to 4 are done. The raw front is
+Status (2026-11-07): steps 1 to 4 and 6 are done. The raw front is
 `templates/composites/helios.raw-front@1.helios-composite.json`; a
 template's `image_sources` take a picture or a raw (see
 [templates.md](templates.md)); the built-in templates (at version 2) and
@@ -235,7 +235,14 @@ less, M a few days, L a week or more.
    and `Frame` gaining the orientation for darktable's masks. Rotating
    the mosaic at load time (with its filter pattern and per-position
    black levels) is the cheaper route, but gives no step to override.
-6. **A loupe from the raw chain** (M). The viewport opened from the
+6. **A loupe from the raw chain** (M). **Done (2026-11-07)**: the
+   Compare panel draws each raw from a render of its head version at the
+   pane's size (`crates/helios-gui/src/head_render.rs`, through the
+   viewport's engine on a thread of its own), the embedded preview until
+   it lands, kept per image and version and made again when the edit or
+   the network changes; an image opened from the library is made ready
+   off the window's thread, a raw's embedded preview drawn meanwhile.
+   The plan as written: the viewport opened from the
    library already renders the workspace's network (`main.rs:467`); the
    Compare panel (`crates/helios-gui/src/library.rs:1334`) draws
    thumbnails: give it a render of each image's head version at the
