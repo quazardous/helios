@@ -470,7 +470,8 @@ memory = "8g"
 cwd = "/work/${src:-egui-pop}"
 command = """mkdir -p /tmp/w/egui-pop && cp -r --preserve=mode . /tmp/w/egui-pop/ && cd /tmp/w/egui-pop && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/egui-pop ] || { rm -rf /target/* && echo /tmp/w/egui-pop > /target/.built-at; }; } && cargo fmt --all --check \
  && cargo clippy --workspace --all-targets --locked -- -D warnings \
- && cargo test --workspace --locked \
+ && cargo nextest run --workspace --locked --profile ci --fail-fast \
+ && cargo test --workspace --locked --doc \
  && RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps --locked \
  && python3 tools/book/summary.py && mdbook build && python3 tools/book/links.py target/book"""
 # parallelism capped: the gate peaked at 10 GB with five rustc and linker
@@ -481,8 +482,8 @@ timeout = "1h"
 
 # egui-pop's narrowest test run, for a fix loop: one crate (`crate=`), one
 # test target (`test=`, else the crate's lib and every test target), and a
-# name filter (`filter=`). Minutes, not the gate's twenty; the gate stays the
-# last run before a merge.
+# name filter (`filter=`). Under nextest as on CI (each test in a process of
+# its own), stopped at the first failure. Minutes, not the gate's twenty.
 [jobs.egui-pop-test]
 about = "egui-pop: one crate's tests, one test target, a name filter (a fix loop's run)"
 checkouts = ["egui-pop"]
@@ -490,7 +491,7 @@ cores = 4
 memory = "5g"
 cwd = "/work/${src:-egui-pop}"
 command = """mkdir -p /tmp/w/egui-pop && cp -r --preserve=mode . /tmp/w/egui-pop/ && cd /tmp/w/egui-pop && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/egui-pop ] || { rm -rf /target/* && echo /tmp/w/egui-pop > /target/.built-at; }; } && \
-cargo test --locked -p ${crate} ${test:+--test ${test}} -- ${filter:-}"""
+cargo nextest run --locked --fail-fast -p ${crate} ${test:+--test ${test}} ${filter:-}"""
 env = { CARGO_NET_OFFLINE = "true", CARGO_BUILD_JOBS = "3", RUST_TEST_THREADS = "3" }
 mounts = { "egui-pop-target/${egui_pop:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
 timeout = "30m"
