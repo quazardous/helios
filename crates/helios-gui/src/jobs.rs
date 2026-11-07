@@ -182,6 +182,9 @@ pub struct StatusLine {
     pub decisions_for_a_person: usize,
     /// The profile in use.
     pub profile: String,
+    /// The health check's worst finding needing attention, and how many
+    /// need it (`crate::shell::health`); `None` while all is well.
+    pub health: Option<(helios_health::Level, usize)>,
 }
 
 /// The status line, shared between the shell and its block.
@@ -195,6 +198,10 @@ pub fn status_block(status: Status) -> impl FnMut(&mut egui::Ui, &AppHandle) + '
         // height (the viewport under it would move).
         ui.set_min_height(ui.spacing().interact_size.y);
         ui.horizontal_centered(|ui| {
+            if let Some((level, count)) = line.health {
+                health_badge(ui, app, level, count);
+                ui.separator();
+            }
             if line.pending_decisions > 0 {
                 decisions_badge(ui, app, &line);
                 ui.separator();
@@ -252,5 +259,53 @@ fn decisions_badge(ui: &mut egui::Ui, app: &AppHandle, line: &StatusLine) {
         let _ = app.focus_panel(&egui_pop::model::ids::PanelId::from_static(
             crate::decisions::PANEL,
         ));
+    }
+}
+
+/// The health badge: a warning sign and how many findings need
+/// attention, in the warning tone, the danger one for a problem. A click
+/// opens the Health page.
+fn health_badge(ui: &mut egui::Ui, app: &AppHandle, level: helios_health::Level, count: usize) {
+    use egui_pop::core::indicator::{Indicator, Tone};
+    let ctx = ui.ctx().clone();
+    let problem = level == helios_health::Level::Problem;
+    let meaning = crate::i18n::text(
+        &ctx,
+        if problem {
+            Message::new(
+                "gui-status-health-problem",
+                "Health check: { $count } findings need attention, a problem among them",
+            )
+        } else {
+            Message::new(
+                "gui-status-health-warning",
+                "Health check: { $count } findings need attention",
+            )
+        }
+        .with("count", count),
+    );
+    let action = crate::i18n::text(
+        &ctx,
+        Message::new("gui-status-health-show", "Open the health check"),
+    );
+    let (tone, colour) = if problem {
+        (Tone::Danger, ui.visuals().error_fg_color)
+    } else {
+        (Tone::Warning, ui.visuals().warn_fg_color)
+    };
+    ui.colored_label(colour, "⚠");
+    let r = ui.add(
+        Indicator::count(count as u64)
+            .tone(tone)
+            .id(crate::shell::HEALTH_BADGE)
+            .name(meaning.clone())
+            .tooltip(meaning)
+            .interactive(action),
+    );
+    if r.clicked() {
+        app.run(
+            egui_pop::model::ids::CommandId::from_static(crate::shell::HEALTH_COMMAND),
+            serde_json::Value::Null,
+        );
     }
 }

@@ -261,6 +261,11 @@ impl Shell {
         }
     }
 
+    /// Whether the volumes are watched ([`Shell::watch_cards`]).
+    pub(super) fn watching_volumes(&self) -> bool {
+        self.import_window.watch.is_some()
+    }
+
     /// Keeps the import window's recent folders, favourites and last
     /// source in `file` (JSON), read now.
     pub fn remember_import_sources_in(&mut self, file: PathBuf) {

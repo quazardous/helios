@@ -51,11 +51,13 @@ use crate::workbench::Contents;
 
 pub use crate::workbench::Content;
 pub use export::{ExportAsk, OPEN_FOLDER, folder_path, settings_of};
+pub use health::{BADGE as HEALTH_BADGE, CHECK_NOW as HEALTH_CHECK_NOW, COMMAND as HEALTH_COMMAND};
 pub use import_choices::Choices;
 pub use macro_edit::{SELECTED as GRAPH_SELECTED, selected_nodes};
 pub use workspace_edit::STATE as WORKSPACE_STATE;
 
 mod export;
+mod health;
 mod import;
 mod import_choices;
 mod import_window;
@@ -144,6 +146,10 @@ enum Action {
     ImportSource(Value, Origin),
     /// Open the import window (`library.importWindow`'s arguments).
     ImportWindow(Value),
+    /// Open the Health page (`help.health`).
+    Health,
+    /// Run the health checks now (`health.checkNow`).
+    HealthCheckNow,
     /// Files and folders to import (`library.importFiles`'s arguments: a
     /// paste of files, a drop on the window).
     ImportFiles(Value, Origin),
@@ -510,6 +516,7 @@ pub struct Shell {
     imports: Vec<Value>,
     /// The import window, its sources and the cards watched.
     import_window: import_window::ImportWindow,
+    health: health::HealthPage,
     /// The lines of the imports the host runs (`import_sink`).
     import_lines: (ImportLines, std::sync::mpsc::Receiver<(Value, Value)>),
     /// Exports asked for, for the host.
@@ -906,6 +913,7 @@ impl Shell {
             import_source: None,
             imports: Vec::new(),
             import_window: import_window::ImportWindow::default(),
+            health: health::HealthPage::default(),
             import_lines: std::sync::mpsc::channel(),
             exports: Vec::new(),
             export_lines: std::sync::mpsc::channel(),
@@ -2718,6 +2726,18 @@ impl Shell {
             Box::new(|a, origin| Ok(Action::ImportSource(a.clone(), origin.clone()))),
         );
         add(
+            CommandSpec::new(health::COMMAND, "Health check…", "Help"),
+            Box::new(|_, _| Ok(Action::Health)),
+        );
+        add(
+            CommandSpec::new(
+                health::CHECK_NOW,
+                "Run the health checks now (Help > Health check)",
+                "Help",
+            ),
+            Box::new(|_, _| Ok(Action::HealthCheckNow)),
+        );
+        add(
             CommandSpec::new(
                 import_window::COMMAND,
                 "Import photos… (`source`: the card or folder the import window opens on)",
@@ -3306,7 +3326,7 @@ impl Shell {
     /// egui-pop's menu bar.
     fn declare_menus(w: &Wiring<'_>) {
         use crate::mask_tree::{ROW_MENU, ROW_MENU_ADD};
-        use egui_pop::api::app::{MENU_EDIT, MENU_FILE};
+        use egui_pop::api::app::{MENU_EDIT, MENU_FILE, MENU_HELP};
         // No label: egui-pop shows the command's title in the interface's
         // language, without its argument hint.
         let command = |menu: MenuId, group: &str, order: i32, id: &str| {
@@ -3337,6 +3357,8 @@ impl Shell {
             // The same commands in the menu bar.
             // Importing, always within reach (Ctrl+Shift+I, as Lightroom).
             command(MENU_FILE, "1_import", 0, import_window::COMMAND),
+            // Help > Health check.
+            command(MENU_HELP, "1_health", 0, health::COMMAND),
             // An entry per importer plugin, the submenu shown only when
             // one is installed (`crate::importers`).
             PopItem::submenu(
@@ -4331,6 +4353,14 @@ impl Shell {
                 self.open_import_window(&args);
                 return Ok(Value::Null);
             }
+            Action::Health => {
+                self.open_health();
+                return Ok(Value::Null);
+            }
+            Action::HealthCheckNow => {
+                let started = self.health_check_now();
+                return Ok(serde_json::json!({ "started": started }));
+            }
             Action::ImportFiles(args, origin) => return self.import_files(&args, &origin),
             Action::ImportWith(args, origin) => return self.import_with(&args, &origin),
             Action::Export(args, origin) => return self.export(&args, &origin),
@@ -4751,6 +4781,7 @@ impl Shell {
         self.follow_decisions();
         self.status_bar(&ctx);
         self.status_items(&ctx);
+        self.health_tick(&ctx);
         // Duplicates an import asks about: said once, answered in the
         // Duplicates panel.
         let asked = self.receive_imports();
@@ -4775,6 +4806,7 @@ impl Shell {
         }
         self.take_dropped_files(&ctx);
         self.import_window_frame(&ctx);
+        self.health_window(&ctx);
         let refused = std::mem::take(&mut self.library.borrow_mut().notes);
         for n in refused {
             self.warn(n);

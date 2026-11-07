@@ -1086,6 +1086,36 @@ NAME=INSPECT[,CONTROL]` follows it (see [jobs.md](jobs.md), "A node's
 jobs on the desktop"), its batch as a parent with its exports as
 children, ids `node:<name>/<id>`; their Cancel goes to the node.
 
+## Health check
+
+Help > Health check (`help.health`) opens a page listing what Helios's
+checks of the setup found (`helios-health`), grouped by level: problems,
+warnings, then what is fine. Each finding has its message, a detail
+line, a "Fix…" button when it has a fix (a command with its arguments,
+such as opening a volume's folder) and "Ignore". Ignored findings wait
+under "Ignored (n)", where "Show again" takes them back; the list is kept
+by finding id in `health-ignored.json` beside Helios's settings. "Check
+now" (`health.checkNow`) runs the checks again.
+
+The checks run as one background job (kind `health`, in the jobs
+centre): 30 seconds after start, then daily, and when a volume is
+mounted or goes (the storage watch). A check is a `helios_health::Check`
+(`id`, `title`, `run(&Context) -> Vec<Finding>`), kept in a `Registry`
+that plugins will extend; a check that panics becomes a problem of its
+own. The first two:
+
+- **Free space** on the library's volume (the one holding the vault's
+  folder) and on every volume with a library, archive, backup or
+  scratch role: a warning under 10 % or 20 GB free, a problem under 3 %
+  or 5 GB.
+- **Catalogue integrity**: SQLite's `PRAGMA quick_check` on the vault,
+  read-only; anything but `ok` is a problem.
+
+While a warning or a problem is shown, the status bar has a badge: a
+warning sign and how many findings need attention, red for a problem.
+It opens the page; nothing shows while all is well, and nothing is
+ever modal.
+
 ## Platform services
 
 **On egui-pop's platform services (2026-10-13).** The desktop window adds

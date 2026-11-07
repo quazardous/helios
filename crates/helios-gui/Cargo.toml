@@ -38,6 +38,7 @@ helios-template.workspace = true
 helios-vault.workspace = true
 # The machine's volumes: the import window's cards.
 helios-storage.workspace = true
+helios-health.workspace = true
 helios-vault-sqlite.workspace = true
 # Import and stack suggestions, as commands.
 helios-library.workspace = true

@@ -1239,3 +1239,67 @@ gui-export-ended = { $written } photos exportées dans { $folder }
 gui-export-ended-skipped = { $outcome } ({ $skipped } laissées de côté : leur fichier existe)
 
 gui-export-failed = L’export n’a pas démarré : { $error }
+
+gui-status-health-problem = { $count ->
+    [one] Bilan de santé : { $count } point demande votre attention, un problème
+   *[other] Bilan de santé : { $count } points demandent votre attention, dont un problème
+}
+
+gui-status-health-warning = { $count ->
+    [one] Bilan de santé : { $count } point demande votre attention
+   *[other] Bilan de santé : { $count } points demandent votre attention
+}
+
+gui-status-health-show = Ouvrir le bilan de santé
+
+gui-health-title = Bilan de santé
+
+gui-health-checking = Vérification…
+
+gui-health-check-now = Vérifier maintenant
+
+gui-health-not-yet = Pas encore vérifié : les vérifications tournent en arrière-plan.
+
+gui-health-problems = Problèmes ({ $count })
+
+gui-health-warnings = Avertissements ({ $count })
+
+gui-health-ok = Tout va bien ({ $count })
+
+gui-health-ignored = Ignorés ({ $count })
+
+gui-health-undo-ignore = Afficher à nouveau
+
+gui-health-fix = Corriger…
+
+gui-health-ignore = Ignorer
+
+health-check-crashed = La vérification { $check } a échoué
+
+health-check-crashed-detail = Elle s’est arrêtée avant de pouvoir dire quoi que ce soit.
+
+health-free-space = Espace libre
+
+health-free-space-ok = { $volume } a de la place
+
+health-free-space-low = { $volume } manque de place
+
+health-free-space-full = { $volume } est presque plein
+
+health-free-space-detail = { $free } libres sur { $capacity } ({ $percent } %)
+
+health-fix-open-volume = Ouvrir le volume
+
+health-vault-integrity = Intégrité du catalogue
+
+health-vault-ok = Le catalogue est sain
+
+health-vault-ok-detail = { $file } a passé la vérification rapide de SQLite
+
+health-vault-damaged = Le catalogue est endommagé
+
+health-vault-damaged-detail = { $file } : { $first } ({ $count } erreurs). Restaurez un instantané du catalogue.
+
+health-vault-unreadable = Le catalogue ne peut pas être vérifié
+
+health-vault-unreadable-detail = { $file } : { $error }

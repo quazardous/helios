@@ -581,3 +581,9 @@ command-workshop-save =
 
 command-workshop-suggest =
     .title = Expérimental : trouver des ateliers d’après ce que vous voulez, classés par nom, mots-clés puis intention (`intent`)
+
+command-help-health =
+    .title = Bilan de santé…
+
+command-health-checkNow =
+    .title = Lancer le bilan de santé maintenant (Aide > Bilan de santé)

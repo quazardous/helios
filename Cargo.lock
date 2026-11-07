@@ -2237,6 +2237,7 @@ dependencies = [
  "helios-display",
  "helios-export",
  "helios-gpu",
+ "helios-health",
  "helios-i18n",
  "helios-inspect",
  "helios-library",
@@ -2266,6 +2267,18 @@ dependencies = [
  "helios-xmp",
  "image",
  "log",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "helios-health"
+version = "0.72.0"
+dependencies = [
+ "helios-core",
+ "helios-storage",
+ "log",
+ "rusqlite",
  "serde",
  "serde_json",
 ]

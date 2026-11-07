@@ -31,6 +31,9 @@ command-gui-record-stop =
 command-gui-snapshot =
     .title = Take a picture of a panel or a widget
 
+command-health-checkNow =
+    .title = Run the health checks now (Help > Health check)
+
 command-helios-compare-detach =
     .title = Move Compare to a new window
 
@@ -183,6 +186,9 @@ command-helios-workshops-dock =
 
 command-helios-workshops-moveTo =
     .title = Move Workshops to an area (`area`)
+
+command-help-health =
+    .title = Health check…
 
 command-keymap-package =
     .title = Add a keymap package's keys over the defaults (`name`: darktable-classic)

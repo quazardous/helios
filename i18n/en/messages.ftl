@@ -239,6 +239,28 @@ gui-graph-wires-orthogonal = Orthogonal
 
 gui-graph-wires-straight = Straight
 
+gui-health-check-now = Check now
+
+gui-health-checking = Checking…
+
+gui-health-fix = Fix…
+
+gui-health-ignore = Ignore
+
+gui-health-ignored = Ignored ({ $count })
+
+gui-health-not-yet = Not checked yet: the checks run in the background.
+
+gui-health-ok = All good ({ $count })
+
+gui-health-problems = Problems ({ $count })
+
+gui-health-title = Health check
+
+gui-health-undo-ignore = Show again
+
+gui-health-warnings = Warnings ({ $count })
+
 gui-history-batch = { $label } ({ $count } values)
 
 gui-history-import = Import { $count } photos
@@ -939,6 +961,12 @@ gui-status-decisions = { $count } decisions wait for an answer
 
 gui-status-decisions-show = Show the decisions
 
+gui-status-health-problem = Health check: { $count } findings need attention, a problem among them
+
+gui-status-health-show = Open the health check
+
+gui-status-health-warning = Health check: { $count } findings need attention
+
 gui-status-history = History
 
 gui-status-history-detail = { $count } steps to undo
@@ -1098,6 +1126,36 @@ gui-workspace-template-title = Save as template
 gui-workspace-template-toolbox = with its tools
 
 gui-workspace-template-version = version
+
+health-check-crashed = The check { $check } failed
+
+health-check-crashed-detail = It stopped before it could say anything.
+
+health-fix-open-volume = Open the volume
+
+health-free-space = Free space
+
+health-free-space-detail = { $free } free of { $capacity } ({ $percent } %)
+
+health-free-space-full = { $volume } is almost full
+
+health-free-space-low = { $volume } is running out of space
+
+health-free-space-ok = { $volume } has room
+
+health-vault-damaged = The catalogue is damaged
+
+health-vault-damaged-detail = { $file }: { $first } ({ $count } complaints). Restore a catalogue snapshot.
+
+health-vault-integrity = Catalogue integrity
+
+health-vault-ok = The catalogue is sound
+
+health-vault-ok-detail = { $file } passed SQLite's quick check
+
+health-vault-unreadable = The catalogue cannot be checked
+
+health-vault-unreadable-detail = { $file }: { $error }
 
 node-batch-only = the batch endpoint only answers load-source, export, cancel, job.cancel, batch_start, batch_end and the workflow.* requests
 

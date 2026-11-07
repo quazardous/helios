@@ -132,6 +132,47 @@ fn seconds_f64() -> f64 {
         .map_or(0.0, |d| d.as_secs_f64())
 }
 
+/// The health check's runner: Helios's checks, over the volumes mounted
+/// (with the roles the vault gives them) and the vault's file, whose
+/// folder stands for the library's place; the ignored findings kept
+/// beside Helios's settings.
+fn health_runner(
+    vault: Option<Arc<helios_vault::Vault<helios_vault_sqlite::SqliteStore>>>,
+    file: Option<PathBuf>,
+) -> helios_health::runner::Runner {
+    use helios_health::{Context, Findings, Ignored, Registry, runner};
+    let file = file.and_then(|f| f.canonicalize().ok());
+    let context = move || {
+        let mut volumes = helios_storage::system().volumes();
+        if let Some(known) = vault
+            .as_deref()
+            .and_then(|v| helios_storage::registry::known(v).ok())
+        {
+            for v in &mut volumes {
+                if let Some(k) = known.iter().find(|k| k.id == v.id) {
+                    v.roles.clone_from(&k.roles);
+                    v.name.clone_from(&k.name);
+                }
+            }
+        }
+        Context {
+            volumes,
+            library: file
+                .as_deref()
+                .and_then(Path::parent)
+                .map(Path::to_path_buf),
+            vault: file.clone(),
+        }
+    };
+    let ignored = Ignored::load(&helios_gui::shell::config_dir().join("health-ignored.json"));
+    runner::Runner::new(
+        Registry::builtin(),
+        context,
+        Findings::with_ignored(ignored),
+        runner::Schedule::desktop(std::time::Instant::now()),
+    )
+}
+
 fn seconds() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -1149,6 +1190,7 @@ fn main() -> Result<(), String> {
         .unwrap_or_else(|| "default".into());
     start::mark("workspace and settings read");
     let bus = std::sync::Arc::new(helios_core::Bus::new());
+    let health_file = vault_file.clone();
     let persist = match vault_file {
         Some(path) => Some(Persist::new(
             helios_vault_sqlite::SqliteStore::open(&path)?,
@@ -1233,6 +1275,7 @@ fn main() -> Result<(), String> {
         Arc::new(broker)
     };
     let known_vault = vault.clone();
+    let health_vault = vault.clone();
     let mut builder = Shell::builder(helios_panels_with(experimental), Some(ui_settings))
         .workspace(&workspace)
         .on_exit(move |app| save_workspace(&dir, app))
@@ -1326,6 +1369,10 @@ fn main() -> Result<(), String> {
                         .unwrap_or_default()
                 }));
             }
+            // The health check (Help > Health check): Helios's checks
+            // over this machine's volumes and the vault, a while after
+            // start, daily and when a volume comes or goes.
+            shell.set_health(health_runner(health_vault.clone(), health_file.clone()));
             shell.remember_import_sources_in(
                 helios_gui::shell::config_dir().join("import-sources.json"),
             );
