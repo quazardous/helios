@@ -889,8 +889,7 @@ fn presets_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &Words) -> Option<
         None if w.choices == Choices::default() => words.default_preset.clone(),
         None => words.last_used.clone(),
     };
-    ui.label(&words.preset);
-    egui::ComboBox::from_id_salt("helios.import.preset")
+    egui::ComboBox::new("helios.import.preset", &words.preset)
         .selected_text(shown)
         .show_ui(ui, |ui| {
             let default = current.is_none() && w.choices == Choices::default();
