@@ -910,14 +910,16 @@ own, for network shares).
 2. **Counting**: does "backed up 2/2" count backup copies only (as
    proposed), or every durable copy, the library copy included (3/3, as
    the 3-2-1 rule counts)?
-3. **Marker files**: may Helios write `.helios/volume.json` at the root
-   of a backup or archive volume to recognise it (proposed), or only
-   inside its own `Helios Backup/` folder?
+3. **Marker files**: settled by the owner (2026-11-07). Helios marks a
+   disk with an identity file when its physical identity is not enough,
+   with the user's leave (section 2.1).
 4. **Shoots**: they do not exist yet (ROADMAP 2.4). Is the import
    session the first "shoot" for overrides, or do shoots come first?
-5. **Backup from the card or from the library copy**: one card read
-   (faster, proposed default) or two independent copies (safer against
-   a bad library disk), as a per-strategy choice?
+5. **Backup from the card or from the library copy**: settled by the
+   owner (2026-11-07). Every copy must be guaranteed and verified (written
+   to a part file, hashed, read back and checked before it counts). There
+   is no "copy from the original" preference: it is too complicated to
+   keep up in the interface. Backups are made from the library copy.
 6. **Exports and catalogue**: should strategies also cover exports, and
    how many catalogue snapshots are kept per backup volume?
 7. **Remote stores**: an rclone wrapper (many stores, one more program
