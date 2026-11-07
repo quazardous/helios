@@ -41,6 +41,12 @@
 //!   its item), a log line per file that was not skipped, then
 //!   `job.finished` (or `job.failed` when the source cannot be listed);
 //!   one JSON line per file goes to `emit`.
+//! - **Safe to format.** After a copy, each card read is checked by
+//!   content hash: every photo on it in the library with a copy in the
+//!   library folder ([`Card`] in the report, a log line "safe to format"
+//!   or "N photos not in the Library"). Helios never formats a card.
+//! - **A lost source** (a card taken out, a folder moved away) pauses the
+//!   job until it is back; it can still be cancelled.
 //! - **Cancel.** [`Jobs::cancel`] with the job's id, or the caller's
 //!   [`Options::cancel`] flag, stops the import before its next file; a
 //!   copy under way stops too and its hidden part is removed. The files
@@ -252,6 +258,38 @@ pub struct Report {
     /// Bytes read from the sources: a copied file is read once, hashed
     /// as it is copied.
     pub read: u64,
+    /// For a copy, each card read: whether it is safe to format.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub cards: Vec<Card>,
+}
+
+/// Whether a card can be formatted after a copy: every photo on it is in
+/// the library with a copy in the library folder, by content hash.
+/// Helios never formats a card itself.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct Card {
+    /// Where it is mounted.
+    pub path: PathBuf,
+    /// Its name: the mount folder's (`EOS_DIGITAL`).
+    pub label: String,
+    /// Photos on it.
+    pub photos: u64,
+    /// Photos on it the library holds no copy of (failed, left out as
+    /// duplicates of a referenced file, not reached).
+    pub missing: u64,
+    pub safe_to_format: bool,
+}
+
+impl Card {
+    /// What to tell a person: "`EOS_DIGITAL`: safe to format" or
+    /// "`EOS_DIGITAL`: 2 photos not in the Library".
+    pub fn said(&self) -> String {
+        match self.missing {
+            0 => format!("{}: safe to format", self.label),
+            1 => format!("{}: 1 photo not in the Library", self.label),
+            n => format!("{}: {n} photos not in the Library", self.label),
+        }
+    }
 }
 
 impl Report {
@@ -566,6 +604,8 @@ struct Run<'a, S: Store> {
     seen: HashMap<ImageId, PathBuf>,
     /// Folder listings, for sidecars.
     folders: BTreeMap<PathBuf, Matched>,
+    /// Each file's content hash, once read.
+    hashes: HashMap<PathBuf, ImageId>,
     /// Copies made so far, for `{seq}`.
     placed: u64,
     report: Report,
@@ -630,6 +670,7 @@ impl<S: Store> Run<'_, S> {
             Some((_, id)) => *id,
             None => hash_counted(path, &mut self.report.read)?,
         };
+        self.hashes.insert(path.to_path_buf(), id);
         let mut line = json!({ "path": path, "id": id.hex() });
         let copying = matches!(self.options.placement, Placement::Copy { .. });
         if !copying
@@ -729,6 +770,35 @@ impl<S: Store> Run<'_, S> {
         self.keep_metadata(path, id, &mut line)?;
         self.keep_edits(path, id, &mut line)?;
         Ok((line, if new { Status::Added } else { Status::Located }))
+    }
+
+    /// Whether the card `source` is safe to format: each of its files
+    /// read, and its image held by a file in the library folder.
+    fn card(&self, source: &Source) -> Result<Card, String> {
+        let Some(root) = &self.root else {
+            return Err("only a copy makes a card safe to format".into());
+        };
+        let mut missing = 0;
+        for file in &source.files {
+            let copied = match self.hashes.get(file) {
+                Some(id) => self
+                    .vault
+                    .locations(id)?
+                    .iter()
+                    .any(|l| l.present && l.path.starts_with(root) && l.path.is_file()),
+                None => false,
+            };
+            if !copied {
+                missing += 1;
+            }
+        }
+        Ok(Card {
+            path: source.path.clone(),
+            label: source.label(),
+            photos: source.files.len() as u64,
+            missing,
+            safe_to_format: missing == 0,
+        })
     }
 
     /// Applies what an importer listed for the file at `path` to its image
@@ -844,6 +914,7 @@ pub fn import<S: Store>(
         now,
         seen: HashMap::new(),
         folders: BTreeMap::new(),
+        hashes: HashMap::new(),
         placed: 0,
         report: Report::default(),
         stop,
@@ -911,6 +982,17 @@ pub fn import<S: Store>(
             Status::Skipped | Status::Asked => {}
         }
         emit(&line);
+    }
+    if run.root.is_some() {
+        for source in files.0.iter().filter(|s| s.kind == "card") {
+            match run.card(source) {
+                Ok(card) => {
+                    job.log(card.said());
+                    run.report.cards.push(card);
+                }
+                Err(e) => job.log(format!("{}: {e}", source.label())),
+            }
+        }
     }
     if let Some(staging) = &run.staging {
         // This import's own folder, then the shared one when empty.

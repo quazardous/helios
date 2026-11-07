@@ -887,3 +887,61 @@ fn a_paused_import_can_be_cancelled() {
     assert_eq!(report.added, 1);
     assert!(event(&bus, "job.cancelled", 1).is_some());
 }
+
+/// After a copy, a card is safe to format only when every photo on it has
+/// a copy in the library folder, by content: a duplicate of a referenced
+/// file left out keeps it unsafe.
+#[test]
+fn a_card_is_safe_to_format_once_every_photo_is_copied() {
+    let p = Place::new("format");
+    let card = p.join("EOS_DIGITAL");
+    let dcim = card.join("DCIM/100CANON");
+    picture(&dcim.join("a.png"), 0, 1.0, 0);
+    picture(&dcim.join("b.png"), 1, 1.25, 0);
+    // b is in the library already, referenced where it is.
+    let elsewhere = p.join("elsewhere");
+    std::fs::create_dir_all(&elsewhere).unwrap();
+    std::fs::copy(dcim.join("b.png"), elsewhere.join("b.png")).unwrap();
+    let vault = vault();
+    run(&vault, None, &[elsewhere], &Options::default());
+    let copy = |duplicates| Options {
+        placement: Placement::Copy {
+            into: Some(p.join("library")),
+        },
+        duplicates,
+        ..Options::default()
+    };
+    let bus = Arc::new(Bus::new());
+    let (report, lines) = run(
+        &vault,
+        Some(bus.clone()),
+        std::slice::from_ref(&card),
+        &copy(Duplicates::Skip),
+    );
+    assert_eq!((report.added, report.skipped), (1, 1), "{lines:?}");
+    let [first] = report.cards.as_slice() else {
+        panic!("one card: {report:?}");
+    };
+    assert_eq!(
+        (first.label.as_str(), first.photos, first.missing),
+        ("EOS_DIGITAL", 2, 1)
+    );
+    assert!(!first.safe_to_format);
+    assert!(
+        bus.since(0).iter().any(|e| e.kind == "job.log"
+            && e.payload["text"] == "EOS_DIGITAL: 1 photo not in the Library"),
+        "the job says it"
+    );
+    // Copied too, b makes the card safe; a folder is never a card.
+    let (report, _) = run(
+        &vault,
+        None,
+        std::slice::from_ref(&card),
+        &copy(Duplicates::Keep),
+    );
+    assert_eq!(report.cards.len(), 1);
+    assert!(report.cards[0].safe_to_format, "{report:?}");
+    assert_eq!(report.cards[0].said(), "EOS_DIGITAL: safe to format");
+    let (report, _) = run(&vault, None, &[dcim], &copy(Duplicates::Skip));
+    assert!(report.cards.is_empty());
+}

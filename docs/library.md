@@ -73,6 +73,16 @@ and skipped so far), a `job.log` line per file brought in, a
 `job.failed` when it cannot start (a missing source, no library folder for
 a copy). A file that fails does not stop the others.
 
+**Safe to format.** At the end of a copy, each card read (a source
+holding `DCIM`) is checked by content hash: a photo counts when the
+library holds its image with a file in the library folder (a copy
+verified as it was written, or one made before). The report's `cards`
+lists each card (`path`, `label`, `photos`, `missing`,
+`safe_to_format`) and the job's log says "EOS_DIGITAL: safe to format"
+or "EOS_DIGITAL: 2 photos not in the Library" (a file that failed, a
+duplicate of a referenced file left out, a file not reached). Helios
+never formats a card itself.
+
 **A lost source pauses.** A card taken out or unmounted (its `DCIM`
 gone), or a folder moved away, mid-import does not fail every file left:
 the job pauses (`job.paused`, its reason also a log line: "Reinsert
