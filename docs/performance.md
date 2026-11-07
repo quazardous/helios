@@ -126,3 +126,47 @@ The bottlenecks, in order:
 4. Renders from the edit run the full-size chain: 0.4 to 0.9 s each.
 5. Files without a readable preview keep an empty cell, with no render
    to replace it.
+
+### The thumbnail work, step by step
+
+**Step 2, one thumbnail cache: built (2026-11-07).** The `helios-thumbs`
+crate, used by the library (`helios_gui::thumbnails`):
+
+- **The fast first read** (`helios_thumbs::read`): the file's embedded
+  JPEG streams are found by their markers and their frame headers read
+  (a raw's thumbnail and previews, a JPEG's Exif thumbnail, the JPEG
+  itself; lossless streams, a raw's mosaic, are left out). The smallest
+  at least 256 px on its long side is decoded by `jpeg-decoder` with DCT
+  scaling (1/2, 1/4 or 1/8 while decoding), straight to 8-bit sRGB, then
+  scaled to 256 px. No floating point, no full-size decode, no colour
+  conversion (previews are sRGB). When no JPEG stream is found, rawler's
+  thumbnail, preview or full image, else the picture itself (PNG, TIFF).
+- **The cache** (`ThumbCache`): JPEG files (quality 80) in `.helios/thumbs`
+  beside the catalogue, 256 px for the grids and 1024 px for Compare's and
+  the loupe's first paint. An entry's key is the image's id (the BLAKE3 of
+  its file: content-addressed, a file imported again finds its entry),
+  the version drawn (`preview` for the embedded preview) and the chain's
+  version (0): step 4 writes renders under their version's key. A size
+  limit (`system.cache.thumbnails`, 2 GiB by default) is kept by evicting
+  the entries used least recently, down to 90 % of the limit; an entry's
+  last use is its file's modification time across restarts.
+- **The pool** (`Loader`): two to four threads (half the CPUs). Each image
+  is looked up in the cache first, its file read only on a miss; a miss
+  stores the 256 px entry, then queues the 1024 px one behind every
+  thumbnail still to show. The grid's in-view hook moves the cells in
+  view to the front of the queue each time they change. A photo with no
+  copy at hand (offline, missing) shows its cached thumbnail; a file with
+  nothing readable, or an offline photo never cached, shows a
+  placeholder (its file type and a crossed frame) instead of an empty
+  cell. Offline and missing photos carry a badge.
+- **Measured**: `thumb_bench` reads the library through the pool, with a
+  cold start (`--start cold`, an empty cache) and a warm one
+  (`--start warm`, every entry cached), and its `decode` part times the
+  fast read and a cache hit per raw (`fast_ms`, `cache_hit_ms`). Not run
+  yet: `thumb-bench` is a timing job, run before a release.
+
+Still open: textures are never freed (step 3, the virtualised grids, with
+the texture budget), and thumbnails are still the embedded previews, not
+renders of the edit (step 4, the render queue, which replaces cache
+entries by renders under their version's key and takes over the pool's
+ordering).

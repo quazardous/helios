@@ -467,7 +467,7 @@ none) and the file is not there. `repair` checks present locations only:
 an offline one is never marked missing, and an image with an offline
 copy is not searched for. The Library's entries carry the image's
 presence (present when a copy is, else offline when one is, else
-missing); nothing draws it yet (phase 3's badge).
+missing); phase 3 draws it (an "offline" or "missing" badge).
 
 ### 2.4 Roles
 
@@ -758,6 +758,18 @@ on the library volume or a scratch-role volume, keyed by image id. It
 also speeds up the grid for photos on slow network shares. This is a
 v1 prerequisite for offline volumes.
 
+**Built (phase 3, 2026-11-07).** The library's thumbnail cache
+(`helios-thumbs`, see [performance.md](performance.md), "The thumbnail
+work"): 256 and 1024 px JPEGs in `.helios/thumbs` beside the catalogue,
+keyed by image id (the file's hash), version and chain version, under a
+size limit (`system.cache.thumbnails`, 2 GiB by default, least recently
+used evicted). Entries are written the first time the library shows a
+photo, not at import. The grid reads the cache first: an offline photo
+shows its cached thumbnail and an "offline" badge (a missing one a
+"missing" badge); one never cached shows a placeholder. The cache lives
+on the library's volume; placing it on a Scratch-role volume is not
+done yet.
+
 ## 5. Recommendation
 
 ### 5.1 The model, sketched in Rust (not decided)
@@ -930,7 +942,7 @@ pub struct BackupStatus { pub have: u8, pub want: u8, pub off_site: bool, pub st
 |---|---|---|
 | 1. Volumes in the core | `helios-storage` crate from the import window's `Volumes`: every volume, identity (UUID, marker, weak), kind, free space, online state, polling and udisks events on Linux | M |
 | 2. Locations on volumes | volume and relative path in `Location` (vault migration, old records relinked on the next scan), three-state presence, `repair` skipping offline volumes | M |
-| 3. Preview cache | embedded previews kept at import, grid reads them first, offline badge | M |
+| 3. Preview cache (built 2026-11-07) | embedded previews kept in a cache (when first shown, not at import), grid reads them first, offline badge | M |
 | 4. Roles and Storage page | roles, names, off site, RAID flag; the page; write permission enforced in copy code | M |
 | 5. Strategies v1 | model, library default, triggers on import, on connect and by hand, `backup` job with verify and pause, status field, filters, badge | L |
 | 6. Import integration | reminder line, strategy line, safe to format by strategy, toast updated when the backup ends | S |
