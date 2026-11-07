@@ -24,6 +24,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.60.0] - 2026-11-07
+
+### Added
+
+- Plugins can now add importers: each appears under File > Import from, asks
+  for the folder or file it reads, and brings the photos into the library with
+  the ratings, labels and tags it knows, without overwriting what the library
+  already holds; what it found and left out is listed in the Log panel.
+
 ## [0.59.0] - 2026-11-07
 
 ### Added
