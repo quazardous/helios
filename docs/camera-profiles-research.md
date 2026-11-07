@@ -6,6 +6,14 @@ good it is, what photographers expect, how other editors ship it, and
 whether Helios should carry profiles as plugins, as manifest files or as
 something else.
 
+**Owner direction (2026-11-07):** Helios tries to stay compatible with
+darktable's profiles. It reads darktable's noise profiles
+(`noiseprofiles.json`), its colour matrices, its lensfun use and its
+per-camera data as they are, and a user's darktable data works in Helios
+without conversion. The data packages of section 5 carry them in
+darktable's own formats. Where Helios goes further (DCP input, quality
+labels), it adds to darktable's data and never replaces its formats.
+
 Not to be confused with [profiles-research.md](profiles-research.md),
 which is about *user* profiles and themes. Here "profile" means data that
 describes a camera body, a lens or a sensor's noise.
