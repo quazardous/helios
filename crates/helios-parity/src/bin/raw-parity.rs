@@ -5,8 +5,9 @@
 //! twice:
 //!
 //! - **chain**: darktable running the same modules as Helios (rawprepare,
-//!   white balance as shot, highlights clipped, its default demosaic,
-//!   colorin's standard matrix, the template's exposure, sigmoid at its
+//!   white balance at the camera's D65 reference, highlights clipped, its
+//!   default demosaic, colorin's standard matrix, colour calibration from
+//!   the camera's illuminant, the template's exposure, sigmoid at its
 //!   defaults), judged by
 //!   [`helios_parity::AS_A_PORT`] away from the image's edges: whether the
 //!   ported modules match;
@@ -45,15 +46,19 @@ const RAWS: [&str; 3] = [
 ];
 
 /// The modules of "Develop one image", in its order.
-const DEVELOP: [&str; 7] = [
+const DEVELOP: [&str; 8] = [
     "rawprepare",
     "whitebalance",
     "highlights",
     "demosaic",
     "colorin",
+    "channelmixerrgb",
     "exposure",
     "sigmoid",
 ];
+
+/// darktable's white balance preset "camera reference" (`DT_IOP_TEMP_D65`).
+const DT_IOP_TEMP_D65: i64 = 3;
 
 /// How far a crop may move between the two decoders, in pixels.
 const REACH: i64 = 64;
@@ -147,13 +152,45 @@ fn helios(raw: &Path) -> Result<Image, String> {
 
 /// darktable running Helios's chain: what Helios's modules default to,
 /// in darktable's terms, and the template's exposure (the rest are
-/// darktable's defaults with no workflow: white balance as shot, its
-/// default demosaic, sigmoid's own defaults, between colorin's standard
-/// matrix and a linear Rec.2020 output).
+/// darktable's defaults with no workflow: its default demosaic, sigmoid's
+/// own defaults, between colorin's standard matrix and a linear Rec.2020
+/// output). The white balance is at the camera's D65 reference, its
+/// coefficients from the matrix Helios reads, and colour calibration
+/// adapts from the camera's illuminant, as "Develop one image" does.
 fn darktable_chain(dt: &Darktable, raw: &Path, dir: &Path) -> Result<Image, String> {
     let exposure = develop_params("exposure")?;
     let float = |k: &str| exposure[k]["float"].as_f64().unwrap_or(0.0);
+    let camera = helios_load::load(raw)?
+        .camera
+        .ok_or_else(|| format!("{}: no camera", raw.display()))?;
+    let d65 = helios_module_whitebalance::d65_coefficients(&camera.xyz_to_camera)
+        .ok_or_else(|| format!("{}: no D65 coefficients from its matrix", raw.display()))?;
+    let identity = |c: usize| {
+        let mut row = [0.0; 4];
+        row[c] = 1.0;
+        row
+    };
     let items = [
+        Item::new(
+            "temperature",
+            json!({
+                "red": d65[0],
+                "green": d65[1],
+                "blue": d65[2],
+                "various": d65[1],
+                "preset": DT_IOP_TEMP_D65,
+            }),
+        ),
+        Item::new(
+            "channelmixerrgb",
+            json!({
+                "red": identity(0),
+                "green": identity(1),
+                "blue": identity(2),
+                "illuminant": "DT_ILLUMINANT_CAMERA",
+                "adaptation": "DT_ADAPTATION_CAT16",
+            }),
+        ),
         Item::new(
             "highlights",
             json!({"mode": "DT_IOP_HIGHLIGHTS_CLIP", "clip": 1.0}),

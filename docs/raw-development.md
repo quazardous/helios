@@ -44,7 +44,7 @@ and the blank workspace (`helios_template::workspace::blank_network`,
 | Batch export from the library | the **workspace's** network: **sensor data** in a "Develop one image" workspace, **embedded preview** in any other, the "Batch export" template included | `crates/helios-gui/src/export.rs:40-63` (`render_item` → `templates::open_file`) |
 | Export from a workspace | the same (`library.export` is the only export; it takes the workspace's bundle) | `crates/helios-gui/src/shell/export.rs:208`, `main.rs:710-713` |
 | CLI and node (`helios-node`, `helios batch`, `load-source`, workflow runs) | **sensor data**, always: a raw source is the mosaic with its camera; the network must hold the raw chain itself (no chain is added, no preview is taken) | `crates/helios-node/src/lib.rs:471` (`load_in`), `crates/helios-node/src/main.rs:597` (`load_source`), `crates/helios-node/src/workflow/runs.rs:1970` |
-| darktable sidecars (`helios import-darktable`, import with darktable edits, `helios batch --sidecar`) | the history is mapped onto Helios's raw modules (`rawprepare`, `temperature` → `whitebalance`, `highlights`, `demosaic`, `colorin`, `exposure`, `sigmoid`, `crates/helios-xmp/src/import.rs:431`), kept as a version; it renders through sensor data only where the network has those nodes | `crates/helios-library/src/darktable.rs:34`, `crates/helios-library/src/import.rs:670-695` |
+| darktable sidecars (`helios import-darktable`, import with darktable edits, `helios batch --sidecar`) | the history is mapped onto Helios's raw modules (`rawprepare`, `temperature` → `whitebalance`, `highlights`, `demosaic`, `colorin`, `channelmixerrgb`, `exposure`, `sigmoid`, `crates/helios-xmp/src/import.rs:431`), kept as a version; it renders through sensor data only where the network has those nodes | `crates/helios-library/src/darktable.rs:34`, `crates/helios-library/src/import.rs:670-695` |
 | darktable library importer (plugin) | metadata only (stars, flags, labels, tags, title): Helios imports the files itself, sidecars as versions as above; darktable's own thumbnails (mipmaps) are not read | `plugins/importers/darktable-library/src/lib.rs:1-16` |
 | Import signals (near-duplicates, sharpness) | **embedded preview** (a small decode of the mosaic when there is none): enough for a hash, kept so | `crates/helios-library/src/signals.rs:281-287` |
 
@@ -84,12 +84,12 @@ and sharpening are not applied by default.
 |-------|-----------|----------------|----------------|-------------------|
 | Decode | yes, rawler 0.8 (not rawspeed, not LibRaw); sRAW, LinearRaw DNG and monochrome refused as "not a mosaic" | `crates/helios-load/src/lib.rs:92` | rawler's recommended crop, filter pattern shifted to it | rawspeed (LibRaw for CR3), rawspeed's crop |
 | Black and white levels | yes | `modules/rawprepare` | per 2 x 2 position, black measured on the masked photosites | the same; plus user overrides and the DNG gain map (not in Helios) |
-| White balance | partly | `modules/whitebalance` | as shot (the camera's coefficients) | camera reference D65 here, the shot's white done by color calibration |
+| White balance | yes: as shot, camera reference (D65), user coefficients; not by temperature and tint | `modules/whitebalance` | camera reference D65 in the raw chain (the D65 coefficients from the camera's matrix), the shot's white done by colour calibration | the same |
 | Highlight reconstruction | clip only | `modules/highlights` | clip at 1.0 (x 0.987) | inpaint opposed |
 | Demosaic, Bayer | yes | `modules/demosaic/src/rcd.rs` | RCD | RCD |
 | Demosaic, X-Trans | yes | `modules/demosaic/src/xtrans.rs` | Markesteijn one pass | Markesteijn one pass |
 | Camera matrix, input profile | standard matrix only | `modules/colorin` | the camera's matrix to linear Rec.2020 | the same, the enhanced matrix for some cameras, ICC input profiles |
-| Colour calibration (CAT) | partly: CAT16 from a given illuminant, not yet in the raw chain (C3b) | `modules/channelmixerrgb` | none | CAT16 from the shot's illuminant |
+| Colour calibration (CAT) | partly: CAT16 from a given illuminant or the camera's ("as shot in camera"); not the mixer, the other adaptations, the detected illuminants | `modules/channelmixerrgb`, after colorin in the raw front and in "Develop one image" | CAT16 from the camera's illuminant | the same |
 | Exposure | yes | `modules/exposure` | 0 EV, bias not compensated | +0.7 EV, bias compensated |
 | Tone mapper | sigmoid, per-channel method | `modules/sigmoid` | darktable's defaults (contrast 1.5, skew 0, targets 100 % and 0.0152 %, hue 100 %) | sigmoid, the same defaults |
 | Filmic | **no** (vkdt's film curve `vkdt_filmcurv` exists, unused) | | | the "filmic" workflow only |
@@ -112,7 +112,9 @@ darktable-cli built from the classic pin of the mask parity:
 
 - **chain**: darktable running Helios's modules (no workflow; white
   balance as shot, highlights clipped, its default demosaic, standard
-  matrix, sigmoid at its defaults), judged by darktable's own thresholds
+  matrix, sigmoid at its defaults; since C3b, the white balance at the
+  camera's D65 reference and colour calibration from the camera's
+  illuminant), judged by darktable's own thresholds
   with the max at the 99.9th percentile (mean <= 0.77, p99.9 <= 2.3);
 - **defaults**: darktable's own defaults, measured.
 
@@ -294,20 +296,38 @@ measure of C.
      copied into a C harness (`modules/channelmixerrgb/src/tests/dt_cat16.c`),
      gives the golden values for 10 colours, 7 illuminants and 4 gamut
      and clip settings, held within 1e-4.
-   - **C3b, left**: the illuminant estimated from the shot's
-     coefficients ("as shot in camera": darktable's
-     `find_illuminant_xy_from_as_shot_coeffs`, which needs the camera
-     matrix and the white balance's D65 coefficients), the white
-     balance's "camera reference" (D65) mode (`modules/whitebalance`,
-     listed there as not ported), both wired into the raw front, the
-     develop template and the desktop's module catalogue (until then an
-     imported colour calibration item finds no node there and is left
-     out, as before), and a parity test in `crates/helios-parity/tests/`
-     against darktable with that module alone. Expected to take most of
-     the remaining colour gap (the grey background of the NEF: neutral
-     in darktable, cool in Helios). darktable's code is in
-     `src/iop/channelmixerrgb.c`, `src/common/chromatic_adaptation.h` and
-     `src/common/illuminants.h`.
+   - **C3b, done** (2026-11-07): darktable's scene-referred default
+     colour pipeline. The white balance's "camera reference" mode
+     (`modules/whitebalance`: the coefficients that make a D65 white
+     neutral, from the camera's matrix, as darktable's
+     `_calculate_bogus_daylight_wb`; as shot when the matrix gives none)
+     and colour calibration's "as shot in camera" illuminant
+     (`modules/channelmixerrgb`, illuminant `camera`: darktable's
+     `find_illuminant_xy_from_as_shot_coeffs` and
+     `WB_coeffs_to_illuminant_xy` on the as-shot coefficients and the
+     camera's matrix, read from the context; D50, nothing adapted, when
+     none is found; `_check_if_close_to_daylight` ported for the
+     temperature and the daylight or black body match). A raw developed
+     through the raw front gets both: the template build sets the raw
+     front's white balance to camera reference and appends
+     `channelmixerrgb` after colorin, as it appends `flip`, rather than
+     changing `helios.raw-front@1`, which keeps rendering as it did
+     wherever it is used as a composite. "Develop one image" has both in
+     its network, and the desktop's catalogue has the module, so an
+     imported darktable colour calibration lands on it; a sidecar item
+     with the camera illuminant (darktable's default) now maps. An edit
+     made without colour calibration (an edit saved before, a darktable
+     edit without the module) keeps its look: its white balance is kept
+     and the colour calibration it does not name adapts nothing
+     (`helios_vault::edit::apply_to_graph`). Pictures are unchanged.
+     Unit parity: darktable's code, copied into a C harness
+     (`modules/channelmixerrgb/src/tests/dt_as_shot.c`), gives the
+     illuminants of four cameras' matrices (LibRaw's) under six as-shot
+     coefficients and their own D65 coefficients, held within 1e-6 in x
+     and y, the temperature within 1e-4 and the daylight match exactly;
+     the camera reference (D65) coefficients within 1e-6. `raw-parity`'s chain now gives
+     darktable the same white balance and colour calibration. Left: the
+     "defaults" rows to measure again on the box (pre-release).
 4. **Highlight reconstruction, inpaint opposed** (M). darktable's default
    method (`src/iop/hlreconstruct/opposed.c`) in `modules/highlights`,
    clip kept as a choice. Matters on skies and speculars; a parity test

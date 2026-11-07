@@ -4,8 +4,13 @@
 //! darktable's default exposure (+0.7 EV, the camera's bias taken back)
 //! where a picture keeps exposure's identity. A raw shot in portrait is
 //! turned upright by the `flip` step, unless the user or a darktable edit
-//! says otherwise.
+//! says otherwise. A raw's colours are calibrated as darktable's
+//! scene-referred default does (the white balance to the camera's D65
+//! reference, colour calibration from the camera's illuminant), a
+//! darktable edit's colour calibration lands on that node, and an edit made
+//! without it keeps its look.
 
+use std::fmt::Write as _;
 use std::sync::Arc;
 
 use helios_core::{Bus, Context, Engine, Graph, Image, NodeId, Region, Value};
@@ -85,7 +90,8 @@ fn batch_export_and_develop_preview_give_a_raw_develop_s_pixels() {
 }
 
 /// What the exposure node `node` does to the raw front's output, as a
-/// factor (the mean of its output over the mean of colorin's).
+/// factor (the mean of its output over the mean of flip's, the raw
+/// front's last step).
 fn exposure_gain(graph: &Graph, node: &str) -> f64 {
     let mean = |n: &str| {
         let px = render(graph, graph.find(n).unwrap());
@@ -95,7 +101,7 @@ fn exposure_gain(graph: &Graph, node: &str) -> f64 {
             .collect();
         rgb.iter().sum::<f64>() / rgb.len() as f64
     };
-    mean(node) / mean("colorin")
+    mean(node) / mean("flip")
 }
 
 #[test]
@@ -165,13 +171,16 @@ fn a_portrait_raw_is_turned_upright_in_every_template_taking_a_raw() {
         let flip = graph
             .find("flip")
             .unwrap_or_else(|| panic!("{id}: no flip"));
-        let colorin = graph.find("colorin").unwrap();
-        assert_eq!(graph.extent(colorin).unwrap(), Some(Region::sized(48, 32)));
+        let calibrated = graph.find("channelmixerrgb").unwrap();
+        assert_eq!(
+            graph.extent(calibrated).unwrap(),
+            Some(Region::sized(48, 32))
+        );
         let extent = graph.extent(view).unwrap().unwrap();
         assert_eq!((extent.width, extent.height), (32, 48), "{id}: {extent}");
         // Turned 90 degrees clockwise: the left column comes from the
         // bottom row.
-        let (before, after) = (whole(&graph, colorin), whole(&graph, flip));
+        let (before, after) = (whole(&graph, calibrated), whole(&graph, flip));
         for v in 0..48 {
             for u in 0..32 {
                 assert_eq!(
@@ -300,4 +309,172 @@ fn a_picture_keeps_its_exposure_under_the_masked_adjustment() {
             bundle.template.id
         );
     }
+}
+
+/// darktable's params of `operation` (its newest layout) from `fields`, as
+/// a sidecar's hex.
+fn params_hex(operation: &str, fields: &serde_json::Value) -> (u32, String) {
+    let layouts = helios_xmp::Layouts::built_in();
+    let version = *layouts.versions(operation).iter().max().unwrap();
+    let bytes = helios_xmp::encode(layouts.get(operation, version).unwrap(), fields).unwrap();
+    let hex = bytes.iter().fold(String::new(), |mut hex, b| {
+        let _ = write!(hex, "{b:02x}");
+        hex
+    });
+    (version, hex)
+}
+
+/// A darktable edit of `items` (operation, params), in that order.
+fn sidecar(items: &[(&str, serde_json::Value)]) -> String {
+    let mut lis = String::new();
+    for (i, (op, fields)) in items.iter().enumerate() {
+        let (version, hex) = params_hex(op, fields);
+        let _ = write!(
+            lis,
+            r#"<rdf:li darktable:num="{i}" darktable:operation="{op}" darktable:enabled="1" darktable:modversion="{version}" darktable:params="{hex}"/>"#
+        );
+    }
+    format!(
+        r#"<x:xmpmeta xmlns:x="adobe:ns:meta/">
+ <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+  <rdf:Description rdf:about="" xmlns:darktable="http://darktable.sf.net/"
+   darktable:xmp_version="5" darktable:iop_order_version="4" darktable:history_end="{}">
+   <darktable:history><rdf:Seq>{lis}</rdf:Seq></darktable:history>
+  </rdf:Description>
+ </rdf:RDF>
+</x:xmpmeta>"#,
+        items.len()
+    )
+}
+
+fn param(graph: &Graph, node: &str, name: &str) -> Option<Value> {
+    let id = graph.find(node).unwrap();
+    graph.params(id).unwrap().unwrap().get(name).cloned()
+}
+
+#[test]
+fn a_raw_gets_darktables_colour_calibration_in_every_template_taking_a_raw() {
+    let mosaic = mosaic();
+    for id in [
+        "helios.develop",
+        "helios.batch-export",
+        "helios.develop-preview",
+        "helios.portrait-retouch",
+    ] {
+        let (graph, view) = built(&find(id), &mosaic, &camera(0.0));
+        assert_eq!(
+            param(&graph, "whitebalance", "mode"),
+            Some(Value::Choice("camera_reference".into())),
+            "{id}"
+        );
+        assert_eq!(
+            param(&graph, "channelmixerrgb", "illuminant"),
+            Some(Value::Choice("camera".into())),
+            "{id}"
+        );
+        let calibrated = graph.find("channelmixerrgb").unwrap();
+        let colorin = graph.find("colorin").unwrap();
+        assert_eq!(graph.input_nodes(calibrated).unwrap(), [Some(colorin)]);
+        // The as-shot coefficients give an illuminant: the colours move.
+        let (before, after) = (render(&graph, colorin), render(&graph, calibrated));
+        assert!(after.iter().all(|v| v.is_finite()), "{id}");
+        assert!(
+            before.iter().zip(&after).any(|(a, b)| (a - b).abs() > 1e-3),
+            "{id}: colour calibration changed nothing"
+        );
+        assert!(render(&graph, view).iter().all(|v| v.is_finite()), "{id}");
+    }
+}
+
+#[test]
+fn a_darktable_edit_s_camera_colour_calibration_applies() {
+    // darktable's scene-referred default: the white balance at the
+    // camera's D65 coefficients (camera reference), colour calibration
+    // CAT16 from the camera's illuminant.
+    let identity = |c: usize| {
+        let mut row = vec![0.0; 4];
+        row[c] = 1.0;
+        row
+    };
+    let xmp = sidecar(&[
+        (
+            "temperature",
+            serde_json::json!({
+                "red": 2.2, "green": 1.0, "blue": 1.25, "various": 1.0, "preset": 1
+            }),
+        ),
+        (
+            "channelmixerrgb",
+            serde_json::json!({
+                "red": identity(0), "green": identity(1), "blue": identity(2),
+                "illuminant": "DT_ILLUMINANT_CAMERA",
+                "illum_fluo": "DT_ILLUMINANT_FLUO_F3",
+                "illum_led": "DT_ILLUMINANT_LED_B5",
+                "adaptation": "DT_ADAPTATION_CAT16",
+                "x": 0.3648, "y": 0.3773, "temperature": 4447.0,
+                "gamut": 1.0, "clip": true,
+                "version": "CHANNELMIXERRGB_V_3",
+            }),
+        ),
+    ]);
+    let (_, imported) = helios_xmp::import_text(&xmp, &helios_xmp::Layouts::built_in()).unwrap();
+    assert!(
+        imported.report.not_applied.is_empty(),
+        "{:#?}",
+        imported.report
+    );
+    for id in ["helios.develop", "helios.batch-export"] {
+        let (mut graph, view) = built(&find(id), &mosaic(), &camera(0.0));
+        let skipped = helios_vault::edit::apply_to_graph(&mut graph, &imported.edit()).unwrap();
+        assert!(skipped.is_empty(), "{id}: {skipped:?}");
+        assert_eq!(
+            param(&graph, "whitebalance", "mode"),
+            Some(Value::Choice("user".into())),
+            "{id}"
+        );
+        assert_eq!(
+            param(&graph, "channelmixerrgb", "illuminant"),
+            Some(Value::Choice("camera".into())),
+            "{id}"
+        );
+        assert!(render(&graph, view).iter().all(|v| v.is_finite()), "{id}");
+    }
+}
+
+#[test]
+fn an_edit_made_without_colour_calibration_keeps_its_look() {
+    // A darktable edit balancing as shot, with no colour calibration
+    // (display-referred), and an edit Helios saved before it had one: the
+    // white balance as shot.
+    let xmp = sidecar(&[(
+        "temperature",
+        serde_json::json!({
+            "red": 2.0, "green": 1.0, "blue": 1.5, "various": 1.0, "preset": 0
+        }),
+    )]);
+    let (_, darktable) = helios_xmp::import_text(&xmp, &helios_xmp::Layouts::built_in()).unwrap();
+    let helios = serde_json::json!({ "modules": [
+        { "name": "whitebalance", "module": "whitebalance", "params": { "mode": { "choice": "as_shot" } } }
+    ] });
+    for edit in [darktable.edit(), helios] {
+        let (mut graph, _) = built(&find("helios.develop"), &mosaic(), &camera(0.0));
+        let skipped = helios_vault::edit::apply_to_graph(&mut graph, &edit).unwrap();
+        assert!(skipped.is_empty(), "{skipped:?}");
+        assert_eq!(
+            param(&graph, "channelmixerrgb", "illuminant"),
+            Some(Value::Choice("pipe".into())),
+            "{edit}"
+        );
+    }
+    // An edit naming its colour calibration keeps it as it is.
+    let edit = serde_json::json!({ "modules": [
+        { "name": "whitebalance", "module": "whitebalance", "params": { "mode": { "choice": "as_shot" } } },
+        { "name": "channelmixerrgb", "module": "channelmixerrgb", "params": { "illuminant": { "choice": "a" } } }
+    ] });
+    let (mut graph, _) = built(&find("helios.develop"), &mosaic(), &camera(0.0));
+    helios_vault::edit::apply_to_graph(&mut graph, &edit).unwrap();
+    assert_eq!(
+        param(&graph, "channelmixerrgb", "illuminant"),
+        Some(Value::Choice("a".into()))
+    );
 }

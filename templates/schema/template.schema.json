@@ -98,7 +98,7 @@
           "items": { "$ref": "#/$defs/name" }
         },
         "image_sources": {
-          "description": "The sources given an image: a picture as it is, a raw file's mosaic with its camera followed by the raw front (helios.raw-front@1: levels, white balance, highlights, demosaicing, camera colours), so what reads them gets a picture, four channels (RGBA), either way. A source is in raw_sources or image_sources, not both.",
+          "description": "The sources given an image: a picture as it is, a raw file's mosaic with its camera followed by the raw front (helios.raw-front@1: levels, white balance, highlights, demosaicing, camera colours), then colour calibration from the camera's illuminant (the white balance then at the camera's D65 reference) and the camera's orientation, so what reads them gets a picture, four channels (RGBA), either way. A source is in raw_sources or image_sources, not both.",
           "type": "array",
           "items": { "$ref": "#/$defs/name" }
         },

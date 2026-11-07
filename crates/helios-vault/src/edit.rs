@@ -146,16 +146,34 @@ fn target(graph: &Graph, name: &str, module: Option<&str>) -> Option<helios_core
     })
 }
 
+/// The raw chain's colour calibration node and module, and the white
+/// balance mode it goes with (see [`apply_to_graph`]).
+const COLOUR_CALIBRATION: &str = "channelmixerrgb";
+const WHITE_BALANCE: &str = "whitebalance";
+const CAMERA_REFERENCE: &str = "camera_reference";
+
 /// Sets a graph's parameters to an edit's, by node name, and bypasses the
 /// nodes it says are (the others it names are not); returns what was left
 /// out (a node the graph lacks, or runs another module in, or that cannot
 /// be bypassed). A darktable edit's raw items land on the raw chain's
 /// nodes (its `temperature` on `whitebalance`), wherever the network has
 /// them: in "Develop one image", or the raw front of an image source.
+///
+/// The raw chain's colour calibration (`channelmixerrgb`, from the
+/// camera's illuminant) goes with a white balance to the camera's D65
+/// reference. An edit made without it (before Helios had it, or a
+/// darktable edit without colour calibration) balances its own way: its
+/// white balance is kept, and the colour calibration it does not name is
+/// set to adapt nothing (illuminant D50, `pipe`), so it looks as it did.
 pub fn apply_to_graph(graph: &mut Graph, edit: &Value) -> Result<Vec<String>, String> {
     let mut skipped = Vec::new();
     let bypassed = bypassed(edit);
-    for (name, (module, params)) in modules(edit)? {
+    let modules = modules(edit)?;
+    let mut balanced = None;
+    let calibrated = modules
+        .values()
+        .any(|(module, _)| module.as_deref() == Some(COLOUR_CALIBRATION));
+    for (name, (module, params)) in modules {
         let Some(id) = target(graph, &name, module.as_deref()) else {
             skipped.push(format!("`{name}`: no such node"));
             continue;
@@ -179,6 +197,28 @@ pub fn apply_to_graph(graph: &mut Graph, edit: &Value) -> Result<Vec<String>, St
         }
         if let Err(e) = graph.set_bypass(id, bypassed.contains(&name)) {
             skipped.push(format!("`{name}`: {e}"));
+        }
+        if running.as_deref() == Some(WHITE_BALANCE) {
+            balanced = Some(id);
+        }
+    }
+    if let (Some(wb), false) = (balanced, calibrated) {
+        let reference = graph
+            .params(wb)
+            .map_err(|e| e.to_string())?
+            .and_then(|p| p.get("mode").and_then(|v| v.as_choice()).map(String::from))
+            .is_some_and(|mode| mode == CAMERA_REFERENCE);
+        let calibration = graph.find(COLOUR_CALIBRATION).filter(|id| {
+            graph
+                .manifest(*id)
+                .ok()
+                .flatten()
+                .is_some_and(|m| m.name == COLOUR_CALIBRATION)
+        });
+        if let (false, Some(id)) = (reference, calibration) {
+            graph
+                .set_param(id, "illuminant", helios_core::Value::Choice("pipe".into()))
+                .map_err(|e| format!("`{COLOUR_CALIBRATION}.illuminant`: {e}"))?;
         }
     }
     Ok(skipped)

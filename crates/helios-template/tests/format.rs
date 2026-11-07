@@ -468,6 +468,96 @@ fn image_catalogue() -> Catalogue {
 }
 
 #[test]
+fn a_raw_through_the_raw_front_gets_darktables_colour_calibration() {
+    use helios_core::{Image, Value};
+    let catalogue = image_catalogue().module(ModuleRef::new(
+        helios_module_channelmixerrgb::ChannelMixerRgb,
+    ));
+    let b = bundle(&image_template());
+    // A Nikon D750 (its XYZ to camera matrix), shot under a warm light.
+    let white_balance = [1.32, 1.0, 2.45, 1.0];
+    let camera = helios_photo::CameraInfo {
+        maker: "Nikon".into(),
+        model: "D750".into(),
+        iso: 100.0,
+        exposure_bias: 0.0,
+        exposure_time: 0.01,
+        aperture: 4.0,
+        focal_length: 50.0,
+        black: [0.0; 4],
+        white: 1.0,
+        white_balance,
+        xyz_to_camera: [
+            0.9020, -0.2890, -0.0715, -0.4535, 1.2436, 0.2348, -0.0934, 0.1919, 0.7086,
+        ],
+        cfa: helios_photo::Cfa::parse("RGGB").unwrap(),
+        orientation: 1,
+    }
+    .to_context();
+    // A grey card under that light: what the as-shot coefficients make
+    // neutral.
+    let mosaic = Image::from_fn(Region::sized(16, 16), 1, |x, y, _| {
+        let c = match (x % 2, y % 2) {
+            (0, 0) => 0,
+            (1, 1) => 2,
+            _ => 1,
+        };
+        0.2 / white_balance[c] as f32
+    });
+    let built = b
+        .build_with(
+            &catalogue,
+            helios_template::Source::Raw {
+                mosaic: &mosaic,
+                camera: &camera,
+            },
+            None,
+        )
+        .unwrap();
+    // The white balance to the camera's D65 reference, then colour
+    // calibration from the camera's illuminant, after colorin.
+    let wb = built.graph.find("whitebalance").unwrap();
+    assert_eq!(
+        built.graph.params(wb).unwrap().unwrap().get("mode"),
+        Some(&Value::Choice("camera_reference".into()))
+    );
+    let cat = built.graph.find("channelmixerrgb").unwrap();
+    assert_eq!(
+        built.graph.params(cat).unwrap().unwrap().get("illuminant"),
+        Some(&Value::Choice("camera".into()))
+    );
+    let colorin = built.graph.find("colorin").unwrap();
+    assert_eq!(built.graph.input_nodes(cat).unwrap(), [Some(colorin)]);
+    let exp = built.graph.find("exp").unwrap();
+    assert_eq!(built.graph.input_nodes(exp).unwrap(), [Some(cat)]);
+    assert!(
+        built
+            .graph
+            .context(cat)
+            .unwrap()
+            .is_some_and(|c| !c.is_empty())
+    );
+    let render = |node| {
+        Engine::new(Arc::new(Bus::new()))
+            .render(&built.graph, node, "output", Region::sized(16, 16))
+            .unwrap()
+    };
+    // The card is neutral again once adapted (CAT16 against the
+    // matrix's Bradford, so within a few percent), not before.
+    let spread = |img: &Image| {
+        let p = img.pixel(8, 8);
+        let max = p[..3].iter().copied().fold(f32::MIN, f32::max);
+        let min = p[..3].iter().copied().fold(f32::MAX, f32::min);
+        assert!(min > 0.0 && max.is_finite(), "{p:?}");
+        max / min
+    };
+    let before = spread(&render(colorin));
+    let after = spread(&render(cat));
+    assert!(after < 1.08, "after colour calibration: {after}");
+    assert!(before > 1.5, "before colour calibration: {before}");
+}
+
+#[test]
 fn an_image_source_takes_a_picture_as_it_is_and_a_raw_through_the_raw_front() {
     use helios_core::Image;
     let t = image_template();

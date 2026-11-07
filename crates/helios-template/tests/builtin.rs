@@ -22,6 +22,9 @@ fn catalogue() -> Catalogue {
         .module(ModuleRef::new(helios_module_highlights::Highlights))
         .module(ModuleRef::new(helios_module_demosaic::Demosaic))
         .module(ModuleRef::new(helios_module_colorin::ColorIn))
+        .module(ModuleRef::new(
+            helios_module_channelmixerrgb::ChannelMixerRgb,
+        ))
         .module(ModuleRef::new(helios_module_flip::Flip))
         .module(ModuleRef::new(helios_module_exposure::Exposure))
         .module(ModuleRef::new(helios_module_sigmoid::Sigmoid))
@@ -366,6 +369,7 @@ fn develop_one_image_reads_a_raw_through_the_raw_chain_beside_the_image() {
             "highlights",
             "demosaic",
             "colorin",
+            "channelmixerrgb",
             "flip",
             "exposure",
             "sigmoid"

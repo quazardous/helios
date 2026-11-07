@@ -433,8 +433,9 @@ pub enum SourceKind {
     /// An image: a picture goes on as a picture source's; a raw file's
     /// mosaic, with its camera, goes through the raw front
     /// ([`RAW_FRONT`]: levels, white balance, highlights, demosaicing,
-    /// camera colours) first, so the nodes reading the source get a
-    /// picture in the working space either way.
+    /// camera colours), colour calibration and orientation first, so the
+    /// nodes reading the source get a picture in the working space
+    /// either way.
     Image,
 }
 

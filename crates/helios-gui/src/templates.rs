@@ -56,6 +56,9 @@ pub fn modules() -> Catalogue {
         .module(ModuleRef::new(helios_module_highlights::Highlights))
         .module(ModuleRef::new(helios_module_demosaic::Demosaic))
         .module(ModuleRef::new(helios_module_colorin::ColorIn))
+        .module(ModuleRef::new(
+            helios_module_channelmixerrgb::ChannelMixerRgb,
+        ))
         .module(ModuleRef::new(helios_module_flip::Flip))
         .module(ModuleRef::new(helios_module_exposure::Exposure))
         .module(ModuleRef::new(helios_module_sigmoid::Sigmoid))

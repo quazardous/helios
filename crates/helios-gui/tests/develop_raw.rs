@@ -102,7 +102,8 @@ fn node_render(raw: &Path, region: Region) -> Image {
             { "from": "whitebalance", "port": "output", "to": "highlights", "input": "input" },
             { "from": "highlights", "port": "output", "to": "demosaic", "input": "input" },
             { "from": "demosaic", "port": "output", "to": "colorin", "input": "input" },
-            { "from": "colorin", "port": "output", "to": "flip", "input": "input" },
+            { "from": "colorin", "port": "output", "to": "channelmixerrgb", "input": "input" },
+            { "from": "channelmixerrgb", "port": "output", "to": "flip", "input": "input" },
             { "from": "flip", "port": "output", "to": "exposure", "input": "input" },
             { "from": "exposure", "port": "output", "to": "sigmoid", "input": "input" }
         ]

@@ -5,7 +5,9 @@ use std::collections::BTreeMap;
 
 use egui_pop_model::ids::PanelId;
 use egui_pop_model::layout::Layout;
-use helios_core::{Context, Expansion, Graph, Image, ModuleRef, NodeId, Params, Region, Wire};
+use helios_core::{
+    Context, Expansion, Graph, Image, ModuleRef, NodeId, Params, Region, Value, Wire,
+};
 
 use crate::catalogue::Catalogue;
 use crate::format::{CompositeRef, NodeDesc, PanelHint, RAW_FRONT, SourceKind, Template};
@@ -316,11 +318,23 @@ fn open(
 /// The orientation module put after the raw front.
 const FLIP: &str = "flip";
 
+/// The colour calibration module put after the raw front.
+const COLOUR_CALIBRATION: &str = "channelmixerrgb";
+
+/// The raw front's white balance node, set to the camera's D65 reference
+/// when colour calibration follows.
+const WHITE_BALANCE: &str = "whitebalance";
+
 /// The raw front after the source `source` (`id`), given a raw: its
 /// nodes opened in the graph under their own names where `taken` does
 /// not hold them, the source wired to its input, then the catalogue's
-/// `flip` module (the camera's orientation). Returns where what reads
-/// the source reads.
+/// `channelmixerrgb` (colour calibration from the camera's illuminant,
+/// the white balance set to the camera's D65 reference: darktable's
+/// scene-referred default) and `flip` modules (the camera's orientation).
+/// Returns where what reads the source reads.
+///
+/// Both are appended here rather than in `helios.raw-front@1`, which
+/// keeps rendering as it always has wherever it is used as a composite.
 fn raw_front(
     graph: &mut Graph,
     nodes: &mut BTreeMap<String, NodeId>,
@@ -367,33 +381,79 @@ fn raw_front(
                 .map_err(|e| format!("`{r}`'s input `{port}`: {e}"))?;
         }
     }
-    let mut output = placed
+    let output = placed
         .outputs
         .values()
         .next()
         .cloned()
         .ok_or_else(|| format!("`{r}` has no output"))?;
+    let mut at = Append {
+        graph,
+        nodes,
+        taken,
+        catalogue,
+        source,
+        output,
+    };
+    // darktable's scene-referred colour: the white balance to the
+    // camera's D65 reference, then colour calibration (CAT16) from the
+    // illuminant the camera's as-shot coefficients give. Left out by a
+    // catalogue without it, the white balance then as shot.
+    let camera = Params::new().with("illuminant", Value::Choice("camera".into()));
+    if at.module(COLOUR_CALIBRATION, &camera)? {
+        let wb = names
+            .get(WHITE_BALANCE)
+            .and_then(|name| at.nodes.get(name))
+            .copied()
+            .ok_or_else(|| format!("`{r}` has no `{WHITE_BALANCE}` node"))?;
+        at.graph
+            .set_param(wb, "mode", Value::Choice("camera_reference".into()))
+            .map_err(|e| format!("`{WHITE_BALANCE}`: {e}"))?;
+    }
     // The orientation step, as darktable's `flip`: the camera's EXIF
     // orientation by default. Left out by a catalogue without it.
-    if let Some(flip) = catalogue.get_module(FLIP) {
-        let name = if taken.contains(FLIP) {
-            format!("{source}.{FLIP}")
-        } else {
-            FLIP.to_string()
-        };
-        taken.insert(name.clone());
-        let id = graph
-            .add_module(&name, flip.clone(), &Params::new())
-            .map_err(|e| e.to_string())?;
-        graph
-            .connect(output.0, &output.1, id, "input")
-            .map_err(|e| format!("`{name}`: {e}"))?;
-        nodes.insert(name, id);
-        output = (id, "output".to_string());
-    }
+    at.module(FLIP, &Params::new())?;
+    let output = at.output;
     let mut p = Placed::default();
     p.outputs.insert(SOURCE_PORT.into(), output);
     Ok(p)
+}
+
+/// Modules appended after the raw front, each wired to the last output.
+struct Append<'a> {
+    graph: &'a mut Graph,
+    nodes: &'a mut BTreeMap<String, NodeId>,
+    taken: &'a mut std::collections::BTreeSet<String>,
+    catalogue: &'a Catalogue,
+    source: &'a str,
+    output: (NodeId, String),
+}
+
+impl Append<'_> {
+    /// The catalogue's `module` with `params`, named after it (or
+    /// `<source>.<module>` where the name is taken), after the last
+    /// output; false when the catalogue lacks it.
+    fn module(&mut self, module: &str, params: &Params) -> Result<bool, String> {
+        let Some(m) = self.catalogue.get_module(module) else {
+            return Ok(false);
+        };
+        let name = if self.taken.contains(module) {
+            format!("{}.{module}", self.source)
+        } else {
+            module.to_string()
+        };
+        self.taken.insert(name.clone());
+        let id = self
+            .graph
+            .add_module(&name, m.clone(), params)
+            .map_err(|e| e.to_string())?;
+        self.graph
+            .connect(self.output.0, &self.output.1, id, "input")
+            .map_err(|e| format!("`{name}`: {e}"))?;
+        self.nodes.insert(name, id);
+        self.output = (id, "output".to_string());
+        Ok(true)
+    }
 }
 
 /// A composite's network (`r`'s) put in the graph as ordinary nodes,
