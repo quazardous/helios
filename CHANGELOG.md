@@ -24,6 +24,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.73.0] - 2026-11-07
+
+### Added
+
+- Help > Health check lists what Helios's background checks found (free space where Helios writes, the catalogue's integrity), each with a fix and "Ignore", and a status bar badge shows when something needs attention.
+
 ## [0.72.0] - 2026-11-07
 
 ### Added
