@@ -24,6 +24,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.74.0] - 2026-11-07
+
+### Added
+
+- File > Storage… lists every disk Helios has seen, online first, to name it, give it its roles, mark it off site or RAID and, for a weakly known disk, write its identity file. Photos on an unplugged disk show an "offline" badge and say which disk to plug in, and missing photos a "missing" one.
+
 ## [0.73.0] - 2026-11-07
 
 ### Added
