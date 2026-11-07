@@ -223,3 +223,24 @@ fn a_darktable_edit_s_orientation_carries_over() {
         Some(Region::new(0, -48, 32, 48))
     );
 }
+
+/// A node's whole output written as an 8-bit PNG, as an export writes it,
+/// read back.
+fn exported(graph: &Graph, node: NodeId) -> image::RgbaImage {
+    let png = helios_export::encode(&whole(graph, node), &helios_export::Format::Png { bits: 8 })
+        .map_err(|m| m.english)
+        .unwrap();
+    image::load_from_memory(&png).unwrap().to_rgba8()
+}
+
+#[test]
+fn a_turned_raw_exports_upright() {
+    let (mut graph, view) = built(&find("helios.batch-export"), &wide(), &tagged(6));
+    let turned = exported(&graph, view);
+    assert_eq!(turned.dimensions(), (32, 48));
+    let flip = graph.find("flip").unwrap();
+    graph.set_param(flip, "orientation", Value::Int(0)).unwrap();
+    let upright = exported(&graph, view);
+    assert_eq!(upright.dimensions(), (48, 32));
+    assert_eq!(turned, image::imageops::rotate90(&upright));
+}

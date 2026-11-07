@@ -95,7 +95,7 @@ and sharpening are not applied by default.
 | Filmic | **no** (vkdt's film curve `vkdt_filmcurv` exists, unused) | | | the "filmic" workflow only |
 | Lens correction | **no** | | | off by default |
 | Denoise | **no** | | | off by default |
-| Orientation (flip) | yes, in the developed image; the viewer and drawn masks do not follow a turned image yet (B5b) | `modules/flip`, after the raw front and in "Develop one image" | the EXIF orientation, the user's value over it | auto, from EXIF |
+| Orientation (flip) | yes, shown and exported upright; darktable's drawn masks do not follow a turned image yet (B5b) | `modules/flip`, after the raw front and in "Develop one image" | the EXIF orientation, the user's value over it | auto, from EXIF |
 | Output profile | yes, at export and on screen | `helios_export::Output` (`crates/helios-export/src/lib.rs:436`), `helios-colour` | sRGB (Display P3, Adobe RGB, Rec.2020 offered) | sRGB |
 
 GPU: of the raw chain, only exposure and sigmoid have GPU kernels
@@ -212,12 +212,16 @@ less, M a few days, L a week or more.
    EXIF tag, read from `photo.orientation`), put after the raw front by
    the template build and in "Develop one image", and darktable's `flip`
    read from sidecars. A turned image's extent starts off the origin
-   (clockwise, `W x H` covers `(-H, 0)` to `(0, W)`). **(b) left**: the
-   viewport (`engine_source.rs` asks regions from `(0, 0)` over the
-   extent's size, so a turned raw shows the wrong area), the export's
-   writers and previews taking an extent off the origin, and
-   `helios_xmp::drawn::Frame` gaining the orientation so darktable's
-   masks land on a turned image.
+   (clockwise, `W x H` covers `(-H, 0)` to `(0, W)`). **(b) partly done
+   (2026-11-07)**: the viewport (`engine_source.rs`) places its tiles and
+   readout at the extent's corner; the export, the clipboard copy and the
+   previews already rendered the extent as it is (their writers read the
+   pixels row by row, whatever the origin). **Left**:
+   `helios_xmp::drawn::Frame` gaining the orientation (points turned
+   about the origin as `flip` turns them, gradient and ellipse angles
+   with them), so a darktable edit's drawn masks, made on the unturned
+   image, land on a turned one. Library thumbnails come from the
+   embedded preview, not the chain, and are not turned by `flip`.
    The original entry: the loader reports the EXIF orientation
    (`crates/helios-load/src/lib.rs`, `Loaded`), a `flip` step (a module or
    the raw front's last node) applies it, masks follow it

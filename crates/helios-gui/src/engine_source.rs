@@ -266,9 +266,19 @@ impl TileSource for EngineSource {
     }
 }
 
-/// The scaled pixels a tile covers.
-fn region_of(r: &TileRequest) -> Region {
-    Region::new(r.origin[0], r.origin[1], r.size[0], r.size[1])
+/// The scaled pixels a tile covers. The viewport counts from the image's
+/// top-left corner; the node's extent may start off the origin (a turned
+/// image, see `Module::output_extent`), so its corner at the tile's scale
+/// is added, as `preview::plan` places it.
+fn region_of(r: &TileRequest, extent: Region) -> Region {
+    let scale = r.key.scale.get();
+    let at = |v: i64| (v as f64 * scale).floor() as i64;
+    Region::new(
+        at(extent.x) + r.origin[0],
+        at(extent.y) + r.origin[1],
+        r.size[0],
+        r.size[1],
+    )
 }
 
 /// An image's pixels as RGBA: a grey spread over the colour channels, an
@@ -320,11 +330,13 @@ fn work(
 
 /// The working-space values of one pixel, at full resolution.
 fn read_out(engine: &Engine, s: &Shown, p: [i64; 2], sink: &TileSink, stats: &Stats) {
-    let one = Region::new(p[0], p[1], 1, 1);
+    // The viewport's pixel, from the image's corner, on the plane.
+    let (x, y) = (s.extent.x + p[0], s.extent.y + p[1]);
+    let one = Region::new(x, y, 1, 1);
     let Ok(image) = engine.render(&s.graph, s.node, &s.port, one) else {
         return;
     };
-    let px = image.pixel(p[0], p[1]);
+    let px = image.pixel(x, y);
     let n = px.len();
     let mut values: Vec<(String, f32)> = ["R", "G", "B"]
         .iter()
@@ -335,7 +347,7 @@ fn read_out(engine: &Engine, s: &Shown, p: [i64; 2], sink: &TileSink, stats: &St
     if let Some(m) = &s.mask
         && let Ok(mask) = engine.render(&s.graph, m.target.node, &m.target.port, one)
     {
-        values.push(("Mask".into(), mask.pixel(p[0], p[1])[0]));
+        values.push(("Mask".into(), mask.pixel(x, y)[0]));
     }
     sink.readout(p, values);
     Stats::add(&stats.readouts, 1);
@@ -431,7 +443,7 @@ fn deliver_on_device(
             Stats::add(&stats.skipped, 1);
             continue;
         }
-        let region = region_of(r);
+        let region = region_of(r, s.extent);
         let origin = [(region.x - at.x) as u32, (region.y - at.y) as u32];
         // Run only when `deliver_device` refuses the tile, on this render
         // thread (never the interface's): a host render of the one tile,
@@ -473,11 +485,11 @@ fn render(
     }
     let mut answered = HashSet::new();
     for ((_, scale), group) in groups {
-        let regions = group.iter().map(region_of).collect();
+        let regions = group.iter().map(|r| region_of(r, s.extent)).collect();
         for union in helios_core::engine::unions(regions) {
             let inside: Vec<&TileRequest> = group
                 .iter()
-                .filter(|r| !answered.contains(&r.id) && union.contains(&region_of(r)))
+                .filter(|r| !answered.contains(&r.id) && union.contains(&region_of(r, s.extent)))
                 .collect();
             answered.extend(inside.iter().map(|r| r.id));
             let live: Vec<&TileRequest> = inside
@@ -515,12 +527,12 @@ fn render(
                             Stats::add(&stats.skipped, 1);
                             continue;
                         }
-                        let tile = image.sample(region_of(r));
+                        let tile = image.sample(region_of(r, s.extent));
                         let mut pixels = rgba(&tile);
                         if let Some((m, mask)) = &mask {
                             crate::mask_display::composite(
                                 &mut pixels,
-                                &mask.sample(region_of(r)),
+                                &mask.sample(region_of(r, s.extent)),
                                 m.mode,
                                 &m.style,
                             );
