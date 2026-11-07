@@ -20,6 +20,8 @@ extend-exclude = [
 extend-ignore-re = ["PNGs"]
 
 [default.extend-words]
+# Hald CLUT, the identity-image format of colour lookup tables.
+hald = "hald"
 # Integer pixel coordinates next to `ix`, as in vkdt's shaders.
 iy = "iy"
 # A job named after the two it waits for, in the scheduler tests.
