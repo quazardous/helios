@@ -243,7 +243,7 @@ egui-pop's jobs, measured on 2026-11-07 (egui-pop `main`):
 | --- | --- | --- | --- | --- |
 | `egui-pop-test` (gallery, one filter) | 5g | cgroup 5.0 GB (the limit, 0.2 GB swapped), 4.5 GB RSS in three links at once; 270 to 360 s | 2 build jobs | 4g |
 | `egui-pop-snapshots` | 7g | cgroup 3.1 GB, 2.8 GB RSS in two links; 453 s (median 472 s) | 2 build jobs (at most two links already) | 4g |
-| `egui-pop-gate` | 8g | log line 2.0 to 2.5 GB over 23 runs (understated, see above); 23 to 44 min | 2 build jobs, timeout 75m | 4g |
+| `egui-pop-gate` | 8g | cgroup 5.0 GB (the limit of a 3g probe, 0.2 GB swapped), 4.7 GB RSS in three links at once (the log line said 2.5 GB); 32 min, 23 to 44 min over 23 runs | 2 build jobs, timeout 75m | 4g |
 
 The "before" peaks were measured with the build jobs at 3 for the test and
 the gate, and at the default 5 for the snapshots. Two build jobs bound a
