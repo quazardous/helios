@@ -2365,7 +2365,7 @@ dependencies = [
 
 [[package]]
 name = "helios-module-flip"
-version = "0.65.0"
+version = "0.67.0"
 dependencies = [
  "helios-core",
  "helios-photo",
