@@ -84,9 +84,9 @@ fn batch_export_and_develop_preview_give_a_raw_develop_s_pixels() {
     }
 }
 
-/// What the exposure node does to its input, as a factor (the mean of
-/// its output over the mean of colorin's).
-fn exposure_gain(graph: &Graph) -> f64 {
+/// What the exposure node `node` does to the raw front's output, as a
+/// factor (the mean of its output over the mean of colorin's).
+fn exposure_gain(graph: &Graph, node: &str) -> f64 {
     let mean = |n: &str| {
         let px = render(graph, graph.find(n).unwrap());
         let rgb: Vec<f64> = px
@@ -95,7 +95,7 @@ fn exposure_gain(graph: &Graph) -> f64 {
             .collect();
         rgb.iter().sum::<f64>() / rgb.len() as f64
     };
-    mean("exposure") / mean("colorin")
+    mean(node) / mean("colorin")
 }
 
 #[test]
@@ -104,7 +104,7 @@ fn a_raw_is_exposed_plus_0_7_ev_its_camera_s_bias_taken_back() {
     for id in ["helios.develop", "helios.batch-export"] {
         for bias in [0.0, 1.0, -0.7] {
             let (graph, _) = built(&find(id), &mosaic, &camera(bias));
-            let ev = exposure_gain(&graph).log2();
+            let ev = exposure_gain(&graph, "exposure").log2();
             // darktable's black (-0.000244) adds a hair on these levels.
             assert!(
                 (ev - (0.7 - bias)).abs() < 0.02,
@@ -188,6 +188,41 @@ fn a_portrait_raw_is_turned_upright_in_every_template_taking_a_raw() {
     }
 }
 
+/// Where the template's exposure is a masked adjustment (Portrait
+/// retouch, the blank workspace), a base exposure under it gives the
+/// whole image a raw's default, and the masked exposure still works on
+/// top of it.
+#[test]
+fn portrait_and_the_blank_workspace_expose_a_raw_under_their_masked_adjustment() {
+    let mosaic = mosaic();
+    let blank = helios_template::workspace::blank();
+    for bundle in [find("helios.portrait-retouch"), blank] {
+        let id = bundle.template.id.clone();
+        for bias in [0.0, 1.0, -0.7] {
+            let (graph, view) = built(&bundle, &mosaic, &camera(bias));
+            let ev = exposure_gain(&graph, "base").log2();
+            assert!(
+                (ev - (0.7 - bias)).abs() < 0.02,
+                "{id}, bias {bias}: {ev} EV"
+            );
+            // The masked exposure starts from the base, its own value
+            // kept (Portrait's +0.5 EV, the blank's identity).
+            let masked = exposure_gain(&graph, "exposure") / exposure_gain(&graph, "base");
+            let own = if id == "helios.portrait-retouch" {
+                0.5
+            } else {
+                0.0
+            };
+            assert!(
+                (masked.log2() - own).abs() < 0.02,
+                "{id}, bias {bias}: masked {} EV",
+                masked.log2()
+            );
+            assert!(render(&graph, view).iter().all(|v| v.is_finite()), "{id}");
+        }
+    }
+}
+
 #[test]
 fn a_landscape_raw_keeps_its_extent() {
     let (graph, view) = built(&find("helios.develop"), &wide(), &tagged(1));
@@ -243,4 +278,26 @@ fn a_turned_raw_exports_upright() {
     let upright = exported(&graph, view);
     assert_eq!(upright.dimensions(), (48, 32));
     assert_eq!(turned, image::imageops::rotate90(&upright));
+}
+
+#[test]
+fn a_picture_keeps_its_exposure_under_the_masked_adjustment() {
+    let picture = Image::from_fn(Region::sized(SIDE, SIDE), 4, |_, _, c| {
+        if c == 3 { 1.0 } else { 0.25 }
+    });
+    for bundle in [
+        find("helios.portrait-retouch"),
+        helios_template::workspace::blank(),
+    ] {
+        let b = bundle
+            .build_with(&templates::modules(), Source::Picture(&picture), None)
+            .unwrap();
+        let out = render(&b.graph, b.graph.find("base").unwrap());
+        assert!(
+            out.iter()
+                .all(|v| (v - 0.25).abs() < 1e-6 || (v - 1.0).abs() < 1e-6),
+            "{}",
+            bundle.template.id
+        );
+    }
 }

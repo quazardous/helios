@@ -570,19 +570,28 @@ impl State {
 /// The network of a workspace not made from a template: an exposure
 /// mixed into the image through a mask the viewport draws in (with no
 /// shape yet the mask is 1 everywhere, so the exposure applies fully).
-/// Its source takes an image: a raw goes through the raw front.
+/// Its source takes an image: a raw goes through the raw front, then a
+/// base exposure under the mask's (identity for a picture, darktable's
+/// default for a raw: +0.7 EV, the camera's bias taken back).
 pub fn blank_network() -> NetworkDesc {
     serde_json::from_value(json!({
         "sources": ["source"],
         "image_sources": ["source"],
         "nodes": [
+            { "name": "base", "module": "exposure",
+              "raw_params": {
+                  "exposure": { "float": 0.7 },
+                  "black": { "float": -0.000244140625 },
+                  "compensate_bias": { "bool": true }
+              } },
             { "name": "exposure", "module": "exposure" },
             { "name": "mask", "module": "mask_combine" },
             { "name": "blend", "module": "mask_blend" }
         ],
         "connections": [
-            { "from": "source", "port": "image", "to": "exposure", "input": "input" },
-            { "from": "source", "port": "image", "to": "blend", "input": "input" },
+            { "from": "source", "port": "image", "to": "base", "input": "input" },
+            { "from": "base", "port": "output", "to": "exposure", "input": "input" },
+            { "from": "base", "port": "output", "to": "blend", "input": "input" },
             { "from": "exposure", "port": "output", "to": "blend", "input": "processed" },
             { "from": "mask", "port": "mask", "to": "blend", "input": "mask" }
         ],
