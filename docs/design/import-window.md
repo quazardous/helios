@@ -27,7 +27,7 @@ or folders on Helios (the window opens with them as its source).
 │  Downloads         │ ── 2026-11-03 · 2,998 ───────────────────────── [✓]   │       IMG_0412.CR3          │
 │ Favourites         │ ┌──┐┌──┐┌──┐ …                                          │ Name  {stem}            [▾] │
 │  NAS/Photos        │                                                       │                             │
-│ ──────────────     │                                                       │ Backup copy to  (off)   [▸] │
+│ ──────────────     │                                                       │                             │
 │ Choose a folder…   │                                                       │ Duplicates  skip        [▾] │
 │                    │                                                       │ ☐ Read darktable edits      │
 │                    │                                                       │ ▸ More                      │
@@ -72,7 +72,6 @@ or folders on Helios (the window opens with them as its source).
   - **Name**: the rename pattern (presets and custom, using today's
     `{date}` `{time}` `{camera}` `{frame}` `{stem}` `{seq}`), with an
     example name.
-  - **Backup copy to**: off by default, its folder remembered.
   - **Duplicates**: skip (default), keep, or ask.
   - **Read darktable edits** (sidecars as versions).
   - **More** (folded): metadata template and time offset, once they
@@ -99,8 +98,8 @@ or folders on Helios (the window opens with them as its source).
 
 ## Pipeline changes this needs (study phase 1)
 
-- Copying reads the card once: hash while copying, then verify the copy,
-  and verify the backup copy the same way.
+- Copying reads the card once: hash while copying, then verify the copy.
+  A backup copy on import is left for later, in a ticket of its own.
 - A lost source pauses the job instead of failing each file.
 - The "safe to format" check by hash.
 - Import becomes one undo step, which resolves the conflict between
