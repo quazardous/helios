@@ -973,10 +973,12 @@ fn the_import_window_keeps_its_size() {
         .unwrap();
     read_through(&mut h);
     headless::assert_window_stable(&mut h, TITLE, 120);
-    // No source.
+    // No source, from the frame it opens: it grew a few points a frame.
     let mut h = headless::harness(Shell::new(helios_panels(), None), size);
     h.run();
-    run(&mut h, "library.importWindow", json!(null));
+    h.state_mut()
+        .run("library.importWindow", json!(null), Origin::User)
+        .unwrap();
     headless::assert_window_stable(&mut h, TITLE, 120);
     // egui-pop's folder chooser, opened from it.
     h.get_by_label("Choose a folder…").click();
