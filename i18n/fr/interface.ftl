@@ -12,8 +12,6 @@ category-node-graph = Graphe de nœuds
 
 category-preferences = Préférences
 
-category-vault = Coffre
-
 category-workspace = Espace de travail
 
 clip-application-x-helios-images-json =

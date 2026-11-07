@@ -158,13 +158,13 @@ command-helios-stacks-moveTo =
     .title = Move Stacks to an area (`area`)
 
 command-helios-vault-detach =
-    .title = Move Vault to a new window
+    .title = Move Library to a new window
 
 command-helios-vault-dock =
-    .title = Dock Vault back in its area
+    .title = Dock Library back in its area
 
 command-helios-vault-moveTo =
-    .title = Move Vault to an area (`area`)
+    .title = Move Library to an area (`area`)
 
 command-helios-viewport-detach =
     .title = Move Image to a new window
@@ -194,10 +194,10 @@ command-library-copyFiles =
     .title = Copy files: the selected images' files, for a file manager or another application
 
 command-library-importFiles =
-    .title = Import files and folders (`paths`), placed as the workspace's import source says (`copy`: into the library folder or not)
+    .title = Import files and folders (`paths`), placed as the workspace's import source says (`copy`: into the library folder or not; `ask`: asked without an import source; `darktable`)
 
 command-library-importSource =
-    .title = Import from the workspace's import source (`path`: the card or folder; asked when absent)
+    .title = Import photos… (`path`: a card or folder, asked when absent; `copy`, `darktable`, `remember` when the workspace has no import source)
 
 command-library-pasteFiles =
     .title = Paste files or an image another application copied into the library, imported once confirmed (`dry_run`: only say what would be imported)
@@ -464,7 +464,7 @@ command-view-endSideBar-toggle =
     .title = Fold the end side bar
 
 command-view-library =
-    .title = Go to the library: the vault's images to browse, rate and cull
+    .title = Go to the library: its photos to browse, rate and cull
 
 command-view-network =
     .title = Go to the workspace's network, to edit it

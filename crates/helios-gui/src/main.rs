@@ -141,7 +141,9 @@ fn seconds() -> u64 {
 /// The library operations as commands (see `helios_library`): an import
 /// runs as a job on the shell's jobs (`job.*`, in the jobs centre, where
 /// it is cancelled), the library filled again when it ends, its
-/// duplicates listed in the Duplicates panel; stack suggestions are
+/// duplicates listed in the Duplicates panel, its photos' darktable edits
+/// kept as versions (unless `darktable` is false), the darktable edits
+/// not kept whole in the Log panel and its end said; stack suggestions are
 /// recorded, and applied once accepted (the Stacks panel answers them).
 fn library_commands(
     shell: &mut Shell,
@@ -157,13 +159,14 @@ fn library_commands(
     let text = |args: &Value, key: &str| args.get(key).and_then(Value::as_str).map(String::from);
     let (vault, jobs) = (persist.vault().clone(), shell.jobs());
     let (done, ctx) = (refill.clone(), ctx.clone());
-    // Each file's line goes to the Duplicates panel with the import's
-    // arguments, so a duplicate kept is imported again the same way.
-    let lines = shell.duplicates_sink();
+    // Each file's line goes to the shell with the import's arguments (the
+    // Duplicates panel, so a duplicate kept is imported again the same
+    // way; the Log panel), then the import's end.
+    let lines = shell.import_sink();
     shell.register(
         CommandSpec::new(
             "library.import",
-            "Import a folder or a card (`path`, or `paths` for several files and folders; `copy`, `into`, `rename`, `duplicates`)",
+            "Import a folder or a card (`path`, or `paths` for several files and folders; `copy`, `into`, `rename`, `duplicates`; `darktable`: false leaves the .xmp sidecars out)",
             "Library",
         ),
         move |args, _| {
@@ -190,6 +193,10 @@ fn library_commands(
             if let Some(policy) = text(args, "duplicates") {
                 options.duplicates = Duplicates::parse(&policy)?;
             }
+            options.darktable = args
+                .get("darktable")
+                .and_then(Value::as_bool)
+                .unwrap_or(true);
             let (vault, jobs, done, ctx) = (vault.clone(), jobs.clone(), done.clone(), ctx.clone());
             let (lines, asked) = (lines.clone(), args.clone());
             std::thread::spawn(move || {
@@ -205,9 +212,14 @@ fn library_commands(
                         let _ = lines.send((asked.clone(), line.clone()));
                     },
                 );
-                if let Err(e) = ended {
-                    warn(&format!("import: {e}"));
-                }
+                let end = match ended {
+                    Ok(report) => json!({ "ended": report }),
+                    Err(e) => {
+                        warn(&format!("import: {e}"));
+                        json!({ "failed": e })
+                    }
+                };
+                let _ = lines.send((asked.clone(), end));
                 done.store(true, Ordering::Relaxed);
                 ctx.request_repaint();
             });

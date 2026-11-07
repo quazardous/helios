@@ -157,13 +157,13 @@ command-helios-stacks-moveTo =
     .title = Déplacer Piles vers une zone (`area`)
 
 command-helios-vault-detach =
-    .title = Déplacer Coffre dans une nouvelle fenêtre
+    .title = Déplacer Bibliothèque dans une nouvelle fenêtre
 
 command-helios-vault-dock =
-    .title = Remettre Coffre dans sa zone
+    .title = Remettre Bibliothèque dans sa zone
 
 command-helios-vault-moveTo =
-    .title = Déplacer Coffre vers une zone (`area`)
+    .title = Déplacer Bibliothèque vers une zone (`area`)
 
 command-helios-viewport-detach =
     .title = Déplacer Image dans une nouvelle fenêtre
@@ -184,10 +184,10 @@ command-library-copyFiles =
     .title = Copier les fichiers : ceux des images sélectionnées, pour un gestionnaire de fichiers ou une autre application
 
 command-library-importFiles =
-    .title = Importer des fichiers et des dossiers (`paths`), placés comme le dit la source d’import de l’espace de travail (`copy` : dans le dossier de la bibliothèque ou non)
+    .title = Importer des fichiers et des dossiers (`paths`), placés comme le dit la source d’import de l’espace de travail (`copy` : dans le dossier de la bibliothèque ou non ; `ask` : demandé sans source d’import ; `darktable`)
 
 command-library-importSource =
-    .title = Importer depuis la source d’import de l’espace de travail (`path` : la carte ou le dossier ; demandé en son absence)
+    .title = Importer des photos… (`path` : une carte ou un dossier, demandé en son absence ; `copy`, `darktable`, `remember` quand l’espace de travail n’a pas de source d’import)
 
 command-library-pasteFiles =
     .title = Coller dans la bibliothèque des fichiers ou une image copiés par une autre application, importés une fois confirmé (`dry_run` : dire seulement ce qui serait importé)
@@ -430,7 +430,7 @@ command-view-endSideBar-toggle =
     .title = Replier la barre latérale de fin
 
 command-view-library =
-    .title = Aller à la bibliothèque : les images du coffre, à parcourir, noter et trier
+    .title = Aller à la bibliothèque : ses photos, à parcourir, noter et trier
 
 command-view-network =
     .title = Aller au réseau de l’espace de travail, pour le modifier

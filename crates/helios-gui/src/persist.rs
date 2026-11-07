@@ -455,8 +455,11 @@ impl<S: Store> Persist<S> {
                 Ok(ids) => shell.library_mut().set_matches(ids),
                 Err(e) => shell.notify(
                     Level::Error,
-                    Message::new("gui-vault-unreadable", "Cannot read the vault: { $error }")
-                        .with("error", e),
+                    Message::new(
+                        "gui-vault-unreadable",
+                        "Cannot read the library: { $error }",
+                    )
+                    .with("error", e),
                 ),
             }
         }
@@ -594,7 +597,7 @@ impl<S: Store> Persist<S> {
                 Level::Warning,
                 Message::new(
                     "gui-library-not-saved",
-                    "Not saved, the library shows what the vault holds: { $error }",
+                    "Not saved, the library shows what was saved last: { $error }",
                 )
                 .with("error", e),
             );
@@ -603,8 +606,11 @@ impl<S: Store> Persist<S> {
         if let Err(e) = self.show_stored(shell, &touched) {
             shell.notify(
                 Level::Error,
-                Message::new("gui-vault-unreadable", "Cannot read the vault: { $error }")
-                    .with("error", e),
+                Message::new(
+                    "gui-vault-unreadable",
+                    "Cannot read the library: { $error }",
+                )
+                .with("error", e),
             );
         }
     }

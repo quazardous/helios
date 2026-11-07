@@ -1495,12 +1495,12 @@ pub fn review(state: &State, x: &Extract, catalogue: &Catalogue) -> Review {
         Stripped {
             what: "images".into(),
             at: String::new(),
-            detail: "the library's images stay in the vault".into(),
+            detail: "the library's images stay in the library".into(),
         },
         Stripped {
             what: "history".into(),
             at: String::new(),
-            detail: "each image's edit history stays in the vault".into(),
+            detail: "each image's edit history stays in the library".into(),
         },
     ];
     let mut t = state.bundle.template.clone();

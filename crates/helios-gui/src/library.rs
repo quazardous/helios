@@ -1,5 +1,5 @@
 //! The library: the vault's images in egui-pop's photo library widgets (the
-//! Vault panel's thumbnail grid, the Filmstrip, the Compare panel), with
+//! Library panel's thumbnail grid, the Filmstrip, the Compare panel), with
 //! their rating, flag (picked or rejected), colour labels and tags.
 //!
 //! The shell does not hold the vault: the host gives it the images
@@ -356,7 +356,8 @@ pub struct Library {
     pub auto_advance: bool,
     /// Marks a plugin refused, to say.
     pub notes: Vec<String>,
-    /// The workspace has an import source: the Vault panel offers it.
+    /// The workspace has an import source: the Library panel's toolbar
+    /// offers it.
     pub import_offered: bool,
     /// The user asked to import from it.
     import_asked: bool,
@@ -1206,7 +1207,7 @@ impl Library {
         }
     }
 
-    /// The Vault panel: the search field, the cursor's marks, and the
+    /// The Library panel: the search field, the cursor's marks, and the
     /// thumbnail grid with the culling keys.
     pub fn grid(&mut self, ui: &mut Ui) {
         self.receive(ui);
@@ -1219,10 +1220,11 @@ impl Library {
                 ui.ctx(),
                 Message::new(
                     "gui-library-empty",
-                    "No images: import a folder into the vault",
+                    "No photos yet: import a card or a folder, or drop photos on the window",
                 ),
             );
             ui.add(egui::Label::new(egui::RichText::new(text).weak()).wrap());
+            self.import_button(ui);
             return;
         }
         let label = crate::i18n::text(ui.ctx(), Message::new("gui-library-images", "Images"));
@@ -1259,24 +1261,29 @@ impl Library {
         }
     }
 
+    /// An empty library's way in, whether or not the workspace has an
+    /// import source: "Import photos…" asks for a card or a folder.
+    fn import_button(&mut self, ui: &mut Ui) {
+        let label = crate::i18n::text(
+            ui.ctx(),
+            Message::new("gui-library-import-photos", "Import photos…"),
+        );
+        if ui.button(label).clicked() {
+            self.import_asked = true;
+        }
+    }
+
     /// The Filmstrip panel: one row, the grid's selection.
     pub fn filmstrip(&mut self, ui: &mut Ui) {
         self.receive(ui);
         if self.entries.is_empty() {
-            if self.import_offered
-                && ui
-                    .button(crate::i18n::text(
-                        ui.ctx(),
-                        Message::new("gui-library-import", "Import…"),
-                    ))
-                    .clicked()
-            {
-                self.import_asked = true;
-            }
-            ui.weak(crate::i18n::text(
-                ui.ctx(),
-                Message::new("gui-library-none", "No images"),
-            ));
+            ui.horizontal_wrapped(|ui| {
+                self.import_button(ui);
+                ui.weak(crate::i18n::text(
+                    ui.ctx(),
+                    Message::new("gui-library-none", "No images"),
+                ));
+            });
             return;
         }
         let keymap = grid_keys();

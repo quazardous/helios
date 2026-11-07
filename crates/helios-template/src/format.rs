@@ -239,6 +239,19 @@ pub struct ImportDesc {
     /// review: nothing is applied until accepted).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub suggest_stacks: bool,
+    /// Keep each photo's darktable sidecars (`.xmp`, its base and its
+    /// duplicates) as versions of it; on unless said otherwise.
+    #[serde(default = "yes", skip_serializing_if = "is_yes")]
+    pub darktable: bool,
+}
+
+fn yes() -> bool {
+    true
+}
+
+#[expect(clippy::trivially_copy_pass_by_ref, reason = "serde's signature")]
+fn is_yes(on: &bool) -> bool {
+    *on
 }
 
 fn reference() -> String {

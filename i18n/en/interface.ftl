@@ -13,8 +13,6 @@ category-node-graph = Node graph
 
 category-preferences = Preferences
 
-category-vault = Vault
-
 category-workspace = Workspace
 
 clip-application-x-helios-images-json =

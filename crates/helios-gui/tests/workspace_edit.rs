@@ -135,6 +135,7 @@ fn the_library_settings_are_edited_after_creation() {
             "rename",
             "duplicates",
             "suggest_stacks",
+            "darktable",
             "query",
             "auto_advance"
         ]

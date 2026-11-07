@@ -130,8 +130,8 @@ fn draws_every_area_and_pictures_a_panel() {
     h.get_by_label("No parameters: nothing is shown yet");
     // The image viewport, empty.
     h.get_by_label("No image");
-    // The Vault panel and the filmstrip show the (empty) library.
-    h.get_by_label("No images: import a folder into the vault");
+    // The Library panel and the filmstrip show the (empty) library.
+    h.get_by_label("No photos yet: import a card or a folder, or drop photos on the window");
     h.get_by_label("No images");
     let window = headless::snapshot(&mut h, "window").unwrap();
     assert_eq!(window.dimensions(), (1280, 800));
@@ -146,7 +146,7 @@ fn draws_every_area_and_pictures_a_panel() {
 }
 
 #[test]
-fn the_vault_s_bar_and_empty_text_stay_in_its_narrow_panel() {
+fn the_library_s_bar_and_empty_text_stay_in_its_narrow_panel() {
     let mut h = headless::harness(Shell::new(helios_panels(), None), vec2(1280.0, 800.0));
     h.run();
     let panel = h.state().target_rect("helios.vault").unwrap();
@@ -154,11 +154,13 @@ fn the_vault_s_bar_and_empty_text_stay_in_its_narrow_panel() {
     let inside = |r: egui::Rect| panel.expand(0.5).contains_rect(r);
     // The text is wider than the panel: it wraps onto lines, all inside.
     let text = h
-        .get_by_label("No images: import a folder into the vault")
+        .get_by_label("No photos yet: import a card or a folder, or drop photos on the window")
         .rect();
     assert!(inside(text), "{text:?} in {panel:?}");
-    let line = h.get_by_label("No images").rect().height();
-    assert!(text.height() > 1.5 * line, "wrapped: {text:?}");
+    // At least two lines of body text (the filmstrip's "No images" sits
+    // in a row as tall as its button, no measure of a line).
+    let line = h.ctx.global_style().text_styles[&egui::TextStyle::Body].size;
+    assert!(text.height() >= 2.0 * line, "wrapped: {text:?}");
     // The search bar above it wraps rather than widen the panel.
     for part in ["Search images", "Auto-advance"] {
         let parts: Vec<egui::Rect> = h.query_all_by_label(part).map(|n| n.rect()).collect();
@@ -188,7 +190,7 @@ fn keys_open_the_palette_which_runs_a_command() {
     h.key_press_modifiers(Modifiers::CTRL | Modifiers::SHIFT, Key::P);
     h.run();
     assert!(h.state().palette_open());
-    // Typed into the focused field (the Vault has a search field too).
+    // Typed into the focused field (the Library has a search field too).
     h.event(egui::Event::Text("hide queue".into()));
     h.run();
     h.key_press(Key::Enter);
@@ -763,7 +765,7 @@ fn helios_s_declarations_sit_cleanly_in_egui_pop() {
     let rate = app
         .command(&CommandId::from_static("vault.rate.3"))
         .unwrap();
-    assert_eq!(rate.category, "Vault");
+    assert_eq!(rate.category, "Library");
     // Alt+Space is the frame's (egui-pop's), which opens Helios's menu.
     let keys = app.keys_for(&egui_pop::api::frame::CMD_SYSTEM_MENU);
     assert_eq!(keys, ["Alt+Space"]);

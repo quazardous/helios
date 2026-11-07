@@ -205,9 +205,35 @@ gui-image-opened = { $name } is open
 
 gui-image-opening = Opening { $name }…
 
-gui-import-form-title = Import a card or a folder
+gui-import-copy = Copy the photos into the library folder
+
+gui-import-copy-help = Off: the photos stay where they are, referenced in place
+
+gui-import-darktable = Read darktable edits (.xmp sidecars)
+
+gui-import-darktable-failed = { $sidecar }: not kept: { $error }
+
+gui-import-darktable-help = Each sidecar, duplicates included, becomes a version of its photo
+
+gui-import-darktable-report = { $sidecar }: { $report }
+
+gui-import-drop = Drop to import into the library
+
+gui-import-dropped-title = Import { $count } items
+
+gui-import-ended = { $photos } photos imported, { $edits } darktable edits
+
+gui-import-ended-reported = { $photos } photos imported, { $edits } darktable edits; { $reported } not kept whole: see the Log panel
+
+gui-import-failed = The import failed: { $error }
+
+gui-import-form-title = Import photos
 
 gui-import-path = card or folder
+
+gui-import-remember = Remember for this workspace
+
+gui-import-remember-help = The workspace's import source: the next import does not ask
 
 gui-import-verb = Import
 
@@ -229,7 +255,7 @@ gui-library-compare-hint = Select two to four images to compare them
 
 gui-library-count = { $shown } of { $total }
 
-gui-library-empty = No images: import a folder into the vault
+gui-library-empty = No photos yet: import a card or a folder, or drop photos on the window
 
 gui-library-file = { $size } · modified { $day }
 
@@ -237,13 +263,15 @@ gui-library-images = Images
 
 gui-library-import = Import…
 
+gui-library-import-photos = Import photos…
+
 gui-library-keep-best = Keep the best: pick it, reject the others
 
 gui-library-no-cursor = No image under the cursor
 
 gui-library-none = No images
 
-gui-library-not-saved = Not saved, the library shows what the vault holds: { $error }
+gui-library-not-saved = Not saved, the library shows what was saved last: { $error }
 
 gui-library-read = { $count } images in the library
 
@@ -254,6 +282,10 @@ gui-library-search = Search images
 gui-library-sync = Sync zoom and pan
 
 gui-library-tags = Tags
+
+gui-log-clear = Clear
+
+gui-log-empty = Nothing to report yet
 
 gui-macro-fold-detail = Changed: { $changes }
 
@@ -745,7 +777,7 @@ gui-theme-problem = theme { $name }: { $problem }
 
 gui-theme-unknown = theme { $name }: no theme `{ $name }`: { $default } is used instead
 
-gui-vault-unreadable = Cannot read the vault: { $error }
+gui-vault-unreadable = Cannot read the library: { $error }
 
 gui-window-frame-error = window frame: { $error }
 
@@ -828,6 +860,8 @@ gui-workspace-import-title = Add from a workspace or a template
 gui-workspace-import-verb = Add
 
 gui-workspace-library-advance = culling advances after each mark
+
+gui-workspace-library-darktable = read darktable edits (.xmp sidecars) on import
 
 gui-workspace-library-duplicates = exact duplicates
 

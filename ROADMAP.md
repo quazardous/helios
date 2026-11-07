@@ -450,6 +450,23 @@ driver, not a rewrite.
   de-duplicate" sets it up, its import source part of the template
   format. Not decided: whether stacks are proposed after every import by
   default (the template does, as a setting of its own).
+  (2026-11-06, decided) **"Library" is the only word users see.** The
+  vault is an internal notion: the normal interface never shows it (at
+  most an advanced settings section may give its path and engine) and
+  never says whether the library is local or remote. The Vault panel is
+  the Library panel ("Bibliothèque" in French), with its strings, help,
+  tips and menus; command ids keep their names. (2026-11-06, decided)
+  **Importing is always within reach**: File > Import… (Ctrl+Shift+I, as
+  Lightroom), "Import photos…" in the empty Library and Filmstrip, files
+  dropped on the window; without an import source a short dialog asks
+  where photos go (referenced in place by default, or copied into the
+  library folder), "remember for this workspace" making the answer its
+  import source. (2026-11-06, decided) **darktable edits come in with an
+  import**: each sidecar (base and `_NN` duplicates) a version of its
+  image, never merged, on by default with a checkbox; what was not
+  applied or was substituted goes to the Log panel and a short toast.
+  Later, not decided in detail: importer plugins under File > Import
+  from →, and reading darktable's `library.db`.
 
 **Sync model.** (2026-10-10) Take git's *model* rather than git itself:
 content-addressed objects, a DAG of versions, refs, offline replicas,

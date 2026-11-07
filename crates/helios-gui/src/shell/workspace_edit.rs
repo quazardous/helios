@@ -1005,6 +1005,7 @@ impl Shell {
             .and_then(|i| i.rename.clone())
             .unwrap_or_default();
         let stacks = import.as_ref().is_some_and(|i| i.suggest_stacks);
+        let darktable = import.as_ref().is_none_or(|i| i.darktable);
         let choice = |key: &str, label: String, choices: &[&str], value: &str| Field {
             key: key.into(),
             descriptor: Descriptor::choice(&label, choices, value),
@@ -1055,6 +1056,14 @@ impl Shell {
                     "suggest stacks after an import",
                 )),
                 stacks,
+            ),
+            boolean(
+                "darktable",
+                self.text(Message::new(
+                    "gui-workspace-library-darktable",
+                    "read darktable edits (.xmp sidecars) on import",
+                )),
+                darktable,
             ),
             text_field(
                 "query",
@@ -1368,6 +1377,7 @@ fn library_of(args: &Value) -> Result<Value, String> {
             .map(String::from),
         duplicates: t("duplicates", "skip"),
         suggest_stacks: args["suggest_stacks"].as_bool().unwrap_or(false),
+        darktable: args["darktable"].as_bool().unwrap_or(true),
     });
     let query = match &args["query"] {
         Value::Null => None,

@@ -279,6 +279,10 @@
         "suggest_stacks": {
           "description": "After each import, propose stacks to review (nothing applied until accepted).",
           "type": "boolean"
+        },
+        "darktable": {
+          "description": "Keep each photo's darktable sidecars (.xmp, base and duplicates) as versions of it; true by default.",
+          "type": "boolean"
         }
       }
     },

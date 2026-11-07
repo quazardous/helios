@@ -156,6 +156,8 @@ pub fn defaults() -> Vec<(String, String, String)> {
     // Navigation, everywhere (egui-pop adds the palette, settings, back,
     // full screen, undo and quit).
     bind("Ctrl+P", crate::quick_open::COMMAND, "");
+    // Import photos, as Lightroom's File > Import.
+    bind("Ctrl+Shift+I", "library.importSource", "");
     // Bypass the selected module (darktable's and Blender's habit).
     bind(crate::modules::KEY, crate::modules::COMMAND, "");
     // Zen mode (egui-pop's, no default key): the image alone, as in

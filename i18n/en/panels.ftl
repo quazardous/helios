@@ -41,7 +41,7 @@ panel-helios-stacks =
     .title = Stacks
 
 panel-helios-vault =
-    .title = Vault
+    .title = Library
 
 panel-helios-viewport =
     .title = Image

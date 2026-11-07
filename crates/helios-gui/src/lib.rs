@@ -19,6 +19,7 @@ pub mod jobs;
 pub mod keymaps;
 pub mod keys;
 pub mod library;
+pub mod log_panel;
 pub mod macro_interface;
 pub mod mask_display;
 pub mod mask_tree;
@@ -69,7 +70,7 @@ pub const FLOATABLE: [&str; 3] = ["helios.masks", "helios.scopes", "helios.navig
 pub const PANEL_ICONS: &[(&str, &str)] = &[
     ("helios.viewport", "phosphor:image"),
     ("helios.graph", "phosphor:graph"),
-    ("helios.vault", "phosphor:vault"),
+    ("helios.vault", "phosphor:images-square"),
     ("helios.modules", "phosphor:puzzle-piece"),
     ("helios.masks", "phosphor:selection"),
     ("helios.navigator", "phosphor:compass"),
@@ -113,7 +114,7 @@ pub fn helios_panels_with(experimental: Experimental) -> Vec<PanelSpec> {
     [
         ("helios.viewport", "Image", Center, &[Center][..], true),
         ("helios.graph", "Graph", Center, &[Center][..], true),
-        ("helios.vault", "Vault", StartSide, &anywhere[..], true),
+        ("helios.vault", "Library", StartSide, &anywhere[..], true),
         ("helios.modules", "Modules", StartSide, &sides[..], true),
         ("helios.masks", "Masks", StartSide, &sides[..], true),
         (

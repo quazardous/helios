@@ -217,7 +217,7 @@ from there.
   |---|---|
   | Image | `phosphor:image` |
   | Graph | `phosphor:graph` |
-  | Vault | `phosphor:vault` |
+  | Library | `phosphor:images-square` |
   | Modules | `phosphor:puzzle-piece` |
   | Masks | `phosphor:selection` |
   | Navigator | `phosphor:compass` |

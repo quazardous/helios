@@ -53,6 +53,10 @@ pub use crate::workbench::Content;
 pub use macro_edit::{SELECTED as GRAPH_SELECTED, selected_nodes};
 pub use workspace_edit::STATE as WORKSPACE_STATE;
 
+mod import;
+
+/// Where an import's lines are sent: its arguments and a line.
+type ImportLines = std::sync::mpsc::Sender<(Value, Value)>;
 mod macro_edit;
 mod network_edit;
 mod workshop_edit;
@@ -130,13 +134,12 @@ enum Action {
     AutoAdvance(Option<bool>),
     /// Expand or collapse the stack under the library's cursor.
     ToggleStack,
-    /// Import from the workspace's import source: this card or folder, or
-    /// asked.
-    ImportSource(Option<PathBuf>),
-    /// Files and folders to import, as the workspace's import source
-    /// places them unless told to copy them or not (a paste of files
-    /// into the library).
-    ImportFiles(Vec<PathBuf>, Option<bool>),
+    /// Import a card or folder: as the workspace's import source says,
+    /// or asked (`library.importSource`'s arguments).
+    ImportSource(Value, Origin),
+    /// Files and folders to import (`library.importFiles`'s arguments: a
+    /// paste of files, a drop on the window).
+    ImportFiles(Value, Origin),
     Fullscreen,
     Minimize,
     Maximize,
@@ -460,6 +463,10 @@ pub struct Shell {
     import_source: Option<helios_template::ImportDesc>,
     /// Imports asked for (`library.import`'s arguments), for the host.
     imports: Vec<Value>,
+    /// The lines of the imports the host runs (`import_sink`).
+    import_lines: (ImportLines, std::sync::mpsc::Receiver<(Value, Value)>),
+    /// The Log panel's entries.
+    log: Rc<RefCell<crate::log_panel::Log>>,
     /// The library's images on disk, by id, for quick open.
     image_files: BTreeMap<String, PathBuf>,
     /// egui-pop's dialogs, once the application is built (`dialog.current`).
@@ -835,6 +842,8 @@ impl Shell {
             duplicates: Rc::default(),
             import_source: None,
             imports: Vec::new(),
+            import_lines: std::sync::mpsc::channel(),
+            log: Rc::default(),
             image_files: BTreeMap::new(),
             dialogs,
             assume_yes: false,
@@ -1053,6 +1062,12 @@ impl Shell {
             .library
             .borrow_mut()
             .set_app(shell.app.handle().clone());
+        if has(&shell, crate::log_panel::PANEL) {
+            let log = shell.log.clone();
+            shell.set_content(crate::log_panel::PANEL, move |ui| {
+                log.borrow_mut().ui(ui);
+            });
+        }
         if has(&shell, crate::duplicates::PANEL) {
             let duplicates = shell.duplicates.clone();
             shell.set_content(crate::duplicates::PANEL, move |ui| {
@@ -1342,7 +1357,7 @@ impl Shell {
         self.library.borrow()
     }
 
-    /// The library's state, to show what the vault holds.
+    /// The library's state, to show what it holds.
     pub fn library_mut(&self) -> std::cell::RefMut<'_, crate::library::Library> {
         self.library.borrow_mut()
     }
@@ -2518,7 +2533,7 @@ impl Shell {
             CommandSpec::new(
                 "vault.rate",
                 "Rate the selected image (`stars`, 0 to 5)",
-                "Vault",
+                "Library",
             ),
             Box::new(|a, _| {
                 a.get("stars")
@@ -2530,7 +2545,7 @@ impl Shell {
         for n in 0..=5 {
             let title = format!("Rate the selected image {n} stars");
             add(
-                CommandSpec::new(&format!("vault.rate.{n}"), &title, "Vault"),
+                CommandSpec::new(&format!("vault.rate.{n}"), &title, "Library"),
                 Box::new(move |_, _| Ok(Action::Rate(n))),
             );
         }
@@ -2538,14 +2553,14 @@ impl Shell {
             CommandSpec::new(
                 "vault.reject",
                 "Reject the selected image, or take it back",
-                "Vault",
+                "Library",
             ),
             Box::new(|_, _| Ok(Action::Reject)),
         );
         for label in crate::library::LABELS {
             let title = format!("Toggle the {label} label on the selected image");
             add(
-                CommandSpec::new(&format!("vault.label.{label}"), &title, "Vault"),
+                CommandSpec::new(&format!("vault.label.{label}"), &title, "Library"),
                 Box::new(move |_, _| Ok(Action::Label(label.into()))),
             );
         }
@@ -2565,7 +2580,7 @@ impl Shell {
                 ),
             ] {
                 add(
-                    CommandSpec::new(id, title, "Vault"),
+                    CommandSpec::new(id, title, "Library"),
                     Box::new(move |_, _| Ok(Action::Flag(flag))),
                 );
             }
@@ -2573,7 +2588,7 @@ impl Shell {
         add(
             CommandSpec::new(
                 "view.library",
-                "Go to the library: the vault's images to browse, rate and cull",
+                "Go to the library: its photos to browse, rate and cull",
                 "View",
             ),
             Box::new(|_, _| Ok(Action::Place(crate::contexts::LIBRARY))),
@@ -2609,7 +2624,7 @@ impl Shell {
             CommandSpec::new(
                 "vault.autoAdvance",
                 "Culling: move to the next image after each mark (`on`; toggled when absent)",
-                "Vault",
+                "Library",
             ),
             Box::new(|a, _| Ok(Action::AutoAdvance(a.get("on").and_then(Value::as_bool)))),
         );
@@ -2617,58 +2632,32 @@ impl Shell {
             CommandSpec::new(
                 "vault.stack.toggle",
                 "Expand or collapse the stack of the selected image",
-                "Vault",
+                "Library",
             ),
             Box::new(|_, _| Ok(Action::ToggleStack)),
         );
         add(
             CommandSpec::new(
                 "library.importSource",
-                "Import from the workspace's import source (`path`: the card or folder; asked when absent)",
-                "Vault",
+                "Import photos… (`path`: a card or folder, asked when absent; `copy`, `darktable`, `remember` when the workspace has no import source)",
+                "Library",
             ),
-            Box::new(|a, _| {
-                Ok(Action::ImportSource(
-                    a.get("path")
-                        .and_then(Value::as_str)
-                        .filter(|s| !s.is_empty())
-                        .map(PathBuf::from),
-                ))
-            }),
+            Box::new(|a, origin| Ok(Action::ImportSource(a.clone(), origin.clone()))),
         );
         add(
             CommandSpec::new(
                 "library.importFiles",
-                "Import files and folders (`paths`), placed as the workspace's import source says (`copy`: into the library folder or not)",
-                "Vault",
+                "Import files and folders (`paths`), placed as the workspace's import source says (`copy`: into the library folder or not; `ask`: asked without an import source; `darktable`)",
+                "Library",
             ),
-            Box::new(|a, _| {
-                let paths: Vec<PathBuf> = a
-                    .get("paths")
-                    .and_then(Value::as_array)
-                    .map(|p| {
-                        p.iter()
-                            .filter_map(Value::as_str)
-                            .filter(|s| !s.is_empty())
-                            .map(PathBuf::from)
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                if paths.is_empty() {
-                    return Err("`paths` is missing".into());
-                }
-                Ok(Action::ImportFiles(
-                    paths,
-                    a.get("copy").and_then(Value::as_bool),
-                ))
-            }),
+            Box::new(|a, origin| Ok(Action::ImportFiles(a.clone(), origin.clone()))),
         );
         add(
-            CommandSpec::new("vault.next", "Select the next image", "Vault"),
+            CommandSpec::new("vault.next", "Select the next image", "Library"),
             Box::new(|_, _| Ok(Action::Step(1))),
         );
         add(
-            CommandSpec::new("vault.previous", "Select the previous image", "Vault"),
+            CommandSpec::new("vault.previous", "Select the previous image", "Library"),
             Box::new(|_, _| Ok(Action::Step(-1))),
         );
         // The system clipboard beyond text: files and images with other
@@ -2677,7 +2666,7 @@ impl Shell {
             CommandSpec::new(
                 "library.copyFiles",
                 "Copy files: the selected images' files, for a file manager or another application",
-                "Vault",
+                "Library",
             ),
             Box::new(|_, origin| Ok(Action::CopyFiles(origin.clone()))),
         );
@@ -2685,7 +2674,7 @@ impl Shell {
             CommandSpec::new(
                 "library.pasteFiles",
                 "Paste files or an image another application copied into the library, imported once confirmed (`dry_run`: only say what would be imported)",
-                "Vault",
+                "Library",
             ),
             Box::new(|a, origin| {
                 let dry_run = a.get("dry_run").and_then(Value::as_bool).unwrap_or(false);
@@ -3241,6 +3230,8 @@ impl Shell {
             command(plugins::PARAM, "2", 1, "param.copyValue"),
             command(plugins::PARAM, "2", 2, "param.paste"),
             // The same commands in the menu bar.
+            // Importing, always within reach (Ctrl+Shift+I, as Lightroom).
+            command(MENU_FILE, "1_import", 0, "library.importSource"),
             command(MENU_FILE, "1_workspace", 0, "workspace.open"),
             // The workspace's own edits.
             command(MENU_FILE, "2_edit", 0, "workspace.edit"),
@@ -3779,7 +3770,7 @@ impl Shell {
     }
 
     /// What a template sets for the library: its import source (the
-    /// Vault panel then offers to import from it), the images it opens
+    /// Library panel then offers to import from it), the images it opens
     /// on (its query, as the search field's filter) and culling's
     /// auto-advance.
     pub fn apply_template_library(&mut self, library: Option<&helios_template::LibraryDesc>) {
@@ -3811,59 +3802,6 @@ impl Shell {
     /// arguments), for the host to run.
     pub fn take_imports(&mut self) -> Vec<Value> {
         std::mem::take(&mut self.imports)
-    }
-
-    /// Imports a card or folder as the workspace's source says (folder,
-    /// referenced, duplicates skipped without one); the path is asked
-    /// when absent.
-    fn import_from_source(&mut self, path: Option<PathBuf>) -> Value {
-        let Some(path) = path else {
-            self.form(crate::dialogs::Form {
-                title: self.text(Message::new(
-                    "gui-import-form-title",
-                    "Import a card or a folder",
-                )),
-                fields: vec![crate::dialogs::Field {
-                    key: "path".into(),
-                    descriptor: helios_values::Descriptor::path(
-                        &self.text(Message::new("gui-import-path", "card or folder")),
-                        helios_values::PathKind::Dir,
-                        &[],
-                    ),
-                    value: helios_core::Value::Text(String::new()),
-                }],
-                verb: self.text(Message::new("gui-import-verb", "Import")),
-                command: "library.importSource".into(),
-            });
-            return Value::Null;
-        };
-        self.queue_import(json!({ "path": path }), None)
-    }
-
-    /// Queues an import (`library.import`'s arguments) for the host,
-    /// placed, renamed and with duplicates handled as the workspace's
-    /// import source says; `copy` overrides its placement (a reference
-    /// is never renamed).
-    fn queue_import(&mut self, mut args: Value, copy: Option<bool>) -> Value {
-        let source = self.import_source.as_ref();
-        if copy.unwrap_or_else(|| source.is_some_and(|s| s.placement == "copy")) {
-            args["copy"] = json!(true);
-            if let Some(rename) = source.and_then(|s| s.rename.as_ref()) {
-                args["rename"] = json!(rename);
-            }
-        }
-        if let Some(source) = source {
-            args["duplicates"] = json!(source.duplicates);
-        }
-        self.imports.push(args.clone());
-        json!({ "queued": args })
-    }
-
-    /// Imports files and folders as one import, as the workspace's
-    /// import source places them (referenced, duplicates skipped without
-    /// one), or copied into the library folder or not as `copy` says.
-    fn import_files(&mut self, paths: Vec<PathBuf>, copy: Option<bool>) -> Value {
-        self.queue_import(json!({ "paths": paths }), copy)
     }
 
     /// A workspace from a template: the templates to pick from (the
@@ -4267,8 +4205,8 @@ impl Shell {
                     &egui_pop::model::commands::Origin::User,
                 );
             }
-            Action::ImportSource(path) => return Ok(self.import_from_source(path)),
-            Action::ImportFiles(paths, copy) => return Ok(self.import_files(paths, copy)),
+            Action::ImportSource(args, origin) => return self.import_from_source(&args, &origin),
+            Action::ImportFiles(args, origin) => return self.import_files(&args, &origin),
             Action::ToggleStack => self
                 .library
                 .borrow_mut()
@@ -4687,7 +4625,7 @@ impl Shell {
         self.status_items(&ctx);
         // Duplicates an import asks about: said once, answered in the
         // Duplicates panel.
-        let asked = self.duplicates.borrow_mut().receive();
+        let asked = self.receive_imports();
         if asked > 0 {
             self.note(
                 Message::new(
@@ -4706,6 +4644,7 @@ impl Shell {
         if self.library.borrow_mut().take_import_asked() {
             let _ = self.run("library.importSource", Value::Null, Origin::User);
         }
+        self.take_dropped_files(&ctx);
         let refused = std::mem::take(&mut self.library.borrow_mut().notes);
         for n in refused {
             self.warn(n);

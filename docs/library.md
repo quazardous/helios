@@ -46,8 +46,20 @@ original extension is kept. A field without a value writes `unknown`.
 darktable names them: the base `NAME.EXT.xmp` and each duplicate
 `NAME_NN.EXT.xmp` (matched as `helios import-darktable` matches them). A
 sidecar whose new name is taken is left out and listed, never written
-over. To keep the darktable edits as versions, run `helios
-import-darktable` on the library folder afterwards.
+over.
+
+**darktable edits.** The desktop's imports (and `library.import`, unless
+`darktable` is false) also keep each file's darktable sidecars as versions
+of its image, as `helios import-darktable` does (the same code,
+`helios_library::darktable`): the base sidecar and each `_NN` duplicate
+become first-edit versions side by side, never merged, and only the base
+gives the image its rating. They are read where the file came from, so a
+copy gets them too. Each file's line lists them under `darktable`, with
+their import report (items not applied, modes substituted) or their
+error; the report counts `edits` kept, `edits_reported` and
+`edits_failed`. Importing again adds nothing for a sidecar already kept.
+A sidecar whose image is not imported (an orphan) is left to `helios
+import-darktable`, which keeps it in the vault's import record.
 
 **One job.** An import reports as a job (see [jobs.md](jobs.md)), so the
 desktop shows it in the jobs centre: `job.started` (kind `import`, id
@@ -179,20 +191,50 @@ palette or by an agent:
 
 | Command | Arguments |
 |---------|-----------|
-| `library.import` | `path` (or `paths`, several files and folders as one import); `copy`, `into`, `rename`, `duplicates` as on the command line. Runs in the background as a job, in the jobs centre and cancelled from it; the library is filled again when it ends |
-| `library.importFiles` | `paths`; `copy` (`true`: into the library folder, `false`: referenced). An import placed, renamed and with duplicates handled as the workspace's import source says, unless `copy` is given: what a paste of files asks for |
+| `library.import` | `path` (or `paths`, several files and folders as one import); `copy`, `into`, `rename`, `duplicates` as on the command line; `darktable` (`false` leaves the sidecars out). Runs in the background as a job, in the jobs centre and cancelled from it; the library is filled again when it ends |
+| `library.importSource` | `path` (a card or folder; the import dialog asks for it when absent); `copy`, `darktable`, `remember` (see below). File > Import… (Ctrl+Shift+I) and the empty library's "Import photos…" run it |
+| `library.importFiles` | `paths`; `copy` (`true`: into the library folder, `false`: referenced); `ask` (`true`: without an import source, the import dialog asks first); `darktable`. An import placed, renamed and with duplicates handled as the workspace's import source says, unless `copy` is given: what a paste of files and a drop on the window ask for |
 | `library.stacks.suggest` | `images` (ids; every image when absent), `resolver` |
 | `library.stacks.accept` | `decision`, `groups` (all when absent) |
 | `library.stacks.decline` | `decision` |
 | `library.stacks.list` | |
 | `library.stacks.dissolve` | `stack` |
 
+### Importing from the desktop
+
+Importing is always within reach, whatever the workspace (decided
+2026-11-06):
+
+- **File > Import…** (Ctrl+Shift+I, as in Lightroom) asks for a card or a
+  folder;
+- the empty **Library** and **Filmstrip** panels show **Import photos…**;
+- files and folders **dropped on the window** are imported (the window
+  says "Drop to import into the library" while they are dragged over it);
+- a paste of files (Edit > Paste) imports them, as before.
+
+A workspace whose template has an import source imports as it says. Without
+one, the import dialog asks where the photos go: **referenced in place**
+(the default: the files stay where they are) or **copied into the library
+folder**. **Remember for this workspace** makes the answer the workspace's
+import source (a `folder` source, duplicates skipped; one Edit > Undo
+step), so the next import does not ask; outside a workspace there is
+nothing to remember it in, and the box is not shown. The dialog's
+**Read darktable edits** box (on by default; an import source's
+`darktable: false` turns it off) keeps each photo's `.xmp` sidecars as
+versions (see "darktable edits" above).
+
+When an import ends, a short toast says how many photos and darktable
+edits came in. The darktable edits not kept whole (items not applied,
+modes substituted, sidecars that could not be read) are listed in the
+**Log** panel, one line per sidecar with its report, and the toast then
+points there.
+
 ## Culling on the desktop
 
 The library panels are egui-pop's photo library widgets (its
 `docs/library.md`) over the vault:
 
-- **Vault**: the search field, the marks of the image under the cursor
+- **Library**: the search field, the marks of the image under the cursor
   (stars, colour labels, pick or reject, tags) and a virtualised thumbnail
   grid. Thumbnails are the raws' embedded previews (a picture itself),
   read in the background and shown as they arrive.

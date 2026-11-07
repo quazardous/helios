@@ -195,7 +195,7 @@ gui-keys-from-template = modèle
 
 gui-layout-not-saved = La disposition n’a pas été enregistrée : { $error }
 
-gui-library-not-saved = Non enregistré, la bibliothèque montre ce que contient le coffre : { $error }
+gui-library-not-saved = Non enregistré, la bibliothèque montre ce qui a été enregistré en dernier : { $error }
 
 gui-mask-display = Afficher le masque
 
@@ -503,7 +503,7 @@ gui-theme-problem = thème { $name } : { $problem }
 
 gui-theme-unknown = thème { $name } : pas de thème « { $name } » : { $default } est utilisé à la place
 
-gui-vault-unreadable = Impossible de lire le coffre : { $error }
+gui-vault-unreadable = Impossible de lire la bibliothèque : { $error }
 
 gui-window-frame-error = cadre de la fenêtre : { $error }
 
@@ -713,7 +713,7 @@ gui-library-compare-hint = Sélectionnez de deux à quatre images pour les compa
 
 gui-library-count = { $shown } sur { $total }
 
-gui-library-empty = Aucune image : importez un dossier dans le coffre
+gui-library-empty = Aucune photo pour l’instant : importez une carte ou un dossier, ou déposez des photos sur la fenêtre
 
 gui-library-images = Images
 
@@ -783,7 +783,7 @@ gui-duplicates-waiting = { $count } doublons attendent une réponse
 
 gui-duplicates-waiting-note = { $count } doublons attendent une réponse dans le panneau Doublons
 
-gui-import-form-title = Importer une carte ou un dossier
+gui-import-form-title = Importer des photos
 
 gui-import-path = carte ou dossier
 
@@ -1013,3 +1013,40 @@ gui-workshops-unit-percent = %
 gui-workshops-unit-stops = IL
 
 gui-workshops-workspace = Cet espace de travail
+
+gui-library-import-photos = Importer des photos…
+
+gui-import-dropped-title = { $count ->
+    [one] Importer { $count } élément
+   *[other] Importer { $count } éléments
+}
+
+gui-import-copy = Copier les photos dans le dossier de la bibliothèque
+
+gui-import-copy-help = Décoché : les photos restent où elles sont, référencées sur place
+
+gui-import-darktable = Lire les retouches darktable (fichiers .xmp)
+
+gui-import-darktable-help = Chaque fichier annexe, doublons compris, devient une version de sa photo
+
+gui-import-remember = Mémoriser pour cet espace de travail
+
+gui-import-remember-help = La source d’import de l’espace de travail : le prochain import ne demande plus
+
+gui-import-darktable-failed = { $sidecar } : non conservé : { $error }
+
+gui-import-darktable-report = { $sidecar } : { $report }
+
+gui-import-failed = L’import a échoué : { $error }
+
+gui-import-ended = { $photos } photos importées, { $edits } retouches darktable
+
+gui-import-ended-reported = { $photos } photos importées, { $edits } retouches darktable ; { $reported } pas conservées en entier : voir le panneau Journal
+
+gui-import-drop = Déposez pour importer dans la bibliothèque
+
+gui-log-empty = Rien à signaler pour l’instant
+
+gui-log-clear = Effacer
+
+gui-workspace-library-darktable = lire les retouches darktable (fichiers .xmp) à l’import

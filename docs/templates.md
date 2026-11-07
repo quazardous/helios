@@ -218,9 +218,11 @@ What the workspace sets for the library (optional):
   `reference` (the default) or `copy`; `rename` a copy's pattern;
   `duplicates` `skip` (the default), `keep` or `ask`; `suggest_stacks`
   proposes stacks after each import (a `stacks.suggest` decision to
-  review, nothing applied until accepted). The Vault panel then offers
-  **Import…**, and `library.importSource` asks for the card or folder and
-  imports it so. Validation refuses a word it does not know, and a
+  review, nothing applied until accepted); `darktable` (`true` by
+  default) keeps each photo's darktable sidecars as versions. The Library
+  panel then offers **Import…**, and `library.importSource` (File >
+  Import…) asks for the card or folder and imports it so, without asking
+  where the photos go. Validation refuses a word it does not know, and a
   renaming without a copy.
 - `query` (2026-11-03) is what the library opens on, as the search
   field's criteria: `min_rating` (0 to 5 stars), `labels` (`red`,

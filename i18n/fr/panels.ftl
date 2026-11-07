@@ -40,7 +40,7 @@ panel-helios-stacks =
     .title = Piles
 
 panel-helios-vault =
-    .title = Coffre
+    .title = Bibliothèque
 
 panel-helios-viewport =
     .title = Image
