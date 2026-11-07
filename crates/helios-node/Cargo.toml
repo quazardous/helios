@@ -31,6 +31,7 @@ helios-module-demosaic = { path = "../../modules/demosaic" }
 helios-module-whitebalance = { path = "../../modules/whitebalance" }
 helios-module-highlights = { path = "../../modules/highlights" }
 helios-module-colorin = { path = "../../modules/colorin" }
+helios-module-flip = { path = "../../modules/flip" }
 helios-module-sigmoid = { path = "../../modules/sigmoid" }
 helios-module-blur = { path = "../../modules/blur" }
 helios-module-vkdt = { path = "../../modules/vkdt" }

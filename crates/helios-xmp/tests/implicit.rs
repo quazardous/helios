@@ -48,7 +48,10 @@ fn an_older_raw_edit_without_highlights_gets_darktables_clip() {
     assert_eq!(imported.report.inserted, ["highlights v4"]);
     let history = imported.darktable["history"].as_array().unwrap();
     assert_eq!(history[1]["inserted"], true);
-    assert_eq!(history[2]["status"], "not_applied");
+    assert_eq!(
+        history[2]["status"], "applied",
+        "darktable's flip is Helios's"
+    );
 }
 
 #[test]

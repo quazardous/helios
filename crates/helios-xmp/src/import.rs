@@ -375,6 +375,23 @@ struct Mapped {
     swaps: Vec<Swap>,
 }
 
+/// darktable's orientation names (`dt_image_orientation_t`), as its
+/// params decode, with their values.
+const ORIENTATIONS: &[(&str, i64)] = &[
+    ("ORIENTATION_NULL", -1),
+    ("ORIENTATION_NONE", 0),
+    ("ORIENTATION_FLIP_Y", 1),
+    ("ORIENTATION_FLIP_X", 2),
+    ("ORIENTATION_SWAP_XY", 4),
+    ("ORIENTATION_FLIP_HORIZONTALLY", 2),
+    ("ORIENTATION_FLIP_VERTICALLY", 1),
+    ("ORIENTATION_ROTATE_180_DEG", 3),
+    ("ORIENTATION_TRANSPOSE", 4),
+    ("ORIENTATION_ROTATE_CCW_90_DEG", 6),
+    ("ORIENTATION_ROTATE_CW_90_DEG", 5),
+    ("ORIENTATION_TRANSVERSE", 7),
+];
+
 /// The darktable modes Helios has.
 const CLIP: &str = "DT_IOP_HIGHLIGHTS_CLIP";
 const RCD: &str = "DT_IOP_DEMOSAIC_RCD";
@@ -477,6 +494,21 @@ fn map(operation: &str, f: &Map<String, Value>) -> Option<Mapped> {
             ("demosaic", vec!["demosaicing_method"])
         }
         "colorin" => ("colorin", vec!["type_work", "filename_work"]),
+        "flip" => {
+            // darktable's orientation value, -1 for the camera's.
+            let o = match f.get("orientation") {
+                Some(Value::String(name)) => ORIENTATIONS
+                    .iter()
+                    .find(|(n, _)| n == name)
+                    .map(|(_, v)| *v),
+                Some(v) => v.as_i64().filter(|v| (-1..=7).contains(v)),
+                None => None,
+            };
+            if let Some(o) = o {
+                p.set("orientation", Param::Int(o));
+            }
+            ("flip", vec!["orientation"])
+        }
         "exposure" => {
             set(&mut p, "exposure", float(f, "exposure"));
             set(&mut p, "black", float(f, "black"));
@@ -526,7 +558,7 @@ fn map(operation: &str, f: &Map<String, Value>) -> Option<Mapped> {
 fn single_instance(operation: &str) -> bool {
     matches!(
         operation,
-        "rawprepare" | "temperature" | "highlights" | "demosaic" | "colorin"
+        "rawprepare" | "temperature" | "highlights" | "demosaic" | "colorin" | "flip"
     )
 }
 

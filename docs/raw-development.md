@@ -95,7 +95,7 @@ and sharpening are not applied by default.
 | Filmic | **no** (vkdt's film curve `vkdt_filmcurv` exists, unused) | | | the "filmic" workflow only |
 | Lens correction | **no** | | | off by default |
 | Denoise | **no** | | | off by default |
-| Orientation (flip) | **no**: a portrait raw shows on its side | | | auto, from EXIF |
+| Orientation (flip) | yes, in the developed image; the viewer and drawn masks do not follow a turned image yet (B5b) | `modules/flip`, after the raw front and in "Develop one image" | the EXIF orientation, the user's value over it | auto, from EXIF |
 | Output profile | yes, at export and on screen | `helios_export::Output` (`crates/helios-export/src/lib.rs:436`), `helios-colour` | sRGB (Display P3, Adobe RGB, Rec.2020 offered) | sRGB |
 
 GPU: of the raw chain, only exposure and sigmoid have GPU kernels
@@ -205,7 +205,20 @@ less, M a few days, L a week or more.
    the import does (`rawprepare`, `whitebalance`...), or map them in
    `apply_to_graph`. Test: `crates/helios-library/tests` with a fixture
    sidecar.
-5. **Orientation** (S). The loader reports the EXIF orientation
+5. **Orientation**. **(a) done (2026-11-07)**: a geometry hook in
+   `helios-core` (`Needs::geometry`, `Module::output_extent`, followed by
+   `Graph::extent`; `input_region` maps back), the `flip` module
+   (`modules/flip`, darktable's orientation values, -1 the camera's
+   EXIF tag, read from `photo.orientation`), put after the raw front by
+   the template build and in "Develop one image", and darktable's `flip`
+   read from sidecars. A turned image's extent starts off the origin
+   (clockwise, `W x H` covers `(-H, 0)` to `(0, W)`). **(b) left**: the
+   viewport (`engine_source.rs` asks regions from `(0, 0)` over the
+   extent's size, so a turned raw shows the wrong area), the export's
+   writers and previews taking an extent off the origin, and
+   `helios_xmp::drawn::Frame` gaining the orientation so darktable's
+   masks land on a turned image.
+   The original entry: the loader reports the EXIF orientation
    (`crates/helios-load/src/lib.rs`, `Loaded`), a `flip` step (a module or
    the raw front's last node) applies it, masks follow it
    (`helios_xmp::drawn::Frame`). darktable applies it by default.

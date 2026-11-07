@@ -1,0 +1,17 @@
+[package]
+name = "helios-module-flip"
+description = "orientation module for Helios, as darktable's flip: quarter turns and mirrors, set from the raw's EXIF orientation"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+helios-core.workspace = true
+helios-photo.workspace = true
+
+[dev-dependencies]
+helios-testkit.workspace = true
+
+[lints]
+workspace = true

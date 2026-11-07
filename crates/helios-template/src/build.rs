@@ -313,10 +313,14 @@ fn open(
     })
 }
 
+/// The orientation module put after the raw front.
+const FLIP: &str = "flip";
+
 /// The raw front after the source `source` (`id`), given a raw: its
 /// nodes opened in the graph under their own names where `taken` does
-/// not hold them, the source wired to its input. Returns where what
-/// reads the source reads.
+/// not hold them, the source wired to its input, then the catalogue's
+/// `flip` module (the camera's orientation). Returns where what reads
+/// the source reads.
 fn raw_front(
     graph: &mut Graph,
     nodes: &mut BTreeMap<String, NodeId>,
@@ -363,12 +367,30 @@ fn raw_front(
                 .map_err(|e| format!("`{r}`'s input `{port}`: {e}"))?;
         }
     }
-    let output = placed
+    let mut output = placed
         .outputs
         .values()
         .next()
         .cloned()
         .ok_or_else(|| format!("`{r}` has no output"))?;
+    // The orientation step, as darktable's `flip`: the camera's EXIF
+    // orientation by default. Left out by a catalogue without it.
+    if let Some(flip) = catalogue.get_module(FLIP) {
+        let name = if taken.contains(FLIP) {
+            format!("{source}.{FLIP}")
+        } else {
+            FLIP.to_string()
+        };
+        taken.insert(name.clone());
+        let id = graph
+            .add_module(&name, flip.clone(), &Params::new())
+            .map_err(|e| e.to_string())?;
+        graph
+            .connect(output.0, &output.1, id, "input")
+            .map_err(|e| format!("`{name}`: {e}"))?;
+        nodes.insert(name, id);
+        output = (id, "output".to_string());
+    }
     let mut p = Placed::default();
     p.outputs.insert(SOURCE_PORT.into(), output);
     Ok(p)

@@ -27,6 +27,8 @@ pub mod fields {
     /// The camera's matrix from CIE XYZ (D65) to camera RGB, row by row.
     pub const XYZ_TO_CAMERA: &str = "photo.xyz_to_camera";
     pub const CFA: &str = "photo.cfa";
+    /// The EXIF orientation tag (1 to 8; 1 when the file has none).
+    pub const ORIENTATION: &str = "photo.orientation";
 
     /// Every field, for modules that need the whole description.
     pub const ALL: &[&str] = &[
@@ -42,6 +44,7 @@ pub mod fields {
         WHITE_BALANCE,
         XYZ_TO_CAMERA,
         CFA,
+        ORIENTATION,
     ];
 }
 
@@ -63,6 +66,9 @@ pub struct CameraInfo {
     pub white_balance: [f64; 4],
     pub xyz_to_camera: [f64; 9],
     pub cfa: Cfa,
+    /// The EXIF orientation tag, 1 to 8 (1: as shot, 6: turned 90 degrees
+    /// clockwise to view, 8: counter-clockwise).
+    pub orientation: u8,
 }
 
 impl CameraInfo {
@@ -87,6 +93,7 @@ impl CameraInfo {
                 Value::List(self.xyz_to_camera.to_vec()),
             )
             .with(fields::CFA, Value::Choice(self.cfa.name()))
+            .with(fields::ORIENTATION, Value::Int(i64::from(self.orientation)))
     }
 
     /// Reads the description back; names the first field missing or malformed.
@@ -125,6 +132,20 @@ impl CameraInfo {
             white_balance: fixed(fields::WHITE_BALANCE, get(fields::WHITE_BALANCE)?.as_list())?,
             xyz_to_camera: fixed(fields::XYZ_TO_CAMERA, get(fields::XYZ_TO_CAMERA)?.as_list())?,
             cfa: Cfa::parse(&text(fields::CFA)?)?,
+            // Absent from a description recorded before it was read.
+            orientation: match context.get(fields::ORIENTATION) {
+                None => 1,
+                Some(v) => v
+                    .as_i64()
+                    .and_then(|o| u8::try_from(o).ok())
+                    .filter(|o| (1..=8).contains(o))
+                    .ok_or_else(|| {
+                        format!(
+                            "context field `{}` is not an EXIF orientation (1 to 8)",
+                            fields::ORIENTATION
+                        )
+                    })?,
+            },
         })
     }
 }
@@ -147,6 +168,7 @@ mod tests {
             white_balance: [2.1, 1.0, 1.4, 1.0],
             xyz_to_camera: [0.9, -0.3, -0.1, -0.4, 1.2, 0.2, -0.05, 0.15, 0.6],
             cfa: Cfa::parse("RGGB").unwrap(),
+            orientation: 6,
         }
     }
 

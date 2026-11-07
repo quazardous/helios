@@ -510,6 +510,7 @@ fn an_image_source_takes_a_picture_as_it_is_and_a_raw_through_the_raw_front() {
         white_balance: [2.0, 1.0, 1.5, 1.0],
         xyz_to_camera: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
         cfa: helios_photo::Cfa::parse("RGGB").unwrap(),
+        orientation: 1,
     }
     .to_context();
     let mosaic = Image::from_fn(Region::sized(8, 8), 1, |_, _, _| 0.3);

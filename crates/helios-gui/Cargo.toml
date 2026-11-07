@@ -54,6 +54,7 @@ helios-module-whitebalance = { path = "../../modules/whitebalance" }
 helios-module-highlights = { path = "../../modules/highlights" }
 helios-module-demosaic = { path = "../../modules/demosaic" }
 helios-module-colorin = { path = "../../modules/colorin" }
+helios-module-flip = { path = "../../modules/flip" }
 # MIT OR Apache-2.0: the system's time zone, for the days the library
 # shows (already in the tree through rawler).
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
@@ -80,6 +81,8 @@ helios-plugin-darktable-library = { path = "../../plugins/importers/darktable-li
 egui-pop-wayland.workspace = true
 # The node's MCP server, whose workspace tools go through the desktop.
 helios-node = { path = "../helios-node" }
+# darktable sidecars, for an edit's orientation.
+helios-xmp.workspace = true
 
 [lints]
 workspace = true

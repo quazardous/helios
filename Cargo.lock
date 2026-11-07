@@ -2244,6 +2244,7 @@ dependencies = [
  "helios-module-colorin",
  "helios-module-demosaic",
  "helios-module-exposure",
+ "helios-module-flip",
  "helios-module-highlights",
  "helios-module-masks",
  "helios-module-rawprepare",
@@ -2260,6 +2261,7 @@ dependencies = [
  "helios-values",
  "helios-vault",
  "helios-vault-sqlite",
+ "helios-xmp",
  "image",
  "log",
  "serde",
@@ -2362,6 +2364,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "helios-module-flip"
+version = "0.65.0"
+dependencies = [
+ "helios-core",
+ "helios-photo",
+ "helios-testkit",
+]
+
+[[package]]
 name = "helios-module-highlights"
 version = "0.67.0"
 dependencies = [
@@ -2437,6 +2448,7 @@ dependencies = [
  "helios-module-colorin",
  "helios-module-demosaic",
  "helios-module-exposure",
+ "helios-module-flip",
  "helios-module-highlights",
  "helios-module-masks",
  "helios-module-rawprepare",
@@ -2562,6 +2574,7 @@ dependencies = [
  "helios-module-colorin",
  "helios-module-demosaic",
  "helios-module-exposure",
+ "helios-module-flip",
  "helios-module-highlights",
  "helios-module-masks",
  "helios-module-rawprepare",

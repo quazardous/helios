@@ -396,6 +396,7 @@ fn a_workspace_from_develop_one_image_reads_a_raw_through_the_raw_chain() {
             "colorin",
             "demosaic",
             "exposure",
+            "flip",
             "highlights",
             "raw",
             "rawprepare",

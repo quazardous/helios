@@ -372,6 +372,12 @@ fn camera(
         white_balance,
         xyz_to_camera,
         cfa,
+        // rawler leaves `RawImage::orientation` unread; the EXIF tag has it.
+        orientation: exif
+            .and_then(|e| e.orientation)
+            .and_then(|o| u8::try_from(o).ok())
+            .filter(|o| (1..=8).contains(o))
+            .unwrap_or(1),
     }
 }
 

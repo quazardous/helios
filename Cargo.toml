@@ -161,6 +161,9 @@ opt-level = 2
 [profile.dev.package.helios-module-colorin]
 opt-level = 2
 
+[profile.dev.package.helios-module-flip]
+opt-level = 2
+
 [profile.dev.package.helios-module-exposure]
 opt-level = 2
 
