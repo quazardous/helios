@@ -937,7 +937,7 @@ fn presets_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &Words) -> Option<
         if (save.clicked() || entered) && !name.is_empty() {
             event = Some(Event::SavePreset(name));
             w.naming = None;
-        } else if ui.small_button("✕").on_hover_text(&words.cancel).clicked() {
+        } else if ui.small_button("×").on_hover_text(&words.cancel).clicked() {
             w.naming = None;
         }
     }

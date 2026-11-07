@@ -67,7 +67,9 @@ fn run_as(
     origin: Origin,
 ) {
     h.state_mut().run(id, args, origin).unwrap();
-    h.run();
+    // A paste of files opens the import window, which reads them with a
+    // spinner turning: frames are stepped, not run to rest.
+    h.run_steps(4);
 }
 
 #[test]
@@ -223,7 +225,8 @@ fn images_copied_or_files_pasted_open_the_import_window_on_them() {
     );
     let out = clipboard::paste(&app, PasteRequest::new(LIBRARY_ENDPOINT), &PopOrigin::User);
     assert!(out.ok(), "{out:?}");
-    h.run();
+    // The window reads the folder with a spinner turning.
+    h.run_steps(4);
     assert!(h.state_mut().take_imports().is_empty(), "nothing yet");
     assert!(h.state().import_window_open());
     assert_eq!(h.state().import_ticked(), std::slice::from_ref(&dir));
@@ -235,7 +238,8 @@ fn images_copied_or_files_pasted_open_the_import_window_on_them() {
         &PopOrigin::User,
     );
     assert!(out.ok(), "{out:?}");
-    h.run();
+    // The window reads the folder with a spinner turning.
+    h.run_steps(4);
     assert!(h.state_mut().take_imports().is_empty(), "nothing yet");
     assert_eq!(h.state().import_ticked(), std::slice::from_ref(&dir));
     let _ = std::fs::remove_dir_all(&dir);
@@ -296,27 +300,31 @@ fn files_and_images_go_to_and_come_from_other_applications() {
         h.state_mut().take_imports().is_empty(),
         "a dry run imports nothing"
     );
+    // Files: the import window opens on their folder.
     run(&mut h, "library.pasteFiles", json!(null));
-    h.key_press(egui::Key::Enter);
-    h.run();
-    let imports = h.state_mut().take_imports();
-    assert_eq!(imports.len(), 1, "{imports:?}");
-    assert_eq!(imports[0]["paths"], json!([file]));
-    // An image another application copied: written as a PNG file and
-    // copied into the library folder.
+    assert!(h.state_mut().take_imports().is_empty(), "nothing yet");
+    assert!(h.state().import_window_open());
+    assert_eq!(h.state().import_ticked(), std::slice::from_ref(&dir));
+    // An image another application copied: written as a PNG file, the
+    // window opened on it, copied into the Library.
     system.hold_image(image::RgbaImage::from_pixel(
         4,
         3,
         image::Rgba([200, 100, 50, 255]),
     ));
     run(&mut h, "library.pasteFiles", json!(null));
-    h.key_press(egui::Key::Enter);
-    h.run();
-    let imports = h.state_mut().take_imports();
-    assert_eq!(imports.len(), 1, "{imports:?}");
-    assert_eq!(imports[0]["copy"], json!(true));
-    let png = std::path::PathBuf::from(imports[0]["paths"][0].as_str().unwrap());
-    assert_eq!(image::open(&png).unwrap().to_rgba8().dimensions(), (4, 3));
+    assert!(h.state_mut().take_imports().is_empty(), "nothing yet");
+    assert!(h.state().import_copies());
+    let folder = h.state().import_ticked()[0].clone();
+    let png = std::fs::read_dir(&folder)
+        .unwrap()
+        .flatten()
+        .map(|e| e.path())
+        .find(|p| {
+            p.extension().is_some_and(|x| x == "png")
+                && image::open(p).is_ok_and(|i| i.to_rgba8().dimensions() == (4, 3))
+        })
+        .unwrap_or_else(|| panic!("no 4×3 PNG in {}", folder.display()));
     let _ = std::fs::remove_file(&png);
     // What the user copied in Helios is still there: the system's item
     // has a slot of its own.

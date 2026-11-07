@@ -72,9 +72,8 @@ fn drop_on(h: &mut Harness<'static, Shell>, path: &Path) {
     h.input_mut()
         .dropped_files
         .push(Arc::new(Dropped(path.to_path_buf())));
-    for _ in 0..3 {
-        h.run();
-    }
+    // The window opens and reads the drop: a spinner turns meanwhile.
+    h.run_steps(3);
 }
 
 #[test]
@@ -348,6 +347,7 @@ fn the_import_choices_show_live_examples_and_reach_the_import() {
     h.run_steps(3);
     let _ = h.get_by_label("e.g. 20261102-0001.JPG");
     h.get_by_label("Keep").click();
+    h.run_steps(3);
     h.get_by_label("Read darktable edits").click();
     h.run_steps(3);
     // Added where they are, the photos are neither filed nor renamed:
