@@ -2257,6 +2257,7 @@ dependencies = [
  "helios-profile",
  "helios-scopes",
  "helios-shell",
+ "helios-storage",
  "helios-template",
  "helios-values",
  "helios-vault",
@@ -2572,6 +2573,18 @@ dependencies = [
 name = "helios-shell"
 version = "0.69.0"
 dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "helios-storage"
+version = "0.69.0"
+dependencies = [
+ "blake3",
+ "helios-vault",
+ "log",
+ "rustix 1.1.5",
  "serde",
  "serde_json",
 ]

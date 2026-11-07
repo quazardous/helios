@@ -3,7 +3,7 @@
 //! toast open it (`library.importWindow`).
 //!
 //! - **Sources**, the left column: the cards and cameras mounted
-//!   ([`crate::volumes`], polled off the interface thread), first; then
+//!   ([`helios_storage`], polled off the interface thread), first; then
 //!   the recent folders, the favourites (added and removed here) and
 //!   "Choose a folder…" (egui-pop's folder chooser). Several can be
 //!   ticked. As it opens, the window ticks the first card, else the last
@@ -39,7 +39,7 @@ use serde_json::{Value, json};
 
 use super::Shell;
 use crate::import_scan::{Contents, Counts, Known, Scan, Scanned, Types};
-use crate::volumes::{self, Volume, Volumes, Watch};
+use helios_storage::{Card, Volumes, Watch};
 
 /// The command that opens the window (`source`: the card or folder to
 /// open it on).
@@ -63,7 +63,7 @@ pub(crate) struct ImportWindow {
     watch: Option<Watch>,
     /// The context the cards' thread asks a frame of.
     ctx: Arc<Mutex<Option<Egui>>>,
-    cards: Vec<Volume>,
+    cards: Vec<Card>,
     memory: Memory,
     file: Option<PathBuf>,
     /// The sources ticked, in the order ticked.
@@ -227,7 +227,7 @@ fn name_of(p: &Path) -> String {
 
 impl Shell {
     /// Watches the cards and cameras of `volumes` for the import window
-    /// and its toasts (the desktop gives `volumes::system()`; tests a list
+    /// and its toasts (the desktop gives `helios_storage::system()`; tests a list
     /// of their own).
     pub fn watch_cards(&mut self, volumes: Arc<dyn Volumes>) {
         let ctx = self.import_window.ctx.clone();
@@ -254,7 +254,7 @@ impl Shell {
     }
 
     /// The import window's cards, as last polled.
-    pub fn import_cards(&self) -> Vec<Volume> {
+    pub fn import_cards(&self) -> Vec<Card> {
         self.import_window.cards.clone()
     }
 
@@ -349,7 +349,7 @@ impl Shell {
     }
 
     /// "`EOS_DIGITAL` inserted": its action opens the window on the card.
-    fn card_toast(&mut self, card: &Volume) {
+    fn card_toast(&mut self, card: &Card) {
         let text = self.text(
             Message::new("gui-import-window-card-inserted", "{ $card } inserted")
                 .with("card", card.label.clone()),
@@ -443,7 +443,7 @@ impl Shell {
             .unwrap_or_else(PoisonError::into_inner)
             .as_ref()
             .map_or_else(
-                || volumes::capacity_text(counts.bytes),
+                || helios_storage::capacity_text(counts.bytes),
                 |ctx| crate::library::size_text(ctx, counts.bytes),
             );
         GridWords {
@@ -598,7 +598,7 @@ fn sources_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &Words, event: &mu
             let cards = w.cards.clone();
             for card in &cards {
                 let label = match card.capacity {
-                    Some(b) => format!("{} · {}", card.label, volumes::capacity_text(b)),
+                    Some(b) => format!("{} · {}", card.label, helios_storage::capacity_text(b)),
                     None => card.label.clone(),
                 };
                 source_row(ui, w, &card.root, label, None);

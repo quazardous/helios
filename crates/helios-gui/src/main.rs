@@ -1273,7 +1273,7 @@ fn main() -> Result<(), String> {
             shell.set_queue_when_empty(queue_when_empty);
             // The import window's cards, polled off the interface thread,
             // and its recent folders and favourites.
-            shell.watch_cards(helios_gui::volumes::system());
+            shell.watch_cards(helios_storage::system());
             // What the vault holds, for its "in your Library" prefilter.
             if let Some(vault) = known_vault.clone() {
                 shell.set_import_known(Arc::new(move || {

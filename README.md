@@ -74,6 +74,9 @@ A Cargo workspace (Rust):
   cursors, over an abstract store and its contract (an in-memory store
   for tests).
 - `crates/helios-vault-sqlite`: the SQLite driver of the vault store.
+- `crates/helios-storage`: the volumes files live on (disks, cards,
+  shares): identity, kind, roles, Linux detection, and the registry of
+  those the vault knows.
 - `crates/helios-load`: loaders, the framework reading files into sources:
   camera raws through rawler (sensor data and camera description), JPEG,
   PNG and TIFF pictures in the working space, embedded previews.

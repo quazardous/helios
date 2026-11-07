@@ -52,7 +52,6 @@ pub mod theme;
 pub mod theme_editor;
 pub mod tips;
 pub mod viewport;
-pub mod volumes;
 mod windows;
 mod workbench;
 pub mod workshops;

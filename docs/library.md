@@ -408,6 +408,38 @@ vault query (several labels: any of them; several tags: all of them);
 its words (in the name or a tag) and dates (the file's day) are matched
 on what the library holds. A filter shows stacks flattened.
 
+## Storage
+
+Where files live is described by **volumes** (the `helios-storage` crate;
+design in [storage-backup-research.md](storage-backup-research.md)): an
+internal or external disk, a card or stick, a network share, later a
+remote store through a plugin. Each volume has:
+
+- an **id** and how it was found, strongest first: a marker file Helios
+  wrote (`.helios/volume.json` at its root), the filesystem's UUID, a
+  share's address (`smb://nas/photos`), else its label and size ("weak":
+  enough to say "reinsert EOS_DIGITAL", never to count a backup);
+- a name (the user's, its label until then), a kind (internal, external,
+  removable, share, remote), its capacity and free space, where it is
+  mounted when online, and the physical drive behind it (two partitions
+  of one disk are one drive);
+- the **node** an internal disk belongs to (the machine's host name),
+  and when and on which node it was **last seen**;
+- whether it holds `DCIM` (a card or a camera), and its **roles**:
+  library, archive, backup, ingest, scratch. A card starts as ingest, the
+  disk holding the library folder as library; the user will set them.
+
+On Linux the volumes are read from `/proc/mounts`, `/dev/disk/by-uuid`,
+`/dev/disk/by-label`, `/dev/disk/by-id` and `/sys/block`, with free space
+from `statvfs`; Windows and macOS list none yet. The import window's cards
+are the removable volumes holding `DCIM`.
+
+The volumes Helios has seen are kept in the vault (documents
+`storage/volumes`): each scan updates what it saw and when, and a volume
+not mounted stays known, offline, never dropped. The marker file is read
+whenever present and written only when the user asks for it, never by a
+scan.
+
 ## Not yet
 
 - Phones over MTP as a source (mount them as folders).

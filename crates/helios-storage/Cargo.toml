@@ -1,0 +1,22 @@
+[package]
+name = "helios-storage"
+description = "Where Helios's files live: the volumes of the machine (disks, cards, shares), their identity, kind and roles, and the registry of those the vault knows"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+helios-vault.workspace = true
+blake3.workspace = true
+log = "0.4"
+serde.workspace = true
+serde_json.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT: `statvfs` without
+# unsafe code (already in the tree through tempfile and others).
+rustix = { version = "1", default-features = false, features = ["std", "fs"] }
+
+[lints]
+workspace = true
