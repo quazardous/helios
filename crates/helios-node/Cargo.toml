@@ -30,6 +30,7 @@ helios-module-rawprepare = { path = "../../modules/rawprepare" }
 helios-module-demosaic = { path = "../../modules/demosaic" }
 helios-module-whitebalance = { path = "../../modules/whitebalance" }
 helios-module-highlights = { path = "../../modules/highlights" }
+helios-module-channelmixerrgb = { path = "../../modules/channelmixerrgb" }
 helios-module-colorin = { path = "../../modules/colorin" }
 helios-module-flip = { path = "../../modules/flip" }
 helios-module-sigmoid = { path = "../../modules/sigmoid" }

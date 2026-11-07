@@ -2337,6 +2337,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "helios-module-channelmixerrgb"
+version = "0.67.0"
+dependencies = [
+ "helios-colour",
+ "helios-core",
+ "helios-testkit",
+]
+
+[[package]]
 name = "helios-module-colorin"
 version = "0.67.0"
 dependencies = [
@@ -2445,6 +2454,7 @@ dependencies = [
  "helios-library",
  "helios-load",
  "helios-module-blur",
+ "helios-module-channelmixerrgb",
  "helios-module-colorin",
  "helios-module-demosaic",
  "helios-module-exposure",
@@ -2475,6 +2485,7 @@ dependencies = [
  "helios-core",
  "helios-export",
  "helios-load",
+ "helios-module-channelmixerrgb",
  "helios-module-colorin",
  "helios-module-demosaic",
  "helios-module-exposure",

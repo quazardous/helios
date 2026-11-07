@@ -225,12 +225,12 @@ const CASES: &[Case] = &[
             "flip",
             "exposure",
             "colorin",
+            "channelmixerrgb",
             "sigmoid",
         ],
         not_applied: &[
             ("denoiseprofile v11", UNKNOWN),
             ("lens v6", UNKNOWN),
-            ("channelmixerrgb v3", UNKNOWN),
             ("colorout v5", UNKNOWN),
             ("gamma v1", UNKNOWN),
         ],
@@ -266,12 +266,12 @@ const CASES: &[Case] = &[
             "flip",
             "exposure",
             "colorin",
+            "channelmixerrgb",
             "sigmoid",
         ],
         not_applied: &[
             ("denoiseprofile v11", UNKNOWN),
             ("lens v9", UNKNOWN),
-            ("channelmixerrgb v3", UNKNOWN),
             ("colorout v5", UNKNOWN),
             ("gamma v1", UNKNOWN),
         ],
@@ -305,9 +305,9 @@ const CASES: &[Case] = &[
             "flip",
             "exposure",
             "colorin",
+            "channelmixerrgb",
         ],
         not_applied: &[
-            ("channelmixerrgb v3", UNKNOWN),
             ("spektrafilm v3", UNKNOWN),
             ("colorout v5", UNKNOWN),
             ("gamma v1", UNKNOWN),
@@ -341,6 +341,7 @@ fn kind(reason: &Reason) -> &'static str {
         Reason::Blend { .. } => "blend",
         Reason::Mask { .. } => "mask",
         Reason::MaskWithoutImage => "mask_without_image",
+        Reason::Unsupported { .. } => "unsupported",
     }
 }
 

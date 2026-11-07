@@ -89,7 +89,7 @@ and sharpening are not applied by default.
 | Demosaic, Bayer | yes | `modules/demosaic/src/rcd.rs` | RCD | RCD |
 | Demosaic, X-Trans | yes | `modules/demosaic/src/xtrans.rs` | Markesteijn one pass | Markesteijn one pass |
 | Camera matrix, input profile | standard matrix only | `modules/colorin` | the camera's matrix to linear Rec.2020 | the same, the enhanced matrix for some cameras, ICC input profiles |
-| Colour calibration (CAT) | **no** (vkdt's `vkdt_colour` does a CAT16, not used by any template) | `modules/vkdt/src/colour.rs` | none | CAT16 from the shot's illuminant |
+| Colour calibration (CAT) | partly: CAT16 from a given illuminant, not yet in the raw chain (C3b) | `modules/channelmixerrgb` | none | CAT16 from the shot's illuminant |
 | Exposure | yes | `modules/exposure` | 0 EV, bias not compensated | +0.7 EV, bias compensated |
 | Tone mapper | sigmoid, per-channel method | `modules/sigmoid` | darktable's defaults (contrast 1.5, skew 0, targets 100 % and 0.0152 %, hue 100 %) | sigmoid, the same defaults |
 | Filmic | **no** (vkdt's film curve `vkdt_filmcurv` exists, unused) | | | the "filmic" workflow only |
@@ -273,16 +273,34 @@ measure of C.
    pictures. Test: `raw-parity`'s EV column near 0.
 2. **Orientation** (S): B5, if not done there.
 3. **Colour calibration and white balance as darktable's modern
-   default** (L). A `colorcal` module ported from `channelmixerrgb`'s
-   chromatic adaptation (CAT16, the illuminant estimated from the shot's
-   coefficients, "as shot to reference"), and the white balance's
-   "camera reference" (D65) mode (`modules/whitebalance`, listed there as
-   not ported). darktable's code is in `src/iop/channelmixerrgb.c` and
-   `src/common/chromatic_adaptation.h`; vkdt's `vkdt_colour`
-   (`modules/vkdt/src/colour.rs`) already has a CAT16 to reuse. A parity
-   test in `crates/helios-parity/tests/` against darktable with that
-   module alone. Expected to take most of the remaining colour gap (the
-   grey background of the NEF: neutral in darktable, cool in Helios).
+   default** (L), in two slices.
+   - **C3a, done** (2026-11-07): `modules/channelmixerrgb`, darktable's
+     operation name and params, CAT16 adaptation only. The illuminant as
+     given (pipe D50, A, E, the F and LED standards, daylight or black
+     body at a temperature with darktable's conversions, custom x and y),
+     adapted to D50 in the working space (linear Rec.2020, its matrix to
+     XYZ D50), with darktable's gamut compression and clipping. A
+     darktable sidecar's colour calibration item maps to it; an item
+     using a part not ported (the camera illuminant, another adaptation,
+     the mixer rows, colourfulness, brightness, grey) is kept out and
+     named in the import's report. Unit parity: darktable's CAT16 code,
+     copied into a C harness (`modules/channelmixerrgb/src/tests/dt_cat16.c`),
+     gives the golden values for 10 colours, 7 illuminants and 4 gamut
+     and clip settings, held within 1e-4.
+   - **C3b, left**: the illuminant estimated from the shot's
+     coefficients ("as shot in camera": darktable's
+     `find_illuminant_xy_from_as_shot_coeffs`, which needs the camera
+     matrix and the white balance's D65 coefficients), the white
+     balance's "camera reference" (D65) mode (`modules/whitebalance`,
+     listed there as not ported), both wired into the raw front, the
+     develop template and the desktop's module catalogue (until then an
+     imported colour calibration item finds no node there and is left
+     out, as before), and a parity test in `crates/helios-parity/tests/`
+     against darktable with that module alone. Expected to take most of
+     the remaining colour gap (the grey background of the NEF: neutral
+     in darktable, cool in Helios). darktable's code is in
+     `src/iop/channelmixerrgb.c`, `src/common/chromatic_adaptation.h` and
+     `src/common/illuminants.h`.
 4. **Highlight reconstruction, inpaint opposed** (M). darktable's default
    method (`src/iop/hlreconstruct/opposed.c`) in `modules/highlights`,
    clip kept as a choice. Matters on skies and speculars; a parity test

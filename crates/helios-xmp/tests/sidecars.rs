@@ -86,8 +86,10 @@ fn a_current_sidecar_imports_with_its_values_and_reports_the_rest() {
             "whitebalance",
             "highlights",
             "demosaic",
+            "flip",
             "exposure",
-            "colorin"
+            "colorin",
+            "channelmixerrgb"
         ],
         "{:#?}",
         imported.report
@@ -103,7 +105,7 @@ fn a_current_sidecar_imports_with_its_values_and_reports_the_rest() {
     );
     let report = &imported.report;
     // What Helios has no module for is named, as is the disabled sigmoid.
-    for missing in ["colorout", "gamma", "channelmixerrgb", "spektrafilm"] {
+    for missing in ["colorout", "gamma", "spektrafilm"] {
         assert!(
             report
                 .not_applied

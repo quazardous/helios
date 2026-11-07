@@ -1111,6 +1111,8 @@ xmp-reason-unknown-module = no Helios module
 
 xmp-reason-unreadable = unreadable: { $error }
 
+xmp-reason-unsupported-part = not supported yet: { $part }
+
 xmp-reason-unsupported-version = version not supported (reads { $known })
 
 xmp-substituted = { $count } applied with a substitute: { $items }

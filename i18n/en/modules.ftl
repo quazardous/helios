@@ -5,6 +5,102 @@ param-blur-radius =
     .description = standard deviation, in full-resolution pixels
     .label = radius
 
+param-channelmixerrgb-adaptation =
+    .description = the chromatic adaptation
+    .label = adaptation
+
+param-channelmixerrgb-adaptation-choice-cat16 = cat16
+
+param-channelmixerrgb-clip =
+    .description = clip negative RGB from gamut
+    .label = clip
+
+param-channelmixerrgb-gamut =
+    .description = gamut compression: 0 for none
+    .label = gamut
+
+param-channelmixerrgb-illum-fluo =
+    .description = the fluorescent illuminant (illuminant f)
+    .label = illum_fluo
+
+param-channelmixerrgb-illum-fluo-choice-f1 = f1
+
+param-channelmixerrgb-illum-fluo-choice-f10 = f10
+
+param-channelmixerrgb-illum-fluo-choice-f11 = f11
+
+param-channelmixerrgb-illum-fluo-choice-f12 = f12
+
+param-channelmixerrgb-illum-fluo-choice-f2 = f2
+
+param-channelmixerrgb-illum-fluo-choice-f3 = f3
+
+param-channelmixerrgb-illum-fluo-choice-f4 = f4
+
+param-channelmixerrgb-illum-fluo-choice-f5 = f5
+
+param-channelmixerrgb-illum-fluo-choice-f6 = f6
+
+param-channelmixerrgb-illum-fluo-choice-f7 = f7
+
+param-channelmixerrgb-illum-fluo-choice-f8 = f8
+
+param-channelmixerrgb-illum-fluo-choice-f9 = f9
+
+param-channelmixerrgb-illum-led =
+    .description = the LED illuminant (illuminant led)
+    .label = illum_led
+
+param-channelmixerrgb-illum-led-choice-b1 = b1
+
+param-channelmixerrgb-illum-led-choice-b2 = b2
+
+param-channelmixerrgb-illum-led-choice-b3 = b3
+
+param-channelmixerrgb-illum-led-choice-b4 = b4
+
+param-channelmixerrgb-illum-led-choice-b5 = b5
+
+param-channelmixerrgb-illum-led-choice-bh1 = bh1
+
+param-channelmixerrgb-illum-led-choice-rgb1 = rgb1
+
+param-channelmixerrgb-illum-led-choice-v1 = v1
+
+param-channelmixerrgb-illum-led-choice-v2 = v2
+
+param-channelmixerrgb-illuminant =
+    .description = the scene's illuminant: D50 (pipe), a standard one, daylight or black body at a temperature, or custom x and y
+    .label = illuminant
+
+param-channelmixerrgb-illuminant-choice-a = a
+
+param-channelmixerrgb-illuminant-choice-bb = bb
+
+param-channelmixerrgb-illuminant-choice-custom = custom
+
+param-channelmixerrgb-illuminant-choice-d = d
+
+param-channelmixerrgb-illuminant-choice-e = e
+
+param-channelmixerrgb-illuminant-choice-f = f
+
+param-channelmixerrgb-illuminant-choice-led = led
+
+param-channelmixerrgb-illuminant-choice-pipe = pipe
+
+param-channelmixerrgb-temperature =
+    .description = the illuminant's temperature in kelvin (daylight and black body)
+    .label = temperature
+
+param-channelmixerrgb-x =
+    .description = the illuminant's CIE x (custom illuminant)
+    .label = x
+
+param-channelmixerrgb-y =
+    .description = the illuminant's CIE y (custom illuminant)
+    .label = y
+
 param-decide-exposure-exposure =
     .description = exposure adjustment, in EV: positive brightens, negative darkens
     .label = exposure
