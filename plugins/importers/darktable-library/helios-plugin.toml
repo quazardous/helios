@@ -9,7 +9,7 @@ services = ["importer"]
 activation = ["onImporter:darktable-library"]
 
 [compat]
-helios = ">=0.67.0, <0.68.0"
+helios = ">=0.68.0, <0.69.0"
 interfaces = { protocol = 1, importer = 1 }
 
 [[importers]]

@@ -24,6 +24,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.68.0] - 2026-11-07
+
+### Added
+
+- File › Import… (Ctrl+Shift+I) and the empty Library's "Import photos…" open
+  the new import window. Its Sources column lists the cards and cameras
+  inserted first (by label and capacity, refreshed as they come and go),
+  then recent folders, favourites and "Choose a folder…"; several sources can
+  be ticked, and the first card is ticked as it opens. A card inserted while
+  the window is closed shows a toast that opens it on the card. Import copies
+  a card into the Library and adds a folder where it is.
+- A raw shot in portrait is shown and exported upright: a `flip` step, as
+  darktable's, applies the camera's orientation. It can be set by hand
+  (none, 90° clockwise or counter-clockwise, 180°, mirror), and a
+  darktable edit's orientation carries over. A darktable edit's drawn
+  masks do not follow a turned image yet.
+
 ## [0.67.0] - 2026-11-07
 
 ### Changed
