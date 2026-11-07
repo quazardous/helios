@@ -56,6 +56,21 @@
       "border-width": {"$type": "dimension", "$value": {"value": 0, "unit": "px"}}
     }
   },
+  "dock-body": {
+    "$description": "Rerun outlines no view: panels are told apart by their fill.",
+    "rest": {
+      "border-width": {"$type": "dimension", "$value": {"value": 0, "unit": "px"}}
+    }
+  },
+  "dock-separator": {
+    "$description": "Rerun's views meet without a line at rest; the separator shows under the pointer and while dragged.",
+    "rest": {
+      "fill": {"$type": "color", "$value": "{transparent}"}
+    }
+  },
+  "scroll-bar": {
+    "visibility": {"$type": "string", "$value": "hover", "$description": "Rerun's scroll bars float and show only while the pointer is over their area (egui's look): no line at rest."}
+  },
   "section-band": {
     "height": {"$type": "dimension", "$value": {"value": 24, "unit": "px"}},
     "rest": {
