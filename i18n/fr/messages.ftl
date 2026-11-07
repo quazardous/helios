@@ -174,6 +174,7 @@ gui-graph-wires-orthogonal = Orthogonales
 gui-graph-wires-straight = Droites
 
 gui-history-batch = { $label } ({ $count } valeurs)
+gui-history-import = Importer { $count } photos
 
 gui-history-preview-applied = appliqué
 

@@ -241,6 +241,8 @@ gui-graph-wires-straight = Straight
 
 gui-history-batch = { $label } ({ $count } values)
 
+gui-history-import = Import { $count } photos
+
 gui-history-preview-applied = applied
 
 gui-history-preview-bypassed = bypassed

@@ -49,6 +49,11 @@
 //!   saved yet"), and lost if the app quits first. Restoring one
 //!   writes its values back as one new step, which an undo takes back;
 //!   egui-pop's `edit.restore` step, vetoed like an undo during a drag.
+//! - **The library** is a second scope, `library`
+//!   (`crate::library_history`): one step per import, active with the
+//!   library's panels. Ctrl+Z picks the newest step of the active scopes
+//!   by time, so each edit step is stamped when it is first seen (the
+//!   revision is read every pass).
 //! - **The hover preview**: the pointer on a row of the History panel
 //!   (a step, a replaced step, a snapshot) shows the image as it was
 //!   there, and the panel lists what differs (egui-pop's
@@ -59,6 +64,7 @@
 //!   per row entered, it costs one render per row, none while the
 //!   pointer rests. A drag going on gets no preview.
 
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use egui_pop::api::contexts::Entry;
@@ -75,6 +81,7 @@ use helios_values::{GestureId, Refused, Set, Step, Store};
 
 use crate::edit_snapshots::{self, Shared, Taken};
 use crate::host::{to_helios, to_pop};
+use crate::library_history::{LIBRARY, LibraryHistory};
 
 /// The scope of Helios's value store: the open image's edit.
 pub const EDIT: ScopeId = ScopeId::from_static("edit");
@@ -89,6 +96,11 @@ pub struct HeliosHistory {
     waker: Option<Arc<Mutex<Waker>>>,
     /// The catalogues a preview's list is said through.
     i18n: Option<I18n>,
+    /// The library's steps (imports).
+    library: LibraryHistory,
+    /// When each edit step was first seen, for Ctrl+Z to pick the newest
+    /// step across scopes; and the revision they were stamped at.
+    stamps: Arc<Mutex<(u64, HashMap<u64, f64>)>>,
 }
 
 impl std::fmt::Debug for HeliosHistory {
@@ -105,7 +117,50 @@ impl HeliosHistory {
             snapshots: Shared::default(),
             waker: None,
             i18n: None,
+            library: LibraryHistory::default(),
+            stamps: Arc::default(),
         }
+    }
+
+    /// Keeps the library's steps in `library` (the shell's, which
+    /// imports record into).
+    pub fn with_library(mut self, library: LibraryHistory) -> Self {
+        self.library = library;
+        self
+    }
+
+    /// Stamps the edit steps not seen yet with the time now; forgets
+    /// those no longer in the line.
+    fn stamp(&self, store: &Store) {
+        let mut stamps = self.stamps.lock().unwrap_or_else(PoisonError::into_inner);
+        let rev = store.history_rev();
+        if stamps.0 == rev && rev != 0 {
+            return;
+        }
+        stamps.0 = rev;
+        let t = now();
+        let ids: Vec<u64> = store
+            .undo_steps()
+            .iter()
+            .chain(store.redo_steps().iter())
+            .map(|s| s.id)
+            .collect();
+        stamps.1.retain(|id, _| ids.contains(id));
+        for id in ids {
+            stamps.1.entry(id).or_insert(t);
+        }
+    }
+
+    /// The edit's line, each step with when it was first seen.
+    fn edit_line(&self) -> Line {
+        let store = self.lock();
+        self.stamp(&store);
+        let mut line = line_of(&store);
+        let stamps = self.stamps.lock().unwrap_or_else(PoisonError::into_inner);
+        for s in line.undo.iter_mut().chain(line.redo.iter_mut()) {
+            s.at = stamps.1.get(&s.id).copied().unwrap_or_default();
+        }
+        line
     }
 
     /// Wakes the window through `waker` when a preview changes what the
@@ -530,30 +585,46 @@ impl HeliosHistory {
 
 impl History for HeliosHistory {
     fn scopes(&self) -> Vec<ScopeInfo> {
-        vec![ScopeInfo::new(EDIT, "Edit")]
+        vec![ScopeInfo::new(EDIT, "Edit"), LibraryHistory::scope()]
     }
 
     fn line(&self, scope: &ScopeId) -> Option<Line> {
-        (*scope == EDIT).then(|| line_of(&self.lock()))
+        if *scope == LIBRARY {
+            return Some(self.library.line());
+        }
+        (*scope == EDIT).then(|| self.edit_line())
     }
 
     fn rev(&self, scope: &ScopeId) -> u64 {
         if *scope == EDIT {
-            self.lock().history_rev()
+            let store = self.lock();
+            self.stamp(&store);
+            store.history_rev()
+        } else if *scope == LIBRARY {
+            self.library.rev()
         } else {
             0
         }
     }
 
     fn undo(&mut self, request: &Request, origin: &PopOrigin) -> Answer {
+        if request.scope == LIBRARY {
+            return self.library.undo(request, origin);
+        }
         self.answer(request, |s| walk(s, origin, false, request.dry_run))
     }
 
     fn redo(&mut self, request: &Request, origin: &PopOrigin) -> Answer {
+        if request.scope == LIBRARY {
+            return self.library.redo(request, origin);
+        }
         self.answer(request, |s| walk(s, origin, true, request.dry_run))
     }
 
     fn jump(&mut self, request: &Request, to: u64, origin: &PopOrigin) -> Answer {
+        if request.scope == LIBRARY {
+            return self.library.jump(request, to, origin);
+        }
         self.answer(request, |s| {
             let line = line_of(s);
             let jump = match plan_jump(&line, to) {

@@ -343,3 +343,64 @@ fn a_folder_with_darktable_sidecars_comes_in_with_versions_and_its_report_logged
     assert!(notice.text.contains("Log panel"), "{}", notice.text);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn an_import_is_one_undo_step_and_ctrl_z_on_the_library_takes_it_back() {
+    let dir = temp("undo");
+    for (n, name) in ["a.png", "b.png"].iter().enumerate() {
+        image::RgbImage::from_fn(16, 16, |x, y| {
+            image::Rgb([(x * 9) as u8, (y * 13) as u8, 40 * n as u8])
+        })
+        .save(dir.join(name))
+        .unwrap();
+    }
+    let vault = Arc::new(Vault::new(MemoryStore::default()));
+    let shell = Shell::new(helios_panels(), None);
+    // As the desktop wires it: undo and redo move the vault's rows.
+    let history = shell.library_history();
+    {
+        let vault = vault.clone();
+        history.set_apply(Arc::new(move |changes, forward| {
+            if forward {
+                vault.replay(changes)
+            } else {
+                vault.revert(changes)
+            }
+        }));
+    }
+    let jobs = helios_core::jobs::Jobs::new(Arc::new(helios_core::Bus::new()));
+    let mut report = import(
+        &vault,
+        &jobs,
+        std::slice::from_ref(&dir),
+        &Options::default(),
+        1,
+        &mut |_: &Value| {},
+    )
+    .unwrap();
+    assert_eq!(report.added, 2);
+    let label = helios_gui::library_history::import_label(report.added + report.located);
+    history.record(label, std::mem::take(&mut report.changes), 1.0);
+    let line = history.line();
+    assert_eq!(line.undo.len(), 1);
+    assert_eq!(line.undo[0].label.text, "Import 2 photos");
+
+    let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+    h.run();
+    // The step is in the history the interface reads, as the library's.
+    let scope = helios_gui::library_history::LIBRARY;
+    let seen = egui_pop::api::history::line(h.state().app().handle(), &scope)
+        .expect("the library's scope");
+    assert_eq!(seen.undo.len(), 1, "{seen:?}");
+    assert_eq!(seen.undo[0].label.text, "Import 2 photos");
+    // Ctrl+Z with the Library shown takes the import back; the files stay.
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    for _ in 0..3 {
+        h.run();
+    }
+    assert!(vault.images().unwrap().is_empty(), "the entries are gone");
+    assert!(dir.join("a.png").is_file() && dir.join("b.png").is_file());
+    let line = history.line();
+    assert_eq!((line.undo.len(), line.redo.len()), (0, 1));
+    let _ = std::fs::remove_dir_all(&dir);
+}

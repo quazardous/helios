@@ -163,6 +163,23 @@ fn library_commands(
     // Duplicates panel, so a duplicate kept is imported again the same
     // way; the Log panel), then the import's end.
     let lines = shell.import_sink();
+    // Each import that changed the library is one undo step of its own
+    // scope; undo and redo move the vault's rows, never a file, then the
+    // Library is filled again.
+    let history = shell.library_history();
+    {
+        let (vault, done, ctx) = (vault.clone(), done.clone(), ctx.clone());
+        history.set_apply(Arc::new(move |changes, forward| {
+            let r = if forward {
+                vault.replay(changes)
+            } else {
+                vault.revert(changes)
+            };
+            done.store(true, Ordering::Relaxed);
+            ctx.request_repaint();
+            r
+        }));
+    }
     let plugins = plugins.clone();
     shell.register(
         CommandSpec::new(
@@ -183,7 +200,7 @@ fn library_commands(
                 return Err("`path` is missing".into());
             }
             let (vault, jobs, done, ctx) = (vault.clone(), jobs.clone(), done.clone(), ctx.clone());
-            let (lines, asked) = (lines.clone(), args.clone());
+            let (lines, asked, history) = (lines.clone(), args.clone(), history.clone());
             std::thread::spawn(move || {
                 // The job's events say how it went; the lines feed the
                 // Duplicates panel.
@@ -210,7 +227,14 @@ fn library_commands(
                     ),
                 };
                 let end = match ended {
-                    Ok(report) => json!({ "ended": report }),
+                    Ok(mut report) => {
+                        let label = helios_gui::library_history::import_label(
+                            report.added + report.located,
+                        );
+                        let changes = std::mem::take(&mut report.changes);
+                        history.record(label, changes, seconds_f64());
+                        json!({ "ended": report })
+                    }
                     Err(e) => {
                         warn(&format!("import: {e}"));
                         json!({ "failed": e })

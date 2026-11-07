@@ -94,7 +94,9 @@ or folders on Helios (the window opens with them as its source).
   is in the Library and verified" (checked by hash). It never formats
   the card itself. The full report goes to the Log panel.
 - Undo removes the import's entries from the Library as one step. It
-  never touches files.
+  never touches files. Built (2026-11-07): the `library` scope of the
+  history, one step per import, finished or cancelled (see
+  docs/library.md, "Undoing an import").
 
 ## Pipeline changes this needs (study phase 1)
 

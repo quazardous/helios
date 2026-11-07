@@ -21,6 +21,7 @@ pub mod jobs;
 pub mod keymaps;
 pub mod keys;
 pub mod library;
+pub mod library_history;
 pub mod log_panel;
 pub mod macro_interface;
 pub mod mask_display;

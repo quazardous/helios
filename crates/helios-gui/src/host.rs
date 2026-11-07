@@ -192,6 +192,12 @@ impl HeliosHost {
         self
     }
 
+    /// The library's steps (imports) are kept in `library`.
+    pub fn with_library(mut self, library: crate::library_history::LibraryHistory) -> Self {
+        self.history = self.history.map(|h| h.with_library(library));
+        self
+    }
+
     /// The history's hover preview lists what differs through `i18n`.
     pub fn with_i18n(mut self, i18n: egui_pop::i18n::I18n) -> Self {
         self.history = self.history.map(|h| h.with_i18n(i18n));

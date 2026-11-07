@@ -380,7 +380,8 @@ Each with the default proposed:
   import source. Text another application copied (absolute paths or
   `file://` URIs, one per line) is the same import, asked first too: it
   writes the vault, and a stray paste of a path must not start a job.
-  An import is a job, not an undo step. Not yet, and why: "Copy files"
+  An import is a job, and one undo step of the Library's history
+  (2026-11-07, see docs/library.md). Not yet, and why: "Copy files"
   (`text/uri-list` for other applications) and pasting `text/uri-list`
   or `image/png` from them need egui-pop's system backend (ADR 0015,
   step 5), since the system clipboard carries text only today and the

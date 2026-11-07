@@ -244,6 +244,23 @@ nothing to remember it in, and the box is not shown. The dialog's
 `darktable: false` turns it off) keeps each photo's `.xmp` sidecars as
 versions (see "darktable edits" above).
 
+**Undoing an import (2026-11-07).** Each import that changed the Library,
+finished or cancelled, is one step of the Library's history, labelled
+"Import 124 photos" (the photos added or found at a new place). Edit ›
+Undo (Ctrl+Z) with the Library, the Filmstrip or the Duplicates panel
+shown takes it back when it is the newest step there (an edit made after
+it is undone first); the History panel lists it under the `library`
+scope. Undo removes the entries the import added from the Library: the
+images it brought, with their locations, fields, signals and the
+darktable edits kept as versions, and on photos the Library already had,
+the new locations and the values an importer gave. Redo puts them all
+back. **No file is touched**: what was referenced stays where it is, and
+the copies the import made stay in the library folder, sidecars
+included. A later import of the same photos finds those copies there by
+their hash and does not copy them again. A photo edited since the import
+(a version saved) or found at another place since is kept, and a value
+changed since is not set back. The steps last for the session.
+
 When an import ends, a short toast says how many photos and darktable
 edits came in. The darktable edits not kept whole (items not applied,
 modes substituted, sidecars that could not be read) are listed in the
@@ -367,8 +384,8 @@ already is a reference: nothing is copied, and a paste with nothing to
 import is refused with the reason. The import is `library.importFiles`,
 one job like any import, placed as the workspace's import source says;
 paste special (Ctrl+Shift+V) chooses **Import the files where they
-are** or **Copy the files into the library folder**. An import is not an
-undo step.
+are** or **Copy the files into the library folder**. Each import is one
+undo step (see "Undoing an import" below).
 
 **Files and images with other applications (2026-10-28).** Edit › Copy
 files (`library.copyFiles`) puts the files of the images selected on the

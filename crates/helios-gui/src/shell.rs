@@ -299,6 +299,7 @@ struct Parts {
     i18n: egui_pop::i18n::I18n,
     opens: crate::platform::Opens,
     jobs: helios_core::jobs::Jobs,
+    library_history: crate::library_history::LibraryHistory,
     status: crate::jobs::Status,
     relays: crate::jobs::Relays,
     /// What checks a restored darkroom's image is still there.
@@ -574,6 +575,8 @@ pub struct Shell {
     about_generation: Option<u64>,
     /// Where background work reports (`job.*` on the shell's bus).
     jobs: helios_core::jobs::Jobs,
+    /// The library's undo steps (imports), shared with the history owner.
+    library_history: crate::library_history::LibraryHistory,
     /// Helios's status line, drawn in egui-pop's status bar.
     status: crate::jobs::Status,
     /// The jobs' ends read up to here, for the desktop notification.
@@ -653,8 +656,10 @@ impl Shell {
             // without the user's settings.
             .language("en");
         let i18n = i18n_plugin.i18n();
+        let library_history = crate::library_history::LibraryHistory::default();
         let host = HeliosHost::new(registry.clone(), bus, Arc::default())
             .with_values(values.clone(), snapshots.clone())
+            .with_library(library_history.clone())
             .with_i18n(i18n.clone());
         let later = host.later();
         let workspace = host.workspace();
@@ -802,6 +807,7 @@ impl Shell {
                 i18n,
                 opens,
                 jobs,
+                library_history,
                 status,
                 relays,
                 images,
@@ -828,6 +834,7 @@ impl Shell {
             i18n,
             opens,
             jobs,
+            library_history,
             status,
             relays,
             images: _,
@@ -920,6 +927,7 @@ impl Shell {
             about_generation: None,
             opens,
             jobs,
+            library_history,
             status,
             ended: crate::jobs::Ended::default(),
             relays,
@@ -4989,6 +4997,13 @@ impl Shell {
     /// desktop, a calibration: each starts its job here.
     pub fn jobs(&self) -> helios_core::jobs::Jobs {
         self.jobs.clone()
+    }
+
+    /// The library's undo steps: an import records its step there, and
+    /// undo and redo reach the vault through what it is given
+    /// ([`crate::library_history::LibraryHistory::set_apply`]).
+    pub fn library_history(&self) -> crate::library_history::LibraryHistory {
+        self.library_history.clone()
     }
 
     /// The exports and batches that ended since the last frame: said on

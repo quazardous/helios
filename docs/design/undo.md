@@ -31,7 +31,7 @@ branch where said.
 | Masks panel values | rename, invert, opacity, lock: store groups | per image | as versions (marks and parameters) | as the store | as the store | fine |
 | Library fields (`Vault::apply`) | field commands (rating, reject, pick, labels, tags), one audit row per change (old, new, who, job) | the library | SQLite, audit kept | none | not reachable | no undo; the audit could give one but has no batch id |
 | Stacks (`stacks.suggest` decisions) | accepted (whole or corrected) or declined, by whom | the library | vault documents | none | not reachable | no undo; dissolving is the only way back |
-| Import and duplicates | a job: files referenced or copied, duplicates skipped, kept or asked | the library | files and catalogue rows | n/a | not reachable | nothing to undo but the catalogue rows; files are never deleted |
+| Import and duplicates | a job: files referenced or copied, duplicates skipped, kept or asked | the library | files and catalogue rows | n/a | not reachable (2026-11-07: one `library` step per import, see below) | nothing to undo but the catalogue rows; files are never deleted |
 | Workspace (workspace-edit branch) | the whole state as one store value `workspace/state`; each edit, reset or parts import one group | the window's workspace | files written at once | as the store | as the store, mixed with image steps | save as template is not a step (it writes a file); panel moves are saved but not steps |
 | Workspace, agents (workspace-edit branch, `Files::save_step`) | the state before each agent step, as files | one workspace | files, survives restarts | last 20, no redo | MCP `helios_workspace_undo` only | a second history the desktop neither writes nor reads |
 | Decision book | every answer, who, model, inputs | per decision node | inside the version | none | not an undo | fine: a record |
@@ -190,6 +190,36 @@ next step saves the whole network.
 - Session or durable: for the session only (decided 2026-10-14), as
   Lightroom; rebuilding it from the audit trail after a restart comes
   later.
+
+### Built: an import as a library step (2026-11-07)
+
+- **The scope.** `library` (`crate::library_history` in helios-gui) sits
+  beside `edit` behind `HeliosHistory`, for the session only, with no
+  snapshots, preview or undo of one step. It is active while the
+  Library, the Filmstrip or the Duplicates panel is drawn; the edit
+  scope stays always active. Ctrl+Z picks the newest head among the
+  active scopes by time, so each edit step is stamped when the owner
+  first sees it (its revision is read every pass); library step ids
+  start at 2^48, apart from the value store's.
+- **The step.** Each import that changed the library, finished or
+  cancelled, records one step, "Import 124 photos", holding what it
+  changed as a value: for each image it touched, its rows before
+  (`None`: new) and after, as `helios_vault::Changes` (locations,
+  fields, signals, versions; the import's report carries them, with the
+  list of files it copied). Undo is `Vault::revert`, redo
+  `Vault::replay`, each one transaction.
+- **The vault.** `Store` learnt `remove_location`, `remove_version`
+  (refused while a child names it) and `remove_image` (with its fields;
+  refused while a location or version names it), on every store and the
+  test wrappers, checked by the contract. Audit rows stay. A revert
+  keeps what changed since: an image to forget that gained a version or
+  a location is left whole, a field or the signals are set back only
+  where they still hold the step's value.
+- **Files.** Nothing on disk moves: copies stay in the library folder,
+  and a later import finds them there by their hash. Agents walk only
+  their own steps, so an import's step is the user's.
+- Not built: field batches, stack decisions and a Keep in the
+  Duplicates panel as library steps.
 
 ## The workspace's scope
 
