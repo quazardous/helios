@@ -38,6 +38,43 @@ Done:
   a `helios batch` JPEG export on the CPU). The zip goes into the Release
   and its line into `SHA256SUMS`. See `docs/releases.md`.
 
+**Tests on Windows: 22 test targets fail** (first run, 2026-11-08). The
+CI step runs them with `continue-on-error`, so the job stays green on the
+build; making the step required is the next task. What fails, by cause:
+
+- **The vault's snapshots (real bug).** `helios-vault-sqlite` (lib,
+  `integrity`, `migrations`): writing `vault.db.snapshots/*.db.partial`
+  then renaming it fails with "Access is denied" (os error 5), so a
+  migration refuses to run and scheduled snapshots fail. The partial file
+  is most likely still open (SQLite's backup handle) when it is renamed:
+  close it first, and retry the rename on sharing violations (§1.3).
+- **darktable library import (real bug).**
+  `helios-plugin-darktable-library` (lib, `scan`) and the GUI's
+  `darktable_library` test: the read-only SQLite URI is built as
+  `file:/D:/...`, which SQLite rejects ("invalid uri authority"); Windows
+  needs `file:///D:/...`.
+- **Verbatim paths.** `\\?\C:\...` from `canonicalize` reaches the
+  importer plugins' answers (`importer_plugins`), and the long and short
+  (`RUNNER~1`) forms of the temp folder differ (`macros_desk`, `import`):
+  use `dunce::canonicalize` (§1.3).
+- **Unix paths in tests.** `/out`, `/tmp/out` and `/photos/...` are not
+  absolute on Windows, or are joined with `\` (`helios-export` lib,
+  `helios-node` lib, the GUI's lib, `clipboard`, `workspace_live`'s
+  paste test): the tests need platform paths.
+- **Unix sockets in tests.** `workspace_live` reaches a desktop over a
+  Unix socket.
+- **Wording.** `helios-plugin`'s `broker` test expects `exit status: 3`;
+  Windows says `exit code: 3`.
+- **The AI setup.** `helios-ai`'s `ai` test expects the Linux setup steps
+  (curl, systemd); on Windows the plan should be Windows' own.
+- **GPU on WARP.** `helios-gpu` (`backend`, `faults`, `residency`): the
+  DX12 shader compiler (FXC) rejects the sigmoid kernel ("array
+  reference cannot be used as an l-value", X3500), so that step falls
+  back to the CPU and the transfer counts differ; `viewport` times out
+  waiting for the GPU.
+- **GUI timing.** `dialogs` and `workshops`: a kittest harness needs 6
+  frames to settle where it allows 4.
+
 Gated on Unix, still (the test files are `#![cfg(unix)]`, see §1.9): the
 node's system, sandbox, batch and workflow tests, the inspection protocol
 tests, the GUI's node-jobs and survival tests, the fake gphoto2 camera.
