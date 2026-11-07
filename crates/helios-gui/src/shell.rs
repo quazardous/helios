@@ -454,6 +454,9 @@ pub struct Shell {
     contents: Contents,
     /// The journal read up to here, for the workbench's refusals.
     seen: u64,
+    /// Why the tab dragged last frame may not go where it is, as the
+    /// workbench's drop hint said it: said when the tab is let go there.
+    drag_refusal: Option<String>,
     queue: Queue,
     rects: BTreeMap<String, Rect>,
     /// The window of each named rectangle drawn outside the main one.
@@ -866,6 +869,7 @@ impl Shell {
             panels,
             contents,
             seen: 0,
+            drag_refusal: None,
             queue,
             rects: BTreeMap::new(),
             rect_windows: BTreeMap::new(),
@@ -4748,7 +4752,7 @@ impl Shell {
         for n in refused {
             self.warn(n);
         }
-        self.workbench_refusals();
+        self.workbench_refusals(&ctx);
         self.save_layout_on_change(&ctx);
         self.engine_notices();
         self.copied_image();
@@ -4877,11 +4881,23 @@ impl Shell {
         self.layout_saved = Some(layout);
     }
 
-    /// What the workbench refused this frame (a tab dropped where its
-    /// panel may not go), from egui-pop's journal: said in the status bar
-    /// (egui-pop shows the toast).
-    fn workbench_refusals(&mut self) {
+    /// What the workbench refused this frame, said in the status bar:
+    /// from egui-pop's journal (a move asked by a command or a palette's
+    /// drop; egui-pop shows the toast), and a tab let go where its panel
+    /// may not go. egui-pop shows that one on the drop zone while the tab
+    /// is dragged and changes nothing on the drop, so it is the last drop
+    /// hint's refusal once the hint is gone with the button up.
+    fn workbench_refusals(&mut self, ctx: &Egui) {
         let h = self.app.handle().clone();
+        let refusal = h.drop_hint().and_then(|hint| hint.refusal);
+        let held = ctx.input(|i| i.pointer.primary_down());
+        let was = std::mem::replace(&mut self.drag_refusal, refusal);
+        if let Some(why) = was
+            && self.drag_refusal.is_none()
+            && !held
+        {
+            self.note(Message::plain(why));
+        }
         let events = h.events_since(self.seen);
         self.seen = h.last_event();
         for e in events {

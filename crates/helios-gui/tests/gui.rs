@@ -659,16 +659,23 @@ fn the_shell_runs_the_value_commands_with_their_origin() {
 }
 
 /// Drags a panel's tab (just above its body) to a point, over a few frames.
+/// The dock repaints for as long as a tab is held, so the drag goes a frame
+/// at a time (`step`, not `run`, which waits for a quiet frame); it is held
+/// at the point for a few frames, as `egui_stack` keeps a target it found for
+/// a moment before it takes the next one, then dropped.
 fn drag_tab(h: &mut egui_kittest::Harness<'_, Shell>, panel: &str, to: egui::Pos2) {
     let body = h.state().target_rect(panel).unwrap();
     let from = egui::pos2(body.left() + 24.0, body.top() - 12.0);
     h.hover_at(from);
     h.run();
     h.drag_at(from);
-    h.run();
+    h.step();
     for k in 1..=8 {
         h.hover_at(from + (to - from) * (k as f32 / 8.0));
-        h.run();
+        h.step();
+    }
+    for _ in 0..4 {
+        h.step();
     }
     h.drop_at(to);
     h.run();
@@ -702,23 +709,10 @@ fn a_tab_that_may_not_go_there_goes_back_and_says_why() {
     let mut h = headless::harness(Shell::new(helios_panels(), None), vec2(1280.0, 800.0));
     h.run();
     let target = h.state().target_rect("helios.vault").unwrap().center();
-    // Shown while dragging, before the drop.
-    let body = h.state().target_rect("helios.viewport").unwrap();
-    let from = egui::pos2(body.left() + 24.0, body.top() - 12.0);
-    h.hover_at(from);
-    h.run();
-    h.drag_at(from);
-    h.run();
-    for k in 1..=8 {
-        h.hover_at(from + (target - from) * (k as f32 / 8.0));
-        h.run();
-    }
-    h.drop_at(target);
-    h.run();
-    h.run();
+    drag_tab(&mut h, "helios.viewport", target);
     assert_eq!(area_of(h.state(), "helios.viewport"), Some(Area::Center));
-    // egui-pop's workbench refuses it (a toast); Helios's status bar says
-    // it too.
+    // egui-pop's workbench refuses it (the drop zone says why while the
+    // tab is dragged); Helios's status bar says it once the tab is let go.
     assert_eq!(
         h.state().notes.last().map(String::as_str),
         Some("Image stays out of the start side bar")
