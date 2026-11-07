@@ -1114,6 +1114,12 @@ fn main() -> Result<(), String> {
             // Tips come by themselves in the window, never in tests.
             shell.tips_by_themselves(true);
             shell.set_queue_when_empty(queue_when_empty);
+            // The import window's cards, polled off the interface thread,
+            // and its recent folders and favourites.
+            shell.watch_cards(helios_gui::volumes::system());
+            shell.remember_import_sources_in(
+                helios_gui::shell::config_dir().join("import-sources.json"),
+            );
             if let Err(e) = shell.use_profile(&profile) {
                 shell.notes.push(format!("profile {profile}: {e}"));
             }

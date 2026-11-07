@@ -74,6 +74,7 @@ pub const COMMAND_ICONS: &[(&str, &str)] = &[
     ("workspace.importParts", "phosphor:tray-arrow-down"),
     ("library.importFiles", "phosphor:tray-arrow-down"),
     ("library.importSource", "phosphor:tray-arrow-down"),
+    ("library.importWindow", "phosphor:tray-arrow-down"),
     ("library.importWith", "phosphor:tray-arrow-down"),
     ("library.export", "phosphor:export"),
     ("library.openFolder", "folder"),

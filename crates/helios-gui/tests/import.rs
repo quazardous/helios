@@ -7,11 +7,13 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use egui::{Key, Modifiers, vec2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable as _;
 use helios_gui::dialogs::Level;
+use helios_gui::volumes::Volume;
 use helios_gui::{Shell, headless, helios_panels, templates};
 use helios_library::import::{Options, import};
 use helios_shell::commands::Origin;
@@ -77,14 +79,14 @@ fn drop_on(h: &mut Harness<'static, Shell>, path: &Path) {
 }
 
 #[test]
-fn file_import_is_in_the_file_menu_on_ctrl_shift_i_and_asks_for_a_folder() {
+fn file_import_is_in_the_file_menu_on_ctrl_shift_i_and_opens_the_import_window() {
     let mut shell = Shell::new(helios_panels(), None);
     let items = shell.menu_items(egui_pop::api::app::MENU_FILE.as_str());
     let import = items
         .as_array()
         .unwrap()
         .iter()
-        .find(|i| i["id"] == "library.importSource")
+        .find(|i| i["id"] == "library.importWindow")
         .unwrap_or_else(|| panic!("no File > Import…: {items}"))
         .clone();
     assert_eq!(import["title"], json!("Import photos…"), "{import}");
@@ -95,10 +97,13 @@ fn file_import_is_in_the_file_menu_on_ctrl_shift_i_and_asks_for_a_folder() {
     for _ in 0..3 {
         h.run();
     }
+    assert!(h.state().import_window_open());
+    // The command without its arguments still asks with the form: no
+    // import source, no workspace, so where the photos go and the
+    // darktable edits, nothing to remember it in.
+    run(&mut h, "library.importSource", json!(null));
     let form = dialog(&mut h);
     assert_eq!(form["command"], json!("library.importSource"), "{form}");
-    // No import source, no workspace: where the photos go and the
-    // darktable edits, nothing to remember it in.
     assert_eq!(field_keys(&form), ["path", "copy", "darktable"]);
     answer(&mut h, json!({ "path": "/photos/trip" }));
     // Referenced in place, darktable edits read (the host's default).
@@ -123,8 +128,51 @@ fn an_empty_library_offers_import_photos_without_an_import_source() {
     for _ in 0..3 {
         h.run();
     }
-    let form = dialog(&mut h);
-    assert_eq!(form["command"], json!("library.importSource"), "{form}");
+    assert!(h.state().import_window_open());
+}
+
+#[test]
+fn the_import_window_lists_a_card_first_ticks_it_and_imports_it() {
+    let dir = temp("card");
+    let card = dir.join("EOS_DIGITAL");
+    std::fs::create_dir_all(card.join("DCIM/100CANON")).unwrap();
+    let mut shell = Shell::new(helios_panels(), None);
+    shell.watch_cards(Arc::new(vec![Volume {
+        label: "EOS_DIGITAL".into(),
+        root: card.clone(),
+        capacity: Some(64_000_000_000),
+    }]));
+    let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+    // The cards are polled on a thread of their own: the first list
+    // comes within a few frames.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while h.state().import_cards().is_empty() {
+        assert!(Instant::now() < deadline, "no card listed in 10 s");
+        std::thread::sleep(Duration::from_millis(20));
+        h.run();
+    }
+    h.key_press_modifiers(Modifiers::CTRL | Modifiers::SHIFT, Key::I);
+    for _ in 0..3 {
+        h.run();
+    }
+    assert!(h.state().import_window_open());
+    // Listed by its label and capacity, and ticked first.
+    let _ = h.get_by_label("EOS_DIGITAL · 64 GB");
+    assert_eq!(h.state().import_ticked(), std::slice::from_ref(&card));
+    h.query_all_by_label("Import")
+        .last()
+        .expect("the Import button")
+        .click();
+    for _ in 0..3 {
+        h.run();
+    }
+    // A card is copied into the Library; the window closes at once.
+    assert_eq!(
+        h.state_mut().take_imports(),
+        [json!({ "path": card, "copy": true })]
+    );
+    assert!(!h.state().import_window_open());
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]

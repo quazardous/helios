@@ -295,6 +295,44 @@ gui-import-remember-help = The workspace's import source: the next import does n
 
 gui-import-verb = Import
 
+gui-import-window-add-favourite = Add to favourites
+
+gui-import-window-cancel = Cancel
+
+gui-import-window-card-inserted = { $card } inserted
+
+gui-import-window-cards = Cards and cameras
+
+gui-import-window-choices = Choices
+
+gui-import-window-choices-card = A card is copied into the Library.
+
+gui-import-window-choices-folder = A folder is added where it is.
+
+gui-import-window-choose = Choose a folder…
+
+gui-import-window-contents = Contents
+
+gui-import-window-contents-soon = The photos of the sources ticked will show here.
+
+gui-import-window-favourites = Favourites
+
+gui-import-window-no-cards = No card inserted
+
+gui-import-window-no-favourites = None yet
+
+gui-import-window-nothing = Tick a card or a folder to import
+
+gui-import-window-open = Import photos…
+
+gui-import-window-recent = Recent
+
+gui-import-window-remove-favourite = Remove from favourites
+
+gui-import-window-sources = Sources
+
+gui-import-window-title = Import photos
+
 gui-importer-file = file
 
 gui-importer-folder = folder

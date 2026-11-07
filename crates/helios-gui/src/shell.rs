@@ -56,6 +56,7 @@ pub use workspace_edit::STATE as WORKSPACE_STATE;
 
 mod export;
 mod import;
+mod import_window;
 
 /// Where an import's lines are sent: its arguments and a line.
 type ImportLines = std::sync::mpsc::Sender<(Value, Value)>;
@@ -139,6 +140,8 @@ enum Action {
     /// Import a card or folder: as the workspace's import source says,
     /// or asked (`library.importSource`'s arguments).
     ImportSource(Value, Origin),
+    /// Open the import window (`library.importWindow`'s arguments).
+    ImportWindow(Value),
     /// Files and folders to import (`library.importFiles`'s arguments: a
     /// paste of files, a drop on the window).
     ImportFiles(Value, Origin),
@@ -503,6 +506,8 @@ pub struct Shell {
     import_source: Option<helios_template::ImportDesc>,
     /// Imports asked for (`library.import`'s arguments), for the host.
     imports: Vec<Value>,
+    /// The import window, its sources and the cards watched.
+    import_window: import_window::ImportWindow,
     /// The lines of the imports the host runs (`import_sink`).
     import_lines: (ImportLines, std::sync::mpsc::Receiver<(Value, Value)>),
     /// Exports asked for, for the host.
@@ -898,6 +903,7 @@ impl Shell {
             duplicates: Rc::default(),
             import_source: None,
             imports: Vec::new(),
+            import_window: import_window::ImportWindow::default(),
             import_lines: std::sync::mpsc::channel(),
             exports: Vec::new(),
             export_lines: std::sync::mpsc::channel(),
@@ -2705,6 +2711,14 @@ impl Shell {
         );
         add(
             CommandSpec::new(
+                import_window::COMMAND,
+                "Import photos… (the import window; `source`: the card or folder it opens on)",
+                "Library",
+            ),
+            Box::new(|a, _| Ok(Action::ImportWindow(a.clone()))),
+        );
+        add(
+            CommandSpec::new(
                 "library.importFiles",
                 "Import files and folders (`paths`), placed as the workspace's import source says (`copy`: into the library folder or not; `ask`: asked without an import source; `darktable`)",
                 "Library",
@@ -3314,7 +3328,7 @@ impl Shell {
             command(plugins::PARAM, "2", 2, "param.paste"),
             // The same commands in the menu bar.
             // Importing, always within reach (Ctrl+Shift+I, as Lightroom).
-            command(MENU_FILE, "1_import", 0, "library.importSource"),
+            command(MENU_FILE, "1_import", 0, import_window::COMMAND),
             // An entry per importer plugin, the submenu shown only when
             // one is installed (`crate::importers`).
             PopItem::submenu(
@@ -4305,6 +4319,10 @@ impl Shell {
                 );
             }
             Action::ImportSource(args, origin) => return self.import_from_source(&args, &origin),
+            Action::ImportWindow(args) => {
+                self.open_import_window(&args);
+                return Ok(Value::Null);
+            }
             Action::ImportFiles(args, origin) => return self.import_files(&args, &origin),
             Action::ImportWith(args, origin) => return self.import_with(&args, &origin),
             Action::Export(args, origin) => return self.export(&args, &origin),
@@ -4745,9 +4763,10 @@ impl Shell {
         self.place_palettes();
         self.graph_edits();
         if self.library.borrow_mut().take_import_asked() {
-            let _ = self.run("library.importSource", Value::Null, Origin::User);
+            let _ = self.run(import_window::COMMAND, Value::Null, Origin::User);
         }
         self.take_dropped_files(&ctx);
+        self.import_window_frame(&ctx);
         let refused = std::mem::take(&mut self.library.borrow_mut().notes);
         for n in refused {
             self.warn(n);

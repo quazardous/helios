@@ -192,6 +192,9 @@ command-library-export =
 command-library-openFolder =
     .title = Ouvrir un dossier dans le gestionnaire de fichiers (`path`)
 
+command-library-importWindow =
+    .title = Importer des photos… (la fenêtre d’import ; `source` : la carte ou le dossier sur lequel elle s’ouvre)
+
 command-library-importWith =
     .title = Importer avec un greffon d’import (`plugin`, `importer` ; `source` : le fichier ou dossier qu’il lit, demandé s’il manque ; `copy`, `darktable`)
 

@@ -157,7 +157,7 @@ pub fn defaults() -> Vec<(String, String, String)> {
     // full screen, undo and quit).
     bind("Ctrl+P", crate::quick_open::COMMAND, "");
     // Import photos, as Lightroom's File > Import.
-    bind("Ctrl+Shift+I", "library.importSource", "");
+    bind("Ctrl+Shift+I", "library.importWindow", "");
     // Export photos, as Lightroom's File > Export.
     bind("Ctrl+Shift+E", "library.export", "");
     // Bypass the selected module (darktable's and Blender's habit).

@@ -213,7 +213,8 @@ palette or by an agent:
 | Command | Arguments |
 |---------|-----------|
 | `library.import` | `path` (or `paths`, several files and folders as one import); `copy`, `into`, `rename`, `duplicates` as on the command line; `darktable` (`false` leaves the sidecars out). Runs in the background as a job, in the jobs centre and cancelled from it; the library is filled again when it ends |
-| `library.importSource` | `path` (a card or folder; the import dialog asks for it when absent); `copy`, `darktable`, `remember` (see below). File > Import… (Ctrl+Shift+I) and the empty library's "Import photos…" run it |
+| `library.importSource` | `path` (a card or folder; the import dialog asks for it when absent); `copy`, `darktable`, `remember` (see below). The import window's Import runs it per source ticked |
+| `library.importWindow` | `source` (the card or folder it opens on). Opens the import window (see `docs/design/import-window.md`): cards and cameras first, recent folders, favourites, "Choose a folder…". File > Import… (Ctrl+Shift+I), the empty library's "Import photos…" and the toast of a card inserted run it |
 | `library.importFiles` | `paths`; `copy` (`true`: into the library folder, `false`: referenced); `ask` (`true`: without an import source, the import dialog asks first); `darktable`. An import placed, renamed and with duplicates handled as the workspace's import source says, unless `copy` is given: what a paste of files and a drop on the window ask for |
 | `library.stacks.suggest` | `images` (ids; every image when absent), `resolver` |
 | `library.stacks.accept` | `decision`, `groups` (all when absent) |

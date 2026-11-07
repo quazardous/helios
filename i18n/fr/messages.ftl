@@ -792,6 +792,44 @@ gui-import-path = carte ou dossier
 
 gui-import-verb = Importer
 
+gui-import-window-add-favourite = Ajouter aux favoris
+
+gui-import-window-cancel = Annuler
+
+gui-import-window-card-inserted = { $card } insérée
+
+gui-import-window-cards = Cartes et appareils
+
+gui-import-window-choices = Choix
+
+gui-import-window-choices-card = Une carte est copiée dans la bibliothèque.
+
+gui-import-window-choices-folder = Un dossier est ajouté là où il est.
+
+gui-import-window-choose = Choisir un dossier…
+
+gui-import-window-contents = Contenu
+
+gui-import-window-contents-soon = Les photos des sources cochées s’afficheront ici.
+
+gui-import-window-favourites = Favoris
+
+gui-import-window-no-cards = Aucune carte insérée
+
+gui-import-window-no-favourites = Aucun pour l’instant
+
+gui-import-window-nothing = Cochez une carte ou un dossier à importer
+
+gui-import-window-open = Importer des photos…
+
+gui-import-window-recent = Récents
+
+gui-import-window-remove-favourite = Retirer des favoris
+
+gui-import-window-sources = Sources
+
+gui-import-window-title = Importer des photos
+
 gui-library-import = Importer…
 
 gui-image-not-reopened = L’image laissée ouverte n’a pas pu être rouverte : { $error }
