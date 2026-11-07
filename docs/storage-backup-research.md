@@ -380,6 +380,14 @@ where it is mounted now, when it was last seen, whether it is off site
 (the user says), and the physical drive behind it when the system says
 (so two partitions of one disk are not two copies).
 
+**Owner direction (2026-11-07):**
+- The user describes the disks. Detection only proposes, and the user names each volume and gives it its roles.
+- A volume is either removable or fixed. A **fixed** disk belongs to its **node**, the machine it is mounted in. Its "offline" means "that node is not running", not "unplugged". Seen from another node, it is listed as belonging elsewhere, and Helios neither writes to it nor repairs it from there.
+- Every volume shows when, and on which node, it was **last seen**: in the Storage page, and on its offline photos ("on Backup-2, last seen 2026-10-28 on the studio PC").
+- When the physical identity is not enough (no UUID, a FAT card, a cloned disk), Helios **marks the disk with a small identity file** (point 3 above), with the user's leave. This settles open question 3.
+
+So `Volume` gains `node` (for a fixed disk), `last_seen` (date and node) and the way it is identified (physical or marker).
+
 **Kinds**: internal, external, removable (card, stick), network share,
 remote (plugin). The kind sets defaults (a card gets the ingest role, an
 internal disk the library role) and wording, never what happens to the
