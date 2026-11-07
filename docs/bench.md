@@ -225,6 +225,34 @@ rebase or a new push is replaced when the job is submitted again under
 its name (above), or cancelled with `ssh … cancel <id>`, rather than left
 to run.
 
+#### Where the time went, 2026-11-07
+
+The box's jobs that day, from `target/bench-remote/<id>/conditions.json`
+(`seconds`) and the client's `bench: waiting` lines, about one a minute:
+
+| job | runs | green | median | max | total | queued (min) |
+|---|---|---|---|---|---|---|
+| egui-pop-gate | 13 | 3 | 20.3 min | 44.4 min | 277 min | 35 |
+| egui-pop-snapshots | 17 | 14 | 8.1 min | 10.7 min | 142 min | 171 |
+| test-affected | 14 | 10 | 8.7 min | 17.1 min | 140 min | 23 |
+| release | 6 | 6 | 12.7 min | 15.4 min | 79 min | 8 |
+| egui-pop-catalogues | 13 | 13 | 0.8 min | 1.7 min | 12 min | 82 |
+| egui-pop-test | 2 | 2 | 4.9 min | 5.3 min | 10 min | 2 |
+| build-gui | 5 | 5 | 1.8 min | 2.6 min | 9 min | 42 |
+| lint | 9 | 9 | 0.8 min | 1.5 min | 8 min | 45 |
+
+- The gate was the biggest cost: 13 runs, 10 of them red, 277 minutes.
+  It was used as a fix loop and failed late on a single-process leak.
+  The box no longer runs it per branch (CI on `next` does), and it now
+  runs under nextest and stops at the first failure.
+- The snapshots waited longer in the queue (171 min) than they ran
+  (142 min), and short jobs (catalogues, lint, build-gui) waited behind
+  the big ones: memory is the bottleneck (see "Capacity" below and the
+  memory work on the egui-pop jobs).
+- On GitHub, egui-pop's lavapipe job took about 20 min: 3 min to build,
+  16 min of tests (2,314), 1 min of doctests. It now runs as three
+  shards side by side.
+
 ## Running what a change touches
 
 A branch rarely needs the whole suite: `cargo xtask affected` says what a
