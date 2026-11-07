@@ -676,6 +676,29 @@ env = { CARGO_NET_OFFLINE = "true" }
 mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", raw-corpus = "/corpus", "darktable-build/classic" = "/dt/classic", "darktable-build/flexi" = "/dt/flexi", sccache = "/sccache" }
 timeout = "2h"
 
+# ---------------------------------------------------------------- raw parity
+# Raw development against darktable (docs/raw-development.md): a Bayer CR2,
+# a Bayer NEF and an X-Trans RAF of the corpus developed by Helios's
+# "Develop one image" at its defaults, against darktable-cli (the classic
+# pin, the build mask-parity keeps) running the same modules (judged) and
+# its own defaults (measured). JUnit, a summary, the numbers and per raw a
+# side-by-side PNG (Helios, darktable's same chain, darktable's defaults)
+# in /out. `only=<id>` picks one raw.
+[jobs.raw-parity]
+about = "corpus raws developed by Helios's Develop chain against darktable-cli: same chain and defaults"
+cores = 6
+memory = "8g"
+cwd = "/work/${src:-helios}"
+command = """mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && \
+DT_JOBS=6 tools/bench/build-darktable.sh /work/darktable /work/rawspeed /work/whereami /work/libraw /dt/classic/build /dt/classic/prefix > /out/darktable-build.log 2>&1 || { tail -50 /out/darktable-build.log; exit 1; }; \
+only=; [ "${only:-all}" = all ] || only="--only ${only:-all}"; \
+cargo build -q --release --locked -p helios-parity --bin raw-parity \
+ && HELIOS_DARKTABLE_CLI=/dt/classic/prefix/bin/darktable-cli timeout 50m /target/release/raw-parity --corpus /corpus --out /out $only"""
+env = { CARGO_NET_OFFLINE = "true" }
+mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", raw-corpus = "/corpus", "darktable-build/classic" = "/dt/classic", sccache = "/sccache" }
+outputs = { shots = { path = "shots/", kind = "images" } }
+timeout = "90m"
+
 # ---------------------------------------------------------------- timings
 # alone on the machine, so the numbers compare from one run to the next
 

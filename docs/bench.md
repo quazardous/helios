@@ -44,6 +44,7 @@ Jobs of the Benchfile:
 | `mask-parity` | darktable's drawn masks against darktable-cli, built from a pinned upstream commit (see [masks.md](masks.md), "Parity with darktable"); JUnit, a summary and the masks in `out/` | 8 cores, 8 GB |
 | `raw-corpus` | the raw corpus checks (`helios-corpus`) on the `raw-corpus` volume; JUnit, a summary, the observed values and thumbnails in `out/`; `bless=yes` accepts new thumbnails | 4 cores, 4 GB |
 | `raw-develop` | a few raws of the `raw-corpus` volume and darktable's integration images opened in "Develop one image" as the desktop opens them (helios-gui's `develop_raw` tests), the middle of each rendered and compared with the node's raw path; JUnit in `out/` | 5 cores, 6 GB |
+| `raw-parity` | a Bayer CR2, a Bayer NEF and an X-Trans RAF of the `raw-corpus` volume developed by "Develop one image" at its defaults (`helios-parity`'s `raw-parity`), against darktable-cli (the classic pin, the `darktable-build` mask-parity keeps) running the same modules (judged: darktable's thresholds, max at the 99.9th percentile) and its own defaults (measured); `summary.md`, `results.json`, JUnit and a side-by-side PNG per raw in `out/shots/`; `only=<id>` picks one raw | 6 cores, 8 GB |
 
 The timing jobs hold the whole machine (`exclusive = ["machine"]`): nothing
 else runs meanwhile, so their numbers compare from one run to the next.
@@ -52,7 +53,7 @@ tests use Mesa's lavapipe (software Vulkan), as in CI.
 
 The `raw-corpus` volume holds the decoder regression corpus, the CC0 raws
 listed in `tests/raw-corpus.toml`, mounted read-only by the `raw-corpus`,
-`raw-develop` and `mask-parity` jobs (and the GUI timing and screenshot
+`raw-develop`, `raw-parity` and `mask-parity` jobs (and the GUI timing and screenshot
 jobs). `provision raw-corpus branch=<branch>` fills it
 (with network, through `tools/bench/fill-corpus.sh`) after the manifest
 changes; see [raw-corpus.md](raw-corpus.md).

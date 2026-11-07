@@ -340,6 +340,42 @@ impl Darktable {
         self.run(&src, xmp, dir)
     }
 
+    /// Renders a raw file as darktable develops it with no edit: its
+    /// default history, the presets it applies itself, in a throwaway
+    /// configuration (the scene-referred sigmoid workflow and the modern
+    /// chromatic adaptation, darktable's defaults, said explicitly), the
+    /// output in linear Rec.2020 as Helios's working space.
+    pub fn render_raw_defaults(&self, raw: &Path, dir: &Path) -> Result<Image, String> {
+        std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        let name = raw.file_name().ok_or("a raw path without a name")?;
+        let src = dir.join(name);
+        std::fs::copy(raw, &src).map_err(|e| format!("{}: {e}", raw.display()))?;
+        let out = dir.join("defaults.pfm");
+        let _ = std::fs::remove_file(&out);
+        let run = Command::new(&self.cli)
+            .arg(&src)
+            .arg(&out)
+            .args(["--icc-type", "LIN_REC2020"])
+            .args(["--apply-custom-presets", "false", "--core", "--configdir"])
+            .arg(dir.join("config-defaults"))
+            .args(["--library", ":memory:"])
+            .args([
+                "--conf",
+                "plugins/darkroom/workflow=scene-referred (sigmoid)",
+            ])
+            .args(["--conf", "plugins/darkroom/chromatic-adaptation=modern"])
+            .output()
+            .map_err(|e| format!("darktable-cli: {e}"))?;
+        if !run.status.success() || !out.exists() {
+            return Err(format!(
+                "darktable-cli failed ({}): {}",
+                run.status,
+                String::from_utf8_lossy(&run.stderr)
+            ));
+        }
+        read_pfm(&out)
+    }
+
     fn run(&self, src: &Path, sidecar: &str, dir: &Path) -> Result<Image, String> {
         let mut xmp = src.as_os_str().to_owned();
         xmp.push(".xmp");

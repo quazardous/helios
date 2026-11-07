@@ -2461,6 +2461,7 @@ name = "helios-parity"
 version = "0.63.0"
 dependencies = [
  "helios-core",
+ "helios-export",
  "helios-load",
  "helios-module-colorin",
  "helios-module-demosaic",

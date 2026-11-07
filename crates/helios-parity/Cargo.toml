@@ -8,6 +8,7 @@ repository.workspace = true
 
 [dependencies]
 helios-core.workspace = true
+helios-export.workspace = true
 helios-load.workspace = true
 helios-node = { path = "../helios-node" }
 helios-photo.workspace = true
