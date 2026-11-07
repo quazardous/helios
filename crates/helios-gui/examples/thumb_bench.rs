@@ -23,10 +23,11 @@
 //!     --corpus <dir> --out <dir> --part grid --n 10000
 //! ```
 
+use std::collections::HashSet;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use egui::{Event, Modifiers, MouseWheelSource, MouseWheelUnit, TouchPhase, vec2};
@@ -209,8 +210,11 @@ fn grid(files: &[PathBuf], n: usize, frames: usize) -> Value {
     let sink = shell.library_thumbnails();
     let stop = Arc::new(AtomicBool::new(false));
     let read = Arc::new(AtomicUsize::new(0));
+    // The images whose file gives no preview: their cells stay empty, so
+    // the first screen does not wait for them.
+    let none: Arc<Mutex<HashSet<String>>> = Arc::default();
     let reader = {
-        let (stop, read) = (stop.clone(), read.clone());
+        let (stop, read, none) = (stop.clone(), read.clone(), none.clone());
         let files: Vec<PathBuf> = files.to_vec();
         std::thread::spawn(move || {
             for i in 0..n {
@@ -223,6 +227,8 @@ fn grid(files: &[PathBuf], n: usize, frames: usize) -> Value {
                     if sink.send((format!("{i:016x}"), small)).is_err() {
                         return;
                     }
+                } else {
+                    none.lock().expect("the set").insert(format!("{i:016x}"));
                 }
                 read.fetch_add(1, Ordering::Relaxed);
             }
@@ -246,7 +252,11 @@ fn grid(files: &[PathBuf], n: usize, frames: usize) -> Value {
         if !in_view.is_empty() {
             first_frame.get_or_insert(start.elapsed());
             cells = in_view.len();
-            if in_view.iter().all(|id| lib.has_thumbnail(id)) {
+            let none = none.lock().expect("the set");
+            if in_view
+                .iter()
+                .all(|id| lib.has_thumbnail(id) || none.contains(id))
+            {
                 first_screen = Some(start.elapsed());
                 break;
             }
@@ -268,6 +278,7 @@ fn grid(files: &[PathBuf], n: usize, frames: usize) -> Value {
     h.event(Event::PointerMoved(rect.center()));
     h.step();
     let (mut ui_ms, mut render_ms, mut ready) = (Vec::new(), Vec::new(), Vec::new());
+    let mut reached = 0usize;
     let scroll_start = Instant::now();
     for _ in 0..frames {
         h.event(Event::MouseWheel {
@@ -286,6 +297,10 @@ fn grid(files: &[PathBuf], n: usize, frames: usize) -> Value {
         let lib = h.state().library();
         let in_view = lib.in_view();
         let have = in_view.iter().filter(|id| lib.has_thumbnail(id)).count();
+        reached = in_view
+            .iter()
+            .filter_map(|id| usize::from_str_radix(id, 16).ok())
+            .fold(reached, usize::max);
         ready.push(have as f64 / in_view.len().max(1) as f64);
     }
     let scrolled = scroll_start.elapsed();
@@ -327,6 +342,7 @@ fn grid(files: &[PathBuf], n: usize, frames: usize) -> Value {
             "ui_ms": stats(ui_ms),
             "render_ms": stats(render_ms),
             "in_view_ready_mean": stats(ready)["mean"],
+            "last_image_reached": reached,
         },
         "previews_read": previews,
         "previews_per_second": (rate * 10.0).round() / 10.0,
