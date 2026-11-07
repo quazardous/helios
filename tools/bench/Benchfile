@@ -479,6 +479,22 @@ env = { CARGO_NET_OFFLINE = "true", CARGO_BUILD_JOBS = "3", RUST_TEST_THREADS = 
 mounts = { "egui-pop-target/${egui_pop:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
 timeout = "1h"
 
+# egui-pop's narrowest test run, for a fix loop: one crate (`crate=`), one
+# test target (`test=`, else the crate's lib and every test target), and a
+# name filter (`filter=`). Minutes, not the gate's twenty; the gate stays the
+# last run before a merge.
+[jobs.egui-pop-test]
+about = "egui-pop: one crate's tests, one test target, a name filter (a fix loop's run)"
+checkouts = ["egui-pop"]
+cores = 4
+memory = "5g"
+cwd = "/work/${src:-egui-pop}"
+command = """mkdir -p /tmp/w/egui-pop && cp -r --preserve=mode . /tmp/w/egui-pop/ && cd /tmp/w/egui-pop && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/egui-pop ] || { rm -rf /target/* && echo /tmp/w/egui-pop > /target/.built-at; }; } && \
+cargo test --locked -p ${crate} ${test:+--test ${test}} -- ${filter:-}"""
+env = { CARGO_NET_OFFLINE = "true", CARGO_BUILD_JOBS = "3", RUST_TEST_THREADS = "3" }
+mounts = { "egui-pop-target/${egui_pop:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
+timeout = "30m"
+
 # egui-pop's gallery snapshots regenerated (UPDATE_SNAPSHOTS=1, on lavapipe
 # as in CI): every PNG of crates/egui-pop-gallery/tests/snapshots lands in
 # /out/snapshots, to review and commit

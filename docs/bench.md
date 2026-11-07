@@ -374,6 +374,10 @@ from incidents on the box; every agent prompt points here.
 **Before queuing**
 - Run the narrowest job first: `test-affected` (or one test) before `test`,
   `survival` or `check-commits`. A full run is the last step, not the first.
+  For egui-pop, a fix loop runs `egui-pop-test crate=<crate> test=<target>
+  filter=<name>` (minutes); `egui-pop-gate` (about twenty minutes) runs once,
+  when the branch is ready. A failure the gate shows is reproduced with
+  `egui-pop-test`, never by queuing the gate again.
 - A new test has a deadline on every wait (a child process, a window, a
   file, a socket reply) and fails fast. Tests run under nextest, which stops
   a test after 120 s; `cargo survival` runs under nextest too.
