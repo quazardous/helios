@@ -24,6 +24,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.67.0] - 2026-11-07
+
+### Changed
+
+- A panel's tab dragged to another area of the window now offers the same
+  drop zones as inside one area: join a group of tabs, split it on a side, or
+  slot the tab between two others. An area a panel cannot go to shows why.
+  Dialogs keep their buttons in view when the window is short.
+
 ## [0.66.0] - 2026-11-07
 
 ### Added
