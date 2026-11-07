@@ -131,7 +131,7 @@ fn through(path: &Path, bundle: &Bundle, preview: bool) -> Result<(Graph, NodeId
         if !preview {
             return Err(format!(
                 "{}: “{name}” takes pictures only, its network cannot develop a raw; \
-                 update the workspace from its template, or export from a workspace for raws",
+                 export it from a workspace whose network takes raws",
                 path.display(),
             ));
         }

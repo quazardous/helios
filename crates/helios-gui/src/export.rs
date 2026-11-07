@@ -36,14 +36,16 @@ pub fn parallelism() -> usize {
 }
 
 /// Renders an item as the darkroom shows it: its file through `bundle`'s
-/// network, its version's edit applied.
+/// network, its version's edit applied. A raw goes through its sensor
+/// data, never its embedded preview: a network that cannot develop it
+/// fails the item, saying why.
 pub fn render_item<S: Store>(
     vault: &Vault<S>,
     engine: &Engine,
     bundle: &Bundle,
     item: &Item,
 ) -> Result<Image, String> {
-    let (mut graph, node) = crate::templates::open_file(&item.source, bundle)?;
+    let (mut graph, node) = crate::templates::develop_file(&item.source, bundle)?;
     if let Some(version) = &item.version {
         let id = VersionId::from_hex(version)?;
         let version = vault

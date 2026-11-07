@@ -61,7 +61,10 @@ an export under way.
    workspace's network, the version's edit applied by node name (a part
    of it this network has no place for is left out), the network's view
    node rendered whole, then scaled down to `long_edge`, converted to the
-   colour space and encoded.
+   colour space and encoded. A raw goes through its sensor data (a raw
+   or an image source, see [templates.md](templates.md)), never through
+   the preview its camera embedded: a network that takes pictures only
+   fails that photo, saying so (2026-11-07).
 
 What people see:
 

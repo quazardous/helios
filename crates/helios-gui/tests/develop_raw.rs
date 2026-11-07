@@ -196,6 +196,59 @@ fn darktable_test_raws_develop_through_the_raw_front_of_an_image_network() {
     }
 }
 
+/// Exports `raw` as "Batch export" does (no edit): the same pixels as
+/// "Develop one image" shows; a network taking pictures only refuses it
+/// rather than export its preview.
+fn exports_as_develop_shows(raw: &Path) {
+    let name = raw.display();
+    let vault = helios_vault::Vault::new(helios_vault::MemoryStore::default());
+    let engine = Engine::new(Arc::new(Bus::new()));
+    let item = helios_export::batch::Item {
+        image: "0".repeat(64),
+        version: None,
+        source: raw.to_path_buf(),
+        output: raw.with_extension("jpg"),
+        skip: None,
+        error: None,
+    };
+    let exported = helios_gui::export::render_item(&vault, &engine, &image_network(), &item)
+        .unwrap_or_else(|e| panic!("{name}: {e}"));
+    let (graph, node) = templates::open_file(raw, &develop()).unwrap();
+    let extent = graph.extent(node).unwrap().unwrap();
+    assert_eq!(exported.region(), extent, "{name}: not the sensor's size");
+    let region = middle(extent, 128);
+    let shown = render(&graph, node, "output", region).to_vec();
+    let cut = exported.crop(region).expect("inside the export").to_vec();
+    let worst = cut
+        .iter()
+        .zip(&shown)
+        .map(|(a, b)| (a - b).abs())
+        .fold(0.0f32, f32::max);
+    assert!(worst < 1e-5, "{name}: the export differs by {worst}");
+    let mut pictures = image_network();
+    pictures.template.network.image_sources.clear();
+    let e = helios_gui::export::render_item(&vault, &engine, &pictures, &item)
+        .err()
+        .unwrap();
+    assert!(e.contains("cannot develop a raw"), "{name}: {e}");
+}
+
+#[test]
+fn a_raw_exported_from_batch_export_has_develop_s_pixels() {
+    let dir = darktable_images();
+    let raw = dir.join(DARKTABLE[0]);
+    if raw.is_file() {
+        exports_as_develop_shows(&raw);
+    } else {
+        eprintln!("skipped: no {}", raw.display());
+    }
+    if let Some(dir) = corpus()
+        && let Some(raw) = corpus_file(&dir, CORPUS[0])
+    {
+        exports_as_develop_shows(&raw);
+    }
+}
+
 #[test]
 fn a_picture_goes_straight_through_an_image_network() {
     let dir = std::env::temp_dir().join(format!("helios-image-network-{}", std::process::id()));
