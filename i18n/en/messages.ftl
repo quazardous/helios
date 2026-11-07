@@ -55,6 +55,8 @@ export-channels = cannot export an image of { $channels } channels
 
 export-encode-failed = cannot encode the image: { $error }
 
+export-folder-failed = cannot make the folder { $folder }: { $error }
+
 export-no-format = no format for { $path }
 
 export-not-a-file = { $path } is not a file path
@@ -156,6 +158,56 @@ gui-duplicates-waiting-note = { $count } duplicates wait for an answer in the Du
 gui-edit-does-not-fit = Part of the saved edit does not fit this network: { $part }
 
 gui-edit-not-saved = The edit was not saved: { $error }
+
+gui-export-bits = PNG bits per channel
+
+gui-export-cancelled = The export was cancelled: { $written } photos written to { $folder }
+
+gui-export-clash = when a file name is taken
+
+gui-export-ended = { $written } photos exported to { $folder }
+
+gui-export-ended-failed = { $written } photos exported to { $folder }; { $failed } failed: see the Log panel
+
+gui-export-ended-skipped = { $outcome } ({ $skipped } left out: their file exists)
+
+gui-export-failed = The export did not start: { $error }
+
+gui-export-folder = folder
+
+gui-export-form-title = Export photos
+
+gui-export-format = format
+
+gui-export-image-failed = { $image }: not exported: { $error }
+
+gui-export-long-edge = long edge (pixels)
+
+gui-export-long-edge-help = The longer side at most; 0 keeps the full size
+
+gui-export-open-folder = Open folder
+
+gui-export-pattern = file names
+
+gui-export-pattern-help = As an import renames: { $fields }; the extension follows the format
+
+gui-export-quality = JPEG quality
+
+gui-export-quality-help = 1 to 100, for JPEG only
+
+gui-export-queued = Exporting { $count } photos to { $folder }
+
+gui-export-remember = Remember for this workspace
+
+gui-export-remember-help = The workspace's export settings: the next export starts from them
+
+gui-export-scope = photos
+
+gui-export-scope-help = selected: the { $selected } selected; shown: the { $shown } the library shows
+
+gui-export-space = colour space
+
+gui-export-verb = Export
 
 gui-gesture-in-progress = { $gesture } is in progress
 

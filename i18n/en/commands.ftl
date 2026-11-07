@@ -193,6 +193,9 @@ command-keymap-package-remove =
 command-library-copyFiles =
     .title = Copy files: the selected images' files, for a file manager or another application
 
+command-library-export =
+    .title = Export… (`images`: ids, else `scope`: `selected` or `shown`, the selection by default, else every image shown; `format`: jpeg, png or tiff; `quality`, `bits`, `long_edge`, `space`, `folder`, `pattern`, `clash`: number, overwrite or skip; `remember`; asked when `folder` is absent or `ask` is true)
+
 command-library-importFiles =
     .title = Import files and folders (`paths`), placed as the workspace's import source says (`copy`: into the library folder or not; `ask`: asked without an import source; `darktable`)
 
@@ -201,6 +204,9 @@ command-library-importSource =
 
 command-library-importWith =
     .title = Import with an importer plugin (`plugin`, `importer`; `source`: the file or folder it reads, asked when absent; `copy`, `darktable`)
+
+command-library-openFolder =
+    .title = Open a folder in the file manager (`path`)
 
 command-library-pasteFiles =
     .title = Paste files or an image another application copied into the library, imported once confirmed (`dry_run`: only say what would be imported)
