@@ -24,6 +24,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.70.0] - 2026-11-07
+
+### Added
+
+- The import window shows what the ticked sources hold, grouped by day, from their embedded previews: photos already in your Library are greyed ("new only" is on), a RAW and its JPEG share one cell, and a count line and a type filter sit above. "Import 2,980" imports exactly the ticked photos.
+
 ## [0.69.0] - 2026-11-07
 
 ### Changed
