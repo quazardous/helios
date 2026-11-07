@@ -42,7 +42,8 @@
 //! network.
 
 pub mod batch;
-pub mod darktable;
+/// darktable's sidecars kept in a vault (`helios_library::darktable`).
+pub use helios_library::darktable;
 pub mod mcp;
 pub mod sandbox;
 pub mod workflow;

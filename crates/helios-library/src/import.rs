@@ -13,6 +13,12 @@
 //!   [`Pattern`] needs a copy: a referenced file stays as it is.
 //! - **Sidecars.** A copy takes its XMP sidecars along (darktable's base
 //!   and `_NN` duplicates), renamed with it.
+//! - **darktable edits.** With [`Options::darktable`], each sidecar of a
+//!   file brought in becomes a version of its image, as
+//!   `helios import-darktable` keeps them ([`crate::darktable`]): the base
+//!   and each duplicate a head of its own, never merged; the line's
+//!   `darktable` lists them with their import report (items not applied,
+//!   modes substituted).
 //! - **Exact duplicates.** A file's content hash is its identity: a file
 //!   whose content the library already has, or that came earlier in the
 //!   same import, is a duplicate. [`Duplicates`] says what to do: skip it
@@ -44,6 +50,7 @@ use helios_xmp::files::Matched;
 use serde::Serialize;
 use serde_json::{Value, json};
 
+use crate::darktable;
 use crate::rename::{Naming, Pattern};
 use crate::signals::{self, Signals};
 
@@ -101,6 +108,8 @@ pub struct Options {
     pub duplicates: Duplicates,
     /// Measure and keep near-duplicate signals.
     pub signals: bool,
+    /// Keep each file's darktable sidecars as versions of its image.
+    pub darktable: bool,
     /// Set by the caller to stop the import (an interrupt): seen before
     /// each file and during a copy, as a cancel of its job is.
     pub cancel: Option<Arc<AtomicBool>>,
@@ -113,6 +122,7 @@ impl Default for Options {
             rename: None,
             duplicates: Duplicates::Skip,
             signals: true,
+            darktable: false,
             cancel: None,
         }
     }
@@ -152,6 +162,13 @@ pub struct Report {
     pub copied: u64,
     /// Sidecars copied with them.
     pub sidecars: u64,
+    /// darktable edits kept as new versions ([`Options::darktable`]).
+    pub edits: u64,
+    /// darktable sidecars whose import reported items not applied or
+    /// modes substituted.
+    pub edits_reported: u64,
+    /// darktable sidecars that could not be kept.
+    pub edits_failed: u64,
 }
 
 impl Report {
@@ -461,6 +478,7 @@ impl<S: Store> Run<'_, S> {
         {
             self.vault.import_hashed(path, id, self.now)?;
             self.seen.entry(id).or_insert_with(|| path.to_path_buf());
+            self.keep_edits(path, id, &mut line)?;
             return Ok((line, Status::Unchanged));
         }
         let duplicate = if let Some(first) = self.seen.get(&id) {
@@ -541,7 +559,37 @@ impl<S: Store> Run<'_, S> {
             self.vault.set_signals(&id, Some(&doc))?;
             line["signals"] = doc;
         }
+        self.keep_edits(path, id, &mut line)?;
         Ok((line, if new { Status::Added } else { Status::Located }))
+    }
+
+    /// Keeps the darktable sidecars of the file at `path` (read where the
+    /// file came from) as versions of its image `id`, when asked: each
+    /// sidecar's outcome under the line's `darktable`.
+    fn keep_edits(&mut self, path: &Path, id: ImageId, line: &mut Value) -> Result<(), String> {
+        if !self.options.darktable {
+            return Ok(());
+        }
+        let files = self.sidecars(path)?;
+        if files.is_empty() {
+            return Ok(());
+        }
+        let mut kept = Vec::with_capacity(files.len());
+        for (i, file) in files.iter().enumerate() {
+            let base = i == 0 && file.version == 0;
+            let out = darktable::keep_file_of(self.vault, id, file, base, self.now, &mut |_, _| {});
+            if out["error"].is_string() {
+                self.report.edits_failed += 1;
+            } else if out["vault"]["added"] == true {
+                self.report.edits += 1;
+            }
+            if out["warning"].is_string() {
+                self.report.edits_reported += 1;
+            }
+            kept.push(out);
+        }
+        line["darktable"] = json!(kept);
+        Ok(())
     }
 }
 
@@ -626,6 +674,14 @@ pub fn import<S: Store>(
             Status::Added | Status::Located | Status::Unchanged => {
                 let said = line["status"].as_str().unwrap_or_default();
                 job.log(format!("{}: {said}", path.display()));
+                for edit in line["darktable"].as_array().into_iter().flatten() {
+                    let sidecar = edit["path"].as_str().unwrap_or_default();
+                    if let Some(e) = edit["error"].as_str() {
+                        job.log(format!("{sidecar}: {e}"));
+                    } else if let Some(w) = edit["warning"].as_str() {
+                        job.log(format!("{sidecar}: {w}"));
+                    }
+                }
             }
             Status::Skipped | Status::Asked => {}
         }
@@ -655,6 +711,12 @@ pub fn import<S: Store>(
         run.report.asked,
         run.report.failed
     ));
+    if options.darktable {
+        job.log(format!(
+            "{} darktable edits kept, {} with a report, {} failed",
+            run.report.edits, run.report.edits_reported, run.report.edits_failed
+        ));
+    }
     job.finished();
     Ok(run.report)
 }

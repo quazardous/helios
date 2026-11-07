@@ -14,6 +14,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use helios_vault::ImageId;
 use helios_xmp::files::{Matched, Orphan, SidecarFile};
 use serde_json::{Value, json};
 
@@ -67,8 +68,21 @@ pub fn keep_sidecar<S: helios_vault::Store>(
     imported: &helios_xmp::Imported,
     now: u64,
 ) -> Result<Value, String> {
-    use helios_vault::fields::{Command, Op, RATING, REJECTED};
     let id = vault.import_file(image, now)?;
+    keep_sidecar_of(vault, id, version, base, sidecar, imported, now)
+}
+
+/// [`keep_sidecar`] for an image the vault already has, by its id.
+pub fn keep_sidecar_of<S: helios_vault::Store>(
+    vault: &helios_vault::Vault<S>,
+    id: ImageId,
+    version: u32,
+    base: bool,
+    sidecar: &helios_xmp::Sidecar,
+    imported: &helios_xmp::Imported,
+    now: u64,
+) -> Result<Value, String> {
+    use helios_vault::fields::{Command, Op, RATING, REJECTED};
     let mut edit = imported.edit();
     edit["import"] = json!(imported.report);
     // Duplicates with the same history stay apart.
@@ -140,6 +154,34 @@ pub fn keep_file<S: helios_vault::Store>(
     now: u64,
     warn: &mut impl FnMut(&Path, &str),
 ) -> Value {
+    keep_file_by(vault, file, base, now, warn, || {
+        vault.import_file(image, now)
+    })
+}
+
+/// [`keep_file`] for an image the vault already has, by its id: what an
+/// import does with each sidecar of a file it brought in.
+pub fn keep_file_of<S: helios_vault::Store>(
+    vault: &helios_vault::Vault<S>,
+    id: ImageId,
+    file: &SidecarFile,
+    base: bool,
+    now: u64,
+    warn: &mut impl FnMut(&Path, &str),
+) -> Value {
+    keep_file_by(vault, file, base, now, warn, || Ok(id))
+}
+
+/// Reads and imports a sidecar file, then keeps it as a version of the
+/// image `image` gives.
+fn keep_file_by<S: helios_vault::Store>(
+    vault: &helios_vault::Vault<S>,
+    file: &SidecarFile,
+    base: bool,
+    now: u64,
+    warn: &mut impl FnMut(&Path, &str),
+    image: impl FnOnce() -> Result<ImageId, String>,
+) -> Value {
     let mut out = json!({ "path": file.path, "version": file.version, "exact": file.exact });
     let kept = std::fs::read_to_string(&file.path)
         .map_err(|e| format!("cannot read {}: {e}", file.path.display()))
@@ -150,7 +192,8 @@ pub fn keep_file<S: helios_vault::Store>(
                 out["warning"] = json!(warning.english);
                 out["warning_message"] = json!(warning);
             }
-            keep_sidecar(vault, image, file.version, base, &sidecar, &imported, now)
+            let id = image()?;
+            keep_sidecar_of(vault, id, file.version, base, &sidecar, &imported, now)
         });
     match kept {
         Ok(vault) => out["vault"] = vault,

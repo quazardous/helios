@@ -521,3 +521,109 @@ fn an_import_shows_in_the_jobs_model_and_is_cancelled_midway() {
         model.log(&job.id)
     );
 }
+
+/// A darktable sidecar: exposure at `ev`, then a module Helios does not
+/// have (reported as not applied).
+fn darktable_sidecar(ev: f64) -> String {
+    let layouts = helios_xmp::Layouts::built_in();
+    let version = *layouts.versions("exposure").iter().max().unwrap();
+    let layout = layouts.get("exposure", version).unwrap();
+    let bytes = helios_xmp::encode(layout, &serde_json::json!({ "exposure": ev })).unwrap();
+    let hex = bytes
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<Vec<_>>()
+        .concat();
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<x:xmpmeta xmlns:x="adobe:ns:meta/">
+ <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+  <rdf:Description rdf:about="" xmlns:darktable="http://darktable.sf.net/" darktable:history_end="2">
+   <darktable:history>
+    <rdf:Seq>
+     <rdf:li darktable:num="0" darktable:operation="exposure" darktable:enabled="1" darktable:modversion="{version}" darktable:params="{hex}" darktable:multi_name="" darktable:multi_priority="0"/>
+     <rdf:li darktable:num="1" darktable:operation="frobnicate" darktable:enabled="1" darktable:modversion="1" darktable:params="00" darktable:multi_name="" darktable:multi_priority="0"/>
+    </rdf:Seq>
+   </darktable:history>
+  </rdf:Description>
+ </rdf:RDF>
+</x:xmpmeta>"#
+    )
+}
+
+#[test]
+fn darktable_edits_come_in_as_versions_with_the_import_when_asked() {
+    let p = Place::new("darktable");
+    let roll = p.join("roll");
+    let (edited, bare) = (roll.join("edited.png"), roll.join("bare.png"));
+    picture(&edited, 0, 1.0, 0);
+    picture(&bare, 1, 1.0, 0);
+    std::fs::write(roll.join("edited.png.xmp"), darktable_sidecar(1.0)).unwrap();
+    std::fs::write(roll.join("edited_01.png.xmp"), darktable_sidecar(2.0)).unwrap();
+    let vault = vault();
+    // Off by default: the files only.
+    let (report, lines) = run(
+        &vault,
+        None,
+        std::slice::from_ref(&roll),
+        &Options::default(),
+    );
+    assert_eq!((report.added, report.edits), (2, 0), "{lines:?}");
+    assert!(
+        lines.iter().all(|l| l.get("darktable").is_none()),
+        "{lines:?}"
+    );
+    let id = ImageId::from_hex(
+        lines
+            .iter()
+            .find(|l| l["path"] == serde_json::json!(edited))
+            .unwrap()["id"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(vault.versions(&id).unwrap().is_empty());
+    // Asked: the base and its duplicate, two versions side by side, each
+    // with its report (the module Helios does not have).
+    let options = Options {
+        darktable: true,
+        signals: false,
+        ..Options::default()
+    };
+    let (report, lines) = run(&vault, None, std::slice::from_ref(&roll), &options);
+    assert_eq!(
+        (
+            report.unchanged,
+            report.edits,
+            report.edits_reported,
+            report.edits_failed
+        ),
+        (2, 2, 2, 0),
+        "{lines:?}"
+    );
+    let line = lines
+        .iter()
+        .find(|l| l["path"] == serde_json::json!(edited))
+        .unwrap();
+    let kept = line["darktable"].as_array().unwrap();
+    assert_eq!(kept.len(), 2, "{line}");
+    assert!(kept.iter().all(|k| k["warning"].is_string()), "{line}");
+    let mut labels: Vec<String> = vault
+        .versions(&id)
+        .unwrap()
+        .into_iter()
+        .map(|v| v.label.unwrap_or_default())
+        .collect();
+    labels.sort();
+    assert_eq!(labels, ["import:xmp", "import:xmp duplicate 01"]);
+    // A file without sidecars has none to keep.
+    let bare_line = lines
+        .iter()
+        .find(|l| l["path"] == serde_json::json!(bare))
+        .unwrap();
+    assert!(bare_line.get("darktable").is_none(), "{bare_line}");
+    // Again: the same sidecars add nothing.
+    let (report, _) = run(&vault, None, std::slice::from_ref(&roll), &options);
+    assert_eq!(report.edits, 0);
+    assert_eq!(vault.versions(&id).unwrap().len(), 2);
+}

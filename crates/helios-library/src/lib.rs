@@ -5,6 +5,9 @@
 //!   copied into the library folder, renamed by a [`rename::Pattern`],
 //!   their sidecars kept, exact duplicates found by content and handled
 //!   by a policy, run as a job announced on the bus;
+//! - [`darktable`]: darktable's sidecars kept as versions (each sidecar of
+//!   a photo, base and duplicates, a version of the one image), by an
+//!   import or alone (`helios import-darktable`);
 //! - [`signals`]: what an import measures of each image to find near
 //!   duplicates (a perceptual hash, the capture time and exposure, frame
 //!   numbers, a sharpness);
@@ -12,6 +15,7 @@
 //!   a selection through a resolver picked by name, and applies them only
 //!   when accepted.
 
+pub mod darktable;
 pub mod import;
 pub mod rename;
 pub mod signals;
