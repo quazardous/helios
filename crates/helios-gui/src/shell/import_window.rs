@@ -633,55 +633,74 @@ impl Shell {
         let mut open = true;
         let mut event = None;
         let w = &mut self.import_window;
-        let max = ctx.content_rect().size() - egui::vec2(32.0, 32.0);
+        let main = ctx.content_rect().size();
+        let max = main - egui::vec2(32.0, 32.0);
         egui::Window::new(&words.title)
             .id(egui::Id::unique("helios.import.window"))
             .open(&mut open)
             .collapsible(false)
             .resizable(true)
-            .default_size(egui::vec2(960.0, 560.0).min(max))
+            .default_size(default_size(main))
+            .min_size(MIN_SIZE.min(max))
             .max_size(max)
             .pivot(egui::Align2::CENTER_CENTER)
             .default_pos(ctx.content_rect().center())
-            .show(ctx, |ui| {
+            .show(ctx, |outer| {
+                // The window has the size the person gives it, never its
+                // content's: an `egui::Window` grows to what its content
+                // took the frame before, so a content a point too wide
+                // grew it frame after frame. The content lays out in the
+                // room it is given, apart, and the window holds that room.
+                let room = outer.available_rect_before_wrap();
+                outer.advance_cursor_after_rect(room);
+                let mut ui = outer.new_child(
+                    egui::UiBuilder::new()
+                        .id_salt("helios.import.room")
+                        .max_rect(room)
+                        .layout(egui::Layout::top_down(egui::Align::Min)),
+                );
+                ui.set_clip_rect(room.intersect(ui.clip_rect()));
+                let ui = &mut ui;
                 let layout = DialogLayout::new(ui, "helios.import.window").fill(true);
                 layout.body(ui, |ui, height| {
-                    ui.set_min_height(height);
-                    // Sources and Choices keep their widths; Contents
-                    // takes the rest.
-                    let gap = ui.spacing().item_spacing.x * 2.0 + 2.0;
-                    let total = ui.available_width();
-                    let side = |w: f32| w.min((total - 2.0 * gap) / 4.0).max(0.0);
-                    let (left, right) = (side(SOURCES_WIDTH), side(CHOICES_WIDTH));
-                    let middle = (total - left - right - 2.0 * gap).max(0.0);
+                    // Sources and Choices keep their widths (a quarter of
+                    // the room at most); Contents takes the rest, each
+                    // column in its own rect, a line between them.
+                    let gap = ui.spacing().item_spacing.x;
+                    let (rect, _) = ui.allocate_exact_size(
+                        egui::vec2(ui.available_width(), height),
+                        egui::Sense::hover(),
+                    );
+                    let [left, middle, right] = columns(rect, gap);
+                    let stroke = ui.visuals().widgets.noninteractive.bg_stroke;
+                    for x in [left.max.x + gap, right.min.x - gap] {
+                        ui.painter().vline(x, rect.y_range(), stroke);
+                    }
                     let column =
-                        |ui: &mut egui::Ui, width: f32, add: &mut dyn FnMut(&mut egui::Ui)| {
-                            ui.allocate_ui_with_layout(
-                                egui::vec2(width, height),
-                                egui::Layout::top_down(egui::Align::Min),
+                        |ui: &mut egui::Ui,
+                         rect: egui::Rect,
+                         add: &mut dyn FnMut(&mut egui::Ui)| {
+                            ui.scope_builder(
+                                egui::UiBuilder::new()
+                                    .max_rect(rect)
+                                    .layout(egui::Layout::top_down(egui::Align::Min)),
                                 |ui| {
-                                    ui.set_width(width);
-                                    ui.set_min_height(height);
+                                    ui.set_clip_rect(rect.intersect(ui.clip_rect()));
                                     add(ui);
                                 },
                             );
                         };
-                    ui.horizontal_top(|ui| {
-                        column(ui, left, &mut |ui| sources_ui(ui, w, &words, &mut event));
-                        ui.separator();
-                        column(ui, middle, &mut |ui| {
-                            ui.heading(&words.contents);
-                            let reading = w.scans.iter().any(|(_, _, done)| !done);
-                            contents_ui(ui, w, &words.grid, reading);
-                        });
-                        ui.separator();
-                        column(ui, right, &mut |ui| {
-                            if let Some(Asked::Into) =
-                                import_choices::choices_ui(ui, w, &words.choices)
-                            {
-                                event = Some(Event::ChooseInto);
-                            }
-                        });
+                    column(ui, left, &mut |ui| sources_ui(ui, w, &words, &mut event));
+                    column(ui, middle, &mut |ui| {
+                        ui.heading(&words.contents);
+                        let reading = w.scans.iter().any(|(_, _, done)| !done);
+                        contents_ui(ui, w, &words.grid, reading);
+                    });
+                    column(ui, right, &mut |ui| {
+                        if let Some(Asked::Into) = import_choices::choices_ui(ui, w, &words.choices)
+                        {
+                            event = Some(Event::ChooseInto);
+                        }
                     });
                 });
                 layout.footer(ui, |ui| {
@@ -877,6 +896,38 @@ fn source_row(
 /// quarter of the window each); Contents takes the rest.
 const SOURCES_WIDTH: f32 = 220.0;
 const CHOICES_WIDTH: f32 = 300.0;
+
+/// The import window's least size and the largest it opens at, in points.
+const MIN_SIZE: egui::Vec2 = egui::vec2(560.0, 360.0);
+const MAX_DEFAULT_SIZE: egui::Vec2 = egui::vec2(1200.0, 800.0);
+
+/// The size the import window opens at in a main window of `main`: four
+/// fifths of it, at most [`MAX_DEFAULT_SIZE`], at least [`MIN_SIZE`] while
+/// the main window holds it.
+fn default_size(main: egui::Vec2) -> egui::Vec2 {
+    let max = (main - egui::vec2(32.0, 32.0)).max(egui::Vec2::ZERO);
+    (main * 0.8).min(MAX_DEFAULT_SIZE).max(MIN_SIZE).min(max)
+}
+
+/// The rects of the Sources, Contents and Choices columns in `rect`, a
+/// line between two columns with `gap` on each side of it: the three
+/// columns and the two gaps fill `rect` exactly, never more.
+fn columns(rect: egui::Rect, gap: f32) -> [egui::Rect; 3] {
+    let total = rect.width();
+    let lines = 4.0 * gap;
+    let side = |w: f32| w.min((total - lines) / 4.0).max(0.0);
+    let (left, right) = (side(SOURCES_WIDTH), side(CHOICES_WIDTH));
+    let middle = (total - left - right - lines).max(0.0);
+    let at = |x: f32, w: f32| {
+        egui::Rect::from_min_size(egui::pos2(x, rect.min.y), egui::vec2(w, rect.height()))
+    };
+    let middle_x = rect.min.x + left + 2.0 * gap;
+    [
+        at(rect.min.x, left),
+        at(middle_x, middle),
+        at(middle_x + middle + 2.0 * gap, right),
+    ]
+}
 
 /// The footer's preset menu: Default, the presets saved, "Save as
 /// preset…" (a name asked in place) and "Delete preset" (the one the
