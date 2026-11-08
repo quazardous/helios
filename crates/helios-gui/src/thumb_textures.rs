@@ -97,6 +97,17 @@ impl Resident {
         self.textures.insert(id, texture);
     }
 
+    /// Drops an image's texture (its picture changed): asked again when
+    /// its cell is drawn.
+    pub fn forget(&mut self, id: &str) {
+        if let Some(bytes) = self.sizes.remove(id) {
+            self.bytes -= bytes;
+        }
+        self.textures.remove(id);
+        self.seen.borrow_mut().remove(id);
+        self.requested.remove(id);
+    }
+
     /// An arrival not kept: no longer waited for.
     pub fn dropped(&mut self, id: &str) {
         self.requested.remove(id);

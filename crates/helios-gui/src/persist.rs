@@ -123,6 +123,9 @@ pub fn read_library<S: Store>(vault: &Vault<S>) -> Result<LibraryRows, String> {
     vault.close_cursor(cursor.id);
     let mut entries = Vec::new();
     let mut files = Vec::new();
+    // The photos another application changed, until acknowledged.
+    let changed: std::collections::HashMap<_, _> =
+        vault.changed_outside_images()?.into_iter().collect();
     for row in rows? {
         let locations = vault.locations(&row.id)?;
         let presence = Presence::of(&locations);
@@ -141,6 +144,7 @@ pub fn read_library<S: Store>(vault: &Vault<S>) -> Result<LibraryRows, String> {
             id: id.clone(),
             presence,
             offline_on,
+            changed_outside: changed.get(&row.id).copied(),
             name: path
                 .as_ref()
                 .and_then(|p| p.file_name())
@@ -190,8 +194,9 @@ impl<S: Store> Persist<S> {
     }
 
     /// Whether a scan changed where copies are since the last call (a
-    /// disk plugged in or out): the host reads the library again, so
-    /// its offline badges follow.
+    /// disk plugged in or out), or a photo was marked changed outside
+    /// Helios or acknowledged: the host reads the library again, so its
+    /// badges follow.
     pub fn take_locations_changed(&mut self) -> bool {
         std::mem::take(&mut self.locations_changed)
     }
@@ -499,7 +504,9 @@ impl<S: Store> Persist<S> {
                 stacks_changed = true;
             } else if event.kind == "library.decision" {
                 decided = true;
-            } else if event.kind == helios_vault::LOCATIONS_CHANGED {
+            } else if event.kind == helios_vault::LOCATIONS_CHANGED
+                || event.kind == helios_vault::changed::CHANGED_OUTSIDE
+            {
                 self.locations_changed = true;
             } else if event.kind == "vault.field_changed" {
                 let p = &event.payload;

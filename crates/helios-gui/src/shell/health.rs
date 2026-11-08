@@ -232,7 +232,14 @@ impl Shell {
                 self.health_check_now();
             }
             Some(Asked::Fix(command, args)) => match CommandId::new(&command) {
-                Ok(id) => self.app.handle().run(id, args),
+                Ok(id) => {
+                    self.app.handle().run(id, args);
+                    // Then the checks again, so a fix done at once (an
+                    // acknowledgement) clears its finding.
+                    if let Ok(again) = CommandId::new(CHECK_NOW) {
+                        self.app.handle().run(again, serde_json::Value::Null);
+                    }
+                }
                 Err(e) => self.warn(format!("health: {command}: {e}")),
             },
             Some(Asked::Ignore(id, on)) => {

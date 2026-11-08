@@ -4,7 +4,8 @@
 //!
 //! - A [`Check`] has an id, a title and a [`Check::run`] over a
 //!   [`Context`] (the volumes mounted with their roles, the library's
-//!   place, the vault's file, its backups), giving [`Finding`]s.
+//!   place, the vault's file, its backups, the photos changed outside
+//!   Helios), giving [`Finding`]s.
 //! - A [`Finding`] has a [`Level`] (ok, warning, problem), a message and a
 //!   detail line for people ([`Message`], translated by the desktop), and
 //!   maybe a [`Fix`]: a command with its arguments.
@@ -112,6 +113,9 @@ pub struct Context {
     /// The catalogue's snapshots; `None` until Helios takes them (the
     /// check then says there are none yet).
     pub snapshots: Option<snapshots::Snapshots>,
+    /// How many Library photos are marked changed outside Helios (their
+    /// file rewritten by another application); `None` without a vault.
+    pub changed_outside: Option<usize>,
 }
 
 /// One check of the setup.
@@ -149,6 +153,7 @@ impl Registry {
         r.add(Arc::new(checks::FreeSpace::default()));
         r.add(Arc::new(checks::VaultIntegrity));
         r.add(Arc::new(checks::Library::default()));
+        r.add(Arc::new(checks::ChangedOutside));
         r.add(Arc::new(backup::StrategySet));
         r.add(Arc::new(backup::StrategyMet));
         r.add(Arc::new(backup::DestinationsSeen));

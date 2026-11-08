@@ -1,6 +1,7 @@
 //! Helios's own checks: the free space where Helios writes, the vault's
-//! database integrity, and the library opening with room to grow (the
-//! backup checks are in [`crate::backup`]).
+//! database integrity, the library opening with room to grow, and its
+//! photos changed outside Helios (the backup checks are in
+//! [`crate::backup`]).
 
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -326,6 +327,54 @@ impl Check for Library {
     }
 }
 
+pub const CHANGED_OUTSIDE: &str = "library.changed-outside";
+
+/// The command that clears the mark "changed outside Helios" (every
+/// photo's, without `images`).
+pub const ACKNOWLEDGE_CHANGED: &str = "library.changedOutside.acknowledge";
+
+/// Library photos whose file another application rewrote: still linked,
+/// their edits kept, until the user acknowledges them.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ChangedOutside;
+
+impl Check for ChangedOutside {
+    fn id(&self) -> &str {
+        CHANGED_OUTSIDE
+    }
+
+    fn title(&self) -> Message {
+        Message::new("health-changed-outside", "Photos changed outside Helios")
+    }
+
+    fn run(&self, ctx: &Context) -> Vec<Finding> {
+        let Some(count) = ctx.changed_outside.filter(|c| *c > 0) else {
+            return Vec::new();
+        };
+        vec![
+            Finding::new(
+                CHANGED_OUTSIDE,
+                "",
+                Level::Warning,
+                Message::new(
+                    "health-changed-outside-some",
+                    "{ $count } photos changed outside Helios",
+                )
+                .with("count", count),
+                Message::new(
+                    "health-changed-outside-detail",
+                    "Another application rewrote their files. They stay in your Library with their edits; their thumbnails were made again.",
+                ),
+            )
+            .fix(Fix {
+                command: ACKNOWLEDGE_CHANGED.into(),
+                args: json!({}),
+                label: Message::new("health-fix-acknowledge-changed", "Acknowledge"),
+            }),
+        ]
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
@@ -393,6 +442,23 @@ mod tests {
         let fix = found[1].fix.as_ref().unwrap();
         assert_eq!(fix.command, "library.storage");
         assert_eq!(fix.args["volume"], "backup");
+    }
+
+    #[test]
+    fn photos_changed_outside_are_a_warning_until_acknowledged() {
+        let quiet = |n| {
+            ChangedOutside.run(&Context {
+                changed_outside: n,
+                ..Context::default()
+            })
+        };
+        assert!(quiet(None).is_empty());
+        assert!(quiet(Some(0)).is_empty(), "acknowledged: nothing to say");
+        let found = quiet(Some(3));
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].level, Level::Warning);
+        assert_eq!(found[0].id, CHANGED_OUTSIDE);
+        assert_eq!(found[0].fix.as_ref().unwrap().command, ACKNOWLEDGE_CHANGED);
     }
 
     #[test]

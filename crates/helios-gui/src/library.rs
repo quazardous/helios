@@ -272,6 +272,9 @@ pub struct Entry {
     /// The volume an offline copy is on (its id), to say which one to
     /// plug in.
     pub offline_on: Option<String>,
+    /// When its file was found changed by another application (seconds
+    /// since 1970), until the user acknowledges it: a badge in the grid.
+    pub changed_outside: Option<u64>,
 }
 
 /// A volume as the library names it: its name, and when and on which
@@ -772,6 +775,7 @@ struct PresenceWords {
     short: String,
     unverified: String,
     no_backup: String,
+    changed: String,
 }
 
 impl PresenceWords {
@@ -794,6 +798,10 @@ impl PresenceWords {
             no_backup: crate::i18n::text(
                 ctx,
                 Message::new("gui-library-badge-no-backup", "no backup"),
+            ),
+            changed: crate::i18n::text(
+                ctx,
+                Message::new("gui-library-badge-changed-outside", "changed outside"),
             ),
         }
     }
@@ -858,6 +866,10 @@ impl LibraryItems<String> for Items<'_> {
             helios_vault::Presence::Missing => {
                 badges.push(Badge::new(self.words.missing.clone()).tone(BadgeTone::Danger));
             }
+        }
+        // Its file rewritten by another application, not acknowledged.
+        if entry.changed_outside.is_some() {
+            badges.push(Badge::new(self.words.changed.clone()).tone(BadgeTone::Info));
         }
         if let Some(mark) = self.backups.and_then(|b| b.get(&entry.id)) {
             let w = self.words;
@@ -1061,8 +1073,8 @@ impl Library {
     }
 
     /// The badges an image shows in the grid, in the interface's
-    /// language: RAW, offline, missing, and its backups when the library
-    /// has a strategy.
+    /// language: RAW, offline, missing, changed outside Helios, and its
+    /// backups when the library has a strategy.
     pub fn badges_of(&self, ctx: &egui::Context, id: &str) -> Vec<String> {
         let Some(&i) = self.index.get(id) else {
             return Vec::new();
@@ -1111,6 +1123,16 @@ impl Library {
             .selected
             .and_then(|i| self.entries.get(i))
             .map(|e| e.id.clone());
+        // A photo found changed outside Helios has a new thumbnail under
+        // its key: its texture is read again.
+        for e in &entries {
+            let before = self.entry(&e.id).and_then(|old| old.changed_outside);
+            if e.changed_outside.is_some() && e.changed_outside != before {
+                self.textures.forget(&e.id);
+                self.large_textures.remove(&e.id);
+                self.large_asked.remove(&e.id);
+            }
+        }
         self.entries = entries;
         self.reindex();
         self.selected = selected.and_then(|id| self.index.get(&id).copied());

@@ -196,6 +196,12 @@ fn health_runner(
             snapshots: file
                 .as_deref()
                 .map(|f| helios_gui::catalogue::health(f, &mounted, now)),
+            changed_outside: vault.as_deref().and_then(|v| {
+                v.changed_outside_images()
+                    .inspect_err(|e| log::warn!("health: changed outside: {e}"))
+                    .ok()
+                    .map(|l| l.len())
+            }),
         }
     };
     let ignored = Ignored::load(&helios_gui::shell::config_dir().join("health-ignored.json"));
@@ -614,6 +620,28 @@ fn library_commands(
                 None,
             );
             Ok(json!({ "queued": true }))
+        },
+    )?;
+    let vault = persist.vault().clone();
+    shell.register(
+        CommandSpec::new(
+            helios_health::checks::ACKNOWLEDGE_CHANGED,
+            "Acknowledge the photos changed outside Helios: clears their mark (`images`: ids, every photo when absent); their new content stays recorded",
+            "Library",
+        ),
+        move |args, _| {
+            let images = args
+                .get("images")
+                .and_then(Value::as_array)
+                .map(|ids| {
+                    ids.iter()
+                        .map(|i| helios_vault::ImageId::from_hex(i.as_str().unwrap_or("")))
+                        .collect::<Result<Vec<_>, _>>()
+                })
+                .transpose()?
+                .unwrap_or_default();
+            let cleared = vault.acknowledge_changed(&images)?;
+            Ok(json!({ "cleared": cleared }))
         },
     )?;
     let (vault, bus) = (persist.vault().clone(), persist.bus().clone());
