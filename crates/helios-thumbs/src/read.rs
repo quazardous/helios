@@ -173,14 +173,24 @@ enum RawGet {
     Full,
 }
 
-/// [`read`] from a file's bytes. A picture's thumbnail is turned as its
-/// EXIF orientation says it is seen (a JPEG's Exif thumbnail is stored as
-/// the picture is, unturned).
+/// [`read`] from a file's bytes. The thumbnail is turned as the file's
+/// EXIF orientation says it is seen: a JPEG's Exif thumbnail is stored as
+/// the picture is, and a raw's embedded previews as its sensor is, both
+/// unturned (darktable turns a raw's embedded preview by the raw's
+/// orientation too). A thumbnail rendered from an edit is not made here:
+/// its `flip` step has turned it already.
 pub fn from_bytes(bytes: Vec<u8>, kind: Kind, long: u32) -> Option<Rgb8> {
+    let bytes = Arc::new(bytes);
     let tag = match kind {
         Kind::Picture => helios_load::picture_orientation(&bytes),
-        Kind::Raw => 1,
+        Kind::Raw => helios_load::raw_orientation(bytes.clone()),
     };
+    from_bytes_tagged(bytes, kind, long, tag)
+}
+
+/// [`from_bytes`] with the file's EXIF orientation `tag` (1 to 8) given:
+/// the stored preview turned by it.
+pub fn from_bytes_tagged(bytes: Arc<Vec<u8>>, kind: Kind, long: u32, tag: u8) -> Option<Rgb8> {
     stored(bytes, kind, long).map(|rgb| upright(rgb, tag))
 }
 
@@ -205,7 +215,7 @@ fn upright(rgb: Rgb8, tag: u8) -> Rgb8 {
 }
 
 /// [`from_bytes`], the pixels as the file stores them.
-fn stored(bytes: Vec<u8>, kind: Kind, long: u32) -> Option<Rgb8> {
+fn stored(bytes: Arc<Vec<u8>>, kind: Kind, long: u32) -> Option<Rgb8> {
     for e in choose(&embedded_jpegs(&bytes), long) {
         if let Ok(rgb) = decode_jpeg(&bytes[e.offset..], long) {
             return Some(rgb);
@@ -213,7 +223,7 @@ fn stored(bytes: Vec<u8>, kind: Kind, long: u32) -> Option<Rgb8> {
     }
     let image = match kind {
         Kind::Raw => {
-            let source = RawSource::new_from_shared_vec(Arc::new(bytes));
+            let source = RawSource::new_from_shared_vec(bytes);
             let decoder = rawler::get_decoder(&source).ok()?;
             let params = RawDecodeParams::default();
             let mut found: Vec<DynamicImage> = Vec::new();

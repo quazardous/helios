@@ -828,13 +828,15 @@ struct Preparing {
 }
 
 /// A raw's embedded preview alone in a graph (its source's `image`
-/// port), to draw while the raw is developed; none for a picture or a
-/// raw without one.
+/// port), turned by the raw's EXIF orientation as the development will
+/// be, to draw while the raw is developed; none for a picture or a raw
+/// without one.
 fn first_paint(path: &Path) -> Option<(helios_core::Graph, helios_core::NodeId)> {
     if helios_load::Kind::of(path) != helios_load::Kind::Raw {
         return None;
     }
-    let preview = helios_load::preview(path).ok().flatten()?;
+    let (preview, tag) = helios_load::preview_oriented(path).ok()?;
+    let preview = helios_load::upright(preview?, tag);
     let mut graph = helios_core::Graph::new();
     let node = graph.add_source("source", preview);
     Some((graph, node))

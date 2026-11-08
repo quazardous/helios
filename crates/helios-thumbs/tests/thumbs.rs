@@ -414,3 +414,27 @@ fn a_picture_shot_in_portrait_gets_an_upright_thumbnail() {
             .unwrap();
     assert_eq!((raw.width, raw.height), (256, 171));
 }
+
+#[test]
+fn a_raw_shot_in_portrait_gets_its_embedded_preview_upright() {
+    // A "raw" carrying a landscape preview, stored as its sensor is: its
+    // EXIF orientation (6, the camera turned right) turns it, as darktable
+    // turns a raw's embedded preview.
+    let mut file = vec![0u8; 4096];
+    file.extend_from_slice(&gradient_jpeg(1200, 800));
+    let file = std::sync::Arc::new(file);
+    let read = |tag| {
+        helios_thumbs::read::from_bytes_tagged(file.clone(), helios_load::Kind::Raw, SMALL, tag)
+            .unwrap()
+    };
+    let upright = read(6);
+    assert_eq!((upright.width, upright.height), (171, 256));
+    assert_eq!((read(8).width, read(8).height), (171, 256));
+    let level = read(1);
+    assert_eq!((level.width, level.height), (256, 171));
+    // Turned right: the preview's top-left corner is now top-right.
+    let at = |rgb: &Rgb8, x: u32, y: u32| rgb.pixels[((y * rgb.width + x) * 3) as usize];
+    assert_eq!(at(&upright, upright.width - 1, 0), at(&level, 0, 0));
+    // Bytes rawler cannot read have no tag: kept as stored.
+    assert_eq!(helios_load::raw_orientation((*file).clone().into()), 1);
+}

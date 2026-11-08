@@ -154,11 +154,19 @@ fn through(path: &Path, bundle: &Bundle, preview: bool) -> Result<(Graph, NodeId
     Ok((built.graph, built.view.0))
 }
 
-/// A raw's embedded preview through `bundle`'s network, as a picture.
+/// A raw's embedded preview through `bundle`'s network, as a picture
+/// turned by the raw's EXIF orientation (the preview is stored unturned).
 fn embedded(path: &Path, bundle: &Bundle) -> Result<Built, String> {
-    let image = helios_load::preview(path)?
-        .ok_or_else(|| format!("{}: no preview to show", path.display()))?;
-    bundle.build_with(&modules(), Source::picture(&image), None)
+    let (image, orientation) = helios_load::preview_oriented(path)?;
+    let image = image.ok_or_else(|| format!("{}: no preview to show", path.display()))?;
+    bundle.build_with(
+        &modules(),
+        Source::Picture {
+            image: &image,
+            orientation,
+        },
+        None,
+    )
 }
 
 /// What a template may name on this desktop: [`modules`], and the panels

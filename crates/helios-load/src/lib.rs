@@ -117,9 +117,21 @@ pub fn load(path: &Path) -> Result<Loaded, String> {
     })
 }
 
-/// The preview a raw file carries (the largest one), in the working space;
-/// `None` when it has none. A picture is its own preview: use [`load`].
+/// The preview a raw file carries (the largest one), in the working space,
+/// as the file stores it; `None` when it has none. A picture is its own
+/// preview: use [`load`].
 pub fn preview(path: &Path) -> Result<Option<Image>, String> {
+    preview_oriented(path).map(|(image, _)| image)
+}
+
+/// [`preview`] and the raw's EXIF orientation tag (1 to 8; 1 when it has
+/// none). A raw's embedded previews are stored as its sensor is, not
+/// turned: as darktable does, they are seen turned by the raw's tag
+/// ([`upright`], or a `flip` step at its default given the tag).
+///
+/// # Errors
+/// The file cannot be read, or its format is unknown.
+pub fn preview_oriented(path: &Path) -> Result<(Option<Image>, u8), String> {
     let (_, bytes) = read(path)?;
     let source = RawSource::new_from_shared_vec(bytes);
     let decoder = rawler::get_decoder(&source).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -131,7 +143,28 @@ pub fn preview(path: &Path) -> Result<Option<Image>, String> {
     ]
     .into_iter()
     .find_map(|r| r.ok().flatten());
-    Ok(found.map(|img| working(&img)))
+    let tag = raw_tag(decoder.as_ref(), &source);
+    Ok((found.map(|img| working(&img)), tag))
+}
+
+/// A raw's EXIF orientation tag, 1 to 8 (1 when it has none), from its
+/// metadata (no pixel decoded).
+fn raw_tag(decoder: &dyn rawler::decoders::Decoder, source: &RawSource) -> u8 {
+    decoder
+        .raw_metadata(source, &RawDecodeParams::default())
+        .ok()
+        .and_then(|m| m.exif.orientation)
+        .and_then(|o| u8::try_from(o).ok())
+        .filter(|o| (1..=8).contains(o))
+        .unwrap_or(1)
+}
+
+/// A raw's EXIF orientation tag from its bytes, 1 to 8 (1 when it has
+/// none, or the bytes are no raw rawler reads): what turns its embedded
+/// previews.
+pub fn raw_orientation(bytes: Arc<Vec<u8>>) -> u8 {
+    let source = RawSource::new_from_shared_vec(bytes);
+    rawler::get_decoder(&source).map_or(1, |d| raw_tag(d.as_ref(), &source))
 }
 
 /// What [`glance`] found: a small picture and when it was taken.
@@ -570,13 +603,7 @@ pub fn sensor(path: &Path) -> Result<Option<(Sensor, u8)>, String> {
         .raw_image(&source, &params, true)
         .map_err(|e| named(e.to_string()))?;
     let (x0, y0, _, _) = crop(&raw).map_err(named)?;
-    let orientation = decoder
-        .raw_metadata(&source, &params)
-        .ok()
-        .and_then(|m| m.exif.orientation)
-        .and_then(|o| u8::try_from(o).ok())
-        .filter(|o| (1..=8).contains(o))
-        .unwrap_or(1);
+    let orientation = raw_tag(decoder.as_ref(), &source);
     Ok(Some((
         Sensor {
             width: raw.width as u32,
