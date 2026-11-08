@@ -111,6 +111,9 @@ pub enum Kind {
         options: &'static [&'static str],
         default: &'static str,
     },
+    /// Free text (a list of rules as JSON...), held as a
+    /// [`Value::Choice`] string; the setting's owner checks what it means.
+    Text { default: &'static str },
 }
 
 impl Kind {
@@ -118,7 +121,9 @@ impl Kind {
         match *self {
             Kind::Number { default, .. } => Value::Number(default),
             Kind::Toggle { default, .. } => Value::Toggle(default),
-            Kind::Choice { default, .. } => Value::Choice(default.to_string()),
+            Kind::Choice { default, .. } | Kind::Text { default } => {
+                Value::Choice(default.to_string())
+            }
         }
     }
 }
@@ -194,6 +199,7 @@ impl Setting {
             Kind::Choice { options, default } => {
                 json!({ "type": "choice", "options": options, "default": default })
             }
+            Kind::Text { default } => json!({ "type": "text", "default": default }),
         }
     }
 }
@@ -237,6 +243,60 @@ pub const SETTINGS: &[Setting] = &[
             max: 1_048_576.0,
             default: 2048.0,
             unit: "MiB",
+            integer: true,
+        },
+    },
+    Setting {
+        key: "system.map.exclude",
+        concern: Concern::Machine,
+        label: "Places never recorded",
+        about: "Rules added to the image map's blacklist, as a JSON list: each `{\"glob\": \"**/Private/**\"}` matches the absolute path, or with `\"volume\": \"<id>\"` the path inside that volume; a glob starting with `!` re-includes what a default excludes. The last rule that matches wins.",
+        kind: Kind::Text { default: "" },
+    },
+    Setting {
+        key: "system.map.defaults",
+        concern: Concern::Machine,
+        label: "Default blacklist",
+        about: "Whether the image map leaves out the system's folders, Helios's own data, caches, build trees, hidden folders, trash and other photo applications' libraries; off keeps only the rules above.",
+        kind: Kind::Toggle {
+            default: true,
+            on: "on",
+            off: "off",
+        },
+    },
+    Setting {
+        key: "system.map.record",
+        concern: Concern::Machine,
+        label: "Image map records",
+        about: "What the image map records: everywhere (every listing, and background scans of known volumes), listings (what Helios is shown, plus scans of volumes with a role) or import (only what is imported).",
+        kind: Kind::Choice {
+            options: &["everywhere", "listings", "import"],
+            default: "listings",
+        },
+    },
+    Setting {
+        key: "system.map.limit",
+        concern: Concern::Machine,
+        label: "Files seen kept",
+        about: "How many files seen but not in the Library the image map keeps; past it, those seen longest ago are forgotten first. Library files are never counted.",
+        kind: Kind::Number {
+            min: 1000.0,
+            max: 100_000_000.0,
+            default: 1_000_000.0,
+            unit: "files",
+            integer: true,
+        },
+    },
+    Setting {
+        key: "system.map.keepMissing",
+        concern: Concern::Machine,
+        label: "Missing files kept",
+        about: "How long a file seen but not in the Library stays in the image map once it is missing from its place.",
+        kind: Kind::Number {
+            min: 0.0,
+            max: 3650.0,
+            default: 30.0,
+            unit: "days",
             integer: true,
         },
     },
@@ -451,6 +511,11 @@ impl Config {
         }
     }
 
+    /// A text setting's value ([`Kind::Text`]).
+    pub fn text(&self, key: &str) -> String {
+        self.choice(key)
+    }
+
     /// What the layers below `layer` give for a setting.
     fn below(&self, setting: &Setting, layer: Layer) -> Value {
         for l in setting
@@ -531,7 +596,7 @@ impl Config {
                     )));
                 }
             },
-            Kind::Choice { .. } => Value::Choice(raw.trim().to_string()),
+            Kind::Choice { .. } | Kind::Text { .. } => Value::Choice(raw.trim().to_string()),
         };
         self.set(layer, key, value)
     }
@@ -639,6 +704,7 @@ fn check(setting: &Setting, value: Value) -> Result<Value, String> {
             }
         }
         (Kind::Toggle { .. }, Value::Toggle(v)) => Ok(Value::Toggle(v)),
+        (Kind::Text { .. }, Value::Choice(v)) => Ok(Value::Choice(v)),
         (Kind::Choice { options, .. }, Value::Choice(v)) => {
             if options.contains(&v.as_str()) {
                 Ok(Value::Choice(v))
@@ -655,6 +721,7 @@ fn kind_name(kind: &Kind) -> &'static str {
         Kind::Number { .. } => "a number",
         Kind::Toggle { .. } => "true or false",
         Kind::Choice { .. } => "one of the choices",
+        Kind::Text { .. } => "text",
     }
 }
 

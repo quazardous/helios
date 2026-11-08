@@ -19,10 +19,13 @@
 //! - [`scan`] records them, links each location to its volume and says
 //!   whether its file is present, offline or missing, on a thread of its
 //!   own ([`scan::Scanner`]).
+//! - [`exclude`] is the image map's blacklist: the places never recorded,
+//!   by default per OS and by the user's `system.map.exclude`.
 //! - [`strategy`] keeps the library's backup strategy, counts each photo's
 //!   verified backup copies and says where Helios may write them.
 
 pub mod detect;
+pub mod exclude;
 pub mod marker;
 pub mod registry;
 pub mod scan;

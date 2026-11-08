@@ -34,6 +34,33 @@ location is the sighting of a file whose image is known. For now only
 imports, scans and backups write them, as before; listings that record
 every file seen come next.
 
+**The blacklist** keeps places out of the map: never recorded, never
+thumbnailed into the cache. By default (`system.map.defaults`, on):
+Helios's own data (`.helios/`, `.helios-part/`, its data and cache
+folders), folders tagged `CACHEDIR.TAG`, version control and build trees
+(`.git`, `.hg`, `.svn`, `node_modules`, `__pycache__`, `.venv`), hidden
+folders and files, NAS thumbnails (`@eaDir`, `.@__thumb`), trash folders,
+other photo applications' caches and libraries (`*.lrdata`,
+`*.photoslibrary`, Capture One's `Cache`, darktable's `mipmaps-*`), and
+the system's folders: on Linux `/proc`, `/sys`, `/dev`, `/run`, `/tmp`,
+`/var`, `/usr`, `/etc`, `/boot`, `/snap`, `/opt`, `~/.cache`,
+`~/.local/share`, `~/.var`; on Windows `C:\Windows`, `Program Files`,
+`ProgramData`, `%APPDATA%`, `%LOCALAPPDATA%` and every volume's
+`System Volume Information` and `$Recycle.Bin`; on macOS `/System`,
+`/Library`, `/Applications`, `/private`, `/usr`, `/opt`, `~/Library` and
+every volume's `.Spotlight-V100`, `.fseventsd`,
+`.DocumentRevisions-V100`, `.Trashes`. A folder excluded takes its
+subfolders with it.
+
+`system.map.exclude` adds rules, as a JSON list:
+`[{"glob": "**/Private/**"}, {"glob": "Archive/Clients/**", "volume":
+"uuid:5A3C-11F0"}, {"glob": "!**/.photos/**"}]`. A glob matches the
+absolute path, or with `volume` the path inside that volume; `**` crosses
+folders, `*` and `?` stay in one, case is ignored on Windows and macOS,
+and a glob covers what the folder it names holds. A glob starting with
+`!` re-includes what a default excludes; the last rule that matches
+wins (`helios_storage::exclude`).
+
 ## The default library
 
 `helios-gui` opens a library at every launch: the vault file given with
