@@ -414,7 +414,19 @@ struct Bench {
 
 impl Bench {
     fn configure(root: &Path) -> Result<Bench, String> {
-        let local = std::fs::read_to_string(root.join("tools/bench/local.env")).unwrap_or_default();
+        // a fresh worktree has no local.env of its own: fall back to the main
+        // checkout's (the repository's common directory's parent)
+        let local = std::fs::read_to_string(root.join("tools/bench/local.env"))
+            .or_else(|_| {
+                let common = git(
+                    root,
+                    &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+                )
+                .ok_or_else(|| std::io::Error::other("no git"))?;
+                let main = Path::new(&common).parent().unwrap_or(root).to_path_buf();
+                std::fs::read_to_string(main.join("tools/bench/local.env"))
+            })
+            .unwrap_or_default();
         let get = |key: &str| {
             std::env::var(key)
                 .ok()
