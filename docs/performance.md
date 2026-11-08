@@ -31,7 +31,8 @@ thumbnail. The vault's read is not in it: a vault holds each file once
 (timing-class: the machine alone, before a release only):
 
 ```bash
-cargo xtask bench-remote thumb-bench branch=main            # 1,000, 10,000 and 50,000
+cargo xtask bench-remote thumb-bench-build branch=main      # builds it (not timed)
+cargo xtask bench-remote thumb-bench branch=main            # then measures: 1,000, 10,000 and 50,000
 cargo xtask bench-remote thumb-bench sizes=10000 frames=120
 ```
 
