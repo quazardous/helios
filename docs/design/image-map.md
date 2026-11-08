@@ -15,7 +15,16 @@ recently shown, then the Library; stat, partial, full hash; a changed
 file's thumbnail made again; waits on battery and under load), fed by
 the import window, the Library grid and Compare (their images' files,
 from their sightings); the import window and dialogs on the shared
-cache are left. Open question 6
+cache are left. Slice 5 built in part (2026-11-08): the map's job
+scans a volume plugged in (`Feed::plugged`) or asked for
+(`library.map.scanNow`), a folder at a time, known folders first, a
+`stat` per file and no read, right after what is on screen (cheaper
+than any read), pausable and giving way as its reads do;
+`system.map.record` says which volumes (every one, those with a role,
+none); a scan's end prunes to `system.map.limit`. A scan asked for by
+name lists a volume forgotten whole again. Renames and moves, read
+throttling on slow volumes, the wipe and the Storage page's view of the
+map are left. Open question 6
 decided (2026-11-08, option A of the owner's choice): a Library photo
 whose file another application changed stays linked (section 3, "A file
 changed in place"). Section 9 gives the order of work, section 10 the

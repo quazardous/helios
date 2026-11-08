@@ -18,7 +18,8 @@ pub struct MapSettings {
     pub defaults: bool,
     /// The JSON of `system.map.exclude`.
     pub exclude: String,
-    /// `system.map.limit` and `system.map.keepMissing`, for the job.
+    /// `system.map.limit`, `system.map.keepMissing` and
+    /// `system.map.record`, for the job.
     pub prune: helios_library::map_job::Settings,
 }
 
@@ -38,6 +39,7 @@ pub fn settings(layer: Option<&str>) -> MapSettings {
         prune: helios_library::map_job::Settings {
             limit: config.number(helios_library::map_job::LIMIT) as usize,
             keep_missing_days: config.number(helios_library::map_job::KEEP_MISSING) as u64,
+            record: Record::parse(&config.choice(RECORD)),
         },
     }
 }
@@ -54,7 +56,8 @@ fn blacklist(settings: &MapSettings, helios: &[PathBuf]) -> Blacklist {
 /// Starts the image map's job on a thread of its own (`map` in the jobs
 /// centre): it reads what `feed` says is on screen first, then the rest
 /// in the note's order, giving way to imports, exports, backups and
-/// renders on `jobs`' bus and to the battery.
+/// renders on `jobs`' bus and to the battery. It scans the volumes `feed`
+/// says were plugged in or asked for, as `system.map.record` allows.
 pub fn start_job<S: Store + 'static>(
     vault: Arc<Vault<S>>,
     jobs: helios_core::jobs::Jobs,
@@ -64,8 +67,14 @@ pub fn start_job<S: Store + 'static>(
 ) {
     use helios_library::map_job::{BusLoad, Disk, Job, SystemPower};
     let checker = Checker::new(blacklist(&settings, &helios));
-    let mounted = helios_storage::system().volumes();
-    let volumes = helios_storage::registry::merged(&vault, &mounted).unwrap_or(mounted);
+    let known = {
+        let vault = vault.clone();
+        move || {
+            let mounted = helios_storage::system().volumes();
+            helios_storage::registry::merged(&vault, &mounted).unwrap_or(mounted)
+        }
+    };
+    let volumes = known();
     let load = BusLoad::new(jobs.bus());
     let spawned = std::thread::Builder::new()
         .name("image map".into())
@@ -79,6 +88,7 @@ pub fn start_job<S: Store + 'static>(
                 feed,
                 settings.prune,
             )
+            .volumes_from(known)
             .load(Box::new(load))
             .power(Box::new(SystemPower))
             .run(&jobs, &stop);

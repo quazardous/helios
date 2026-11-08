@@ -4,6 +4,15 @@
 //!
 //! 1. [`Stage::Screen`]: what is on screen ([`Feed::on_screen`], fed by
 //!    the interface with the paths in view): their partial hash;
+//!
+//!    then the **scans** of volumes plugged in just now ([`Feed::plugged`])
+//!    or asked for ([`Feed::scan_now`]), a folder at a time
+//!    ([`Next::List`]): the folders the map knows there first, then the
+//!    rest of the volume. A scan costs a `stat` per file and reads none;
+//!    it records what it finds as sightings (`seen_by: scan`), never in a
+//!    place the blacklist excludes or a folder the user forgot. Which
+//!    volumes are scanned follows `system.map.record` ([`Record`]): every
+//!    one, those with a role, or none;
 //! 2. [`Stage::Library`]: Library sightings never verified by their full
 //!    hash;
 //! 3. [`Stage::Plugged`]: volumes plugged in just now ([`Feed::plugged`]):
@@ -16,8 +25,10 @@
 //! it was listed (the next listing records it again). It pauses while an
 //! import, an export, a batch, a backup or a render runs ([`Load`]), on
 //! battery ([`Power`]) and when the user pauses it; it can be cancelled.
-//! At most once an hour it prunes the map ([`Vault::prune_sightings`],
-//! `system.map.limit` and `system.map.keepMissing`).
+//! At most once an hour, and after each scan, it prunes the map
+//! ([`Vault::prune_sightings`], `system.map.limit` and
+//! `system.map.keepMissing`): past the cap, the files outside the Library
+//! seen longest ago go first.
 //!
 //! [`Job::next_read`] and [`Job::read`] do one file at a time and are what the
 //! tests drive; [`Job::run`] loops them on a thread of its own, starting a
@@ -37,7 +48,9 @@ use helios_core::jobs::{self, Jobs, Progress, Start};
 use helios_storage::Volume;
 use helios_storage::exclude::Checker;
 use helios_vault::storage::VolumeId;
-use helios_vault::{ImageId, Sighting, Store, ToRead, Vault};
+use helios_vault::{IMAGE_EXTENSIONS, ImageId, Sighting, Store, ToRead, Vault};
+
+use crate::map::Record;
 
 /// The jobs-centre kind of the map's job.
 pub const KIND: &str = "map";
@@ -86,9 +99,22 @@ struct Fed {
     /// What was on screen before, last shown first, at most [`RECENT`].
     recent: VecDeque<PathBuf>,
     plugged: Vec<VolumeId>,
+    /// Volumes to scan (listed whole), in the order asked.
+    scans: Vec<Scan>,
     paused: bool,
     /// Something new to do: the idle wait ends.
     woken: bool,
+}
+
+/// A scan asked for: a volume, or every volume the setting allows.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Scan {
+    /// Plugged in just now: scanned when the setting allows it.
+    Plugged(VolumeId),
+    /// Asked for on purpose: a volume forgotten whole is listed again.
+    Now(VolumeId),
+    /// Every volume mounted that the setting allows.
+    All,
 }
 
 /// What the rest of Helios tells the job: the paths on screen, the volumes
@@ -138,10 +164,27 @@ impl Feed {
     }
 
     /// A volume just plugged in: its files are read before the rest.
+    /// It is scanned (listed) first, once, when `system.map.record` allows.
     pub fn plugged(&self, volume: VolumeId) {
         let mut fed = self.fed();
         if !fed.plugged.contains(&volume) {
-            fed.plugged.push(volume);
+            fed.plugged.push(volume.clone());
+        }
+        let scan = Scan::Plugged(volume);
+        if !fed.scans.contains(&scan) {
+            fed.scans.push(scan);
+        }
+        fed.woken = true;
+    }
+
+    /// Scans a volume now (`library.map.scanNow`), or with `None` every
+    /// volume mounted that `system.map.record` allows. A volume asked for
+    /// by its id is listed again even if it was forgotten whole.
+    pub fn scan_now(&self, volume: Option<VolumeId>) {
+        let mut fed = self.fed();
+        let scan = volume.map_or(Scan::All, Scan::Now);
+        if !fed.scans.contains(&scan) {
+            fed.scans.push(scan);
         }
         fed.woken = true;
     }
@@ -168,6 +211,18 @@ pub trait Files: Send {
     fn stat(&self, path: &Path) -> Option<(u64, u64)>;
     fn partial(&self, path: &Path, size: u64) -> Result<ContentHash, String>;
     fn full(&self, path: &Path) -> Result<ContentHash, String>;
+    /// The entries of a folder: each name and whether it is a folder
+    /// (links are not followed: a link is neither).
+    fn list(&self, dir: &Path) -> Result<Vec<(std::ffi::OsString, Entry)>, String>;
+}
+
+/// What a folder's entry is, as its listing says (no `stat`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Entry {
+    File,
+    Folder,
+    /// A link or anything else: not followed, not recorded.
+    Other,
 }
 
 /// The files on disk.
@@ -194,6 +249,21 @@ impl Files for Disk {
         let mut hasher = blake3::Hasher::new();
         std::io::copy(&mut file, &mut hasher).map_err(|e| format!("{}: {e}", path.display()))?;
         Ok(ContentHash(*hasher.finalize().as_bytes()))
+    }
+
+    fn list(&self, dir: &Path) -> Result<Vec<(std::ffi::OsString, Entry)>, String> {
+        let entries = std::fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        Ok(entries
+            .flatten()
+            .map(|e| {
+                let kind = match e.file_type() {
+                    Ok(t) if t.is_dir() => Entry::Folder,
+                    Ok(t) if t.is_file() => Entry::File,
+                    _ => Entry::Other,
+                };
+                (e.file_name(), kind)
+            })
+            .collect())
     }
 }
 
@@ -337,6 +407,19 @@ pub trait Map: Send + Sync {
         at: u64,
     ) -> Result<(), String>;
     fn prune(&self, limit: usize, missing_before: u64) -> Result<usize, String>;
+    /// Records what a scan listed in a folder, in one transaction
+    /// ([`Vault::record_listed`]).
+    ///
+    /// # Errors
+    /// The vault cannot be written.
+    fn listed(&self, batch: &[Sighting]) -> Result<(), String>;
+    /// The folders of `volume` the map holds files of.
+    fn known_folders(&self, volume: &VolumeId) -> Vec<PathBuf>;
+    /// Whether the folder `rel_dir` of `volume`, or one above it, was
+    /// forgotten.
+    fn forgotten(&self, volume: &VolumeId, rel_dir: &Path) -> bool;
+    /// Notes that a scan listed a folder (a forgotten one is listed again).
+    fn folder_listed(&self, volume: &VolumeId, rel_dir: &Path, files: u64, now: u64);
 }
 
 impl<S: Store> Map for Vault<S> {
@@ -388,6 +471,33 @@ impl<S: Store> Map for Vault<S> {
     fn prune(&self, limit: usize, missing_before: u64) -> Result<usize, String> {
         self.prune_sightings(limit, missing_before)
     }
+
+    fn listed(&self, batch: &[Sighting]) -> Result<(), String> {
+        self.record_listed(batch).map(|_| ())
+    }
+
+    fn known_folders(&self, volume: &VolumeId) -> Vec<PathBuf> {
+        let mut folders: Vec<PathBuf> = self
+            .sightings_under(Some(volume), Path::new(""))
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|s| s.rel_path?.parent().map(Path::to_path_buf))
+            .collect();
+        folders.sort();
+        folders.dedup();
+        folders
+    }
+
+    fn forgotten(&self, volume: &VolumeId, rel_dir: &Path) -> bool {
+        // `Vault::forgotten` asks about a file: the folders above it.
+        Vault::forgotten(self, Some(volume), &rel_dir.join("-")).unwrap_or(false)
+    }
+
+    fn folder_listed(&self, volume: &VolumeId, rel_dir: &Path, files: u64, now: u64) {
+        if let Err(e) = Vault::folder_listed(self, Some(volume), rel_dir, files, now) {
+            log::warn!("map: {}: {e}", rel_dir.display());
+        }
+    }
 }
 
 /// The pruning settings.
@@ -397,6 +507,8 @@ pub struct Settings {
     pub limit: usize,
     /// `system.map.keepMissing`, in days.
     pub keep_missing_days: u64,
+    /// `system.map.record`: which volumes are scanned.
+    pub record: Record,
 }
 
 impl Default for Settings {
@@ -404,6 +516,7 @@ impl Default for Settings {
         Self {
             limit: 1_000_000,
             keep_missing_days: 30,
+            record: Record::Listings,
         }
     }
 }
@@ -415,6 +528,8 @@ pub enum Next {
     Paused(String),
     /// A file to read.
     Read(Stage, Box<Sighting>),
+    /// A folder of a volume to list ([`Job::list`]): a scan.
+    List(VolumeId, PathBuf),
     /// Nothing to do.
     Idle,
 }
@@ -434,6 +549,20 @@ pub struct Job<M: Map> {
     /// Places read this hour (or found unreadable), not asked again.
     done: HashSet<PathBuf>,
     queue: VecDeque<(Stage, Sighting)>,
+    /// The volumes known now, asked again when a scan starts.
+    volumes_from: Option<Box<dyn Fn() -> Vec<Volume> + Send>>,
+    /// The scans running, the first listed first.
+    scanning: VecDeque<Scanning>,
+}
+
+/// A volume being scanned: the folders left to list.
+struct Scanning {
+    volume: VolumeId,
+    mount: PathBuf,
+    folders: VecDeque<PathBuf>,
+    /// Folders listed or queued, never listed twice.
+    seen: HashSet<PathBuf>,
+    files: u64,
 }
 
 impl<M: Map> Job<M> {
@@ -464,7 +593,18 @@ impl<M: Map> Job<M> {
             last_prune: None,
             done: HashSet::new(),
             queue: VecDeque::new(),
+            volumes_from: None,
+            scanning: VecDeque::new(),
         }
+    }
+
+    /// Where the volumes known come from (the system's, merged with the
+    /// vault's registry): asked again when a scan starts, so a volume
+    /// plugged in after the job started is placed.
+    #[must_use]
+    pub fn volumes_from(mut self, volumes: impl Fn() -> Vec<Volume> + Send + 'static) -> Self {
+        self.volumes_from = Some(Box::new(volumes));
+        self
     }
 
     /// Gives way to the jobs `load` says run.
@@ -507,14 +647,19 @@ impl<M: Map> Job<M> {
         self.last_prune = Some(now);
         // A new hour: what could not be read is tried again.
         self.done.clear();
+        Some(self.prune_now())
+    }
+
+    /// Prunes the map now; returns how many sightings went.
+    fn prune_now(&mut self) -> usize {
+        let now = (self.clock)();
         let before = now.saturating_sub(self.settings.keep_missing_days * 86_400);
-        match self.map.prune(self.settings.limit, before) {
-            Ok(n) => Some(n),
-            Err(e) => {
+        self.map
+            .prune(self.settings.limit, before)
+            .unwrap_or_else(|e| {
                 log::warn!("map: pruning: {e}");
-                Some(0)
-            }
-        }
+                0
+            })
     }
 
     /// The next file to read, in the job's order.
@@ -526,6 +671,10 @@ impl<M: Map> Job<M> {
         if let Some(s) = self.on_screen() {
             return Next::Read(Stage::Screen, Box::new(s));
         }
+        self.take_scans();
+        if let Some((volume, folder)) = self.next_folder() {
+            return Next::List(volume, folder);
+        }
         if self.queue.is_empty() {
             self.fill();
         }
@@ -536,6 +685,163 @@ impl<M: Map> Job<M> {
             }
             None => Next::Idle,
         }
+    }
+
+    /// Whether `system.map.record` lets `volume` be scanned: everywhere,
+    /// every volume; listings, those with a role or asked for on purpose;
+    /// import, none.
+    fn scans(&self, volume: &Volume, on_purpose: bool) -> bool {
+        match self.settings.record {
+            Record::Everywhere => true,
+            Record::Listings => on_purpose || !volume.roles.is_empty(),
+            Record::Import => false,
+        }
+    }
+
+    /// Starts the scans the feed asks for.
+    fn take_scans(&mut self) {
+        let asked = std::mem::take(&mut self.feed.fed().scans);
+        if asked.is_empty() {
+            return;
+        }
+        if let Some(from) = &self.volumes_from {
+            self.volumes = from();
+        }
+        let now = (self.clock)();
+        for scan in asked {
+            let (wanted, on_purpose): (Vec<Volume>, bool) = match &scan {
+                Scan::Plugged(id) | Scan::Now(id) => (
+                    self.volumes
+                        .iter()
+                        .filter(|v| &v.id == id)
+                        .cloned()
+                        .collect(),
+                    matches!(scan, Scan::Now(_)),
+                ),
+                Scan::All => (self.volumes.clone(), false),
+            };
+            for v in wanted {
+                let Some(mount) = v.mount.clone() else {
+                    continue;
+                };
+                if !self.scans(&v, on_purpose) || self.scanning.iter().any(|s| s.volume == v.id) {
+                    continue;
+                }
+                if on_purpose && self.map.forgotten(&v.id, Path::new("")) {
+                    // Asked for by name: a volume forgotten whole is listed
+                    // again (its folders forgotten one by one stay so).
+                    self.map.folder_listed(&v.id, Path::new(""), 0, now);
+                }
+                // The folders known first, then the whole volume.
+                let mut folders: VecDeque<PathBuf> = self.map.known_folders(&v.id).into();
+                if !folders.iter().any(|f| f.as_os_str().is_empty()) {
+                    folders.push_back(PathBuf::new());
+                }
+                self.scanning.push_back(Scanning {
+                    volume: v.id.clone(),
+                    mount,
+                    seen: folders.iter().cloned().collect(),
+                    folders,
+                    files: 0,
+                });
+            }
+        }
+    }
+
+    /// The next folder a scan lists; a scan with none left ends (and the
+    /// map is pruned: the cap holds).
+    fn next_folder(&mut self) -> Option<(VolumeId, PathBuf)> {
+        while let Some(scan) = self.scanning.front_mut() {
+            if let Some(folder) = scan.folders.pop_front() {
+                return Some((scan.volume.clone(), folder));
+            }
+            let done = self.scanning.pop_front().expect("a scan");
+            log::info!("map: {} scanned, {} files", done.volume.0, done.files);
+            self.prune_now();
+        }
+        None
+    }
+
+    /// Lists a folder of a volume being scanned: a `stat` per image file,
+    /// recorded in one transaction; its folders are queued. An excluded
+    /// or forgotten folder is skipped with what is below it. Returns how
+    /// many files were recorded.
+    ///
+    /// # Errors
+    /// The folder cannot be listed (a volume gone ends its scan), or the
+    /// vault cannot be written.
+    pub fn list(&mut self, volume: &VolumeId, rel_dir: &Path) -> Result<usize, String> {
+        let Some(at) = self.scanning.iter().position(|s| &s.volume == volume) else {
+            return Ok(0);
+        };
+        let mount = self.scanning[at].mount.clone();
+        let root = rel_dir.as_os_str().is_empty();
+        let dir = if root {
+            mount.clone()
+        } else {
+            mount.join(rel_dir)
+        };
+        if !root && let Some(reason) = self.checker.excluded(&dir, Some((volume, rel_dir))) {
+            log::debug!("map: {} not scanned: {reason:?}", dir.display());
+            return Ok(0);
+        }
+        if self.map.forgotten(volume, rel_dir) {
+            return Ok(0);
+        }
+        let mut entries = match self.files.list(&dir) {
+            Ok(entries) => entries,
+            Err(e) => {
+                if self.files.list(&mount).is_err() {
+                    // The volume went away: its scan stops at once.
+                    self.scanning.remove(at);
+                }
+                return Err(e);
+            }
+        };
+        entries.sort_by(|a, b| a.0.cmp(&b.0));
+        let now = (self.clock)();
+        let mut batch = Vec::new();
+        for (name, entry) in entries {
+            let rel = rel_dir.join(&name);
+            match entry {
+                Entry::Folder => {
+                    if self
+                        .checker
+                        .excluded(&dir.join(&name), Some((volume, &rel)))
+                        .is_some()
+                    {
+                        continue;
+                    }
+                    let scan = &mut self.scanning[at];
+                    if scan.seen.insert(rel.clone()) {
+                        scan.folders.push_back(rel);
+                    }
+                }
+                Entry::File => {
+                    let path = dir.join(&name);
+                    if !is_image(&path)
+                        || self.checker.excluded(&path, Some((volume, &rel))).is_some()
+                    {
+                        continue;
+                    }
+                    let Some((size, modified)) = self.files.stat(&path) else {
+                        continue;
+                    };
+                    let mut s = Sighting::seen(path, size, modified, now, "scan");
+                    s.volume = Some(volume.clone());
+                    s.rel_path = Some(rel);
+                    batch.push(s);
+                }
+                Entry::Other => {}
+            }
+        }
+        if !batch.is_empty() {
+            self.map.listed(&batch)?;
+        }
+        let n = batch.len();
+        self.map.folder_listed(volume, rel_dir, n as u64, now);
+        self.scanning[at].files += n as u64;
+        Ok(n)
     }
 
     /// The first path on screen with a sighting to read.
@@ -672,6 +978,7 @@ impl<M: Map> Job<M> {
         let cancel = Arc::new(AtomicBool::new(false));
         let mut paused: Option<String> = None;
         let mut read = 0u64;
+        let mut listed = 0u64;
         let mut shown = Instant::now();
         let mut idle_since: Option<Instant> = None;
         while !stop.load(Ordering::SeqCst) {
@@ -695,7 +1002,7 @@ impl<M: Map> Job<M> {
                 }
                 Next::Idle => {
                     if let Some(r) = report.take() {
-                        r.log(format!("{read} files read"));
+                        r.log(format!("{read} files read, {listed} listed"));
                         r.finished();
                     }
                     paused = None;
@@ -703,11 +1010,12 @@ impl<M: Map> Job<M> {
                     let wait = Duration::from_secs(PRUNE_EVERY).saturating_sub(since.elapsed());
                     self.wait_for_news(stop, wait.max(Duration::from_secs(1)));
                 }
-                Next::Read(stage, s) => {
+                next @ (Next::Read(..) | Next::List(..)) => {
                     idle_since = None;
                     let r = report.get_or_insert_with(|| {
                         runs += 1;
                         read = 0;
+                        listed = 0;
                         let r = jobs.start(
                             Start::new(&format!("map-{runs}"), "Image map", KIND).pausable(),
                         );
@@ -720,15 +1028,29 @@ impl<M: Map> Job<M> {
                     if paused.take().is_some() {
                         r.resumed();
                     }
-                    let name = s.path.display().to_string();
-                    match self.read(stage, *s) {
-                        Ok(true) => read += 1,
-                        Ok(false) => {}
-                        Err(e) => r.item_failed(&name, &e),
-                    }
+                    let (name, step) = match next {
+                        Next::Read(stage, s) => {
+                            let name = s.path.display().to_string();
+                            match self.read(stage, *s) {
+                                Ok(true) => read += 1,
+                                Ok(false) => {}
+                                Err(e) => r.item_failed(&name, &e),
+                            }
+                            (name, stage.as_str())
+                        }
+                        Next::List(volume, folder) => {
+                            let name = format!("{}: {}", volume.0, folder.display());
+                            match self.list(&volume, &folder) {
+                                Ok(n) => listed += n as u64,
+                                Err(e) => r.item_failed(&name, &e),
+                            }
+                            (name, "scan")
+                        }
+                        Next::Paused(_) | Next::Idle => unreachable!("matched above"),
+                    };
                     if shown.elapsed() > Duration::from_millis(500) {
                         shown = Instant::now();
-                        r.progress(Progress::new().done(read).item(&name).step(stage.as_str()));
+                        r.progress(Progress::new().done(read + listed).item(&name).step(step));
                     }
                 }
             }
@@ -748,6 +1070,13 @@ impl<M: Map> Job<M> {
             std::thread::sleep(Duration::from_millis(200));
         }
     }
+}
+
+/// Whether `path` names an image file Helios imports.
+fn is_image(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| IMAGE_EXTENSIONS.contains(&e.to_ascii_lowercase().as_str()))
 }
 
 /// Never busy, never on battery.
@@ -779,11 +1108,34 @@ mod tests {
     struct Fake {
         files: HashMap<PathBuf, (u64, u64, ContentHash)>,
         reads: Arc<Mutex<Vec<String>>>,
+        stats: Arc<std::sync::atomic::AtomicUsize>,
     }
 
     impl Files for Fake {
         fn stat(&self, path: &Path) -> Option<(u64, u64)> {
+            self.stats.fetch_add(1, Ordering::SeqCst);
             self.files.get(path).map(|&(s, m, _)| (s, m))
+        }
+        fn list(&self, dir: &Path) -> Result<Vec<(std::ffi::OsString, Entry)>, String> {
+            let mut found = BTreeMap::new();
+            for p in self.files.keys() {
+                let Ok(rest) = p.strip_prefix(dir) else {
+                    continue;
+                };
+                let mut parts = rest.components();
+                if let Some(first) = parts.next() {
+                    let kind = if parts.next().is_some() {
+                        Entry::Folder
+                    } else {
+                        Entry::File
+                    };
+                    found.insert(first.as_os_str().to_owned(), kind);
+                }
+            }
+            if found.is_empty() {
+                return Err(format!("{}: gone", dir.display()));
+            }
+            Ok(found.into_iter().collect())
         }
         fn partial(&self, path: &Path, _: u64) -> Result<ContentHash, String> {
             self.reads
@@ -891,6 +1243,12 @@ mod tests {
     }
 
     fn job(w: &World) -> Job<Vault<MemoryStore>> {
+        job_with(w, Settings::default())
+    }
+
+    /// A job whose card is an ingest volume (a role: scanned when
+    /// plugged under the default setting).
+    fn job_with(w: &World, settings: Settings) -> Job<Vault<MemoryStore>> {
         let checker = Checker::new(Blacklist::new(
             Os::Linux,
             &Places::default(),
@@ -901,12 +1259,13 @@ mod tests {
             w.vault.clone(),
             Box::new(w.fake.clone()),
             checker,
-            vec![
-                volume("uuid:disk", "/media/disk"),
-                volume("uuid:card", "/media/card"),
-            ],
+            vec![volume("uuid:disk", "/media/disk"), {
+                let mut card = volume("uuid:card", "/media/card");
+                card.roles = [helios_storage::Role::Ingest].into();
+                card
+            }],
             w.feed.clone(),
-            Settings::default(),
+            settings,
         )
         .clock(|| 1_000_000)
     }
@@ -922,10 +1281,195 @@ mod tests {
                         read.push((stage, name));
                     }
                 }
+                Next::List(volume, folder) => {
+                    job.list(&volume, &folder).unwrap();
+                    read.push((Stage::Plugged, format!("list {}", folder.display())));
+                }
                 Next::Idle => return read,
                 Next::Paused(why) => panic!("paused: {why}"),
             }
         }
+    }
+
+    /// The folders a drain listed.
+    fn listed(read: &[(Stage, String)]) -> Vec<&str> {
+        read.iter()
+            .filter_map(|(_, r)| r.strip_prefix("list "))
+            .collect()
+    }
+
+    /// The world with more on the card: a new photo below `DCIM`, one in
+    /// a hidden folder and a file that is no image.
+    fn card_world() -> World {
+        let mut w = world();
+        for rel in ["DCIM/100/x.cr3", "DCIM/.thumbs/y.jpg", "notes.txt"] {
+            w.fake.files.insert(
+                Path::new("/media/card").join(rel),
+                (11, 5, ContentHash([3; 32])),
+            );
+        }
+        w
+    }
+
+    fn card_at(w: &World, rel: &str) -> Option<Sighting> {
+        w.vault
+            .sighting_at(
+                Some(&VolumeId("uuid:card".into())),
+                Some(Path::new(rel)),
+                &Path::new("/media/card").join(rel),
+            )
+            .unwrap()
+    }
+
+    #[test]
+    fn plugging_a_volume_scans_it_once() {
+        let w = card_world();
+        let mut job = job(&w);
+        w.feed.plugged(VolumeId("uuid:card".into()));
+        let read = drain(&mut job);
+        // The folder known first, then the volume from its root; the
+        // hidden folder is never listed.
+        assert_eq!(listed(&read), ["DCIM", "", "DCIM/100"], "{read:?}");
+        let x = card_at(&w, "DCIM/100/x.cr3").expect("recorded");
+        assert_eq!((x.seen_by.as_str(), x.size), ("scan", 11));
+        assert_eq!(
+            card_at(&w, "DCIM/b.cr3").unwrap().seen_by,
+            "import",
+            "what listed it first stays"
+        );
+        assert!(card_at(&w, "DCIM/.thumbs/y.jpg").is_none(), "excluded");
+        assert!(card_at(&w, "notes.txt").is_none(), "not an image");
+        let folder = w
+            .vault
+            .folder(Some(&VolumeId("uuid:card".into())), Path::new("DCIM/100"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(folder.files, Some(1));
+        // Once: nothing more to list until it is plugged again.
+        assert!(listed(&drain(&mut job)).is_empty());
+        // A volume with no role is not scanned under the default setting.
+        w.feed.plugged(VolumeId("uuid:disk".into()));
+        assert!(listed(&drain(&mut job)).is_empty());
+    }
+
+    #[test]
+    fn a_pause_stops_the_scan() {
+        let w = card_world();
+        let mut job = job(&w);
+        w.feed.plugged(VolumeId("uuid:card".into()));
+        let Next::List(volume, folder) = job.next_read() else {
+            panic!("a scan first");
+        };
+        assert_eq!(folder, Path::new("DCIM"));
+        job.list(&volume, &folder).unwrap();
+        w.feed.pause(true);
+        assert_eq!(job.next_read(), Next::Paused("Paused".into()));
+        assert!(card_at(&w, "DCIM/100/x.cr3").is_none(), "not listed yet");
+        w.feed.pause(false);
+        assert_eq!(listed(&drain(&mut job)), ["", "DCIM/100"]);
+        assert!(card_at(&w, "DCIM/100/x.cr3").is_some());
+    }
+
+    #[test]
+    fn a_scan_ends_with_the_cap_dropping_the_oldest_outside_the_library() {
+        let w = card_world();
+        let mut job = job_with(
+            &w,
+            Settings {
+                limit: 2,
+                ..Settings::default()
+            },
+        );
+        w.feed.plugged(VolumeId("uuid:card".into()));
+        drain(&mut job);
+        let mut left: Vec<String> = Vec::new();
+        for v in ["uuid:disk", "uuid:card"] {
+            left.extend(
+                w.vault
+                    .sightings_under(Some(&VolumeId(v.into())), Path::new(""))
+                    .unwrap()
+                    .into_iter()
+                    .map(|s| s.rel_path.unwrap().display().to_string()),
+            );
+        }
+        left.sort();
+        // The Library's file is never counted; of the rest, the two
+        // just scanned are the most recently seen.
+        assert_eq!(left, ["DCIM/100/x.cr3", "DCIM/b.cr3", "lib/a.cr3"]);
+    }
+
+    #[test]
+    fn recording_only_on_import_scans_nothing() {
+        let w = card_world();
+        let mut job = job_with(
+            &w,
+            Settings {
+                record: Record::Import,
+                ..Settings::default()
+            },
+        );
+        w.feed.plugged(VolumeId("uuid:card".into()));
+        w.feed.scan_now(None);
+        w.feed.scan_now(Some(VolumeId("uuid:disk".into())));
+        assert!(listed(&drain(&mut job)).is_empty());
+        assert!(card_at(&w, "DCIM/100/x.cr3").is_none());
+        assert!(!Record::parse("import").listings());
+    }
+
+    #[test]
+    fn scan_now_lists_a_volume_forgotten_whole_again() {
+        let w = card_world();
+        let mut job = job_with(
+            &w,
+            Settings {
+                record: Record::Everywhere,
+                ..Settings::default()
+            },
+        );
+        let disk = VolumeId("uuid:disk".into());
+        let old = |w: &World| {
+            w.vault
+                .sighting_at(
+                    Some(&disk),
+                    Some(Path::new("old/c.jpg")),
+                    Path::new("/media/disk/old/c.jpg"),
+                )
+                .unwrap()
+        };
+        w.vault.forget(Some(&disk), None, 10).unwrap();
+        assert!(old(&w).is_none());
+        // Every volume is scanned, but the one forgotten records nothing.
+        w.feed.scan_now(None);
+        drain(&mut job);
+        assert!(old(&w).is_none(), "forgotten");
+        assert!(card_at(&w, "DCIM/100/x.cr3").is_some());
+        // Asked for by name: listed again.
+        w.feed.scan_now(Some(disk.clone()));
+        drain(&mut job);
+        assert!(old(&w).is_some());
+        assert!(!w.vault.forgotten(Some(&disk), Path::new("x.jpg")).unwrap());
+    }
+
+    #[test]
+    fn an_unchanged_file_costs_one_stat() {
+        let w = card_world();
+        let mut job = job(&w);
+        w.feed.plugged(VolumeId("uuid:card".into()));
+        drain(&mut job);
+        w.fake.stats.store(0, Ordering::SeqCst);
+        w.fake.reads.lock().unwrap().clear();
+        let before = card_at(&w, "DCIM/100/x.cr3").unwrap();
+        w.feed.plugged(VolumeId("uuid:card".into()));
+        assert_eq!(listed(&drain(&mut job)), ["DCIM", "DCIM/100", ""]);
+        assert_eq!(
+            w.fake.stats.load(Ordering::SeqCst),
+            2,
+            "one stat for each of the card's two photos"
+        );
+        assert!(w.fake.reads.lock().unwrap().is_empty(), "nothing read");
+        let after = card_at(&w, "DCIM/100/x.cr3").unwrap();
+        assert_eq!(after.partial, before.partial, "what was read stands");
+        assert!(after.partial.is_some());
     }
 
     #[test]
@@ -934,7 +1478,12 @@ mod tests {
         let mut job = job(&w);
         w.feed.on_screen(vec![w.sightings["screen"].path.clone()]);
         w.feed.plugged(VolumeId("uuid:card".into()));
-        let read = drain(&mut job);
+        // The card's scan (its listings) comes right after the screen; the
+        // reads are what this checks.
+        let read: Vec<(Stage, String)> = drain(&mut job)
+            .into_iter()
+            .filter(|(_, r)| !r.starts_with("list "))
+            .collect();
         let stages: Vec<Stage> = read.iter().map(|(s, _)| *s).collect();
         assert_eq!(
             stages,

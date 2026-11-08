@@ -1859,6 +1859,26 @@ fn main() -> Result<(), String> {
                 // then each volume plugged in.
                 let feed = helios_library::map_job::Feed::default();
                 shell.set_map_feed(feed.clone());
+                // A scan asked for: a volume by its id, or every volume
+                // `system.map.record` allows.
+                let scan = feed.clone();
+                if let Err(e) = shell.register(
+                    helios_shell::commands::CommandSpec::new(
+                        "library.map.scanNow",
+                        "Scan a volume for the image map now (`volume`, its id; none: every volume the settings allow)",
+                        "Library",
+                    ),
+                    move |args, _| {
+                        let volume = args
+                            .get("volume")
+                            .and_then(serde_json::Value::as_str)
+                            .map(|v| helios_vault::storage::VolumeId(v.into()));
+                        scan.scan_now(volume);
+                        Ok(serde_json::json!({ "asked": true }))
+                    },
+                ) {
+                    log::warn!("library.map.scanNow: {e}");
+                }
                 let plugged = feed.clone();
                 let known = std::sync::Mutex::new(
                     helios_storage::system()

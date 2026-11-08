@@ -443,6 +443,9 @@ mod tests {
             self.log("full", path);
             Ok(self.files.lock().unwrap()[path].3)
         }
+        fn list(&self, _: &Path) -> Result<Vec<(std::ffi::OsString, map_job::Entry)>, String> {
+            Ok(Vec::new())
+        }
     }
 
     /// A cache of keys; what is made and renamed is logged.
