@@ -139,6 +139,9 @@ pub fn declared(spec: &HeliosSpec, d: &Declarations) -> Result<CommandSpec, Plug
     if d.hidden.contains(&spec.id) {
         s = s.hidden();
     }
+    if spec.read_only {
+        s = s.read_only();
+    }
     Ok(s)
 }
 

@@ -30,6 +30,11 @@ pub struct CommandSpec {
     pub category: String,
     /// Where the command applies; empty: everywhere.
     pub when: String,
+    /// It only reads: what a status or a record table of the Settings app
+    /// may run to show its value, and what an agent may run when it may
+    /// only read.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub read_only: bool,
 }
 
 impl CommandSpec {
@@ -39,11 +44,18 @@ impl CommandSpec {
             title: title.into(),
             category: category.into(),
             when: String::new(),
+            read_only: false,
         }
     }
 
     pub fn when(mut self, when: &str) -> Self {
         self.when = when.into();
+        self
+    }
+
+    /// Declares it read-only: it changes nothing.
+    pub fn read_only(mut self) -> Self {
+        self.read_only = true;
         self
     }
 }

@@ -423,7 +423,8 @@ fn catalogue_commands(
             catalogue::LIST_COMMAND,
             "The catalogue's snapshots, next to it and on the backup disks plugged in, newest first",
             "Library",
-        ),
+        )
+        .read_only(),
         move |_, _| {
             let mounted = helios_storage::system().volumes();
             serde_json::to_value(catalogue::list(&at, &mounted)).map_err(|e| e.to_string())
