@@ -93,6 +93,9 @@ plugin-helios-clipboard =
 plugin-helios-commands =
     .title = Helios
 
+plugin-helios-config =
+    .title = Helios settings
+
 plugin-helios-contexts =
     .title = Helios places and modes
 
@@ -133,6 +136,90 @@ setting-health-destinationDays =
     .description = The health check warns when a disk the backup strategy copies to has not been plugged in for longer.
     .label = Warn when a backup disk is away for (days)
 
+setting-interface-experimental-workshops =
+    .description = Experimental: the Workshops panel and commands, to find, apply and aim macros by what they are for. May change; what it saves stays a macro. Takes effect at the next start.
+    .label = Workshops
+
+setting-interface-graph-zoom =
+    .description = Whether the graph view opens on the overview or the full detail.
+    .label = Graph view opens on
+
+setting-interface-graph-zoom-choice-detail = detail
+
+setting-interface-graph-zoom-choice-overview = overview
+
+setting-interface-panels-queue-when-empty =
+    .description = What the queue panel does when the selected node has no queue.
+    .label = Queue panel without a queue
+
 setting-notifications-jobs =
     .description = Shows a desktop notification when a long export or batch finishes or fails while no Helios window has the focus.
     .label = Notify when a long job ends
+
+setting-project-decisions-mode =
+    .description = How decision nodes are resolved by default in this project.
+    .label = Decision nodes
+
+setting-project-decisions-mode-choice-ai-assisted = ai_assisted
+
+setting-project-decisions-mode-choice-full-ai = full_ai
+
+setting-project-decisions-mode-choice-human = human
+
+setting-system-ai-calls =
+    .description = How many calls to AI models (decision nodes) run at the same time.
+    .label = Model calls at once
+
+setting-system-cache-budget =
+    .description = Memory the render cache may use before evicting what was used least recently; 0 means a share of the machine's memory (the setting below).
+    .label = Render cache
+
+setting-system-cache-share =
+    .description = The share of the machine's memory the render cache may use when no size is set above; 0 means no limit.
+    .label = Render cache share
+
+setting-system-cache-textures =
+    .description = Graphics memory the grids' thumbnails may hold; beyond it, the thumbnails out of view are freed, those seen longest ago first, and read back from the thumbnail cache when they come back.
+    .label = Thumbnail textures
+
+setting-system-cache-thumbnails =
+    .description = Disk space the library's thumbnail cache (.helios/thumbs beside the catalogue) may use before evicting the thumbnails used least recently.
+    .label = Thumbnail cache
+
+setting-system-events-journal =
+    .description = How many recent events the bus keeps for inspection and waits.
+    .label = Event journal
+
+setting-system-map-defaults =
+    .description = Whether the image map leaves out the system's folders, Helios's own data, caches, build trees, hidden folders, trash and other photo applications' libraries; off keeps only the rules above.
+    .label = Default blacklist
+
+setting-system-map-exclude =
+    .description = Rules added to the image map's blacklist, as a JSON list: each `{"{"}"glob": "**/Private/**"{"}"}` matches the absolute path, or with `"volume": "<id>"` the path inside that volume; a glob starting with `!` re-includes what a default excludes. The last rule that matches wins.
+    .label = Places never recorded
+
+setting-system-map-keepMissing =
+    .description = How long a file seen but not in the Library stays in the image map once it is missing from its place.
+    .label = Missing files kept
+
+setting-system-map-limit =
+    .description = How many files seen but not in the Library the image map keeps; past it, those seen longest ago are forgotten first. Library files are never counted.
+    .label = Files seen kept
+
+setting-system-map-record =
+    .description = What the image map records: everywhere (every listing, and background scans of known volumes), listings (what Helios is shown, plus scans of volumes with a role) or import (only what is imported).
+    .label = Image map records
+
+setting-system-map-record-choice-everywhere = everywhere
+
+setting-system-map-record-choice-import = import
+
+setting-system-map-record-choice-listings = listings
+
+setting-system-scheduler-workers =
+    .description = How many jobs run at once on this machine; 0 means one per CPU.
+    .label = Worker threads
+
+setting-system-workflow-keep-days =
+    .description = How long a finished batch (a run of the workflow level) stays in the vault, failures included, before it is removed whole; 0 removes it when the node next starts.
+    .label = Finished batches kept
