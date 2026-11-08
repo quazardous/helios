@@ -40,6 +40,10 @@ use serde_json::{Value as Json, json};
 /// (`packaging/linux`), the single instance's socket.
 pub const APP_ID: &str = "io.github.quazardous.Helios";
 
+/// The application's id for egui-pop (`AppBuilder::app_id`): it names the
+/// agent socket, `egui-pop-agent-helios.sock` in the runtime directory.
+pub const AGENT_APP_ID: &str = "helios";
+
 /// The scheme of Helios's links: `helios://open?path=...`.
 pub const SCHEME: &str = "helios";
 
@@ -506,6 +510,7 @@ impl Plugin for Platform {
 /// and theme files, and the desktop's text scaling ("larger text", read
 /// once at start), the text size's default until the user picks one.
 pub fn desktop(app: AppBuilder, instance: Instance) -> AppBuilder {
+    use egui_pop_agent::AgentSocketExt as _;
     let mut logs = LogsPlugin::new(STATE_NAME);
     if let Some(dir) = log_dir() {
         logs = logs.logs(Logs::new(dir, STATE_NAME));
@@ -522,6 +527,11 @@ pub fn desktop(app: AppBuilder, instance: Instance) -> AppBuilder {
         .plugin(crashes)
         .plugin(InstancePlugin::new(instance).scheme(SCHEME))
         .plugin(NotifyPlugin::new("Helios").backend(Desktop::new("Helios").app_id(APP_ID)))
+        // The agent socket, off unless the user asks for it
+        // (`EGUI_POP_AGENT_SOCKET=1`: `$XDG_RUNTIME_DIR/egui-pop-agent-helios.sock`;
+        // or a path), read-only (docs/gui.md, "Agents").
+        .app_id(AGENT_APP_ID)
+        .agent_socket_from_env()
 }
 
 #[cfg(test)]

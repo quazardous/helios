@@ -1218,6 +1218,36 @@ palette) opens the folder.
 - Helios's other crates write to the terminal (`eprintln!`), not to the
   log file.
 
+## Agents
+
+**The agent socket (2026-11-08).** An agent (a script, an MCP client)
+can drive a running Helios through egui-pop's debug bridge, served out of
+the process by `egui-pop-agent` (egui-pop's `docs/agent-socket.md`). It
+is off by default; the desktop window turns it on when asked:
+
+```console
+$ EGUI_POP_AGENT_SOCKET=1 helios-gui
+```
+
+The socket is `$XDG_RUNTIME_DIR/egui-pop-agent-helios.sock` (mode 0600;
+`EGUI_POP_AGENT_SOCKET=/some/path.sock` puts it elsewhere), and its path
+is in the log at start. The bridge is read-only: an agent reads the
+state (`snapshot`), lists the capabilities (`describe`), runs read-only
+commands and waits for events; anything that changes the image or the
+library is refused. Tests, pictures and tools never open it.
+
+An MCP client connects through egui-pop's bridge binary, built from
+egui-pop's repository with the `mcp` feature:
+
+```console
+$ cargo install --git https://github.com/quazardous/egui-pop egui-pop-agent --features mcp
+$ claude mcp add helios -- egui-pop-agent-mcp $XDG_RUNTIME_DIR/egui-pop-agent-helios.sock
+```
+
+Its tools are Helios's capabilities, generated from `describe` (a
+command `about.read` is the tool `about_read`), plus `snapshot` and
+`wait`.
+
 ## Parameters
 
 Parameter widgets are generated from value descriptors and bound to the

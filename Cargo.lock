@@ -795,7 +795,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "117725a109d387c937a1533ce01b450cbde6b88abceea8473c4d7a85853cda3c"
 dependencies = [
  "lazy_static",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -1136,6 +1136,20 @@ dependencies = [
  "egui-pop-tokens",
  "egui-pop-viewport",
  "egui-pop-views",
+]
+
+[[package]]
+name = "egui-pop-agent"
+version = "0.1.0"
+source = "git+https://github.com/quazardous/egui-pop?rev=f6c6dc71#f6c6dc71718eaf67929331199bbf9ec48380f413"
+dependencies = [
+ "egui",
+ "egui-pop-api",
+ "egui-pop-core",
+ "egui-pop-model",
+ "interprocess",
+ "log",
+ "serde_json",
 ]
 
 [[package]]
@@ -2274,6 +2288,7 @@ dependencies = [
  "eframe",
  "egui",
  "egui-pop",
+ "egui-pop-agent",
  "egui-pop-test",
  "egui-pop-wayland",
  "egui_kittest",

@@ -17,6 +17,9 @@ helios-shell.workspace = true
 # (egui-phosphor, MIT OR Apache-2.0; the icons MIT) for the commands' and
 # panels' icons, named `phosphor:<name>`.
 egui-pop = { workspace = true, features = ["phosphor", "viewport", "imaging", "i18n", "views", "editors", "platform-instance", "platform-notify", "platform-logs", "platform-crash", "platform-text-scale", "image-previews", "platform-thumbnails"] }
+# The agent socket: the debug bridge to agents (MCP through
+# egui-pop-agent-mcp), when EGUI_POP_AGENT_SOCKET=1.
+egui-pop-agent.workspace = true
 helios-i18n.workspace = true
 # The settings the desktop reads (the Queue panel's when empty).
 helios-config.workspace = true
