@@ -14,6 +14,9 @@
 //!   An offline location (its volume unplugged) is left alone;
 //! - **stacks** group images shown as one, and each image's import
 //!   **signals** are kept beside it ([`stacks`]).
+//! - the **Library** is the images flagged in it, and every file seen is a
+//!   **sighting**, a location being the sighting of a known image
+//!   ([`sightings`]); every Library read leaves the other images out.
 //!
 //! Rows live in a [`Store`], an abstraction no storage engine leaks into:
 //! [`MemoryStore`] here, drivers in their own crates (SQLite in

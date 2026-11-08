@@ -147,7 +147,7 @@ fn an_image_off_the_library_never_shows_in_a_library_read<S: Store>(s: S) {
         (seen[0].image, seen[0].partial),
         (Some(b.id), Some(b.partial))
     );
-    assert_eq!(v.sightings_like(b.size, &b.partial).unwrap(), seen);
+    assert_eq!(v.sightings_like(seen[0].size, &b.partial).unwrap(), seen);
     assert!(v.at_path(Path::new("/p/1.nef")).unwrap().is_some());
     // A third image out leaves no stack of two.
     v.set_in_library(&[c.id], false, "user", 10).unwrap();
