@@ -1010,6 +1010,19 @@ fn no_missing_command(shell: &Shell) {
     );
 }
 
+/// Why the shell refused `id`: a queued command's error comes in the
+/// frame it applies, as a warning.
+fn refusal(h: &mut Harness<'static, Shell>, id: &str, args: Value) -> String {
+    h.state_mut().notes.clear();
+    h.state_mut().run(id, args, Origin::User).unwrap();
+    h.run_steps(3);
+    let notes = &h.state().notes;
+    notes
+        .last()
+        .unwrap_or_else(|| panic!("{id} was not refused"))
+        .clone()
+}
+
 /// Helios started without a library (no `--vault`): the window opens on a
 /// card and says why nothing can be imported, its Import button off;
 /// nothing is queued for a command the host does not have.
@@ -1052,8 +1065,7 @@ fn without_a_library_a_drop_and_every_import_command_say_why() {
         ("library.importFiles", json!({ "paths": [dir] })),
         ("library.importSource", json!({ "path": dir })),
     ] {
-        let e = h.state_mut().run(id, args, Origin::User).unwrap_err();
-        assert_eq!(e, NO_LIBRARY, "{id}");
+        assert_eq!(refusal(&mut h, id, args), NO_LIBRARY, "{id}");
     }
     assert!(h.state_mut().take_imports().is_empty());
     no_missing_command(h.state());
@@ -1090,14 +1102,7 @@ fn a_library_that_could_not_be_opened_gives_its_reason() {
     assert!(!shell.library_open());
     let mut h = headless::harness(shell, vec2(1280.0, 800.0));
     h.run();
-    let e = h
-        .state_mut()
-        .run(
-            "library.importFiles",
-            json!({ "paths": ["/x"] }),
-            Origin::User,
-        )
-        .unwrap_err();
+    let e = refusal(&mut h, "library.importFiles", json!({ "paths": ["/x"] }));
     assert_eq!(e, "No library is open: library.db: read-only file system");
     assert!(h.state_mut().take_imports().is_empty());
     no_missing_command(h.state());
