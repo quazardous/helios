@@ -415,6 +415,8 @@ gui-import-window-duplicates-skip d5661c3c615168d0
 gui-import-window-empty fe07d84361c8a78d
 gui-import-window-example 3ee1ea9bdc5fbf23
 gui-import-window-favourites 7192206bcca57ec5
+gui-import-window-forget b048c9b09ccf06b2
+gui-import-window-forget-hint c993c16ae95c1288
 gui-import-window-import a96568bcea9b92b7
 gui-import-window-in-library 8e2f7088b5da9f30
 gui-import-window-into 952ca2732019c6b3
@@ -749,6 +751,8 @@ gui-storage-backup-on-connect 92ef1f7b5efcc1d8
 gui-storage-backup-on-import 4f1098d1c2062d33
 gui-storage-dest-archive 682c314264c76df2
 gui-storage-dest-backup a15f2913d776321c
+gui-storage-forget 2ef72c664799512a
+gui-storage-forget-hint b48856a4bf3d07a8
 gui-storage-free acb9b4a088648dc0
 gui-storage-intro 962af15992d7d261
 gui-storage-kind-external d3186ff36d482e4b

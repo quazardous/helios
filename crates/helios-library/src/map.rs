@@ -199,6 +199,78 @@ impl Drop for Recorder {
     }
 }
 
+/// Where a path lies: the volume of `volumes` holding it and its path
+/// there, or on no volume, the path itself.
+pub fn place(
+    volumes: &[Volume],
+    path: &Path,
+) -> (Option<helios_vault::storage::VolumeId>, PathBuf) {
+    helios_storage::registry::holding(volumes, path)
+        .and_then(|v| {
+            let rel = path.strip_prefix(v.mount.as_ref()?).ok()?;
+            Some((Some(v.id.clone()), rel.to_path_buf()))
+        })
+        .unwrap_or_else(|| (None, path.to_path_buf()))
+}
+
+/// Forgets the folder at `path` (`library.forgetFolder`, the import
+/// window's sources): its sightings not in the Library go, and listings
+/// skip it until it is listed again on purpose. Returns how many went.
+pub fn forget_folder<S: Store>(
+    vault: &Vault<S>,
+    volumes: &[Volume],
+    path: &Path,
+    now: u64,
+) -> Result<usize, String> {
+    let (volume, rel) = place(volumes, path);
+    vault.forget(volume.as_ref(), Some(&rel), now)
+}
+
+/// Forgets what the blacklist `checker` now excludes (a rule just added
+/// to `system.map.exclude`): each folder of a sighting on `volumes` or on
+/// no volume that is itself excluded is forgotten. A file excluded alone
+/// (a glob on file names) keeps its folder. Returns how many sightings
+/// went.
+pub fn forget_excluded<S: Store>(
+    vault: &Vault<S>,
+    volumes: &[Volume],
+    checker: &mut Checker,
+    now: u64,
+) -> Result<usize, String> {
+    let mut sightings = Vec::new();
+    for v in volumes {
+        sightings.extend(vault.sightings_under(Some(&v.id), Path::new(""))?);
+    }
+    sightings.extend(vault.sightings_under(None, Path::new("/"))?);
+    let mut folders = std::collections::BTreeSet::new();
+    for s in &sightings {
+        let Some(dir) = s.path.parent() else {
+            continue;
+        };
+        let rel = s.rel_path.as_deref().and_then(Path::parent);
+        let place = s.volume.as_ref().zip(rel);
+        if checker.excluded(dir, place).is_some() {
+            let key = match (&s.volume, rel) {
+                (Some(v), Some(r)) => (Some(v.clone()), r.to_path_buf()),
+                _ => (None, dir.to_path_buf()),
+            };
+            folders.insert(key);
+        }
+    }
+    let mut dropped = 0;
+    for (volume, rel) in &folders {
+        // A folder below one forgotten already went with it.
+        if folders
+            .iter()
+            .any(|(v, r)| v == volume && r != rel && rel.starts_with(r))
+        {
+            continue;
+        }
+        dropped += vault.forget(volume.as_ref(), Some(rel), now)?;
+    }
+    Ok(dropped)
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Mutex;
@@ -296,6 +368,62 @@ mod tests {
         let written = list.0.lock().unwrap();
         assert_eq!(written.len(), 2);
         assert_eq!(written[1].len(), 3);
+    }
+
+    #[test]
+    fn forget_a_folder_and_what_a_new_rule_excludes() {
+        let vault = Vault::new(helios_vault::MemoryStore::default());
+        let volumes = vec![volume("uuid:disk", "/media/disk")];
+        let id = VolumeId("uuid:disk".into());
+        let record = |rel: &str| {
+            let mut s = Sighting::seen(Path::new("/media/disk").join(rel), 1, 1, 1, "import");
+            s.volume = Some(id.clone());
+            s.rel_path = Some(rel.into());
+            vault.record_sighting(&s).unwrap();
+        };
+        for rel in [
+            "a/1.jpg",
+            "a/b/2.jpg",
+            "c/3.jpg",
+            "Private/4.jpg",
+            "Private/x/5.jpg",
+            "d/6.png",
+        ] {
+            record(rel);
+        }
+        let all = |v: &Vault<helios_vault::MemoryStore>| {
+            v.sightings_under(Some(&id), Path::new("")).unwrap().len()
+        };
+        assert_eq!(
+            forget_folder(&vault, &volumes, Path::new("/media/disk/a"), 2).unwrap(),
+            2
+        );
+        assert!(vault.forgotten(Some(&id), Path::new("a/new.jpg")).unwrap());
+        assert_eq!(all(&vault), 4);
+        // A rule just added: the folders it excludes go, a file rule
+        // leaves its folder.
+        let rules = vec![
+            Rule {
+                glob: "**/Private/**".into(),
+                volume: None,
+            },
+            Rule {
+                glob: "**/*.png".into(),
+                volume: None,
+            },
+        ];
+        let mut checker = Checker::new(Blacklist::new(Os::Linux, &Places::default(), false, rules));
+        assert_eq!(
+            forget_excluded(&vault, &volumes, &mut checker, 3).unwrap(),
+            2
+        );
+        let left: Vec<_> = vault
+            .sightings_under(Some(&id), Path::new(""))
+            .unwrap()
+            .into_iter()
+            .map(|s| s.rel_path.unwrap())
+            .collect();
+        assert_eq!(left, [PathBuf::from("c/3.jpg"), PathBuf::from("d/6.png")]);
     }
 
     #[test]

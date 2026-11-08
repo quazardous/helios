@@ -61,7 +61,11 @@ hour. Its entry shows while it has work and ends once it has none.
 **Forget a volume or a folder** drops its sightings not in the Library
 and marks the folder `forgotten` in the `folders` table: listings and
 scans leave it out until it is listed again on purpose
-(`Vault::forget`, `Vault::folder_listed`). The upkeep
+(`Vault::forget`, `Vault::folder_listed`). The commands
+`library.forgetFolder` (`path`) and `library.forgetVolume` (`volume`, its
+id) do it, from a source's menu in the import window ("Forget this
+folder") and a volume's "Forget what was seen here" on the Storage page;
+the volume itself stays known. The upkeep
 (`Vault::prune_sightings`) drops sightings not in the Library missing
 for longer than `system.map.keepMissing` (30 days), then the ones seen
 longest ago past `system.map.limit` (1,000,000); Library sightings are

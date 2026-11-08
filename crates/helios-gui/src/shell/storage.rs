@@ -205,6 +205,8 @@ enum Asked {
     Save(Volume),
     AskMark(VolumeId),
     Mark(Volume),
+    /// "Forget what was seen here" (`library.forgetVolume`).
+    Forget(VolumeId),
     CancelMark,
     Strategy(Option<Strategy>),
     BackupNow,
@@ -516,6 +518,13 @@ impl Shell {
                 self.storage.marking = Some(id);
                 Ok(())
             }
+            Asked::Forget(id) => self
+                .run(
+                    super::import_window::FORGET_VOLUME,
+                    serde_json::json!({ "volume": id.as_str() }),
+                    Origin::User,
+                )
+                .map(|_| ()),
             Asked::CancelMark => {
                 self.storage.marking = None;
                 Ok(())
@@ -913,6 +922,19 @@ fn volume_ui(
             {
                 *asked = Some(Asked::AskMark(volume.id.clone()));
             }
+        }
+        if ui
+            .button(t(Message::new(
+                "gui-storage-forget",
+                "Forget what was seen here",
+            )))
+            .on_hover_text(t(Message::new(
+                "gui-storage-forget-hint",
+                "Drops what the image map knows of this volume's files not in the Library; the volume stays known",
+            )))
+            .clicked()
+        {
+            *asked = Some(Asked::Forget(volume.id.clone()));
         }
     });
 }

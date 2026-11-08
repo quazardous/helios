@@ -991,6 +991,10 @@ gui-import-window-recent = Récents
 
 gui-import-window-remove-favourite = Retirer des favoris
 
+gui-import-window-forget = Oublier ce dossier
+
+gui-import-window-forget-hint = Retire ce que la carte des images sait des fichiers de ce dossier hors de la Bibliothèque ; il n’est plus enregistré tant que vous ne le listez pas
+
 gui-import-window-select = Sélection :
 
 gui-import-window-select-all = tout
@@ -1170,7 +1174,6 @@ gui-modules-save-workshop-hint = Donner à { $node } une intention et des cibles
 gui-modules-macro-update = Passer à la version { $version }
 
 gui-modules-macro-update-hint = Passer { $node } à la version { $version } de sa macro, ses valeurs reprises par nom
-
 
 gui-workshops-experimental = Expérimental : peut changer ; ce qu’il enregistre reste une macro
 
@@ -1564,6 +1567,10 @@ gui-storage-mark-cancel = Annuler
 gui-storage-mark = Marquer ce disque…
 
 gui-storage-mark-hint = Connu seulement par son nom de volume et sa taille : un fichier d’identité le distingue
+
+gui-storage-forget = Oublier ce qui a été vu ici
+
+gui-storage-forget-hint = Retire ce que la carte des images sait des fichiers de ce volume hors de la Bibliothèque ; le volume reste connu
 
 gui-import-window-delete-preset = Supprimer le préréglage
 

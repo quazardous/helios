@@ -461,6 +461,10 @@ gui-import-window-recent = Recent
 
 gui-import-window-remove-favourite = Remove from favourites
 
+gui-import-window-forget = Forget this folder
+
+gui-import-window-forget-hint = Drops what the image map knows of this folder's files not in the Library; it is not recorded again until you list it
+
 gui-import-window-save-preset = Save as preset…
 
 gui-import-window-select = Select:
@@ -1084,6 +1088,10 @@ gui-storage-mark-confirm = Write the identity file
 gui-storage-mark-explain = This disk is known only by its label and size, so Helios could take another disk for it. Marking it writes a small file, .helios/volume.json, at its root: nothing else on the disk changes.
 
 gui-storage-mark-hint = Known only by its label and size: an identity file tells it apart
+
+gui-storage-forget = Forget what was seen here
+
+gui-storage-forget-hint = Drops what the image map knows of this volume's files not in the Library; the volume stays known
 
 gui-storage-name-hint = Its name; Enter saves it
 

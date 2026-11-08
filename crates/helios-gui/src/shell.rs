@@ -64,6 +64,7 @@ mod health;
 mod import;
 mod import_choices;
 mod import_window;
+pub use import_window::{FORGET_FOLDER, FORGET_VOLUME};
 mod storage;
 
 /// Where an import's lines are sent: its arguments and a line.

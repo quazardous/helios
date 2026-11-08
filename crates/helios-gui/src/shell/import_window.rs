@@ -66,6 +66,12 @@ struct Memory {
 }
 
 /// The window's state, kept by the shell.
+/// The command that forgets a folder in the image map (registered by
+/// the desktop over its vault).
+pub const FORGET_FOLDER: &str = "library.forgetFolder";
+/// The command that forgets a volume in the image map.
+pub const FORGET_VOLUME: &str = "library.forgetVolume";
+
 #[derive(Default)]
 pub(crate) struct ImportWindow {
     open: bool,
@@ -237,6 +243,8 @@ enum Event {
     Choose,
     ChooseInto,
     Favourite(PathBuf, bool),
+    /// "Forget this folder" (`library.forgetFolder`).
+    Forget(PathBuf),
     /// "Storage…": the Storage page, to set up a backup.
     Storage,
 }
@@ -272,6 +280,8 @@ struct Words {
     choose: String,
     add_favourite: String,
     remove_favourite: String,
+    forget: String,
+    forget_hint: String,
     contents: String,
     grid: GridWords,
     choices: ChoiceWords,
@@ -578,6 +588,14 @@ impl Shell {
                 "gui-import-window-remove-favourite",
                 "Remove from favourites",
             )),
+            forget: t(Message::new(
+                "gui-import-window-forget",
+                "Forget this folder",
+            )),
+            forget_hint: t(Message::new(
+                "gui-import-window-forget-hint",
+                "Drops what the image map knows of this folder's files not in the Library; it is not recorded again until you list it",
+            )),
             contents: t(Message::new("gui-import-window-contents", "Contents")),
             grid: self.grid_words(),
             choices: self.choice_words(sample),
@@ -822,6 +840,12 @@ impl Shell {
                 }
                 w.save();
             }
+            Some(Event::Forget(path)) => {
+                let args = serde_json::json!({ "path": path.display().to_string() });
+                if let Err(e) = self.run(FORGET_FOLDER, args, Origin::User) {
+                    self.warn(format!("forget: {e}"));
+                }
+            }
             Some(Event::Import) => self.import_ticked_sources(),
             Some(Event::Storage) => {
                 if let Err(e) = self.run(super::storage::COMMAND, Value::Null, Origin::User) {
@@ -916,14 +940,16 @@ fn sources_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &Words, event: &mu
                     Some(b) => format!("{} · {}", card.label, helios_storage::capacity_text(b)),
                     None => card.label.clone(),
                 };
-                source_row(ui, w, &card.root, label, None);
+                if let Some(e) = source_row(ui, w, words, &card.root, label, None) {
+                    *event = Some(e);
+                }
             }
             ui.separator();
             ui.strong(&words.recent);
             let favourites = w.memory.favourites.clone();
             for path in w.memory.recent.clone() {
                 let star = (!favourites.contains(&path)).then_some((&words.add_favourite, true));
-                if let Some(e) = source_row(ui, w, &path, name_of(&path), star) {
+                if let Some(e) = source_row(ui, w, words, &path, name_of(&path), star) {
                     *event = Some(e);
                 }
             }
@@ -933,7 +959,7 @@ fn sources_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &Words, event: &mu
             }
             for path in favourites {
                 let remove = Some((&words.remove_favourite, false));
-                if let Some(e) = source_row(ui, w, &path, name_of(&path), remove) {
+                if let Some(e) = source_row(ui, w, words, &path, name_of(&path), remove) {
                     *event = Some(e);
                 }
             }
@@ -944,10 +970,12 @@ fn sources_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &Words, event: &mu
         });
 }
 
-/// A source's row: its tick, and a favourite's button when given.
+/// A source's row: its tick, a favourite's button when given, and
+/// "Forget this folder" in its menu.
 fn source_row(
     ui: &mut egui::Ui,
     w: &mut ImportWindow,
+    words: &Words,
     path: &Path,
     label: String,
     favourite: Option<(&String, bool)>,
@@ -955,14 +983,23 @@ fn source_row(
     let mut event = None;
     ui.horizontal(|ui| {
         let mut on = w.ticked.iter().any(|p| p == path);
-        if ui
+        let tick = ui
             .checkbox(&mut on, label)
-            .on_hover_text(path.display().to_string())
-            .changed()
-        {
+            .on_hover_text(path.display().to_string());
+        if tick.changed() {
             w.tick(path, on);
             w.touched = true;
         }
+        tick.context_menu(|ui| {
+            if ui
+                .button(&words.forget)
+                .on_hover_text(&words.forget_hint)
+                .clicked()
+            {
+                event = Some(Event::Forget(path.to_path_buf()));
+                ui.close();
+            }
+        });
         if let Some((text, add)) = favourite {
             let icon = if add { "☆" } else { "✕" };
             if ui.small_button(icon).on_hover_text(text).clicked() {

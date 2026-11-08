@@ -583,6 +583,39 @@ fn library_commands(
                 .map(|d| stacks::to_json(&d))
         },
     )?;
+    // The image map: forget a folder or a volume (its sightings not in
+    // the Library go; listings skip it until listed again on purpose).
+    let vault = persist.vault().clone();
+    shell.register(
+        CommandSpec::new(
+            helios_gui::shell::FORGET_FOLDER,
+            "Forget a folder in the image map (`path`): its files not in the Library",
+            "Library",
+        ),
+        move |args, _| {
+            let path = text(args, "path").ok_or("`path` is missing")?;
+            let mounted = helios_storage::system().volumes();
+            let volumes =
+                helios_storage::registry::merged(vault.as_ref(), &mounted).unwrap_or(mounted);
+            helios_library::map::forget_folder(&vault, &volumes, Path::new(&path), seconds())
+                .map(|n| serde_json::json!({ "forgotten": n }))
+        },
+    )?;
+    let vault = persist.vault().clone();
+    shell.register(
+        CommandSpec::new(
+            helios_gui::shell::FORGET_VOLUME,
+            "Forget a volume in the image map (`volume`, its id): its files not in the Library",
+            "Library",
+        ),
+        move |args, _| {
+            let id = text(args, "volume").ok_or("`volume` is missing")?;
+            let id = helios_vault::storage::VolumeId(id);
+            vault
+                .forget(Some(&id), None, seconds())
+                .map(|n| serde_json::json!({ "forgotten": n }))
+        },
+    )?;
     let vault = persist.vault().clone();
     shell.register(
         CommandSpec::new("library.stacks.list", "List the stacks", "Library"),
