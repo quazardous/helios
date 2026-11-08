@@ -572,6 +572,32 @@ pub fn desktop(app: AppBuilder, instance: Instance) -> AppBuilder {
         // read-only (docs/gui.md, "Agents").
         .app_id(AGENT_APP_ID)
         .agent_socket_from_env_or_setting()
+        .debug_bridge_if(agent_writes(|n| std::env::var(n).ok()))
+}
+
+/// `HELIOS_AGENT_WRITE=1`: the agents may change the image and the
+/// library, not only read them. For scenario runs on a throwaway library
+/// (docs/gui.md, "Agents"); the bridge stays read-only otherwise.
+pub const AGENT_WRITE: &str = "HELIOS_AGENT_WRITE";
+
+/// Whether the environment lets agents write.
+fn agent_writes(env: impl Fn(&str) -> Option<String>) -> bool {
+    env(AGENT_WRITE).is_some_and(|v| v == "1")
+}
+
+/// The bridge made writable when asked, left to its default otherwise.
+trait DebugBridgeIf {
+    fn debug_bridge_if(self, on: bool) -> Self;
+}
+
+impl DebugBridgeIf for AppBuilder {
+    fn debug_bridge_if(self, on: bool) -> Self {
+        if on {
+            self.debug_bridge(egui_pop::core::debug::BridgeMode::On)
+        } else {
+            self
+        }
+    }
 }
 
 #[cfg(test)]
@@ -580,6 +606,15 @@ mod tests {
 
     fn args(a: &[&str]) -> Vec<String> {
         a.iter().map(|s| (*s).to_string()).collect()
+    }
+
+    #[test]
+    fn agents_write_only_when_the_environment_says_1() {
+        assert!(agent_writes(|n| (n == AGENT_WRITE).then(|| "1".to_string())));
+        assert!(!agent_writes(
+            |n| (n == AGENT_WRITE).then(|| "yes".to_string())
+        ));
+        assert!(!agent_writes(|_| None));
     }
 
     #[test]
