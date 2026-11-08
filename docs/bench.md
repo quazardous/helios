@@ -106,11 +106,15 @@ current branch while it has commits origin lacks). Before queueing it also
 checks, when the box runs this checkout's code, that Cargo.lock is up to
 date and that the changelog fragments are well formed (at most 600
 characters): a few seconds here instead of a failed job on the box.
-It also refuses a job missing a parameter its command needs, and runs
-`cargo check --tests` on the code the job will build (the crate it names,
-else the workspace; for egui-pop jobs, in the local egui-pop checkout of
-`egui_pop=`): **a compile error never reaches the box** (owner,
-2026-11-08). `HELIOS_BENCH_NO_PREFLIGHT=1` queues it anyway; never for a
+It also refuses a job missing a parameter its command needs. Then, before
+any job that builds, it sends the box's short `check` job (`egui-pop-check`
+for egui-pop's jobs): `cargo check --tests` on the crate the job names, else
+the workspace, with no code generated and no link, stopping at the first
+crate that fails. The job itself is queued only if that check passes:
+**a compile error never takes a test job's place** (owner, 2026-11-08). The
+check also warms the branch's target for the job that follows.
+`HELIOS_BENCH_LOCAL_CHECK=1` runs the same `cargo check` here instead;
+`HELIOS_BENCH_NO_CHECK=1` skips it. `HELIOS_BENCH_NO_PREFLIGHT=1` queues it anyway; never for a
 compile error.
 
 **Every failed job has a reason.** A failed job is recorded in

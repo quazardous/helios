@@ -816,6 +816,49 @@ fn affected(root: &Path, req: &Request) -> Result<u8, String> {
     Ok(combined(&codes))
 }
 
+/// `cargo check` runs here instead of on the box when
+/// `HELIOS_BENCH_LOCAL_CHECK=1` (the default is the box's `check` job).
+fn local_check() -> bool {
+    std::env::var_os("HELIOS_BENCH_LOCAL_CHECK").is_some()
+}
+
+/// The box's `check` (or `egui-pop-check`) job sent before a job that
+/// builds, with the same branch, crate and pushed code; none for the check
+/// jobs themselves, for jobs that build nothing, with
+/// `HELIOS_BENCH_NO_CHECK=1`, or when the check runs here.
+pub fn check_request(req: &Request) -> Option<Request> {
+    let builds_nothing = ["check", "egui-pop-check", "lint", "thumb-bench", "release"];
+    if req.job.is_empty()
+        || builds_nothing.contains(&req.job.as_str())
+        || local_check()
+        || std::env::var_os("HELIOS_BENCH_NO_CHECK").is_some()
+    {
+        return None;
+    }
+    let egui_pop = req.job.starts_with("egui-pop");
+    let keep: &[&str] = if egui_pop {
+        &["branch", "egui_pop", "crate", "priority", "src"]
+    } else {
+        &["branch", "crate", "priority", "src"]
+    };
+    let mut params: Vec<(String, String)> = req
+        .params
+        .iter()
+        .filter(|(k, _)| keep.contains(&k.as_str()))
+        .cloned()
+        .collect();
+    let name = format!("{}-check", req.param("ext_job_id").unwrap_or(&req.job));
+    params.push(("ext_job_id".into(), name));
+    Some(Request {
+        job: if egui_pop { "egui-pop-check" } else { "check" }.into(),
+        params,
+        push: false,
+        affected: false,
+        chain: None,
+        expect_fail: false,
+    })
+}
+
 /// The local checkout of egui-pop that has `branch` checked out (the
 /// sibling `../egui-pop` or one of its worktrees), if any.
 fn egui_pop_checkout(root: &Path, branch: &str) -> Option<PathBuf> {
@@ -929,6 +972,7 @@ fn preflight(
             .iter()
             .find(|(k, _)| k == "egui_pop")
             .map(|(_, v)| v.as_str())
+        && local_check()
         && let Some(dir) = egui_pop_checkout(root, branch)
     {
         compiles(
@@ -957,13 +1001,15 @@ fn preflight(
             );
         }
     }
-    compiles(
-        root,
-        given
-            .iter()
-            .find(|(k, _)| k == "crate")
-            .map(|(_, v)| v.as_str()),
-    )?;
+    if local_check() {
+        compiles(
+            root,
+            given
+                .iter()
+                .find(|(k, _)| k == "crate")
+                .map(|(_, v)| v.as_str()),
+        )?;
+    }
     crate::read_fragments(&root.join("changelog.d"))
         .map_err(|problems| format!("changelog fragments: {}", problems.join("; ")))?;
     Ok(())
@@ -1022,6 +1068,20 @@ fn remote(root: &Path, req: &mut Request) -> Result<u8, String> {
     }
     if let Some(code) = prepare(root, &b, req) {
         return Ok(code);
+    }
+    if let Some(mut check) = check_request(req) {
+        eprintln!(
+            "bench-remote: first `{}` on the box: a compile error stops there",
+            check.job
+        );
+        let code = remote(root, &mut check)?;
+        if code != 0 {
+            eprintln!(
+                "bench-remote: `{}` not queued: the code does not compile",
+                req.job
+            );
+            return Ok(code);
+        }
     }
 
     let started = Instant::now();
@@ -1839,6 +1899,26 @@ mod tests {
             "refused by the box (a parameter missing or invalid)"
         );
         assert_eq!(failure_class(100), "tests failed");
+    }
+
+    #[test]
+    fn a_job_that_builds_is_preceded_by_a_check_with_its_branch_and_crate() {
+        let req = parse_args(&[
+            "test-crate",
+            "branch=b",
+            "crate=x",
+            "test=t",
+            "ext_job_id=j",
+        ])
+        .unwrap();
+        let c = check_request(&req).unwrap();
+        assert_eq!(c.job, "check");
+        assert_eq!(c.param("crate"), Some("x"));
+        assert_eq!(c.param("test"), None);
+        assert_eq!(c.param("ext_job_id"), Some("j-check"));
+        let e = parse_args(&["egui-pop-test", "egui_pop=f", "crate=y", "test=t"]).unwrap();
+        assert_eq!(check_request(&e).unwrap().job, "egui-pop-check");
+        assert!(check_request(&parse_args(&["check", "crate=x"]).unwrap()).is_none());
     }
 
     #[test]
