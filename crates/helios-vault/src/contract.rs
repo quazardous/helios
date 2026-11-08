@@ -224,8 +224,9 @@ fn forgetting_and_pruning_never_touch_the_library<S: Store>(s: S) {
         rows.push(s);
     }
     v.record_listed(&rows).unwrap();
-    // Six outside the Library on e (one missing since 50): the missing
-    // one goes, then the cap of 3 drops the two seen longest ago.
+    // Six outside the Library, all on e (one missing since 50): the
+    // missing one goes, then the cap of 3 drops the two seen longest ago
+    // (shoot/e.jpg, then p/0.jpg).
     assert_eq!(v.prune_sightings(3, 60).unwrap(), 3);
     let left: Vec<PathBuf> = v
         .sightings_under(Some(&e), Path::new(""))
@@ -235,7 +236,11 @@ fn forgetting_and_pruning_never_touch_the_library<S: Store>(s: S) {
         .collect();
     assert_eq!(
         left,
-        [PathBuf::from("p/2.jpg"), PathBuf::from("p/3.jpg")],
+        [
+            PathBuf::from("p/1.jpg"),
+            PathBuf::from("p/2.jpg"),
+            PathBuf::from("p/3.jpg")
+        ],
         "{left:?}"
     );
     assert_eq!(v.sightings(&a.id).unwrap().len(), 1, "the library stays");
