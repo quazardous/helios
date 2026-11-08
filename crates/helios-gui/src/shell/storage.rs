@@ -21,6 +21,11 @@
 //! which disks (any backup disk, any archive disk, or one disk), whether
 //! one must be off site and when copies are made; saved at once. "Back up
 //! now" runs `library.backupNow`.
+//!
+//! Below it, the catalogue (`crate::catalogue`): its snapshots, next to it
+//! and on the backup disks plugged in, newest first; "Snapshot now", how
+//! often one is taken and how many are kept (settings), and "Restore…" on
+//! each, which asks before Helios closes and starts again on it.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, PoisonError};
@@ -198,6 +203,11 @@ pub(crate) struct StoragePage {
     waiting: Vec<Card>,
     /// The same, for the health check's thread.
     shared_waiting: Arc<Mutex<Vec<Card>>>,
+    /// The catalogue's snapshots, as `library.catalogue.snapshots` lists
+    /// them (none without a library).
+    snapshots: Vec<Value>,
+    /// The snapshot whose restore waits for its confirmation.
+    restoring: Option<Value>,
 }
 
 /// What the page's controls asked.
@@ -210,6 +220,14 @@ enum Asked {
     CancelMark,
     Strategy(Option<Strategy>),
     BackupNow,
+    SnapshotNow,
+    /// "Restore…": asks first.
+    AskRestore(Value),
+    CancelRestore,
+    /// Confirmed: the snapshot's file.
+    Restore(String),
+    /// A catalogue setting (`settings/<id>`) set to a number.
+    Setting(&'static str, i64),
 }
 
 impl Shell {
@@ -239,6 +257,7 @@ impl Shell {
                 Ok(p) => self.storage.photos = p,
                 Err(e) => self.storage.error = Some(e),
             }
+            self.refresh_snapshots();
         }
         // The import window's strategy line reads it too.
         match link.strategy() {
@@ -247,6 +266,23 @@ impl Shell {
         }
         let known: Vec<VolumeId> = self.storage.volumes.iter().map(|v| v.id.clone()).collect();
         self.storage.names.retain(|id, _| known.contains(id));
+    }
+
+    /// The catalogue's snapshots read again, when Helios has a library.
+    fn refresh_snapshots(&mut self) {
+        if !self.has_command(crate::catalogue::LIST_COMMAND) {
+            return;
+        }
+        if let Ok(Value::Array(list)) =
+            self.run(crate::catalogue::LIST_COMMAND, Value::Null, Origin::User)
+        {
+            self.storage.snapshots = list;
+        }
+    }
+
+    /// The catalogue's snapshots the Storage page lists, newest first.
+    pub fn storage_snapshots(&self) -> &[Value] {
+        &self.storage.snapshots
     }
 
     /// Each photo's backups read again (one read for the Library), for
@@ -451,6 +487,14 @@ impl Shell {
         let mut open = true;
         let mut asked = None;
         let max = ctx.content_rect().size() - egui::vec2(32.0, 32.0);
+        let catalogue_on = self.has_command(crate::catalogue::SNAPSHOT_COMMAND);
+        let settings = {
+            let store = self.app.handle().store();
+            (
+                crate::catalogue::every(&store) / 3600,
+                crate::catalogue::kept(&store) as u64,
+            )
+        };
         let page = &mut self.storage;
         // The volume asked for first, then online ones, then offline.
         let mut order: Vec<usize> = (0..page.volumes.len()).collect();
@@ -480,6 +524,17 @@ impl Shell {
                 ui.separator();
                 strategy_ui(ui, &t, page.strategy.as_ref(), &page.volumes, &mut asked);
                 ui.separator();
+                if catalogue_on {
+                    catalogue_ui(
+                        ui,
+                        &t,
+                        &page.snapshots,
+                        page.restoring.as_ref(),
+                        settings,
+                        &mut asked,
+                    );
+                    ui.separator();
+                }
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     if page.volumes.is_empty() {
                         ui.weak(t(Message::new(
@@ -514,6 +569,44 @@ impl Shell {
             Asked::Save(v) => link.save(&v).map(|_| ()),
             Asked::Strategy(s) => link.set_strategy(s.as_ref()),
             Asked::BackupNow => self.run(BACKUP_NOW, Value::Null, Origin::User).map(|_| ()),
+            Asked::SnapshotNow => self
+                .run(
+                    crate::catalogue::SNAPSHOT_COMMAND,
+                    Value::Null,
+                    Origin::User,
+                )
+                .map(|_| ()),
+            Asked::AskRestore(s) => {
+                self.storage.restoring = Some(s);
+                Ok(())
+            }
+            Asked::CancelRestore => {
+                self.storage.restoring = None;
+                Ok(())
+            }
+            Asked::Restore(file) => {
+                self.storage.restoring = None;
+                self.run(
+                    crate::catalogue::RESTORE_COMMAND,
+                    serde_json::json!({ "file": file }),
+                    Origin::User,
+                )
+                .map(|_| ())
+            }
+            Asked::Setting(id, value) => {
+                use egui_pop::model::commands::Origin as PopOrigin;
+                use egui_pop::model::values::{Change, Set, Value as PopValue};
+                let store = self.app.handle().store();
+                let mut store = store.lock().unwrap_or_else(PoisonError::into_inner);
+                store
+                    .set(Set::new(
+                        &format!("settings/{id}"),
+                        Change::To(PopValue::Int(value)),
+                        PopOrigin::User,
+                    ))
+                    .map(|_| ())
+                    .map_err(|e| e.to_string())
+            }
             Asked::AskMark(id) => {
                 self.storage.marking = Some(id);
                 Ok(())
@@ -578,6 +671,129 @@ fn card_of(v: &Value) -> Option<Card> {
         root: v["root"].as_str()?.into(),
         files,
     })
+}
+
+/// "3 days ago", "today": how old a snapshot taken at `taken` is.
+fn age_text(t: &dyn Fn(Message) -> String, taken: u64) -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    match now.saturating_sub(taken) / 86_400 {
+        0 => t(Message::new("gui-catalogue-today", "today")),
+        1 => t(Message::new("gui-catalogue-one-day", "1 day ago")),
+        days => t(Message::new("gui-catalogue-days", "{ $days } days ago").with("days", days)),
+    }
+}
+
+/// The catalogue's snapshots: "Snapshot now", the settings, each snapshot
+/// with "Restore…", and the confirmation of a restore asked.
+fn catalogue_ui(
+    ui: &mut egui::Ui,
+    t: &dyn Fn(Message) -> String,
+    snapshots: &[Value],
+    restoring: Option<&Value>,
+    (every, kept): (u64, u64),
+    asked: &mut Option<Asked>,
+) {
+    ui.strong(t(Message::new("gui-catalogue", "Catalogue")));
+    ui.label(
+        egui::RichText::new(t(Message::new(
+            "gui-catalogue-intro",
+            "Verified snapshots of the catalogue (ratings, tags, edits): kept next to it and copied to the backup disks plugged in.",
+        )))
+        .small(),
+    );
+    ui.horizontal(|ui| {
+        if ui
+            .button(t(Message::new(
+                "gui-catalogue-snapshot-now",
+                "Snapshot now",
+            )))
+            .clicked()
+        {
+            *asked = Some(Asked::SnapshotNow);
+        }
+        ui.label(t(Message::new("gui-catalogue-every", "Every (hours)")));
+        let mut hours = every;
+        if ui
+            .add(egui::DragValue::new(&mut hours).range(1..=720))
+            .changed()
+        {
+            *asked = Some(Asked::Setting(
+                "catalogue.snapshotEvery",
+                i64::try_from(hours).unwrap_or(24),
+            ));
+        }
+        ui.label(t(Message::new("gui-catalogue-kept", "Kept")));
+        let mut keep = kept;
+        if ui
+            .add(egui::DragValue::new(&mut keep).range(1..=100))
+            .changed()
+        {
+            *asked = Some(Asked::Setting(
+                "catalogue.snapshotsKept",
+                i64::try_from(keep).unwrap_or(5),
+            ));
+        }
+    });
+    if let Some(s) = restoring {
+        let file = s["file"].as_str().unwrap_or_default().to_string();
+        let when = age_text(t, s["taken"].as_u64().unwrap_or(0));
+        ui.group(|ui| {
+            ui.colored_label(
+                ui.visuals().warn_fg_color,
+                t(Message::new(
+                    "gui-catalogue-restore-ask",
+                    "Restore the catalogue from the snapshot of { $when }? Changes made since are lost. The current catalogue is kept aside, and Helios closes and starts again on the snapshot.",
+                )
+                .with("when", when)),
+            );
+            ui.weak(&file);
+            ui.horizontal(|ui| {
+                if ui
+                    .button(t(Message::new(
+                        "gui-catalogue-restore-confirm",
+                        "Restore and restart",
+                    )))
+                    .clicked()
+                {
+                    *asked = Some(Asked::Restore(file.clone()));
+                }
+                if ui
+                    .button(t(Message::new("gui-catalogue-restore-cancel", "Cancel")))
+                    .clicked()
+                {
+                    *asked = Some(Asked::CancelRestore);
+                }
+            });
+        });
+    }
+    if snapshots.is_empty() {
+        ui.weak(t(Message::new("gui-catalogue-none", "No snapshot yet.")));
+        return;
+    }
+    for s in snapshots {
+        ui.horizontal(|ui| {
+            let place = match s["disk"].as_str() {
+                Some(disk) => t(Message::new("gui-catalogue-on-disk", "on { $disk }")
+                    .with("disk", disk.to_string())),
+                None => t(Message::new("gui-catalogue-here", "next to the catalogue")),
+            };
+            ui.label(format!(
+                "{} · {} · {}",
+                age_text(t, s["taken"].as_u64().unwrap_or(0)),
+                s["reason"].as_str().unwrap_or_default(),
+                place
+            ))
+            .on_hover_text(s["file"].as_str().unwrap_or_default());
+            if ui
+                .button(t(Message::new("gui-catalogue-restore", "Restore…")))
+                .clicked()
+            {
+                *asked = Some(Asked::AskRestore(s.clone()));
+            }
+        });
+    }
 }
 
 /// A destination's words: any disk of a role, or one disk by name.

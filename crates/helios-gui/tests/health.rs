@@ -714,3 +714,44 @@ fn without_catalogue_snapshots_one_line_says_none_yet() {
     assert_eq!(f.level, Level::Warning);
     assert_eq!(f.fix.unwrap().command, "library.openFolder");
 }
+
+#[test]
+fn catalogue_snapshots_taken_fill_the_check_with_their_copies_on_backup_disks() {
+    use helios_gui::catalogue;
+    let lib = Library::new("snapshots-taken");
+    lib.strategy(Some(&Strategy::default()));
+    let mounted = [lib.studio.clone(), lib.backup.clone()];
+    let (taken, copies) = catalogue::take(&lib.vault, &mounted, &lib.file, "by-hand", 3).unwrap();
+    assert_eq!(
+        copies,
+        [lib.dir
+            .join("backup/Helios Backup/catalogue/library")
+            .join(taken.file_name().unwrap())]
+    );
+    // Listed next to the catalogue, then on the backup disk.
+    let listed = catalogue::list(&lib.file, &mounted);
+    assert_eq!(listed.len(), 2);
+    assert_eq!(listed[0].file, taken);
+    assert_eq!(listed[0].disk, None);
+    assert_eq!(listed[1].disk.as_deref(), Some("Backup"));
+    let check = |now: u64| {
+        let ctx = Context {
+            vault: Some(lib.file.clone()),
+            snapshots: Some(catalogue::health(&lib.file, &mounted, now)),
+            ..Context::default()
+        };
+        SnapshotsCheck.run(&ctx).remove(0)
+    };
+    let when = listed[0].taken;
+    let found = check(when + 60);
+    assert_eq!(found.level, Level::Ok);
+    assert_eq!(found.message.key, "health-snapshots-ok");
+    assert_eq!(check(when + 10 * 86_400).level, Level::Warning);
+    // A newest snapshot that no longer reads back cannot be restored.
+    for l in &listed {
+        std::fs::write(&l.file, b"broken").unwrap();
+    }
+    let found = check(when + 60);
+    assert_eq!(found.level, Level::Problem);
+    assert_eq!(found.message.key, "health-snapshots-broken");
+}

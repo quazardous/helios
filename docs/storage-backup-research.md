@@ -104,8 +104,10 @@ From the code of `helios-vault`, `helios-vault-sqlite` and
   `/media` on Linux, none elsewhere yet.
 - **Catalogue snapshots**: `helios-vault-sqlite` takes verified
   snapshots through SQLite's backup API (`quick_check`, synced, then
-  renamed), five kept, next to the database, today before a schema
-  migration.
+  renamed), five kept, next to the database, before a schema migration,
+  daily and by hand; each is copied, verified, to the strategy's disks
+  plugged in (`Helios Backup/catalogue/`), listed and restored from the
+  Storage page (phase 7, `docs/library.md`, "Catalogue snapshots").
 - **No preview cache.** The grid reads embedded previews from the
   files themselves, in the background. A photo whose file is not
   reachable has no thumbnail.

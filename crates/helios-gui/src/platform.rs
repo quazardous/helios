@@ -115,10 +115,25 @@ pub fn library_file_with(
 }
 
 /// Opens the library (vault file) at `path`, its folder made first (the
-/// default library's, on the first launch).
+/// default library's, on the first launch). A catalogue snapshot whose
+/// restore was asked for (`library.catalogue.restore`) is put in place
+/// first, the catalogue it replaces kept aside; a restore that fails
+/// leaves the catalogue as it was, and says why in the log.
 pub fn open_library(path: &Path) -> Result<helios_vault_sqlite::SqliteStore, String> {
     if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
         std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    match helios_vault_sqlite::snapshot::apply_pending(path, now) {
+        Ok(Some(r)) => log::info!(
+            "catalogue restored from {}; the one it replaced is kept as {}",
+            r.from.display(),
+            r.aside.display()
+        ),
+        Ok(None) => {}
+        Err(e) => log::error!("catalogue restore refused: {e}"),
     }
     helios_vault_sqlite::SqliteStore::open(path).map_err(|e| format!("{}: {e}", path.display()))
 }
@@ -467,6 +482,30 @@ impl Plugin for Platform {
             )
             .description(
                 "The health check warns when a disk the backup strategy copies to has not been plugged in for longer.",
+            ),
+        )?;
+        ctx.setting(
+            crate::catalogue::SETTING_EVERY,
+            Descriptor::int(
+                "Catalogue snapshot every (hours)",
+                1,
+                24 * 30,
+                i64::try_from(crate::catalogue::EVERY_HOURS).unwrap_or(24),
+            )
+            .description(
+                "Helios takes a verified snapshot of the catalogue this often, keeps it next to the catalogue and copies it to the backup disks plugged in.",
+            ),
+        )?;
+        ctx.setting(
+            crate::catalogue::SETTING_KEPT,
+            Descriptor::int(
+                "Catalogue snapshots kept",
+                1,
+                100,
+                i64::try_from(crate::catalogue::KEPT).unwrap_or(5),
+            )
+            .description(
+                "How many catalogue snapshots are kept next to the catalogue and on each backup disk; the oldest go first.",
             ),
         )?;
         // Without a single instance (tests, pictures, tools) there are

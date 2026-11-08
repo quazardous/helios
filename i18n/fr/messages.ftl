@@ -1590,3 +1590,18 @@ gui-import-window-totals = { $photos ->
     [one] { $photos } photo, { $size }
    *[other] { $photos } photos, { $size }
 }
+gui-catalogue = Catalogue
+gui-catalogue-days = il y a { $days } jours
+gui-catalogue-every = Toutes les (heures)
+gui-catalogue-here = à côté du catalogue
+gui-catalogue-intro = Instantanés vérifiés du catalogue (notes, mots-clés, retouches) : gardés à côté de lui et copiés sur les disques de sauvegarde branchés.
+gui-catalogue-kept = Gardés
+gui-catalogue-none = Aucun instantané pour l'instant.
+gui-catalogue-on-disk = sur { $disk }
+gui-catalogue-one-day = il y a 1 jour
+gui-catalogue-restore = Restaurer…
+gui-catalogue-restore-ask = Restaurer le catalogue depuis l'instantané d'{ $when } ? Les changements faits depuis sont perdus. Le catalogue actuel est mis de côté, et Helios se ferme puis redémarre sur l'instantané.
+gui-catalogue-restore-cancel = Annuler
+gui-catalogue-restore-confirm = Restaurer et redémarrer
+gui-catalogue-snapshot-now = Instantané maintenant
+gui-catalogue-today = aujourd'hui

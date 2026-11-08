@@ -364,6 +364,37 @@ pub fn backup_path(mount: &Path, in_library: &Path) -> PathBuf {
     mount.join(BACKUP_FOLDER).join(in_library)
 }
 
+/// The folder catalogue snapshots go to, inside [`BACKUP_FOLDER`].
+pub const CATALOGUE_FOLDER: &str = "catalogue";
+
+/// Where the snapshots of the catalogue named `library` (its database
+/// file's stem: several libraries can share a disk) go on a volume
+/// mounted at `mount`: `Helios Backup/catalogue/<library>/`.
+pub fn catalogue_path(mount: &Path, library: &str) -> PathBuf {
+    mount
+        .join(BACKUP_FOLDER)
+        .join(CATALOGUE_FOLDER)
+        .join(library)
+}
+
+/// The folders the catalogue's snapshots are copied to: on each
+/// destination of `strategy` plugged in ([`destinations_online`]), the
+/// [`catalogue_path`], when Helios may write there ([`may_write`]).
+pub fn catalogue_destinations(
+    strategy: &Strategy,
+    volumes: &[Volume],
+    library: &str,
+) -> Vec<(Volume, PathBuf)> {
+    destinations_online(strategy, volumes)
+        .into_iter()
+        .filter_map(|v| {
+            let folder = catalogue_path(v.mount.as_deref()?, library);
+            may_write(&v, &folder).ok()?;
+            Some((v, folder))
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use helios_vault::MemoryStore;
@@ -494,6 +525,24 @@ mod tests {
         assert!(may_write(&card, Path::new("/media/C/Helios Backup/x.raf")).is_err());
         let ingest = disk("uuid:i", &[Role::Backup, Role::Ingest]);
         assert!(may_back_up_to(&ingest).is_err());
+    }
+
+    #[test]
+    fn catalogue_snapshots_go_to_the_destinations_plugged_in() {
+        let mut a = disk("uuid:a", &[Role::Backup]);
+        a.mount = Some("/media/A".into());
+        let b = disk("uuid:b", &[Role::Backup]);
+        let mut none = disk("uuid:n", &[]);
+        none.mount = Some("/media/N".into());
+        let s = Strategy::default();
+        let found = catalogue_destinations(&s, &[a, b, none], "library");
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].0.id, VolumeId("uuid:a".into()));
+        assert_eq!(
+            found[0].1,
+            Path::new("/media/A/Helios Backup/catalogue/library")
+        );
+        assert!(may_write(&found[0].0, &found[0].1).is_ok());
     }
 
     #[test]

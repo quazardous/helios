@@ -661,6 +661,43 @@ is filled (`helios_storage::strategy::statuses`). The search field takes
 `backup:unverified` and `backup:none` (no backup copy at all, strategy or
 not).
 
+### Catalogue snapshots
+
+The catalogue (the vault database: ratings, tags, edits, collections) is
+not beside the photos, so Helios keeps **snapshots** of it
+(`helios_vault_sqlite::snapshot`, `helios_gui::catalogue`). A snapshot is
+a copy made through SQLite's backup API from a connection of its own, in
+one read transaction: consistent while Helios writes. It is written under
+a part name, checked (it opens read-only, has a schema version and passes
+`PRAGMA quick_check`), synced, then renamed: a snapshot that exists was
+verified. They live next to the catalogue, in `<file>.snapshots/`, named
+`<sequence>-v<schema>-<reason>.db`.
+
+- **When:** every `catalogue.snapshotEvery` hours (daily by default; a
+  thread looks every ten minutes), before a schema migration (the vault
+  does it), and by hand ("Snapshot now" on the Storage page,
+  `library.catalogue.snapshot`).
+- **Where:** next to the catalogue, and copied to each disk of the backup
+  strategy plugged in, under `Helios Backup/catalogue/<library>/` (the
+  catalogue file's stem). A copy is written to a part file, read back and
+  checked like the snapshot, then named; one already there and whole is
+  kept.
+- **Retention:** `catalogue.snapshotsKept` (five by default) in each
+  place, the oldest removed only once a new one is in place, never the
+  last one.
+- **Restore:** the Storage page's Catalogue section lists the snapshots
+  next to the catalogue and on the disks plugged in
+  (`library.catalogue.snapshots`); "Restore…" asks first, then
+  `library.catalogue.restore` checks the snapshot, asks the vault to put
+  it in place and closes Helios, which starts again. At the opening, the
+  snapshot is checked again, copied next to the catalogue and checked
+  once more; the current catalogue (with its log) is kept aside as
+  `<file>.before-restore-<time>`, then the copy takes its name. A step
+  that fails leaves the catalogue as it was.
+- **Health:** `catalogue.snapshots` reports the newest one, here or on a
+  disk plugged in, read back at each run: none, or one that no longer
+  reads back, is a problem; older than seven days, a warning.
+
 ## Not yet
 
 - Phones over MTP as a source (mount them as folders).

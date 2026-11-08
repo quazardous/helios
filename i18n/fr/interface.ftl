@@ -124,3 +124,11 @@ setting-health-destinationDays =
 setting-notifications-jobs =
     .description = Affiche une notification sur le bureau quand un long export ou un lot se termine ou échoue alors qu’aucune fenêtre de Helios n’a le focus.
     .label = Notifier la fin d’une longue tâche
+
+setting-catalogue-snapshotEvery =
+    .description = Helios prend un instantané vérifié du catalogue à cet intervalle, le garde à côté du catalogue et le copie sur les disques de sauvegarde branchés.
+    .label = Instantané du catalogue toutes les (heures)
+
+setting-catalogue-snapshotsKept =
+    .description = Combien d'instantanés du catalogue sont gardés à côté du catalogue et sur chaque disque de sauvegarde ; les plus anciens partent d'abord.
+    .label = Instantanés du catalogue gardés

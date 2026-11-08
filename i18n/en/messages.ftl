@@ -79,6 +79,36 @@ gui-caption-jobs = Show the jobs
 
 gui-caption-profile = Profile in use: { $name }
 
+gui-catalogue = Catalogue
+
+gui-catalogue-days = { $days } days ago
+
+gui-catalogue-every = Every (hours)
+
+gui-catalogue-here = next to the catalogue
+
+gui-catalogue-intro = Verified snapshots of the catalogue (ratings, tags, edits): kept next to it and copied to the backup disks plugged in.
+
+gui-catalogue-kept = Kept
+
+gui-catalogue-none = No snapshot yet.
+
+gui-catalogue-on-disk = on { $disk }
+
+gui-catalogue-one-day = 1 day ago
+
+gui-catalogue-restore = Restore…
+
+gui-catalogue-restore-ask = Restore the catalogue from the snapshot of { $when }? Changes made since are lost. The current catalogue is kept aside, and Helios closes and starts again on the snapshot.
+
+gui-catalogue-restore-cancel = Cancel
+
+gui-catalogue-restore-confirm = Restore and restart
+
+gui-catalogue-snapshot-now = Snapshot now
+
+gui-catalogue-today = today
+
 gui-confirmed-by-policy = { $verb }: confirmed by policy
 
 gui-copied = copied { $text }
@@ -391,6 +421,10 @@ gui-import-window-example = e.g. { $example }
 
 gui-import-window-favourites = Favourites
 
+gui-import-window-forget = Forget this folder
+
+gui-import-window-forget-hint = Drops what the image map knows of this folder's files not in the Library; it is not recorded again until you list it
+
 gui-import-window-import = Import { $count }
 
 gui-import-window-in-library = in your Library
@@ -460,10 +494,6 @@ gui-import-window-reading = Reading…
 gui-import-window-recent = Recent
 
 gui-import-window-remove-favourite = Remove from favourites
-
-gui-import-window-forget = Forget this folder
-
-gui-import-window-forget-hint = Drops what the image map knows of this folder's files not in the Library; it is not recorded again until you list it
 
 gui-import-window-save-preset = Save as preset…
 
@@ -1063,6 +1093,10 @@ gui-storage-dest-archive = Any archive disk
 
 gui-storage-dest-backup = Any backup disk
 
+gui-storage-forget = Forget what was seen here
+
+gui-storage-forget-hint = Drops what the image map knows of this volume's files not in the Library; the volume stays known
+
 gui-storage-free = { $free } free of { $capacity }
 
 gui-storage-intro = The disks Helios has seen. Name them and say what each is for: Helios writes only to library, archive, backup and scratch disks.
@@ -1088,10 +1122,6 @@ gui-storage-mark-confirm = Write the identity file
 gui-storage-mark-explain = This disk is known only by its label and size, so Helios could take another disk for it. Marking it writes a small file, .helios/volume.json, at its root: nothing else on the disk changes.
 
 gui-storage-mark-hint = Known only by its label and size: an identity file tells it apart
-
-gui-storage-forget = Forget what was seen here
-
-gui-storage-forget-hint = Drops what the image map knows of this volume's files not in the Library; the volume stays known
 
 gui-storage-name-hint = Its name; Enter saves it
 

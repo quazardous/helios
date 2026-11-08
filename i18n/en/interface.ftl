@@ -114,6 +114,14 @@ plugin-helios-theme-editor =
 plugin-helios-workbench =
     .title = Helios areas
 
+setting-catalogue-snapshotEvery =
+    .description = Helios takes a verified snapshot of the catalogue this often, keeps it next to the catalogue and copies it to the backup disks plugged in.
+    .label = Catalogue snapshot every (hours)
+
+setting-catalogue-snapshotsKept =
+    .description = How many catalogue snapshots are kept next to the catalogue and on each backup disk; the oldest go first.
+    .label = Catalogue snapshots kept
+
 setting-display-wide-gamut-preview =
     .description = Shows the image in Rec.2020 where the window can carry it (Wayland with colour management), so colours outside sRGB are not clipped. Elsewhere the image stays sRGB.
     .label = Wide-gamut preview

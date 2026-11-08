@@ -192,8 +192,10 @@ fn health_runner(
             backup,
             gpu: health_gpu(),
             plugins: health_plugins(&plugins),
-            // Catalogue snapshots do not exist yet: the check says so.
-            snapshots: None,
+            // The catalogue's snapshots, here and on the disks plugged in.
+            snapshots: file
+                .as_deref()
+                .map(|f| helios_gui::catalogue::health(f, &mounted, now)),
         }
     };
     let ignored = Ignored::load(&helios_gui::shell::config_dir().join("health-ignored.json"));
@@ -363,6 +365,110 @@ fn seconds() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs())
+}
+
+/// Set by a catalogue restore: Helios starts again once its window has
+/// closed and its vault is released, the restore applied at the opening.
+static RESTART: AtomicBool = AtomicBool::new(false);
+
+/// Catalogue snapshots (`helios_gui::catalogue`): one taken by hand
+/// (copied to the backup disks on a thread of its own), the list, and a
+/// restore (asked of the vault, then Helios closes and starts again).
+/// Then the schedule: a thread looks every ten minutes whether the
+/// newest snapshot is older than `catalogue.snapshotEvery`.
+fn catalogue_commands(
+    shell: &mut Shell,
+    persist: &Persist,
+    file: PathBuf,
+    ctx: &egui::Context,
+) -> Result<(), String> {
+    use helios_gui::catalogue;
+    use helios_shell::commands::CommandSpec;
+    use serde_json::{Value, json};
+
+    let settings = shell.app().handle().store();
+    let (vault, at, store) = (persist.vault().clone(), file.clone(), settings.clone());
+    shell.register(
+        CommandSpec::new(
+            catalogue::SNAPSHOT_COMMAND,
+            "Snapshot the catalogue now: a verified copy next to it, then copied to the backup disks plugged in",
+            "Library",
+        ),
+        move |_, _| {
+            let options = helios_vault_sqlite::Options {
+                keep_snapshots: catalogue::kept(&store),
+                ..helios_vault_sqlite::Options::default()
+            };
+            let taken = helios_vault_sqlite::snapshot::take_file(&at, "by-hand", &options)?;
+            let (vault, at, copy, keep) = (vault.clone(), at.clone(), taken.clone(), options.keep_snapshots);
+            std::thread::spawn(move || {
+                let mounted = helios_storage::system().volumes();
+                let (_, errors) = catalogue::copy_to_backups(&vault, &mounted, &at, &copy, keep);
+                for e in errors {
+                    warn(&format!("catalogue snapshot copy: {e}"));
+                }
+            });
+            Ok(json!({ "file": taken }))
+        },
+    )?;
+    let at = file.clone();
+    shell.register(
+        CommandSpec::new(
+            catalogue::LIST_COMMAND,
+            "The catalogue's snapshots, next to it and on the backup disks plugged in, newest first",
+            "Library",
+        ),
+        move |_, _| {
+            let mounted = helios_storage::system().volumes();
+            serde_json::to_value(catalogue::list(&at, &mounted)).map_err(|e| e.to_string())
+        },
+    )?;
+    let (at, egui) = (file.clone(), ctx.clone());
+    shell.register(
+        CommandSpec::new(
+            catalogue::RESTORE_COMMAND,
+            "Restore the catalogue from a snapshot (`file`): Helios closes and starts again, the current catalogue kept aside",
+            "Library",
+        ),
+        move |args, _| {
+            let from = args
+                .get("file")
+                .and_then(Value::as_str)
+                .ok_or("`file` is missing")?;
+            helios_vault_sqlite::snapshot::request_restore(&at, Path::new(from))?;
+            RESTART.store(true, Ordering::Relaxed);
+            egui.send_viewport_cmd(egui::ViewportCommand::Close);
+            Ok(json!({ "restarting": true }))
+        },
+    )?;
+    // The schedule. The thread holds the vault only while it works, so
+    // quitting releases it.
+    let vault = Arc::downgrade(persist.vault());
+    std::thread::Builder::new()
+        .name("catalogue-snapshots".into())
+        .spawn(move || {
+            std::thread::sleep(std::time::Duration::from_mins(2));
+            loop {
+                let Some(vault) = vault.upgrade() else { return };
+                if helios_vault_sqlite::snapshot::due(&file, catalogue::every(&settings), seconds())
+                {
+                    let mounted = helios_storage::system().volumes();
+                    if let Err(e) = catalogue::take(
+                        &vault,
+                        &mounted,
+                        &file,
+                        "daily",
+                        catalogue::kept(&settings),
+                    ) {
+                        warn(&format!("catalogue snapshot: {e}"));
+                    }
+                }
+                drop(vault);
+                std::thread::sleep(std::time::Duration::from_mins(10));
+            }
+        })
+        .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 /// The library operations as commands (see `helios_library`): an import
@@ -1462,6 +1568,7 @@ fn main() -> Result<(), String> {
     start::mark("workspace and settings read");
     let bus = std::sync::Arc::new(helios_core::Bus::new());
     let health_file = vault_file.clone();
+    let catalogue_file = vault_file.clone();
     let thumbs_file = vault_file.clone();
     let map_file = vault_file.clone();
     // A library that cannot be opened leaves Helios without one: the
@@ -1811,6 +1918,11 @@ fn main() -> Result<(), String> {
             {
                 shell.notes.push(format!("library commands: {e}"));
             }
+            if let (Some(p), Some(file)) = (&persist, catalogue_file.clone())
+                && let Err(e) = catalogue_commands(&mut shell, p, file, &cc.egui_ctx)
+            {
+                shell.notes.push(format!("catalogue commands: {e}"));
+            }
             // Without a library (no `--vault`), nothing registers the
             // import the shell hands over: its imports say so instead.
             if let Some(e) = &no_library {
@@ -1865,6 +1977,15 @@ fn main() -> Result<(), String> {
     }
     for left in finisher.finish() {
         warn(&format!("quit: {left} was left unfinished"));
+    }
+    // A catalogue restore was asked: the next Helios applies it as it
+    // opens the library.
+    if RESTART.load(Ordering::Relaxed) {
+        let started = std::env::current_exe()
+            .and_then(|exe| std::process::Command::new(exe).args(&args).spawn());
+        if let Err(e) = started {
+            warn(&format!("restart after the catalogue restore: {e}"));
+        }
     }
     ran
 }
