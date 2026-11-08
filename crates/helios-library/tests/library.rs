@@ -1212,8 +1212,14 @@ fn a_duplicate_of_the_library_is_found_by_a_lookup_not_a_read() {
     seen_as(&vault, &copy, id);
     tamper(&copy);
     let (report, lines) = run(&vault, None, &[p.join("roll")], &Options::default());
-    assert_eq!((report.skipped, report.read), (1, 0), "{lines:?}");
-    assert_eq!(lines[0]["duplicate"]["of"], "library", "{lines:?}");
+    // The map knows it holds a Library image: already in the Library, at
+    // that place, nothing read and nothing added.
+    assert_eq!(
+        (report.unchanged, report.added, report.read),
+        (1, 0, 0),
+        "{lines:?}"
+    );
+    assert_eq!(vault.images().unwrap().len(), 1);
     // An image only seen, off the Library, is no duplicate: it is imported.
     vault.set_in_library(&[id], false, "user", 1100).unwrap();
     let (report, lines) = run(&vault, None, &[p.join("roll")], &Options::default());
