@@ -133,6 +133,8 @@ fn helios(raw: &Path, xmp: &str) -> Result<(Image, Image, Image), String> {
         height: f64::from(sensor.height),
         x0: f64::from(sensor.crop_x),
         y0: f64::from(sensor.crop_y),
+        // The parity chain has no flip: the image is not turned.
+        orientation: 0,
     };
     let region = loaded.image.region();
     let sidecar = Sidecar::parse(xmp)?;

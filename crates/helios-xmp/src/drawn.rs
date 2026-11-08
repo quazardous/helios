@@ -109,8 +109,10 @@ pub struct Form {
 }
 
 /// How darktable's normalised coordinates relate to Helios's pixels: the
-/// size of the image darktable's pipe starts from, and where Helios's
-/// image starts in it (the loader's crop).
+/// size of the image darktable's pipe starts from, where Helios's image
+/// starts in it (the loader's crop), and how the image is turned before
+/// the mask applies (darktable's `flip`, which runs before the modules
+/// that blend through drawn masks).
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
 pub struct Frame {
     pub width: f64,
@@ -118,30 +120,92 @@ pub struct Frame {
     /// Helios's `(0, 0)` in darktable's pixels.
     pub x0: f64,
     pub y0: f64,
+    /// darktable's orientation bits (`dt_image_orientation_t`: 1 flips
+    /// y, 2 flips x, 4 swaps x and y, after the flips), as Helios's
+    /// `flip` node takes them: the image turns about Helios's origin.
+    pub orientation: u8,
 }
 
+/// darktable's orientation bits (see [`Frame::orientation`]).
+const FLIP_Y: u8 = 1;
+const FLIP_X: u8 = 2;
+const SWAP_XY: u8 = 4;
+
 impl Frame {
-    /// A frame without crop.
+    /// A frame without crop or turn.
     pub fn new(width: f64, height: f64) -> Frame {
         Frame {
             width,
             height,
             x0: 0.0,
             y0: 0.0,
+            orientation: 0,
         }
     }
 
-    fn x(&self, nx: f32) -> f64 {
-        f64::from(nx) * self.width - self.x0
+    /// The frame with the image turned by darktable's `orientation` bits
+    /// (an out-of-range value keeps its low three bits).
+    pub fn oriented(self, orientation: u8) -> Frame {
+        Frame {
+            orientation: orientation & (FLIP_Y | FLIP_X | SWAP_XY),
+            ..self
+        }
     }
 
-    fn y(&self, ny: f32) -> f64 {
-        f64::from(ny) * self.height - self.y0
+    /// A point or a direction turned as darktable's `flip` turns the
+    /// image (its `distort_transform`), about the origin as Helios's
+    /// `flip` does: x, then y, mirrored, then the two swapped.
+    fn turn(&self, x: f64, y: f64) -> (f64, f64) {
+        let x = if self.orientation & FLIP_X != 0 {
+            -x
+        } else {
+            x
+        };
+        let y = if self.orientation & FLIP_Y != 0 {
+            -y
+        } else {
+            y
+        };
+        if self.orientation & SWAP_XY != 0 {
+            (y, x)
+        } else {
+            (x, y)
+        }
+    }
+
+    /// A normalised point in Helios's pixels, the image turned.
+    fn point(&self, nx: f32, ny: f32) -> (f64, f64) {
+        self.turn(
+            f64::from(nx) * self.width - self.x0,
+            f64::from(ny) * self.height - self.y0,
+        )
     }
 
     /// A length normalised by the smaller side.
     fn length(&self, n: f32) -> f64 {
         f64::from(n) * self.width.min(self.height)
+    }
+
+    /// An ellipse's rotation once the image is turned: its first axis,
+    /// from the x axis toward the y axis, turned with it.
+    fn ellipse_rotation(&self, degrees: f32) -> f64 {
+        if self.orientation == 0 {
+            return f64::from(degrees);
+        }
+        let a = f64::from(degrees).to_radians();
+        let (x, y) = self.turn(a.cos(), a.sin());
+        y.atan2(x).to_degrees()
+    }
+
+    /// A gradient's rotation once the image is turned: its normal
+    /// (`(-sin r, -cos r)`, toward the full side) turned with it.
+    fn gradient_rotation(&self, degrees: f32) -> f64 {
+        if self.orientation == 0 {
+            return f64::from(degrees);
+        }
+        let r = f64::from(degrees).to_radians();
+        let (nx, ny) = self.turn(-r.sin(), -r.cos());
+        (-nx).atan2(-ny).to_degrees()
     }
 }
 
@@ -503,12 +567,15 @@ pub fn map(form: &Form, frame: &Frame) -> Mapped {
     }
     let mut losses = Vec::new();
     let params: Vec<(String, Value)> = match module {
-        "mask_circle" => vec![
-            float("x", frame.x(p.f(0, 0))),
-            float("y", frame.y(p.f(0, 1))),
-            float("radius", frame.length(p.f(0, 2))),
-            float("feather", frame.length(p.f(0, 3))),
-        ],
+        "mask_circle" => {
+            let (x, y) = frame.point(p.f(0, 0), p.f(0, 1));
+            vec![
+                float("x", x),
+                float("y", y),
+                float("radius", frame.length(p.f(0, 2))),
+                float("feather", frame.length(p.f(0, 3))),
+            ]
+        }
         "mask_ellipse" => {
             let (a, b) = (frame.length(p.f(0, 2)), frame.length(p.f(0, 3)));
             let border = p.f(0, 5);
@@ -518,12 +585,13 @@ pub fn map(form: &Form, frame: &Frame) -> Mapped {
             } else {
                 frame.length(border)
             };
+            let (x, y) = frame.point(p.f(0, 0), p.f(0, 1));
             vec![
-                float("x", frame.x(p.f(0, 0))),
-                float("y", frame.y(p.f(0, 1))),
+                float("x", x),
+                float("y", y),
                 float("radius_x", a),
                 float("radius_y", b),
-                float("rotation", f64::from(p.f(0, 4))),
+                float("rotation", frame.ellipse_rotation(p.f(0, 4))),
                 float("feather", feather),
                 ("proportional".into(), Value::Bool(proportional)),
             ]
@@ -538,10 +606,11 @@ pub fn map(form: &Form, frame: &Frame) -> Mapped {
                 });
             }
             let sigmoid = form.version >= 6 && p.i(0, 6) == 2;
+            let (x, y) = frame.point(p.f(0, 0), p.f(0, 1));
             vec![
-                float("x", frame.x(p.f(0, 0))),
-                float("y", frame.y(p.f(0, 1))),
-                float("rotation", f64::from(p.f(0, 2))),
+                float("x", x),
+                float("y", y),
+                float("rotation", frame.gradient_rotation(p.f(0, 2))),
                 float("feather", 2.0 * compression * diagonal),
                 (
                     "profile".into(),
@@ -561,8 +630,8 @@ pub fn map(form: &Form, frame: &Frame) -> Mapped {
             for i in 0..count {
                 // corner, ctrl1 (before), ctrl2 (after).
                 for (fx, fy) in [(0, 1), (2, 3), (4, 5)] {
-                    values.push(frame.x(p.f(i, fx)));
-                    values.push(frame.y(p.f(i, fy)));
+                    let (x, y) = frame.point(p.f(i, fx), p.f(i, fy));
+                    values.extend([x, y]);
                 }
                 borders.extend([p.f(i, 6), p.f(i, 7)]);
             }
@@ -589,8 +658,8 @@ pub fn map(form: &Form, frame: &Frame) -> Mapped {
             let mut values = Vec::with_capacity(count * 9);
             for i in 0..count {
                 for (fx, fy) in [(0, 1), (2, 3), (4, 5)] {
-                    values.push(frame.x(p.f(i, fx)));
-                    values.push(frame.y(p.f(i, fy)));
+                    let (x, y) = frame.point(p.f(i, fx), p.f(i, fy));
+                    values.extend([x, y]);
                 }
                 let (b0, b1) = (p.f(i, 6), p.f(i, 7));
                 if spread(&[b0, b1]).2 {
@@ -1182,6 +1251,7 @@ mod tests {
         height: 4000.0,
         x0: 10.0,
         y0: 20.0,
+        orientation: 0,
     };
 
     #[test]
@@ -1698,5 +1768,137 @@ mod tests {
             panic!("skipped")
         };
         assert_eq!(problem, Problem::Version { version: 8 });
+    }
+
+    /// Where Helios's `flip` sends the pixel `(x, y)` (its `forward`).
+    fn flipped_pixel(o: u8, x: i64, y: i64) -> (i64, i64) {
+        let x = if o & FLIP_X != 0 { -1 - x } else { x };
+        let y = if o & FLIP_Y != 0 { -1 - y } else { y };
+        if o & SWAP_XY != 0 { (y, x) } else { (x, y) }
+    }
+
+    // Points go through darktable's f32 fields: at a few hundred pixels an
+    // f32 rounds to about 1e-5, so the check allows 1e-4.
+    fn close(a: (f64, f64), b: (f64, f64)) -> bool {
+        (a.0 - b.0).abs() < 1e-4 && (a.1 - b.1).abs() < 1e-4
+    }
+
+    #[test]
+    fn under_each_orientation_points_land_on_the_pixels_the_flip_moves() {
+        // A path through pixel centres: each lands on the centre of the
+        // pixel Helios's flip moves it to.
+        let frame = Frame::new(400.0, 200.0);
+        let centres = [(10_i64, 20_i64), (123, 45), (399, 0), (0, 199)];
+        let mut fields = Vec::new();
+        for (x, y) in centres {
+            let (nx, ny) = ((x as f32 + 0.5) / 400.0, (y as f32 + 0.5) / 200.0);
+            for _ in 0..3 {
+                fields.extend([f(nx), f(ny)]);
+            }
+            fields.extend([f(0.01), f(0.01), i(0)]);
+        }
+        let forms = read(&sidecar(&[li(1, 3, kind::PATH, 4, &hex(&fields))])).unwrap();
+        for o in 0..8 {
+            let p = shape(map(&forms[0], &frame.oriented(o)));
+            let Some(Value::List(v)) = p.params.get("points") else {
+                panic!("points")
+            };
+            for (k, (x, y)) in centres.iter().enumerate() {
+                let (fx, fy) = flipped_pixel(o, *x, *y);
+                let want = (fx as f64 + 0.5, fy as f64 + 0.5);
+                for h in 0..3 {
+                    let at = k * 6 + h * 2;
+                    assert!(
+                        close((v[at], v[at + 1]), want),
+                        "orientation {o}, point {k}: {:?}, not {want:?}",
+                        (v[at], v[at + 1])
+                    );
+                }
+            }
+            assert!((get(&p, "feather") - 2.0).abs() < 1e-3, "{o}");
+        }
+        // A circle's centre too, its radius by the smaller side whatever
+        // the turn; the crop comes off before the turn.
+        let circle = read(&sidecar(&[li(
+            1,
+            7,
+            kind::CIRCLE,
+            1,
+            &hex(&[f(0.5), f(0.25), f(0.1), f(0.05)]),
+        )]))
+        .unwrap();
+        for o in 0..8 {
+            let c = shape(map(&circle[0], &FRAME.oriented(o)));
+            let want = {
+                let (x, y) = (2990.0_f64, 980.0_f64);
+                let x = if o & FLIP_X != 0 { -x } else { x };
+                let y = if o & FLIP_Y != 0 { -y } else { y };
+                if o & SWAP_XY != 0 { (y, x) } else { (x, y) }
+            };
+            assert!(close((get(&c, "x"), get(&c, "y")), want), "{o}");
+            assert!((get(&c, "radius") - 400.0).abs() < 1e-2, "{o}");
+        }
+    }
+
+    #[test]
+    fn under_each_orientation_ellipse_and_gradient_angles_turn_with_the_image() {
+        let frame = Frame::new(1000.0, 1000.0);
+        let ellipse =
+            |rotation: f32| hex(&[f(0.4), f(0.3), f(0.1), f(0.05), f(rotation), f(0.0), i(0)]);
+        let gradient =
+            |rotation: f32| hex(&[f(0.4), f(0.3), f(rotation), f(0.1), f(0.5), f(0.0), i(0)]);
+        for rotation in [0.0_f32, 30.0, -75.0, 120.0] {
+            let forms = read(&sidecar(&[
+                li(1, 8, kind::ELLIPSE, 1, &ellipse(rotation)),
+                li(1, 9, kind::GRADIENT, 1, &gradient(rotation)),
+            ]))
+            .unwrap();
+            let plain_e = shape(map(&forms[0], &frame));
+            let plain_g = shape(map(&forms[1], &frame));
+            for o in 0..8 {
+                let turned = frame.oriented(o);
+                // The end of the ellipse's first axis, turned, is the end
+                // of the turned ellipse's first axis (either end).
+                let e = shape(map(&forms[0], &turned));
+                let axis = |m: &Member, sign: f64| {
+                    let a = get(m, "rotation").to_radians();
+                    let r = get(m, "radius_x");
+                    (
+                        get(m, "x") + sign * r * a.cos(),
+                        get(m, "y") + sign * r * a.sin(),
+                    )
+                };
+                let (x, y) = axis(&plain_e, 1.0);
+                let end = turned.turn(x, y);
+                assert!(
+                    close(end, axis(&e, 1.0)) || close(end, axis(&e, -1.0)),
+                    "ellipse {rotation} under {o}: {}",
+                    get(&e, "rotation")
+                );
+                // A point's signed distance to the gradient's line, on
+                // the normal toward its full side, is kept.
+                let g = shape(map(&forms[1], &turned));
+                let side = |m: &Member, (px, py): (f64, f64)| {
+                    let r = get(m, "rotation").to_radians();
+                    (px - get(m, "x")) * -r.sin() + (py - get(m, "y")) * -r.cos()
+                };
+                for p in [(10.0, 20.0), (700.0, 650.0), (-30.0, 900.0)] {
+                    let d = side(&plain_g, p);
+                    let d_turned = side(&g, turned.turn(p.0, p.1));
+                    assert!(
+                        (d - d_turned).abs() < 1e-6,
+                        "gradient {rotation} under {o}: {d} became {d_turned}"
+                    );
+                }
+            }
+        }
+        // darktable's turns by name: a gradient full above its line is
+        // full on the left once turned counter-clockwise (6), on the
+        // right once turned clockwise (5).
+        let up = read(&sidecar(&[li(1, 9, kind::GRADIENT, 1, &gradient(0.0))])).unwrap();
+        let ccw = shape(map(&up[0], &frame.oriented(6)));
+        assert!((get(&ccw, "rotation") - 90.0).abs() < 1e-9);
+        let cw = shape(map(&up[0], &frame.oriented(5)));
+        assert!((get(&cw, "rotation") + 90.0).abs() < 1e-9);
     }
 }
