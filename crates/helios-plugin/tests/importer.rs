@@ -124,8 +124,8 @@ fn importers_are_declared_and_checked_in_the_manifest() {
     );
     refused(
         "importer = 1",
-        "importer = 2",
-        "interface `importer` version 2",
+        "importer = 3",
+        "interface `importer` version 3",
     );
 }
 
