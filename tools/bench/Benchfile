@@ -637,6 +637,24 @@ mounts = { "egui-pop-target/${egui_pop:-main}" = "/target", registry = "/cargo/r
 outputs = { gallery = { path = "egui-pop-gallery", kind = "file" } }
 timeout = "1h"
 
+# egui-pop's gallery in a headless labwc (wbox), driven by one of its
+# scenarios (`script=`, a file of egui-pop's tools/wbox, titlebar.py by
+# default): the release build, then the script's JSON lines in the log and
+# its screenshots in /out
+[jobs.egui-pop-wbox]
+about = "egui-pop: a wbox scenario of tools/wbox (script=) on the gallery in release, in a headless labwc"
+checkouts = ["egui-pop"]
+cores = 5
+memory = "6g"
+cwd = "/work/${src:-egui-pop}"
+command = """mkdir -p /tmp/w/egui-pop && cp -r --preserve=mode . /tmp/w/egui-pop/ && cd /tmp/w/egui-pop && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/egui-pop ] || { rm -rf /target/* && echo /tmp/w/egui-pop > /target/.built-at; }; } && \
+cargo build --release --locked -p egui-pop-gallery && \
+mkdir -p "$XDG_RUNTIME_DIR" "$HOME" && chmod 700 "$XDG_RUNTIME_DIR" && \
+"$WBOX_PYTHON" -I tools/wbox/${script:-titlebar.py} --out /out"""
+env = { CARGO_NET_OFFLINE = "true", WLR_RENDERER = "pixman" }
+mounts = { "egui-pop-target/${egui_pop:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
+timeout = "1h"
+
 [jobs.egui-pop-catalogues]
 about = "egui-pop's catalogue test: the English catalogues match the sources, the French stamped"
 checkouts = ["egui-pop"]
