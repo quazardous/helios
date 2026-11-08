@@ -8,11 +8,14 @@ on:
     branches: [main, next]
   pull_request:
 
-# A newer push to `next` replaces the run still going: only the newest
-# commit is promoted.
+# One run per branch at a time. A run on `next` is never cancelled: next
+# moves faster than a full run lasts, so cancelling meant no run ever
+# finished and main was never promoted (2026-11-08). The run going finishes;
+# the newest push waits behind it (GitHub keeps only the latest pending
+# one), so main is promoted at least once per run.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref == 'refs/heads/next' }}
+  cancel-in-progress: false
 
 jobs:
   test:
