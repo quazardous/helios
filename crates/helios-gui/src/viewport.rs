@@ -42,6 +42,7 @@ use egui::Ui;
 use egui_pop::viewport::display::{
     DisplayTarget, DisplayTransform, Primaries, Stage, SurfaceFormat, Transfer,
 };
+use egui_pop::viewport::navigation::NavCommand;
 use egui_pop::viewport::source::{Readout, TileSource};
 use egui_pop::viewport::tiles::{exact_scale, scaled_size};
 use egui_pop::viewport::view::{MAX_ZOOM, MIN_ZOOM};
@@ -230,6 +231,9 @@ pub fn write_view(store: &mut Store, view: &View, gesture: Option<GestureId>) {
         }
     }
 }
+
+/// The image's id as egui-pop's canvas in use (`egui_pop::core::canvas`).
+pub const CANVAS: &str = "helios.viewport.canvas";
 
 /// What the zoom commands ask for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -890,6 +894,33 @@ impl Viewport {
         write_view(&mut store, &view, None);
     }
 
+    /// Takes one of egui-pop's canvas navigation commands (`view.fit`,
+    /// `view.zoom_in`, `view.pan_left`, ...), as the image's own zoom
+    /// commands do.
+    pub fn navigate(&mut self, command: NavCommand, store: &Mutex<Store>) {
+        let to = match command {
+            NavCommand::Fit | NavCommand::FrameSelection => ZoomTo::Fit,
+            NavCommand::ZoomIn => ZoomTo::In,
+            NavCommand::ZoomOut => ZoomTo::Out,
+            NavCommand::Zoom100 => ZoomTo::Actual,
+            NavCommand::Hand => return,
+            NavCommand::Pan(dir) => {
+                let Some(m) = self.state.mapping() else {
+                    return;
+                };
+                // A tenth of the view, as the widget's arrows: the view
+                // moves that way, so the image moves the other.
+                let step = m.rect.size() * 0.1;
+                let mut store = store.lock().unwrap_or_else(PoisonError::into_inner);
+                let mut view = view_of(&store);
+                self.state.propose(&mut view, m.panned(-dir.vec() * step));
+                write_view(&mut store, &view, None);
+                return;
+            }
+        };
+        self.zoom(to, store);
+    }
+
     /// What the viewport's window should be drawn in (sRGB, or a wider
     /// target for a wide-gamut preview); asked of egui-pop when drawn.
     pub fn set_wanted(&mut self, wanted: DisplayTarget) {
@@ -908,6 +939,21 @@ impl Viewport {
         let ctx = ui.ctx().clone();
         if egui_pop::viewport::display::wanted(&ctx) != self.wanted {
             egui_pop::viewport::display::want(&ctx, ctx.viewport_id(), self.wanted);
+        }
+        // The image is a canvas of egui-pop's navigation model: the
+        // `view.*` commands (Ctrl+Plus, Ctrl+Minus, Shift+1, ...) come here
+        // while the pointer is over it or it has the keyboard, as they go
+        // to the node graph under the pointer.
+        let canvas = egui::Id::unique(CANVAS);
+        for command in egui_pop::core::canvas::take(&ctx, canvas) {
+            match NavCommand::from_id(&command) {
+                Some(NavCommand::Hand) => {
+                    let on = egui_pop::viewport::navigation::hand(&ctx);
+                    egui_pop::viewport::navigation::set_hand(&ctx, !on);
+                }
+                Some(c) => self.navigate(c, store),
+                None => {}
+            }
         }
         let (mut view, compare) = {
             let store = store.lock().unwrap_or_else(PoisonError::into_inner);
@@ -952,6 +998,9 @@ impl Viewport {
             .readout(true)
             .label("Image")
             .show(ui, &mut self.state, &mut view);
+        if out.response.hovered() || out.response.has_focus() {
+            egui_pop::core::canvas::mark_active(&ctx, canvas);
+        }
         let rect = out.response.rect;
         crate::name_rect(ui.ctx(), "viewport.display", rect);
         if self.edited.is_none() {

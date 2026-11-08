@@ -136,11 +136,19 @@ pub fn defaults() -> Vec<(String, String, String)> {
         ("Alt+1", "viewport.zoom.100"),
         ("Alt+2", "viewport.zoom.fill"),
         ("Alt+3", "viewport.zoom.fit"),
+    ] {
+        bind(k, command, &viewport);
+    }
+    // Ctrl+Plus and Ctrl+Minus are egui-pop's `view.zoom_in` and
+    // `view.zoom_out`, for the canvas in use (the image or the node graph
+    // under the pointer, `canvasActive`). With no canvas in use, they
+    // still zoom the image where it is the subject.
+    for (k, command) in [
         ("Ctrl+Equals", "viewport.zoom.in"),
         ("Ctrl+Plus", "viewport.zoom.in"),
         ("Ctrl+Minus", "viewport.zoom.out"),
     ] {
-        bind(k, command, &viewport);
+        bind(k, command, &format!("({viewport}) && !canvasActive"));
     }
     // Sub-workspaces, in the graph, as Houdini goes in and out of a
     // network: I enters the one holding the selected node, U goes up

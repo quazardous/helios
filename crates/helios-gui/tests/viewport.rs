@@ -239,6 +239,48 @@ fn the_zoom_commands_walk_the_ladder_from_100_percent() {
     assert!(h.state().values.lock().unwrap().undo_steps().is_empty());
 }
 
+/// The image is a canvas of egui-pop's navigation model: with the
+/// pointer over it, Ctrl+Plus and Ctrl+Minus run egui-pop's
+/// `view.zoom_in` and `view.zoom_out` and zoom it (Helios's own keys
+/// bind them only with no canvas in use, so the two never clash).
+#[test]
+fn ctrl_plus_and_minus_zoom_the_image_under_the_pointer_as_a_canvas() {
+    let mut h = headless::harness(shell(), vec2(1280.0, 800.0));
+    run(&mut h, "viewport.zoom.100", json!(null));
+    settled(&mut h);
+    let c = h.state().target_rect("viewport.display").unwrap().center();
+    h.hover_at(c);
+    h.step();
+    h.step();
+    let key = |h: &mut Harness<'_, Shell>, k: egui::Key| {
+        h.key_press_modifiers(Modifiers::COMMAND, k);
+        for _ in 0..3 {
+            h.step();
+        }
+        let trace = h.state().app().handle().key_traces().last().cloned();
+        (
+            value(h.state(), ZOOM),
+            trace.map(|t| t.resolution.to_string()),
+        )
+    };
+    let (zoom, trace) = key(&mut h, egui::Key::Plus);
+    assert_eq!(zoom, 2.0, "{trace:?}");
+    assert!(
+        trace.as_deref().is_some_and(|t| t.contains("view.zoom_in")),
+        "{trace:?}"
+    );
+    let (zoom, trace) = key(&mut h, egui::Key::Minus);
+    assert_eq!(zoom, 1.0, "{trace:?}");
+    assert!(
+        trace
+            .as_deref()
+            .is_some_and(|t| t.contains("view.zoom_out")),
+        "{trace:?}"
+    );
+    let (zoom, _) = key(&mut h, egui::Key::Equals);
+    assert_eq!(zoom, 2.0);
+}
+
 fn press(h: &mut Harness<'_, Shell>, pos: Pos2, pressed: bool) {
     h.input_mut().events.push(Event::PointerButton {
         pos,
