@@ -618,7 +618,7 @@ pub struct Library {
     /// The thumbnails' textures, within their budget.
     textures: Resident,
     /// The large thumbnails Compare draws until a render lands.
-    larges: HashMap<String, TextureHandle>,
+    large_textures: HashMap<String, TextureHandle>,
     /// The large thumbnails asked for, not arrived yet.
     larges_asked: HashSet<String>,
     /// Asked an image's large thumbnail.
@@ -688,7 +688,7 @@ impl Default for Library {
             },
             receiver,
             textures: Resident::default(),
-            larges: HashMap::new(),
+            large_textures: HashMap::new(),
             larges_asked: HashSet::new(),
             on_large: None,
             view_changed: std::cell::Cell::new(false),
@@ -881,7 +881,7 @@ impl LibraryItems<String> for Items<'_> {
 struct CompareThumbs<'a> {
     heads: &'a HashMap<String, HeadTexture>,
     /// The cache's large entries, drawn until a render lands.
-    larges: &'a HashMap<String, TextureHandle>,
+    large_textures: &'a HashMap<String, TextureHandle>,
     thumbs: Thumbs<'a>,
 }
 
@@ -895,7 +895,7 @@ impl ThumbSource<String> for CompareThumbs<'_> {
                     size: [w as u32, ht as u32],
                 }
             }
-            None => match self.larges.get(key) {
+            None => match self.large_textures.get(key) {
                 Some(t) => {
                     let [w, h] = t.size();
                     Thumb::Ready {
@@ -1303,7 +1303,7 @@ impl Library {
     /// The large thumbnail Compare draws for an image until its render
     /// lands: its size, when one is held.
     pub fn large_thumbnail(&self, id: &str) -> Option<[usize; 2]> {
-        self.larges.get(id).map(TextureHandle::size)
+        self.large_textures.get(id).map(TextureHandle::size)
     }
 
     /// After a pass drawing thumbnails: asks those drawn without one (and,
@@ -1874,7 +1874,7 @@ impl Library {
                             rgb_image(&rgb),
                             egui::TextureOptions::LINEAR,
                         );
-                        self.larges.insert(id, texture);
+                        self.large_textures.insert(id, texture);
                         any = true;
                     }
                     continue;
@@ -2199,7 +2199,7 @@ impl Library {
         let out = {
             let thumbs = CompareThumbs {
                 heads: &self.heads.renders,
-                larges: &self.larges,
+                large_textures: &self.large_textures,
                 thumbs: Thumbs {
                     textures: &self.textures,
                     pass: ui.ctx().cumulative_pass_nr(),
@@ -2227,14 +2227,14 @@ impl Library {
     /// entries of images no longer shown, or rendered, are freed.
     fn ask_larges(&mut self, keys: &[String]) {
         let renders = &self.heads.renders;
-        self.larges
+        self.large_textures
             .retain(|k, _| keys.contains(k) && !renders.contains_key(k));
         let Some(on_large) = &self.on_large else {
             return;
         };
         for k in keys {
             if !renders.contains_key(k)
-                && !self.larges.contains_key(k)
+                && !self.large_textures.contains_key(k)
                 && self.larges_asked.insert(k.clone())
             {
                 on_large(k);
