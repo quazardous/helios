@@ -76,6 +76,20 @@ run = [
   """python3 -m venv /opt/wbox \
  && /opt/wbox/bin/pip install --quiet \
       "git+https://github.com/quazardous/wbox-mcp.git@1383aee1a0e0ccbe4903f997a85bdf4368346159\"""",
+  # a headless mutter for GNOME-only GUI bugs (egui-pop's tools/wbox/mutter.py,
+  # `egui-pop-wbox compositor=mutter`): input through its RemoteDesktop D-Bus
+  # API, held by jeepney 0.9.0 (its published sha256), frames through
+  # ScreenCast and PipeWire, captured by GStreamer. `--allowerasing`:
+  # pipewire pulls systemd, which replaces the base image's
+  # systemd-standalone-tmpfiles
+  """dnf -y install --allowerasing --setopt=install_weak_deps=False mutter pipewire wireplumber \
+      pipewire-gstreamer gstreamer1 gstreamer1-plugins-base gstreamer1-plugins-good \
+ && dnf clean all""",
+  """curl -sSfL -o /tmp/jeepney-0.9.0-py3-none-any.whl \
+      https://files.pythonhosted.org/packages/b2/a3/e137168c9c44d18eff0376253da9f1e9234d0239e0ee230d2fee6cea8e55/jeepney-0.9.0-py3-none-any.whl \
+ && echo "97e5714520c16fc0a45695e5365a2e11b81ea79bba796e26f9f1d178cb182683  /tmp/jeepney-0.9.0-py3-none-any.whl" | sha256sum -c - \
+ && /opt/wbox/bin/pip install --quiet --no-deps /tmp/jeepney-0.9.0-py3-none-any.whl \
+ && rm /tmp/jeepney-0.9.0-py3-none-any.whl""",
 ]
 # CARGO_HOME is the registry cache; the toolchain lives in /opt. Line
 # tables only and no incremental state keep the per-branch target small.
@@ -667,12 +681,13 @@ mounts = { "egui-pop-target/${egui_pop:-main}" = "/target", registry = "/cargo/r
 outputs = { gallery = { path = "egui-pop-gallery", kind = "file" } }
 timeout = "1h"
 
-# egui-pop's gallery in a headless labwc (wbox), driven by one of its
+# egui-pop's gallery in a headless compositor (wbox), driven by one of its
 # scenarios (`script=`, a file of egui-pop's tools/wbox, titlebar.py by
 # default): the release build, then the script's JSON lines in the log and
-# its screenshots in /out
+# its screenshots in /out. `compositor=mutter` runs it in a headless mutter
+# (tools/wbox/mutter.py) instead of labwc, for GNOME-only bugs
 [jobs.egui-pop-wbox]
-about = "egui-pop: a wbox scenario of tools/wbox (script=) on the gallery in release, in a headless labwc"
+about = "egui-pop: a wbox scenario of tools/wbox (script=) on the gallery in release, in a headless labwc or mutter (compositor=)"
 checkouts = ["egui-pop"]
 cores = 5
 memory = "6g"
@@ -680,7 +695,7 @@ cwd = "/work/${src:-egui-pop}"
 command = """mkdir -p /tmp/w/egui-pop && cp -r --preserve=mode . /tmp/w/egui-pop/ && cd /tmp/w/egui-pop && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/egui-pop ] || { rm -rf /target/* && echo /tmp/w/egui-pop > /target/.built-at; }; } && \
 cargo build --release --locked -p egui-pop-gallery && \
 mkdir -p "$XDG_RUNTIME_DIR" "$HOME" && chmod 700 "$XDG_RUNTIME_DIR" && \
-"$WBOX_PYTHON" -I tools/wbox/${script:-titlebar.py} --out /out"""
+WBOX_COMPOSITOR=${compositor:-labwc} "$WBOX_PYTHON" -I tools/wbox/${script:-titlebar.py} --out /out"""
 env = { CARGO_NET_OFFLINE = "true", WLR_RENDERER = "pixman" }
 mounts = { "egui-pop-target/${egui_pop:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
 timeout = "1h"
