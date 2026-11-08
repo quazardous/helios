@@ -44,6 +44,20 @@ interface thread, a few hundred per transaction
 `listings` (the default), `everywhere`, or `import` (listings keep
 nothing). File dialogs record once egui-pop's file browser has a source.
 
+**The `map` job** reads what the map knows, one low-priority job in the
+jobs centre (`helios_library::map_job`): first the files in view in the
+import window (their partial hash), then Library files never verified
+by their full hash, then the files of volumes just plugged in, then
+duplicates to confirm (same size and partial hash as an image: the full
+hash links them to it), then every other file without a partial hash.
+It never reads a blacklisted place nor a file changed since it was
+listed. It waits while an import, an export, a batch, a backup or a
+render runs, and on battery (Linux reads `/sys/class/power_supply`;
+Windows and macOS count as on mains for now); it can be paused and
+cancelled in the jobs centre, and starts again when there is something
+new to read or an hour later. It prunes the map (below) at most once an
+hour. Its entry shows while it has work and ends once it has none.
+
 **Forget a volume or a folder** drops its sightings not in the Library
 and marks the folder `forgotten` in the `folders` table: listings and
 scans leave it out until it is listed again on purpose

@@ -27,6 +27,7 @@ pub mod darktable;
 pub mod export;
 pub mod import;
 pub mod map;
+pub mod map_job;
 pub mod rename;
 pub mod signals;
 pub mod stacks;

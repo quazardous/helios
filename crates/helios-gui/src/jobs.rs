@@ -14,8 +14,9 @@
 //! - Cancel runs `job.cancel` in the desktop's process ([`plugin`]):
 //!   [`Jobs::cancel`], which stops the job the way it gave when it
 //!   started; a node's job (`node:<name>/<id>`) is cancelled on its node,
-//!   `job.cancel` sent to the node's control endpoint by its relay. Pause,
-//!   resume and retry are refused: no Helios job offers them yet.
+//!   `job.cancel` sent to the node's control endpoint by its relay. Pause
+//!   and resume run [`Jobs::pause`] for a job that offered it (the image
+//!   map's `map` job); retry is refused: no Helios job offers it yet.
 //! - A long export or batch that ends while no Helios window has the
 //!   focus says so on the desktop ([`Ended`], then
 //!   `platform::job_finished`).
@@ -50,6 +51,9 @@ pub fn plugin(jobs: Jobs, relays: Relays) -> JobsPlugin {
                 .cancel(own),
             None => jobs.cancel(id).map(|()| json!({ "cancelling": id })),
         },
+        Request::Pause | Request::Resume if crate::relay::split_node_job(id).is_none() => jobs
+            .pause(id, matches!(request, Request::Pause))
+            .map(|()| json!({ "pausing": id })),
         Request::Pause | Request::Resume | Request::Retry => {
             Err(format!("job `{id}` cannot be paused, resumed or retried"))
         }

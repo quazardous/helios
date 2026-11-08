@@ -1670,7 +1670,38 @@ fn main() -> Result<(), String> {
                         .parent()
                         .map(|d| d.join(".helios"))
                 }));
-                shell.set_import_map(helios_gui::image_map::recorder(vault, settings, helios));
+                shell.set_import_map(helios_gui::image_map::recorder(
+                    vault.clone(),
+                    settings.clone(),
+                    helios.clone(),
+                ));
+                // The map's job: the import window's cells in view first,
+                // then each volume plugged in.
+                let feed = helios_library::map_job::Feed::default();
+                shell.set_map_feed(feed.clone());
+                let plugged = feed.clone();
+                let known = std::sync::Mutex::new(
+                    helios_storage::system()
+                        .volumes()
+                        .into_iter()
+                        .map(|v| v.id)
+                        .collect::<std::collections::BTreeSet<_>>(),
+                );
+                shell.on_volumes_changed(move || {
+                    let now: std::collections::BTreeSet<_> = helios_storage::system()
+                        .volumes()
+                        .into_iter()
+                        .map(|v| v.id)
+                        .collect();
+                    let mut known = known
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    for id in now.difference(&known) {
+                        plugged.plugged(id.clone());
+                    }
+                    *known = now;
+                });
+                helios_gui::image_map::start_job(vault, shell.jobs(), settings, helios, feed);
             }
             // The health check (Help > Health check): Helios's checks
             // over this machine's volumes and the vault, a while after

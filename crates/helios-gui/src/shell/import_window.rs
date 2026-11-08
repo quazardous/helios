@@ -86,6 +86,10 @@ pub(crate) struct ImportWindow {
     known: Option<Known>,
     /// The image map's recorder: what the sources list is kept.
     map: Option<MapRecorder>,
+    /// The image map's job, told which files are in view (read first).
+    map_feed: Option<helios_library::map_job::Feed>,
+    /// The files in view last told to it.
+    on_screen: Vec<PathBuf>,
     /// The sources given by a drop or a paste (recorded as `drop`).
     dropped: Vec<PathBuf>,
     /// Each source ticked being read, and whether it is read through.
@@ -358,6 +362,11 @@ impl Shell {
     /// source read, off the interface thread.
     pub fn set_import_map(&mut self, map: MapRecorder) {
         self.import_window.map = Some(map);
+    }
+
+    /// The image map's job: the import window tells it the files in view.
+    pub fn set_map_feed(&mut self, feed: helios_library::map_job::Feed) {
+        self.import_window.map_feed = Some(feed);
     }
 
     /// The import window's counts: photos shown, new, their size, and the
@@ -1141,6 +1150,7 @@ fn contents_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &GridWords, readi
     let shown = c.shown();
     let days = c.days().to_vec();
     let mut clicked = None;
+    let mut in_view = Vec::new();
     egui::ScrollArea::vertical()
         .id_salt("helios.import.grid")
         .auto_shrink([false, false])
@@ -1158,13 +1168,19 @@ fn contents_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &GridWords, readi
                 }
                 ui.horizontal_wrapped(|ui| {
                     for &i in cells {
-                        if cell_ui(ui, c, i, w.focus == Some(i), words) {
+                        if cell_ui(ui, c, i, w.focus == Some(i), words, &mut in_view) {
                             clicked = Some(i);
                         }
                     }
                 });
             }
         });
+    if let Some(feed) = &w.map_feed
+        && in_view != w.on_screen
+    {
+        feed.on_screen(in_view.clone());
+        w.on_screen = in_view;
+    }
     let shift = ui.input(|i| i.modifiers.shift);
     if let Some(i) = clicked {
         // Shift extends the anchor's tick to every cell between.
@@ -1196,8 +1212,16 @@ fn contents_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &GridWords, readi
 
 /// A cell: its preview, its tick, greyed with "in your Library" when New
 /// only leaves it out, "RAW+JPG" on a pair; its name, time and size on
-/// hover. Whether it was clicked.
-fn cell_ui(ui: &mut egui::Ui, c: &Contents, i: usize, focused: bool, words: &GridWords) -> bool {
+/// hover. Whether it was clicked; its files go to `in_view` when it is
+/// in view.
+fn cell_ui(
+    ui: &mut egui::Ui,
+    c: &Contents,
+    i: usize,
+    focused: bool,
+    words: &GridWords,
+    in_view: &mut Vec<PathBuf>,
+) -> bool {
     let cell = &c.cells[i];
     let importable = c.importable(i);
     let greyed = c.new_only && cell.known();
@@ -1214,6 +1238,10 @@ fn cell_ui(ui: &mut egui::Ui, c: &Contents, i: usize, focused: bool, words: &Gri
         egui::WidgetInfo::selected(egui::Role::CheckBox, importable, ticked, &label)
     });
     if ui.is_rect_visible(rect) {
+        in_view.extend(cell.raw.iter().chain(&cell.picture).cloned());
+        if cell.raw.is_none() && cell.picture.is_none() {
+            in_view.push(cell.source.clone());
+        }
         let visuals = ui.visuals();
         let painter = ui.painter_at(rect);
         painter.rect_filled(rect, 4.0, visuals.extreme_bg_color);

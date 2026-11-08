@@ -69,6 +69,7 @@ pub const FAILED: &str = "job.failed";
 pub const CANCELLED: &str = "job.cancelled";
 
 type Cancel = Arc<dyn Fn() + Send + Sync>;
+type Pause = Arc<dyn Fn(bool) + Send + Sync>;
 
 /// Where jobs report: a bus, and the way to cancel each running job.
 /// Cheap to clone; clones share the jobs.
@@ -76,6 +77,7 @@ type Cancel = Arc<dyn Fn() + Send + Sync>;
 pub struct Jobs {
     bus: Arc<Bus>,
     cancels: Arc<Mutex<BTreeMap<String, Cancel>>>,
+    pauses: Arc<Mutex<BTreeMap<String, Pause>>>,
 }
 
 impl fmt::Debug for Jobs {
@@ -92,6 +94,7 @@ impl Jobs {
         Self {
             bus,
             cancels: Arc::default(),
+            pauses: Arc::default(),
         }
     }
 
@@ -133,6 +136,23 @@ impl Jobs {
         Ok(())
     }
 
+    fn pauses(&self) -> std::sync::MutexGuard<'_, BTreeMap<String, Pause>> {
+        self.pauses.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Pauses (`paused` true) or resumes a running job that offered it
+    /// ([`Report::on_pause`]); the job says `job.paused` or `job.resumed`
+    /// itself. Refused for a job that is not running or cannot pause.
+    pub fn pause(&self, id: &str, paused: bool) -> Result<(), String> {
+        let pause = self
+            .pauses()
+            .get(id)
+            .cloned()
+            .ok_or_else(|| format!("no running job `{id}` to pause or resume"))?;
+        pause(paused);
+        Ok(())
+    }
+
     /// The running jobs that can be cancelled, by id.
     pub fn cancellable(&self) -> Vec<String> {
         self.cancels().keys().cloned().collect()
@@ -155,6 +175,8 @@ pub struct Start {
     /// The job it is part of, and its weight there.
     pub parent: Option<(String, f64)>,
     pub cancellable: bool,
+    /// The user may pause and resume it ([`Report::on_pause`]).
+    pub pausable: bool,
     /// The graph node it works for (an export: the node it renders).
     pub node: Option<String>,
 }
@@ -169,6 +191,7 @@ impl Start {
             steps: Vec::new(),
             parent: None,
             cancellable: true,
+            pausable: false,
             node: None,
         }
     }
@@ -200,13 +223,20 @@ impl Start {
         self
     }
 
+    /// The user may pause and resume it (Pause in the jobs centre): the
+    /// job gives the way with [`Report::on_pause`].
+    pub fn pausable(mut self) -> Self {
+        self.pausable = true;
+        self
+    }
+
     fn data(&self) -> Json {
         let mut d = json!({
             "id": self.id,
             "title": self.title,
             "kind": self.kind,
             "cancellable": self.cancellable,
-            "pausable": false,
+            "pausable": self.pausable,
             "retryable": false,
         });
         if let Some(t) = self.total {
@@ -330,6 +360,14 @@ impl Report {
         }
     }
 
+    /// How [`Jobs::pause`] pauses (`true`) and resumes this job, until it
+    /// ends.
+    pub fn on_pause(&self, pause: impl Fn(bool) + Send + Sync + 'static) {
+        if !self.ended.load(Ordering::SeqCst) {
+            self.jobs.pauses().insert(self.id.clone(), Arc::new(pause));
+        }
+    }
+
     pub fn progress(&self, progress: Progress) {
         self.publish(PROGRESS, Json::Object(progress.0));
     }
@@ -367,6 +405,7 @@ impl Report {
             return;
         }
         self.jobs.cancels().remove(&self.id);
+        self.jobs.pauses().remove(&self.id);
         data["kind"] = json!(self.kind);
         data["seconds"] = json!(self.seconds());
         self.publish(kind, data);
