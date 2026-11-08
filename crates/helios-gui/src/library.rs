@@ -620,7 +620,7 @@ pub struct Library {
     /// The large thumbnails Compare draws until a render lands.
     large_textures: HashMap<String, TextureHandle>,
     /// The large thumbnails asked for, not arrived yet.
-    larges_asked: HashSet<String>,
+    large_asked: HashSet<String>,
     /// Asked an image's large thumbnail.
     on_large: Option<Box<OnLarge>>,
     /// The grid's cells in view changed since the margin was asked.
@@ -689,7 +689,7 @@ impl Default for Library {
             receiver,
             textures: Resident::default(),
             large_textures: HashMap::new(),
-            larges_asked: HashSet::new(),
+            large_asked: HashSet::new(),
             on_large: None,
             view_changed: std::cell::Cell::new(false),
             placeholders: HashMap::new(),
@@ -1284,14 +1284,14 @@ impl Library {
         self.on_view = Some(Box::new(on_view));
         // A new pool: what the last one was asked is asked again.
         self.textures.clear_requests();
-        self.larges_asked.clear();
+        self.large_asked.clear();
     }
 
     /// Asked an image's large thumbnail (the cache's 1024 px entry):
     /// Compare's first paint, before the render of its head version.
     pub fn set_on_large(&mut self, on_large: impl Fn(&str) + 'static) {
         self.on_large = Some(Box::new(on_large));
-        self.larges_asked.clear();
+        self.large_asked.clear();
     }
 
     /// The thumbnails' textures budget, in bytes
@@ -1867,7 +1867,7 @@ impl Library {
                     rgb_image(&rgb)
                 }
                 Arrival::Large(rgb) => {
-                    self.larges_asked.remove(&id);
+                    self.large_asked.remove(&id);
                     if !self.heads.renders.contains_key(&id) {
                         let texture = ui.ctx().load_texture(
                             format!("helios.library.large.{id}"),
@@ -2195,7 +2195,7 @@ impl Library {
         let pane = ui.available_size() * ui.ctx().pixels_per_point();
         let side = pane.x / keys.len() as f32;
         self.ask_heads(&keys, side.max(pane.y).ceil() as u32);
-        self.ask_larges(&keys);
+        self.ask_large(&keys);
         let out = {
             let thumbs = CompareThumbs {
                 heads: &self.heads.renders,
@@ -2225,7 +2225,7 @@ impl Library {
     /// Compare's first paint: the cache's large entry of each image shown
     /// with no render of its head version yet, asked once. The large
     /// entries of images no longer shown, or rendered, are freed.
-    fn ask_larges(&mut self, keys: &[String]) {
+    fn ask_large(&mut self, keys: &[String]) {
         let renders = &self.heads.renders;
         self.large_textures
             .retain(|k, _| keys.contains(k) && !renders.contains_key(k));
@@ -2235,7 +2235,7 @@ impl Library {
         for k in keys {
             if !renders.contains_key(k)
                 && !self.large_textures.contains_key(k)
-                && self.larges_asked.insert(k.clone())
+                && self.large_asked.insert(k.clone())
             {
                 on_large(k);
             }
