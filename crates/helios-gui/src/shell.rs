@@ -797,6 +797,11 @@ impl Shell {
             .plugin(crate::jobs::plugin(jobs.clone(), relays.clone()))
             .plugin(egui_pop::editors::JobConsolesPlugin)
             .plugin(crate::display::Display)
+            // egui-pop's Settings app (full pages, families on top), with
+            // Helios's scopes and its own settings (`helios-config`) in
+            // them. The settings window stays beside it for now.
+            .plugin(egui_pop::api::admin::AdminPlugin)
+            .plugin(crate::config::BridgePlugin)
             // egui-pop's theme editor, as a page of the settings window
             // (Appearance), on the theme in use.
             .plugin(egui_pop::api::theme_editor::ThemeEditorPlugin)

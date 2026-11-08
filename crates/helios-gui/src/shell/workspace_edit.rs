@@ -137,6 +137,7 @@ impl Shell {
     pub fn open_workspace(&mut self, config: &Path, dir: &Path) -> Result<(), String> {
         let files = Files::new(config, dir);
         let mut state = files.load()?;
+        let settings_file = files.own.join(crate::config::WORKSPACE_FILE);
         // The layout egui-pop loaded, as shown.
         state.bundle.layout = self.own_layout();
         let origin = files.origin().transpose()?;
@@ -171,6 +172,9 @@ impl Shell {
         self.read_library();
         self.offer_workspace_keys();
         self.keys_loaded();
+        // The workspace's own values of the settings (the Settings app's
+        // `workspace` value scope), beside its files.
+        crate::config::open_workspace(self.app.handle(), Some(settings_file));
         Ok(())
     }
 
