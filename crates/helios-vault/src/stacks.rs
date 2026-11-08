@@ -75,6 +75,30 @@ fn read(doc: Value) -> Result<Stack, String> {
     serde_json::from_value(doc).map_err(|e| format!("a stored stack: {e}"))
 }
 
+/// A stack with its members off the Library left out (its top moving to
+/// the first member left when it was one); none when fewer than two are
+/// left. The stored stack is kept as it is.
+fn in_library<S: Store>(store: &S, mut stack: Stack) -> Result<Option<Stack>, String> {
+    let mut members = Vec::with_capacity(stack.members.len());
+    for m in stack.members {
+        let flagged = match ImageId::from_hex(&m) {
+            Ok(id) => store.library_flag(&id)?.is_some_and(|f| f.in_library),
+            Err(_) => false,
+        };
+        if flagged {
+            members.push(m);
+        }
+    }
+    if members.len() < 2 {
+        return Ok(None);
+    }
+    if !members.contains(&stack.top) {
+        stack.top.clone_from(&members[0]);
+    }
+    stack.members = members;
+    Ok(Some(stack))
+}
+
 fn all<S: Store>(store: &S) -> Result<Vec<Stack>, String> {
     store
         .documents(STACKS)?
@@ -101,20 +125,25 @@ impl<S: Store> Vault<S> {
         }
     }
 
-    /// Every stack, by id.
+    /// Every stack, by id, as the Library shows it: only its members in
+    /// the Library ([`in_library`]).
     pub fn stacks(&self) -> Result<Vec<Stack>, String> {
-        let mut stacks = all(&*self.store.lock().expect("store lock"))?;
+        let store = self.store.lock().expect("store lock");
+        let mut stacks = Vec::new();
+        for stack in all(&*store)? {
+            stacks.extend(in_library(&*store, stack)?);
+        }
         stacks.sort_by(|a, b| a.id.cmp(&b.id));
         Ok(stacks)
     }
 
+    /// A stack, as the Library shows it ([`in_library`]).
     pub fn stack(&self, id: &str) -> Result<Option<Stack>, String> {
-        self.store
-            .lock()
-            .expect("store lock")
-            .document(STACKS, id)?
-            .map(read)
-            .transpose()
+        let store = self.store.lock().expect("store lock");
+        match store.document(STACKS, id)?.map(read).transpose()? {
+            Some(stack) => in_library(&*store, stack),
+            None => Ok(None),
+        }
     }
 
     /// The stack an image is in, if any.

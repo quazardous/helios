@@ -418,9 +418,9 @@ impl Card {
 
 /// Whether the card mounted at `path` (named `label`) is safe to format:
 /// each of its `files` (with the image it holds, `None` for one not
-/// imported) held by a file in the library folder `root` and, when the
-/// library has a backup strategy, its image with its verified backup
-/// copies, from the images' locations in the vault. An import computes it
+/// imported) in the Library, held by a file in the library folder `root`
+/// and, when the library has a backup strategy, its image with its
+/// verified backup copies, from the images' locations in the vault. An import computes it
 /// at its end; it is computed again when a backup job ends, for the cards
 /// still inserted.
 pub fn card_safety<S: Store>(
@@ -440,11 +440,15 @@ pub fn card_safety<S: Store>(
     };
     let (mut missing, mut short) = (0, 0);
     for (_, id) in &files {
-        let Some(id) = id else {
-            missing += 1;
-            continue;
+        // A file whose image is not in the Library is not held by it.
+        let id = match id {
+            Some(id) if vault.in_library(id)? => *id,
+            _ => {
+                missing += 1;
+                continue;
+            }
         };
-        let locations = vault.locations(id)?;
+        let locations = vault.locations(&id)?;
         if !locations
             .iter()
             .any(|l| l.present() && l.path.starts_with(root) && l.path.is_file())
@@ -453,7 +457,7 @@ pub fn card_safety<S: Store>(
             continue;
         }
         if let Some(s) = &strategy
-            && !helios_storage::strategy::status(&locations, &volumes, verified.get(id), Some(s))
+            && !helios_storage::strategy::status(&locations, &volumes, verified.get(&id), Some(s))
                 .met()
         {
             short += 1;

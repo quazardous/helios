@@ -2,7 +2,7 @@
 //!
 //! An import records, for each image it touched, the image's rows before
 //! it ([`ImageRows`], `None` when the image was new) and after it: its
-//! locations, fields, signals and versions. [`Vault::revert`] brings the
+//! Library flag, locations, fields, signals and versions. [`Vault::revert`] brings the
 //! rows back to before, [`Vault::replay`] to after, each in one
 //! transaction. Only catalogue rows move: no file is ever touched, so a
 //! copy an import made stays on disk after an undo (a later import finds
@@ -24,12 +24,14 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::{Image, ImageId, Location, Store, Vault, Version};
+use crate::{Image, ImageId, LibraryFlag, Location, Store, Vault, Version};
 
 /// The rows of one image.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct ImageRows {
     pub image: Image,
+    /// Whether it is in the Library.
+    pub library: LibraryFlag,
     pub locations: Vec<Location>,
     /// Every field it holds, by name.
     pub fields: BTreeMap<String, Value>,
@@ -135,7 +137,10 @@ impl<S: Store> Vault<S> {
     }
 }
 
-fn rows_of<S: Store + ?Sized>(store: &S, id: &ImageId) -> Result<Option<ImageRows>, String> {
+pub(crate) fn rows_of<S: Store + ?Sized>(
+    store: &S,
+    id: &ImageId,
+) -> Result<Option<ImageRows>, String> {
     let Some(image) = store.image(id)? else {
         return Ok(None);
     };
@@ -148,6 +153,7 @@ fn rows_of<S: Store + ?Sized>(store: &S, id: &ImageId) -> Result<Option<ImageRow
     }
     Ok(Some(ImageRows {
         image,
+        library: store.library_flag(id)?.unwrap_or_default(),
         locations: store.locations(id)?,
         fields,
         signals: store.document(crate::stacks::SIGNALS, &id.hex())?,
@@ -295,6 +301,15 @@ fn put_rows<S: Store>(
     for v in back {
         if store.version(&v.id)?.is_none() {
             store.put_version(v)?;
+            wrote = true;
+        }
+    }
+    // The Library flag: set back where it still holds the step's.
+    let was = from.map(|f| &f.library);
+    if was != Some(&to.library) {
+        let now = store.library_flag(id)?.unwrap_or_default();
+        if was.is_none_or(|w| *w == now) && now != to.library {
+            store.set_library_flag(id, &to.library)?;
             wrote = true;
         }
     }

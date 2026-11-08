@@ -1,7 +1,12 @@
 # The image map: every image seen, import as a flag
 
-Status: proposed (2026-11-08). Nothing here is built yet; section 9
-gives the order of work, section 10 the questions left to the owner.
+Status: accepted (2026-11-08), with recommendations 1 to 7. Slice 1
+built (2026-11-08): schema 5, the migration, the sighting and flag calls
+of the `Store` (`put_sighting`, `sightings_of`, `sightings_like`,
+`library_flag`, `set_library_flag`; `Vault::set_in_library` is an undo
+step) and every Library read gated on the flag, with contract tests on
+both stores. Section 9 gives the order of work, section 10 the questions
+as they were put.
 
 The owner's request: "Helios's database records every image it sees on
 every known volume. Import only means changing a flag, plus, when needed,

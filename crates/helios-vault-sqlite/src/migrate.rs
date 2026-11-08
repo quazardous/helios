@@ -131,7 +131,66 @@ ALTER TABLE locations DROP COLUMN present;
 CREATE INDEX locations_volume ON locations (volume);
 ",
     },
+    Migration {
+        version: 5,
+        name: "the image map",
+        sql: V5,
+    },
 ];
+
+/// The image map (`docs/design/image-map.md`): an image is in the Library
+/// by a flag, and every file seen is a sighting. Every image a vault held
+/// was imported: it is flagged, `migrated`. Every location becomes a
+/// sighting with its image, partial hash, presence and last check, and
+/// the `locations` table goes (only this driver read it). Two locations
+/// at one place on a volume (a mount point that moved) keep the one
+/// checked last.
+const V5: &str = "
+ALTER TABLE images ADD COLUMN in_library INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE images ADD COLUMN library_at INTEGER;
+ALTER TABLE images ADD COLUMN library_by TEXT;
+UPDATE images SET in_library = 1, library_by = 'migrated',
+    library_at = (SELECT MIN(last_verified) FROM locations l WHERE l.image = images.id);
+CREATE INDEX images_in_library ON images (in_library);
+CREATE TABLE sightings (
+    id            INTEGER PRIMARY KEY,
+    volume        TEXT,
+    rel_path      TEXT,
+    path          TEXT NOT NULL,
+    size          INTEGER NOT NULL,
+    modified      INTEGER NOT NULL,
+    partial       TEXT,
+    image         TEXT REFERENCES images (id),
+    taken         INTEGER,
+    camera        TEXT,
+    lens          TEXT,
+    first_seen    INTEGER NOT NULL,
+    last_seen     INTEGER NOT NULL,
+    last_verified INTEGER,
+    presence      TEXT NOT NULL DEFAULT 'present',
+    seen_by       TEXT NOT NULL DEFAULT 'import'
+);
+CREATE UNIQUE INDEX sightings_place ON sightings (volume, rel_path) WHERE volume IS NOT NULL;
+CREATE UNIQUE INDEX sightings_loose ON sightings (path) WHERE volume IS NULL;
+CREATE INDEX sightings_path ON sightings (path);
+CREATE INDEX sightings_image ON sightings (image);
+CREATE INDEX sightings_size ON sightings (size, partial);
+INSERT OR IGNORE INTO sightings (volume, rel_path, path, size, modified, partial, image,
+                                 first_seen, last_seen, last_verified, presence)
+    SELECT l.volume, l.rel_path, l.path, l.size, l.modified, i.partial, l.image,
+           l.last_verified, l.last_verified, l.last_verified, l.presence
+    FROM locations l LEFT JOIN images i ON i.id = l.image
+    ORDER BY l.last_verified DESC, l.path;
+DROP TABLE locations;
+CREATE TABLE folders (
+    volume      TEXT,
+    rel_dir     TEXT NOT NULL,
+    last_listed INTEGER,
+    files       INTEGER,
+    state       TEXT NOT NULL DEFAULT 'listed',
+    PRIMARY KEY (volume, rel_dir)
+);
+";
 
 /// The views and triggers of the current schema (none yet), created again
 /// at the end of every step.

@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use helios_vault::{Location, Presence, Store};
+use helios_vault::{ImageId, LibraryFlag, Location, Presence, Store};
 use helios_vault_sqlite::{OpenError, Options, Progress, SCHEMA_VERSION, SqliteStore, snapshot};
 use rusqlite::Connection;
 
@@ -205,7 +205,7 @@ fn a_messy_database_migrates_and_reports_what_it_found() {
         migrated.orphans,
         [
             "fields row 2 points to a missing images row",
-            "locations row 1 points to a missing images row"
+            "sightings row 1 points to a missing images row"
         ]
     );
     assert_eq!(store.images().unwrap().len(), 1, "the vault is usable");
@@ -300,5 +300,145 @@ fn old_locations_keep_their_path_and_wait_for_a_volume() {
         Some((id, relinked))
     );
     drop(store);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Schema 4 as it was released, after `VERSION_1`: the vault state and
+/// locations on volumes.
+const VERSION_4: &str = "
+CREATE TABLE vault_state (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+ALTER TABLE locations ADD COLUMN volume TEXT;
+ALTER TABLE locations ADD COLUMN rel_path TEXT;
+ALTER TABLE locations ADD COLUMN presence TEXT NOT NULL DEFAULT 'present';
+ALTER TABLE locations DROP COLUMN present;
+CREATE INDEX locations_volume ON locations (volume);
+";
+
+/// Version 5, the image map: every image is flagged in the Library
+/// (`migrated`, since its first location's check), every location becomes
+/// a sighting with its image, partial hash, presence and last check, and
+/// fields and versions stay as they were.
+#[test]
+fn schema_4_moves_to_the_image_map_keeping_every_row() {
+    let dir = scratch("map");
+    let path = dir.join("vault.db");
+    let (one, two, three) = ("01".repeat(32), "05".repeat(32), "07".repeat(32));
+    let version = "09".repeat(32);
+    old_database(
+        &path,
+        4,
+        &format!(
+            "{VERSION_4}
+             INSERT INTO images VALUES ('{two}', 200, '{}');
+             INSERT INTO images VALUES ('{three}', 300, '{}');
+             INSERT INTO locations VALUES ('/photos/a.nef', '{one}', 100, 5, 70, NULL, NULL, 'present');
+             INSERT INTO locations VALUES ('/media/b/x.cr3', '{one}', 100, 5, 30, 'uuid:b', 'x.cr3', 'offline');
+             INSERT INTO locations VALUES ('/photos/gone.nef', '{two}', 200, 6, 50, NULL, NULL, 'missing');
+             INSERT INTO versions VALUES ('{version}', '{one}', '[]', '{{\"n\":1}}', 'user', 3, 'first');",
+            "06".repeat(32),
+            "08".repeat(32)
+        ),
+    );
+    let store = SqliteStore::open(&path).unwrap();
+    let migrated = store.report().migrated.clone().unwrap();
+    assert_eq!((migrated.from, migrated.to), (4, SCHEMA_VERSION));
+    assert!(migrated.snapshot.is_some(), "a snapshot first");
+    assert!(migrated.orphans.is_empty(), "{:?}", migrated.orphans);
+    let id = |hex: &str| ImageId::from_hex(hex).unwrap();
+    // Every image, flagged.
+    let images: Vec<_> = store.images().unwrap().iter().map(|i| i.id).collect();
+    assert_eq!(images, [id(&one), id(&two), id(&three)]);
+    let flag = |hex: &str| store.library_flag(&id(hex)).unwrap().unwrap();
+    assert_eq!(
+        flag(&one),
+        LibraryFlag {
+            in_library: true,
+            at: Some(30),
+            by: Some("migrated".into())
+        }
+    );
+    assert_eq!(flag(&two).at, Some(50));
+    assert_eq!(flag(&three).at, None, "no location, no date");
+    // Fields and versions untouched.
+    assert_eq!(
+        store.field(&id(&one), "rating").unwrap(),
+        Some(serde_json::json!(3))
+    );
+    assert_eq!(store.versions(&id(&one)).unwrap().len(), 1);
+    // Every location, as before.
+    let all: Vec<_> = store
+        .all_locations()
+        .unwrap()
+        .into_iter()
+        .map(|(i, l)| {
+            (
+                i,
+                l.path.to_str().unwrap().to_string(),
+                l.size,
+                l.modified,
+                l.last_verified,
+                l.volume.map(|v| v.0),
+                l.rel_path.map(|p| p.to_str().unwrap().to_string()),
+                l.presence,
+            )
+        })
+        .collect();
+    assert_eq!(
+        all,
+        [
+            (
+                id(&one),
+                "/media/b/x.cr3".into(),
+                100,
+                5,
+                30,
+                Some("uuid:b".into()),
+                Some("x.cr3".into()),
+                Presence::Offline
+            ),
+            (
+                id(&one),
+                "/photos/a.nef".into(),
+                100,
+                5,
+                70,
+                None,
+                None,
+                Presence::Present
+            ),
+            (
+                id(&two),
+                "/photos/gone.nef".into(),
+                200,
+                6,
+                50,
+                None,
+                None,
+                Presence::Missing
+            ),
+        ]
+    );
+    // As sightings, with their partial hash and when they were seen.
+    let seen = store.sightings_of(&id(&one)).unwrap();
+    assert_eq!(seen.len(), 2);
+    let partial = helios_vault::parse_hash(&"02".repeat(32)).unwrap();
+    assert!(seen.iter().all(|s| s.partial == Some(partial)));
+    assert_eq!(
+        (seen[1].first_seen, seen[1].last_seen, seen[1].last_verified),
+        (70, 70, Some(70))
+    );
+    assert_eq!(store.sightings_like(100, &partial).unwrap(), seen);
+    // The old table is gone, the folders' is there.
+    let db = Connection::open(&path).unwrap();
+    let tables: Vec<String> = db
+        .prepare("SELECT name FROM sqlite_schema WHERE type = 'table' ORDER BY name")
+        .unwrap()
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert!(!tables.contains(&"locations".to_string()), "{tables:?}");
+    assert!(tables.contains(&"folders".to_string()), "{tables:?}");
+    drop((db, store));
     let _ = std::fs::remove_dir_all(&dir);
 }

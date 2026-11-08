@@ -34,9 +34,13 @@ use std::collections::BTreeMap;
 use serde::Serialize;
 use serde_json::Value;
 
+use helios_core::ContentHash;
 use helios_vault::fields::{AuditEntry, LABELS, Order, PICKED, Query, RATING, REJECTED, TAGS};
 use helios_vault::storage::VolumeId;
-use helios_vault::{Image, ImageId, Location, Presence, Store, Version, VersionId, parse_hash};
+use helios_vault::{
+    Image, ImageId, LibraryFlag, Location, Presence, Sighting, Store, Version, VersionId,
+    parse_hash,
+};
 
 mod migrate;
 pub mod snapshot;
@@ -514,49 +518,128 @@ impl SqliteStore {
     }
 }
 
-type LocationRow = (
-    String,
-    String,
-    i64,
-    i64,
-    i64,
-    Option<String>,
-    Option<String>,
-    String,
+/// The columns a [`Sighting`] is read from, in [`sighting`]'s order.
+const SIGHTING_COLUMNS: &str = "volume, rel_path, path, size, modified, partial, image, taken, \
+     camera, lens, first_seen, last_seen, last_verified, presence, seen_by";
+
+type SightingRow = (
+    (Option<String>, Option<String>, String, i64, i64),
+    (Option<String>, Option<String>, Option<i64>, Option<String>),
+    (Option<String>, i64, i64, Option<i64>, String, String),
 );
 
-fn location(row: &rusqlite::Row) -> rusqlite::Result<LocationRow> {
+fn sighting(r: &rusqlite::Row) -> rusqlite::Result<SightingRow> {
     Ok((
-        row.get(0)?,
-        row.get(1)?,
-        row.get(2)?,
-        row.get(3)?,
-        row.get(4)?,
-        row.get(5)?,
-        row.get(6)?,
-        row.get(7)?,
+        (r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?),
+        (r.get(5)?, r.get(6)?, r.get(7)?, r.get(8)?),
+        (
+            r.get(9)?,
+            r.get(10)?,
+            r.get(11)?,
+            r.get(12)?,
+            r.get(13)?,
+            r.get(14)?,
+        ),
     ))
 }
 
-fn to_location(
-    (image, path, size, modified, verified, volume, rel_path, presence): LocationRow,
-) -> Result<(ImageId, Location), String> {
-    Ok((
-        ImageId::from_hex(&image)?,
-        Location {
-            path: PathBuf::from(path),
-            size: size as u64,
-            modified: modified as u64,
-            last_verified: verified as u64,
-            volume: volume.map(VolumeId),
-            rel_path: rel_path.map(PathBuf::from),
-            presence: Presence::parse(&presence),
-        },
-    ))
+fn to_sighting(
+    (
+        (volume, rel_path, path, size, modified),
+        (partial, image, taken, camera),
+        (lens, first_seen, last_seen, last_verified, presence, seen_by),
+    ): SightingRow,
+) -> Result<Sighting, String> {
+    Ok(Sighting {
+        volume: volume.map(VolumeId),
+        rel_path: rel_path.map(PathBuf::from),
+        path: PathBuf::from(path),
+        size: size as u64,
+        modified: modified as u64,
+        partial: partial.map(|p| parse_hash(&p)).transpose()?,
+        image: image.map(|i| ImageId::from_hex(&i)).transpose()?,
+        taken,
+        camera,
+        lens,
+        first_seen: first_seen as u64,
+        last_seen: last_seen as u64,
+        last_verified: last_verified.map(|v| v as u64),
+        presence: Presence::parse(&presence),
+        seen_by,
+    })
 }
 
-const LOCATION_COLUMNS: &str =
-    "image, path, size, modified, last_verified, volume, rel_path, presence";
+impl SqliteStore {
+    /// The sightings a condition selects (its arguments in `args`), by
+    /// path.
+    fn sightings_where(
+        &self,
+        condition: &str,
+        args: impl rusqlite::Params,
+    ) -> Result<Vec<Sighting>, String> {
+        let sql = format!(
+            "SELECT {SIGHTING_COLUMNS} FROM sightings s WHERE {condition} ORDER BY s.path, s.id"
+        );
+        let mut statement = self.db.prepare(&sql).map_err(err)?;
+        let rows = statement
+            .query_map(args, sighting)
+            .map_err(err)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(err)?;
+        rows.into_iter().map(to_sighting).collect()
+    }
+
+    fn locations_where(
+        &self,
+        condition: &str,
+        args: impl rusqlite::Params,
+    ) -> Result<Vec<(ImageId, Location)>, String> {
+        Ok(self
+            .sightings_where(&format!("s.image IS NOT NULL AND ({condition})"), args)?
+            .iter()
+            .filter_map(Sighting::location)
+            .collect())
+    }
+}
+
+/// Writes a sighting as a new row.
+fn insert_sighting(db: &Connection, s: &Sighting) -> Result<(), String> {
+    db.execute(
+        &format!(
+            "INSERT INTO sightings ({SIGHTING_COLUMNS})
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)"
+        ),
+        params![
+            s.volume.as_ref().map(VolumeId::as_str),
+            s.rel_path.as_ref().map(|p| p.to_string_lossy()),
+            s.path.to_string_lossy(),
+            s.size as i64,
+            s.modified as i64,
+            s.partial.as_ref().map(ToString::to_string),
+            s.image.as_ref().map(ImageId::hex),
+            s.taken,
+            s.camera,
+            s.lens,
+            s.first_seen as i64,
+            s.last_seen as i64,
+            s.last_verified.map(|v| v as i64),
+            s.presence.as_str(),
+            s.seen_by
+        ],
+    )
+    .map(|_| ())
+    .map_err(err)
+}
+
+fn image_known(db: &Connection, id: &ImageId) -> Result<Option<String>, String> {
+    db.query_row(
+        "SELECT partial FROM images WHERE id = ?1",
+        params![id.hex()],
+        |r| r.get(0),
+    )
+    .optional()
+    .map_err(err)
+}
 
 impl Store for SqliteStore {
     fn add_image(&mut self, image: &Image) -> Result<bool, String> {
@@ -564,7 +647,7 @@ impl Store for SqliteStore {
         let added = self
             .db
             .execute(
-                "INSERT OR IGNORE INTO images (id, size, partial) VALUES (?1, ?2, ?3)",
+                "INSERT OR IGNORE INTO images (id, size, partial, in_library) VALUES (?1, ?2, ?3, 1)",
                 params![image.id.hex(), image.size as i64, image.partial.to_string()],
             )
             .map_err(err)?;
@@ -587,7 +670,7 @@ impl Store for SqliteStore {
     fn images(&self) -> Result<Vec<Image>, String> {
         let mut statement = self
             .db
-            .prepare("SELECT id, size, partial FROM images ORDER BY id")
+            .prepare("SELECT id, size, partial FROM images WHERE in_library = 1 ORDER BY id")
             .map_err(err)?;
         let rows = statement
             .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
@@ -599,68 +682,98 @@ impl Store for SqliteStore {
             .collect()
     }
 
-    fn put_location(&mut self, id: &ImageId, location: &Location) -> Result<(), String> {
-        self.writable()?;
+    fn library_flag(&self, id: &ImageId) -> Result<Option<LibraryFlag>, String> {
         self.db
+            .query_row(
+                "SELECT in_library, library_at, library_by FROM images WHERE id = ?1",
+                params![id.hex()],
+                |r| {
+                    Ok(LibraryFlag {
+                        in_library: r.get::<_, i64>(0)? != 0,
+                        at: r.get::<_, Option<i64>>(1)?.map(|a| a as u64),
+                        by: r.get(2)?,
+                    })
+                },
+            )
+            .optional()
+            .map_err(err)
+    }
+
+    fn set_library_flag(&mut self, id: &ImageId, flag: &LibraryFlag) -> Result<(), String> {
+        self.writable()?;
+        let set = self
+            .db
             .execute(
-                "INSERT INTO locations
-                     (path, image, size, modified, last_verified, volume, rel_path, presence)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
-                 ON CONFLICT (path) DO UPDATE SET image = ?2, size = ?3, modified = ?4,
-                     last_verified = ?5, volume = ?6, rel_path = ?7, presence = ?8",
+                "UPDATE images SET in_library = ?2, library_at = ?3, library_by = ?4 WHERE id = ?1",
                 params![
-                    location.path.to_string_lossy(),
                     id.hex(),
-                    location.size as i64,
-                    location.modified as i64,
-                    location.last_verified as i64,
-                    location.volume.as_ref().map(VolumeId::as_str),
-                    location.rel_path.as_ref().map(|p| p.to_string_lossy()),
-                    location.presence.as_str()
+                    i64::from(flag.in_library),
+                    flag.at.map(|a| a as i64),
+                    flag.by
                 ],
             )
-            .map_err(|e| match e {
-                rusqlite::Error::SqliteFailure(_, _) if self.image(id).ok().flatten().is_none() => {
-                    format!("no image {}", id.hex())
-                }
-                other => other.to_string(),
-            })?;
+            .map_err(err)?;
+        if set == 0 {
+            return Err(format!("no image {}", id.hex()));
+        }
         Ok(())
     }
 
-    fn locations(&self, id: &ImageId) -> Result<Vec<Location>, String> {
-        let sql =
-            format!("SELECT {LOCATION_COLUMNS} FROM locations WHERE image = ?1 ORDER BY path");
-        let mut statement = self.db.prepare(&sql).map_err(err)?;
-        let rows = statement
-            .query_map(params![id.hex()], location)
-            .map_err(err)?
-            .collect::<Result<Vec<_>, _>>()
+    fn put_location(&mut self, id: &ImageId, location: &Location) -> Result<(), String> {
+        self.write(|db| {
+            let partial = image_known(db, id)?.ok_or_else(|| format!("no image {}", id.hex()))?;
+            let partial = parse_hash(&partial)?;
+            let path = location.path.to_string_lossy();
+            let volume = location.volume.as_ref().map(VolumeId::as_str);
+            let rel = location.rel_path.as_ref().map(|p| p.to_string_lossy());
+            // The row at this path, else the one at its place on its
+            // volume; both go, the new row replaces them.
+            let place = "path = ?1 OR (?2 IS NOT NULL AND ?3 IS NOT NULL AND volume = ?2 AND rel_path = ?3)";
+            let old = db
+                .query_row(
+                    &format!(
+                        "SELECT {SIGHTING_COLUMNS} FROM sightings WHERE {place}
+                         ORDER BY path = ?1 DESC, id LIMIT 1"
+                    ),
+                    params![path, volume, rel],
+                    sighting,
+                )
+                .optional()
+                .map_err(err)?
+                .map(to_sighting)
+                .transpose()?;
+            db.execute(
+                &format!("DELETE FROM sightings WHERE {place}"),
+                params![path, volume, rel],
+            )
             .map_err(err)?;
-        rows.into_iter()
-            .map(|r| to_location(r).map(|(_, l)| l))
-            .collect()
+            insert_sighting(
+                db,
+                &Sighting::of_location(id, location, partial, old.as_ref()),
+            )
+        })
+    }
+
+    fn locations(&self, id: &ImageId) -> Result<Vec<Location>, String> {
+        Ok(self
+            .locations_where("s.image = ?1", params![id.hex()])?
+            .into_iter()
+            .map(|(_, l)| l)
+            .collect())
     }
 
     fn at_path(&self, path: &Path) -> Result<Option<(ImageId, Location)>, String> {
-        let sql = format!("SELECT {LOCATION_COLUMNS} FROM locations WHERE path = ?1");
-        let row = self
-            .db
-            .query_row(&sql, params![path.to_string_lossy()], location)
-            .optional()
-            .map_err(err)?;
-        row.map(to_location).transpose()
+        Ok(self
+            .locations_where("s.path = ?1", params![path.to_string_lossy()])?
+            .into_iter()
+            .next())
     }
 
     fn all_locations(&self) -> Result<Vec<(ImageId, Location)>, String> {
-        let sql = format!("SELECT {LOCATION_COLUMNS} FROM locations ORDER BY path");
-        let mut statement = self.db.prepare(&sql).map_err(err)?;
-        let rows = statement
-            .query_map([], location)
-            .map_err(err)?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(err)?;
-        rows.into_iter().map(to_location).collect()
+        self.locations_where(
+            "s.image IN (SELECT id FROM images WHERE in_library = 1)",
+            [],
+        )
     }
 
     fn remove_location(&mut self, path: &Path) -> Result<bool, String> {
@@ -668,11 +781,55 @@ impl Store for SqliteStore {
         let removed = self
             .db
             .execute(
-                "DELETE FROM locations WHERE path = ?1",
+                "DELETE FROM sightings WHERE path = ?1 AND image IS NOT NULL",
                 params![path.to_string_lossy()],
             )
             .map_err(err)?;
-        Ok(removed == 1)
+        Ok(removed > 0)
+    }
+
+    fn put_sighting(&mut self, s: &Sighting) -> Result<(), String> {
+        s.check()?;
+        self.write(|db| {
+            if let Some(id) = &s.image
+                && image_known(db, id)?.is_none()
+            {
+                return Err(format!("no image {}", id.hex()));
+            }
+            let path = s.path.to_string_lossy();
+            let volume = s.volume.as_ref().map(VolumeId::as_str);
+            let rel = s.rel_path.as_ref().map(|p| p.to_string_lossy());
+            let place = "(?1 IS NULL AND volume IS NULL AND path = ?3)
+                 OR (?1 IS NOT NULL AND volume = ?1 AND rel_path = ?2)";
+            let first: Option<i64> = db
+                .query_row(
+                    &format!("SELECT MIN(first_seen) FROM sightings WHERE {place}"),
+                    params![volume, rel, path],
+                    |r| r.get(0),
+                )
+                .map_err(err)?;
+            db.execute(
+                &format!("DELETE FROM sightings WHERE {place}"),
+                params![volume, rel, path],
+            )
+            .map_err(err)?;
+            let mut new = s.clone();
+            if let Some(first) = first {
+                new.first_seen = new.first_seen.min(first as u64);
+            }
+            insert_sighting(db, &new)
+        })
+    }
+
+    fn sightings_of(&self, id: &ImageId) -> Result<Vec<Sighting>, String> {
+        self.sightings_where("s.image = ?1", params![id.hex()])
+    }
+
+    fn sightings_like(&self, size: u64, partial: &ContentHash) -> Result<Vec<Sighting>, String> {
+        self.sightings_where(
+            "s.size = ?1 AND s.partial = ?2",
+            params![size as i64, partial.to_string()],
+        )
     }
 
     fn remove_image(&mut self, id: &ImageId) -> Result<bool, String> {
@@ -686,7 +843,7 @@ impl Store for SqliteStore {
                 .optional()
                 .map_err(err)
             };
-            if named("locations")?.is_some() || named("versions")?.is_some() {
+            if named("sightings")?.is_some() || named("versions")?.is_some() {
                 return Err(format!(
                     "image {} still has locations or versions",
                     id.hex()
@@ -803,7 +960,8 @@ impl Store for SqliteStore {
              LEFT JOIN fields p ON p.image = i.id AND p.name = '{PICKED}'
              LEFT JOIN fields x ON x.image = i.id AND x.name = '{REJECTED}'
              LEFT JOIN fields t ON t.image = i.id AND t.name = '{TAGS}'
-             WHERE (?1 IS NULL OR COALESCE(r.number, 0) >= ?1)
+             WHERE i.in_library = 1
+               AND (?1 IS NULL OR COALESCE(r.number, 0) >= ?1)
                AND (?2 IS NULL OR EXISTS (SELECT 1 FROM json_each(l.value) WHERE json_each.value = ?2))"
         );
         if !query.labels.is_empty() {

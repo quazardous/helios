@@ -476,3 +476,58 @@ fn a_card_is_safe_to_format_once_its_photos_meet_the_strategy() {
         "EOS_DIGITAL: safe to format (1 copy, in the Library: no backup set up)"
     );
 }
+
+/// A photo taken out of the Library counts nowhere: no backup status, no
+/// backup to make, and a card holding it is not safe to format. Put back,
+/// it counts again.
+#[test]
+fn a_photo_out_of_the_library_counts_for_no_backup_and_no_card() {
+    let w = world("out", 0);
+    let card = w.p.join("EOS_DIGITAL");
+    photo(&card.join("DCIM/100CANON/a.raf"), 13);
+    let library = w.p.join("libdisk/Library");
+    let s = library_strategy(&w.vault, &[Trigger::ByHand]);
+    let report = import_into(&w.vault, &w.jobs, std::slice::from_ref(&card), &library);
+    let [first] = report.cards.as_slice() else {
+        panic!("one card: {report:?}")
+    };
+    let id = first.files[0].1.expect("imported");
+    let volumes = registry::known(&w.vault).unwrap();
+    let dest = w.backup.clone();
+    assert_eq!(
+        backup::pending(&w.vault, &volumes, &s, &dest).unwrap(),
+        [id]
+    );
+    let safety = |w: &World| {
+        helios_library::import::card_safety(
+            &w.vault,
+            &first.root,
+            &first.path,
+            &first.label,
+            first.files.clone(),
+        )
+        .unwrap()
+    };
+    let out = w.vault.set_in_library(&[id], false, "user", 600).unwrap();
+    let statuses = strategy::statuses(&w.vault, &volumes, Some(&s)).unwrap();
+    assert!(!statuses.contains_key(&id), "no backup status");
+    assert!(
+        backup::pending(&w.vault, &volumes, &s, &dest)
+            .unwrap()
+            .is_empty()
+    );
+    let none = backup::run(&w.vault, &w.jobs, &w.plugged, Trigger::ByHand, 600, None).unwrap();
+    assert!(none.is_empty(), "nothing to back up: {none:?}");
+    let card_now = safety(&w);
+    assert_eq!(card_now.missing, 1);
+    assert!(!card_now.safe_to_format);
+    // Back in the Library (undo), it counts again.
+    w.vault.revert(&out).unwrap();
+    assert!(
+        strategy::statuses(&w.vault, &volumes, Some(&s))
+            .unwrap()
+            .contains_key(&id)
+    );
+    backup::run(&w.vault, &w.jobs, &w.plugged, Trigger::ByHand, 700, None).unwrap();
+    assert!(safety(&w).safe_to_format);
+}

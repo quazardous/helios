@@ -8,9 +8,31 @@ near duplicates, and group photos into stacks. They run the same from the
 command line (`helios import`, `helios stacks`, see [cli.md](cli.md)) and
 from the desktop (the `library.*` commands).
 
-Proposed next (2026-11-08): the vault records every image Helios sees on
+Under way (2026-11-08): the vault records every image Helios sees on
 every known volume, and import becomes a flag plus the copies the backup
 strategy asks for; see [design/image-map.md](design/image-map.md).
+
+## The Library and the map
+
+An image is **in the Library** when its flag says so, with when and by
+what it was set (an import, the user, an agent, `migrated` for the
+images a vault held before the flag existed). Every read of the Library
+leaves the other images out: its listing, queries and cursors, stacks
+(a member out of the Library is not shown; a stack left with fewer than
+two is not shown at all), every location the scan and the Storage page
+count, backup status and backup jobs, and "safe to format" (a card file
+whose image is out of the Library is not held by it). An image out of
+the Library keeps its marks, versions and sightings; putting it in or
+out is one undo step of the library, which moves the flag only.
+
+The vault also keeps **sightings**: one file at one place (a volume and
+its path there, or an absolute path on no volume yet), with its size and
+modification time, and what reading it told: its partial hash, its image
+once fully hashed, its capture time, camera and lens, when it was first
+and last seen and last verified, its presence, and what listed it. A
+location is the sighting of a file whose image is known. For now only
+imports, scans and backups write them, as before; listings that record
+every file seen come next.
 
 ## The default library
 

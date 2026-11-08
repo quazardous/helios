@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use std::sync::Arc;
 
-use helios_core::{Bus, ContentHash};
+use helios_core::{Bus, ContentHash, Describe};
 use serde_json::json;
 
 use crate::fields::{Command, LABELS, Op, Order, PICKED, Query, RATING, REJECTED, TAGS};
@@ -41,6 +41,231 @@ pub fn check<S: Store>(make: impl Fn() -> S) {
     an_edit_is_saved_step_by_step_and_reopened_at_its_head(make());
     removals_forget_rows_and_refuse_what_is_still_named(make());
     a_step_is_reverted_and_replayed_keeping_the_files(make(), &scratch("undo"));
+    an_image_off_the_library_never_shows_in_a_library_read(make());
+    sightings_are_kept_one_per_place(make());
+}
+
+/// The Library is the flagged images: one taken out of it is in no
+/// listing, query, cursor, stack or location list, yet it keeps its rows
+/// and its sightings, and putting it back is an undoable step.
+fn an_image_off_the_library_never_shows_in_a_library_read<S: Store>(s: S) {
+    let v = Vault::new(s);
+    let (a, b, c) = (image(1), image(2), image(3));
+    v.transaction(|s| {
+        for (i, img) in [&a, &b, &c].into_iter().enumerate() {
+            assert!(s.add_image(img)?);
+            s.put_location(&img.id, &location(&format!("/p/{i}.nef")))?;
+            s.set_field(&img.id, RATING, Some(&json!(5)))?;
+            s.set_field(&img.id, LABELS, Some(&json!(["red"])))?;
+        }
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(
+        v.library_flag(&a.id).unwrap(),
+        Some(crate::LibraryFlag::added()),
+        "an image added is in the Library"
+    );
+    v.create_stack(&[a.id, b.id, c.id], Some(b.id), "user", 1)
+        .unwrap();
+    let cursor = v.open_cursor(Query::default()).unwrap();
+    assert_eq!(cursor.count, 3);
+    // Taken out.
+    let out = v.set_in_library(&[b.id, b.id], false, "user", 9).unwrap();
+    assert_eq!(out.images.len(), 1, "one image, once");
+    assert!(out.images[0].changed());
+    assert!(!v.in_library(&b.id).unwrap());
+    let flag = v.library_flag(&b.id).unwrap().unwrap();
+    assert_eq!((flag.at, flag.by.as_deref()), (Some(9), Some("user")));
+    let ids = |images: Vec<Image>| images.into_iter().map(|i| i.id).collect::<Vec<_>>();
+    assert_eq!(ids(v.images().unwrap()), [a.id, c.id], "images");
+    let queries = [
+        Query::default(),
+        Query {
+            min_rating: Some(4),
+            ..Query::default()
+        },
+        Query {
+            label: Some("red".into()),
+            order: Order::RatingDesc,
+            ..Query::default()
+        },
+        Query {
+            labels: vec!["red".into()],
+            flags: vec!["none".into()],
+            ..Query::default()
+        },
+    ];
+    for q in &queries {
+        assert_eq!(
+            v.store.lock().unwrap().select(q).unwrap(),
+            [a.id, c.id],
+            "{q:?}"
+        );
+    }
+    let delta = v.refresh(cursor.id).unwrap();
+    assert_eq!(
+        (delta.count, delta.removed.as_slice()),
+        (2, [b.id].as_slice())
+    );
+    assert_eq!(v.rank_of(cursor.id, &b.id).unwrap(), None);
+    let fetched: Vec<ImageId> = v
+        .fetch(cursor.id, 0, 10, &[RATING])
+        .unwrap()
+        .into_iter()
+        .map(|r| r.id)
+        .collect();
+    assert_eq!(fetched, [a.id, c.id], "cursor rows");
+    let located: Vec<ImageId> = v
+        .all_locations()
+        .unwrap()
+        .into_iter()
+        .map(|(i, _)| i)
+        .collect();
+    assert_eq!(located, [a.id, c.id], "every location");
+    let stacks = v.stacks().unwrap();
+    assert_eq!(stacks.len(), 1);
+    assert_eq!(stacks[0].members, [a.id.hex(), c.id.hex()], "stack members");
+    assert_eq!(stacks[0].top, a.id.hex(), "a top taken out moves");
+    assert_eq!(v.stack(&stacks[0].id).unwrap(), Some(stacks[0].clone()));
+    assert_eq!(v.stack_of(&b.id).unwrap(), None);
+    assert_eq!(v.describe()["images"], 2);
+    // Repair walks the Library: the files are gone, only its locations
+    // are marked missing.
+    assert_eq!(v.repair(&[], 10).unwrap().lost, 2);
+    assert_eq!(v.locations(&b.id).unwrap()[0].presence, Presence::Present);
+    // Still known by its id, with its rows and its sightings.
+    assert_eq!(v.image(&b.id).unwrap(), Some(b.clone()));
+    assert_eq!(v.locations(&b.id).unwrap().len(), 1);
+    assert_eq!(
+        v.fields_of(&[b.id], &[RATING]).unwrap()[0][RATING],
+        json!(5)
+    );
+    let seen = v.sightings(&b.id).unwrap();
+    assert_eq!(seen.len(), 1);
+    assert_eq!(
+        (seen[0].image, seen[0].partial),
+        (Some(b.id), Some(b.partial))
+    );
+    assert_eq!(v.sightings_like(b.size, &b.partial).unwrap(), seen);
+    assert!(v.at_path(Path::new("/p/1.nef")).unwrap().is_some());
+    // A third image out leaves no stack of two.
+    v.set_in_library(&[c.id], false, "user", 10).unwrap();
+    assert!(v.stacks().unwrap().is_empty());
+    assert_eq!(v.stack_of(&a.id).unwrap(), None);
+    // Undo puts the flag back; redo takes it out again.
+    v.revert(&out).unwrap();
+    assert!(v.in_library(&b.id).unwrap());
+    assert_eq!(ids(v.images().unwrap()), [a.id, b.id]);
+    assert_eq!(v.refresh(cursor.id).unwrap().inserted, [b.id]);
+    v.replay(&out).unwrap();
+    assert!(!v.in_library(&b.id).unwrap());
+    assert!(
+        v.set_in_library(&[image(9).id], true, "user", 11)
+            .unwrap_err()
+            .contains("no image")
+    );
+    // Back in by an import's job: listed again.
+    let back = v
+        .set_in_library(&[b.id, c.id], true, "import-1", 12)
+        .unwrap();
+    assert_eq!(back.images.len(), 2);
+    assert_eq!(ids(v.images().unwrap()), [a.id, b.id, c.id]);
+}
+
+/// A sighting is one file at one place: recorded again it is replaced,
+/// keeping when it was first seen; a location is a sighting with an image.
+fn sightings_are_kept_one_per_place<S: Store>(mut s: S) {
+    let a = image(1);
+    s.add_image(&a).unwrap();
+    let mut loose = crate::Sighting::seen(PathBuf::from("/card/x.cr3"), 101, 5, 20, "dialog");
+    loose.partial = Some(a.partial);
+    loose.camera = Some("EOS R5".into());
+    s.put_sighting(&loose).unwrap();
+    assert_eq!(
+        s.at_path(Path::new("/card/x.cr3")).unwrap(),
+        None,
+        "no image yet"
+    );
+    assert_eq!(s.sightings_like(101, &a.partial).unwrap(), [loose.clone()]);
+    assert!(s.sightings_like(102, &a.partial).unwrap().is_empty());
+    assert!(s.sightings_of(&a.id).unwrap().is_empty());
+    // Seen again later: one row, first seen kept.
+    let again = crate::Sighting {
+        first_seen: 30,
+        last_seen: 30,
+        image: Some(a.id),
+        ..loose.clone()
+    };
+    s.put_sighting(&again).unwrap();
+    let kept = s.sightings_like(101, &a.partial).unwrap();
+    assert_eq!(kept.len(), 1);
+    assert_eq!((kept[0].first_seen, kept[0].last_seen), (20, 30));
+    assert_eq!(s.sightings_of(&a.id).unwrap(), kept);
+    // On a volume, the place is the volume and the path there.
+    let on = crate::Sighting {
+        volume: Some(VolumeId("uuid:card".into())),
+        rel_path: Some("DCIM/x.cr3".into()),
+        path: PathBuf::from("/media/a/DCIM/x.cr3"),
+        ..again.clone()
+    };
+    s.put_sighting(&on).unwrap();
+    let moved = crate::Sighting {
+        path: PathBuf::from("/media/b/DCIM/x.cr3"),
+        first_seen: 40,
+        ..on.clone()
+    };
+    s.put_sighting(&moved).unwrap();
+    let all = s.sightings_of(&a.id).unwrap();
+    assert_eq!(all.len(), 2, "{all:?}");
+    assert_eq!(all[1].path, PathBuf::from("/media/b/DCIM/x.cr3"));
+    assert_eq!(all[1].first_seen, 30, "the earliest kept");
+    assert!(
+        s.put_sighting(&crate::Sighting {
+            image: Some(image(9).id),
+            ..loose.clone()
+        })
+        .unwrap_err()
+        .contains("no image")
+    );
+    assert!(
+        s.put_sighting(&crate::Sighting {
+            rel_path: None,
+            ..on.clone()
+        })
+        .is_err(),
+        "a volume needs its path there"
+    );
+    // A location at a loose sighting's path takes it over, keeping its
+    // glance and first sighting; removing it forgets it.
+    let b = image(2);
+    s.add_image(&b).unwrap();
+    let mut file = crate::Sighting::seen(PathBuf::from("/in/y.nef"), 102, 5, 3, "drop");
+    file.camera = Some("Z8".into());
+    s.put_sighting(&file).unwrap();
+    s.put_location(
+        &b.id,
+        &Location::seen(PathBuf::from("/in/y.nef"), 102, 5, 8),
+    )
+    .unwrap();
+    let as_location = s.sightings_of(&b.id).unwrap();
+    assert_eq!(as_location.len(), 1);
+    assert_eq!(
+        (
+            as_location[0].first_seen,
+            as_location[0].last_verified,
+            as_location[0].partial,
+            as_location[0].seen_by.as_str()
+        ),
+        (3, Some(8), Some(b.partial), "drop")
+    );
+    assert!(s.remove_location(Path::new("/in/y.nef")).unwrap());
+    assert!(s.sightings_of(&b.id).unwrap().is_empty());
+    assert!(s.remove_image(&b.id).unwrap());
+    assert!(
+        s.remove_image(&a.id).unwrap_err().contains("still has"),
+        "a sighting names it"
+    );
 }
 
 fn removals_forget_rows_and_refuse_what_is_still_named<S: Store>(mut s: S) {
@@ -408,6 +633,25 @@ impl<S: Store> Store for FailingAudit<S> {
     }
     fn images(&self) -> Result<Vec<Image>, String> {
         self.0.images()
+    }
+    fn library_flag(&self, id: &ImageId) -> Result<Option<crate::LibraryFlag>, String> {
+        self.0.library_flag(id)
+    }
+    fn set_library_flag(&mut self, id: &ImageId, flag: &crate::LibraryFlag) -> Result<(), String> {
+        self.0.set_library_flag(id, flag)
+    }
+    fn put_sighting(&mut self, sighting: &crate::Sighting) -> Result<(), String> {
+        self.0.put_sighting(sighting)
+    }
+    fn sightings_of(&self, id: &ImageId) -> Result<Vec<crate::Sighting>, String> {
+        self.0.sightings_of(id)
+    }
+    fn sightings_like(
+        &self,
+        size: u64,
+        partial: &ContentHash,
+    ) -> Result<Vec<crate::Sighting>, String> {
+        self.0.sightings_like(size, partial)
     }
     fn put_location(&mut self, id: &ImageId, location: &Location) -> Result<(), String> {
         self.0.put_location(id, location)

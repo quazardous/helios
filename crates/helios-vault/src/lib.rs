@@ -36,6 +36,7 @@ pub mod edit;
 pub mod fields;
 pub mod journal;
 pub mod settings;
+pub mod sightings;
 pub mod snapshots;
 pub mod stacks;
 pub mod storage;
@@ -46,6 +47,7 @@ pub mod workflow;
 pub use catalog::{ApplyReport, CursorId, CursorInfo, Delta, Row};
 pub use edit::{EditSaved, EditSession};
 pub use fields::{AuditEntry, Command, Order, Query};
+pub use sightings::{LibraryFlag, Sighting};
 pub use stacks::Stack;
 pub use undo::{Change, Changes, ImageRows, Replayed};
 pub use versions::{Version, VersionId};
@@ -134,7 +136,8 @@ impl Presence {
     }
 }
 
-/// Where a copy of an image was seen.
+/// Where a copy of an image was seen: the [`Sighting`] of a file whose
+/// content (its image) is known, as the Library reads it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Location {
     /// Its absolute path, as last resolved: on a volume, the volume's
@@ -172,15 +175,32 @@ impl Location {
 }
 
 /// Where rows are kept. A store only stores: every rule is the vault's.
+///
+/// **The Library is the images flagged in it** ([`LibraryFlag`]): every
+/// read of the Library (`images`, `select`, `all_locations`) leaves the
+/// other images out. An image off the Library is still known by its id
+/// (`image`, `locations`, `fields`...) and through its sightings.
 pub trait Store: Send {
-    /// Adds an image; false if it was already known.
+    /// Adds an image, in the Library; false if it was already known (its
+    /// flag is then left as it is).
     fn add_image(&mut self, image: &Image) -> Result<bool, String>;
+    /// Any image the vault knows, in the Library or not.
     fn image(&self, id: &ImageId) -> Result<Option<Image>, String>;
+    /// The images in the Library.
     fn images(&self) -> Result<Vec<Image>, String>;
-    /// Records a location; a path belongs to one image at a time.
+    /// An image's Library flag; `None` for an unknown image.
+    fn library_flag(&self, id: &ImageId) -> Result<Option<LibraryFlag>, String>;
+    /// Sets an image's Library flag; the image must exist.
+    fn set_library_flag(&mut self, id: &ImageId, flag: &LibraryFlag) -> Result<(), String>;
+    /// Records a location: the sighting at its path (or, on a volume, at
+    /// its place there) now holds this image. A path belongs to one image
+    /// at a time.
     fn put_location(&mut self, id: &ImageId, location: &Location) -> Result<(), String>;
+    /// Every location of an image, in the Library or not, by path.
     fn locations(&self, id: &ImageId) -> Result<Vec<Location>, String>;
+    /// The image known at a path, with its location.
     fn at_path(&self, path: &Path) -> Result<Option<(ImageId, Location)>, String>;
+    /// Every location of the images in the Library, by path.
     fn all_locations(&self) -> Result<Vec<(ImageId, Location)>, String>;
     /// Forgets the location at `path` (the file stays where it is); false
     /// if none was recorded there.
@@ -189,6 +209,17 @@ pub trait Store: Send {
     /// Refused while a location or a version still names it. Its audit
     /// rows stay: they are a record.
     fn remove_image(&mut self, id: &ImageId) -> Result<bool, String>;
+
+    /// Records a sighting at its place (on a volume: the volume and the
+    /// path there, which it must have; else its absolute path), replacing
+    /// what was seen there and keeping the earliest `first_seen`. Its
+    /// image, when given, must exist.
+    fn put_sighting(&mut self, sighting: &Sighting) -> Result<(), String>;
+    /// Every sighting of an image, by path.
+    fn sightings_of(&self, id: &ImageId) -> Result<Vec<Sighting>, String>;
+    /// The sightings of files of `size` bytes with this partial hash, by
+    /// path: "probably the same content".
+    fn sightings_like(&self, size: u64, partial: &ContentHash) -> Result<Vec<Sighting>, String>;
 
     /// One field of an image.
     fn field(&self, id: &ImageId, name: &str) -> Result<Option<serde_json::Value>, String>;
@@ -248,60 +279,125 @@ pub struct MemoryStore {
     before: Option<Box<MemoryStore>>,
     documents: BTreeMap<(String, String), serde_json::Value>,
     versions: BTreeMap<VersionId, Version>,
-    images: BTreeMap<ImageId, Image>,
-    locations: BTreeMap<PathBuf, (ImageId, Location)>,
+    images: BTreeMap<ImageId, (Image, LibraryFlag)>,
+    /// One per place.
+    sightings: Vec<Sighting>,
     fields: BTreeMap<(ImageId, String), serde_json::Value>,
     audit: Vec<AuditEntry>,
 }
 
+impl MemoryStore {
+    fn in_library(&self, id: &ImageId) -> bool {
+        self.images.get(id).is_some_and(|(_, f)| f.in_library)
+    }
+
+    fn by_path(mut sightings: Vec<Sighting>) -> Vec<Sighting> {
+        sightings.sort_by(|a, b| a.path.cmp(&b.path));
+        sightings
+    }
+
+    fn locations_where(&self, keep: impl Fn(&ImageId) -> bool) -> Vec<(ImageId, Location)> {
+        let mut all: Vec<(ImageId, Location)> = self
+            .sightings
+            .iter()
+            .filter_map(Sighting::location)
+            .filter(|(id, _)| keep(id))
+            .collect();
+        all.sort_by(|a, b| a.1.path.cmp(&b.1.path));
+        all
+    }
+}
+
 impl Store for MemoryStore {
     fn add_image(&mut self, image: &Image) -> Result<bool, String> {
-        Ok(self.images.insert(image.id, image.clone()).is_none())
+        if self.images.contains_key(&image.id) {
+            return Ok(false);
+        }
+        self.images
+            .insert(image.id, (image.clone(), LibraryFlag::added()));
+        Ok(true)
     }
 
     fn image(&self, id: &ImageId) -> Result<Option<Image>, String> {
-        Ok(self.images.get(id).cloned())
+        Ok(self.images.get(id).map(|(i, _)| i.clone()))
     }
 
     fn images(&self) -> Result<Vec<Image>, String> {
-        Ok(self.images.values().cloned().collect())
+        Ok(self
+            .images
+            .values()
+            .filter(|(_, f)| f.in_library)
+            .map(|(i, _)| i.clone())
+            .collect())
+    }
+
+    fn library_flag(&self, id: &ImageId) -> Result<Option<LibraryFlag>, String> {
+        Ok(self.images.get(id).map(|(_, f)| f.clone()))
+    }
+
+    fn set_library_flag(&mut self, id: &ImageId, flag: &LibraryFlag) -> Result<(), String> {
+        let (_, f) = self
+            .images
+            .get_mut(id)
+            .ok_or_else(|| format!("no image {}", id.hex()))?;
+        *f = flag.clone();
+        Ok(())
     }
 
     fn put_location(&mut self, id: &ImageId, location: &Location) -> Result<(), String> {
-        if !self.images.contains_key(id) {
+        let Some((image, _)) = self.images.get(id) else {
             return Err(format!("no image {}", id.hex()));
-        }
-        self.locations
-            .insert(location.path.clone(), (*id, location.clone()));
+        };
+        let place = |s: &Sighting| {
+            s.path == location.path
+                || (location.volume.is_some()
+                    && location.rel_path.is_some()
+                    && s.volume == location.volume
+                    && s.rel_path == location.rel_path)
+        };
+        let old = self
+            .sightings
+            .iter()
+            .find(|s| s.path == location.path)
+            .or_else(|| self.sightings.iter().find(|s| place(s)));
+        let new = Sighting::of_location(id, location, image.partial, old);
+        self.sightings.retain(|s| !place(s));
+        self.sightings.push(new);
         Ok(())
     }
 
     fn locations(&self, id: &ImageId) -> Result<Vec<Location>, String> {
         Ok(self
-            .locations
-            .values()
-            .filter(|(i, _)| i == id)
-            .map(|(_, l)| l.clone())
+            .locations_where(|i| i == id)
+            .into_iter()
+            .map(|(_, l)| l)
             .collect())
     }
 
     fn at_path(&self, path: &Path) -> Result<Option<(ImageId, Location)>, String> {
-        Ok(self.locations.get(path).cloned())
+        Ok(self
+            .sightings
+            .iter()
+            .filter(|s| s.path == path)
+            .find_map(Sighting::location))
     }
 
     fn all_locations(&self) -> Result<Vec<(ImageId, Location)>, String> {
-        Ok(self.locations.values().cloned().collect())
+        Ok(self.locations_where(|id| self.in_library(id)))
     }
 
     fn remove_location(&mut self, path: &Path) -> Result<bool, String> {
-        Ok(self.locations.remove(path).is_some())
+        let before = self.sightings.len();
+        self.sightings
+            .retain(|s| s.path != path || s.image.is_none());
+        Ok(self.sightings.len() < before)
     }
 
     fn remove_image(&mut self, id: &ImageId) -> Result<bool, String> {
         if !self.images.contains_key(id) {
             return Ok(false);
         }
-        if self.locations.values().any(|(i, _)| i == id)
+        if self.sightings.iter().any(|s| s.image == Some(*id))
             || self.versions.values().any(|v| v.image == *id)
         {
             return Err(format!(
@@ -312,6 +408,42 @@ impl Store for MemoryStore {
         self.fields.retain(|(i, _), _| i != id);
         self.images.remove(id);
         Ok(true)
+    }
+
+    fn put_sighting(&mut self, sighting: &Sighting) -> Result<(), String> {
+        sighting.check()?;
+        if let Some(id) = &sighting.image
+            && !self.images.contains_key(id)
+        {
+            return Err(format!("no image {}", id.hex()));
+        }
+        let mut new = sighting.clone();
+        if let Some(old) = self.sightings.iter().find(|s| s.same_place(sighting)) {
+            new.first_seen = new.first_seen.min(old.first_seen);
+        }
+        self.sightings.retain(|s| !s.same_place(sighting));
+        self.sightings.push(new);
+        Ok(())
+    }
+
+    fn sightings_of(&self, id: &ImageId) -> Result<Vec<Sighting>, String> {
+        Ok(Self::by_path(
+            self.sightings
+                .iter()
+                .filter(|s| s.image == Some(*id))
+                .cloned()
+                .collect(),
+        ))
+    }
+
+    fn sightings_like(&self, size: u64, partial: &ContentHash) -> Result<Vec<Sighting>, String> {
+        Ok(Self::by_path(
+            self.sightings
+                .iter()
+                .filter(|s| s.size == size && s.partial.as_ref() == Some(partial))
+                .cloned()
+                .collect(),
+        ))
     }
 
     fn field(&self, id: &ImageId, name: &str) -> Result<Option<serde_json::Value>, String> {
@@ -378,6 +510,7 @@ impl Store for MemoryStore {
         let mut ids: Vec<ImageId> = self
             .images
             .keys()
+            .filter(|id| self.in_library(id))
             .filter(|id| query.min_rating.is_none_or(|min| rating(id) >= min))
             .filter(|id| {
                 query
