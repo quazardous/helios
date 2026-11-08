@@ -23,6 +23,8 @@ serde_json.workspace = true
 
 [dev-dependencies]
 helios-plugin.workspace = true
+# the edits it reads, mapped as Helios maps them
+helios-xmp.workspace = true
 # its own fixtures, for its tests
 helios-plugin-darktable-library = { path = ".", features = ["fixture"] }
 

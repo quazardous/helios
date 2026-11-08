@@ -163,7 +163,7 @@ fn number<T: std::str::FromStr>(
 /// attribute missing or not a number, params that do not decode) is kept
 /// with what could be read and the reason: dropping it would shift
 /// `history_end` onto other items.
-fn item(attrs: Vec<(String, String)>, position: usize) -> HistoryItem {
+pub(crate) fn item(attrs: Vec<(String, String)>, position: usize) -> HistoryItem {
     let mut problems: Vec<String> = Vec::new();
     let mut read = |key: &str| -> Option<u32> {
         number(&attrs, key).unwrap_or_else(|e| {
@@ -296,7 +296,7 @@ impl Sidecar {
     /// the default of the time, not today's. darktable puts it second,
     /// after the first item, and moves the history end one further
     /// (`dt_exif_xmp_read_data`). The item is marked [`HistoryItem::inserted`].
-    fn add_implicit_highlights(&mut self) {
+    pub(crate) fn add_implicit_highlights(&mut self) {
         let has = |op: &str| self.history.iter().any(|i| i.operation == op);
         if self.xmp_version.unwrap_or(0) >= 5 || !has("rawprepare") || has("highlights") {
             return;

@@ -657,3 +657,38 @@ with its marks landing in the vault.
 Not in v1, as planned: edits from the database (duplicates without
 sidecars), film rolls as views, groups as stacks, geotags, paging, and a
 library outside the configuration folder.
+
+## Status: importer interface 2 (2026-11-08)
+
+The plugin speaks importer interface 2 (docs/extensions.md, "Importer
+interface version 2"):
+
+- **Pages.** The scan streams its photos in pages of Helios's
+  `pageSize` (`importer/page`), a cancel seen before each page.
+- **Edits from the library.** Each duplicate's edit is rebuilt from
+  `history` (`module` is the params version, `op_params` and
+  `blendop_params` sent as hex), `masks_history`, `module_order`
+  (`version`, `iop_list`) and `images.history_end`, and mapped by
+  Helios exactly as a sidecar's (`helios_xmp::Sidecar::from_history`).
+  Edits whose `.xmp` is missing (darktable's `write_sidecar_files` off)
+  are no longer lost.
+- **Library or .xmp.** For each duplicate, its sidecar is
+  `<name>.xmp`, or `<stem>_NN.<ext>.xmp` for duplicate NN. No `.xmp`:
+  the library's history. The same `history_hash.current_hash` as the
+  sidecar's `darktable:history_current_hash`: the `.xmp` (the same
+  edit). Hashes differing: the `.xmp` when it changed after darktable
+  last wrote it (its modification time past `images.write_timestamp` by
+  more than darktable's 2 s skew, darktable's crawler's rule), the
+  library's history otherwise. No history in the library: the `.xmp`.
+  Which and why goes to the import's log, line by line.
+
+Tests (`plugins/importers/darktable-library/tests/history.rs`): the
+masks test's circle edit (colorin, highlights, demosaic, exposure under
+a drawn circle, colorout, flip) plus sigmoid at its defaults, written as
+library rows, gives the same Helios chain as its `.xmp`; each branch of
+the library-or-`.xmp` choice; 3000 photos in six pages, a cancel after
+the second page, and the same library through the broker.
+
+Not yet: filmic rgb is not in the equivalence test (sigmoid stands for
+the tone mappers), and pages are checked by Helios when the scan
+answers, not as each arrives.

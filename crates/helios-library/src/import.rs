@@ -202,6 +202,12 @@ pub struct Metadata {
     pub title: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// The file's darktable edits as the importer found them (importer
+    /// interface 2), in place of the sidecars beside the file: each with
+    /// its duplicate `version`, `from` (`library` or `xmp`), `why`, and a
+    /// `history` (see `helios_xmp::history`) or the `xmp` path.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub edits: Vec<Value>,
 }
 
 impl Metadata {
@@ -987,6 +993,17 @@ impl<S: Store> Run<'_, S> {
         if !self.options.darktable {
             return Ok(());
         }
+        if let Some(edits) = self
+            .options
+            .listed
+            .as_ref()
+            .and_then(|l| l.files.get(path))
+            .map(|m| m.edits.clone())
+            .filter(|e| !e.is_empty())
+        {
+            self.keep_listed_edits(path, id, &edits, line);
+            return Ok(());
+        }
         let files = self.sidecars(path)?;
         if files.is_empty() {
             return Ok(());
@@ -1007,6 +1024,65 @@ impl<S: Store> Run<'_, S> {
         }
         line["darktable"] = json!(kept);
         Ok(())
+    }
+
+    /// Keeps the edits an importer listed for the file at `path` (see
+    /// [`Metadata::edits`]) as versions of its image `id`: a history
+    /// goes through the same darktable mapping a sidecar does
+    /// ([`helios_xmp::Sidecar::from_history`]), an `xmp` path is read as
+    /// the sidecar it is. Each edit's outcome, with where it came from
+    /// and why, under the line's `darktable`.
+    fn keep_listed_edits(&mut self, path: &Path, id: ImageId, edits: &[Value], line: &mut Value) {
+        let mut kept = Vec::with_capacity(edits.len());
+        for edit in edits {
+            let version = edit["version"]
+                .as_u64()
+                .and_then(|v| u32::try_from(v).ok())
+                .unwrap_or(0);
+            let base = version == 0;
+            let mut out = if let Some(xmp) = edit["xmp"].as_str() {
+                let file = helios_xmp::files::SidecarFile {
+                    path: PathBuf::from(xmp),
+                    version,
+                    exact: true,
+                };
+                darktable::keep_file_of(self.vault, id, &file, base, self.now, &mut |_, _| {})
+            } else {
+                let mut out = json!({
+                    "path": format!("{} (darktable library, version {version})", path.display()),
+                    "version": version,
+                });
+                let kept =
+                    helios_xmp::Sidecar::from_history(&edit["history"]).and_then(|sidecar| {
+                        let imported =
+                            helios_xmp::import(&sidecar, &helios_xmp::Layouts::built_in());
+                        if let Some(warning) = imported.report.summary() {
+                            out["warning"] = json!(warning.english);
+                            out["warning_message"] = json!(warning);
+                        }
+                        darktable::keep_sidecar_of(
+                            self.vault, id, version, base, &sidecar, &imported, self.now,
+                        )
+                    });
+                match kept {
+                    Ok(vault) => out["vault"] = vault,
+                    Err(e) => out["error"] = json!(e),
+                }
+                out
+            };
+            out["from"] = edit["from"].clone();
+            out["why"] = edit["why"].clone();
+            if out["error"].is_string() {
+                self.report.edits_failed += 1;
+            } else if out["vault"]["added"] == true {
+                self.report.edits += 1;
+            }
+            if out["warning"].is_string() {
+                self.report.edits_reported += 1;
+            }
+            kept.push(out);
+        }
+        line["darktable"] = json!(kept);
     }
 }
 
@@ -1131,6 +1207,9 @@ pub fn import<S: Store>(
                 job.log(format!("{}: {said}", path.display()));
                 for edit in line["darktable"].as_array().into_iter().flatten() {
                     let sidecar = edit["path"].as_str().unwrap_or_default();
+                    if let (Some(from), Some(why)) = (edit["from"].as_str(), edit["why"].as_str()) {
+                        job.log(format!("{sidecar}: edit from the {from}: {why}"));
+                    }
                     if let Some(e) = edit["error"].as_str() {
                         job.log(format!("{sidecar}: {e}"));
                     } else if let Some(w) = edit["warning"].as_str() {

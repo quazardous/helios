@@ -215,6 +215,7 @@ pub fn run<S: Store>(
                     tags: i.tags,
                     title: i.title,
                     description: i.description,
+                    edits: i.edits,
                 };
                 (i.path, metadata)
             })

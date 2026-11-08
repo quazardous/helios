@@ -10,7 +10,7 @@ activation = ["onImporter:darktable-library"]
 
 [compat]
 helios = ">=0.74.0, <0.75.0"
-interfaces = { protocol = 1, importer = 1 }
+interfaces = { protocol = 1, importer = 2 }
 
 [[importers]]
 id = "darktable-library"
@@ -21,4 +21,4 @@ anywhere = true
 
 [[capabilities]]
 name = "source.read"
-reason = "Reads library.db and data.db in the darktable folder you pick, never writing them (while darktable runs, from a private temporary copy)"
+reason = "Reads library.db and data.db in the darktable folder you pick, and the .xmp sidecars beside its photos, never writing them (while darktable runs, from a private temporary copy)"

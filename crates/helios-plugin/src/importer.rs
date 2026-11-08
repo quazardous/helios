@@ -7,7 +7,13 @@
 //!   the importer declares, before the plugin starts;
 //! - [`checked`]: the plugin's answer, each image's path resolved and
 //!   held to the source, its metadata to the library's fields; what does
-//!   not hold is refused or dropped, and said.
+//!   not hold is refused or dropped, and said;
+//! - [`Pages`]: the same, page by page, for an importer of interface
+//!   version 2, whose scan streams its images (`importer/page`).
+//!
+//! Version 2 also lets an image carry its edits (`edits`): each a
+//! darktable duplicate's edit, as a history (the shape of
+//! `helios_xmp::Sidecar::from_history`) or as the path of its `.xmp`.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -44,7 +50,16 @@ pub struct Found {
     pub title: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// Interface version 2: the image's edits, each an object with its
+    /// darktable duplicate `version`, `from` (`library` or `xmp`), `why`
+    /// it was chosen, and either a `history` or the `xmp` path.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub edits: Vec<Json>,
 }
+
+/// The size of a page a host asks an importer of interface version 2
+/// for.
+pub const PAGE_SIZE: usize = 500;
 
 /// A path of the answer left out, and why.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -137,48 +152,91 @@ pub fn checked(
         .get("images")
         .and_then(Json::as_array)
         .ok_or("the scan's answer has no `images` list")?;
-    let mut scan = Scan {
-        importer: decl.id.clone(),
-        source: source.to_path_buf(),
-        ..Scan::default()
-    };
-    if let Some(w) = answer.get("warnings").and_then(Json::as_array) {
-        scan.warnings
-            .extend(w.iter().filter_map(Json::as_str).map(String::from));
-    }
-    let base = base(decl, source);
-    let mut seen = BTreeSet::new();
-    for item in list {
-        let given = item.get("path").and_then(Json::as_str).unwrap_or_default();
-        let refuse = |why: &str| Refused {
-            path: given.into(),
-            why: why.into(),
-        };
-        if given.is_empty() {
-            scan.refused.push(refuse("no path"));
-            continue;
+    let mut pages = Pages::new(decl, source);
+    pages.page(list, is_image);
+    pages.finish(answer)
+}
+
+/// A scan's answer checked as it comes, page by page (interface
+/// version 2): an image listed twice is refused across pages too.
+pub struct Pages {
+    scan: Scan,
+    base: PathBuf,
+    anywhere: bool,
+    seen: BTreeSet<PathBuf>,
+    /// Pages received.
+    pub received: u64,
+}
+
+impl Pages {
+    pub fn new(decl: &ImporterDecl, source: &Path) -> Pages {
+        Pages {
+            scan: Scan {
+                importer: decl.id.clone(),
+                source: source.to_path_buf(),
+                ..Scan::default()
+            },
+            base: base(decl, source),
+            anywhere: decl.anywhere,
+            seen: BTreeSet::new(),
+            received: 0,
         }
-        let path = match base.join(given).canonicalize() {
-            Ok(p) => p,
-            Err(e) => {
-                scan.refused.push(refuse(&e.to_string()));
+    }
+
+    /// Checks one page's images.
+    pub fn page(&mut self, list: &[Json], is_image: &dyn Fn(&Path) -> bool) {
+        self.received += 1;
+        let scan = &mut self.scan;
+        for item in list {
+            let given = item.get("path").and_then(Json::as_str).unwrap_or_default();
+            let refuse = |why: &str| Refused {
+                path: given.into(),
+                why: why.into(),
+            };
+            if given.is_empty() {
+                scan.refused.push(refuse("no path"));
                 continue;
             }
-        };
-        if !path.is_file() {
-            scan.refused.push(refuse("not a plain file"));
-        } else if !decl.anywhere && !path.starts_with(&base) {
-            scan.refused.push(refuse("outside the source"));
-        } else if !is_image(&path) {
-            scan.refused.push(refuse("not an image file"));
-        } else if !seen.insert(path.clone()) {
-            scan.refused.push(refuse("listed twice"));
-        } else {
-            let found = fields(item, path, &mut scan.warnings);
-            scan.images.push(found);
+            let path = match self.base.join(given).canonicalize() {
+                Ok(p) => p,
+                Err(e) => {
+                    scan.refused.push(refuse(&e.to_string()));
+                    continue;
+                }
+            };
+            if !path.is_file() {
+                scan.refused.push(refuse("not a plain file"));
+            } else if !self.anywhere && !path.starts_with(&self.base) {
+                scan.refused.push(refuse("outside the source"));
+            } else if !is_image(&path) {
+                scan.refused.push(refuse("not an image file"));
+            } else if !self.seen.insert(path.clone()) {
+                scan.refused.push(refuse("listed twice"));
+            } else {
+                let found = fields(item, path, &mut scan.warnings);
+                scan.images.push(found);
+            }
         }
     }
-    Ok(scan)
+
+    /// Images accepted so far.
+    pub fn images(&self) -> usize {
+        self.scan.images.len()
+    }
+
+    /// The scan, once the final answer came: its `warnings` first.
+    pub fn finish(mut self, answer: &Json) -> Result<Scan, String> {
+        if let Some(w) = answer.get("warnings").and_then(Json::as_array) {
+            let mut warnings: Vec<String> = w
+                .iter()
+                .filter_map(Json::as_str)
+                .map(String::from)
+                .collect();
+            warnings.append(&mut self.scan.warnings);
+            self.scan.warnings = warnings;
+        }
+        Ok(self.scan)
+    }
 }
 
 /// An image's values, each held to its field; what does not fit is
@@ -227,6 +285,22 @@ fn fields(item: &Json, path: PathBuf, warnings: &mut Vec<String>) -> Found {
                 }
             }
             _ => dropped("label", &v),
+        }
+    }
+    for v in names("edits") {
+        let version_ok = v.get("version").and_then(Json::as_u64).is_some();
+        let history = v.get("history").is_some_and(Json::is_object);
+        let xmp = v
+            .get("xmp")
+            .and_then(Json::as_str)
+            .is_some_and(|x| Path::new(x).is_absolute());
+        if version_ok && (history || xmp) {
+            found.edits.push(v);
+        } else {
+            dropped(
+                "edit (a `version`, and a `history` or an absolute `xmp` path)",
+                &v,
+            );
         }
     }
     for v in names("tags") {

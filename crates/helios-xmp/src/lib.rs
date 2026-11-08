@@ -20,6 +20,8 @@
 //!   edit's `darktable` part, and the import never stops at one.
 //! - [`blend`] reads a module's blend params, and [`drawn`] its drawn
 //!   mask: both make the mask sub-network a masked module gets.
+//! - [`history`] reads an edit handed over as a history (an importer
+//!   reading darktable's library), as the sidecar it stands for.
 //! - [`files`] finds an image's sidecars in its folder: the base one, the
 //!   duplicates darktable writes as `_NN`, case variants, and the sidecars
 //!   whose image is not there.
@@ -27,6 +29,7 @@
 pub mod blend;
 pub mod drawn;
 pub mod files;
+pub mod history;
 pub mod import;
 pub mod iop_order;
 pub mod layout;

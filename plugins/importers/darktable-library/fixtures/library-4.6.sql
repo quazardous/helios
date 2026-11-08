@@ -10,3 +10,10 @@ CREATE TABLE main.color_labels (imgid INTEGER, color INTEGER);
 CREATE UNIQUE INDEX main.color_labels_idx ON color_labels (imgid, color);
 CREATE TABLE main.meta_data (id INTEGER, key INTEGER, value VARCHAR);
 CREATE UNIQUE INDEX main.metadata_index ON meta_data (id, key, value);
+-- the edit's tables, the same from library schema 36 (darktable 4.0) on
+CREATE TABLE main.history (imgid INTEGER, num INTEGER, module INTEGER, operation VARCHAR(256), op_params BLOB, enabled INTEGER, blendop_params BLOB, blendop_version INTEGER, multi_priority INTEGER, multi_name VARCHAR(256), multi_name_hand_edited INTEGER, FOREIGN KEY(imgid) REFERENCES images(id) ON UPDATE CASCADE ON DELETE CASCADE);
+CREATE INDEX main.history_imgid_op_index ON history (imgid, operation);
+CREATE TABLE main.masks_history (imgid INTEGER, num INTEGER, formid INTEGER, form INTEGER, name VARCHAR(256), version INTEGER, points BLOB, points_count INTEGER, source BLOB, FOREIGN KEY(imgid) REFERENCES images(id) ON UPDATE CASCADE ON DELETE CASCADE);
+CREATE INDEX main.masks_history_imgid_index ON masks_history (imgid, num);
+CREATE TABLE main.module_order (imgid INTEGER PRIMARY KEY, version INTEGER, iop_list VARCHAR);
+CREATE TABLE main.history_hash (imgid INTEGER PRIMARY KEY, basic_hash BLOB, auto_hash BLOB, current_hash BLOB, mipmap_hash BLOB, FOREIGN KEY(imgid) REFERENCES images(id) ON UPDATE CASCADE ON DELETE CASCADE);

@@ -527,6 +527,18 @@ impl Broker {
                             params,
                         }
                     }
+                    // a page of a scan (importer interface 2): its
+                    // scan's watcher only
+                    "importer/page" => {
+                        let watcher = params
+                            .get("token")
+                            .and_then(Json::as_str)
+                            .and_then(|t| watchers.lock().expect("watchers lock").get(t).cloned());
+                        if let Some(w) = watcher {
+                            w(&params);
+                        }
+                        return;
+                    }
                     "$/log" => Notice::Log {
                         plugin: plugin.clone(),
                         message: params
@@ -709,26 +721,74 @@ impl Broker {
             "onService:importer".to_string()
         };
         let token = format!("{plugin}#scan-{}", NEXT.fetch_add(1, Ordering::Relaxed));
-        self.watchers
-            .lock()
-            .expect("watchers lock")
-            .insert(token.clone(), Arc::new(progress));
+        let paged = slot
+            .manifest
+            .compat
+            .interfaces
+            .get("importer")
+            .is_some_and(|v| *v >= 2);
+        // Pages as they come, checked once the scan answers.
+        let pages: Arc<Mutex<Vec<Json>>> = Arc::default();
+        {
+            let pages = pages.clone();
+            let watcher = move |p: &Json| {
+                if let Some(images) = p.get("images") {
+                    pages.lock().expect("pages lock").push(images.clone());
+                    if p.get("done").is_some() {
+                        progress(p);
+                    }
+                } else {
+                    progress(p);
+                }
+            };
+            self.watchers
+                .lock()
+                .expect("watchers lock")
+                .insert(token.clone(), Arc::new(watcher));
+        }
+        let mut params = json!({
+            "importer": importer,
+            "source": source,
+            "kind": decl.source.as_str(),
+            "progress": token,
+        });
+        if paged {
+            params["pageSize"] = json!(importer::PAGE_SIZE);
+        }
         let answer = self.call_with(
             plugin,
             &event,
             "importer.scan",
-            json!({
-                "importer": importer,
-                "source": source,
-                "kind": decl.source.as_str(),
-                "progress": token,
-            }),
+            params,
             self.policy.scan_timeout,
             cancel,
         );
         self.watchers.lock().expect("watchers lock").remove(&token);
-        let mut scan = importer::checked(&answer?, &decl, &source, is_image)
-            .map_err(|e| format!("plugin `{plugin}`: {e}"))?;
+        let answer = answer?;
+        let received = std::mem::take(&mut *pages.lock().expect("pages lock"));
+        let mut scan = if paged && answer.get("pages").is_some() {
+            let said = answer["pages"].as_u64().unwrap_or(0);
+            if said != received.len() as u64 {
+                return Err(format!(
+                    "plugin `{plugin}`: the scan said {said} pages, {} came",
+                    received.len()
+                ));
+            }
+            let mut checked = importer::Pages::new(&decl, &source);
+            for page in &received {
+                let list = page
+                    .as_array()
+                    .ok_or_else(|| format!("plugin `{plugin}`: a page without an `images` list"))?;
+                checked.page(list, is_image);
+            }
+            if let Some(last) = answer.get("images").and_then(Json::as_array) {
+                checked.page(last, is_image);
+            }
+            checked.finish(&answer)
+        } else {
+            importer::checked(&answer, &decl, &source, is_image)
+        }
+        .map_err(|e| format!("plugin `{plugin}`: {e}"))?;
         scan.plugin = plugin.into();
         Ok(scan)
     }

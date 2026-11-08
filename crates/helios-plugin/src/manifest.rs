@@ -48,7 +48,7 @@ pub const INTERFACES: &[(&str, &[u32])] = &[
     ("protocol", &[1]),
     ("metadata.read", &[1]),
     ("device", &[1]),
-    ("importer", &[1]),
+    ("importer", &[1, 2]),
 ];
 
 /// The services a plugin may provide; each is also an interface.

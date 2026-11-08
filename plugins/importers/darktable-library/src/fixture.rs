@@ -91,6 +91,9 @@ pub fn build(out: &Path, schema: Schema, photos: &Path, options: &Options) -> ru
     // out (`makers`, `cameras`...); rusqlite's bundled SQLite enforces
     // foreign keys by default, darktable's connection does not.
     con.pragma_update(None, "foreign_keys", false)?;
+    // a few thousand photos in a test: no sync per row
+    con.pragma_update(None, "synchronous", "OFF")?;
+    con.pragma_update(None, "journal_mode", "MEMORY")?;
     con.execute(
         "ATTACH DATABASE ?1 AS data",
         [out.join("data.db").to_string_lossy()],
@@ -198,5 +201,100 @@ pub fn build(out: &Path, schema: Schema, photos: &Path, options: &Options) -> ru
     if let Some(pid) = options.lock_pid {
         std::fs::write(out.join("library.db.lock"), format!("{pid}\0")).expect("the lock");
     }
+    Ok(())
+}
+
+/// One `history` row of an edit [`add_edit`] writes.
+#[derive(Clone, Debug, Default)]
+pub struct HistoryRow {
+    pub num: i64,
+    pub operation: String,
+    /// `history.module`: the params' version.
+    pub modversion: i64,
+    pub params: Vec<u8>,
+    pub enabled: bool,
+    pub blendop_version: Option<i64>,
+    pub blendop_params: Option<Vec<u8>>,
+    pub multi_priority: i64,
+    pub multi_name: String,
+}
+
+/// One `masks_history` row.
+#[derive(Clone, Debug, Default)]
+pub struct MaskRow {
+    pub num: i64,
+    pub formid: i64,
+    pub form: i64,
+    pub name: String,
+    pub version: i64,
+    pub points: Vec<u8>,
+    pub points_count: i64,
+}
+
+/// An edit for the photo `filename` (duplicate `version`) of a library
+/// [`build`] made: its history and masks rows, `history_end`, the
+/// history hash darktable keeps (`current_hash`) and the time darktable
+/// last wrote its sidecar (`write_timestamp`, seconds), as darktable
+/// stores them.
+#[allow(clippy::too_many_arguments)]
+pub fn add_edit(
+    library: &Path,
+    filename: &str,
+    version: i64,
+    history: &[HistoryRow],
+    masks: &[MaskRow],
+    history_end: i64,
+    hash: &[u8],
+    write_timestamp: i64,
+) -> rusqlite::Result<()> {
+    let con = Connection::open(library.join("library.db"))?;
+    let id: i64 = con.query_row(
+        "SELECT id FROM main.images WHERE filename = ?1 AND version = ?2",
+        params![filename, version],
+        |r| r.get(0),
+    )?;
+    con.execute(
+        "UPDATE main.images SET history_end = ?2, write_timestamp = ?3 WHERE id = ?1",
+        params![id, history_end, write_timestamp],
+    )?;
+    for h in history {
+        con.execute(
+            "INSERT INTO main.history (imgid, num, module, operation, op_params, enabled, \
+             blendop_params, blendop_version, multi_priority, multi_name, multi_name_hand_edited) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 0)",
+            params![
+                id,
+                h.num,
+                h.modversion,
+                h.operation,
+                h.params,
+                i64::from(h.enabled),
+                h.blendop_params,
+                h.blendop_version,
+                h.multi_priority,
+                h.multi_name
+            ],
+        )?;
+    }
+    for m in masks {
+        con.execute(
+            "INSERT INTO main.masks_history (imgid, num, formid, form, name, version, points, \
+             points_count, source) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, zeroblob(8))",
+            params![
+                id,
+                m.num,
+                m.formid,
+                m.form,
+                m.name,
+                m.version,
+                m.points,
+                m.points_count
+            ],
+        )?;
+    }
+    con.execute(
+        "INSERT OR REPLACE INTO main.history_hash (imgid, current_hash) VALUES (?1, ?2)",
+        params![id, hash],
+    )?;
     Ok(())
 }

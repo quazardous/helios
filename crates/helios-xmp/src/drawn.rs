@@ -368,6 +368,12 @@ fn form(e: &BytesStart) -> Result<Form, String> {
             .map_err(|e| e.to_string())?;
         attrs.push((a.key.as_ref().to_string(), value.into_owned()));
     }
+    form_of(&attrs)
+}
+
+/// A form from its attributes as a sidecar spells them
+/// (`darktable:mask_num`, `darktable:mask_points`...).
+pub(crate) fn form_of(attrs: &[(String, String)]) -> Result<Form, String> {
     let get = |key: &str| {
         attrs
             .iter()

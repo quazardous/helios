@@ -174,7 +174,8 @@ the desktop (the submenu shows only when one is installed); choosing it
 asks for the source with egui-pop's path field, and where the photos go
 as File > Import… does (see docs/library.md).
 
-**Manifest.** The plugin serves `importer` (interface version 1),
+**Manifest.** The plugin serves `importer` (interface version 1, or 2:
+see below),
 declares `source.read`, and one `[[importers]]` table per entry:
 
 ```toml
@@ -291,6 +292,63 @@ once: the import ends cancelled before its first file. The plugin should
 stop and may answer -32800; any later answer to that id is ignored, and
 the plugin stays running for the next call. Cancelling the import job
 afterwards stops it between two files, as for any import.
+
+### Importer interface version 2
+
+A plugin declares `importer = 2` in `compat.interfaces`; Helios accepts
+1 and 2, and a version 1 importer runs as above, unchanged. Version 2
+adds two things.
+
+**Paged answers.** Helios adds `"pageSize": 500` to `importer.scan`'s
+params. The plugin sends its images in pages, notifications carrying the
+scan's progress token, in order, before its answer:
+
+```json
+{"jsonrpc": "2.0", "method": "importer/page", "params": {
+  "token": "<progress>", "images": [ … up to pageSize images … ],
+  "done": 500, "total": 100000
+}}
+```
+
+then answers with the count of pages sent (and `total` when known):
+`{"pages": 200, "total": 100000, "warnings": [ … ]}`. An answer may also
+carry a last `images` list. Helios checks that every page announced
+came, checks each image as in version 1 (a path listed twice is refused
+across pages too), and shows each page's `done`/`total` as the scan's
+progress. The plugin looks for `$/cancelRequest` before each page, so a
+cancel stops it between pages. A plugin may still answer without pages
+(an `images` list, no `pages`), as in version 1.
+
+**Edits as history.** An image may carry `edits`, one per darktable
+duplicate (`version`, 0 for the original), each with `from` (`library`
+or `xmp`), `why` it was chosen (said in the import's log), and either:
+
+- `xmp`: the absolute path of the duplicate's sidecar, read as Helios
+  reads any darktable sidecar; or
+- `history`: the edit itself, in the shape of
+  `helios_xmp::Sidecar::from_history`:
+
+```json
+"history": {
+  "end": 7,
+  "iop_order_version": 5, "iop_order_list": "rawprepare,0,…",
+  "items": [{"num": 0, "operation": "exposure", "modversion": 6,
+             "enabled": true, "params": "<hex>", "multi_name": "",
+             "multi_priority": 0, "blendop_version": 14,
+             "blendop_params": "<hex>"}],
+  "masks": [{"num": 4, "id": 1, "type": 1, "name": "circle 1",
+             "version": 6, "count": 1, "points": "<hex>"}]
+}
+```
+
+`params`, `blendop_params` and `points` are darktable's bytes in a
+sidecar's own encodings (hex, or `gz` + base64 of zlib data), decoded by
+the same function, so a history and the `.xmp` spelling the same edit
+map onto the same Helios chain, report included. An image with `edits`
+gets those as its versions (`import:xmp`, with darktable's duplicate
+number), in place of the sidecars found beside it; one without keeps
+Helios's own sidecar lookup. An edit with neither a `version` nor a
+`history` or absolute `xmp` is dropped with a warning.
 
 **Report.** The scan's line goes to the Log panel: how many photos were
 found and left out, each one left out with why, and the plugin's

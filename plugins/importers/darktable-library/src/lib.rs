@@ -1,4 +1,4 @@
-//! Helios's darktable library importer (`importer` interface version 1;
+//! Helios's darktable library importer (`importer` interface version 2;
 //! see Helios's `docs/extensions.md`, "Importers", and
 //! `docs/darktable-library-import.md`).
 //!
@@ -6,8 +6,15 @@
 //! beside it, and lists each photo file the library holds with what
 //! darktable knows of it: stars, reject, colour labels, tags (the whole
 //! `a|b|c` path, darktable's own `darktable|…` tags left out), title and
-//! description. Helios imports the files itself; their `.xmp` sidecars
-//! come in through Helios's ordinary import, as versions.
+//! description, and each duplicate's edit: rebuilt from the library's
+//! `history`, `masks_history` and `module_order`, or the `.xmp` beside
+//! the photo when it is the newer one (see [`choose`]). Helios imports
+//! the files itself and maps the edits as it maps a sidecar's.
+//!
+//! The scan answers in pages (`importer/page` notifications, then an
+//! answer with their count) when Helios asks for them (`pageSize`), so a
+//! library of 100 000 photos never travels as one message; a cancel is
+//! seen between pages.
 //!
 //! The library is never written: both files are opened read-only (a
 //! `mode=ro` URI, never `immutable`, which would ignore darktable's
@@ -96,6 +103,37 @@ const LIBRARY_COLUMNS: &[(&str, &[&str])] = &[
     ("color_labels", &["imgid", "color"]),
     ("tagged_images", &["imgid", "tagid"]),
     ("meta_data", &["id", "key", "value"]),
+    (
+        "history",
+        &[
+            "imgid",
+            "num",
+            "module",
+            "operation",
+            "op_params",
+            "enabled",
+            "blendop_params",
+            "blendop_version",
+            "multi_priority",
+            "multi_name",
+        ],
+    ),
+    (
+        "masks_history",
+        &[
+            "imgid",
+            "num",
+            "formid",
+            "form",
+            "name",
+            "version",
+            "points",
+            "points_count",
+            "source",
+        ],
+    ),
+    ("history_hash", &["imgid", "current_hash"]),
+    ("module_order", &["imgid", "version", "iop_list"]),
 ];
 const DATA_COLUMNS: &[(&str, &[&str])] = &[("tags", &["id", "name"])];
 
@@ -384,9 +422,232 @@ struct Row {
     id: i64,
     film: i64,
     filename: String,
+    version: i64,
     flags: i64,
     folder: String,
+    history_end: Option<i64>,
+    write_timestamp: Option<i64>,
 }
+
+/// darktable's allowance between a sidecar's time and the library's
+/// (`MAX_TIME_SKEW`, src/control/crawler.c), in seconds.
+const TIME_SKEW: i64 = 2;
+
+/// The name of a duplicate's sidecar, as darktable spells it: `a.cr2.xmp`
+/// for the original, `a_01.cr2.xmp` for duplicate 1
+/// (`dt_image_path_append_version_no_db`).
+pub fn sidecar_name(filename: &str, version: i64) -> String {
+    if version <= 0 {
+        return format!("{filename}.xmp");
+    }
+    match filename.rfind('.') {
+        Some(dot) => format!("{}_{version:02}{}.xmp", &filename[..dot], &filename[dot..]),
+        None => format!("{filename}_{version:02}.xmp"),
+    }
+}
+
+/// Lowercase hex, darktable's spelling of params in a sidecar.
+fn hex(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        let _ = write!(out, "{b:02x}");
+    }
+    out
+}
+
+fn blob(v: ValueRef<'_>) -> Option<Vec<u8>> {
+    match v {
+        ValueRef::Blob(b) | ValueRef::Text(b) => Some(b.to_vec()),
+        _ => None,
+    }
+}
+
+/// The `darktable:history_current_hash` a sidecar's text holds, as
+/// written (hex, or `gz…` when darktable compressed it).
+pub fn xmp_hash(xml: &str) -> Option<String> {
+    let key = "darktable:history_current_hash=\"";
+    let at = xml.find(key)? + key.len();
+    let end = xml[at..].find('"')?;
+    Some(xml[at..at + end].to_string())
+}
+
+/// What is known of a duplicate's `.xmp`.
+pub struct Xmp {
+    pub path: PathBuf,
+    /// Its history hash, hex; none when absent or compressed.
+    pub hash: Option<String>,
+    /// Its modification time, seconds since the epoch.
+    pub modified: Option<i64>,
+}
+
+/// Where a duplicate's edit comes from, and why: the library's history
+/// when there is no `.xmp`, or when the history hashes differ and the
+/// `.xmp` did not change after darktable last wrote it (the library is
+/// newer); the `.xmp` otherwise. None when neither holds an edit.
+pub fn choose(
+    history: bool,
+    library_hash: Option<&str>,
+    write_timestamp: Option<i64>,
+    xmp: Option<&Xmp>,
+) -> Option<(&'static str, String)> {
+    match (history, xmp) {
+        (false, None) => None,
+        (true, None) => Some((
+            "library",
+            "no .xmp beside the photo (darktable's write_sidecar_files off?): the edit comes \
+             from the library"
+                .into(),
+        )),
+        (false, Some(_)) => Some(("xmp", "the library holds no history for it".into())),
+        (true, Some(x)) => {
+            if let (Some(l), Some(h)) = (library_hash, x.hash.as_deref())
+                && l.eq_ignore_ascii_case(h)
+            {
+                return Some((
+                    "xmp",
+                    "the .xmp and the library hold the same edit (same history hash)".into(),
+                ));
+            }
+            if let (Some(m), Some(w)) = (x.modified, write_timestamp)
+                && m > w + TIME_SKEW
+            {
+                return Some((
+                    "xmp",
+                    "the .xmp changed after darktable last wrote it: it is newer than the library"
+                        .into(),
+                ));
+            }
+            Some((
+                "library",
+                "the library's history hash differs from the .xmp's and the .xmp is not newer: \
+                 the library's history is"
+                    .into(),
+            ))
+        }
+    }
+}
+
+fn modified(path: &Path) -> Option<i64> {
+    let t = std::fs::metadata(path).ok()?.modified().ok()?;
+    let secs = t.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs();
+    i64::try_from(secs).ok()
+}
+
+/// One duplicate's history, in the protocol's shape (see
+/// `helios_xmp::history`).
+fn history(con: &Connection, row: &Row) -> Result<Option<Value>, ScanError> {
+    let mut stmt = con.prepare_cached(
+        "SELECT num, module, operation, op_params, enabled, blendop_params, \
+         blendop_version, multi_priority, multi_name \
+         FROM main.history WHERE imgid = ?1 ORDER BY num",
+    )?;
+    let items: Vec<Value> = stmt
+        .query_map([row.id], |r| {
+            let mut item = json!({
+                "num": r.get::<_, Option<i64>>(0)?.unwrap_or_default(),
+                "modversion": r.get::<_, Option<i64>>(1)?.unwrap_or_default(),
+                "operation": text(r.get_ref(2)?).unwrap_or_default(),
+                "params": hex(&blob(r.get_ref(3)?).unwrap_or_default()),
+                "enabled": r.get::<_, Option<i64>>(4)?.unwrap_or_default() != 0,
+                "multi_priority": r.get::<_, Option<i64>>(7)?.unwrap_or_default(),
+                "multi_name": text(r.get_ref(8)?).unwrap_or_default(),
+            });
+            if let Some(b) = blob(r.get_ref(5)?) {
+                item["blendop_params"] = json!(hex(&b));
+            }
+            if let Some(v) = r.get::<_, Option<i64>>(6)? {
+                item["blendop_version"] = json!(v);
+            }
+            Ok(item)
+        })?
+        .collect::<Result<_, _>>()?;
+    if items.is_empty() {
+        return Ok(None);
+    }
+    let mut stmt = con.prepare_cached(
+        "SELECT num, formid, form, name, version, points, points_count, source \
+         FROM main.masks_history WHERE imgid = ?1 ORDER BY num, formid",
+    )?;
+    let masks: Vec<Value> = stmt
+        .query_map([row.id], |r| {
+            let mut mask = json!({
+                "num": r.get::<_, Option<i64>>(0)?.unwrap_or_default(),
+                "id": r.get::<_, Option<i64>>(1)?.unwrap_or_default(),
+                "type": r.get::<_, Option<i64>>(2)?.unwrap_or_default(),
+                "name": text(r.get_ref(3)?).unwrap_or_default(),
+                "version": r.get::<_, Option<i64>>(4)?.unwrap_or_default(),
+                "points": hex(&blob(r.get_ref(5)?).unwrap_or_default()),
+                "count": r.get::<_, Option<i64>>(6)?.unwrap_or_default(),
+            });
+            if let Some(b) = blob(r.get_ref(7)?) {
+                mask["source"] = json!(hex(&b));
+            }
+            Ok(mask)
+        })?
+        .collect::<Result<_, _>>()?;
+    let end = row.history_end.unwrap_or(items.len() as i64).max(0);
+    let mut out = json!({ "end": end, "items": items, "masks": masks });
+    let mut stmt =
+        con.prepare_cached("SELECT version, iop_list FROM main.module_order WHERE imgid = ?1")?;
+    let order = stmt
+        .query_row([row.id], |r| {
+            Ok((r.get::<_, Option<i64>>(0)?, text(r.get_ref(1)?)))
+        })
+        .optional()?;
+    if let Some((version, list)) = order {
+        if let Some(v) = version {
+            out["iop_order_version"] = json!(v);
+        }
+        if let Some(l) = list.filter(|l| !l.is_empty()) {
+            out["iop_order_list"] = json!(l);
+        }
+    }
+    Ok(Some(out))
+}
+
+/// The edits of a photo's duplicates, each from the library or its
+/// `.xmp` (see [`choose`]).
+fn edits(con: &Connection, versions: &[Row]) -> Result<Vec<Value>, ScanError> {
+    let mut out = Vec::new();
+    for row in versions {
+        let history = history(con, row)?;
+        let mut stmt =
+            con.prepare_cached("SELECT current_hash FROM main.history_hash WHERE imgid = ?1")?;
+        let hash = stmt
+            .query_row([row.id], |r| Ok(blob(r.get_ref(0)?)))
+            .optional()?
+            .flatten()
+            .map(|b| hex(&b));
+        let path = Path::new(&row.folder).join(sidecar_name(&row.filename, row.version));
+        let xmp = path.is_file().then(|| Xmp {
+            hash: std::fs::read_to_string(&path)
+                .ok()
+                .and_then(|t| xmp_hash(&t))
+                .filter(|h| !h.starts_with("gz")),
+            modified: modified(&path),
+            path,
+        });
+        let Some((from, why)) = choose(
+            history.is_some(),
+            hash.as_deref(),
+            row.write_timestamp,
+            xmp.as_ref(),
+        ) else {
+            continue;
+        };
+        let mut edit = json!({ "version": row.version, "from": from, "why": why });
+        match (from, history, &xmp) {
+            ("library", Some(h), _) => edit["history"] = h,
+            (_, _, Some(x)) => edit["xmp"] = json!(x.path.to_string_lossy()),
+            _ => continue,
+        }
+        out.push(edit);
+    }
+    Ok(out)
+}
+
+/// Where a paged scan sends its pages: `(images, done, total)`.
+pub type Pager<'a> = (usize, &'a mut dyn FnMut(Vec<Value>, usize, usize));
 
 /// One `importer.scan`: `progress(done, total, message)` as it goes;
 /// `cancelled` seen between batches.
@@ -394,6 +655,18 @@ pub fn scan(
     params: &Value,
     cancelled: &AtomicBool,
     progress: &mut dyn FnMut(usize, usize, &str),
+) -> Result<Value, ScanError> {
+    scan_paged(params, cancelled, progress, None)
+}
+
+/// [`scan`], its images sent in pages of `pager.0` to `pager.1` when
+/// given, the answer then holding their count (`pages`) and the `total`
+/// in place of `images`; `cancelled` is seen before each page.
+pub fn scan_paged(
+    params: &Value,
+    cancelled: &AtomicBool,
+    progress: &mut dyn FnMut(usize, usize, &str),
+    pager: Option<Pager<'_>>,
 ) -> Result<Value, ScanError> {
     let importer = params["importer"].as_str().unwrap_or_default();
     if importer != IMPORTER {
@@ -463,7 +736,7 @@ pub fn scan(
     } else {
         warnings.push("there is no data.db beside library.db: the tags were skipped".into());
     }
-    read(&con, data_version, cancelled, progress, warnings)
+    read(&con, data_version, cancelled, progress, warnings, pager)
 }
 
 #[allow(clippy::too_many_lines)]
@@ -473,9 +746,11 @@ fn read(
     cancelled: &AtomicBool,
     progress: &mut dyn FnMut(usize, usize, &str),
     mut warnings: Vec<String>,
+    mut pager: Option<Pager<'_>>,
 ) -> Result<Value, ScanError> {
     let mut stmt = con.prepare(
-        "SELECT i.id, i.film_id, i.filename, i.flags, f.folder \
+        "SELECT i.id, i.film_id, i.filename, i.flags, f.folder, i.version, i.history_end, \
+         i.write_timestamp \
          FROM main.images AS i JOIN main.film_rolls AS f ON f.id = i.film_id \
          WHERE i.filename IS NOT NULL AND f.folder IS NOT NULL \
          ORDER BY i.film_id, i.filename, i.version, i.id",
@@ -488,6 +763,9 @@ fn read(
                 filename: text(r.get_ref(2)?).unwrap_or_default(),
                 flags: r.get::<_, Option<i64>>(3)?.unwrap_or_default(),
                 folder: text(r.get_ref(4)?).unwrap_or_default(),
+                version: r.get::<_, Option<i64>>(5)?.unwrap_or_default(),
+                history_end: r.get(6)?,
+                write_timestamp: r.get(7)?,
             })
         })?
         .collect::<Result<_, _>>()?;
@@ -593,7 +871,17 @@ fn read(
             std::thread::sleep(Duration::from_millis(20));
         }
     }
+    let mut pages = 0usize;
     for (done, versions) in files.iter().enumerate() {
+        if let Some((size, send)) = &mut pager
+            && images.len() >= (*size).max(1)
+        {
+            if cancelled.load(Ordering::SeqCst) {
+                return Err(ScanError::Cancelled);
+            }
+            send(std::mem::take(&mut images), done, total);
+            pages += 1;
+        }
         if done % BATCH == 0 {
             if cancelled.load(Ordering::SeqCst) {
                 return Err(ScanError::Cancelled);
@@ -646,6 +934,10 @@ fn read(
                 entry[field] = json!(value);
             }
         }
+        let found = edits(con, versions)?;
+        if !found.is_empty() {
+            entry["edits"] = json!(found);
+        }
         images.push(entry);
     }
     if cancelled.load(Ordering::SeqCst) {
@@ -678,6 +970,13 @@ fn read(
             "texts with no place in Helios yet were not imported: {}",
             counts.join(", ")
         ));
+    }
+    if let Some((_, send)) = &mut pager {
+        if !images.is_empty() {
+            send(images, total, total);
+            pages += 1;
+        }
+        return Ok(json!({ "pages": pages, "total": total, "warnings": warnings }));
     }
     Ok(json!({ "images": images, "warnings": warnings }))
 }
@@ -740,7 +1039,22 @@ pub fn serve<R: BufRead, W: Write + Send + 'static>(input: R, output: W) {
                             );
                         }
                     };
-                    let answer = scan(&params, &flag, &mut progress);
+                    let size = params["pageSize"]
+                        .as_u64()
+                        .and_then(|s| usize::try_from(s).ok())
+                        .filter(|s| *s > 0);
+                    let page_token = token.clone();
+                    let page_out = out.clone();
+                    let mut page = |images: Vec<Value>, done: usize, total: usize| {
+                        send(
+                            &page_out,
+                            &json!({"jsonrpc": "2.0", "method": "importer/page", "params": {
+                                "token": page_token, "images": images, "done": done, "total": total,
+                            }}),
+                        );
+                    };
+                    let pager = size.map(|s| (s, &mut page as &mut dyn FnMut(Vec<Value>, usize, usize)));
+                    let answer = scan_paged(&params, &flag, &mut progress, pager);
                     scans
                         .lock()
                         .unwrap_or_else(PoisonError::into_inner)
