@@ -1005,6 +1005,74 @@ gui-scopes-green = Green
 
 gui-scopes-red = Red
 
+gui-settings-backup = Backup
+
+gui-settings-caches = Caches
+
+gui-settings-catalogue = Catalogue
+
+gui-settings-catalogue-about = Verified snapshots of the catalogue (ratings, tags, edits): kept next to it and copied to the backup disks plugged in.
+
+gui-settings-decisions = Decisions
+
+gui-settings-destinations = Destinations
+
+gui-settings-display = Display
+
+gui-settings-experimental = Experimental
+
+gui-settings-hardware = Hardware
+
+gui-settings-history = History
+
+gui-settings-image-map = Image map
+
+gui-settings-library = Library
+
+gui-settings-storage = Storage
+
+gui-settings-strategy = Strategy
+
+gui-settings-strategy-copies = Copies
+
+gui-settings-strategy-destinations = On
+
+gui-settings-strategy-online = Disks plugged in
+
+gui-settings-strategy-summary = Backup
+
+gui-settings-volume-backup = Backup
+
+gui-settings-volume-backup-role = Backup disk on/off
+
+gui-settings-volume-forget = Forget
+
+gui-settings-volume-kind = Kind
+
+gui-settings-volume-name = Name
+
+gui-settings-volume-photos = Photos
+
+gui-settings-volume-roles = Roles
+
+gui-settings-volume-scan = Scan now
+
+gui-settings-volume-space = Space
+
+gui-settings-volume-state = State
+
+gui-settings-volumes = Volumes
+
+gui-settings-volumes-about = Every disk the library knows: those plugged in first, then the others, offline.
+
+gui-settings-volumes-none = No volume known yet: plug in a disk.
+
+gui-settings-volumes-seen = Volumes
+
+gui-settings-workbench = Workbench
+
+gui-settings-workers = Workers
+
 gui-size-bytes = { $size } B
 
 gui-size-gib = { $size } GiB

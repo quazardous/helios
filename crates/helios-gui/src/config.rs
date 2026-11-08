@@ -29,7 +29,9 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
-use egui_pop::api::admin::model::{FORMAT, Field, Manifest, ValueScope};
+use egui_pop::api::admin::model::{
+    Action, FORMAT, Field, Manifest, Records, SectionBuilder, Status, ValueScope,
+};
 use egui_pop::api::admin::{ADMIN, Admin};
 use egui_pop::api::hooks::On;
 use egui_pop::api::services::ServiceToken;
@@ -38,6 +40,7 @@ use egui_pop::model::commands::Origin;
 use egui_pop::model::ids::{OwnerId, PluginId, SettingId};
 use egui_pop::model::values::{Change, Descriptor, Set, Value as PopValue};
 use helios_config::{Concern, Config, Kind, Layer, Schema, Value};
+use helios_core::Message;
 use serde_json::{Value as Json, json};
 
 /// The machine's layer, in the configuration folder.
@@ -353,21 +356,18 @@ pub fn scopes(concern: Concern) -> &'static [ValueScope] {
     }
 }
 
-/// Where each declared setting goes: scope, section, its title.
-pub const PLACES: &[(&str, &str, &[&str])] = &[
+/// Where each declared setting goes: scope and section.
+pub const PLACES: &[(&str, &[&str])] = &[
     (
         "interface/workbench",
-        "Workbench",
         &["interface.panels.queue_when_empty", "interface.graph.zoom"],
     ),
     (
         "interface/experimental",
-        "Experimental",
         &["interface.experimental.workshops"],
     ),
     (
         "library/image-map",
-        "Image map",
         &[
             "system.map.record",
             "system.map.defaults",
@@ -376,15 +376,10 @@ pub const PLACES: &[(&str, &str, &[&str])] = &[
             "system.map.keepMissing",
         ],
     ),
-    (
-        "library/decisions",
-        "Decisions",
-        &["project.decisions.mode"],
-    ),
-    ("library/history", "History", &["system.workflow.keep_days"]),
+    ("library/decisions", &["project.decisions.mode"]),
+    ("library/history", &["system.workflow.keep_days"]),
     (
         "storage/caches",
-        "Caches",
         &[
             "system.cache.budget",
             "system.cache.share",
@@ -394,7 +389,6 @@ pub const PLACES: &[(&str, &str, &[&str])] = &[
     ),
     (
         "hardware/workers",
-        "Workers",
         &[
             "system.scheduler.workers",
             "system.ai.calls",
@@ -403,17 +397,47 @@ pub const PLACES: &[(&str, &str, &[&str])] = &[
     ),
 ];
 
+/// A scope's or a section's title, by its path, in the catalogues
+/// (`cargo xtask i18n extract` reads them here).
+pub fn title(path: &str) -> Message {
+    match path {
+        "library" => Message::new("gui-settings-library", "Library"),
+        "storage" => Message::new("gui-settings-storage", "Storage"),
+        "backup" => Message::new("gui-settings-backup", "Backup"),
+        "hardware" => Message::new("gui-settings-hardware", "Hardware"),
+        "interface/workbench" => Message::new("gui-settings-workbench", "Workbench"),
+        "interface/experimental" => Message::new("gui-settings-experimental", "Experimental"),
+        "library/image-map" => Message::new("gui-settings-image-map", "Image map"),
+        "library/decisions" => Message::new("gui-settings-decisions", "Decisions"),
+        "library/history" => Message::new("gui-settings-history", "History"),
+        "storage/volumes" => Message::new("gui-settings-volumes", "Volumes"),
+        "storage/caches" => Message::new("gui-settings-caches", "Caches"),
+        "storage/catalogue" => Message::new("gui-settings-catalogue", "Catalogue"),
+        "hardware/workers" => Message::new("gui-settings-workers", "Workers"),
+        "hardware/display" => Message::new("gui-settings-display", "Display"),
+        "backup/strategy" => Message::new("gui-settings-strategy", "Strategy"),
+        "backup/destinations" => Message::new("gui-settings-destinations", "Destinations"),
+        other => Message::from(other.to_string()),
+    }
+}
+
 /// The manifest: Helios's scopes, in the note's order, and its settings
-/// placed in them (the display's and the backup destinations' egui-pop
-/// settings too).
-pub fn manifest(schema: &Schema) -> Manifest {
+/// placed in them (the display's, the catalogue's and the backup
+/// destinations' egui-pop settings too), with the Storage and Backup
+/// pages read from the storage commands; its texts through `t` (the
+/// interface's language).
+pub fn manifest(schema: &Schema, t: &dyn Fn(Message) -> String) -> Manifest {
+    let tt = |path: &str| t(title(path));
     let mut m = Manifest::new(FORMAT)
-        .scope_at("library", "Library", "folder", 30)
-        .scope_at("storage", "Storage", "disc", 40)
-        .scope_at("backup", "Backup", "lock", 50)
-        .scope_at("hardware", "Hardware", "command", 70);
-    for (path, title, keys) in PLACES {
-        m = m.section(path, title, |s| {
+        .scope_at("library", &tt("library"), "folder", 30)
+        .scope_at("storage", &tt("storage"), "disc", 40)
+        .scope_at("backup", &tt("backup"), "lock", 50)
+        .scope_at("hardware", &tt("hardware"), "command", 70);
+    m = m.section("storage/volumes", &tt("storage/volumes"), |s| {
+        volumes_section(s, t);
+    });
+    for (path, keys) in PLACES {
+        m = m.section(path, &tt(path), |s| {
             for key in *keys {
                 let Some(setting) = schema.get(key) else {
                     continue;
@@ -427,21 +451,146 @@ pub fn manifest(schema: &Schema) -> Manifest {
             }
         });
     }
-    m.section("hardware/display", "Display", |s| {
+    m.section("storage/catalogue", &tt("storage/catalogue"), |s| {
+        s.description(&t(Message::new(
+            "gui-settings-catalogue-about",
+            "Verified snapshots of the catalogue (ratings, tags, edits): kept next to it and copied to the backup disks plugged in.",
+        )));
+        s.field(Field::setting(crate::catalogue::SETTING_EVERY.as_str()));
+        s.field(Field::setting(crate::catalogue::SETTING_KEPT.as_str()));
+    })
+    .section("hardware/display", &tt("hardware/display"), |s| {
         s.field(Field::setting(crate::display::SETTING_WIDE_GAMUT.as_str()));
     })
-    .section("backup/destinations", "Destinations", |s| {
+    .section("backup/strategy", &tt("backup/strategy"), |s| {
+        strategy_section(s, t);
+    })
+    .section("backup/destinations", &tt("backup/destinations"), |s| {
         s.field(Field::setting(
             crate::platform::SETTING_DESTINATION_DAYS.as_str(),
         ));
     })
 }
 
+/// The Storage scope's volume table: every volume known
+/// (`library.volumes`), toned by its state, with its actions.
+fn volumes_section(s: &mut SectionBuilder<'_>, t: &dyn Fn(Message) -> String) {
+    use crate::shell::{FORGET_VOLUME, VOLUME_ROLE_COMMAND, VOLUMES_COMMAND};
+    s.description(&t(Message::new(
+        "gui-settings-volumes-about",
+        "Every disk the library knows: those plugged in first, then the others, offline.",
+    )));
+    s.status(Status::command(
+        "volumes-summary",
+        &t(Message::new("gui-settings-volumes-seen", "Volumes")),
+        VOLUMES_COMMAND,
+        "/summary",
+    ));
+    let volume = json!({ "volume": "${row.id}" });
+    s.table(
+        Records::command("volumes", "", VOLUMES_COMMAND, "/volumes", "id")
+            .column("name", &t(Message::new("gui-settings-volume-name", "Name")))
+            .column(
+                "stateText",
+                &t(Message::new("gui-settings-volume-state", "State")),
+            )
+            .column("kind", &t(Message::new("gui-settings-volume-kind", "Kind")))
+            .column(
+                "roleText",
+                &t(Message::new("gui-settings-volume-roles", "Roles")),
+            )
+            .column(
+                "space",
+                &t(Message::new("gui-settings-volume-space", "Space")),
+            )
+            .column(
+                "photos",
+                &t(Message::new("gui-settings-volume-photos", "Photos")),
+            )
+            .column(
+                "backupText",
+                &t(Message::new("gui-settings-volume-backup", "Backup")),
+            )
+            .tone("tone")
+            .row_action(
+                Action::command(VOLUME_ROLE_COMMAND)
+                    .title(&t(Message::new(
+                        "gui-settings-volume-backup-role",
+                        "Backup disk on/off",
+                    )))
+                    .args(json!({ "volume": "${row.id}", "role": "backup" })),
+            )
+            .row_action(
+                Action::command("library.map.scanNow")
+                    .title(&t(Message::new("gui-settings-volume-scan", "Scan now")))
+                    .args(volume.clone()),
+            )
+            .row_action(
+                Action::command(FORGET_VOLUME)
+                    .title(&t(Message::new("gui-settings-volume-forget", "Forget")))
+                    .args(volume)
+                    .danger(),
+            )
+            .empty(
+                &t(Message::new(
+                    "gui-settings-volumes-none",
+                    "No volume known yet: plug in a disk.",
+                )),
+                None,
+            )
+            .refresh("storage.*"),
+    );
+}
+
+/// The Backup scope's strategy: its line and what it holds, read from
+/// `library.backupStrategy`, and "Back up now".
+fn strategy_section(s: &mut SectionBuilder<'_>, t: &dyn Fn(Message) -> String) {
+    use crate::shell::{BACKUP_NOW_COMMAND, BACKUP_STRATEGY_COMMAND};
+    let status = |id: &str, title: Message, pointer: &str| {
+        Status::command(id, &t(title), BACKUP_STRATEGY_COMMAND, pointer)
+    };
+    s.status(status(
+        "strategy-summary",
+        Message::new("gui-settings-strategy-summary", "Backup"),
+        "/summary",
+    ));
+    s.status(status(
+        "strategy-copies",
+        Message::new("gui-settings-strategy-copies", "Copies"),
+        "/copies",
+    ));
+    s.status(status(
+        "strategy-destinations",
+        Message::new("gui-settings-strategy-destinations", "On"),
+        "/destinations",
+    ));
+    s.status(status(
+        "strategy-online",
+        Message::new("gui-settings-strategy-online", "Disks plugged in"),
+        "/online",
+    ));
+    s.action(
+        Action::command(BACKUP_NOW_COMMAND)
+            .title(&t(Message::new("gui-storage-backup-now", "Back up now")))
+            .primary(),
+    );
+}
+
 /// The plugin: declares the settings and the manifest, follows their
 /// changes. Values come once the desktop [`install`]s them; until then
 /// the settings show their defaults and nothing is written.
-#[derive(Debug, Default)]
-pub struct BridgePlugin;
+#[derive(Default)]
+pub struct BridgePlugin {
+    /// The interface's catalogues, for the manifest's texts; English
+    /// without.
+    pub i18n: Option<egui_pop::i18n::I18n>,
+}
+
+impl std::fmt::Debug for BridgePlugin {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BridgePlugin").finish_non_exhaustive()
+    }
+}
 
 impl Plugin for BridgePlugin {
     fn id(&self) -> PluginId {
@@ -465,7 +614,12 @@ impl Plugin for BridgePlugin {
             .app()
             .service(&ADMIN)
             .ok_or_else(|| PluginError::Failed("no Settings app".to_string()))?;
-        admin.manifest(manifest(&schema));
+        let i18n = self.i18n.clone();
+        let t = |m: Message| match &i18n {
+            Some(i) => helios_i18n::message(i, &m),
+            None => m.english,
+        };
+        admin.manifest(manifest(&schema, &t));
         let bridge = Bridge::default();
         let dirty = bridge.dirty.clone();
         ctx.service(&BRIDGE, bridge)?;
@@ -732,7 +886,7 @@ mod tests {
     #[test]
     fn every_setting_is_placed_once_with_the_scopes_of_its_concern() {
         let schema = Schema::core();
-        let m = manifest(&schema);
+        let m = manifest(&schema, &|m| m.english);
         let bound: Vec<&str> = m.bound_settings().collect();
         for s in schema.iter() {
             assert_eq!(
@@ -762,6 +916,22 @@ mod tests {
             let j = to_json(&s.kind, &s.kind.default_value());
             assert_eq!(d.default.to_json(), j, "{}", s.key);
             assert_eq!(from_json(&s.kind, &j), Some(s.kind.default_value()));
+        }
+    }
+
+    #[test]
+    fn the_manifest_s_texts_go_through_the_catalogues() {
+        let m = manifest(&Schema::core(), &|m| format!("<{}>", m.key));
+        let library = m.scopes.iter().find(|s| s.meta.id == "library").unwrap();
+        assert_eq!(library.meta.title, "<gui-settings-library>");
+        for s in &m.sections {
+            assert!(
+                s.meta.title.starts_with("<gui-settings-"),
+                "{}/{}: {}",
+                s.scope,
+                s.meta.id,
+                s.meta.title
+            );
         }
     }
 

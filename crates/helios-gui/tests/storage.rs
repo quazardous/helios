@@ -514,7 +514,7 @@ fn a_card_short_of_its_backups_is_said_safe_once_a_backup_ends() {
 }
 
 #[test]
-fn the_volumes_and_the_strategy_are_read_through_read_only_commands() {
+fn the_storage_scope_reads_the_volumes_and_the_strategy_from_commands() {
     use helios_gui::shell::{BACKUP_STRATEGY_COMMAND, VOLUME_ROLE_COMMAND, VOLUMES_COMMAND};
 
     let (mut world, shell) = World::new("admin");
@@ -573,4 +573,17 @@ fn the_volumes_and_the_strategy_are_read_through_read_only_commands() {
     assert_eq!(set["copies"], 1);
     assert_eq!(set["online"], 1, "the studio disk takes copies now");
     assert_eq!(set["summary"]["tone"], "success");
+
+    // The Settings app's Storage scope shows the table from the command.
+    h.state_mut()
+        .run(
+            "admin.open",
+            json!({ "path": "storage/volumes" }),
+            Origin::User,
+        )
+        .unwrap();
+    until(&mut h, "the volume table", |h| {
+        h.query_by_label("Studio").is_some() && h.query_by_label("offline").is_some()
+    });
+    h.run();
 }

@@ -806,7 +806,9 @@ impl Shell {
             // Helios's scopes and its own settings (`helios-config`) in
             // them. The settings window stays beside it for now.
             .plugin(egui_pop::api::admin::AdminPlugin)
-            .plugin(crate::config::BridgePlugin)
+            .plugin(crate::config::BridgePlugin {
+                i18n: Some(i18n.clone()),
+            })
             // egui-pop's theme editor, as a page of the settings window
             // (Appearance), on the theme in use.
             .plugin(egui_pop::api::theme_editor::ThemeEditorPlugin)

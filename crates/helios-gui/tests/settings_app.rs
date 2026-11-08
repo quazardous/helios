@@ -60,6 +60,7 @@ fn helios_settings_are_placed_read_and_written_to_their_layer() {
     assert_eq!(places("system.cache.thumbnails"), ["storage/caches"]);
     assert_eq!(places("project.decisions.mode"), ["library/decisions"]);
     assert_eq!(places("display.wide-gamut-preview"), ["hardware/display"]);
+    assert_eq!(places("catalogue.snapshotEvery"), ["storage/catalogue"]);
     let scopes: Vec<&str> = tree
         .shown_scopes()
         .iter()
