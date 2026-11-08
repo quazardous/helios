@@ -321,6 +321,21 @@ env = { CARGO_NET_OFFLINE = "true" }
 mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
 timeout = "1h"
 
+# a fix loop's run: one crate's tests, one test target (`test=`), a name
+# filter (`filter=`), stopped at the first failure; seconds of tests, in
+# the branch's target that test-affected reuses before the merge
+[jobs.test-crate]
+about = "one crate's tests, one test target, a name filter (a fix loop's run)"
+checkouts = ["helios", "vkdt", "egui-pop"]
+cores = 4
+memory = "4g"
+cwd = "/work/${src:-helios}"
+command = """mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && \
+t="${test:-}"; cargo nextest run --locked --fail-fast -p ${crate} ${t:+--test $t} ${filter:-}"""
+env = { CARGO_NET_OFFLINE = "true" }
+mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
+timeout = "30m"
+
 # the tests a change touches (base=<commit or branch>, origin/main by
 # default): `cargo xtask affected` maps the files changed since the merge
 # base to the crates and their dependents, plus the critical set (smoke

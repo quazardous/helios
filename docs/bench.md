@@ -27,6 +27,7 @@ Jobs of the Benchfile:
 | `build` | `cargo build --workspace --all-targets` | 8 cores, 6 GB |
 | `lint` | fast compile feedback: `cargo clippy --workspace --all-targets -- -D warnings`, `cargo xtask check`, then `cargo xtask i18n check` (its report in `out/i18n.txt`) | 8 cores, 6 GB |
 | `test` | `cargo nextest run --workspace --profile ci`, its JUnit report and a summary of the slowest tests in `out/` | 6 cores, 6 GB |
+| `test-crate` | a fix loop's run: `crate=` (required), `test=` (one test target) and `filter=` (a name filter), stopped at the first failure, in the branch's target | 4 cores, 4 GB |
 | `test-affected` | the tests a change touches since `base=` (`origin/main` by default) and the critical set: see "Running what a change touches"; the selection in `out/affected.json`, the JUnit report and the slowest tests in `out/` | 6 cores, 6 GB |
 | `survival` | `cargo survival`: quit, `kill -9` and reopen | 4 cores, 4 GB |
 | `release` | `cargo xtask release` (survival first), Cargo.lock refreshed; the change as `out/release.patch` (see CONTRIBUTING.md) | 5 cores, 6 GB |
@@ -420,6 +421,19 @@ Several agents share one box, one queue and one disk quota. A job that hangs
 or hoards blocks everyone for the length of its timeout. These rules come
 from incidents on the box; every agent prompt points here.
 
+**The next branch** (owner, 2026-11-08: Helios is alpha, so tests run on
+`next` only)
+- Agents merge finished work into `next` after the local checks (fmt,
+  check, clippy on the crates touched, `cargo update -w --offline`,
+  fragments): no box run is required before the merge. A narrow
+  `test-crate` run is there when a fix loop needs one.
+- Every push to `next` runs GitHub CI (the whole suite, survival, the
+  commits walk, lint, Windows). Once it passes, `promote.yml`
+  fast-forwards `main` to that commit; releases are made from `main`.
+- A red CI on `next` is fixed first, by whoever broke it, from what CI
+  reports: work goes on from the errors CI finds, not from runs queued
+  before each merge.
+
 **The work cycle**
 - Code the whole change with local checks only: `cargo fmt --check`, then
   `cargo check` and `cargo clippy` on the crates touched, with
@@ -437,9 +451,16 @@ from incidents on the box; every agent prompt points here.
   a time.
 
 **Before queuing**
-- Run the narrowest job first: `test-affected` (or one test) before `test`,
-  `survival` or `check-commits`. A full run is the last step, not the first.
-  For egui-pop, a fix loop runs `egui-pop-test crate=<crate> test=<target>
+- Run the narrowest job first. A Helios fix loop runs `test-crate
+  crate=<crate> test=<target> filter=<name>` (seconds of tests); before the
+  merge, `test-affected` once. A green `test-affected` is not followed by
+  `test` on the same branch: on Helios it reaches nearly the whole suite
+  (2026-11-08: 1,370 to 1,440 of 1,440 tests), so `test` would run it
+  twice. `test` is for the daily run and releases.
+- A test that fails, then passes on nextest's retry (`retries = 1` in the
+  `ci` profile), is reported FLAKY and the run stays green; each flaky test
+  gets a ticket and a fix, never a lasting place in the suite.
+- For egui-pop, a fix loop runs `egui-pop-test crate=<crate> test=<target>
   filter=<name>` (minutes). A failure CI shows is reproduced with
   `egui-pop-test`.
 - The box does not repeat what CI runs. egui-pop and egui_stack pull

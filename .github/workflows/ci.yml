@@ -2,8 +2,17 @@ name: ci
 
 on:
   push:
-    branches: [main]
+    # `next` is the buffer branch agents merge into; once this workflow
+    # passes there, promote.yml fast-forwards `main` (docs/bench.md, "The
+    # next branch").
+    branches: [main, next]
   pull_request:
+
+# A newer push to `next` replaces the run still going: only the newest
+# commit is promoted.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref == 'refs/heads/next' }}
 
 jobs:
   test:

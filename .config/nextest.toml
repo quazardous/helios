@@ -14,5 +14,10 @@ slow-timeout = { period = "10s", terminate-after = 12 }
 path = "junit.xml"
 
 [profile.ci]
-retries = 0
+# A test that fails then passes on its retry is reported FLAKY, not failed:
+# the run stays green and the flaky test gets a ticket and a fix.
+retries = 1
 fail-fast = false
+# The suite's tests wait more than they compute (the box's CPU sat 64 %
+# idle on 5 threads): run more at once than there are cores.
+test-threads = 12
