@@ -598,9 +598,11 @@ fn strategy_ui(
     let mut edited = current.clone();
     ui.horizontal_wrapped(|ui| {
         let mut copies = u32::from(edited.copies);
-        ui.add(egui::DragValue::new(&mut copies).range(1..=5));
+        let count = ui.add(egui::DragValue::new(&mut copies).range(1..=5));
         edited.copies = u8::try_from(copies).unwrap_or(1);
-        ui.label(t(Message::new("gui-storage-backup-copies", "copies on")));
+        // The words after the count name it and the disks' menu.
+        let words = ui.label(t(Message::new("gui-storage-backup-copies", "copies on")));
+        count.labelled_by(words.id);
         // v1 edits one destination; a strategy may hold several.
         let first = edited
             .destinations
@@ -625,7 +627,9 @@ fn strategy_ui(
                     let text = destination_text(t, &c, volumes);
                     ui.selectable_value(&mut chosen, c, text);
                 }
-            });
+            })
+            .response
+            .labelled_by(words.id);
         if chosen != first {
             edited.destinations = vec![chosen];
         }
