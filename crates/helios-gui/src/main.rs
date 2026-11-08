@@ -417,17 +417,19 @@ fn catalogue_commands(
             Ok(json!({ "file": taken }))
         },
     )?;
-    let at = file.clone();
+    let (at, t) = (file.clone(), shell.texts());
     shell.register(
         CommandSpec::new(
             catalogue::LIST_COMMAND,
-            "The catalogue's snapshots, next to it and on the backup disks plugged in, newest first",
+            "The catalogue's snapshots, next to it and on the backup disks plugged in, newest first, each with how old it is and where",
             "Library",
         )
         .read_only(),
         move |_, _| {
             let mounted = helios_storage::system().volumes();
-            serde_json::to_value(catalogue::list(&at, &mounted)).map_err(|e| e.to_string())
+            serde_json::to_value(catalogue::list(&at, &mounted))
+                .map(|list| helios_gui::shell::snapshot_rows(&t, list))
+                .map_err(|e| e.to_string())
         },
     )?;
     let (at, egui) = (file.clone(), ctx.clone());

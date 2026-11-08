@@ -56,6 +56,7 @@ pub use import_choices::Choices;
 pub use macro_edit::{SELECTED as GRAPH_SELECTED, selected_nodes};
 pub use storage::{
     BACKUP_NOW as BACKUP_NOW_COMMAND, COMMAND as STORAGE_COMMAND, StorageLink, VaultStorage,
+    role_text,
 };
 pub use workspace_edit::STATE as WORKSPACE_STATE;
 
@@ -68,8 +69,9 @@ pub use import_window::{FORGET_FOLDER, FORGET_VOLUME};
 mod storage;
 mod storage_admin;
 pub use storage_admin::{
+    MARK_VOLUME as MARK_VOLUME_COMMAND, SET_STRATEGY as SET_STRATEGY_COMMAND,
     STRATEGY as BACKUP_STRATEGY_COMMAND, VOLUME_ROLE as VOLUME_ROLE_COMMAND,
-    VOLUMES as VOLUMES_COMMAND,
+    VOLUME_SET as VOLUME_SET_COMMAND, VOLUMES as VOLUMES_COMMAND, snapshot_rows,
 };
 
 /// Where an import's lines are sent: its arguments and a line.
@@ -1379,6 +1381,13 @@ impl Shell {
     /// Declares a command on Helios's registry, and to the interface at
     /// once (egui-pop's `App::declare`): its menus, palette entry and keys
     /// follow, no plugin reconnected.
+    /// The interface's texts, for a command's answer written on another
+    /// thread.
+    pub fn texts(&self) -> impl Fn(Message) -> String + Send + Sync + 'static {
+        let i18n = self.i18n.clone();
+        move |m| helios_i18n::message(&i18n, &m)
+    }
+
     pub fn register(
         &mut self,
         spec: CommandSpec,
@@ -2809,7 +2818,7 @@ impl Shell {
         add(
             CommandSpec::new(
                 storage::COMMAND,
-                "Storage… (`volume`: the volume to show first)",
+                "Storage… (the Settings app at Storage › Volumes; `volume`: the volume to mark and scroll to)",
                 "Library",
             ),
             Box::new(|a, _| Ok(Action::Storage(a.clone()))),
@@ -4490,10 +4499,7 @@ impl Shell {
                 let started = self.health_check_now();
                 return Ok(serde_json::json!({ "started": started }));
             }
-            Action::Storage(args) => {
-                self.open_storage(&args);
-                return Ok(Value::Null);
-            }
+            Action::Storage(args) => return self.open_storage(&args),
             Action::ImportFiles(args, origin) => return self.import_files(&args, &origin),
             Action::ImportWith(args, origin) => return self.import_with(&args, &origin),
             Action::Export(args, origin) => return self.export(&args, &origin),
@@ -4942,7 +4948,6 @@ impl Shell {
         self.take_dropped_files(&ctx);
         self.import_window_frame(&ctx);
         self.health_window(&ctx);
-        self.storage_window(&ctx);
         let refused = std::mem::take(&mut self.library.borrow_mut().notes);
         for n in refused {
             self.warn(n);

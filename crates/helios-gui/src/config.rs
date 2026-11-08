@@ -30,7 +30,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use egui_pop::api::admin::model::{
-    Action, FORMAT, Field, Manifest, Records, SectionBuilder, Status, ValueScope,
+    Action, Clauses as _, Confirmation, FORMAT, Field, Manifest, Records, RowField, SectionBuilder,
+    Status, ValueScope,
 };
 use egui_pop::api::admin::{ADMIN, Admin};
 use egui_pop::api::hooks::On;
@@ -458,6 +459,7 @@ pub fn manifest(schema: &Schema, t: &dyn Fn(Message) -> String) -> Manifest {
         )));
         s.field(Field::setting(crate::catalogue::SETTING_EVERY.as_str()));
         s.field(Field::setting(crate::catalogue::SETTING_KEPT.as_str()));
+        snapshots_section(s, t);
     })
     .section("hardware/display", &tt("hardware/display"), |s| {
         s.field(Field::setting(crate::display::SETTING_WIDE_GAMUT.as_str()));
@@ -473,12 +475,19 @@ pub fn manifest(schema: &Schema, t: &dyn Fn(Message) -> String) -> Manifest {
 }
 
 /// The Storage scope's volume table: every volume known
-/// (`library.volumes`), toned by its state, with its actions.
+/// (`library.volumes`), toned by its state: its name edited in place, a
+/// toggle per role, the off-site and RAID flags, its space as a meter,
+/// when and where it was last seen, and its actions ("Mark this disk…"
+/// and "Forget…" ask first).
 fn volumes_section(s: &mut SectionBuilder<'_>, t: &dyn Fn(Message) -> String) {
-    use crate::shell::{FORGET_VOLUME, VOLUME_ROLE_COMMAND, VOLUMES_COMMAND};
+    use crate::shell::{
+        FORGET_VOLUME, MARK_VOLUME_COMMAND, VOLUME_ROLE_COMMAND, VOLUME_SET_COMMAND,
+        VOLUMES_COMMAND,
+    };
+    use helios_storage::Role;
     s.description(&t(Message::new(
-        "gui-settings-volumes-about",
-        "Every disk the library knows: those plugged in first, then the others, offline.",
+        "gui-storage-intro",
+        "The disks Helios has seen. Name them and say what each is for: Helios writes only to library, archive, backup and scratch disks.",
     )));
     s.status(Status::command(
         "volumes-summary",
@@ -487,92 +496,266 @@ fn volumes_section(s: &mut SectionBuilder<'_>, t: &dyn Fn(Message) -> String) {
         "/summary",
     ));
     let volume = json!({ "volume": "${row.id}" });
-    s.table(
-        Records::command("volumes", "", VOLUMES_COMMAND, "/volumes", "id")
-            .column("name", &t(Message::new("gui-settings-volume-name", "Name")))
-            .column(
-                "stateText",
-                &t(Message::new("gui-settings-volume-state", "State")),
+    let set = |key: &str| json!({ "volume": "${row.id}", key: "${value}" });
+    let mut table = Records::command("volumes", "", VOLUMES_COMMAND, "/volumes", "id")
+        .column("name", &t(Message::new("gui-settings-volume-name", "Name")))
+        .column(
+            "stateText",
+            &t(Message::new("gui-settings-volume-state", "State")),
+        )
+        .column("kind", &t(Message::new("gui-settings-volume-kind", "Kind")))
+        .row_field(
+            RowField::text(
+                "name",
+                &t(Message::new("gui-settings-volume-name", "Name")),
+                VOLUME_SET_COMMAND,
+                set("name"),
             )
-            .column("kind", &t(Message::new("gui-settings-volume-kind", "Kind")))
-            .column(
-                "roleText",
-                &t(Message::new("gui-settings-volume-roles", "Roles")),
+            .help(&t(Message::new(
+                "gui-storage-name-hint",
+                "Its name; Enter saves it",
+            ))),
+        );
+    for role in Role::ALL {
+        let name = serde_json::to_value(role)
+            .ok()
+            .and_then(|v| v.as_str().map(String::from))
+            .unwrap_or_default();
+        table = table.row_field(RowField::toggle(
+            &format!("role_{name}"),
+            &t(crate::shell::role_text(role)),
+            VOLUME_ROLE_COMMAND,
+            json!({ "volume": "${row.id}", "role": name, "on": "${value}" }),
+        ));
+    }
+    let table = table
+        .row_field(
+            RowField::toggle(
+                "offSite",
+                &t(Message::new("gui-storage-off-site", "Off site")),
+                VOLUME_SET_COMMAND,
+                set("offSite"),
             )
-            .column(
-                "space",
-                &t(Message::new("gui-settings-volume-space", "Space")),
+            .help(&t(Message::new(
+                "gui-storage-off-site-hint",
+                "Kept away from the other disks (another building)",
+            ))),
+        )
+        .row_field(
+            RowField::toggle(
+                "raid",
+                &t(Message::new("gui-storage-raid", "RAID")),
+                VOLUME_SET_COMMAND,
+                set("raid"),
             )
-            .column(
-                "photos",
-                &t(Message::new("gui-settings-volume-photos", "Photos")),
-            )
-            .column(
-                "backupText",
-                &t(Message::new("gui-settings-volume-backup", "Backup")),
-            )
-            .tone("tone")
-            .row_action(
-                Action::command(VOLUME_ROLE_COMMAND)
-                    .title(&t(Message::new(
-                        "gui-settings-volume-backup-role",
-                        "Backup disk on/off",
-                    )))
-                    .args(json!({ "volume": "${row.id}", "role": "backup" })),
-            )
-            .row_action(
-                Action::command("library.map.scanNow")
-                    .title(&t(Message::new("gui-settings-volume-scan", "Scan now")))
-                    .args(volume.clone()),
-            )
-            .row_action(
-                Action::command(FORGET_VOLUME)
-                    .title(&t(Message::new("gui-settings-volume-forget", "Forget")))
-                    .args(volume)
-                    .danger(),
-            )
-            .empty(
-                &t(Message::new(
-                    "gui-settings-volumes-none",
-                    "No volume known yet: plug in a disk.",
+            .help(&t(Message::new(
+                "gui-storage-raid-note",
+                "A RAID counts as one copy: it survives a dead disk, not a deletion or a theft.",
+            ))),
+        )
+        .meter(
+            "used",
+            &t(Message::new("gui-settings-volume-space", "Space")),
+            "space",
+        )
+        .column(
+            "photos",
+            &t(Message::new("gui-settings-volume-photos", "Photos")),
+        )
+        .column(
+            "backupText",
+            &t(Message::new("gui-settings-volume-backup", "Backup")),
+        )
+        .column(
+            "seen",
+            &t(Message::new("gui-settings-volume-seen", "Seen")),
+        )
+        .tone("tone")
+        .row_action(
+            Action::command(MARK_VOLUME_COMMAND)
+                .title(&t(Message::new("gui-storage-mark", "Mark this disk…")))
+                .args(volume.clone())
+                .when("row.weak")
+                .confirmation(Confirmation::new(
+                    &t(Message::new(
+                        "gui-storage-mark-title",
+                        "Mark { $disk }?",
+                    )
+                    .with("disk", "${row.name}")),
+                    &t(Message::new(
+                        "gui-storage-mark-explain",
+                        "This disk is known only by its label and size, so Helios could take another disk for it. Marking it writes a small file, .helios/volume.json, at its root: nothing else on the disk changes.",
+                    )),
+                    &t(Message::new(
+                        "gui-storage-mark-confirm",
+                        "Write the identity file",
+                    )),
                 )),
-                None,
-            )
-            .refresh("storage.*"),
-    );
+        )
+        .row_action(
+            Action::command("library.map.scanNow")
+                .title(&t(Message::new("gui-settings-volume-scan", "Scan now")))
+                .args(volume.clone()),
+        )
+        .row_action(
+            Action::command(FORGET_VOLUME)
+                .title(&t(Message::new("gui-settings-volume-forget", "Forget…")))
+                .args(volume)
+                .danger()
+                .confirmation(
+                    Confirmation::new(
+                        &t(Message::new(
+                            "gui-settings-volume-forget-title",
+                            "Forget what was seen on { $disk }?",
+                        )
+                        .with("disk", "${row.name}")),
+                        &t(Message::new(
+                            "gui-storage-forget-hint",
+                            "Drops what the image map knows of this volume's files not in the Library; the volume stays known",
+                        )),
+                        &t(Message::new("gui-settings-volume-forget-verb", "Forget")),
+                    )
+                    .danger(),
+                ),
+        )
+        .empty(
+            &t(Message::new(
+                "gui-settings-volumes-none",
+                "No volume known yet: plug in a disk.",
+            )),
+            None,
+        )
+        .refresh("storage.*");
+    s.table(table);
 }
 
-/// The Backup scope's strategy: its line and what it holds, read from
-/// `library.backupStrategy`, and "Back up now".
+/// The Backup scope's strategy, edited in place: on or off, how many
+/// copies, where, one off site, when copies are made (each written at
+/// once through `library.setBackupStrategy`); its disks plugged in and
+/// "Back up now".
 fn strategy_section(s: &mut SectionBuilder<'_>, t: &dyn Fn(Message) -> String) {
-    use crate::shell::{BACKUP_NOW_COMMAND, BACKUP_STRATEGY_COMMAND};
-    let status = |id: &str, title: Message, pointer: &str| {
-        Status::command(id, &t(title), BACKUP_STRATEGY_COMMAND, pointer)
+    use crate::shell::{BACKUP_NOW_COMMAND, BACKUP_STRATEGY_COMMAND, SET_STRATEGY_COMMAND};
+    let part = |key: &str| json!({ "key": key, "value": "${value}" });
+    let toggle = |key: &str, title: Message| {
+        RowField::toggle(key, &t(title), SET_STRATEGY_COMMAND, part(key)).when("row.on")
     };
-    s.status(status(
-        "strategy-summary",
-        Message::new("gui-settings-strategy-summary", "Backup"),
-        "/summary",
-    ));
-    s.status(status(
-        "strategy-copies",
-        Message::new("gui-settings-strategy-copies", "Copies"),
-        "/copies",
-    ));
-    s.status(status(
-        "strategy-destinations",
-        Message::new("gui-settings-strategy-destinations", "On"),
-        "/destinations",
-    ));
-    s.status(status(
+    let copies: Vec<(Json, String)> = (1..=5).map(|n| (json!(n), n.to_string())).collect();
+    let copies: Vec<(Json, &str)> = copies
+        .iter()
+        .map(|(v, l)| (v.clone(), l.as_str()))
+        .collect();
+    s.list(
+        Records::command("strategy", "", BACKUP_STRATEGY_COMMAND, "", "set")
+            .titles("summaryText", None)
+            .tone("tone")
+            .row_field(RowField::toggle(
+                "on",
+                &t(Message::new(
+                    "gui-storage-backup-on",
+                    "Keep verified backup copies of every photo",
+                )),
+                SET_STRATEGY_COMMAND,
+                part("on"),
+            ))
+            .row_field(
+                RowField::choice(
+                    "copies",
+                    &t(Message::new("gui-settings-strategy-copies", "Copies")),
+                    &copies,
+                    SET_STRATEGY_COMMAND,
+                    part("copies"),
+                )
+                .when("row.on"),
+            )
+            .row_field(
+                RowField::choice(
+                    "destination",
+                    &t(Message::new("gui-settings-strategy-destinations", "On")),
+                    &[],
+                    SET_STRATEGY_COMMAND,
+                    part("destination"),
+                )
+                .choices_from("destinationChoices")
+                .when("row.on"),
+            )
+            .row_field(toggle(
+                "offSite",
+                Message::new("gui-storage-backup-off-site", "One of them off site"),
+            ))
+            .row_field(toggle(
+                "onImport",
+                Message::new("gui-storage-backup-on-import", "After each import"),
+            ))
+            .row_field(toggle(
+                "onConnect",
+                Message::new(
+                    "gui-storage-backup-on-connect",
+                    "When a backup disk is plugged in",
+                ),
+            ))
+            .refresh("storage.*"),
+    );
+    s.status(Status::command(
         "strategy-online",
-        Message::new("gui-settings-strategy-online", "Disks plugged in"),
+        &t(Message::new(
+            "gui-settings-strategy-online",
+            "Disks plugged in",
+        )),
+        BACKUP_STRATEGY_COMMAND,
         "/online",
     ));
     s.action(
         Action::command(BACKUP_NOW_COMMAND)
             .title(&t(Message::new("gui-storage-backup-now", "Back up now")))
             .primary(),
+    );
+}
+
+/// The catalogue's snapshots (`library.catalogue.snapshots`), newest
+/// first, each with "Restore…" (asked first), and "Snapshot now".
+fn snapshots_section(s: &mut SectionBuilder<'_>, t: &dyn Fn(Message) -> String) {
+    use crate::catalogue::{LIST_COMMAND, RESTORE_COMMAND, SNAPSHOT_COMMAND};
+    s.action(Action::command(SNAPSHOT_COMMAND).title(&t(Message::new(
+        "gui-catalogue-snapshot-now",
+        "Snapshot now",
+    ))));
+    s.list(
+        Records::command(
+            "snapshots",
+            &t(Message::new("gui-settings-snapshots", "Snapshots")),
+            LIST_COMMAND,
+            "",
+            "file",
+        )
+        .titles("whenText", Some("placeText"))
+        .column("reason", "")
+        .row_action(
+            Action::command(RESTORE_COMMAND)
+                .title(&t(Message::new("gui-catalogue-restore", "Restore…")))
+                .args(json!({ "file": "${row.file}" }))
+                .confirmation(
+                    Confirmation::new(
+                        &t(Message::new(
+                            "gui-catalogue-restore-title",
+                            "Restore the catalogue?",
+                        )),
+                        &t(Message::new(
+                            "gui-catalogue-restore-ask",
+                            "Restore the catalogue from the snapshot of { $when }? Changes made since are lost. The current catalogue is kept aside, and Helios closes and starts again on the snapshot.",
+                        )
+                        .with("when", "${row.whenText}")),
+                        &t(Message::new(
+                            "gui-catalogue-restore-confirm",
+                            "Restore and restart",
+                        )),
+                    )
+                    .danger(),
+                ),
+        )
+        .empty(
+            &t(Message::new("gui-catalogue-none", "No snapshot yet.")),
+            None,
+        ),
     );
 }
 

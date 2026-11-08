@@ -9,6 +9,14 @@
 //!   and a summary line with its tone (`/summary`).
 //! - `library.volumeRole`: gives a volume a role, or takes it back
 //!   (`{"volume", "role", "on"}`; without `on` the role is toggled).
+//! - `library.volumeSet`: renames a volume or sets its flags
+//!   (`{"volume", "name", "offSite", "raid"}`, each optional).
+//! - `library.markVolume`: writes the identity file on a weakly
+//!   identified volume plugged in (`{"volume"}`), after the page's
+//!   confirmation.
+//! - `library.setBackupStrategy`: turns the strategy on or off and sets
+//!   one of its parts (`{"key": "on" | "copies" | "destination" |
+//!   "offSite" | "onImport" | "onConnect", "value"}`), saved at once.
 //!
 //! The texts in the answers are in the interface's language.
 
@@ -17,12 +25,12 @@ use std::sync::Arc;
 
 use helios_core::Message;
 use helios_shell::commands::CommandSpec;
-use helios_storage::strategy::{self, Strategy, Trigger};
-use helios_storage::{Role, Volume, VolumeId};
+use helios_storage::strategy::{self, Destination, Strategy, Trigger};
+use helios_storage::{Identity, Role, Volume, VolumeId};
 use serde_json::{Value, json};
 
 use super::Shell;
-use super::storage::{StorageLink, backup_line, destination_text, kind_of, role_text};
+use super::storage::{StorageLink, backup_line, day_of, destination_text, kind_of, role_text};
 
 /// Lists the volumes known (read-only).
 pub const VOLUMES: &str = "library.volumes";
@@ -32,6 +40,15 @@ pub const STRATEGY: &str = "library.backupStrategy";
 
 /// Gives a volume a role or takes it back.
 pub const VOLUME_ROLE: &str = "library.volumeRole";
+
+/// Renames a volume or sets its off-site and RAID flags.
+pub const VOLUME_SET: &str = "library.volumeSet";
+
+/// Writes the identity file on a weakly identified volume.
+pub const MARK_VOLUME: &str = "library.markVolume";
+
+/// Sets a part of the library's backup strategy.
+pub const SET_STRATEGY: &str = "library.setBackupStrategy";
 
 /// Below this share of free space an online volume is said short of it.
 const LOW_FREE: f64 = 0.1;
@@ -49,11 +66,15 @@ fn role_name(role: Role) -> String {
 }
 
 /// The volumes as rows: `id`, `name`, `label`, `kind`, `roles` (their
-/// stored names) and `roleText`, `state` (`online`, `offline`) and
-/// `stateText`, `tone` (`success` online, `warning` online and short of
-/// space, none offline), `mount`, `free` and `capacity` (bytes) and
-/// `space`, `photos`, `backup` (whether the strategy copies to it) and
-/// `backupText`, `offSite`, `raid`.
+/// stored names), `roleText` and `role_<name>` (a boolean per role),
+/// `state` (`online`, `offline`), `online` and `stateText`, `tone`
+/// (`success` online, `warning` online and short of space, none
+/// offline), `mount`, `free` and `capacity` (bytes), `used` (the share
+/// used, 0 to 1) and `space`, `photos`, `backup` (whether the strategy
+/// copies to it) and `backupText`, `offSite`, `raid`, `seen` (when and
+/// where an offline one was last seen, or the node a fixed one is in),
+/// `weak` (known only by its label and size, plugged in, not a card:
+/// it may be marked).
 pub fn volume_rows(
     t: &dyn Fn(Message) -> String,
     volumes: &[Volume],
@@ -94,7 +115,26 @@ pub fn volume_rows(
                 .filter(|r| v.roles.contains(r))
                 .map(|r| t(role_text(r)))
                 .collect();
-            json!({
+            let used = match (v.free, v.capacity.filter(|&c| c > 0)) {
+                (Some(free), Some(capacity)) => {
+                    json!((capacity - free.min(capacity)) as f64 / capacity as f64)
+                }
+                _ => Value::Null,
+            };
+            let seen = if !online && let Some(seen) = &v.last_seen {
+                t(
+                    Message::new("gui-storage-last-seen", "Last seen { $date } on { $node }")
+                        .with("date", day_of(seen.at))
+                        .with("node", seen.node.clone()),
+                )
+            } else if v.kind.is_fixed()
+                && let Some(node) = &v.node
+            {
+                t(Message::new("gui-storage-node", "In { $node }").with("node", node.clone()))
+            } else {
+                String::new()
+            };
+            let mut row = json!({
                 "id": v.id.as_str(),
                 "name": v.name,
                 "label": v.label,
@@ -121,7 +161,15 @@ pub fn volume_rows(
                 },
                 "offSite": v.off_site,
                 "raid": v.raid,
-            })
+                "online": online,
+                "used": used,
+                "seen": seen,
+                "weak": v.identified_by == Identity::Weak && online && !v.is_card(),
+            });
+            for r in Role::ALL {
+                row[format!("role_{}", role_name(r))] = json!(v.roles.contains(&r));
+            }
+            row
         })
         .collect();
     let online = volumes.iter().filter(|v| v.online()).count();
@@ -153,12 +201,16 @@ pub fn strategy_answer(
     volumes: &[Volume],
 ) -> Value {
     let Some(s) = strategy else {
+        let text = t(Message::new(
+            "gui-storage-strategy-none",
+            "No backup set up",
+        ));
         return json!({
             "set": false,
-            "summary": {
-                "text": t(Message::new("gui-storage-strategy-none", "No backup set up")),
-                "tone": "warning",
-            },
+            "on": false,
+            "summaryText": text,
+            "tone": "warning",
+            "summary": { "text": text, "tone": "warning" },
         });
     };
     let online = strategy::destinations_online(s, volumes);
@@ -169,8 +221,39 @@ pub fn strategy_answer(
         .filter(|tr| **tr != Trigger::ByHand)
         .map(|tr| serde_json::to_value(tr).unwrap_or(Value::Null))
         .collect();
+    let tone = if online.is_empty() {
+        "warning"
+    } else {
+        "success"
+    };
+    let mut choices = vec![
+        Destination::Role(Role::Backup),
+        Destination::Role(Role::Archive),
+    ];
+    choices.extend(
+        volumes
+            .iter()
+            .filter(|v| strategy::may_back_up_to(v).is_ok())
+            .map(|v| Destination::Volume(v.id.clone())),
+    );
+    let first = s
+        .destinations
+        .first()
+        .cloned()
+        .unwrap_or(Destination::Role(Role::Backup));
     json!({
         "set": true,
+        "on": true,
+        "summaryText": line,
+        "tone": tone,
+        "destination": destination_value(&first),
+        "destinationChoices": choices
+            .iter()
+            .map(|d| json!({ "value": destination_value(d), "label": destination_text(t, d, volumes) }))
+            .collect::<Vec<_>>(),
+        "offSite": s.off_site_required,
+        "onImport": s.triggers.contains(&Trigger::OnImport),
+        "onConnect": s.triggers.contains(&Trigger::OnConnect),
         "name": s.name,
         "copies": s.copies,
         "destinations": s
@@ -181,28 +264,148 @@ pub fn strategy_answer(
         "offSiteRequired": s.off_site_required,
         "triggers": triggers,
         "online": online.len(),
-        "summary": {
-            "text": line,
-            "tone": if online.is_empty() { "warning" } else { "success" },
-        },
+        "summary": { "text": line, "tone": tone },
     })
+}
+
+/// A destination as a choice's value: `backup`, `archive` (any disk of
+/// the role) or `volume:<id>`.
+fn destination_value(d: &Destination) -> String {
+    match d {
+        Destination::Role(r) => role_name(*r),
+        Destination::Volume(id) => format!("volume:{}", id.as_str()),
+    }
+}
+
+fn destination_named(value: &str) -> Option<Destination> {
+    match value.strip_prefix("volume:") {
+        Some(id) => Some(Destination::Volume(VolumeId(id.into()))),
+        None => role_named(value).map(Destination::Role),
+    }
+}
+
+/// `library.setBackupStrategy`'s edit: the strategy with one part set
+/// (`on` turns it on, the default one, or off).
+fn with_strategy(current: Option<&Strategy>, args: &Value) -> Result<Option<Strategy>, String> {
+    let key = args["key"].as_str().ok_or("`key` is missing")?;
+    let value = &args["value"];
+    let flag = || {
+        value
+            .as_bool()
+            .ok_or_else(|| format!("`{key}` takes true or false"))
+    };
+    if key == "on" {
+        return Ok(flag()?.then(|| current.cloned().unwrap_or_default()));
+    }
+    let mut s = current
+        .cloned()
+        .ok_or("no backup strategy: turn it on first")?;
+    match key {
+        "copies" => {
+            let n = value
+                .as_u64()
+                .or_else(|| value.as_str().and_then(|v| v.parse().ok()))
+                .filter(|n| (1..=5).contains(n))
+                .ok_or("`copies` is 1 to 5")?;
+            s.copies = n as u8;
+        }
+        "destination" => {
+            let d = value
+                .as_str()
+                .and_then(destination_named)
+                .ok_or("`destination` is backup, archive or volume:<id>")?;
+            s.destinations = vec![d];
+        }
+        "offSite" => s.off_site_required = flag()?,
+        "onImport" | "onConnect" => {
+            let trigger = if key == "onImport" {
+                Trigger::OnImport
+            } else {
+                Trigger::OnConnect
+            };
+            if flag()? {
+                s.triggers.insert(trigger);
+            } else {
+                s.triggers.remove(&trigger);
+            }
+        }
+        other => return Err(format!("no strategy part `{other}`")),
+    }
+    Ok(Some(s))
+}
+
+/// `library.volumeSet`'s edit: the volume renamed or its flags set.
+fn with_set(volumes: &[Volume], args: &Value) -> Result<Volume, String> {
+    let mut v = volume_of(volumes, args)?;
+    if let Some(name) = args.get("name").and_then(Value::as_str) {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err("a volume's name is not empty".into());
+        }
+        v.name = name.into();
+    }
+    if let Some(on) = args.get("offSite").and_then(Value::as_bool) {
+        v.off_site = on;
+    }
+    if let Some(on) = args.get("raid").and_then(Value::as_bool) {
+        v.raid = on;
+    }
+    Ok(v)
+}
+
+fn volume_of(volumes: &[Volume], args: &Value) -> Result<Volume, String> {
+    let id = args["volume"].as_str().ok_or("`volume` is missing")?;
+    volumes
+        .iter()
+        .find(|v| v.id.as_str() == id)
+        .cloned()
+        .ok_or_else(|| format!("no volume `{id}`"))
+}
+
+/// "3 days ago", "today": how old a snapshot taken at `taken` is.
+pub fn age_text(t: &dyn Fn(Message) -> String, taken: u64) -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    match now.saturating_sub(taken) / 86_400 {
+        0 => t(Message::new("gui-catalogue-today", "today")),
+        1 => t(Message::new("gui-catalogue-one-day", "1 day ago")),
+        days => t(Message::new("gui-catalogue-days", "{ $days } days ago").with("days", days)),
+    }
+}
+
+/// The catalogue's snapshots as rows (`library.catalogue.snapshots`):
+/// each with `whenText` (how old) and `placeText` (next to the
+/// catalogue, or on a disk).
+pub fn snapshot_rows(t: &dyn Fn(Message) -> String, list: Value) -> Value {
+    let Value::Array(list) = list else {
+        return list;
+    };
+    Value::Array(
+        list.into_iter()
+            .map(|mut s| {
+                s["whenText"] = json!(age_text(t, s["taken"].as_u64().unwrap_or(0)));
+                s["placeText"] = json!(match s["disk"].as_str() {
+                    Some(disk) => t(Message::new("gui-catalogue-on-disk", "on { $disk }")
+                        .with("disk", disk.to_string())),
+                    None => t(Message::new("gui-catalogue-here", "next to the catalogue")),
+                });
+                s
+            })
+            .collect(),
+    )
 }
 
 /// `library.volumeRole`'s edit: the volume with the role given or taken
 /// back (toggled without `on`).
 fn with_role(volumes: &[Volume], args: &Value) -> Result<Volume, String> {
-    let id = args["volume"].as_str().ok_or("`volume` is missing")?;
     let role = args["role"]
         .as_str()
         .ok_or("`role` is missing")
         .and_then(|r| {
             role_named(r).ok_or("`role` is library, archive, backup, ingest or scratch")
         })?;
-    let mut v = volumes
-        .iter()
-        .find(|v| v.id.as_str() == id)
-        .cloned()
-        .ok_or_else(|| format!("no volume `{id}`"))?;
+    let mut v = volume_of(volumes, args)?;
     let on = args["on"].as_bool().unwrap_or(!v.roles.contains(&role));
     if on {
         v.roles.insert(role);
@@ -262,7 +465,48 @@ impl Shell {
                 Ok(json!({ "volume": saved.id.as_str(), "roles": roles }))
             },
         );
-        for r in [volumes, strategy, role] {
+        let l = link.clone();
+        let set = self.register(
+            CommandSpec::new(
+                VOLUME_SET,
+                "Rename a volume or set its flags (`volume`, and `name`, `offSite`, `raid`)",
+                "Library",
+            ),
+            move |args, _| {
+                let saved = l.save(&with_set(&l.volumes()?, args)?)?;
+                Ok(json!({ "volume": saved.id.as_str(), "name": saved.name, "offSite": saved.off_site, "raid": saved.raid }))
+            },
+        );
+        let l = link.clone();
+        let mark = self.register(
+            CommandSpec::new(
+                MARK_VOLUME,
+                "Write the identity file (.helios/volume.json) on a volume known only by its label and size, plugged in (`volume`)",
+                "Library",
+            ),
+            move |args, _| {
+                let v = volume_of(&l.volumes()?, args)?;
+                if v.identified_by != Identity::Weak || !v.online() || v.is_card() {
+                    return Err(format!("{} is not a disk to mark", v.name));
+                }
+                let marked = l.mark(&v)?;
+                Ok(json!({ "volume": marked.id.as_str() }))
+            },
+        );
+        let l = link.clone();
+        let set_strategy = self.register(
+            CommandSpec::new(
+                SET_STRATEGY,
+                "Set the library's backup strategy (`key`: on, copies, destination, offSite, onImport or onConnect; `value`)",
+                "Library",
+            ),
+            move |args, _| {
+                let s = with_strategy(l.strategy()?.as_ref(), args)?;
+                l.set_strategy(s.as_ref())?;
+                Ok(json!({ "set": s.is_some() }))
+            },
+        );
+        for r in [volumes, strategy, role, set, mark, set_strategy] {
             if let Err(e) = r {
                 log::warn!("the Storage page's commands: {e}");
             }
@@ -274,7 +518,7 @@ impl Shell {
 mod tests {
     use std::path::PathBuf;
 
-    use helios_storage::{Identity, VolumeKind, detect};
+    use helios_storage::{VolumeKind, detect};
 
     use super::*;
 
@@ -355,5 +599,67 @@ mod tests {
         assert!(v.roles.contains(&Role::Archive));
         assert!(with_role(&volumes, &json!({ "volume": "x", "role": "backup" })).is_err());
         assert!(with_role(&volumes, &json!({ "volume": "d", "role": "nope" })).is_err());
+    }
+
+    #[test]
+    fn a_volume_is_renamed_and_its_flags_set() {
+        let volumes = [disk("d", 1, true, &[])];
+        let v = with_set(
+            &volumes,
+            &json!({ "volume": "d", "name": " Studio ", "raid": true }),
+        )
+        .unwrap();
+        assert_eq!(v.name, "Studio");
+        assert!(v.raid && !v.off_site);
+        assert!(with_set(&volumes, &json!({ "volume": "d", "name": " " })).is_err());
+        let rows = volume_rows(&english, &volumes, &HashMap::new(), None);
+        let row = &rows["volumes"][0];
+        assert_eq!(row["role_backup"], false);
+        assert_eq!(row["online"], true);
+        assert!(row["used"].as_f64().unwrap() > 0.99);
+    }
+
+    #[test]
+    fn the_strategy_is_turned_on_and_its_parts_set() {
+        let on = with_strategy(None, &json!({ "key": "on", "value": true }))
+            .unwrap()
+            .unwrap();
+        assert_eq!(on, Strategy::default());
+        assert!(with_strategy(None, &json!({ "key": "copies", "value": 2 })).is_err());
+        let s = with_strategy(Some(&on), &json!({ "key": "copies", "value": "3" }))
+            .unwrap()
+            .unwrap();
+        assert_eq!(s.copies, 3);
+        assert!(with_strategy(Some(&on), &json!({ "key": "copies", "value": 9 })).is_err());
+        let s = with_strategy(
+            Some(&s),
+            &json!({ "key": "destination", "value": "volume:d" }),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(s.destinations, [Destination::Volume(VolumeId("d".into()))]);
+        let s = with_strategy(Some(&s), &json!({ "key": "onImport", "value": false }))
+            .unwrap()
+            .unwrap();
+        assert!(!s.triggers.contains(&Trigger::OnImport));
+        assert!(
+            with_strategy(Some(&s), &json!({ "key": "on", "value": false }))
+                .unwrap()
+                .is_none()
+        );
+        let a = strategy_answer(&english, Some(&s), &[disk("d", 1, true, &[Role::Backup])]);
+        assert_eq!(a["destination"], "volume:d");
+        assert_eq!(a["destinationChoices"].as_array().unwrap().len(), 3);
+        assert_eq!(a["onImport"], false);
+    }
+
+    #[test]
+    fn snapshots_say_their_age_and_place() {
+        let rows = snapshot_rows(
+            &english,
+            json!([{ "file": "a", "taken": 0, "reason": "daily", "disk": "Backup" }]),
+        );
+        assert_eq!(rows[0]["placeText"], "on Backup");
+        assert!(rows[0]["whenText"].as_str().unwrap().ends_with("days ago"));
     }
 }

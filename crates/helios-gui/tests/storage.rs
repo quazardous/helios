@@ -1,4 +1,5 @@
-//! The Storage page and offline photos, over a temporary vault and fake
+//! The Storage page (the Settings app's Storage and Backup scopes) and
+//! offline photos, over a temporary vault and fake
 //! volumes: the page lists an online and an offline volume, and saves a
 //! new name and a role; a photo on an unplugged disk shows its "offline"
 //! badge and says which disk to plug in; plugging it in clears the badge.
@@ -161,19 +162,29 @@ fn known(vault: &Vault<SqliteStore>, id: &str) -> Volume {
         .unwrap()
 }
 
+/// The Storage page is the Settings app's Storage scope: `library.storage`
+/// opens it on a volume, whose row says when and where it was last seen;
+/// a role toggled and a name typed in place are saved, and "Forget…"
+/// asks first.
 #[test]
 fn the_page_lists_online_and_offline_volumes_and_saves_edits() {
     let (mut world, shell) = World::new("page");
-    let mut h = headless::harness(shell, vec2(1280.0, 900.0));
+    let mut h = headless::harness(shell, vec2(1600.0, 900.0));
     // The backup disk goes: offline, last seen at the first scan.
     let studio = world.studio.clone();
     world.plug(&mut h, &[&studio], FIRST + DAY);
     h.state_mut()
-        .run(STORAGE_COMMAND, json!(null), Origin::User)
+        .run(
+            STORAGE_COMMAND,
+            json!({ "volume": "uuid:backup" }),
+            Origin::User,
+        )
         .unwrap();
     until(&mut h, "the page", |h| {
-        h.query_by_label("Storage").is_some()
+        h.query_by_label_contains("Last seen 1970-01-11 on studio-pc")
+            .is_some()
     });
+    assert!(h.state().storage_page_open());
     let listed: Vec<(String, bool)> = h
         .state()
         .storage_volumes()
@@ -185,12 +196,6 @@ fn the_page_lists_online_and_offline_volumes_and_saves_edits() {
         [("Studio".to_string(), true), ("Backup".to_string(), false)],
         "online first"
     );
-    assert!(
-        h.query_by_label_contains("Last seen 1970-01-11 on studio-pc")
-            .is_some(),
-        "the offline disk says when and where it was last seen"
-    );
-    assert!(h.query_by_label_contains("Photos on it: 1").is_some());
 
     // A role toggled is saved: the first "Backup" checkbox is the
     // studio disk's (listed first).
@@ -210,6 +215,9 @@ fn the_page_lists_online_and_offline_volumes_and_saves_edits() {
             .role(egui::accesskit::Role::TextInput)
             .value("Studio")
     };
+    until(&mut h, "the table read again", |h| {
+        h.query(name()).is_some()
+    });
     h.get(name()).focus();
     h.run();
     h.get(name()).type_text("-SSD");
@@ -226,6 +234,60 @@ fn the_page_lists_online_and_offline_volumes_and_saves_edits() {
     let saved = known(&world.vault, "uuid:studio");
     assert!(saved.name.contains("-SSD"));
     assert!(saved.roles.contains(&Role::Backup));
+
+    // "Forget…" asks first, naming the disk.
+    until(&mut h, "the actions", |h| {
+        h.query_all_by_label("Forget…").count() == 2
+    });
+    h.query_all_by_label("Forget…").nth(1).unwrap().click();
+    until(&mut h, "the confirmation", |h| {
+        h.query_by_label("Forget what was seen on Backup?")
+            .is_some()
+    });
+    h.state_mut()
+        .run(
+            "dialog.answer",
+            json!({ "answer": "primary" }),
+            Origin::User,
+        )
+        .unwrap();
+    until(&mut h, "answered", |h| {
+        h.query_by_label("Forget what was seen on Backup?")
+            .is_none()
+    });
+}
+
+/// Backup › Strategy edits the strategy in place: turned on, then one
+/// of its triggers off, each saved at once.
+#[test]
+fn the_strategy_is_edited_in_the_settings_app() {
+    let (world, shell) = World::new("strategy");
+    let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+    h.run();
+    h.state_mut()
+        .run(
+            "admin.open",
+            json!({ "path": "backup/strategy" }),
+            Origin::User,
+        )
+        .unwrap();
+    let on = "Keep verified backup copies of every photo";
+    until(&mut h, "the strategy", |h| h.query_by_label(on).is_some());
+    h.get_by_label(on).click();
+    until(&mut h, "turned on", |_| {
+        strategy::load(&world.vault, &Scope::Library)
+            .unwrap()
+            .is_some()
+    });
+    until(&mut h, "its parts", |h| {
+        h.query_by_label("After each import").is_some()
+    });
+    h.get_by_label("After each import").click();
+    until(&mut h, "the trigger off", |_| {
+        strategy::load(&world.vault, &Scope::Library)
+            .unwrap()
+            .is_some_and(|s| !s.triggers.contains(&Trigger::OnImport))
+    });
 }
 
 #[test]
@@ -282,23 +344,6 @@ fn an_offline_photo_shows_its_badge_and_plugging_its_disk_in_clears_it() {
     assert!(world2.persist.take_locations_changed());
     world2.persist.fill_library(h.state_mut()).unwrap();
     assert_eq!(badges(&h), ["missing"]);
-}
-
-/// The Storage page keeps the size it opened at, frame after frame, in a
-/// 960x640 main window.
-#[test]
-fn the_storage_page_keeps_its_size() {
-    let (mut world, shell) = World::new("stable");
-    let mut h = headless::harness(shell, vec2(960.0, 640.0));
-    let studio = world.studio.clone();
-    world.plug(&mut h, &[&studio], FIRST + DAY);
-    h.state_mut()
-        .run(STORAGE_COMMAND, json!(null), Origin::User)
-        .unwrap();
-    until(&mut h, "the page", |h| {
-        h.query_by_label("Storage").is_some()
-    });
-    headless::assert_window_stable(&mut h, "Storage", 120);
 }
 
 /// Gives the known volume `id` the roles `roles`.
@@ -583,7 +628,13 @@ fn the_storage_scope_reads_the_volumes_and_the_strategy_from_commands() {
         )
         .unwrap();
     until(&mut h, "the volume table", |h| {
-        h.query_by_label("Studio").is_some() && h.query_by_label("offline").is_some()
+        h.query(
+            By::new()
+                .role(egui::accesskit::Role::TextInput)
+                .value("Studio"),
+        )
+        .is_some()
+            && h.query_by_label("offline").is_some()
     });
     h.run();
 }

@@ -1,49 +1,36 @@
-//! The Storage page (Library > Storage…, `library.storage`): every volume
-//! the vault knows (`helios_storage::registry`), online ones first, then
-//! offline ones. Each shows its name (edited in place), kind, capacity and
-//! free space, roles (toggles), the off-site and RAID flags the user sets,
-//! the node a fixed disk belongs to, when and where an offline one was
-//! last seen, and how many photos the library holds on it. A weakly
-//! identified volume offers "Mark this disk…", which writes the identity
-//! file only after the user reads why and confirms. Every edit is saved
-//! to the registry at once.
+//! Storage: what the shell keeps of the volumes the vault knows
+//! (`helios_storage::registry`), the library's backup strategy
+//! (`helios_storage::strategy`), each photo's backups and the cards
+//! waiting for theirs.
 //!
 //! The shell holds no vault: the host gives a [`StorageLink`]
 //! ([`VaultStorage`] over the vault and the machine's volumes, tests
 //! their own). The same link names the volumes of offline photos in the
 //! Library ([`crate::library::Library::set_volumes`]).
 //!
-//! `library.storage` takes `{"volume": id}` to open the page on one volume
-//! (the health check's free-space fix does).
-//!
-//! Above the volumes, the library's backup strategy
-//! (`helios_storage::strategy`): none, or how many verified copies, on
-//! which disks (any backup disk, any archive disk, or one disk), whether
-//! one must be off site and when copies are made; saved at once. "Back up
-//! now" runs `library.backupNow`.
-//!
-//! Below it, the catalogue (`crate::catalogue`): its snapshots, next to it
-//! and on the backup disks plugged in, newest first; "Snapshot now", how
-//! often one is taken and how many are kept (settings), and "Restore…" on
-//! each, which asks before Helios closes and starts again on it.
+//! The Storage page is the Settings app's Storage and Backup scopes
+//! (`crate::config::manifest`), read and written through the commands of
+//! [`super::storage_admin`]. `library.storage` opens it at Storage ›
+//! Volumes; `{"volume": id}` marks that volume and scrolls to it (the
+//! health check's free-space fix does).
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, PoisonError};
 
-use egui::Context as Egui;
 use egui_pop::api::toasts::{TOASTS, Toast};
 use egui_pop::core::icon::Icon;
 use helios_core::Message;
 use helios_library::import::Card;
 use helios_shell::commands::Origin;
-use helios_storage::strategy::{self, BackupStatus, Destination, Scope, Strategy, Trigger};
-use helios_storage::{Identity, Role, Volume, VolumeId, VolumeKind, Volumes, registry};
+use helios_storage::strategy::{self, BackupStatus, Destination, Scope, Strategy};
+use helios_storage::{Role, Volume, VolumeId, VolumeKind, Volumes, registry};
 use helios_vault::{Store, Vault};
 use serde_json::Value;
 
 use super::Shell;
 
-/// Opens the Storage page; `volume` (an id) puts that volume first.
+/// Opens the Settings app at Storage › Volumes; `volume` (an id) marks
+/// that volume and scrolls to it.
 pub const COMMAND: &str = "library.storage";
 
 /// Backs up now what is below the library's strategy.
@@ -182,19 +169,11 @@ where
     }
 }
 
-/// The page's state, kept by the shell.
+/// What the shell keeps of storage.
 #[derive(Default)]
 pub(crate) struct StoragePage {
     link: Option<Arc<dyn StorageLink>>,
-    open: bool,
     volumes: Vec<Volume>,
-    photos: HashMap<VolumeId, usize>,
-    /// The names being typed, by volume.
-    names: HashMap<VolumeId, String>,
-    /// The volume asked for (the health check's fix): shown first.
-    focus: Option<VolumeId>,
-    /// The volume whose "Mark this disk" explanation is shown.
-    marking: Option<VolumeId>,
     /// The library's backup strategy, as last read.
     strategy: Option<Strategy>,
     error: Option<String>,
@@ -203,31 +182,6 @@ pub(crate) struct StoragePage {
     waiting: Vec<Card>,
     /// The same, for the health check's thread.
     shared_waiting: Arc<Mutex<Vec<Card>>>,
-    /// The catalogue's snapshots, as `library.catalogue.snapshots` lists
-    /// them (none without a library).
-    snapshots: Vec<Value>,
-    /// The snapshot whose restore waits for its confirmation.
-    restoring: Option<Value>,
-}
-
-/// What the page's controls asked.
-enum Asked {
-    Save(Volume),
-    AskMark(VolumeId),
-    Mark(Volume),
-    /// "Forget what was seen here" (`library.forgetVolume`).
-    Forget(VolumeId),
-    CancelMark,
-    Strategy(Option<Strategy>),
-    BackupNow,
-    SnapshotNow,
-    /// "Restore…": asks first.
-    AskRestore(Value),
-    CancelRestore,
-    /// Confirmed: the snapshot's file.
-    Restore(String),
-    /// A catalogue setting (`settings/<id>`) set to a number.
-    Setting(&'static str, i64),
 }
 
 impl Shell {
@@ -253,37 +207,14 @@ impl Shell {
             }
             Err(e) => self.storage.error = Some(e),
         }
-        if self.storage.open {
-            match link.photos() {
-                Ok(p) => self.storage.photos = p,
-                Err(e) => self.storage.error = Some(e),
-            }
-            self.refresh_snapshots();
-        }
         // The import window's strategy line reads it too.
         match link.strategy() {
             Ok(s) => self.storage.strategy = s,
             Err(e) => self.storage.error = Some(e),
         }
-        let known: Vec<VolumeId> = self.storage.volumes.iter().map(|v| v.id.clone()).collect();
-        self.storage.names.retain(|id, _| known.contains(id));
-    }
-
-    /// The catalogue's snapshots read again, when Helios has a library.
-    fn refresh_snapshots(&mut self) {
-        if !self.has_command(crate::catalogue::LIST_COMMAND) {
-            return;
+        if let Some(e) = &self.storage.error {
+            log::warn!("storage: {e}");
         }
-        if let Ok(Value::Array(list)) =
-            self.run(crate::catalogue::LIST_COMMAND, Value::Null, Origin::User)
-        {
-            self.storage.snapshots = list;
-        }
-    }
-
-    /// The catalogue's snapshots the Storage page lists, newest first.
-    pub fn storage_snapshots(&self) -> &[Value] {
-        &self.storage.snapshots
     }
 
     /// Each photo's backups read again (one read for the Library), for
@@ -399,188 +330,37 @@ impl Shell {
         )
     }
 
-    /// Whether the Storage page is open.
+    /// Whether the Settings app is open on its Storage or Backup scope.
     pub fn storage_page_open(&self) -> bool {
-        self.storage.open
+        let app = self.app.handle();
+        app.service(&egui_pop::api::admin::ADMIN).is_some_and(|a| {
+            a.is_open() && matches!(a.shown().0.as_deref(), Some("storage" | "backup"))
+        })
     }
 
-    /// The library's backup strategy, as the Storage page shows it.
+    /// The library's backup strategy, as last read.
     pub fn storage_strategy(&self) -> Option<&Strategy> {
         self.storage.strategy.as_ref()
     }
 
-    /// The volumes the Storage page lists, in its order.
+    /// The volumes known, online ones first.
     pub fn storage_volumes(&self) -> &[Volume] {
         &self.storage.volumes
     }
 
-    /// `library.storage`: opens the page, on `volume` when given.
-    pub(super) fn open_storage(&mut self, args: &Value) {
-        self.storage.open = true;
-        self.storage.focus = args["volume"].as_str().map(|v| VolumeId(v.to_string()));
+    /// `library.storage`: opens the Settings app at Storage › Volumes,
+    /// on `volume` when given.
+    pub(super) fn open_storage(&mut self, args: &Value) -> Result<Value, String> {
         self.refresh_volumes();
-    }
-
-    /// After the panels: the page, when open.
-    pub(super) fn storage_window(&mut self, ctx: &Egui) {
-        if !self.storage.open {
-            return;
-        }
-        let t = |m: Message| crate::i18n::text(ctx, m);
-        let mut open = true;
-        let mut asked = None;
-        let max = ctx.content_rect().size() - egui::vec2(32.0, 32.0);
-        let catalogue_on = self.has_command(crate::catalogue::SNAPSHOT_COMMAND);
-        let settings = {
-            let store = self.app.handle().store();
-            (
-                crate::catalogue::every(&store) / 3600,
-                crate::catalogue::kept(&store) as u64,
-            )
+        let path = match args["volume"].as_str() {
+            Some(v) => format!("storage/volumes/{v}"),
+            None => "storage/volumes".into(),
         };
-        let page = &mut self.storage;
-        // The volume asked for first, then online ones, then offline.
-        let mut order: Vec<usize> = (0..page.volumes.len()).collect();
-        if let Some(focus) = &page.focus {
-            order.sort_by_key(|&i| &page.volumes[i].id != focus);
-        }
-        egui::Window::new(t(Message::new("gui-storage-title", "Storage")))
-            .id(egui::Id::unique("helios.storage.window"))
-            .open(&mut open)
-            .collapsible(false)
-            .resizable(true)
-            .default_size(egui::vec2(620.0, 480.0).min(max))
-            .max_size(max)
-            .pivot(egui::Align2::CENTER_CENTER)
-            .default_pos(ctx.content_rect().center())
-            .show(ctx, |ui| {
-                ui.label(
-                    egui::RichText::new(t(Message::new(
-                        "gui-storage-intro",
-                        "The disks Helios has seen. Name them and say what each is for: Helios writes only to library, archive, backup and scratch disks.",
-                    )))
-                    .small(),
-                );
-                if let Some(e) = &page.error {
-                    ui.colored_label(ui.visuals().error_fg_color, e);
-                }
-                ui.separator();
-                strategy_ui(ui, &t, page.strategy.as_ref(), &page.volumes, &mut asked);
-                ui.separator();
-                if catalogue_on {
-                    catalogue_ui(
-                        ui,
-                        &t,
-                        &page.snapshots,
-                        page.restoring.as_ref(),
-                        settings,
-                        &mut asked,
-                    );
-                    ui.separator();
-                }
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    if page.volumes.is_empty() {
-                        ui.weak(t(Message::new(
-                            "gui-storage-none",
-                            "No disk known yet: the scan runs in the background.",
-                        )));
-                    }
-                    for i in order {
-                        let volume = &page.volumes[i];
-                        let count = page.photos.get(&volume.id).copied().unwrap_or(0);
-                        let marking = page.marking.as_ref() == Some(&volume.id);
-                        let focused = page.focus.as_ref() == Some(&volume.id);
-                        let name = page
-                            .names
-                            .entry(volume.id.clone())
-                            .or_insert_with(|| volume.name.clone());
-                        volume_ui(ui, &t, volume, name, count, marking, focused, &mut asked);
-                    }
-                });
-            });
-        if !open {
-            self.storage.open = false;
-            self.storage.marking = None;
-        }
-        let Some(asked) = asked else {
-            return;
-        };
-        let Some(link) = self.storage.link.clone() else {
-            return;
-        };
-        let done = match asked {
-            Asked::Save(v) => link.save(&v).map(|_| ()),
-            Asked::Strategy(s) => link.set_strategy(s.as_ref()),
-            Asked::BackupNow => self.run(BACKUP_NOW, Value::Null, Origin::User).map(|_| ()),
-            Asked::SnapshotNow => self
-                .run(
-                    crate::catalogue::SNAPSHOT_COMMAND,
-                    Value::Null,
-                    Origin::User,
-                )
-                .map(|_| ()),
-            Asked::AskRestore(s) => {
-                self.storage.restoring = Some(s);
-                Ok(())
-            }
-            Asked::CancelRestore => {
-                self.storage.restoring = None;
-                Ok(())
-            }
-            Asked::Restore(file) => {
-                self.storage.restoring = None;
-                self.run(
-                    crate::catalogue::RESTORE_COMMAND,
-                    serde_json::json!({ "file": file }),
-                    Origin::User,
-                )
-                .map(|_| ())
-            }
-            Asked::Setting(id, value) => {
-                use egui_pop::model::commands::Origin as PopOrigin;
-                use egui_pop::model::values::{Change, Set, Value as PopValue};
-                let store = self.app.handle().store();
-                let mut store = store.lock().unwrap_or_else(PoisonError::into_inner);
-                store
-                    .set(Set::new(
-                        &format!("settings/{id}"),
-                        Change::To(PopValue::Int(value)),
-                        PopOrigin::User,
-                    ))
-                    .map(|_| ())
-                    .map_err(|e| e.to_string())
-            }
-            Asked::AskMark(id) => {
-                self.storage.marking = Some(id);
-                Ok(())
-            }
-            Asked::Forget(id) => self
-                .run(
-                    super::import_window::FORGET_VOLUME,
-                    serde_json::json!({ "volume": id.as_str() }),
-                    Origin::User,
-                )
-                .map(|_| ()),
-            Asked::CancelMark => {
-                self.storage.marking = None;
-                Ok(())
-            }
-            Asked::Mark(v) => {
-                self.storage.marking = None;
-                link.mark(&v).map(|marked| {
-                    // Its record moved to the marker's id.
-                    self.storage.names.remove(&v.id);
-                    if self.storage.focus.as_ref() == Some(&v.id) {
-                        self.storage.focus = Some(marked.id);
-                    }
-                })
-            }
-        };
-        if let Err(e) = done {
-            self.warn(format!("storage: {e}"));
-        }
-        self.refresh_volumes();
-        self.refresh_backups();
+        self.run(
+            egui_pop::api::admin::CMD_OPEN.as_str(),
+            serde_json::json!({ "path": path }),
+            Origin::User,
+        )
     }
 }
 
@@ -616,129 +396,6 @@ fn card_of(v: &Value) -> Option<Card> {
     })
 }
 
-/// "3 days ago", "today": how old a snapshot taken at `taken` is.
-fn age_text(t: &dyn Fn(Message) -> String, taken: u64) -> String {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs());
-    match now.saturating_sub(taken) / 86_400 {
-        0 => t(Message::new("gui-catalogue-today", "today")),
-        1 => t(Message::new("gui-catalogue-one-day", "1 day ago")),
-        days => t(Message::new("gui-catalogue-days", "{ $days } days ago").with("days", days)),
-    }
-}
-
-/// The catalogue's snapshots: "Snapshot now", the settings, each snapshot
-/// with "Restore…", and the confirmation of a restore asked.
-fn catalogue_ui(
-    ui: &mut egui::Ui,
-    t: &dyn Fn(Message) -> String,
-    snapshots: &[Value],
-    restoring: Option<&Value>,
-    (every, kept): (u64, u64),
-    asked: &mut Option<Asked>,
-) {
-    ui.strong(t(Message::new("gui-catalogue", "Catalogue")));
-    ui.label(
-        egui::RichText::new(t(Message::new(
-            "gui-catalogue-intro",
-            "Verified snapshots of the catalogue (ratings, tags, edits): kept next to it and copied to the backup disks plugged in.",
-        )))
-        .small(),
-    );
-    ui.horizontal(|ui| {
-        if ui
-            .button(t(Message::new(
-                "gui-catalogue-snapshot-now",
-                "Snapshot now",
-            )))
-            .clicked()
-        {
-            *asked = Some(Asked::SnapshotNow);
-        }
-        ui.label(t(Message::new("gui-catalogue-every", "Every (hours)")));
-        let mut hours = every;
-        if ui
-            .add(egui::DragValue::new(&mut hours).range(1..=720))
-            .changed()
-        {
-            *asked = Some(Asked::Setting(
-                "catalogue.snapshotEvery",
-                i64::try_from(hours).unwrap_or(24),
-            ));
-        }
-        ui.label(t(Message::new("gui-catalogue-kept", "Kept")));
-        let mut keep = kept;
-        if ui
-            .add(egui::DragValue::new(&mut keep).range(1..=100))
-            .changed()
-        {
-            *asked = Some(Asked::Setting(
-                "catalogue.snapshotsKept",
-                i64::try_from(keep).unwrap_or(5),
-            ));
-        }
-    });
-    if let Some(s) = restoring {
-        let file = s["file"].as_str().unwrap_or_default().to_string();
-        let when = age_text(t, s["taken"].as_u64().unwrap_or(0));
-        ui.group(|ui| {
-            ui.colored_label(
-                ui.visuals().warn_fg_color,
-                t(Message::new(
-                    "gui-catalogue-restore-ask",
-                    "Restore the catalogue from the snapshot of { $when }? Changes made since are lost. The current catalogue is kept aside, and Helios closes and starts again on the snapshot.",
-                )
-                .with("when", when)),
-            );
-            ui.weak(&file);
-            ui.horizontal(|ui| {
-                if ui
-                    .button(t(Message::new(
-                        "gui-catalogue-restore-confirm",
-                        "Restore and restart",
-                    )))
-                    .clicked()
-                {
-                    *asked = Some(Asked::Restore(file.clone()));
-                }
-                if ui
-                    .button(t(Message::new("gui-catalogue-restore-cancel", "Cancel")))
-                    .clicked()
-                {
-                    *asked = Some(Asked::CancelRestore);
-                }
-            });
-        });
-    }
-    if snapshots.is_empty() {
-        ui.weak(t(Message::new("gui-catalogue-none", "No snapshot yet.")));
-        return;
-    }
-    for s in snapshots {
-        ui.horizontal(|ui| {
-            let place = match s["disk"].as_str() {
-                Some(disk) => t(Message::new("gui-catalogue-on-disk", "on { $disk }")
-                    .with("disk", disk.to_string())),
-                None => t(Message::new("gui-catalogue-here", "next to the catalogue")),
-            };
-            ui.label(format!(
-                "{} · {} · {}",
-                age_text(t, s["taken"].as_u64().unwrap_or(0)),
-                s["reason"].as_str().unwrap_or_default(),
-                place
-            ))
-            .on_hover_text(s["file"].as_str().unwrap_or_default());
-            if ui
-                .button(t(Message::new("gui-catalogue-restore", "Restore…")))
-                .clicked()
-            {
-                *asked = Some(Asked::AskRestore(s.clone()));
-            }
-        });
-    }
-}
-
 /// A destination's words: any disk of a role, or one disk by name.
 pub(super) fn destination_text(
     t: &dyn Fn(Message) -> String,
@@ -754,120 +411,6 @@ pub(super) fn destination_text(
             .iter()
             .find(|v| &v.id == id)
             .map_or_else(|| id.to_string(), |v| v.name.clone()),
-    }
-}
-
-/// The library's backup strategy and its editor.
-fn strategy_ui(
-    ui: &mut egui::Ui,
-    t: &dyn Fn(Message) -> String,
-    strategy: Option<&Strategy>,
-    volumes: &[Volume],
-    asked: &mut Option<Asked>,
-) {
-    ui.strong(t(Message::new("gui-storage-backup", "Backup")));
-    let mut on = strategy.is_some();
-    if ui
-        .checkbox(
-            &mut on,
-            t(Message::new(
-                "gui-storage-backup-on",
-                "Keep verified backup copies of every photo",
-            )),
-        )
-        .changed()
-    {
-        *asked = Some(Asked::Strategy(on.then(Strategy::default)));
-    }
-    let Some(current) = strategy else {
-        ui.weak(t(Message::new(
-            "gui-storage-backup-none",
-            "No backup set up: each photo has one copy, in the Library.",
-        )));
-        return;
-    };
-    let mut edited = current.clone();
-    ui.horizontal_wrapped(|ui| {
-        let mut copies = u32::from(edited.copies);
-        let count = ui.add(egui::DragValue::new(&mut copies).range(1..=5));
-        edited.copies = u8::try_from(copies).unwrap_or(1);
-        // The words after the count name it and the disks' menu.
-        let words = ui.label(t(Message::new("gui-storage-backup-copies", "copies on")));
-        count.labelled_by(words.id);
-        // v1 edits one destination; a strategy may hold several.
-        let first = edited
-            .destinations
-            .first()
-            .cloned()
-            .unwrap_or(Destination::Role(Role::Backup));
-        let mut chosen = first.clone();
-        let mut choices = vec![
-            Destination::Role(Role::Backup),
-            Destination::Role(Role::Archive),
-        ];
-        choices.extend(
-            volumes
-                .iter()
-                .filter(|v| strategy::may_back_up_to(v).is_ok())
-                .map(|v| Destination::Volume(v.id.clone())),
-        );
-        egui::ComboBox::from_id_salt("helios.storage.backup.destination")
-            .selected_text(destination_text(t, &chosen, volumes))
-            .show_ui(ui, |ui| {
-                for c in choices {
-                    let text = destination_text(t, &c, volumes);
-                    ui.selectable_value(&mut chosen, c, text);
-                }
-            })
-            .response
-            .labelled_by(words.id);
-        if chosen != first {
-            edited.destinations = vec![chosen];
-        }
-    });
-    ui.horizontal_wrapped(|ui| {
-        ui.checkbox(
-            &mut edited.off_site_required,
-            t(Message::new(
-                "gui-storage-backup-off-site",
-                "One of them off site",
-            )),
-        );
-        for (trigger, text) in [
-            (
-                Trigger::OnImport,
-                Message::new("gui-storage-backup-on-import", "After each import"),
-            ),
-            (
-                Trigger::OnConnect,
-                Message::new(
-                    "gui-storage-backup-on-connect",
-                    "When a backup disk is plugged in",
-                ),
-            ),
-        ] {
-            let mut on = edited.triggers.contains(&trigger);
-            if ui.checkbox(&mut on, t(text)).changed() {
-                if on {
-                    edited.triggers.insert(trigger);
-                } else {
-                    edited.triggers.remove(&trigger);
-                }
-            }
-        }
-    });
-    if edited != *current {
-        *asked = Some(Asked::Strategy(Some(edited)));
-    }
-    if ui
-        .button(t(Message::new("gui-storage-backup-now", "Back up now")))
-        .on_hover_text(t(Message::new(
-            "gui-storage-backup-now-hint",
-            "Copies the photos short of their backups to the disks plugged in, verified",
-        )))
-        .clicked()
-    {
-        *asked = Some(Asked::BackupNow);
     }
 }
 
@@ -898,7 +441,7 @@ pub(super) fn kind_of(kind: VolumeKind) -> (Icon, Message) {
 }
 
 /// A role's words.
-pub(super) fn role_text(role: Role) -> Message {
+pub fn role_text(role: Role) -> Message {
     match role {
         Role::Library => Message::new("gui-storage-role-library", "Library"),
         Role::Archive => Message::new("gui-storage-role-archive", "Archive"),
@@ -909,197 +452,11 @@ pub(super) fn role_text(role: Role) -> Message {
 }
 
 /// When a volume was last seen, as a day.
-fn day_of(at: u64) -> String {
+pub(super) fn day_of(at: u64) -> String {
     i64::try_from(at)
         .ok()
         .and_then(crate::library::day_text)
         .unwrap_or_else(|| "?".into())
-}
-
-/// One volume.
-#[allow(clippy::too_many_arguments)]
-fn volume_ui(
-    ui: &mut egui::Ui,
-    t: &dyn Fn(Message) -> String,
-    volume: &Volume,
-    name: &mut String,
-    photos: usize,
-    marking: bool,
-    focused: bool,
-    asked: &mut Option<Asked>,
-) {
-    let frame = egui::Frame::group(ui.style());
-    let frame = if focused {
-        frame.stroke(egui::Stroke::new(1.5, ui.visuals().selection.stroke.color))
-    } else {
-        frame
-    };
-    frame.show(ui, |ui| {
-        ui.set_width(ui.available_width());
-        let (icon, kind) = kind_of(volume.kind);
-        let kind = t(kind);
-        ui.horizontal(|ui| {
-            ui.add(icon.label(&kind));
-            let edit = ui.add(
-                egui::TextEdit::singleline(name)
-                    .id(egui::Id::unique(("helios.storage.name", volume.id.as_str())))
-                    .desired_width(220.0),
-            );
-            let edit = edit.on_hover_text(t(Message::new(
-                "gui-storage-name-hint",
-                "Its name; Enter saves it",
-            )));
-            if edit.lost_focus() && name.trim() != volume.name {
-                *asked = Some(Asked::Save(Volume {
-                    name: name.clone(),
-                    ..volume.clone()
-                }));
-            }
-            let state = if volume.online() {
-                t(Message::new("gui-storage-online", "online"))
-            } else {
-                t(Message::new("gui-storage-offline", "offline"))
-            };
-            ui.weak(format!("{kind} · {state}"));
-        });
-        // Capacity and free space.
-        if let Some(capacity) = volume.capacity.filter(|&c| c > 0) {
-            let free = volume.free.unwrap_or(0).min(capacity);
-            let used = (capacity - free) as f32 / capacity as f32;
-            let text = t(Message::new("gui-storage-free", "{ $free } free of { $capacity }")
-                .with("free", helios_storage::capacity_text(free))
-                .with("capacity", helios_storage::capacity_text(capacity)));
-            ui.add(
-                egui::ProgressBar::new(used)
-                    .desired_width(ui.available_width().min(360.0))
-                    .text(text),
-            );
-        }
-        // Roles.
-        ui.horizontal_wrapped(|ui| {
-            ui.label(t(Message::new("gui-storage-roles", "For:")));
-            for role in Role::ALL {
-                let mut on = volume.roles.contains(&role);
-                if ui.checkbox(&mut on, t(role_text(role))).changed() {
-                    let mut v = volume.clone();
-                    if on {
-                        v.roles.insert(role);
-                    } else {
-                        v.roles.remove(&role);
-                    }
-                    *asked = Some(Asked::Save(v));
-                }
-            }
-        });
-        // The user's flags.
-        ui.horizontal_wrapped(|ui| {
-            let mut off_site = volume.off_site;
-            if ui
-                .checkbox(&mut off_site, t(Message::new("gui-storage-off-site", "Off site")))
-                .on_hover_text(t(Message::new(
-                    "gui-storage-off-site-hint",
-                    "Kept away from the other disks (another building)",
-                )))
-                .changed()
-            {
-                *asked = Some(Asked::Save(Volume {
-                    off_site,
-                    ..volume.clone()
-                }));
-            }
-            let mut raid = volume.raid;
-            if ui
-                .checkbox(&mut raid, t(Message::new("gui-storage-raid", "RAID")))
-                .changed()
-            {
-                *asked = Some(Asked::Save(Volume {
-                    raid,
-                    ..volume.clone()
-                }));
-            }
-            if volume.raid {
-                ui.weak(t(Message::new(
-                    "gui-storage-raid-note",
-                    "A RAID counts as one copy: it survives a dead disk, not a deletion or a theft.",
-                )));
-            }
-        });
-        let mut facts = Vec::new();
-        if volume.kind.is_fixed()
-            && let Some(node) = &volume.node
-        {
-            facts.push(t(
-                Message::new("gui-storage-node", "In { $node }").with("node", node.clone())
-            ));
-        }
-        if !volume.online()
-            && let Some(seen) = &volume.last_seen
-        {
-            facts.push(t(Message::new(
-                "gui-storage-last-seen",
-                "Last seen { $date } on { $node }",
-            )
-            .with("date", day_of(seen.at))
-            .with("node", seen.node.clone())));
-        }
-        facts.push(t(
-            Message::new(
-                "gui-storage-photos",
-                "Photos on it: { $count }",
-            )
-            .with("count", photos),
-        ));
-        ui.label(egui::RichText::new(facts.join(" · ")).small());
-        // A weak identity: the identity file, on the user's say only (a
-        // card is never written).
-        if volume.identified_by == Identity::Weak && volume.online() && !volume.is_card() {
-            if marking {
-                ui.label(t(Message::new(
-                    "gui-storage-mark-explain",
-                    "This disk is known only by its label and size, so Helios could take another disk for it. Marking it writes a small file, .helios/volume.json, at its root: nothing else on the disk changes.",
-                )));
-                ui.horizontal(|ui| {
-                    if ui
-                        .button(t(Message::new(
-                            "gui-storage-mark-confirm",
-                            "Write the identity file",
-                        )))
-                        .clicked()
-                    {
-                        *asked = Some(Asked::Mark(volume.clone()));
-                    }
-                    if ui
-                        .button(t(Message::new("gui-storage-mark-cancel", "Cancel")))
-                        .clicked()
-                    {
-                        *asked = Some(Asked::CancelMark);
-                    }
-                });
-            } else if ui
-                .button(t(Message::new("gui-storage-mark", "Mark this disk…")))
-                .on_hover_text(t(Message::new(
-                    "gui-storage-mark-hint",
-                    "Known only by its label and size: an identity file tells it apart",
-                )))
-                .clicked()
-            {
-                *asked = Some(Asked::AskMark(volume.id.clone()));
-            }
-        }
-        if ui
-            .button(t(Message::new(
-                "gui-storage-forget",
-                "Forget what was seen here",
-            )))
-            .on_hover_text(t(Message::new(
-                "gui-storage-forget-hint",
-                "Drops what the image map knows of this volume's files not in the Library; the volume stays known",
-            )))
-            .clicked()
-        {
-            *asked = Some(Asked::Forget(volume.id.clone()));
-        }
-    });
 }
 
 /// The strategy's line ([`Shell::import_backup_line`]) from a strategy

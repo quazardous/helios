@@ -1486,11 +1486,9 @@ gui-library-cannot-open = La bibliothèque ne peut pas être ouverte : { $error 
 
 gui-library-badge-missing = manquante
 
-gui-storage-title = Stockage
 
 gui-storage-intro = Les disques que Helios a vus. Nommez-les et dites à quoi sert chacun : Helios n’écrit que sur les disques de bibliothèque, d’archive, de sauvegarde et de travail.
 
-gui-storage-none = Aucun disque connu pour l’instant : l’analyse tourne en arrière-plan.
 
 gui-storage-kind-internal = Disque interne
 
@@ -1520,15 +1518,11 @@ gui-storage-offline = hors ligne
 
 gui-storage-free = { $free } libres sur { $capacity }
 
-gui-storage-backup = Sauvegarde
 
-gui-storage-backup-copies = copies sur
 
-gui-storage-backup-none = Aucune sauvegarde en place : chaque photo n’a qu’une copie, dans la Bibliothèque.
 
 gui-storage-backup-now = Sauvegarder maintenant
 
-gui-storage-backup-now-hint = Copie les photos auxquelles il manque des sauvegardes sur les disques branchés, vérifiées
 
 gui-storage-backup-off-site = L’une d’elles hors site
 
@@ -1542,7 +1536,6 @@ gui-storage-dest-archive = Tout disque d’archive
 
 gui-storage-dest-backup = Tout disque de sauvegarde
 
-gui-storage-roles = Pour :
 
 gui-storage-off-site = Hors site
 
@@ -1556,19 +1549,15 @@ gui-storage-node = Dans { $node }
 
 gui-storage-last-seen = Vu pour la dernière fois le { $date } sur { $node }
 
-gui-storage-photos = Photos dessus : { $count }
 
 gui-storage-mark-explain = Ce disque n’est connu que par son nom de volume et sa taille : Helios pourrait le confondre avec un autre. Le marquer écrit un petit fichier, .helios/volume.json, à sa racine : rien d’autre ne change sur le disque.
 
 gui-storage-mark-confirm = Écrire le fichier d’identité
 
-gui-storage-mark-cancel = Annuler
 
 gui-storage-mark = Marquer ce disque…
 
-gui-storage-mark-hint = Connu seulement par son nom de volume et sa taille : un fichier d’identité le distingue
 
-gui-storage-forget = Oublier ce qui a été vu ici
 
 gui-storage-forget-hint = Retire ce que la carte des images sait des fichiers de ce volume hors de la Bibliothèque ; le volume reste connu
 
@@ -1590,18 +1579,13 @@ gui-import-window-totals = { $photos ->
     [one] { $photos } photo, { $size }
    *[other] { $photos } photos, { $size }
 }
-gui-catalogue = Catalogue
 gui-catalogue-days = il y a { $days } jours
-gui-catalogue-every = Toutes les (heures)
 gui-catalogue-here = à côté du catalogue
-gui-catalogue-intro = Instantanés vérifiés du catalogue (notes, mots-clés, retouches) : gardés à côté de lui et copiés sur les disques de sauvegarde branchés.
-gui-catalogue-kept = Gardés
 gui-catalogue-none = Aucun instantané pour l'instant.
 gui-catalogue-on-disk = sur { $disk }
 gui-catalogue-one-day = il y a 1 jour
 gui-catalogue-restore = Restaurer…
 gui-catalogue-restore-ask = Restaurer le catalogue depuis l'instantané d'{ $when } ? Les changements faits depuis sont perdus. Le catalogue actuel est mis de côté, et Helios se ferme puis redémarre sur l'instantané.
-gui-catalogue-restore-cancel = Annuler
 gui-catalogue-restore-confirm = Restaurer et redémarrer
 gui-catalogue-snapshot-now = Instantané maintenant
 gui-catalogue-today = aujourd'hui

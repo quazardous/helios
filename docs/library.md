@@ -602,31 +602,37 @@ follow at once.
 
 ### The Storage page
 
-File > Storage… (`library.storage`) lists every volume the vault knows,
-those online first, then the offline ones. Each shows:
+File > Storage… (`library.storage`) opens the Settings app at Storage ›
+Volumes: a table of every volume the vault knows, those online first,
+then the offline ones (`library.volumes`). Each row shows:
 
-- its **name**, edited in place (Enter or leaving the field saves it; a
-  blank name gives back its label);
-- its kind and icon, and a bar of its capacity and free space;
-- its **roles** as toggles: Library, Archive, Backup, Ingest, Scratch;
-- **Off site** and **RAID**, the user's flags;
-- the computer an internal disk belongs to, and for an offline volume
-  when and on which computer it was last seen;
-- how many copies of photos the library holds on it.
+- its **name**, edited in place (Enter or leaving the field saves it,
+  `library.volumeSet`);
+- its state and kind, and a bar of its space used with its free space;
+- its **roles** as toggles: Library, Archive, Backup, Ingest, Scratch
+  (`library.volumeRole`);
+- **Off site** and **RAID**, the user's flags (`library.volumeSet`);
+- how many copies of photos the library holds on it, and whether the
+  backup strategy copies to it;
+- for an offline volume when and on which computer it was last seen, for
+  an internal disk the computer it belongs to.
 
 Every change is saved to the vault at once and kept by later scans. A
-volume known only by its label and size (a weak identity) offers **Mark
-this disk…**: it explains what will be written, and only on the user's
-confirmation writes the identity file `.helios/volume.json` at its root.
-A card is never offered it: Helios never writes to a card.
-`library.storage` takes `{"volume": id}` to put that volume first, as
-the health check's free-space fix does.
+volume known only by its label and size (a weak identity), plugged in,
+offers **Mark this disk…**: a confirmation explains what will be written,
+and only once confirmed is the identity file `.helios/volume.json`
+written at its root (`library.markVolume`). A card is never offered it:
+Helios never writes to a card. "Scan now" scans it; "Forget…" asks
+before dropping what the image map knows of its files not in the
+Library. `library.storage` takes `{"volume": id}` to mark that row and
+scroll to it, as the health check's free-space fix does.
 
 ## Backups
 
 The library has one backup **strategy**, or none (a new library's
 default). It is kept in the vault (documents `storage/strategies`, key
-`library`) and set on the Storage page: how many verified **copies** each
+`library`) and set in the Settings app at Backup › Strategy, each part
+saved at once (`library.setBackupStrategy`): how many verified **copies** each
 photo needs, the **destinations** (any backup disk, any archive disk, or
 one disk), whether one copy must be **off site**, and its **triggers**:
 after each import, when a destination disk is plugged in, and by hand
@@ -695,7 +701,8 @@ verified. They live next to the catalogue, in `<file>.snapshots/`, named
 
 - **When:** every `catalogue.snapshotEvery` hours (daily by default; a
   thread looks every ten minutes), before a schema migration (the vault
-  does it), and by hand ("Snapshot now" on the Storage page,
+  does it), and by hand ("Snapshot now" in the Settings app at Storage ›
+  Catalogue,
   `library.catalogue.snapshot`).
 - **Where:** next to the catalogue, and copied to each disk of the backup
   strategy plugged in, under `Helios Backup/catalogue/<library>/` (the
@@ -705,7 +712,7 @@ verified. They live next to the catalogue, in `<file>.snapshots/`, named
 - **Retention:** `catalogue.snapshotsKept` (five by default) in each
   place, the oldest removed only once a new one is in place, never the
   last one.
-- **Restore:** the Storage page's Catalogue section lists the snapshots
+- **Restore:** the Settings app's Storage › Catalogue lists the snapshots
   next to the catalogue and on the disks plugged in
   (`library.catalogue.snapshots`); "Restore…" asks first, then
   `library.catalogue.restore` checks the snapshot, asks the vault to put

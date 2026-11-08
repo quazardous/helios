@@ -221,7 +221,7 @@ command-library-pasteFiles =
     .title = Paste files or an image another application copied into the library, imported once confirmed (`dry_run`: only say what would be imported)
 
 command-library-storage =
-    .title = Storage… (`volume`: the volume to show first)
+    .title = Storage… (the Settings app at Storage › Volumes; `volume`: the volume to mark and scroll to)
 
 command-macro-dissolve =
     .title = Give a macro way to its nodes, as ordinary ones (`node`; `dry_run`)

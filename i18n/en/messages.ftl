@@ -79,17 +79,9 @@ gui-caption-jobs = Show the jobs
 
 gui-caption-profile = Profile in use: { $name }
 
-gui-catalogue = Catalogue
-
 gui-catalogue-days = { $days } days ago
 
-gui-catalogue-every = Every (hours)
-
 gui-catalogue-here = next to the catalogue
-
-gui-catalogue-intro = Verified snapshots of the catalogue (ratings, tags, edits): kept next to it and copied to the backup disks plugged in.
-
-gui-catalogue-kept = Kept
 
 gui-catalogue-none = No snapshot yet.
 
@@ -101,9 +93,9 @@ gui-catalogue-restore = Restore…
 
 gui-catalogue-restore-ask = Restore the catalogue from the snapshot of { $when }? Changes made since are lost. The current catalogue is kept aside, and Helios closes and starts again on the snapshot.
 
-gui-catalogue-restore-cancel = Cancel
-
 gui-catalogue-restore-confirm = Restore and restart
+
+gui-catalogue-restore-title = Restore the catalogue?
 
 gui-catalogue-snapshot-now = Snapshot now
 
@@ -1029,6 +1021,8 @@ gui-settings-image-map = Image map
 
 gui-settings-library = Library
 
+gui-settings-snapshots = Snapshots
+
 gui-settings-storage = Storage
 
 gui-settings-strategy = Strategy
@@ -1039,13 +1033,13 @@ gui-settings-strategy-destinations = On
 
 gui-settings-strategy-online = Disks plugged in
 
-gui-settings-strategy-summary = Backup
-
 gui-settings-volume-backup = Backup
 
-gui-settings-volume-backup-role = Backup disk on/off
+gui-settings-volume-forget = Forget…
 
-gui-settings-volume-forget = Forget
+gui-settings-volume-forget-title = Forget what was seen on { $disk }?
+
+gui-settings-volume-forget-verb = Forget
 
 gui-settings-volume-kind = Kind
 
@@ -1053,17 +1047,15 @@ gui-settings-volume-name = Name
 
 gui-settings-volume-photos = Photos
 
-gui-settings-volume-roles = Roles
-
 gui-settings-volume-scan = Scan now
+
+gui-settings-volume-seen = Seen
 
 gui-settings-volume-space = Space
 
 gui-settings-volume-state = State
 
 gui-settings-volumes = Volumes
-
-gui-settings-volumes-about = Every disk the library knows: those plugged in first, then the others, offline.
 
 gui-settings-volumes-none = No volume known yet: plug in a disk.
 
@@ -1141,17 +1133,9 @@ gui-status-zoom-fill = Fill
 
 gui-status-zoom-fit = Fit
 
-gui-storage-backup = Backup
-
-gui-storage-backup-copies = copies on
-
 gui-storage-backup-destination = takes copies
 
-gui-storage-backup-none = No backup set up: each photo has one copy, in the Library.
-
 gui-storage-backup-now = Back up now
-
-gui-storage-backup-now-hint = Copies the photos short of their backups to the disks plugged in, verified
 
 gui-storage-backup-off-site = One of them off site
 
@@ -1164,8 +1148,6 @@ gui-storage-backup-on-import = After each import
 gui-storage-dest-archive = Any archive disk
 
 gui-storage-dest-backup = Any backup disk
-
-gui-storage-forget = Forget what was seen here
 
 gui-storage-forget-hint = Drops what the image map knows of this volume's files not in the Library; the volume stays known
 
@@ -1187,19 +1169,15 @@ gui-storage-last-seen = Last seen { $date } on { $node }
 
 gui-storage-mark = Mark this disk…
 
-gui-storage-mark-cancel = Cancel
-
 gui-storage-mark-confirm = Write the identity file
 
 gui-storage-mark-explain = This disk is known only by its label and size, so Helios could take another disk for it. Marking it writes a small file, .helios/volume.json, at its root: nothing else on the disk changes.
 
-gui-storage-mark-hint = Known only by its label and size: an identity file tells it apart
+gui-storage-mark-title = Mark { $disk }?
 
 gui-storage-name-hint = Its name; Enter saves it
 
 gui-storage-node = In { $node }
-
-gui-storage-none = No disk known yet: the scan runs in the background.
 
 gui-storage-off-site = Off site
 
@@ -1208,8 +1186,6 @@ gui-storage-off-site-hint = Kept away from the other disks (another building)
 gui-storage-offline = offline
 
 gui-storage-online = online
-
-gui-storage-photos = Photos on it: { $count }
 
 gui-storage-raid = RAID
 
@@ -1225,13 +1201,9 @@ gui-storage-role-library = Library
 
 gui-storage-role-scratch = Scratch
 
-gui-storage-roles = For:
-
 gui-storage-strategy-none = No backup set up
 
 gui-storage-summary = { $online } online, { $offline } offline
-
-gui-storage-title = Storage
 
 gui-subworkspace-gone = The sub-workspace { $id } is gone: back to where it was entered from
 
