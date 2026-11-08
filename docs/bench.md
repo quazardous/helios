@@ -439,21 +439,45 @@ Several agents share one box, one queue and one disk quota. A job that hangs
 or hoards blocks everyone for the length of its timeout. These rules come
 from incidents on the box; every agent prompt points here.
 
-**The next branch** (owner, 2026-11-08: Helios is alpha, so tests run on
-`next` only)
-- Agents merge finished work into `next` after the local checks (fmt,
-  check, clippy on the crates touched, `cargo update -w --offline`,
-  fragments): no box run is required before the merge. A narrow
-  `test-crate` run is there when a fix loop needs one.
-- Every push to `next` runs GitHub CI (the whole suite, survival, the
-  commits walk, lint, Windows). Once it passes, `promote.yml`
-  fast-forwards `main` to that commit; releases are made from `main`.
-- Each agent tests only the part it is working on (a narrow `test-crate`
-  run), never the whole suite before merging.
-- A red CI on `next`, or a bug the owner reports, is fixed first: an agent
-  takes the work back, reproduces it, adds the tests that would have caught
-  it, fixes it and merges into `next`. Work goes on from the errors CI
-  finds, not from runs queued before each merge.
+**The next branch** (owner, 2026-11-08: Helios is alpha, so CI and tests
+run on `next` only; egui-pop and egui_stack work the same way, with PRs)
+
+How a change goes in:
+1. **Branch from `origin/next`**, in a worktree of its own. Never from main.
+2. **Code with local checks only:** `cargo fmt`, then `cargo check --tests`
+   and `cargo clippy --tests` on the crates touched (`CARGO_INCREMENTAL=0`),
+   `cargo update -w --offline` (commit Cargo.lock if it changed), and
+   changelog fragments of at most 600 characters. No local test runs.
+3. **Test only the part being changed,** on the box: `test-crate crate=…
+   test=… filter=…` for Helios, `egui-pop-test` for egui-pop. Never the whole
+   suite before a merge. `bench-remote`'s pre-flight refuses an unpushed
+   branch, a stale Cargo.lock, a bad fragment or a missing parameter, and
+   the box runs `check` (`cargo check --tests`, the job's `first`) before
+   any job that builds: a compile error never takes a test job's place.
+4. **Every failed box job gets its reason** at once: `bench-remote why <id>
+   "<cause, and what is done about it>"`; a reproduction meant to fail runs
+   with `expect=fail`. `bench-remote failures` lists the unexplained ones.
+5. **Merge into `next`** and stop: Helios with `git push origin
+   <branch>:next` after rebasing on `origin/next`; egui-pop and egui_stack
+   with a PR into `next`, merged once its quick checks pass. Then delete the
+   branch and the worktree. **Never push to `main`.**
+6. **Do not wait for CI.** It is asynchronous: once the change is on `next`,
+   the work is done.
+
+What happens on `next`:
+- Every push runs the whole CI (the suite, survival, the commits walk,
+  lint, Windows). A newer push cancels the run still going: only the newest
+  commit is promoted.
+- When CI passes, `promote.yml` fast-forwards `main` to that commit. `main`
+  only holds commits that passed everything; releases are made from it. If
+  `main` ever holds a commit `next` lacks, promotion refuses: merge `main`
+  into `next`.
+- **One watcher** (the coordinating agent) follows CI on `next`. When a run
+  goes red, it starts **one fixing agent first**, before any other work.
+  That agent reproduces the failure, adds the test that would have caught
+  it, fixes it, and merges into `next`. The same goes for a bug the owner
+  reports: the agents reproduce and validate it themselves and never ask
+  the owner to test.
 
 **The work cycle**
 - Code the whole change with local checks only: `cargo fmt --check`, then
