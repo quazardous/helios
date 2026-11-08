@@ -1261,7 +1261,10 @@ palette) opens the folder.
 **The agent socket (2026-11-08).** An agent (a script, an MCP client)
 can drive a running Helios through egui-pop's debug bridge, served out of
 the process by `egui-pop-agent` (egui-pop's `docs/agent-socket.md`). It
-is off by default; the desktop window turns it on when asked:
+is off by default; the desktop window turns it on when asked, from the
+settings (Developer, "Agent socket", the `developer.agentSocket` setting,
+2026-11-08: it starts and stops at once, no restart) or from the
+environment, whatever the setting says:
 
 ```console
 $ EGUI_POP_AGENT_SOCKET=1 helios-gui
@@ -1269,7 +1272,8 @@ $ EGUI_POP_AGENT_SOCKET=1 helios-gui
 
 The socket is `$XDG_RUNTIME_DIR/egui-pop-agent-helios.sock` (mode 0600;
 `EGUI_POP_AGENT_SOCKET=/some/path.sock` puts it elsewhere), and its path
-is in the log at start. The bridge is read-only: an agent reads the
+is in the log when it starts. Turned off, the socket file goes and a
+client still connected is refused. The bridge is read-only: an agent reads the
 state (`snapshot`), lists the capabilities (`describe`), runs read-only
 commands and waits for events; anything that changes the image or the
 library is refused. Tests, pictures and tools never open it.

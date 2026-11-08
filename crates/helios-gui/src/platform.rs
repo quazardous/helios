@@ -527,11 +527,12 @@ pub fn desktop(app: AppBuilder, instance: Instance) -> AppBuilder {
         .plugin(crashes)
         .plugin(InstancePlugin::new(instance).scheme(SCHEME))
         .plugin(NotifyPlugin::new("Helios").backend(Desktop::new("Helios").app_id(APP_ID)))
-        // The agent socket, off unless the user asks for it
-        // (`EGUI_POP_AGENT_SOCKET=1`: `$XDG_RUNTIME_DIR/egui-pop-agent-helios.sock`;
-        // or a path), read-only (docs/gui.md, "Agents").
+        // The agent socket, off unless the user asks for it: the
+        // `developer.agentSocket` setting, live, or `EGUI_POP_AGENT_SOCKET=1`
+        // (`$XDG_RUNTIME_DIR/egui-pop-agent-helios.sock`; or a path),
+        // read-only (docs/gui.md, "Agents").
         .app_id(AGENT_APP_ID)
-        .agent_socket_from_env()
+        .agent_socket_from_env_or_setting()
 }
 
 #[cfg(test)]
