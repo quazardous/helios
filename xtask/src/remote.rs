@@ -734,6 +734,14 @@ fn conditions_warning(json: &str) -> Option<String> {
 
 pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
     match args {
+        ["help" | "--help" | "-h"] => {
+            // `help` is the client's, never a job: the box would refuse it.
+            for form in USAGE.split(" | ") {
+                println!("{form}");
+            }
+            println!("Jobs and their parameters: tools/bench/Benchfile; the box: docs/bench.md.");
+            return Some(ExitCode::SUCCESS);
+        }
         ["failures"] => return Some(ExitCode::from(failures(false))),
         ["failures", "--all"] => return Some(ExitCode::from(failures(true))),
         ["why", id, reason @ ..] if !reason.is_empty() => {
