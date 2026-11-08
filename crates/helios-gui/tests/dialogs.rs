@@ -1,6 +1,7 @@
 //! The shell's windows, dialogs, menus and notices: one set (egui-pop's
 //! components), drawn the same way, answered by a human or an agent alike.
 
+use egui::accesskit::Role;
 use egui::{Key, vec2};
 use egui_kittest::kittest::{NodeT, Queryable};
 use helios_gui::dialogs::{
@@ -162,7 +163,16 @@ fn a_picker_runs_its_command_with_the_value_chosen() {
     // Typed into the focused field (the Vault has a search field too).
     h.event(egui::Event::Text("end".into()));
     h.run();
-    assert!(h.query_by_label("center").is_none());
+    // The shell's centre area is a pane named "center" too: only the
+    // dialog's rows are looked at.
+    let options = |h: &egui_kittest::Harness<'static, Shell>, label: &str| {
+        h.query_all_by_label(label)
+            .filter(|n| n.accesskit_node().role() != Role::Pane)
+            .count()
+    };
+    assert_eq!(options(&h, "center"), 0);
+    assert_eq!(options(&h, "start side"), 0);
+    assert_eq!(options(&h, "end side"), 1);
     h.key_press(Key::Enter);
     h.run();
     h.run();
