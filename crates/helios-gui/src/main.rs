@@ -208,15 +208,6 @@ fn back_up<S: helios_vault::Store + 'static>(
     });
 }
 
-/// Opens the vault at `path`, its folder made first (the default
-/// library's, on the first launch).
-fn open_vault(path: &Path) -> Result<helios_vault_sqlite::SqliteStore, String> {
-    if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
-        std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-    }
-    helios_vault_sqlite::SqliteStore::open(path).map_err(|e| format!("{}: {e}", path.display()))
-}
-
 fn seconds() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -1290,7 +1281,10 @@ fn main() -> Result<(), String> {
     let thumbs_file = vault_file.clone();
     // A library that cannot be opened leaves Helios without one: the
     // reason is said, and imports refuse with it.
-    let (persist, no_library) = match vault_file.as_deref().map(open_vault) {
+    let (persist, no_library) = match vault_file
+        .as_deref()
+        .map(helios_gui::platform::open_library)
+    {
         Some(Ok(store)) => (Some(Persist::new(store, bus)), None),
         Some(Err(e)) => {
             warn(&format!("the library: {e}"));

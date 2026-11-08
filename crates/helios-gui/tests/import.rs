@@ -821,6 +821,69 @@ fn an_import_is_one_undo_step_and_ctrl_z_on_the_library_takes_it_back() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// The host's `library.import`, as `main.rs` registers it: the import
+/// run as a job into `vault`, its lines to the shell, its changes one
+/// undo step; `done` once it ended.
+fn host_import<S: helios_vault::Store + Send + 'static>(
+    shell: &mut Shell,
+    vault: &Arc<Vault<S>>,
+    done: &Arc<std::sync::atomic::AtomicBool>,
+) {
+    use std::sync::atomic::Ordering;
+    let history = shell.library_history();
+    let v = vault.clone();
+    history.set_apply(Arc::new(move |changes, forward| {
+        if forward {
+            v.replay(changes)
+        } else {
+            v.revert(changes)
+        }
+    }));
+    let (v, done, lines) = (vault.clone(), done.clone(), shell.import_sink());
+    let jobs = shell.jobs();
+    shell
+        .register(
+            helios_shell::commands::CommandSpec::new("library.import", "Import", "Library"),
+            move |args, _| {
+                let options = helios_gui::importers::options(args)?;
+                let sources: Vec<PathBuf> = args["paths"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .map(PathBuf::from)
+                    .collect();
+                let (v, jobs, done, lines, history, asked) = (
+                    v.clone(),
+                    jobs.clone(),
+                    done.clone(),
+                    lines.clone(),
+                    history.clone(),
+                    args.clone(),
+                );
+                std::thread::spawn(move || {
+                    let mut emit = |line: &Value| {
+                        let _ = lines.send((asked.clone(), line.clone()));
+                    };
+                    let end = match import(&v, &jobs, &sources, &options, 1, &mut emit) {
+                        Ok(mut report) => {
+                            let label = helios_gui::library_history::import_label(
+                                report.added + report.located,
+                            );
+                            history.record(label, std::mem::take(&mut report.changes), 1.0);
+                            json!({ "ended": report })
+                        }
+                        Err(e) => json!({ "failed": e }),
+                    };
+                    let _ = lines.send((asked, end));
+                    done.store(true, Ordering::Relaxed);
+                });
+                Ok(json!({ "queued": true }))
+            },
+        )
+        .unwrap();
+}
+
 /// The whole path, as the desktop runs it: the window opened on a card,
 /// Import, the host's job (`library.import`, as `main.rs` registers it),
 /// then the photos in the Library, selected, and Ctrl+Z taking the import
@@ -835,60 +898,7 @@ fn a_card_imported_from_the_window_lands_in_the_library_selected_as_one_undo_ste
     put(&dcim.join("IMG_0002.JPG"), Ok(&jpeg("c")), 3);
     let vault = Arc::new(Vault::new(MemoryStore::default()));
     let done = Arc::new(AtomicBool::new(false));
-    let mut h = card_window_with(&dir, None, |shell| {
-        let history = shell.library_history();
-        let v = vault.clone();
-        history.set_apply(Arc::new(move |changes, forward| {
-            if forward {
-                v.replay(changes)
-            } else {
-                v.revert(changes)
-            }
-        }));
-        let (v, done, lines) = (vault.clone(), done.clone(), shell.import_sink());
-        let jobs = shell.jobs();
-        shell
-            .register(
-                helios_shell::commands::CommandSpec::new("library.import", "Import", "Library"),
-                move |args, _| {
-                    let options = helios_gui::importers::options(args)?;
-                    let sources: Vec<PathBuf> = args["paths"]
-                        .as_array()
-                        .into_iter()
-                        .flatten()
-                        .filter_map(Value::as_str)
-                        .map(PathBuf::from)
-                        .collect();
-                    let (v, jobs, done, lines, history, asked) = (
-                        v.clone(),
-                        jobs.clone(),
-                        done.clone(),
-                        lines.clone(),
-                        history.clone(),
-                        args.clone(),
-                    );
-                    std::thread::spawn(move || {
-                        let mut emit = |line: &Value| {
-                            let _ = lines.send((asked.clone(), line.clone()));
-                        };
-                        let end = match import(&v, &jobs, &sources, &options, 1, &mut emit) {
-                            Ok(mut report) => {
-                                let label = helios_gui::library_history::import_label(
-                                    report.added + report.located,
-                                );
-                                history.record(label, std::mem::take(&mut report.changes), 1.0);
-                                json!({ "ended": report })
-                            }
-                            Err(e) => json!({ "failed": e }),
-                        };
-                        let _ = lines.send((asked, end));
-                        done.store(true, Ordering::Relaxed);
-                    });
-                    Ok(json!({ "queued": true }))
-                },
-            )
-            .unwrap();
-    });
+    let mut h = card_window_with(&dir, None, |shell| host_import(shell, &vault, &done));
     // Copies go to a folder of the test's.
     let mut choices = h.state().import_choices();
     choices.into = Some(dir.join("photos"));
@@ -1091,4 +1101,70 @@ fn a_library_that_could_not_be_opened_gives_its_reason() {
     assert_eq!(e, "No library is open: library.db: read-only file system");
     assert!(h.state_mut().take_imports().is_empty());
     no_missing_command(h.state());
+}
+
+/// Helios started without `--vault`: the default library, `library.db`
+/// in Helios's data directory (here a temporary `XDG_DATA_HOME`, never the
+/// user's), is made on the first launch; a folder of two JPEGs imported
+/// from the import window lands in it, and it keeps them once reopened.
+#[test]
+fn without_vault_a_folder_imports_into_the_default_library() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let dir = temp("default-library");
+    let data = dir.join("data");
+    let photos = dir.join("photos");
+    put(&photos.join("a.jpg"), Ok(&jpeg("a")), 2);
+    put(&photos.join("c.jpg"), Ok(&jpeg("c")), 3);
+    // Every variable a platform reads for its data directory points into
+    // the test's folder.
+    let env = |name: &str| match name {
+        "XDG_DATA_HOME" | "LOCALAPPDATA" => Some(data.to_string_lossy().into_owned()),
+        "HOME" => Some(dir.join("home").to_string_lossy().into_owned()),
+        _ => None,
+    };
+    let args = ["helios-gui".to_string()];
+    let file = helios_gui::platform::library_file_with(&args, env)
+        .unwrap()
+        .expect("a default library");
+    assert!(file.starts_with(&dir), "{file:?}");
+    assert!(file.ends_with(helios_gui::platform::LIBRARY_FILE));
+    assert!(!file.exists(), "not there before the first launch");
+    let store = helios_gui::platform::open_library(&file).unwrap();
+    assert!(file.is_file(), "made on the first launch");
+    let vault = Arc::new(Vault::new(store));
+    let done = Arc::new(AtomicBool::new(false));
+    let mut shell = Shell::new(helios_panels(), None);
+    host_import(&mut shell, &vault, &done);
+    assert!(shell.library_open());
+    let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+    h.run();
+    h.state_mut()
+        .run(
+            "library.importWindow",
+            json!({ "paths": [photos] }),
+            Origin::User,
+        )
+        .unwrap();
+    read_through(&mut h);
+    h.get_by_label("Import 2").click();
+    h.run_steps(3);
+    assert!(!h.state().import_window_open());
+    for args in h.state_mut().take_imports() {
+        h.state_mut()
+            .run("library.import", args, Origin::User)
+            .unwrap();
+    }
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while !done.load(Ordering::Relaxed) {
+        assert!(Instant::now() < deadline, "the import not done in 30 s");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    no_missing_command(h.state());
+    assert_eq!(vault.images().unwrap().len(), 2);
+    drop(h);
+    drop(vault);
+    // The next launch finds them in the same library.
+    let again = Vault::new(helios_gui::platform::open_library(&file).unwrap());
+    assert_eq!(again.images().unwrap().len(), 2);
+    let _ = std::fs::remove_dir_all(&dir);
 }

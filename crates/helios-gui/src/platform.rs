@@ -110,6 +110,15 @@ pub fn library_file_with(
     Ok(data_dir_with(env).map(|d| d.join(LIBRARY_FILE)))
 }
 
+/// Opens the library (vault file) at `path`, its folder made first (the
+/// default library's, on the first launch).
+pub fn open_library(path: &Path) -> Result<helios_vault_sqlite::SqliteStore, String> {
+    if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
+        std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    }
+    helios_vault_sqlite::SqliteStore::open(path).map_err(|e| format!("{}: {e}", path.display()))
+}
+
 /// [`library_file_with`] from this process's environment.
 pub fn library_file(args: &[String]) -> Result<Option<PathBuf>, String> {
     library_file_with(args, |name| std::env::var(name).ok())
