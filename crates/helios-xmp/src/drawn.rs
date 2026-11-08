@@ -131,6 +131,22 @@ const FLIP_Y: u8 = 1;
 const FLIP_X: u8 = 2;
 const SWAP_XY: u8 = 4;
 
+/// The orientation bits darktable gives an image from its EXIF
+/// orientation tag (`dt_image_orientation_to_flip_bits`): what its `flip`
+/// turns the image by at its default. A tag out of range turns nothing.
+pub fn exif_orientation(tag: i64) -> u8 {
+    match tag {
+        2 => FLIP_X,
+        3 => FLIP_X | FLIP_Y,
+        4 => FLIP_Y,
+        5 => SWAP_XY,
+        6 => FLIP_Y | SWAP_XY,
+        7 => FLIP_X | FLIP_Y | SWAP_XY,
+        8 => FLIP_X | SWAP_XY,
+        _ => 0,
+    }
+}
+
 impl Frame {
     /// A frame without crop or turn.
     pub fn new(width: f64, height: f64) -> Frame {

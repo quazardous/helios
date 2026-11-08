@@ -1026,6 +1026,23 @@ pub fn import_with(sidecar: &Sidecar, layouts: &Layouts, frame: Option<&Frame>) 
         if !item.enabled {
             out.report.disabled.push(item.operation.clone());
             status[at] = json!({ "status": "disabled" });
+            if item.operation == "flip" && item.multi_priority == 0 {
+                // darktable's flip is on by default, following the EXIF
+                // tag: disabled, it leaves the image unturned, which
+                // Helios's flip does at 0 (left out, it would turn the
+                // image by the tag).
+                let name = node_name(item, &out.nodes);
+                status[at]["node"] = json!(name);
+                out.nodes.push(Node {
+                    name,
+                    operation: item.operation.clone(),
+                    multi_name: item.multi_name.clone(),
+                    instance: 0,
+                    module: "flip".into(),
+                    params: Params::new().with("orientation", Param::Int(0)),
+                    mask: None,
+                });
+            }
             continue;
         }
         let name = node_name(item, &out.nodes);

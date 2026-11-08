@@ -325,6 +325,37 @@ impl Sidecar {
         out
     }
 
+    /// How darktable turns the image this sidecar edits (its orientation
+    /// bits, `dt_image_orientation_t`), given the image's own (`image`,
+    /// from its EXIF tag: [`crate::drawn::exif_orientation`]). darktable's
+    /// `flip` decides (`commit_params` in `src/iop/flip.c`): its
+    /// `orientation` param, or the image's when it is -1 (`auto`, the
+    /// default); a disabled `flip` does not turn the image, and a history
+    /// without one runs it at its default, the image's. A `flip` whose
+    /// params cannot be read (an older layout) is taken as its default,
+    /// as the import leaves it.
+    pub fn orientation(&self, image: u8) -> u8 {
+        let flip = self
+            .effective()
+            .into_iter()
+            .find(|i| i.operation == "flip" && i.multi_priority == 0);
+        let Some(flip) = flip else {
+            return image;
+        };
+        if !flip.enabled {
+            return 0;
+        }
+        match (flip.modversion, flip.params.get(..4)) {
+            (2, Some(b)) if flip.unreadable.is_none() => {
+                match i32::from_le_bytes([b[0], b[1], b[2], b[3]]) {
+                    o @ 0..=7 => o as u8,
+                    _ => image,
+                }
+            }
+            _ => image,
+        }
+    }
+
     /// The items in force, in the order darktable runs them.
     pub fn in_pipe_order(&self) -> crate::iop_order::Arranged<'_> {
         crate::iop_order::arrange(self)
