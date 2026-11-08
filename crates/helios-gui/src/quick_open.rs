@@ -17,7 +17,9 @@
 //! field, the arrows, Enter). Each entry's value names its item
 //! (`module:<node>`, `subworkspace:<id>`, `image:<id>`,
 //! `workspace:<path>`); the picker runs
-//! `workbench.quickOpen.go` with it, which agents may run too.
+//! `workbench.quickOpen.go` with it, which agents may run too. Agents
+//! and scenarios also go to an image file by its path (`file:<path>`),
+//! in the library or not, which the list does not offer.
 
 use std::path::PathBuf;
 
@@ -41,24 +43,29 @@ pub enum Item {
     Image(String),
     /// A workspace directory.
     Workspace(PathBuf),
+    /// An image file, by its path: for agents and scenarios, which know
+    /// the file and not its vault id.
+    File(PathBuf),
 }
 
 impl Item {
     /// The value its entry carries: `module:<node>`,
-    /// `subworkspace:<id>`, `image:<id>`, `workspace:<path>`.
+    /// `subworkspace:<id>`, `image:<id>`, `workspace:<path>`,
+    /// `file:<path>`.
     pub fn value(&self) -> String {
         match self {
             Item::Module(n) => format!("module:{n}"),
             Item::Subworkspace(id) => format!("subworkspace:{id}"),
             Item::Image(id) => format!("image:{id}"),
             Item::Workspace(p) => format!("workspace:{}", p.display()),
+            Item::File(p) => format!("file:{}", p.display()),
         }
     }
 
     /// An entry's value read back.
     pub fn parse(value: &str) -> Result<Item, String> {
         let (kind, rest) = value.split_once(':').ok_or_else(|| {
-            format!("`{value}`: not module:, subworkspace:, image: or workspace:")
+            format!("`{value}`: not module:, subworkspace:, image:, workspace: or file:")
         })?;
         if rest.is_empty() {
             return Err(format!("`{value}` names nothing"));
@@ -68,8 +75,9 @@ impl Item {
             "subworkspace" => Ok(Item::Subworkspace(rest.into())),
             "image" => Ok(Item::Image(rest.into())),
             "workspace" => Ok(Item::Workspace(rest.into())),
+            "file" => Ok(Item::File(rest.into())),
             _ => Err(format!(
-                "`{value}`: not module:, subworkspace:, image: or workspace:"
+                "`{value}`: not module:, subworkspace:, image:, workspace: or file:"
             )),
         }
     }
@@ -150,6 +158,7 @@ mod tests {
             Item::Subworkspace("skin".into()),
             Item::Image("0a1b".into()),
             Item::Workspace("/photos/2026".into()),
+            Item::File("/photos/a.jpg".into()),
         ] {
             assert_eq!(Item::parse(&item.value()).unwrap(), item);
         }

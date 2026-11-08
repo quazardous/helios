@@ -3738,6 +3738,13 @@ impl Shell {
                 self.opens.push(crate::platform::Open::Image(path.clone()));
                 Ok(json!({ "image": id, "path": path }))
             }
+            Item::File(path) => {
+                if !path.is_file() {
+                    return Err(format!("no image file at {}", path.display()));
+                }
+                self.opens.push(crate::platform::Open::Image(path.clone()));
+                Ok(json!({ "path": path }))
+            }
             Item::Workspace(dir) => {
                 let ctx = self.app.handle().egui();
                 self.apply(&ctx, Action::OpenWorkspace(Some(dir.clone())))?;
