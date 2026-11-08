@@ -265,6 +265,11 @@ from `helios_load::sensor` (its geometry, the mosaic not decoded) and the
 `flip` item's orientation, the EXIF tag's (`drawn::exif_orientation`)
 when it is -1 or when the history has no `flip`, none when it is
 disabled (imported as Helios's `flip` at 0, so the render agrees).
+A picture (JPEG, PNG, TIFF) is placed the same way on its pixels as
+stored: `helios_load::picture_geometry` reads its size and EXIF tag
+without decoding it, and Helios builds a picture's network with a
+`flip` step at its default reading that tag, so the turned render and
+the turned masks agree.
 
 Two approximations hold for all: darktable computes a shape on a coarse
 grid (up to 4 pixels) and interpolates, Helios computes every pixel; and

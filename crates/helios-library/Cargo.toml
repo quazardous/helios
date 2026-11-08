@@ -25,7 +25,7 @@ serde_json.workspace = true
 
 [dev-dependencies]
 egui-pop-model.workspace = true
-image = { version = "0.25", default-features = false, features = ["png"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 
 [lints]
 workspace = true

@@ -53,9 +53,11 @@ pub fn read_sidecar_for(
 /// Imports a darktable edit of `image`, its drawn masks placed where
 /// darktable draws them: on the raw's sensor, turned as darktable turns
 /// the image (its `flip`, by default the EXIF orientation, see
-/// [`helios_xmp::Sidecar::orientation`]). The raw's geometry is read only
-/// when the edit has drawn masks; for a picture, or a raw that cannot be
-/// read, the masked items are not applied, as without the image.
+/// [`helios_xmp::Sidecar::orientation`]); on a picture (JPEG, PNG,
+/// TIFF), on its pixels as stored, turned the same way by its EXIF tag.
+/// The image's geometry is read only when the edit has drawn masks; for
+/// an image that cannot be read, the masked items are not applied, as
+/// without the image.
 pub fn import_for(sidecar: &helios_xmp::Sidecar, image: &Path) -> helios_xmp::Imported {
     let frame = if sidecar.masks.is_empty() {
         None
@@ -65,8 +67,21 @@ pub fn import_for(sidecar: &helios_xmp::Sidecar, image: &Path) -> helios_xmp::Im
     helios_xmp::import_with(sidecar, &helios_xmp::Layouts::built_in(), frame.as_ref())
 }
 
-/// Where `sidecar`'s drawn masks land on the raw `image`.
+/// Where `sidecar`'s drawn masks land on `image`, a raw or a picture.
 fn frame(sidecar: &helios_xmp::Sidecar, image: &Path) -> Option<Frame> {
+    if helios_load::Kind::of(image) == helios_load::Kind::Picture {
+        let (width, height, tag) = match helios_load::picture_geometry(image) {
+            Ok(found) => found?,
+            Err(e) => {
+                log::warn!("darktable masks not placed: {e}");
+                return None;
+            }
+        };
+        let exif = helios_xmp::drawn::exif_orientation(i64::from(tag));
+        return Some(
+            Frame::new(f64::from(width), f64::from(height)).oriented(sidecar.orientation(exif)),
+        );
+    }
     let (sensor, tag) = match helios_load::sensor(image) {
         Ok(found) => found?,
         Err(e) => {
