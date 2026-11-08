@@ -75,7 +75,7 @@ fn portrait_retouch_is_valid_and_builds_with_masks_docked_and_the_scopes_floatin
     for p in &bundle.template.network.presets {
         let built = bundle.build_with(
             &catalogue(),
-            helios_template::Source::Picture(&helios_template::placeholder()),
+            helios_template::Source::picture(&helios_template::placeholder()),
             Some(p.id.as_str()),
         );
         assert!(built.is_ok(), "{}", p.id);

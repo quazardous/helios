@@ -126,7 +126,7 @@ fn a_picture_keeps_exposure_s_identity() {
         if c == 3 { 1.0 } else { 0.25 }
     });
     let b = find("helios.batch-export")
-        .build_with(&templates::modules(), Source::Picture(&picture), None)
+        .build_with(&templates::modules(), Source::picture(&picture), None)
         .unwrap();
     let id = b.graph.find("exposure").unwrap();
     let out = render(&b.graph, id);
@@ -299,7 +299,7 @@ fn a_picture_keeps_its_exposure_under_the_masked_adjustment() {
         helios_template::workspace::blank(),
     ] {
         let b = bundle
-            .build_with(&templates::modules(), Source::Picture(&picture), None)
+            .build_with(&templates::modules(), Source::picture(&picture), None)
             .unwrap();
         let out = render(&b.graph, b.graph.find("base").unwrap());
         assert!(

@@ -53,8 +53,11 @@ pub fn raw_placeholder() -> Image {
 /// either.
 #[derive(Clone, Copy, Debug)]
 pub enum Source<'a> {
-    /// A picture in the working space, four channels.
-    Picture(&'a Image),
+    /// A picture in the working space, four channels, as the file stores
+    /// it, and its EXIF orientation tag (1 to 8; 1 when it has none):
+    /// what reads the source reads it through a `flip` step, which turns
+    /// it as the tag says unless the user sets another orientation.
+    Picture { image: &'a Image, orientation: u8 },
     /// A raw file's sensor mosaic, one channel, and its camera's
     /// description as context (`helios_photo::CameraInfo::to_context`):
     /// every node reading the source, directly or not, is given it.
@@ -64,10 +67,18 @@ pub enum Source<'a> {
     },
 }
 
-impl Source<'_> {
+impl<'a> Source<'a> {
+    /// A picture seen as stored (EXIF orientation 1).
+    pub fn picture(image: &'a Image) -> Source<'a> {
+        Source::Picture {
+            image,
+            orientation: 1,
+        }
+    }
+
     pub fn kind(&self) -> SourceKind {
         match self {
-            Source::Picture(_) => SourceKind::Picture,
+            Source::Picture { .. } => SourceKind::Picture,
             Source::Raw { .. } => SourceKind::Raw,
         }
     }
@@ -157,10 +168,15 @@ pub fn build(
         .collect();
     for name in &net.sources {
         let kind = net.source_kind(name);
+        let mut turned = None;
         let (image, raw) = match (kind, source) {
             (SourceKind::Picture | SourceKind::Image, None) => (placeholder(), false),
             (SourceKind::Raw, None) => (raw_placeholder(), true),
-            (SourceKind::Picture | SourceKind::Image, Some(Source::Picture(image))) => {
+            (
+                SourceKind::Picture | SourceKind::Image,
+                Some(Source::Picture { image, orientation }),
+            ) => {
+                turned = Some(orientation);
                 (image.clone(), false)
             }
             (SourceKind::Raw | SourceKind::Image, Some(Source::Raw { mosaic, camera: c })) => {
@@ -181,6 +197,18 @@ pub fn build(
         if raw && kind == SourceKind::Image {
             p = raw_front(&mut graph, &mut nodes, &mut taken, catalogue, name, id)
                 .map_err(|e| format!("network.sources: `{name}`: {e}"))?;
+        }
+        if let Some(orientation) = turned {
+            p = picture_front(
+                &mut graph,
+                &mut nodes,
+                &mut taken,
+                catalogue,
+                name,
+                id,
+                orientation,
+            )
+            .map_err(|e| format!("network.sources: `{name}`: {e}"))?;
         }
         placed.insert(name.clone(), p);
     }
@@ -416,6 +444,44 @@ fn raw_front(
     let output = at.output;
     let mut p = Placed::default();
     p.outputs.insert(SOURCE_PORT.into(), output);
+    Ok(p)
+}
+
+/// What reads a picture source (`id`) reads it through the catalogue's
+/// `flip` module at its default, given the picture's EXIF orientation
+/// tag as context (`photo.orientation`): the picture turned as it is
+/// seen, as a raw is after its front, unless the user sets another
+/// orientation. Left out by a catalogue without it. Returns where what
+/// reads the source reads.
+fn picture_front(
+    graph: &mut Graph,
+    nodes: &mut BTreeMap<String, NodeId>,
+    taken: &mut std::collections::BTreeSet<String>,
+    catalogue: &Catalogue,
+    source: &str,
+    id: NodeId,
+    orientation: u8,
+) -> Result<Placed, String> {
+    let mut at = Append {
+        graph,
+        nodes,
+        taken,
+        catalogue,
+        source,
+        output: (id, SOURCE_PORT.to_string()),
+    };
+    if at.module(FLIP, &Params::new())? {
+        let flip = at.output.0;
+        let context = Context::new().with(
+            helios_photo::camera::fields::ORIENTATION,
+            Value::Int(i64::from(orientation)),
+        );
+        at.graph
+            .set_context(flip, context)
+            .map_err(|e| format!("`{FLIP}`: {e}"))?;
+    }
+    let mut p = Placed::default();
+    p.outputs.insert(SOURCE_PORT.into(), at.output);
     Ok(p)
 }
 

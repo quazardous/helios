@@ -324,6 +324,7 @@ impl Shell {
     /// when no image is shown; an error when the new network cannot take
     /// the image (a raw network for a picture): the host opens it again.
     pub fn keep_image_open(&mut self) -> Result<bool, String> {
+        use helios_photo::camera::fields;
         use helios_template::Source;
         let kept = self
             .edit
@@ -339,16 +340,19 @@ impl Shell {
         let e = |e: helios_core::Error| e.to_string();
         let mut image = None;
         let mut camera = None;
+        // A picture's `flip` holds its EXIF orientation, no camera.
+        let mut orientation = None;
         for id in before.ids() {
             if image.is_none() {
                 image = before.source_image(id).map_err(e)?.cloned();
             }
-            if camera.is_none() {
-                camera = before
-                    .context(id)
-                    .map_err(e)?
-                    .filter(|c| !c.is_empty())
-                    .cloned();
+            let Some(context) = before.context(id).map_err(e)?.filter(|c| !c.is_empty()) else {
+                continue;
+            };
+            if context.get(fields::CFA).is_some() {
+                camera.get_or_insert_with(|| context.clone());
+            } else if let Some(tag) = context.get(fields::ORIENTATION) {
+                orientation = orientation.or_else(|| tag.as_i64());
             }
         }
         let image = image.ok_or("the image shown has no source")?;
@@ -371,7 +375,15 @@ impl Shell {
             // from its preview.
             return Err("the new network takes pictures only, not a raw's sensor data".into());
         } else {
-            bundle.build_with(&catalogue, Source::Picture(&image), None)?
+            let orientation = orientation.and_then(|o| u8::try_from(o).ok()).unwrap_or(1);
+            bundle.build_with(
+                &catalogue,
+                Source::Picture {
+                    image: &image,
+                    orientation,
+                },
+                None,
+            )?
         };
         let mut graph = built.graph;
         let (node, port) = built.view;

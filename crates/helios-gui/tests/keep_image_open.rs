@@ -43,7 +43,7 @@ fn window(root: &Path) -> Harness<'static, Shell> {
     let built = shell
         .workspace_bundle()
         .unwrap()
-        .build_with(&templates::modules(), Source::Picture(&image), None)
+        .build_with(&templates::modules(), Source::picture(&image), None)
         .unwrap();
     shell
         .set_view_source(built.graph, built.view.0, &built.view.1)

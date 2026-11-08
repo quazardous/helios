@@ -94,7 +94,7 @@ fn render(state: &State, values: &Values) -> (Vec<f32>, helios_core::ContentHash
     let image = picture();
     let mut built = state
         .bundle
-        .build_with(&catalogue(), Source::Picture(&image), None)
+        .build_with(&catalogue(), Source::picture(&image), None)
         .unwrap();
     for (path, v) in values {
         let (node, param) = path
@@ -272,7 +272,7 @@ fn aimed_through_the_engine_then_applied_the_median_lands_on_the_target() {
     let image = picture();
     let b = now
         .bundle
-        .build_with(&c, Source::Picture(&image), None)
+        .build_with(&c, Source::picture(&image), None)
         .unwrap();
     let input = engine
         .render(&b.graph, b.nodes["tone"], "output", Region::sized(16, 12))

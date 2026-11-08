@@ -138,7 +138,7 @@ fn a_template_is_checked_and_built_headless() {
     let more = b
         .build_with(
             &catalogue(),
-            helios_template::Source::Picture(&helios_template::placeholder()),
+            helios_template::Source::picture(&helios_template::placeholder()),
             Some("more"),
         )
         .unwrap();
@@ -393,7 +393,7 @@ fn a_raw_source_takes_a_mosaic_and_gives_its_camera_to_what_reads_it() {
     let e = b
         .build_with(
             &raw_catalogue(),
-            helios_template::Source::Picture(&helios_template::placeholder()),
+            helios_template::Source::picture(&helios_template::placeholder()),
             None,
         )
         .err()
@@ -576,7 +576,7 @@ fn an_image_source_takes_a_picture_as_it_is_and_a_raw_through_the_raw_front() {
     let built = b
         .build_with(
             &image_catalogue(),
-            helios_template::Source::Picture(&picture),
+            helios_template::Source::picture(&picture),
             None,
         )
         .unwrap();
@@ -678,7 +678,7 @@ fn raw_params_go_over_params_when_the_network_is_built_with_a_raw() {
     let built = b
         .build_with(
             &image_catalogue(),
-            helios_template::Source::Picture(&picture),
+            helios_template::Source::picture(&picture),
             None,
         )
         .unwrap();

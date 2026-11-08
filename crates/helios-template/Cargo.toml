@@ -8,6 +8,7 @@ repository.workspace = true
 
 [dependencies]
 helios-core.workspace = true
+helios-photo.workspace = true
 # Workshops' measures: the scopes' luminance counts.
 helios-scopes.workspace = true
 # MIT: egui-pop's logic without egui (the layout document, panel specs).
@@ -27,8 +28,6 @@ helios-module-demosaic = { path = "../../modules/demosaic" }
 helios-module-colorin = { path = "../../modules/colorin" }
 helios-module-flip = { path = "../../modules/flip" }
 helios-module-channelmixerrgb = { path = "../../modules/channelmixerrgb" }
-# A camera's description, for an image source given a raw.
-helios-photo.workspace = true
 
 [lints]
 workspace = true

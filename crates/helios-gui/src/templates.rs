@@ -141,8 +141,15 @@ fn through(path: &Path, bundle: &Bundle, preview: bool) -> Result<(Graph, NodeId
         }
         embedded(path, bundle)?
     } else {
-        let image = helios_load::load(path)?.image;
-        bundle.build_with(&catalogue, Source::Picture(&image), None)?
+        let loaded = helios_load::load(path)?;
+        bundle.build_with(
+            &catalogue,
+            Source::Picture {
+                image: &loaded.image,
+                orientation: loaded.orientation,
+            },
+            None,
+        )?
     };
     Ok((built.graph, built.view.0))
 }
@@ -151,7 +158,7 @@ fn through(path: &Path, bundle: &Bundle, preview: bool) -> Result<(Graph, NodeId
 fn embedded(path: &Path, bundle: &Bundle) -> Result<Built, String> {
     let image = helios_load::preview(path)?
         .ok_or_else(|| format!("{}: no preview to show", path.display()))?;
-    bundle.build_with(&modules(), Source::Picture(&image), None)
+    bundle.build_with(&modules(), Source::picture(&image), None)
 }
 
 /// What a template may name on this desktop: [`modules`], and the panels

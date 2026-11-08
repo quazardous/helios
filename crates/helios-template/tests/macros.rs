@@ -85,7 +85,7 @@ fn render(state: &State, values: &Values) -> (Vec<f32>, helios_core::ContentHash
     let image = picture();
     let mut built = state
         .bundle
-        .build_with(&catalogue(), Source::Picture(&image), None)
+        .build_with(&catalogue(), Source::picture(&image), None)
         .unwrap();
     for (path, v) in values {
         let Some(rest) = path.strip_prefix("node/") else {
