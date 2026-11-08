@@ -73,9 +73,18 @@ impl Stage {
     }
 }
 
+/// How many paths shown before the thumbnail re-check remembers.
+pub const RECENT: usize = 512;
+
 #[derive(Debug, Default)]
 struct Fed {
     screen: Vec<PathBuf>,
+    /// What is on screen now, kept for the thumbnail re-check
+    /// ([`crate::thumb_check`]), and how many times it changed.
+    shown: Vec<PathBuf>,
+    shown_changes: u64,
+    /// What was on screen before, last shown first, at most [`RECENT`].
+    recent: VecDeque<PathBuf>,
     plugged: Vec<VolumeId>,
     paused: bool,
     /// Something new to do: the idle wait ends.
@@ -96,8 +105,36 @@ impl Feed {
     /// Library), replacing what was: read first.
     pub fn on_screen(&self, paths: Vec<PathBuf>) {
         let mut fed = self.fed();
+        let gone: Vec<PathBuf> = fed
+            .shown
+            .iter()
+            .filter(|p| !paths.contains(p))
+            .cloned()
+            .collect();
+        for p in gone.into_iter().rev() {
+            fed.recent.retain(|r| r != &p);
+            fed.recent.push_front(p);
+        }
+        fed.recent.truncate(RECENT);
+        for p in &paths {
+            fed.recent.retain(|r| r != p);
+        }
+        fed.shown.clone_from(&paths);
+        fed.shown_changes += 1;
         fed.screen = paths;
         fed.woken = true;
+    }
+
+    /// What is on screen now and how many times that changed (the job's
+    /// reads do not consume it).
+    pub fn shown(&self) -> (u64, Vec<PathBuf>) {
+        let fed = self.fed();
+        (fed.shown_changes, fed.shown.clone())
+    }
+
+    /// What was on screen before, last shown first.
+    pub fn recent(&self) -> Vec<PathBuf> {
+        self.fed().recent.iter().cloned().collect()
     }
 
     /// A volume just plugged in: its files are read before the rest.
@@ -241,6 +278,28 @@ pub fn on_battery_in(dir: &Path) -> bool {
         }
     }
     discharging
+}
+
+/// Why background reads wait now, if they do: the user's pause, another
+/// job, the battery.
+pub fn waits(feed: &Feed, load: &mut dyn Load, power: &mut dyn Power) -> Option<String> {
+    if feed.paused() {
+        return Some("Paused".into());
+    }
+    if let Some(kind) = load.busy() {
+        return Some(format!("Waiting for the {kind} job to end"));
+    }
+    if power.on_battery() {
+        return Some("Waiting for mains power".into());
+    }
+    None
+}
+
+/// Where `path` is: its volume and its path inside it, if a volume holds it.
+pub fn place_of(volumes: &[Volume], path: &Path) -> Option<(VolumeId, PathBuf)> {
+    let v = helios_storage::registry::holding(volumes, path)?;
+    let rel = path.strip_prefix(v.mount.as_ref()?).ok()?;
+    Some((v.id.clone(), rel.to_path_buf()))
 }
 
 /// What the job needs of the vault.
@@ -395,16 +454,7 @@ impl<M: Map> Job<M> {
     /// Why it waits now, if it does: the user's pause, another job, the
     /// battery.
     pub fn waits(&mut self) -> Option<String> {
-        if self.feed.paused() {
-            return Some("Paused".into());
-        }
-        if let Some(kind) = self.load.busy() {
-            return Some(format!("Waiting for the {kind} job to end"));
-        }
-        if self.power.on_battery() {
-            return Some("Waiting for mains power".into());
-        }
-        None
+        waits(&self.feed, self.load.as_mut(), self.power.as_mut())
     }
 
     /// Prunes the map if the last pruning is an hour old or more; returns
@@ -464,10 +514,7 @@ impl<M: Map> Job<M> {
             if self.done.contains(&path) {
                 continue;
             }
-            let place = helios_storage::registry::holding(&self.volumes, &path).and_then(|v| {
-                let rel = path.strip_prefix(v.mount.as_ref()?).ok()?;
-                Some((v.id.clone(), rel.to_path_buf()))
-            });
+            let place = place_of(&self.volumes, &path);
             let s = self
                 .map
                 .sighting_at(
@@ -665,7 +712,7 @@ impl<M: Map> Job<M> {
 }
 
 /// Never busy, never on battery.
-struct Never;
+pub(crate) struct Never;
 
 impl Load for Never {
     fn busy(&mut self) -> Option<String> {

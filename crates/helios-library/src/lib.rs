@@ -31,6 +31,7 @@ pub mod map_job;
 pub mod rename;
 pub mod signals;
 pub mod stacks;
+pub mod thumb_check;
 
 pub use import::{Duplicates, Options, Placement, Report};
 pub use signals::Signals;

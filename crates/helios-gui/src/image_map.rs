@@ -88,6 +88,47 @@ pub fn start_job<S: Store + 'static>(
     }
 }
 
+/// Starts the shared thumbnail cache's re-check on a thread of its own
+/// (`helios_library::thumb_check`): what `feed` says is on screen first,
+/// then what was, then the Library's files, giving way as the map's job
+/// does.
+pub fn start_thumb_check<S: Store + 'static>(
+    vault: Arc<Vault<S>>,
+    jobs: &helios_core::jobs::Jobs,
+    cache: Arc<helios_thumbs::ThumbCache>,
+    settings: &MapSettings,
+    helios: Vec<PathBuf>,
+    feed: helios_library::map_job::Feed,
+) {
+    use helios_library::map_job::{BusLoad, Disk, SystemPower};
+    use helios_library::thumb_check::Check;
+    let checker = Checker::new(blacklist(settings, &helios));
+    let mounted = helios_storage::system().volumes();
+    let volumes = helios_storage::registry::merged(&vault, &mounted).unwrap_or(mounted);
+    let load = BusLoad::new(jobs.bus());
+    let spawned = std::thread::Builder::new()
+        .name("thumbnail re-check".into())
+        .spawn(move || {
+            // The pool lists the cache's folder; the re-check waits for it.
+            cache.list();
+            let stop = std::sync::atomic::AtomicBool::new(false);
+            Check::new(
+                vault,
+                Box::new(Disk),
+                Box::new(cache),
+                checker,
+                volumes,
+                feed,
+            )
+            .load(Box::new(load))
+            .power(Box::new(SystemPower))
+            .run(&stop);
+        });
+    if let Err(e) = spawned {
+        log::warn!("thumbnail re-check: it did not start: {e}");
+    }
+}
+
 /// The recorder the import window's scans use: each makes one on its
 /// thread, over the volumes known now. `helios` names Helios's own
 /// folders (the vault's, its data and cache), which are never recorded.

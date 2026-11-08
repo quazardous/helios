@@ -8,7 +8,12 @@ step) and every Library read gated on the flag, with contract tests on
 both stores. Slice 3 built (2026-11-08): import sets the flag
 (`Vault::import_known`), `Store::add_image` records off the Library,
 undo clears the flag keeping sightings and signals, duplicates and the
-import window's "in your Library" are lookups. Section 9 gives the order of work, section 10 the questions
+import window's "in your Library" are lookups. Slice 4 built in part
+(2026-11-08): provisional keys and their renaming (`Key::provisional`,
+`ThumbCache::rename`) and the re-check queue (`thumb_check`: on screen,
+recently shown, then the Library; stat, partial, full hash; a changed
+file's thumbnail made again; waits on battery and under load); the
+import window and dialogs on the shared cache are left. Section 9 gives the order of work, section 10 the questions
 as they were put.
 
 The owner's request: "Helios's database records every image it sees on

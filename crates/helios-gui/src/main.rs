@@ -1846,6 +1846,16 @@ fn main() -> Result<(), String> {
                     }
                     *known = now;
                 });
+                if let Some(cache) = THUMB_CACHE.get().cloned().flatten() {
+                    helios_gui::image_map::start_thumb_check(
+                        vault.clone(),
+                        &shell.jobs(),
+                        cache,
+                        &settings,
+                        helios.clone(),
+                        feed.clone(),
+                    );
+                }
                 helios_gui::image_map::start_job(vault, shell.jobs(), settings, helios, feed);
             }
             // The health check (Help > Health check): Helios's checks

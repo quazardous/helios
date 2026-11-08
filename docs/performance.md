@@ -151,6 +151,14 @@ crate, used by the library (`helios_gui::thumbnails`):
   limit (`system.cache.thumbnails`, 2 GiB by default) is kept by evicting
   the entries used least recently, down to 90 % of the limit; an entry's
   last use is its file's modification time across restarts.
+  A file seen but not fully hashed yet has a provisional key,
+  `p:<size>:<partial hash>`, whose entry is renamed (`ThumbCache::rename`)
+  once its full hash links it to an image. An entry is trusted while its
+  file matches its sighting: `helios_library::thumb_check` re-checks in
+  the background (on screen, then shown recently, then the Library, once
+  an hour), a `stat` for an unchanged file, a partial then a full hash
+  only when size or time changed, a new thumbnail when the content did;
+  it waits on battery and while imports, exports, backups or renders run.
 - **The pool** (`Loader`): two to four threads (half the CPUs). Each image
   is looked up in the cache first, its file read only on a miss; a miss
   stores the 256 px entry, then queues the 1024 px one behind every

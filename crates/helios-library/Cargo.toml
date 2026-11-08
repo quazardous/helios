@@ -14,6 +14,8 @@ helios-export.workspace = true
 helios-load.workspace = true
 # Volumes, roles and backup strategies: the backup job and safe to format.
 helios-storage.workspace = true
+# The shared thumbnail cache's re-check (`thumb_check`).
+helios-thumbs.workspace = true
 helios-vault.workspace = true
 helios-xmp.workspace = true
 blake3.workspace = true
