@@ -18,6 +18,19 @@ path = "junit.xml"
 # the run stays green and the flaky test gets a ticket and a fix.
 retries = 1
 fail-fast = false
-# The suite's tests wait more than they compute (the box's CPU sat 64 %
-# idle on 5 threads): run more at once than there are cores.
-test-threads = 12
+# More tests at once than cores is set by the box's jobs only
+# (`--test-threads 12` in tools/bench/Benchfile): on CI's 4-core runners it
+# starved the frame-time tests.
+
+# Frame-time tests measure the UI's own speed: they run alone, never beside
+# other tests.
+[test-groups]
+alone = { max-threads = 1 }
+
+[[profile.default.overrides]]
+filter = 'test(/stays_fluid|frame_budget|frames_stay/)'
+test-group = 'alone'
+
+[[profile.ci.overrides]]
+filter = 'test(/stays_fluid|frame_budget|frames_stay/)'
+test-group = 'alone'

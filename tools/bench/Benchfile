@@ -331,7 +331,7 @@ checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 5
 memory = "6g"
 cwd = "/work/${src:-helios}"
-command = """mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && cargo nextest run --workspace --locked --profile ci; rc=$?; \
+command = """mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && cargo nextest run --workspace --locked --profile ci --test-threads 12; rc=$?; \
 cp target/nextest/ci/junit.xml /out/ \
  && cargo xtask test-times --from-junit /out/junit.xml --summary > /out/summary.md; \
 exit $rc"""
@@ -398,7 +398,7 @@ memory = "6g"
 cwd = "/work/${src:-helios}"
 command = """mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && \
 cargo xtask affected ${base:-origin/main} > /out/affected.json && filter=$(cargo xtask affected ${base:-origin/main} --filter) || exit 1; \
-cargo nextest run --workspace --locked --profile ci -E "$filter"; rc=$?; \
+cargo nextest run --workspace --locked --profile ci --test-threads 12 -E "$filter"; rc=$?; \
 cp target/nextest/ci/junit.xml /out/ \
  && cargo xtask test-times --from-junit /out/junit.xml --summary > /out/summary.md; \
 exit $rc"""
@@ -556,7 +556,7 @@ memory = "5g"
 cwd = "/work/${src:-egui-pop}"
 command = """mkdir -p /tmp/w/egui-pop && cp -r --preserve=mode . /tmp/w/egui-pop/ && cd /tmp/w/egui-pop && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/egui-pop ] || { rm -rf /target/* && echo /tmp/w/egui-pop > /target/.built-at; }; } && cargo fmt --all --check \
  && cargo clippy --workspace --all-targets --locked -- -D warnings \
- && cargo nextest run --workspace --locked --profile ci --fail-fast \
+ && cargo nextest run --workspace --locked --profile ci --test-threads 12 --fail-fast \
  && cargo test --workspace --locked --doc \
  && RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps --locked \
  && python3 tools/book/summary.py && mdbook build && python3 tools/book/links.py target/book"""
