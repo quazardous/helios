@@ -156,4 +156,5 @@ Done (2026-11-07), in the order planned:
    paths.
 
 Left for later: the grid's virtualisation and texture eviction for very
-large cards.
+large cards, and keeping what the window lists between openings (proposed
+in [image-map.md](image-map.md)).

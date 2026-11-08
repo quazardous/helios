@@ -8,6 +8,10 @@ near duplicates, and group photos into stacks. They run the same from the
 command line (`helios import`, `helios stacks`, see [cli.md](cli.md)) and
 from the desktop (the `library.*` commands).
 
+Proposed next (2026-11-08): the vault records every image Helios sees on
+every known volume, and import becomes a flag plus the copies the backup
+strategy asks for; see [design/image-map.md](design/image-map.md).
+
 ## The default library
 
 `helios-gui` opens a library at every launch: the vault file given with
