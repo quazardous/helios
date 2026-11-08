@@ -374,8 +374,10 @@ impl Shell {
         self.import_window.map = Some(map);
     }
 
-    /// The image map's job: the import window tells it the files in view.
+    /// The image map's job: the import window, the Library grid and
+    /// Compare tell it the files in view.
     pub fn set_map_feed(&mut self, feed: helios_library::map_job::Feed) {
+        self.library.borrow_mut().set_map_feed(feed.clone());
         self.import_window.map_feed = Some(feed);
     }
 

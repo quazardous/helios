@@ -646,6 +646,11 @@ pub struct Library {
     /// Whether the grid shows the backup badges: the library has a
     /// strategy.
     backup_badges: Shown,
+    /// The image map's feed: the thumbnail re-check reads the files of
+    /// the cells in view first.
+    map_feed: Option<helios_library::map_job::Feed>,
+    /// The ids in view in the grid and in Compare, as last fed.
+    fed: (Vec<String>, Vec<String>),
 }
 
 /// Whether something is drawn (a struct of many flags reads worse).
@@ -703,6 +708,8 @@ impl Default for Library {
             volumes: HashMap::new(),
             backups: HashMap::new(),
             backup_badges: Shown::No,
+            map_feed: None,
+            fed: (Vec::new(), Vec::new()),
         }
     }
 }
@@ -1307,6 +1314,38 @@ impl Library {
         // A new pool: what the last one was asked is asked again.
         self.textures.clear_requests();
         self.large_asked.clear();
+    }
+
+    /// The image map's feed: the files of the grid's and Compare's cells
+    /// in view are told it, so the thumbnail re-check reads them first.
+    pub fn set_map_feed(&mut self, feed: helios_library::map_job::Feed) {
+        self.map_feed = Some(feed);
+    }
+
+    /// Tells the map's feed the files in view when they changed: the
+    /// grid's cells (`grid`) or Compare's panes; each image's file is the
+    /// sighting the library reads it from.
+    fn feed_in_view(&mut self, ids: Vec<String>, grid: bool) {
+        let Some(feed) = &self.map_feed else {
+            return;
+        };
+        let last = if grid {
+            &mut self.fed.0
+        } else {
+            &mut self.fed.1
+        };
+        if *last == ids {
+            return;
+        }
+        *last = ids;
+        let paths: Vec<PathBuf> = self
+            .fed
+            .0
+            .iter()
+            .chain(&self.fed.1)
+            .filter_map(|id| self.files.get(id).cloned())
+            .collect();
+        feed.on_screen(paths);
     }
 
     /// Asked an image's large thumbnail (the cache's 1024 px entry):
@@ -2105,6 +2144,8 @@ impl Library {
             grid.show(ui, &mut self.state, &items, &thumbs)
         };
         self.after_pass(ui.ctx());
+        let in_view = self.in_view.borrow().clone();
+        self.feed_in_view(in_view, true);
         crate::name_rect(ui.ctx(), "helios.library.grid", out.response.rect);
         self.presence_hover(ui, "grid");
         // Its context menu, a secondary click anywhere on it (a cell
@@ -2213,6 +2254,7 @@ impl Library {
             ));
             return;
         }
+        self.feed_in_view(keys.clone(), false);
         let ctx = ui.ctx().clone();
         let sync = crate::i18n::text(&ctx, Message::new("gui-library-sync", "Sync zoom and pan"));
         let keep_text = crate::i18n::text(
@@ -2317,5 +2359,41 @@ impl Library {
                 self.notes.push(e);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_files_in_view_feed_the_map_once_per_change() {
+        let feed = helios_library::map_job::Feed::default();
+        let mut library = Library::default();
+        library.set_files([
+            ("a".to_string(), PathBuf::from("/p/a.jpg")),
+            ("b".to_string(), PathBuf::from("/p/b.jpg")),
+            ("c".to_string(), PathBuf::from("/p/c.jpg")),
+        ]);
+        library.set_map_feed(feed.clone());
+        library.feed_in_view(vec!["a".into(), "b".into()], true);
+        let (changes, shown) = feed.shown();
+        assert_eq!(
+            shown,
+            [PathBuf::from("/p/a.jpg"), PathBuf::from("/p/b.jpg")]
+        );
+        // The same cells again: nothing told.
+        library.feed_in_view(vec!["a".into(), "b".into()], true);
+        assert_eq!(feed.shown().0, changes);
+        // Compare's panes join the grid's; an image with no file is left.
+        library.feed_in_view(vec!["c".into(), "gone".into()], false);
+        assert_eq!(
+            feed.shown().1,
+            [
+                PathBuf::from("/p/a.jpg"),
+                PathBuf::from("/p/b.jpg"),
+                PathBuf::from("/p/c.jpg"),
+            ]
+        );
     }
 }

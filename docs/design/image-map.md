@@ -12,8 +12,10 @@ import window's "in your Library" are lookups. Slice 4 built in part
 (2026-11-08): provisional keys and their renaming (`Key::provisional`,
 `ThumbCache::rename`) and the re-check queue (`thumb_check`: on screen,
 recently shown, then the Library; stat, partial, full hash; a changed
-file's thumbnail made again; waits on battery and under load); the
-import window and dialogs on the shared cache are left. Open question 6
+file's thumbnail made again; waits on battery and under load), fed by
+the import window, the Library grid and Compare (their images' files,
+from their sightings); the import window and dialogs on the shared
+cache are left. Open question 6
 decided (2026-11-08, option A of the owner's choice): a Library photo
 whose file another application changed stays linked (section 3, "A file
 changed in place"). Section 9 gives the order of work, section 10 the
