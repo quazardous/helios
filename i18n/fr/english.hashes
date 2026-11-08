@@ -374,6 +374,8 @@ gui-import-ended-reported 4a72175477f43d3b
 gui-import-failed dbdb6ddf097d8f5c
 gui-import-form-title 1bab6c9d205270b1
 gui-import-metadata 4527af2f3dee5442
+gui-import-no-library 8616507b955eb56d
+gui-import-no-library-error 20cc542909de7d21
 gui-import-path 54572ccc6f105c66
 gui-import-remember 75f1f4460d6a89ec
 gui-import-remember-help e20b1b9d5a401bc1
@@ -460,6 +462,7 @@ gui-layout-not-saved 942738e1ab7b193d
 gui-library-auto-advance b947431b44afe299
 gui-library-badge-missing 5821c2953f0639df
 gui-library-badge-offline 01064de9e41d67ce
+gui-library-cannot-open 2702ccb4eb8511ba
 gui-library-compare-hint ef5d43662fafd120
 gui-library-count e72204ddb791f955
 gui-library-empty d1a64591ca82b2f8

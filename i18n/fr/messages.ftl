@@ -1157,6 +1157,10 @@ gui-import-cancelled = L’import a été annulé : { $photos } photos importée
 
 gui-import-metadata = { $photos } photos ont reçu leurs notes, étiquettes ou mots-clés de l’importateur
 
+gui-import-no-library = Aucune bibliothèque n’est ouverte : lancez Helios avec une bibliothèque (--vault FICHIER) pour importer des photos
+
+gui-import-no-library-error = Aucune bibliothèque n’est ouverte : { $error }
+
 gui-importer-folder = dossier
 
 gui-importer-file = fichier
@@ -1298,6 +1302,8 @@ gui-library-missing-note = Manquante : son fichier n’est plus où il était, e
 gui-library-plug-in = Branchez { $volume } pour ouvrir cette photo (vu pour la dernière fois le { $date } sur { $node })
 
 gui-library-badge-offline = hors ligne
+
+gui-library-cannot-open = La bibliothèque ne peut pas être ouverte : { $error }
 
 gui-library-badge-missing = manquante
 
