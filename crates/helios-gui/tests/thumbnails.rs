@@ -157,3 +157,109 @@ fn test_images() -> Option<PathBuf> {
     );
     dir.join("mire1.cr2").is_file().then_some(dir)
 }
+
+#[test]
+fn startup_does_not_wait_for_the_cache_index() {
+    let dir = scratch("index");
+    let vault_file = dir.join("library.helios");
+    // A cache seen before, with one entry.
+    let thumbs = helios_thumbs::cache_dir(&vault_file);
+    let cached = helios_thumbs::Rgb8 {
+        width: SMALL,
+        height: 170,
+        pixels: vec![120; (SMALL * 170 * 3) as usize],
+    };
+    ThumbCache::open(&thumbs, 1 << 30)
+        .unwrap()
+        .put(&Key::preview("seen"), SMALL, &cached)
+        .unwrap();
+    // Opened as the interface thread opens it: the folder is not listed.
+    let cache = helios_gui::thumbnails::open_cache(&vault_file, 1 << 30).unwrap();
+    assert!(
+        !cache.listed(),
+        "the interface thread does not list the cache"
+    );
+    let entries = vec![Entry {
+        id: "seen".into(),
+        name: "seen.cr2".into(),
+        presence: helios_vault::Presence::Offline,
+        ..Entry::default()
+    }];
+    let mut shell = Shell::new(helios_panels(), None);
+    shell.set_library(entries);
+    let mut h = headless::harness(shell, vec2(1024.0, 700.0));
+    // The grid draws with the index not there yet: its cell waits.
+    for _ in 0..3 {
+        h.step();
+    }
+    assert!(!h.state().library().has_thumbnail("seen"));
+    assert!(!cache.listed());
+    // The pool lists it, then the cell fills from it.
+    let loader = helios_gui::thumbnails::start(h.state(), Some(cache.clone()), &[], |_| {});
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while !h.state().library().has_thumbnail("seen") {
+        assert!(Instant::now() < deadline, "the thumbnail within 30 s");
+        h.step();
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(cache.listed());
+    assert!(!h.state().library().has_placeholder("seen"));
+    drop(loader);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn compare_shows_the_large_entry_first() {
+    let dir = scratch("large");
+    let cache = Arc::new(ThumbCache::open(&dir.join("thumbs"), 1 << 30).unwrap());
+    let large = helios_thumbs::Rgb8 {
+        width: helios_thumbs::LARGE,
+        height: 683,
+        pixels: vec![100; (helios_thumbs::LARGE * 683 * 3) as usize],
+    };
+    for id in ["a", "b"] {
+        cache
+            .put(&Key::preview(id), helios_thumbs::LARGE, &large)
+            .unwrap();
+    }
+    // JPEGs: no render of a head version replaces the large entry.
+    let entries: Vec<Entry> = ["a", "b"]
+        .iter()
+        .map(|id| Entry {
+            id: (*id).into(),
+            name: format!("{id}.jpg"),
+            ..Entry::default()
+        })
+        .collect();
+    let mut shell = Shell::new(helios_panels(), None);
+    shell.set_library(entries);
+    shell
+        .library_mut()
+        .select_ids(&["a".to_string(), "b".to_string()]);
+    let loader = helios_gui::thumbnails::start(&shell, Some(cache), &[], |_| {});
+    let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+    h.state_mut()
+        .run(
+            "helios.compare.focus",
+            serde_json::Value::Null,
+            helios_shell::commands::Origin::User,
+        )
+        .expect("the Compare panel");
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        h.step();
+        let shown = {
+            let library = h.state().library();
+            (library.large_thumbnail("a"), library.large_thumbnail("b"))
+        };
+        if let (Some(a), Some(b)) = shown {
+            assert_eq!(a[0].max(a[1]), helios_thumbs::LARGE as usize);
+            assert_eq!(b[0].max(b[1]), helios_thumbs::LARGE as usize);
+            break;
+        }
+        assert!(Instant::now() < deadline, "the large entries within 30 s");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    drop(loader);
+    let _ = std::fs::remove_dir_all(&dir);
+}

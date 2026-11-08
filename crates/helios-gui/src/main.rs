@@ -1620,9 +1620,19 @@ fn main() -> Result<(), String> {
                     .ok()
             }),
     );
+    // The grids' thumbnail textures, within their budget.
+    let texture_budget = vault
+        .as_ref()
+        .map_or(Ok(None), |v| v.config_layer("user"))
+        .and_then(|layer| helios_gui::thumb_textures::budget(layer.as_deref()))
+        .unwrap_or_else(|e| {
+            warn(&format!("the user's settings: {e}"));
+            helios_gui::thumb_textures::DEFAULT_BUDGET
+        });
     let ran = builder
         .run_native("helios-gui", options, move |mut shell, cc| {
             start::mark("window open, application built (plugins, fonts)");
+            shell.library_mut().set_texture_budget(texture_budget);
             if let Some(rs) = cc.wgpu_render_state.as_ref() {
                 shell.attach_gpu(rs);
             }

@@ -17,6 +17,15 @@ pub const CACHE_LIMIT: &str = "system.cache.thumbnails";
 /// # Errors
 /// The layer does not read.
 pub fn cache_limit(user_layer: Option<&str>) -> Result<u64, String> {
+    setting_mib(user_layer, CACHE_LIMIT)
+}
+
+/// A setting counted in MiB, in bytes, from the user's settings layer
+/// (its TOML text; none: the default).
+///
+/// # Errors
+/// The layer does not read.
+pub fn setting_mib(user_layer: Option<&str>, key: &str) -> Result<u64, String> {
     let mut config = helios_config::Config::new(helios_config::Schema::core());
     if let Some(text) = user_layer {
         config
@@ -29,23 +38,27 @@ pub fn cache_limit(user_layer: Option<&str>) -> Result<u64, String> {
                     .join("; ")
             })?;
     }
-    Ok((config.number(CACHE_LIMIT).max(1.0) as u64) * 1024 * 1024)
+    Ok((config.number(key).max(1.0) as u64) * 1024 * 1024)
 }
 
 /// Opens the cache of the library whose catalogue is `vault_file`
-/// (`.helios/thumbs` beside it).
+/// (`.helios/thumbs` beside it), without listing its folder: the pool's
+/// threads list it, so the interface thread never waits for it.
 ///
 /// # Errors
 /// Its folder cannot be made.
 pub fn open_cache(vault_file: &Path, limit: u64) -> Result<Arc<ThumbCache>, String> {
     let file = std::path::absolute(vault_file).unwrap_or_else(|_| vault_file.to_path_buf());
-    ThumbCache::open(&helios_thumbs::cache_dir(&file), limit).map(Arc::new)
+    ThumbCache::open_unlisted(&helios_thumbs::cache_dir(&file), limit).map(Arc::new)
 }
 
 /// Starts filling the library's thumbnails: every image without one, the
 /// cache first (an offline photo shows its cached thumbnail), its file
 /// read on a miss (`files`: where each image's file is), the cells in
-/// view first. The pool stops when the returned loader is dropped.
+/// view first. Cells whose textures were freed (beyond the textures'
+/// budget) are read again from the cache when they come back in view;
+/// Compare asks the cache's large entries for its first paint. The pool
+/// stops when the returned loader is dropped.
 pub fn start(
     shell: &Shell,
     cache: Option<Arc<ThumbCache>>,
@@ -58,6 +71,7 @@ pub fn start(
         helios_thumbs::workers(),
         move |id, outcome| match outcome {
             Outcome::Thumb(rgb) => sink.send_srgb(id.to_string(), rgb),
+            Outcome::Large(rgb) => sink.send_large(id.to_string(), rgb),
             Outcome::NoPreview | Outcome::Unavailable => sink.send_no_preview(id.to_string()),
             Outcome::Failed(e) => {
                 warn(&format!("no thumbnail for {id}: {e}"));
@@ -81,5 +95,6 @@ pub fn start(
     // The cells already in view, then each change of them.
     loader.prefer(&library.in_view());
     library.set_on_view(loader.preferrer());
+    library.set_on_large(loader.larger());
     loader
 }

@@ -173,8 +173,41 @@ crate, used by the library (`helios_gui::thumbnails`):
   page cache) took about 19 ms, against 360 ms on average for the old
   read in the baseline; a cache hit about 0.8 ms.
 
-Still open: textures are never freed (step 3, the virtualised grids, with
-the texture budget), and thumbnails are still the embedded previews, not
-renders of the edit (step 4, the render queue, which replaces cache
-entries by renders under their version's key and takes over the pool's
-ordering).
+**Step 3, virtualised grids: built (2026-11-08).**
+
+- **A texture budget** (`system.cache.textures`, 512 MiB by default;
+  `helios_gui::thumb_textures`): the grid, the filmstrip and Compare
+  mark each texture they draw. Beyond the budget, the textures drawn
+  longest ago are freed (never those of the cells in view); a thumbnail
+  that arrives out of view, beyond the budget, is not uploaded. A
+  placeholder's texture is shared and not counted.
+- **Asked again from the disk cache:** after each pass the library asks
+  the pool for the cells drawn without a texture, then, when the cells in
+  view changed, a screen's worth after and before them. The pool
+  (`Loader::prefer`) moves those queued to the front and queues again
+  those it read already: a cache hit, not a file read.
+- **The cache index off the interface thread:** `helios-gui` opens the
+  cache with `ThumbCache::open_unlisted` (the folder made, not listed);
+  the pool's threads list it first (`ThumbCache::list`), and every
+  lookup waits for the listing. The grid shows its waiting cells
+  meanwhile.
+- **Compare's first paint:** each image shown with no render of its head
+  version asks the pool for its 1024 px entry (`Loader::large`, before
+  any other job: the cache, else the file, stored); Compare draws it
+  until the render lands, then frees it. The loupe (the image viewport)
+  does not use it yet: its first frame is still the engine's.
+- **Tested** without timings: `helios-gui`'s `thumb_budget` scrolls a
+  10,000-image grid through a fake pool and cache (textures under the
+  budget at every frame, the cells in view asked before the margin, the
+  first screen freed, then read back from the cache, never from its file
+  again); `thumbnails` checks that startup does not list the cache and
+  that Compare shows the 1024 px entries. Timing stays with `thumb-bench`.
+
+Still open: the import window's grid does not share this code (its cells
+are glanced, not hashed, so they have no cache key); the pool still reads
+every image at startup, decoding cache hits that are then not uploaded;
+thumbnails are still the embedded previews, not renders of the edit
+(step 4, the render queue, which replaces cache entries by renders under
+their version's key and takes over the pool's ordering). Cache keys go
+through `helios_thumbs::key_of`, to move to the image map's content
+identity.

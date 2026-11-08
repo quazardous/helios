@@ -51,6 +51,7 @@ pub mod status_items;
 pub mod templates;
 pub mod theme;
 pub mod theme_editor;
+pub mod thumb_textures;
 pub mod thumbnails;
 pub mod tips;
 pub mod viewport;

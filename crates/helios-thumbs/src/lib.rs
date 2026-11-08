@@ -30,6 +30,13 @@ pub struct Rgb8 {
     pub pixels: Vec<u8>,
 }
 
+/// The cache key of an image's thumbnail, from its id. Every lookup goes
+/// through it: keys move to the image map's content identity later (see
+/// `docs/design/image-map.md`).
+pub fn key_of(id: &str) -> Key {
+    Key::preview(id)
+}
+
 /// The cache's folder for a library whose catalogue is `vault_file`:
 /// `.helios/thumbs` beside it.
 pub fn cache_dir(vault_file: &std::path::Path) -> std::path::PathBuf {

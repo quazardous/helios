@@ -247,6 +247,19 @@ pub const SETTINGS: &[Setting] = &[
         },
     },
     Setting {
+        key: "system.cache.textures",
+        concern: Concern::Machine,
+        label: "Thumbnail textures",
+        about: "Graphics memory the grids' thumbnails may hold; beyond it, the thumbnails out of view are freed, those seen longest ago first, and read back from the thumbnail cache when they come back.",
+        kind: Kind::Number {
+            min: 16.0,
+            max: 65_536.0,
+            default: 512.0,
+            unit: "MiB",
+            integer: true,
+        },
+    },
+    Setting {
         key: "system.map.exclude",
         concern: Concern::Machine,
         label: "Places never recorded",

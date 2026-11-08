@@ -5,8 +5,8 @@
 use std::collections::HashMap;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Condvar, Mutex, MutexGuard};
 use std::time::SystemTime;
 
 use image::RgbImage;
@@ -73,9 +73,18 @@ struct Entry {
     used: u64,
 }
 
+/// Whether the folder has been listed into the index.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Listing {
+    NotYet,
+    Running,
+    Done,
+}
+
 struct Index {
     entries: HashMap<PathBuf, Entry>,
     total: u64,
+    listing: Listing,
 }
 
 /// The cache: a folder of JPEG thumbnails.
@@ -83,6 +92,8 @@ pub struct ThumbCache {
     dir: PathBuf,
     limit: u64,
     index: Mutex<Index>,
+    /// Signalled once the folder is listed.
+    listed: Condvar,
     clock: AtomicU64,
 }
 
@@ -98,8 +109,54 @@ impl ThumbCache {
     /// # Errors
     /// The folder cannot be made.
     pub fn open(dir: &Path, limit: u64) -> Result<ThumbCache, String> {
+        let cache = ThumbCache::open_unlisted(dir, limit)?;
+        cache.list();
+        Ok(cache)
+    }
+
+    /// Opens (creating it) the cache in `dir` without listing its folder:
+    /// what the interface thread does at startup. The folder is listed by
+    /// [`ThumbCache::list`] (the pool's threads call it first); until then
+    /// every lookup waits for it, except [`ThumbCache::listed`].
+    ///
+    /// # Errors
+    /// The folder cannot be made.
+    pub fn open_unlisted(dir: &Path, limit: u64) -> Result<ThumbCache, String> {
         std::fs::create_dir_all(dir)
             .map_err(|e| format!("cannot make the thumbnail cache {}: {e}", dir.display()))?;
+        Ok(ThumbCache {
+            dir: dir.to_path_buf(),
+            limit,
+            index: Mutex::new(Index {
+                entries: HashMap::new(),
+                total: 0,
+                listing: Listing::NotYet,
+            }),
+            listed: Condvar::new(),
+            clock: AtomicU64::new(nanos(SystemTime::now())),
+        })
+    }
+
+    /// Whether the folder has been listed (never waits).
+    pub fn listed(&self) -> bool {
+        self.index.lock().expect("the cache's index").listing == Listing::Done
+    }
+
+    /// Lists the folder into the index, once: each entry last used when
+    /// its file last changed. A second caller waits for the first.
+    pub fn list(&self) {
+        {
+            let mut index = self.index.lock().expect("the cache's index");
+            match index.listing {
+                Listing::Done => return,
+                Listing::Running => {
+                    drop(self.ready_from(index));
+                    return;
+                }
+                Listing::NotYet => index.listing = Listing::Running,
+            }
+        }
+        let dir = &self.dir;
         let mut entries = HashMap::new();
         let mut total = 0;
         let mut latest = 0;
@@ -128,14 +185,27 @@ impl ThumbCache {
                 );
             }
         }
-        let cache = ThumbCache {
-            dir: dir.to_path_buf(),
-            limit,
-            index: Mutex::new(Index { entries, total }),
-            clock: AtomicU64::new(latest.max(nanos(SystemTime::now()))),
-        };
-        cache.evict(None);
-        Ok(cache)
+        self.clock.fetch_max(latest, Ordering::Relaxed);
+        {
+            let mut index = self.index.lock().expect("the cache's index");
+            index.entries = entries;
+            index.total = total;
+            index.listing = Listing::Done;
+        }
+        self.listed.notify_all();
+        self.evict(None);
+    }
+
+    /// The index, once the folder is listed.
+    fn ready(&self) -> MutexGuard<'_, Index> {
+        self.ready_from(self.index.lock().expect("the cache's index"))
+    }
+
+    fn ready_from<'a>(&self, mut index: MutexGuard<'a, Index>) -> MutexGuard<'a, Index> {
+        while index.listing != Listing::Done {
+            index = self.listed.wait(index).expect("the cache's index");
+        }
+        index
     }
 
     pub fn dir(&self) -> &Path {
@@ -148,7 +218,7 @@ impl ThumbCache {
 
     /// The bytes the entries take, and how many there are.
     pub fn usage(&self) -> (u64, usize) {
-        let index = self.index.lock().expect("the cache's index");
+        let index = self.ready();
         (index.total, index.entries.len())
     }
 
@@ -158,7 +228,7 @@ impl ThumbCache {
 
     /// Whether an entry is there.
     pub fn contains(&self, key: &Key, size: u32) -> bool {
-        let index = self.index.lock().expect("the cache's index");
+        let index = self.ready();
         index.entries.contains_key(&key.file(size))
     }
 
@@ -168,7 +238,7 @@ impl ThumbCache {
         let rel = key.file(size);
         let tick = self.tick();
         {
-            let mut index = self.index.lock().expect("the cache's index");
+            let mut index = self.ready();
             index.entries.get_mut(&rel)?.used = tick;
         }
         let path = self.dir.join(&rel);
@@ -226,6 +296,9 @@ impl ThumbCache {
     /// # Errors
     /// The file cannot be written.
     pub fn put_jpeg(&self, key: &Key, size: u32, jpeg: &[u8]) -> Result<(), String> {
+        // Not before the folder is listed: the listing removes what it
+        // takes for an interrupted write.
+        drop(self.ready());
         let rel = key.file(size);
         let path = self.dir.join(&rel);
         if let Some(parent) = path.parent() {

@@ -43,6 +43,8 @@ use std::sync::{Arc, OnceLock};
 
 use egui::{Color32, ColorImage, TextureHandle, Ui};
 use egui_pop::api::AppHandle;
+
+use crate::thumb_textures::Resident;
 use egui_pop::views::library::compare::{CompareState, CompareView, Pane};
 use egui_pop::views::library::filter::{Candidate, Filter, SearchField, SearchState};
 use egui_pop::views::library::marks::{ColorLabels, FlagToggle, RatingStars};
@@ -88,8 +90,11 @@ pub struct ThumbnailSink {
     wake: Arc<Wake>,
 }
 
-/// What is told the grid's cells in view (see [`Library::set_on_view`]).
+/// What is told the thumbnails wanted (see [`Library::set_on_view`]).
 type OnView = dyn Fn(&[String]);
+
+/// What is asked an image's large thumbnail (see [`Library::set_on_large`]).
+type OnLarge = dyn Fn(&str);
 
 /// A thumbnail on its way to the window.
 enum Arrival {
@@ -97,6 +102,8 @@ enum Arrival {
     Linear(Image),
     /// 8-bit sRGB, as the thumbnail cache holds it.
     Srgb(helios_thumbs::Rgb8),
+    /// The cache's large entry (Compare's first paint), 8-bit sRGB.
+    Large(helios_thumbs::Rgb8),
     /// The file has no readable preview (or no copy at hand and nothing
     /// cached): its cell shows the placeholder.
     NoPreview,
@@ -131,6 +138,13 @@ impl ThumbnailSink {
     /// fast read); `false` once the library is gone.
     pub fn send_srgb(&self, id: String, thumb: helios_thumbs::Rgb8) -> bool {
         self.arrive(id, Arrival::Srgb(thumb)).is_ok()
+    }
+
+    /// Sends an image's large thumbnail (the cache's 1024 px entry):
+    /// Compare draws it until the render of its head version lands;
+    /// `false` once the library is gone.
+    pub fn send_large(&self, id: String, thumb: helios_thumbs::Rgb8) -> bool {
+        self.arrive(id, Arrival::Large(thumb)).is_ok()
     }
 
     /// Says an image has no thumbnail to show: its cell shows the
@@ -601,14 +615,23 @@ pub struct Library {
     activated: Option<String>,
     sink: ThumbnailSink,
     receiver: Receiver<(String, Arrival)>,
-    textures: HashMap<String, TextureHandle>,
+    /// The thumbnails' textures, within their budget.
+    textures: Resident,
+    /// The large thumbnails Compare draws until a render lands.
+    larges: HashMap<String, TextureHandle>,
+    /// The large thumbnails asked for, not arrived yet.
+    larges_asked: HashSet<String>,
+    /// Asked an image's large thumbnail.
+    on_large: Option<Box<OnLarge>>,
+    /// The grid's cells in view changed since the margin was asked.
+    view_changed: std::cell::Cell<bool>,
     /// The placeholders' textures, by file type (`CR2`, `?`).
     placeholders: HashMap<String, TextureHandle>,
     /// The grid's cells in view at its last pass (the thumbnail benchmark
     /// reads them: `examples/thumb_bench.rs`).
     in_view: RefCell<Vec<String>>,
-    /// Told the cells in view when they change: the thumbnail pool reads
-    /// those first.
+    /// Told the thumbnails wanted (the cells in view without one, then a
+    /// margin around them): the thumbnail pool reads those first.
     on_view: Option<Box<OnView>>,
     heads: Heads,
     /// Where each image's file is, by id: what a copy of images names.
@@ -664,7 +687,11 @@ impl Default for Library {
                 wake: Arc::default(),
             },
             receiver,
-            textures: HashMap::new(),
+            textures: Resident::default(),
+            larges: HashMap::new(),
+            larges_asked: HashSet::new(),
+            on_large: None,
+            view_changed: std::cell::Cell::new(false),
             placeholders: HashMap::new(),
             in_view: RefCell::default(),
             on_view: None,
@@ -853,6 +880,8 @@ impl LibraryItems<String> for Items<'_> {
 /// it is, its thumbnail (a raw's embedded preview) until then.
 struct CompareThumbs<'a> {
     heads: &'a HashMap<String, HeadTexture>,
+    /// The cache's large entries, drawn until a render lands.
+    larges: &'a HashMap<String, TextureHandle>,
     thumbs: Thumbs<'a>,
 }
 
@@ -866,23 +895,34 @@ impl ThumbSource<String> for CompareThumbs<'_> {
                     size: [w as u32, ht as u32],
                 }
             }
-            None => self.thumbs.thumb(key, size),
+            None => match self.larges.get(key) {
+                Some(t) => {
+                    let [w, h] = t.size();
+                    Thumb::Ready {
+                        texture: t.id(),
+                        size: [w as u32, h as u32],
+                    }
+                }
+                None => self.thumbs.thumb(key, size),
+            },
         }
     }
 }
 
 /// The thumbnails received so far.
 struct Thumbs<'a> {
-    textures: &'a HashMap<String, TextureHandle>,
+    textures: &'a Resident,
+    /// The pass drawn (what a texture's last use counts).
+    pass: u64,
     /// Where the cells the grid builds are recorded, when it does.
     in_view: Option<&'a RefCell<Vec<String>>>,
-    /// Told when the cells in view change.
-    on_view: Option<&'a OnView>,
+    /// Set when the cells in view change.
+    changed: Option<&'a std::cell::Cell<bool>>,
 }
 
 impl ThumbSource<String> for Thumbs<'_> {
     fn thumb(&self, key: &String, _size: u32) -> Thumb {
-        match self.textures.get(key) {
+        match self.textures.draw(key, self.pass) {
             Some(t) => {
                 let [w, h] = t.size();
                 Thumb::Ready {
@@ -899,8 +939,8 @@ impl ThumbSource<String> for Thumbs<'_> {
             let mut in_view = in_view.borrow_mut();
             if in_view.as_slice() != keys {
                 *in_view = keys.to_vec();
-                if let Some(on_view) = self.on_view {
-                    on_view(keys);
+                if let Some(changed) = self.changed {
+                    changed.set(true);
                 }
             }
         }
@@ -1236,10 +1276,82 @@ impl Library {
         self.sink.clone()
     }
 
-    /// Told the grid's cells in view each time they change (the
-    /// thumbnail pool reads those first).
+    /// Told the thumbnails wanted, in the order wanted: the cells in view
+    /// without a texture (one never received, or freed beyond the
+    /// textures' budget), then a margin of a screen around them. The
+    /// thumbnail pool reads those first, from its cache.
     pub fn set_on_view(&mut self, on_view: impl Fn(&[String]) + 'static) {
         self.on_view = Some(Box::new(on_view));
+        // A new pool: what the last one was asked is asked again.
+        self.textures.clear_requests();
+        self.larges_asked.clear();
+    }
+
+    /// Asked an image's large thumbnail (the cache's 1024 px entry):
+    /// Compare's first paint, before the render of its head version.
+    pub fn set_on_large(&mut self, on_large: impl Fn(&str) + 'static) {
+        self.on_large = Some(Box::new(on_large));
+        self.larges_asked.clear();
+    }
+
+    /// The thumbnails' textures budget, in bytes
+    /// (`system.cache.textures`).
+    pub fn set_texture_budget(&mut self, bytes: u64) {
+        self.textures.set_budget(bytes);
+    }
+
+    /// The large thumbnail Compare draws for an image until its render
+    /// lands: its size, when one is held.
+    pub fn large_thumbnail(&self, id: &str) -> Option<[usize; 2]> {
+        self.larges.get(id).map(TextureHandle::size)
+    }
+
+    /// After a pass drawing thumbnails: asks those drawn without one (and,
+    /// when the grid's cells in view changed, a margin around them), then
+    /// frees what the budget cannot hold.
+    fn after_pass(&mut self, ctx: &egui::Context) {
+        let mut wanted = self.textures.take_missing();
+        if self.view_changed.replace(false) {
+            let margin = self.margin();
+            wanted.extend(self.textures.ask(margin));
+        }
+        if !wanted.is_empty()
+            && let Some(on_view) = &self.on_view
+        {
+            on_view(&wanted);
+        }
+        self.textures.evict(ctx.cumulative_pass_nr());
+    }
+
+    /// The images around the grid's cells in view, a screen's worth on
+    /// each side, those after first.
+    fn margin(&self) -> Vec<String> {
+        let in_view = self.in_view.borrow();
+        if in_view.is_empty() {
+            return Vec::new();
+        }
+        let shown: HashSet<usize> = in_view
+            .iter()
+            .filter_map(|k| self.index.get(k).copied())
+            .collect();
+        let mut first = usize::MAX;
+        let mut last = 0;
+        for (pos, e) in self.order.iter().enumerate() {
+            if shown.contains(e) {
+                first = first.min(pos);
+                last = last.max(pos);
+            }
+        }
+        if first == usize::MAX {
+            return Vec::new();
+        }
+        let m = in_view.len();
+        let after = self.order.iter().skip(last + 1).take(m);
+        let before = self.order[first.saturating_sub(m)..first].iter().rev();
+        after
+            .chain(before)
+            .map(|&e| self.entries[e].id.clone())
+            .collect()
     }
 
     /// An image's file type, for its placeholder: its file's extension,
@@ -1255,9 +1367,11 @@ impl Library {
 
     /// Whether this image's cell shows the placeholder (no preview).
     pub fn has_placeholder(&self, id: &str) -> bool {
-        self.textures
-            .get(id)
-            .is_some_and(|t| self.placeholders.values().any(|p| p.id() == t.id()))
+        self.textures.is_shared(id)
+            && self
+                .textures
+                .get(id)
+                .is_some_and(|t| self.placeholders.values().any(|p| p.id() == t.id()))
     }
 
     /// Where renders of images' head versions are sent, from any thread.
@@ -1372,15 +1486,21 @@ impl Library {
         self.in_view.borrow().clone()
     }
 
-    /// The thumbnails' textures held, and their bytes.
+    /// The thumbnails' textures held (the placeholders, shared, left
+    /// out), and their bytes.
     pub fn thumbnail_textures(&self) -> (usize, u64) {
-        let bytes = self.textures.values().map(|t| t.byte_size() as u64).sum();
-        (self.textures.len(), bytes)
+        self.textures.usage()
     }
 
-    /// Whether the thumbnail of this image has been received.
+    /// The thumbnails' textures budget, in bytes.
+    pub fn texture_budget(&self) -> u64 {
+        self.textures.budget()
+    }
+
+    /// Whether this image's thumbnail is held (received, and not freed
+    /// since).
     pub fn has_thumbnail(&self, id: &str) -> bool {
-        self.textures.contains_key(id)
+        self.textures.contains(id)
     }
 
     pub fn take_changes(&mut self) -> Vec<Change> {
@@ -1731,10 +1851,34 @@ impl Library {
         // drain sets it again and wakes the window.
         wake.pending.store(false, Ordering::SeqCst);
         let mut any = false;
+        let pass = ui.ctx().cumulative_pass_nr();
         while let Ok((id, arrival)) = self.receiver.try_recv() {
+            // RGBA, as the texture holds it.
+            let bytes = |w: u32, h: u32| u64::from(w) * u64::from(h) * 4;
             let picture = match arrival {
                 Arrival::Linear(image) => thumbnail(&image),
-                Arrival::Srgb(rgb) => rgb_image(&rgb),
+                Arrival::Srgb(rgb) => {
+                    if !self.textures.accepts(&id, bytes(rgb.width, rgb.height)) {
+                        // Out of view, beyond the budget: read again from
+                        // the cache when its cell comes in view.
+                        self.textures.dropped(&id);
+                        continue;
+                    }
+                    rgb_image(&rgb)
+                }
+                Arrival::Large(rgb) => {
+                    self.larges_asked.remove(&id);
+                    if !self.heads.renders.contains_key(&id) {
+                        let texture = ui.ctx().load_texture(
+                            format!("helios.library.large.{id}"),
+                            rgb_image(&rgb),
+                            egui::TextureOptions::LINEAR,
+                        );
+                        self.larges.insert(id, texture);
+                        any = true;
+                    }
+                    continue;
+                }
                 Arrival::NoPreview => {
                     let kind = self.file_type(&id);
                     let texture = self
@@ -1748,7 +1892,7 @@ impl Library {
                             )
                         })
                         .clone();
-                    self.textures.insert(id, texture);
+                    self.textures.insert(id, texture, true, pass);
                     any = true;
                     continue;
                 }
@@ -1758,7 +1902,7 @@ impl Library {
                 picture,
                 egui::TextureOptions::LINEAR,
             );
-            self.textures.insert(id, texture);
+            self.textures.insert(id, texture, false, pass);
             any = true;
         }
         any |= self.receive_heads(ui.ctx());
@@ -1903,8 +2047,9 @@ impl Library {
             };
             let thumbs = Thumbs {
                 textures: &self.textures,
+                pass: ui.ctx().cumulative_pass_nr(),
                 in_view: Some(&self.in_view),
-                on_view: self.on_view.as_deref(),
+                changed: Some(&self.view_changed),
             };
             let mut grid = ThumbGrid::new("grid").label(label).keymap(keymap);
             if let Some(app) = &self.app {
@@ -1912,6 +2057,7 @@ impl Library {
             }
             grid.show(ui, &mut self.state, &items, &thumbs)
         };
+        self.after_pass(ui.ctx());
         crate::name_rect(ui.ctx(), "helios.library.grid", out.response.rect);
         self.presence_hover(ui, "grid");
         // Its context menu, a secondary click anywhere on it (a cell
@@ -1987,8 +2133,9 @@ impl Library {
             };
             let thumbs = Thumbs {
                 textures: &self.textures,
+                pass: ui.ctx().cumulative_pass_nr(),
                 in_view: None,
-                on_view: None,
+                changed: None,
             };
             let mut strip = ThumbGrid::filmstrip("strip").keymap(keymap).height(height);
             if let Some(app) = &self.app {
@@ -1996,6 +2143,7 @@ impl Library {
             }
             strip.show(ui, &mut self.state, &items, &thumbs)
         };
+        self.after_pass(ui.ctx());
         crate::name_rect(ui.ctx(), "helios.library.strip", out.response.rect);
         self.presence_hover(ui, "strip");
         self.bind_clipboard(ui.ctx(), out.response.rect);
@@ -2047,13 +2195,16 @@ impl Library {
         let pane = ui.available_size() * ui.ctx().pixels_per_point();
         let side = pane.x / keys.len() as f32;
         self.ask_heads(&keys, side.max(pane.y).ceil() as u32);
+        self.ask_larges(&keys);
         let out = {
             let thumbs = CompareThumbs {
                 heads: &self.heads.renders,
+                larges: &self.larges,
                 thumbs: Thumbs {
                     textures: &self.textures,
+                    pass: ui.ctx().cumulative_pass_nr(),
                     in_view: None,
-                    on_view: None,
+                    changed: None,
                 },
             };
             CompareView::new("helios.compare")
@@ -2062,11 +2213,32 @@ impl Library {
                 .show(ui, &mut self.compare.state, &panes, &thumbs)
         };
         crate::name_rect(ui.ctx(), "helios.library.compare", out.response.rect);
+        self.after_pass(ui.ctx());
         if let Some(k) = out.best {
             self.best = Some(k);
         }
         if keep && let Some(best) = best {
             self.keep_best(&best, &keys);
+        }
+    }
+
+    /// Compare's first paint: the cache's large entry of each image shown
+    /// with no render of its head version yet, asked once. The large
+    /// entries of images no longer shown, or rendered, are freed.
+    fn ask_larges(&mut self, keys: &[String]) {
+        let renders = &self.heads.renders;
+        self.larges
+            .retain(|k, _| keys.contains(k) && !renders.contains_key(k));
+        let Some(on_large) = &self.on_large else {
+            return;
+        };
+        for k in keys {
+            if !renders.contains_key(k)
+                && !self.larges.contains_key(k)
+                && self.larges_asked.insert(k.clone())
+            {
+                on_large(k);
+            }
         }
     }
 

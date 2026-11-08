@@ -233,12 +233,79 @@ fn a_miss_fills_the_large_entry_after() {
     }]);
     rx.recv_timeout(Duration::from_secs(30)).unwrap();
     let deadline = std::time::Instant::now() + Duration::from_secs(30);
-    while loader.large("b").is_none() {
+    while !cache.contains(&Key::preview("b"), LARGE) {
         assert!(std::time::Instant::now() < deadline, "no large entry");
         std::thread::sleep(Duration::from_millis(20));
     }
-    let large = loader.large("b").unwrap();
+    // Asked, it is sent from the cache.
+    loader.large("b");
+    let (id, outcome) = rx.recv_timeout(Duration::from_secs(30)).unwrap();
+    assert_eq!(id, "b");
+    let Outcome::Large(large) = outcome else {
+        panic!("the large entry, not {outcome:?}");
+    };
     assert_eq!(large.width.max(large.height), LARGE);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn opening_the_cache_does_not_list_it_the_pool_does() {
+    let dir = scratch("unlisted");
+    let thumbs = dir.join("cache");
+    let thumb = Rgb8 {
+        width: SMALL,
+        height: 100,
+        pixels: vec![90; (SMALL * 100 * 3) as usize],
+    };
+    ThumbCache::open(&thumbs, 1 << 30)
+        .unwrap()
+        .put(&Key::preview("seen"), SMALL, &thumb)
+        .unwrap();
+    // What the interface thread does at startup: nothing is listed.
+    let cache = std::sync::Arc::new(ThumbCache::open_unlisted(&thumbs, 1 << 30).unwrap());
+    assert!(!cache.listed(), "opening does not list the folder");
+    // The pool's threads list it, then serve the entry from it (no file
+    // to read: the thumbnail can only come from the cache).
+    let (tx, rx) = channel();
+    let tx = std::sync::Mutex::new(tx);
+    let loader = Loader::start(Some(cache.clone()), 2, move |id, o| {
+        tx.lock().unwrap().send((id.to_string(), o)).is_ok()
+    });
+    loader.load([Job {
+        id: "seen".into(),
+        path: None,
+    }]);
+    let (_, outcome) = rx.recv_timeout(Duration::from_secs(30)).unwrap();
+    assert!(matches!(outcome, Outcome::Thumb(_)), "{outcome:?}");
+    assert!(cache.listed());
+    assert_eq!(cache.usage().1, 1);
+    drop(loader);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_thumbnail_dropped_is_queued_again_when_preferred() {
+    let dir = scratch("again");
+    let cache = std::sync::Arc::new(ThumbCache::open(&dir.join("cache"), 1 << 30).unwrap());
+    let path = write(&dir, "d.jpg", &gradient_jpeg(600, 400));
+    let (tx, rx) = channel();
+    let tx = std::sync::Mutex::new(tx);
+    let loader = Loader::start(Some(cache), 1, move |id, o| {
+        tx.lock().unwrap().send((id.to_string(), o)).is_ok()
+    });
+    loader.load([Job {
+        id: "d".into(),
+        path: Some(path.clone()),
+    }]);
+    rx.recv_timeout(Duration::from_secs(30)).unwrap();
+    // Its texture freed, its cell back in view: read again, from the
+    // cache (the file gone, only the cache has it).
+    std::fs::remove_file(&path).unwrap();
+    loader.prefer(&["d".to_string()]);
+    let (id, outcome) = rx.recv_timeout(Duration::from_secs(30)).unwrap();
+    assert_eq!(id, "d");
+    assert!(matches!(outcome, Outcome::Thumb(_)), "{outcome:?}");
+    drop(loader);
     let _ = std::fs::remove_dir_all(&dir);
 }
 

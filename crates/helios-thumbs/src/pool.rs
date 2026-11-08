@@ -5,8 +5,8 @@ use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::{Arc, Condvar, Mutex, Weak};
 
-use crate::cache::{Key, ThumbCache};
-use crate::{LARGE, Rgb8, SMALL, read};
+use crate::cache::ThumbCache;
+use crate::{LARGE, Rgb8, SMALL, key_of, read};
 
 /// An image whose thumbnail is wanted, and where its file is (none when
 /// no copy is at hand: an offline or missing photo).
@@ -21,6 +21,9 @@ pub struct Job {
 pub enum Outcome {
     /// The thumbnail, [`SMALL`] pixels on its long side, 8-bit sRGB.
     Thumb(Rgb8),
+    /// The [`LARGE`] entry asked by [`Loader::large`]: Compare's and the
+    /// loupe's first paint.
+    Large(Rgb8),
     /// The file holds nothing readable as a picture.
     NoPreview,
     /// No copy of the file is at hand and the cache has no thumbnail.
@@ -34,11 +37,16 @@ pub enum Outcome {
 pub type Sink = dyn Fn(&str, Outcome) -> bool + Send + Sync;
 
 struct Queue {
+    /// [`LARGE`] entries to show (Compare's first paint): before all.
+    show_large: VecDeque<Job>,
     /// Thumbnails to show, in the order wanted.
     small: VecDeque<Job>,
     /// [`LARGE`] entries to fill once nothing is waiting to be shown.
     large: VecDeque<Job>,
     closed: bool,
+    /// Every image loaded, and where its file is: what
+    /// [`Loader::prefer`] queues again once its thumbnail was dropped.
+    known: HashMap<String, Option<PathBuf>>,
 }
 
 struct Shared {
@@ -61,7 +69,9 @@ pub fn workers() -> usize {
 
 impl Loader {
     /// Starts `threads` threads reading through `cache` (none: every
-    /// thumbnail is read from its file), sending to `sink`.
+    /// thumbnail is read from its file), sending to `sink`. The threads
+    /// list the cache's folder first ([`ThumbCache::list`]), so the
+    /// caller never waits for it.
     pub fn start(
         cache: Option<Arc<ThumbCache>>,
         threads: usize,
@@ -69,7 +79,9 @@ impl Loader {
     ) -> Loader {
         let shared = Arc::new(Shared {
             queue: Mutex::new(Queue {
+                show_large: VecDeque::new(),
                 small: VecDeque::new(),
+                known: HashMap::new(),
                 large: VecDeque::new(),
                 closed: false,
             }),
@@ -89,12 +101,17 @@ impl Loader {
     /// Queues jobs, after those already queued.
     pub fn load(&self, jobs: impl IntoIterator<Item = Job>) {
         let mut queue = self.shared.queue.lock().expect("the pool's queue");
-        queue.small.extend(jobs);
+        for job in jobs {
+            queue.known.insert(job.id.clone(), job.path.clone());
+            queue.small.push_back(job);
+        }
         drop(queue);
         self.shared.ready.notify_all();
     }
 
     /// The images in view, to read before the others (in this order).
+    /// One already read whose thumbnail was dropped (its texture freed) is
+    /// queued again: read back from the cache.
     pub fn prefer(&self, ids: &[String]) {
         prefer(&self.shared, ids);
     }
@@ -110,10 +127,22 @@ impl Loader {
         }
     }
 
-    /// An image's [`LARGE`] thumbnail, when the cache holds it (Compare's
-    /// and the loupe's first paint).
-    pub fn large(&self, id: &str) -> Option<Rgb8> {
-        self.shared.cache.as_ref()?.get(&Key::preview(id), LARGE)
+    /// Asks an image's [`LARGE`] thumbnail (Compare's and the loupe's
+    /// first paint), before any other job: from the cache, else read from
+    /// its file and stored. Sent as [`Outcome::Large`]; nothing is sent
+    /// when there is none.
+    pub fn large(&self, id: &str) {
+        large(&self.shared, id);
+    }
+
+    /// [`Loader::large`] for a hook that must not keep the pool alive.
+    pub fn larger(&self) -> impl Fn(&str) + Send + Sync + 'static {
+        let weak: Weak<Shared> = Arc::downgrade(&self.shared);
+        move |id| {
+            if let Some(shared) = weak.upgrade() {
+                large(&shared, id);
+            }
+        }
     }
 
     /// The jobs still queued (thumbnails to show, large entries to fill).
@@ -134,6 +163,17 @@ fn close(shared: &Shared) {
     shared.ready.notify_all();
 }
 
+fn large(shared: &Shared, id: &str) {
+    let mut queue = shared.queue.lock().expect("the pool's queue");
+    let path = queue.known.get(id).cloned().flatten();
+    queue.show_large.push_back(Job {
+        id: id.to_string(),
+        path,
+    });
+    drop(queue);
+    shared.ready.notify_all();
+}
+
 fn prefer(shared: &Shared, ids: &[String]) {
     let mut queue = shared.queue.lock().expect("the pool's queue");
     let place: HashMap<&str, usize> = ids
@@ -143,10 +183,28 @@ fn prefer(shared: &Shared, ids: &[String]) {
         .collect();
     let mut front: Vec<(usize, Job)> = Vec::new();
     let mut rest = VecDeque::with_capacity(queue.small.len());
-    for job in queue.small.drain(..) {
+    let mut queued = std::collections::HashSet::new();
+    for job in std::mem::take(&mut queue.small) {
         match place.get(job.id.as_str()) {
-            Some(&i) => front.push((i, job)),
+            Some(&i) => {
+                queued.insert(job.id.clone());
+                front.push((i, job));
+            }
             None => rest.push_back(job),
+        }
+    }
+    // Those read already: again, from the cache.
+    for (i, id) in ids.iter().enumerate() {
+        if !queued.contains(id)
+            && let Some(path) = queue.known.get(id)
+        {
+            front.push((
+                i,
+                Job {
+                    id: id.clone(),
+                    path: path.clone(),
+                },
+            ));
         }
     }
     if front.is_empty() {
@@ -159,26 +217,48 @@ fn prefer(shared: &Shared, ids: &[String]) {
     queue.small = small;
 }
 
+/// What a thread does next.
+enum Task {
+    ShowLarge,
+    Small,
+    FillLarge,
+}
+
 fn work(shared: &Shared) {
+    if let Some(cache) = &shared.cache {
+        cache.list();
+    }
     loop {
-        let (job, large) = {
+        let (job, task) = {
             let mut queue = shared.queue.lock().expect("the pool's queue");
             loop {
                 if queue.closed {
                     return;
                 }
+                if let Some(job) = queue.show_large.pop_front() {
+                    break (job, Task::ShowLarge);
+                }
                 if let Some(job) = queue.small.pop_front() {
-                    break (job, false);
+                    break (job, Task::Small);
                 }
                 if let Some(job) = queue.large.pop_front() {
-                    break (job, true);
+                    break (job, Task::FillLarge);
                 }
                 queue = shared.ready.wait(queue).expect("the pool's queue");
             }
         };
-        if large {
-            fill_large(shared, &job);
-        } else if !(shared.sink)(&job.id, small(shared, &job)) {
+        let sent = match task {
+            Task::FillLarge => {
+                fill_large(shared, &job);
+                true
+            }
+            Task::ShowLarge => match show_large(shared, &job) {
+                Some(rgb) => (shared.sink)(&job.id, Outcome::Large(rgb)),
+                None => true,
+            },
+            Task::Small => (shared.sink)(&job.id, small(shared, &job)),
+        };
+        if !sent {
             close(shared);
             return;
         }
@@ -188,7 +268,7 @@ fn work(shared: &Shared) {
 /// A thumbnail to show: from the cache, else read from the file (and
 /// stored, its large entry queued).
 fn small(shared: &Shared, job: &Job) -> Outcome {
-    let key = Key::preview(&job.id);
+    let key = key_of(&job.id);
     if let Some(cache) = &shared.cache
         && let Some(thumb) = cache.get(&key, SMALL)
     {
@@ -226,11 +306,27 @@ fn fill_large(shared: &Shared, job: &Job) {
     let (Some(cache), Some(path)) = (&shared.cache, &job.path) else {
         return;
     };
-    let key = Key::preview(&job.id);
+    let key = key_of(&job.id);
     if cache.contains(&key, LARGE) {
         return;
     }
     if let Ok(Some(thumb)) = read::read(path, LARGE) {
         let _ = cache.put(&key, LARGE, &thumb);
     }
+}
+
+/// A [`LARGE`] thumbnail to show: from the cache, else read from the file
+/// (and stored).
+fn show_large(shared: &Shared, job: &Job) -> Option<Rgb8> {
+    let key = key_of(&job.id);
+    if let Some(cache) = &shared.cache
+        && let Some(rgb) = cache.get(&key, LARGE)
+    {
+        return Some(rgb);
+    }
+    let thumb = read::read(job.path.as_ref()?, LARGE).ok()??;
+    if let Some(cache) = &shared.cache {
+        let _ = cache.put(&key, LARGE, &thumb);
+    }
+    Some(thumb)
 }
