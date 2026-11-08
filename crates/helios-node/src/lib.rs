@@ -56,7 +56,6 @@ use std::sync::Arc;
 use helios_core::{Context, Graph, ModuleKind, ModuleRef, NodeId, Params, Region};
 use helios_decision::Mode;
 use helios_export::Format;
-use helios_photo::CameraInfo;
 use helios_resolve::command::Command;
 use helios_resolve::http::{Api, Http};
 use helios_resolve::{Cached, Resolver, Routed};
@@ -357,8 +356,9 @@ pub struct Loaded {
     /// The file of the first source, when it is read from one: the image
     /// whose edit a node with a vault keeps.
     pub frame_file: Option<PathBuf>,
-    /// The camera of each source loaded from a raw file.
-    pub cameras: BTreeMap<NodeId, CameraInfo>,
+    /// What each source loaded from a file gives the modules reading it
+    /// ([`file_context`]): a raw's camera, a picture's orientation.
+    pub contexts: BTreeMap<NodeId, Context>,
 }
 
 impl Loaded {
@@ -384,19 +384,33 @@ fn upstream(graph: &Graph, id: NodeId, seen: &mut BTreeSet<NodeId>) -> Result<()
     Ok(())
 }
 
-/// Gives every module reading one raw, directly or not, that raw's camera
-/// as context; the others get none.
-pub fn give_cameras(
+/// What a source loaded from a file gives the modules reading it: a
+/// raw's camera ([`helios_photo::CameraInfo::to_context`]), or a picture's EXIF
+/// orientation tag (`photo.orientation`), which a `flip` step at its
+/// default turns the picture by, as the desktop's networks do.
+pub fn file_context(loaded: &helios_load::Loaded) -> Context {
+    match &loaded.camera {
+        Some(camera) => camera.to_context(),
+        None => Context::new().with(
+            helios_photo::camera::fields::ORIENTATION,
+            helios_core::Value::Int(i64::from(loaded.orientation)),
+        ),
+    }
+}
+
+/// Gives every module reading one source loaded from a file, directly or
+/// not, that source's context ([`file_context`]); the others get none.
+pub fn give_contexts(
     graph: &mut Graph,
-    cameras: &BTreeMap<NodeId, CameraInfo>,
+    contexts: &BTreeMap<NodeId, Context>,
 ) -> Result<(), String> {
     let ids: Vec<NodeId> = graph.ids().collect();
     for id in ids {
         let mut seen = BTreeSet::new();
         upstream(graph, id, &mut seen)?;
-        let mut found = seen.iter().filter_map(|s| cameras.get(s));
+        let mut found = seen.iter().filter_map(|s| contexts.get(s));
         let context = match (found.next(), found.next()) {
-            (Some(camera), None) => camera.to_context(),
+            (Some(context), None) => context.clone(),
             _ => Context::new(),
         };
         graph.set_context(id, context).map_err(|e| e.to_string())?;
@@ -419,14 +433,16 @@ pub struct SourceLoaded {
     pub colour: Option<helios_load::Colour>,
 }
 
-/// Gives the source `id` the image of a file: a raw with its camera (the
-/// modules reading it get it as context) or a picture.
+/// Gives the source `id` the image of a file: a raw with its camera or a
+/// picture with its orientation, which the modules reading it get as
+/// context ([`file_context`]).
 pub fn load_source(
     graph: &mut Graph,
-    cameras: &mut BTreeMap<NodeId, CameraInfo>,
+    contexts: &mut BTreeMap<NodeId, Context>,
     id: NodeId,
     loaded: helios_load::Loaded,
 ) -> Result<SourceLoaded, String> {
+    let context = file_context(&loaded);
     let answer = SourceLoaded {
         hash: loaded.hash,
         region: loaded.image.region(),
@@ -437,11 +453,8 @@ pub fn load_source(
     graph
         .set_source(id, loaded.image)
         .map_err(|e| e.to_string())?;
-    match loaded.camera {
-        Some(camera) => cameras.insert(id, camera),
-        None => cameras.remove(&id),
-    };
-    give_cameras(graph, cameras)?;
+    contexts.insert(id, context);
+    give_contexts(graph, contexts)?;
     Ok(answer)
 }
 
@@ -466,7 +479,7 @@ pub fn load_in(mut desc: Description, base: &Path) -> Result<Loaded, String> {
             Some(_) => Err(format!("two nodes named `{name}`")),
         }
     };
-    let mut cameras = BTreeMap::new();
+    let mut contexts = BTreeMap::new();
     let mut frame = None;
     let mut frame_file = None;
     for s in &desc.sources {
@@ -474,14 +487,13 @@ pub fn load_in(mut desc: Description, base: &Path) -> Result<Loaded, String> {
             (Some(synthetic), None) => synthetic,
             (None, Some(file)) => {
                 let loaded = helios_load::load(&base.join(file))?;
+                let context = file_context(&loaded);
                 let id = graph.add_source(&s.name, loaded.image);
                 if frame.is_none() {
                     frame_file = Some(base.join(file));
                 }
                 frame.get_or_insert(id);
-                if let Some(camera) = loaded.camera {
-                    cameras.insert(id, camera);
-                }
+                contexts.insert(id, context);
                 add(&s.name, id)?;
                 continue;
             }
@@ -545,7 +557,7 @@ pub fn load_in(mut desc: Description, base: &Path) -> Result<Loaded, String> {
         resolvers: desc.resolvers,
         frame,
         frame_file,
-        cameras: BTreeMap::new(),
+        contexts: BTreeMap::new(),
     };
     for c in &desc.connections {
         let (from, to) = (loaded.node(&c.from)?, loaded.node(&c.to)?);
@@ -554,8 +566,8 @@ pub fn load_in(mut desc: Description, base: &Path) -> Result<Loaded, String> {
             .connect(from, &c.port, to, &c.input)
             .map_err(|e| e.to_string())?;
     }
-    loaded.cameras = cameras;
-    give_cameras(&mut loaded.graph, &loaded.cameras)?;
+    loaded.contexts = contexts;
+    give_contexts(&mut loaded.graph, &loaded.contexts)?;
     for r in &loaded.renders {
         loaded.node(&r.node)?;
     }

@@ -1973,8 +1973,8 @@ impl Workflows {
                         .with("error", e),
                 )
             })?;
-            let mut cameras = BTreeMap::new();
-            crate::load_source(&mut graph, &mut cameras, source, loaded).map_err(|e| {
+            let mut contexts = BTreeMap::new();
+            crate::load_source(&mut graph, &mut contexts, source, loaded).map_err(|e| {
                 keyed(
                     Message::new(
                         "node-source-refused",

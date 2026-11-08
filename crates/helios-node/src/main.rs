@@ -68,14 +68,14 @@ use std::time::{Duration, Instant};
 use helios_config::{Config, Layer, Schema};
 use helios_core::jobs::{Jobs, Report as JobReport, Start};
 use helios_core::{
-    Bus, Describe, Engine, Event, Graph, JobId, JobState, Message, NodeId, Region, Scheduler,
+    Bus, Context, Describe, Engine, Event, Graph, JobId, JobState, Message, NodeId, Region,
+    Scheduler,
 };
 use helios_decision::Book;
 use helios_inspect::control::ControlRequest;
 use helios_inspect::{Inspector, Listen, new_token, serve_inspector, write_token};
 use helios_node::ExportDesc;
 use helios_node::workflow::runs::{Context as RunsContext, Workflows};
-use helios_photo::CameraInfo;
 use helios_resolve::{Report, Resolver, Settings};
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -246,8 +246,8 @@ struct Node {
     brief: Option<String>,
     /// The first source: decisions look at its region.
     frame: Option<NodeId>,
-    /// The camera of each source holding a raw.
-    cameras: Mutex<BTreeMap<NodeId, CameraInfo>>,
+    /// What each source loaded from a file gives the modules reading it.
+    contexts: Mutex<BTreeMap<NodeId, Context>>,
     /// The vault keeping the edit, when the node has one.
     edit: Option<NodeEdit>,
     /// Where its exports and batches report (`job.*` on its bus), and
@@ -598,8 +598,8 @@ impl Node {
             Message::new("node-load-refused", "cannot load the image: { $error }").with("error", e)
         })?;
         let mut graph = self.graph.0.write().expect("graph lock");
-        let mut cameras = self.cameras.lock().expect("cameras lock");
-        helios_node::load_source(&mut graph, &mut cameras, id, loaded).map_err(|e| {
+        let mut contexts = self.contexts.lock().expect("contexts lock");
+        helios_node::load_source(&mut graph, &mut contexts, id, loaded).map_err(|e| {
             Message::new(
                 "node-source-refused",
                 "`{ $name }` cannot take the image: { $error }",
@@ -1426,7 +1426,7 @@ fn main() -> ExitCode {
         resolver,
         brief: loaded.brief.clone(),
         frame: loaded.frame,
-        cameras: Mutex::new(loaded.cameras),
+        contexts: Mutex::new(loaded.contexts),
         edit,
         jobs,
         batches: Mutex::new(BTreeMap::new()),

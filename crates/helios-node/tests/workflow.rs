@@ -35,6 +35,13 @@ const DECIDED: &str = r#"{
   "decisions": { "bright": "full_ai" }
 }"#;
 
+/// A picture read through a `flip` step at its default.
+const FLIPPED: &str = r#"{
+  "sources": [{ "name": "src", "synthetic": { "kind": "ramp", "width": 8, "height": 8, "channels": 4 } }],
+  "modules": [{ "name": "turn", "module": "flip" }],
+  "connections": [{ "from": "src", "port": "image", "to": "turn", "input": "input" }]
+}"#;
+
 /// How long a run of a few tiny pictures may take, retries included.
 const DEADLINE: Duration = Duration::from_mins(1);
 
@@ -101,6 +108,28 @@ impl Node {
         })
         .save(&path)
         .unwrap();
+        path
+    }
+
+    /// A 6×3 JPEG tagged with the EXIF orientation `tag`.
+    fn tagged(&self, name: &str, tag: u16) -> PathBuf {
+        use image::ImageEncoder as _;
+        let mut exif = b"II*\0".to_vec();
+        exif.extend(8u32.to_le_bytes());
+        exif.extend(1u16.to_le_bytes());
+        exif.extend(0x0112u16.to_le_bytes());
+        exif.extend(3u16.to_le_bytes());
+        exif.extend(1u32.to_le_bytes());
+        exif.extend(tag.to_le_bytes());
+        exif.extend([0, 0, 0, 0, 0, 0]);
+        let img = image::RgbImage::from_fn(6, 3, |x, _| image::Rgb([(x * 40) as u8, 60, 120]));
+        let mut out = Vec::new();
+        let mut enc = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 90);
+        enc.set_exif_metadata(exif).unwrap();
+        enc.write_image(img.as_raw(), 6, 3, image::ExtendedColorType::Rgb8)
+            .unwrap();
+        let path = self.dir.join(name);
+        std::fs::write(&path, out).unwrap();
         path
     }
 
@@ -584,4 +613,23 @@ fn an_item_asking_is_cancelled_then_asks_again_when_retried() {
     });
     assert_eq!(asking["state"], "active", "{asking}");
     assert_eq!(asking["nodes"]["exp"]["upstream"], 1, "{asking}");
+}
+
+#[test]
+fn a_picture_shot_in_portrait_comes_out_upright() {
+    // Its EXIF orientation reaches the network's `flip` step, as on the
+    // desktop: 6 turns the 6×3 picture to 3×6; an untagged one stays.
+    let node = Node::start("upright", FLIPPED, false);
+    let portrait = node.tagged("portrait.jpg", 6);
+    let level = node.tagged("level.jpg", 1);
+    let out = node.dir.join("out");
+    let run = node.submit(&out, &[&portrait, &level], &[])["run"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let done = node.finished(&run);
+    assert_eq!(done["nodes"]["turn"]["done"], 2, "{done}");
+    let size = |name: &str| image::image_dimensions(out.join(name)).unwrap();
+    assert_eq!(size("portrait.png"), (3, 6));
+    assert_eq!(size("level.png"), (6, 3));
 }
