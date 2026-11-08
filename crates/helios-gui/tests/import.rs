@@ -1118,6 +1118,7 @@ fn without_vault_a_folder_imports_into_the_default_library() {
     let dir = temp("default-library");
     let data = dir.join("data");
     let photos = dir.join("photos");
+    std::fs::create_dir_all(&photos).unwrap();
     put(&photos.join("a.jpg"), Ok(&jpeg("a")), 2);
     put(&photos.join("c.jpg"), Ok(&jpeg("c")), 3);
     // Every variable a platform reads for its data directory points into
