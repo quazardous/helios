@@ -99,7 +99,12 @@ follows its log, then fetches the results to
 duration. The exit code is the job's.
 
 Without `--push`, the box checks the branch out from GitHub: push it first
-(`bench-remote` warns when the local branch differs from `origin`). With
+(`bench-remote` refuses to queue a branch origin does not have, or the
+current branch while it has commits origin lacks). Before queueing it also
+checks, when the box runs this checkout's code, that Cargo.lock is up to
+date and that the changelog fragments are well formed (at most 600
+characters): a few seconds here instead of a failed job on the box.
+`HELIOS_BENCH_NO_PREFLIGHT=1` queues it anyway. With
 `--push`, the tracked and untracked files of the working tree (not the
 ignored ones) are sent to the box and the job runs on them; the target
 cache used is the current branch's when GitHub has it, else main's. Each

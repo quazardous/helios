@@ -799,6 +799,62 @@ fn affected(root: &Path, req: &Request) -> Result<u8, String> {
     Ok(combined(&codes))
 }
 
+/// The exit code of a run refused before it was queued (`EX_DATAERR`).
+const EX_PREFLIGHT: u8 = 65;
+
+/// Checks a few seconds settle here, before a job waits in the queue and
+/// fails on the box: the branch is on origin (and is this checkout's HEAD
+/// when it is the current branch), and, when the box runs this checkout's
+/// code, Cargo.lock is up to date and the changelog fragments are well
+/// formed (the release job refuses them otherwise).
+fn preflight(root: &Path, job: &str, branch: &str, push: bool) -> Result<(), String> {
+    let current = git(root, &["rev-parse", "--abbrev-ref", "HEAD"]);
+    // egui-pop's jobs build egui-pop's branch: Helios's checkout is not what they test
+    let here = !job.starts_with("egui-pop") && (push || current.as_deref() == Some(branch));
+    if !push && !branch.is_empty() {
+        let remote = git(
+            root,
+            &[
+                "rev-parse",
+                "--verify",
+                "--quiet",
+                &format!("refs/remotes/origin/{branch}"),
+            ],
+        )
+        .ok_or_else(|| {
+            format!("origin has no branch `{branch}` here: push it first (or --push)")
+        })?;
+        let unpushed = git(root, &["rev-list", "--count", &format!("{remote}..HEAD")]);
+        if here && unpushed.as_deref().is_some_and(|n| n != "0") {
+            return Err(format!(
+                "this checkout has {} commit(s) origin/{branch} lacks: push the branch first (or --push)",
+                unpushed.unwrap_or_default()
+            ));
+        }
+    }
+    if !here {
+        return Ok(());
+    }
+    let lock = Command::new("cargo")
+        .args(["metadata", "--locked", "--offline", "--format-version", "1"])
+        .current_dir(root)
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .output()
+        .map_err(|e| format!("cargo metadata: {e}"))?;
+    if !lock.status.success() {
+        let why = String::from_utf8_lossy(&lock.stderr);
+        if why.contains("lock file") {
+            return Err(
+                "Cargo.lock is out of date: run `cargo update -w --offline` and commit it".into(),
+            );
+        }
+    }
+    crate::read_fragments(&root.join("changelog.d"))
+        .map_err(|problems| format!("changelog fragments: {}", problems.join("; ")))?;
+    Ok(())
+}
+
 /// `branch=` when none is given: the current branch.
 fn set_branch(root: &Path, req: &mut Request) -> Result<(), String> {
     if req.param("branch").is_none() {
@@ -814,6 +870,15 @@ fn set_branch(root: &Path, req: &mut Request) -> Result<(), String> {
 /// push failed.
 fn prepare(root: &Path, b: &Bench, req: &mut Request) -> Option<u8> {
     let branch = req.param("branch").unwrap_or_default().to_string();
+    if std::env::var_os("HELIOS_BENCH_NO_PREFLIGHT").is_none()
+        && let Err(why) = preflight(root, &req.job, &branch, req.push)
+    {
+        eprintln!(
+            "bench-remote: not queued: {why}\n\
+             bench-remote: (HELIOS_BENCH_NO_PREFLIGHT=1 queues it anyway)"
+        );
+        return Some(EX_PREFLIGHT);
+    }
     if req.push {
         if let Err(e) = push(b, root, false) {
             return Some(unavailable(&e));
