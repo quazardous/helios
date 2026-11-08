@@ -512,3 +512,65 @@ fn a_card_short_of_its_backups_is_said_safe_once_a_backup_ends() {
     });
     assert!(h.state().cards_waiting_for_backups().is_empty());
 }
+
+#[test]
+fn the_volumes_and_the_strategy_are_read_through_read_only_commands() {
+    use helios_gui::shell::{BACKUP_STRATEGY_COMMAND, VOLUME_ROLE_COMMAND, VOLUMES_COMMAND};
+
+    let (mut world, shell) = World::new("admin");
+    let mut h = headless::harness(shell, vec2(1280.0, 900.0));
+    let studio = world.studio.clone();
+    world.plug(&mut h, &[&studio], FIRST + DAY);
+
+    // Declared read-only to egui-pop: what the Settings app may read.
+    let app = h.state().app().handle().clone();
+    let spec = |id: &str| {
+        app.command(&egui_pop::model::ids::CommandId::new(id).unwrap())
+            .unwrap()
+    };
+    assert!(spec(VOLUMES_COMMAND).read_only);
+    assert!(spec(BACKUP_STRATEGY_COMMAND).read_only);
+    assert!(!spec(VOLUME_ROLE_COMMAND).read_only);
+
+    // The volumes as rows: online first, with their state's tone.
+    let answer = h
+        .state_mut()
+        .run(VOLUMES_COMMAND, json!(null), Origin::User)
+        .unwrap();
+    let rows = answer["volumes"].as_array().unwrap();
+    let names: Vec<&str> = rows.iter().filter_map(|r| r["name"].as_str()).collect();
+    assert_eq!(names, ["Studio", "Backup"]);
+    assert_eq!(rows[0]["state"], "online");
+    assert_eq!(rows[1]["state"], "offline");
+    assert!(rows[1]["tone"].is_null());
+    assert_eq!(rows[1]["photos"], 1);
+
+    // A role given through its command is saved.
+    h.state_mut()
+        .run(
+            VOLUME_ROLE_COMMAND,
+            json!({ "volume": "uuid:studio", "role": "backup" }),
+            Origin::User,
+        )
+        .unwrap();
+    assert!(
+        known(&world.vault, "uuid:studio")
+            .roles
+            .contains(&Role::Backup)
+    );
+
+    // The strategy: none, then the default one, its disk plugged in.
+    let none = h
+        .state_mut()
+        .run(BACKUP_STRATEGY_COMMAND, json!(null), Origin::User)
+        .unwrap();
+    assert_eq!(none["set"], false);
+    strategy::save(&world.vault, &Scope::Library, Some(&Strategy::default())).unwrap();
+    let set = h
+        .state_mut()
+        .run(BACKUP_STRATEGY_COMMAND, json!(null), Origin::User)
+        .unwrap();
+    assert_eq!(set["copies"], 1);
+    assert_eq!(set["online"], 1, "the studio disk takes copies now");
+    assert_eq!(set["summary"]["tone"], "success");
+}

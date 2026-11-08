@@ -66,6 +66,11 @@ mod import_choices;
 mod import_window;
 pub use import_window::{FORGET_FOLDER, FORGET_VOLUME};
 mod storage;
+mod storage_admin;
+pub use storage_admin::{
+    STRATEGY as BACKUP_STRATEGY_COMMAND, VOLUME_ROLE as VOLUME_ROLE_COMMAND,
+    VOLUMES as VOLUMES_COMMAND,
+};
 
 /// Where an import's lines are sent: its arguments and a line.
 type ImportLines = std::sync::mpsc::Sender<(Value, Value)>;

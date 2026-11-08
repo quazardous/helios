@@ -1077,6 +1077,8 @@ gui-storage-backup = Backup
 
 gui-storage-backup-copies = copies on
 
+gui-storage-backup-destination = takes copies
+
 gui-storage-backup-none = No backup set up: each photo has one copy, in the Library.
 
 gui-storage-backup-now = Back up now
@@ -1156,6 +1158,10 @@ gui-storage-role-library = Library
 gui-storage-role-scratch = Scratch
 
 gui-storage-roles = For:
+
+gui-storage-strategy-none = No backup set up
+
+gui-storage-summary = { $online } online, { $offline } offline
 
 gui-storage-title = Storage
 

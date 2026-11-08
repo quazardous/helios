@@ -234,6 +234,7 @@ impl Shell {
     /// Reads and writes volumes through `link`: the Storage page, and the
     /// names of offline photos' volumes in the Library.
     pub fn set_storage(&mut self, link: Arc<dyn StorageLink>) {
+        self.register_storage_commands(&link);
         self.storage.link = Some(link);
         self.refresh_volumes();
     }
@@ -391,69 +392,11 @@ impl Shell {
     /// without a strategy ("No backup set up:", the Storage page offered):
     /// "2 copies: Backup disk (plugged in), NAS (not seen for 3 days)".
     pub fn import_backup_line(&self) -> (String, bool) {
-        let Some(s) = &self.storage.strategy else {
-            return (
-                self.text(Message::new("gui-import-backup-none", "No backup set up:")),
-                true,
-            );
-        };
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |d| d.as_secs());
-        let online = strategy::destinations_online(s, &self.storage.volumes);
-        let disks: Vec<String> = self
-            .storage
-            .volumes
-            .iter()
-            .filter(|v| !v.is_card() && s.destinations.iter().any(|d| d.takes(v)))
-            .map(|v| {
-                let disk = v.name.clone();
-                let m = if online.iter().any(|o| o.id == v.id) {
-                    Message::new("gui-import-backup-plugged", "{ $disk } (plugged in)")
-                } else if v.online() {
-                    Message::new(
-                        "gui-import-backup-unusable",
-                        "{ $disk } (plugged in, cannot take copies)",
-                    )
-                } else {
-                    match v
-                        .last_seen
-                        .as_ref()
-                        .map(|l| now.saturating_sub(l.at) / 86_400)
-                    {
-                        None => Message::new("gui-import-backup-never", "{ $disk } (never seen)"),
-                        Some(0) => {
-                            Message::new("gui-import-backup-today", "{ $disk } (seen today)")
-                        }
-                        Some(1) => Message::new(
-                            "gui-import-backup-one-day",
-                            "{ $disk } (not seen for 1 day)",
-                        ),
-                        Some(days) => Message::new(
-                            "gui-import-backup-days",
-                            "{ $disk } (not seen for { $days } days)",
-                        )
-                        .with("days", days),
-                    }
-                };
-                self.text(m.with("disk", disk))
-            })
-            .collect();
-        let disks = if disks.is_empty() {
-            self.text(Message::new(
-                "gui-import-backup-no-disk",
-                "no disk for them yet",
-            ))
-        } else {
-            disks.join(", ")
-        };
-        let line = if s.copies == 1 {
-            Message::new("gui-import-backup-one", "1 copy: { $disks }")
-        } else {
-            Message::new("gui-import-backup-copies", "{ $copies } copies: { $disks }")
-                .with("copies", u64::from(s.copies))
-        };
-        (self.text(line.with("disks", disks)), false)
+        backup_line(
+            &|m| self.text(m),
+            self.storage.strategy.as_ref(),
+            &self.storage.volumes,
+        )
     }
 
     /// Whether the Storage page is open.
@@ -797,7 +740,11 @@ fn catalogue_ui(
 }
 
 /// A destination's words: any disk of a role, or one disk by name.
-fn destination_text(t: &dyn Fn(Message) -> String, d: &Destination, volumes: &[Volume]) -> String {
+pub(super) fn destination_text(
+    t: &dyn Fn(Message) -> String,
+    d: &Destination,
+    volumes: &[Volume],
+) -> String {
     match d {
         Destination::Role(Role::Archive) => {
             t(Message::new("gui-storage-dest-archive", "Any archive disk"))
@@ -925,7 +872,7 @@ fn strategy_ui(
 }
 
 /// A kind's icon and words.
-fn kind_of(kind: VolumeKind) -> (Icon, Message) {
+pub(super) fn kind_of(kind: VolumeKind) -> (Icon, Message) {
     match kind {
         VolumeKind::Internal => (
             Icon::Home,
@@ -951,7 +898,7 @@ fn kind_of(kind: VolumeKind) -> (Icon, Message) {
 }
 
 /// A role's words.
-fn role_text(role: Role) -> Message {
+pub(super) fn role_text(role: Role) -> Message {
     match role {
         Role::Library => Message::new("gui-storage-role-library", "Library"),
         Role::Archive => Message::new("gui-storage-role-archive", "Archive"),
@@ -1153,4 +1100,72 @@ fn volume_ui(
             *asked = Some(Asked::Forget(volume.id.clone()));
         }
     });
+}
+
+/// The strategy's line ([`Shell::import_backup_line`]) from a strategy
+/// and the volumes known.
+pub fn backup_line(
+    t: &dyn Fn(Message) -> String,
+    strategy: Option<&Strategy>,
+    volumes: &[Volume],
+) -> (String, bool) {
+    let Some(s) = strategy else {
+        return (
+            t(Message::new("gui-import-backup-none", "No backup set up:")),
+            true,
+        );
+    };
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    let online = strategy::destinations_online(s, volumes);
+    let disks: Vec<String> = volumes
+        .iter()
+        .filter(|v| !v.is_card() && s.destinations.iter().any(|d| d.takes(v)))
+        .map(|v| {
+            let disk = v.name.clone();
+            let m = if online.iter().any(|o| o.id == v.id) {
+                Message::new("gui-import-backup-plugged", "{ $disk } (plugged in)")
+            } else if v.online() {
+                Message::new(
+                    "gui-import-backup-unusable",
+                    "{ $disk } (plugged in, cannot take copies)",
+                )
+            } else {
+                match v
+                    .last_seen
+                    .as_ref()
+                    .map(|l| now.saturating_sub(l.at) / 86_400)
+                {
+                    None => Message::new("gui-import-backup-never", "{ $disk } (never seen)"),
+                    Some(0) => Message::new("gui-import-backup-today", "{ $disk } (seen today)"),
+                    Some(1) => Message::new(
+                        "gui-import-backup-one-day",
+                        "{ $disk } (not seen for 1 day)",
+                    ),
+                    Some(days) => Message::new(
+                        "gui-import-backup-days",
+                        "{ $disk } (not seen for { $days } days)",
+                    )
+                    .with("days", days),
+                }
+            };
+            t(m.with("disk", disk))
+        })
+        .collect();
+    let disks = if disks.is_empty() {
+        t(Message::new(
+            "gui-import-backup-no-disk",
+            "no disk for them yet",
+        ))
+    } else {
+        disks.join(", ")
+    };
+    let line = if s.copies == 1 {
+        Message::new("gui-import-backup-one", "1 copy: { $disks }")
+    } else {
+        Message::new("gui-import-backup-copies", "{ $copies } copies: { $disks }")
+            .with("copies", u64::from(s.copies))
+    };
+    (t(line.with("disks", disks)), false)
 }
