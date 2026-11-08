@@ -332,7 +332,7 @@ fn the_import_windows_strategy_line_says_what_backups_the_photos_get() {
         ("No backup set up:".to_string(), true)
     );
     let _ = h.get_by_label("No backup set up:");
-    h.get_by_label("Storage…").click();
+    h.get_by_label("Storage…").click_accesskit();
     until(&mut h, "the Storage page", |h| {
         h.state().storage_page_open()
     });
