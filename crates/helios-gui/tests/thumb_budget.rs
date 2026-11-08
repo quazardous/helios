@@ -138,12 +138,18 @@ fn scrolling_ten_thousand_images_keeps_the_textures_in_budget() {
     // Down, far: the first screen's textures are freed.
     let mut step = 0;
     let mut deepest = 0;
-    for _ in 0..80 {
+    // A screen passed on the way down (the first screen stays drawn by
+    // the filmstrip, around the cursor).
+    let mut passed: Vec<String> = Vec::new();
+    for n in 0..80 {
         step += 1;
         cache.borrow_mut().step = step;
         h.event(wheel(-400.0));
         h.step();
         check(&h, step, &cache.borrow());
+        if n == 20 {
+            passed = h.state().library().in_view();
+        }
         deepest = h
             .state()
             .library()
@@ -156,20 +162,18 @@ fn scrolling_ten_thousand_images_keeps_the_textures_in_budget() {
     {
         let s = h.state();
         let library = s.library();
-        let freed = first_screen
-            .iter()
-            .filter(|k| !library.has_thumbnail(k))
-            .count();
-        assert!(freed > 0, "the first screen's textures were freed");
+        assert!(!passed.is_empty());
+        let freed = passed.iter().filter(|k| !library.has_thumbnail(k)).count();
+        assert_eq!(freed, passed.len(), "the screen passed was freed");
     }
-    // Back up to the top: the first screen comes back, from the cache.
+    // Back up: the screen passed comes back, from the cache.
     for _ in 0..200 {
         step += 1;
         cache.borrow_mut().step = step;
         h.event(wheel(400.0));
         h.step();
         check(&h, step, &cache.borrow());
-        let back = h.state().library().in_view().contains(&first_screen[0]);
+        let back = h.state().library().in_view().contains(&passed[0]);
         if back {
             break;
         }
@@ -185,7 +189,7 @@ fn scrolling_ten_thousand_images_keeps_the_textures_in_budget() {
     for k in library.in_view() {
         assert!(library.has_thumbnail(&k), "{k} shown again");
     }
-    let reloaded: Vec<&String> = first_screen
+    let reloaded: Vec<&String> = passed
         .iter()
         .filter(|k| library.in_view().contains(k))
         .filter(|k| c.hits.get(*k).copied().unwrap_or(0) > 0)
@@ -194,7 +198,7 @@ fn scrolling_ten_thousand_images_keeps_the_textures_in_budget() {
         !reloaded.is_empty(),
         "cells scrolled back in reloaded from the cache"
     );
-    for k in &first_screen {
+    for k in &passed {
         assert_eq!(
             c.reads.get(k).copied().unwrap_or(0),
             1,
