@@ -430,9 +430,12 @@ from incidents on the box; every agent prompt points here.
 - Every push to `next` runs GitHub CI (the whole suite, survival, the
   commits walk, lint, Windows). Once it passes, `promote.yml`
   fast-forwards `main` to that commit; releases are made from `main`.
-- A red CI on `next` is fixed first, by whoever broke it, from what CI
-  reports: work goes on from the errors CI finds, not from runs queued
-  before each merge.
+- Each agent tests only the part it is working on (a narrow `test-crate`
+  run), never the whole suite before merging.
+- A red CI on `next`, or a bug the owner reports, is fixed first: an agent
+  takes the work back, reproduces it, adds the tests that would have caught
+  it, fixes it and merges into `next`. Work goes on from the errors CI
+  finds, not from runs queued before each merge.
 
 **The work cycle**
 - Code the whole change with local checks only: `cargo fmt --check`, then
