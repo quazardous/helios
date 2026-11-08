@@ -827,15 +827,19 @@ fn local_check() -> bool {
 /// jobs themselves, for jobs that build nothing, with
 /// `HELIOS_BENCH_NO_CHECK=1`, or when the check runs here.
 pub fn check_request(req: &Request) -> Option<Request> {
-    let builds_nothing = ["check", "egui-pop-check", "lint", "thumb-bench", "release"];
     // the box runs it itself now (the Benchfile's `first`): this is only
     // for a box without `first`, asked with HELIOS_BENCH_CLIENT_CHECK=1
-    if std::env::var_os("HELIOS_BENCH_CLIENT_CHECK").is_none()
-        || req.job.is_empty()
-        || builds_nothing.contains(&req.job.as_str())
-        || local_check()
-        || std::env::var_os("HELIOS_BENCH_NO_CHECK").is_some()
-    {
+    let wanted = std::env::var_os("HELIOS_BENCH_CLIENT_CHECK").is_some()
+        && !local_check()
+        && std::env::var_os("HELIOS_BENCH_NO_CHECK").is_none();
+    if wanted { check_for(req) } else { None }
+}
+
+/// The `check` request for a job that builds (none for the check jobs
+/// themselves and for jobs that build nothing).
+pub fn check_for(req: &Request) -> Option<Request> {
+    let builds_nothing = ["check", "egui-pop-check", "lint", "thumb-bench", "release"];
+    if req.job.is_empty() || builds_nothing.contains(&req.job.as_str()) {
         return None;
     }
     let egui_pop = req.job.starts_with("egui-pop");
@@ -1921,14 +1925,14 @@ mod tests {
             "ext_job_id=j",
         ])
         .unwrap();
-        let c = check_request(&req).unwrap();
+        let c = check_for(&req).unwrap();
         assert_eq!(c.job, "check");
         assert_eq!(c.param("crate"), Some("x"));
         assert_eq!(c.param("test"), None);
         assert_eq!(c.param("ext_job_id"), Some("j-check"));
         let e = parse_args(&["egui-pop-test", "egui_pop=f", "crate=y", "test=t"]).unwrap();
-        assert_eq!(check_request(&e).unwrap().job, "egui-pop-check");
-        assert!(check_request(&parse_args(&["check", "crate=x"]).unwrap()).is_none());
+        assert_eq!(check_for(&e).unwrap().job, "egui-pop-check");
+        assert!(check_for(&parse_args(&["check", "crate=x"]).unwrap()).is_none());
     }
 
     #[test]
