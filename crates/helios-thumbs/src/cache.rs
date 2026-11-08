@@ -46,6 +46,19 @@ impl Key {
         }
     }
 
+    /// The provisional key of a file seen but not fully hashed yet:
+    /// `p:<size>:<partial hash>` (`docs/design/image-map.md`, section 7).
+    /// Its entry is renamed to the full key ([`ThumbCache::rename`]) once
+    /// the full hash links the file to an image.
+    pub fn provisional(size: u64, partial: &str) -> Key {
+        Key::preview(format!("p:{size}:{partial}"))
+    }
+
+    /// Whether it is a provisional key ([`Key::provisional`]).
+    pub fn is_provisional(&self) -> bool {
+        self.image.starts_with("p:")
+    }
+
     /// The entry's file name, relative to the cache's folder.
     fn file(&self, size: u32) -> PathBuf {
         let image: String = self
@@ -322,6 +335,38 @@ impl ThumbCache {
         }
         self.evict(Some(&rel));
         Ok(())
+    }
+
+    /// Renames the entries of `from` (every size) to `to`: a cheap file
+    /// rename, for a provisional key once the full hash is known. An entry
+    /// `to` already has is kept and `from`'s is dropped. Returns how many
+    /// entries moved.
+    pub fn rename(&self, from: &Key, to: &Key) -> usize {
+        let mut moved = 0;
+        for size in [crate::SMALL, crate::LARGE] {
+            let (old, new) = (from.file(size), to.file(size));
+            let mut index = self.ready();
+            let Some(entry) = index.entries.remove(&old) else {
+                continue;
+            };
+            if index.entries.contains_key(&new) {
+                index.total -= entry.bytes;
+                drop(index);
+                let _ = std::fs::remove_file(self.dir.join(&old));
+                continue;
+            }
+            let path = self.dir.join(&new);
+            if let Some(parent) = path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            if std::fs::rename(self.dir.join(&old), &path).is_ok() {
+                index.entries.insert(new, entry);
+                moved += 1;
+            } else {
+                index.total -= entry.bytes;
+            }
+        }
+        moved
     }
 
     /// Removes the entries used least recently until the cache is under

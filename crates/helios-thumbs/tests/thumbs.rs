@@ -340,3 +340,34 @@ fn the_pool_reads_the_images_in_view_first() {
     assert!(at("16") < at("15"), "{order:?}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_provisional_entry_is_renamed_to_its_full_key() {
+    let dir = scratch("rename");
+    let cache = ThumbCache::open(&dir, 1 << 30).unwrap();
+    let provisional = Key::provisional(1234, &"ab".repeat(32));
+    assert!(provisional.is_provisional());
+    let full = Key::preview("cd".repeat(32));
+    assert!(!full.is_provisional());
+    assert_ne!(
+        cache.file_of(&provisional, SMALL),
+        cache.file_of(&full, SMALL)
+    );
+    cache.put(&provisional, SMALL, &noise(1)).unwrap();
+    let before = cache.usage();
+    assert_eq!(cache.rename(&provisional, &full), 1);
+    assert!(!cache.contains(&provisional, SMALL));
+    assert!(cache.get(&full, SMALL).is_some(), "the file moved with it");
+    assert_eq!(cache.usage(), before, "a rename keeps the bytes");
+    // Renamed onto an entry already there: that one stays.
+    cache.put(&provisional, SMALL, &noise(2)).unwrap();
+    assert_eq!(cache.rename(&provisional, &full), 0);
+    assert!(!cache.contains(&provisional, SMALL));
+    assert_eq!(cache.usage(), before);
+    // Reopened, the index matches the folder.
+    drop(cache);
+    let cache = ThumbCache::open(&dir, 1 << 30).unwrap();
+    assert_eq!(cache.usage(), before);
+    assert!(cache.contains(&full, SMALL));
+    let _ = std::fs::remove_dir_all(&dir);
+}
