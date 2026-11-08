@@ -68,6 +68,8 @@ export-write-failed = impossible d’écrire { $path } : { $error }
 
 gui-about-description = Un framework de traitement d’image client/serveur, pensé d’abord pour l’IA.
 
+gui-backup-card-safe = { $card } peut être formatée : chaque photo a ses sauvegardes
+
 gui-caption-decisions = Décisions en attente
 
 gui-caption-decisions-count = { $count ->
@@ -186,6 +188,28 @@ gui-history-snapshot-restored = « { $name } » restauré
 
 gui-history-undo = Annuler
 
+gui-import-backup-copies = { $copies } copies : { $disks }
+
+gui-import-backup-days = { $disk } (pas vu depuis { $days } jours)
+
+gui-import-backup-never = { $disk } (jamais vu)
+
+gui-import-backup-no-disk = aucun disque pour elles pour l’instant
+
+gui-import-backup-none = Aucune sauvegarde configurée :
+
+gui-import-backup-one = 1 copie : { $disks }
+
+gui-import-backup-one-day = { $disk } (pas vu depuis 1 jour)
+
+gui-import-backup-plugged = { $disk } (branché)
+
+gui-import-backup-storage = Stockage…
+
+gui-import-backup-today = { $disk } (vu aujourd’hui)
+
+gui-import-backup-unusable = { $disk } (branché, ne peut pas recevoir de copies)
+
 gui-job-batch-done = Lot terminé
 
 gui-job-batch-failed = Échec du lot
@@ -197,6 +221,14 @@ gui-job-export-failed = Échec de l’export
 gui-keys-from-template = modèle
 
 gui-layout-not-saved = La disposition n’a pas été enregistrée : { $error }
+
+gui-library-badge-backed-up = sauvegardée
+
+gui-library-badge-backup-short = sauvegarde incomplète
+
+gui-library-badge-backup-unverified = non vérifiée
+
+gui-library-badge-no-backup = sans sauvegarde
 
 gui-library-not-saved = Non enregistré, la bibliothèque montre ce qui a été enregistré en dernier : { $error }
 

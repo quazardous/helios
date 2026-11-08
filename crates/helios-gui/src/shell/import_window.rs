@@ -223,6 +223,8 @@ enum Event {
     Choose,
     ChooseInto,
     Favourite(PathBuf, bool),
+    /// "Storage…": the Storage page, to set up a backup.
+    Storage,
 }
 
 /// The Contents column's words.
@@ -273,6 +275,11 @@ struct Words {
     none_ticked: String,
     /// Why nothing can be imported: no library open.
     no_library: Option<String>,
+    /// The strategy line: what backups the photos will get.
+    backup: String,
+    /// No strategy: the line offers the Storage page.
+    no_backup: bool,
+    storage: String,
 }
 
 fn name_of(p: &Path) -> String {
@@ -369,6 +376,8 @@ impl Shell {
     /// a file its folder with only the files given ticked; `copy` sets
     /// copy or add), else on the first card, else on the last source used.
     pub(super) fn open_import_window(&mut self, args: &Value) {
+        // The strategy line reads the strategy and its disks as they are.
+        self.refresh_volumes();
         let w = &mut self.import_window;
         w.follow_cards();
         w.clear_contents();
@@ -518,6 +527,7 @@ impl Shell {
 
     fn import_words(&self, sample: Option<&import_choices::Sample>) -> Words {
         let t = |m: Message| self.text(m);
+        let backup = self.import_backup_line();
         Words {
             title: t(Message::new("gui-import-window-title", "Import photos")),
             sources: t(Message::new("gui-import-window-sources", "Sources")),
@@ -579,6 +589,9 @@ impl Shell {
                 "Tick the photos to import",
             )),
             no_library: self.no_library.clone().map(t),
+            backup: backup.0,
+            no_backup: backup.1,
+            storage: t(Message::new("gui-import-backup-storage", "Storage…")),
         }
     }
 
@@ -704,6 +717,10 @@ impl Shell {
                         {
                             event = Some(Event::ChooseInto);
                         }
+                        ui.separator();
+                        if backup_line_ui(ui, &words) {
+                            event = Some(Event::Storage);
+                        }
                     });
                 });
                 layout.footer(ui, |ui| {
@@ -776,6 +793,11 @@ impl Shell {
                 w.save();
             }
             Some(Event::Import) => self.import_ticked_sources(),
+            Some(Event::Storage) => {
+                if let Err(e) = self.run(super::storage::COMMAND, Value::Null, Origin::User) {
+                    self.warn(format!("storage: {e}"));
+                }
+            }
             Some(Event::Preset(name)) => self.apply_import_preset(name.as_deref()),
             Some(Event::SavePreset(name)) => self.save_import_preset(&name),
             Some(Event::DeletePreset(name)) => self.delete_import_preset(&name),
@@ -832,6 +854,22 @@ impl Shell {
 
 /// The Sources column: cards first, then recent folders, favourites and
 /// "Choose a folder…".
+/// The strategy line under the choices: "2 copies: Backup disk (plugged
+/// in), NAS (not seen for 3 days)", or "No backup set up:" with a button
+/// to the Storage page; whether it was pressed.
+fn backup_line_ui(ui: &mut egui::Ui, words: &Words) -> bool {
+    ui.horizontal_wrapped(|ui| {
+        if words.no_backup {
+            ui.colored_label(ui.visuals().warn_fg_color, &words.backup);
+            ui.button(&words.storage).clicked()
+        } else {
+            ui.add(egui::Label::new(&words.backup).wrap());
+            false
+        }
+    })
+    .inner
+}
+
 fn sources_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &Words, event: &mut Option<Event>) {
     ui.heading(&words.sources);
     egui::ScrollArea::vertical()

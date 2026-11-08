@@ -254,6 +254,7 @@ frame-helios-mask-editing.title 9d40fb207fdf75d9
 frame-helios-sub-workspace.title e8980ceace620065
 frame-helios-workspace.title e7a125cdd87cf1f5
 gui-about-description 6b6356eedfe61a4e
+gui-backup-card-safe c563f3ba220cc628
 gui-caption-decisions 10452c9e778ad3f7
 gui-caption-decisions-count 81c7f058fde7d9c6
 gui-caption-jobs 2dc28dab487c66ad
@@ -360,6 +361,17 @@ gui-history-undo cc7022a2d9050a57
 gui-image-not-reopened 422cb049e7d6fe52
 gui-image-opened 8cddc04842c75210
 gui-image-opening 0a3761ae857369a4
+gui-import-backup-copies c5e2a9c008db2419
+gui-import-backup-days 7f3c0cfff2a6e70a
+gui-import-backup-never e9addb91d6f0d9a6
+gui-import-backup-no-disk 26e218303c7e51be
+gui-import-backup-none 441fb27ce257361d
+gui-import-backup-one 4fc228d025d1aced
+gui-import-backup-one-day 28c5d427feab6781
+gui-import-backup-plugged 2b17139b69ac2c5c
+gui-import-backup-storage dffe60fd3753af8c
+gui-import-backup-today 1bd8ff62b6d88dc1
+gui-import-backup-unusable 8a3552433dddd753
 gui-import-cancelled ef0a315043a78d47
 gui-import-copy 6559bd9463867f74
 gui-import-copy-help 94e74fb4f9cc2bcf
@@ -460,7 +472,11 @@ gui-job-export-failed f5ce199f9e1502ae
 gui-keys-from-template e70109422c5ad48b
 gui-layout-not-saved 942738e1ab7b193d
 gui-library-auto-advance b947431b44afe299
+gui-library-badge-backed-up 66092309e2a740ca
+gui-library-badge-backup-short 8fac7f711ac4176d
+gui-library-badge-backup-unverified 8ff08de6c4a53720
 gui-library-badge-missing 5821c2953f0639df
+gui-library-badge-no-backup 2b3f93f60c5b31be
 gui-library-badge-offline 01064de9e41d67ce
 gui-library-cannot-open 2702ccb4eb8511ba
 gui-library-compare-hint ef5d43662fafd120

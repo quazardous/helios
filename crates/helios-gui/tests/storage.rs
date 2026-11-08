@@ -2,6 +2,9 @@
 //! volumes: the page lists an online and an offline volume, and saves a
 //! new name and a role; a photo on an unplugged disk shows its "offline"
 //! badge and says which disk to plug in; plugging it in clears the badge.
+//! With a backup strategy: the import window's strategy line, each photo's
+//! backup badge and the `backup:` filters, and a card short of its backups
+//! said safe to format once a backup job ends.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -14,7 +17,10 @@ use helios_core::Bus;
 use helios_gui::persist::Persist;
 use helios_gui::shell::{STORAGE_COMMAND, VaultStorage};
 use helios_gui::{Shell, headless, helios_panels};
+use helios_library::backup;
+use helios_library::import::{self, Options, Placement};
 use helios_shell::commands::Origin;
+use helios_storage::strategy::{self, Scope, Strategy, Trigger};
 use helios_storage::{
     Identity, Role, Volume, VolumeId, VolumeKind, Volumes, detect, registry, scan,
 };
@@ -293,4 +299,216 @@ fn the_storage_page_keeps_its_size() {
         h.query_by_label("Storage").is_some()
     });
     headless::assert_window_stable(&mut h, "Storage", 120);
+}
+
+/// Gives the known volume `id` the roles `roles`.
+fn give_roles(vault: &Vault<SqliteStore>, id: &str, roles: &[Role]) {
+    let mut v = known(vault, id);
+    v.roles = roles.iter().copied().collect();
+    registry::save(vault, &v).unwrap();
+}
+
+fn now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+}
+
+/// The import window's strategy line: no strategy offers the Storage
+/// page; a strategy names its disks, plugged in or not seen for days.
+#[test]
+fn the_import_windows_strategy_line_says_what_backups_the_photos_get() {
+    let (world, shell) = World::new("line");
+    let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+    h.run();
+    // None: "No backup set up:", its button opens the Storage page.
+    h.state_mut()
+        .run("library.importWindow", json!(null), Origin::User)
+        .unwrap();
+    h.run();
+    assert_eq!(
+        h.state().import_backup_line(),
+        ("No backup set up:".to_string(), true)
+    );
+    let _ = h.get_by_label("No backup set up:");
+    h.get_by_label("Storage…").click();
+    until(&mut h, "the Storage page", |h| {
+        h.state().storage_page_open()
+    });
+
+    // Two copies on any backup disk, both plugged in.
+    give_roles(&world.vault, "uuid:studio", &[Role::Backup]);
+    give_roles(&world.vault, "uuid:backup", &[Role::Backup]);
+    let two = Strategy {
+        copies: 2,
+        ..Strategy::default()
+    };
+    strategy::save(&world.vault, &Scope::Library, Some(&two)).unwrap();
+    h.state_mut().refresh_volumes();
+    assert_eq!(
+        h.state().import_backup_line(),
+        (
+            "2 copies: Backup (plugged in), Studio (plugged in)".to_string(),
+            false
+        )
+    );
+    h.run();
+    let _ = h.get_by_label("2 copies: Backup (plugged in), Studio (plugged in)");
+
+    // The studio disk last seen three days ago, unplugged since.
+    let (studio, backup) = (world.studio.clone(), world.backup.clone());
+    world.plugged.set(&[&studio, &backup]);
+    scan::scan(
+        &world.vault,
+        &world.plugged.volumes(),
+        "studio-pc",
+        now() - 3 * DAY - 60,
+        None,
+    )
+    .unwrap();
+    world.plugged.set(&[&backup]);
+    h.state_mut().refresh_volumes();
+    assert_eq!(
+        h.state().import_backup_line().0,
+        "2 copies: Backup (plugged in), Studio (not seen for 3 days)"
+    );
+}
+
+/// Each photo's backups as a badge in the grid, once the library has a
+/// strategy, and the `backup:` filters of the search field.
+#[test]
+fn photos_show_their_backups_and_the_search_filters_on_them() {
+    let (world, mut shell) = World::new("backups");
+    // A second photo, on the studio disk only.
+    let other_file = world.dir.join("studio/other.jpg");
+    std::fs::write(&other_file, b"another photo, on the studio disk").unwrap();
+    let other = world.vault.import_file(&other_file, 2).unwrap().hex();
+    scan::scan(
+        &world.vault,
+        &world.plugged.volumes(),
+        "studio-pc",
+        FIRST + 1,
+        None,
+    )
+    .unwrap();
+    give_roles(&world.vault, "uuid:backup", &[Role::Backup]);
+    world.persist.fill_library(&mut shell).unwrap();
+    let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+    h.run();
+    let photo = world.photo.clone();
+    let badges = |h: &Harness<'_, Shell>, id: &str| h.state().library().badges_of(&h.ctx, id);
+    // No strategy: no backup badge.
+    assert!(badges(&h, &photo).is_empty(), "{:?}", badges(&h, &photo));
+
+    let refresh = |h: &mut Harness<'_, Shell>, world: &World| {
+        h.state_mut().refresh_volumes();
+        world.persist.fill_library(h.state_mut()).unwrap();
+        h.run();
+    };
+    strategy::save(&world.vault, &Scope::Library, Some(&Strategy::default())).unwrap();
+    refresh(&mut h, &world);
+    // On the backup disk, not verified; the other on no backup disk.
+    assert_eq!(badges(&h, &photo), ["unverified"]);
+    assert_eq!(badges(&h, &other), ["no backup"]);
+
+    // Verified: backed up.
+    let id = helios_vault::ImageId::from_hex(&photo).unwrap();
+    strategy::record_verified(
+        &world.vault,
+        &id,
+        &VolumeId("uuid:backup".into()),
+        Path::new("photo.jpg"),
+        FIRST + 2,
+    )
+    .unwrap();
+    refresh(&mut h, &world);
+    assert_eq!(badges(&h, &photo), ["backed up"]);
+
+    // The filters.
+    let shown = |h: &mut Harness<'_, Shell>, typed: &str| {
+        h.state()
+            .library_mut()
+            .set_filter(egui_pop::views::library::filter::Filter::parse(typed));
+        h.state().library().shown()
+    };
+    assert_eq!(shown(&mut h, "backup:met"), std::slice::from_ref(&photo));
+    assert_eq!(shown(&mut h, "backup:none"), std::slice::from_ref(&other));
+    assert_eq!(shown(&mut h, "backup:short"), std::slice::from_ref(&other));
+
+    // Two copies asked: one is short.
+    let two = Strategy {
+        copies: 2,
+        ..Strategy::default()
+    };
+    strategy::save(&world.vault, &Scope::Library, Some(&two)).unwrap();
+    refresh(&mut h, &world);
+    assert_eq!(badges(&h, &photo), ["backup short"]);
+    let mut short = shown(&mut h, "backup:short");
+    short.sort();
+    let mut both = vec![photo.clone(), other.clone()];
+    both.sort();
+    assert_eq!(short, both);
+    assert!(shown(&mut h, "backup:met").is_empty());
+}
+
+/// A card left in the reader short of its backups: once a backup job
+/// ends with its photos backed up, a toast says it is safe to format.
+#[test]
+fn a_card_short_of_its_backups_is_said_safe_once_a_backup_ends() {
+    let (world, shell) = World::new("card-safe");
+    give_roles(&world.vault, "uuid:studio", &[Role::Library]);
+    give_roles(&world.vault, "uuid:backup", &[Role::Backup]);
+    let one = Strategy {
+        triggers: [Trigger::ByHand].into(),
+        ..Strategy::default()
+    };
+    strategy::save(&world.vault, &Scope::Library, Some(&one)).unwrap();
+    let card = world.dir.join("EOS_DIGITAL");
+    let dcim = card.join("DCIM/100CANON");
+    std::fs::create_dir_all(&dcim).unwrap();
+    std::fs::write(dcim.join("IMG_0001.JPG"), b"a photo on the card, to copy").unwrap();
+    let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+    h.run();
+    let jobs = h.state().jobs();
+    let options = Options {
+        placement: Placement::Copy {
+            into: Some(world.dir.join("studio/Library")),
+        },
+        signals: false,
+        ..Options::default()
+    };
+    let report = import::import(
+        world.vault.as_ref(),
+        &jobs,
+        std::slice::from_ref(&card),
+        &options,
+        FIRST + 10,
+        &mut |_: &serde_json::Value| {},
+    )
+    .unwrap();
+    assert_eq!(report.cards.len(), 1, "{report:?}");
+    assert!(!report.cards[0].safe_to_format, "{report:?}");
+    h.state()
+        .import_sink()
+        .send((json!({}), json!({ "ended": report })))
+        .unwrap();
+    until(&mut h, "the card waits for its backups", |h| {
+        h.state().cards_waiting_for_backups() == ["EOS_DIGITAL"]
+    });
+
+    backup::run(
+        world.vault.as_ref(),
+        &jobs,
+        world.plugged.as_ref(),
+        Trigger::ByHand,
+        FIRST + 20,
+        None,
+    )
+    .unwrap();
+    let said = "EOS_DIGITAL is safe to format: every photo has its backups";
+    until(&mut h, "the toast", |h| {
+        h.state().notes.iter().any(|n| n == said)
+    });
+    assert!(h.state().cards_waiting_for_backups().is_empty());
 }

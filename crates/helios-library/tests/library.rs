@@ -981,7 +981,10 @@ fn a_card_is_safe_to_format_once_every_photo_is_copied() {
     );
     assert_eq!(report.cards.len(), 1);
     assert!(report.cards[0].safe_to_format, "{report:?}");
-    assert_eq!(report.cards[0].said(), "EOS_DIGITAL: safe to format");
+    assert_eq!(
+        report.cards[0].said(),
+        "EOS_DIGITAL: safe to format (1 copy, in the Library: no backup set up)"
+    );
     let (report, _) = run(&vault, None, &[dcim], &copy(Duplicates::Skip));
     assert!(report.cards.is_empty());
 }

@@ -563,8 +563,12 @@ destination is unplugged and stays cancellable. Triggers: after an
 import, on `Watch::on_volumes`, and `library.backupNow`. The import's
 cards are safe to format only once their photos meet the strategy. The
 Storage page shows and edits the strategy (one destination) with "Back up
-now". Not yet: re-check periods, sidecars copied along, per-photo badges,
-filters, the import's reminder and the toast when a backup ends (phase 6).
+now". Built since (phase 6, 2026-11-08): per-photo badges and the
+`backup:` filters, the import window's strategy line (or "No backup set
+up" with the Storage page), "1 copy, in the Library: no backup set up"
+without a strategy, and the toast when a backup ends makes a card still
+inserted safe to format. Not yet: re-check periods, sidecars copied
+along, the reminder's close button and a strategy picked per import.
 
 ### 3.3 Overrides per shoot, import session or card
 
@@ -966,7 +970,7 @@ pub struct BackupStatus { pub have: u8, pub want: u8, pub off_site: bool, pub st
 | 3. Preview cache (built 2026-11-07) | embedded previews kept in a cache (when first shown, not at import), grid reads them first, offline badge | M |
 | 4. Roles and Storage page | roles, names, off site, RAID flag; the page; write permission enforced in copy code | M |
 | 5. Strategies v1 | model, library default, triggers on import, on connect and by hand, `backup` job with verify and pause, status field, filters, badge | L |
-| 6. Import integration | reminder line, strategy line, safe to format by strategy, toast updated when the backup ends | S |
+| 6. Import integration (built 2026-11-08) | reminder line, strategy line, safe to format by strategy, toast updated when the backup ends | S |
 | 7. Catalogue backup | snapshots on close and daily, copied to backup volumes, manifest | S |
 | 8. Overrides and report (v2) | per import, card, selection, then shoot; strongest wins; the report | M |
 | 9. Archive moves (v2) | move a shoot to an archive volume, verified, confirmed | M |

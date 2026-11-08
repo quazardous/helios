@@ -60,12 +60,23 @@ pub fn plugin(jobs: Jobs, relays: Relays) -> JobsPlugin {
 #[derive(Debug, Default)]
 pub struct Ended {
     seen: Seq,
+    /// A backup job ended since [`Ended::take_backups`].
+    backups: bool,
 }
 
 impl Ended {
     /// Starts after what the journal holds now.
     pub fn after(seq: Seq) -> Self {
-        Self { seen: seq }
+        Self {
+            seen: seq,
+            backups: false,
+        }
+    }
+
+    /// Whether a backup job ended (or failed) since the last call: seen
+    /// by [`Ended::take`].
+    pub fn take_backups(&mut self) -> bool {
+        std::mem::take(&mut self.backups)
     }
 
     /// The exports and batches that ended since the last call: how, and
@@ -83,6 +94,10 @@ impl Ended {
             let job = match e.data["kind"].as_str() {
                 Some("export") => Job::Export,
                 Some("batch") => Job::Batch,
+                Some(helios_library::backup::KIND) => {
+                    self.backups = true;
+                    continue;
+                }
                 _ => continue,
             };
             let id = e.data["id"].as_str().unwrap_or_default();

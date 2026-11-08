@@ -511,6 +511,8 @@ impl Shell {
             return;
         }
         let report = &line["ended"];
+        // Its cards short of their backups wait for a backup job.
+        self.wait_for_backups(report);
         let count = |k: &str| report[k].as_u64().unwrap_or(0);
         let photos = count("added") + count("located");
         if report["cancelled"] == true {

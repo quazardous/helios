@@ -444,16 +444,35 @@ fn a_card_is_safe_to_format_once_its_photos_meet_the_strategy() {
         "EOS_DIGITAL: in the Library, 1 photo short of its backups: keep the card"
     );
     backup::run(&w.vault, &w.jobs, &w.plugged, Trigger::ByHand, 500, None).unwrap();
+    // Once the backup ended, the card still inserted is safe, computed
+    // again from its files and their images.
+    let again = helios_library::import::card_safety(
+        &w.vault,
+        &first.root,
+        &first.path,
+        &first.label,
+        first.files.clone(),
+    )
+    .unwrap();
+    assert!(again.safe_to_format, "{again:?}");
+    assert_eq!(
+        again.said(),
+        "EOS_DIGITAL: safe to format (library + 1 backup, verified)"
+    );
     let report = import_into(&w.vault, &w.jobs, std::slice::from_ref(&card), &library);
     assert!(report.cards[0].safe_to_format, "{report:?}");
     assert_eq!(
         report.cards[0].said(),
         "EOS_DIGITAL: safe to format (library + 1 backup, verified)"
     );
-    // Without a strategy, the library copy is enough.
+    // Without a strategy, the library copy is enough, and the card says
+    // it is the only one.
     strategy::save(&w.vault, &Scope::Library, None).unwrap();
     photo(&card.join("DCIM/100CANON/b.raf"), 11);
     let report = import_into(&w.vault, &w.jobs, std::slice::from_ref(&card), &library);
     assert!(report.cards[0].safe_to_format, "{report:?}");
-    assert_eq!(report.cards[0].said(), "EOS_DIGITAL: safe to format");
+    assert_eq!(
+        report.cards[0].said(),
+        "EOS_DIGITAL: safe to format (1 copy, in the Library: no backup set up)"
+    );
 }

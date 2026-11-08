@@ -552,7 +552,28 @@ be cancelled, its copy under way removed. One run goes at a time.
 **Safe to format**: with a strategy, a card is safe to format only when
 every photo on it is in the Library and has its verified backup copies;
 otherwise the import says "EOS_DIGITAL: in the Library, 3 photos short of
-their backups: keep the card".
+their backups: keep the card". Without one, the card is "safe to format (1
+copy, in the Library: no backup set up)". A card left short is checked
+again each time a backup job ends (`helios_library::import::card_safety`,
+from the card's files and their images' locations), while it is still
+inserted: once its photos have their backups, a toast says "EOS_DIGITAL is
+safe to format: every photo has its backups".
+
+**The import window's strategy line**, under the choices, says what
+backups the photos will get: "2 copies: Backup disk (plugged in), NAS (not
+seen for 3 days)", each disk the strategy copies to with whether it is
+plugged in; without a strategy, "No backup set up:" and a button opening
+the Storage page.
+
+**Per photo**: with a strategy, each thumbnail of the Library has a badge
+for its backups: "backed up" (its verified copies meet the strategy),
+"backup short" (fewer verified copies than asked, or none off site when
+one must be), "unverified" (copies on backup disks not checked by hash
+yet) or "no backup". They are read once for the whole Library each time it
+is filled (`helios_storage::strategy::statuses`). The search field takes
+`backup:met`, `backup:short` (short, unverified or with no backup),
+`backup:unverified` and `backup:none` (no backup copy at all, strategy or
+not).
 
 ## Not yet
 

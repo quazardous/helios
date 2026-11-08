@@ -27,6 +27,12 @@
 //! tags; [`query_of`]), run by the host ([`Library::take_query`],
 //! [`Library::set_matches`]); its words and dates are matched here, on the
 //! names, tags and days the library holds.
+//!
+//! Each photo's backups (`helios_storage::strategy::statuses`, read once
+//! per refresh: [`Library::set_backups`]) show as a badge when the library
+//! has a strategy ([`BackupMark`]: backed up, short, unverified, no
+//! backup), and the search field takes `backup:met`, `backup:short`
+//! (short or unverified), `backup:unverified` and `backup:none`.
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -486,6 +492,74 @@ pub fn query_typed(text: &str) -> Result<Option<helios_template::QueryDesc>, Str
 /// The longest side of a thumbnail, in pixels.
 pub const THUMB: u32 = 256;
 
+/// A photo's backups as the grid marks them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum BackupMark {
+    /// Its verified copies meet the strategy.
+    Met,
+    /// Some verified copies, fewer than the strategy asks (or none off
+    /// site when one must be).
+    Short,
+    /// Copies on backup disks not verified by hash yet, short otherwise.
+    Unverified,
+    /// No backup copy at all.
+    None,
+}
+
+impl BackupMark {
+    /// The mark of a photo with `status`.
+    pub fn of(status: &helios_storage::strategy::BackupStatus) -> Self {
+        if status.have == 0 && status.unverified == 0 {
+            Self::None
+        } else if status.met() {
+            Self::Met
+        } else if status.unverified > 0 {
+            Self::Unverified
+        } else {
+            Self::Short
+        }
+    }
+
+    /// Whether `backup:<word>` in the search field takes it: `met`,
+    /// `short` (short, unverified, or none while copies are asked),
+    /// `unverified` and `none`; `None` for a word it does not know.
+    fn wanted(word: &str, mark: Option<Self>) -> Option<bool> {
+        Some(match word {
+            "met" | "ok" => mark == Some(Self::Met),
+            "short" => matches!(mark, Some(Self::Short | Self::Unverified | Self::None)),
+            "unverified" => mark == Some(Self::Unverified),
+            "none" => matches!(mark, Some(Self::None) | None),
+            _ => return None,
+        })
+    }
+}
+
+/// The `backup:` words of a filter's text, apart: what is left of its
+/// text, and the words.
+fn backup_words(filter: &Filter) -> (Filter, Vec<String>) {
+    let mut rest = filter.clone();
+    let mut words = Vec::new();
+    let kept: Vec<&str> = filter
+        .text
+        .split_whitespace()
+        .filter(|w| {
+            match w
+                .to_lowercase()
+                .strip_prefix("backup:")
+                .filter(|b| BackupMark::wanted(b, None).is_some())
+            {
+                Some(b) => {
+                    words.push(b.to_string());
+                    false
+                }
+                None => true,
+            }
+        })
+        .collect();
+    rest.text = kept.join(" ");
+    (rest, words)
+}
+
 pub struct Library {
     pub entries: Vec<Entry>,
     /// The image under the cursor, by its place in `entries`.
@@ -541,6 +615,19 @@ pub struct Library {
     files: HashMap<String, PathBuf>,
     /// The volumes the vault knows, by id: what an offline photo names.
     volumes: HashMap<String, VolumeNote>,
+    /// Each photo's backups, by id, as last read.
+    backups: HashMap<String, BackupMark>,
+    /// Whether the grid shows the backup badges: the library has a
+    /// strategy.
+    backup_badges: Shown,
+}
+
+/// Whether something is drawn (a struct of many flags reads worse).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum Shown {
+    #[default]
+    No,
+    Yes,
 }
 
 impl Default for Library {
@@ -584,6 +671,8 @@ impl Default for Library {
             heads: Heads::default(),
             files: HashMap::new(),
             volumes: HashMap::new(),
+            backups: HashMap::new(),
+            backup_badges: Shown::No,
         }
     }
 }
@@ -652,6 +741,10 @@ struct Comparison {
 struct PresenceWords {
     offline: String,
     missing: String,
+    backed_up: String,
+    short: String,
+    unverified: String,
+    no_backup: String,
 }
 
 impl PresenceWords {
@@ -659,6 +752,22 @@ impl PresenceWords {
         Self {
             offline: crate::i18n::text(ctx, Message::new("gui-library-badge-offline", "offline")),
             missing: crate::i18n::text(ctx, Message::new("gui-library-badge-missing", "missing")),
+            backed_up: crate::i18n::text(
+                ctx,
+                Message::new("gui-library-badge-backed-up", "backed up"),
+            ),
+            short: crate::i18n::text(
+                ctx,
+                Message::new("gui-library-badge-backup-short", "backup short"),
+            ),
+            unverified: crate::i18n::text(
+                ctx,
+                Message::new("gui-library-badge-backup-unverified", "unverified"),
+            ),
+            no_backup: crate::i18n::text(
+                ctx,
+                Message::new("gui-library-badge-no-backup", "no backup"),
+            ),
         }
     }
 }
@@ -671,6 +780,8 @@ struct Items<'a> {
     stacks: bool,
     revision: u64,
     words: &'a PresenceWords,
+    /// Each photo's backups, when the badges show.
+    backups: Option<&'a HashMap<String, BackupMark>>,
 }
 
 impl Items<'_> {
@@ -720,6 +831,15 @@ impl LibraryItems<String> for Items<'_> {
             helios_vault::Presence::Missing => {
                 badges.push(Badge::new(self.words.missing.clone()).tone(BadgeTone::Danger));
             }
+        }
+        if let Some(mark) = self.backups.and_then(|b| b.get(&entry.id)) {
+            let w = self.words;
+            badges.push(match mark {
+                BackupMark::Met => Badge::new(w.backed_up.clone()).tone(BadgeTone::Success),
+                BackupMark::Short => Badge::new(w.short.clone()).tone(BadgeTone::Warning),
+                BackupMark::Unverified => Badge::new(w.unverified.clone()).tone(BadgeTone::Info),
+                BackupMark::None => Badge::new(w.no_backup.clone()).tone(BadgeTone::Danger),
+            });
         }
         badges
     }
@@ -819,6 +939,24 @@ impl Library {
             .collect();
     }
 
+    /// Each photo's backups, by id, read once per refresh; `badges`: the
+    /// library has a strategy, so the grid shows them. The `backup:`
+    /// words of the search field match on them.
+    pub fn set_backups(&mut self, backups: HashMap<String, BackupMark>, badges: bool) {
+        let badges = if badges { Shown::Yes } else { Shown::No };
+        if self.backups == backups && self.backup_badges == badges {
+            return;
+        }
+        self.backups = backups;
+        self.backup_badges = badges;
+        self.reorder();
+    }
+
+    /// A photo's backups, as last read.
+    pub fn backup_of(&self, id: &str) -> Option<BackupMark> {
+        self.backups.get(id).copied()
+    }
+
     /// The volume an offline image is on, as the library names it.
     pub fn offline_volume(&self, id: &str) -> Option<VolumeNote> {
         let entry = self.entry(id)?;
@@ -883,7 +1021,8 @@ impl Library {
     }
 
     /// The badges an image shows in the grid, in the interface's
-    /// language: RAW, offline, missing.
+    /// language: RAW, offline, missing, and its backups when the library
+    /// has a strategy.
     pub fn badges_of(&self, ctx: &egui::Context, id: &str) -> Vec<String> {
         let Some(&i) = self.index.get(id) else {
             return Vec::new();
@@ -896,6 +1035,7 @@ impl Library {
             stacks: false,
             revision: 0,
             words: &words,
+            backups: (self.backup_badges == Shown::Yes).then_some(&self.backups),
         };
         items.badges(0).into_iter().map(|b| b.text).collect()
     }
@@ -981,13 +1121,18 @@ impl Library {
         self.reorder();
     }
 
-    /// Whether an image passes the filter.
-    fn passes(&self, e: &Entry) -> bool {
+    /// Whether an image passes the filter (`filter`: its criteria but
+    /// the `backup:` words, which `backup` holds).
+    fn passes(&self, e: &Entry, filter: &Filter, backup: &[String]) -> bool {
         if self.filter.is_empty() {
             return true;
         }
+        let mark = self.backups.get(&e.id).copied();
         self.matches.as_ref().is_none_or(|m| m.contains(&e.id))
-            && self.filter.matches(&Candidate {
+            && backup
+                .iter()
+                .all(|w| BackupMark::wanted(w, mark).unwrap_or(true))
+            && filter.matches(&Candidate {
                 name: &e.name,
                 marks: e.marks(),
                 tags: &e.tags,
@@ -999,10 +1144,11 @@ impl Library {
     /// other members right after it.
     fn reorder(&mut self) {
         let stacks = self.filter.is_empty();
+        let (filter, backup) = backup_words(&self.filter);
         let mut order = Vec::new();
         let mut placed: HashSet<&str> = HashSet::new();
         for (i, e) in self.entries.iter().enumerate() {
-            if !self.passes(e) {
+            if !self.passes(e, &filter, &backup) {
                 continue;
             }
             match e.stack.as_ref().filter(|_| stacks) {
@@ -1753,6 +1899,7 @@ impl Library {
                 stacks: self.filter.is_empty(),
                 revision: self.revision,
                 words: &words,
+                backups: (self.backup_badges == Shown::Yes).then_some(&self.backups),
             };
             let thumbs = Thumbs {
                 textures: &self.textures,
@@ -1836,6 +1983,7 @@ impl Library {
                 stacks: self.filter.is_empty(),
                 revision: self.revision,
                 words: &words,
+                backups: (self.backup_badges == Shown::Yes).then_some(&self.backups),
             };
             let thumbs = Thumbs {
                 textures: &self.textures,

@@ -1428,6 +1428,8 @@ impl Shell {
     /// selection follows its image when it is still there.
     pub fn set_library(&mut self, entries: Vec<crate::library::Entry>) {
         self.library.borrow_mut().set_entries(entries);
+        // Their backups, read once for the whole Library.
+        self.refresh_backups();
     }
 
     /// Where the library's images are on disk, by id: quick open opens
@@ -5158,6 +5160,9 @@ impl Shell {
         let ends = self.ended.take(self.app.handle());
         for end in ends {
             self.job_finished(&end);
+        }
+        if self.ended.take_backups() {
+            self.backup_ended();
         }
         self.forgotten.take(self.app.handle());
     }

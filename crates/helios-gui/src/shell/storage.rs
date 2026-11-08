@@ -26,10 +26,12 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use egui::Context as Egui;
+use egui_pop::api::toasts::{TOASTS, Toast};
 use egui_pop::core::icon::Icon;
 use helios_core::Message;
+use helios_library::import::Card;
 use helios_shell::commands::Origin;
-use helios_storage::strategy::{self, Destination, Scope, Strategy, Trigger};
+use helios_storage::strategy::{self, BackupStatus, Destination, Scope, Strategy, Trigger};
 use helios_storage::{Identity, Role, Volume, VolumeId, VolumeKind, Volumes, registry};
 use helios_vault::{Store, Vault};
 use serde_json::Value;
@@ -60,6 +62,18 @@ pub trait StorageLink: Send + Sync {
     /// Keeps (or with `None` removes) the library's backup strategy.
     fn set_strategy(&self, _strategy: Option<&Strategy>) -> Result<(), String> {
         Err("no backup strategy here".into())
+    }
+    /// Every image's backup status against the library's strategy, by id
+    /// (`helios_storage::strategy::statuses`): one read for the whole
+    /// Library.
+    fn statuses(&self) -> Result<HashMap<String, BackupStatus>, String> {
+        Ok(HashMap::new())
+    }
+    /// Whether a card an import read is safe to format now
+    /// (`helios_library::import::card_safety`, from its files and their
+    /// images).
+    fn card_safety(&self, card: &Card) -> Result<Card, String> {
+        Ok(card.clone())
     }
 }
 
@@ -142,6 +156,25 @@ where
     fn set_strategy(&self, strategy: Option<&Strategy>) -> Result<(), String> {
         strategy::save(&self.vault, &Scope::Library, strategy)
     }
+
+    fn statuses(&self) -> Result<HashMap<String, BackupStatus>, String> {
+        let s = strategy::load(&self.vault, &Scope::Library)?;
+        let volumes = registry::known(&self.vault)?;
+        Ok(strategy::statuses(&self.vault, &volumes, s.as_ref())?
+            .into_iter()
+            .map(|(id, (status, _))| (id.hex(), status))
+            .collect())
+    }
+
+    fn card_safety(&self, card: &Card) -> Result<Card, String> {
+        helios_library::import::card_safety(
+            &self.vault,
+            &card.root,
+            &card.path,
+            &card.label,
+            card.files.clone(),
+        )
+    }
 }
 
 /// The page's state, kept by the shell.
@@ -160,6 +193,9 @@ pub(crate) struct StoragePage {
     /// The library's backup strategy, as last read.
     strategy: Option<Strategy>,
     error: Option<String>,
+    /// The cards an import left short of their backups: told safe to
+    /// format once a backup job makes them so, while still inserted.
+    waiting: Vec<Card>,
 }
 
 /// What the page's controls asked.
@@ -199,13 +235,168 @@ impl Shell {
                 Ok(p) => self.storage.photos = p,
                 Err(e) => self.storage.error = Some(e),
             }
-            match link.strategy() {
-                Ok(s) => self.storage.strategy = s,
-                Err(e) => self.storage.error = Some(e),
-            }
+        }
+        // The import window's strategy line reads it too.
+        match link.strategy() {
+            Ok(s) => self.storage.strategy = s,
+            Err(e) => self.storage.error = Some(e),
         }
         let known: Vec<VolumeId> = self.storage.volumes.iter().map(|v| v.id.clone()).collect();
         self.storage.names.retain(|id, _| known.contains(id));
+    }
+
+    /// Each photo's backups read again (one read for the Library), for
+    /// its badges and its `backup:` filters.
+    pub fn refresh_backups(&mut self) {
+        let Some(link) = self.storage.link.clone() else {
+            return;
+        };
+        match link.statuses() {
+            Ok(statuses) => {
+                let marks = statuses
+                    .iter()
+                    .map(|(id, s)| (id.clone(), crate::library::BackupMark::of(s)))
+                    .collect();
+                let badges = self.storage.strategy.is_some();
+                self.library.borrow_mut().set_backups(marks, badges);
+            }
+            Err(e) => log::warn!("backups: {e}"),
+        }
+    }
+
+    /// The cards an import read, from its report (`cards`): those short
+    /// of their backups wait for a backup job to end.
+    pub(super) fn wait_for_backups(&mut self, report: &Value) {
+        for card in report["cards"].as_array().into_iter().flatten() {
+            if card["safe_to_format"] == true
+                || card["missing"].as_u64().unwrap_or(0) > 0
+                || card["short"].as_u64().unwrap_or(0) == 0
+            {
+                continue;
+            }
+            let Some(card) = card_of(card) else {
+                continue;
+            };
+            self.storage.waiting.retain(|c| c.path != card.path);
+            self.storage.waiting.push(card);
+        }
+    }
+
+    /// The cards still waiting for their backups.
+    pub fn cards_waiting_for_backups(&self) -> Vec<String> {
+        self.storage
+            .waiting
+            .iter()
+            .map(|c| c.label.clone())
+            .collect()
+    }
+
+    /// A backup job ended: the badges read again, and each card still
+    /// inserted that waited for its backups checked again; one now safe
+    /// to format says so ("`EOS_DIGITAL` is safe to format: every photo
+    /// has its backups"). A card taken out is no longer followed.
+    pub(super) fn backup_ended(&mut self) {
+        self.refresh_backups();
+        let Some(link) = self.storage.link.clone() else {
+            return;
+        };
+        let waiting = std::mem::take(&mut self.storage.waiting);
+        for card in waiting {
+            if !card.path.is_dir() {
+                continue;
+            }
+            match link.card_safety(&card) {
+                Ok(now) if now.safe_to_format => {
+                    let message = Message::new(
+                        "gui-backup-card-safe",
+                        "{ $card } is safe to format: every photo has its backups",
+                    )
+                    .with("card", now.label.clone());
+                    let text = self.text(message.clone());
+                    if let Some(toasts) = self.app.handle().service(&TOASTS) {
+                        toasts.notify(Toast::success(&text));
+                    }
+                    self.log
+                        .borrow_mut()
+                        .push(crate::dialogs::Level::Info, message);
+                    self.notes.push(text);
+                }
+                Ok(_) => self.storage.waiting.push(card),
+                Err(e) => {
+                    log::warn!("{}: {e}", card.label);
+                    self.storage.waiting.push(card);
+                }
+            }
+        }
+    }
+
+    /// The import window's strategy line, and whether it is the one
+    /// without a strategy ("No backup set up:", the Storage page offered):
+    /// "2 copies: Backup disk (plugged in), NAS (not seen for 3 days)".
+    pub fn import_backup_line(&self) -> (String, bool) {
+        let Some(s) = &self.storage.strategy else {
+            return (
+                self.text(Message::new("gui-import-backup-none", "No backup set up:")),
+                true,
+            );
+        };
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs());
+        let online = strategy::destinations_online(s, &self.storage.volumes);
+        let disks: Vec<String> = self
+            .storage
+            .volumes
+            .iter()
+            .filter(|v| !v.is_card() && s.destinations.iter().any(|d| d.takes(v)))
+            .map(|v| {
+                let disk = v.name.clone();
+                let m = if online.iter().any(|o| o.id == v.id) {
+                    Message::new("gui-import-backup-plugged", "{ $disk } (plugged in)")
+                } else if v.online() {
+                    Message::new(
+                        "gui-import-backup-unusable",
+                        "{ $disk } (plugged in, cannot take copies)",
+                    )
+                } else {
+                    match v
+                        .last_seen
+                        .as_ref()
+                        .map(|l| now.saturating_sub(l.at) / 86_400)
+                    {
+                        None => Message::new("gui-import-backup-never", "{ $disk } (never seen)"),
+                        Some(0) => {
+                            Message::new("gui-import-backup-today", "{ $disk } (seen today)")
+                        }
+                        Some(1) => Message::new(
+                            "gui-import-backup-one-day",
+                            "{ $disk } (not seen for 1 day)",
+                        ),
+                        Some(days) => Message::new(
+                            "gui-import-backup-days",
+                            "{ $disk } (not seen for { $days } days)",
+                        )
+                        .with("days", days),
+                    }
+                };
+                self.text(m.with("disk", disk))
+            })
+            .collect();
+        let disks = if disks.is_empty() {
+            self.text(Message::new(
+                "gui-import-backup-no-disk",
+                "no disk for them yet",
+            ))
+        } else {
+            disks.join(", ")
+        };
+        let line = if s.copies == 1 {
+            Message::new("gui-import-backup-one", "1 copy: { $disks }")
+        } else {
+            Message::new("gui-import-backup-copies", "{ $copies } copies: { $disks }")
+                .with("copies", u64::from(s.copies))
+        };
+        (self.text(line.with("disks", disks)), false)
     }
 
     /// Whether the Storage page is open.
@@ -325,7 +516,40 @@ impl Shell {
             self.warn(format!("storage: {e}"));
         }
         self.refresh_volumes();
+        self.refresh_backups();
     }
+}
+
+/// A card from an import's report line (`helios_library::import::Card`
+/// as it serializes).
+fn card_of(v: &Value) -> Option<Card> {
+    let files = v["files"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|f| {
+            let path = std::path::PathBuf::from(f.get(0)?.as_str()?);
+            let id = f
+                .get(1)
+                .and_then(Value::as_str)
+                .and_then(|h| helios_vault::ImageId::from_hex(h).ok());
+            Some((path, id))
+        })
+        .collect();
+    Some(Card {
+        path: v["path"].as_str()?.into(),
+        label: v["label"].as_str()?.to_string(),
+        photos: v["photos"].as_u64().unwrap_or(0),
+        missing: v["missing"].as_u64().unwrap_or(0),
+        want: v["want"]
+            .as_u64()
+            .and_then(|w| u8::try_from(w).ok())
+            .unwrap_or(0),
+        short: v["short"].as_u64().unwrap_or(0),
+        safe_to_format: v["safe_to_format"] == true,
+        root: v["root"].as_str()?.into(),
+        files,
+    })
 }
 
 /// A destination's words: any disk of a role, or one disk by name.

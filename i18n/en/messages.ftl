@@ -69,6 +69,8 @@ export-write-failed = cannot write { $path }: { $error }
 
 gui-about-description = A client/server, AI-first image processing framework.
 
+gui-backup-card-safe = { $card } is safe to format: every photo has its backups
+
 gui-caption-decisions = Decisions waiting
 
 gui-caption-decisions-count = { $count } stack suggestions waiting for an answer
@@ -281,6 +283,28 @@ gui-image-opened = { $name } is open
 
 gui-image-opening = Opening { $name }…
 
+gui-import-backup-copies = { $copies } copies: { $disks }
+
+gui-import-backup-days = { $disk } (not seen for { $days } days)
+
+gui-import-backup-never = { $disk } (never seen)
+
+gui-import-backup-no-disk = no disk for them yet
+
+gui-import-backup-none = No backup set up:
+
+gui-import-backup-one = 1 copy: { $disks }
+
+gui-import-backup-one-day = { $disk } (not seen for 1 day)
+
+gui-import-backup-plugged = { $disk } (plugged in)
+
+gui-import-backup-storage = Storage…
+
+gui-import-backup-today = { $disk } (seen today)
+
+gui-import-backup-unusable = { $disk } (plugged in, cannot take copies)
+
 gui-import-cancelled = The import was cancelled: { $photos } photos imported
 
 gui-import-copy = Copy the photos into the library folder
@@ -481,7 +505,15 @@ gui-layout-not-saved = The layout was not saved: { $error }
 
 gui-library-auto-advance = Auto-advance
 
+gui-library-badge-backed-up = backed up
+
+gui-library-badge-backup-short = backup short
+
+gui-library-badge-backup-unverified = unverified
+
 gui-library-badge-missing = missing
+
+gui-library-badge-no-backup = no backup
 
 gui-library-badge-offline = offline
 

@@ -47,7 +47,10 @@
 //!   library folder ([`Card`] in the report, a log line "safe to format"
 //!   or "N photos not in the Library"); when the library has a backup
 //!   strategy, every photo must also have its verified backup copies
-//!   ([`Card::short`]). Helios never formats a card.
+//!   ([`Card::short`]); without one, the card is "safe to format (1
+//!   copy, in the Library: no backup set up)". [`card_safety`] computes
+//!   it again from the card's files and their images, once a backup job
+//!   ends. Helios never formats a card.
 //! - **A lost source** (a card taken out, a folder moved away) pauses the
 //!   job until it is back; it can still be cancelled.
 //! - **Cancel.** [`Jobs::cancel`] with the job's id, or the caller's
@@ -373,15 +376,26 @@ pub struct Card {
     /// copies (a backup disk not plugged in yet).
     pub short: u64,
     pub safe_to_format: bool,
+    /// The library folder its photos were copied into.
+    pub root: PathBuf,
+    /// Each file read on it, with its image (`None`: not imported): what
+    /// [`card_safety`] recomputes it from once a backup job ends.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub files: Vec<(PathBuf, Option<ImageId>)>,
 }
 
 impl Card {
-    /// What to tell a person: "`EOS_DIGITAL`: safe to format",
+    /// What to tell a person: "`EOS_DIGITAL`: safe to format (library +
+    /// 1 backup, verified)", "`EOS_DIGITAL`: safe to format (1 copy, in the
+    /// Library: no backup set up)",
     /// "`EOS_DIGITAL`: 2 photos not in the Library" or "`EOS_DIGITAL`: in
     /// the Library, 3 photos short of their backups: keep the card".
     pub fn said(&self) -> String {
         match (self.missing, self.short) {
-            (0, 0) if self.want == 0 => format!("{}: safe to format", self.label),
+            (0, 0) if self.want == 0 => format!(
+                "{}: safe to format (1 copy, in the Library: no backup set up)",
+                self.label
+            ),
             (0, 0) => format!(
                 "{}: safe to format (library + {} backup{}, verified)",
                 self.label,
@@ -400,6 +414,62 @@ impl Card {
             (n, _) => format!("{}: {n} photos not in the Library", self.label),
         }
     }
+}
+
+/// Whether the card mounted at `path` (named `label`) is safe to format:
+/// each of its `files` (with the image it holds, `None` for one not
+/// imported) held by a file in the library folder `root` and, when the
+/// library has a backup strategy, its image with its verified backup
+/// copies, from the images' locations in the vault. An import computes it
+/// at its end; it is computed again when a backup job ends, for the cards
+/// still inserted.
+pub fn card_safety<S: Store>(
+    vault: &Vault<S>,
+    root: &Path,
+    path: &Path,
+    label: &str,
+    files: Vec<(PathBuf, Option<ImageId>)>,
+) -> Result<Card, String> {
+    let strategy = helios_storage::strategy::load(vault, &Scope::Library)?;
+    let (volumes, verified) = match &strategy {
+        Some(_) => (
+            helios_storage::registry::known(vault)?,
+            helios_storage::strategy::verified(vault)?,
+        ),
+        None => Default::default(),
+    };
+    let (mut missing, mut short) = (0, 0);
+    for (_, id) in &files {
+        let Some(id) = id else {
+            missing += 1;
+            continue;
+        };
+        let locations = vault.locations(id)?;
+        if !locations
+            .iter()
+            .any(|l| l.present() && l.path.starts_with(root) && l.path.is_file())
+        {
+            missing += 1;
+            continue;
+        }
+        if let Some(s) = &strategy
+            && !helios_storage::strategy::status(&locations, &volumes, verified.get(id), Some(s))
+                .met()
+        {
+            short += 1;
+        }
+    }
+    Ok(Card {
+        path: path.to_path_buf(),
+        label: label.to_string(),
+        photos: files.len() as u64,
+        missing,
+        want: strategy.as_ref().map_or(0, |s| s.copies),
+        short,
+        safe_to_format: missing == 0 && short == 0,
+        root: root.to_path_buf(),
+        files,
+    })
 }
 
 impl Report {
@@ -913,56 +983,18 @@ impl<S: Store> Run<'_, S> {
         Ok((line, if new { Status::Added } else { Status::Located }))
     }
 
-    /// Whether the card `source` is safe to format: each of its files
-    /// read, its image held by a file in the library folder and, when the
-    /// library has a backup strategy, its verified backup copies there.
+    /// Whether the card `source` is safe to format ([`card_safety`] over
+    /// the images this import found its files hold).
     fn card(&self, source: &Source) -> Result<Card, String> {
         let Some(root) = &self.root else {
             return Err("only a copy makes a card safe to format".into());
         };
-        let strategy = helios_storage::strategy::load(self.vault, &Scope::Library)?;
-        let (volumes, verified) = match &strategy {
-            Some(_) => (
-                helios_storage::registry::known(self.vault)?,
-                helios_storage::strategy::verified(self.vault)?,
-            ),
-            None => Default::default(),
-        };
-        let (mut missing, mut short) = (0, 0);
-        for file in &source.files {
-            let Some(id) = self.hashes.get(file) else {
-                missing += 1;
-                continue;
-            };
-            let locations = self.vault.locations(id)?;
-            if !locations
-                .iter()
-                .any(|l| l.present() && l.path.starts_with(root) && l.path.is_file())
-            {
-                missing += 1;
-                continue;
-            }
-            if let Some(s) = &strategy
-                && !helios_storage::strategy::status(
-                    &locations,
-                    &volumes,
-                    verified.get(id),
-                    Some(s),
-                )
-                .met()
-            {
-                short += 1;
-            }
-        }
-        Ok(Card {
-            path: source.path.clone(),
-            label: source.label(),
-            photos: source.files.len() as u64,
-            missing,
-            want: strategy.as_ref().map_or(0, |s| s.copies),
-            short,
-            safe_to_format: missing == 0 && short == 0,
-        })
+        let files: Vec<(PathBuf, Option<ImageId>)> = source
+            .files
+            .iter()
+            .map(|f| (f.clone(), self.hashes.get(f).copied()))
+            .collect();
+        card_safety(self.vault, root, &source.path, &source.label(), files)
     }
 
     /// Applies what an importer listed for the file at `path` to its image
