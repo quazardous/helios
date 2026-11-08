@@ -6,9 +6,11 @@
 //!   one's glance (its smallest embedded preview and its capture time,
 //!   [`helios_load::glance`], never a raw decoded), so the first
 //!   thumbnails show while the rest is read.
-//! - [`Prefilter`]: whether a file is probably in the Library already, by
-//!   size, then by partial hash for a file whose size the vault holds. An
-//!   import confirms it with the full hash.
+//! - [`Prefilter`]: whether a file is probably in the Library already, a
+//!   lookup on the image map first (a Library image's file seen at that
+//!   path, unchanged since: known without a read), then by size, then by
+//!   partial hash for a file whose size the vault holds. An import
+//!   confirms it with the full hash.
 //! - [`Contents`]: the cells of the grid (a RAW+JPEG pair is one), their
 //!   days, ticks and counts, and the files a selection imports.
 
@@ -21,9 +23,47 @@ use std::sync::mpsc::{Receiver, channel};
 use chrono::{NaiveDate, NaiveDateTime, TimeZone};
 use helios_core::{ContentHash, Image};
 
-/// What the vault holds, as (size, partial hash) pairs: read once per
-/// scan, on its thread.
-pub type Known = Arc<dyn Fn() -> Vec<(u64, ContentHash)> + Send + Sync>;
+/// What the vault holds ([`Holdings`]): read once per scan, on its
+/// thread.
+pub type Known = Arc<dyn Fn() -> Holdings + Send + Sync>;
+
+/// What the Library holds, for the prefilter: its images as (size,
+/// partial hash), and where their files were seen (path, size,
+/// modification time in seconds).
+#[derive(Clone, Debug, Default)]
+pub struct Holdings {
+    pub partials: Vec<(u64, ContentHash)>,
+    pub seen: Vec<(PathBuf, u64, u64)>,
+}
+
+impl From<Vec<(u64, ContentHash)>> for Holdings {
+    fn from(partials: Vec<(u64, ContentHash)>) -> Self {
+        Self {
+            partials,
+            seen: Vec::new(),
+        }
+    }
+}
+
+/// The prefilter's lookup on a vault: the images in the Library (their
+/// flag) and their sightings.
+pub fn known_of<S: helios_vault::Store + 'static>(vault: Arc<helios_vault::Vault<S>>) -> Known {
+    Arc::new(move || Holdings {
+        partials: vault
+            .images()
+            .map(|images| images.into_iter().map(|i| (i.size, i.partial)).collect())
+            .unwrap_or_default(),
+        seen: vault
+            .all_locations()
+            .map(|all| {
+                all.into_iter()
+                    .filter(|(_, l)| l.present())
+                    .map(|(_, l)| (l.path, l.size, l.modified))
+                    .collect()
+            })
+            .unwrap_or_default(),
+    })
+}
 
 /// The image map's recorder of a listing by what (`import`, `drop`), made
 /// on the scan's thread; `None` when the map keeps no listing
@@ -36,6 +76,8 @@ pub type MapRecorder = Arc<dyn Fn(&str) -> Option<helios_library::map::Recorder>
 #[derive(Default)]
 pub struct Prefilter {
     by_size: HashMap<u64, HashSet<ContentHash>>,
+    /// Library files by path: (size, modification time).
+    seen: HashMap<PathBuf, (u64, u64)>,
 }
 
 impl Prefilter {
@@ -44,7 +86,35 @@ impl Prefilter {
         for (size, partial) in known {
             by_size.entry(size).or_default().insert(partial);
         }
-        Self { by_size }
+        Self {
+            by_size,
+            seen: HashMap::new(),
+        }
+    }
+
+    /// From what the Library holds: its partial hashes and its sightings.
+    pub fn of(holdings: Holdings) -> Self {
+        let mut filter = Self::new(holdings.partials);
+        filter.seen = holdings
+            .seen
+            .into_iter()
+            .map(|(path, size, modified)| (path, (size, modified)))
+            .collect();
+        filter
+    }
+
+    /// [`Prefilter::read`], a file of the Library seen at `path` with this
+    /// size and modification time known by a lookup, without a read.
+    pub fn read_at(
+        &self,
+        path: &Path,
+        size: u64,
+        modified: Option<u64>,
+    ) -> (bool, Option<ContentHash>) {
+        if modified.is_some_and(|m| self.seen.get(path) == Some(&(size, m))) {
+            return (true, None);
+        }
+        self.read(path, size)
     }
 
     /// Whether the file at `path`, of `size` bytes, is probably known.
@@ -116,7 +186,7 @@ impl Scan {
             .name("helios-import-scan".into())
             .spawn(move || {
                 let files = helios_library::import::files_of(&source).unwrap_or_default();
-                let prefilter = known.map(|k| Prefilter::new(k())).unwrap_or_default();
+                let prefilter = known.map(|k| Prefilter::of(k())).unwrap_or_default();
                 let mut recorder = map.and_then(|(make, seen_by)| make(seen_by));
                 let mut listed = Vec::with_capacity(files.len());
                 for path in files {
@@ -132,7 +202,8 @@ impl Scan {
                         .ok()
                         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                         .and_then(|d| i64::try_from(d.as_secs()).ok());
-                    let (known, partial) = prefilter.read(&path, bytes);
+                    let at = modified.and_then(|m| u64::try_from(m).ok());
+                    let (known, partial) = prefilter.read_at(&path, bytes, at);
                     if let Some(r) = recorder.as_mut() {
                         let at = modified.and_then(|m| u64::try_from(m).ok()).unwrap_or(0);
                         r.listed(&path, bytes, at, partial);
@@ -559,6 +630,22 @@ mod tests {
         assert!(!filter.holds(&other, size));
         // Another size is never read: a file that is not there is not known.
         assert!(!filter.holds(&dir.join("missing.raw"), size + 1));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_prefilter_knows_a_library_file_by_lookup_without_reading_it() {
+        let dir = temp("prefilter-lookup");
+        // Not on disk: a read would fail; the map knows it.
+        let path = dir.join("seen.raw");
+        let filter = Prefilter::of(Holdings {
+            partials: Vec::new(),
+            seen: vec![(path.clone(), 1_000, 42)],
+        });
+        assert_eq!(filter.read_at(&path, 1_000, Some(42)), (true, None));
+        // Changed since (another time or size): not known by the lookup.
+        assert!(!filter.read_at(&path, 1_000, Some(43)).0);
+        assert!(!filter.read_at(&path, 999, Some(42)).0);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -531,3 +531,39 @@ fn a_photo_out_of_the_library_counts_for_no_backup_and_no_card() {
     backup::run(&w.vault, &w.jobs, &w.plugged, Trigger::ByHand, 700, None).unwrap();
     assert!(safety(&w).safe_to_format);
 }
+
+/// A card imported with an "on import" strategy: one library copy by the
+/// verified copy, then the backup copies by the backup job, and the card
+/// safe to format.
+#[test]
+fn a_card_import_makes_the_library_copy_then_the_strategy_s_backups() {
+    let w = world("card-on-import", 0);
+    let card = w.p.join("EOS_DIGITAL");
+    photo(&card.join("DCIM/100CANON/a.raf"), 17);
+    photo(&card.join("DCIM/100CANON/b.raf"), 19);
+    let library = w.p.join("libdisk/Library");
+    library_strategy(&w.vault, &[Trigger::OnImport]);
+    let report = import_into(&w.vault, &w.jobs, std::slice::from_ref(&card), &library);
+    assert_eq!((report.added, report.copied), (2, 2), "{report:?}");
+    let done = backup::after_import(&w.vault, &w.jobs, &w.plugged, &report, 500).unwrap();
+    assert_eq!(done.len(), 1);
+    assert_eq!(done[0].copied, 2, "{done:?}");
+    for (_, id) in &report.cards[0].files {
+        let id = id.expect("imported");
+        assert!(w.vault.in_library(&id).unwrap());
+        // The library copy and the backup copy, each a sighting; the card
+        // is no copy.
+        let sightings = w.vault.sightings(&id).unwrap();
+        assert_eq!(sightings.len(), 2, "{sightings:?}");
+        assert!(sightings.iter().all(|s| !s.path.starts_with(&card)));
+    }
+    let card_now = helios_library::import::card_safety(
+        &w.vault,
+        &report.cards[0].root,
+        &report.cards[0].path,
+        &report.cards[0].label,
+        report.cards[0].files.clone(),
+    )
+    .unwrap();
+    assert!(card_now.safe_to_format, "{card_now:?}");
+}

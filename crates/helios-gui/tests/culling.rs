@@ -43,7 +43,7 @@ fn vault_file(dir: &Path) -> PathBuf {
     let mut store = SqliteStore::open(&path).unwrap();
     for n in 1..=3 {
         store
-            .add_image(&Image {
+            .add_to_library(&Image {
                 id: id(n),
                 size: 10,
                 partial: ContentHash([n; 32]),

@@ -68,7 +68,9 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use helios_core::jobs::{Jobs, Progress, Start};
 use helios_storage::strategy::Scope;
 use helios_vault::fields::{self as vault_fields, Command, Op};
-use helios_vault::{Change, Changes, IMAGE_EXTENSIONS, ImageId, ImageRows, Location, Store, Vault};
+use helios_vault::{
+    Change, Changes, IMAGE_EXTENSIONS, ImageId, ImageRows, LibraryFlag, Location, Store, Vault,
+};
 use helios_xmp::files::Matched;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -797,6 +799,8 @@ struct Run<'a, S: Store> {
     stop: Arc<AtomicBool>,
     /// Each image this import touched, in order, with its rows before.
     touched: Vec<(ImageId, Option<ImageRows>)>,
+    /// Its job's id: what sets the Library flag (`library_by`).
+    by: String,
 }
 
 impl<S: Store> Run<'_, S> {
@@ -809,21 +813,41 @@ impl<S: Store> Run<'_, S> {
         Ok(())
     }
 
-    /// What this import changed, image by image.
+    /// What this import changed, image by image: what it saw is kept by
+    /// an undo ([`facts_kept`]).
     fn changes(&self) -> Changes {
         let images = self
             .touched
             .iter()
             .filter_map(|(id, before)| {
+                let after = self.vault.rows(id).ok()?;
                 let change = Change {
                     image: *id,
-                    before: before.clone(),
-                    after: self.vault.rows(id).ok()?,
+                    before: facts_kept(before.clone(), after.as_ref()),
+                    after,
                 };
                 change.changed().then_some(change)
             })
             .collect();
         Changes { images }
+    }
+
+    /// The image of the file at `path` when it was seen before, unchanged
+    /// since (the same size and modification time, its content hashed
+    /// then): known without a read.
+    fn seen_before(&self, path: &Path) -> Result<Option<ImageId>, String> {
+        let Ok(meta) = std::fs::metadata(path) else {
+            return Ok(None);
+        };
+        let modified = meta
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map_or(0, |d| d.as_secs());
+        let absolute = std::path::absolute(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        Ok(self.vault.at_path(&absolute)?.and_then(|(id, l)| {
+            (l.present() && l.size == meta.len() && l.modified == modified).then_some(id)
+        }))
     }
 
     fn stopped(&self) -> bool {
@@ -864,6 +888,14 @@ impl<S: Store> Run<'_, S> {
 
     /// Imports one file: its line, and what happened.
     fn file(&mut self, path: &Path) -> Result<(Value, Status), String> {
+        let copying = matches!(self.options.placement, Placement::Copy { .. });
+        // Added where it is, a file seen before is not read again: the
+        // map knows its content.
+        let seen = if copying {
+            None
+        } else {
+            self.seen_before(path)?
+        };
         // A copy reads the source once, hashing it as it is copied; its
         // identity is known before the copy takes a name.
         let staged = match &self.staging {
@@ -878,21 +910,24 @@ impl<S: Store> Run<'_, S> {
             }
             None => None,
         };
-        let id = match &staged {
-            Some((_, id)) => *id,
-            None => hash_counted(path, &mut self.report.read)?,
+        let id = match (&staged, seen) {
+            (Some((_, id)), _) => *id,
+            (None, Some(id)) => id,
+            (None, None) => hash_counted(path, &mut self.report.read)?,
         };
         self.hashes.insert(path.to_path_buf(), id);
         self.touch(id)?;
         let mut line = json!({ "path": path, "id": id.hex() });
-        let copying = matches!(self.options.placement, Placement::Copy { .. });
+        let in_library = self.vault.in_library(&id)?;
         if !copying
+            && in_library
             && self
                 .vault
                 .at_path(path)?
                 .is_some_and(|(known, l)| known == id && l.present())
         {
-            self.vault.import_hashed(path, id, self.now)?;
+            self.vault
+                .import_known(path, id, self.now, Some(&self.by))?;
             self.seen.entry(id).or_insert_with(|| path.to_path_buf());
             self.keep_metadata(path, id, &mut line)?;
             self.keep_edits(path, id, &mut line)?;
@@ -900,7 +935,9 @@ impl<S: Store> Run<'_, S> {
         }
         let duplicate = if let Some(first) = self.seen.get(&id) {
             Some(json!({ "of": "source", "first": first }))
-        } else if self.vault.image(&id)?.is_some() {
+        } else if in_library {
+            // A lookup: the image is in the Library (an image only seen,
+            // or whose import was undone, is not a duplicate).
             let places: Vec<PathBuf> = self
                 .vault
                 .locations(&id)?
@@ -921,7 +958,10 @@ impl<S: Store> Run<'_, S> {
                 Duplicates::Keep => {}
             }
         }
-        let measured = if self.options.signals || copying {
+        // Signals measured before are kept: the same content measures the
+        // same.
+        let measure = copying || (self.options.signals && self.vault.signals(&id)?.is_none());
+        let measured = if measure {
             // A copy is measured, not the source: the source is read once.
             let at = staged.as_ref().map_or(path, |(part, _)| part.0.as_path());
             match signals::measure(at) {
@@ -967,11 +1007,16 @@ impl<S: Store> Run<'_, S> {
             line["to"] = json!(dest);
             line["copied"] = json!(copied);
             line["sidecars"] = json!(kept);
-            self.vault.import_hashed(&dest, id, self.now)?
+            // The copy is a sighting at its destination; the image is
+            // flagged in the Library.
+            self.vault
+                .import_known(&dest, id, self.now, Some(&self.by))?
         } else {
             let sidecars = self.sidecars(path)?;
             line["sidecars"] = json!(sidecars.iter().map(|s| &s.path).collect::<Vec<_>>());
-            self.vault.import_hashed(path, id, self.now)?
+            // Added where it is: no copy, its sighting there and the flag.
+            self.vault
+                .import_known(path, id, self.now, Some(&self.by))?
         };
         if self.options.signals
             && let Some(s) = &measured
@@ -1189,6 +1234,7 @@ pub fn import<S: Store>(
         report: Report::default(),
         stop,
         touched: Vec::new(),
+        by: id.clone(),
     };
     for (done, (source, path)) in files.iter().enumerate() {
         if run.stopped() {
@@ -1316,6 +1362,31 @@ pub fn import<S: Store>(
     }
     job.finished();
     Ok(run.report)
+}
+
+/// The rows an undo of an import goes back to: `before`, with what the
+/// import saw kept, as facts are: the image's locations (its sightings)
+/// and, for an image the import recorded, the image itself, off the
+/// Library, with its measured signals. So an undo clears the Library flag
+/// and takes back fields and versions; a redo sets them again.
+fn facts_kept(before: Option<ImageRows>, after: Option<&ImageRows>) -> Option<ImageRows> {
+    let Some(after) = after else {
+        return before;
+    };
+    Some(match before {
+        Some(mut before) => {
+            before.locations.clone_from(&after.locations);
+            before
+        }
+        None => ImageRows {
+            image: after.image.clone(),
+            library: LibraryFlag::default(),
+            locations: after.locations.clone(),
+            fields: BTreeMap::new(),
+            signals: after.signals.clone(),
+            versions: Vec::new(),
+        },
+    })
 }
 
 /// How often a paused import looks for its source again.

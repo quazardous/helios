@@ -176,9 +176,9 @@ fn a_restore_round_trip_keeps_the_current_catalogue_aside() {
     let dir = scratch("restore");
     let path = dir.join("vault.db");
     let mut store = SqliteStore::open(&path).unwrap();
-    store.add_image(&image(1)).unwrap();
+    store.add_to_library(&image(1)).unwrap();
     let file = snapshot::take_file(&path, "by-hand", &Options::default()).unwrap();
-    store.add_image(&image(2)).unwrap();
+    store.add_to_library(&image(2)).unwrap();
     snapshot::request_restore(&path, &file).unwrap();
     assert_eq!(snapshot::pending(&path).as_ref(), Some(&file));
     store.close().unwrap();

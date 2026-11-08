@@ -125,7 +125,7 @@ mod tests {
         for id in [a, b] {
             vault
                 .transaction(|s| {
-                    s.add_image(&Image {
+                    s.add_to_library(&Image {
                         id,
                         size: 1,
                         partial: id.0,

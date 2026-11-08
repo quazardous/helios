@@ -1,7 +1,8 @@
 //! What an operation changed in the catalogue, as a value an undo replays.
 //!
 //! An import records, for each image it touched, the image's rows before
-//! it ([`ImageRows`], `None` when the image was new) and after it: its
+//! it ([`ImageRows`]; an image it recorded, off the Library and with only
+//! its locations, which are facts an undo keeps) and after it: its
 //! Library flag, locations, fields, signals and versions. [`Vault::revert`] brings the
 //! rows back to before, [`Vault::replay`] to after, each in one
 //! transaction. Only catalogue rows move: no file is ever touched, so a
@@ -80,9 +81,14 @@ impl Changes {
         self.images.is_empty()
     }
 
-    /// Images the step brought into the vault.
+    /// Images the step brought into the Library (new to the vault, or
+    /// known off the Library and flagged).
     pub fn added(&self) -> usize {
-        self.images.iter().filter(|c| c.before.is_none()).count()
+        let on = |r: &Option<ImageRows>| r.as_ref().is_some_and(|r| r.library.in_library);
+        self.images
+            .iter()
+            .filter(|c| !on(&c.before) && on(&c.after))
+            .count()
     }
 }
 

@@ -81,7 +81,7 @@ fn connections_sharing_a_file_never_fail_as_busy() {
     let dir = scratch("concurrent");
     let path = dir.join("vault.db");
     let mut first = SqliteStore::open(&path).unwrap();
-    first.add_image(&image(1)).unwrap();
+    first.add_to_library(&image(1)).unwrap();
     let a = Vault::new(first);
     let b = Vault::new(SqliteStore::open(&path).unwrap());
     let reader = SqliteStore::open(&path).unwrap();
@@ -129,7 +129,7 @@ fn two_handles_with_stale_views_keep_each_others_fields() {
     let dir = scratch("two-handles");
     let path = dir.join("vault.db");
     let mut first = SqliteStore::open(&path).unwrap();
-    first.add_image(&image(1)).unwrap();
+    first.add_to_library(&image(1)).unwrap();
     let a = Vault::new(first);
     let b = Vault::new(SqliteStore::open(&path).unwrap());
     let id = image(1).id;

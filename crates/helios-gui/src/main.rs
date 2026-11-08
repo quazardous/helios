@@ -1798,12 +1798,7 @@ fn main() -> Result<(), String> {
             }
             // What the vault holds, for its "in your Library" prefilter.
             if let Some(vault) = known_vault.clone() {
-                shell.set_import_known(Arc::new(move || {
-                    vault
-                        .images()
-                        .map(|images| images.into_iter().map(|i| (i.size, i.partial)).collect())
-                        .unwrap_or_default()
-                }));
+                shell.set_import_known(helios_gui::import_scan::known_of(vault));
             }
             // The image map: what the import window's sources list is
             // recorded, Helios's own folders never.

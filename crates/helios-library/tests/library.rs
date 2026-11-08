@@ -1022,7 +1022,9 @@ fn an_import_is_undone_and_redone_its_files_kept() {
         (1, 1, 1),
         "{lines:?}"
     );
-    assert_eq!(report.changes.images.len(), 2, "{:?}", report.changes);
+    // The copy of the image the library had is a sighting, a fact: not a
+    // change an undo takes back.
+    assert_eq!(report.changes.images.len(), 1, "{:?}", report.changes);
     assert_eq!(report.changes.added(), 1);
     assert!(!report.copies.is_empty());
     let after: Vec<_> = vault
@@ -1034,15 +1036,24 @@ fn an_import_is_undone_and_redone_its_files_kept() {
     let mut files: Vec<PathBuf> = report.copies.clone();
     files.extend([edited.clone(), bare.clone(), roll.join("edited.png.xmp")]);
 
-    // Undo: the entries go, the files stay.
+    // Undo: the new image leaves the Library, what Helios saw stays (the
+    // image, its sightings), and so do the files.
     let undone = vault.revert(&report.changes).unwrap();
-    assert_eq!((undone.removed, undone.changed, undone.kept), (1, 1, 0));
+    assert_eq!((undone.removed, undone.changed, undone.kept), (0, 1, 0));
     assert_eq!(vault.images().unwrap(), before);
     let bare_id = before[0].id;
     assert_eq!(
         vault.locations(&bare_id).unwrap().len(),
-        1,
-        "the copy's location is forgotten"
+        2,
+        "the copy's sighting stays"
+    );
+    let new_id = report.changes.images[0].image;
+    assert!(!vault.in_library(&new_id).unwrap());
+    assert!(vault.image(&new_id).unwrap().is_some(), "still known");
+    assert!(!vault.sightings(&new_id).unwrap().is_empty());
+    assert!(
+        vault.versions(&new_id).unwrap().is_empty(),
+        "its edit taken back"
     );
     for f in &files {
         assert!(f.is_file(), "{} stays on disk", f.display());
@@ -1067,4 +1078,144 @@ fn an_import_is_undone_and_redone_its_files_kept() {
     for f in &files {
         assert!(f.is_file(), "{} stays on disk", f.display());
     }
+}
+
+/// The modification time of `path`, in seconds, as a listing records it.
+fn modified_of(path: &Path) -> u64 {
+    std::fs::metadata(path)
+        .unwrap()
+        .modified()
+        .unwrap()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+}
+
+/// Records what the import window's scan and the map job know of the file
+/// at `path`: a sighting with its image (the map job confirmed it).
+fn seen_as(vault: &Vault<MemoryStore>, path: &Path, id: ImageId) {
+    let size = std::fs::metadata(path).unwrap().len();
+    let mut s =
+        helios_vault::Sighting::seen(path.to_path_buf(), size, modified_of(path), 900, "import");
+    s.image = Some(id);
+    s.partial = Some(vault.image(&id).unwrap().unwrap().partial);
+    vault.record_sighting(&s).unwrap();
+}
+
+/// Overwrites the file at `path` with other bytes of the same size,
+/// keeping its modification time: a read of it would see another content,
+/// so a file read shows (a reader that tells on itself).
+fn tamper(path: &Path) {
+    let meta = std::fs::metadata(path).unwrap();
+    let modified = meta.modified().unwrap();
+    std::fs::write(path, vec![0x5au8; meta.len() as usize]).unwrap();
+    std::fs::File::options()
+        .write(true)
+        .open(path)
+        .unwrap()
+        .set_modified(modified)
+        .unwrap();
+}
+
+#[test]
+fn an_import_of_files_seen_before_sets_the_flag_without_reading_them() {
+    let p = Place::new("flag-seen");
+    let (first, again) = (p.join("roll/a.png"), p.join("roll2/a.png"));
+    picture(&first, 0, 1.0, 0);
+    std::fs::create_dir_all(again.parent().unwrap()).unwrap();
+    std::fs::copy(&first, &again).unwrap();
+    let vault = vault();
+    // Imported once, then taken out of the Library: known, off it.
+    let (report, _) = run(&vault, None, &[p.join("roll")], &Options::default());
+    let id = report.changes.images[0].image;
+    vault.set_in_library(&[id], false, "user", 1100).unwrap();
+    assert!(vault.images().unwrap().is_empty());
+    // The scan listed its copy in roll2, the map job confirmed it.
+    seen_as(&vault, &again, id);
+    tamper(&again);
+    let reads = vault.reads();
+    let (report, lines) = run(&vault, None, &[p.join("roll2")], &Options::default());
+    assert_eq!(report.added, 1, "{lines:?}");
+    assert_eq!(report.read, 0, "nothing read: {lines:?}");
+    assert_eq!(
+        (vault.reads().full_hashes, vault.reads().partial_hashes),
+        (reads.full_hashes, reads.partial_hashes)
+    );
+    // Flagged by the lookup: had the file been read, its other bytes
+    // would be another image.
+    let flag = vault.library_flag(&id).unwrap().unwrap();
+    assert!(flag.in_library);
+    assert_eq!(flag.at, Some(1000));
+    assert!(
+        flag.by.as_deref().is_some_and(|b| b.starts_with("import-")),
+        "{flag:?}"
+    );
+    assert_eq!(vault.images().unwrap().len(), 1);
+
+    // Undo clears the flag and keeps the sightings and the files; redo sets
+    // it again.
+    let undone = vault.revert(&report.changes).unwrap();
+    assert_eq!(undone.changed, 1);
+    assert!(!vault.in_library(&id).unwrap());
+    assert_eq!(vault.sightings(&id).unwrap().len(), 2);
+    assert!(first.is_file() && again.is_file());
+    vault.replay(&report.changes).unwrap();
+    assert!(vault.in_library(&id).unwrap());
+    assert_eq!(vault.sightings(&id).unwrap().len(), 2);
+}
+
+#[test]
+fn a_copy_records_a_sighting_where_it_lands_and_an_add_in_place_none() {
+    let p = Place::new("flag-places");
+    let (here, there) = (p.join("disk/a.png"), p.join("card/DCIM/100/b.png"));
+    picture(&here, 0, 1.0, 0);
+    picture(&there, 1, 1.0, 0);
+    let library = p.join("library");
+    let vault = vault();
+    // Added where it is: zero copies, its one sighting at its place.
+    let (added, _) = run(&vault, None, &[p.join("disk")], &Options::default());
+    assert_eq!((added.added, added.copied), (1, 0));
+    let a = added.changes.images[0].image;
+    let sightings = vault.sightings(&a).unwrap();
+    assert_eq!(sightings.len(), 1);
+    assert_eq!(sightings[0].path, here);
+    assert!(!library.exists(), "nothing copied");
+    // Copied into the Library: one copy, a sighting where it landed, seen
+    // by the import and verified.
+    let options = Options {
+        placement: Placement::Copy {
+            into: Some(library.clone()),
+        },
+        ..Options::default()
+    };
+    let (copied, _) = run(&vault, None, &[p.join("card")], &options);
+    assert_eq!((copied.added, copied.copied), (1, 1));
+    let b = copied.changes.images[0].image;
+    let sightings = vault.sightings(&b).unwrap();
+    assert_eq!(sightings.len(), 1, "{sightings:?}");
+    assert!(sightings[0].path.starts_with(&library), "{sightings:?}");
+    assert_eq!(sightings[0].seen_by, "import");
+    assert!(sightings[0].last_verified.is_some());
+    assert!(vault.in_library(&a).unwrap() && vault.in_library(&b).unwrap());
+}
+
+#[test]
+fn a_duplicate_of_the_library_is_found_by_a_lookup_not_a_read() {
+    let p = Place::new("flag-duplicate");
+    let (kept, copy) = (p.join("library/a.png"), p.join("roll/a-copy.png"));
+    picture(&kept, 0, 1.0, 0);
+    std::fs::create_dir_all(copy.parent().unwrap()).unwrap();
+    std::fs::copy(&kept, &copy).unwrap();
+    let vault = vault();
+    let (report, _) = run(&vault, None, &[p.join("library")], &Options::default());
+    let id = report.changes.images[0].image;
+    seen_as(&vault, &copy, id);
+    tamper(&copy);
+    let (report, lines) = run(&vault, None, &[p.join("roll")], &Options::default());
+    assert_eq!((report.skipped, report.read), (1, 0), "{lines:?}");
+    assert_eq!(lines[0]["duplicate"]["of"], "library", "{lines:?}");
+    // An image only seen, off the Library, is no duplicate: it is imported.
+    vault.set_in_library(&[id], false, "user", 1100).unwrap();
+    let (report, lines) = run(&vault, None, &[p.join("roll")], &Options::default());
+    assert_eq!((report.added, report.skipped), (1, 0), "{lines:?}");
 }

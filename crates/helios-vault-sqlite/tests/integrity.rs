@@ -44,7 +44,7 @@ fn writer_child() {
         return;
     };
     let mut store = SqliteStore::open(Path::new(&path)).unwrap();
-    store.add_image(&image(1)).unwrap();
+    store.add_to_library(&image(1)).unwrap();
     let mut out = std::io::stdout();
     // Bounded, so an orphaned child ends by itself.
     for i in 0..100_000 {
@@ -122,7 +122,7 @@ fn a_vault_corrupted_at_a_page_opens_read_only_with_its_snapshot() {
     let dir = scratch("corrupt");
     let path = dir.join("vault.db");
     let mut store = SqliteStore::open(&path).unwrap();
-    store.add_image(&image(1)).unwrap();
+    store.add_to_library(&image(1)).unwrap();
     for n in 0..200 {
         store
             .set_document("notes", &format!("{n:04}"), Some(&json!("x".repeat(100))))

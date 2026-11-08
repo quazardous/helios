@@ -25,6 +25,20 @@ whose image is out of the Library is not held by it). An image out of
 the Library keeps its marks, versions and sightings; putting it in or
 out is one undo step of the library, which moves the flag only.
 
+**Import is a flag.** An import records each file it brings (its image
+if unknown, off the Library, and its sighting), then sets the flag, with
+when and the import's job as what set it (`library_by: import-12`).
+Recording an image (`Store::add_image`) never puts it in the Library:
+only an import does (the CLI's `helios import`, importer plugins,
+darktable imports, files dropped or opened). A file added where it is
+and seen before, unchanged since (the same size and modification time,
+its content known), is flagged without being read again. Copies follow
+the placement: "Add where they are" makes none, "Copy into the Library"
+makes one by the verified copy, and the strategy's backups come after
+(on import) from the backup job; each copy is a sighting where it
+landed. Duplicates and "in your Library" are lookups on the flag: an
+image only seen, or whose import was undone, is no duplicate.
+
 The vault also keeps **sightings**: one file at one place (a volume and
 its path there, or an absolute path on no volume yet), with its size and
 modification time, and what reading it told: its partial hash, its image
@@ -212,8 +226,9 @@ with 1 when a file failed, 130 when interrupted.
 ## Exact duplicates
 
 The content hash of the whole file is computed for every file (streamed,
-never held in memory). A file is an exact duplicate when the library already
-has its content (`"duplicate": {"of": "library", "at": [...]}`), or when an
+never held in memory), unless the file was seen before unchanged and its
+content is known. A file is an exact duplicate when its image is in the
+Library (a lookup on the flag) (`"duplicate": {"of": "library", "at": [...]}`), or when an
 earlier file of the same import had it (`{"of": "source", "first": ...}`).
 `--duplicates` says what to do:
 
@@ -358,11 +373,12 @@ finished or cancelled, is one step of the Library's history, labelled
 Undo (Ctrl+Z) with the Library, the Filmstrip or the Duplicates panel
 shown takes it back when it is the newest step there (an edit made after
 it is undone first); the History panel lists it under the `library`
-scope. Undo removes the entries the import added from the Library: the
-images it brought, with their locations, fields, signals and the
-darktable edits kept as versions, and on photos the Library already had,
-the new locations and the values an importer gave. Redo puts them all
-back. **No file is touched**: what was referenced stays where it is, and
+scope. Undo takes the photos the import brought out of the Library
+(their flag cleared) with the values and darktable edits it gave them,
+and on photos the Library already had, the values an importer gave. What
+Helios saw stays: the images, their sightings and measured signals, so
+importing them again reads nothing it knows. Redo sets the flag and the
+values again; "Remove from Library" clears the flag the same way. **No file is touched**: what was referenced stays where it is, and
 the copies the import made stay in the library folder, sidecars
 included. A later import of the same photos finds those copies there by
 their hash and does not copy them again. A photo edited since the import

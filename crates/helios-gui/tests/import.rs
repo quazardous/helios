@@ -233,14 +233,7 @@ fn fake_card(dir: &Path) -> (PathBuf, helios_gui::import_scan::Known) {
     std::fs::copy(jpeg("b"), library.join("b.jpg")).unwrap();
     let vault = Arc::new(Vault::new(MemoryStore::default()));
     vault.import_file(&library.join("b.jpg"), 0).unwrap();
-    let known: helios_gui::import_scan::Known = Arc::new(move || {
-        vault
-            .images()
-            .unwrap()
-            .into_iter()
-            .map(|i| (i.size, i.partial))
-            .collect()
-    });
+    let known = helios_gui::import_scan::known_of(vault);
     (dcim, known)
 }
 

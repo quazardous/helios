@@ -3212,7 +3212,7 @@ mod tests {
         let id = helios_vault::ImageId(helios_core::ContentHash([7; 32]));
         let mut store = helios_vault_sqlite::SqliteStore::open(&path).unwrap();
         store
-            .add_image(&helios_vault::Image {
+            .add_to_library(&helios_vault::Image {
                 id,
                 size: 10,
                 partial: helios_core::ContentHash([7; 32]),

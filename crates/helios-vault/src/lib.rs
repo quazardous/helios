@@ -185,9 +185,21 @@ impl Location {
 /// other images out. An image off the Library is still known by its id
 /// (`image`, `locations`, `fields`...) and through its sightings.
 pub trait Store: Send {
-    /// Adds an image, in the Library; false if it was already known (its
-    /// flag is then left as it is).
+    /// Records an image, off the Library (seen, not imported); false if
+    /// it was already known (its flag is then left as it is). An import
+    /// puts it in the Library with [`Store::set_library_flag`].
     fn add_image(&mut self, image: &Image) -> Result<bool, String>;
+    /// Records an image if unknown and puts it in the Library (a flag
+    /// already on keeps its provenance): what an import does in one go.
+    /// Whether it was new to the Library.
+    fn add_to_library(&mut self, image: &Image) -> Result<bool, String> {
+        self.add_image(image)?;
+        let on = self.library_flag(&image.id)?.is_some_and(|f| f.in_library);
+        if !on {
+            self.set_library_flag(&image.id, &LibraryFlag::added())?;
+        }
+        Ok(!on)
+    }
     /// Any image the vault knows, in the Library or not.
     fn image(&self, id: &ImageId) -> Result<Option<Image>, String>;
     /// The images in the Library.
@@ -355,7 +367,7 @@ impl Store for MemoryStore {
             return Ok(false);
         }
         self.images
-            .insert(image.id, (image.clone(), LibraryFlag::added()));
+            .insert(image.id, (image.clone(), LibraryFlag::default()));
         Ok(true)
     }
 
@@ -978,20 +990,29 @@ impl<S: Store> Vault<S> {
                     presence: Presence::Present,
                     ..location.clone()
                 };
-                self.store
-                    .lock()
-                    .expect("store lock")
-                    .put_location(id, &verified)?;
-                report.unchanged += 1;
+                // Seen before, imported now: the flag goes on, nothing is
+                // read.
+                let flagged = self.transaction(|store| {
+                    store.put_location(id, &verified)?;
+                    let image = store.image(id)?.ok_or("no image")?;
+                    store.add_to_library(&image)
+                })?;
+                if flagged {
+                    report.added += 1;
+                    self.catalog.lock().expect("catalog lock").version += 1;
+                } else {
+                    report.unchanged += 1;
+                }
                 continue;
             }
             let id = ImageId(self.full_hash(&path)?);
             let partial = self.partial_hash(&path, size)?;
-            // The image and its location go in together, or not at all.
+            // The image and its location go in together, or not at all:
+            // recorded, then flagged in the Library.
             let new = self.transaction(|store| {
-                let new = store.add_image(&Image { id, size, partial })?;
+                store.add_image(&Image { id, size, partial })?;
                 store.put_location(&id, &Location::seen(path, size, modified, now))?;
-                Ok(new)
+                store.add_to_library(&Image { id, size, partial })
             })?;
             if new {
                 report.added += 1;
@@ -1014,14 +1035,22 @@ impl<S: Store> Vault<S> {
             && location.modified == modified
             && location.present()
         {
+            // Seen before: flagged without a read.
+            let flagged = self.transaction(|store| {
+                let image = store.image(&id)?.ok_or("no image")?;
+                store.add_to_library(&image)
+            })?;
+            if flagged {
+                self.catalog.lock().expect("catalog lock").version += 1;
+            }
             return Ok(id);
         }
         let id = ImageId(self.full_hash(&path)?);
         let partial = self.partial_hash(&path, size)?;
         let new = self.transaction(|store| {
-            let new = store.add_image(&Image { id, size, partial })?;
+            store.add_image(&Image { id, size, partial })?;
             store.put_location(&id, &Location::seen(path, size, modified, now))?;
-            Ok(new)
+            store.add_to_library(&Image { id, size, partial })
         })?;
         if new {
             self.catalog.lock().expect("catalog lock").version += 1;
@@ -1036,15 +1065,46 @@ impl<S: Store> Vault<S> {
 
     /// Records a file whose content hash the caller has just computed
     /// (while copying it, say), so it is not read in full again: only its
-    /// partial hash is. Returns whether the image is new to the vault.
+    /// partial hash is, unless the image is known (the same content has
+    /// its partial hash). The image is put in the Library. Returns whether
+    /// it is new to the Library.
     pub fn import_hashed(&self, path: &Path, id: ImageId, now: u64) -> Result<bool, String> {
+        self.import_known(path, id, now, None)
+    }
+
+    /// [`Vault::import_hashed`], the Library flag set by `by` at `now`
+    /// (an import's job): the file's location is recorded (a sighting at
+    /// its place), its image recorded if unknown, then flagged.
+    pub fn import_known(
+        &self,
+        path: &Path,
+        id: ImageId,
+        now: u64,
+        by: Option<&str>,
+    ) -> Result<bool, String> {
         let path = std::path::absolute(path).map_err(|e| format!("{}: {e}", path.display()))?;
         let (size, modified) = stat(&path)?;
-        let partial = self.partial_hash(&path, size)?;
+        let known = self.image(&id)?.filter(|i| i.size == size);
+        let partial = match known {
+            Some(image) => image.partial,
+            None => self.partial_hash(&path, size)?,
+        };
         let new = self.transaction(|store| {
-            let new = store.add_image(&Image { id, size, partial })?;
+            let image = Image { id, size, partial };
+            store.add_image(&image)?;
             store.put_location(&id, &Location::seen(path, size, modified, now))?;
-            Ok(new)
+            let on = store.library_flag(&id)?.is_some_and(|f| f.in_library);
+            if !on {
+                store.set_library_flag(
+                    &id,
+                    &LibraryFlag {
+                        in_library: true,
+                        at: by.map(|_| now),
+                        by: by.map(Into::into),
+                    },
+                )?;
+            }
+            Ok(!on)
         })?;
         if new {
             self.catalog.lock().expect("catalog lock").version += 1;

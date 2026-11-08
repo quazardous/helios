@@ -669,7 +669,7 @@ impl Store for SqliteStore {
         let added = self
             .db
             .execute(
-                "INSERT OR IGNORE INTO images (id, size, partial, in_library) VALUES (?1, ?2, ?3, 1)",
+                "INSERT OR IGNORE INTO images (id, size, partial, in_library) VALUES (?1, ?2, ?3, 0)",
                 params![image.id.hex(), image.size as i64, image.partial.to_string()],
             )
             .map_err(err)?;

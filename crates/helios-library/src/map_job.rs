@@ -764,7 +764,7 @@ mod tests {
     fn world() -> World {
         let mut store = MemoryStore::default();
         let a = image(1);
-        store.add_image(&a).unwrap();
+        store.add_to_library(&a).unwrap();
         let mut sightings = BTreeMap::new();
         let mut lib = on("uuid:disk", "/media/disk", "lib/a.cr3", a.size, 1);
         lib.partial = Some(a.partial);

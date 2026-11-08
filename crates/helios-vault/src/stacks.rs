@@ -316,7 +316,7 @@ mod tests {
         for id in &ids {
             vault
                 .transaction(|s| {
-                    s.add_image(&Image {
+                    s.add_to_library(&Image {
                         id: *id,
                         size: 1,
                         partial: id.0,

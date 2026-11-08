@@ -62,7 +62,7 @@ fn on(volume: &str, rel: &str, size: u64, seen: u64) -> crate::Sighting {
 fn listings_record_and_keep_what_was_read<S: Store>(s: S) {
     let v = Vault::new(s);
     let a = image(1);
-    v.transaction(|s| s.add_image(&a).map(|_| ())).unwrap();
+    v.transaction(|s| s.add_to_library(&a).map(|_| ())).unwrap();
     let mut first = on("uuid:d", "shoot/x.cr3", 101, 10);
     first.partial = Some(a.partial);
     first.camera = Some("Z 8".into());
@@ -132,8 +132,8 @@ fn listings_record_and_keep_what_was_read<S: Store>(s: S) {
 /// library files, verified longest ago first; duplicates to confirm.
 fn the_map_reads_by_kind_newest_first<S: Store>(mut s: S) {
     let (a, b) = (image(1), image(2));
-    s.add_image(&a).unwrap();
-    s.add_image(&b).unwrap();
+    s.add_to_library(&a).unwrap();
+    s.add_to_library(&b).unwrap();
     s.set_library_flag(&b.id, &crate::LibraryFlag::default())
         .unwrap();
     let old = on("uuid:d", "a.jpg", 7, 10);
@@ -187,7 +187,7 @@ fn the_map_reads_by_kind_newest_first<S: Store>(mut s: S) {
 fn forgetting_and_pruning_never_touch_the_library<S: Store>(s: S) {
     let v = Vault::new(s);
     let a = image(1);
-    v.transaction(|s| s.add_image(&a).map(|_| ())).unwrap();
+    v.transaction(|s| s.add_to_library(&a).map(|_| ())).unwrap();
     let mut lib = on("uuid:d", "shoot/l.cr3", a.size, 1);
     lib.image = Some(a.id);
     lib.partial = Some(a.partial);
@@ -254,7 +254,7 @@ fn an_image_off_the_library_never_shows_in_a_library_read<S: Store>(s: S) {
     let (a, b, c) = (image(1), image(2), image(3));
     v.transaction(|s| {
         for (i, img) in [&a, &b, &c].into_iter().enumerate() {
-            assert!(s.add_image(img)?);
+            assert!(s.add_to_library(img)?);
             s.put_location(&img.id, &location(&format!("/p/{i}.nef")))?;
             s.set_field(&img.id, RATING, Some(&json!(5)))?;
             s.set_field(&img.id, LABELS, Some(&json!(["red"])))?;
@@ -378,7 +378,7 @@ fn an_image_off_the_library_never_shows_in_a_library_read<S: Store>(s: S) {
 /// keeping when it was first seen; a location is a sighting with an image.
 fn sightings_are_kept_one_per_place<S: Store>(mut s: S) {
     let a = image(1);
-    s.add_image(&a).unwrap();
+    s.add_to_library(&a).unwrap();
     let mut loose = crate::Sighting::seen(PathBuf::from("/card/x.cr3"), 101, 5, 20, "dialog");
     loose.partial = Some(a.partial);
     loose.camera = Some("EOS R5".into());
@@ -440,7 +440,7 @@ fn sightings_are_kept_one_per_place<S: Store>(mut s: S) {
     // A location at a loose sighting's path takes it over, keeping its
     // glance and first sighting; removing it forgets it.
     let b = image(2);
-    s.add_image(&b).unwrap();
+    s.add_to_library(&b).unwrap();
     let mut file = crate::Sighting::seen(PathBuf::from("/in/y.nef"), 102, 5, 3, "drop");
     file.camera = Some("Z8".into());
     s.put_sighting(&file).unwrap();
@@ -471,7 +471,7 @@ fn sightings_are_kept_one_per_place<S: Store>(mut s: S) {
 
 fn removals_forget_rows_and_refuse_what_is_still_named<S: Store>(mut s: S) {
     let a = image(1);
-    s.add_image(&a).unwrap();
+    s.add_to_library(&a).unwrap();
     s.put_location(&a.id, &location("/a.nef")).unwrap();
     s.set_field(&a.id, "rating", Some(&json!(3))).unwrap();
     let base = crate::Version::new(a.id, vec![], json!({ "n": 1 }), "user", 1);
@@ -489,7 +489,7 @@ fn removals_forget_rows_and_refuse_what_is_still_named<S: Store>(mut s: S) {
     assert!(!s.remove_image(&a.id).unwrap());
     assert_eq!(s.image(&a.id).unwrap(), None);
     // Its fields went with it: added again, it holds none.
-    s.add_image(&a).unwrap();
+    s.add_to_library(&a).unwrap();
     assert_eq!(s.field(&a.id, "rating").unwrap(), None);
 }
 
@@ -1043,7 +1043,7 @@ fn versions_are_content_addressed_and_heads_follow_forks_and_merges<S: Store>(st
         "an unknown image has no versions"
     );
     {
-        vault.store.lock().unwrap().add_image(&img).unwrap();
+        vault.store.lock().unwrap().add_to_library(&img).unwrap();
     }
     assert!(vault.add_version(&first).unwrap());
     // The same edit on the same parents is the same version, whoever and whenever.
@@ -1077,7 +1077,7 @@ fn versions_are_content_addressed_and_heads_follow_forks_and_merges<S: Store>(st
 
     // A parent must be a version of the same image.
     let other = image(2);
-    vault.store.lock().unwrap().add_image(&other).unwrap();
+    vault.store.lock().unwrap().add_to_library(&other).unwrap();
     let stray = Version::new(other.id, vec![first.id], edit(0.1), "user", 40);
     assert!(
         vault
@@ -1124,6 +1124,12 @@ fn images_are_added_once<S: Store>(mut s: S) {
     s.add_image(&image(2)).unwrap();
     assert_eq!(s.image(&image(1).id).unwrap(), Some(image(1)));
     assert_eq!(s.image(&image(9).id).unwrap(), None);
+    // Recorded, not imported: off the Library until flagged.
+    assert!(s.images().unwrap().is_empty());
+    assert!(!s.library_flag(&image(1).id).unwrap().unwrap().in_library);
+    assert!(s.add_to_library(&image(1)).unwrap());
+    assert!(!s.add_to_library(&image(1)).unwrap(), "flagged twice");
+    s.add_to_library(&image(2)).unwrap();
     assert_eq!(s.images().unwrap().len(), 2);
 }
 
@@ -1133,8 +1139,8 @@ fn locations_belong_to_one_image_and_round_trip<S: Store>(mut s: S) {
             .unwrap_err()
             .contains("no image")
     );
-    s.add_image(&image(1)).unwrap();
-    s.add_image(&image(2)).unwrap();
+    s.add_to_library(&image(1)).unwrap();
+    s.add_to_library(&image(2)).unwrap();
     let lost = Location {
         presence: Presence::Missing,
         ..location("/b.nef")
@@ -1285,7 +1291,7 @@ fn repair_relinks_by_content_reading_as_little_as_possible<S: Store>(s: S, dir: 
 
 fn with_images<S: Store>(mut s: S, n: u8) -> S {
     for i in 1..=n {
-        s.add_image(&image(i)).unwrap();
+        s.add_to_library(&image(i)).unwrap();
     }
     s
 }
