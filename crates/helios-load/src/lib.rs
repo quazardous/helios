@@ -49,6 +49,10 @@ pub struct Loaded {
     pub sensor: Option<Sensor>,
     /// For pictures: what their colours were read as.
     pub colour: Option<Colour>,
+    /// The EXIF orientation tag, 1 to 8 (1 when the file has none): how
+    /// the image is turned to be seen. The pixels are as stored: the
+    /// `flip` step turns them (a raw's tag is also its camera's).
+    pub orientation: u8,
 }
 
 /// Where a raw's image sits on its sensor: the full photosite grid (what
@@ -92,14 +96,15 @@ fn read(path: &Path) -> Result<(String, Arc<Vec<u8>>), String> {
 pub fn load(path: &Path) -> Result<Loaded, String> {
     let (hash, bytes) = read(path)?;
     let named = |e: String| format!("{}: {e}", path.display());
-    let (image, camera, sensor, colour) = match Kind::of(path) {
+    let (image, camera, sensor, colour, orientation) = match Kind::of(path) {
         Kind::Picture => {
-            let (image, colour) = picture(&bytes).map_err(named)?;
-            (image, None, None, Some(colour))
+            let (image, colour, orientation) = picture(&bytes).map_err(named)?;
+            (image, None, None, Some(colour), orientation)
         }
         Kind::Raw => {
             let (image, camera, sensor) = raw(bytes).map_err(named)?;
-            (image, Some(camera), Some(sensor), None)
+            let orientation = camera.orientation;
+            (image, Some(camera), Some(sensor), None, orientation)
         }
     };
     Ok(Loaded {
@@ -108,6 +113,7 @@ pub fn load(path: &Path) -> Result<Loaded, String> {
         camera,
         sensor,
         colour,
+        orientation,
     })
 }
 
@@ -163,6 +169,12 @@ pub fn glance(path: &Path) -> Result<Glance, String> {
         .find_map(|r| r.ok().flatten())
         .map(|img| working(&img));
         let metadata = decoder.raw_metadata(&source, &params).ok();
+        let tag = metadata
+            .as_ref()
+            .and_then(|m| m.exif.orientation)
+            .and_then(|o| u8::try_from(o).ok())
+            .unwrap_or(1);
+        let preview = preview.map(|p| upright(p, tag));
         let taken = metadata.as_ref().and_then(|m| {
             m.exif
                 .date_time_original
@@ -181,6 +193,7 @@ pub fn glance(path: &Path) -> Result<Glance, String> {
     let reader = image::ImageReader::new(Cursor::new(&bytes[..]))
         .with_guessed_format()
         .map_err(|e| named(e.to_string()))?;
+    let tag = picture_tag(&bytes, reader.format());
     let (taken, camera, thumb) = if reader.format() == Some(image::ImageFormat::Jpeg) {
         use image::ImageDecoder as _;
         image::codecs::jpeg::JpegDecoder::new(Cursor::new(&bytes[..]))
@@ -195,7 +208,7 @@ pub fn glance(path: &Path) -> Result<Glance, String> {
         None => load(path)?.image,
     };
     Ok(Glance {
-        preview: Some(preview),
+        preview: Some(upright(preview, tag)),
         taken,
         camera,
     })
@@ -310,25 +323,89 @@ fn working(img: &DynamicImage) -> Image {
     convert(img, &InputSpace::srgb()).expect("the sRGB conversion cannot fail")
 }
 
-fn picture(bytes: &[u8]) -> Result<(Image, Colour), String> {
+/// A picture in the working space, its colours and its EXIF orientation
+/// tag (1 when it has none).
+fn picture(bytes: &[u8]) -> Result<(Image, Colour, u8), String> {
     let reader = image::ImageReader::new(Cursor::new(bytes))
         .with_guessed_format()
         .map_err(|e| e.to_string())?;
     let format = reader.format();
     let mut decoder = reader.into_decoder().map_err(|e| e.to_string())?;
     let tags = colour::tags(bytes, format, &mut decoder);
+    let orientation = tags.orientation();
     let img = DynamicImage::from_decoder(decoder).map_err(|e| e.to_string())?;
     let (space, mut colour) = colour::choose(&tags, !img.color().has_color());
     match convert(&img, &space) {
-        Ok(image) => Ok((image, colour)),
+        Ok(image) => Ok((image, colour, orientation)),
         Err(e) => {
             // The pixels are as they were: read them as sRGB instead.
             colour.ignored.push(e);
             colour.from = ColourTag::Untagged;
             colour.space = format!("{} (assumed)", OutputSpace::Srgb.name());
-            Ok((working(&img), colour))
+            Ok((working(&img), colour, orientation))
         }
     }
+}
+
+/// A picture's EXIF orientation tag, 1 to 8 (1 when it has none), read
+/// from its bytes without decoding a pixel.
+fn picture_tag(bytes: &[u8], format: Option<image::ImageFormat>) -> u8 {
+    colour::exif_of(bytes, format)
+        .and_then(|b| colour::exif_orientation(&b))
+        .unwrap_or(1)
+}
+
+/// The EXIF orientation tag of a picture's bytes (JPEG, PNG, TIFF), 1
+/// to 8; 1 when it has none or the bytes are no picture.
+pub fn picture_orientation(bytes: &[u8]) -> u8 {
+    let format = image::guess_format(bytes).ok();
+    picture_tag(bytes, format)
+}
+
+/// An image turned as its EXIF orientation `tag` says it is seen, as
+/// darktable's `flip` turns it at its default: for what is shown
+/// without going through a network (a glance, a thumbnail).
+pub fn upright(image: Image, tag: u8) -> Image {
+    let Some(o) = image::metadata::Orientation::from_exif(tag)
+        .filter(|o| *o != image::metadata::Orientation::NoTransforms)
+    else {
+        return image;
+    };
+    let region = image.region();
+    let channels = image.channels();
+    if channels != 4 {
+        return image;
+    }
+    let Some(buffer) =
+        image::Rgba32FImage::from_raw(region.width, region.height, image.data().to_vec())
+    else {
+        return image;
+    };
+    let mut turned = DynamicImage::ImageRgba32F(buffer);
+    turned.apply_orientation(o);
+    let (w, h) = (turned.width(), turned.height());
+    Image::new(Region::sized(w, h), 4, turned.into_rgba32f().into_raw())
+}
+
+/// A picture's size as stored (before its orientation turns it) and its
+/// EXIF orientation tag (1 to 8, 1 when it has none), read without
+/// decoding its pixels: what places darktable's drawn masks on it.
+/// `None` for a raw (see [`sensor`]).
+///
+/// # Errors
+/// The file cannot be read, or is no picture.
+pub fn picture_geometry(path: &Path) -> Result<Option<(u32, u32, u8)>, String> {
+    if Kind::of(path) == Kind::Raw {
+        return Ok(None);
+    }
+    let bytes = std::fs::read(path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+    let named = |e: String| format!("{}: {e}", path.display());
+    let reader = image::ImageReader::new(Cursor::new(&bytes[..]))
+        .with_guessed_format()
+        .map_err(|e| named(e.to_string()))?;
+    let tag = picture_tag(&bytes, reader.format());
+    let (width, height) = reader.into_dimensions().map_err(|e| named(e.to_string()))?;
+    Ok(Some((width, height, tag)))
 }
 
 fn ratio(n: f64, d: f64) -> f64 {

@@ -371,3 +371,46 @@ fn a_provisional_entry_is_renamed_to_its_full_key() {
     assert!(cache.contains(&full, SMALL));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A `w`×`h` JPEG tagged with the EXIF orientation `tag`.
+fn tagged_jpeg(w: u32, h: u32, tag: u16) -> Vec<u8> {
+    use image::ImageEncoder as _;
+    let mut exif = b"II*\0".to_vec();
+    exif.extend(8u32.to_le_bytes());
+    exif.extend(1u16.to_le_bytes());
+    exif.extend(0x0112u16.to_le_bytes());
+    exif.extend(3u16.to_le_bytes());
+    exif.extend(1u32.to_le_bytes());
+    exif.extend(tag.to_le_bytes());
+    exif.extend([0, 0, 0, 0, 0, 0]);
+    let img = image::RgbImage::from_fn(w, h, |x, _| image::Rgb([(x % 256) as u8, 60, 120]));
+    let mut out = Vec::new();
+    let mut enc = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 90);
+    enc.set_exif_metadata(exif).unwrap();
+    enc.write_image(img.as_raw(), w, h, image::ExtendedColorType::Rgb8)
+        .unwrap();
+    out
+}
+
+#[test]
+fn a_picture_shot_in_portrait_gets_an_upright_thumbnail() {
+    let turned = helios_thumbs::read::from_bytes(
+        tagged_jpeg(300, 200, 6),
+        helios_load::Kind::Picture,
+        SMALL,
+    )
+    .unwrap();
+    assert_eq!((turned.width, turned.height), (171, 256));
+    let upright = helios_thumbs::read::from_bytes(
+        tagged_jpeg(300, 200, 1),
+        helios_load::Kind::Picture,
+        SMALL,
+    )
+    .unwrap();
+    assert_eq!((upright.width, upright.height), (256, 171));
+    // A raw's bytes are not read as a picture's tags.
+    let raw =
+        helios_thumbs::read::from_bytes(tagged_jpeg(300, 200, 6), helios_load::Kind::Raw, SMALL)
+            .unwrap();
+    assert_eq!((raw.width, raw.height), (256, 171));
+}

@@ -173,8 +173,39 @@ enum RawGet {
     Full,
 }
 
-/// [`read`] from a file's bytes.
+/// [`read`] from a file's bytes. A picture's thumbnail is turned as its
+/// EXIF orientation says it is seen (a JPEG's Exif thumbnail is stored as
+/// the picture is, unturned).
 pub fn from_bytes(bytes: Vec<u8>, kind: Kind, long: u32) -> Option<Rgb8> {
+    let tag = match kind {
+        Kind::Picture => helios_load::picture_orientation(&bytes),
+        Kind::Raw => 1,
+    };
+    stored(bytes, kind, long).map(|rgb| upright(rgb, tag))
+}
+
+/// An 8-bit thumbnail turned by an EXIF orientation tag.
+fn upright(rgb: Rgb8, tag: u8) -> Rgb8 {
+    let Some(o) = image::metadata::Orientation::from_exif(tag)
+        .filter(|o| *o != image::metadata::Orientation::NoTransforms)
+    else {
+        return rgb;
+    };
+    let Some(image) = RgbImage::from_raw(rgb.width, rgb.height, rgb.pixels.clone()) else {
+        return rgb;
+    };
+    let mut turned = DynamicImage::ImageRgb8(image);
+    turned.apply_orientation(o);
+    let turned = turned.into_rgb8();
+    Rgb8 {
+        width: turned.width(),
+        height: turned.height(),
+        pixels: turned.into_raw(),
+    }
+}
+
+/// [`from_bytes`], the pixels as the file stores them.
+fn stored(bytes: Vec<u8>, kind: Kind, long: u32) -> Option<Rgb8> {
     for e in choose(&embedded_jpegs(&bytes), long) {
         if let Ok(rgb) = decode_jpeg(&bytes[e.offset..], long) {
             return Some(rgb);

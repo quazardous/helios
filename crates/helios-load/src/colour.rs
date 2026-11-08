@@ -76,6 +76,13 @@ pub(crate) struct Tags<'a> {
     exif: Option<Cow<'a, [u8]>>,
 }
 
+impl Tags<'_> {
+    /// The EXIF orientation tag, 1 to 8; 1 when there is none.
+    pub(crate) fn orientation(&self) -> u8 {
+        self.exif.as_deref().and_then(exif_orientation).unwrap_or(1)
+    }
+}
+
 /// Reads the tags of a picture: its bytes, and the decoder that will give
 /// its pixels (for JPEG, whose decoder has already read the tags). Never
 /// fails: what cannot be read is absent.
@@ -343,6 +350,33 @@ pub(crate) fn exif_glance(block: &[u8]) -> (Option<String>, Option<String>, Opti
         t.b.get(start..start + len).map(<[u8]>::to_vec)
     })();
     (taken, camera, thumb)
+}
+
+/// The Exif `Orientation` tag (0x0112 of the first directory), 1 to 8;
+/// `None` when the block has none, or one out of range.
+pub(crate) fn exif_orientation(block: &[u8]) -> Option<u8> {
+    let t = Ifds::new(block)?;
+    let ifd0 = t.u32(4)? as usize;
+    let (kind, _, at) = t.entry(ifd0, 0x0112)?;
+    // SHORT, in the first two bytes of the value field.
+    (kind == 3).then_some(())?;
+    u8::try_from(t.u16(at)?)
+        .ok()
+        .filter(|o| (1..=8).contains(o))
+}
+
+/// The Exif block of a picture's bytes, when it has one (what [`tags`]
+/// reads), without decoding a pixel.
+pub(crate) fn exif_of(bytes: &[u8], format: Option<ImageFormat>) -> Option<Cow<'_, [u8]>> {
+    match format {
+        Some(ImageFormat::Png) => png_tags(bytes).exif,
+        Some(ImageFormat::Jpeg) => image::codecs::jpeg::JpegDecoder::new(Cursor::new(bytes))
+            .ok()
+            .and_then(|mut d| d.exif_metadata().ok().flatten())
+            .map(Cow::Owned),
+        Some(ImageFormat::Tiff) => Some(Cow::Borrowed(bytes)),
+        _ => None,
+    }
 }
 
 /// Exif `ColorSpace` (tag 0xA001) and the interoperability index (tag 1 of
