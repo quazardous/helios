@@ -6,6 +6,7 @@ pub mod agent_state;
 pub mod caption;
 pub mod catalogue;
 pub mod clipboard;
+pub mod config;
 pub mod contexts;
 pub mod decisions;
 pub mod dialogs;

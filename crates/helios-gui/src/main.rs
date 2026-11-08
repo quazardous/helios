@@ -1625,30 +1625,34 @@ fn main() -> Result<(), String> {
     let vault = persist.as_ref().map(|p| p.vault().clone());
     // The library is read while the window opens.
     let library_reading = vault.clone().map(read_library);
-    // The user's settings the desktop follows, from the vault's user
-    // layer (the one `helios-node --vault` keeps there).
-    let queue_when_empty = vault
-        .as_ref()
-        .map_or(Ok(None), |v| v.config_layer("user"))
-        .and_then(|layer| helios_gui::queue::when_empty(layer.as_deref()))
-        .unwrap_or_else(|e| {
-            warn(&format!("the user's settings: {e}"));
-            true
-        });
+    // Helios's settings, resolved once from their layers: the machine's
+    // file, the library's and the person's layers in the vault (the ones
+    // `helios-node --vault` keeps there), `--set`. Every part reads them
+    // from here; what does not read is left out and logged.
+    let config = helios_gui::shell::config_dir();
+    let settings = {
+        let (sources, problems) = helios_gui::config::read(
+            &config,
+            &|name| vault.as_ref().map_or(Ok(None), |v| v.config_layer(name)),
+            vault
+                .as_ref()
+                .and(vault_file.as_deref())
+                .and_then(helios_gui::config::project_layer),
+            &run_settings,
+        );
+        let settings = helios_gui::config::Settings::resolve(&sources);
+        for p in problems.iter().chain(settings.problems()) {
+            log::warn!(target: "helios", "the settings: {p}");
+        }
+        settings
+    };
+    let queue_when_empty = helios_gui::queue::when_empty(settings.config());
     // The experimental features, read once: on, their panels are
     // declared (and their commands registered) for the whole session.
     let experimental = helios_gui::Experimental {
-        workshops: vault
-            .as_ref()
-            .map_or(Ok(None), |v| v.config_layer("user"))
-            .and_then(|layer| helios_gui::workshops::enabled(layer.as_deref(), &run_settings))
-            .unwrap_or_else(|e| {
-                warn(&format!("the user's settings: {e}"));
-                false
-            }),
+        workshops: helios_gui::workshops::enabled(settings.config()),
     };
     // The workspace as it stands: its template's network, as edited.
-    let config = helios_gui::shell::config_dir();
     let bundle = match helios_template::workspace::Files::new(&config, &workspace).load() {
         Ok(state) => state.bundle,
         Err(e) => {
@@ -1749,32 +1753,31 @@ fn main() -> Result<(), String> {
             .as_ref()
             .filter(|_| vault.is_some())
             .and_then(|file| {
-                let limit = vault
-                    .as_ref()
-                    .map_or(Ok(None), |v| v.config_layer("user"))
-                    .and_then(|layer| helios_gui::thumbnails::cache_limit(layer.as_deref()))
-                    .unwrap_or_else(|e| {
-                        warn(&format!("the user's settings: {e}"));
-                        helios_thumbs::DEFAULT_LIMIT
-                    });
+                let limit = helios_gui::thumbnails::cache_limit(&settings);
                 helios_gui::thumbnails::open_cache(file, limit)
                     .map_err(|e| warn(&e))
                     .ok()
             }),
     );
     // The grids' thumbnail textures, within their budget.
-    let texture_budget = vault
-        .as_ref()
-        .map_or(Ok(None), |v| v.config_layer("user"))
-        .and_then(|layer| helios_gui::thumb_textures::budget(layer.as_deref()))
-        .unwrap_or_else(|e| {
-            warn(&format!("the user's settings: {e}"));
-            helios_gui::thumb_textures::DEFAULT_BUDGET
-        });
+    let texture_budget = helios_gui::thumb_textures::budget(&settings);
+    // The Settings app writes them back: the person's and the library's
+    // layers to the vault, the machine's to its file.
+    let settings_vault = vault.clone();
+    let settings_dir = config.clone();
     let ran = builder
         .run_native("helios-gui", options, move |mut shell, cc| {
             start::mark("window open, application built (plugins, fonts)");
             shell.library_mut().set_texture_budget(texture_budget);
+            helios_gui::config::install(
+                shell.app().handle(),
+                settings.clone(),
+                settings_vault.clone().map(|v| {
+                    Box::new(move |name: &str, text: &str| v.set_config_layer(name, Some(text)))
+                        as helios_gui::config::VaultWriter
+                }),
+                &settings_dir,
+            );
             if let Some(rs) = cc.wgpu_render_state.as_ref() {
                 shell.attach_gpu(rs);
             }
@@ -1838,8 +1841,7 @@ fn main() -> Result<(), String> {
             // The image map: what the import window's sources list is
             // recorded, Helios's own folders never.
             if let Some(vault) = known_vault.clone() {
-                let layer = vault.config_layer("user").ok().flatten();
-                let settings = helios_gui::image_map::settings(layer.as_deref());
+                let settings = helios_gui::image_map::settings(settings.config());
                 let mut helios = vec![helios_gui::shell::config_dir()];
                 helios.extend(helios_gui::platform::data_dir_with(|k| {
                     std::env::var(k).ok()

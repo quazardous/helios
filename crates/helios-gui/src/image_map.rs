@@ -23,15 +23,8 @@ pub struct MapSettings {
     pub prune: helios_library::map_job::Settings,
 }
 
-/// The map's settings from the user's settings layer (its TOML text; none
-/// or unreadable: the defaults).
-pub fn settings(layer: Option<&str>) -> MapSettings {
-    let mut config = helios_config::Config::new(helios_config::Schema::core());
-    if let Some(text) = layer
-        && let Err(problems) = config.load_str(helios_config::Layer::Global, text)
-    {
-        log::warn!("image map settings: {} problems", problems.len());
-    }
+/// The map's settings, from the resolved settings ([`crate::config`]).
+pub fn settings(config: &helios_config::Config) -> MapSettings {
     MapSettings {
         record: Record::parse(&config.choice(RECORD)),
         defaults: config.toggle(DEFAULTS),

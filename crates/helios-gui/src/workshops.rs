@@ -37,31 +37,10 @@ pub const PANEL: &str = "helios.workshops";
 /// palette shows the word.
 pub const CATEGORY: &str = "Experimental";
 
-/// Whether workshops are on: the user's settings layer (its TOML text;
-/// none: the default), then the run layer's `KEY=VALUE` pairs (the
-/// desktop's `--set`).
-pub fn enabled(user_layer: Option<&str>, run: &[(String, String)]) -> Result<bool, String> {
-    let mut config = helios_config::Config::new(helios_config::Schema::core());
-    if let Some(text) = user_layer {
-        config
-            .load_str(helios_config::Layer::User, text)
-            .map_err(|problems| {
-                problems
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>()
-                    .join("; ")
-            })?;
-    }
-    for (key, value) in run {
-        // The run layer names any setting; only the ones known matter here.
-        if config.schema().get(key).is_some() {
-            config
-                .set_str(helios_config::Layer::Run, key, value)
-                .map_err(|p| format!("--set {key}={value}: {p}"))?;
-        }
-    }
-    Ok(config.toggle(SETTING))
+/// Whether workshops are on, from the resolved settings
+/// ([`crate::config`]: the user's layer, then `--set`).
+pub fn enabled(config: &helios_config::Config) -> bool {
+    config.toggle(SETTING)
 }
 
 /// The `--set KEY=VALUE` pairs of a launch's arguments: one invocation's
@@ -506,19 +485,32 @@ mod tests {
 
     #[test]
     fn off_by_default_on_from_the_user_layer_or_the_run() {
-        assert!(!enabled(None, &[]).unwrap());
+        use crate::config::{Settings, Sources};
+        let resolve = |user: Option<&str>, run: &[(String, String)]| {
+            let s = Settings::resolve(&Sources {
+                user: user.map(String::from),
+                run: run.to_vec(),
+                ..Sources::default()
+            });
+            (enabled(s.config()), s.problems().len())
+        };
+        assert_eq!(resolve(None, &[]), (false, 0));
         let on = "[interface.experimental]\nworkshops = true\n";
-        assert!(enabled(Some(on), &[]).unwrap());
+        assert_eq!(resolve(Some(on), &[]), (true, 0));
         let run = run_layer(&[
             "--set".into(),
             "interface.experimental.workshops=true".into(),
         ])
         .unwrap();
-        assert!(enabled(None, &run).unwrap());
+        assert_eq!(resolve(None, &run), (true, 0));
         // The run layer wins over the user's.
         let off = run_layer(&["--set".into(), format!("{SETTING}=false")]).unwrap();
-        assert!(!enabled(Some(on), &off).unwrap());
-        assert!(enabled(Some("[interface.experimental]\nworkshops = 3\n"), &[]).is_err());
+        assert_eq!(resolve(Some(on), &off), (false, 0));
+        // A value that does not check is left out, and said.
+        assert_eq!(
+            resolve(Some("[interface.experimental]\nworkshops = 3\n"), &[]),
+            (false, 1)
+        );
         assert!(run_layer(&["--set".into()]).is_err());
         assert!(run_layer(&["--set".into(), "nokey".into()]).is_err());
     }

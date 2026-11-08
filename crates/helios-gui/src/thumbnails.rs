@@ -11,34 +11,10 @@ use crate::shell::Shell;
 /// The setting that limits the cache's size, in MiB.
 pub const CACHE_LIMIT: &str = "system.cache.thumbnails";
 
-/// The cache's size limit, in bytes, from the user's settings layer (its
-/// TOML text; none: the default).
-///
-/// # Errors
-/// The layer does not read.
-pub fn cache_limit(user_layer: Option<&str>) -> Result<u64, String> {
-    setting_mib(user_layer, CACHE_LIMIT)
-}
-
-/// A setting counted in MiB, in bytes, from the user's settings layer
-/// (its TOML text; none: the default).
-///
-/// # Errors
-/// The layer does not read.
-pub fn setting_mib(user_layer: Option<&str>, key: &str) -> Result<u64, String> {
-    let mut config = helios_config::Config::new(helios_config::Schema::core());
-    if let Some(text) = user_layer {
-        config
-            .load_str(helios_config::Layer::User, text)
-            .map_err(|problems| {
-                problems
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>()
-                    .join("; ")
-            })?;
-    }
-    Ok((config.number(key).max(1.0) as u64) * 1024 * 1024)
+/// The cache's size limit, in bytes, from the resolved settings (a
+/// machine setting: the machine's layer, or `--set`).
+pub fn cache_limit(settings: &crate::config::Settings) -> u64 {
+    settings.mib(CACHE_LIMIT)
 }
 
 /// Opens the cache of the library whose catalogue is `vault_file`

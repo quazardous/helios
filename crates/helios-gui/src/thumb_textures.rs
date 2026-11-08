@@ -179,11 +179,8 @@ impl Resident {
     }
 }
 
-/// The textures' budget, in bytes, from the user's settings layer (its
-/// TOML text; none: the default).
-///
-/// # Errors
-/// The layer does not read.
-pub fn budget(user_layer: Option<&str>) -> Result<u64, String> {
-    crate::thumbnails::setting_mib(user_layer, BUDGET_SETTING)
+/// The textures' budget, in bytes, from the resolved settings (a machine
+/// setting: the machine's layer, or `--set`).
+pub fn budget(settings: &crate::config::Settings) -> u64 {
+    settings.mib(BUDGET_SETTING)
 }

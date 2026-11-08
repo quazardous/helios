@@ -263,22 +263,10 @@ impl QueueSource for JobsQueue {
     }
 }
 
-/// Whether the panel shows when empty, from the user's settings layer
-/// (its TOML text; none: the default).
-pub fn when_empty(user_layer: Option<&str>) -> Result<bool, String> {
-    let mut config = helios_config::Config::new(helios_config::Schema::core());
-    if let Some(text) = user_layer {
-        config
-            .load_str(helios_config::Layer::User, text)
-            .map_err(|problems| {
-                problems
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>()
-                    .join("; ")
-            })?;
-    }
-    Ok(config.toggle(WHEN_EMPTY))
+/// Whether the panel shows when empty, from the resolved settings
+/// ([`crate::config`]).
+pub fn when_empty(config: &helios_config::Config) -> bool {
+    config.toggle(WHEN_EMPTY)
 }
 
 /// The panel: the selected node's queue, as its source last gave it.
@@ -538,9 +526,19 @@ mod tests {
 
     #[test]
     fn the_setting_comes_from_the_user_layer() {
-        assert_eq!(when_empty(None), Ok(true));
-        let off = "[interface.panels]\nqueue_when_empty = false\n";
-        assert_eq!(when_empty(Some(off)), Ok(false));
-        assert!(when_empty(Some("[interface.panels]\nqueue_when_empty = 3\n")).is_err());
+        use crate::config::{Settings, Sources};
+        let user = |text: &str| {
+            Settings::resolve(&Sources {
+                user: Some(text.into()),
+                ..Sources::default()
+            })
+        };
+        assert!(when_empty(Settings::default().config()));
+        let off = user("[interface.panels]\nqueue_when_empty = false\n");
+        assert!(!when_empty(off.config()));
+        // A value that does not check is left out, and said.
+        let bad = user("[interface.panels]\nqueue_when_empty = 3\n");
+        assert!(when_empty(bad.config()));
+        assert_eq!(bad.problems().len(), 1);
     }
 }
