@@ -10,6 +10,8 @@
 //! - [`darktable`]: darktable's sidecars kept as versions (each sidecar of
 //!   a photo, base and duplicates, a version of the one image), by an
 //!   import or alone (`helios import-darktable`);
+//! - [`map`]: recording the image map, what a listing found as
+//!   sightings, the blacklist and forgotten folders left out;
 //! - [`signals`]: what an import measures of each image to find near
 //!   duplicates (a perceptual hash, the capture time and exposure, frame
 //!   numbers, a sharpness);
@@ -24,6 +26,7 @@ pub mod backup;
 pub mod darktable;
 pub mod export;
 pub mod import;
+pub mod map;
 pub mod rename;
 pub mod signals;
 pub mod stacks;

@@ -38,8 +38,8 @@ use helios_core::ContentHash;
 use helios_vault::fields::{AuditEntry, LABELS, Order, PICKED, Query, RATING, REJECTED, TAGS};
 use helios_vault::storage::VolumeId;
 use helios_vault::{
-    Image, ImageId, LibraryFlag, Location, Presence, Sighting, Store, Version, VersionId,
-    parse_hash,
+    Folder, FolderState, Image, ImageId, LibraryFlag, Location, Presence, Sighting, Store, ToRead,
+    Version, VersionId, parse_hash,
 };
 
 mod migrate;
@@ -602,6 +602,28 @@ impl SqliteStore {
     }
 }
 
+/// A sighting not in the Library: no image yet, or an image out of it.
+const OUTSIDE: &str =
+    "(image IS NULL OR image NOT IN (SELECT id FROM images WHERE in_library = 1))";
+
+/// The condition (on `s`, with `?1` the volume and `?2` the folder) for
+/// sightings in a folder and below: on a volume its path there, else the
+/// absolute path. The empty folder is the whole volume.
+fn under(volume: Option<&VolumeId>, rel_dir: &Path) -> (String, String) {
+    let sep = std::path::MAIN_SEPARATOR;
+    let dir = rel_dir.to_string_lossy();
+    let dir = dir.trim_end_matches(sep);
+    let (place, column) = if volume.is_some() {
+        ("s.volume = ?1", "s.rel_path")
+    } else {
+        ("?1 IS NULL AND s.volume IS NULL", "s.path")
+    };
+    let condition = format!(
+        "{place} AND (?2 = '' OR {column} = ?2 OR substr({column}, 1, length(?2) + 1) = ?2 || '{sep}')"
+    );
+    (condition, dir.to_string())
+}
+
 /// Writes a sighting as a new row.
 fn insert_sighting(db: &Connection, s: &Sighting) -> Result<(), String> {
     db.execute(
@@ -830,6 +852,167 @@ impl Store for SqliteStore {
             "s.size = ?1 AND s.partial = ?2",
             params![size as i64, partial.to_string()],
         )
+    }
+
+    fn sighting_at(
+        &self,
+        volume: Option<&VolumeId>,
+        rel_path: Option<&Path>,
+        path: &Path,
+    ) -> Result<Option<Sighting>, String> {
+        let volume = volume.map(VolumeId::as_str);
+        let rel = rel_path.map(|p| p.to_string_lossy());
+        Ok(self
+            .sightings_where(
+                "(?1 IS NULL AND s.volume IS NULL AND s.path = ?3)
+                 OR (?1 IS NOT NULL AND s.volume = ?1 AND s.rel_path = ?2)",
+                params![volume, rel, path.to_string_lossy()],
+            )?
+            .into_iter()
+            .next())
+    }
+
+    fn sightings_under(
+        &self,
+        volume: Option<&VolumeId>,
+        rel_dir: &Path,
+    ) -> Result<Vec<Sighting>, String> {
+        let (condition, dir) = under(volume, rel_dir);
+        self.sightings_where(&condition, params![volume.map(VolumeId::as_str), dir])
+    }
+
+    fn sightings_to_read(
+        &self,
+        read: ToRead,
+        volume: Option<&VolumeId>,
+        limit: usize,
+    ) -> Result<Vec<Sighting>, String> {
+        let (what, order) = match read {
+            ToRead::Partial => ("s.partial IS NULL", "s.last_seen DESC, s.path"),
+            ToRead::Library => (
+                "s.image IN (SELECT id FROM images WHERE in_library = 1)",
+                "COALESCE(s.last_verified, 0), s.path",
+            ),
+            ToRead::Confirm => (
+                "s.image IS NULL AND s.partial IS NOT NULL AND EXISTS
+                 (SELECT 1 FROM images i WHERE i.size = s.size AND i.partial = s.partial)",
+                "s.last_seen DESC, s.path",
+            ),
+        };
+        let sql = format!(
+            "SELECT {SIGHTING_COLUMNS} FROM sightings s
+             WHERE s.presence = 'present' AND (?1 IS NULL OR s.volume = ?1) AND {what}
+             ORDER BY {order} LIMIT ?2"
+        );
+        let mut statement = self.db.prepare(&sql).map_err(err)?;
+        let rows = statement
+            .query_map(
+                params![volume.map(VolumeId::as_str), limit as i64],
+                sighting,
+            )
+            .map_err(err)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(err)?;
+        rows.into_iter().map(to_sighting).collect()
+    }
+
+    fn forget_sightings(
+        &mut self,
+        volume: Option<&VolumeId>,
+        rel_dir: Option<&Path>,
+    ) -> Result<usize, String> {
+        let (condition, dir) = under(volume, rel_dir.unwrap_or(Path::new("")));
+        let condition = condition.replace("s.", "");
+        self.write(|db| {
+            db.execute(
+                &format!("DELETE FROM sightings WHERE ({condition}) AND {OUTSIDE}"),
+                params![volume.map(VolumeId::as_str), dir],
+            )
+            .map_err(err)
+        })
+    }
+
+    fn prune_sightings(&mut self, limit: usize, missing_before: u64) -> Result<usize, String> {
+        self.write(|db| {
+            let missing = db
+                .execute(
+                    &format!(
+                        "DELETE FROM sightings WHERE presence = 'missing' AND last_seen < ?1
+                         AND {OUTSIDE}"
+                    ),
+                    params![missing_before as i64],
+                )
+                .map_err(err)?;
+            let count: i64 = db
+                .query_row(
+                    &format!("SELECT COUNT(*) FROM sightings WHERE {OUTSIDE}"),
+                    [],
+                    |r| r.get(0),
+                )
+                .map_err(err)?;
+            let over = (count - limit as i64).max(0);
+            let capped = db
+                .execute(
+                    &format!(
+                        "DELETE FROM sightings WHERE id IN (SELECT id FROM sightings
+                         WHERE {OUTSIDE} ORDER BY last_seen, path LIMIT ?1)"
+                    ),
+                    params![over],
+                )
+                .map_err(err)?;
+            Ok(missing + capped)
+        })
+    }
+
+    fn put_folder(&mut self, f: &Folder) -> Result<(), String> {
+        self.write(|db| {
+            let volume = f.volume.as_ref().map(VolumeId::as_str);
+            let dir = f.rel_dir.to_string_lossy();
+            db.execute(
+                "DELETE FROM folders WHERE volume IS ?1 AND rel_dir = ?2",
+                params![volume, dir],
+            )
+            .map_err(err)?;
+            db.execute(
+                "INSERT INTO folders (volume, rel_dir, last_listed, files, state)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![
+                    volume,
+                    dir,
+                    f.last_listed.map(|v| v as i64),
+                    f.files.map(|v| v as i64),
+                    f.state.as_str()
+                ],
+            )
+            .map(|_| ())
+            .map_err(err)
+        })
+    }
+
+    fn folder(&self, volume: Option<&VolumeId>, rel_dir: &Path) -> Result<Option<Folder>, String> {
+        self.db
+            .query_row(
+                "SELECT last_listed, files, state FROM folders WHERE volume IS ?1 AND rel_dir = ?2",
+                params![volume.map(VolumeId::as_str), rel_dir.to_string_lossy()],
+                |r| {
+                    Ok((
+                        r.get::<_, Option<i64>>(0)?,
+                        r.get::<_, Option<i64>>(1)?,
+                        r.get::<_, String>(2)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(err)
+            .map(|row| {
+                row.map(|(last_listed, files, state)| Folder {
+                    volume: volume.cloned(),
+                    rel_dir: rel_dir.to_path_buf(),
+                    last_listed: last_listed.map(|v| v as u64),
+                    files: files.map(|v| v as u64),
+                    state: FolderState::parse(&state),
+                })
+            })
     }
 
     fn remove_image(&mut self, id: &ImageId) -> Result<bool, String> {

@@ -13,10 +13,10 @@
 //!   images out; setting or clearing the flag is an undoable step
 //!   ([`Vault::set_in_library`]).
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use helios_core::ContentHash;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::storage::VolumeId;
 use crate::undo::{Change, Changes, rows_of};
@@ -146,6 +146,97 @@ impl Sighting {
     }
 }
 
+impl Sighting {
+    /// What a new listing of the same place keeps from `old`, the sighting
+    /// recorded there: the same file (same size and modification time)
+    /// keeps what reading it told; a changed file keeps only when it was
+    /// first seen and what listed it first, to be read again. A changed
+    /// file whose image is known keeps its sighting as it is, for the
+    /// `map` job to read again: a listing never drops a location.
+    pub fn listed_again(mut self, old: Option<&Self>) -> Option<Self> {
+        let Some(old) = old else {
+            return Some(self);
+        };
+        self.first_seen = self.first_seen.min(old.first_seen);
+        self.seen_by.clone_from(&old.seen_by);
+        if old.size == self.size && old.modified == self.modified {
+            self.partial = self.partial.or(old.partial);
+            self.image = old.image;
+            self.taken = self.taken.or(old.taken);
+            if self.camera.is_none() {
+                self.camera.clone_from(&old.camera);
+            }
+            if self.lens.is_none() {
+                self.lens.clone_from(&old.lens);
+            }
+            self.last_verified = old.last_verified;
+        } else if old.image.is_some() {
+            return None;
+        }
+        Some(self)
+    }
+
+    /// Whether it lies in the folder `rel_dir` of `volume` (on no volume,
+    /// `rel_dir` is an absolute folder), or in a folder below it.
+    pub fn under(&self, volume: Option<&VolumeId>, rel_dir: &Path) -> bool {
+        match (volume, &self.volume, &self.rel_path) {
+            (Some(v), Some(own), Some(rel)) => v == own && rel.starts_with(rel_dir),
+            (None, None, _) => self.path.starts_with(rel_dir),
+            _ => false,
+        }
+    }
+}
+
+/// What the `map` job reads next, in its order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ToRead {
+    /// Present sightings with no partial hash yet, seen last first.
+    Partial,
+    /// Present sightings of Library images, verified longest ago first.
+    Library,
+    /// Present sightings with no image whose size and partial hash match
+    /// an image's: a duplicate to confirm by the full hash.
+    Confirm,
+}
+
+/// What is known of a folder: when it was last listed, how many files it
+/// held, and whether the user asked to forget it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Folder {
+    pub volume: Option<VolumeId>,
+    /// Its path inside the volume (on no volume, its absolute path).
+    pub rel_dir: PathBuf,
+    pub last_listed: Option<u64>,
+    pub files: Option<u64>,
+    pub state: FolderState,
+}
+
+/// Whether scans visit a folder.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FolderState {
+    Listed,
+    /// Forgotten by the user: skipped until listed again on purpose.
+    Forgotten,
+}
+
+impl FolderState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Listed => "listed",
+            Self::Forgotten => "forgotten",
+        }
+    }
+
+    pub fn parse(text: &str) -> Self {
+        if text == "forgotten" {
+            Self::Forgotten
+        } else {
+            Self::Listed
+        }
+    }
+}
+
 /// Whether an image is in the Library, since when and by what.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct LibraryFlag {
@@ -177,6 +268,140 @@ impl<S: Store> Vault<S> {
             .lock()
             .expect("store lock")
             .put_sighting(sighting)
+    }
+
+    /// Records what a listing found, in one transaction: each file at its
+    /// place, keeping what was known of the same file there
+    /// ([`Sighting::listed_again`]). Returns how many were written.
+    pub fn record_listed(&self, listed: &[Sighting]) -> Result<usize, String> {
+        for s in listed {
+            s.check()?;
+        }
+        self.transaction(|store| {
+            let mut written = 0;
+            for s in listed {
+                let old = store.sighting_at(s.volume.as_ref(), s.rel_path.as_deref(), &s.path)?;
+                if let Some(new) = s.clone().listed_again(old.as_ref()) {
+                    store.put_sighting(&new)?;
+                    written += 1;
+                }
+            }
+            Ok(written)
+        })
+    }
+
+    /// The sighting at a place, if any.
+    pub fn sighting_at(
+        &self,
+        volume: Option<&VolumeId>,
+        rel_path: Option<&Path>,
+        path: &Path,
+    ) -> Result<Option<Sighting>, String> {
+        self.store
+            .lock()
+            .expect("store lock")
+            .sighting_at(volume, rel_path, path)
+    }
+
+    /// The sightings in a folder and below ([`Sighting::under`]).
+    pub fn sightings_under(
+        &self,
+        volume: Option<&VolumeId>,
+        rel_dir: &Path,
+    ) -> Result<Vec<Sighting>, String> {
+        self.store
+            .lock()
+            .expect("store lock")
+            .sightings_under(volume, rel_dir)
+    }
+
+    /// What the `map` job reads next ([`ToRead`]), on `volume` only when
+    /// given, at most `limit`.
+    pub fn sightings_to_read(
+        &self,
+        read: ToRead,
+        volume: Option<&VolumeId>,
+        limit: usize,
+    ) -> Result<Vec<Sighting>, String> {
+        self.store
+            .lock()
+            .expect("store lock")
+            .sightings_to_read(read, volume, limit)
+    }
+
+    /// Forgets a volume (`rel_dir` `None`) or a folder of it: drops its
+    /// sightings not in the Library, and marks the folder forgotten (a
+    /// whole volume, its root folder) so scans skip it until it is listed
+    /// again on purpose. Returns how many sightings were dropped.
+    pub fn forget(
+        &self,
+        volume: Option<&VolumeId>,
+        rel_dir: Option<&Path>,
+        now: u64,
+    ) -> Result<usize, String> {
+        self.transaction(|store| {
+            let dropped = store.forget_sightings(volume, rel_dir)?;
+            store.put_folder(&Folder {
+                volume: volume.cloned(),
+                rel_dir: rel_dir.map(Path::to_path_buf).unwrap_or_default(),
+                last_listed: Some(now),
+                files: Some(0),
+                state: FolderState::Forgotten,
+            })?;
+            Ok(dropped)
+        })
+    }
+
+    /// Notes that a folder was listed (on purpose: a forgotten folder is
+    /// listed again).
+    pub fn folder_listed(
+        &self,
+        volume: Option<&VolumeId>,
+        rel_dir: &Path,
+        files: u64,
+        now: u64,
+    ) -> Result<(), String> {
+        self.store.lock().expect("store lock").put_folder(&Folder {
+            volume: volume.cloned(),
+            rel_dir: rel_dir.to_path_buf(),
+            last_listed: Some(now),
+            files: Some(files),
+            state: FolderState::Listed,
+        })
+    }
+
+    /// What is known of a folder.
+    pub fn folder(
+        &self,
+        volume: Option<&VolumeId>,
+        rel_dir: &Path,
+    ) -> Result<Option<Folder>, String> {
+        self.store
+            .lock()
+            .expect("store lock")
+            .folder(volume, rel_dir)
+    }
+
+    /// Whether `path` (inside `volume` at `rel_path`) lies in a folder the
+    /// user forgot: a listing does not record it.
+    pub fn forgotten(&self, volume: Option<&VolumeId>, rel_path: &Path) -> Result<bool, String> {
+        let store = self.store.lock().expect("store lock");
+        for dir in rel_path.ancestors().skip(1) {
+            if store
+                .folder(volume, dir)?
+                .is_some_and(|f| f.state == FolderState::Forgotten)
+            {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    /// The map's upkeep: drops sightings not in the Library missing since
+    /// before `missing_before`, then the ones seen longest ago past
+    /// `limit`. Library sightings are never dropped. Returns how many were.
+    pub fn prune_sightings(&self, limit: usize, missing_before: u64) -> Result<usize, String> {
+        self.transaction(|store| store.prune_sightings(limit, missing_before))
     }
 
     /// Every sighting of an image, in the Library or not.

@@ -30,9 +30,28 @@ its path there, or an absolute path on no volume yet), with its size and
 modification time, and what reading it told: its partial hash, its image
 once fully hashed, its capture time, camera and lens, when it was first
 and last seen and last verified, its presence, and what listed it. A
-location is the sighting of a file whose image is known. For now only
-imports, scans and backups write them, as before; listings that record
-every file seen come next.
+location is the sighting of a file whose image is known. Imports, scans
+and backups write them, and so does every source the import window
+lists, folders and cards (`seen_by: import`) and files dropped or pasted
+(`drop`): each file's place (the volume holding it and its path there),
+size and modification time, the partial hash when the "in your Library"
+prefilter read it anyway, then the capture time and camera its glance
+tells. Nothing is read for the map alone. A file listed again unchanged
+keeps what was read of it; changed in place, it is read again, except a
+Library file, left to the background job. Rows are written off the
+interface thread, a few hundred per transaction
+(`helios_library::map::Recorder`). `system.map.record` says what is kept:
+`listings` (the default), `everywhere`, or `import` (listings keep
+nothing). File dialogs record once egui-pop's file browser has a source.
+
+**Forget a volume or a folder** drops its sightings not in the Library
+and marks the folder `forgotten` in the `folders` table: listings and
+scans leave it out until it is listed again on purpose
+(`Vault::forget`, `Vault::folder_listed`). The upkeep
+(`Vault::prune_sightings`) drops sightings not in the Library missing
+for longer than `system.map.keepMissing` (30 days), then the ones seen
+longest ago past `system.map.limit` (1,000,000); Library sightings are
+never dropped.
 
 **The blacklist** keeps places out of the map: never recorded, never
 thumbnailed into the cache. By default (`system.map.defaults`, on):

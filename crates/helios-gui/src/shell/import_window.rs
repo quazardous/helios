@@ -47,7 +47,7 @@ use serde_json::{Value, json};
 
 use super::Shell;
 use super::import_choices::{self, Asked, ChoiceWords, Choices};
-use crate::import_scan::{Contents, Counts, Known, Scan, Scanned, Types};
+use crate::import_scan::{Contents, Counts, Known, MapRecorder, Scan, Scanned, Types};
 use helios_storage::{Card, Volumes, Watch};
 
 /// The command that opens the window (`source`: the card or folder to
@@ -84,6 +84,10 @@ pub(crate) struct ImportWindow {
     choosing_into: Option<Pending>,
     /// What the vault holds, for the "in your Library" prefilter.
     known: Option<Known>,
+    /// The image map's recorder: what the sources list is kept.
+    map: Option<MapRecorder>,
+    /// The sources given by a drop or a paste (recorded as `drop`).
+    dropped: Vec<PathBuf>,
     /// Each source ticked being read, and whether it is read through.
     scans: Vec<(PathBuf, Scan, bool)>,
     pub(super) contents: Contents,
@@ -143,7 +147,13 @@ impl ImportWindow {
                 continue;
             }
             let ctx = self.ctx.clone();
-            let scan = Scan::start(path.clone(), self.known.clone(), move || {
+            let seen_by = if self.dropped.contains(path) {
+                "drop"
+            } else {
+                "import"
+            };
+            let map = self.map.clone().map(|m| (m, seen_by));
+            let scan = Scan::start(path.clone(), self.known.clone(), map, move || {
                 if let Some(ctx) = ctx.lock().unwrap_or_else(PoisonError::into_inner).as_ref() {
                     ctx.request_repaint();
                 }
@@ -343,6 +353,13 @@ impl Shell {
         self.import_window.known = Some(known);
     }
 
+    /// The image map's recorder for what the import window's sources
+    /// list (`docs/design/image-map.md`, section 4); called once per
+    /// source read, off the interface thread.
+    pub fn set_import_map(&mut self, map: MapRecorder) {
+        self.import_window.map = Some(map);
+    }
+
     /// The import window's counts: photos shown, new, their size, and the
     /// ones an Import takes.
     pub fn import_counts(&self) -> Counts {
@@ -388,6 +405,7 @@ impl Shell {
         w.naming = None;
         w.ticked.clear();
         w.picked.clear();
+        w.dropped.clear();
         let paths: Vec<PathBuf> = args
             .get("paths")
             .and_then(Value::as_array)
@@ -411,6 +429,9 @@ impl Shell {
                     w.picked.push(path);
                     dir
                 };
+                if !w.dropped.contains(&source) {
+                    w.dropped.push(source.clone());
+                }
                 if !w.ticked.contains(&source) {
                     w.ticked.push(source);
                 }

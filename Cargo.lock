@@ -2388,6 +2388,7 @@ dependencies = [
  "helios-vault",
  "helios-xmp",
  "image",
+ "log",
  "serde",
  "serde_json",
 ]

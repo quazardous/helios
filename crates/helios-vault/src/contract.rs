@@ -15,7 +15,7 @@ use serde_json::json;
 
 use crate::fields::{Command, LABELS, Op, Order, PICKED, Query, RATING, REJECTED, TAGS};
 use crate::storage::VolumeId;
-use crate::{Image, ImageId, Location, Presence, Store, Vault};
+use crate::{Image, ImageId, Location, Presence, Store, ToRead, Vault};
 
 /// Runs every scenario against fresh stores made by `make`.
 pub fn check<S: Store>(make: impl Fn() -> S) {
@@ -43,6 +43,202 @@ pub fn check<S: Store>(make: impl Fn() -> S) {
     a_step_is_reverted_and_replayed_keeping_the_files(make(), &scratch("undo"));
     an_image_off_the_library_never_shows_in_a_library_read(make());
     sightings_are_kept_one_per_place(make());
+    listings_record_and_keep_what_was_read(make());
+    the_map_reads_by_kind_newest_first(make());
+    forgetting_and_pruning_never_touch_the_library(make());
+}
+
+fn on(volume: &str, rel: &str, size: u64, seen: u64) -> crate::Sighting {
+    crate::Sighting {
+        volume: Some(VolumeId(volume.into())),
+        rel_path: Some(rel.into()),
+        ..crate::Sighting::seen(PathBuf::from("/m").join(rel), size, 5, seen, "import")
+    }
+}
+
+/// A listing records each file at its place; listed again unchanged it
+/// keeps what was read of it, changed it is read again, and a library
+/// file changed in place keeps its location for the map job.
+fn listings_record_and_keep_what_was_read<S: Store>(s: S) {
+    let v = Vault::new(s);
+    let a = image(1);
+    v.transaction(|s| s.add_image(&a).map(|_| ())).unwrap();
+    let mut first = on("uuid:d", "shoot/x.cr3", 101, 10);
+    first.partial = Some(a.partial);
+    first.camera = Some("Z 8".into());
+    let lib = crate::Sighting {
+        image: Some(a.id),
+        ..on("uuid:d", "lib/y.cr3", 101, 10)
+    };
+    assert_eq!(v.record_listed(&[first.clone(), lib.clone()]).unwrap(), 2);
+    let d = VolumeId("uuid:d".into());
+    // Unchanged: the new listing read nothing, the old reading stays.
+    let again = crate::Sighting {
+        seen_by: "dialog".into(),
+        ..on("uuid:d", "shoot/x.cr3", 101, 20)
+    };
+    v.record_listed(std::slice::from_ref(&again)).unwrap();
+    let got = v
+        .sighting_at(Some(&d), Some(Path::new("shoot/x.cr3")), Path::new("/x"))
+        .unwrap()
+        .unwrap();
+    assert_eq!(got.partial, Some(a.partial));
+    assert_eq!(got.camera.as_deref(), Some("Z 8"));
+    assert_eq!((got.first_seen, got.last_seen), (10, 20));
+    assert_eq!(got.seen_by, "import", "what listed it first");
+    // Changed in place: read again.
+    let changed = crate::Sighting {
+        modified: 6,
+        ..on("uuid:d", "shoot/x.cr3", 101, 30)
+    };
+    v.record_listed(&[changed]).unwrap();
+    let got = v
+        .sighting_at(Some(&d), Some(Path::new("shoot/x.cr3")), Path::new("/x"))
+        .unwrap()
+        .unwrap();
+    assert_eq!((got.partial, got.camera), (None, None));
+    // A library file changed in place is left to the map job.
+    let lib_changed = crate::Sighting {
+        size: 999,
+        ..on("uuid:d", "lib/y.cr3", 999, 30)
+    };
+    assert_eq!(v.record_listed(&[lib_changed]).unwrap(), 0);
+    assert_eq!(v.sightings(&a.id).unwrap().len(), 1);
+    // A folder and below.
+    assert_eq!(
+        v.sightings_under(Some(&d), Path::new("shoot"))
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(v.sightings_under(Some(&d), Path::new("")).unwrap().len(), 2);
+    assert_eq!(
+        v.sightings_under(Some(&d), Path::new("sho")).unwrap().len(),
+        0
+    );
+    let loose = crate::Sighting::seen(PathBuf::from("/tmp/p/q.jpg"), 3, 4, 5, "drop");
+    v.record_listed(&[loose]).unwrap();
+    assert_eq!(
+        v.sightings_under(None, Path::new("/tmp/p")).unwrap().len(),
+        1
+    );
+    assert_eq!(
+        v.sightings_under(None, Path::new("/tmp/pp")).unwrap().len(),
+        0
+    );
+}
+
+/// What the map job reads: files with no partial hash, newest first;
+/// library files, verified longest ago first; duplicates to confirm.
+fn the_map_reads_by_kind_newest_first<S: Store>(mut s: S) {
+    let (a, b) = (image(1), image(2));
+    s.add_image(&a).unwrap();
+    s.add_image(&b).unwrap();
+    s.set_library_flag(&b.id, &crate::LibraryFlag::default())
+        .unwrap();
+    let old = on("uuid:d", "a.jpg", 7, 10);
+    let new = on("uuid:e", "b.jpg", 7, 20);
+    let mut gone = on("uuid:d", "c.jpg", 7, 30);
+    gone.presence = Presence::Missing;
+    let mut dup = on("uuid:d", "dup.cr3", a.size, 5);
+    dup.partial = Some(a.partial);
+    let mut lib1 = on("uuid:d", "l1.cr3", a.size, 5);
+    lib1.partial = Some(a.partial);
+    lib1.image = Some(a.id);
+    lib1.last_verified = Some(50);
+    let mut lib2 = on("uuid:d", "l2.cr3", a.size, 5);
+    lib2.partial = Some(a.partial);
+    lib2.image = Some(a.id);
+    lib2.last_verified = Some(40);
+    let mut out = on("uuid:d", "out.cr3", b.size, 5);
+    out.partial = Some(b.partial);
+    out.image = Some(b.id);
+    for x in [&old, &new, &gone, &dup, &lib1, &lib2, &out] {
+        s.put_sighting(x).unwrap();
+    }
+    let paths =
+        |v: Vec<crate::Sighting>| -> Vec<PathBuf> { v.into_iter().map(|s| s.path).collect() };
+    assert_eq!(
+        paths(s.sightings_to_read(ToRead::Partial, None, 10).unwrap()),
+        [new.path.clone(), old.path.clone()]
+    );
+    assert_eq!(
+        paths(s.sightings_to_read(ToRead::Partial, None, 1).unwrap()),
+        std::slice::from_ref(&new.path)
+    );
+    let d = VolumeId("uuid:d".into());
+    assert_eq!(
+        paths(s.sightings_to_read(ToRead::Partial, Some(&d), 10).unwrap()),
+        std::slice::from_ref(&old.path)
+    );
+    assert_eq!(
+        paths(s.sightings_to_read(ToRead::Library, None, 10).unwrap()),
+        [lib2.path.clone(), lib1.path.clone()]
+    );
+    assert_eq!(
+        paths(s.sightings_to_read(ToRead::Confirm, None, 10).unwrap()),
+        [dup.path.clone()]
+    );
+}
+
+/// Forgetting a folder or a volume drops what is not in the Library and
+/// marks the folder; pruning drops long-missing files, then the oldest
+/// past the cap; library sightings stay through both.
+fn forgetting_and_pruning_never_touch_the_library<S: Store>(s: S) {
+    let v = Vault::new(s);
+    let a = image(1);
+    v.transaction(|s| s.add_image(&a).map(|_| ())).unwrap();
+    let mut lib = on("uuid:d", "shoot/l.cr3", a.size, 1);
+    lib.image = Some(a.id);
+    lib.partial = Some(a.partial);
+    let mut rows = vec![lib.clone()];
+    for i in 0..4 {
+        rows.push(on("uuid:d", &format!("shoot/{i}.jpg"), 7, 10 + i));
+    }
+    rows.push(on("uuid:d", "other/z.jpg", 7, 1));
+    rows.push(on("uuid:e", "shoot/e.jpg", 7, 1));
+    v.record_listed(&rows).unwrap();
+    let d = VolumeId("uuid:d".into());
+    assert_eq!(v.forget(Some(&d), Some(Path::new("shoot")), 99).unwrap(), 4);
+    let folder = v.folder(Some(&d), Path::new("shoot")).unwrap().unwrap();
+    assert_eq!(folder.state, crate::FolderState::Forgotten);
+    assert!(v.forgotten(Some(&d), Path::new("shoot/new/n.jpg")).unwrap());
+    assert!(!v.forgotten(Some(&d), Path::new("other/n.jpg")).unwrap());
+    assert_eq!(v.sightings(&a.id).unwrap().len(), 1, "the library stays");
+    // Listed again on purpose: no longer forgotten.
+    v.folder_listed(Some(&d), Path::new("shoot"), 3, 100)
+        .unwrap();
+    assert!(!v.forgotten(Some(&d), Path::new("shoot/n.jpg")).unwrap());
+    // A whole volume.
+    assert_eq!(v.forget(Some(&d), None, 99).unwrap(), 1);
+    assert_eq!(v.sightings_under(Some(&d), Path::new("")).unwrap().len(), 1);
+    // Pruning: missing for long, then the cap, oldest first.
+    let e = VolumeId("uuid:e".into());
+    let mut rows = Vec::new();
+    for i in 0..5 {
+        let mut s = on("uuid:e", &format!("p/{i}.jpg"), 7, 100 + i);
+        if i == 4 {
+            s.presence = Presence::Missing;
+            s.last_seen = 50;
+        }
+        rows.push(s);
+    }
+    v.record_listed(&rows).unwrap();
+    // Six outside the Library on e (one missing since 50): the missing
+    // one goes, then the cap of 3 drops the two seen longest ago.
+    assert_eq!(v.prune_sightings(3, 60).unwrap(), 3);
+    let left: Vec<PathBuf> = v
+        .sightings_under(Some(&e), Path::new(""))
+        .unwrap()
+        .into_iter()
+        .filter_map(|s| s.rel_path)
+        .collect();
+    assert_eq!(
+        left,
+        [PathBuf::from("p/2.jpg"), PathBuf::from("p/3.jpg")],
+        "{left:?}"
+    );
+    assert_eq!(v.sightings(&a.id).unwrap().len(), 1, "the library stays");
 }
 
 /// The Library is the flagged images: one taken out of it is in no
@@ -652,6 +848,49 @@ impl<S: Store> Store for FailingAudit<S> {
         partial: &ContentHash,
     ) -> Result<Vec<crate::Sighting>, String> {
         self.0.sightings_like(size, partial)
+    }
+    fn sighting_at(
+        &self,
+        volume: Option<&crate::storage::VolumeId>,
+        rel_path: Option<&Path>,
+        path: &Path,
+    ) -> Result<Option<crate::Sighting>, String> {
+        self.0.sighting_at(volume, rel_path, path)
+    }
+    fn sightings_under(
+        &self,
+        volume: Option<&crate::storage::VolumeId>,
+        rel_dir: &Path,
+    ) -> Result<Vec<crate::Sighting>, String> {
+        self.0.sightings_under(volume, rel_dir)
+    }
+    fn sightings_to_read(
+        &self,
+        read: crate::ToRead,
+        volume: Option<&crate::storage::VolumeId>,
+        limit: usize,
+    ) -> Result<Vec<crate::Sighting>, String> {
+        self.0.sightings_to_read(read, volume, limit)
+    }
+    fn forget_sightings(
+        &mut self,
+        volume: Option<&crate::storage::VolumeId>,
+        rel_dir: Option<&Path>,
+    ) -> Result<usize, String> {
+        self.0.forget_sightings(volume, rel_dir)
+    }
+    fn prune_sightings(&mut self, limit: usize, missing_before: u64) -> Result<usize, String> {
+        self.0.prune_sightings(limit, missing_before)
+    }
+    fn put_folder(&mut self, folder: &crate::Folder) -> Result<(), String> {
+        self.0.put_folder(folder)
+    }
+    fn folder(
+        &self,
+        volume: Option<&crate::storage::VolumeId>,
+        rel_dir: &Path,
+    ) -> Result<Option<crate::Folder>, String> {
+        self.0.folder(volume, rel_dir)
     }
     fn put_location(&mut self, id: &ImageId, location: &Location) -> Result<(), String> {
         self.0.put_location(id, location)

@@ -25,6 +25,11 @@ use helios_core::{ContentHash, Image};
 /// scan, on its thread.
 pub type Known = Arc<dyn Fn() -> Vec<(u64, ContentHash)> + Send + Sync>;
 
+/// The image map's recorder of a listing by what (`import`, `drop`), made
+/// on the scan's thread; `None` when the map keeps no listing
+/// (`system.map.record` is `import`) or there is no vault.
+pub type MapRecorder = Arc<dyn Fn(&str) -> Option<helios_library::map::Recorder> + Send + Sync>;
+
 /// Whether a file is probably in the Library already: a file of a size the
 /// vault holds is read in part (its beginning and end), any other is not
 /// read at all.
@@ -44,9 +49,19 @@ impl Prefilter {
 
     /// Whether the file at `path`, of `size` bytes, is probably known.
     pub fn holds(&self, path: &Path, size: u64) -> bool {
-        self.by_size.get(&size).is_some_and(|partials| {
-            helios_vault::partial_hash(path, size).is_ok_and(|p| partials.contains(&p))
-        })
+        self.read(path, size).0
+    }
+
+    /// Whether the file is probably known, with its partial hash when it
+    /// was read to tell (a size the vault holds).
+    pub fn read(&self, path: &Path, size: u64) -> (bool, Option<ContentHash>) {
+        let Some(partials) = self.by_size.get(&size) else {
+            return (false, None);
+        };
+        match helios_vault::partial_hash(path, size) {
+            Ok(p) => (partials.contains(&p), Some(p)),
+            Err(_) => (false, None),
+        }
     }
 }
 
@@ -86,8 +101,14 @@ pub struct Scan {
 
 impl Scan {
     /// Starts reading `source`; `wake` is called (from the thread) when
-    /// something was sent.
-    pub fn start(source: PathBuf, known: Option<Known>, wake: impl Fn() + Send + 'static) -> Self {
+    /// something was sent. With `map`, what is listed and glanced is
+    /// recorded in the image map as `seen_by` (no file is read for it).
+    pub fn start(
+        source: PathBuf,
+        known: Option<Known>,
+        map: Option<(MapRecorder, &'static str)>,
+        wake: impl Fn() + Send + 'static,
+    ) -> Self {
         let (sender, receiver) = channel();
         let stop = Arc::new(AtomicBool::new(false));
         let stopped = stop.clone();
@@ -96,6 +117,7 @@ impl Scan {
             .spawn(move || {
                 let files = helios_library::import::files_of(&source).unwrap_or_default();
                 let prefilter = known.map(|k| Prefilter::new(k())).unwrap_or_default();
+                let mut recorder = map.and_then(|(make, seen_by)| make(seen_by));
                 let mut listed = Vec::with_capacity(files.len());
                 for path in files {
                     if stopped.load(Ordering::Relaxed) {
@@ -110,7 +132,11 @@ impl Scan {
                         .ok()
                         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                         .and_then(|d| i64::try_from(d.as_secs()).ok());
-                    let known = prefilter.holds(&path, bytes);
+                    let (known, partial) = prefilter.read(&path, bytes);
+                    if let Some(r) = recorder.as_mut() {
+                        let at = modified.and_then(|m| u64::try_from(m).ok()).unwrap_or(0);
+                        r.listed(&path, bytes, at, partial);
+                    }
                     let found = Found {
                         source: source.clone(),
                         path: path.clone(),
@@ -124,6 +150,9 @@ impl Scan {
                     listed.push(path);
                 }
                 wake();
+                if let Some(r) = recorder.as_mut() {
+                    r.flush();
+                }
                 for path in listed {
                     if stopped.load(Ordering::Relaxed) {
                         return;
@@ -139,6 +168,11 @@ impl Scan {
                             (None, None, None)
                         }
                     };
+                    if let Some(r) = recorder.as_mut() {
+                        // The camera's local time, kept as if it were UTC.
+                        let at = taken.map(|t| t.and_utc().timestamp());
+                        r.glanced(&path, at, camera.clone());
+                    }
                     let glance = Scanned::Glance {
                         path,
                         taken,
@@ -149,6 +183,9 @@ impl Scan {
                         return;
                     }
                     wake();
+                }
+                if let Some(r) = recorder.take() {
+                    r.finish();
                 }
                 let _ = sender.send(Scanned::Done);
                 wake();

@@ -1308,6 +1308,7 @@ fn main() -> Result<(), String> {
     let bus = std::sync::Arc::new(helios_core::Bus::new());
     let health_file = vault_file.clone();
     let thumbs_file = vault_file.clone();
+    let map_file = vault_file.clone();
     // A library that cannot be opened leaves Helios without one: the
     // reason is said, and imports refuse with it.
     let (persist, no_library) = match vault_file
@@ -1531,6 +1532,23 @@ fn main() -> Result<(), String> {
                         .map(|images| images.into_iter().map(|i| (i.size, i.partial)).collect())
                         .unwrap_or_default()
                 }));
+            }
+            // The image map: what the import window's sources list is
+            // recorded, Helios's own folders never.
+            if let Some(vault) = known_vault.clone() {
+                let layer = vault.config_layer("user").ok().flatten();
+                let settings = helios_gui::image_map::settings(layer.as_deref());
+                let mut helios = vec![helios_gui::shell::config_dir()];
+                helios.extend(helios_gui::platform::data_dir_with(|k| {
+                    std::env::var(k).ok()
+                }));
+                helios.extend(map_file.as_ref().and_then(|f| {
+                    std::path::absolute(f)
+                        .ok()?
+                        .parent()
+                        .map(|d| d.join(".helios"))
+                }));
+                shell.set_import_map(helios_gui::image_map::recorder(vault, settings, helios));
             }
             // The health check (Help > Health check): Helios's checks
             // over this machine's volumes and the vault, a while after

@@ -32,6 +32,7 @@ use std::sync::Mutex;
 use helios_core::{ContentHash, Describe};
 use serde::Serialize;
 use serde_json::json;
+use storage::VolumeId;
 
 pub mod catalog;
 pub mod contract;
@@ -50,7 +51,7 @@ pub mod workflow;
 pub use catalog::{ApplyReport, CursorId, CursorInfo, Delta, Row};
 pub use edit::{EditSaved, EditSession};
 pub use fields::{AuditEntry, Command, Order, Query};
-pub use sightings::{LibraryFlag, Sighting};
+pub use sightings::{Folder, FolderState, LibraryFlag, Sighting, ToRead};
 pub use stacks::Stack;
 pub use undo::{Change, Changes, ImageRows, Replayed};
 pub use versions::{Version, VersionId};
@@ -223,6 +224,42 @@ pub trait Store: Send {
     /// The sightings of files of `size` bytes with this partial hash, by
     /// path: "probably the same content".
     fn sightings_like(&self, size: u64, partial: &ContentHash) -> Result<Vec<Sighting>, String>;
+    /// The sighting at a place: on a volume, its volume and path there;
+    /// else its absolute path.
+    fn sighting_at(
+        &self,
+        volume: Option<&VolumeId>,
+        rel_path: Option<&Path>,
+        path: &Path,
+    ) -> Result<Option<Sighting>, String>;
+    /// The sightings in a folder and below ([`Sighting::under`]), by path.
+    fn sightings_under(
+        &self,
+        volume: Option<&VolumeId>,
+        rel_dir: &Path,
+    ) -> Result<Vec<Sighting>, String>;
+    /// What the `map` job reads next ([`ToRead`]), on `volume` only when
+    /// given, at most `limit`.
+    fn sightings_to_read(
+        &self,
+        read: ToRead,
+        volume: Option<&VolumeId>,
+        limit: usize,
+    ) -> Result<Vec<Sighting>, String>;
+    /// Drops the sightings not in the Library on a volume, or in a folder
+    /// of it and below; returns how many.
+    fn forget_sightings(
+        &mut self,
+        volume: Option<&VolumeId>,
+        rel_dir: Option<&Path>,
+    ) -> Result<usize, String>;
+    /// Drops sightings not in the Library: the ones missing since before
+    /// `missing_before`, then the ones seen longest ago past `limit`.
+    fn prune_sightings(&mut self, limit: usize, missing_before: u64) -> Result<usize, String>;
+    /// Records what is known of a folder, replacing what was.
+    fn put_folder(&mut self, folder: &Folder) -> Result<(), String>;
+    /// What is known of a folder.
+    fn folder(&self, volume: Option<&VolumeId>, rel_dir: &Path) -> Result<Option<Folder>, String>;
 
     /// One field of an image.
     fn field(&self, id: &ImageId, name: &str) -> Result<Option<serde_json::Value>, String>;
@@ -285,6 +322,7 @@ pub struct MemoryStore {
     images: BTreeMap<ImageId, (Image, LibraryFlag)>,
     /// One per place.
     sightings: Vec<Sighting>,
+    folders: Vec<Folder>,
     fields: BTreeMap<(ImageId, String), serde_json::Value>,
     audit: Vec<AuditEntry>,
 }
@@ -447,6 +485,143 @@ impl Store for MemoryStore {
                 .cloned()
                 .collect(),
         ))
+    }
+
+    fn sighting_at(
+        &self,
+        volume: Option<&VolumeId>,
+        rel_path: Option<&Path>,
+        path: &Path,
+    ) -> Result<Option<Sighting>, String> {
+        let place = Sighting {
+            volume: volume.cloned(),
+            rel_path: rel_path.map(Path::to_path_buf),
+            ..Sighting::seen(path.to_path_buf(), 0, 0, 0, "")
+        };
+        Ok(self
+            .sightings
+            .iter()
+            .find(|s| s.same_place(&place))
+            .cloned())
+    }
+
+    fn sightings_under(
+        &self,
+        volume: Option<&VolumeId>,
+        rel_dir: &Path,
+    ) -> Result<Vec<Sighting>, String> {
+        Ok(Self::by_path(
+            self.sightings
+                .iter()
+                .filter(|s| s.under(volume, rel_dir))
+                .cloned()
+                .collect(),
+        ))
+    }
+
+    fn sightings_to_read(
+        &self,
+        read: ToRead,
+        volume: Option<&VolumeId>,
+        limit: usize,
+    ) -> Result<Vec<Sighting>, String> {
+        let partials: std::collections::HashSet<(u64, ContentHash)> = self
+            .images
+            .values()
+            .map(|(i, _)| (i.size, i.partial))
+            .collect();
+        let mut found: Vec<Sighting> = self
+            .sightings
+            .iter()
+            .filter(|s| s.presence == Presence::Present)
+            .filter(|s| volume.is_none() || s.volume.as_ref() == volume)
+            .filter(|s| match read {
+                ToRead::Partial => s.partial.is_none(),
+                ToRead::Library => s.image.is_some_and(|i| self.in_library(&i)),
+                ToRead::Confirm => {
+                    s.image.is_none() && s.partial.is_some_and(|p| partials.contains(&(s.size, p)))
+                }
+            })
+            .cloned()
+            .collect();
+        match read {
+            ToRead::Partial | ToRead::Confirm => {
+                found.sort_by(|a, b| b.last_seen.cmp(&a.last_seen).then(a.path.cmp(&b.path)));
+            }
+            ToRead::Library => {
+                found.sort_by(|a, b| {
+                    a.last_verified
+                        .cmp(&b.last_verified)
+                        .then(a.path.cmp(&b.path))
+                });
+            }
+        }
+        found.truncate(limit);
+        Ok(found)
+    }
+
+    fn forget_sightings(
+        &mut self,
+        volume: Option<&VolumeId>,
+        rel_dir: Option<&Path>,
+    ) -> Result<usize, String> {
+        let before = self.sightings.len();
+        let library: Vec<ImageId> = self
+            .images
+            .iter()
+            .filter(|(_, (_, f))| f.in_library)
+            .map(|(id, _)| *id)
+            .collect();
+        self.sightings.retain(|s| {
+            s.image.is_some_and(|i| library.contains(&i))
+                || !s.under(volume, rel_dir.unwrap_or(Path::new("")))
+        });
+        Ok(before - self.sightings.len())
+    }
+
+    fn prune_sightings(&mut self, limit: usize, missing_before: u64) -> Result<usize, String> {
+        let before = self.sightings.len();
+        let library: Vec<ImageId> = self
+            .images
+            .iter()
+            .filter(|(_, (_, f))| f.in_library)
+            .map(|(id, _)| *id)
+            .collect();
+        let kept = |s: &Sighting| s.image.is_some_and(|i| library.contains(&i));
+        self.sightings.retain(|s| {
+            kept(s) || !(s.presence == Presence::Missing && s.last_seen < missing_before)
+        });
+        let mut outside: Vec<(u64, PathBuf)> = self
+            .sightings
+            .iter()
+            .filter(|s| !kept(s))
+            .map(|s| (s.last_seen, s.path.clone()))
+            .collect();
+        if outside.len() > limit {
+            outside.sort();
+            let drop: std::collections::HashSet<PathBuf> = outside[..outside.len() - limit]
+                .iter()
+                .map(|(_, p)| p.clone())
+                .collect();
+            self.sightings
+                .retain(|s| kept(s) || !drop.contains(&s.path));
+        }
+        Ok(before - self.sightings.len())
+    }
+
+    fn put_folder(&mut self, folder: &Folder) -> Result<(), String> {
+        self.folders
+            .retain(|f| !(f.volume == folder.volume && f.rel_dir == folder.rel_dir));
+        self.folders.push(folder.clone());
+        Ok(())
+    }
+
+    fn folder(&self, volume: Option<&VolumeId>, rel_dir: &Path) -> Result<Option<Folder>, String> {
+        Ok(self
+            .folders
+            .iter()
+            .find(|f| f.volume.as_ref() == volume && f.rel_dir == rel_dir)
+            .cloned())
     }
 
     fn field(&self, id: &ImageId, name: &str) -> Result<Option<serde_json::Value>, String> {
