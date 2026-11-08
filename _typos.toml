@@ -17,7 +17,8 @@ extend-exclude = [
 
 [default]
 # "PNGs": the plural of PNG, split as PN + Gs by typos.
-extend-ignore-re = ["PNGs"]
+# "/FO": tasklist's output-format flag (`tasklist /FO CSV`), on Windows.
+extend-ignore-re = ["PNGs", '"/FO"']
 
 [default.extend-words]
 # Hald CLUT, the identity-image format of colour lookup tables.
