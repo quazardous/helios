@@ -1,0 +1,17 @@
+// A folder of photos imported into an empty library, in place.
+// Run live by tools/bench/scenarios.py: `$folder` is a folder of known
+// photos the run made, the library a throwaway one.
+Scenario(
+    name: "import-folder",
+    description: "A folder of photos imported into an empty library, without copying.",
+    steps: [
+        Wait(Settled),
+        Shot("empty"),
+        Call("library.importFiles", { "paths": ["$folder"], "copy": false }),
+        Wait(Any([Event("command.done"), Event("command.failed")])),
+        Wait(Settled),
+        Expect(Journal(has: "command.done", data: { "command": "library.importFiles" })),
+        Expect(NoError),
+        Shot("imported"),
+    ],
+)

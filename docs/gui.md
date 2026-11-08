@@ -1290,6 +1290,18 @@ Its tools are Helios's capabilities, generated from `describe` (a
 command `about.read` is the tool `about_read`), plus `snapshot` and
 `wait`.
 
+**Writing agents and scenarios (2026-11-08).** `HELIOS_AGENT_WRITE=1`
+makes the bridge writable: the agent may then import, open images,
+change parameters and undo, as a person would. It is meant for runs on a
+throwaway library, never set by Helios itself. Quick open's
+`workbench.quickOpen.go` also takes `file:<path>`, so an agent opens an
+image by its path. Helios's scenarios (`crates/helios-gui/tests/scenarios`,
+egui-pop's `docs/scenarios.md`) are replayed that way by the box's
+`scenarios` job: each on a fresh library with known photos, in a
+headless compositor, with the invariants (no error toast, no failed or
+unknown command, no untranslated text, helios-gui still alive) checked
+after every step, and shots and the journal kept.
+
 ## Parameters
 
 Parameter widgets are generated from value descriptors and bound to the

@@ -1,0 +1,31 @@
+// Two changes of exposure, the last undone then redone.
+// Run live by tools/bench/scenarios.py: `$image` is a photo the run made.
+Scenario(
+    name: "undo-redo",
+    description: "Exposure set twice; Undo goes back to the first value, Redo to the second.",
+    steps: [
+        Wait(Settled),
+        Call("workbench.quickOpen.go", { "item": "file:$image" }),
+        Wait(Event("command.done")),
+        Wait(Settled),
+        Call("param.set", { "path": "node/exposure/exposure", "value": 0.5 }),
+        Wait(Event("command.done")),
+        Call("param.set", { "path": "node/exposure/exposure", "value": 1.25 }),
+        Wait(Event("command.done")),
+        Call("param.undo", ()),
+        Wait(Event("command.done")),
+        Call("param.get", { "path": "node/exposure/exposure" }),
+        Wait(Event("command.done")),
+        Expect(Journal(has: "command.done", data: { "command": "param.get", "result": { "value": 0.5 } })),
+        Wait(Settled),
+        Shot("undone"),
+        Call("param.redo", ()),
+        Wait(Event("command.done")),
+        Call("param.get", { "path": "node/exposure/exposure" }),
+        Wait(Event("command.done")),
+        Expect(Journal(has: "command.done", data: { "command": "param.get", "result": { "value": 1.25 } })),
+        Wait(Settled),
+        Expect(NoError),
+        Shot("redone"),
+    ],
+)

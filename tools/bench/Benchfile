@@ -295,6 +295,29 @@ env = { CARGO_NET_OFFLINE = "true", WLR_RENDERER = "pixman" }
 mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", raw-corpus = "/corpus", sccache = "/sccache" }
 timeout = "1h"
 
+# Helios's scenarios run live (crates/helios-gui/tests/scenarios/*.ron):
+# helios-gui in release, in a headless labwc through wbox, each scenario
+# on a throwaway library with a folder of known photos, driven over its
+# agent socket by the `scenarios` example (egui-pop's scenario runner),
+# the invariants checked after every step. Shots, journals, failure
+# reports and helios-gui's logs in /out; `only=<name>[,<name>]` picks
+# scenarios (tools/bench/scenarios.py)
+[jobs.scenarios]
+about = "Helios's scenarios replayed live on helios-gui in a headless labwc, with shots and journals"
+first = [{ job = "check", pass = ["branch", "crate"] }]
+checkouts = ["helios", "vkdt", "egui-pop"]
+cores = 5
+memory = "6g"
+cwd = "/work/${src:-helios}"
+command = """mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && \
+cargo build --locked --release -p helios-gui --bin helios-gui --example scenarios && \
+mkdir -p "$XDG_RUNTIME_DIR" "$HOME" && chmod 700 "$XDG_RUNTIME_DIR" && \
+"$WBOX_PYTHON" -I tools/bench/scenarios.py --gui /target/release/helios-gui --runner /target/release/examples/scenarios \
+  --out /out --only "${only:-}""""
+env = { CARGO_NET_OFFLINE = "true", WLR_RENDERER = "pixman" }
+mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
+timeout = "1h"
+
 # helios-gui's snapshots regenerated (UPDATE_SNAPSHOTS=1, on lavapipe as
 # in CI): every PNG of crates/helios-gui/tests/snapshots lands in
 # /out/snapshots, to review and commit
