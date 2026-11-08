@@ -959,7 +959,8 @@ impl App {
     /// Opens an image the library activated (Enter, a double click) in
     /// the viewport, from its first copy still present: made ready off
     /// the window's thread, a raw's embedded preview drawn until it is
-    /// developed ([`App::open_prepared`]).
+    /// developed ([`App::open_prepared`]); its large thumbnail (the
+    /// cache's 1024 px entry) drawn before either.
     fn open_from_library(&mut self, id: &str) -> Result<(), String> {
         let bundle = self.bundle();
         let persist = self.persist.as_mut().ok_or("no vault open")?;
@@ -981,6 +982,8 @@ impl App {
         self.preparing.retain(|p| p.library.is_none());
         self.preparing
             .push(prepare_library(id, image, path, bundle));
+        // Its large thumbnail drawn until its render is complete.
+        self.shell.open_from_library(Some(id));
         Ok(())
     }
 
@@ -1182,6 +1185,10 @@ impl App {
     /// An image of the library made ready: shown in the darkroom, or the
     /// error said (a darkroom restored on it is left).
     fn library_opened(&mut self, id: &str, done: Result<(), String>) {
+        if done.is_err() {
+            // Its large thumbnail is no longer drawn.
+            self.shell.open_from_library(None);
+        }
         let handle = self.shell.app().handle();
         let opened = Opened::Image(id.to_string());
         match done {

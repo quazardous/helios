@@ -202,14 +202,22 @@ crate, used by the library (`helios_gui::thumbnails`):
 - **Compare's first paint:** each image shown with no render of its head
   version asks the pool for its 1024 px entry (`Loader::large`, before
   any other job: the cache, else the file, stored); Compare draws it
-  until the render lands, then frees it. The loupe (the image viewport)
-  does not use it yet: its first frame is still the engine's.
+  until the render lands, then frees it.
+- **The loupe's first frame (2026-11-08):** an image opened from the
+  library asks the pool for its 1024 px entry at once
+  (`Shell::open_from_library`); the viewport draws it scaled to fit
+  until the render of what it shows is complete (every exact tile on
+  screen, none stale): the first to complete, a raw's embedded preview
+  or the developed image, takes its place. An opening that fails
+  forgets it.
 - **Tested** without timings: `helios-gui`'s `thumb_budget` scrolls a
   10,000-image grid through a fake pool and cache (textures under the
   budget at every frame, the cells in view asked before the margin, the
   first screen freed, then read back from the cache, never from its file
-  again); `thumbnails` checks that startup does not list the cache and
-  that Compare shows the 1024 px entries. Timing stays with `thumb-bench`.
+  again); `thumbnails` checks that startup does not list the cache, that
+  Compare shows the 1024 px entries, and that the loupe draws its 1024 px
+  entry before any render, then its render in its place. Timing stays
+  with `thumb-bench`.
 
 Still open: the import window's grid does not share this code (its cells
 are glanced, not hashed, so they have no cache key); the pool still reads

@@ -263,3 +263,89 @@ fn compare_shows_the_large_entry_first() {
     drop(loader);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn the_loupe_shows_the_large_entry_until_its_render_is_complete() {
+    let dir = scratch("loupe");
+    let cache = Arc::new(ThumbCache::open(&dir.join("thumbs"), 1 << 30).unwrap());
+    let large = helios_thumbs::Rgb8 {
+        width: helios_thumbs::LARGE,
+        height: 683,
+        pixels: vec![100; (helios_thumbs::LARGE * 683 * 3) as usize],
+    };
+    cache
+        .put(&Key::preview("a"), helios_thumbs::LARGE, &large)
+        .unwrap();
+    let mut shell = Shell::new(helios_panels(), None);
+    shell.set_library(vec![Entry {
+        id: "a".into(),
+        name: "a.jpg".into(),
+        ..Entry::default()
+    }]);
+    let loader = helios_gui::thumbnails::start(&shell, Some(cache), &[], |_| {});
+    let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+    h.state_mut()
+        .run(
+            "helios.viewport.focus",
+            serde_json::Value::Null,
+            helios_shell::commands::Origin::User,
+        )
+        .expect("the viewport");
+    h.step();
+    // Opened from the library: the large entry is drawn, scaled to fit,
+    // before anything is rendered (no source given yet).
+    h.state_mut().open_from_library(Some("a"));
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        h.step();
+        if let Some(size) = h.state().viewport().stand_in() {
+            assert_eq!(size, [helios_thumbs::LARGE as usize, 683]);
+            break;
+        }
+        assert!(Instant::now() < deadline, "the large entry within 30 s");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    h.step();
+    let display = h.state().target_rect("viewport.display").unwrap();
+    let drawn = h
+        .state()
+        .target_rect("viewport.stand-in")
+        .expect("the large entry drawn");
+    assert!(
+        display.contains_rect(drawn.shrink(0.5)),
+        "{drawn:?} in {display:?}"
+    );
+    let fits = |a: f32, b: f32| (a - b).abs() < 1.0;
+    assert!(
+        fits(drawn.width(), display.width()) || fits(drawn.height(), display.height()),
+        "scaled to fit: {drawn:?} in {display:?}"
+    );
+    // The image made ready: the large entry stays while its render runs.
+    let mut g = helios_core::Graph::new();
+    let src = g.add_source(
+        "source",
+        helios_core::Image::from_fn(helios_core::Region::sized(300, 200), 4, |_, _, _| 0.5),
+    );
+    h.state_mut().set_view_source(g, src, "image").unwrap();
+    h.step();
+    assert!(h.state().viewport().stand_in().is_some());
+    assert!(h.state().target_rect("viewport.stand-in").is_ok());
+    // Then the render replaces it.
+    for _ in 0..40 {
+        let stats = h.state().viewport_stats();
+        assert!(stats.wait_idle(Duration::from_mins(1)), "{stats:?}");
+        h.step();
+        if h.state().viewport().stand_in().is_none() {
+            break;
+        }
+    }
+    assert!(
+        h.state().viewport().stand_in().is_none(),
+        "the render replaced it"
+    );
+    assert!(h.state().viewport().state().tiles_complete());
+    h.step();
+    assert!(h.state().target_rect("viewport.stand-in").is_err());
+    drop(loader);
+    let _ = std::fs::remove_dir_all(&dir);
+}

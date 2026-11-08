@@ -1300,6 +1300,31 @@ impl Library {
         self.textures.set_budget(bytes);
     }
 
+    /// The loupe's first frame: the large thumbnail (the cache's 1024 px
+    /// entry) of an image being opened, handed over once it arrived (the
+    /// library keeps no copy), asked of the pool the first time. The
+    /// render of its head version Compare holds, when it does.
+    pub fn take_large(&mut self, ctx: &egui::Context, id: &str) -> Option<TextureHandle> {
+        self.receive(ctx);
+        if let Some(h) = self.heads.renders.get(id) {
+            return Some(h.texture.clone());
+        }
+        if let Some(t) = self.large_textures.remove(id) {
+            return Some(t);
+        }
+        self.ask_large(id);
+        None
+    }
+
+    /// Asks the pool an image's large thumbnail, once (until it arrives).
+    pub fn ask_large(&mut self, id: &str) {
+        if let Some(on_large) = &self.on_large
+            && self.large_asked.insert(id.to_string())
+        {
+            on_large(id);
+        }
+    }
+
     /// The large thumbnail Compare draws for an image until its render
     /// lands: its size, when one is held.
     pub fn large_thumbnail(&self, id: &str) -> Option<[usize; 2]> {
@@ -1842,16 +1867,16 @@ impl Library {
         }
     }
 
-    fn receive(&mut self, ui: &Ui) {
+    fn receive(&mut self, ctx: &egui::Context) {
         let wake = &self.sink.wake;
         if wake.ctx.get().is_none() {
-            let _ = wake.ctx.set(ui.ctx().clone());
+            let _ = wake.ctx.set(ctx.clone());
         }
         // Cleared before the queue is drained: a thumbnail sent after the
         // drain sets it again and wakes the window.
         wake.pending.store(false, Ordering::SeqCst);
         let mut any = false;
-        let pass = ui.ctx().cumulative_pass_nr();
+        let pass = ctx.cumulative_pass_nr();
         while let Ok((id, arrival)) = self.receiver.try_recv() {
             // RGBA, as the texture holds it.
             let bytes = |w: u32, h: u32| u64::from(w) * u64::from(h) * 4;
@@ -1869,7 +1894,7 @@ impl Library {
                 Arrival::Large(rgb) => {
                     self.large_asked.remove(&id);
                     if !self.heads.renders.contains_key(&id) {
-                        let texture = ui.ctx().load_texture(
+                        let texture = ctx.load_texture(
                             format!("helios.library.large.{id}"),
                             rgb_image(&rgb),
                             egui::TextureOptions::LINEAR,
@@ -1885,7 +1910,7 @@ impl Library {
                         .placeholders
                         .entry(kind.clone())
                         .or_insert_with(|| {
-                            ui.ctx().load_texture(
+                            ctx.load_texture(
                                 format!("helios.library.placeholder.{kind}"),
                                 rgb_image(&helios_thumbs::placeholder(&kind)),
                                 egui::TextureOptions::LINEAR,
@@ -1897,7 +1922,7 @@ impl Library {
                     continue;
                 }
             };
-            let texture = ui.ctx().load_texture(
+            let texture = ctx.load_texture(
                 format!("helios.library.{id}"),
                 picture,
                 egui::TextureOptions::LINEAR,
@@ -1905,9 +1930,9 @@ impl Library {
             self.textures.insert(id, texture, false, pass);
             any = true;
         }
-        any |= self.receive_heads(ui.ctx());
+        any |= self.receive_heads(ctx);
         if any {
-            ui.ctx().request_repaint();
+            ctx.request_repaint();
         }
     }
 
@@ -2016,7 +2041,7 @@ impl Library {
     /// The Library panel: the search field, the cursor's marks, and the
     /// thumbnail grid with the culling keys.
     pub fn grid(&mut self, ui: &mut Ui) {
-        self.receive(ui);
+        self.receive(ui.ctx());
         // The search field (with the import button) and the marks bar
         // stay in place while the library is empty.
         self.toolbar(ui);
@@ -2108,7 +2133,7 @@ impl Library {
 
     /// The Filmstrip panel: one row, the grid's selection.
     pub fn filmstrip(&mut self, ui: &mut Ui) {
-        self.receive(ui);
+        self.receive(ui.ctx());
         if self.entries.is_empty() {
             ui.horizontal_wrapped(|ui| {
                 self.import_button(ui);
@@ -2154,7 +2179,7 @@ impl Library {
     /// zoom and pan synced, one marked best; keeping the best picks it
     /// and rejects the others.
     pub fn compare_ui(&mut self, ui: &mut Ui) {
-        self.receive(ui);
+        self.receive(ui.ctx());
         let keys = self.selection();
         if !(2..=4).contains(&keys.len()) {
             ui.weak(crate::i18n::text(
@@ -2195,7 +2220,7 @@ impl Library {
         let pane = ui.available_size() * ui.ctx().pixels_per_point();
         let side = pane.x / keys.len() as f32;
         self.ask_heads(&keys, side.max(pane.y).ceil() as u32);
-        self.ask_large(&keys);
+        self.ask_compare_large(&keys);
         let out = {
             let thumbs = CompareThumbs {
                 heads: &self.heads.renders,
@@ -2225,7 +2250,7 @@ impl Library {
     /// Compare's first paint: the cache's large entry of each image shown
     /// with no render of its head version yet, asked once. The large
     /// entries of images no longer shown, or rendered, are freed.
-    fn ask_large(&mut self, keys: &[String]) {
+    fn ask_compare_large(&mut self, keys: &[String]) {
         let renders = &self.heads.renders;
         self.large_textures
             .retain(|k, _| keys.contains(k) && !renders.contains_key(k));

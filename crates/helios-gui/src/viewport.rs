@@ -281,7 +281,21 @@ pub struct Viewport {
     /// The pointer asked to leave the view (the darktable profile's
     /// double click on the image), not yet acted on.
     leave: bool,
+    /// An image being opened: drawn from its large thumbnail until its
+    /// render lands.
+    stand_in: Option<StandIn>,
     pub stats: Arc<Stats>,
+}
+
+/// The large thumbnail (the cache's 1024 px entry) drawn for an image
+/// being opened, scaled to fit, until the render of what the viewport
+/// shows is complete: the loupe's first frame, with no blank one.
+struct StandIn {
+    /// The thumbnail, once it arrived.
+    texture: Option<egui::TextureHandle>,
+    /// The image was given to the viewport since ([`Viewport::set_source`]):
+    /// its render, once complete, replaces the thumbnail.
+    sourced: bool,
 }
 
 impl Default for Viewport {
@@ -322,6 +336,7 @@ impl Default for Viewport {
             layer: None,
             gpu,
             leave: false,
+            stand_in: None,
             stats,
         }
     }
@@ -338,6 +353,9 @@ impl Viewport {
         self.layer = None;
         self.after.show(Some(shown.clone()));
         self.before.show(Some(shown));
+        if let Some(s) = &mut self.stand_in {
+            s.sourced = true;
+        }
         self.edited = Some(Edited {
             graph,
             node,
@@ -781,6 +799,39 @@ impl Viewport {
         self.after.shown()
     }
 
+    /// An image is being opened: its large thumbnail, once given
+    /// ([`Viewport::set_stand_in`]), is drawn until its render is
+    /// complete. `false` forgets it (the opening failed).
+    pub fn await_stand_in(&mut self, on: bool) {
+        self.stand_in = on.then_some(StandIn {
+            texture: None,
+            sourced: false,
+        });
+    }
+
+    /// Whether an image being opened still waits for its large thumbnail.
+    pub fn wants_stand_in(&self) -> bool {
+        self.stand_in.as_ref().is_some_and(|s| s.texture.is_none())
+    }
+
+    /// The large thumbnail of the image being opened, drawn until its
+    /// render is complete.
+    pub fn set_stand_in(&mut self, texture: egui::TextureHandle) {
+        if let Some(s) = &mut self.stand_in {
+            s.texture = Some(texture);
+        }
+    }
+
+    /// The size of the large thumbnail drawn for the image being opened,
+    /// while it is.
+    pub fn stand_in(&self) -> Option<[usize; 2]> {
+        self.stand_in
+            .as_ref()?
+            .texture
+            .as_ref()
+            .map(egui::TextureHandle::size)
+    }
+
     /// The part of the image (in the scaled image's pixels) and the scale
     /// the render of what "after" shows last asked for.
     pub fn rendered(&self) -> Option<(Region, f64)> {
@@ -933,6 +984,35 @@ impl Viewport {
     }
 
     /// Draws the viewport; reads and writes the view in `store`.
+    /// Draws the large thumbnail of the image being opened, scaled to fit
+    /// `rect`, until the render of what the viewport shows is complete
+    /// (every exact tile on screen, none stale).
+    fn draw_stand_in(&mut self, ui: &Ui, rect: egui::Rect) {
+        let Some(s) = &self.stand_in else { return };
+        if s.sourced && self.state.tiles_complete() {
+            self.stand_in = None;
+            return;
+        }
+        let Some(texture) = &s.texture else { return };
+        let [w, h] = texture.size().map(|v| v as f32);
+        if w <= 0.0 || h <= 0.0 {
+            return;
+        }
+        let scale = (rect.width() / w).min(rect.height() / h);
+        let at = egui::Rect::from_center_size(rect.center(), egui::vec2(w, h) * scale);
+        let painter = ui.painter_at(rect);
+        painter.rect_filled(rect, 0.0, ui.visuals().extreme_bg_color);
+        painter.image(
+            texture.id(),
+            at,
+            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+            egui::Color32::WHITE,
+        );
+        crate::name_rect(ui.ctx(), "viewport.stand-in", at);
+        // Its render comes on the render threads: look again.
+        ui.ctx().request_repaint();
+    }
+
     pub fn ui(&mut self, ui: &mut Ui, store: &Mutex<Store>) {
         // Asked of the window the viewport is in (the main one, or its
         // own once detached); egui-pop resolves it against the surface.
@@ -1003,7 +1083,8 @@ impl Viewport {
         }
         let rect = out.response.rect;
         crate::name_rect(ui.ctx(), "viewport.display", rect);
-        if self.edited.is_none() {
+        self.draw_stand_in(ui, rect);
+        if self.edited.is_none() && self.stand_in().is_none() {
             ui.put(
                 rect,
                 egui::Label::new(egui::RichText::new("No image").weak()),

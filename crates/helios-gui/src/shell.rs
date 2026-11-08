@@ -562,6 +562,9 @@ pub struct Shell {
     /// The GUI's clock, in seconds, as of this frame.
     now: f64,
     viewport: Rc<RefCell<crate::viewport::Viewport>>,
+    /// The library's image being opened in the viewport, while its large
+    /// thumbnail is awaited (the loupe's first frame).
+    opening: Option<String>,
     /// A small render of what the viewport shows, for the scopes and the
     /// navigator.
     preview: Rc<crate::preview::Preview>,
@@ -949,6 +952,7 @@ impl Shell {
             notices: Vec::new(),
             now: 0.0,
             viewport,
+            opening: None,
             preview,
             gpu: None,
             gpu_info: None,
@@ -1457,6 +1461,33 @@ impl Shell {
     /// (the Compare panel's head versions).
     pub fn render_engine(&self) -> Arc<helios_core::Engine> {
         self.viewport.borrow().engine().clone()
+    }
+
+    /// An image of the library is being opened in the viewport (`None`:
+    /// its opening failed): until its render is complete, the viewport
+    /// draws its large thumbnail (the cache's 1024 px entry), asked of
+    /// the thumbnail pool now.
+    pub fn open_from_library(&mut self, id: Option<&str>) {
+        self.viewport.borrow_mut().await_stand_in(id.is_some());
+        self.opening = id.map(str::to_string);
+        if let Some(id) = id {
+            self.library.borrow_mut().ask_large(id);
+        }
+    }
+
+    /// Hands the viewport the large thumbnail of the image being opened,
+    /// once it arrived.
+    fn follow_opening(&mut self, ctx: &Egui) {
+        let Some(id) = &self.opening else { return };
+        let mut viewport = self.viewport.borrow_mut();
+        if !viewport.wants_stand_in() {
+            self.opening = None;
+            return;
+        }
+        if let Some(texture) = self.library.borrow_mut().take_large(ctx, id) {
+            viewport.set_stand_in(texture);
+            self.opening = None;
+        }
     }
 
     /// The library's state, to read.
@@ -4849,6 +4880,7 @@ impl Shell {
         self.rects.insert("window".into(), ctx.content_rect());
 
         self.viewport.borrow_mut().sync(&mut lock(&self.values));
+        self.follow_opening(&ctx);
         self.follow_decisions();
         self.status_bar(&ctx);
         self.status_items(&ctx);
