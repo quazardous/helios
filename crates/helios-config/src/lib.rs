@@ -462,6 +462,15 @@ impl fmt::Display for Problem {
     }
 }
 
+/// What [`Config::load_str_lenient`] did besides loading.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Lenient {
+    /// Keys read as `global`: their concern does not allow the layer.
+    pub moved: Vec<String>,
+    /// Values left out.
+    pub problems: Vec<Problem>,
+}
+
 /// Settings resolved through their layers.
 #[derive(Clone, Debug)]
 pub struct Config {
@@ -492,7 +501,11 @@ impl Config {
         Some((setting.kind.default_value(), Layer::Default))
     }
 
-    /// The effective number of a declared number setting.
+    /// A layer's own value of a setting, if it sets one.
+    pub fn value_in(&self, layer: Layer, key: &str) -> Option<Value> {
+        self.layers.get(&layer)?.get(key).cloned()
+    }
+
     /// The render cache's budget in bytes: `system.cache.budget` when set
     /// (MiB), else `system.cache.share` of `memory` (bytes, 2 GiB when not
     /// known); `None` for no limit.
@@ -650,6 +663,43 @@ impl Config {
         }
     }
 
+    /// Loads a layer from TOML text value by value, for a layer an older
+    /// program may have filled with what it refuses: a value whose concern
+    /// does not allow `layer` is read as `global` (every concern allows
+    /// it), and a value that does not check is left out. The layer is
+    /// replaced; the keys read as global and the problems are returned.
+    pub fn load_str_lenient(&mut self, layer: Layer, text: &str) -> Lenient {
+        let mut out = Lenient::default();
+        let table: Table = match text.parse() {
+            Ok(t) => t,
+            Err(e) => {
+                let e: toml::de::Error = e;
+                out.problems.push(Problem {
+                    layer,
+                    key: String::new(),
+                    reason: format!("not valid TOML: {}", e.message()),
+                });
+                return out;
+            }
+        };
+        let mut flat = Vec::new();
+        flatten("", &table, &mut flat, layer, &mut out.problems);
+        self.layers.remove(&layer);
+        for (key, value) in flat {
+            let allowed = self
+                .schema
+                .get(&key)
+                .is_none_or(|s| s.concern.layers().contains(&layer));
+            let target = if allowed { layer } else { Layer::Global };
+            match self.set(target, &key, value) {
+                Ok(()) if !allowed => out.moved.push(key),
+                Ok(()) => {}
+                Err(p) => out.problems.push(p),
+            }
+        }
+        out
+    }
+
     /// Loads a layer from a file; a missing file is an empty layer.
     pub fn load_file(&mut self, layer: Layer, path: &Path) -> Result<(), Vec<Problem>> {
         match std::fs::read_to_string(path) {
@@ -804,6 +854,27 @@ mod tests {
             Some((Value::Number(1024.0), Layer::Default))
         );
         assert_eq!(c.get("nope"), None);
+    }
+
+    #[test]
+    fn a_lenient_load_reads_a_machine_value_of_the_user_layer_as_global() {
+        let mut c = config();
+        let text = "[system.cache]\nthumbnails = 4096\n[interface.graph]\nzoom = \"overview\"\nbogus = 1\n";
+        // All or nothing refuses the whole layer.
+        assert!(c.clone().load_str(Layer::User, text).is_err());
+        let l = c.load_str_lenient(Layer::User, text);
+        assert_eq!(l.moved, ["system.cache.thumbnails"]);
+        assert_eq!(l.problems.len(), 1, "the unknown key: {:?}", l.problems);
+        assert_eq!(
+            c.get("system.cache.thumbnails"),
+            Some((Value::Number(4096.0), Layer::Global))
+        );
+        assert_eq!(
+            c.get("interface.graph.zoom"),
+            Some((Value::Choice("overview".into()), Layer::User))
+        );
+        // Text that does not parse loads nothing and says so.
+        assert_eq!(c.load_str_lenient(Layer::User, "[").problems.len(), 1);
     }
 
     #[test]
