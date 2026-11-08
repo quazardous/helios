@@ -127,10 +127,12 @@ impl Check for StrategySet {
                     "Each photo has one copy, in the Library: a dead disk loses it.",
                 ),
             )
-            .fix(open_storage(Message::new(
-                "health-fix-set-strategy",
-                "Set up a backup strategy on the Storage page",
-            ))),
+            .fix(Fix {
+                // The Settings app at Backup › Strategy.
+                command: "admin.open".into(),
+                args: json!({ "path": "backup/strategy" }),
+                label: Message::new("health-fix-set-strategy", "Set up a backup strategy"),
+            }),
             Some(s) => Finding::new(
                 STRATEGY_SET,
                 "",

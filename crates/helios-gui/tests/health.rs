@@ -1,7 +1,7 @@
 //! The health check on the desktop: a check that finds a problem shows
-//! the status bar's badge; the badge opens the Health page listing it;
-//! "Ignore" hides it (under "Ignored (1)") and clears the badge; "Show
-//! again" brings it back.
+//! the status bar's badge; the badge opens the Settings app at Health,
+//! listing it; "Ignore" moves it last, marked ignored, and clears the
+//! badge; "Show again" brings it back.
 //!
 //! Helios's own checks over a temporary library, fake volumes and cards:
 //! the backup strategy set, the photos meeting it, the backup disks seen
@@ -114,17 +114,21 @@ fn a_problem_shows_the_badge_the_page_lists_it_and_ignore_clears_it() {
     h.drop_at(centre);
     until(&mut h, "the page", |h| h.state().health_page_open());
     until(&mut h, "the finding", |h| {
-        h.query_by_label("The flux capacitor is unplugged")
+        h.query_by_label_contains("The flux capacitor is unplugged")
             .is_some()
     });
-    assert!(h.query_by_label("Plug it back in").is_some());
-    assert!(h.query_by_label_contains("Problems (1)").is_some());
+    assert!(h.query_by_label_contains("Plug it back in").is_some());
+    until(&mut h, "the summary", |h| {
+        h.query_by_label_contains("Problems: 1").is_some()
+    });
 
-    // Ignore: gone from the list, and the badge goes.
+    // Ignore: marked ignored, and the badge goes.
     h.get_by_label("Ignore").click();
     until(&mut h, "the badge gone", |h| badge(h).is_none());
-    assert!(h.query_by_label_contains("Ignored (1)").is_some());
-    assert!(h.query_by_label_contains("Problems (1)").is_none());
+    until(&mut h, "said ignored", |h| {
+        h.query_by_label_contains("Problems: 1").is_none()
+            && h.query_by_label("Show again").is_some()
+    });
 
     // Undone: back, with its badge.
     h.get_by_label("Show again").click();
@@ -153,35 +157,51 @@ fn the_health_page_is_a_command_and_check_now_runs_again() {
         .run(
             helios_gui::shell::HEALTH_CHECK_NOW,
             serde_json::Value::Null,
-            helios_shell::commands::Origin::User,
+            Origin::User,
         )
         .unwrap();
     until(&mut h, "a second run", |h| {
         h.state().health().is_some_and(|r| r.runs() == 2)
     });
-}
-
-/// The Health page keeps the size it opened at, frame after frame, in a
-/// 960x640 main window.
-#[test]
-fn the_health_page_keeps_its_size() {
-    let mut h = headless::harness(shell(), vec2(960.0, 640.0));
-    until(&mut h, "a first run", |h| {
-        h.state()
-            .health()
-            .is_some_and(|r| r.findings().ran() && !r.running())
-    });
-    h.state_mut()
+    // What the page reads, and the fix and Ignore it runs.
+    let read = h
+        .state_mut()
         .run(
-            helios_gui::shell::HEALTH_COMMAND,
+            helios_gui::shell::HEALTH_FINDINGS,
             serde_json::Value::Null,
-            helios_shell::commands::Origin::User,
+            Origin::User,
         )
         .unwrap();
-    until(&mut h, "the page", |h| {
-        h.query_by_label("Check now").is_some()
-    });
-    headless::assert_window_stable(&mut h, "Health check", 120);
+    assert_eq!(read["findings"][0]["id"], "test.broken");
+    assert_eq!(read["findings"][0]["tone"], "danger");
+    assert_eq!(read["summary"]["tone"], "danger");
+    assert!(
+        h.state_mut()
+            .run(
+                helios_gui::shell::HEALTH_FIX,
+                json!({ "id": "test.broken" }),
+                Origin::User,
+            )
+            .is_err(),
+        "no fix"
+    );
+    h.state_mut()
+        .run(
+            helios_gui::shell::HEALTH_IGNORE,
+            json!({ "id": "test.broken" }),
+            Origin::User,
+        )
+        .unwrap();
+    let read = h
+        .state_mut()
+        .run(
+            helios_gui::shell::HEALTH_FINDINGS,
+            serde_json::Value::Null,
+            Origin::User,
+        )
+        .unwrap();
+    assert_eq!(read["findings"][0]["ignored"], true);
+    assert_eq!(read["summary"]["tone"], "success");
 }
 
 /// When the first scan ran.
@@ -314,7 +334,7 @@ fn fix(h: &mut Harness<'_, Shell>, id: &str) {
 }
 
 #[test]
-fn no_strategy_is_a_warning_whose_fix_opens_the_storage_page() {
+fn no_strategy_is_a_warning_whose_fix_opens_backup_strategy() {
     let lib = Library::new("none");
     let mut h = checked(lib.context(&[&lib.studio, &lib.backup], FIRST));
     until(&mut h, "the finding", |h| {
@@ -333,6 +353,20 @@ fn no_strategy_is_a_warning_whose_fix_opens_the_storage_page() {
     assert!(!h.state().storage_page_open());
     fix(&mut h, "backup.strategy");
     assert!(h.state().storage_page_open(), "the strategy editor's page");
+    let admin = h
+        .state()
+        .app()
+        .handle()
+        .service(&egui_pop::api::admin::ADMIN)
+        .unwrap();
+    assert_eq!(
+        admin.shown(),
+        (
+            Some("backup".into()),
+            Some("strategy".into()),
+            String::new()
+        )
+    );
 
     // Set: fine.
     lib.strategy(Some(&Strategy::default()));

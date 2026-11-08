@@ -406,6 +406,8 @@ pub fn title(path: &str) -> Message {
         "storage" => Message::new("gui-settings-storage", "Storage"),
         "backup" => Message::new("gui-settings-backup", "Backup"),
         "hardware" => Message::new("gui-settings-hardware", "Hardware"),
+        "health" => Message::new("gui-settings-health", "Health"),
+        "health/check" => Message::new("gui-settings-health-check", "Health check"),
         "interface/workbench" => Message::new("gui-settings-workbench", "Workbench"),
         "interface/experimental" => Message::new("gui-settings-experimental", "Experimental"),
         "library/image-map" => Message::new("gui-settings-image-map", "Image map"),
@@ -433,7 +435,8 @@ pub fn manifest(schema: &Schema, t: &dyn Fn(Message) -> String) -> Manifest {
         .scope_at("library", &tt("library"), "folder", 30)
         .scope_at("storage", &tt("storage"), "disc", 40)
         .scope_at("backup", &tt("backup"), "lock", 50)
-        .scope_at("hardware", &tt("hardware"), "command", 70);
+        .scope_at("hardware", &tt("hardware"), "command", 70)
+        .scope_at("health", &tt("health"), "success", 90);
     m = m.section("storage/volumes", &tt("storage/volumes"), |s| {
         volumes_section(s, t);
     });
@@ -472,6 +475,79 @@ pub fn manifest(schema: &Schema, t: &dyn Fn(Message) -> String) -> Manifest {
             crate::platform::SETTING_DESTINATION_DAYS.as_str(),
         ));
     })
+    .section("health/check", &tt("health/check"), |s| {
+        health_section(s, t);
+    })
+}
+
+/// The Health scope: how it stands, "Check now", and the findings of the
+/// last run (`health.findings`), the worst first, toned by their level,
+/// each with its fix ("Fix…", asked first when it changes something not
+/// easily taken back) and "Ignore"; the ignored ones last, with "Show
+/// again".
+fn health_section(s: &mut SectionBuilder<'_>, t: &dyn Fn(Message) -> String) {
+    use crate::shell::{HEALTH_CHECK_NOW, HEALTH_FINDINGS, HEALTH_FIX, HEALTH_IGNORE};
+    s.description(&t(Message::new(
+        "gui-health-about",
+        "Helios checks the backups, the disks, the GPU, the plugins and the catalogue snapshots in the background: a while after start, daily, and when a disk comes or goes.",
+    )));
+    s.status(Status::command(
+        "summary",
+        &t(Message::new("gui-health-status", "Status")),
+        HEALTH_FINDINGS,
+        "/summary",
+    ));
+    s.action(
+        Action::command(HEALTH_CHECK_NOW)
+            .title(&t(Message::new("gui-health-check-now", "Check now")))
+            .primary(),
+    );
+    let id = json!({ "id": "${row.id}" });
+    let fix = |destructive: bool| {
+        let a = Action::command(HEALTH_FIX)
+            .title(&t(Message::new("gui-health-fix", "Fix…")))
+            .args(id.clone());
+        if destructive {
+            a.when("row.fix && row.destructive").danger().confirmation(
+                Confirmation::new(
+                    "${row.fixLabel}",
+                    "${row.title}",
+                    &t(Message::new("gui-health-fix-confirm", "Fix it")),
+                )
+                .danger(),
+            )
+        } else {
+            a.when("row.fix && !row.destructive")
+        }
+    };
+    s.list(
+        Records::command("findings", "", HEALTH_FINDINGS, "/findings", "id")
+            .titles("title", Some("text"))
+            .column("fixLabel", "")
+            .column("ignoredText", "")
+            .tone("tone")
+            .row_action(fix(false))
+            .row_action(fix(true))
+            .row_action(
+                Action::command(HEALTH_IGNORE)
+                    .title(&t(Message::new("gui-health-ignore", "Ignore")))
+                    .args(json!({ "id": "${row.id}", "on": true }))
+                    .when("row.attention && !row.ignored"),
+            )
+            .row_action(
+                Action::command(HEALTH_IGNORE)
+                    .title(&t(Message::new("gui-health-undo-ignore", "Show again")))
+                    .args(json!({ "id": "${row.id}", "on": false }))
+                    .when("row.ignored"),
+            )
+            .empty(
+                &t(Message::new(
+                    "gui-health-not-yet",
+                    "Not checked yet: the checks run in the background.",
+                )),
+                None,
+            ),
+    );
 }
 
 /// The Storage scope's volume table: every volume known
@@ -715,10 +791,16 @@ fn strategy_section(s: &mut SectionBuilder<'_>, t: &dyn Fn(Message) -> String) {
 /// first, each with "Restore…" (asked first), and "Snapshot now".
 fn snapshots_section(s: &mut SectionBuilder<'_>, t: &dyn Fn(Message) -> String) {
     use crate::catalogue::{LIST_COMMAND, RESTORE_COMMAND, SNAPSHOT_COMMAND};
-    s.action(Action::command(SNAPSHOT_COMMAND).title(&t(Message::new(
-        "gui-catalogue-snapshot-now",
-        "Snapshot now",
-    ))));
+    // Only with a library open: there is no catalogue to snapshot
+    // without one.
+    s.action(
+        Action::command(SNAPSHOT_COMMAND)
+            .title(&t(Message::new(
+                "gui-catalogue-snapshot-now",
+                "Snapshot now",
+            )))
+            .when("libraryOpen"),
+    );
     s.list(
         Records::command(
             "snapshots",
@@ -755,7 +837,8 @@ fn snapshots_section(s: &mut SectionBuilder<'_>, t: &dyn Fn(Message) -> String) 
         .empty(
             &t(Message::new("gui-catalogue-none", "No snapshot yet.")),
             None,
-        ),
+        )
+        .when("libraryOpen"),
     );
 }
 

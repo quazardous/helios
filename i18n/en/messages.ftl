@@ -263,27 +263,31 @@ gui-graph-wires-orthogonal = Orthogonal
 
 gui-graph-wires-straight = Straight
 
+gui-health-about = Helios checks the backups, the disks, the GPU, the plugins and the catalogue snapshots in the background: a while after start, daily, and when a disk comes or goes.
+
 gui-health-check-now = Check now
 
 gui-health-checking = Checking…
 
 gui-health-fix = Fix…
 
+gui-health-fix-confirm = Fix it
+
 gui-health-ignore = Ignore
 
-gui-health-ignored = Ignored ({ $count })
+gui-health-ignored-row = ignored
 
 gui-health-not-yet = Not checked yet: the checks run in the background.
 
-gui-health-ok = All good ({ $count })
+gui-health-status = Status
 
-gui-health-problems = Problems ({ $count })
+gui-health-summary-ok = All good
 
-gui-health-title = Health check
+gui-health-summary-problems = Problems: { $problems }, warnings: { $warnings }
+
+gui-health-summary-warnings = Warnings: { $count }
 
 gui-health-undo-ignore = Show again
-
-gui-health-warnings = Warnings ({ $count })
 
 gui-history-batch = { $label } ({ $count } values)
 
@@ -1015,6 +1019,10 @@ gui-settings-experimental = Experimental
 
 gui-settings-hardware = Hardware
 
+gui-settings-health = Health
+
+gui-settings-health-check = Health check
+
 gui-settings-history = History
 
 gui-settings-image-map = Image map
@@ -1383,7 +1391,7 @@ health-fix-plugin-folder = Open its folder
 
 health-fix-plugin-update = Update it: open its folder
 
-health-fix-set-strategy = Set up a backup strategy on the Storage page
+health-fix-set-strategy = Set up a backup strategy
 
 health-fix-show-volume = Show it on the Storage page
 

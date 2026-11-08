@@ -1088,14 +1088,18 @@ children, ids `node:<name>/<id>`; their Cancel goes to the node.
 
 ## Health check
 
-Help > Health check (`help.health`) opens a page listing what Helios's
-checks of the setup found (`helios-health`), grouped by level: problems,
-warnings, then what is fine. Each finding has its message, a detail
-line, a "Fix…" button when it has a fix (a command with its arguments,
-such as opening a volume's folder) and "Ignore". Ignored findings wait
-under "Ignored (n)", where "Show again" takes them back; the list is kept
-by finding id in `health-ignored.json` beside Helios's settings. "Check
-now" (`health.checkNow`) runs the checks again.
+Help > Health check (`help.health`) and the status bar's badge open the
+Settings app at Health › Health check, a page declared like the others
+(`helios-health`'s findings read through `health.findings`). Its status
+says how it stands; the findings follow, the worst first, toned by level,
+each with its message, a detail line, its fix's words, "Fix…" when it
+has a fix (`health.fix`: its command with its arguments, such as opening
+a volume's folder, then the checks again; a fix that is not easily taken
+back asks first) and "Ignore" (`health.ignore`). Ignored findings come
+last, marked ignored, with "Show again"; the list is kept by finding id
+in `health-ignored.json` beside Helios's settings. "Check now"
+(`health.checkNow`) runs the checks again. "No backup is set up" opens
+Backup › Strategy.
 
 The checks run as one background job (kind `health`, in the jobs
 centre): 30 seconds after start, then daily, and when a volume is

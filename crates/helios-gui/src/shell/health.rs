@@ -1,8 +1,17 @@
-//! The health check on the desktop ([`helios_health`]): Help > Health
-//! check (`help.health`) opens its page, which lists the findings by
-//! level, each with its detail, a "Fix…" button running its command and
-//! "Ignore"; the ignored ones wait under "Ignored (n)" to be taken back.
-//! "Check now" (`health.checkNow`) runs the checks again.
+//! The health check on the desktop ([`helios_health`]): its page is the
+//! Settings app's Health scope (`crate::config::manifest`), declared and
+//! drawn by the Settings app from these commands, never by the shell.
+//!
+//! - `help.health` opens the Settings app at Health › Check.
+//! - `health.findings` (read-only): the findings of the last run, the
+//!   worst first, then the ignored ones, as rows (`/findings`) with their
+//!   tone, their fix's words and command; and a summary line with its
+//!   tone (`/summary`).
+//! - `health.fix` (`{"id"}`): runs a finding's fix, then the checks again
+//!   (so a fix done at once, an acknowledgement, clears its finding).
+//! - `health.ignore` (`{"id", "on"}`): ignores a finding, or shows it
+//!   again.
+//! - `health.checkNow`: runs the checks again.
 //!
 //! The checks run as a background job ([`helios_health::runner`]): a
 //! while after start, daily, and when a volume comes or goes (the
@@ -18,7 +27,8 @@ use egui::Context as Egui;
 use egui_pop::model::ids::CommandId;
 use helios_core::Message;
 use helios_health::runner::Runner;
-use helios_health::{Finding, Level};
+use helios_health::{Finding, Findings, Level};
+use serde_json::{Value, json};
 
 use super::Shell;
 
@@ -26,35 +36,114 @@ use super::Shell;
 pub const COMMAND: &str = "help.health";
 /// Runs the checks now.
 pub const CHECK_NOW: &str = "health.checkNow";
+/// The findings of the last run (read-only).
+pub const FINDINGS: &str = "health.findings";
+/// Runs a finding's fix.
+pub const FIX: &str = "health.fix";
+/// Ignores a finding or shows it again.
+pub const IGNORE: &str = "health.ignore";
 /// The status bar badge's id.
 pub const BADGE: &str = "helios.health.badge";
+/// The Health page in the Settings app.
+pub const PAGE: &str = "health/check";
 
-/// The page's state, kept by the shell.
+/// The fixes that change something not easily taken back: their button
+/// asks first.
+const DESTRUCTIVE: &[&str] = &["plugin.disable"];
+
+/// The health check's state, kept by the shell.
 #[derive(Default)]
 pub(crate) struct HealthPage {
     runner: Option<Runner>,
-    open: bool,
     /// The context the job's thread asks a frame of.
     ctx: Arc<Mutex<Option<Egui>>>,
     /// How many times a volume came or went, once listened to.
     volumes: Arc<AtomicU64>,
     listening: bool,
+    /// The run state the Settings app's page last read.
+    seen: (u64, bool),
 }
 
-/// A finding as the page shows it, its words translated.
-struct Row {
-    id: String,
-    level: Level,
-    message: String,
-    detail: String,
-    fix: Option<(String, String, serde_json::Value)>,
-}
-
-/// What the page's buttons asked.
-enum Asked {
-    CheckNow,
-    Fix(String, serde_json::Value),
-    Ignore(String, bool),
+/// The findings as the page reads them: each finding a row with `id`,
+/// `level` (`problem`, `warning`, `ok`), `tone`, `title` and `text` (its
+/// message and detail), `fix` (whether it has one), `fixLabel` and
+/// `fixCommand`, `destructive` (its fix asks first), `attention` (a
+/// warning or a problem) and `ignored`; the shown ones worst first, then
+/// the ignored ones. `summary` says how it stands, with its tone; `ran`
+/// and `running` the run's state.
+pub fn findings_answer(t: &dyn Fn(Message) -> String, findings: &Findings, running: bool) -> Value {
+    let row = |f: &Finding, ignored: bool| {
+        let (level, tone) = match f.level {
+            Level::Problem => ("problem", "danger"),
+            Level::Warning => ("warning", "warning"),
+            Level::Ok => ("ok", "success"),
+        };
+        json!({
+            "id": f.id,
+            "level": level,
+            "tone": if ignored { Value::Null } else { json!(tone) },
+            "title": t(f.message.clone()),
+            "text": t(f.detail.clone()),
+            "fix": f.fix.is_some(),
+            "fixLabel": f.fix.as_ref().map(|x| t(x.label.clone())).unwrap_or_default(),
+            "fixCommand": f.fix.as_ref().map(|x| x.command.clone()),
+            "destructive": f.fix.as_ref().is_some_and(|x| DESTRUCTIVE.contains(&x.command.as_str())),
+            "attention": f.level > Level::Ok,
+            "ignored": ignored,
+            "ignoredText": if ignored {
+                t(Message::new("gui-health-ignored-row", "ignored"))
+            } else {
+                String::new()
+            },
+        })
+    };
+    let shown = findings.shown();
+    let ignored = findings.ignored_findings();
+    let mut rows: Vec<Value> = shown.iter().map(|f| row(f, false)).collect();
+    rows.extend(ignored.iter().map(|f| row(f, true)));
+    let count = |l: Level| shown.iter().filter(|f| f.level == l).count();
+    let (problems, warnings) = (count(Level::Problem), count(Level::Warning));
+    let (text, tone) = if !findings.ran() && running {
+        (t(Message::new("gui-health-checking", "Checking…")), "info")
+    } else if !findings.ran() {
+        (
+            t(Message::new(
+                "gui-health-not-yet",
+                "Not checked yet: the checks run in the background.",
+            )),
+            "info",
+        )
+    } else if problems > 0 {
+        (
+            t(Message::new(
+                "gui-health-summary-problems",
+                "Problems: { $problems }, warnings: { $warnings }",
+            )
+            .with("problems", problems)
+            .with("warnings", warnings)),
+            "danger",
+        )
+    } else if warnings > 0 {
+        (
+            t(
+                Message::new("gui-health-summary-warnings", "Warnings: { $count }")
+                    .with("count", warnings),
+            ),
+            "warning",
+        )
+    } else {
+        (
+            t(Message::new("gui-health-summary-ok", "All good")),
+            "success",
+        )
+    };
+    json!({
+        "findings": rows,
+        "ignored": ignored.len(),
+        "ran": findings.ran(),
+        "running": running,
+        "summary": { "text": text, "tone": tone },
+    })
 }
 
 impl Shell {
@@ -77,13 +166,20 @@ impl Shell {
         self.health.runner.as_ref()
     }
 
-    /// Whether the Health page is open.
+    /// Whether the Settings app is open on its Health scope.
     pub fn health_page_open(&self) -> bool {
-        self.health.open
+        let app = self.app.handle();
+        app.service(&egui_pop::api::admin::ADMIN)
+            .is_some_and(|a| a.is_open() && a.shown().0.as_deref() == Some("health"))
     }
 
-    pub(super) fn open_health(&mut self) {
-        self.health.open = true;
+    /// `help.health`: the Settings app at Health › Check.
+    pub(super) fn open_health(&mut self) -> Result<Value, String> {
+        self.run(
+            egui_pop::api::admin::CMD_OPEN.as_str(),
+            json!({ "path": PAGE }),
+            helios_shell::commands::Origin::User,
+        )
     }
 
     /// `health.checkNow`: whether a run started (none while one runs).
@@ -91,8 +187,49 @@ impl Shell {
         self.health.runner.as_mut().is_some_and(Runner::run_now)
     }
 
+    /// `health.findings`.
+    pub(super) fn health_findings(&self) -> Result<Value, String> {
+        let runner = self.health.runner.as_ref().ok_or("no health check")?;
+        let t = |m: Message| self.text(m);
+        Ok(findings_answer(&t, &runner.findings(), runner.running()))
+    }
+
+    /// `health.fix`: the finding's fix, then the checks again.
+    pub(super) fn health_fix(&mut self, args: &Value) -> Result<Value, String> {
+        let id = args["id"].as_str().ok_or("`id` is missing")?;
+        let fix = {
+            let runner = self.health.runner.as_ref().ok_or("no health check")?;
+            let findings = runner.findings();
+            let f = findings
+                .shown()
+                .into_iter()
+                .chain(findings.ignored_findings())
+                .find(|f| f.id == id)
+                .cloned()
+                .ok_or_else(|| format!("no finding `{id}`"))?;
+            f.fix.ok_or_else(|| format!("`{id}` has no fix"))?
+        };
+        let command = CommandId::new(&fix.command).map_err(|e| format!("{}: {e}", fix.command))?;
+        self.app.handle().run(command, fix.args.clone());
+        if let Ok(again) = CommandId::new(CHECK_NOW) {
+            self.app.handle().run(again, Value::Null);
+        }
+        Ok(json!({ "id": id, "command": fix.command }))
+    }
+
+    /// `health.ignore`: ignored (`on`, the default) or shown again.
+    pub(super) fn health_ignore(&mut self, args: &Value) -> Result<Value, String> {
+        let id = args["id"].as_str().ok_or("`id` is missing")?;
+        let on = args["on"].as_bool().unwrap_or(true);
+        let runner = self.health.runner.as_ref().ok_or("no health check")?;
+        runner.findings().ignored.set(id, on)?;
+        let worst = runner.findings().worst();
+        self.status.borrow_mut().health = worst;
+        Ok(json!({ "id": id, "ignored": on }))
+    }
+
     /// Before the bar is drawn: a run when one is due, and the badge's
-    /// worst finding.
+    /// worst finding; the page read again when a run starts or ends.
     pub(super) fn health_tick(&mut self, ctx: &Egui) {
         {
             let mut held = self
@@ -121,191 +258,58 @@ impl Shell {
         };
         runner.tick(Instant::now(), generation);
         let worst = runner.findings().worst();
+        let seen = (runner.runs(), runner.running());
         self.status.borrow_mut().health = worst;
-    }
-
-    /// After the panels: the page, when open.
-    pub(super) fn health_window(&mut self, ctx: &Egui) {
-        if !self.health.open {
-            return;
-        }
-        let Some(runner) = self.health.runner.as_ref() else {
-            self.health.open = false;
-            return;
-        };
-        let t = |m: Message| crate::i18n::text(ctx, m);
-        let (rows, ignored, ran) = {
-            let findings = runner.findings();
-            let row = |f: &Finding| Row {
-                id: f.id.clone(),
-                level: f.level,
-                message: t(f.message.clone()),
-                detail: t(f.detail.clone()),
-                fix: f
-                    .fix
-                    .as_ref()
-                    .map(|x| (t(x.label.clone()), x.command.clone(), x.args.clone())),
-            };
-            (
-                findings.shown().into_iter().map(row).collect::<Vec<_>>(),
-                findings
-                    .ignored_findings()
-                    .into_iter()
-                    .map(row)
-                    .collect::<Vec<_>>(),
-                findings.ran(),
-            )
-        };
-        let running = runner.running();
-        let mut open = true;
-        let mut asked = None;
-        let max = ctx.content_rect().size() - egui::vec2(32.0, 32.0);
-        egui::Window::new(t(Message::new("gui-health-title", "Health check")))
-            .id(egui::Id::unique("helios.health.window"))
-            .open(&mut open)
-            .collapsible(false)
-            .resizable(true)
-            .default_size(egui::vec2(560.0, 420.0).min(max))
-            .max_size(max)
-            .pivot(egui::Align2::CENTER_CENTER)
-            .default_pos(ctx.content_rect().center())
-            .show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    let label = if running {
-                        t(Message::new("gui-health-checking", "Checking…"))
-                    } else {
-                        t(Message::new("gui-health-check-now", "Check now"))
-                    };
-                    if ui.add_enabled(!running, egui::Button::new(label)).clicked() {
-                        asked = Some(Asked::CheckNow);
-                    }
-                });
-                ui.separator();
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    if !ran {
-                        ui.label(t(Message::new(
-                            "gui-health-not-yet",
-                            "Not checked yet: the checks run in the background.",
-                        )));
-                    }
-                    for (level, heading) in [
-                        (
-                            Level::Problem,
-                            Message::new("gui-health-problems", "Problems ({ $count })"),
-                        ),
-                        (
-                            Level::Warning,
-                            Message::new("gui-health-warnings", "Warnings ({ $count })"),
-                        ),
-                        (
-                            Level::Ok,
-                            Message::new("gui-health-ok", "All good ({ $count })"),
-                        ),
-                    ] {
-                        let these: Vec<&Row> = rows.iter().filter(|r| r.level == level).collect();
-                        if these.is_empty() {
-                            continue;
-                        }
-                        ui.heading(t(heading.with("count", these.len())));
-                        for row in these {
-                            row_ui(ui, row, &t, &mut asked, false);
-                        }
-                    }
-                    if !ignored.is_empty() {
-                        ui.separator();
-                        ui.heading(t(Message::new(
-                            "gui-health-ignored",
-                            "Ignored ({ $count })",
-                        )
-                        .with("count", ignored.len())));
-                        for row in &ignored {
-                            row_ui(ui, row, &t, &mut asked, true);
-                        }
-                    }
-                });
-            });
-        if !open {
-            self.health.open = false;
-        }
-        match asked {
-            Some(Asked::CheckNow) => {
-                self.health_check_now();
+        if seen != self.health.seen {
+            self.health.seen = seen;
+            if let Some(admin) = self.app.handle().service(&egui_pop::api::admin::ADMIN) {
+                admin.refresh();
             }
-            Some(Asked::Fix(command, args)) => match CommandId::new(&command) {
-                Ok(id) => {
-                    self.app.handle().run(id, args);
-                    // Then the checks again, so a fix done at once (an
-                    // acknowledgement) clears its finding.
-                    if let Ok(again) = CommandId::new(CHECK_NOW) {
-                        self.app.handle().run(again, serde_json::Value::Null);
-                    }
-                }
-                Err(e) => self.warn(format!("health: {command}: {e}")),
-            },
-            Some(Asked::Ignore(id, on)) => {
-                let saved = self
-                    .health
-                    .runner
-                    .as_ref()
-                    .map(|r| r.findings().ignored.set(&id, on));
-                if let Some(Err(e)) = saved {
-                    self.warn(format!("health: {e}"));
-                }
-                let worst = self
-                    .health
-                    .runner
-                    .as_ref()
-                    .and_then(|r| r.findings().worst());
-                self.status.borrow_mut().health = worst;
-            }
-            None => {}
         }
     }
 }
 
-/// One finding: its message, its detail, its fix and Ignore (or Undo,
-/// ignored).
-fn row_ui(
-    ui: &mut egui::Ui,
-    row: &Row,
-    t: &dyn Fn(Message) -> String,
-    asked: &mut Option<Asked>,
-    ignored: bool,
-) {
-    ui.group(|ui| {
-        ui.set_width(ui.available_width());
-        let colour = match row.level {
-            Level::Problem => ui.visuals().error_fg_color,
-            Level::Warning => ui.visuals().warn_fg_color,
-            Level::Ok => ui.visuals().text_color(),
-        };
-        ui.colored_label(colour, egui::RichText::new(&row.message).strong());
-        ui.label(egui::RichText::new(&row.detail).small());
-        ui.horizontal(|ui| {
-            if ignored {
-                if ui
-                    .button(t(Message::new("gui-health-undo-ignore", "Show again")))
-                    .clicked()
-                {
-                    *asked = Some(Asked::Ignore(row.id.clone(), false));
-                }
-                return;
-            }
-            if let Some((label, command, args)) = &row.fix
-                && ui
-                    .button(t(Message::new("gui-health-fix", "Fix…")))
-                    .on_hover_text(label)
-                    .clicked()
-            {
-                *asked = Some(Asked::Fix(command.clone(), args.clone()));
-            }
-            if row.level > Level::Ok
-                && ui
-                    .button(t(Message::new("gui-health-ignore", "Ignore")))
-                    .clicked()
-            {
-                *asked = Some(Asked::Ignore(row.id.clone(), true));
-            }
+#[cfg(test)]
+mod tests {
+    use helios_health::{Fix, Ignored};
+
+    use super::*;
+
+    fn english(m: Message) -> String {
+        helios_i18n::message(&helios_i18n::I18n::new("en"), &m)
+    }
+
+    #[test]
+    fn findings_are_rows_worst_first_then_the_ignored_ones() {
+        let plain = Message::plain;
+        let fine = Finding::new("a.fine", "", Level::Ok, plain("Fine"), plain(""));
+        let warn = Finding::new("a.warn", "", Level::Warning, plain("Warn"), plain(""));
+        let bad = Finding::new("a.bad", "", Level::Problem, plain("Bad"), plain("Why")).fix(Fix {
+            command: "plugin.disable".into(),
+            args: json!({ "plugin": "p" }),
+            label: plain("Disable it"),
         });
-    });
+        let dir = std::env::temp_dir().join(format!("helios-health-rows-{}", std::process::id()));
+        let mut findings = Findings::with_ignored(Ignored::load(&dir.join("ignored.json")));
+        let a = findings_answer(&english, &findings, false);
+        assert_eq!(a["summary"]["tone"], "info", "not checked yet");
+        findings.replace(vec![fine, warn, bad]);
+        let a = findings_answer(&english, &findings, false);
+        let rows = a["findings"].as_array().unwrap();
+        let ids: Vec<&str> = rows.iter().map(|r| r["id"].as_str().unwrap()).collect();
+        assert_eq!(ids, ["a.bad", "a.warn", "a.fine"]);
+        assert_eq!(rows[0]["tone"], "danger");
+        assert_eq!(rows[0]["fixLabel"], "Disable it");
+        assert_eq!(rows[0]["destructive"], true);
+        assert_eq!(rows[2]["attention"], false);
+        assert_eq!(a["summary"]["tone"], "danger");
+        findings.ignored.set("a.bad", true).unwrap();
+        let a = findings_answer(&english, &findings, false);
+        let rows = a["findings"].as_array().unwrap();
+        assert_eq!(rows[2]["id"], "a.bad");
+        assert_eq!(rows[2]["ignored"], true);
+        assert!(rows[2]["tone"].is_null());
+        assert_eq!(a["summary"]["tone"], "warning");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

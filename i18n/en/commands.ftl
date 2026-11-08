@@ -49,6 +49,15 @@ command-gui-snapshot =
 command-health-checkNow =
     .title = Run the health checks now (Help > Health check)
 
+command-health-findings =
+    .title = The health check's findings, worst first, then the ignored ones: level, words, fix; and a summary
+
+command-health-fix =
+    .title = Run a health finding's fix, then the checks again (`id`)
+
+command-health-ignore =
+    .title = Ignore a health finding, or show it again (`id`, `on`: true by default)
+
 command-helios-compare-detach =
     .title = Move Compare to a new window
 

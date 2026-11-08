@@ -1352,25 +1352,33 @@ gui-status-health-warning = { $count ->
 
 gui-status-health-show = Ouvrir le bilan de santé
 
-gui-health-title = Bilan de santé
-
 gui-health-checking = Vérification…
 
 gui-health-check-now = Vérifier maintenant
 
 gui-health-not-yet = Pas encore vérifié : les vérifications tournent en arrière-plan.
 
-gui-health-problems = Problèmes ({ $count })
-
-gui-health-warnings = Avertissements ({ $count })
-
-gui-health-ok = Tout va bien ({ $count })
-
-gui-health-ignored = Ignorés ({ $count })
-
 gui-health-undo-ignore = Afficher à nouveau
 
 gui-health-fix = Corriger…
+
+gui-health-about = Helios vérifie les sauvegardes, les disques, le GPU, les plugins et les instantanés du catalogue en arrière-plan : peu après le démarrage, chaque jour, et quand un disque arrive ou part.
+
+gui-health-fix-confirm = Corriger
+
+gui-health-ignored-row = ignoré
+
+gui-health-status = État
+
+gui-health-summary-ok = Tout va bien
+
+gui-health-summary-problems = Problèmes : { $problems }, avertissements : { $warnings }
+
+gui-health-summary-warnings = Avertissements : { $count }
+
+gui-settings-health = Santé
+
+gui-settings-health-check = Bilan de santé
 
 gui-health-ignore = Ignorer
 
@@ -1404,7 +1412,7 @@ health-fix-no-destination = Aucun disque de sauvegarde branché : ouvrir la page
 
 health-fix-plug-in = Brancher { $volume } pour sauvegarder
 
-health-fix-set-strategy = Définir une stratégie de sauvegarde dans la page Stockage
+health-fix-set-strategy = Définir une stratégie de sauvegarde
 
 health-fix-show-volume = Le montrer dans la page Stockage
 

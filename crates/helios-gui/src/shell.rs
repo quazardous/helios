@@ -50,7 +50,11 @@ use crate::workbench::Contents;
 
 pub use crate::workbench::Content;
 pub use export::{ExportAsk, OPEN_FOLDER, folder_path, settings_of};
-pub use health::{BADGE as HEALTH_BADGE, CHECK_NOW as HEALTH_CHECK_NOW, COMMAND as HEALTH_COMMAND};
+pub use health::{
+    BADGE as HEALTH_BADGE, CHECK_NOW as HEALTH_CHECK_NOW, COMMAND as HEALTH_COMMAND,
+    FINDINGS as HEALTH_FINDINGS, FIX as HEALTH_FIX, IGNORE as HEALTH_IGNORE, PAGE as HEALTH_PAGE,
+    findings_answer as health_findings_answer,
+};
 pub use import_choices::Choices;
 pub use macro_edit::{SELECTED as GRAPH_SELECTED, selected_nodes};
 pub use storage::{
@@ -165,6 +169,12 @@ enum Action {
     Health,
     /// Run the health checks now (`health.checkNow`).
     HealthCheckNow,
+    /// The health check's findings (`health.findings`).
+    HealthFindings,
+    /// Run a finding's fix (`health.fix`'s arguments).
+    HealthFix(Value),
+    /// Ignore a finding or show it again (`health.ignore`'s arguments).
+    HealthIgnore(Value),
     /// Open the Storage page (`library.storage`'s arguments).
     Storage(Value),
     /// Files and folders to import (`library.importFiles`'s arguments: a
@@ -2844,6 +2854,31 @@ impl Shell {
         );
         add(
             CommandSpec::new(
+                health::FINDINGS,
+                "The health check's findings, worst first, then the ignored ones: level, words, fix; and a summary",
+                "Help",
+            )
+            .read_only(),
+            Box::new(|_, _| Ok(Action::HealthFindings)),
+        );
+        add(
+            CommandSpec::new(
+                health::FIX,
+                "Run a health finding's fix, then the checks again (`id`)",
+                "Help",
+            ),
+            Box::new(|a, _| Ok(Action::HealthFix(a.clone()))),
+        );
+        add(
+            CommandSpec::new(
+                health::IGNORE,
+                "Ignore a health finding, or show it again (`id`, `on`: true by default)",
+                "Help",
+            ),
+            Box::new(|a, _| Ok(Action::HealthIgnore(a.clone()))),
+        );
+        add(
+            CommandSpec::new(
                 import_window::COMMAND,
                 "Import photos… (`source`: the card or folder the import window opens on)",
                 "Library",
@@ -3959,6 +3994,7 @@ impl Shell {
             h.set_context("maskDisplay", crate::mask_display::mode(&store).name());
         }
         h.set_context("heliosTheme", &self.theme_name);
+        h.set_context("libraryOpen", flag(self.library_open()));
         h.set_context("heliosProfile", &self.profile_name);
         h.set_context(
             crate::importers::CONTEXT,
@@ -4497,10 +4533,10 @@ impl Shell {
                 self.open_import_window(&args);
                 return Ok(Value::Null);
             }
-            Action::Health => {
-                self.open_health();
-                return Ok(Value::Null);
-            }
+            Action::Health => return self.open_health(),
+            Action::HealthFindings => return self.health_findings(),
+            Action::HealthFix(args) => return self.health_fix(&args),
+            Action::HealthIgnore(args) => return self.health_ignore(&args),
             Action::HealthCheckNow => {
                 let started = self.health_check_now();
                 return Ok(serde_json::json!({ "started": started }));
@@ -4953,7 +4989,6 @@ impl Shell {
         }
         self.take_dropped_files(&ctx);
         self.import_window_frame(&ctx);
-        self.health_window(&ctx);
         let refused = std::mem::take(&mut self.library.borrow_mut().notes);
         for n in refused {
             self.warn(n);
