@@ -146,6 +146,27 @@ fn target(graph: &Graph, name: &str, module: Option<&str>) -> Option<helios_core
     })
 }
 
+/// The node a network keeps its whole-image exposure in when its node
+/// `exposure` is a masked adjustment over it (Portrait retouch, the blank
+/// workspace).
+const BASE: &str = "base";
+const EXPOSURE: &str = "exposure";
+
+/// The node name a darktable edit gives darktable's base exposure: its
+/// `exposure` module's first instance (`multi_priority` 0), as the
+/// import applied it (see `helios_xmp::Imported::edit`). `None` for an
+/// edit Helios saved, or one without that instance.
+fn darktable_base_exposure(edit: &Value) -> Option<String> {
+    edit["darktable"]["history"]
+        .as_array()?
+        .iter()
+        .filter(|item| item["operation"] == EXPOSURE && item["instance"] == 0)
+        .filter(|item| item["status"] == "applied")
+        .filter_map(|item| item["node"].as_str())
+        .next_back()
+        .map(String::from)
+}
+
 /// The raw chain's colour calibration node and module, and the white
 /// balance mode it goes with (see [`apply_to_graph`]).
 const COLOUR_CALIBRATION: &str = "channelmixerrgb";
@@ -165,6 +186,11 @@ const CAMERA_REFERENCE: &str = "camera_reference";
 /// darktable edit without colour calibration) balances its own way: its
 /// white balance is kept, and the colour calibration it does not name is
 /// set to adapt nothing (illuminant D50, `pipe`), so it looks as it did.
+///
+/// darktable's base exposure (its `exposure` module's first instance)
+/// lands on the `base` exposure node where the network has one under a
+/// masked `exposure` node, else on the `exposure` node, whatever the
+/// instance's name; its other instances keep their own names.
 pub fn apply_to_graph(graph: &mut Graph, edit: &Value) -> Result<Vec<String>, String> {
     let mut skipped = Vec::new();
     let bypassed = bypassed(edit);
@@ -173,8 +199,24 @@ pub fn apply_to_graph(graph: &mut Graph, edit: &Value) -> Result<Vec<String>, St
     let calibrated = modules
         .values()
         .any(|(module, _)| module.as_deref() == Some(COLOUR_CALIBRATION));
+    // darktable's base exposure is the whole image's: where the network
+    // keeps that one in `base`, it goes there, not on the masked node;
+    // else on the `exposure` node, whatever its instance's name.
+    let exposure_node = |node: &str| {
+        let id = graph.find(node)?;
+        let runs = graph.manifest(id).ok().flatten()?.name;
+        (runs == EXPOSURE).then_some(id)
+    };
+    let base = darktable_base_exposure(edit).and_then(|name| {
+        let id = exposure_node(BASE).or_else(|| exposure_node(EXPOSURE))?;
+        Some((name, id))
+    });
     for (name, (module, params)) in modules {
-        let Some(id) = target(graph, &name, module.as_deref()) else {
+        let found = match &base {
+            Some((base_name, id)) if *base_name == name => Some(*id),
+            _ => target(graph, &name, module.as_deref()),
+        };
+        let Some(id) = found else {
             skipped.push(format!("`{name}`: no such node"));
             continue;
         };

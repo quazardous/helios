@@ -478,3 +478,99 @@ fn an_edit_made_without_colour_calibration_keeps_its_look() {
         Some(Value::Choice("a".into()))
     );
 }
+
+/// A darktable edit of exposure `instances` (instance number, name, EV),
+/// in that order.
+fn exposures(instances: &[(u32, &str, f64)]) -> String {
+    let mut lis = String::new();
+    for (i, (priority, name, ev)) in instances.iter().enumerate() {
+        let (version, hex) = params_hex(
+            "exposure",
+            &serde_json::json!({ "exposure": ev, "compensate_exposure_bias": false }),
+        );
+        let _ = write!(
+            lis,
+            r#"<rdf:li darktable:num="{i}" darktable:operation="exposure" darktable:enabled="1" darktable:modversion="{version}" darktable:params="{hex}" darktable:multi_priority="{priority}" darktable:multi_name="{name}"/>"#
+        );
+    }
+    format!(
+        r#"<x:xmpmeta xmlns:x="adobe:ns:meta/">
+ <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+  <rdf:Description rdf:about="" xmlns:darktable="http://darktable.sf.net/"
+   darktable:xmp_version="5" darktable:iop_order_version="4" darktable:history_end="{}">
+   <darktable:history><rdf:Seq>{lis}</rdf:Seq></darktable:history>
+  </rdf:Description>
+ </rdf:RDF>
+</x:xmpmeta>"#,
+        instances.len()
+    )
+}
+
+/// darktable's base exposure is its exposure module's first instance:
+/// where the template's `exposure` is a masked adjustment over a `base`
+/// (Portrait retouch, the blank workspace), it lands on `base`, the
+/// masked exposure kept; in "Develop one image" it is the `exposure`,
+/// whatever the instance's name.
+#[test]
+fn darktable_s_first_exposure_instance_lands_on_the_base_exposure() {
+    // The instances (number, name, EV), and those left out.
+    type Case<'a> = (&'a [(u32, &'a str, f64)], &'a [&'a str]);
+    let ev = |graph: &Graph, node: &str| match param(graph, node, "exposure") {
+        Some(Value::Float(v)) => v,
+        other => panic!("{node}: {other:?}"),
+    };
+    let cases: [Case; 3] = [
+        (&[(0, "", 1.5)], &[]),
+        (&[(0, "", 1.5), (1, "", -0.5)], &["exposure 1"]),
+        (&[(1, "", -0.5), (0, "global", 1.5)], &["exposure 1"]),
+    ];
+    for (instances, extra) in cases {
+        let (_, imported) =
+            helios_xmp::import_text(&exposures(instances), &helios_xmp::Layouts::built_in())
+                .unwrap();
+        assert!(
+            imported.report.not_applied.is_empty(),
+            "{:#?}",
+            imported.report
+        );
+        let skipped_extra: Vec<String> = extra
+            .iter()
+            .map(|n| format!("`{n}`: no such node"))
+            .collect();
+        for bundle in [
+            find("helios.portrait-retouch"),
+            helios_template::workspace::blank(),
+        ] {
+            let id = bundle.template.id.clone();
+            let (mut graph, _) = built(&bundle, &mosaic(), &camera(0.0));
+            let masked = ev(&graph, "exposure");
+            let skipped = helios_vault::edit::apply_to_graph(&mut graph, &imported.edit()).unwrap();
+            assert_eq!(skipped, skipped_extra, "{id}: {instances:?}");
+            assert!(
+                (ev(&graph, "base") - 1.5).abs() < 1e-9,
+                "{id}: {instances:?}"
+            );
+            assert_eq!(
+                param(&graph, "base", "compensate_bias"),
+                Some(Value::Bool(false)),
+                "{id}"
+            );
+            assert_eq!(ev(&graph, "exposure"), masked, "{id}: {instances:?}");
+        }
+        // Without a base, the first instance is the template's exposure.
+        let (mut graph, _) = built(&find("helios.develop"), &mosaic(), &camera(0.0));
+        let skipped = helios_vault::edit::apply_to_graph(&mut graph, &imported.edit()).unwrap();
+        assert_eq!(skipped, skipped_extra, "{instances:?}");
+        assert!((ev(&graph, "exposure") - 1.5).abs() < 1e-9, "{instances:?}");
+    }
+    // An edit Helios saved names its nodes itself: its `exposure` is the
+    // masked one.
+    let helios = serde_json::json!({ "modules": [
+        { "name": "exposure", "module": "exposure", "params": { "exposure": { "float": 2.0 } } }
+    ] });
+    let (mut graph, _) = built(&find("helios.portrait-retouch"), &mosaic(), &camera(0.0));
+    let base = ev(&graph, "base");
+    helios_vault::edit::apply_to_graph(&mut graph, &helios).unwrap();
+    assert!((ev(&graph, "exposure") - 2.0).abs() < 1e-9);
+    assert_eq!(ev(&graph, "base"), base);
+}

@@ -615,8 +615,9 @@ impl<S: Store> Persist<S> {
             e.session.save(&self.vault, current, &label, &origin, at)
         };
         e.unsaved = saved.is_err();
-        if saved.is_ok() {
-            // Renders of the image's head version are made again.
+        if saved.is_ok() && !e.session.in_progress() {
+            // Renders of the image's head version are made again once a
+            // gesture ends, not at each save while it goes (a drag).
             shell.library_mut().edit_changed(&e.session.image().hex());
         }
         if let Err(err) = saved {

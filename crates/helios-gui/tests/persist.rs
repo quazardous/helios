@@ -746,3 +746,74 @@ fn a_network_changed_in_place_is_saved_with_its_new_nodes_and_without_the_old() 
     drop((shell, persist));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// The Compare panel's render of an image's head version is made again
+/// when the edit changes: once a gesture ends, not at each save while a
+/// drag goes on.
+#[test]
+fn a_drag_makes_compare_render_again_once_at_its_end() {
+    use helios_gui::head_render::HeadRender;
+    use helios_gui::library::Entry;
+    use helios_shell::commands::Origin;
+    let dir = scratch("compare");
+    let path = vault_file(&dir);
+    let mut shell = Shell::new(helios_panels(), None);
+    let mut persist = Persist::new(SqliteStore::open(&path).unwrap(), Arc::new(Bus::new()));
+    open_exposure(&mut shell, &mut persist, 1);
+    let key = id(1).hex();
+    shell.library_mut().set_entries(vec![Entry {
+        id: key.clone(),
+        name: "a.cr2".into(),
+        ..Entry::default()
+    }]);
+    let ctx = egui::Context::default();
+    let land = |shell: &Shell, version: &str| {
+        let mut library = shell.library_mut();
+        library.ask_heads(std::slice::from_ref(&key), 600);
+        assert_eq!(library.take_head_requests(), [(key.clone(), 600)]);
+        library.head_sink().send(HeadRender {
+            id: key.clone(),
+            version: Some(version.into()),
+            size: 600,
+            image: Ok(helios_core::Image::from_fn(
+                helios_core::Region::sized(4, 4),
+                4,
+                |_, _, _| 0.5,
+            )),
+        });
+        assert!(library.receive_heads(&ctx));
+    };
+    let asked = |shell: &Shell| {
+        let mut library = shell.library_mut();
+        library.ask_heads(std::slice::from_ref(&key), 600);
+        library.take_head_requests().len()
+    };
+    land(&shell, "v1");
+    // A drag of many frames, saved in progress every FLUSH_SECONDS.
+    let start = shown(&shell);
+    let drag = shell
+        .values
+        .lock()
+        .unwrap()
+        .begin_gesture(Origin::User, "drag exposure");
+    for frame in 0..12_u32 {
+        set(&shell, start + 0.1 * f64::from(frame + 1), Some(drag));
+        persist.frame(&mut shell, 10.0 + 0.5 * f64::from(frame));
+        assert_eq!(asked(&shell), 0, "frame {frame}: rendered while dragging");
+    }
+    assert!(
+        saved(persist.bus()).len() > 2,
+        "saved in progress: {:?}",
+        saved(persist.bus())
+    );
+    assert!(!shell.library().head_render(&key).unwrap().2);
+    // The drag ends: one render, then none until the edit changes again.
+    shell.values.lock().unwrap().end(drag);
+    persist.frame(&mut shell, 20.0);
+    assert!(shell.library().head_render(&key).unwrap().2, "stale");
+    land(&shell, "v2");
+    persist.frame(&mut shell, 21.0);
+    assert_eq!(asked(&shell), 0);
+    drop((shell, persist));
+    let _ = std::fs::remove_dir_all(&dir);
+}
