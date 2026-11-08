@@ -638,15 +638,17 @@ timeout = "30m"
 # as in CI): every PNG of crates/egui-pop-gallery/tests/snapshots lands in
 # /out/snapshots, to review and commit
 [jobs.egui-pop-snapshots]
-about = "egui-pop's gallery snapshots regenerated, every PNG returned"
+about = "egui-pop's snapshots regenerated (gallery, inspect, rerun-like, the app template), every PNG returned"
 first = [{ job = "egui-pop-check", pass = ["branch", "egui_pop", "crate"] }]
 checkouts = ["egui-pop"]
 cores = 5
 memory = "4g"
 cwd = "/work/${src:-egui-pop}"
 command = """mkdir -p /tmp/w/egui-pop && cp -r --preserve=mode . /tmp/w/egui-pop/ && cd /tmp/w/egui-pop && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/egui-pop ] || { rm -rf /target/* && echo /tmp/w/egui-pop > /target/.built-at; }; } && \
-UPDATE_SNAPSHOTS=1 cargo test --locked -p egui-pop-gallery --test gallery --test rerun_like; rc=$?; \
-mkdir -p /out/snapshots && find crates/egui-pop-gallery/tests/snapshots -name '*.png' ! -name '*.new.png' ! -name '*.old.png' ! -name '*.diff.png' -exec cp -t /out/snapshots/ {} + ; \
+UPDATE_SNAPSHOTS=1 cargo test --locked -p egui-pop-gallery --test gallery --test rerun_like --test inspect; rc=$?; \
+UPDATE_SNAPSHOTS=1 cargo test --locked -p egui-pop-app-template; rt=$?; [ $rc -eq 0 ] && rc=$rt; \
+mkdir -p /out/snapshots /out/snapshots/template && find crates/egui-pop-gallery/tests/snapshots -name '*.png' ! -name '*.new.png' ! -name '*.old.png' ! -name '*.diff.png' -exec cp -t /out/snapshots/ {} + ; \
+find templates/app/tests/snapshots -name '*.png' ! -name '*.new.png' ! -name '*.old.png' ! -name '*.diff.png' -exec cp -t /out/snapshots/template/ {} + ; \
 exit $rc"""
 env = { CARGO_NET_OFFLINE = "true", CARGO_BUILD_JOBS = "2" }
 mounts = { "egui-pop-target/${egui_pop:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
