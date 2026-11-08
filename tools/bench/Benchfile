@@ -607,7 +607,7 @@ cores = 4
 memory = "4g"
 cwd = "/work/${src:-egui-pop}"
 command = """mkdir -p /tmp/w/egui-pop && cp -r --preserve=mode . /tmp/w/egui-pop/ && cd /tmp/w/egui-pop && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/egui-pop ] || { rm -rf /target/* && echo /tmp/w/egui-pop > /target/.built-at; }; } && \
-cargo nextest run --locked --fail-fast -p ${crate} ${test:+--test ${test}} ${filter:-}"""
+t="${test:-}"; cargo nextest run --locked --fail-fast -p ${crate} ${t:+--test $t} ${filter:-}"""
 env = { CARGO_NET_OFFLINE = "true", CARGO_BUILD_JOBS = "2", RUST_TEST_THREADS = "3" }
 mounts = { "egui-pop-target/${egui_pop:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
 timeout = "30m"
