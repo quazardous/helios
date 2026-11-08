@@ -545,6 +545,8 @@ gui-library-badge-backup-short = backup short
 
 gui-library-badge-backup-unverified = unverified
 
+gui-library-badge-changed-outside = changed outside
+
 gui-library-badge-missing = missing
 
 gui-library-badge-no-backup = no backup
@@ -1307,9 +1309,17 @@ health-card-short-detail = Photos on it short of their backups: { $count }. Keep
 
 health-cards = Cards safe to format
 
+health-changed-outside = Photos changed outside Helios
+
+health-changed-outside-detail = Another application rewrote their files. They stay in your Library with their edits; their thumbnails were made again.
+
+health-changed-outside-some = { $count } photos changed outside Helios
+
 health-check-crashed = The check { $check } failed
 
 health-check-crashed-detail = It stopped before it could say anything.
+
+health-fix-acknowledge-changed = Acknowledge
 
 health-fix-back-up-now = Back up now
 
