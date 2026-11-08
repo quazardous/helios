@@ -23,7 +23,9 @@ a failure's report (`<scenario>-failure.txt`), the compositor's picture
 at the end (`<scenario>-screen.png`) and helios-gui's stderr and log
 files (`<scenario>/`). One JSON line per scenario in `scenarios.jsonl`.
 The exit status is 1 when a scenario failed or helios-gui did not
-survive it (`NoPanic`, from outside).
+survive it (`NoPanic`, from outside). After the scenario, helios-gui is
+closed by its `workbench.quit` command over the socket, before the
+compositor stops (`quit`: `clean`, `forced` or why not).
 """
 
 from __future__ import annotations
@@ -33,6 +35,7 @@ import importlib.util
 import json
 import os
 import shutil
+import socket
 import subprocess
 import sys
 import time
@@ -99,6 +102,38 @@ def world(work: Path) -> dict:
         "image": image,
         "socket": work / "agent" / "helios.sock",
     }
+
+
+def quit_app(sock: Path, proc, within: float = 10.0) -> str:
+    """Closes helios-gui through `workbench.quit` on its agent socket, before
+    the compositor stops: `clean` when it exits within `within` seconds,
+    else why not (the compositor's stop then ends it)."""
+    if proc is None or proc.poll() is not None:
+        return "gone"
+    request = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "call",
+        "params": {
+            "collector": "commands",
+            "action": "run",
+            "args": {"id": "workbench.quit", "args": {}},
+        },
+    }
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+            s.settimeout(within)
+            s.connect(str(sock))
+            s.sendall((json.dumps(request) + "\n").encode())
+            # The answer, or the socket closing with the application.
+            s.recv(65536)
+    except OSError as exc:
+        return f"no quit: {exc}"
+    try:
+        proc.wait(timeout=within)
+    except subprocess.TimeoutExpired:
+        return "forced"
+    return "clean"
 
 
 def run_one(args, scenario: Path) -> dict:
@@ -170,6 +205,9 @@ def run_one(args, scenario: Path) -> dict:
         if "path" in shot:
             shutil.copy(shot["path"], args.out / f"{name}-screen.png")
         entry["passed"] = entry.get("rc") == 0 and entry["alive"]
+        # Closed by its own quit command, not by the compositor going away
+        # (a broken pipe and winit's event loop error at teardown).
+        entry["quit"] = quit_app(w["socket"], proc)
         return entry
     finally:
         comp.stop()
