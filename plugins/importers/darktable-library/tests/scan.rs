@@ -224,7 +224,7 @@ fn a_schema_the_importer_does_not_know_is_refused_with_its_number() {
                 library_version: Some(34),
                 ..Options::default()
             },
-            "older than 4.0 (library schema 34",
+            "darktable library from an older darktable (schema 34): open it once in darktable 4.0",
         ),
         (
             Schema::V5_2,

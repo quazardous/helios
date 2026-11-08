@@ -143,10 +143,23 @@ fn refused(m: impl Into<String>) -> ScanError {
 /// writing, and SQLite must keep honouring its locks.
 pub fn read_only(path: &Path) -> String {
     let absolute = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
-    let text = absolute.to_string_lossy().replace('\\', "/");
-    let mut uri = String::from("file:");
+    file_uri(&absolute.to_string_lossy()) + "?mode=ro"
+}
+
+/// The `file:` URI of an absolute path, Unix (`/a/b`) or Windows
+/// (`D:\a\b`, `\\server\share\b`), percent-encoded: always
+/// `file:///…`, since SQLite rejects `file:/D:/…` on Windows.
+fn file_uri(path: &str) -> String {
+    let mut text = path.replace('\\', "/");
+    // a verbatim Windows path: \\?\D:\… or \\?\UNC\server\…
+    if let Some(rest) = text.strip_prefix("//?/UNC/") {
+        text = format!("//{rest}");
+    } else if let Some(rest) = text.strip_prefix("//?/") {
+        text = rest.to_string();
+    }
+    let mut uri = String::from("file://");
     if !text.starts_with('/') {
-        // a Windows drive: file:/C:/...
+        // a Windows drive: file:///D:/…
         uri.push('/');
     }
     for b in text.bytes() {
@@ -156,7 +169,7 @@ pub fn read_only(path: &Path) -> String {
             let _ = write!(uri, "%{b:02X}");
         }
     }
-    uri + "?mode=ro"
+    uri
 }
 
 fn open_read_only(path: &Path) -> rusqlite::Result<Connection> {
@@ -276,10 +289,13 @@ fn check_version(kind: &str, found: i64, known: &RangeInclusive<i64>) -> Result<
         )));
     }
     if found < *low {
+        let what = if kind == "library" {
+            format!("darktable library from an older darktable (schema {found})")
+        } else {
+            format!("darktable {kind}.db from an older darktable ({kind} schema {found})")
+        };
         return Err(refused(format!(
-            "this {kind}.db was written by a darktable older than 4.0 \
-             ({kind} schema {found}; it reads {low} to {high}): open it once in \
-             darktable 4.0 or later, which upgrades it, then import again"
+            "{what}: open it once in darktable 4.0 or later to upgrade it, then import again"
         )));
     }
     Ok(())
@@ -768,7 +784,56 @@ mod tests {
     fn a_read_only_uri_escapes_the_path() {
         assert_eq!(
             read_only(Path::new("/a b/Été?#%.db")),
-            "file:/a%20b/%C3%89t%C3%A9%3F%23%25.db?mode=ro"
+            "file:///a%20b/%C3%89t%C3%A9%3F%23%25.db?mode=ro"
+        );
+    }
+
+    #[test]
+    fn a_file_uri_has_three_slashes_on_unix_and_windows() {
+        assert_eq!(
+            file_uri("/home/ann/.config/darktable/library.db"),
+            "file:///home/ann/.config/darktable/library.db"
+        );
+        assert_eq!(
+            file_uri(r"D:\Users\Ann Été\darktable\library.db"),
+            "file:///D:/Users/Ann%20%C3%89t%C3%A9/darktable/library.db"
+        );
+        assert_eq!(
+            file_uri(r"\\?\D:\darktable\data.db"),
+            "file:///D:/darktable/data.db"
+        );
+        assert_eq!(
+            file_uri(r"\\nas\photos\library.db"),
+            "file:////nas/photos/library.db"
+        );
+    }
+
+    #[test]
+    fn a_library_older_than_darktable_4_0_is_refused() {
+        // a minimal library at schema 34 (darktable 3.6 and 3.8)
+        let dir = std::env::temp_dir().join(format!("helios-dt-old-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let con = Connection::open(dir.join("library.db")).unwrap();
+        con.execute_batch(
+            "CREATE TABLE db_info (key VARCHAR PRIMARY KEY, value VARCHAR); \
+             INSERT INTO db_info VALUES ('version', '34');",
+        )
+        .unwrap();
+        drop(con);
+        let params = json!({"importer": IMPORTER, "kind": "folder", "source": dir});
+        let e = scan(&params, &AtomicBool::new(false), &mut |_, _, _| {}).unwrap_err();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(e.code(), NOT_A_SOURCE);
+        assert_eq!(
+            e.message(),
+            "darktable library from an older darktable (schema 34): open it once in \
+             darktable 4.0 or later to upgrade it, then import again"
+        );
+        let e = check_version("data", 8, &DATA).unwrap_err();
+        assert!(
+            e.message()
+                .contains("(data schema 8): open it once in darktable 4.0")
         );
     }
 

@@ -3,6 +3,8 @@
 Status: study (2026-11-07); version 1 implemented (2026-11-07), see
 "Status: implemented (v1)" at the end.
 
+Supported: darktable 4.0 and later.
+
 This study asks what it takes to read darktable's catalogue (`library.db`,
 with `data.db` beside it) into the Helios library, as an importer plugin
 over the importer protocol (File > Import from →, `importer.scan`). It
@@ -623,7 +625,12 @@ points settled:
 - **Schemas.** Library 36 to 57 and data 9 to 13 (darktable 4.0 to 5.6),
   the columns read checked with `PRAGMA table_info`; anything else is
   refused with -32001 naming the version found and the range read.
-- **Reading.** `file:…?mode=ro` URIs only. A `library.db.lock` or
+- **Older libraries.** A library below schema 36 or a data file below
+  9 (darktable 3.8 and older) is refused, naming the schema found and
+  asking to open it once in darktable 4.0 or later, which upgrades it
+  (owner's decision, 2026-11-08: no pre-4.0 reader).
+- **Reading.** `file:///…?mode=ro` URIs only (three slashes, so a
+  Windows path reads `file:///D:/…`; SQLite rejects `file:/D:/…`). A `library.db.lock` or
   `data.db.lock` naming a live process (any lock on Windows, where a
   process cannot be probed safely) makes the plugin copy both files with
   SQLite's backup API into a private temporary folder, read the copy and
