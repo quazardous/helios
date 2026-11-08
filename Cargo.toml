@@ -55,21 +55,21 @@ helios-health = { path = "crates/helios-health" }
 # eframe as Helios; its icon font stays off. Its bundled font pair (Inter
 # and JetBrains Mono NL, SIL Open Font License 1.1) is Helios's interface
 # font.
-egui-pop = { git = "https://github.com/quazardous/egui-pop", rev = "5245ff8c", default-features = false, features = ["eframe", "bundled-fonts"] }
+egui-pop = { git = "https://github.com/quazardous/egui-pop", rev = "b4974940", default-features = false, features = ["eframe", "bundled-fonts"] }
 # MIT: egui-pop's agent socket (the debug bridge served to agents out of
 # the process), off unless EGUI_POP_AGENT_SOCKET asks for it.
-egui-pop-agent = { git = "https://github.com/quazardous/egui-pop", rev = "5245ff8c" }
+egui-pop-agent = { git = "https://github.com/quazardous/egui-pop", rev = "b4974940" }
 # MIT: egui-pop's translation plugin, alone for the tools (xtask's
 # catalogue tasks) that do not build the window's stack.
-egui-pop-i18n = { git = "https://github.com/quazardous/egui-pop", rev = "5245ff8c" }
+egui-pop-i18n = { git = "https://github.com/quazardous/egui-pop", rev = "b4974940" }
 # MIT: egui-pop's logic without egui (layouts, panels), for what checks a
 # layout without building the window's stack (workspace templates).
-egui-pop-model = { git = "https://github.com/quazardous/egui-pop", rev = "5245ff8c" }
+egui-pop-model = { git = "https://github.com/quazardous/egui-pop", rev = "b4974940" }
 # MIT: egui-pop's test kit (keymap checks, the accessibility tree).
-egui-pop-test = { git = "https://github.com/quazardous/egui-pop", rev = "5245ff8c" }
+egui-pop-test = { git = "https://github.com/quazardous/egui-pop", rev = "b4974940" }
 # MIT: egui-pop's Wayland layer, for the compositor announcements the
 # image surface's tests fake.
-egui-pop-wayland = { git = "https://github.com/quazardous/egui-pop", rev = "5245ff8c" }
+egui-pop-wayland = { git = "https://github.com/quazardous/egui-pop", rev = "b4974940" }
 blake3 = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
