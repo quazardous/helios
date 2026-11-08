@@ -251,10 +251,20 @@ mode other than normal, a blend colour space other than scene-referred
 RGB, a parametric or raster mask, the details threshold, the
 guided-filter feathering (Helios's guide is the luminance, darktable's
 the colour: see Refinement), a flexi mask, or blend params of a version
-not read. `import` (without the image's frame, as the vault import and
-the batch's sidecars read them) keeps masked items out with
-`xmp-reason-mask-without-image`; the batch, which maps an edit onto a
+not read. `import` (without the image's frame) keeps masked items out
+with `xmp-reason-mask-without-image`, as the vault import does for a
+picture or a raw it cannot read; the batch, which maps an edit onto a
 network's existing nodes, keeps masked modules out too.
+
+**On a turned photo.** The vault import (sidecars, the darktable library
+importer's histories, the batch's sidecars) places masks through
+`helios_library::darktable::import_for`: the raw's sensor and crop come
+from `helios_load::sensor` (its geometry, the mosaic not decoded) and the
+`Frame` is turned as darktable turns the image
+(`Sidecar::orientation`, darktable's `flip` `commit_params`): the
+`flip` item's orientation, the EXIF tag's (`drawn::exif_orientation`)
+when it is -1 or when the history has no `flip`, none when it is
+disabled (imported as Helios's `flip` at 0, so the render agrees).
 
 Two approximations hold for all: darktable computes a shape on a coarse
 grid (up to 4 pixels) and interpolates, Helios computes every pixel; and

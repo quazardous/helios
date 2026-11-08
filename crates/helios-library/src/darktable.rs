@@ -15,6 +15,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use helios_vault::ImageId;
+use helios_xmp::drawn::Frame;
 use helios_xmp::files::{Matched, Orphan, SidecarFile};
 use serde_json::{Value, json};
 
@@ -31,8 +32,59 @@ pub const IMPORT_XMP: &str = "import:xmp";
 pub const ORPHANS: &str = "darktable-orphans";
 
 /// Reads and imports a sidecar's text once, for the network and the vault.
+/// Without its image, an item with a drawn mask is not applied: see
+/// [`read_sidecar_for`].
 pub fn read_sidecar(xml: &str) -> Result<(helios_xmp::Sidecar, helios_xmp::Imported), String> {
     helios_xmp::import_text(xml, &helios_xmp::Layouts::built_in())
+}
+
+/// [`read_sidecar`] for the sidecar of `image`: its drawn masks are placed
+/// on the image (see [`import_for`]).
+pub fn read_sidecar_for(
+    xml: &str,
+    image: &Path,
+) -> Result<(helios_xmp::Sidecar, helios_xmp::Imported), String> {
+    let sidecar = helios_xmp::Sidecar::parse(xml)?;
+    let mut imported = import_for(&sidecar, image);
+    imported.darktable["sidecar"] = Value::String(xml.to_string());
+    Ok((sidecar, imported))
+}
+
+/// Imports a darktable edit of `image`, its drawn masks placed where
+/// darktable draws them: on the raw's sensor, turned as darktable turns
+/// the image (its `flip`, by default the EXIF orientation, see
+/// [`helios_xmp::Sidecar::orientation`]). The raw's geometry is read only
+/// when the edit has drawn masks; for a picture, or a raw that cannot be
+/// read, the masked items are not applied, as without the image.
+pub fn import_for(sidecar: &helios_xmp::Sidecar, image: &Path) -> helios_xmp::Imported {
+    let frame = if sidecar.masks.is_empty() {
+        None
+    } else {
+        frame(sidecar, image)
+    };
+    helios_xmp::import_with(sidecar, &helios_xmp::Layouts::built_in(), frame.as_ref())
+}
+
+/// Where `sidecar`'s drawn masks land on the raw `image`.
+fn frame(sidecar: &helios_xmp::Sidecar, image: &Path) -> Option<Frame> {
+    let (sensor, tag) = match helios_load::sensor(image) {
+        Ok(found) => found?,
+        Err(e) => {
+            log::warn!("darktable masks not placed: {e}");
+            return None;
+        }
+    };
+    let exif = helios_xmp::drawn::exif_orientation(i64::from(tag));
+    Some(
+        Frame {
+            width: f64::from(sensor.width),
+            height: f64::from(sensor.height),
+            x0: f64::from(sensor.crop_x),
+            y0: f64::from(sensor.crop_y),
+            orientation: 0,
+        }
+        .oriented(sidecar.orientation(exif)),
+    )
 }
 
 /// The label of a sidecar's version: darktable's duplicate number and the
@@ -154,7 +206,7 @@ pub fn keep_file<S: helios_vault::Store>(
     now: u64,
     warn: &mut impl FnMut(&Path, &str),
 ) -> Value {
-    keep_file_by(vault, file, base, now, warn, || {
+    keep_file_by(vault, image, file, base, now, warn, || {
         vault.import_file(image, now)
     })
 }
@@ -164,18 +216,20 @@ pub fn keep_file<S: helios_vault::Store>(
 pub fn keep_file_of<S: helios_vault::Store>(
     vault: &helios_vault::Vault<S>,
     id: ImageId,
+    image: &Path,
     file: &SidecarFile,
     base: bool,
     now: u64,
     warn: &mut impl FnMut(&Path, &str),
 ) -> Value {
-    keep_file_by(vault, file, base, now, warn, || Ok(id))
+    keep_file_by(vault, image, file, base, now, warn, || Ok(id))
 }
 
-/// Reads and imports a sidecar file, then keeps it as a version of the
-/// image `image` gives.
+/// Reads and imports a sidecar file of the image file `path`, then keeps
+/// it as a version of the image `image` gives.
 fn keep_file_by<S: helios_vault::Store>(
     vault: &helios_vault::Vault<S>,
+    path: &Path,
     file: &SidecarFile,
     base: bool,
     now: u64,
@@ -186,7 +240,7 @@ fn keep_file_by<S: helios_vault::Store>(
     let kept = std::fs::read_to_string(&file.path)
         .map_err(|e| format!("cannot read {}: {e}", file.path.display()))
         .and_then(|xml| {
-            let (sidecar, imported) = read_sidecar(&xml)?;
+            let (sidecar, imported) = read_sidecar_for(&xml, path)?;
             if let Some(warning) = imported.report.summary() {
                 warn(&file.path, &warning.english);
                 out["warning"] = json!(warning.english);

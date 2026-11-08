@@ -1092,7 +1092,8 @@ impl<S: Store> Run<'_, S> {
         let mut kept = Vec::with_capacity(files.len());
         for (i, file) in files.iter().enumerate() {
             let base = i == 0 && file.version == 0;
-            let out = darktable::keep_file_of(self.vault, id, file, base, self.now, &mut |_, _| {});
+            let out =
+                darktable::keep_file_of(self.vault, id, path, file, base, self.now, &mut |_, _| {});
             if out["error"].is_string() {
                 self.report.edits_failed += 1;
             } else if out["vault"]["added"] == true {
@@ -1127,7 +1128,7 @@ impl<S: Store> Run<'_, S> {
                     version,
                     exact: true,
                 };
-                darktable::keep_file_of(self.vault, id, &file, base, self.now, &mut |_, _| {})
+                darktable::keep_file_of(self.vault, id, path, &file, base, self.now, &mut |_, _| {})
             } else {
                 let mut out = json!({
                     "path": format!("{} (darktable library, version {version})", path.display()),
@@ -1135,8 +1136,7 @@ impl<S: Store> Run<'_, S> {
                 });
                 let kept =
                     helios_xmp::Sidecar::from_history(&edit["history"]).and_then(|sidecar| {
-                        let imported =
-                            helios_xmp::import(&sidecar, &helios_xmp::Layouts::built_in());
+                        let imported = darktable::import_for(&sidecar, path);
                         if let Some(warning) = imported.report.summary() {
                             out["warning"] = json!(warning.english);
                             out["warning_message"] = json!(warning);

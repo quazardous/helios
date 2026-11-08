@@ -454,6 +454,63 @@ fn camera(
     }
 }
 
+/// The area of the sensor the loader keeps: `(x, y, width, height)`.
+fn crop(raw: &RawImage) -> Result<(usize, usize, usize, usize), String> {
+    let (x0, y0, w, h) = raw
+        .crop_area
+        .or(raw.active_area)
+        .map_or((0, 0, raw.width, raw.height), |r| {
+            (r.p.x, r.p.y, r.d.w, r.d.h)
+        });
+    if x0 + w > raw.width || y0 + h > raw.height || w == 0 || h == 0 {
+        return Err(format!(
+            "crop {w}x{h}+{x0}+{y0} outside the {}x{} sensor",
+            raw.width, raw.height
+        ));
+    }
+    Ok((x0, y0, w, h))
+}
+
+/// Where a raw's image sits on its sensor ([`Sensor`], as [`load`] gives
+/// it) and its EXIF orientation tag (1 to 8, 1 when it has none), read
+/// without decoding the mosaic: what places darktable's drawn masks.
+/// `None` for a picture.
+///
+/// # Errors
+/// The file cannot be read, or a raw's format is unknown.
+pub fn sensor(path: &Path) -> Result<Option<(Sensor, u8)>, String> {
+    if Kind::of(path) == Kind::Picture {
+        return Ok(None);
+    }
+    let bytes =
+        Arc::new(std::fs::read(path).map_err(|e| format!("cannot read {}: {e}", path.display()))?);
+    let named = |e: String| format!("{}: {e}", path.display());
+    let source = RawSource::new_from_shared_vec(bytes);
+    let decoder = rawler::get_decoder(&source).map_err(|e| named(e.to_string()))?;
+    let params = RawDecodeParams::default();
+    // A dummy image: its geometry without its photosites.
+    let raw = decoder
+        .raw_image(&source, &params, true)
+        .map_err(|e| named(e.to_string()))?;
+    let (x0, y0, _, _) = crop(&raw).map_err(named)?;
+    let orientation = decoder
+        .raw_metadata(&source, &params)
+        .ok()
+        .and_then(|m| m.exif.orientation)
+        .and_then(|o| u8::try_from(o).ok())
+        .filter(|o| (1..=8).contains(o))
+        .unwrap_or(1);
+    Ok(Some((
+        Sensor {
+            width: raw.width as u32,
+            height: raw.height as u32,
+            crop_x: x0 as u32,
+            crop_y: y0 as u32,
+        },
+        orientation,
+    )))
+}
+
 fn raw(bytes: Arc<Vec<u8>>) -> Result<(Image, CameraInfo, Sensor), String> {
     let source = RawSource::new_from_shared_vec(bytes);
     let decoder = rawler::get_decoder(&source).map_err(|e| e.to_string())?;
@@ -468,19 +525,7 @@ fn raw(bytes: Arc<Vec<u8>>) -> Result<(Image, CameraInfo, Sensor), String> {
     if raw.cpp != 1 {
         return Err(format!("{} components per photosite, expected 1", raw.cpp));
     }
-    let area = raw
-        .crop_area
-        .or(raw.active_area)
-        .map_or((0, 0, raw.width, raw.height), |r| {
-            (r.p.x, r.p.y, r.d.w, r.d.h)
-        });
-    let (x0, y0, w, h) = area;
-    if x0 + w > raw.width || y0 + h > raw.height || w == 0 || h == 0 {
-        return Err(format!(
-            "crop {w}x{h}+{x0}+{y0} outside the {}x{} sensor",
-            raw.width, raw.height
-        ));
-    }
+    let (x0, y0, w, h) = crop(&raw)?;
     // The pattern as seen from the crop's corner.
     if !config.cfa.is_rgb() {
         return Err(format!(

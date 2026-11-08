@@ -48,7 +48,7 @@ use helios_inspect::control::{ControlRequest, FileFormat, RunItem};
 use helios_inspect::{Address, Request, request_at};
 use serde_json::{Value, json};
 
-pub use crate::darktable::{IMPORT_XMP, keep_sidecar, read_sidecar};
+pub use crate::darktable::{IMPORT_XMP, keep_sidecar, read_sidecar, read_sidecar_for};
 use crate::darktable::{Listings, keep_file};
 
 /// What `helios batch` was asked.
@@ -892,7 +892,7 @@ fn sidecar_of(
                     .with("error", e.to_string())
             })
             .and_then(|xml| {
-                let (sidecar, imported) = read_sidecar(&xml).map_err(Message::plain)?;
+                let (sidecar, imported) = read_sidecar_for(&xml, image).map_err(Message::plain)?;
                 if let Some(warning) = imported.report.summary() {
                     warn(path, &warning.english);
                 }
