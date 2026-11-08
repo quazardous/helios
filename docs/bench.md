@@ -158,15 +158,15 @@ If the connection drops while a job runs, the job goes on: `bench-remote`
 reattaches (`wait <id>`) a few times, and otherwise prints the id to
 reattach to later.
 
-The box's commands work directly too:
+The box's commands work directly too. `-o IdentitiesOnly=yes` keeps ssh from offering every key the agent holds, which the box refuses as "Too many authentication failures":
 
 ```bash
-ssh -i ~/.ssh/bench-helios bench-helios@<host> box               # can it serve? (then JSON)
-ssh -i ~/.ssh/bench-helios bench-helios@<host> queue             # what runs, what waits and why
-ssh -i ~/.ssh/bench-helios bench-helios@<host> health            # the same as JSON
-ssh -i ~/.ssh/bench-helios bench-helios@<host> list              # recent jobs
-ssh -i ~/.ssh/bench-helios bench-helios@<host> fetch <id> > r.tar
-ssh -t -i ~/.ssh/bench-helios bench-helios@<host> debug test branch=main   # a shell in the job's container
+ssh -o IdentitiesOnly=yes -i ~/.ssh/bench-helios bench-helios@<host> box               # can it serve? (then JSON)
+ssh -o IdentitiesOnly=yes -i ~/.ssh/bench-helios bench-helios@<host> queue             # what runs, what waits and why
+ssh -o IdentitiesOnly=yes -i ~/.ssh/bench-helios bench-helios@<host> health            # the same as JSON
+ssh -o IdentitiesOnly=yes -i ~/.ssh/bench-helios bench-helios@<host> list              # recent jobs
+ssh -o IdentitiesOnly=yes -i ~/.ssh/bench-helios bench-helios@<host> fetch <id> > r.tar
+ssh -t -o IdentitiesOnly=yes -i ~/.ssh/bench-helios bench-helios@<host> debug test branch=main   # a shell in the job's container
 ```
 
 After changing the Benchfile on a branch, upload it under that branch's
@@ -174,14 +174,14 @@ name. Jobs run with `branch=<branch>` then use it, and every other branch
 keeps the default Benchfile:
 
 ```bash
-ssh -i ~/.ssh/bench-helios bench-helios@<host> config benchfile <branch> < tools/bench/Benchfile
+ssh -o IdentitiesOnly=yes -i ~/.ssh/bench-helios bench-helios@<host> config benchfile <branch> < tools/bench/Benchfile
 ```
 
 The default Benchfile is the one on `main`. Upload it, with no branch name,
 only from `main`, once the change is merged:
 
 ```bash
-ssh -i ~/.ssh/bench-helios bench-helios@<host> config benchfile < tools/bench/Benchfile
+ssh -o IdentitiesOnly=yes -i ~/.ssh/bench-helios bench-helios@<host> config benchfile < tools/bench/Benchfile
 ```
 
 ### Job names, priority and dependencies
