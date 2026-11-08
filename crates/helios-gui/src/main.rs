@@ -133,13 +133,15 @@ fn seconds_f64() -> f64 {
 /// (with the roles the vault gives them), the vault's file, whose folder
 /// stands for the library's place, and its backups (with the cards an
 /// import left short, still inserted, and the `health.destinationDays`
-/// setting read from `settings`); the ignored findings kept beside
+/// setting read from `settings`), the GPU in use and its kernels, and the
+/// plugins installed, each probed; the ignored findings kept beside
 /// Helios's settings.
 fn health_runner(
     vault: Option<Arc<helios_vault::Vault<helios_vault_sqlite::SqliteStore>>>,
     file: Option<PathBuf>,
     cards: Arc<std::sync::Mutex<Vec<helios_library::import::Card>>>,
     settings: egui_pop::core::binding::SharedStore,
+    plugins: Arc<helios_plugin::Broker>,
 ) -> helios_health::runner::Runner {
     use helios_health::backup::{Backup, CardShort};
     use helios_health::{Context, Findings, Ignored, Registry, runner};
@@ -188,15 +190,135 @@ fn health_runner(
                 .map(Path::to_path_buf),
             vault: file.clone(),
             backup,
+            gpu: health_gpu(),
+            plugins: health_plugins(&plugins),
+            // Catalogue snapshots do not exist yet: the check says so.
+            snapshots: None,
         }
     };
     let ignored = Ignored::load(&helios_gui::shell::config_dir().join("health-ignored.json"));
+    let mut registry = Registry::builtin();
+    registry.add(Arc::new(helios_health::gpu::Kernels::new(health_kernels())));
     runner::Runner::new(
-        Registry::builtin(),
+        registry,
         context,
         Findings::with_ignored(ignored),
         runner::Schedule::desktop(std::time::Instant::now()),
     )
+}
+
+/// The adapters wgpu enumerated and the one the process's device is open
+/// on; `None` before the GPU was tried (never enumerates from here).
+fn health_gpu() -> Option<helios_health::gpu::Gpu> {
+    use helios_health::gpu::{Adapter, AdapterKind, Gpu};
+    let adapters = helios_gpu::shared::enumerated()?;
+    let opened = helios_gpu::shared::opened();
+    let adapters: Vec<Adapter> = adapters
+        .iter()
+        .map(|a| {
+            let info = a.get_info();
+            Adapter {
+                name: info.name.clone(),
+                driver: format!("{} {}", info.driver, info.driver_info)
+                    .trim()
+                    .to_string(),
+                backend: format!("{:?}", info.backend),
+                kind: match info.device_type {
+                    eframe::wgpu::DeviceType::DiscreteGpu => AdapterKind::Discrete,
+                    eframe::wgpu::DeviceType::IntegratedGpu => AdapterKind::Integrated,
+                    eframe::wgpu::DeviceType::VirtualGpu => AdapterKind::Virtual,
+                    eframe::wgpu::DeviceType::Other => AdapterKind::Other,
+                    eframe::wgpu::DeviceType::Cpu => AdapterKind::Software,
+                },
+            }
+        })
+        .collect();
+    let used = opened.as_ref().map(|(i, _)| *i);
+    Some(Gpu {
+        adapters,
+        used,
+        why_cpu: used
+            .is_none()
+            .then(|| "the GPU device did not open (see the log)".to_string()),
+    })
+}
+
+/// Compiles every GPU kernel of the modules Helios links on the device
+/// open (none without one); run by the health check's thread.
+fn health_kernels() -> impl Fn() -> Vec<helios_health::gpu::Kernel> + Send + Sync + 'static {
+    let catalogue = helios_gui::templates::modules();
+    let kernels: Vec<(String, helios_core::GpuKernel)> = catalogue
+        .module_names()
+        .filter_map(|n| Some((n.to_string(), catalogue.get_module(n)?.gpu_kernel()?)))
+        .collect();
+    move || {
+        let Some((_, gpu)) = helios_gpu::shared::opened() else {
+            return Vec::new();
+        };
+        kernels
+            .iter()
+            .map(|(module, kernel)| helios_health::gpu::Kernel {
+                module: module.clone(),
+                error: gpu.compile(module, *kernel).err(),
+            })
+            .collect()
+    }
+}
+
+/// Every plugin installed, probed (started and its handshake answered,
+/// then stopped), and those whose manifest was refused.
+fn health_plugins(broker: &helios_plugin::Broker) -> Vec<helios_health::plugins::Plugin> {
+    use helios_health::plugins::{Plugin, Status};
+    use helios_plugin::Probed;
+    let mut out: Vec<Plugin> = broker
+        .ids()
+        .filter_map(|id| {
+            let m = broker.manifest(id)?;
+            let (status, log) = match broker.probe(id) {
+                Ok((Probed::Answers, log)) => (Status::Answers, log),
+                Ok((Probed::Disabled, log)) => (Status::Disabled, log),
+                Ok((Probed::NotGranted(c), log)) => (Status::NotGranted(c), log),
+                Ok((Probed::Failed(e), log)) => (Status::Crashed(e), log),
+                Err(e) => (Status::Crashed(e), Vec::new()),
+            };
+            Some(Plugin {
+                id: id.to_string(),
+                name: m.title().to_string(),
+                version: m.version.clone(),
+                dir: broker.dir(id).map(Path::to_path_buf).unwrap_or_default(),
+                status,
+                log,
+            })
+        })
+        .collect();
+    for r in broker.rejected() {
+        let manifest = helios_plugin::Manifest::read(&r.dir).ok();
+        let id = manifest.as_ref().map_or_else(
+            || {
+                r.dir
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default()
+            },
+            |m| m.id.clone(),
+        );
+        // A copy shadowed by another of the same id is not a plugin of
+        // its own.
+        if broker.manifest(&id).is_some() {
+            continue;
+        }
+        out.push(Plugin {
+            name: manifest
+                .as_ref()
+                .map_or_else(|| id.clone(), |m| m.title().to_string()),
+            version: manifest.map(|m| m.version).unwrap_or_default(),
+            id,
+            dir: r.dir.clone(),
+            status: Status::Unsupported(r.problems.clone()),
+            log: Vec::new(),
+        });
+    }
+    out
 }
 
 /// One backup run at a time, whatever started it.
@@ -1559,6 +1681,7 @@ fn main() -> Result<(), String> {
                 health_file.clone(),
                 cards,
                 settings,
+                plugins.clone(),
             ));
             shell.remember_import_sources_in(
                 helios_gui::shell::config_dir().join("import-sources.json"),

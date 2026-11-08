@@ -117,6 +117,19 @@ pub enum Notice {
     },
 }
 
+/// What [`Broker::probe`] found of a plugin.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Probed {
+    /// It runs, or it started and answered its handshake (`initialize`).
+    Answers,
+    /// Turned off by the user: not started.
+    Disabled,
+    /// It needs this capability, not granted: not started.
+    NotGranted(String),
+    /// It did not start or did not answer its handshake: why.
+    Failed(String),
+}
+
 /// A plugin directory whose manifest was refused.
 #[derive(Clone, Debug, Serialize)]
 pub struct Rejected {
@@ -399,6 +412,48 @@ impl Broker {
                 && st.last_used.elapsed() >= self.policy.idle
             {
                 self.stop_locked(id, &mut st, "idle");
+            }
+        }
+    }
+
+    /// Whether a plugin starts and answers its handshake, for the health
+    /// check: one running already answers; otherwise it is started,
+    /// handed `initialize`, then stopped again (a probe keeps nothing
+    /// running). A disabled plugin, or one waiting for a capability, is
+    /// not started. Also gives its last log lines (standard error of its
+    /// last process, its last error).
+    pub fn probe(&self, id: &str) -> Result<(Probed, Vec<String>), String> {
+        let slot = self.slot(id)?;
+        let mut st = slot.state.lock().expect("plugin lock");
+        let mut log: Vec<String> = Vec::new();
+        if let Some(p) = &st.process {
+            if p.alive() {
+                return Ok((Probed::Answers, log));
+            }
+            log.extend(p.stderr_tail());
+        }
+        if let Some(e) = &st.last_error {
+            log.push(e.clone());
+        }
+        if !st.enabled {
+            return Ok((Probed::Disabled, log));
+        }
+        for c in &slot.manifest.capabilities {
+            if capability(&c.name).map(|(e, _)| e) == Some(Enforcement::Ambient)
+                && !st.granted.contains(&c.name)
+            {
+                return Ok((Probed::NotGranted(c.name.clone()), log));
+            }
+        }
+        match self.start(id, slot, &st) {
+            Ok(p) => {
+                p.stop(self.policy.grace);
+                Ok((Probed::Answers, log))
+            }
+            Err(e) => {
+                st.last_error = Some(e.clone());
+                log.push(e.clone());
+                Ok((Probed::Failed(e), log))
             }
         }
     }

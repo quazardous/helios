@@ -456,6 +456,16 @@ impl Gpu {
             })
     }
 
+    /// Compiles a module's kernel on the device (once a device: the
+    /// pipeline is kept for its renders), for the health check; why not
+    /// when it does not.
+    pub fn compile(&self, name: &str, kernel: GpuKernel) -> Result<(), String> {
+        let live = self.live().map_err(|e| e.reason)?;
+        self.pipeline(&live, name, kernel)
+            .map(|_| ())
+            .map_err(|e| e.reason)
+    }
+
     /// The kernel's pipeline, compiled once a device. A kernel that does
     /// not compile is an error, never a panic.
     fn pipeline(

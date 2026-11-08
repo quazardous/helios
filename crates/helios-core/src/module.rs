@@ -555,6 +555,11 @@ impl ModuleRef {
         Image::new(Region::new(output.x, output.y, 1, 1), 1, vec![0.0])
     }
 
+    /// The module's GPU kernel, when it has a GPU variant.
+    pub fn gpu_kernel(&self) -> Option<GpuKernel> {
+        self.0.gpu_kernel()
+    }
+
     /// Whether an accelerator can run this module: a GPU variant, one
     /// output, and one input or none.
     pub(crate) fn acceleratable(&self) -> bool {

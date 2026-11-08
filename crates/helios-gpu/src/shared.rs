@@ -65,6 +65,12 @@ pub fn adapters() -> &'static [wgpu::Adapter] {
     })
 }
 
+/// The adapters, if [`adapters`] enumerated them already: never
+/// enumerates (a health check asks from its own thread while work runs).
+pub fn enumerated() -> Option<&'static [wgpu::Adapter]> {
+    ADAPTERS.get().map(Vec::as_slice)
+}
+
 /// How preferred an adapter is for computing, higher first: a discrete
 /// GPU, then an integrated one, then the rest, software last.
 pub fn rank(info: &wgpu::AdapterInfo) -> u8 {

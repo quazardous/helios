@@ -9,7 +9,7 @@
 //!   detail line for people ([`Message`], translated by the desktop), and
 //!   maybe a [`Fix`]: a command with its arguments.
 //! - The [`Registry`] holds the checks: Helios's own ([`checks`],
-//!   [`backup`]), and
+//!   [`backup`], [`gpu`], [`plugins`], [`snapshots`]), and
 //!   later those plugins bring (the seam is [`Registry::add`]).
 //! - [`Findings`] keeps the last findings in memory beside the
 //!   [`Ignored`] list, saved in a small JSON file and undoable.
@@ -18,7 +18,10 @@
 
 pub mod backup;
 pub mod checks;
+pub mod gpu;
+pub mod plugins;
 pub mod runner;
+pub mod snapshots;
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -101,6 +104,14 @@ pub struct Context {
     /// The library's backups, read from the vault; `None` without one
     /// (the backup checks then say nothing).
     pub backup: Option<backup::Backup>,
+    /// The adapters wgpu sees and the one Helios renders on; `None` when
+    /// unknown (the GPU checks then say nothing).
+    pub gpu: Option<gpu::Gpu>,
+    /// The plugins installed, each probed (started, handshake answered).
+    pub plugins: Vec<plugins::Plugin>,
+    /// The catalogue's snapshots; `None` until Helios takes them (the
+    /// check then says there are none yet).
+    pub snapshots: Option<snapshots::Snapshots>,
 }
 
 /// One check of the setup.
@@ -131,7 +142,8 @@ impl std::fmt::Debug for Registry {
 }
 
 impl Registry {
-    /// Helios's own checks.
+    /// Helios's own checks; the GPU kernels check is added by the desktop,
+    /// which knows the kernels ([`gpu::Kernels::new`]).
     pub fn builtin() -> Self {
         let mut r = Self::default();
         r.add(Arc::new(checks::FreeSpace::default()));
@@ -142,6 +154,9 @@ impl Registry {
         r.add(Arc::new(backup::DestinationsSeen));
         r.add(Arc::new(backup::Unverified));
         r.add(Arc::new(backup::Cards));
+        r.add(Arc::new(gpu::AdapterCheck));
+        r.add(Arc::new(plugins::Plugins));
+        r.add(Arc::new(snapshots::SnapshotsCheck));
         r
     }
 

@@ -623,6 +623,82 @@ gui-workspace-template-toolbox = avec ses outils
 
 gui-workspace-template-version = version
 
+health-fix-gpu-docs = Comment choisir le GPU
+
+health-fix-plugin-disable = Le désactiver
+
+health-fix-plugin-folder = Ouvrir son dossier
+
+health-fix-plugin-update = Le mettre à jour : ouvrir son dossier
+
+health-fix-snapshots-folder = Ouvrir le dossier des instantanés
+
+health-gpu-adapter = Le GPU
+
+health-gpu-cpu = Helios calcule sur le processeur
+
+health-gpu-cpu-detail = { $hardware } est présent mais n’a pas été ouvert : { $why }
+
+health-gpu-kernel-cpu = { $module } se replie sur le processeur
+
+health-gpu-kernel-cpu-detail = Son noyau GPU ne compile pas sur { $adapter } : { $error }
+
+health-gpu-kernels = Noyaux GPU
+
+health-gpu-kernels-ok = Tous les noyaux GPU compilent ({ $count })
+
+health-gpu-kernels-ok-detail = Sur { $adapter }
+
+health-gpu-none-detail = Aucun GPU trouvé.
+
+health-gpu-ok = Helios calcule sur { $adapter }
+
+health-gpu-ok-detail = { $used }
+
+health-gpu-software = Helios calcule sur un adaptateur logiciel, { $adapter }
+
+health-gpu-software-detail = { $used } tourne sur le processeur alors que { $hardware } est présent : choisissez le GPU dans les réglages.
+
+health-plugin-crashed = { $plugin } ne démarre pas
+
+health-plugin-crashed-detail = { $why }. Journal : { $log }
+
+health-plugin-disabled = { $plugin } est désactivé
+
+health-plugin-disabled-detail = Journal : { $log }
+
+health-plugin-not-granted = { $plugin } attend une autorisation
+
+health-plugin-not-granted-detail = Il lui faut { $capability } avant de démarrer.
+
+health-plugin-ok = { $plugin } répond
+
+health-plugin-ok-detail = Version { $version }, dans { $dir }
+
+health-plugin-unsupported = { $plugin } ne convient pas à cet Helios
+
+health-plugin-unsupported-detail = { $problems }. Mettez-le à jour.
+
+health-plugins = Extensions
+
+health-snapshots = Instantanés du catalogue
+
+health-snapshots-broken = Le dernier instantané du catalogue ne peut pas être restauré
+
+health-snapshots-file-detail = { $file }, vieux de { $days } jours
+
+health-snapshots-none-yet = Pas encore d’instantanés du catalogue
+
+health-snapshots-none-yet-detail = Helios ne prend pas encore d’instantanés du catalogue ; les sauvegardes gardent les photos.
+
+health-snapshots-ok = Le dernier instantané du catalogue est récent et restaurable
+
+health-snapshots-old = Le dernier instantané du catalogue a { $days } jours
+
+health-snapshots-unverified = Aucun instantané du catalogue n’est vérifié
+
+health-snapshots-unverified-detail = { $count } instantanés, aucun relu encore.
+
 node-batch-only = le point d’accès des lots ne répond qu’à load-source, export, cancel, job.cancel, batch_start, batch_end et aux requêtes workflow.*
 
 node-edit-not-saved = fait, mais la retouche n’a pas été enregistrée : { $error }

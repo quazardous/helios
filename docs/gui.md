@@ -1135,6 +1135,44 @@ strategy only the first speaks:
 - **Cards safe to format**: each card an import left short of its
   backups and still inserted is a warning, with "Back up now".
 
+The setup checks read what the desktop gathers on the check's own
+thread, never the interface's:
+
+- **The GPU** (`gpu.adapter`): the adapter Helios renders on, with its
+  backend and driver, or the CPU. A software adapter (llvmpipe, lavapipe,
+  WARP) while a hardware one is present is a warning, and so is the CPU
+  while a GPU is there; the fix opens this documentation (see
+  [The GPU](#the-gpu)). Before the GPU was tried it says nothing: the
+  check never enumerates adapters itself.
+- **GPU kernels** (`gpu.kernels`): every GPU kernel of the modules Helios
+  links is compiled on the device open, once per adapter and driver (the
+  next runs reuse the answer); each that does not compile is a warning,
+  "<module> falls back to the CPU", with the compiler's reason.
+- **Plugins** (`plugins.<id>`, one finding each): each plugin installed
+  is started, handed its handshake (`initialize`) and stopped again
+  (`Broker::probe`; one running already answers as it is). A plugin that
+  does not start or answer is a problem with its log and "Disable it"
+  (`plugin.disable`); one whose manifest asks for an interface version
+  this Helios does not support is a problem whose fix opens its folder,
+  to update it; a disabled one is said, with its last log; one waiting
+  for a capability grant is a warning.
+- **Catalogue snapshots** (`catalogue.snapshots`): until Helios takes
+  snapshots of the catalogue, one line, "No catalogue snapshots yet".
+  Once they exist, the desktop fills `Context::snapshots` and the check
+  needs nothing else: no verified snapshot or one that cannot be
+  restored is a problem, the last verified one older than 7 days a
+  warning, both with the snapshots' folder.
+
+### The GPU
+
+Helios opens one GPU device a process, on the best adapter wgpu sees: a
+discrete GPU, then an integrated one, software adapters last. A machine
+whose only Vulkan driver is a software one (llvmpipe, lavapipe; WARP on
+Windows) renders on its CPU through it, slowly: install the GPU's
+driver (Mesa's radv or anv, NVIDIA's, the vendor's on Windows). Helios
+has no setting to choose the adapter yet; wgpu's `WGPU_BACKEND`
+environment variable picks the API (`vulkan`, `dx12`, `metal`, `gl`).
+
 While a warning or a problem is shown, the status bar has a badge: a
 warning sign and how many findings need attention, red for a problem.
 It opens the page; nothing shows while all is well, and nothing is

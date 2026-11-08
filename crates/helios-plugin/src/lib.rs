@@ -30,7 +30,7 @@ pub mod importer;
 pub mod manifest;
 pub mod rpc;
 
-pub use broker::{Broker, Notice, Policy, Scope, default_dirs};
+pub use broker::{Broker, Notice, Policy, Probed, Scope, default_dirs};
 pub use commands::register;
 pub use manifest::{MANIFEST, Manifest};
 pub use rpc::Cancel;

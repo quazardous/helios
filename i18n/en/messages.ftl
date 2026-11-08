@@ -1275,15 +1275,25 @@ health-check-crashed-detail = It stopped before it could say anything.
 
 health-fix-back-up-now = Back up now
 
+health-fix-gpu-docs = How to choose the GPU
+
 health-fix-library-folder = Open the library's folder
 
 health-fix-no-destination = No backup disk is plugged in: open the Storage page
 
 health-fix-plug-in = Plug in { $volume } to back up
 
+health-fix-plugin-disable = Disable it
+
+health-fix-plugin-folder = Open its folder
+
+health-fix-plugin-update = Update it: open its folder
+
 health-fix-set-strategy = Set up a backup strategy on the Storage page
 
 health-fix-show-volume = Show it on the Storage page
+
+health-fix-snapshots-folder = Open the snapshots' folder
 
 health-fix-verify = Back up now, which verifies them
 
@@ -1296,6 +1306,32 @@ health-free-space-full = { $volume } is almost full
 health-free-space-low = { $volume } is running out of space
 
 health-free-space-ok = { $volume } has room
+
+health-gpu-adapter = The GPU
+
+health-gpu-cpu = Helios renders on the CPU
+
+health-gpu-cpu-detail = { $hardware } is present but was not opened: { $why }
+
+health-gpu-kernel-cpu = { $module } falls back to the CPU
+
+health-gpu-kernel-cpu-detail = Its GPU kernel does not compile on { $adapter }: { $error }
+
+health-gpu-kernels = GPU kernels
+
+health-gpu-kernels-ok = Every GPU kernel compiles ({ $count })
+
+health-gpu-kernels-ok-detail = On { $adapter }
+
+health-gpu-none-detail = No GPU was found.
+
+health-gpu-ok = Helios renders on { $adapter }
+
+health-gpu-ok-detail = { $used }
+
+health-gpu-software = Helios renders on a software adapter, { $adapter }
+
+health-gpu-software-detail = { $used } runs on the CPU while { $hardware } is present: choose the GPU in the settings.
 
 health-library = The library
 
@@ -1321,6 +1357,28 @@ health-met-short = Photos short of their backups: { $count }
 
 health-met-short-detail = Verified copies { $name } asks for per photo: { $copies }
 
+health-plugin-crashed = { $plugin } does not start
+
+health-plugin-crashed-detail = { $why }. Log: { $log }
+
+health-plugin-disabled = { $plugin } is disabled
+
+health-plugin-disabled-detail = Log: { $log }
+
+health-plugin-not-granted = { $plugin } waits for a permission
+
+health-plugin-not-granted-detail = It needs { $capability } before it can start.
+
+health-plugin-ok = { $plugin } answers
+
+health-plugin-ok-detail = Version { $version }, in { $dir }
+
+health-plugin-unsupported = { $plugin } does not suit this Helios
+
+health-plugin-unsupported-detail = { $problems }. Update it.
+
+health-plugins = Plugins
+
 health-seen = Backup disks seen lately
 
 health-seen-ok = Every backup disk was seen lately
@@ -1330,6 +1388,24 @@ health-seen-ok-detail = Within the last { $limit } days
 health-seen-stale = { $volume } was last seen { $days } days ago
 
 health-seen-stale-detail = Its backups are not kept up to date while it stays away (more than { $limit } days).
+
+health-snapshots = Catalogue snapshots
+
+health-snapshots-broken = The last catalogue snapshot cannot be restored
+
+health-snapshots-file-detail = { $file }, { $days } days old
+
+health-snapshots-none-yet = No catalogue snapshots yet
+
+health-snapshots-none-yet-detail = Helios does not take catalogue snapshots yet; the backups keep the photos.
+
+health-snapshots-ok = The last catalogue snapshot is recent and restorable
+
+health-snapshots-old = The last catalogue snapshot is { $days } days old
+
+health-snapshots-unverified = No catalogue snapshot is verified
+
+health-snapshots-unverified-detail = { $count } snapshots, none read back yet.
 
 health-strategy = Backup strategy
 

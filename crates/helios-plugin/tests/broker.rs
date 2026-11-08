@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use helios_plugin::{Broker, Notice, Policy, Scope};
+use helios_plugin::{Broker, Notice, Policy, Probed, Scope};
 use helios_shell::commands::{Origin, Registry};
 use helios_shell::when::Context;
 use serde_json::{Value as Json, json};
@@ -359,4 +359,32 @@ fn the_broker_as_commands() {
         run("metadata.read", json!({"image": image})).unwrap_err(),
         "no plugin reads metadata"
     );
+}
+
+#[test]
+fn a_probe_starts_a_plugin_hands_it_its_handshake_and_stops_it() {
+    if !python() {
+        return;
+    }
+    // A plugin that dies before it answers `initialize`.
+    let dead = testee_copy("dead", |t| {
+        t.replace(TESTEE, "org.example.dead").replace(
+            r#"["python3", "testee.py"]"#,
+            r#"["python3", "-c", "import sys; print('dying', file=sys.stderr); sys.exit(3)"]"#,
+        )
+    });
+    let mut b = testee(quick());
+    b.add(&dead, Scope::User).unwrap();
+    let (probed, _) = b.probe(TESTEE).unwrap();
+    assert_eq!(probed, Probed::Answers);
+    assert!(!b.running(TESTEE), "a probe keeps nothing running");
+    let (probed, log) = b.probe("org.example.dead").unwrap();
+    assert!(
+        matches!(probed, Probed::Failed(ref e) if e.contains("did not initialize")),
+        "{probed:?}"
+    );
+    assert!(!log.is_empty(), "its error is its log");
+    b.set_enabled(TESTEE, false).unwrap();
+    assert_eq!(b.probe(TESTEE).unwrap().0, Probed::Disabled);
+    assert!(b.probe("org.example.nothing").is_err());
 }

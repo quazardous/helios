@@ -6,10 +6,14 @@
 //! Helios's own checks over a temporary library, fake volumes and cards:
 //! the backup strategy set, the photos meeting it, the backup disks seen
 //! lately, the copies verified, the cards safe to format, and the library
-//! opening with room; each finding's fix runs its command.
+//! opening with room; each finding's fix runs its command. Then the GPU
+//! in use (fake adapters), its kernels (a compile failure injected), the
+//! plugins (fake ones: fine, of a wrong version, crashing) and the
+//! catalogue snapshots.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use egui::vec2;
@@ -20,7 +24,10 @@ use helios_core::Message;
 use helios_gui::shell::HEALTH_BADGE;
 use helios_gui::{Shell, headless, helios_panels};
 use helios_health::backup::{Backup, CardShort};
+use helios_health::gpu::{Adapter, AdapterCheck, AdapterKind, Gpu, Kernel, Kernels};
+use helios_health::plugins::{Plugin, Plugins, Status};
 use helios_health::runner::{Runner, Schedule};
+use helios_health::snapshots::{Snapshot, Snapshots, SnapshotsCheck};
 use helios_health::{Check, Context, Finding, Findings, Level, Registry};
 use helios_shell::commands::Origin;
 use helios_storage::strategy::{self, Scope, Strategy};
@@ -246,6 +253,7 @@ impl Library {
             library: Some(self.dir.clone()),
             vault: Some(self.file.clone()),
             backup: Some(Backup::read(&self.vault, &mounted, now).unwrap()),
+            ..Context::default()
         }
     }
 }
@@ -259,9 +267,15 @@ impl Drop for Library {
 /// A shell running Helios's checks over `ctx`, its Health page open
 /// once the first run is in.
 fn checked(ctx: Context) -> Harness<'static, Shell> {
+    checked_by(Registry::builtin(), ctx)
+}
+
+/// A shell running `registry`'s checks over `ctx`, its Health page open
+/// once the first run is in.
+fn checked_by(registry: Registry, ctx: Context) -> Harness<'static, Shell> {
     let mut shell = Shell::new(helios_panels(), None);
     shell.set_health(Runner::new(
-        Registry::builtin(),
+        registry,
         move || ctx.clone(),
         Findings::default(),
         Schedule::new(Instant::now(), Duration::ZERO, Duration::from_hours(1)),
@@ -469,4 +483,234 @@ fn the_library_opens_and_its_disk_needs_room() {
     let x = f.fix.unwrap();
     assert_eq!(x.command, "library.openFolder");
     assert_eq!(x.args["path"], json!(lib.dir.display().to_string()));
+}
+
+/// Only `check`.
+fn only(check: Arc<dyn Check>) -> Registry {
+    let mut r = Registry::default();
+    r.add(check);
+    r
+}
+
+fn adapter(name: &str, kind: AdapterKind) -> Adapter {
+    Adapter {
+        name: name.into(),
+        driver: "Mesa 25.2".into(),
+        backend: "Vulkan".into(),
+        kind,
+    }
+}
+
+#[test]
+fn a_software_adapter_beside_a_gpu_is_a_warning_whose_fix_is_the_docs() {
+    let gpu = |used| Gpu {
+        adapters: vec![
+            adapter("llvmpipe (LLVM 19.1.7, 256 bits)", AdapterKind::Software),
+            adapter("AMD Radeon RX 7600", AdapterKind::Discrete),
+        ],
+        used,
+        why_cpu: None,
+    };
+    let ctx = Context {
+        gpu: Some(gpu(Some(0))),
+        ..Context::default()
+    };
+    let mut h = checked_by(only(Arc::new(AdapterCheck)), ctx);
+    until(&mut h, "the finding", |h| {
+        h.query_by_label("Helios renders on a software adapter, llvmpipe (LLVM 19.1.7, 256 bits)")
+            .is_some()
+    });
+    assert!(
+        h.query_by_label_contains("AMD Radeon RX 7600 (Vulkan, Mesa 25.2) is present")
+            .is_some()
+    );
+    let f = finding(&h, "gpu.adapter").unwrap();
+    assert_eq!(f.level, Level::Warning);
+    let x = f.fix.unwrap();
+    assert_eq!(x.command, "links.open");
+    // The command is there; a dry run opens nothing.
+    let mut args = x.args.clone();
+    args["dry_run"] = json!(true);
+    h.state_mut().run(&x.command, args, Origin::User).unwrap();
+
+    // On the GPU: fine, its driver said.
+    let ctx = Context {
+        gpu: Some(gpu(Some(1))),
+        ..Context::default()
+    };
+    let mut h = checked_by(only(Arc::new(AdapterCheck)), ctx);
+    until(&mut h, "the finding", |h| {
+        h.query_by_label("Helios renders on AMD Radeon RX 7600")
+            .is_some()
+    });
+    assert_eq!(finding(&h, "gpu.adapter").unwrap().level, Level::Ok);
+
+    // The CPU while a GPU is there: a warning.
+    let ctx = Context {
+        gpu: Some(Gpu {
+            why_cpu: Some("no device".into()),
+            ..gpu(None)
+        }),
+        ..Context::default()
+    };
+    let mut h = checked_by(only(Arc::new(AdapterCheck)), ctx);
+    until(&mut h, "the finding", |h| {
+        h.query_by_label("Helios renders on the CPU").is_some()
+    });
+    assert_eq!(finding(&h, "gpu.adapter").unwrap().level, Level::Warning);
+}
+
+#[test]
+fn a_kernel_that_does_not_compile_falls_back_to_the_cpu_and_compiles_once() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let c = calls.clone();
+    let kernels = Kernels::new(move || {
+        c.fetch_add(1, Ordering::SeqCst);
+        vec![
+            Kernel {
+                module: "exposure".into(),
+                error: None,
+            },
+            Kernel {
+                module: "sigmoid".into(),
+                error: Some("kernel `main`: did not compile (injected)".into()),
+            },
+        ]
+    });
+    let ctx = Context {
+        gpu: Some(Gpu {
+            adapters: vec![adapter(
+                "Microsoft Basic Render Driver",
+                AdapterKind::Software,
+            )],
+            used: Some(0),
+            why_cpu: None,
+        }),
+        ..Context::default()
+    };
+    let mut h = checked_by(only(Arc::new(kernels)), ctx);
+    until(&mut h, "the finding", |h| {
+        h.query_by_label("sigmoid falls back to the CPU").is_some()
+    });
+    assert!(
+        h.query_by_label_contains("did not compile (injected)")
+            .is_some()
+    );
+    assert!(finding(&h, "gpu.kernels/exposure").is_none());
+    assert_eq!(
+        finding(&h, "gpu.kernels/sigmoid").unwrap().level,
+        Level::Warning
+    );
+    // Checked again: the same adapter and driver, nothing compiled again.
+    h.state_mut()
+        .run(
+            helios_gui::shell::HEALTH_CHECK_NOW,
+            serde_json::Value::Null,
+            Origin::User,
+        )
+        .unwrap();
+    until(&mut h, "a second run", |h| {
+        h.state().health().is_some_and(|r| !r.running()) && calls.load(Ordering::SeqCst) == 1
+    });
+    for _ in 0..10 {
+        h.step();
+    }
+    assert_eq!(calls.load(Ordering::SeqCst), 1, "compiled once per adapter");
+}
+
+fn plugin(id: &str, name: &str, status: Status, log: &[&str]) -> Plugin {
+    Plugin {
+        id: id.into(),
+        name: name.into(),
+        version: "1.2.0".into(),
+        dir: std::env::temp_dir().join(id),
+        status,
+        log: log.iter().map(|l| (*l).to_string()).collect(),
+    }
+}
+
+#[test]
+fn each_plugin_answers_or_says_why_with_its_fix() {
+    let ctx = Context {
+        plugins: vec![
+            plugin("org.example.fine", "Fine", Status::Answers, &[]),
+            plugin(
+                "org.example.old",
+                "Old",
+                Status::Unsupported(vec![
+                    "interface `importer` version 9 is not supported (supported: [1, 2])".into(),
+                ]),
+                &[],
+            ),
+            plugin(
+                "org.example.crash",
+                "Crash",
+                Status::Crashed("plugin `org.example.crash` did not initialize".into()),
+                &["Traceback (most recent call last)", "ValueError: boom"],
+            ),
+        ],
+        ..Context::default()
+    };
+    let mut h = checked_by(only(Arc::new(Plugins)), ctx);
+    until(&mut h, "the findings", |h| {
+        h.query_by_label("Crash does not start").is_some()
+    });
+    assert!(h.query_by_label("Fine answers").is_some());
+    assert!(h.query_by_label("Old does not suit this Helios").is_some());
+    assert!(
+        h.query_by_label_contains("ValueError: boom").is_some(),
+        "its log"
+    );
+    assert!(
+        h.query_by_label_contains("version 9 is not supported")
+            .is_some()
+    );
+    assert_eq!(
+        finding(&h, "plugins.org.example.fine").unwrap().level,
+        Level::Ok
+    );
+    let old = finding(&h, "plugins.org.example.old").unwrap();
+    assert_eq!(old.level, Level::Problem);
+    assert_eq!(old.fix.unwrap().command, "library.openFolder");
+    let crash = finding(&h, "plugins.org.example.crash").unwrap();
+    assert_eq!(crash.level, Level::Problem);
+    let x = crash.fix.unwrap();
+    assert_eq!(x.command, "plugin.disable");
+    assert_eq!(x.args["plugin"], "org.example.crash");
+}
+
+#[test]
+fn without_catalogue_snapshots_one_line_says_none_yet() {
+    let lib = Library::new("snapshots");
+    let ctx = lib.context(&[&lib.studio], FIRST);
+    let mut h = checked_by(only(Arc::new(SnapshotsCheck)), ctx.clone());
+    until(&mut h, "the finding", |h| {
+        h.query_by_label("No catalogue snapshots yet").is_some()
+    });
+    assert_eq!(finding(&h, "catalogue.snapshots").unwrap().level, Level::Ok);
+
+    // Once snapshots exist, an old one is a warning with its folder.
+    let day = 86_400;
+    let file = lib.dir.join("snapshots/catalogue-1.sqlite");
+    let ctx = Context {
+        snapshots: Some(Snapshots {
+            list: vec![Snapshot {
+                file: file.clone(),
+                taken: FIRST,
+                verified: Some(FIRST),
+                restorable: true,
+            }],
+            now: FIRST + 30 * day,
+            max_age_days: helios_health::snapshots::MAX_AGE_DAYS,
+        }),
+        ..ctx
+    };
+    let mut h = checked_by(only(Arc::new(SnapshotsCheck)), ctx);
+    until(&mut h, "the finding", |h| {
+        h.query_by_label("The last catalogue snapshot is 30 days old")
+            .is_some()
+    });
+    let f = finding(&h, "catalogue.snapshots").unwrap();
+    assert_eq!(f.level, Level::Warning);
+    assert_eq!(f.fix.unwrap().command, "library.openFolder");
 }
