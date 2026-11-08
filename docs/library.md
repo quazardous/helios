@@ -239,7 +239,11 @@ earlier file of the same import had it (`{"of": "source", "first": ...}`).
 | `ask` | left out and listed (status `asked`), for whoever started the import to answer, by importing those files again with `skip` or `keep` |
 
 Nothing is ever deleted, whatever the policy. A file that changed (same
-path, other content) is a new image.
+path, other content) is a new image, except the file of a Library photo:
+changed by another application, it stays that photo, with its marks and
+edits; the thumbnail re-check records its new content, makes its
+thumbnail again and marks it "changed outside" until acknowledged on the
+Health page (`library.changedOutside.acknowledge`).
 
 ## Near-duplicate signals
 

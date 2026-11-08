@@ -318,6 +318,24 @@ pub trait Map: Send + Sync {
     ) -> Result<Option<Sighting>, String>;
     fn record(&self, sighting: &Sighting) -> Result<(), String>;
     fn image_known(&self, id: &ImageId) -> bool;
+    /// Whether image `id` is in the Library.
+    fn in_library(&self, id: &ImageId) -> bool;
+    /// The content image `id`'s file holds now: its id, unless another
+    /// application changed it ([`Vault::content_of`]).
+    fn content_of(&self, id: &ImageId) -> ImageId;
+    /// Records that the file of Library image `id` now holds `hash`, a
+    /// change made outside Helios ([`Vault::changed_outside`]).
+    ///
+    /// # Errors
+    /// The vault cannot be written.
+    fn changed_outside(
+        &self,
+        id: &ImageId,
+        hash: ImageId,
+        size: u64,
+        partial: &ContentHash,
+        at: u64,
+    ) -> Result<(), String>;
     fn prune(&self, limit: usize, missing_before: u64) -> Result<usize, String>;
 }
 
@@ -346,6 +364,25 @@ impl<S: Store> Map for Vault<S> {
 
     fn image_known(&self, id: &ImageId) -> bool {
         self.image(id).is_ok_and(|i| i.is_some())
+    }
+
+    fn in_library(&self, id: &ImageId) -> bool {
+        Vault::in_library(self, id).unwrap_or(false)
+    }
+
+    fn content_of(&self, id: &ImageId) -> ImageId {
+        Vault::content_of(self, id).unwrap_or(*id)
+    }
+
+    fn changed_outside(
+        &self,
+        id: &ImageId,
+        hash: ImageId,
+        size: u64,
+        partial: &ContentHash,
+        at: u64,
+    ) -> Result<(), String> {
+        Vault::changed_outside(self, id, hash, size, partial, at)
     }
 
     fn prune(&self, limit: usize, missing_before: u64) -> Result<usize, String> {
@@ -603,7 +640,9 @@ impl<M: Map> Job<M> {
         match stage {
             Stage::Library => {
                 let hash = self.files.full(&s.path)?;
-                if s.image != Some(ImageId(hash)) {
+                // A Library file changed outside Helios is checked against
+                // the content recorded then (the thumbnail re-check's).
+                if s.image.map(|id| self.map.content_of(&id)) != Some(ImageId(hash)) {
                     return Err(format!("{}: its content changed", s.path.display()));
                 }
                 s.last_verified = Some(now);

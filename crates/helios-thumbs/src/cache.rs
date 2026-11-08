@@ -275,6 +275,14 @@ impl ThumbCache {
         })
     }
 
+    /// Removes the entry of `key` at `size`, when there is one (its
+    /// picture is out of date).
+    pub fn remove(&self, key: &Key, size: u32) {
+        if self.contains(key, size) {
+            self.forget(&key.file(size));
+        }
+    }
+
     fn forget(&self, rel: &Path) {
         let mut index = self.index.lock().expect("the cache's index");
         if let Some(e) = index.entries.remove(rel) {

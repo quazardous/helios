@@ -13,10 +13,15 @@
 //!    takes the new time); a provisional entry ([`Key::provisional`]) is
 //!    renamed to its full key when the hash is an image's.
 //!
-//! A changed file's sighting is updated (size, time, partial hash) and its
-//! image cleared; its new thumbnail is made from the file under the
-//! provisional key; the old entry is left to the cache's LRU (another
-//! sighting may still use it). It waits, as the map's job does, while the
+//! A changed file's sighting is updated (size, time, partial hash). A
+//! file of a Library photo stays linked (decided 2026-11-08): its full
+//! hash is read and recorded as the photo's content
+//! ([`helios_vault::Vault::changed_outside`]), the photo is marked
+//! "changed outside Helios" with its edits and history kept, and its
+//! thumbnail is made again under the photo's own key. Any other file's
+//! image is cleared and its new thumbnail made under the provisional key;
+//! the old entry is left to the cache's LRU (another sighting may still
+//! use it). It waits, as the map's job does, while the
 //! user pauses the map, while an import, an export, a backup or a render
 //! runs, and on battery ([`map_job::waits`]).
 //!
@@ -31,7 +36,7 @@ use std::time::{Duration, Instant};
 
 use helios_storage::Volume;
 use helios_storage::exclude::Checker;
-use helios_thumbs::{Key, SMALL, ThumbCache};
+use helios_thumbs::{Key, LARGE, SMALL, ThumbCache};
 use helios_vault::{ImageId, Presence, Sighting, ToRead};
 
 use crate::map_job::{self, Feed, Files, Load, Map, Never, Power, place_of};
@@ -61,6 +66,10 @@ pub enum Verdict {
     Linked,
     /// Its content changed: its thumbnail was made again.
     Remade,
+    /// The file of a Library photo changed outside Helios: still linked,
+    /// the photo marked, its thumbnail made again under its key (`false`:
+    /// the file holds no readable preview).
+    ChangedOutside(bool),
     /// Its content changed and it holds no readable preview: the sighting
     /// is updated, no thumbnail made.
     NoPreview,
@@ -83,8 +92,9 @@ pub fn key_of(s: &Sighting) -> Option<Key> {
 /// What the re-check needs of the thumbnail cache.
 pub trait Thumbs: Send {
     fn has(&self, key: &Key) -> bool;
-    /// Makes the thumbnail of the file at `path` under `key`; `false` when
-    /// the file holds no readable preview.
+    /// Makes the thumbnail of the file at `path` under `key`, dropping
+    /// any larger one `key` has (made from what the file held before);
+    /// `false` when the file holds no readable preview.
     ///
     /// # Errors
     /// The file cannot be read or the entry written.
@@ -98,6 +108,7 @@ impl Thumbs for Arc<ThumbCache> {
     }
 
     fn remake(&self, path: &Path, key: &Key) -> Result<bool, String> {
+        self.remove(key, LARGE);
         match helios_thumbs::read::read(path, SMALL)? {
             Some(thumb) => self.put(key, SMALL, &thumb).map(|()| true),
             None => Ok(false),
@@ -290,17 +301,18 @@ impl<M: Map> Check<M> {
         }
         let now = (self.clock)();
         let partial = self.files.partial(&s.path, size)?;
+        // What the file held when last read: a Library photo's content
+        // may have changed outside Helios before.
+        let held = s.image.map(|id| self.map.content_of(&id));
+        let mut full = None;
         if size == s.size && s.partial == Some(partial) {
-            let full = ImageId(self.files.full(&s.path)?);
-            let same = match s.image {
-                Some(id) => id == full,
-                None => true,
-            };
-            if same {
+            let hash = ImageId(self.files.full(&s.path)?);
+            full = Some(hash);
+            if held.is_none_or(|h| h == hash) {
                 let mut verdict = Verdict::Touched;
-                if s.image.is_none() && self.map.image_known(&full) {
-                    s.image = Some(full);
-                    self.thumbs.rename(&key, &Key::preview(full.hex()));
+                if s.image.is_none() && self.map.image_known(&hash) {
+                    s.image = Some(hash);
+                    self.thumbs.rename(&key, &Key::preview(hash.hex()));
                     verdict = Verdict::Linked;
                 }
                 s.modified = modified;
@@ -312,13 +324,29 @@ impl<M: Map> Check<M> {
                 return Ok(verdict);
             }
         }
-        // Changed: the old entry stays for whoever else has that content.
         s.size = size;
         s.modified = modified;
         s.partial = Some(partial);
+        s.last_seen = now;
+        // A Library photo's file stays linked: its new content recorded,
+        // the photo marked, its thumbnail made again under its own key.
+        if let Some(id) = s.image.filter(|id| self.map.in_library(id)) {
+            let hash = match full {
+                Some(h) => h,
+                None => ImageId(self.files.full(&s.path)?),
+            };
+            if held != Some(hash) {
+                self.map.changed_outside(&id, hash, size, &partial, now)?;
+            }
+            s.last_verified = Some(now);
+            self.map.record(&s)?;
+            return Ok(Verdict::ChangedOutside(
+                self.thumbs.remake(&s.path, &Key::preview(id.hex()))?,
+            ));
+        }
+        // Changed: the old entry stays for whoever else has that content.
         s.image = None;
         s.last_verified = None;
-        s.last_seen = now;
         self.map.record(&s)?;
         let new = key_of(&s).expect("a partial hash makes a key");
         Ok(if self.thumbs.remake(&s.path, &new)? {
@@ -345,7 +373,7 @@ impl<M: Map> Check<M> {
                 Next::Check(_, s) => {
                     let name = s.path.display().to_string();
                     match self.check(*s) {
-                        Ok(Verdict::Remade) => remade += 1,
+                        Ok(Verdict::Remade | Verdict::ChangedOutside(true)) => remade += 1,
                         Ok(_) => {}
                         Err(e) => log::warn!("thumbnail re-check: {name}: {e}"),
                     }
@@ -375,7 +403,8 @@ mod tests {
     use helios_core::ContentHash;
     use helios_storage::exclude::{Blacklist, Os, Places};
     use helios_vault::storage::VolumeId;
-    use helios_vault::{Image, MemoryStore, Store, Vault};
+    use helios_vault::{Command, Image, MemoryStore, Store, Vault, Version};
+    use serde_json::json;
 
     use super::*;
 
@@ -475,15 +504,15 @@ mod tests {
         paths: BTreeMap<&'static str, PathBuf>,
     }
 
-    /// Library files `a`, `b`, `c` (images 1, 2, 3) and a file `p` seen
-    /// in the import window (partial read, no image), each with a cache
-    /// entry.
+    /// Library files `a`, `b`, `c` (images 1, 2, 3), a file `p` seen in
+    /// the import window (partial read, no image) and a file `q` whose
+    /// image (5) is not in the Library, each with a cache entry.
     fn world() -> World {
         let mut store = MemoryStore::default();
         let fake = Fake::default();
         let cache = Cache::default();
         let mut paths = BTreeMap::new();
-        for (name, n) in [("a", 1u8), ("b", 2), ("c", 3), ("p", 4)] {
+        for (name, n) in [("a", 1u8), ("b", 2), ("c", 3), ("p", 4), ("q", 5)] {
             let rel = format!("{name}.jpg");
             let path = Path::new(MOUNT).join(&rel);
             let mut s = Sighting::seen(path.clone(), 100 + u64::from(n), 5, 1, "import");
@@ -496,7 +525,11 @@ mod tests {
                     size: s.size,
                     partial: h(n + 10),
                 };
-                store.add_to_library(&image).unwrap();
+                if name == "q" {
+                    store.add_image(&image).unwrap();
+                } else {
+                    store.add_to_library(&image).unwrap();
+                }
                 s.image = Some(image.id);
             }
             store.put_sighting(&s).unwrap();
@@ -584,8 +617,14 @@ mod tests {
     }
 
     #[test]
-    fn a_changed_original_gets_a_new_thumbnail() {
+    fn a_library_photo_changed_outside_stays_linked() {
         let w = world();
+        let b = ImageId(h(2));
+        w.vault
+            .apply(&[Command::set(b, "rating", json!(4))], "user", None, 1)
+            .unwrap();
+        let version = Version::new(b, Vec::new(), json!({"exposure": 1}), "user", 1);
+        w.vault.add_version(&version).unwrap();
         w.fake
             .files
             .lock()
@@ -593,27 +632,109 @@ mod tests {
             .insert(w.paths["b"].clone(), (500, 9, h(50), h(51)));
         let mut c = check(&w);
         let out = drain(&mut c);
-        let b: Vec<_> = out.iter().filter(|(_, n, _)| n == "b.jpg").collect();
-        assert_eq!(b.len(), 1);
-        assert_eq!(b[0].2, Verdict::Remade);
+        let found: Vec<_> = out.iter().filter(|(_, n, _)| n == "b.jpg").collect();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].2, Verdict::ChangedOutside(true));
+        assert!(
+            w.fake
+                .reads()
+                .contains(&"full /media/disk/b.jpg".to_string()),
+            "its new content is hashed"
+        );
+        let s = sighting(&w, "b");
+        assert_eq!((s.size, s.modified, s.partial), (500, 9, Some(h(50))));
+        assert_eq!(s.image, Some(b), "still image 2");
+        assert_eq!(s.last_verified, Some(1_000_000));
+        assert_eq!(w.vault.content_of(&b).unwrap(), ImageId(h(51)));
+        assert_eq!(
+            w.vault.changed_outside_images().unwrap(),
+            [(b, 1_000_000)],
+            "marked, with when"
+        );
+        let history = w.vault.content(&b).unwrap().unwrap().history;
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].hash, h(2).to_string(), "the old content kept");
+        assert_eq!(
+            *w.cache.made.lock().unwrap(),
+            [format!("make /media/disk/b.jpg {}", h(2))],
+            "made again under the photo's own key"
+        );
+        // Its marks and edits stay.
+        let fields = w.vault.fields_of(&[b], &["rating"]).unwrap();
+        assert_eq!(fields[0]["rating"], json!(4));
+        assert_eq!(w.vault.versions(&b).unwrap(), [version]);
+        // A pass later: unchanged, nothing read but a stat.
+        let mut c = c.clock(|| 1_000_000 + PASS_EVERY);
+        assert!(
+            drain(&mut c)
+                .iter()
+                .all(|(_, _, v)| *v == Verdict::Unchanged)
+        );
+        // Acknowledged: the mark goes, the link and content stay.
+        assert_eq!(w.vault.acknowledge_changed(&[]).unwrap(), 1);
+        assert!(w.vault.changed_outside_images().unwrap().is_empty());
+        assert_eq!(sighting(&w, "b").image, Some(b));
+        assert_eq!(w.vault.content_of(&b).unwrap(), ImageId(h(51)));
+    }
+
+    #[test]
+    fn a_touched_library_photo_after_a_change_is_not_marked_again() {
+        let w = world();
+        w.fake
+            .files
+            .lock()
+            .unwrap()
+            .insert(w.paths["b"].clone(), (500, 9, h(50), h(51)));
+        let mut c = check(&w);
+        drain(&mut c);
+        w.vault.acknowledge_changed(&[]).unwrap();
+        // Touched only: same content as recorded at the change.
+        w.fake
+            .files
+            .lock()
+            .unwrap()
+            .get_mut(&w.paths["b"])
+            .unwrap()
+            .1 = 10;
+        w.feed.on_screen(vec![w.paths["b"].clone()]);
+        assert_eq!(
+            drain(&mut c),
+            [(Priority::Shown, "b.jpg".into(), Verdict::Touched)]
+        );
+        assert!(w.vault.changed_outside_images().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_changed_file_off_the_library_gets_a_provisional_thumbnail() {
+        let w = world();
+        w.fake
+            .files
+            .lock()
+            .unwrap()
+            .insert(w.paths["q"].clone(), (500, 9, h(50), h(51)));
+        let mut c = check(&w);
+        w.feed.on_screen(vec![w.paths["q"].clone()]);
+        let out = drain(&mut c);
+        assert_eq!(out[0], (Priority::Shown, "q.jpg".into(), Verdict::Remade));
         let reads = w.fake.reads();
-        assert!(reads.contains(&"partial /media/disk/b.jpg".to_string()));
         assert!(
             !reads.iter().any(|r| r.starts_with("full")),
             "a different partial hash is enough: {reads:?}"
         );
-        let s = sighting(&w, "b");
+        let s = sighting(&w, "q");
         assert_eq!((s.size, s.modified, s.partial), (500, 9, Some(h(50))));
-        assert_eq!(s.image, None, "the sighting no longer shows image 2");
+        assert_eq!(s.image, None, "the sighting no longer shows image 5");
         let new = Key::provisional(500, &h(50).to_string());
         assert_eq!(
             *w.cache.made.lock().unwrap(),
-            [format!("make /media/disk/b.jpg {}", new.image)]
+            [format!("make /media/disk/q.jpg {}", new.image)]
         );
         assert!(
-            w.cache.has(&Key::preview(h(2).to_string())),
+            w.cache.has(&Key::preview(h(5).to_string())),
             "left to the LRU"
         );
+        assert!(w.vault.changed_outside_images().unwrap().is_empty());
+        assert_eq!(w.vault.content(&ImageId(h(5))).unwrap(), None);
     }
 
     #[test]

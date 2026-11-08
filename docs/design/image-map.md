@@ -13,8 +13,11 @@ import window's "in your Library" are lookups. Slice 4 built in part
 `ThumbCache::rename`) and the re-check queue (`thumb_check`: on screen,
 recently shown, then the Library; stat, partial, full hash; a changed
 file's thumbnail made again; waits on battery and under load); the
-import window and dialogs on the shared cache are left. Section 9 gives the order of work, section 10 the questions
-as they were put.
+import window and dialogs on the shared cache are left. Open question 6
+decided (2026-11-08, option A of the owner's choice): a Library photo
+whose file another application changed stays linked (section 3, "A file
+changed in place"). Section 9 gives the order of work, section 10 the
+questions as they were put.
 
 The owner's request: "Helios's database records every image it sees on
 every known volume. Import only means changing a flag, plus, when needed,
@@ -297,9 +300,30 @@ answers "where else is this?" with a query, and the Library shows it in
 the photo's info ("also on BACKUP_A, last seen 2026-10-28").
 
 **A file changed in place** (another tool wrote metadata into it): its
-sighting's size or time changes, its partial and image are cleared, and
-the new content is a new image (as docs/library.md says today). Whether
-the marks of the old content should follow is open question 6.
+sighting's size or time changes and its partial hash is read again.
+
+- **A file of a Library photo stays linked** (decided 2026-11-08). The
+  re-check (section 7) reads its full hash and records it as the photo's
+  content: the photo's id stays the hash it was imported with, since its
+  marks, edits and history hang on it, and the document
+  `content/<image id>` keeps the content its file holds now, every
+  content it held before (hash, size, partial hash, from and until when)
+  and the mark "changed outside Helios" with when it was found. No schema
+  step: the documents table holds it (`helios_vault::changed`). The
+  photo's thumbnail is made again under its own key, its larger entry
+  dropped. The Library grid shows a "changed outside" badge, and the
+  health check counts these photos ("N photos changed outside Helios")
+  with an action, `library.changedOutside.acknowledge`, that clears the
+  mark; the content and its history stay. A later re-check, and the
+  map's verification of Library files, compare the file with the content
+  recorded, not with the id.
+- **Any other file**: its partial and image are cleared, and the new
+  content is a new image, as before.
+
+Left for later: thumbnails rendered from an edit (keyed by version and
+chain) are not made again when the source changes, and the import
+window's prefilter still knows the photo by the size and partial hash
+it was imported with.
 
 ## 4. Recording
 
@@ -490,9 +514,11 @@ thumbnail rendered from an edit is keyed by its version and chain
 made from still matches. The upkeep queue (section 4), cells in view
 first, re-checks in steps: size and time (a `stat`), then the partial
 hash when they changed, then the full hash in the background. When the
-content changed, the sighting's image is cleared, the old entry is left
-to the LRU (another sighting may still use it) and a new thumbnail is
-made from the file.
+content of a Library photo's file changed, the photo stays linked and
+its thumbnail is made again under its own key (section 3, "A file
+changed in place"). When another file's content changed, the sighting's
+image is cleared, the old entry is left to the LRU (another sighting may
+still use it) and a new thumbnail is made from the file.
 
 **Virtualised grids (#4833 step 3).** The grid asks for the cells in
 view; each cell is a row of a query (Library: images flagged; import
@@ -574,6 +600,9 @@ Options in key order; the recommendation is marked.
      (recommended: about 300 MB of vault and thumbnails at most).
    - C. A cap per volume (100,000).
 6. **A file changed in place** (metadata written by another tool).
+   Decided 2026-11-08: a Library photo stays linked, its new content
+   recorded and the photo marked until acknowledged (section 3); other
+   files as A.
    - A. A new image; the old one keeps its marks, its sighting gone
      (recommended for now: what library.md says today, and safe).
    - B. The new content succeeds the old: marks and versions follow.
