@@ -1106,6 +1106,9 @@ fn control_handler(
     }
 }
 
+/// Where Unix sockets exist, the batch endpoint is one: never TCP.
+const BATCH_TCP_REFUSED: &str = "--batch-control takes a Unix socket path, not a TCP address";
+
 /// Serves the batch endpoint: `load-source`, `export` and `cancel` only,
 /// in every build. A Unix socket readable and writable by this user alone,
 /// or, where Unix sockets do not exist, loopback TCP behind the session
@@ -1117,7 +1120,7 @@ fn serve_batch_control(
     token: Option<&str>,
 ) -> Result<String, String> {
     if matches!(listen, Listen::Tcp(_)) && cfg!(unix) {
-        return Err("--batch-control takes a Unix socket path, not a TCP address".into());
+        return Err(BATCH_TCP_REFUSED.into());
     }
     let bound = helios_inspect::serve_connections_at(
         listen,
@@ -1188,7 +1191,15 @@ fn parse_args() -> Result<Args, String> {
             "--graph" => graph = Some(PathBuf::from(value()?)),
             "--socket" => socket = Some(Listen::parse(&value()?)?),
             "--control" => control = Some(Listen::parse(&value()?)?),
-            "--batch-control" => batch_control = Some(Listen::parse(&value()?)?),
+            "--batch-control" => {
+                let listen = Listen::parse(&value()?)?;
+                // Refused here, before any other check (a TCP endpoint's
+                // token file), so the refusal names its real reason.
+                if matches!(listen, Listen::Tcp(_)) && cfg!(unix) {
+                    return Err(BATCH_TCP_REFUSED.into());
+                }
+                batch_control = Some(listen);
+            }
             "--token-file" => token_file = Some(PathBuf::from(value()?)),
             "--global" => layers.push((Layer::Global, PathBuf::from(value()?))),
             "--project" => {

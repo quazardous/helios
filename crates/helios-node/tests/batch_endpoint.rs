@@ -139,28 +139,51 @@ fn the_batch_endpoint_answers_only_what_a_batch_needs() {
     );
 }
 
+/// Where Unix sockets exist, the batch endpoint refuses TCP for that reason,
+/// whether a token file is given or not (a missing token file is not the
+/// reason, and a token file does not open TCP).
 #[test]
 fn the_batch_endpoint_takes_no_tcp_address() {
     let dir =
         std::env::temp_dir().join(format!("helios-batch-endpoint-tcp-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("network.json"), NETWORK).unwrap();
-    let out = Command::new(env!("CARGO_BIN_EXE_helios-node"))
-        .arg("--graph")
-        .arg(dir.join("network.json"))
-        .arg("--socket")
-        .arg(dir.join("node.sock"))
-        .arg("--batch-control")
-        .arg("tcp://127.0.0.1:0")
-        .output()
-        .unwrap();
+    for token_file in [None, Some(dir.join("token"))] {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_helios-node"));
+        command
+            .arg("--graph")
+            .arg(dir.join("network.json"))
+            .arg("--socket")
+            .arg(dir.join("node.sock"))
+            .arg("--batch-control")
+            .arg("tcp://127.0.0.1:0")
+            .stdin(Stdio::null());
+        if let Some(file) = &token_file {
+            command.arg("--token-file").arg(file);
+        }
+        let mut child = command
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        // A node that serves instead of refusing must not hang the test.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        while child.try_wait().unwrap().is_none() {
+            if std::time::Instant::now() > deadline {
+                let _ = child.kill();
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let out = child.wait_with_output().unwrap();
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(!out.status.success(), "token file {token_file:?}: {stderr}");
+        assert!(
+            stderr.contains("Unix socket"),
+            "token file {token_file:?}: {stderr}"
+        );
+    }
     let _ = std::fs::remove_dir_all(&dir);
-    assert!(!out.status.success());
-    assert!(
-        String::from_utf8_lossy(&out.stderr).contains("Unix socket"),
-        "{}",
-        String::from_utf8_lossy(&out.stderr)
-    );
 }
 
 /// `job.cancel` on the batch endpoint: a batch job cancelled by its id
