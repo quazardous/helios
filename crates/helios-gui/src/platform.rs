@@ -138,6 +138,21 @@ pub fn crash_dir() -> Option<PathBuf> {
 /// `settings/notifications.jobs` (on by default).
 pub const SETTING_JOBS: SettingId = SettingId::from_static("notifications.jobs");
 
+/// Days a backup disk may stay away before the health check warns, at
+/// `settings/health.destinationDays` (14 by default).
+pub const SETTING_DESTINATION_DAYS: SettingId = SettingId::from_static("health.destinationDays");
+
+/// The `health.destinationDays` setting from the settings' `store`.
+pub fn destination_days(store: &egui_pop::core::binding::SharedStore) -> u64 {
+    store
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .get(&format!("settings/{SETTING_DESTINATION_DAYS}"))
+        .and_then(|e| e.value.as_i64())
+        .and_then(|d| u64::try_from(d).ok())
+        .unwrap_or(helios_health::backup::DESTINATION_DAYS)
+}
+
 /// A job is long, and its end worth a notification, from this many
 /// seconds.
 pub const LONG_JOB_SECONDS: f64 = 10.0;
@@ -436,6 +451,18 @@ impl Plugin for Platform {
             SETTING_JOBS,
             Descriptor::bool("Notify when a long job ends", true).description(
                 "Shows a desktop notification when a long export or batch finishes or fails while no Helios window has the focus.",
+            ),
+        )?;
+        ctx.setting(
+            SETTING_DESTINATION_DAYS,
+            Descriptor::int(
+                "Warn when a backup disk is away for (days)",
+                1,
+                365,
+                i64::try_from(helios_health::backup::DESTINATION_DAYS).unwrap_or(14),
+            )
+            .description(
+                "The health check warns when a disk the backup strategy copies to has not been plugged in for longer.",
             ),
         )?;
         // Without a single instance (tests, pictures, tools) there are

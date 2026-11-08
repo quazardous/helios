@@ -130,17 +130,23 @@ fn seconds_f64() -> f64 {
 }
 
 /// The health check's runner: Helios's checks, over the volumes mounted
-/// (with the roles the vault gives them) and the vault's file, whose
-/// folder stands for the library's place; the ignored findings kept
-/// beside Helios's settings.
+/// (with the roles the vault gives them), the vault's file, whose folder
+/// stands for the library's place, and its backups (with the cards an
+/// import left short, still inserted, and the `health.destinationDays`
+/// setting read from `settings`); the ignored findings kept beside
+/// Helios's settings.
 fn health_runner(
     vault: Option<Arc<helios_vault::Vault<helios_vault_sqlite::SqliteStore>>>,
     file: Option<PathBuf>,
+    cards: Arc<std::sync::Mutex<Vec<helios_library::import::Card>>>,
+    settings: egui_pop::core::binding::SharedStore,
 ) -> helios_health::runner::Runner {
+    use helios_health::backup::{Backup, CardShort};
     use helios_health::{Context, Findings, Ignored, Registry, runner};
     let file = file.and_then(|f| f.canonicalize().ok());
     let context = move || {
-        let mut volumes = helios_storage::system().volumes();
+        let mounted = helios_storage::system().volumes();
+        let mut volumes = mounted.clone();
         if let Some(known) = vault
             .as_deref()
             .and_then(|v| helios_storage::registry::known(v).ok())
@@ -152,6 +158,28 @@ fn health_runner(
                 }
             }
         }
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs());
+        let backup = vault.as_deref().and_then(|v| {
+            Backup::read(v, &mounted, now)
+                .inspect_err(|e| log::warn!("health: backups: {e}"))
+                .ok()
+        });
+        let backup = backup.map(|mut b| {
+            b.destination_days = helios_gui::platform::destination_days(&settings);
+            b.cards = cards
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .iter()
+                .filter(|c| c.path.is_dir())
+                .map(|c| CardShort {
+                    label: c.label.clone(),
+                    short: c.short,
+                })
+                .collect();
+            b
+        });
         Context {
             volumes,
             library: file
@@ -159,6 +187,7 @@ fn health_runner(
                 .and_then(Path::parent)
                 .map(Path::to_path_buf),
             vault: file.clone(),
+            backup,
         }
     };
     let ignored = Ignored::load(&helios_gui::shell::config_dir().join("health-ignored.json"));
@@ -1506,7 +1535,13 @@ fn main() -> Result<(), String> {
             // The health check (Help > Health check): Helios's checks
             // over this machine's volumes and the vault, a while after
             // start, daily and when a volume comes or goes.
-            shell.set_health(health_runner(health_vault.clone(), health_file.clone()));
+            let (cards, settings) = (shell.waiting_cards(), shell.app().handle().store());
+            shell.set_health(health_runner(
+                health_vault.clone(),
+                health_file.clone(),
+                cards,
+                settings,
+            ));
             shell.remember_import_sources_in(
                 helios_gui::shell::config_dir().join("import-sources.json"),
             );

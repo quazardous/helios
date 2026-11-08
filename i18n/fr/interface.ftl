@@ -117,6 +117,10 @@ setting-display-wide-gamut-preview =
     .description = Affiche l’image en Rec.2020 là où la fenêtre peut la porter (Wayland avec la gestion des couleurs), pour que les couleurs hors du sRGB ne soient pas écrêtées. Ailleurs, l’image reste en sRGB.
     .label = Aperçu en gamut étendu
 
+setting-health-destinationDays =
+    .description = Le bilan de santé avertit quand un disque où copie la stratégie de sauvegarde n'a pas été branché depuis plus longtemps.
+    .label = Avertir quand un disque de sauvegarde est absent depuis (jours)
+
 setting-notifications-jobs =
     .description = Affiche une notification sur le bureau quand un long export ou un lot se termine ou échoue alors qu’aucune fenêtre de Helios n’a le focus.
     .label = Notifier la fin d’une longue tâche

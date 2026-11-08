@@ -2,7 +2,13 @@
 //! the status bar's badge; the badge opens the Health page listing it;
 //! "Ignore" hides it (under "Ignored (1)") and clears the badge; "Show
 //! again" brings it back.
+//!
+//! Helios's own checks over a temporary library, fake volumes and cards:
+//! the backup strategy set, the photos meeting it, the backup disks seen
+//! lately, the copies verified, the cards safe to format, and the library
+//! opening with room; each finding's fix runs its command.
 
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -13,8 +19,15 @@ use egui_pop::core::indicator::{self, Tone};
 use helios_core::Message;
 use helios_gui::shell::HEALTH_BADGE;
 use helios_gui::{Shell, headless, helios_panels};
+use helios_health::backup::{Backup, CardShort};
 use helios_health::runner::{Runner, Schedule};
 use helios_health::{Check, Context, Finding, Findings, Level, Registry};
+use helios_shell::commands::Origin;
+use helios_storage::strategy::{self, Scope, Strategy};
+use helios_storage::{Identity, Role, Volume, VolumeId, VolumeKind, detect, registry, scan};
+use helios_vault::Vault;
+use helios_vault_sqlite::SqliteStore;
+use serde_json::json;
 
 /// A check that always finds the same problem.
 struct Broken;
@@ -162,4 +175,298 @@ fn the_health_page_keeps_its_size() {
         h.query_by_label("Check now").is_some()
     });
     headless::assert_window_stable(&mut h, "Health check", 120);
+}
+
+/// When the first scan ran.
+const FIRST: u64 = 86_400 * 10 + 43_200;
+const DAY: u64 = 86_400;
+const GB: u64 = 1_000_000_000;
+
+fn disk(id: &str, name: &str, mount: &Path) -> Volume {
+    Volume {
+        id: VolumeId(id.into()),
+        identified_by: Identity::Uuid,
+        name: name.into(),
+        label: Some(name.into()),
+        kind: VolumeKind::External,
+        capacity: Some(1000 * GB),
+        free: Some(500 * GB),
+        mount: Some(mount.to_path_buf()),
+        ..detect::weak(name, None)
+    }
+}
+
+/// A library (`library.db` in a temporary folder) with one photo on the
+/// "Backup" disk (its role set, its copy not verified yet), and the
+/// "Studio" disk; both seen at `FIRST`.
+struct Library {
+    dir: PathBuf,
+    file: PathBuf,
+    vault: Arc<Vault<SqliteStore>>,
+    studio: Volume,
+    backup: Volume,
+}
+
+impl Library {
+    fn new(name: &str) -> Self {
+        let dir =
+            std::env::temp_dir().join(format!("helios-gui-health-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let (a, b) = (dir.join("studio"), dir.join("backup"));
+        std::fs::create_dir_all(&a).unwrap();
+        std::fs::create_dir_all(&b).unwrap();
+        let photo = b.join("photo.jpg");
+        std::fs::write(&photo, b"not really a jpeg, enough for the vault").unwrap();
+        let file = dir.join("library.db");
+        let vault = Arc::new(Vault::new(SqliteStore::open(&file).unwrap()));
+        vault.import_file(&photo, 1).unwrap();
+        let studio = disk("uuid:studio", "Studio", &a);
+        let mut backup = disk("uuid:backup", "Backup", &b);
+        scan::scan(&vault, &[studio.clone(), backup.clone()], "pc", FIRST, None).unwrap();
+        backup.roles.insert(Role::Backup);
+        registry::save(&vault, &backup).unwrap();
+        Self {
+            dir,
+            file,
+            vault,
+            studio,
+            backup,
+        }
+    }
+
+    fn strategy(&self, strategy: Option<&Strategy>) {
+        strategy::save(&self.vault, &Scope::Library, strategy).unwrap();
+    }
+
+    /// What a run reads with `mounted` plugged in at `now`.
+    fn context(&self, mounted: &[&Volume], now: u64) -> Context {
+        let mounted: Vec<Volume> = mounted.iter().map(|v| (*v).clone()).collect();
+        Context {
+            volumes: mounted.clone(),
+            library: Some(self.dir.clone()),
+            vault: Some(self.file.clone()),
+            backup: Some(Backup::read(&self.vault, &mounted, now).unwrap()),
+        }
+    }
+}
+
+impl Drop for Library {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.dir);
+    }
+}
+
+/// A shell running Helios's checks over `ctx`, its Health page open
+/// once the first run is in.
+fn checked(ctx: Context) -> Harness<'static, Shell> {
+    let mut shell = Shell::new(helios_panels(), None);
+    shell.set_health(Runner::new(
+        Registry::builtin(),
+        move || ctx.clone(),
+        Findings::default(),
+        Schedule::new(Instant::now(), Duration::ZERO, Duration::from_hours(1)),
+    ));
+    let mut h = headless::harness(shell, vec2(1280.0, 900.0));
+    until(&mut h, "a first run", |h| {
+        h.state()
+            .health()
+            .is_some_and(|r| r.findings().ran() && !r.running())
+    });
+    h.state_mut()
+        .run(
+            helios_gui::shell::HEALTH_COMMAND,
+            serde_json::Value::Null,
+            Origin::User,
+        )
+        .unwrap();
+    until(&mut h, "the page", |h| {
+        h.query_by_label("Check now").is_some()
+    });
+    h
+}
+
+/// The finding `id` of the last run: its level, message and fix.
+fn finding(h: &Harness<'_, Shell>, id: &str) -> Option<Finding> {
+    let runner = h.state().health()?;
+    let findings = runner.findings();
+    findings.shown().into_iter().find(|f| f.id == id).cloned()
+}
+
+/// Runs `id`'s fix, as its "Fix…" button does.
+fn fix(h: &mut Harness<'_, Shell>, id: &str) {
+    let f = finding(h, id).expect(id).fix.expect("a fix");
+    h.state_mut().run(&f.command, f.args, Origin::User).unwrap();
+    h.run();
+}
+
+#[test]
+fn no_strategy_is_a_warning_whose_fix_opens_the_storage_page() {
+    let lib = Library::new("none");
+    let mut h = checked(lib.context(&[&lib.studio, &lib.backup], FIRST));
+    until(&mut h, "the finding", |h| {
+        h.query_by_label("No backup is set up").is_some()
+    });
+    let f = finding(&h, "backup.strategy").unwrap();
+    assert_eq!(f.level, Level::Warning);
+    // Without a strategy, the other backup checks say nothing.
+    for id in [
+        "backup.met",
+        "backup.destinations-seen",
+        "backup.unverified",
+    ] {
+        assert!(finding(&h, id).is_none(), "{id}");
+    }
+    assert!(!h.state().storage_page_open());
+    fix(&mut h, "backup.strategy");
+    assert!(h.state().storage_page_open(), "the strategy editor's page");
+
+    // Set: fine.
+    lib.strategy(Some(&Strategy::default()));
+    let h = checked(lib.context(&[&lib.studio, &lib.backup], FIRST));
+    assert_eq!(finding(&h, "backup.strategy").unwrap().level, Level::Ok);
+}
+
+#[test]
+fn photos_short_of_their_copies_offer_back_up_now_or_the_storage_page() {
+    let lib = Library::new("met");
+    lib.strategy(Some(&Strategy::default()));
+    // The backup disk plugged in: "Back up now".
+    let mut h = checked(lib.context(&[&lib.studio, &lib.backup], FIRST));
+    until(&mut h, "the finding", |h| {
+        h.query_by_label("Photos short of their backups: 1")
+            .is_some()
+    });
+    let f = finding(&h, "backup.met").unwrap();
+    assert_eq!(f.level, Level::Warning);
+    assert_eq!(f.fix.unwrap().command, "library.backupNow");
+
+    // None plugged in: the Storage page.
+    let mut h = checked(lib.context(&[&lib.studio], FIRST));
+    let f = finding(&h, "backup.met").unwrap();
+    assert_eq!(f.fix.unwrap().command, "library.storage");
+    fix(&mut h, "backup.met");
+    assert!(h.state().storage_page_open());
+
+    // Verified: met.
+    let photo = lib.vault.images().unwrap()[0].id;
+    strategy::record_verified(
+        &lib.vault,
+        &photo,
+        &lib.backup.id,
+        Path::new("photo.jpg"),
+        FIRST,
+    )
+    .unwrap();
+    let h = checked(lib.context(&[&lib.studio, &lib.backup], FIRST));
+    assert_eq!(finding(&h, "backup.met").unwrap().level, Level::Ok);
+}
+
+#[test]
+fn a_backup_disk_away_too_long_asks_to_be_plugged_in() {
+    let lib = Library::new("seen");
+    lib.strategy(Some(&Strategy::default()));
+    // Away 20 days: past the 14 by default.
+    let mut h = checked(lib.context(&[&lib.studio], FIRST + 20 * DAY));
+    until(&mut h, "the finding", |h| {
+        h.query_by_label("Backup was last seen 20 days ago")
+            .is_some()
+    });
+    let f = finding(&h, "backup.destinations-seen/uuid:backup").unwrap();
+    assert_eq!(f.level, Level::Warning);
+    let x = f.fix.unwrap();
+    assert_eq!(x.command, "library.storage");
+    assert_eq!(x.args["volume"], "uuid:backup");
+    assert_eq!(
+        helios_gui::i18n::text(&h.ctx, x.label),
+        "Plug in Backup to back up"
+    );
+    fix(&mut h, "backup.destinations-seen/uuid:backup");
+    assert!(h.state().storage_page_open());
+
+    // Ten days, or a longer setting: fine.
+    let h = checked(lib.context(&[&lib.studio], FIRST + 10 * DAY));
+    assert_eq!(
+        finding(&h, "backup.destinations-seen").unwrap().level,
+        Level::Ok
+    );
+    let mut ctx = lib.context(&[&lib.studio], FIRST + 20 * DAY);
+    ctx.backup.as_mut().unwrap().destination_days = 30;
+    let h = checked(ctx);
+    assert!(finding(&h, "backup.destinations-seen/uuid:backup").is_none());
+}
+
+#[test]
+fn unverified_copies_offer_back_up_now() {
+    let lib = Library::new("unverified");
+    lib.strategy(Some(&Strategy::default()));
+    let mut h = checked(lib.context(&[&lib.studio, &lib.backup], FIRST));
+    until(&mut h, "the finding", |h| {
+        h.query_by_label("Photos with backup copies not verified: 1")
+            .is_some()
+    });
+    let f = finding(&h, "backup.unverified").unwrap();
+    assert_eq!(f.level, Level::Warning);
+    assert_eq!(f.fix.unwrap().command, "library.backupNow");
+}
+
+#[test]
+fn a_card_short_of_its_backups_is_not_safe_to_format() {
+    let lib = Library::new("cards");
+    lib.strategy(Some(&Strategy::default()));
+    let mut ctx = lib.context(&[&lib.studio, &lib.backup], FIRST);
+    ctx.backup.as_mut().unwrap().cards = vec![
+        CardShort {
+            label: "EOS_DIGITAL".into(),
+            short: 3,
+        },
+        CardShort {
+            label: "SAFE_CARD".into(),
+            short: 0,
+        },
+    ];
+    let mut h = checked(ctx);
+    until(&mut h, "the finding", |h| {
+        h.query_by_label("EOS_DIGITAL is not safe to format yet")
+            .is_some()
+    });
+    assert!(
+        h.query_by_label_contains("Photos on it short of their backups: 3")
+            .is_some()
+    );
+    assert!(finding(&h, "backup.cards/SAFE_CARD").is_none());
+    let f = finding(&h, "backup.cards/EOS_DIGITAL").unwrap();
+    assert_eq!(f.fix.unwrap().command, "library.backupNow");
+}
+
+#[test]
+fn the_library_opens_and_its_disk_needs_room() {
+    let lib = Library::new("library");
+    let mut h = checked(lib.context(&[&lib.studio, &lib.backup], FIRST));
+    until(&mut h, "the finding", |h| {
+        h.query_by_label("The library opens and has room").is_some()
+    });
+
+    // Its disk at 1 GB free: a warning, the fix on the Storage page.
+    let mut home = disk("uuid:home", "Home", &lib.dir);
+    home.free = Some(GB);
+    let mut h = checked(lib.context(&[&home], FIRST));
+    until(&mut h, "the finding", |h| {
+        h.query_by_label("The library's disk is almost full")
+            .is_some()
+    });
+    let x = finding(&h, "library.default").unwrap().fix.unwrap();
+    assert_eq!(x.command, "library.storage");
+    assert_eq!(x.args["volume"], "uuid:home");
+
+    // A file that is no library: a problem, its folder offered.
+    let mut ctx = lib.context(&[&lib.studio], FIRST);
+    let bad = lib.dir.join("broken.db");
+    std::fs::write(&bad, vec![0x5a; 8192]).unwrap();
+    ctx.vault = Some(bad);
+    let h = checked(ctx);
+    let f = finding(&h, "library.default").unwrap();
+    assert_eq!(f.level, Level::Problem);
+    let x = f.fix.unwrap();
+    assert_eq!(x.command, "library.openFolder");
+    assert_eq!(x.args["path"], json!(lib.dir.display().to_string()));
 }

@@ -2319,6 +2319,7 @@ version = "0.74.0"
 dependencies = [
  "helios-core",
  "helios-storage",
+ "helios-vault",
  "log",
  "rusqlite",
  "serde",

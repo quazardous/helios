@@ -1263,11 +1263,29 @@ gui-workspace-template-toolbox = with its tools
 
 gui-workspace-template-version = version
 
+health-card-short = { $card } is not safe to format yet
+
+health-card-short-detail = Photos on it short of their backups: { $count }. Keep the card.
+
+health-cards = Cards safe to format
+
 health-check-crashed = The check { $check } failed
 
 health-check-crashed-detail = It stopped before it could say anything.
 
+health-fix-back-up-now = Back up now
+
+health-fix-library-folder = Open the library's folder
+
+health-fix-no-destination = No backup disk is plugged in: open the Storage page
+
+health-fix-plug-in = Plug in { $volume } to back up
+
+health-fix-set-strategy = Set up a backup strategy on the Storage page
+
 health-fix-show-volume = Show it on the Storage page
+
+health-fix-verify = Back up now, which verifies them
 
 health-free-space = Free space
 
@@ -1278,6 +1296,56 @@ health-free-space-full = { $volume } is almost full
 health-free-space-low = { $volume } is running out of space
 
 health-free-space-ok = { $volume } has room
+
+health-library = The library
+
+health-library-closed = The library cannot be opened
+
+health-library-closed-detail = { $file }: { $error }
+
+health-library-no-room = The library's disk is almost full
+
+health-library-no-room-detail = { $free } free of { $capacity } on { $volume }: the library needs room to grow.
+
+health-library-ok = The library opens and has room
+
+health-library-ok-detail = { $file }
+
+health-met = Photos backed up
+
+health-met-ok = Every photo has its backups
+
+health-met-ok-detail = Photos checked: { $count }
+
+health-met-short = Photos short of their backups: { $count }
+
+health-met-short-detail = Verified copies { $name } asks for per photo: { $copies }
+
+health-seen = Backup disks seen lately
+
+health-seen-ok = Every backup disk was seen lately
+
+health-seen-ok-detail = Within the last { $limit } days
+
+health-seen-stale = { $volume } was last seen { $days } days ago
+
+health-seen-stale-detail = Its backups are not kept up to date while it stays away (more than { $limit } days).
+
+health-strategy = Backup strategy
+
+health-strategy-none = No backup is set up
+
+health-strategy-none-detail = Each photo has one copy, in the Library: a dead disk loses it.
+
+health-strategy-set = Backups follow { $name }
+
+health-strategy-set-detail = Verified copies per photo: { $copies }
+
+health-unverified = Verified copies
+
+health-unverified-detail = A copy counts once it is read back and matches its hash.
+
+health-unverified-some = Photos with backup copies not verified: { $count }
 
 health-vault-damaged = The catalogue is damaged
 

@@ -1,5 +1,6 @@
-//! Helios's own checks: the free space where Helios writes, and the
-//! vault's database integrity.
+//! Helios's own checks: the free space where Helios writes, the vault's
+//! database integrity, and the library opening with room to grow (the
+//! backup checks are in [`crate::backup`]).
 
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -208,6 +209,123 @@ impl Check for VaultIntegrity {
     }
 }
 
+pub const LIBRARY: &str = "library.default";
+
+/// The library (the vault's file): it opens, and its disk has room to
+/// grow (a warning under 5 % or 2 GB free).
+#[derive(Clone, Debug)]
+pub struct Library {
+    pub warn_fraction: f64,
+    pub warn_bytes: u64,
+}
+
+impl Default for Library {
+    fn default() -> Self {
+        Self {
+            warn_fraction: 0.05,
+            warn_bytes: 2_000_000_000,
+        }
+    }
+}
+
+/// Whether the SQLite file at `path` opens and reads.
+pub fn opens(path: &Path) -> Result<(), String> {
+    let db = rusqlite::Connection::open_with_flags(
+        path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .map_err(|e| e.to_string())?;
+    db.busy_timeout(std::time::Duration::from_secs(10))
+        .map_err(|e| e.to_string())?;
+    db.query_row("SELECT count(*) FROM sqlite_master", [], |r| {
+        r.get::<_, i64>(0)
+    })
+    .map(|_| ())
+    .map_err(|e| e.to_string())
+}
+
+impl Check for Library {
+    fn id(&self) -> &str {
+        LIBRARY
+    }
+
+    fn title(&self) -> Message {
+        Message::new("health-library", "The library")
+    }
+
+    fn run(&self, ctx: &Context) -> Vec<Finding> {
+        let Some(path) = &ctx.vault else {
+            return Vec::new();
+        };
+        let file = path.display().to_string();
+        let folder = path
+            .parent()
+            .map(|p| p.display().to_string())
+            .unwrap_or_default();
+        if let Err(e) = opens(path) {
+            return vec![
+                Finding::new(
+                    LIBRARY,
+                    "",
+                    Level::Problem,
+                    Message::new("health-library-closed", "The library cannot be opened"),
+                    Message::new("health-library-closed-detail", "{ $file }: { $error }")
+                        .with("file", file)
+                        .with("error", e),
+                )
+                .fix(Fix {
+                    command: "library.openFolder".into(),
+                    args: json!({ "path": folder }),
+                    label: Message::new("health-fix-library-folder", "Open the library's folder"),
+                }),
+            ];
+        }
+        let holder = ctx
+            .library
+            .as_deref()
+            .and_then(|l| registry::holding(&ctx.volumes, l));
+        if let Some(v) = holder
+            && let (Some(free), Some(capacity)) = (v.free, v.capacity)
+            && (free < self.warn_bytes
+                || (capacity > 0 && (free as f64) < self.warn_fraction * capacity as f64))
+        {
+            return vec![
+                Finding::new(
+                    LIBRARY,
+                    "",
+                    Level::Warning,
+                    Message::new(
+                        "health-library-no-room",
+                        "The library's disk is almost full",
+                    ),
+                    Message::new(
+                        "health-library-no-room-detail",
+                        "{ $free } free of { $capacity } on { $volume }: the library needs room to grow.",
+                    )
+                    .with("free", capacity_text(free))
+                    .with("capacity", capacity_text(capacity))
+                    .with("volume", v.name.clone()),
+                )
+                .fix(Fix {
+                    command: "library.storage".into(),
+                    args: json!({ "volume": v.id.as_str() }),
+                    label: Message::new(
+                        "health-fix-show-volume",
+                        "Show it on the Storage page",
+                    ),
+                }),
+            ];
+        }
+        vec![Finding::new(
+            LIBRARY,
+            "",
+            Level::Ok,
+            Message::new("health-library-ok", "The library opens and has room"),
+            Message::new("health-library-ok-detail", "{ $file }").with("file", file),
+        )]
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
@@ -261,7 +379,7 @@ mod tests {
                 volume("other", "/mnt/o", &[], 0, 64 * GB),
             ],
             library: Some(PathBuf::from("/home/me/Pictures")),
-            vault: None,
+            ..Context::default()
         };
         let found = FreeSpace::default().run(&ctx);
         let ids: Vec<(&str, Level)> = found.iter().map(|f| (f.id.as_str(), f.level)).collect();

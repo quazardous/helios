@@ -4,17 +4,19 @@
 //!
 //! - A [`Check`] has an id, a title and a [`Check::run`] over a
 //!   [`Context`] (the volumes mounted with their roles, the library's
-//!   place, the vault's file), giving [`Finding`]s.
+//!   place, the vault's file, its backups), giving [`Finding`]s.
 //! - A [`Finding`] has a [`Level`] (ok, warning, problem), a message and a
 //!   detail line for people ([`Message`], translated by the desktop), and
 //!   maybe a [`Fix`]: a command with its arguments.
-//! - The [`Registry`] holds the checks: Helios's own ([`checks`]), and
+//! - The [`Registry`] holds the checks: Helios's own ([`checks`],
+//!   [`backup`]), and
 //!   later those plugins bring (the seam is [`Registry::add`]).
 //! - [`Findings`] keeps the last findings in memory beside the
 //!   [`Ignored`] list, saved in a small JSON file and undoable.
 //! - [`runner`] runs every check as one background job, at start (after a
 //!   delay), daily and when a volume comes or goes.
 
+pub mod backup;
 pub mod checks;
 pub mod runner;
 
@@ -96,6 +98,9 @@ pub struct Context {
     pub library: Option<PathBuf>,
     /// The vault's database file, when there is one.
     pub vault: Option<PathBuf>,
+    /// The library's backups, read from the vault; `None` without one
+    /// (the backup checks then say nothing).
+    pub backup: Option<backup::Backup>,
 }
 
 /// One check of the setup.
@@ -131,6 +136,12 @@ impl Registry {
         let mut r = Self::default();
         r.add(Arc::new(checks::FreeSpace::default()));
         r.add(Arc::new(checks::VaultIntegrity));
+        r.add(Arc::new(checks::Library::default()));
+        r.add(Arc::new(backup::StrategySet));
+        r.add(Arc::new(backup::StrategyMet));
+        r.add(Arc::new(backup::DestinationsSeen));
+        r.add(Arc::new(backup::Unverified));
+        r.add(Arc::new(backup::Cards));
         r
     }
 

@@ -1102,7 +1102,7 @@ centre): 30 seconds after start, then daily, and when a volume is
 mounted or goes (the storage watch). A check is a `helios_health::Check`
 (`id`, `title`, `run(&Context) -> Vec<Finding>`), kept in a `Registry`
 that plugins will extend; a check that panics becomes a problem of its
-own. The first two:
+own. Helios's own:
 
 - **Free space** on the library's volume (the one holding the vault's
   folder) and on every volume with a library, archive, backup or
@@ -1111,6 +1111,29 @@ own. The first two:
   [library.md](library.md#the-storage-page)).
 - **Catalogue integrity**: SQLite's `PRAGMA quick_check` on the vault,
   read-only; anything but `ok` is a problem.
+- **The library**: the vault's file opens read-only and reads, else a
+  problem whose fix opens its folder (`library.openFolder`); the volume
+  holding it under 5 % or 2 GB free is a warning whose fix opens the
+  Storage page on that volume.
+
+The backup checks (`helios_health::backup`) read the library's strategy,
+the volumes the vault knows and every photo's backup status once per run
+(`Backup::read`); without a vault they say nothing, and without a
+strategy only the first speaks:
+
+- **Backup strategy**: none is a warning; its fix opens the Storage
+  page, whose strategy editor is at the top.
+- **Photos backed up**: how many photos are short of the copies the
+  strategy asks for. The fix is "Back up now" (`library.backupNow`) when
+  a destination is plugged in, else the Storage page.
+- **Backup disks seen lately**: each destination volume not plugged in
+  and last seen more days ago than the `health.destinationDays` setting
+  (14 by default) is a warning; its fix, "Plug in <disk> to back up",
+  opens the Storage page on that disk.
+- **Verified copies**: photos with backup copies that have no
+  verification record; "Back up now" reads them back and records them.
+- **Cards safe to format**: each card an import left short of its
+  backups and still inserted is a warning, with "Back up now".
 
 While a warning or a problem is shown, the status bar has a badge: a
 warning sign and how many findings need attention, red for a problem.

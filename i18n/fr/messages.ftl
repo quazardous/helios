@@ -1295,9 +1295,17 @@ gui-health-fix = Corriger…
 
 gui-health-ignore = Ignorer
 
+health-card-short = { $card } ne peut pas encore être formatée
+
+health-card-short-detail = Photos sans toutes leurs sauvegardes : { $count }. Gardez la carte.
+
+health-cards = Cartes prêtes à formater
+
 health-check-crashed = La vérification { $check } a échoué
 
 health-check-crashed-detail = Elle s’est arrêtée avant de pouvoir dire quoi que ce soit.
+
+health-fix-verify = Sauvegarder maintenant, ce qui les vérifie
 
 health-free-space = Espace libre
 
@@ -1309,6 +1317,16 @@ health-free-space-full = { $volume } est presque plein
 
 health-free-space-detail = { $free } libres sur { $capacity } ({ $percent } %)
 
+health-fix-back-up-now = Sauvegarder maintenant
+
+health-fix-library-folder = Ouvrir le dossier de la bibliothèque
+
+health-fix-no-destination = Aucun disque de sauvegarde branché : ouvrir la page Stockage
+
+health-fix-plug-in = Brancher { $volume } pour sauvegarder
+
+health-fix-set-strategy = Définir une stratégie de sauvegarde dans la page Stockage
+
 health-fix-show-volume = Le montrer dans la page Stockage
 
 health-vault-integrity = Intégrité du catalogue
@@ -1316,6 +1334,56 @@ health-vault-integrity = Intégrité du catalogue
 health-vault-ok = Le catalogue est sain
 
 health-vault-ok-detail = { $file } a passé la vérification rapide de SQLite
+
+health-library = La bibliothèque
+
+health-library-closed = La bibliothèque ne s'ouvre pas
+
+health-library-closed-detail = { $file } : { $error }
+
+health-library-no-room = Le disque de la bibliothèque est presque plein
+
+health-library-no-room-detail = { $free } libres sur { $capacity } sur { $volume } : la bibliothèque a besoin de place pour grandir.
+
+health-library-ok = La bibliothèque s'ouvre et a de la place
+
+health-library-ok-detail = { $file }
+
+health-met = Photos sauvegardées
+
+health-met-ok = Chaque photo a ses sauvegardes
+
+health-met-ok-detail = Photos vérifiées : { $count }
+
+health-met-short = Photos sans toutes leurs sauvegardes : { $count }
+
+health-met-short-detail = Copies vérifiées que { $name } demande par photo : { $copies }
+
+health-seen = Disques de sauvegarde vus récemment
+
+health-seen-ok = Chaque disque de sauvegarde a été vu récemment
+
+health-seen-ok-detail = Dans les { $limit } derniers jours
+
+health-seen-stale = { $volume } a été vu pour la dernière fois il y a { $days } jours
+
+health-seen-stale-detail = Ses sauvegardes ne sont pas tenues à jour tant qu'il reste absent (plus de { $limit } jours).
+
+health-strategy = Stratégie de sauvegarde
+
+health-strategy-none = Aucune sauvegarde n'est configurée
+
+health-strategy-none-detail = Chaque photo n'a qu'une copie, dans la bibliothèque : un disque qui lâche la perd.
+
+health-strategy-set = Les sauvegardes suivent { $name }
+
+health-strategy-set-detail = Copies vérifiées par photo : { $copies }
+
+health-unverified = Copies vérifiées
+
+health-unverified-detail = Une copie compte une fois relue et conforme à son empreinte.
+
+health-unverified-some = Photos dont des copies de sauvegarde ne sont pas vérifiées : { $count }
 
 health-vault-damaged = Le catalogue est endommagé
 

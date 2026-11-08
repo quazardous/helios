@@ -23,7 +23,7 @@
 //! now" runs `library.backupNow`.
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use egui::Context as Egui;
 use egui_pop::api::toasts::{TOASTS, Toast};
@@ -196,6 +196,8 @@ pub(crate) struct StoragePage {
     /// The cards an import left short of their backups: told safe to
     /// format once a backup job makes them so, while still inserted.
     waiting: Vec<Card>,
+    /// The same, for the health check's thread.
+    shared_waiting: Arc<Mutex<Vec<Card>>>,
 }
 
 /// What the page's controls asked.
@@ -280,6 +282,22 @@ impl Shell {
             self.storage.waiting.retain(|c| c.path != card.path);
             self.storage.waiting.push(card);
         }
+        self.share_waiting();
+    }
+
+    /// The cards waiting for their backups, as the health check's thread
+    /// reads them (kept current by the shell).
+    pub fn waiting_cards(&self) -> Arc<Mutex<Vec<Card>>> {
+        self.storage.shared_waiting.clone()
+    }
+
+    fn share_waiting(&self) {
+        let mut shared = self
+            .storage
+            .shared_waiting
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        shared.clone_from(&self.storage.waiting);
     }
 
     /// The cards still waiting for their backups.
@@ -328,6 +346,7 @@ impl Shell {
                 }
             }
         }
+        self.share_waiting();
     }
 
     /// The import window's strategy line, and whether it is the one
