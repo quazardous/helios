@@ -5,7 +5,9 @@ use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::{Arc, Condvar, Mutex, Weak};
 
-use crate::cache::ThumbCache;
+use helios_load::Kind;
+
+use crate::cache::{Key, ThumbCache};
 use crate::{LARGE, Rgb8, SMALL, key_of, read};
 
 /// An image whose thumbnail is wanted, and where its file is (none when
@@ -270,7 +272,7 @@ fn work(shared: &Shared) {
 fn small(shared: &Shared, job: &Job) -> Outcome {
     let key = key_of(&job.id);
     if let Some(cache) = &shared.cache
-        && let Some(thumb) = cache.get(&key, SMALL)
+        && let Some(thumb) = cached(cache, job, &key, SMALL)
     {
         if job.path.is_some() && !cache.contains(&key, LARGE) {
             queue_large(shared, job);
@@ -291,6 +293,32 @@ fn small(shared: &Shared, job: &Job) -> Outcome {
         Ok(None) => Outcome::NoPreview,
         Err(e) => Outcome::Failed(e),
     }
+}
+
+/// The cached thumbnail of `job` at `size`, when it is still right. An
+/// entry stored before this reader ([`crate::cache::READER`]) of a
+/// picture its EXIF orientation turns was read sideways: its entries are
+/// dropped, to be read again. One of a picture with nothing to turn is
+/// marked and kept, never read again. A raw's is kept as it is: its tag
+/// would cost reading the whole raw, for every raw.
+fn cached(cache: &ThumbCache, job: &Job, key: &Key, size: u32) -> Option<Rgb8> {
+    let (rgb, current) = cache.get_marked(key, size)?;
+    if current {
+        return Some(rgb);
+    }
+    let Some(path) = job.path.as_deref().filter(|p| Kind::of(p) == Kind::Picture) else {
+        return Some(rgb);
+    };
+    let Ok(bytes) = std::fs::read(path) else {
+        return Some(rgb);
+    };
+    if helios_load::picture_orientation(&bytes) == 1 {
+        cache.mark(key);
+        return Some(rgb);
+    }
+    cache.remove(key, SMALL);
+    cache.remove(key, LARGE);
+    None
 }
 
 fn queue_large(shared: &Shared, job: &Job) {
@@ -320,7 +348,7 @@ fn fill_large(shared: &Shared, job: &Job) {
 fn show_large(shared: &Shared, job: &Job) -> Option<Rgb8> {
     let key = key_of(&job.id);
     if let Some(cache) = &shared.cache
-        && let Some(rgb) = cache.get(&key, LARGE)
+        && let Some(rgb) = cached(cache, job, &key, LARGE)
     {
         return Some(rgb);
     }

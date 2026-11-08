@@ -14,7 +14,7 @@ pub mod cache;
 pub mod pool;
 pub mod read;
 
-pub use cache::{DEFAULT_LIMIT, Key, ThumbCache};
+pub use cache::{DEFAULT_LIMIT, Key, READER, ThumbCache};
 pub use pool::{Job, Loader, Outcome, workers};
 
 /// The library's thumbnails: their long side, in pixels.

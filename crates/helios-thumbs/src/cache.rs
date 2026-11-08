@@ -19,6 +19,31 @@ pub const DEFAULT_LIMIT: u64 = 2 * 1024 * 1024 * 1024;
 /// The JPEG quality of the cache's files.
 pub const QUALITY: u8 = 80;
 
+/// The version of the reader whose thumbnails [`ThumbCache::put`] stores,
+/// written in each entry as a JPEG comment: 2 since a file's preview is
+/// turned by its EXIF orientation. An entry without it was read before
+/// (see [`ThumbCache::get_marked`]).
+pub const READER: u32 = 2;
+
+/// The comment that says an entry was stored by [`READER`].
+const MARK: &[u8] = b"helios-thumbs reader 2";
+
+/// Whether a JPEG starts with [`MARK`], right after its start marker.
+fn marked(jpeg: &[u8]) -> bool {
+    jpeg.get(2..4) == Some(&[0xFF, 0xFE][..]) && jpeg.get(6..6 + MARK.len()) == Some(MARK)
+}
+
+/// A JPEG with [`MARK`] as a comment right after its start marker.
+fn with_mark(jpeg: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(jpeg.len() + MARK.len() + 4);
+    out.extend_from_slice(&jpeg[..2.min(jpeg.len())]);
+    out.extend_from_slice(&[0xFF, 0xFE]);
+    out.extend_from_slice(&u16::try_from(MARK.len() + 2).unwrap_or(0).to_be_bytes());
+    out.extend_from_slice(MARK);
+    out.extend_from_slice(jpeg.get(2..).unwrap_or_default());
+    out
+}
+
 /// What a cache entry is the thumbnail of.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Key {
@@ -248,6 +273,13 @@ impl ThumbCache {
     /// The thumbnail of `key` at `size` pixels on its long side, when the
     /// cache holds it: marked used, so evicted last.
     pub fn get(&self, key: &Key, size: u32) -> Option<Rgb8> {
+        self.get_marked(key, size).map(|(rgb, _)| rgb)
+    }
+
+    /// [`ThumbCache::get`], and whether the entry was stored by this
+    /// reader ([`READER`]): one stored before was read unturned (a
+    /// portrait picture's sideways).
+    pub fn get_marked(&self, key: &Key, size: u32) -> Option<(Rgb8, bool)> {
         let rel = key.file(size);
         let tick = self.tick();
         {
@@ -255,9 +287,9 @@ impl ThumbCache {
             index.entries.get_mut(&rel)?.used = tick;
         }
         let path = self.dir.join(&rel);
-        let decoded = std::fs::read(&path)
-            .ok()
-            .and_then(|bytes| image::load_from_memory(&bytes).ok());
+        let bytes = std::fs::read(&path).ok();
+        let current = bytes.as_deref().is_some_and(marked);
+        let decoded = bytes.and_then(|bytes| image::load_from_memory(&bytes).ok());
         let Some(img) = decoded else {
             // Gone or damaged: forgotten.
             self.forget(&rel);
@@ -268,11 +300,31 @@ impl ThumbCache {
             let _ = f.set_modified(SystemTime::now());
         }
         let rgb = img.to_rgb8();
-        Some(Rgb8 {
-            width: rgb.width(),
-            height: rgb.height(),
-            pixels: rgb.into_raw(),
-        })
+        Some((
+            Rgb8 {
+                width: rgb.width(),
+                height: rgb.height(),
+                pixels: rgb.into_raw(),
+            },
+            current,
+        ))
+    }
+
+    /// Marks the entries of `key` (both sizes) as stored by this reader
+    /// ([`READER`]), their pixels kept: what an entry stored before gets
+    /// once it is known to be right (a file with nothing to turn).
+    pub fn mark(&self, key: &Key) {
+        for size in [crate::SMALL, crate::LARGE] {
+            if !self.contains(key, size) {
+                continue;
+            }
+            let Ok(jpeg) = std::fs::read(self.dir.join(key.file(size))) else {
+                continue;
+            };
+            if !marked(&jpeg) {
+                let _ = self.put_jpeg(key, size, &with_mark(&jpeg));
+            }
+        }
     }
 
     /// Removes the entry of `key` at `size`, when there is one (its
@@ -291,7 +343,8 @@ impl ThumbCache {
         let _ = std::fs::remove_file(self.dir.join(rel));
     }
 
-    /// Stores the thumbnail of `key` at `size`, as a JPEG; then evicts
+    /// Stores the thumbnail of `key` at `size`, as a JPEG marked as this
+    /// reader's ([`READER`]); then evicts
     /// what was used least recently until the cache is under its limit.
     ///
     /// # Errors
@@ -303,7 +356,7 @@ impl ThumbCache {
         image::codecs::jpeg::JpegEncoder::new_with_quality(Cursor::new(&mut jpeg), QUALITY)
             .encode_image(&rgb)
             .map_err(|e| e.to_string())?;
-        self.put_jpeg(key, size, &jpeg)
+        self.put_jpeg(key, size, &with_mark(&jpeg))
     }
 
     /// The file of an entry, relative to the cache's folder.
@@ -312,7 +365,7 @@ impl ThumbCache {
     }
 
     /// Stores a thumbnail already encoded as a JPEG (a render's, a copy of
-    /// another entry); then evicts as [`ThumbCache::put`] does.
+    /// another entry), as it is; then evicts as [`ThumbCache::put`] does.
     ///
     /// # Errors
     /// The file cannot be written.

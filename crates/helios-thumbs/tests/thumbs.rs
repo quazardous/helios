@@ -438,3 +438,65 @@ fn a_raw_shot_in_portrait_gets_its_embedded_preview_upright() {
     // Bytes rawler cannot read have no tag: kept as stored.
     assert_eq!(helios_load::raw_orientation((*file).clone().into()), 1);
 }
+
+/// A thumbnail encoded as a JPEG without the reader's mark: an entry
+/// stored before pictures were turned.
+fn unmarked_jpeg(thumb: &Rgb8) -> Vec<u8> {
+    let img = image::RgbImage::from_raw(thumb.width, thumb.height, thumb.pixels.clone()).unwrap();
+    let mut out = Vec::new();
+    image::codecs::jpeg::JpegEncoder::new_with_quality(Cursor::new(&mut out), 80)
+        .encode_image(&img)
+        .unwrap();
+    out
+}
+
+#[test]
+fn an_old_sideways_entry_is_read_again_and_the_others_are_kept() {
+    let dir = scratch("reader");
+    let cache = std::sync::Arc::new(ThumbCache::open(&dir.join("cache"), 1 << 30).unwrap());
+    let level = write(&dir, "level.jpg", &gradient_jpeg(1200, 800));
+    let portrait = write(&dir, "portrait.jpg", &tagged_jpeg(300, 200, 6));
+    let mut raw = vec![0u8; 4096];
+    raw.extend_from_slice(&gradient_jpeg(1200, 800));
+    let raw = write(&dir, "shot.nef", &raw);
+    // Entries stored before: noise, 256×170, where a read gives 256×171
+    // (171×256 turned).
+    for id in ["level", "portrait", "raw"] {
+        cache
+            .put_jpeg(&Key::preview(id), SMALL, &unmarked_jpeg(&noise(3)))
+            .unwrap();
+        cache
+            .put_jpeg(&Key::preview(id), LARGE, &unmarked_jpeg(&noise(4)))
+            .unwrap();
+        assert!(!cache.get_marked(&Key::preview(id), SMALL).unwrap().1);
+    }
+    let size = |id: &str, path: &Path| match one(
+        Some(cache.clone()),
+        Job {
+            id: id.into(),
+            path: Some(path.to_path_buf()),
+        },
+    ) {
+        Outcome::Thumb(t) => (t.width, t.height),
+        other => panic!("{id}: {other:?}"),
+    };
+    // The portrait picture's entry was sideways: read again, upright.
+    assert_eq!(size("portrait", &portrait), (171, 256));
+    let (_, current) = cache.get_marked(&Key::preview("portrait"), SMALL).unwrap();
+    assert!(current, "stored by this reader");
+    // The picture with nothing to turn keeps its entries, marked: no read.
+    assert_eq!(size("level", &level), (256, 170));
+    for s in [SMALL, LARGE] {
+        let (thumb, current) = cache.get_marked(&Key::preview("level"), s).unwrap();
+        assert!(current, "marked at {s}");
+        assert_eq!((thumb.width, thumb.height), (256, 170), "kept at {s}");
+    }
+    // Marked: its file is not read again, even gone.
+    std::fs::remove_file(&level).unwrap();
+    assert_eq!(size("level", &level), (256, 170));
+    // A raw's entry is kept as it is: no read of the raw.
+    assert_eq!(size("raw", &raw), (256, 170));
+    let (_, current) = cache.get_marked(&Key::preview("raw"), SMALL).unwrap();
+    assert!(!current, "a raw's old entry is left as it was");
+    let _ = std::fs::remove_dir_all(&dir);
+}
