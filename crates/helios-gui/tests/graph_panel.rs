@@ -392,6 +392,23 @@ fn copied_nodes_paste_renamed_and_wired_as_one_undo_step() {
 /// included).
 const FRAME_BUDGET: std::time::Duration = std::time::Duration::from_millis(100);
 
+/// Checks a frame time against [`FRAME_BUDGET`]. Over budget fails, except
+/// under `HELIOS_SHARED_MACHINE` (set by the bench box's shared test jobs:
+/// other jobs and throttling slow every frame there), where it only warns.
+/// A real regression still fails on CI and in the box's `test-times` job,
+/// which holds the machine alone (see docs/bench.md).
+fn within_budget(what: &str, mean: std::time::Duration) {
+    if mean <= FRAME_BUDGET {
+        return;
+    }
+    let message = format!("{what}: {mean:?} a frame, over {FRAME_BUDGET:?}");
+    if std::env::var_os("HELIOS_SHARED_MACHINE").is_some_and(|v| !v.is_empty() && v != "0") {
+        eprintln!("warning (shared machine, budget not enforced): {message}");
+    } else {
+        panic!("{message}");
+    }
+}
+
 /// The masks stress network (three masked modules, 58 nodes) as a
 /// workspace's network: its nodes named without dots (a dot names an
 /// opened composite's inner node), its source the workspace's.
@@ -439,6 +456,9 @@ fn stress_network() -> Value {
     })
 }
 
+/// The Graph panel draws the masks stress network within
+/// [`FRAME_BUDGET`] at each level. The budget only warns on a shared
+/// machine (see [`within_budget`]).
 #[test]
 fn the_masks_stress_network_stays_fluid() {
     let root = temp("fluid");
@@ -465,11 +485,7 @@ fn the_masks_stress_network_stays_fluid() {
         for _ in 0..frames {
             h.step();
         }
-        let mean = start.elapsed() / frames;
-        assert!(
-            mean <= FRAME_BUDGET,
-            "{level}: {mean:?} a frame, over {FRAME_BUDGET:?}"
-        );
+        within_budget(level, start.elapsed() / frames);
     }
     std::fs::remove_dir_all(&root).unwrap();
 }

@@ -349,6 +349,11 @@ env = { CARGO_NET_OFFLINE = "true" }
 mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
 timeout = "1h"
 
+# HELIOS_SHARED_MACHINE=1 in the test jobs that share the box (test,
+# test-crate, test-affected, release): frame-time budgets only warn there,
+# since other jobs and the box's throttling slow every frame. They fail on
+# CI and in test-times, which holds the machine alone (docs/bench.md).
+
 # the CI profile (no retry, no fail-fast), its JUnit report and a Markdown
 # summary of the slowest tests in /out
 [jobs.test]
@@ -362,7 +367,7 @@ command = """mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ &&
 cp target/nextest/ci/junit.xml /out/ \
  && cargo xtask test-times --from-junit /out/junit.xml --summary > /out/summary.md; \
 exit $rc"""
-env = { CARGO_NET_OFFLINE = "true" }
+env = { CARGO_NET_OFFLINE = "true", HELIOS_SHARED_MACHINE = "1" }
 mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
 timeout = "1h"
 
@@ -409,7 +414,7 @@ memory = "4g"
 cwd = "/work/${src:-helios}"
 command = """mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && \
 t="${test:-}"; case "$t" in lib) sel="--lib";; "") sel="";; *) sel="--test $t";; esac; cargo nextest run --locked --fail-fast -p ${crate} $sel ${filter:-}"""
-env = { CARGO_NET_OFFLINE = "true" }
+env = { CARGO_NET_OFFLINE = "true", HELIOS_SHARED_MACHINE = "1" }
 mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
 timeout = "30m"
 
@@ -430,7 +435,7 @@ cargo nextest run --workspace --locked --profile ci --test-threads 12 -E "$filte
 cp target/nextest/ci/junit.xml /out/ \
  && cargo xtask test-times --from-junit /out/junit.xml --summary > /out/summary.md; \
 exit $rc"""
-env = { CARGO_NET_OFFLINE = "true" }
+env = { CARGO_NET_OFFLINE = "true", HELIOS_SHARED_MACHINE = "1" }
 mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
 timeout = "1h"
 
@@ -462,7 +467,7 @@ cwd = "/work/${src:-helios}"
 command = """mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && \
 cargo xtask release && cargo check --offline --workspace && cargo nextest run --workspace --profile ci && \
 git add -A && git diff --cached --binary > /out/release.patch && grep -m1 '^version' Cargo.toml > /out/version.txt"""
-env = { CARGO_NET_OFFLINE = "true" }
+env = { CARGO_NET_OFFLINE = "true", HELIOS_SHARED_MACHINE = "1" }
 mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
 timeout = "1h"
 

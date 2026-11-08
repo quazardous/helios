@@ -53,6 +53,17 @@ Jobs of the Benchfile:
 
 The timing jobs hold the whole machine (`exclusive = ["machine"]`): nothing
 else runs meanwhile, so their numbers compare from one run to the next.
+
+The other test jobs share the box (`test`, `test-crate`, `test-affected`,
+`release`): they run beside other jobs on a machine that may throttle, so a
+frame-time budget there measures the load, not the code. Their Benchfile
+entries set `HELIOS_SHARED_MACHINE=1`, and a test asserting a frame time
+only warns under it (the rest of the test still asserts). The budget is
+enforced where the machine is not shared: on CI, in `test-times` (the
+whole suite, the machine alone) and in any local run. A frame-time test
+reads the variable through a helper, as the Graph panel's
+`within_budget`, and its name matches the nextest `alone` group
+(`stays_fluid`, `frame_budget`, `frames_stay`).
 Every other job runs without a GPU: the GPU backend and the GUI snapshot
 tests use Mesa's lavapipe (software Vulkan), as in CI.
 
