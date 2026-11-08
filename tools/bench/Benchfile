@@ -43,7 +43,7 @@ run = [
       pipewire wireplumber pipewire-pulseaudio pipewire-alsa \
  && dnf clean all""",
   # every download is pinned and checked: rustup-init 1.29.1 (its published
-  # sha256), cargo-nextest 0.9.148, wbox-mcp at a commit
+  # sha256), cargo-nextest 0.9.148, wbox-mcp 0.14.0 at its release commit
   # the toolchain of rust-toolchain.toml, outside CARGO_HOME (a cache)
   """curl -sSfL -o /tmp/rustup-init \
       https://static.rust-lang.org/rustup/archive/1.29.1/x86_64-unknown-linux-gnu/rustup-init \
@@ -72,24 +72,28 @@ run = [
   # darktable, and a session bus daemon for darktable's D-Bus Lua method
   """dnf -y install --setopt=install_weak_deps=False libasan dbus-daemon \
  && dnf clean all""",
-  # wbox drives a headless labwc (egui-pop-screenshots)
-  """python3 -m venv /opt/wbox \
- && /opt/wbox/bin/pip install --quiet \
-      "git+https://github.com/quazardous/wbox-mcp.git@1383aee1a0e0ccbe4903f997a85bdf4368346159\"""",
-  # a headless mutter for GNOME-only GUI bugs (egui-pop's tools/wbox/mutter.py,
-  # `egui-pop-wbox compositor=mutter`): input through its RemoteDesktop D-Bus
-  # API, held by jeepney 0.9.0 (its published sha256), frames through
-  # ScreenCast and PipeWire, captured by GStreamer. `--allowerasing`:
-  # pipewire pulls systemd, which replaces the base image's
-  # systemd-standalone-tmpfiles
+  # wbox's headless mutter (`compositor: mutter`, `egui-pop-wbox
+  # compositor=mutter`) for GNOME-only GUI bugs, with what wbox's docs ask
+  # for it: mutter, dbus-daemon (above), PipeWire and WirePlumber, GStreamer
+  # with pipewiresrc and videoconvert, and gi-cairo (PyGObject) for GTK test
+  # apps. `--allowerasing`: pipewire pulls systemd, which replaces the base
+  # image's systemd-standalone-tmpfiles
   """dnf -y install --allowerasing --setopt=install_weak_deps=False mutter pipewire wireplumber \
-      pipewire-gstreamer gstreamer1 gstreamer1-plugins-base gstreamer1-plugins-good \
+      pipewire-gstreamer gstreamer1 gstreamer1-plugins-base gstreamer1-plugins-good python3-gobject \
  && dnf clean all""",
-  """curl -sSfL -o /tmp/jeepney-0.9.0-py3-none-any.whl \
+  # wbox drives a headless labwc or mutter (egui-pop-screenshots,
+  # egui-pop-wbox): wbox-mcp 0.14.0 with its `mutter` extra, whose jeepney
+  # (pure Python D-Bus) is installed first from its pinned 0.9.0 wheel
+  # (published sha256), so pip keeps it
+  """python3 -m venv /opt/wbox \
+ && curl -sSfL -o /tmp/jeepney-0.9.0-py3-none-any.whl \
       https://files.pythonhosted.org/packages/b2/a3/e137168c9c44d18eff0376253da9f1e9234d0239e0ee230d2fee6cea8e55/jeepney-0.9.0-py3-none-any.whl \
  && echo "97e5714520c16fc0a45695e5365a2e11b81ea79bba796e26f9f1d178cb182683  /tmp/jeepney-0.9.0-py3-none-any.whl" | sha256sum -c - \
  && /opt/wbox/bin/pip install --quiet --no-deps /tmp/jeepney-0.9.0-py3-none-any.whl \
- && rm /tmp/jeepney-0.9.0-py3-none-any.whl""",
+ && rm /tmp/jeepney-0.9.0-py3-none-any.whl \
+ && /opt/wbox/bin/pip install --quiet \
+      "wbox-mcp[mutter] @ git+https://github.com/quazardous/wbox-mcp.git@aafe8058a87c08ecf1e6e207e4266606f4e686fd" \
+ && /opt/wbox/bin/python3 -c "import wbox, jeepney; assert wbox.__version__ == '0.14.0', wbox.__version__\"""",
 ]
 # CARGO_HOME is the registry cache; the toolchain lives in /opt. Line
 # tables only and no incremental state keep the per-branch target small.
@@ -700,8 +704,8 @@ timeout = "1h"
 # egui-pop's gallery in a headless compositor (wbox), driven by one of its
 # scenarios (`script=`, a file of egui-pop's tools/wbox, titlebar.py by
 # default): the release build, then the script's JSON lines in the log and
-# its screenshots in /out. `compositor=mutter` runs it in a headless mutter
-# (tools/wbox/mutter.py) instead of labwc, for GNOME-only bugs
+# its screenshots in /out. `compositor=mutter` runs it in wbox's headless
+# mutter instead of labwc, for GNOME-only bugs
 [jobs.egui-pop-wbox]
 about = "egui-pop: a wbox scenario of tools/wbox (script=) on the gallery in release, in a headless labwc or mutter (compositor=)"
 first = [{ job = "egui-pop-check", pass = ["branch", "egui_pop", "crate"] }]
