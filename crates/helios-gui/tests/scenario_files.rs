@@ -1,12 +1,12 @@
 //! Helios's scenarios (`tests/scenarios/*.ron`) are run live, against a
 //! running helios-gui in a headless compositor, by the box's `scenarios`
 //! job (tools/bench/scenarios.py). Here, each file reads as a scenario
-//! and names only Helios's commands, so a typo fails in seconds rather
+//! and names only Helios's commands and collectors, so a typo fails in seconds rather
 //! than on the box.
 
 use std::path::PathBuf;
 
-use egui_pop_test::scenario::{Runner, Step};
+use egui_pop_test::scenario::{Expect, Runner, Step};
 use helios_gui::{Shell, helios_panels};
 
 fn files() -> Vec<PathBuf> {
@@ -27,6 +27,13 @@ fn every_scenario_reads_and_calls_known_commands() {
     assert!(files.len() >= 3, "{files:?}");
     let shell = Shell::new(helios_panels(), None);
     let caps = shell.app().handle().debug_capabilities();
+    let snapshot = shell.app().handle().debug_snapshot();
+    // An `Expect(Value)` path starts with a collector's name (which may
+    // hold dots).
+    let collected = |path: &str| {
+        let parts: Vec<&str> = path.split('.').collect();
+        (1..=parts.len()).any(|n| snapshot.get(parts[..n].join(".")).is_some())
+    };
     let known = |name: &str| {
         caps["capabilities"]
             .as_array()
@@ -40,8 +47,14 @@ fn every_scenario_reads_and_calls_known_commands() {
             "a scenario is named after its file"
         );
         for step in &s.steps {
-            if let Step::Call(name, _) = step {
-                assert!(known(name), "{}: no capability `{name}`", s.name);
+            match step {
+                Step::Call(name, _) => {
+                    assert!(known(name), "{}: no capability `{name}`", s.name);
+                }
+                Step::Expect(Expect::Value(path, _)) => {
+                    assert!(collected(path), "{}: no collector for `{path}`", s.name);
+                }
+                _ => {}
             }
         }
     }
