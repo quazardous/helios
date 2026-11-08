@@ -193,6 +193,7 @@ sccache = { about = "sccache's compile cache, shared by every job and branch: a 
 
 [jobs.build]
 about = "the whole workspace built, every target (debug), the build cache warmed"
+first = [{ job = "check", pass = ["branch", "crate"] }]
 checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 5
 memory = "6g"
@@ -212,6 +213,7 @@ timeout = "1h"
 # tools/bench/fetch-gui.sh, so no local build is needed
 [jobs.build-gui]
 about = "helios-gui and the plugins it ships built in release, kept as outputs for the desktop launcher"
+first = [{ job = "check", pass = ["branch", "crate"] }]
 checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 5
 memory = "6g"
@@ -294,6 +296,7 @@ timeout = "1h"
 # /out/snapshots, to review and commit
 [jobs.gui-snapshots]
 about = "helios-gui's snapshots regenerated, every PNG returned"
+first = [{ job = "check", pass = ["branch", "crate"] }]
 checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 5
 memory = "6g"
@@ -323,6 +326,7 @@ timeout = "1h"
 # summary of the slowest tests in /out
 [jobs.test]
 about = "the whole test suite (CI profile), with its JUnit report and the slowest tests"
+first = [{ job = "check", pass = ["branch", "crate"] }]
 checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 5
 memory = "6g"
@@ -370,6 +374,7 @@ timeout = "20m"
 # the branch's target that test-affected reuses before the merge
 [jobs.test-crate]
 about = "one crate's tests, one test target, a name filter (a fix loop's run)"
+first = [{ job = "check", pass = ["branch", "crate"] }]
 checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 4
 memory = "4g"
@@ -387,6 +392,7 @@ timeout = "30m"
 # /out/affected.json, the JUnit report and the slowest tests in /out
 [jobs.test-affected]
 about = "the tests a change affects since a base commit, plus the critical set"
+first = [{ job = "check", pass = ["branch", "crate"] }]
 cores = 5
 memory = "6g"
 cwd = "/work/${src:-helios}"
@@ -403,6 +409,7 @@ timeout = "1h"
 # quit, kill -9 and reopen: the scenarios that gate a release
 [jobs.survival]
 about = "quit, kill -9 and reopen: the survival scenarios that gate a release"
+first = [{ job = "check", pass = ["branch", "crate"] }]
 checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 4
 memory = "4g"
@@ -436,6 +443,7 @@ timeout = "1h"
 # changes as /out/i18n.patch, to apply on the branch (git apply --index)
 [jobs.i18n-extract]
 about = "the translation catalogues regenerated on a branch; the change as a patch"
+first = [{ job = "check", pass = ["branch", "crate"] }]
 checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 5
 memory = "6g"
@@ -494,6 +502,7 @@ timeout = "2h"
 # /out/check-commits.md
 [jobs.check-commits]
 about = "every commit of a range builds, passes clippy and the tests it touches"
+first = [{ job = "check", pass = ["branch", "crate"] }]
 checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 5
 memory = "6g"
@@ -540,6 +549,7 @@ timeout = "30m"
 # egui-pop's gate: fmt, clippy, the workspace tests with the doctests, docs
 [jobs.egui-pop-gate]
 about = "egui-pop's gate: fmt, clippy, the workspace tests with the doctests, the docs build, and the docs site's links"
+first = [{ job = "egui-pop-check", pass = ["branch", "egui_pop", "crate"] }]
 checkouts = ["egui-pop"]
 cores = 5
 memory = "5g"
@@ -563,6 +573,7 @@ timeout = "75m"
 # its own), stopped at the first failure. Minutes, not the gate's twenty.
 [jobs.egui-pop-test]
 about = "egui-pop: one crate's tests, one test target, a name filter (a fix loop's run)"
+first = [{ job = "egui-pop-check", pass = ["branch", "egui_pop", "crate"] }]
 checkouts = ["egui-pop"]
 cores = 4
 memory = "4g"
@@ -579,6 +590,7 @@ timeout = "30m"
 # test hides; `filter=` narrows it
 [jobs.egui-pop-test-1p]
 about = "egui-pop: one test target under cargo test, all its tests in one process (leaks between tests)"
+first = [{ job = "egui-pop-check", pass = ["branch", "egui_pop", "crate"] }]
 checkouts = ["egui-pop"]
 cores = 4
 memory = "5g"
@@ -594,6 +606,7 @@ timeout = "30m"
 # /out/snapshots, to review and commit
 [jobs.egui-pop-snapshots]
 about = "egui-pop's gallery snapshots regenerated, every PNG returned"
+first = [{ job = "egui-pop-check", pass = ["branch", "egui_pop", "crate"] }]
 checkouts = ["egui-pop"]
 cores = 5
 memory = "4g"
@@ -653,6 +666,7 @@ timeout = "1h"
 # output `screenshots`
 [jobs.egui-pop-screenshots]
 about = "egui-pop's documentation screenshots in a headless labwc"
+first = [{ job = "egui-pop-check", pass = ["branch", "egui_pop", "crate"] }]
 checkouts = ["egui-pop"]
 cores = 5
 memory = "4g"
@@ -670,6 +684,7 @@ timeout = "1h"
 # tools/bench/fetch-gallery.sh puts where the gallery's launcher points
 [jobs.egui-pop-gallery]
 about = "egui-pop's gallery built in release, kept as the output `gallery` for its desktop launcher"
+first = [{ job = "egui-pop-check", pass = ["branch", "egui_pop", "crate"] }]
 checkouts = ["egui-pop"]
 cores = 5
 memory = "6g"
@@ -688,6 +703,7 @@ timeout = "1h"
 # (tools/wbox/mutter.py) instead of labwc, for GNOME-only bugs
 [jobs.egui-pop-wbox]
 about = "egui-pop: a wbox scenario of tools/wbox (script=) on the gallery in release, in a headless labwc or mutter (compositor=)"
+first = [{ job = "egui-pop-check", pass = ["branch", "egui_pop", "crate"] }]
 checkouts = ["egui-pop"]
 cores = 5
 memory = "6g"
@@ -702,6 +718,7 @@ timeout = "1h"
 
 [jobs.egui-pop-catalogues]
 about = "egui-pop's catalogue test: the English catalogues match the sources, the French stamped"
+first = [{ job = "egui-pop-check", pass = ["branch", "egui_pop", "crate"] }]
 checkouts = ["egui-pop"]
 cores = 5
 memory = "7g"

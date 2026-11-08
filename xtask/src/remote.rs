@@ -828,7 +828,10 @@ fn local_check() -> bool {
 /// `HELIOS_BENCH_NO_CHECK=1`, or when the check runs here.
 pub fn check_request(req: &Request) -> Option<Request> {
     let builds_nothing = ["check", "egui-pop-check", "lint", "thumb-bench", "release"];
-    if req.job.is_empty()
+    // the box runs it itself now (the Benchfile's `first`): this is only
+    // for a box without `first`, asked with HELIOS_BENCH_CLIENT_CHECK=1
+    if std::env::var_os("HELIOS_BENCH_CLIENT_CHECK").is_none()
+        || req.job.is_empty()
         || builds_nothing.contains(&req.job.as_str())
         || local_check()
         || std::env::var_os("HELIOS_BENCH_NO_CHECK").is_some()
@@ -1103,7 +1106,14 @@ fn remote(root: &Path, req: &mut Request) -> Result<u8, String> {
         hook
     };
     let (code, lines) = follow(b.ssh(10, &words).stdin(Stdio::null()), &watching);
-    let Some(id) = lines.iter().find_map(|l| queued_id(l)).map(str::to_string) else {
+    // with a Benchfile `first`, the prerequisite is queued first: the job
+    // followed is the last one queued
+    let Some(id) = lines
+        .iter()
+        .rev()
+        .find_map(|l| queued_id(l))
+        .map(str::to_string)
+    else {
         stop.store(true, Ordering::Relaxed);
         return Ok(refused(&b, code, &lines));
     };
