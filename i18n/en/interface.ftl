@@ -84,6 +84,9 @@ plugin-egui-pop-imaging =
 plugin-helios =
     .title = Helios
 
+plugin-helios-agent-state =
+    .title = Agent state
+
 plugin-helios-clipboard =
     .title = Helios's clipboard types
 
