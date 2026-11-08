@@ -1,0 +1,29 @@
+// The import window opened by a click (the Library panel's button, the
+// first of two with the filmstrip's), a folder picked, its photos
+// imported by a click on the Import button.
+// Run live by tools/bench/scenarios.py: `$folder` is a folder of known
+// photos the run made, `$count` how many, the library a throwaway one.
+Scenario(
+    name: "import-window",
+    description: "The empty Library's Import button opens the import window; the folder is picked, kept in place, and Import adds every photo.",
+    steps: [
+        Wait(Settled),
+        Ui(Click(role: "Button", label: "Import photos…", nth: 0)),
+        Wait(Settled),
+        Expect(Tree(has: (label: "Import photos"))),
+        Shot("opened"),
+        // The folder chooser is the desktop's: the window is given the
+        // folder as a dropped one would be, its photos added in place.
+        Call("library.importWindow", { "source": "$folder", "copy": false }),
+        Wait(Settled),
+        Expect(Tree(has: (role: "Button", label: "Import $count"))),
+        Shot("picked"),
+        Ui(Click(role: "Button", label: "Import $count")),
+        Wait(Event("job.finished")),
+        Wait(Settled),
+        Expect(Journal(has: "job.finished", data: { "kind": "import" })),
+        Expect(Value("helios.library.count", 4)),
+        Expect(NoError),
+        Shot("imported"),
+    ],
+)

@@ -14,7 +14,8 @@ JPEG fixtures and a synthetic picture). `helios-gui` starts in its own
 compositor with its agent socket on and writable (`EGUI_POP_AGENT_SOCKET`,
 `HELIOS_AGENT_WRITE=1`); the runner (`--runner`, the `scenarios`
 example: egui-pop's scenario command line) replays the scenario over the
-socket, with `$folder` and `$image` set and `gui.snapshot` as the shot
+socket, with `$folder`, `$image` and `$count` (the photos in
+`$folder`) set and `gui.snapshot` as the shot
 capability, checking the invariants after every step.
 
 In `--out`, per scenario: its shots (`<scenario>-<shot>.png`, and every
@@ -100,6 +101,7 @@ def world(work: Path) -> dict:
         "workspace": work / "workspace",
         "photos": photos,
         "image": image,
+        "count": sum(1 for _ in photos.iterdir()),
         "socket": work / "agent" / "helios.sock",
     }
 
@@ -178,6 +180,8 @@ def run_one(args, scenario: Path) -> dict:
             f"folder={w['photos']}",
             "--var",
             f"image={w['image']}",
+            "--var",
+            f"count={w['count']}",
             "--shot",
             "gui.snapshot",
             json.dumps({"target": "window", "path": "$path"}),
