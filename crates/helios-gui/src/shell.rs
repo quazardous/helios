@@ -328,6 +328,8 @@ struct Parts {
     images: crate::contexts::Images,
     /// The workspace's sub-workspaces, for their place.
     subworkspaces: crate::contexts::Subworkspaces,
+    /// Where the agents' collectors find the library and the viewport.
+    agent_state: crate::agent_state::Late,
 }
 
 /// A shell whose egui-pop application is still to build: in a test
@@ -684,6 +686,7 @@ impl Shell {
         // Helios's values: what widgets and agents edit, and what Edit >
         // Undo walks back through the host.
         let values: Arc<Mutex<helios_values::Store>> = Arc::default();
+        let agent_state = crate::agent_state::Late::default();
         // The open image's history snapshots: taken through the history
         // owner, pinned and kept by the vault's link (`persist`).
         let snapshots = crate::edit_snapshots::Shared::default();
@@ -824,7 +827,13 @@ impl Shell {
             // tips; they come by themselves once the desktop asks
             // (`Shell::tips_by_themselves`).
             .plugin(egui_pop::api::tips::TipsPlugin)
-            .plugin(crate::tips::Tips);
+            .plugin(crate::tips::Tips)
+            // What agents and scenarios read: the library, the values,
+            // the jobs (`helios.library`, `helios.values`, `helios.jobs`).
+            .plugin(crate::agent_state::AgentState {
+                late: agent_state.clone(),
+                values: values.clone(),
+            });
         if let Some(dir) = ui_settings {
             builder = builder.persist(dir);
         }
@@ -852,6 +861,7 @@ impl Shell {
                 relays,
                 images,
                 subworkspaces,
+                agent_state,
             },
         }
     }
@@ -879,12 +889,14 @@ impl Shell {
             relays,
             images: _,
             subworkspaces,
+            agent_state,
         } = parts;
         if let Some(d) = app.handle().service(&DIALOGS) {
             let _ = dialogs.set((*d).clone());
         }
         let viewport: Rc<RefCell<crate::viewport::Viewport>> = Rc::default();
         let library: Rc<RefCell<crate::library::Library>> = Rc::default();
+        agent_state.set(library.clone(), viewport.clone());
         let system: crate::clipboard::system::Shared = Rc::new(RefCell::new(Box::new(
             crate::clipboard::system::Arboard::default(),
         )));

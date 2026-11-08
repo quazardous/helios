@@ -1302,6 +1302,15 @@ headless compositor, with the invariants (no error toast, no failed or
 unknown command, no untranslated text, helios-gui still alive) checked
 after every step, and shots and the journal kept.
 
+**State for agents.** Three collectors say what a scenario checks with
+`Expect(Value(..))`: `helios.library` (`count`, `picked`, `rejected`,
+`selected`, `selection`, `current` with its `id`, `name` and `path`,
+`open_size`), `helios.values` (the image's parameters by path:
+`helios.values.node/exposure/exposure`) and `helios.jobs` (`idle`,
+`total`, `running`, `finished`, `failed`, `cancelled`, and `list`, each
+job's `id`, `kind`, `title` and `state`). egui-pop's `jobs` collector
+has the whole jobs centre.
+
 ## Parameters
 
 Parameter widgets are generated from value descriptors and bound to the
