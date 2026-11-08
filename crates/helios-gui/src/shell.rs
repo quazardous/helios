@@ -5501,22 +5501,48 @@ pub mod headless {
         })
     }
 
+    /// Frames a window is given to show up: an `egui::Window` lays itself
+    /// out unseen on its first frame, so it may be missing from the
+    /// accessibility tree until the next one.
+    pub const WINDOW_APPEARS_WITHIN: usize = 10;
+
     /// Steps `frames` frames (six at least) and asserts that the window
-    /// titled `title` keeps, every frame after the fifth, the rect it had
-    /// at the fifth: a window never grows on its own, frame after frame,
-    /// through a spacing or a margin its content counts twice.
+    /// titled `title` never grows on its own, frame after frame, through a
+    /// spacing or a margin its content counts twice. The window is waited
+    /// for first (at most [`WINDOW_APPEARS_WITHIN`] frames); from the frame
+    /// it shows on, its size never exceeds the one of the frame before, and
+    /// from its fifth frame on its rect stays the one it had then.
     pub fn assert_window_stable(harness: &mut Harness<'_, Shell>, title: &str, frames: usize) {
         assert!(frames > 5, "{frames} frames: six at least");
-        let mut first = None;
-        for frame in 1..=frames {
+        let mut waited = 0;
+        let mut shown = loop {
+            harness.step();
+            waited += 1;
+            if let Some(rect) = window_rect(harness, title) {
+                break rect;
+            }
+            assert!(
+                waited < WINDOW_APPEARS_WITHIN,
+                "no window titled {title:?} within {WINDOW_APPEARS_WITHIN} frames"
+            );
+        };
+        let mut settled = None;
+        for frame in 2..=frames {
             harness.step();
             let rect = window_rect(harness, title)
-                .unwrap_or_else(|| panic!("no window titled {title:?} at frame {frame}"));
-            match first {
-                None if frame == 5 => first = Some(rect),
-                Some(first) => assert_eq!(
-                    rect, first,
-                    "the window {title:?} changed between frame 5 and frame {frame}"
+                .unwrap_or_else(|| panic!("the window {title:?} went at its frame {frame}"));
+            assert!(
+                rect.width() <= shown.width() && rect.height() <= shown.height(),
+                "the window {title:?} grew at its frame {frame}: {:?} after {:?}",
+                rect.size(),
+                shown.size()
+            );
+            shown = rect;
+            match settled {
+                None if frame == 5 => settled = Some(rect),
+                Some(settled) => assert_eq!(
+                    rect, settled,
+                    "the window {title:?} changed between its frame 5 and its frame {frame}"
                 ),
                 None => {}
             }
