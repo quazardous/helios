@@ -106,7 +106,20 @@ current branch while it has commits origin lacks). Before queueing it also
 checks, when the box runs this checkout's code, that Cargo.lock is up to
 date and that the changelog fragments are well formed (at most 600
 characters): a few seconds here instead of a failed job on the box.
-`HELIOS_BENCH_NO_PREFLIGHT=1` queues it anyway. With
+It also refuses a job missing a parameter its command needs, and runs
+`cargo check --tests` on the code the job will build (the crate it names,
+else the workspace; for egui-pop jobs, in the local egui-pop checkout of
+`egui_pop=`): **a compile error never reaches the box** (owner,
+2026-11-08). `HELIOS_BENCH_NO_PREFLIGHT=1` queues it anyway; never for a
+compile error.
+
+**Every failed job has a reason.** A failed job is recorded in
+`$XDG_STATE_HOME/helios-bench/failures.jsonl` with its failing lines, and
+`bench-remote` asks for the cause: the agent that queued it records it at
+once with `cargo xtask bench-remote why <id> "<cause, and what is done
+about it>"`. `cargo xtask bench-remote failures` lists the ones still
+unexplained (`--all` for every one). A run meant to fail (a reproduction
+before a fix) says so with `expect=fail` and is recorded as expected. With
 `--push`, the tracked and untracked files of the working tree (not the
 ignored ones) are sent to the box and the job runs on them; the target
 cache used is the current branch's when GitHub has it, else main's. Each

@@ -60,7 +60,7 @@ use serde_json::Value;
 
 use crate::test_times::target_dir;
 
-pub const USAGE: &str = "bench-remote <job> [key=value...] [--priority high|normal] [--push] | bench-remote --affected [base=REF] [key=value...] [--push] | bench-remote --chain egui-pop|helios [--release] [key=value...] [--priority high|normal] [--push] | bench-remote queue";
+pub const USAGE: &str = "bench-remote failures [--all] | bench-remote why <id> <reason> | bench-remote <job> [key=value...] [--priority high|normal] [--push] | bench-remote --affected [base=REF] [key=value...] [--push] | bench-remote --chain egui-pop|helios [--release] [key=value...] [--priority high|normal] [--push] | bench-remote queue";
 
 /// The exit code of a job the box could not serve.
 pub const EX_TEMPFAIL: u8 = 75;
@@ -163,6 +163,9 @@ pub struct Request {
     pub affected: bool,
     /// A chain of jobs (`--chain`): `job` is empty.
     pub chain: Option<Chain>,
+    /// `expect=fail`: a reproduction meant to fail (before a fix); kept
+    /// here, not sent to the box.
+    pub expect_fail: bool,
 }
 
 /// The usual sequences of a branch, submitted together (`--chain`).
@@ -282,12 +285,15 @@ pub fn parse_args(args: &[&str]) -> Option<Request> {
         (None, true, None) | (None, false, Some(_)) => String::new(),
         _ => return None,
     };
+    let expect_fail = params.iter().any(|(k, v)| k == "expect" && v == "fail");
+    params.retain(|(k, _)| k != "expect");
     Some(Request {
         job,
         params,
         push,
         affected,
         chain,
+        expect_fail,
     })
 }
 
@@ -715,6 +721,17 @@ fn conditions_warning(json: &str) -> Option<String> {
 }
 
 pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
+    match args {
+        ["failures"] => return Some(ExitCode::from(failures(false))),
+        ["failures", "--all"] => return Some(ExitCode::from(failures(true))),
+        ["why", id, reason @ ..] if !reason.is_empty() => {
+            return Some(match why(id, &reason.join(" ")) {
+                Ok(code) => ExitCode::from(code),
+                Err(e) => crate::fail(&[e]),
+            });
+        }
+        _ => {}
+    }
     if args == ["queue"] {
         return Some(match queue(root) {
             Ok(code) => ExitCode::from(code),
@@ -799,6 +816,59 @@ fn affected(root: &Path, req: &Request) -> Result<u8, String> {
     Ok(combined(&codes))
 }
 
+/// The local checkout of egui-pop that has `branch` checked out (the
+/// sibling `../egui-pop` or one of its worktrees), if any.
+fn egui_pop_checkout(root: &Path, branch: &str) -> Option<PathBuf> {
+    let main = root.parent()?.join("egui-pop");
+    let list = git(&main, &["worktree", "list", "--porcelain"])?;
+    let mut path: Option<PathBuf> = None;
+    for line in list.lines() {
+        if let Some(p) = line.strip_prefix("worktree ") {
+            path = Some(PathBuf::from(p));
+        } else if line.strip_prefix("branch refs/heads/") == Some(branch) {
+            return path;
+        }
+    }
+    None
+}
+
+/// The code the box will build compiles here first, tests included: a
+/// compile error never reaches the box (owner, 2026-11-08). `cargo check
+/// --tests` on the crate a job names, else on the workspace, in the
+/// checkout's own target folder.
+fn compiles(dir: &Path, krate: Option<&str>) -> Result<(), String> {
+    let mut cmd = Command::new("cargo");
+    cmd.args(["check", "--locked", "--offline", "--tests", "--quiet"])
+        .current_dir(dir)
+        .env_remove("CARGO_TARGET_DIR")
+        .env("CARGO_INCREMENTAL", "0")
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped());
+    match krate {
+        Some(k) => cmd.args(["-p", k]),
+        None => cmd.arg("--workspace"),
+    };
+    eprintln!(
+        "bench-remote: pre-flight: cargo check --tests {} in {}",
+        krate.map_or("--workspace".to_string(), |k| format!("-p {k}")),
+        dir.display()
+    );
+    let out = cmd.output().map_err(|e| format!("cargo check: {e}"))?;
+    if out.status.success() {
+        return Ok(());
+    }
+    let err = String::from_utf8_lossy(&out.stderr);
+    let first: Vec<&str> = err
+        .lines()
+        .filter(|l| l.starts_with("error"))
+        .take(4)
+        .collect();
+    Err(format!(
+        "it does not compile here ({}): fix it before queueing",
+        first.join(" | ")
+    ))
+}
+
 /// The exit code of a run refused before it was queued (`EX_DATAERR`).
 const EX_PREFLIGHT: u8 = 65;
 
@@ -807,7 +877,29 @@ const EX_PREFLIGHT: u8 = 65;
 /// when it is the current branch), and, when the box runs this checkout's
 /// code, Cargo.lock is up to date and the changelog fragments are well
 /// formed (the release job refuses them otherwise).
-fn preflight(root: &Path, job: &str, branch: &str, push: bool) -> Result<(), String> {
+fn preflight(
+    root: &Path,
+    job: &str,
+    given: &[(String, String)],
+    branch: &str,
+    push: bool,
+) -> Result<(), String> {
+    if let Ok(benchfile) = std::fs::read_to_string(root.join("tools/bench/Benchfile")) {
+        let missing: Vec<String> = required_params(&benchfile, job)
+            .into_iter()
+            .filter(|p| !given.iter().any(|(k, _)| k == p))
+            .collect();
+        if !missing.is_empty() {
+            return Err(format!(
+                "job `{job}` needs {} (the box would refuse it)",
+                missing
+                    .iter()
+                    .map(|m| format!("`{m}=`"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
+    }
     let current = git(root, &["rev-parse", "--abbrev-ref", "HEAD"]);
     // egui-pop's jobs build egui-pop's branch: Helios's checkout is not what they test
     let here = !job.starts_with("egui-pop") && (push || current.as_deref() == Some(branch));
@@ -832,6 +924,21 @@ fn preflight(root: &Path, job: &str, branch: &str, push: bool) -> Result<(), Str
             ));
         }
     }
+    if job.starts_with("egui-pop")
+        && let Some(branch) = given
+            .iter()
+            .find(|(k, _)| k == "egui_pop")
+            .map(|(_, v)| v.as_str())
+        && let Some(dir) = egui_pop_checkout(root, branch)
+    {
+        compiles(
+            &dir,
+            given
+                .iter()
+                .find(|(k, _)| k == "crate")
+                .map(|(_, v)| v.as_str()),
+        )?;
+    }
     if !here {
         return Ok(());
     }
@@ -850,6 +957,13 @@ fn preflight(root: &Path, job: &str, branch: &str, push: bool) -> Result<(), Str
             );
         }
     }
+    compiles(
+        root,
+        given
+            .iter()
+            .find(|(k, _)| k == "crate")
+            .map(|(_, v)| v.as_str()),
+    )?;
     crate::read_fragments(&root.join("changelog.d"))
         .map_err(|problems| format!("changelog fragments: {}", problems.join("; ")))?;
     Ok(())
@@ -871,7 +985,7 @@ fn set_branch(root: &Path, req: &mut Request) -> Result<(), String> {
 fn prepare(root: &Path, b: &Bench, req: &mut Request) -> Option<u8> {
     let branch = req.param("branch").unwrap_or_default().to_string();
     if std::env::var_os("HELIOS_BENCH_NO_PREFLIGHT").is_none()
-        && let Err(why) = preflight(root, &req.job, &branch, req.push)
+        && let Err(why) = preflight(root, &req.job, &req.params, &branch, req.push)
     {
         eprintln!(
             "bench-remote: not queued: {why}\n\
@@ -1006,6 +1120,15 @@ fn finish(
         }
         Outcome::Exit(c) => {
             summary(req, id, c, took, dir.as_deref());
+            if c != 0 {
+                let mut all = lines.clone();
+                if let Some(d) = dir.as_deref()
+                    && let Ok(log) = std::fs::read_to_string(d.join("log"))
+                {
+                    all.extend(log.lines().map(str::to_string));
+                }
+                record_failure(req, id, c, &all, req.expect_fail);
+            }
             c
         }
         Outcome::Lost => unreachable!("handled above"),
@@ -1488,9 +1611,242 @@ fn shared_target_warning(linked: bool, target: Option<&Path>, root: &Path) -> Op
     }
 }
 
+// ---------------------------------------------------------------- failures
+
+/// Every failed box job, with the reason the agent that queued it gives:
+/// one JSON line per job in `$XDG_STATE_HOME/helios-bench/failures.jsonl`,
+/// shared by every worktree. `bench-remote why <id> <reason>` records the
+/// reason; `bench-remote failures` lists the jobs still unexplained.
+fn failures_file() -> PathBuf {
+    let state = std::env::var_os("XDG_STATE_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state")))
+        .unwrap_or_else(|| PathBuf::from("."));
+    state.join("helios-bench").join("failures.jsonl")
+}
+
+/// What kind of failure an exit code is, as the box reports it.
+pub fn failure_class(code: u8) -> &'static str {
+    match code {
+        2 => "refused by the box (a parameter missing or invalid)",
+        3 => "checkout or setup failed",
+        100 | 101 => "tests failed",
+        124 => "timed out",
+        130 => "cancelled",
+        EX_TEMPFAIL => "box unavailable",
+        EX_PREFLIGHT => "refused by the pre-flight",
+        _ => "the job's command failed",
+    }
+}
+
+/// The lines of a job's output that say what failed: failing tests,
+/// errors, refusals, panics (at most eight).
+pub fn failure_lines(lines: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for l in lines {
+        let t = l.trim();
+        let hit = t.starts_with("FAIL [")
+            || t.starts_with("TIMEOUT [")
+            || t.starts_with("error:")
+            || t.starts_with("error[")
+            || t.contains("refused")
+            || t.contains("panicked at")
+            || t.starts_with("bench: checkout");
+        if hit && !out.iter().any(|o| o == t) {
+            out.push(t.to_string());
+        }
+        if out.len() == 8 {
+            break;
+        }
+    }
+    out
+}
+
+fn read_failures() -> Vec<Value> {
+    std::fs::read_to_string(failures_file())
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|l| serde_json::from_str(l).ok())
+        .collect()
+}
+
+fn write_failures(all: &[Value]) -> Result<(), String> {
+    let path = failures_file();
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    }
+    let text = all.iter().fold(String::new(), |mut t, v| {
+        let _ = writeln!(t, "{v}");
+        t
+    });
+    std::fs::write(&path, text).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// Records a failed job; an expected one (`expect=fail`) carries its reason.
+fn record_failure(req: &Request, id: &str, code: u8, lines: &[String], expected: bool) {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    let params: serde_json::Map<String, Value> = req
+        .params
+        .iter()
+        .map(|(k, v)| (k.clone(), Value::from(v.clone())))
+        .collect();
+    let entry = serde_json::json!({
+        "id": id,
+        "at": now,
+        "job": req.job,
+        "params": params,
+        "exit": code,
+        "class": failure_class(code),
+        "errors": failure_lines(lines),
+        "reason": if expected { Value::from("expected: a reproduction before the fix (expect=fail)") } else { Value::Null },
+    });
+    let mut all = read_failures();
+    all.retain(|v| v["id"] != id);
+    all.push(entry);
+    if let Err(e) = write_failures(&all) {
+        eprintln!("bench-remote: could not record the failure: {e}");
+        return;
+    }
+    if !expected {
+        eprintln!(
+            "bench-remote: job {id} failed ({}). Record why, in one line: \
+             cargo xtask bench-remote why {id} \"<cause, and what you do about it>\"",
+            failure_class(code)
+        );
+    }
+}
+
+/// `why <id> <reason...>`: the reason a failed job failed.
+fn why(id: &str, reason: &str) -> Result<u8, String> {
+    let mut all = read_failures();
+    let entry = all
+        .iter_mut()
+        .find(|v| v["id"] == id)
+        .ok_or_else(|| format!("no failed job {id} in {}", failures_file().display()))?;
+    entry["reason"] = Value::from(reason);
+    write_failures(&all)?;
+    Ok(0)
+}
+
+/// `failures [--all]`: the failed jobs with no reason yet (all with `--all`).
+fn failures(all_of_them: bool) -> u8 {
+    let all = read_failures();
+    let shown: Vec<&Value> = all
+        .iter()
+        .filter(|v| all_of_them || v["reason"].is_null())
+        .collect();
+    for v in &shown {
+        let params = v["params"]
+            .as_object()
+            .map(|m| {
+                m.iter()
+                    .filter(|(k, _)| *k != "ext_job_id" && *k != "priority")
+                    .map(|(k, v)| format!("{k}={}", v.as_str().unwrap_or("")))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })
+            .unwrap_or_default();
+        println!(
+            "{}  exit {}  {} {}  [{}]",
+            v["id"].as_str().unwrap_or(""),
+            v["exit"],
+            v["job"].as_str().unwrap_or(""),
+            params,
+            v["class"].as_str().unwrap_or("")
+        );
+        for e in v["errors"].as_array().into_iter().flatten().take(3) {
+            println!("    {}", e.as_str().unwrap_or(""));
+        }
+        match v["reason"].as_str() {
+            Some(r) => println!("    why: {r}"),
+            None => println!("    why: (unexplained)"),
+        }
+    }
+    u8::from(!all_of_them && !shown.is_empty())
+}
+
+/// The parameters a job's command needs with no default (`${name}` with
+/// no `:-` or `:+`), read from the Benchfile; `branch` and the box's own
+/// (`src`) are left out.
+pub fn required_params(benchfile: &str, job: &str) -> Vec<String> {
+    let head = format!("[jobs.{job}]");
+    let Some(start) = benchfile.find(&head) else {
+        return Vec::new();
+    };
+    let rest = &benchfile[start + head.len()..];
+    let section = &rest[..rest.find("\n[").unwrap_or(rest.len())];
+    let Some(cmd) = section.find("command = \"\"\"") else {
+        return Vec::new();
+    };
+    let body = &section[cmd + 13..];
+    let body = &body[..body.find("\"\"\"").unwrap_or(body.len())];
+    let mut out = Vec::new();
+    let mut s = body;
+    while let Some(i) = s.find("${") {
+        s = &s[i + 2..];
+        let name: String = s
+            .chars()
+            .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+            .collect();
+        let after = &s[name.len()..];
+        let defaulted =
+            after.starts_with(":-") || after.starts_with(":+") || after.starts_with('-');
+        if !name.is_empty()
+            && !defaulted
+            && !["branch", "src"].contains(&name.as_str())
+            && !out.contains(&name)
+        {
+            out.push(name);
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_job_s_parameters_without_a_default_are_required() {
+        let bf = "[jobs.a]\nabout = \"x\"\ncommand = \"\"\"run -p ${crate} ${t:+--test $t} ${filter:-} ${branch} ${test}\"\"\"\n[jobs.b]\ncommand = \"\"\"${other}\"\"\"\n";
+        assert_eq!(
+            required_params(bf, "a"),
+            vec!["crate".to_string(), "test".to_string()]
+        );
+        assert_eq!(required_params(bf, "b"), vec!["other".to_string()]);
+        assert!(required_params(bf, "none").is_empty());
+    }
+
+    #[test]
+    fn a_failure_keeps_the_lines_that_say_what_failed() {
+        let lines: Vec<String> = [
+            "        PASS [   0.1s] a::b ok",
+            "        FAIL [   2.0s] a::c broken",
+            "error: test run failed",
+            "bench: refused: parameter test is not set (run <job> test=...)",
+            "noise",
+        ]
+        .iter()
+        .map(ToString::to_string)
+        .collect();
+        let got = failure_lines(&lines);
+        assert_eq!(got.len(), 3);
+        assert!(got[0].starts_with("FAIL ["));
+        assert_eq!(
+            failure_class(2),
+            "refused by the box (a parameter missing or invalid)"
+        );
+        assert_eq!(failure_class(100), "tests failed");
+    }
+
+    #[test]
+    fn expect_fail_is_kept_here_and_not_sent() {
+        let req = parse_args(&["test-crate", "crate=x", "expect=fail"]).unwrap();
+        assert!(req.expect_fail);
+        assert!(req.params.iter().all(|(k, _)| k != "expect"));
+    }
 
     /// `health`'s queue as the box answers it, trimmed to what is read.
     const HEALTH: &str = r#"{
