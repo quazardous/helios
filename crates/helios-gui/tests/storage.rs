@@ -638,3 +638,102 @@ fn the_storage_scope_reads_the_volumes_and_the_strategy_from_commands() {
     });
     h.run();
 }
+
+/// The backup wizard, opened by "Set up backups…" on Backup › Strategy:
+/// Next waits for the disks to copy to, the off-site step comes only for
+/// two copies or more, and finishing sets the whole strategy through
+/// `library.setUpBackups`.
+#[test]
+fn the_backup_wizard_sets_up_the_strategy() {
+    use egui::accesskit::Role as A11y;
+    use egui_kittest::kittest::NodeT as _;
+
+    let (mut world, shell) = World::new("wizard");
+    let mut h = headless::harness(shell, vec2(1280.0, 900.0));
+    let studio = world.studio.clone();
+    world.plug(&mut h, &[&studio], FIRST + DAY);
+    h.state_mut()
+        .run(
+            "admin.open",
+            json!({ "path": "backup/strategy" }),
+            Origin::User,
+        )
+        .unwrap();
+    until(&mut h, "the strategy page", |h| {
+        h.query_by_label("Set up backups…").is_some()
+    });
+    h.get_by_label("Set up backups…").click();
+    until(&mut h, "the wizard", |h| {
+        h.query_by_role_and_label(A11y::ListItem, "Step 1 of 5, Copies")
+            .is_some()
+    });
+    // Two copies by default: Next, then the disks are required.
+    h.get_by_label("Next").click();
+    until(&mut h, "the disks step", |h| {
+        h.query_all_by_label("Copy to: required.").next().is_some()
+    });
+    assert!(h.get_by_label("Next").accesskit_node().is_disabled());
+    let state = |h: &mut Harness<'_, Shell>, cmd: &str, args: serde_json::Value| {
+        let out = h.state_mut().run(cmd, args, Origin::User);
+        h.run();
+        out
+    };
+    assert_eq!(
+        state(&mut h, "admin.wizard.next", json!({})).unwrap_err(),
+        "Copy to: required."
+    );
+    // One copy: no off-site step.
+    let s = state(
+        &mut h,
+        "admin.wizard.set",
+        json!({ "values": { "destination": "backup", "copies": 1 } }),
+    )
+    .unwrap();
+    assert_eq!(s["count"], 3, "{s}");
+    let s = state(
+        &mut h,
+        "admin.wizard.set",
+        json!({ "key": "copies", "value": 3 }),
+    )
+    .unwrap();
+    assert_eq!(s["count"], 4);
+    let s = state(&mut h, "admin.wizard.next", json!({})).unwrap();
+    assert_eq!(s["step"], "off-site");
+    state(
+        &mut h,
+        "admin.wizard.set",
+        json!({ "key": "offSite", "value": true }),
+    )
+    .unwrap();
+    state(
+        &mut h,
+        "admin.wizard.set",
+        json!({ "key": "onConnect", "value": false }),
+    )
+    .unwrap();
+    let s = state(&mut h, "admin.wizard.go", json!({ "step": "summary" })).unwrap();
+    assert_eq!(s["canFinish"], true);
+    until(&mut h, "the summary", |h| {
+        h.query_by_role_and_label(A11y::Group, "Copy to: Any disk with the backup role")
+            .is_some()
+    });
+    h.get_by_label("Use this strategy");
+    let done = state(&mut h, "admin.wizard.finish", json!({})).unwrap();
+    assert_eq!(done["command"], "library.setUpBackups", "{done}");
+    until(&mut h, "the strategy saved", |_| {
+        strategy::load(&world.vault, &Scope::Library)
+            .unwrap()
+            .is_some()
+    });
+    let s = strategy::load(&world.vault, &Scope::Library)
+        .unwrap()
+        .unwrap();
+    assert_eq!(s.copies, 3);
+    assert!(s.off_site_required);
+    assert_eq!(s.destinations, [strategy::Destination::Role(Role::Backup)]);
+    assert!(s.triggers.contains(&Trigger::OnImport));
+    assert!(!s.triggers.contains(&Trigger::OnConnect));
+    // Opened from the Settings app: back on its page.
+    let app = h.state().app().handle().clone();
+    assert!(egui_pop::api::admin::is_open(&app));
+}

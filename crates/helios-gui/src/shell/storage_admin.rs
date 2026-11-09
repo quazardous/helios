@@ -17,6 +17,9 @@
 //! - `library.setBackupStrategy`: turns the strategy on or off and sets
 //!   one of its parts (`{"key": "on" | "copies" | "destination" |
 //!   "offSite" | "onImport" | "onConnect", "value"}`), saved at once.
+//! - `library.setUpBackups`: sets the whole strategy at once (`{"copies",
+//!   "destination", "offSite", "onImport", "onConnect"}`), the backup
+//!   wizard's result.
 //!
 //! The texts in the answers are in the interface's language.
 
@@ -49,6 +52,9 @@ pub const MARK_VOLUME: &str = "library.markVolume";
 
 /// Sets a part of the library's backup strategy.
 pub const SET_STRATEGY: &str = "library.setBackupStrategy";
+
+/// Sets the whole backup strategy at once (the backup wizard's finish).
+pub const SET_UP_STRATEGY: &str = "library.setUpBackups";
 
 /// Below this share of free space an online volume is said short of it.
 const LOW_FREE: f64 = 0.1;
@@ -334,6 +340,41 @@ fn with_strategy(current: Option<&Strategy>, args: &Value) -> Result<Option<Stra
     Ok(Some(s))
 }
 
+/// `library.setUpBackups`'s strategy: every part given at once (`copies`
+/// 1 to 5, `destination`; `offSite`, `onImport` and `onConnect` false
+/// when left out or null), made by hand too.
+fn strategy_of(args: &Value) -> Result<Strategy, String> {
+    let copies = args["copies"]
+        .as_u64()
+        .or_else(|| args["copies"].as_str().and_then(|v| v.parse().ok()))
+        .filter(|n| (1..=5).contains(n))
+        .ok_or("`copies` is 1 to 5")?;
+    let destination = args["destination"]
+        .as_str()
+        .and_then(destination_named)
+        .ok_or("`destination` is backup, archive or volume:<id>")?;
+    let flag = |key: &str| match &args[key] {
+        Value::Null => Ok(false),
+        v => v
+            .as_bool()
+            .ok_or_else(|| format!("`{key}` takes true or false")),
+    };
+    let mut triggers = std::collections::BTreeSet::from([Trigger::ByHand]);
+    if flag("onImport")? {
+        triggers.insert(Trigger::OnImport);
+    }
+    if flag("onConnect")? {
+        triggers.insert(Trigger::OnConnect);
+    }
+    Ok(Strategy {
+        copies: copies as u8,
+        destinations: vec![destination],
+        off_site_required: flag("offSite")?,
+        triggers,
+        ..Strategy::default()
+    })
+}
+
 /// `library.volumeSet`'s edit: the volume renamed or its flags set.
 fn with_set(volumes: &[Volume], args: &Value) -> Result<Volume, String> {
     let mut v = volume_of(volumes, args)?;
@@ -506,7 +547,20 @@ impl Shell {
                 Ok(json!({ "set": s.is_some() }))
             },
         );
-        for r in [volumes, strategy, role, set, mark, set_strategy] {
+        let l = link.clone();
+        let set_up = self.register(
+            CommandSpec::new(
+                SET_UP_STRATEGY,
+                "Set up the library's backups at once (`copies`, `destination`, `offSite`, `onImport`, `onConnect`): the backup wizard's result",
+                "Library",
+            ),
+            move |args, _| {
+                let s = strategy_of(args)?;
+                l.set_strategy(Some(&s))?;
+                Ok(json!({ "set": true, "copies": s.copies }))
+            },
+        );
+        for r in [volumes, strategy, role, set, mark, set_strategy, set_up] {
             if let Err(e) = r {
                 log::warn!("the Storage page's commands: {e}");
             }
@@ -651,6 +705,28 @@ mod tests {
         assert_eq!(a["destination"], "volume:d");
         assert_eq!(a["destinationChoices"].as_array().unwrap().len(), 3);
         assert_eq!(a["onImport"], false);
+    }
+
+    #[test]
+    fn the_whole_strategy_is_set_at_once() {
+        let s = strategy_of(&json!({
+            "copies": 2, "destination": "archive", "offSite": true,
+            "onImport": true, "onConnect": null
+        }))
+        .unwrap();
+        assert_eq!(s.copies, 2);
+        assert_eq!(s.destinations, [Destination::Role(Role::Archive)]);
+        assert!(s.off_site_required);
+        assert!(s.triggers.contains(&Trigger::OnImport));
+        assert!(!s.triggers.contains(&Trigger::OnConnect));
+        assert!(s.triggers.contains(&Trigger::ByHand));
+        let s = strategy_of(&json!({ "copies": "1", "destination": "backup" })).unwrap();
+        assert!(!s.off_site_required);
+        assert!(strategy_of(&json!({ "copies": 0, "destination": "backup" })).is_err());
+        assert!(strategy_of(&json!({ "copies": 2 })).is_err());
+        assert!(
+            strategy_of(&json!({ "copies": 2, "destination": "backup", "offSite": 3 })).is_err()
+        );
     }
 
     #[test]

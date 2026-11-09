@@ -30,8 +30,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use egui_pop::api::admin::model::{
-    Action, Clauses as _, Confirmation, FORMAT, Field, Manifest, Records, RowField, SectionBuilder,
-    Status, ValueScope,
+    Action, Clauses as _, Confirmation, FORMAT, Field, FieldKind, Manifest, Records, RowField,
+    SectionBuilder, Status, ValueScope, Wizard,
 };
 use egui_pop::api::admin::{ADMIN, Admin};
 use egui_pop::api::hooks::On;
@@ -478,6 +478,131 @@ pub fn manifest(schema: &Schema, t: &dyn Fn(Message) -> String) -> Manifest {
     .section("health/check", &tt("health/check"), |s| {
         health_section(s, t);
     })
+    .wizard(backup_wizard(t))
+}
+
+/// The backup wizard's id: "Set up backups…" on the Backup scope's
+/// strategy opens it.
+pub const BACKUP_WIZARD: &str = "backup.setup";
+
+/// The backup wizard: how many copies, on which disks, one off site
+/// (asked only for two copies or more), when they are made; a summary,
+/// then `library.setUpBackups` with the choices.
+fn backup_wizard(t: &dyn Fn(Message) -> String) -> Wizard {
+    use crate::shell::SET_UP_STRATEGY_COMMAND;
+    let field = |key: &str, title: Message, kind| Field::draft(BACKUP_WIZARD, key, &t(title), kind);
+    let copies = (1..=5).fold(
+        field(
+            "copies",
+            Message::new("gui-backup-wizard-copies", "Copies of each photo"),
+            FieldKind::Choice,
+        ),
+        |f, n| f.choice(json!(n), &n.to_string()),
+    );
+    Wizard::new(
+        BACKUP_WIZARD,
+        &t(Message::new("gui-backup-wizard", "Set up backups")),
+        SET_UP_STRATEGY_COMMAND,
+    )
+    .description(&t(Message::new(
+        "gui-backup-wizard-about",
+        "Helios keeps verified copies of every photo on your backup disks: choose how many, where, and when.",
+    )))
+    .step(
+        "copies",
+        &t(Message::new("gui-backup-wizard-step-copies", "Copies")),
+        |s| {
+            s.description(&t(Message::new(
+                "gui-backup-wizard-copies-about",
+                "Each copy is on a different disk, besides the photo in the library. Two copies survive a disk failing.",
+            )))
+            .field(copies.default_value(json!(2)));
+        },
+    )
+    .step(
+        "destination",
+        &t(Message::new("gui-backup-wizard-step-destination", "Disks")),
+        |s| {
+            s.field(
+                field(
+                    "destination",
+                    Message::new("gui-backup-wizard-destination", "Copy to"),
+                    FieldKind::Choice,
+                )
+                .choice(
+                    json!("backup"),
+                    &t(Message::new(
+                        "gui-backup-wizard-destination-backup",
+                        "Any disk with the backup role",
+                    )),
+                )
+                .choice(
+                    json!("archive"),
+                    &t(Message::new(
+                        "gui-backup-wizard-destination-archive",
+                        "Any disk with the archive role",
+                    )),
+                )
+                .required()
+                .help(&t(Message::new(
+                    "gui-backup-wizard-destination-help",
+                    "Give a disk its role on Storage › Volumes; one disk per copy.",
+                ))),
+            );
+        },
+    )
+    .step(
+        "off-site",
+        &t(Message::new("gui-backup-wizard-step-off-site", "Off site")),
+        |s| {
+            s.field(
+                field(
+                    "offSite",
+                    Message::new(
+                        "gui-backup-wizard-off-site",
+                        "Keep one of the copies off site",
+                    ),
+                    FieldKind::Toggle,
+                )
+                .default_value(json!(false))
+                .help(&t(Message::new(
+                    "gui-backup-wizard-off-site-help",
+                    "A disk kept elsewhere survives a fire or a theft: mark it off site on Storage › Volumes.",
+                ))),
+            );
+        },
+    )
+    .when("form.copies != '1'")
+    .step(
+        "when",
+        &t(Message::new("gui-backup-wizard-step-when", "When")),
+        |s| {
+            s.description(&t(Message::new(
+                "gui-backup-wizard-when-about",
+                "Back up now on the Backup page makes copies at any time.",
+            )))
+            .field(
+                field(
+                    "onImport",
+                    Message::new("gui-backup-wizard-on-import", "After each import"),
+                    FieldKind::Toggle,
+                )
+                .default_value(json!(true)),
+            )
+            .field(
+                field(
+                    "onConnect",
+                    Message::new(
+                        "gui-backup-wizard-on-connect",
+                        "When a backup disk is plugged in",
+                    ),
+                    FieldKind::Toggle,
+                )
+                .default_value(json!(true)),
+            );
+        },
+    )
+    .verb(&t(Message::new("gui-backup-wizard-finish", "Use this strategy")))
 }
 
 /// The Health scope: how it stands, "Check now", and the findings of the
@@ -784,6 +909,14 @@ fn strategy_section(s: &mut SectionBuilder<'_>, t: &dyn Fn(Message) -> String) {
         Action::command(BACKUP_NOW_COMMAND)
             .title(&t(Message::new("gui-storage-backup-now", "Back up now")))
             .primary(),
+    );
+    s.action(
+        Action::command(egui_pop::api::admin::CMD_WIZARD_OPEN.as_str())
+            .title(&t(Message::new(
+                "gui-backup-wizard-open",
+                "Set up backups…",
+            )))
+            .args(json!({ "id": BACKUP_WIZARD })),
     );
 }
 

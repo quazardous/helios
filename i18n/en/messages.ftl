@@ -71,6 +71,44 @@ gui-about-description = A client/server, AI-first image processing framework.
 
 gui-backup-card-safe = { $card } is safe to format: every photo has its backups
 
+gui-backup-wizard = Set up backups
+
+gui-backup-wizard-about = Helios keeps verified copies of every photo on your backup disks: choose how many, where, and when.
+
+gui-backup-wizard-copies = Copies of each photo
+
+gui-backup-wizard-copies-about = Each copy is on a different disk, besides the photo in the library. Two copies survive a disk failing.
+
+gui-backup-wizard-destination = Copy to
+
+gui-backup-wizard-destination-archive = Any disk with the archive role
+
+gui-backup-wizard-destination-backup = Any disk with the backup role
+
+gui-backup-wizard-destination-help = Give a disk its role on Storage › Volumes; one disk per copy.
+
+gui-backup-wizard-finish = Use this strategy
+
+gui-backup-wizard-off-site = Keep one of the copies off site
+
+gui-backup-wizard-off-site-help = A disk kept elsewhere survives a fire or a theft: mark it off site on Storage › Volumes.
+
+gui-backup-wizard-on-connect = When a backup disk is plugged in
+
+gui-backup-wizard-on-import = After each import
+
+gui-backup-wizard-open = Set up backups…
+
+gui-backup-wizard-step-copies = Copies
+
+gui-backup-wizard-step-destination = Disks
+
+gui-backup-wizard-step-off-site = Off site
+
+gui-backup-wizard-step-when = When
+
+gui-backup-wizard-when-about = Back up now on the Backup page makes copies at any time.
+
 gui-caption-decisions = Decisions waiting
 
 gui-caption-decisions-count = { $count } stack suggestions waiting for an answer
