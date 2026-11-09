@@ -162,3 +162,62 @@ fn helios_settings_are_placed_read_and_written_to_their_layer() {
     h.get_by_role_and_label(egui::accesskit::Role::Group, "Image map records");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// The search reaches inside the shortcuts editor: a shortcut found by
+/// its key lands on the shortcuts page, marked; and every setting shows
+/// once, whether a field binds it or a page's widget edits it.
+#[test]
+fn the_search_lands_on_a_shortcut_and_every_setting_shows_once() {
+    use egui::accesskit::{Role, Toggled};
+    use egui_kittest::kittest::{NodeT as _, by};
+    use egui_pop::api::admin::model::Item;
+
+    let shell = Shell::new(helios_panels(), None);
+    let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+    h.run();
+    let app = h.state().app().handle().clone();
+    let admin = app.service(&ADMIN).unwrap();
+
+    let tree = admin.tree(&app);
+    let mut placed: Vec<&str> = tree
+        .sections
+        .iter()
+        .flat_map(|s| s.groups.iter().flat_map(|g| &g.items))
+        .flat_map(|i| -> Vec<&str> {
+            match i {
+                Item::Field(f) => f.setting_id().into_iter().collect(),
+                Item::Widget(w) => w.settings().collect(),
+                _ => Vec::new(),
+            }
+        })
+        .collect();
+    let all = placed.len();
+    placed.sort_unstable();
+    placed.dedup();
+    assert_eq!(placed.len(), all, "a setting placed twice");
+
+    h.state_mut()
+        .run("admin.open", json!({ "path": "library" }), Origin::User)
+        .unwrap();
+    h.run();
+    h.run();
+    let hint = "Search every setting";
+    h.get_by_role_and_label(Role::SearchInput, hint).click();
+    h.run();
+    h.get_by_role_and_label(Role::SearchInput, hint)
+        .type_text("ctrl+shift+i");
+    h.run();
+    h.run();
+    // The import window's shortcut, chosen in the left panel.
+    h.get(by().role(Role::Button).label_contains("(Ctrl+Shift+I)"))
+        .click();
+    h.run();
+    h.run();
+    assert_eq!(admin.shown().1.as_deref(), Some("shortcuts"));
+    assert_eq!(admin.marked().as_deref(), Some("library.importWindow"));
+    let marked = h
+        .get_all_by_role(Role::Label)
+        .filter(|n| n.accesskit_node().toggled() == Some(Toggled::True))
+        .count();
+    assert_eq!(marked, 1, "the shortcut's row is marked");
+}
