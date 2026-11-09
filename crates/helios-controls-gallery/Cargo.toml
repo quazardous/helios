@@ -1,0 +1,30 @@
+[package]
+name = "helios-controls-gallery"
+description = "The Helios controls gallery: one card per registered control, its representations side by side, a live value and its description, native or in a browser"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+helios-controls = { workspace = true, features = ["render"] }
+helios-core.workspace = true
+helios-shell.workspace = true
+helios-values.workspace = true
+egui-pop.workspace = true
+serde_json.workspace = true
+# MIT OR Apache-2.0 (eframe): the window, or the browser's canvas.
+eframe = { version = "0.37", default-features = false, features = ["default_fonts", "wgpu", "wayland", "x11", "accesskit"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# MIT OR Apache-2.0: the web runner's start, awaited.
+wasm-bindgen-futures = "0.4"
+
+[dev-dependencies]
+# MIT OR Apache-2.0: the exposure card's snapshot (tests/snapshots,
+# thresholds in the workspace's kittest.toml).
+egui_kittest = { version = "0.37", features = ["wgpu", "snapshot"] }
+
+[lints]
+workspace = true

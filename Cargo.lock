@@ -2208,6 +2208,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "helios-controls-gallery"
+version = "0.74.0"
+dependencies = [
+ "eframe",
+ "egui-pop",
+ "egui_kittest",
+ "helios-controls",
+ "helios-core",
+ "helios-shell",
+ "helios-values",
+ "serde_json",
+ "wasm-bindgen-futures",
+]
+
+[[package]]
 name = "helios-core"
 version = "0.74.0"
 dependencies = [
