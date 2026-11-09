@@ -588,9 +588,6 @@ command-workshop-suggest =
 command-help-health =
     .title = Bilan de santé…
 
-command-health-findings =
-    .title = Les constats du bilan de santé, les pires d’abord, puis les ignorés : niveau, mots, correction ; et un résumé
-
 command-health-fix =
     .title = Lancer la correction d’un constat de santé, puis les vérifications à nouveau (`id`)
 

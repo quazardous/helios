@@ -169,8 +169,6 @@ enum Action {
     Health,
     /// Run the health checks now (`health.checkNow`).
     HealthCheckNow,
-    /// The health check's findings (`health.findings`).
-    HealthFindings,
     /// Run a finding's fix (`health.fix`'s arguments).
     HealthFix(Value),
     /// Ignore a finding or show it again (`health.ignore`'s arguments).
@@ -2854,15 +2852,6 @@ impl Shell {
         );
         add(
             CommandSpec::new(
-                health::FINDINGS,
-                "The health check's findings, worst first, then the ignored ones: level, words, fix; and a summary",
-                "Help",
-            )
-            .read_only(),
-            Box::new(|_, _| Ok(Action::HealthFindings)),
-        );
-        add(
-            CommandSpec::new(
                 health::FIX,
                 "Run a health finding's fix, then the checks again (`id`)",
                 "Help",
@@ -4534,7 +4523,6 @@ impl Shell {
                 return Ok(Value::Null);
             }
             Action::Health => return self.open_health(),
-            Action::HealthFindings => return self.health_findings(),
             Action::HealthFix(args) => return self.health_fix(&args),
             Action::HealthIgnore(args) => return self.health_ignore(&args),
             Action::HealthCheckNow => {

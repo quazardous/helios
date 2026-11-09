@@ -49,9 +49,6 @@ command-gui-snapshot =
 command-health-checkNow =
     .title = Run the health checks now (Help > Health check)
 
-command-health-findings =
-    .title = The health check's findings, worst first, then the ignored ones: level, words, fix; and a summary
-
 command-health-fix =
     .title = Run a health finding's fix, then the checks again (`id`)
 

@@ -42,7 +42,6 @@ command-gui-record-start.title f3ddcd32ecfa4d0a
 command-gui-record-stop.title 8d3aad9304f56ea8
 command-gui-snapshot.title b408436c6f1ff343
 command-health-checkNow.title f8dc3e3e8d7ee6d8
-command-health-findings.title 354b7c797478ba3d
 command-health-fix.title 2ecc29744a3313ea
 command-health-ignore.title 392bdd709e064211
 command-helios-compare-detach.title aa7ae7ff58e60317

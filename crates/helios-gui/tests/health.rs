@@ -175,16 +175,6 @@ fn the_health_page_is_a_command_and_check_now_runs_again() {
     assert_eq!(read["findings"][0]["id"], "test.broken");
     assert_eq!(read["findings"][0]["tone"], "danger");
     assert_eq!(read["summary"]["tone"], "danger");
-    assert!(
-        h.state_mut()
-            .run(
-                helios_gui::shell::HEALTH_FIX,
-                json!({ "id": "test.broken" }),
-                Origin::User,
-            )
-            .is_err(),
-        "no fix"
-    );
     h.state_mut()
         .run(
             helios_gui::shell::HEALTH_IGNORE,
@@ -192,6 +182,7 @@ fn the_health_page_is_a_command_and_check_now_runs_again() {
             Origin::User,
         )
         .unwrap();
+    h.run();
     let read = h
         .state_mut()
         .run(

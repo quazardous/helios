@@ -60,8 +60,11 @@ pub(crate) struct HealthPage {
     /// How many times a volume came or went, once listened to.
     volumes: Arc<AtomicU64>,
     listening: bool,
-    /// The run state the Settings app's page last read.
+    /// The run state the answer was made at.
     seen: (u64, bool),
+    /// `health.findings`'s answer, made again when a run starts or ends
+    /// and when a finding is ignored, and read by the command at once.
+    answer: Arc<Mutex<Value>>,
 }
 
 /// The findings as the page reads them: each finding a row with `id`,
@@ -159,6 +162,40 @@ impl Shell {
             }
         });
         self.health.runner = Some(runner);
+        if !self.has_command(FINDINGS) {
+            let answer = self.health.answer.clone();
+            let registered = self.register(
+                helios_shell::commands::CommandSpec::new(
+                    FINDINGS,
+                    "The health check's findings, worst first, then the ignored ones: level, words, fix; and a summary",
+                    "Help",
+                )
+                .read_only(),
+                move |_, _| Ok(answer.lock().unwrap_or_else(PoisonError::into_inner).clone()),
+            );
+            if let Err(e) = registered {
+                log::warn!("health: {e}");
+            }
+        }
+        self.health_answer();
+    }
+
+    /// Makes `health.findings`'s answer again, and has the Settings app
+    /// read it.
+    fn health_answer(&mut self) {
+        let Some(runner) = self.health.runner.as_ref() else {
+            return;
+        };
+        let t = |m: Message| self.text(m);
+        let answer = findings_answer(&t, &runner.findings(), runner.running());
+        *self
+            .health
+            .answer
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = answer;
+        if let Some(admin) = self.app.handle().service(&egui_pop::api::admin::ADMIN) {
+            admin.refresh();
+        }
     }
 
     /// The health checks' runner, when set.
@@ -185,13 +222,6 @@ impl Shell {
     /// `health.checkNow`: whether a run started (none while one runs).
     pub(super) fn health_check_now(&mut self) -> bool {
         self.health.runner.as_mut().is_some_and(Runner::run_now)
-    }
-
-    /// `health.findings`.
-    pub(super) fn health_findings(&self) -> Result<Value, String> {
-        let runner = self.health.runner.as_ref().ok_or("no health check")?;
-        let t = |m: Message| self.text(m);
-        Ok(findings_answer(&t, &runner.findings(), runner.running()))
     }
 
     /// `health.fix`: the finding's fix, then the checks again.
@@ -225,6 +255,7 @@ impl Shell {
         runner.findings().ignored.set(id, on)?;
         let worst = runner.findings().worst();
         self.status.borrow_mut().health = worst;
+        self.health_answer();
         Ok(json!({ "id": id, "ignored": on }))
     }
 
@@ -262,9 +293,7 @@ impl Shell {
         self.status.borrow_mut().health = worst;
         if seen != self.health.seen {
             self.health.seen = seen;
-            if let Some(admin) = self.app.handle().service(&egui_pop::api::admin::ADMIN) {
-                admin.refresh();
-            }
+            self.health_answer();
         }
     }
 }
