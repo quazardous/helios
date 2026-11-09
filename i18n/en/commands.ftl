@@ -1,6 +1,21 @@
 # Generated from Helios's declarations and code by `cargo xtask i18n extract`:
 # do not edit. Translations live in i18n/<locale>/ under the same names.
 
+command-controls-catalogue =
+    .title = List the registered controls
+
+command-controls-describe =
+    .title = Describe a control (`id`): purpose, footprints, connector, gestures, detents, variants, settings schema
+
+command-controls-nudge =
+    .title = Step a control on a node (`node`, `control`, `steps`; `fine`, `coarse`)
+
+command-controls-reset =
+    .title = Reset a control on a node to its default (`node`, `control`)
+
+command-controls-set =
+    .title = Set a control on a node (`node`, `control`, `value`; `force`)
+
 command-decision-accept =
     .title = Accept a decision's proposal (`node`; `option`, 0 for the model's best)
 

@@ -738,6 +738,13 @@ impl Shell {
         // The param commands first: the menus take their titles.
         helios_values::register(&mut lock(&registry), wiring.values.clone())
             .expect("param commands are declared once");
+        helios_controls::commands::register(
+            &mut lock(&registry),
+            wiring.values.clone(),
+            crate::controls::registry().clone(),
+            crate::controls::steps().clone(),
+        )
+        .expect("controls commands are declared once");
         Shell::declare_menus(&wiring);
         let opens = crate::platform::Opens::default();
         let Wiring {

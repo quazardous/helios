@@ -35,7 +35,7 @@ use std::sync::Mutex;
 use egui::{Sense, Ui};
 use egui_pop::api::sliders;
 use egui_pop::core::icon::{Icon, Tone};
-use egui_pop::core::slider::{Cause, Slider, SliderOutput};
+use egui_pop::core::slider::{Cause, Change as SliderChange, Slider, SliderOutput, Verdict};
 use egui_pop::core::ui::UiPop as _;
 use egui_pop::viewport::change::{Cause as ToolCause, Change as ToolChange};
 use egui_pop::viewport::curve::CurveEditor;
@@ -168,6 +168,55 @@ pub fn choice(ctx: &egui::Context, path: &str, d: &Descriptor, value: &str) -> S
         .as_deref()
         .map(|m| helios_i18n::ids::param_choice(m, param_name(path), value));
     translated(ctx, key, value)
+}
+
+/// What a slider's change becomes: held on its control's detents (unless
+/// `free`), then egui-pop's `slider.change` step (`hook`), then, once
+/// done, the `controls.change` step; a veto or a redirect of either wins.
+fn control_verdict(
+    control: Option<&helios_controls::Control>,
+    path: &str,
+    free: bool,
+    c: &SliderChange,
+    hook: Option<&mut impl FnMut(&SliderChange) -> Verdict>,
+) -> Verdict {
+    let mut change = *c;
+    if let Some(ctl) = control
+        && c.cause == Cause::Drag
+    {
+        change.to = ctl.detented(c.to, free);
+    }
+    match hook.map_or(Verdict::Go, |h| h(&change)) {
+        Verdict::Veto => return Verdict::Veto,
+        Verdict::Redirect(v) => change.to = v,
+        Verdict::Go => {}
+    }
+    if let Some(ctl) = control
+        && change.done
+    {
+        let event = helios_controls::flow::ChangeEvent {
+            control: ctl.id.clone(),
+            node: helios_controls::flow::node_of(path),
+            path: path.into(),
+            from: c.from,
+            to: change.to,
+            cause: helios_controls::render::cause_of(c.cause),
+            device: "pointer".into(),
+        };
+        let steps = crate::controls::steps()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        match steps.run(&event) {
+            helios_controls::flow::Verdict::Veto => return Verdict::Veto,
+            helios_controls::flow::Verdict::Redirect(v) => change.to = v,
+            helios_controls::flow::Verdict::Go => {}
+        }
+    }
+    if change.to == c.to {
+        Verdict::Go
+    } else {
+        Verdict::Redirect(change.to)
+    }
 }
 
 fn write(
@@ -427,11 +476,18 @@ impl Params {
         let width = (ui.available_width() - 28.0).clamp(120.0, 320.0);
         let height = ui.spacing().interact_size.y;
         let app = self.app.clone();
+        // A business control patched to it (exposure) gives its steps
+        // and detents; others are their implicit control, the slider the
+        // descriptor calls for.
+        let control = crate::controls::registry().control_for(path, d).cloned();
+        let free = helios_controls::render::detents_off(ui);
         let out = ui
             .allocate_ui(egui::vec2(width, height), |ui| {
                 ui.set_width(width);
                 let mut slider = Slider::from_descriptor(&mut v, &spec);
-                if d.unit.as_deref() == Some("EV") {
+                if let Some(c) = &control {
+                    slider = helios_controls::render::configure(slider, c);
+                } else if d.unit.as_deref() == Some("EV") {
                     // As darktable shows exposures: `+0.70 EV`.
                     slider = slider.signed();
                 }
@@ -441,8 +497,11 @@ impl Params {
                 if d.picker {
                     slider = slider.quad(Icon::Picker, &picker);
                 }
-                if let Some(app) = &app {
-                    slider = slider.on_change(sliders::hook(app, path));
+                let mut hook = app.as_ref().map(|app| sliders::hook(app, path));
+                if control.is_some() || hook.is_some() {
+                    slider = slider.on_change(move |c| {
+                        control_verdict(control.as_ref(), path, free, c, hook.as_mut())
+                    });
                 }
                 slider.show(ui)
             })

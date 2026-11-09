@@ -174,6 +174,18 @@ impl Module for DecideExposure {
     }
 }
 
+/// The controls this module's parameters are patched to: `exposure` is
+/// edited by the exposure control (`docs/design/controls.md`); the others
+/// keep their implicit controls, built from their descriptors.
+pub fn patches() -> Vec<helios_controls::Patch> {
+    vec![helios_controls::Patch::new(
+        "exposure",
+        "exposure",
+        helios_controls::catalogue::EXPOSURE,
+        "value",
+    )]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

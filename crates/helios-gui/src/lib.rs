@@ -8,6 +8,7 @@ pub mod catalogue;
 pub mod clipboard;
 pub mod config;
 pub mod contexts;
+pub mod controls;
 pub mod decisions;
 pub mod dialogs;
 pub mod display;

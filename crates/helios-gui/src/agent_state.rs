@@ -8,6 +8,8 @@
 //!   size of the image open in the viewport (`open_size`).
 //! - `helios.values`: the image's parameters, path to value
 //!   (`node/exposure/exposure`), what `param.get` reads.
+//! - `controls`: every node parameter and the control that edits it
+//!   (`helios_controls::commands::instances`).
 //! - `helios.jobs`: egui-pop's jobs centre counted by state (`running`,
 //!   `finished`, `failed`, `cancelled`, `total`, `idle`), and each job's
 //!   `id`, `kind`, `title` and `state` (`list`).
@@ -93,6 +95,17 @@ impl Plugin for AgentState {
             .snapshot(move |_| {
                 let store = values.lock().unwrap_or_else(PoisonError::into_inner);
                 values_snapshot(&store)
+            }),
+        )?;
+        let values = self.values.clone();
+        ctx.collector(
+            FnCollector::new(
+                "controls",
+                "Every node parameter and the control that edits it: path, node, control id, implicit (built from its descriptor) or patched, value and how the control shows it.",
+            )
+            .snapshot(move |_| {
+                let store = values.lock().unwrap_or_else(PoisonError::into_inner);
+                helios_controls::commands::instances(&store, crate::controls::registry())
             }),
         )?;
         let app = ctx.app();

@@ -2305,6 +2305,7 @@ dependencies = [
  "egui-pop-wayland",
  "egui_kittest",
  "helios-config",
+ "helios-controls",
  "helios-core",
  "helios-decision",
  "helios-display",
@@ -2462,6 +2463,7 @@ dependencies = [
 name = "helios-module-exposure"
 version = "0.74.0"
 dependencies = [
+ "helios-controls",
  "helios-core",
  "helios-photo",
  "helios-testkit",

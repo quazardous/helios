@@ -28,6 +28,8 @@ helios-inspect.workspace = true
 helios-profile.workspace = true
 helios-scopes.workspace = true
 helios-values.workspace = true
+# Business controls (exposure) and the implicit ones of other parameters.
+helios-controls = { workspace = true, features = ["render"] }
 helios-core.workspace = true
 # The edit's decisions, answered in the Decisions panel.
 helios-decision.workspace = true

@@ -9,6 +9,8 @@ repository.workspace = true
 [dependencies]
 helios-core.workspace = true
 helios-photo.workspace = true
+# The controls its parameters are patched to (the model only, no egui).
+helios-controls.workspace = true
 
 [dev-dependencies]
 helios-testkit.workspace = true

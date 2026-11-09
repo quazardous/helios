@@ -252,7 +252,8 @@ fn the_wheel_steps_a_slider_only_once_focused() {
         h.step();
     }
     wheel(&mut h, Modifiers::NONE);
-    assert!((ev(&h) - 0.02).abs() < 1e-9, "focused: {}", ev(&h));
+    // The exposure control's step: 0.01 EV.
+    assert!((ev(&h) - 0.01).abs() < 1e-9, "focused: {}", ev(&h));
 }
 
 /// Enter types an expression of the current value, `x`.
@@ -338,11 +339,12 @@ fn keys_step_enter_types_and_double_click_resets() {
     h.run();
     h.key_press(Key::ArrowRight);
     h.run();
-    assert!((ev(&h) - 0.02).abs() < 1e-9, "{}", ev(&h));
+    // The exposure control's step: 0.01 EV.
+    assert!((ev(&h) - 0.01).abs() < 1e-9, "{}", ev(&h));
     // Shift: ten steps at once (up to the coarse step).
     h.key_press_modifiers(Modifiers::SHIFT, Key::ArrowRight);
     h.run();
-    assert!((ev(&h) - 0.22).abs() < 1e-9, "{}", ev(&h));
+    assert!((ev(&h) - 0.11).abs() < 1e-9, "{}", ev(&h));
     // Enter types; past the soft range (-3..4 EV) is forced, up to the hard one.
     h.key_press(Key::Enter);
     h.run();
