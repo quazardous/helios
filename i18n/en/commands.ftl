@@ -4,14 +4,26 @@
 command-controls-catalogue =
     .title = List the registered controls
 
+command-controls-context =
+    .title = Read the controls' context keys, box, density and hand; set any of them (`task`, `detail`, `image`, `tool`, `device`, `target`, `density`, `box`, `layouts`, `gesture_open`, `pointer_in_panel`, `handled`)
+
 command-controls-describe =
-    .title = Describe a control (`id`): purpose, footprints, connector, gestures, detents, variants, settings schema
+    .title = Describe a control (`id`): purpose, connector, gestures, detents, variants, slot policies, orientations, integration and fallback per surface, warnings, settings schema; with `node`, its placement on that node's card and why
+
+command-controls-find =
+    .title = Search a node's controls (`node`, `query`), shown or folded, with their placement and reason
 
 command-controls-nudge =
     .title = Step a control on a node (`node`, `control`, `steps`; `fine`, `coarse`)
 
 command-controls-reset =
     .title = Reset a control on a node to its default (`node`, `control`)
+
+command-controls-reveal =
+    .title = Show a folded part of a node's card for the moment (`node`, `key`)
+
+command-controls-reveal-all =
+    .title = Show every part of a node's card for the moment (`node`)
 
 command-controls-set =
     .title = Set a control on a node (`node`, `control`, `value`; `force`)
