@@ -380,6 +380,33 @@ gaps.
 The footprints above are the first slot sizes. The base unit and the
 full set of slot sizes are to be settled with the workshop.
 
+**Orientation (decided 2026-11-09).** Some controls prefer to be vertical,
+some horizontal, and some work either way. A control declares:
+
+- its preferred orientation: `horizontal`, `vertical` or `any`;
+- the orientations it supports.
+
+Some examples:
+
+- A slider is horizontal in a panel row, and vertical in a mixer-like
+  strip (a bank of faders for a MIDI controller, a narrow side dock).
+- A tone curve or a colour wheel has no orientation, but keeps its
+  aspect ratio.
+- A gradient bar, or a histogram strip, is horizontal only.
+
+Slots have a shape, and the docking system matches it to the control:
+
+1. It uses the preferred orientation when the slot allows it.
+2. Otherwise it uses another supported orientation.
+3. Otherwise it falls back to a smaller representation or to the managed
+   fallback.
+
+A control is never rotated into an orientation it does not support.
+Turning a control's whole layout from horizontal to vertical is a
+variant (3.2, standard 4), so it keeps the connector, the bindings and
+the muscle memory of its gestures. For instance, dragging up on a
+vertical slider does what dragging right does on a horizontal one.
+
 **2. Standard connectors.** Every control has a typed interface, its
 **connector**:
 
