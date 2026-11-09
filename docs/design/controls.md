@@ -377,8 +377,24 @@ gaps.
   swapped, moved or stacked without re-laying out the rest of the
   module.
 
-The footprints above are the first slot sizes. The base unit and the
-full set of slot sizes are to be settled with the workshop.
+The footprints above are the first slot sizes.
+
+**Base unit and fractions (decided 2026-11-09).**
+
+- **The base unit** is one panel row, scaled by density.
+- **The allowed sizes** are halves, thirds and quarters of it, and whole
+  multiples: ¼, ⅓, ½, ⅔, ¾, 1, n.
+- **Exact arithmetic.** Thirds do not nest in halves, so the engine
+  counts in twelfths of the unit. 12 is the least common multiple of 2,
+  3 and 4. Every allowed size is then a whole number of twelfths, and
+  the sums stay exact.
+- **Rows mixing thirds with halves or quarters may leave a gap.**
+  - The engine never reorders to fill it (predictable placement).
+  - It gives the gap to a growable neighbour when the neighbour's
+    policy allows that size.
+  - Otherwise it leaves the gap empty.
+- **To be measured on the bench:** which slot sizes the shelf shows
+  first.
 
 **Orientation (decided 2026-11-09).** Some controls prefer to be vertical,
 some horizontal, and some work either way. A control declares:
