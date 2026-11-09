@@ -18,9 +18,8 @@ Status: **accepted** (2026-11-08), recommended answers to Q1 to Q10
 - everything interactive or live is a control, static items are a
   case's chrome (3.1).
 
-The context rules (`control-contexts.md`) are proposed: which contexts
-may fold parts (C1) and the default detail level, `standard` (C2), are
-decided (2026-11-09); two choices are open.
+The context rules (`control-contexts.md`) are accepted too (2026-11-09,
+its choices C1 to C4).
 
 **Slice 1 built** (2026-11-09): the `helios-controls` crate (model,
 registry and `controls.describe` output, the value flow with the vetoable
@@ -343,8 +342,9 @@ levels:
   - The module does not care about the look. It gives only placement
     information: the group (the case) and the order. The control's own
     size policy and orientations (3.2) say what slot it needs. A part's
-    **tier** (essential, standard, expert) would join this list, but it
-    is only proposed (`control-contexts.md`), not decided.
+    **tier** (essential, standard, expert) joins it, from the context
+    study (`control-contexts.md`, accepted 2026-11-09): it decides what
+    the detail level folds.
   - The host places the control (in a panel, a dock, a float, a HUD or a
     toolbar) and draws it with the standard renderer for its slot,
     orientation and representation.

@@ -1,9 +1,9 @@
 # Control contexts: what changes what the controls show
 
-Status: **study, proposed** (2026-11-09). The context rules here are
-not decided, except C1 (which contexts may fold) and C2 (the default
-detail level, `standard`), both decided 2026-11-09; the two open
-**choices** at the end (C3, C4) are for the owner. The layout they act on was decided on 2026-11-09 and lives in
+Status: **accepted** (2026-11-09). The study's four **choices** (section
+7, C1 to C4) were decided on 2026-11-09, each on its recommended option.
+The additions to `helios-controls` (section 6.5) are named, not built
+(controls note section 7, slice 5). The layout they act on was decided on 2026-11-09 and lives in
 [controls.md](controls.md): integration levels (3.1), size policies,
 standard slots, orientation and dense packing (3.2), the slot engine
 (section 4). This note uses those words and does not restate them.
@@ -337,7 +337,7 @@ From the weakest to the strongest:
 
 1. **The control's declaration**: its default representation per mode,
    its size policy and orientations (decided, controls note 3.2), and
-   its parts' **tier** (`essential`, `standard`, `expert`; proposed).
+   its parts' **tier** (`essential`, `standard`, `expert`).
 2. **The group's rules**: a case or a module's card declares rules, each
    a `when` clause over the keys and an effect (a representation, parts
    folded or shown, a mode offer, HUD chips). Rules are data, evaluated
@@ -456,8 +456,8 @@ Named, not implemented.
 
 ## 7. Choices
 
-C1 and C2 are decided; C3 and C4 are open, each with its
-recommendation.
+All four were decided on 2026-11-09, each on its recommended option;
+the options set aside are kept for the record.
 
 **C1. Which contexts may fold parts. Decided 2026-11-09: B.**
 - **Slow keys** (`ctl.task`, `ctl.space`, `ctl.detail`) may fold parts.
@@ -488,34 +488,32 @@ recommendation.
   visible, and `essential` is better offered by a profile than
   imposed.
 
-**C3. The person's layout against a group's rules.** Open.
-- A. The person's layout always wins, on order, visibility,
-  representation, span, orientation and position; rules apply only to
-  what the person has not placed. It never wins over a control's
-  limits: never below its minimum, never into an orientation it does
-  not support; then the control falls back (a smaller form, its managed
-  fallback) with a visible reason.
-- B. Rules win within their context; the person's layout is the base
-  outside it.
-- C. One saved layout per task replaces rules altogether (Capture One's
-  workspaces).
-- Recommended: **A**. It is the only one where a person who pinned a
-  part never sees it vanish; per-task layouts remain possible as a
-  task selector on the layout, without dropping the rules' defaults.
+**C3. The person's layout against a group's rules. Decided
+2026-11-09: A.**
+- The person's layout always wins: on order, visibility,
+  representation, span, the orientation pin and the position pin.
+- Rules apply only to the parts the person has not placed.
+- The layout never pushes a control below its minimum or into an
+  orientation it does not support. In that case the control falls back
+  (a smaller form, its managed fallback), with a visible reason.
+- The options were: A, as above; B, rules win within their context,
+  the person's layout being the base outside it; C, one saved layout
+  per task replaces rules altogether (Capture One's workspaces). A was
+  recommended: it is the only one where a person who pinned a part
+  never sees it vanish, and per-task layouts remain possible as a task
+  selector on the layout, without dropping the rules' defaults.
 
-**C4. How the screen space is measured.** Open.
-- A. `ctl.space` derived from the panel's own box, in slot columns at
-  the current density, with half a base unit of hysteresis; the density
-  is a person setting (`comfortable`, `compact`, `touch`) that the
-  device may suggest but never switches alone.
-- B. Per window or screen class (laptop, large, web).
-- C. The density alone, picked by the person, with no automatic change
-  of `ctl.space`.
-- Recommended: **A**. A wide screen with a narrow dock is narrow; only
-  the panel's own box tells, counting in slot columns ties the key to
-  what the slot engine can actually place, and the hysteresis stops
-  flicker during a resize. The density keeps the person's say over
-  size.
+**C4. How the screen space is measured. Decided 2026-11-09: A.**
+- `ctl.space` derives from the panel's own box, counted in slot
+  columns at the current density, with half a base unit of hysteresis.
+- The density is a setting the person chooses (`comfortable`,
+  `compact` or `touch`). The device may suggest one, never switch it.
+- The options were: A, as above; B, per window or screen class (laptop,
+  large, web); C, the density alone, with no automatic change of
+  `ctl.space`. A was recommended: a wide screen with a narrow dock is
+  narrow, only the panel's own box tells, counting in slot columns ties
+  the key to what the slot engine can place, and the hysteresis stops
+  flicker during a resize.
 
 ## 8. Sources
 
