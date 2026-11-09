@@ -1056,7 +1056,7 @@ customisation slices of the 2026-11-08 plan.
 | 1 | **Done** (2026-11-09). `helios-controls`: model, registry and `controls.describe`, the value flow with the `controls.change` step, implicit controls from descriptors, the `exposure` control patched by the exposure module, the `controls.*` commands and collector, the gallery card | M | none |
 | 2 | **Done** (2026-11-09). This note and `control-contexts.md` reconciled with the decisions of 2026-11-09 | S | 1 |
 | 3 | **Done** (2026-11-09). The slot crate v0, `egui_gridflow`: the twelfths grid, size policies, orientation from the slot's shape, dense deterministic packing, pinned positions, growth slot by slot, hysteresis; pure unit tests, no egui | M | none |
-| 4 | `helios-controls` on the slot engine: size policies, orientations and integration levels in the model in place of `Footprint`; cards laid out through it | M | 3 |
+| 4 | **Done** (2026-11-09). `helios-controls` on the slot engine: size policies, orientations and integration levels in the model in place of `Footprint`; cards laid out through it | M | 3 |
 | 5 | Contexts and `resolve` per card (case): the context keys, the box and the density in, a `Placement` per control out, through the slot engine; the reachability invariant | M | 4 |
 | 6 | Renderers by representation and orientation: full, compact, simplified, horizontal and vertical, under the ergonomic contract; the value-type managed fallbacks | M | 4 |
 | 7 | Bench A: the gallery's shelf and bench, controls moved from the shelf to the bench (`controls.bench.*`) and packed live | M | 5, 6 |
