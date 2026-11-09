@@ -1,16 +1,36 @@
 # Controls: one controller per parameter, three surfaces, any device
 
-Status: **accepted** (2026-11-08), recommended answers to Q1 to Q10.
+Status: **accepted** (2026-11-08), recommended answers to Q1 to Q10
+(Q6 superseded on 2026-11-09). **Layout and integration decided
+2026-11-09** (owner's decisions, each dated where it is written):
+
+- two integration levels, managed and integrated (3.1);
+- a size policy per control, the module laid out like an HTML form
+  (3.2);
+- standard slots on a base unit of one panel row, counted in twelfths
+  (D1, 3.2);
+- an orientation per control, picked by the engine from the slot's
+  shape (D4, 3.2);
+- the slot engine as a standalone crate (D2) with its own small
+  quantized-grid core (D2b, section 4);
+- dense, deterministic packing with gap filling (D3, 3.2);
+- the gallery's composing area named the **bench** (D5, section 7);
+- everything interactive or live is a control, static items are a
+  case's chrome (3.1).
+
+The context rules (`control-contexts.md`) are proposed: which contexts
+may fold parts (C1) and the default detail level, `standard` (C2), are
+decided (2026-11-09); two choices are open.
+
 **Slice 1 built** (2026-11-09): the `helios-controls` crate (model,
 registry and `controls.describe` output, the value flow with the vetoable
 `controls.change` step, implicit controls from descriptors), the
 `exposure` control patched by the exposure module (steps, 0 EV detent,
 fine mode, slider and scrub variants, HUD chip), the `controls.*`
 commands and `controls` collector, and the controls gallery
-(`crates/helios-controls-gallery`, native and web). Left: the chip
-anchored in the darkroom HUD and the scrub on the image (slice 5), and
-the panel drawn through the renderers for every parameter (slice 2).
-Section 8 holds the questions, each with its recommendation.
+(`crates/helios-controls-gallery`, native and web). Section 7 lists the
+slices left. Section 8 holds the questions, each with its
+recommendation.
 
 **The request.** Helios modules should not draw widgets. They declare
 **controls**: specialised, configurable controllers, "a kind of
@@ -34,7 +54,7 @@ Where the admin note has generic bricks, this note has **business
 controls**: each is built for a purpose (exposure, feather, a gradient
 mask, crop), and the generic parts (a slider, a knob, a handle, a
 read-out) stay egui-pop's. The controls layer is standardised like an
-audio rack: standard footprints, standard connectors, cases that hold
+audio rack: standard slots, standard connectors, cases that hold
 smaller controls, variants swapped within a purpose, and one ergonomic
 contract (section 3.2).
 
@@ -60,6 +80,23 @@ addition; the controls themselves never move into egui-pop.
 - A **surface** is where a control appears: the **panel** (the module's
   card), the **HUD** (read-outs and small controls over the image, near
   the pointer), the **handles** (gizmos on the image).
+- A **mode** is where the host mounts a control on the panel side:
+  `panel` (the module's card), `docked` (a dock of its own), `floating`
+  (a window), `hud`, `toolbar`. Toolbars and docks are surfaces too,
+  with their own slots (3.2).
+- A **representation** is how much a control shows in its slot, the
+  same variant either way: `full`, `compact` (labels inside, less
+  chrome) or `simplified` (a nudge, a read-out). A slider and a knob
+  are two variants, not two representations.
+- An **orientation** is the direction a control is laid out along:
+  horizontal or vertical. It is neither a variant nor a representation
+  (3.2).
+- A **slot** is the box the host gives a control: whole units of the
+  base unit on each axis (3.2).
+- An **indicator** is a control with read-only jacks: a histogram, a
+  meter, a read-out.
+- A case's **chrome** is what it draws that is not a control: its
+  legend, separators, help text, icons. It has no value and no jack.
 - A **renderer** draws a control on one surface with egui-pop widgets.
 - A **device** is anything that produces input for a control (pointer,
   wheel, keys, MIDI, gamepad, console, an agent).
@@ -77,7 +114,7 @@ Read on 2026-11-08: Helios's `next`, egui-pop's `next`.
 | Value descriptors | `egui_pop_model::values::Descriptor` | Type (`Float`, `Int`, `Bool`, `Choice`, `Floats`, `Ints`, `Text`), label, default, hard and soft range, step, coarse step, unit, display scale, precision, choices, count, `Writers`. | Nothing about points, angles or how a value is shown on the image. |
 | The value store and gestures | `egui_pop_model::values::Store`: `begin_gesture`, `end`, `GestureId`; `Set::gesture` | One gesture is one undo step, its paths held against other writers meanwhile; listeners told of each change. | Nothing: the controls write through it. |
 | Bindings | `egui_pop_core::binding::Binding` (ADR 0009): `plain`, `bound`, `watch` | Any widget edits a store path as the user, a drag being a gesture. | One path per widget; a composite writes several paths in one gesture. |
-| The parameter widget | `egui_pop_core::param::param` | The editor a descriptor calls for (slider, check box, drop-down, colour swatch, text). | One representation per type, no choice by the person. |
+| The parameter widget | `egui_pop_core::param::param` | The editor a descriptor calls for (slider, check box, drop-down, colour swatch, text). | One widget per type, no choice by the person. |
 | Sliders | `egui_pop_core::slider::{Slider, RangeSlider}` (`docs/sliders.md`) | darktable's bauhaus row: soft and hard range, fine and coarse modifiers, typed expressions, reset, a quad button, logarithmic, gradient track, field states, AccessKit actions; `on_change` with `Change { from, to, cause, done }`, causes `Drag`, `Key`, `Wheel`, `Typed`, `Reset`, `Access`; `slider::Gestures` as data. | A knob and a scrub field are not there. |
 | The `slider.change` step | `egui_pop_api::sliders::hook` | Each finished change runs a step that hooks may veto or redirect. | Per slider, not per parameter. |
 | Image tools | `egui_pop_viewport::{curve::CurveEditor, wheels, histogram, zoom, navigator}`, steps in `egui-pop-imaging` (`curve.change`, `wheel.change`…) | A curve editor, colour wheels, a histogram you drag, each with the same `Change` and `done` rule. | Nothing for a list of points or a mask shape. |
@@ -119,7 +156,7 @@ There is no darkroom crate: the darkroom is a place of `helios-gui`
 module gives descriptors and hints, the GUI picks the widget. What is
 missing is everything above one parameter: points, angles and shapes
 that span several parameters (written by hand in `drag_writes`, per
-shape), a representation the person chooses, any device but the
+shape), a variant the person chooses, any device but the
 keyboard and pointer, a HUD, and a way for a plugin to bring a shape.
 `ParamWidget::Curve`, `Wheel` and `picker` exist but no module uses them
 yet.
@@ -219,7 +256,7 @@ checked against a source.
   range.
 - **Customisation is per person, with workspaces for layout.** Capture
   One's tool tabs and workspaces, darktable's module groups and quick
-  access panel, Lightroom's panel order. Representation (slider or
+  access panel, Lightroom's panel order. A variant (slider or
   knob) is rarely offered; sensitivity and keys are.
 - **Commit on release.** Blender's operators, darktable's history item
   after the drag, Lightroom's history step per slider gesture: preview
@@ -279,15 +316,23 @@ control  id: "exposure"                       # the purpose, stable
 value is one of a few types the model knows how to store, compare,
 interpolate and map: `number`, `bool`, `one-of`, `point`, `angle`,
 `range`, `colour`, `points` (a curve or a path), `box`. They describe
-storage; they are never offered as controls.
+storage, and the catalogue never offers a bare value type as a control:
+the person picks "the tone curve", never "a `points`". A type still has
+a **standard managed renderer**, which is what an integrated control's
+managed fallback (below) is drawn with: `points` as a list of numbered
+rows (x and y per node), `colour` as a swatch with its channels as
+sliders, `point` as two numbers. That renderer is part of the control
+that uses it, under its purpose and its ergonomic contract.
 
 **Who adds a control.** The catalogue is curated: Helios's controls are
 decided in this note and its follow-ups, like the admin note's bricks.
 A plugin may register its own control (section 3.3 for composites, Q5 for
 how far), declared as data with the same fields, so it gets
 customisation, devices, undo and agents for free. A control that needs a
-visual part egui-pop lacks waits for that part, or ships with a
-registered renderer in Rust, counted by the inspector as an exception.
+visual part egui-pop lacks waits for that part, or ships as an
+integrated control (below): its own renderer in Rust plus a managed
+fallback. Only a control with **no** managed fallback is an exception,
+registered and counted by the inspector.
 
 **Two levels of integration (decided 2026-11-09).** A control matters by
 what it controls (its patch to parameters) and by what it shows (its
@@ -296,11 +341,13 @@ levels:
 
 - **Managed (docked).**
   - The module does not care about the look. It gives only placement
-    information: the group, the order, the footprint, and the part's
-    tier.
+    information: the group (the case) and the order. The control's own
+    size policy and orientations (3.2) say what slot it needs. A part's
+    **tier** (essential, standard, expert) would join this list, but it
+    is only proposed (`control-contexts.md`), not decided.
   - The host places the control (in a panel, a dock, a float, a HUD or a
-    toolbar) and draws it with the standard renderer for its footprint
-    and representation.
+    toolbar) and draws it with the standard renderer for its slot,
+    orientation and representation.
   - This is the default, and most controls never leave it.
 - **Integrated (graphical).**
   - The control brings its own drawing on a surface: a curve editor,
@@ -314,90 +361,143 @@ levels:
     compact or simplified representation, a folded group, a narrow
     panel, a device with no pointer.
 
-The level belongs to the control's renderer, not to the module: one
-control may be managed in the panel and integrated on the image.
+The level is chosen **per surface** and belongs to the control's
+renderer, not to the module: one control may be managed in the panel
+and integrated on the image. An integrated control with no managed
+fallback is the exception counted by the inspector (Q5).
 
-### 3.2 The rack: footprints, connectors, cases
+**Everything a control (decided 2026-11-09, answer B).**
+
+- Anything interactive, or showing live data, is a control. A
+  histogram, a meter or a read-out is an **indicator**: a control whose
+  jacks are read-only. It gets a slot, a size policy, a place in the
+  order and an AccessKit node like any other.
+- Static items (a legend, a separator, help text, an icon) are the
+  case's **chrome**, as `legend` and the border are a `fieldset`'s. They
+  have no value and no connector, and the case draws them.
+- Nothing is drawn outside a control. Integrated controls draw by
+  design, inside their slot or on their surface.
+- There is no free egui zone: a module never gets a raw `Ui` to draw
+  in.
+
+### 3.2 The rack: slots, connectors, cases
 
 The controls layer is a Lego layer, standardised the way audio racks
 are: 19-inch rack units, Eurorack's HP widths, patch cables between
 jacks. Five standards make it so.
 
-**1. Standard footprints.** Every control fits one of a few footprints,
-on each surface:
+**1. Standard slots (decided 2026-11-09).** The host does not hand out
+arbitrary sizes. It places every control in a **slot** of a standard
+size, the way Eurobox-style storage crates work: every size is a
+multiple or a simple fraction of one base unit, so slots tile and nest
+without gaps, and a growable control grows slot by slot. This replaces
+the fixed footprints accepted on 2026-11-08 (Q6).
 
-| Footprint | Surface | Size | Holds, for example |
-|---|---|---|---|
-| `half` | panel | half a row (two side by side) | a toggle, a short choice, a small number |
-| `row` | panel | one row, the panel's width | a slider, a drop-down, a range |
-| `block(n)` | panel | n rows, n from 2 to 8 | a colour wheel (4), a curve (6), a composite's own block |
-| `chip` | HUD | one line of text, an icon, at most a nudge | "+0.67 EV", "Feather 48 px" |
-| `gizmo` | image | no box: handles in the image's space | a line, a box, an ellipse |
+**Base unit and fractions (D1, decided 2026-11-09).**
 
-A module's card is a column of rows; a footprint is all the layout code
-knows. Cards are assembled from controls that snap in, and the person
-reorders, hides, collapses or moves them to another card or to
-favourites without any bespoke layout. A control declares its
-footprint per surface; a variant may change it (a knob is a `half`, the
-slider it replaces a `row`).
+- **The base unit** is one panel row, scaled by the density (a person
+  setting: comfortable, compact, touch; see `control-contexts.md`).
+- **The allowed sizes**, on each axis, are ¼, ⅓, ½, ⅔, ¾, 1 and n
+  (whole multiples).
+- **Exact arithmetic.** Thirds do not nest in halves, so the engine
+  counts in twelfths of the unit. 12 is the least common multiple of 2,
+  3 and 4. Every allowed size is a whole number of twelfths, and the
+  sums stay exact.
 
-**Size policy (decided 2026-11-09).** Within its footprint, a control is
-either **fixed** or **growable**, depending on how it is drawn:
+The slots, width × height in base units:
+
+| Slot | Size | Holds, for example |
+|---|---|---|
+| ¼, ⅓ | ¼ or ⅓ × 1 | an icon toggle, a pip, a two-digit number |
+| ½ (the old `half`) | ½ × 1 | a toggle, a short choice, a knob, a small number |
+| ⅔, ¾ | ⅔ or ¾ × 1 | a short slider next to a toggle |
+| 1 (the old `row`) | 1 × 1 | a slider, a drop-down, a range |
+| 1 × n (the old `block(n)`) | 1 × n, n from 2 to 8 | a colour wheel (4), a curve (6), a case's own block |
+| k × n | k × n, on surfaces wider than one column | a strip of vertical faders, a wide curve |
+
+Slots belong to the surfaces that lay controls out in a grid:
+
+| Surface | Its grid |
+|---|---|
+| **Panel** (a module's card) | one column of slots in a narrow panel, more when the panel is wide (`ctl.space` in `control-contexts.md` counts the columns) |
+| **Dock** (a rack docked on its own: favourites, a quick strip, a MIDI bank strip) | its own width in slot columns, often several |
+| **Toolbar** | a single line of slots along the toolbar's axis, horizontal or vertical; what does not fit goes to egui-pop's "More tools" overflow |
+| **Floating** (a rack in a window) | as a dock, at the window's width |
+
+Two surfaces have no slots: the **HUD**, whose element is a **chip**
+(one line of text, an icon, at most a nudge: "+0.67 EV", "Feather
+48 px"), and the **image**, whose element is a **gizmo** (no box:
+handles in the image's space). `chip` and `gizmo` are forms on those
+surfaces, not slot sizes.
+
+A module's card is a grid of slot columns, and the slot engine
+(section 4) packs its controls into it: the size policies and
+orientations are all the layout code knows. Cards are assembled from
+controls that snap in, and the person reorders, hides, collapses or
+moves them to another card or to favourites without any bespoke layout.
+A variant may declare its own size policy (a knob prefers ½, the slider
+it replaces 1).
+
+**Size policy (decided 2026-11-09).** Within the slots of a surface, a
+control is either **fixed** or **growable**, depending on how it is
+drawn:
 
 - A bitmap-like drawing keeps its size.
 - A vector drawing can use more room, such as a wider curve or a bigger
   wheel.
 
-A control declares a minimum, a preferred and a maximum size for each
-axis, an aspect ratio if it has one, and the axis it grows along. The
-docking system then lays the module out the way a browser lays out an
-HTML form:
+The control declares its policy: a minimum, a preferred and a maximum
+size for each axis (each an allowed size), an aspect ratio if it has
+one, and the axis it grows along. The module gives only the order and
+the group. The host then lays the module out the way a browser lays out
+an HTML form:
 
-- **Cases** are the containers, like `fieldset`.
+- **Cases** are the containers, like `fieldset`; their chrome (legend,
+  separators, help text) is the `legend`.
 - **Controls** are the elements.
 - **Size policies** drive the flow.
 
-The box a control is given, and the density, are part of the **context**
-handed to the control, alongside the context keys in
-`control-contexts.md`. Below its minimum, the control switches to a
-smaller representation, or to its managed fallback.
+The slot a control is given, and the density, are part of the
+**context** handed to the control, alongside the context keys in
+`control-contexts.md`. A growable control grows to the next allowed
+size that fits within its maximum, never to an in-between size. Below
+its minimum, the control switches to a smaller representation, or to
+its managed fallback (3.1). That resizing is a physical effect of the
+size policy, not a context rule.
 
-**Standard slots (decided 2026-11-09).** The docking system does not
-hand out arbitrary sizes. It works with slots of standard sizes, the
-way Eurobox-style storage crates do: every size is a multiple or a
-simple fraction of one base module, so slots tile and nest without
-gaps.
+**Packing: a grid with gap filling (D3, decided 2026-11-09).** The
+owner chose dense packing over an ordered flow that never reorders.
+The design keeps it predictable:
 
-- **A slot is a whole number of base units on each axis.** For a panel,
-  that means half a row, a row, or a block of n rows. On wider docks a
-  slot can also span several columns.
-- **A growable control grows in steps.** It grows to the next standard
-  slot that fits within its maximum, never to an in-between size.
+- **Dense and deterministic**, in the manner of CSS
+  `grid-auto-flow: dense`. Controls are placed in the declared order,
+  or the person's order when they set one. A later control may move up
+  into an earlier gap that it fits; nothing else changes the order.
+  The same inputs (controls, policies, order, slot columns, density)
+  always give the same placement.
+- **Rows that mix thirds with halves or quarters may leave a gap.** The
+  engine fills it with the first later control that fits; failing that,
+  it gives the gap to a growable neighbour whose policy allows the size;
+  failing that, it leaves the gap empty.
+- **Logical order is not visual order.** Tab, AccessKit and the order
+  of a MIDI bank follow the declared or person order, never the visual
+  position, so a control moved up into a gap keeps its place for the
+  keyboard, screen readers and encoders.
+- **No jump under the hand.** A repack caused by a context change (a
+  resize, a task switch, a part folded) waits until the pointer leaves
+  the panel and no gesture is open (the anti-jump rule of
+  `control-contexts.md`). A part being handled never moves.
+- **The person can pin a position** in their layout (3.9); the engine
+  packs around pinned controls.
 - **Same slot, same swap.** Two controls that fit the same slot can be
-  swapped, moved or stacked without re-laying out the rest of the
-  module.
-
-The footprints above are the first slot sizes.
-
-**Base unit and fractions (decided 2026-11-09).**
-
-- **The base unit** is one panel row, scaled by density.
-- **The allowed sizes** are halves, thirds and quarters of it, and whole
-  multiples: ¼, ⅓, ½, ⅔, ¾, 1, n.
-- **Exact arithmetic.** Thirds do not nest in halves, so the engine
-  counts in twelfths of the unit. 12 is the least common multiple of 2,
-  3 and 4. Every allowed size is then a whole number of twelfths, and
-  the sums stay exact.
-- **Rows mixing thirds with halves or quarters may leave a gap.**
-  - The engine never reorders to fill it (predictable placement).
-  - It gives the gap to a growable neighbour when the neighbour's
-    policy allows that size.
-  - Otherwise it leaves the gap empty.
+  swapped, and the swap moves nothing else. Moving a control elsewhere,
+  or changing its slot size, may repack the controls after it, under
+  the rules above.
 - **To be measured on the bench:** which slot sizes the shelf shows
-  first.
+  first, and how often gap filling moves a control in practice.
 
-**Orientation (decided 2026-11-09).** Some controls prefer to be vertical,
-some horizontal, and some work either way. A control declares:
+**Orientation (decided 2026-11-09).** Some controls prefer to be
+vertical, some horizontal, and some work either way. A control declares:
 
 - its preferred orientation: `horizontal`, `vertical` or `any`;
 - the orientations it supports.
@@ -410,24 +510,31 @@ Some examples:
   aspect ratio.
 - A gradient bar, or a histogram strip, is horizontal only.
 
-Slots have a shape, and the docking system matches it to the control:
+**D4 (decided 2026-11-09): the engine picks the orientation
+automatically from the slot's shape.**
 
 1. It uses the preferred orientation when the slot allows it.
 2. Otherwise it uses another supported orientation.
-3. Otherwise it falls back to a smaller representation or to the managed
-   fallback.
+3. Otherwise it falls back to a smaller form (a smaller representation,
+   or the managed fallback).
 
-A control is never rotated into an orientation it does not support.
-Turning a control's whole layout from horizontal to vertical is a
-variant (3.2, standard 4), so it keeps the connector, the bindings and
-the muscle memory of its gestures. For instance, dragging up on a
-vertical slider does what dragging right does on a horizontal one.
+The person may **pin** an orientation for a control; the pin is stored
+in their layout (3.9), and the engine then treats it as the only
+supported one. A control is never turned into an orientation it does
+not support.
+
+Orientation is **not a variant**: it is the same variant laid out along
+the other axis. A flipped control keeps its connector, its bindings and
+the meaning of its gestures. Dragging up on a vertical slider does what
+dragging right does on a horizontal one, and the arrow keys follow the
+axis.
 
 **2. Standard connectors.** Every control has a typed interface, its
 **connector**:
 
 - **jacks**: the values it reads and writes, each typed with its value
   type, unit and space (`number<EV>`, `point<image>`, `box<oriented>`);
+  an indicator's jacks are read-only;
 - **gestures** it accepts (drag, scrub, wheel, pick, typed value,
   reset) and **intents** from devices (3.8);
 - **signals** it emits: `preview` (a value inside a gesture), `commit`
@@ -439,7 +546,8 @@ jack into a parameter, like patch cables between modules and a mixer
 parameter; a `point<image>` jack takes a `Floats` of two or two floats.
 
 **3. Cases.** A composite is a **case**: it holds smaller controls and
-wires them inside (3.3). The case has its own footprint and connector;
+wires them inside (3.3). The case has its own size policy, chrome and
+connector;
 from outside, a gradient mask is one control with jacks `anchor`,
 `angle`, `feather` and `profile`, whatever it holds.
 
@@ -451,7 +559,7 @@ the purpose; the person picks the variant (3.9). That is where
 customisation lives.
 
 **5. The ergonomic contract.** The standard is not only pixels: a
-footprint guarantees how a control is handled, so muscle memory carries
+slot guarantees how a control is handled, so muscle memory carries
 from one module to the next. The renderers and the runtime in
 `helios-controls` implement it once; a control's author declares
 numbers (sensitivity, detents), never behaviour.
@@ -464,15 +572,25 @@ numbers (sensitivity, detents), never behaviour.
   **response curve** per purpose: linear, logarithmic (radius, ISO-like
   values) or perceptual (exposure in stops), with the same acceleration
   for fast wheel and encoder turns everywhere.
-- **Predictable placement and reach.** In a `row`, the label is on the
-  start side inside the bar, the value on the end side, the modified
-  mark before the label, the quad button (a picker, an on/off) at the
-  end; a `half` keeps the same order in half the width; a `block` puts
-  its title row first with the same mark and reset. Frequent actions are
-  near the pointer: the HUD chip appears next to the pointer or the
-  handle being dragged, never in a corner; handles sit on the image
-  where the hand already is, and the wheel over a handle adjusts what it
-  shows.
+- **Predictable placement and reach.** Placement is predictable
+  because packing is deterministic and the logical order never changes
+  under the hand (standard 1); within a slot, the parts of a control
+  are always in the same places:
+  - **Horizontal**, in a slot one unit wide: the label is on the start
+    side inside the bar, the value on the end side, the modified mark
+    before the label, the quad button (a picker, an on/off) at the end.
+    A ½ slot keeps the same order in half the width; narrower slots
+    (¼, ⅓) drop the label into the tooltip and keep the value.
+  - **Vertical**: the label at the bottom, under the track (as on a
+    mixer's fader strip), the value at the top, the modified mark next
+    to the value, the quad button below the label. Up is more.
+  - **Blocks** (n rows high) put their title row first with the same
+    mark and reset.
+
+  Frequent actions are near the pointer: the HUD chip appears next to
+  the pointer or the handle being dragged, never in a corner; handles
+  sit on the image where the hand already is, and the wheel over a
+  handle adjusts what it shows.
 - **Device ergonomics.** Each purpose maps onto physical controls in a
   standard way: a number onto an endless encoder (relative, with
   acceleration) or a fader (absolute over the soft range), its reset onto
@@ -480,7 +598,7 @@ numbers (sensitivity, detents), never behaviour.
   encoders; an angle onto an encoder with detents; a choice onto
   buttons or an encoder with steps; a pick onto a button. A **rack**
   (a card, or the favourites) maps onto a **bank** of physical controls
-  in its order: eight controls, eight encoders, and the bank pages with
+  in its logical order (declared or the person's, not the visual one): eight controls, eight encoders, and the bank pages with
   the next card.
 - **Feedback.** While handled, every control gives the same feedback: a
   live read-out in the HUD chip, the preview rendered from the gesture's
@@ -648,7 +766,7 @@ direction).
   declaration (Shift + wheel: feather, Ctrl + wheel: opacity) and the
   pointer profile.
 - **Keyboard focus** stays egui-pop's: Tab moves through the panel's
-  controls; with the image focused, Tab cycles the active composite's
+  controls in their logical order (3.2, packing), not their visual one; with the image focused, Tab cycles the active composite's
   handles (each handle is an AccessKit node with its value and actions).
 - The active control and part are published as context keys
   (`control.active`, `control.part`), so keys and menus can be scoped to
@@ -697,7 +815,7 @@ Customisation is data stored in the settings, in layers, never code:
 | Sensitivity, fine, coarse, acceleration | drag speed ×0.5, fine ×0.1 | `controls.feel.<control>`, or `controls.feel.<module>.<control>` for one module |
 | Steps and detents | exposure in steps of 1/3 EV; the 0 EV detent off | `controls.steps.<control>`, `controls.detents.<control>` |
 | Bindings | MIDI cc 21 to exposure | `controls.bindings` (a list) |
-| Layout | the module card's rows reordered, some hidden, some in a "More" group | `controls.layout.<module>` |
+| Layout | the module card's controls reordered, some hidden, some in a "More" group; per control, a slot size within its policy, a span (columns), a pinned orientation and a pinned position (decided 2026-11-09) | `controls.layout.<module>` |
 | Favourites | a quick panel of controls picked from any module | `controls.favourites` |
 | HUD | which read-outs show, where, when | `controls.hud.*` |
 
@@ -745,14 +863,26 @@ and never reaches past it into egui.
 
 | Layer | Crate | Holds |
 |---|---|---|
-| Slot layout | a standalone crate in its own repository, dual MIT OR Apache-2.0, depending on neither egui nor Helios (placeholder name `slotflow`; decided 2026-11-09) | slot packing over plain boxes: the base unit and its fractions, size policies, orientations, smaller forms by index, ordered flow with spans, growth slot by slot, hysteresis. It knows nothing of controls, values or drawing. helios-controls is its first user. egui_stack's sections and toolbar overflow, and egui-pop's admin forms, may adopt it once the bench has proved it. It is not published before then. |
+| Slot layout | a standalone crate in its own repository, dual MIT OR Apache-2.0, depending on neither egui nor Helios (placeholder name `slotflow`; D2, decided 2026-11-09) | slot packing over plain boxes: the base unit and its fractions in twelfths, size policies, orientations picked from the slot's shape, smaller forms by index, dense deterministic grid packing with spans and pinned positions (D3), growth slot by slot, hysteresis. It knows nothing of controls, values or drawing. helios-controls is its first user. egui_stack's sections and toolbar overflow, and egui-pop's admin forms, may adopt it once the bench has proved it. It is not published before then. |
 | Visual | egui-pop (`egui-pop-core`, `egui-pop-viewport`, `egui-pop-api`) | widgets (slider, range, curve, wheels), the viewport, overlays and handles, the canvas and its commands, the history contract, keys and pointer profiles, the agent bridge. Unchanged in spirit: visual parts, no meaning. |
-| Model | `helios-controls`, module `model` (no egui; on `helios-values` and `helios-core`) | the catalogue of business controls, value types, footprints, connectors, cases, declarations and their serialisable form, bindings, derive and apply, coordinate spaces and mappings, intents, customisation types, resolution and diagnostics. |
-| Renderers | `helios-controls`, module `render` (on egui-pop) | per control, variant and surface, under the ergonomic contract: panel rows (egui-pop sliders, range sliders, check boxes, drop-downs, swatches, curve, wheels), HUD read-outs and mini-controls, handles (egui-pop overlays, built from composites); the fallback rule. |
+| Model | `helios-controls`, module `model` (no egui; on `helios-values` and `helios-core`) | the catalogue of business controls, value types, size policies and the slots they ask for (today's `Footprint` gives way to them), orientations (preferred and supported), the integration level per surface (managed or integrated, with the managed fallback), indicators and a case's chrome, connectors, cases, declarations and their serialisable form, bindings, derive and apply, coordinate spaces and mappings, intents, customisation types, resolution and diagnostics. |
+| Renderers | `helios-controls`, module `render` (on egui-pop) | per control, variant, surface, orientation and representation, under the ergonomic contract: the standard managed renderers (egui-pop sliders, range sliders, check boxes, drop-downs, swatches, knobs, value-type fallbacks), HUD read-outs and mini-controls, integrated renderers (curve, wheels, handles from composites on egui-pop overlays); the fallback rule. |
 | Runtime | `helios-controls`, module `runtime` | instantiation per node, the active control, gestures, `controls.*` commands and steps, the collector, the devices trait, the settings bridge. |
 | Patches | each module (`modules/<name>`), each plugin | which controls they use and how each jack is patched to a parameter, as Rust builders over the model (no egui, so engine crates stay free of the interface) or the same data as JSON (out-of-process plugins). Today's `ParamHint` becomes the implicit control's source, then gives way to patches. |
 | Devices | `plugins/devices/<name>` | MIDI, gamepad, console backends (Rust, out of process, as Helios plugins are). |
 | Hosting | `helios-gui` | mounts panels, the HUD and handles in the darkroom; drops its hand-drawn editors as modules migrate. |
+
+**The slot engine's core (D2b, decided 2026-11-09).** The slot crate
+owns a small **quantized-grid core**: placements in twelfths of the
+base unit, on a grid of slot columns, packed densely (D3). It borrows
+taffy's vocabulary so a reader of either recognises the other:
+`min_size`, `size`, `max_size`, `aspect_ratio`, and a grow factor along
+the growth axis. It does not wrap taffy: taffy's continuous flexbox and
+grid solve a more general problem, and the slot rules (allowed sizes
+only, growth slot by slot, orientation from the slot's shape, smaller
+forms by index) would sit on top of it as much code as they take on
+their own. A taffy backend stays possible later behind the same
+vocabulary.
 
 **Small egui-pop additions** the controls need (visual primitives only):
 
@@ -778,15 +908,31 @@ Each is an issue of its own in egui-pop, useful to any application.
 ## 5. The first catalogue
 
 Drawn from today's modules (section 1.2) and the darktable modules
-Helios ports next. Each control has a purpose. Footprints are panel /
-HUD / image (3.2); a dash means none. Variants are the swappable forms
-of the same control; the first is the default.
+Helios ports next. Each control has a purpose. The slot column gives
+the panel slot (3.2, its preferred size: `row` is 1, `half` is ½,
+`block(n)` is 1 × n), then the HUD form and the image form; a dash
+means none. Variants are the swappable forms of the same control; the
+first is the default.
 
-### 5.1 Simple controls: footprint and connector
+**Size policy and orientation, as a rule** (proposed, to be checked
+on the bench; in place of three more columns; a control that departs from the rule says so in its row):
 
-| Control | Connector (jacks) | Footprint | Variants | Used by |
+- **Growable along the width**: sliders, range sliders and drop-downs
+  (from ½ to n columns). **Fixed**: toggles, buttons, knobs, dials.
+- **Growable with an aspect ratio of 1**: `grade-wheel`, `tone-curve`,
+  the chromaticity plot (they grow by whole blocks, keeping square).
+- **Orientation**: sliders, range sliders and the knob's strip are
+  `horizontal` by preference and support `vertical` (fader strips,
+  narrow docks); `targets` and `luminance-range` are horizontal only,
+  being drawn on a horizontal track; wheels, curves, toggles, knobs and
+  dials are `any`. Composites take the orientation of their parts'
+  flow.
+
+### 5.1 Simple controls: slot and connector
+
+| Control | Connector (jacks) | Slot | Variants | Used by |
 |---|---|---|---|---|
-| `exposure` | `value: number<EV>` | row / chip / scrub | slider, knob (`half`), scrub field | exposure; vkdt `exposure`; a mask's exposure later |
+| `exposure` | `value: number<EV>` | row / chip / scrub | slider, knob (½), scrub field | exposure; vkdt `exposure`; a mask's exposure later |
 | `black-level` | `value: number<relative>` | row / chip / - | slider, knob | exposure `black` |
 | `feather` | `width: number<px image>` | row / chip / band of its shape | slider, knob | circle, ellipse, gradient, path masks |
 | `opacity` | `value: number<percent>` | row / chip / - | slider, knob | every mask member, mask groups |
@@ -809,7 +955,7 @@ of the same control; the first is the default.
 
 ### 5.2 Composites (cases)
 
-| Control | Holds | Outside jacks | Footprint | Used by |
+| Control | Holds | Outside jacks | Slot | Used by |
 |---|---|---|---|---|
 | `circle-mask` | centre (`point<image>`), `radius`, `feather` | `center`, `radius`, `feather` | block(3) / chip / gizmo | masks `circle` |
 | `ellipse-mask` | centre, two `radius`, `angle`, `feather`, proportional (`invert`-like toggle) | `center`, `radii`, `rotation`, `feather`, `proportional` | block(5) / chip / gizmo | masks `ellipse`; a vignette later |
@@ -893,23 +1039,34 @@ control.
 
 Sizes: S is a day or less of agent work, M two or three days, L a week.
 
+Slice 1 is done; slice 2 is this note's reconciliation with the
+decisions of 2026-11-09. The slices after it were renumbered that day:
+the slot engine, contexts and the bench come first, then the masks and
+customisation slices of the 2026-11-08 plan.
+
 | # | Slice | Size | Depends on |
 |---|---|---|---|
-| 1 | `helios-controls` model: controls, value types, declarations as data, binding, resolution and diagnostics, implicit controls from descriptors; unit tests | M | none |
-| 2 | Runtime and panel: instantiation per node, gestures, the `controls.change` step, `param_ui_with` replaced by the panel renderer with no visible change; snapshots unchanged | M | 1 |
-| 3 | `exposure` and `black-level` bound; the `controls.*` commands and the `controls` collector | S | 2 |
-| 4 | egui-pop: knob and scrub field; anchored HUD element | M | none (egui-pop issues) |
-| 5 | HUD and the exposure scrub on the image; the active control and its context keys | M | 3, 4 |
-| 6 | `feather`, `angle`, `gradient-mask` with derived parts and handles; its part of `drag_writes` removed; scenario with invariants | M | 5 |
-| 7 | `ellipse-mask`, `circle-mask`, `path-mask`; `drag_writes` removed | M | 6 |
-| 8 | Customisation as settings (variants, feel, steps, layout, favourites), profiles; pages declared in the admin framework | M | 5 |
-| 9 | Keys bound to controls (nudge, reset, the active control) in the keymap | S | 5 |
-| 10 | egui-pop: mapping hook on overlays, scalar handle; the image viewport on the navigation model | M | none (egui-pop issues) |
-| 11 | Crop module and `crop` control, in the oriented space | L | 7, 10 |
-| 12 | `colour-picker`, `white-balance`, `temperature-tint`, `chromaticity` | M | 6 |
-| 13 | The device trait and a MIDI backend with feedback (if Q3 says v1) | M | 9 |
-| 14 | Gamepad and console backends | M | 13 |
-| 15 | Plugin-declared controls and composites over the plugin protocol | M | 7 |
+| 1 | **Done** (2026-11-09). `helios-controls`: model, registry and `controls.describe`, the value flow with the `controls.change` step, implicit controls from descriptors, the `exposure` control patched by the exposure module, the `controls.*` commands and collector, the gallery card | M | none |
+| 2 | **Done** (2026-11-09). This note and `control-contexts.md` reconciled with the decisions of 2026-11-09 | S | 1 |
+| 3 | The slot crate v0 (placeholder `slotflow`): the twelfths grid, size policies, orientation from the slot's shape, dense deterministic packing, pinned positions, growth slot by slot, hysteresis; pure unit tests, no egui | M | none |
+| 4 | `helios-controls` on the slot engine: size policies, orientations and integration levels in the model in place of `Footprint`; cards laid out through it | M | 3 |
+| 5 | Contexts and `resolve` per card (case): the context keys, the box and the density in, a `Placement` per control out, through the slot engine; the reachability invariant | M | 4 |
+| 6 | Renderers by representation and orientation: full, compact, simplified, horizontal and vertical, under the ergonomic contract; the value-type managed fallbacks | M | 4 |
+| 7 | Bench A: the gallery's shelf and bench, controls moved from the shelf to the bench (`controls.bench.*`) and packed live | M | 5, 6 |
+| 8 | Bench B: the context switches on the bench and the measures (steps, reach, shift, reachability) as agent scenarios | M | 7 |
+| 9 | The darkroom panels through the engine: `param_ui_with` replaced by the managed renderers, no visible change beyond the packing; snapshots updated knowingly | M | 5, 6 |
+| 10 | egui-pop: knob and scrub field; anchored HUD element | M | none (egui-pop issues) |
+| 11 | HUD and the exposure scrub on the image; the active control and its context keys | M | 9, 10 |
+| 12 | `feather`, `angle`, `gradient-mask` with derived parts: integrated on the image plus a managed fallback in the panel; its part of `drag_writes` removed; scenario with invariants | M | 11 |
+| 13 | `ellipse-mask`, `circle-mask`, `path-mask`, each integrated on the image plus a managed fallback; `drag_writes` removed | M | 12 |
+| 14 | Customisation as settings (variants, feel, steps, layout with slot sizes, spans and pins, favourites), profiles; pages declared in the admin framework | M | 9 |
+| 15 | Keys bound to controls (nudge, reset, the active control) in the keymap | S | 11 |
+| 16 | egui-pop: mapping hook on overlays, scalar handle; the image viewport on the navigation model | M | none (egui-pop issues) |
+| 17 | Crop module and `crop` control, in the oriented space | L | 13, 16 |
+| 18 | `colour-picker`, `white-balance`, `temperature-tint`, `chromaticity` | M | 12 |
+| 19 | The device trait and a MIDI backend with feedback (if Q3 says v1) | M | 15 |
+| 20 | Gamepad and console backends | M | 19 |
+| 21 | Plugin-declared controls and composites over the plugin protocol | M | 13 |
 
 ## 8. Open questions
 
@@ -953,15 +1110,18 @@ Sizes: S is a day or less of agent work, M two or three days, L a week.
 
 **Q5. Who may add controls and cases.**
 - A. Helios's catalogue is curated; plugins may add **cases** built from
-  catalogue controls (and controls only with a registered renderer,
-  counted as exceptions); people may not.
+  catalogue controls, and controls of their own as integrated controls
+  (their renderer plus a managed fallback); a control with no managed
+  fallback is an exception, registered and counted; people may not.
 - B. Plugins may add any control; people may build cases in an editor.
 - C. Catalogue only; plugins patch existing controls.
 - Recommended: **A**. Cases keep the rack standard (their parts follow
   the ergonomic contract); a free-for-all brings back hand-drawn widgets;
   a case editor for people can come once the catalogue is stable.
 
-**Q6. The set of footprints.**
+**Q6. The set of footprints.** *Superseded on 2026-11-09 by standard
+slots (3.2, D1 to D4): a grid of base units after all, counted in
+twelfths, with dense packing. Kept below for the record.*
 - A. `half`, `row`, `block(n)` in the panel, `chip` in the HUD, `gizmo`
   on the image.
 - B. A grid: units of a quarter row, controls 1 to 4 units wide and 1 to
