@@ -289,6 +289,34 @@ customisation, devices, undo and agents for free. A control that needs a
 visual part egui-pop lacks waits for that part, or ships with a
 registered renderer in Rust, counted by the inspector as an exception.
 
+**Two levels of integration (decided 2026-11-09).** A control matters by
+what it controls (its patch to parameters) and by what it shows (its
+read-out and feedback). Its look is secondary, and comes at one of two
+levels:
+
+- **Managed (docked).**
+  - The module does not care about the look. It gives only placement
+    information: the group, the order, the footprint, and the part's
+    tier.
+  - The host places the control (in a panel, a dock, a float, a HUD or a
+    toolbar) and draws it with the standard renderer for its footprint
+    and representation.
+  - This is the default, and most controls never leave it.
+- **Integrated (graphical).**
+  - The control brings its own drawing on a surface: a curve editor,
+    colour wheels, a histogram you drag, a gradient's line on the image,
+    a custom gizmo.
+  - It is still bound by the same contract: the value flow (preview,
+    commit, cancel), one gesture per undo step, focus, devices, agents
+    and accessibility.
+  - It also declares a managed fallback, its parameters as standard
+    parts. That fallback is used wherever its own drawing cannot go: a
+    compact or simplified representation, a folded group, a narrow
+    panel, a device with no pointer.
+
+The level belongs to the control's renderer, not to the module: one
+control may be managed in the panel and integrated on the image.
+
 ### 3.2 The rack: footprints, connectors, cases
 
 The controls layer is a Lego layer, standardised the way audio racks
