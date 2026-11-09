@@ -341,6 +341,27 @@ favourites without any bespoke layout. A control declares its
 footprint per surface; a variant may change it (a knob is a `half`, the
 slider it replaces a `row`).
 
+**Size policy (decided 2026-11-09).** Within its footprint, a control is
+either **fixed** or **growable**, depending on how it is drawn:
+
+- A bitmap-like drawing keeps its size.
+- A vector drawing can use more room, such as a wider curve or a bigger
+  wheel.
+
+A control declares a minimum, a preferred and a maximum size for each
+axis, an aspect ratio if it has one, and the axis it grows along. The
+docking system then lays the module out the way a browser lays out an
+HTML form:
+
+- **Cases** are the containers, like `fieldset`.
+- **Controls** are the elements.
+- **Size policies** drive the flow.
+
+The box a control is given, and the density, are part of the **context**
+handed to the control, alongside the context keys in
+`control-contexts.md`. Below its minimum, the control switches to a
+smaller representation, or to its managed fallback.
+
 **2. Standard connectors.** Every control has a typed interface, its
 **connector**:
 
