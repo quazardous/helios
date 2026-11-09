@@ -3,8 +3,9 @@
 //!
 //! - `controls.catalogue`: every registered control, one line each;
 //! - `controls.describe {id}`: one control's full description (purpose,
-//!   footprints, connector, gestures, detents, variants, the JSON schema
-//!   of its settings, its patches);
+//!   connector, gestures, detents, variants, each variant's slot
+//!   policies, orientations and integration level per surface with its
+//!   fallback, warnings, the JSON schema of its settings, its patches);
 //! - `controls.set {node, control, value, force}`,
 //!   `controls.nudge {node, control, steps, fine, coarse}`,
 //!   `controls.reset {node, control}`: one gesture each, through the
@@ -137,7 +138,7 @@ pub fn register(
     commands.register(
         CommandSpec::new(
             "controls.describe",
-            "Describe a control (`id`): purpose, footprints, connector, gestures, detents, variants, settings schema",
+            "Describe a control (`id`): purpose, connector, gestures, detents, variants, slot policies, orientations, integration and fallback per surface, warnings, settings schema",
             "Controls",
         )
         .read_only(),

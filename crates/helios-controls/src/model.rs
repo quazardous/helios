@@ -6,16 +6,23 @@
 //!   ([`ValueSpec`]), units and ranges, [`Feel`] (sensitivity, fine
 //!   factor, response curve), [`Detent`]s, [`Readout`], [`Connector`] and
 //!   [`Variant`]s.
-//! - The rack standard: [`Footprint`]s per [`Surface`], typed
-//!   [`Connector`]s (jacks, gestures, intents, signals), [`Case`]s
-//!   (composites, a skeleton for now), variants, and the ergonomic
-//!   contract ([`HIT_AREA`], [`Feel`], detents).
+//! - The rack standard: slots and size policies per [`Representation`]
+//!   on boxed [`Surface`]s, orientations and integration levels
+//!   ([`crate::slot`]); the HUD's chip and the image's gizmo; typed
+//!   [`Connector`]s (jacks, gestures, intents, signals); [`Kind`]
+//!   (a control or an indicator, whose jacks are read-only); [`Case`]s
+//!   (composites: parts and chrome); variants; and the ergonomic contract
+//!   ([`HIT_AREA`], [`Feel`], detents).
 //! - Where a control lives ([`Mode`]) and how much it shows
 //!   ([`Representation`]): hooks only, the context rules wait for a usage
 //!   study.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 use serde_json::{Value as Json, json};
+
+use crate::slot::{Chrome, Fallback, Integration, Orientation, SizePolicy, SlotForm};
 
 /// The smallest hit area of anything a control lets the hand grab, in
 /// points, whatever its drawn size (the ergonomic contract).
@@ -38,47 +45,56 @@ pub enum ValueType {
     Text,
 }
 
-/// Where a control appears.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+/// Where a control appears. Panel, dock, toolbar and float are boxed:
+/// they lay controls out in slots. The HUD shows a chip, the image a
+/// gizmo: forms of those surfaces, not slots.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Surface {
     /// The module's card.
     Panel,
+    /// A rack docked on its own (favourites, a quick strip, a bank strip).
+    Dock,
+    /// A single line of slots along a toolbar.
+    Toolbar,
+    /// A rack in a window.
+    Float,
     /// Read-outs and small controls over the image.
     Hud,
     /// Handles on the image.
     Image,
 }
 
-/// The standard sizes a control fits on a surface.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum Footprint {
-    /// Half a panel row: two side by side.
-    Half,
-    /// One panel row.
-    Row,
-    /// So many panel rows, 2 to 8.
-    Block(u8),
-    /// One line in the HUD.
-    Chip,
-    /// No box: handles in the image's space.
-    Gizmo,
+impl Surface {
+    pub const ALL: [Surface; 6] = [
+        Surface::Panel,
+        Surface::Dock,
+        Surface::Toolbar,
+        Surface::Float,
+        Surface::Hud,
+        Surface::Image,
+    ];
+
+    /// Whether it lays controls out in slots.
+    pub fn is_boxed(self) -> bool {
+        !matches!(self, Surface::Hud | Surface::Image)
+    }
 }
 
-impl Footprint {
-    /// The surface it belongs to.
-    pub fn surface(self) -> Surface {
-        match self {
-            Footprint::Half | Footprint::Row | Footprint::Block(_) => Surface::Panel,
-            Footprint::Chip => Surface::Hud,
-            Footprint::Gizmo => Surface::Image,
-        }
-    }
+/// A control, or an indicator: a control whose jacks are all read-only
+/// (a histogram, a meter, a read-out). Both get a slot, a place in the
+/// order and an accessibility node.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Kind {
+    #[default]
+    Control,
+    Indicator,
+}
 
-    /// Whether it is a valid footprint (a block of 2 to 8 rows).
-    pub fn is_valid(self) -> bool {
-        !matches!(self, Footprint::Block(n) if !(2..=8).contains(&n))
+impl Kind {
+    fn is_control(&self) -> bool {
+        *self == Kind::Control
     }
 }
 
@@ -94,8 +110,10 @@ pub enum Mode {
     Toolbar,
 }
 
-/// How much a control shows (hooks only, as [`Mode`]).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// How much a control shows in its slot, the same variant either way.
+/// In that order they are the slot engine's forms of a variant: full
+/// first, then the smaller ones it declares.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Representation {
     /// Everything: the label, the bar, the value, the marks.
@@ -171,6 +189,9 @@ pub struct Jack {
     /// The coordinate space of a point or an angle (`image`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub space: Option<String>,
+    /// Read, never written: an indicator's jacks.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub read_only: bool,
 }
 
 impl Jack {
@@ -180,7 +201,13 @@ impl Jack {
             ty,
             unit: None,
             space: None,
+            read_only: false,
         }
+    }
+
+    pub fn read_only(mut self) -> Self {
+        self.read_only = true;
+        self
     }
 
     pub fn unit(mut self, unit: &str) -> Self {
@@ -345,29 +372,112 @@ impl ValueSpec {
 }
 
 /// A form of a control; variants of one control share its connector.
+/// A variant declares what it asks of each surface: its slot forms on
+/// boxed surfaces (a size policy per representation, largest first), the
+/// orientations it supports (preferred first), whether it has a HUD chip
+/// or an image gizmo, and who draws it where (managed unless said).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Variant {
     pub id: String,
     pub label: String,
-    /// Its footprint on each surface it shows on.
-    pub footprints: Vec<Footprint>,
+    /// Its forms on boxed surfaces: full, then the smaller ones.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub slots: Vec<SlotForm>,
+    /// Supported orientations, preferred first; empty is horizontal only.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub orientations: Vec<Orientation>,
+    /// A one-line chip in the HUD.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub chip: bool,
+    /// Handles on the image.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub gizmo: bool,
+    /// Its integration level on the surfaces where it is not managed.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub integration: BTreeMap<Surface, Integration>,
 }
 
 impl Variant {
-    pub fn new(id: &str, label: &str, footprints: &[Footprint]) -> Self {
+    /// A variant with no surface yet; the builders below add them.
+    pub fn new(id: &str, label: &str) -> Self {
         Self {
             id: id.into(),
             label: label.into(),
-            footprints: footprints.to_vec(),
+            slots: Vec::new(),
+            orientations: Vec::new(),
+            chip: false,
+            gizmo: false,
+            integration: BTreeMap::new(),
         }
     }
 
-    /// Its footprint on a surface.
-    pub fn footprint(&self, surface: Surface) -> Option<Footprint> {
-        self.footprints
+    /// Its slot policy in a representation (declare full first).
+    pub fn slot(mut self, representation: Representation, policy: SizePolicy) -> Self {
+        self.slots.push(SlotForm {
+            representation,
+            policy,
+        });
+        self
+    }
+
+    /// Its supported orientations, preferred first.
+    pub fn orientations(mut self, orientations: &[Orientation]) -> Self {
+        self.orientations = orientations.to_vec();
+        self
+    }
+
+    pub fn chip(mut self) -> Self {
+        self.chip = true;
+        self
+    }
+
+    pub fn gizmo(mut self) -> Self {
+        self.gizmo = true;
+        self
+    }
+
+    /// Its integration level on `surface`.
+    pub fn integrated(mut self, surface: Surface, integration: Integration) -> Self {
+        self.integration.insert(surface, integration);
+        self
+    }
+
+    /// Whether it shows on a surface.
+    pub fn shows_on(&self, surface: Surface) -> bool {
+        match surface {
+            Surface::Hud => self.chip,
+            Surface::Image => self.gizmo,
+            _ => !self.slots.is_empty(),
+        }
+    }
+
+    /// The surfaces it shows on.
+    pub fn surfaces(&self) -> Vec<Surface> {
+        Surface::ALL
+            .into_iter()
+            .filter(|s| self.shows_on(*s))
+            .collect()
+    }
+
+    /// Who draws it on `surface`: managed unless declared.
+    pub fn integration(&self, surface: Surface) -> Integration {
+        self.integration.get(&surface).cloned().unwrap_or_default()
+    }
+
+    /// Its slot form in a representation.
+    pub fn form(&self, representation: Representation) -> Option<&SlotForm> {
+        self.slots
             .iter()
-            .copied()
-            .find(|f| f.surface() == surface)
+            .find(|f| f.representation == representation)
+    }
+
+    /// Its supported orientations, preferred first.
+    pub fn orientation_order(&self) -> Vec<Orientation> {
+        if self.orientations.is_empty() {
+            vec![Orientation::Horizontal]
+        } else {
+            self.orientations.clone()
+        }
     }
 }
 
@@ -386,11 +496,43 @@ pub struct Part {
     pub control: String,
 }
 
-/// A composite's skeleton: its parts. Derived parts and their wiring come
-/// with the first case (the gradient mask).
+/// What a case holds, in its order: a part (a control) or chrome (a
+/// legend, a separator, help text, an icon: no value, no jack).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum CaseItem {
+    Part(Part),
+    Chrome(Chrome),
+}
+
+/// A composite: its parts and its chrome, in order. Derived parts and
+/// their wiring come with the first case (the gradient mask).
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Case {
-    pub parts: Vec<Part>,
+    pub items: Vec<CaseItem>,
+}
+
+impl Case {
+    pub fn part(mut self, name: &str, control: &str) -> Self {
+        self.items.push(CaseItem::Part(Part {
+            name: name.into(),
+            control: control.into(),
+        }));
+        self
+    }
+
+    pub fn chrome(mut self, chrome: Chrome) -> Self {
+        self.items.push(CaseItem::Chrome(chrome));
+        self
+    }
+
+    /// Its parts, without the chrome.
+    pub fn parts(&self) -> impl Iterator<Item = &Part> {
+        self.items.iter().filter_map(|i| match i {
+            CaseItem::Part(p) => Some(p),
+            CaseItem::Chrome(_) => None,
+        })
+    }
 }
 
 /// A business control.
@@ -401,6 +543,9 @@ pub struct Control {
     pub label: String,
     /// What it is for, one sentence.
     pub purpose: String,
+    /// A control, or an indicator (read-only jacks).
+    #[serde(default, skip_serializing_if = "Kind::is_control")]
+    pub kind: Kind,
     pub value: ValueSpec,
     pub connector: Connector,
     /// The first is the default.
@@ -424,6 +569,7 @@ impl Control {
             id: id.into(),
             label: label.into(),
             purpose: String::new(),
+            kind: Kind::Control,
             value,
             connector: Connector {
                 signals: vec![Signal::Preview, Signal::Commit, Signal::Cancel],
@@ -440,6 +586,12 @@ impl Control {
 
     pub fn purpose(mut self, purpose: &str) -> Self {
         self.purpose = purpose.into();
+        self
+    }
+
+    /// Makes it an indicator: declare its jacks read-only.
+    pub fn indicator(mut self) -> Self {
+        self.kind = Kind::Indicator;
         self
     }
 
@@ -498,12 +650,24 @@ impl Control {
             return Err(format!("control `{}` has no variant", self.id));
         }
         for v in &self.variants {
-            if let Some(f) = v.footprints.iter().find(|f| !f.is_valid()) {
+            self.check_variant(v)
+                .map_err(|e| format!("control `{}`, variant `{}`: {e}", self.id, v.id))?;
+        }
+        let read_only = self.connector.jacks.iter().filter(|j| j.read_only).count();
+        match self.kind {
+            Kind::Indicator if read_only < self.connector.jacks.len() => {
                 return Err(format!(
-                    "control `{}`, variant `{}`: footprint {f:?} is not standard",
-                    self.id, v.id
+                    "indicator `{}` has a jack it writes; an indicator's jacks are read-only",
+                    self.id
                 ));
             }
+            Kind::Control if read_only > 0 && read_only == self.connector.jacks.len() => {
+                return Err(format!(
+                    "control `{}` writes no jack: declare it an indicator",
+                    self.id
+                ));
+            }
+            _ => {}
         }
         if let Some(n) = self.value.number() {
             if !(n.hard.0 <= n.soft.0 && n.soft.1 <= n.hard.1) {
@@ -524,6 +688,141 @@ impl Control {
             }
         }
         Ok(())
+    }
+
+    fn check_variant(&self, v: &Variant) -> Result<(), String> {
+        if v.surfaces().is_empty() {
+            return Err("it shows on no surface".into());
+        }
+        let mut last = None;
+        for f in &v.slots {
+            if last.is_some_and(|r| r >= f.representation) {
+                return Err(format!(
+                    "slot forms go full, compact, simplified, each once; {:?} is out of order",
+                    f.representation
+                ));
+            }
+            last = Some(f.representation);
+            f.policy
+                .check()
+                .map_err(|e| format!("{:?} slot: {e}", f.representation))?;
+        }
+        if v.slots
+            .first()
+            .is_some_and(|f| f.representation != Representation::Full)
+        {
+            return Err("its first slot form is not the full one".into());
+        }
+        let mut seen = Vec::new();
+        for o in &v.orientations {
+            if seen.contains(o) {
+                return Err(format!("orientation {o} given twice"));
+            }
+            seen.push(*o);
+        }
+        for (surface, level) in &v.integration {
+            if !v.shows_on(*surface) {
+                return Err(format!("integrated on {surface:?}, where it does not show"));
+            }
+            match level {
+                Integration::Integrated {
+                    fallback: Some(Fallback::Variant(id)),
+                } => {
+                    let Some(f) = self.variants.iter().find(|o| &o.id == id) else {
+                        return Err(format!("its fallback variant `{id}` does not exist"));
+                    };
+                    if f.id == v.id
+                        || !f.shows_on(*surface)
+                        || f.integration(*surface) != Integration::Managed
+                    {
+                        return Err(format!(
+                            "its fallback variant `{id}` is not managed on {surface:?}"
+                        ));
+                    }
+                }
+                Integration::Integrated {
+                    fallback: Some(Fallback::Parts),
+                } if self.case.is_none() => {
+                    return Err("its fallback is its parts, but it is not a case".into());
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
+    /// What the inspector counts but does not refuse: an integrated
+    /// variant with no managed fallback, per surface.
+    pub fn warnings(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        for v in &self.variants {
+            for (surface, level) in &v.integration {
+                if *level == (Integration::Integrated { fallback: None }) {
+                    out.push(format!(
+                        "control `{}`, variant `{}`: integrated on {} with no managed fallback",
+                        self.id,
+                        v.id,
+                        surface_name(*surface)
+                    ));
+                }
+            }
+        }
+        out
+    }
+
+    /// How each variant lays out: its slot policies per representation,
+    /// orientations, chip and gizmo, and its integration level per
+    /// surface with the fallback. What `controls.describe` reports.
+    pub fn layout_report(&self) -> Json {
+        let variants: serde_json::Map<String, Json> = self
+            .variants
+            .iter()
+            .map(|v| {
+                let slots: serde_json::Map<String, Json> = v
+                    .slots
+                    .iter()
+                    .map(|f| {
+                        (
+                            representation_name(f.representation).to_owned(),
+                            json!({
+                                "policy": f.policy,
+                                "summary": f.policy.to_string(),
+                            }),
+                        )
+                    })
+                    .collect();
+                let integration: serde_json::Map<String, Json> = v
+                    .surfaces()
+                    .into_iter()
+                    .map(|s| {
+                        let level = v.integration(s);
+                        let (name, fallback) = match &level {
+                            Integration::Managed => ("managed", Json::Null),
+                            Integration::Integrated { fallback } => ("integrated", json!(fallback)),
+                        };
+                        (
+                            surface_name(s).to_owned(),
+                            json!({"level": name, "fallback": fallback}),
+                        )
+                    })
+                    .collect();
+                (
+                    v.id.clone(),
+                    json!({
+                        "slots": slots,
+                        "orientations": v.orientation_order(),
+                        "preferred_orientation": v.orientation_order()[0],
+                        "surfaces": v.surfaces().into_iter().map(surface_name).collect::<Vec<_>>(),
+                        "integration": integration,
+                    }),
+                )
+            })
+            .collect();
+        json!({
+            "kind": self.kind,
+            "variants": variants,
+            "warnings": self.warnings(),
+        })
     }
 
     /// A value moved by a hand, held on a detent within its window
@@ -604,5 +903,26 @@ impl Control {
                 },
             },
         })
+    }
+}
+
+/// A surface's name as data (`panel`, `hud`).
+pub fn surface_name(s: Surface) -> &'static str {
+    match s {
+        Surface::Panel => "panel",
+        Surface::Dock => "dock",
+        Surface::Toolbar => "toolbar",
+        Surface::Float => "float",
+        Surface::Hud => "hud",
+        Surface::Image => "image",
+    }
+}
+
+/// A representation's name as data (`full`).
+pub fn representation_name(r: Representation) -> &'static str {
+    match r {
+        Representation::Full => "full",
+        Representation::Compact => "compact",
+        Representation::Simplified => "simplified",
     }
 }

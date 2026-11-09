@@ -154,6 +154,9 @@ pub fn begin(
     path: &str,
     origin: Origin,
 ) -> Result<Gesture, String> {
+    if control.kind == crate::model::Kind::Indicator {
+        return Err(format!("`{}` is an indicator: it is read-only", control.id));
+    }
     let from = store
         .get(path)
         .ok_or_else(|| format!("no value at `{path}`"))?

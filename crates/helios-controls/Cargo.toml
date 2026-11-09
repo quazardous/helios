@@ -1,6 +1,6 @@
 [package]
 name = "helios-controls"
-description = "Helios controls: business controllers (exposure, feather, a gradient mask) patched to node parameters, with their registry, value flow and renderers"
+description = "Helios controls: business controllers (exposure, feather, a gradient mask) patched to node parameters, with their registry, value flow, slot layout and renderers"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -18,6 +18,7 @@ helios-shell.workspace = true
 helios-values.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+egui_gridflow.workspace = true
 egui-pop = { workspace = true, optional = true }
 
 [lints]

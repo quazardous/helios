@@ -5,8 +5,8 @@ Status: **accepted** (2026-11-09). The study's four **choices** (section
 The additions to `helios-controls` (section 6.5) are named, not built
 (controls note section 7, slice 5). The layout they act on was decided on 2026-11-09 and lives in
 [controls.md](controls.md): integration levels (3.1), size policies,
-standard slots, orientation and dense packing (3.2), the slot engine
-(section 4). This note uses those words and does not restate them.
+standard slots, orientation and dense packing (3.2), the slot engine,
+`egui_gridflow` (section 4). This note uses those words and does not restate them.
 `Mode` and `Representation` are defined in controls.md's terms; the
 crate carries them as hooks waiting for this usage study.
 
@@ -39,8 +39,9 @@ Read on 2026-11-09, Helios's `next`.
 |---|---|---|
 | `Mode` | `helios_controls::model::Mode` | `Panel`, `Docked`, `Floating`, `Hud`, `Toolbar`; declared, not used. |
 | `Representation` | `helios_controls::model::Representation` | `Full`, `Compact`, `Simplified`; the renderer takes one (`render::show(ui, control, representation, variant, value)`). |
-| `Surface`, `Footprint` | `model` | Panel (`half`, `row`, `block(n)`), HUD (`chip`), image (`gizmo`). Decided on 2026-11-09 to give way to slots (controls note 3.2): panel, dock, toolbar and floating racks hold slots of ¼ to n base units; `chip` and `gizmo` stay the HUD's and the image's forms, not slots. |
-| `Variant` | `model` | Swappable forms of one purpose, each with its footprints (its size policy, once slots land). The person picks one (`controls.variant.*` in the note, not built). |
+| `Surface`, slots | `model`, `slot` | Boxed surfaces (panel, dock, toolbar, float) hold slots of ¼ to n base units (controls note 3.2); the HUD's `chip` and the image's `gizmo` are surface forms, not slots. `Footprint` gave way to slots in slice 4. |
+| `Variant` | `model` | Swappable forms of one purpose. Each declares a size policy per representation (the slot engine's forms, full first), its orientations (preferred first), its chip and gizmo, and its integration level per surface with its managed fallback. The person picks one (`controls.variant.*` in the note, not built). |
+| `card::layout` | `card` | A card or a case (controls and chrome, in order) laid out through `egui_gridflow` in a rack (its width in slot columns, the row height): each item's slot, orientation, representation and status. What `resolve` (section 6.5) hands the shown controls to. |
 | `Readout.when` | `model` | A string, `"active"` today: the only "when" in the crate. |
 | `Case`, `Part` | `model` | A composite's parts by name; no rule on them yet. |
 | `Registry::describe` | `registry` | What `controls.describe` answers and the gallery card shows. |

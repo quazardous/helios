@@ -6,7 +6,8 @@ use std::sync::{Arc, Mutex};
 
 use helios_controls::catalogue::{self, EXPOSURE};
 use helios_controls::flow::{self, Cause, Outcome, Steps, Verdict};
-use helios_controls::model::{Control, Footprint, Surface};
+use helios_controls::model::{Control, Representation, Surface};
+use helios_controls::slot::{Grow, Size, SizePolicy, Slot};
 use helios_controls::{Patch, Registry, implicit};
 use helios_core::{ParamHint, ParamSpec, Value};
 use helios_shell::commands::{Origin, Registry as Commands};
@@ -72,8 +73,27 @@ fn the_catalogue_lists_exposure_and_describes_it() {
     let d = r.describe(EXPOSURE).unwrap();
     assert_eq!(d["connector"], json!(["number<EV>"]));
     assert_eq!(d["variants"], json!(["slider", "scrub"]));
-    assert_eq!(d["footprints"]["slider"], json!(["row", "chip"]));
-    assert_eq!(d["footprints"]["scrub"], json!(["half", "chip"]));
+    assert_eq!(
+        d["surfaces"]["slider"],
+        json!(["panel", "dock", "toolbar", "float", "hud"])
+    );
+    let slider = &d["layout"]["variants"]["slider"];
+    assert_eq!(
+        slider["slots"]["full"]["summary"],
+        "1x1 (from 1x1 to 4x1, grows across)"
+    );
+    assert_eq!(slider["slots"]["full"]["policy"]["max"], "4x1");
+    assert_eq!(slider["slots"]["compact"]["summary"], "fixed 1/2x1");
+    assert_eq!(slider["slots"]["simplified"]["summary"], "fixed 1/3x1");
+    assert_eq!(slider["orientations"], json!(["horizontal", "vertical"]));
+    assert_eq!(slider["preferred_orientation"], "horizontal");
+    assert_eq!(slider["integration"]["panel"]["level"], "managed");
+    assert_eq!(slider["integration"]["hud"]["level"], "managed");
+    let scrub = &d["layout"]["variants"]["scrub"];
+    assert_eq!(scrub["slots"]["full"]["summary"], "fixed 1/2x1");
+    assert!(scrub["slots"].get("compact").is_none());
+    assert_eq!(scrub["orientations"], json!(["horizontal"]));
+    assert_eq!(d["layout"]["warnings"], json!([]));
     assert_eq!(d["detents"][0]["value"], json!(0.0));
     assert!(
         d["gestures"]
@@ -110,8 +130,15 @@ fn bad_declarations_and_patches_are_refused() {
     );
     let mut bad = catalogue::exposure();
     bad.id = "bad".into();
-    bad.variants[0].footprints = vec![Footprint::Block(9)];
-    assert!(r.register(bad).is_err(), "a block of nine rows");
+    bad.variants[0].slots[0].policy.min = Slot::wide(2);
+    assert!(
+        r.register(bad).is_err(),
+        "a minimum above the preferred slot"
+    );
+    let mut bad = catalogue::exposure();
+    bad.id = "bad".into();
+    bad.variants[0].slots.swap(0, 1);
+    assert!(r.register(bad).is_err(), "compact before full");
     let errors = r.patch([
         Patch::new("exposure", "exposure", EXPOSURE, "value"),
         Patch::new("blur", "radius", "radius", "value"),
@@ -128,10 +155,11 @@ fn implicit_controls_follow_the_descriptor() {
     assert!(r.control_for(BLACK, d).is_none(), "black has no patch");
     let c = implicit(BLACK, d);
     assert!(c.implicit);
-    assert_eq!(
-        c.variants[0].footprint(Surface::Panel),
-        Some(Footprint::Row)
-    );
+    let full = c.variants[0].form(Representation::Full).unwrap();
+    assert_eq!(full.policy.size, Slot::ROW);
+    assert_eq!(full.policy.grow, Grow::Width);
+    assert!(c.variants[0].shows_on(Surface::Panel));
+    assert!(!c.variants[0].shows_on(Surface::Hud));
     let n = c.value.number().unwrap();
     assert_eq!((n.soft, n.step, n.precision), ((-0.1, 0.1), 0.0005, 2));
     assert_eq!(n.format(0.0012), "0.12 %");
@@ -326,4 +354,111 @@ fn commands_set_nudge_and_reset_exposure() {
     assert_eq!(black["implicit"], true);
     let exp = rows.iter().find(|r| r["path"] == PATH).unwrap();
     assert_eq!(exp["control"], "exposure");
+}
+
+#[test]
+fn an_integrated_variant_without_fallback_is_flagged_not_refused() {
+    use helios_controls::Variant;
+    use helios_controls::slot::{Fallback, Integration};
+    let base = catalogue::exposure();
+    // A drawn variant with the slider as its managed fallback: fine.
+    let mut c = base.clone();
+    c.id = "drawn".into();
+    c.variants.push(
+        Variant::new("dial", "Dial")
+            .slot(Representation::Full, SizePolicy::fixed(Slot::HALF))
+            .integrated(
+                Surface::Panel,
+                Integration::integrated(Fallback::Variant("slider".into())),
+            ),
+    );
+    assert!(c.check().is_ok());
+    assert!(c.warnings().is_empty());
+    // No fallback: registered, but counted.
+    let mut lone = c.clone();
+    lone.id = "lone".into();
+    lone.variants[2]
+        .integration
+        .insert(Surface::Panel, Integration::Integrated { fallback: None });
+    assert!(lone.check().is_ok());
+    assert_eq!(
+        lone.warnings(),
+        ["control `lone`, variant `dial`: integrated on panel with no managed fallback"]
+    );
+    let mut r = Registry::standard();
+    r.register(lone).unwrap();
+    assert_eq!(r.warnings().len(), 1);
+    let d = r.describe("lone").unwrap();
+    assert_eq!(
+        d["layout"]["variants"]["dial"]["integration"]["panel"]["level"],
+        "integrated"
+    );
+    assert_eq!(
+        d["layout"]["variants"]["dial"]["integration"]["panel"]["fallback"],
+        json!(null)
+    );
+    assert_eq!(d["layout"]["warnings"].as_array().unwrap().len(), 1);
+    assert_eq!(r.catalogue()[1]["warnings"], 1);
+    // A fallback that is not a managed variant is refused.
+    let mut bad = c.clone();
+    bad.variants[2].integration.insert(
+        Surface::Panel,
+        Integration::integrated(Fallback::Variant("nope".into())),
+    );
+    assert!(bad.check().is_err());
+    let mut bad = c;
+    bad.variants[2]
+        .integration
+        .insert(Surface::Panel, Integration::integrated(Fallback::Parts));
+    assert!(bad.check().is_err(), "parts, but not a case");
+}
+
+#[test]
+fn an_indicator_has_read_only_jacks() {
+    use helios_controls::Variant;
+    use helios_controls::model::{Jack, Kind, ValueType};
+    let meter = |read_only: bool| {
+        let jack = Jack::new("level", ValueType::Number);
+        Control::new(
+            "meter",
+            "Meter",
+            helios_controls::model::ValueSpec::Other {
+                stored: ValueType::Number,
+            },
+        )
+        .jack(if read_only { jack.read_only() } else { jack })
+        .variant(
+            Variant::new("bar", "Bar").slot(Representation::Full, SizePolicy::fixed(Slot::ROW)),
+        )
+    };
+    assert!(meter(true).indicator().check().is_ok());
+    assert!(meter(false).indicator().check().is_err(), "it writes");
+    assert!(
+        meter(true).check().is_err(),
+        "a control that writes nothing"
+    );
+    let c = meter(true).indicator();
+    assert_eq!(c.kind, Kind::Indicator);
+    let text = serde_json::to_string(&c).unwrap();
+    assert!(text.contains(r#""kind":"indicator""#), "{text}");
+    assert!(text.contains(r#""read_only":true"#), "{text}");
+    let back: Control = serde_json::from_str(&text).unwrap();
+    assert_eq!(back, c);
+    // The value flow refuses to write it.
+    let mut s = store();
+    assert!(flow::begin(&mut s, &c, PATH, Origin::User).is_err());
+}
+
+#[test]
+fn a_size_policy_reads_as_slots_in_json() {
+    let p = SizePolicy::growable(Slot::HALF, Slot::ROW, Slot::wide(3), Grow::Width);
+    let j = serde_json::to_value(p).unwrap();
+    assert_eq!(
+        j,
+        json!({"min": "1/2x1", "size": "1x1", "max": "3x1", "grow": "width"})
+    );
+    let back: SizePolicy = serde_json::from_value(j).unwrap();
+    assert_eq!(back, p);
+    assert!(serde_json::from_value::<Slot>(json!("5/7x1")).is_err());
+    assert_eq!(Slot::new(Size::TWO_THIRDS, Size::ONE).to_string(), "2/3x1");
 }

@@ -3,9 +3,20 @@
 //! follow-ups.
 
 use crate::model::{
-    Control, Feel, Footprint, Gesture, Intent, Jack, NumberSpec, Response, ValueSpec, ValueType,
-    Variant,
+    Control, Feel, Gesture, Intent, Jack, NumberSpec, Representation, Response, ValueSpec,
+    ValueType, Variant,
 };
+use crate::slot::{Grow, Orientation, Size, SizePolicy, Slot};
+
+/// A third of a unit wide, one row high: a read-out.
+const THIRD: Slot = Slot::new(Size::THIRD, Size::ONE);
+
+/// A slider's full form: a row, growing across up to four units (the
+/// rule of section 5 for sliders, range sliders and drop-downs). Below a
+/// row it steps down to its compact form.
+pub fn slider_policy() -> SizePolicy {
+    SizePolicy::growable(Slot::ROW, Slot::ROW, Slot::wide(4), Grow::Width)
+}
 
 /// The exposure control's id.
 pub const EXPOSURE: &str = "exposure";
@@ -19,6 +30,11 @@ pub fn all() -> Vec<Control> {
 /// 0.01 EV (0.001 in fine mode), a third of a stop for the coarse step; a
 /// detent at 0 EV; a scrub moves 1 EV per 200 points; double click
 /// resets to 0 EV; the HUD reads `+0.67 EV` while handled.
+///
+/// Its slider takes a row, grows across up to four units, steps down to
+/// a half-unit value field (compact) and a third-unit read-out
+/// (simplified), and turns vertical in a fader strip. Its scrub field
+/// takes half a unit, a third when simplified, horizontal only.
 pub fn exposure() -> Control {
     Control::new(
         EXPOSURE,
@@ -54,16 +70,21 @@ pub fn exposure() -> Control {
         Intent::End,
         Intent::Cancel,
     ])
-    .variant(Variant::new(
-        "slider",
-        "Slider",
-        &[Footprint::Row, Footprint::Chip],
-    ))
-    .variant(Variant::new(
-        "scrub",
-        "Scrub field",
-        &[Footprint::Half, Footprint::Chip],
-    ))
+    .variant(
+        Variant::new("slider", "Slider")
+            .slot(Representation::Full, slider_policy())
+            .slot(Representation::Compact, SizePolicy::fixed(Slot::HALF))
+            .slot(Representation::Simplified, SizePolicy::fixed(THIRD))
+            .orientations(&[Orientation::Horizontal, Orientation::Vertical])
+            .chip(),
+    )
+    .variant(
+        Variant::new("scrub", "Scrub field")
+            .slot(Representation::Full, SizePolicy::fixed(Slot::HALF))
+            .slot(Representation::Simplified, SizePolicy::fixed(THIRD))
+            .orientations(&[Orientation::Horizontal])
+            .chip(),
+    )
     .feel(Feel {
         sensitivity: 1.0 / 200.0,
         fine: 0.1,

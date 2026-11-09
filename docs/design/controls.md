@@ -27,8 +27,15 @@ registry and `controls.describe` output, the value flow with the vetoable
 `exposure` control patched by the exposure module (steps, 0 EV detent,
 fine mode, slider and scrub variants, HUD chip), the `controls.*`
 commands and `controls` collector, and the controls gallery
-(`crates/helios-controls-gallery`, native and web). Section 7 lists the
-slices left. Section 8 holds the questions, each with its
+(`crates/helios-controls-gallery`, native and web). **Slice 4 built**
+(2026-11-09): `helios-controls` on `egui_gridflow`. Each variant
+declares a size policy per representation (full, compact, simplified:
+the engine's forms 0, 1, 2 in that order), its orientations and its
+integration level per surface with its managed fallback; indicators
+and a case's chrome are in the model; `card::layout` packs a card or a
+case and maps each placement back. A rack counts its width in slot
+columns and its height in rows, so a `1x1` slot is a panel row whatever
+the column's width. Section 7 lists the slices left. Section 8 holds the questions, each with its
 recommendation.
 
 **The request.** Helios modules should not draw widgets. They declare
@@ -863,9 +870,9 @@ and never reaches past it into egui.
 
 | Layer | Crate | Holds |
 |---|---|---|
-| Slot layout | a standalone crate in its own repository, dual MIT OR Apache-2.0, depending on neither egui nor Helios (placeholder name `slotflow`; D2, decided 2026-11-09) | slot packing over plain boxes: the base unit and its fractions in twelfths, size policies, orientations picked from the slot's shape, smaller forms by index, dense deterministic grid packing with spans and pinned positions (D3), growth slot by slot, hysteresis. It knows nothing of controls, values or drawing. helios-controls is its first user. egui_stack's sections and toolbar overflow, and egui-pop's admin forms, may adopt it once the bench has proved it. It is not published before then. |
+| Slot layout | a standalone crate in its own repository, dual MIT OR Apache-2.0, depending on neither egui nor Helios (`egui_gridflow`, at https://github.com/quazardous/egui_gridflow; D2, decided 2026-11-09) | slot packing over plain boxes: the base unit and its fractions in twelfths, size policies, orientations picked from the slot's shape, smaller forms by index, dense deterministic grid packing with spans and pinned positions (D3), growth slot by slot, hysteresis. It knows nothing of controls, values or drawing. helios-controls is its first user. egui_stack's sections and toolbar overflow, and egui-pop's admin forms, may adopt it once the bench has proved it. It is not published before then. |
 | Visual | egui-pop (`egui-pop-core`, `egui-pop-viewport`, `egui-pop-api`) | widgets (slider, range, curve, wheels), the viewport, overlays and handles, the canvas and its commands, the history contract, keys and pointer profiles, the agent bridge. Unchanged in spirit: visual parts, no meaning. |
-| Model | `helios-controls`, module `model` (no egui; on `helios-values` and `helios-core`) | the catalogue of business controls, value types, size policies and the slots they ask for (today's `Footprint` gives way to them), orientations (preferred and supported), the integration level per surface (managed or integrated, with the managed fallback), indicators and a case's chrome, connectors, cases, declarations and their serialisable form, bindings, derive and apply, coordinate spaces and mappings, intents, customisation types, resolution and diagnostics. |
+| Model | `helios-controls`, module `model` (no egui; on `helios-values` and `helios-core`) | the catalogue of business controls, value types, size policies and the slots they ask for (module `slot`; they replaced `Footprint` in slice 4), orientations (preferred and supported), the integration level per surface (managed or integrated, with the managed fallback), indicators and a case's chrome, connectors, cases, declarations and their serialisable form, bindings, derive and apply, coordinate spaces and mappings, intents, customisation types, resolution and diagnostics. |
 | Renderers | `helios-controls`, module `render` (on egui-pop) | per control, variant, surface, orientation and representation, under the ergonomic contract: the standard managed renderers (egui-pop sliders, range sliders, check boxes, drop-downs, swatches, knobs, value-type fallbacks), HUD read-outs and mini-controls, integrated renderers (curve, wheels, handles from composites on egui-pop overlays); the fallback rule. |
 | Runtime | `helios-controls`, module `runtime` | instantiation per node, the active control, gestures, `controls.*` commands and steps, the collector, the devices trait, the settings bridge. |
 | Patches | each module (`modules/<name>`), each plugin | which controls they use and how each jack is patched to a parameter, as Rust builders over the model (no egui, so engine crates stay free of the interface) or the same data as JSON (out-of-process plugins). Today's `ParamHint` becomes the implicit control's source, then gives way to patches. |
@@ -1039,7 +1046,7 @@ control.
 
 Sizes: S is a day or less of agent work, M two or three days, L a week.
 
-Slice 1 is done; slice 2 is this note's reconciliation with the
+Slices 1 to 4 are done; slice 2 is this note's reconciliation with the
 decisions of 2026-11-09. The slices after it were renumbered that day:
 the slot engine, contexts and the bench come first, then the masks and
 customisation slices of the 2026-11-08 plan.
@@ -1048,7 +1055,7 @@ customisation slices of the 2026-11-08 plan.
 |---|---|---|---|
 | 1 | **Done** (2026-11-09). `helios-controls`: model, registry and `controls.describe`, the value flow with the `controls.change` step, implicit controls from descriptors, the `exposure` control patched by the exposure module, the `controls.*` commands and collector, the gallery card | M | none |
 | 2 | **Done** (2026-11-09). This note and `control-contexts.md` reconciled with the decisions of 2026-11-09 | S | 1 |
-| 3 | The slot crate v0 (placeholder `slotflow`): the twelfths grid, size policies, orientation from the slot's shape, dense deterministic packing, pinned positions, growth slot by slot, hysteresis; pure unit tests, no egui | M | none |
+| 3 | **Done** (2026-11-09). The slot crate v0, `egui_gridflow`: the twelfths grid, size policies, orientation from the slot's shape, dense deterministic packing, pinned positions, growth slot by slot, hysteresis; pure unit tests, no egui | M | none |
 | 4 | `helios-controls` on the slot engine: size policies, orientations and integration levels in the model in place of `Footprint`; cards laid out through it | M | 3 |
 | 5 | Contexts and `resolve` per card (case): the context keys, the box and the density in, a `Placement` per control out, through the slot engine; the reachability invariant | M | 4 |
 | 6 | Renderers by representation and orientation: full, compact, simplified, horizontal and vertical, under the ergonomic contract; the value-type managed fallbacks | M | 4 |

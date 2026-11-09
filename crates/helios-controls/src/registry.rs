@@ -15,10 +15,12 @@ use helios_values::{Descriptor, Type};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value as Json, json};
 
+use crate::catalogue::slider_policy;
 use crate::model::{
-    Control, Feel, Footprint, Gesture, Intent, Jack, NumberSpec, Response, Surface, ValueSpec,
+    Control, Feel, Gesture, Intent, Jack, NumberSpec, Representation, Response, Surface, ValueSpec,
     ValueType, Variant,
 };
+use crate::slot::{Fallback, Grow, Integration, Orientation, Size, SizePolicy, Slot};
 
 /// A module's parameter plugged into a control's jack.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -131,6 +133,12 @@ impl Registry {
         self.get(&self.patch_of(module, param)?.control)
     }
 
+    /// Every registered control's warnings (an integrated variant with no
+    /// managed fallback): the exceptions the inspector counts.
+    pub fn warnings(&self) -> Vec<String> {
+        self.controls.values().flat_map(Control::warnings).collect()
+    }
+
     /// One line per control: what `controls.catalogue` lists.
     pub fn catalogue(&self) -> Json {
         Json::Array(self.controls.values().map(summary).collect())
@@ -150,7 +158,13 @@ fn summary(c: &Control) -> Json {
         "id": c.id,
         "label": c.label,
         "purpose": c.purpose,
-        "footprint": c.variants.first().and_then(|v| v.footprint(Surface::Panel)),
+        "kind": c.kind,
+        "slot": c
+            .variants
+            .first()
+            .and_then(|v| v.form(Representation::Full))
+            .map(|f| f.policy.size),
+        "warnings": c.warnings().len(),
         "connector": c.connector.jacks.iter().map(Jack::signature).collect::<Vec<_>>(),
         "variants": c.variants.iter().map(|v| v.id.as_str()).collect::<Vec<_>>(),
         "case": c.case.is_some(),
@@ -166,7 +180,12 @@ pub fn describe(c: &Control, patches: &[&Patch]) -> Json {
         "purpose": c.purpose,
         "control": c,
         "connector": c.connector.jacks.iter().map(Jack::signature).collect::<Vec<_>>(),
-        "footprints": c.variants.iter().map(|v| (v.id.clone(), v.footprints.clone())).collect::<BTreeMap<_, _>>(),
+        "layout": c.layout_report(),
+        "surfaces": c
+            .variants
+            .iter()
+            .map(|v| (v.id.clone(), v.surfaces()))
+            .collect::<BTreeMap<_, _>>(),
         "gestures": c.connector.gestures,
         "detents": c.detents,
         "variants": c.variants.iter().map(|v| v.id.as_str()).collect::<Vec<_>>(),
@@ -175,12 +194,63 @@ pub fn describe(c: &Control, patches: &[&Patch]) -> Json {
     })
 }
 
+/// What an implicit control's one variant asks of the surfaces.
+enum Shape {
+    /// A slider: a row growing across, a value field, a read-out; turns
+    /// vertical in a strip.
+    Slider,
+    /// A toggle: half a unit, a quarter when simplified.
+    Toggle,
+    /// A drop-down: a row growing across, half a unit compact.
+    Choice,
+    /// A field one row high, growing across.
+    Field,
+    /// An editor that draws itself in a block of `n` rows (a curve in
+    /// six, a colour wheel in four), a row when compact, its values as
+    /// the value type's managed rows where its drawing cannot go.
+    Drawn(u32),
+}
+
+impl Shape {
+    fn variant(self) -> Variant {
+        let v = Variant::new("default", "Default");
+        let third = Slot::new(Size::THIRD, Size::ONE);
+        let quarter = Slot::new(Size::QUARTER, Size::ONE);
+        match self {
+            Shape::Slider => v
+                .slot(Representation::Full, slider_policy())
+                .slot(Representation::Compact, SizePolicy::fixed(Slot::HALF))
+                .slot(Representation::Simplified, SizePolicy::fixed(third))
+                .orientations(&[Orientation::Horizontal, Orientation::Vertical]),
+            Shape::Toggle => v
+                .slot(Representation::Full, SizePolicy::fixed(Slot::HALF))
+                .slot(Representation::Simplified, SizePolicy::fixed(quarter)),
+            Shape::Choice => v
+                .slot(Representation::Full, slider_policy())
+                .slot(Representation::Compact, SizePolicy::fixed(Slot::HALF))
+                .orientations(&[Orientation::Horizontal]),
+            Shape::Field => v
+                .slot(
+                    Representation::Full,
+                    SizePolicy::growable(Slot::ROW, Slot::ROW, Slot::wide(4), Grow::Width),
+                )
+                .orientations(&[Orientation::Horizontal]),
+            Shape::Drawn(rows) => v
+                .slot(Representation::Full, SizePolicy::fixed(Slot::block(rows)))
+                .slot(Representation::Compact, SizePolicy::fixed(Slot::ROW))
+                .integrated(Surface::Panel, Integration::integrated(Fallback::ValueType))
+                .integrated(Surface::Dock, Integration::integrated(Fallback::ValueType))
+                .integrated(Surface::Float, Integration::integrated(Fallback::ValueType)),
+        }
+    }
+}
+
 /// The implicit control of a parameter no control is patched to, from
 /// its descriptor and hints: the row the panel draws for it (a slider, a
 /// toggle, a list, a curve).
 pub fn implicit(path: &str, d: &Descriptor) -> Control {
     let id = format!("implicit:{path}");
-    let (value, footprint, gestures): (ValueSpec, Footprint, &[Gesture]) = match d.ty {
+    let (value, shape, gestures): (ValueSpec, Shape, &[Gesture]) = match d.ty {
         Type::Float | Type::Int => {
             let hard = d.hard.unwrap_or((f64::MIN, f64::MAX));
             let default = d.default.as_f64().unwrap_or(0.0);
@@ -197,7 +267,7 @@ pub fn implicit(path: &str, d: &Descriptor) -> Control {
                     signed: d.unit.as_deref() == Some("EV"),
                     integer: d.ty == Type::Int,
                 }),
-                Footprint::Row,
+                Shape::Slider,
                 &[
                     Gesture::Drag,
                     Gesture::Wheel,
@@ -211,7 +281,7 @@ pub fn implicit(path: &str, d: &Descriptor) -> Control {
             ValueSpec::Bool {
                 default: d.default == helios_core::Value::Bool(true),
             },
-            Footprint::Half,
+            Shape::Toggle,
             &[],
         ),
         Type::Choice => (
@@ -222,17 +292,17 @@ pub fn implicit(path: &str, d: &Descriptor) -> Control {
                     _ => String::new(),
                 },
             },
-            Footprint::Row,
+            Shape::Choice,
             &[Gesture::Keys],
         ),
         Type::Floats => (
             ValueSpec::Other {
                 stored: ValueType::Points,
             },
-            if d.widget.is_some() {
-                Footprint::Block(6)
-            } else {
-                Footprint::Row
+            match d.widget {
+                Some(helios_core::ParamWidget::Curve) => Shape::Drawn(6),
+                Some(helios_core::ParamWidget::Wheel) => Shape::Drawn(4),
+                None => Shape::Field,
             },
             &[],
         ),
@@ -240,14 +310,14 @@ pub fn implicit(path: &str, d: &Descriptor) -> Control {
             ValueSpec::Other {
                 stored: ValueType::Points,
             },
-            Footprint::Row,
+            Shape::Field,
             &[],
         ),
         Type::Text => (
             ValueSpec::Other {
                 stored: ValueType::Text,
             },
-            Footprint::Row,
+            Shape::Field,
             &[Gesture::Typed],
         ),
     };
@@ -259,7 +329,7 @@ pub fn implicit(path: &str, d: &Descriptor) -> Control {
         .jack(jack)
         .gestures(gestures)
         .intents(&[Intent::Nudge, Intent::Set, Intent::Reset])
-        .variant(Variant::new("default", "Default", &[footprint]))
+        .variant(shape.variant())
         .feel(Feel {
             response: if d.logarithmic {
                 Response::Logarithmic
