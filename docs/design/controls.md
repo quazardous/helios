@@ -1,8 +1,16 @@
 # Controls: one controller per parameter, three surfaces, any device
 
-Status: **design note, proposed** (2026-11-08). Nothing is built. The
-owner's direction of 2026-11-08 is in the request below; section 8 holds
-the questions left to settle, each with a recommendation.
+Status: **accepted** (2026-11-08), recommended answers to Q1 to Q10.
+**Slice 1 built** (2026-11-09): the `helios-controls` crate (model,
+registry and `controls.describe` output, the value flow with the vetoable
+`controls.change` step, implicit controls from descriptors), the
+`exposure` control patched by the exposure module (steps, 0 EV detent,
+fine mode, slider and scrub variants, HUD chip), the `controls.*`
+commands and `controls` collector, and the controls gallery
+(`crates/helios-controls-gallery`, native and web). Left: the chip
+anchored in the darkroom HUD and the scrub on the image (slice 5), and
+the panel drawn through the renderers for every parameter (slice 2).
+Section 8 holds the questions, each with its recommendation.
 
 **The request.** Helios modules should not draw widgets. They declare
 **controls**: specialised, configurable controllers, "a kind of
