@@ -11,16 +11,22 @@
 
 use std::collections::BTreeMap;
 
-use helios_values::{Descriptor, Type};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value as Json, json};
 
-use crate::catalogue::slider_policy;
 use crate::model::{
     Control, Feel, Gesture, Intent, Jack, NumberSpec, Representation, Response, Surface, ValueSpec,
     ValueType, Variant,
 };
 use crate::slot::{Fallback, Grow, Integration, Orientation, Size, SizePolicy, Slot};
+use crate::value::{ParamDescriptor, ParamType, Value, Widget};
+
+/// A slider's full form: a row, growing across up to four units (the
+/// rule for sliders, range sliders and drop-downs). Below a row it steps
+/// down to its compact form.
+pub fn slider_policy() -> SizePolicy {
+    SizePolicy::growable(Slot::ROW, Slot::ROW, Slot::wide(4), Grow::Width)
+}
 
 /// A module's parameter plugged into a control's jack.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -58,13 +64,14 @@ impl Registry {
         Self::default()
     }
 
-    /// Helios's own catalogue (`crate::catalogue`), with no patches.
-    pub fn standard() -> Self {
+    /// A registry of these controls, with no patches; an invalid one is
+    /// refused.
+    pub fn with(controls: impl IntoIterator<Item = Control>) -> Result<Self, String> {
         let mut r = Self::new();
-        for c in crate::catalogue::all() {
-            r.register(c).expect("the standard catalogue is valid");
+        for c in controls {
+            r.register(c)?;
         }
-        r
+        Ok(r)
     }
 
     /// Adds a control; an invalid one or a second one with the same id
@@ -125,10 +132,10 @@ impl Registry {
             .find(|p| p.module == module && p.param == param)
     }
 
-    /// The control patched to a store path (`node/<node>/<param>`), from
-    /// its descriptor's module.
-    pub fn control_for(&self, path: &str, d: &Descriptor) -> Option<&Control> {
-        let module = d.module.as_deref()?;
+    /// The control patched to a store path (`node/<node>/<param>`) of a
+    /// parameter of `module`.
+    pub fn control_at(&self, path: &str, module: Option<&str>) -> Option<&Control> {
+        let module = module?;
         let param = path.strip_prefix("node/")?.rsplit_once('/')?.1;
         self.get(&self.patch_of(module, param)?.control)
     }
@@ -248,10 +255,10 @@ impl Shape {
 /// The implicit control of a parameter no control is patched to, from
 /// its descriptor and hints: the row the panel draws for it (a slider, a
 /// toggle, a list, a curve).
-pub fn implicit(path: &str, d: &Descriptor) -> Control {
+pub fn implicit(path: &str, d: &ParamDescriptor) -> Control {
     let id = format!("implicit:{path}");
     let (value, shape, gestures): (ValueSpec, Shape, &[Gesture]) = match d.ty {
-        Type::Float | Type::Int => {
+        ParamType::Float | ParamType::Int => {
             let hard = d.hard.unwrap_or((f64::MIN, f64::MAX));
             let default = d.default.as_f64().unwrap_or(0.0);
             (
@@ -265,7 +272,7 @@ pub fn implicit(path: &str, d: &Descriptor) -> Control {
                     precision: d.precision,
                     display_scale: d.display_scale,
                     signed: d.unit.as_deref() == Some("EV"),
-                    integer: d.ty == Type::Int,
+                    integer: d.ty == ParamType::Int,
                 }),
                 Shape::Slider,
                 &[
@@ -277,43 +284,43 @@ pub fn implicit(path: &str, d: &Descriptor) -> Control {
                 ],
             )
         }
-        Type::Bool => (
+        ParamType::Bool => (
             ValueSpec::Bool {
-                default: d.default == helios_core::Value::Bool(true),
+                default: d.default == Value::Bool(true),
             },
             Shape::Toggle,
             &[],
         ),
-        Type::Choice => (
+        ParamType::Choice => (
             ValueSpec::OneOf {
                 choices: d.choices.clone(),
                 default: match &d.default {
-                    helios_core::Value::Choice(c) => c.clone(),
+                    Value::Choice(c) => c.clone(),
                     _ => String::new(),
                 },
             },
             Shape::Choice,
             &[Gesture::Keys],
         ),
-        Type::Floats => (
+        ParamType::Floats => (
             ValueSpec::Other {
                 stored: ValueType::Points,
             },
             match d.widget {
-                Some(helios_core::ParamWidget::Curve) => Shape::Drawn(6),
-                Some(helios_core::ParamWidget::Wheel) => Shape::Drawn(4),
+                Some(Widget::Curve) => Shape::Drawn(6),
+                Some(Widget::Wheel) => Shape::Drawn(4),
                 None => Shape::Field,
             },
             &[],
         ),
-        Type::Ints => (
+        ParamType::Ints => (
             ValueSpec::Other {
                 stored: ValueType::Points,
             },
             Shape::Field,
             &[],
         ),
-        Type::Text => (
+        ParamType::Text => (
             ValueSpec::Other {
                 stored: ValueType::Text,
             },

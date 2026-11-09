@@ -7,8 +7,8 @@ use std::sync::{Arc, Mutex};
 use helios_controls::catalogue::{self, EXPOSURE};
 use helios_controls::flow::{self, Cause, Outcome, Steps, Verdict};
 use helios_controls::model::{Control, Representation, Surface};
-use helios_controls::slot::{Grow, Size, SizePolicy, Slot};
-use helios_controls::{Patch, Registry, implicit};
+use helios_controls::slot::{Grow, SizePolicy, Slot};
+use helios_controls::{HeliosRegistry, Patch, Registry, implicit};
 use helios_core::{ParamHint, ParamSpec, Value};
 use helios_shell::commands::{Origin, Registry as Commands};
 use helios_values::{Descriptor, Store};
@@ -447,18 +447,4 @@ fn an_indicator_has_read_only_jacks() {
     // The value flow refuses to write it.
     let mut s = store();
     assert!(flow::begin(&mut s, &c, PATH, Origin::User).is_err());
-}
-
-#[test]
-fn a_size_policy_reads_as_slots_in_json() {
-    let p = SizePolicy::growable(Slot::HALF, Slot::ROW, Slot::wide(3), Grow::Width);
-    let j = serde_json::to_value(p).unwrap();
-    assert_eq!(
-        j,
-        json!({"min": "1/2x1", "size": "1x1", "max": "3x1", "grow": "width"})
-    );
-    let back: SizePolicy = serde_json::from_value(j).unwrap();
-    assert_eq!(back, p);
-    assert!(serde_json::from_value::<Slot>(json!("5/7x1")).is_err());
-    assert_eq!(Slot::new(Size::TWO_THIRDS, Size::ONE).to_string(), "2/3x1");
 }

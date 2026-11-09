@@ -1427,6 +1427,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "egui_hudget"
+version = "0.74.0"
+dependencies = [
+ "egui-pop",
+ "egui-pop-model",
+ "egui_gridflow",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "egui_kittest"
 version = "0.37.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2207,13 +2218,11 @@ dependencies = [
 name = "helios-controls"
 version = "0.74.0"
 dependencies = [
- "egui-pop",
- "egui-pop-model",
  "egui_gridflow",
+ "egui_hudget",
  "helios-core",
  "helios-shell",
  "helios-values",
- "serde",
  "serde_json",
 ]
 

@@ -479,7 +479,12 @@ impl Params {
         // A business control patched to it (exposure) gives its steps
         // and detents; others are their implicit control, the slider the
         // descriptor calls for.
-        let control = crate::controls::registry().control_for(path, d).cloned();
+        let control = helios_controls::HeliosRegistry::control_for(
+            crate::controls::registry().as_ref(),
+            path,
+            d,
+        )
+        .cloned();
         let free = helios_controls::render::detents_off(ui);
         let out = ui
             .allocate_ui(egui::vec2(width, height), |ui| {

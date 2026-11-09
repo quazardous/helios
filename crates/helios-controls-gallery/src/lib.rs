@@ -16,7 +16,7 @@ use egui_pop::egui::{self, RichText, Ui};
 use helios_controls::flow::{self, Outcome, Steps};
 use helios_controls::model::{Representation, ValueSpec};
 use helios_controls::render;
-use helios_controls::{Control, Registry};
+use helios_controls::{Control, HeliosRegistry, Registry};
 use helios_core::Value;
 use helios_shell::commands::Origin;
 use helios_values::{Descriptor, Store};

@@ -7,8 +7,8 @@
 
 use std::sync::{Arc, LazyLock, Mutex};
 
-use helios_controls::Registry;
 use helios_controls::flow::{SharedSteps, Steps};
+use helios_controls::{HeliosRegistry, Registry};
 
 static REGISTRY: LazyLock<Arc<Registry>> = LazyLock::new(|| {
     let mut r = Registry::standard();

@@ -1,46 +1,59 @@
-//! Helios controls: business controllers between a module's parameters
-//! and whatever the person touches (`docs/design/controls.md`).
+//! Helios controls: Helios's side of the controls framework
+//! (`egui_hudget`, `docs/design/controls.md`).
 //!
-//! - [`model`]: what a control is (purpose, value, units, ranges, feel,
-//!   detents, read-out), the rack standard (connectors, cases and their
-//!   chrome, variants, indicators), modes and representations. No egui.
-//! - [`slot`]: what a control asks of a boxed surface: slots, size
-//!   policies per representation, orientations, integration levels.
-//! - [`card`]: a card or a case laid out on the slot engine
-//!   (`egui_gridflow`), item by item.
-//! - [`context`]: the context keys (task, space, detail, image, tool,
-//!   device), the box and the density, each key's class, a part's tier,
-//!   and the rules a card or a case declares over the keys.
-//! - [`resolve`]: a card resolved in its context: the precedence (the
-//!   declaration, the rules, the profile, the person's layout, the
-//!   moment), the slot engine, a placement per item with its reasons, the
-//!   "More (n)" entry, anti-jump, and the reachability invariant.
-//! - [`registry`]: every control registered and described as data, the
-//!   modules' patches onto parameters, implicit controls built from
-//!   descriptors for the parameters nothing is patched to.
-//! - [`catalogue`]: Helios's controls (exposure, for now).
-//! - [`flow`]: begin, preview, commit (one undo step, through the
-//!   vetoable `controls.change` step) or cancel (no trace), on
-//!   `helios_values::Store`.
-//! - [`commands`]: `controls.catalogue`, `controls.describe`,
-//!   `controls.set`, `controls.nudge`, `controls.reset`, and what the
-//!   `controls` collector reads.
-//! - `render` (feature `render`): the renderers on egui-pop.
+//! - [`catalogue`]: Helios's business controls (exposure, for now).
+//! - [`values`]: `helios_values::Store` behind the framework's store
+//!   traits, and Helios's values, descriptors and parameter widgets
+//!   mapped to the framework's.
+//! - [`flow`]: the value flow on `helios_values::Store`.
+//! - [`commands`]: the `controls.*` commands declared in the shell's
+//!   command registry, and what the `controls` collector reads.
+//! - [`HeliosRegistry`]: the standard registry (the catalogue) and the
+//!   control patched to a store path, from a Helios descriptor.
+//!
+//! The framework's modules are re-exported as they are: [`model`],
+//! [`slot`], [`card`], [`context`], [`resolve`], [`registry`], and
+//! `render` (feature `render`).
 
-pub mod card;
 pub mod catalogue;
 pub mod commands;
-pub mod context;
 pub mod flow;
-pub mod model;
-pub mod registry;
+pub mod values;
+
 #[cfg(feature = "render")]
-pub mod render;
-pub mod resolve;
-pub mod slot;
+pub use egui_hudget::render;
+pub use egui_hudget::{card, context, model, registry, resolve, slot};
 
 pub use context::{ContextKeys, Rule, Tier};
 pub use model::{Control, Kind, Mode, Representation, Surface, Variant};
-pub use registry::{Patch, Registry, implicit};
-pub use resolve::{CardPlacement, Layout, Placement, Visibility, resolve};
+pub use registry::{Patch, Registry};
+pub use resolve::{CardPlacement, Layout, Placement, Visibility};
 pub use slot::{Integration, Orientation, SizePolicy, Slot};
+
+use helios_values::Descriptor;
+
+/// The implicit control of a parameter no control is patched to, from
+/// its Helios descriptor ([`egui_hudget::implicit`]).
+pub fn implicit(path: &str, d: &Descriptor) -> Control {
+    egui_hudget::implicit(path, &values::descriptor(d))
+}
+
+/// Helios's ways into the framework's registry.
+pub trait HeliosRegistry {
+    /// Helios's own catalogue ([`catalogue`]), with no patches.
+    fn standard() -> Self;
+
+    /// The control patched to a store path (`node/<node>/<param>`), from
+    /// its descriptor's module.
+    fn control_for(&self, path: &str, d: &Descriptor) -> Option<&Control>;
+}
+
+impl HeliosRegistry for Registry {
+    fn standard() -> Self {
+        catalogue::registry()
+    }
+
+    fn control_for(&self, path: &str, d: &Descriptor) -> Option<&Control> {
+        self.control_at(path, d.module.as_deref())
+    }
+}

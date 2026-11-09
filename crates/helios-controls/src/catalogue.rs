@@ -2,21 +2,16 @@
 //! section 5). Curated: each control is decided in the note and its
 //! follow-ups.
 
-use crate::model::{
+use egui_hudget::model::{
     Control, Feel, Gesture, Intent, Jack, NumberSpec, Representation, Response, ValueSpec,
     ValueType, Variant,
 };
-use crate::slot::{Grow, Orientation, Size, SizePolicy, Slot};
+use egui_hudget::slot::{Orientation, Size, SizePolicy, Slot};
+
+pub use egui_hudget::registry::slider_policy;
 
 /// A third of a unit wide, one row high: a read-out.
 const THIRD: Slot = Slot::new(Size::THIRD, Size::ONE);
-
-/// A slider's full form: a row, growing across up to four units (the
-/// rule of section 5 for sliders, range sliders and drop-downs). Below a
-/// row it steps down to its compact form.
-pub fn slider_policy() -> SizePolicy {
-    SizePolicy::growable(Slot::ROW, Slot::ROW, Slot::wide(4), Grow::Width)
-}
 
 /// The exposure control's id.
 pub const EXPOSURE: &str = "exposure";
@@ -24,6 +19,11 @@ pub const EXPOSURE: &str = "exposure";
 /// Every control of the catalogue.
 pub fn all() -> Vec<Control> {
     vec![exposure()]
+}
+
+/// A registry of the catalogue, with no patches.
+pub fn registry() -> egui_hudget::Registry {
+    egui_hudget::Registry::with(all()).expect("the standard catalogue is valid")
 }
 
 /// Exposure, in stops: -18 to +18 EV, the bar spanning -3 to +4; steps of

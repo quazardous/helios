@@ -5,7 +5,7 @@ use helios_controls::card::{self, Card, CardItem, ItemKind, Rack, SlotStatus};
 use helios_controls::catalogue::EXPOSURE;
 use helios_controls::model::{Case, Representation, Surface};
 use helios_controls::slot::{Chrome, ChromeKind, Orientation};
-use helios_controls::{Registry, implicit};
+use helios_controls::{HeliosRegistry, Registry, implicit};
 use helios_core::{ParamKind, ParamSpec};
 use helios_values::Descriptor;
 

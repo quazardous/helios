@@ -16,7 +16,7 @@ use helios_controls::resolve::{
     self, CardPlacement, Layout, Layouts, Moment, Source, Values, Visibility,
 };
 use helios_controls::slot::{Chrome, ChromeKind, Orientation, Size, Slot};
-use helios_controls::{Patch, Registry, implicit};
+use helios_controls::{HeliosRegistry, Patch, Registry, implicit};
 use helios_core::{ParamHint, ParamKind, ParamSpec, ParamWidget};
 use helios_shell::commands::{Origin, Registry as Commands};
 use helios_values::{Descriptor, Store};

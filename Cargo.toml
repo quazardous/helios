@@ -51,6 +51,9 @@ helios-colour = { path = "crates/helios-colour" }
 helios-storage = { path = "crates/helios-storage" }
 helios-health = { path = "crates/helios-health" }
 helios-controls = { path = "crates/helios-controls" }
+# GPL for now (the workspace's licence): the controls framework, agnostic
+# of Helios, to move to its own repository once the API has settled.
+egui_hudget = { path = "crates/egui_hudget" }
 # MIT: the UI library and application framework Helios is built on.
 # Pinned to a commit while the two move together. Its eframe support (the window's place) runs on the same
 # eframe as Helios; its icon font stays off. Its bundled font pair (Inter
