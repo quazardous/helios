@@ -155,10 +155,12 @@ fn about_and_keyboard_shortcuts_open_dialogs() {
         .run("workbench.keybindings", json!(null), Origin::User)
         .unwrap();
     h.run();
-    // egui-pop's settings window, on its shortcuts editor: every command
-    // with the keys the keymap binds, which a click there changes.
+    // The Settings app, on its shortcuts editor: every command with the
+    // keys the keymap binds, which a click there changes.
     let app = h.state().app().handle().clone();
-    assert!(egui_pop::api::settings_window::is_open(&app));
+    assert!(egui_pop::api::admin::is_open(&app));
+    let admin = app.service(&egui_pop::api::admin::ADMIN).unwrap();
+    assert_eq!(admin.shown().1.as_deref(), Some("shortcuts"));
     let keys = app.keys_for(&egui_pop::api::app::CMD_PALETTE);
     assert!(
         keys.iter().any(|k| k == "Ctrl+Shift+P") && keys.iter().any(|k| k == "F1"),

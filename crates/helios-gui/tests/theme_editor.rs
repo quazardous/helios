@@ -31,7 +31,8 @@ fn the_theme_editor_page_edits_a_token_of_the_theme_in_use() {
         .unwrap();
     h.run();
     h.run();
-    assert!(egui_pop::api::settings_window::is_open(&app));
+    // Its page in the Settings app.
+    assert!(egui_pop::api::admin::is_open(&app));
     // Helios's dark and light themes are a pair: the editor offers the
     // variant to edit.
     assert!(h.query_by_label("Variant edited").is_some());

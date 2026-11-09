@@ -24,7 +24,6 @@ use egui_pop::api::app::OverlayKind;
 use egui_pop::api::dialogs::{self, Choose, ChooseOption, DIALOGS, Dialogs};
 use egui_pop::api::frame::{self, FramePlugin, SETTING_FRAME};
 use egui_pop::api::host::{Reply, Resolver};
-use egui_pop::api::settings_window::{SETTINGS_WINDOW, SHORTCUTS};
 use egui_pop::api::toasts::{TOASTS, Toast};
 use egui_pop::api::{App, AppBuilder, AppHandle, DefaultPlugins, palette};
 use egui_pop::core::frame::{FrameRequest, HitTable};
@@ -811,15 +810,16 @@ impl Shell {
             .plugin(crate::jobs::plugin(jobs.clone(), relays.clone()))
             .plugin(egui_pop::editors::JobConsolesPlugin)
             .plugin(crate::display::Display)
-            // egui-pop's Settings app (full pages, families on top), with
-            // Helios's scopes and its own settings (`helios-config`) in
-            // them. The settings window stays beside it for now.
+            // egui-pop's Settings app (full pages, families on top; `Ctrl+,`
+            // and File > Settings), with Helios's scopes and its own
+            // settings (`helios-config`) in them. In `DefaultPlugins` too:
+            // named here, it takes the group's place.
             .plugin(egui_pop::api::admin::AdminPlugin)
             .plugin(crate::config::BridgePlugin {
                 i18n: Some(i18n.clone()),
             })
-            // egui-pop's theme editor, as a page of the settings window
-            // (Appearance), on the theme in use.
+            // egui-pop's theme editor, as a page of the Settings app, on
+            // the theme in use.
             .plugin(egui_pop::api::theme_editor::ThemeEditorPlugin)
             .plugin(crate::theme_editor::Page)
             .plugin(crate::platform::Platform::new(opens.clone()))
@@ -4286,12 +4286,11 @@ impl Shell {
             Action::Run(id, args, origin) => return self.run(&id, args, origin),
             Action::KeymapPackage(name, on) => return self.keymap_package(&name, on),
             Action::Keybindings => {
-                let w = self
-                    .app
-                    .handle()
-                    .service(&SETTINGS_WINDOW)
-                    .ok_or("no settings window")?;
-                w.open(Some(SHORTCUTS));
+                return self.run(
+                    egui_pop::api::admin::CMD_OPEN.as_str(),
+                    serde_json::json!({ "path": "input/shortcuts" }),
+                    Origin::User,
+                );
             }
             Action::OpenWorkspace(None) => self.form(crate::dialogs::Form {
                 title: self.text(Message::new("gui-open-workspace-title", "Open a workspace")),
