@@ -362,6 +362,24 @@ handed to the control, alongside the context keys in
 `control-contexts.md`. Below its minimum, the control switches to a
 smaller representation, or to its managed fallback.
 
+**Standard slots (decided 2026-11-09).** The docking system does not
+hand out arbitrary sizes. It works with slots of standard sizes, the
+way Eurobox-style storage crates do: every size is a multiple or a
+simple fraction of one base module, so slots tile and nest without
+gaps.
+
+- **A slot is a whole number of base units on each axis.** For a panel,
+  that means half a row, a row, or a block of n rows. On wider docks a
+  slot can also span several columns.
+- **A growable control grows in steps.** It grows to the next standard
+  slot that fits within its maximum, never to an in-between size.
+- **Same slot, same swap.** Two controls that fit the same slot can be
+  swapped, moved or stacked without re-laying out the rest of the
+  module.
+
+The footprints above are the first slot sizes. The base unit and the
+full set of slot sizes are to be settled with the workshop.
+
 **2. Standard connectors.** Every control has a typed interface, its
 **connector**:
 
