@@ -817,8 +817,25 @@ fn affected(root: &Path, req: &Request) -> Result<u8, String> {
     if req.param("base").is_none() {
         req.params.push(("base".into(), base));
     }
+    let benchfile = std::fs::read_to_string(root.join("tools/bench/Benchfile")).unwrap_or_default();
     let mut results = Vec::new();
+    let mut skipped = Vec::new();
     for mut job in affected_requests(&req, &selection.box_jobs()) {
+        // a job that needs a parameter only a person can give (mask-parity's
+        // `dt=`) is named, not refused: the rest of the series still runs
+        let missing: Vec<String> = required_params(&benchfile, &job.job)
+            .into_iter()
+            .filter(|p| job.param(p).is_none())
+            .collect();
+        if !missing.is_empty() {
+            println!(
+                "\nbench-remote: --affected: {} skipped (needs {})",
+                job.job,
+                missing.join("=, ") + "="
+            );
+            skipped.push((job.job, missing));
+            continue;
+        }
         println!("\nbench-remote: --affected: {}", job.job);
         let code = remote(root, &mut job)?;
         results.push((job.job, code));
@@ -831,6 +848,16 @@ fn affected(root: &Path, req: &Request) -> Result<u8, String> {
             c => format!("exit {c}"),
         };
         println!("  {job:<14} {result}");
+    }
+    for (job, missing) in &skipped {
+        println!(
+            "  {job:<14} skipped: run it alone with {}",
+            missing
+                .iter()
+                .map(|m| format!("{m}=…"))
+                .collect::<Vec<_>>()
+                .join(" ")
+        );
     }
     let codes: Vec<u8> = results.iter().map(|(_, c)| *c).collect();
     Ok(combined(&codes))
@@ -1887,8 +1914,12 @@ pub fn required_params(benchfile: &str, job: &str) -> Vec<String> {
         let after = &s[name.len()..];
         let defaulted =
             after.starts_with(":-") || after.starts_with(":+") || after.starts_with('-');
+        // a name in capitals is the shell's own (`${PIPESTATUS[0]}`), not a
+        // parameter: the box leaves those to the shell
+        let shell = name.chars().any(|c| c.is_ascii_uppercase());
         if !name.is_empty()
             && !defaulted
+            && !shell
             && !["branch", "src"].contains(&name.as_str())
             && !out.contains(&name)
         {
@@ -1911,6 +1942,12 @@ mod tests {
         );
         assert_eq!(required_params(bf, "b"), vec!["other".to_string()]);
         assert!(required_params(bf, "none").is_empty());
+        let shell = "[jobs.s]\ncommand = \"\"\"x | tee o; exit ${PIPESTATUS[0]} ${need}\"\"\"\n";
+        assert_eq!(
+            required_params(shell, "s"),
+            vec!["need".to_string()],
+            "the shell's own names are no parameters"
+        );
     }
 
     #[test]
