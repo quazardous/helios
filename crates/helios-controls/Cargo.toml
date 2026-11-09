@@ -1,0 +1,24 @@
+[package]
+name = "helios-controls"
+description = "Helios controls: business controllers (exposure, feather, a gradient mask) patched to node parameters, with their registry, value flow and renderers"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+## The renderers (panel rows, HUD chips) on egui-pop. Off, the crate is the
+## model, the registry and the value flow only, with no egui: what engine
+## crates (modules declaring their patches) depend on.
+render = ["dep:egui-pop"]
+
+[dependencies]
+helios-core.workspace = true
+helios-shell.workspace = true
+helios-values.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+egui-pop = { workspace = true, optional = true }
+
+[lints]
+workspace = true

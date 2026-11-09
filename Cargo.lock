@@ -2196,6 +2196,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "helios-controls"
+version = "0.74.0"
+dependencies = [
+ "egui-pop",
+ "helios-core",
+ "helios-shell",
+ "helios-values",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "helios-core"
 version = "0.74.0"
 dependencies = [
