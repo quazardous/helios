@@ -286,7 +286,11 @@ impl Drop for Scratch {
 /// from a read-only connection.
 fn snapshot(path: &Path, into: &Path) -> rusqlite::Result<()> {
     let src = open_read_only(path)?;
-    src.backup(rusqlite::MAIN_DB, into, None)
+    src.backup(
+        rusqlite::MAIN_DB,
+        into,
+        None::<fn(rusqlite::backup::Progress)>,
+    )
 }
 
 fn schema_version(con: &Connection, schema: &str, name: &str) -> Result<i64, ScanError> {

@@ -18,7 +18,7 @@ path = "src/main.rs"
 fixture = []
 
 [dependencies]
-rusqlite = { version = "0.40", features = ["bundled", "backup"] }
+rusqlite = { version = "0.41", features = ["bundled", "backup"] }
 serde_json.workspace = true
 
 [dev-dependencies]
