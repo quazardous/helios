@@ -18,9 +18,10 @@ use core::fmt::Write as _;
 use egui_gridflow as gf;
 use serde::Serialize;
 
+use crate::context::{Rule, Tier};
 use crate::model::{Case, CaseItem, Kind, Representation, Surface, representation_name};
 use crate::registry::Registry;
-use crate::slot::{Chrome, Integration, Orientation, Size};
+use crate::slot::{Chrome, Integration, Orientation, Size, SizePolicy, Slot};
 
 /// One item of a card, in its logical order.
 #[derive(Clone, Debug, PartialEq)]
@@ -36,6 +37,14 @@ pub enum CardItem {
         orientation: Option<Orientation>,
         /// A position the person pinned, in twelfths of a unit.
         pin: Option<(u32, u32)>,
+        /// How rare it is: folded under "More" below its detail level.
+        tier: Tier,
+        /// The largest representation wanted (a rule's or the person's):
+        /// the larger forms are left out. `None`: from full down.
+        representation: Option<Representation>,
+        /// The slot the person gave it, within its form's policy: the
+        /// form's preferred size.
+        slot: Option<Slot>,
     },
     /// A piece of chrome.
     Chrome(Chrome),
@@ -50,32 +59,88 @@ impl CardItem {
             variant: None,
             orientation: None,
             pin: None,
+            tier: Tier::Standard,
+            representation: None,
+            slot: None,
+        }
+    }
+
+    /// The same control at another tier.
+    pub fn tier(mut self, to: Tier) -> Self {
+        if let CardItem::Control { tier, .. } = &mut self {
+            *tier = to;
+        }
+        self
+    }
+
+    /// The same control in another variant.
+    pub fn variant(mut self, id: &str) -> Self {
+        if let CardItem::Control { variant, .. } = &mut self {
+            *variant = Some(id.into());
+        }
+        self
+    }
+
+    /// Its key, for a control.
+    pub fn key(&self) -> Option<&str> {
+        match self {
+            CardItem::Control { key, .. } => Some(key),
+            CardItem::Chrome(_) => None,
         }
     }
 }
 
-/// What a card holds, in order.
+/// What a card holds, in order, and the rules it declares over the
+/// context keys (`docs/design/control-contexts.md`, section 6.2).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Card {
     pub items: Vec<CardItem>,
+    pub rules: Vec<Rule>,
 }
 
 impl Card {
     pub fn new(items: Vec<CardItem>) -> Self {
-        Self { items }
+        Self {
+            items,
+            rules: Vec::new(),
+        }
     }
 
-    /// A case's parts and chrome, each part keyed by its name.
+    /// The same card with one more rule.
+    pub fn rule(mut self, rule: Rule) -> Self {
+        self.rules.push(rule);
+        self
+    }
+
+    /// A case's parts (each keyed by its name, at its tier), its chrome
+    /// and its rules.
     pub fn from_case(case: &Case) -> Self {
-        Self::new(
-            case.items
+        Self {
+            items: case
+                .items
                 .iter()
                 .map(|i| match i {
-                    CaseItem::Part(p) => CardItem::control(&p.name, &p.control),
+                    CaseItem::Part(p) => CardItem::control(&p.name, &p.control).tier(p.tier),
                     CaseItem::Chrome(c) => CardItem::Chrome(c.clone()),
                 })
                 .collect(),
-        )
+            rules: case.rules.clone(),
+        }
+    }
+
+    /// Its controls' keys, in order.
+    pub fn keys(&self) -> impl Iterator<Item = &str> {
+        self.items.iter().filter_map(CardItem::key)
+    }
+
+    /// What is wrong with its rules: each checked against the card's
+    /// parts and the class rule (C1).
+    pub fn check(&self) -> Result<(), String> {
+        let keys: Vec<&str> = self.keys().collect();
+        for r in &self.rules {
+            r.check(&keys)?;
+        }
+        Ok(())
     }
 }
 
@@ -271,6 +336,14 @@ fn line_width(columns: f32) -> Size {
     Size::from_twelfths(t).unwrap_or(Size::QUARTER)
 }
 
+/// Whether `slot` lies within `policy`'s smallest and largest slots.
+pub fn fits(policy: &SizePolicy, slot: Slot) -> bool {
+    policy.min.width <= slot.width
+        && slot.width <= policy.max.width
+        && policy.min.height <= slot.height
+        && slot.height <= policy.max.height
+}
+
 /// Lays `card` out in `rack`. Pass the card's previous layout in the same
 /// rack to keep its choices while the box stays within half a unit of a
 /// threshold (hysteresis).
@@ -280,6 +353,20 @@ fn line_width(columns: f32) -> Size {
 pub fn layout(
     registry: &Registry,
     card: &Card,
+    rack: Rack,
+    previous: Option<&CardLayout>,
+) -> Result<CardLayout, String> {
+    let items: Vec<(usize, &CardItem)> = card.items.iter().enumerate().collect();
+    layout_items(registry, &items, rack, previous)
+}
+
+/// Lays some of a card's items out, each with its index in the card: the
+/// index keys it for the engine (so hysteresis holds when other items are
+/// folded) and names its chrome. What `resolve` lays the shown items out
+/// with.
+pub fn layout_items(
+    registry: &Registry,
+    items: &[(usize, &CardItem)],
     rack: Rack,
     previous: Option<&CardLayout>,
 ) -> Result<CardLayout, String> {
@@ -296,9 +383,9 @@ pub fn layout(
     };
     // The width in columns, as the widest allowed slot a line can take.
     let line = line_width(columns);
-    let mut sources = Vec::with_capacity(card.items.len());
-    let mut elements = Vec::with_capacity(card.items.len());
-    for (i, item) in card.items.iter().enumerate() {
+    let mut sources = Vec::with_capacity(items.len());
+    let mut elements = Vec::with_capacity(items.len());
+    for &(i, item) in items {
         let key = i as u64;
         match item {
             CardItem::Control {
@@ -307,6 +394,9 @@ pub fn layout(
                 variant,
                 orientation,
                 pin,
+                representation,
+                slot,
+                ..
             } => {
                 let c = registry
                     .get(control)
@@ -319,14 +409,32 @@ pub fn layout(
                         format!("card item `{name}`: control `{control}` has no variant")
                     })?,
                 };
-                let mut forms = v.slots.iter();
+                // The forms from the wanted representation down.
+                let wanted: Vec<_> = v
+                    .slots
+                    .iter()
+                    .filter(|f| representation.is_none_or(|r| f.representation >= r))
+                    .collect();
+                let kept = if wanted.is_empty() {
+                    v.slots.iter().collect()
+                } else {
+                    wanted
+                };
+                let mut forms = kept.iter().copied();
                 let first = forms.next().ok_or_else(|| {
                     format!(
                         "card item `{name}`: variant `{}` of `{control}` has no slot",
                         v.id
                     )
                 })?;
-                let mut e = gf::Element::new(key, first.policy.to_gridflow()).with_orientations(
+                let first_policy = match slot {
+                    Some(s) if fits(&first.policy, *s) => SizePolicy {
+                        size: *s,
+                        ..first.policy
+                    },
+                    _ => first.policy,
+                };
+                let mut e = gf::Element::new(key, first_policy.to_gridflow()).with_orientations(
                     &v.orientation_order()
                         .into_iter()
                         .map(Orientation::to_gridflow)
@@ -350,7 +458,7 @@ pub fn layout(
                     },
                     control: Some(c.id.clone()),
                     variant: Some(v.id.clone()),
-                    forms: v.slots.iter().map(|f| f.representation).collect(),
+                    forms: kept.iter().map(|f| f.representation).collect(),
                     integration: Some(v.integration(rack.surface)),
                 });
             }

@@ -2,13 +2,19 @@
 
 Status: **accepted** (2026-11-09). The study's four **choices** (section
 7, C1 to C4) were decided on 2026-11-09, each on its recommended option.
-The additions to `helios-controls` (section 6.5) are named, not built
-(controls note section 7, slice 5). The layout they act on was decided on 2026-11-09 and lives in
+The additions to `helios-controls` (section 6.5) were **built in
+slice 5** (2026-11-09): the context keys, tiers and rules
+(`helios_controls::context`), `resolve` per card with its placements,
+"More (n)" entry, anti-jump and reachability invariant
+(`helios_controls::resolve`), and the `controls.context`,
+`controls.find`, `controls.reveal`, `controls.reveal_all` commands with
+placements in `controls.describe`. Drawing "More (n)" and the context
+bar are later slices (controls note section 7). The layout they act on was decided on 2026-11-09 and lives in
 [controls.md](controls.md): integration levels (3.1), size policies,
 standard slots, orientation and dense packing (3.2), the slot engine,
 `egui_gridflow` (section 4). This note uses those words and does not restate them.
 `Mode` and `Representation` are defined in controls.md's terms; the
-crate carries them as hooks waiting for this usage study.
+crate places controls in them through `resolve` (section 6.5).
 
 **The question.** A control has a **mode** (where it lives: panel,
 docked, floating, HUD, toolbar) and a **representation** (how much it
@@ -409,7 +415,35 @@ like a bad patch today.
 
 ### 6.5 Additions to `helios-controls`
 
-Named, not implemented.
+Built in slice 5 (2026-11-09), as named below, with these differences:
+
+- The context keys, `Tier`, `Rule`, `Density` and the box live in
+  `helios_controls::context`; the box is `CardBox` (so it does not
+  shadow Rust's `Box`) and carries its surface. `ctl.image` is
+  published as `ctl.image` (the flags joined) and one flag key each
+  (`ctl.image.raw`, `ctl.image.edited`, `ctl.image.masked`); the target
+  is `ctl.target`.
+- A rule's effect also has `inapplicable` (the parts that do not apply:
+  the only thing an image-key rule may do) and `emphasise` and `grow`
+  (what fast keys may do). `Card::check` and `Control::check` refuse a
+  rule that breaks the class rule, tests an unknown key or names an
+  unknown part.
+- `Visibility` is `Shown`, `Folded { reason }` or
+  `NotApplicable { reason }`; emphasis is a mark on the placement, not a
+  visibility. A part that does not apply is named in "More", not
+  counted. A part the slot engine cannot place is folded with a size
+  reason.
+- `resolve`, `Placement`, `Layout`, `reachable` and `find` live in
+  `helios_controls::resolve`. `resolve` also takes the moment (the
+  parts revealed, "show all", and the hand: a gesture open, the pointer
+  in the panel, the part handled) and the previous resolution
+  (hysteresis and anti-jump). `reachable` checks one resolution;
+  `reachable_everywhere` sweeps every slow-key and image combination.
+- The commands resolve a node's card (one item per parameter, the
+  patched or implicit control) in a context the host may share
+  (`commands::register_with`).
+- Not built yet: `Readout.when` as a clause, placements in the
+  `controls` collector, and the renderers' part (slices 6 to 8).
 
 - **`model::ContextKeys`**: the six keys as a struct of enums
   (`Task`, `Space`, `Detail`, `ImageFlags`, the tool's id, `Device`),

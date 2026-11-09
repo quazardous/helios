@@ -35,7 +35,14 @@ integration level per surface with its managed fallback; indicators
 and a case's chrome are in the model; `card::layout` packs a card or a
 case and maps each placement back. A rack counts its width in slot
 columns and its height in rows, so a `1x1` slot is a panel row whatever
-the column's width. Section 7 lists the slices left. Section 8 holds the questions, each with its
+the column's width. **Slice 5 built** (2026-11-09): the context keys,
+the box and the density, tiers on parts and rules on cards and cases
+under the class rule, and `resolve` per card: the precedence, the
+person's layout, never folding a changed value, the slot engine, a
+placement per item with its reasons, the "More (n)" entry, anti-jump,
+the reachability invariant, and the `controls.context`, `controls.find`,
+`controls.reveal`, `controls.reveal_all` commands
+(`control-contexts.md`, section 6.5). Section 7 lists the slices left. Section 8 holds the questions, each with its
 recommendation.
 
 **The request.** Helios modules should not draw widgets. They declare
@@ -1046,7 +1053,7 @@ control.
 
 Sizes: S is a day or less of agent work, M two or three days, L a week.
 
-Slices 1 to 4 are done; slice 2 is this note's reconciliation with the
+Slices 1 to 5 are done; slice 2 is this note's reconciliation with the
 decisions of 2026-11-09. The slices after it were renumbered that day:
 the slot engine, contexts and the bench come first, then the masks and
 customisation slices of the 2026-11-08 plan.
@@ -1057,7 +1064,7 @@ customisation slices of the 2026-11-08 plan.
 | 2 | **Done** (2026-11-09). This note and `control-contexts.md` reconciled with the decisions of 2026-11-09 | S | 1 |
 | 3 | **Done** (2026-11-09). The slot crate v0, `egui_gridflow`: the twelfths grid, size policies, orientation from the slot's shape, dense deterministic packing, pinned positions, growth slot by slot, hysteresis; pure unit tests, no egui | M | none |
 | 4 | **Done** (2026-11-09). `helios-controls` on the slot engine: size policies, orientations and integration levels in the model in place of `Footprint`; cards laid out through it | M | 3 |
-| 5 | Contexts and `resolve` per card (case): the context keys, the box and the density in, a `Placement` per control out, through the slot engine; the reachability invariant | M | 4 |
+| 5 | **Done** (2026-11-09). Contexts and `resolve` per card (case): the context keys, the box and the density in, a `Placement` per control out, through the slot engine; the reachability invariant. Built: `helios_controls::context` (keys, classes, tiers, rules), `helios_controls::resolve` (precedence, layouts, "More (n)", anti-jump, `reachable`, `find`), the `controls.context`, `controls.find`, `controls.reveal`, `controls.reveal_all` commands, placements in `controls.describe` | M | 4 |
 | 6 | Renderers by representation and orientation: full, compact, simplified, horizontal and vertical, under the ergonomic contract; the value-type managed fallbacks | M | 4 |
 | 7 | Bench A: the gallery's shelf and bench, controls moved from the shelf to the bench (`controls.bench.*`) and packed live | M | 5, 6 |
 | 8 | Bench B: the context switches on the bench and the measures (steps, reach, shift, reachability) as agent scenarios | M | 7 |

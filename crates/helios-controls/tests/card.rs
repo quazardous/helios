@@ -43,13 +43,7 @@ fn card() -> Card {
         CardItem::control("black", "implicit:node/exp/black"),
         CardItem::control("clip", "implicit:node/exp/clip"),
         CardItem::Chrome(Chrome::new(ChromeKind::Separator)),
-        CardItem::Control {
-            key: "quick".into(),
-            control: EXPOSURE.into(),
-            variant: Some("scrub".into()),
-            orientation: None,
-            pin: None,
-        },
+        CardItem::control("quick", EXPOSURE).variant("scrub"),
     ])
 }
 
@@ -160,13 +154,7 @@ fn bad_cards_are_refused() {
     let rack = Rack::new(Surface::Panel, COLUMN, COLUMN, ROW);
     let unknown = Card::new(vec![CardItem::control("x", "feather")]);
     assert!(card::layout(&r, &unknown, rack, None).is_err());
-    let bad_variant = Card::new(vec![CardItem::Control {
-        key: "x".into(),
-        control: EXPOSURE.into(),
-        variant: Some("knob".into()),
-        orientation: None,
-        pin: None,
-    }]);
+    let bad_variant = Card::new(vec![CardItem::control("x", EXPOSURE).variant("knob")]);
     assert!(card::layout(&r, &bad_variant, rack, None).is_err());
     let hud = Rack::new(Surface::Hud, COLUMN, COLUMN, ROW);
     assert!(

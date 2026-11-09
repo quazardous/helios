@@ -138,6 +138,10 @@ pub struct SizePolicy {
     pub grow: Grow,
 }
 
+#[allow(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde's skip_serializing_if passes a reference"
+)]
 fn is_fixed(g: &Grow) -> bool {
     *g == Grow::Fixed
 }

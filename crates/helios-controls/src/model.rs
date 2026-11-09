@@ -14,14 +14,15 @@
 //!   (composites: parts and chrome); variants; and the ergonomic contract
 //!   ([`HIT_AREA`], [`Feel`], detents).
 //! - Where a control lives ([`Mode`]) and how much it shows
-//!   ([`Representation`]): hooks only, the context rules wait for a usage
-//!   study.
+//!   ([`Representation`]); which of them a context picks is
+//!   [`crate::context`] and [`crate::resolve`].
 
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value as Json, json};
 
+use crate::context::{Rule, Tier};
 use crate::slot::{Chrome, Fallback, Integration, Orientation, SizePolicy, SlotForm};
 
 /// The smallest hit area of anything a control lets the hand grab, in
@@ -93,13 +94,17 @@ pub enum Kind {
 }
 
 impl Kind {
+    #[allow(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde's skip_serializing_if passes a reference"
+    )]
     fn is_control(&self) -> bool {
         *self == Kind::Control
     }
 }
 
-/// Where a control lives (hooks only: which mode a context picks is not
-/// settled).
+/// Where a control lives. The host mounts it; a placement says which
+/// mode it is in and which one a rule offers.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Mode {
@@ -489,11 +494,14 @@ pub struct Readout {
     pub when: String,
 }
 
-/// A part of a case: another control, by id.
+/// A part of a case: another control, by id, at a tier (how rare it
+/// is: folded under "More" below its detail level).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Part {
     pub name: String,
     pub control: String,
+    #[serde(default, skip_serializing_if = "Tier::is_standard")]
+    pub tier: Tier,
 }
 
 /// What a case holds, in its order: a part (a control) or chrome (a
@@ -505,19 +513,36 @@ pub enum CaseItem {
     Chrome(Chrome),
 }
 
-/// A composite: its parts and its chrome, in order. Derived parts and
-/// their wiring come with the first case (the gradient mask).
+/// A composite: its parts and its chrome, in order, and the rules it
+/// declares over the context keys (`docs/design/control-contexts.md`).
+/// Derived parts and their wiring come with the first case (the gradient
+/// mask).
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Case {
     pub items: Vec<CaseItem>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rules: Vec<Rule>,
 }
 
 impl Case {
-    pub fn part(mut self, name: &str, control: &str) -> Self {
+    /// A part at the standard tier.
+    pub fn part(self, name: &str, control: &str) -> Self {
+        self.tiered_part(name, control, Tier::Standard)
+    }
+
+    /// A part at a tier.
+    pub fn tiered_part(mut self, name: &str, control: &str, tier: Tier) -> Self {
         self.items.push(CaseItem::Part(Part {
             name: name.into(),
             control: control.into(),
+            tier,
         }));
+        self
+    }
+
+    /// A rule over the context keys.
+    pub fn rule(mut self, rule: Rule) -> Self {
+        self.rules.push(rule);
         self
     }
 
@@ -668,6 +693,13 @@ impl Control {
                 ));
             }
             _ => {}
+        }
+        if let Some(case) = &self.case {
+            let names: Vec<&str> = case.parts().map(|p| p.name.as_str()).collect();
+            for r in &case.rules {
+                r.check(&names)
+                    .map_err(|e| format!("control `{}`: {e}", self.id))?;
+            }
         }
         if let Some(n) = self.value.number() {
             if !(n.hard.0 <= n.soft.0 && n.soft.1 <= n.hard.1) {

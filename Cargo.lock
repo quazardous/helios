@@ -2208,6 +2208,7 @@ name = "helios-controls"
 version = "0.74.0"
 dependencies = [
  "egui-pop",
+ "egui-pop-model",
  "egui_gridflow",
  "helios-core",
  "helios-shell",
