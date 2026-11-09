@@ -208,8 +208,10 @@ fn the_search_lands_on_a_shortcut_and_every_setting_shows_once() {
         .type_text("ctrl+shift+i");
     h.run();
     h.run();
-    // The import window's shortcut, chosen in the left panel.
-    h.get(by().role(Role::Button).label_contains("(Ctrl+Shift+I)"))
+    // The import window's shortcut, chosen in the left panel (the
+    // results page lists it too).
+    h.get_by_role_and_label(Role::Tree, "Sections")
+        .get(by().role(Role::Button).label_contains("(Ctrl+Shift+I)"))
         .click();
     h.run();
     h.run();
