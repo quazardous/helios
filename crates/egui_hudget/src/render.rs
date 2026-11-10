@@ -1260,6 +1260,9 @@ mod tests {
             ]);
             out = Some(card(ui, registry, placement, &mut values, drawings));
         });
+        // epaint panics when a frame's texture changes are dropped unread.
+        let mut full = full;
+        full.textures_delta.clear();
         let names = full
             .platform_output
             .accesskit_update
@@ -1335,6 +1338,8 @@ mod tests {
                     &mut v,
                 );
             });
+            let mut full = full;
+            full.textures_delta.clear();
             let update = full.platform_output.accesskit_update.unwrap();
             let node = update
                 .nodes
