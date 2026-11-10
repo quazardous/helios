@@ -207,15 +207,25 @@ struct Open {
     before: BTreeMap<String, Value>,
 }
 
+/// One undo step of a [`MemoryStore`]: each path's value before and
+/// after.
+#[derive(Debug, Clone, PartialEq)]
+struct Step {
+    label: String,
+    changes: Vec<(String, Value, Value)>,
+}
+
 /// A value store in memory: parameters declared with their descriptor,
-/// one gesture open at a time, undo steps kept as their labels. Its
-/// origin is the device's name (`pointer`, `agent`…).
+/// one gesture open at a time, undo steps with their labels, undone and
+/// redone. Its origin is the device's name (`pointer`, `agent`…).
 #[derive(Debug, Default)]
 pub struct MemoryStore {
     params: BTreeMap<String, (Value, ParamDescriptor)>,
     open: Option<Open>,
     next: u64,
     steps: Vec<String>,
+    done: Vec<Step>,
+    undone: Vec<Step>,
 }
 
 impl MemoryStore {
@@ -236,6 +246,47 @@ impl MemoryStore {
     /// The open gesture's label.
     pub fn open_gesture(&self) -> Option<&str> {
         self.open.as_ref().map(|o| o.label.as_str())
+    }
+
+    /// The steps undone, newest last: what [`redo`](Self::redo) replays.
+    pub fn redo_steps(&self) -> Vec<&str> {
+        self.undone.iter().map(|s| s.label.as_str()).collect()
+    }
+
+    /// Puts back the values from before the last step, and answers its
+    /// label; `None` with nothing to undo or a gesture open.
+    pub fn undo(&mut self) -> Option<String> {
+        if self.open.is_some() {
+            return None;
+        }
+        let step = self.done.pop()?;
+        self.steps.pop();
+        for (path, before, _) in &step.changes {
+            if let Some((now, _)) = self.params.get_mut(path) {
+                *now = before.clone();
+            }
+        }
+        let label = step.label.clone();
+        self.undone.push(step);
+        Some(label)
+    }
+
+    /// Writes again the values of the last step undone, and answers its
+    /// label; `None` with nothing to redo or a gesture open.
+    pub fn redo(&mut self) -> Option<String> {
+        if self.open.is_some() {
+            return None;
+        }
+        let step = self.undone.pop()?;
+        for (path, _, after) in &step.changes {
+            if let Some((now, _)) = self.params.get_mut(path) {
+                *now = after.clone();
+            }
+        }
+        let label = step.label.clone();
+        self.steps.push(label.clone());
+        self.done.push(step);
+        Some(label)
     }
 }
 
@@ -315,12 +366,24 @@ impl ValueStore for MemoryStore {
     }
 
     fn commit(&mut self, gesture: u64) {
-        if let Some(o) = self.open.take_if(|o| o.id == gesture)
-            && o.before
-                .iter()
-                .any(|(p, v)| self.params.get(p).is_some_and(|(now, _)| now != v))
-        {
-            self.steps.push(o.label);
+        let Some(o) = self.open.take_if(|o| o.id == gesture) else {
+            return;
+        };
+        let changes: Vec<(String, Value, Value)> = o
+            .before
+            .into_iter()
+            .filter_map(|(p, before)| {
+                let now = self.params.get(&p).map(|(v, _)| v.clone())?;
+                (now != before).then_some((p, before, now))
+            })
+            .collect();
+        if !changes.is_empty() {
+            self.steps.push(o.label.clone());
+            self.done.push(Step {
+                label: o.label,
+                changes,
+            });
+            self.undone.clear();
         }
     }
 

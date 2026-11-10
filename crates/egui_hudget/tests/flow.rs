@@ -256,3 +256,31 @@ fn a_size_policy_reads_as_slots_in_json() {
     assert!(serde_json::from_value::<Slot>(json!("5/7x1")).is_err());
     assert_eq!(Slot::new(Size::TWO_THIRDS, Size::ONE).to_string(), "2/3x1");
 }
+
+#[test]
+fn a_committed_step_undoes_and_redoes() {
+    let mut s = store();
+    let steps = Steps::new();
+    for to in [2.0, 3.0] {
+        let g = flow::begin(&mut s, &gain(), GAIN, "pointer").unwrap();
+        g.preview(&mut s, to, false).unwrap();
+        g.commit(&mut s, &steps, Cause::Drag, "pointer");
+    }
+    assert_eq!(s.undo().as_deref(), Some("Gain"));
+    assert_eq!(value(&s, GAIN), 2.0);
+    assert_eq!(s.undo_steps(), ["Gain"]);
+    assert_eq!(s.redo_steps(), ["Gain"]);
+    assert_eq!(s.redo().as_deref(), Some("Gain"));
+    assert_eq!(value(&s, GAIN), 3.0);
+    s.undo();
+    s.undo();
+    assert_eq!(value(&s, GAIN), 0.0);
+    assert!(s.undo().is_none(), "nothing left");
+    // A new step forgets what was undone.
+    let g = flow::begin(&mut s, &gain(), GAIN, "pointer").unwrap();
+    g.preview(&mut s, 1.0, false).unwrap();
+    // No undo while a gesture is open.
+    assert!(s.undo().is_none());
+    g.commit(&mut s, &steps, Cause::Drag, "pointer");
+    assert!(s.redo_steps().is_empty());
+}
