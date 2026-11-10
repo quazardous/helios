@@ -148,6 +148,9 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: trunk
+      # The toolchain rust-toolchain.toml pins is not the one the action
+      # named: add the target to it.
+      - run: rustup target add wasm32-unknown-unknown
       - run: cargo clippy --locked --target wasm32-unknown-unknown -p egui_hud_demo -p helios-controls-gallery -- -D warnings
       - name: Build the demo
         working-directory: crates/egui_hud_demo
