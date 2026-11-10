@@ -12,7 +12,7 @@ use serde_json::json;
 
 fn harness(page: BenchPage) -> Harness<'static, BenchPage> {
     Harness::builder()
-        .with_size(vec2(1100.0, 420.0))
+        .with_size(vec2(1100.0, 900.0))
         .build_ui_state(|ui, p: &mut BenchPage| p.ui(ui), page)
 }
 
