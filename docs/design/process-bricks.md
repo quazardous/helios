@@ -1,7 +1,7 @@
 # Process bricks: the functions modules are made of
 
-Status: **study, not decided** (2026-11-10). Every proposal below has a
-default; the open choices at the end are for the owner to settle.
+Status: **study accepted** (2026-11-10). The four choices are decided in
+§9; where a decision changes a proposal above, §9 wins.
 
 **The request.** Process bricks are the sub-layer of the box (node)
 diagram: the functions modules provide, in effect the public SDK. A
@@ -611,60 +611,64 @@ Slices 1 and 2 are useful alone (an AI can read the toolbox; analysis
 nodes get their value ports). Each is one branch, merged to `next`
 with its tests.
 
-## 9. Open choices
+## 9. Decisions (2026-11-10)
 
-**Q1. What a brick is in code.**
-- **A.** The same `Module` trait and contract, marked `layer: brick` in
-  its manifest, with the description, shape and namespace added; a
-  module is a composite of bricks or a sealed module.
-- **B.** A separate, lighter `Brick` trait (a pure function on typed
-  values and regions, no plan type), adapted to `Module` by the engine.
-- **C.** Bricks as a Rust and WGSL function library only, not graph
-  nodes; modules stay Rust code calling them.
-- Recommended: **A**. Everything the engine knows (regions, union
-  planning, cache, GPU, bypass, the test kit) already works on modules
-  and composites; vkdt's kernels and the masks sub-network prove the
-  shape. B duplicates the contract; C keeps composition closed to
-  everyone but Rust authors, which is the problem the request names.
+**Q1. Contracts: one module type declares the contracts it offers.**
+A module is not either a brick or a node: one module can offer several
+**contracts**, each the way it is used.
 
-**Q2. How a module's parameters reach brick parameters.**
-- **A.** A value graph of registered value bricks evaluated at prepare
-  time (AVS's parameter ports, geometry nodes' fields), written as data
-  in the assembly.
-- **B.** A small expression language in the assembly file
-  (`scale = 1 / (2^-exposure - black)`).
-- **C.** One-to-one exposure only, as macros do today; any derivation
-  needs a sealed module.
-- Recommended: **A**. It stays data an AI can produce and a schema can
-  check, each step is described and versioned like other bricks, and it
-  reuses the parameter-port idea the contract already holds. B needs a
-  parser, a type checker and its own versioning; C cannot express
-  exposure or sigmoid.
+- **brick**: a step inside an assembly (§3, §5);
+- **node**: an element of the node diagram, with its card of controls
+  and its exposed ports (§5.2);
+- **process**: a step of a batch, an export or a job, with job inputs
+  and outputs;
+- later ones as they come (a mask source, an analysis…).
 
-**Q3. What a plugin may contribute first.**
-- **A.** Assembled modules as data only (composite files naming
-  registered bricks, with values and control patches); no plugin code
-  in the render.
-- **B.** A, plus WGSL bricks, GPU-only or with a CPU path to be found.
-- **C.** A, plus code bricks run out of process over shared memory.
-- Recommended: **A** now, **C** as a later slice once the tile round
-  trip is measured. A needs no sandbox and costs nothing at render; B
-  breaks the "CPU is the reference" rule; C is the general answer but
-  pays a transfer per tile and loses GPU residency.
+The manifest lists them: `provides: [brick, node, process]`, each with
+its own ports and description. Every contract goes through the same
+`Module` core (parameters, regions, cache, GPU, bypass, the test kit);
+a contract adds only what is its own (a brick its shape and tolerance,
+a node its card and exposed ports, a process its job inputs and
+outputs). The registry indexes modules by contract, so
+`bricks.catalogue` and `nodes.catalogue` are views of one registry. An
+assembly written as data declares its contracts the same way. This
+replaces the study's first wording, "a module marked `layer: brick`"
+(§3, §4.1).
 
-**Q4. darktable-mirroring modules.**
-- **A.** They stay sealed Rust modules for good; bricks serve new
-  modules only.
-- **B.** Each is rebuilt from bricks once the brick form equals the
-  sealed one (bit for bit on the CPU, or within its parity thresholds
-  with the parity test green); the sealed form stays until then.
-- **C.** Both forms kept side by side, the brick form a checked shadow
-  of the sealed one.
-- Recommended: **B**. It makes the darktable lineage readable and
-  composable (blending, curves, colour steps) without risking parity,
-  since nothing moves until the equivalence holds; exposure is the
-  first, demosaic may stay sealed forever. A leaves the SDK without
-  its best-known functions; C doubles maintenance.
+**Q2. A value graph.** A module's parameters reach brick parameters
+through a graph of registered value bricks, evaluated at prepare time
+and written as data in the assembly (§5.1). A derivation (exposure's
+scale, sigmoid's constants) is itself a small described brick an AI
+can assemble and a schema can check. (Left to the implementer by the
+owner; the recommended option.)
+
+**Q3. Forms: no restriction, the implementation declares them.** What a
+plugin may contribute is not restricted by policy. Each implementation
+declares the **forms** its process is available in, a second axis next
+to the contracts:
+
+- an assembly written as data;
+- Rust code (CPU);
+- a WGSL kernel (GPU);
+- code run out of process over shared memory;
+- later ones.
+
+A process may offer several forms. The engine picks a form per run and
+per context (interactive preview, export, a parity test). A missing form
+is visible, not forbidden: a GPU-only process cannot serve where a CPU
+path is required (a CPU-only export, the darktable parity tests), and
+the registry says so; an out-of-process form states its transfer cost.
+"The CPU is the reference" becomes a property: a process with a CPU form
+can be the reference, one without it cannot. This replaces §6.1's
+order (data first, out-of-process code later) with declared forms;
+§8.3's plugin slice still comes after the tile round trip is measured.
+
+**Q4. darktable-mirroring modules move to bricks only at equality.**
+Each is rebuilt from bricks once its brick form equals the sealed one,
+bit for bit on the CPU or within its parity thresholds with the parity
+test green; the sealed form stays until then. Exposure is the first;
+demosaic may stay sealed for good. (Left to the implementer by the
+owner; the recommended option.)
 
 ## 10. Sources
 
