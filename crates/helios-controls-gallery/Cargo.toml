@@ -9,7 +9,7 @@ publish = false
 
 [dependencies]
 helios-controls = { workspace = true, features = ["render"] }
-egui_hud = { workspace = true, features = ["render"] }
+egui_hud = { workspace = true, features = ["render", "bench"] }
 helios-core.workspace = true
 helios-shell.workspace = true
 helios-values.workspace = true

@@ -61,7 +61,7 @@ fn order(h: &Harness<'_, BenchPage>) -> Vec<String> {
 }
 
 fn page_with(commands: &[serde_json::Value]) -> BenchPage {
-    let mut page = BenchPage::default();
+    let mut page = helios_controls_gallery::bench_ui::page();
     for c in commands {
         page.bench
             .run("controls.bench.add", c)
@@ -72,7 +72,7 @@ fn page_with(commands: &[serde_json::Value]) -> BenchPage {
 
 #[test]
 fn a_drag_from_the_shelf_adds_the_control_where_it_is_dropped() {
-    let mut h = harness(BenchPage::default());
+    let mut h = harness(helios_controls_gallery::bench_ui::page());
     h.run();
     let from = h.get_by_label("Shelf: Exposure").rect().center();
     let to = bench_middle(&h);
@@ -271,7 +271,7 @@ fn controls_context_and_the_context_bar_share_the_keys() {
     // The bar sets the shared keys too: a click on its density.
     let mut h = harness(BenchPage::new(
         helios_controls_gallery::bench::Bench::with_contexts(
-            helios_controls::HeliosRegistry::standard(),
+            helios_controls_gallery::bench::kit(),
             g.bench.bench.contexts(),
         ),
     ));
@@ -285,7 +285,7 @@ fn controls_context_and_the_context_bar_share_the_keys() {
 /// a picture: shown (changed), contrast folded by a rule, the profile by
 /// its tier.
 fn explained_page() -> BenchPage {
-    let mut b = helios_controls_gallery::bench::Bench::default();
+    let mut b = helios_controls_gallery::bench::standard();
     b.load_sample();
     b.nudge("black", 20, "pointer").unwrap();
     b.set_context(
@@ -324,7 +324,7 @@ fn snapshots_of_the_context_bar_and_the_reason_pane() {
 
 #[test]
 fn the_mode_switch_shows_the_hud_as_chips() {
-    let mut page = BenchPage::default();
+    let mut page = helios_controls_gallery::bench_ui::page();
     page.bench.load_sample();
     let mut h = harness(page);
     h.run();

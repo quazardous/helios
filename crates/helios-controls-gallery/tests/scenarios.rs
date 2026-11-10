@@ -38,7 +38,7 @@ fn report(name: &str, text: &str) {
 }
 
 fn sample() -> Bench {
-    let mut b = Bench::default();
+    let mut b = helios_controls_gallery::bench::standard();
     b.load_sample();
     b
 }

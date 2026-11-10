@@ -30,7 +30,11 @@
 //!   `controls.context`, `controls.find`, `controls.reveal`,
 //!   `controls.reveal_all`, and what a `controls` collector reads.
 //! - `render` (feature `render`): the renderers on egui-pop.
+//! - `bench` (feature `bench`): a shelf of a host's controls composed
+//!   onto a card and tried live, and its page.
 
+#[cfg(feature = "bench")]
+pub mod bench;
 pub mod card;
 pub mod commands;
 pub mod context;

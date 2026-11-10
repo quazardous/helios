@@ -36,15 +36,13 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use egui_hud::commands::{Shared, SharedContexts};
-use egui_pop::egui::{self, Rect, RichText, Ui};
-use egui_pop::viewport::curve::CurveEditor;
-use egui_pop::viewport::wheel::{ColorWheel, WheelValue};
+use egui_pop::egui::{self, RichText, Ui};
 use helios_controls::card::{Card, CardItem};
 use helios_controls::commands::Contexts;
 use helios_controls::context::CardBox;
 use helios_controls::flow::{self, Outcome, Steps};
-use helios_controls::model::{Representation, ValueSpec, ValueType};
-use helios_controls::render::{self, CardEvent, Drawings, Edit};
+use helios_controls::model::{Representation, ValueSpec};
+use helios_controls::render::{self, CardEvent, Edit};
 use helios_controls::resolve::{CardPlacement, Layout, Layouts, Moment};
 use helios_controls::values::{StoreMut, helios_value, value as framework_value};
 use helios_controls::{ContextKeys, Control, HeliosRegistry, Orientation, Registry, Slot, Surface};
@@ -271,7 +269,10 @@ impl Gallery {
         // The bench resolves in the same context: `controls.context` and
         // its context bar read and set the same keys.
         let bench = bench_ui::BenchPage::new(bench::Bench::with_contexts(
-            registry.clone(),
+            bench::Kit {
+                registry: registry.clone(),
+                ..bench::kit()
+            },
             contexts.clone(),
         ));
         let commands = Shared {
@@ -664,73 +665,9 @@ impl Gallery {
     }
 }
 
-/// The gallery's own drawings for integrated controls: egui-pop's curve
-/// editor for a list of points, its offset wheel for a colour, each where
-/// it has room (80 points high at least).
-pub struct EditorDrawings;
-
-impl Drawings for EditorDrawings {
-    fn draw(
-        &mut self,
-        ui: &mut Ui,
-        key: &str,
-        control: &Control,
-        rect: Rect,
-        value: &mut egui_hud::Value,
-    ) -> Option<Vec<Edit>> {
-        let ValueSpec::Other { stored } = &control.value else {
-            return None;
-        };
-        let egui_hud::Value::Floats(list) = value else {
-            return None;
-        };
-        if rect.height() < 80.0 {
-            return None;
-        }
-        let set = |to: &[f64], done: bool| Edit::Set {
-            key: key.to_owned(),
-            to: egui_hud::Value::Floats(to.to_vec()),
-            done,
-        };
-        match stored {
-            ValueType::Points => {
-                let mut points: Vec<[f32; 2]> = list
-                    .chunks(2)
-                    .filter(|c| c.len() == 2)
-                    .map(|c| [c[0] as f32, c[1] as f32])
-                    .collect();
-                let side = rect.width().min(rect.height());
-                let out = CurveEditor::new(&mut points, &control.label)
-                    .size(egui::vec2(side, side))
-                    .show(ui);
-                *list = points
-                    .iter()
-                    .flat_map(|[x, y]| [f64::from(*x), f64::from(*y)])
-                    .collect();
-                Some(out.changes.iter().map(|c| set(list, c.done)).collect())
-            }
-            ValueType::Colour => {
-                let at = |i: usize| list.get(i).copied().unwrap_or(0.0) as f32;
-                let mut w = WheelValue {
-                    hue: (at(0) * 360.0).rem_euclid(360.0),
-                    chroma: at(1),
-                    luminance: at(2),
-                };
-                let side = (rect.height() - 28.0).min(rect.width()).max(40.0);
-                let out = ColorWheel::offset(&mut w, &control.label)
-                    .size(side)
-                    .show(ui);
-                *list = vec![
-                    f64::from(w.hue) / 360.0,
-                    f64::from(w.chroma),
-                    f64::from(w.luminance),
-                ];
-                Some(out.changes.iter().map(|c| set(list, c.done)).collect())
-            }
-            _ => None,
-        }
-    }
-}
+/// The drawings of the integrated controls: egui-pop's curve editor and
+/// colour wheel, as the bench draws them.
+pub use egui_hud::bench::EditorDrawings;
 
 /// The gallery as an eframe application.
 #[derive(Default)]
