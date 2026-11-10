@@ -8,9 +8,11 @@
 //!   from a descriptor as a module's parameter would be.
 //! - A [`Composition`] is what is on the bench, in its logical order:
 //!   controls, and cases grouping some of them under a legend, with help
-//!   text and a closing separator as the case's chrome. It flattens into
-//!   one [`Card`], so the bench is laid out by the slot engine through
-//!   `resolve` as any module's card is.
+//!   text and a closing separator as the case's chrome. It splits into
+//!   cards ([`Composition::sections`]): each run of loose controls, and
+//!   each case as a card of its own (a `fieldset`), so dense packing never
+//!   pulls a part above its legend. Each is laid out by the slot engine
+//!   through `resolve`, as any module's card is, and they are stacked.
 //! - [`Bench`] holds the composition, an in-memory value store
 //!   ([`MemoryStore`]) with a value per control on the bench, the box's
 //!   width, the previous resolution (for hysteresis), and runs the
@@ -28,8 +30,8 @@ use egui_hudget::model::{Control, ValueSpec, ValueType};
 use egui_hudget::resolve::Layouts;
 use egui_hudget::slot::{Chrome, ChromeKind};
 use egui_hudget::value::{MemoryStore, ParamDescriptor, ParamType, Value, ValueSource, ValueStore};
-use egui_hudget::{CardPlacement, ContextKeys, Registry};
-use helios_controls::card::{Card, CardItem};
+use egui_hudget::{CardPlacement, ContextKeys, Placement, Registry};
+use helios_controls::card::{Card, CardItem, CardLayout, Rect as CardRect};
 use helios_controls::context::{CardBox, Density};
 use helios_controls::render;
 use helios_controls::resolve::Moment;
@@ -517,26 +519,34 @@ impl Composition {
         Ok(())
     }
 
-    /// One card of every control and every case's chrome, in logical
-    /// order, and where each card item comes from.
-    pub fn card(&self) -> (Card, Vec<Origin>) {
-        let mut items = Vec::new();
-        let mut origins = Vec::new();
+    /// The bench's cards, in logical order: each run of loose controls is
+    /// one card, each case another (its legend, help, parts and
+    /// separator), so dense packing never pulls a part out of its case;
+    /// with where each card item comes from.
+    pub fn sections(&self) -> Vec<(Card, Vec<Origin>)> {
+        let mut out: Vec<(Card, Vec<Origin>)> = Vec::new();
+        let mut loose = false;
         for (i, e) in self.entries.iter().enumerate() {
             match e {
                 Entry::Control(p) => {
-                    items.push(CardItem::control(&p.key, &p.control));
+                    if !loose {
+                        out.push((Card::default(), Vec::new()));
+                        loose = true;
+                    }
+                    let (card, origins) = out.last_mut().expect("pushed above");
+                    card.items.push(CardItem::control(&p.key, &p.control));
                     origins.push(Origin::Control {
                         key: p.key.clone(),
                         spot: Spot::top(i),
                     });
                 }
                 Entry::Case(c) => {
+                    loose = false;
+                    let mut items = Vec::new();
+                    let mut origins = Vec::new();
                     let mut chrome = |kind, text: Option<&str>| {
                         let mut ch = Chrome::new(kind);
-                        if let Some(t) = text {
-                            ch = ch.text(t);
-                        }
+                        ch.text = text.map(str::to_owned);
                         items.push(CardItem::Chrome(ch));
                         origins.push(Origin::Chrome {
                             case: c.key.clone(),
@@ -555,18 +565,75 @@ impl Composition {
                         });
                     }
                     if c.separator {
-                        let mut ch = Chrome::new(ChromeKind::Separator);
-                        ch.text = None;
-                        items.push(CardItem::Chrome(ch));
+                        items.push(CardItem::Chrome(Chrome::new(ChromeKind::Separator)));
                         origins.push(Origin::Chrome {
                             case: c.key.clone(),
                             kind: ChromeKind::Separator,
                         });
                     }
+                    out.push((Card::new(items), origins));
                 }
             }
         }
-        (Card::new(items), origins)
+        out
+    }
+}
+
+/// The gap between two of the bench's cards, in points.
+pub const SECTION_GAP: f32 = 6.0;
+
+/// One of the bench's cards, resolved, at its offset from the bench's top.
+#[derive(Clone, Debug)]
+pub struct Section {
+    pub placement: CardPlacement,
+    pub origins: Vec<Origin>,
+    pub top: f32,
+}
+
+/// The bench laid out: its cards stacked.
+#[derive(Clone, Debug, Default)]
+pub struct Laid {
+    pub sections: Vec<Section>,
+    /// The height used, in points.
+    pub height: f32,
+}
+
+impl Laid {
+    /// Every item: its placement, where it comes from, and its slot in
+    /// points from the bench's top left when placed.
+    pub fn items(&self) -> impl Iterator<Item = (&Placement, &Origin, Option<CardRect>)> {
+        self.sections.iter().flat_map(|s| {
+            s.placement.items.iter().zip(&s.origins).map(move |(p, o)| {
+                let r = p.rect.map(|r| CardRect {
+                    y: r.y + s.top,
+                    ..r
+                });
+                (p, o, r)
+            })
+        })
+    }
+
+    /// The placement of the control keyed `key`.
+    pub fn get(&self, key: &str) -> Option<&Placement> {
+        self.sections.iter().find_map(|s| s.placement.get(key))
+    }
+
+    fn stack(sections: Vec<(CardPlacement, Vec<Origin>)>) -> Self {
+        let mut top = 0.0;
+        let mut out = Vec::new();
+        for (placement, origins) in sections {
+            let h = placement.layout.as_ref().map_or(0.0, CardLayout::height);
+            out.push(Section {
+                placement,
+                origins,
+                top,
+            });
+            top += h + SECTION_GAP;
+        }
+        Self {
+            sections: out,
+            height: (top - SECTION_GAP).max(0.0),
+        }
     }
 }
 
@@ -622,9 +689,9 @@ pub struct Bench {
     /// The bench's width, in points.
     pub width: f32,
     keys: ContextKeys,
-    /// The last resolution and the card it was of: hysteresis holds while
-    /// the card is the same.
-    previous: Option<(Card, CardPlacement)>,
+    /// Each card's last resolution: hysteresis holds while the card is
+    /// the same.
+    previous: Vec<(Card, CardPlacement)>,
     next_case: u32,
 }
 
@@ -656,7 +723,7 @@ impl Bench {
             last: BTreeMap::new(),
             width: DEFAULT_WIDTH,
             keys,
-            previous: None,
+            previous: Vec::new(),
             next_case: 1,
         }
     }
@@ -766,24 +833,43 @@ impl Bench {
         }
     }
 
-    /// The bench resolved in its box: the card of its composition through
-    /// `resolve`, with the previous resolution for hysteresis while the
-    /// card is unchanged; and where each item comes from.
-    pub fn resolve(&mut self) -> Result<(CardPlacement, Vec<Origin>), String> {
-        let (card, origins) = self.composition.card();
-        let p = self.resolve_card(&card, true)?;
-        self.previous = Some((card, p.clone()));
-        Ok((p, origins))
+    /// The bench resolved in its box: each of its cards through
+    /// `resolve`, with its previous resolution for hysteresis while that
+    /// card is unchanged, stacked.
+    pub fn resolve(&mut self) -> Result<Laid, String> {
+        let sections = self.composition.sections();
+        let mut resolved = Vec::new();
+        for (i, (card, origins)) in sections.iter().enumerate() {
+            let previous = self
+                .previous
+                .get(i)
+                .filter(|(c, _)| c == card)
+                .map(|(_, p)| p);
+            resolved.push((self.resolve_card(card, previous)?, origins.clone()));
+        }
+        self.previous = sections
+            .into_iter()
+            .zip(&resolved)
+            .map(|((card, _), (p, _))| (card, p.clone()))
+            .collect();
+        Ok(Laid::stack(resolved))
     }
 
-    /// A composition resolved in the bench's box without keeping it (a
+    /// A composition laid out in the bench's box without keeping it (a
     /// drop's preview).
-    pub fn resolve_trial(&self, composition: &Composition) -> Result<CardPlacement, String> {
-        let (card, _) = composition.card();
-        self.resolve_card(&card, false)
+    pub fn resolve_trial(&self, composition: &Composition) -> Result<Laid, String> {
+        let mut resolved = Vec::new();
+        for (card, origins) in composition.sections() {
+            resolved.push((self.resolve_card(&card, None)?, origins));
+        }
+        Ok(Laid::stack(resolved))
     }
 
-    fn resolve_card(&self, card: &Card, keep: bool) -> Result<CardPlacement, String> {
+    fn resolve_card(
+        &self,
+        card: &Card,
+        previous: Option<&CardPlacement>,
+    ) -> Result<CardPlacement, String> {
         let values = card
             .keys()
             .filter_map(|k| Some((k.to_owned(), self.value(k)?.to_json())))
@@ -792,11 +878,6 @@ impl Bench {
             gesture_open: !self.gestures.is_empty() || self.set_gesture.is_some(),
             ..Moment::default()
         };
-        let previous = self
-            .previous
-            .as_ref()
-            .filter(|(c, _)| keep && c == card)
-            .map(|(_, p)| p);
         helios_controls::resolve::resolve(
             &self.registry,
             card,
@@ -986,7 +1067,7 @@ impl Bench {
 
     /// What `controls.bench.list` answers.
     pub fn list(&mut self) -> Result<Json, String> {
-        let (placement, _) = self.resolve()?;
+        let placement = self.resolve()?;
         let controls: Vec<Json> = self
             .composition
             .pieces()
@@ -1100,7 +1181,7 @@ mod tests {
         assert_eq!(b.composition.keys(), ["exposure", "exposure-2"]);
         assert_eq!(b.value("exposure-2"), Some(Value::Float(0.0)));
         assert!(b.add("nothing", None).is_err());
-        let (p, _) = b.resolve().unwrap();
+        let p = b.resolve().unwrap();
         assert!(p.get("exposure-2").unwrap().visibility.is_shown());
     }
 
@@ -1142,25 +1223,50 @@ mod tests {
     }
 
     #[test]
-    fn a_case_flattens_into_its_chrome_and_parts() {
-        let mut b = bench_of(&["exposure", "number"]);
+    fn a_case_is_a_card_of_its_chrome_and_parts() {
+        let mut b = bench_of(&["exposure", "number", "toggle"]);
         let case = b.group(&["number".into()], "Mix").unwrap();
         b.composition.case_mut(&case).unwrap().help = Some("How much".into());
-        let (card, origins) = b.composition.card();
+        let sections = b.composition.sections();
+        assert_eq!(sections.len(), 3, "exposure, the case, toggle");
+        let (card, origins) = &sections[1];
+        assert_eq!(card.items.len(), 4, "legend, help, part, separator");
         assert_eq!(
-            card.items.len(),
-            5,
-            "control, legend, help, part, separator"
-        );
-        assert_eq!(
-            origins[1],
+            origins[0],
             Origin::Chrome {
                 case: case.clone(),
                 kind: ChromeKind::Legend
             }
         );
-        let (p, _) = b.resolve().unwrap();
-        assert!(p.items.iter().all(|i| i.visibility.is_shown()));
+        let laid = b.resolve().unwrap();
+        assert!(laid.items().all(|(p, _, _)| p.visibility.is_shown()));
+        // Stacked: the case's legend below exposure, toggle below the case.
+        let top = |k: &str| {
+            laid.items()
+                .find(|(p, _, _)| p.key == k)
+                .unwrap()
+                .2
+                .unwrap()
+                .y
+        };
+        let legend = laid
+            .items()
+            .find(|(_, o, _)| {
+                matches!(
+                    o,
+                    Origin::Chrome {
+                        kind: ChromeKind::Legend,
+                        ..
+                    }
+                )
+            })
+            .unwrap()
+            .2
+            .unwrap()
+            .y;
+        assert!(
+            top("exposure") < legend && legend < top("number") && top("number") < top("toggle")
+        );
         // Removing the last part takes the case away.
         b.remove("number").unwrap();
         assert!(!b.composition.holds(&case));
@@ -1192,10 +1298,7 @@ mod tests {
         assert_eq!(list["order"], json!(["number", "toggle", "exposure"]));
         assert_eq!(list["cases"][0]["key"], case["key"]);
         assert_eq!(list["controls"][2]["readout"], "0.00 EV");
-        assert_eq!(
-            list["controls"][2]["slot"], "2x1",
-            "grown across two columns"
-        );
+        assert!(list["controls"][2]["slot"].is_string(), "placed in a slot");
         b.run("controls.bench.remove", &json!({"key": "number"}))
             .unwrap();
         assert!(
@@ -1245,12 +1348,13 @@ mod tests {
 
     #[test]
     fn the_box_follows_the_width_with_hysteresis() {
-        let mut b = bench_of(&["exposure", "number"]);
+        // Alone, the slider grows across the columns it is given.
+        let mut b = bench_of(&["exposure"]);
         b.set_width(240.0);
-        let (narrow, _) = b.resolve().unwrap();
+        let narrow = b.resolve().unwrap();
         b.set_width(480.0);
-        let (wide, _) = b.resolve().unwrap();
-        let rect = |p: &CardPlacement, k: &str| p.get(k).unwrap().rect.unwrap();
+        let wide = b.resolve().unwrap();
+        let rect = |p: &Laid, k: &str| p.get(k).unwrap().rect.unwrap();
         assert!(rect(&wide, "exposure").w > rect(&narrow, "exposure").w);
         b.set_width(5000.0);
         assert_eq!(b.width, WIDTH_RANGE.1);

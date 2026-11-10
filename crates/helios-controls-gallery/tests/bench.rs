@@ -5,6 +5,7 @@
 
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable as _;
+use egui_pop::egui::accesskit::Role;
 use egui_pop::egui::{Event, Modifiers, PointerButton, Pos2, vec2};
 use helios_controls_gallery::bench_ui::BenchPage;
 use serde_json::json;
@@ -79,10 +80,14 @@ fn a_drag_from_the_shelf_adds_the_control_where_it_is_dropped() {
     assert_eq!(order(&h), ["exposure"]);
     // A toggle dropped at the left of the exposure goes before it.
     let from = h.get_by_label("Shelf: Preserve colours").rect().center();
-    let exposure = h.get_by_label("Exposure").rect();
+    let exposure = h.get_by_role_and_label(Role::Slider, "Exposure").rect();
     drag(&mut h, from, exposure.left_center() + vec2(4.0, 0.0));
     assert_eq!(order(&h), ["toggle", "exposure"]);
-    assert!(h.query_by_label("Preserve colours").is_some(), "drawn live");
+    assert!(
+        h.query_by_role_and_label(Role::CheckBox, "Preserve colours")
+            .is_some(),
+        "drawn live"
+    );
 }
 
 #[test]
@@ -136,7 +141,8 @@ fn arranging_groups_selected_controls_into_a_case() {
 fn a_value_changes_through_the_flow_and_undoes() {
     let mut h = harness(page_with(&[json!({"control": "exposure"})]));
     h.run();
-    h.get_by_label("Exposure").set_value_accesskit(0.7);
+    h.get_by_role_and_label(Role::Slider, "Exposure")
+        .set_value_accesskit(0.7);
     h.run();
     assert_eq!(h.state().bench.readout("exposure"), "+0.70 EV");
     assert!(h.query_by_label("exposure: +0.70 EV").is_some(), "read out");
@@ -152,12 +158,13 @@ fn a_value_changes_through_the_flow_and_undoes() {
 
 #[test]
 fn the_width_handle_resizes_the_bench_and_the_placements_follow() {
-    let mut h = harness(page_with(&[
-        json!({"control": "exposure"}),
-        json!({"control": "number"}),
-    ]));
+    // Alone, the slider grows across the columns the bench gives it.
+    let mut h = harness(page_with(&[json!({"control": "exposure"})]));
     h.run();
-    let before = h.get_by_label("Exposure").rect().width();
+    let before = h
+        .get_by_role_and_label(Role::Slider, "Exposure")
+        .rect()
+        .width();
     let handle = h
         .get_by_role(egui_pop::egui::accesskit::Role::Splitter)
         .rect()
@@ -168,7 +175,10 @@ fn the_width_handle_resizes_the_bench_and_the_placements_follow() {
         "{}",
         h.state().bench.width
     );
-    let after = h.get_by_label("Exposure").rect().width();
+    let after = h
+        .get_by_role_and_label(Role::Slider, "Exposure")
+        .rect()
+        .width();
     assert!(after < before, "{after} < {before}");
 }
 
