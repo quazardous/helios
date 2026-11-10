@@ -15,7 +15,6 @@ helios-shell.workspace = true
 helios-values.workspace = true
 # The curve editor and the colour wheel: the implicit card's own drawings.
 egui-pop = { workspace = true, features = ["viewport"] }
-serde.workspace = true
 serde_json.workspace = true
 # MIT OR Apache-2.0 (eframe): the window, or the browser's canvas.
 eframe = { version = "0.37", default-features = false, features = ["default_fonts", "wgpu", "wayland", "x11", "accesskit"] }

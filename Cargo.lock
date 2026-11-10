@@ -2250,7 +2250,6 @@ dependencies = [
  "helios-core",
  "helios-shell",
  "helios-values",
- "serde",
  "serde_json",
  "wasm-bindgen-futures",
 ]
