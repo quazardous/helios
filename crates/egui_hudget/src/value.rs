@@ -98,6 +98,11 @@ pub struct ParamDescriptor {
     /// The module (or any owner) the parameter belongs to: what a patch
     /// names ([`crate::registry::Patch`]).
     pub module: Option<String>,
+    /// Value units per point of a scrub, when the parameter states one;
+    /// otherwise its implicit control derives one from the soft range
+    /// ([`crate::registry::scrub_sensitivity`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sensitivity: Option<f64>,
 }
 
 impl ParamDescriptor {
@@ -119,6 +124,7 @@ impl ParamDescriptor {
             logarithmic: false,
             widget: None,
             module: None,
+            sensitivity: None,
         }
     }
 

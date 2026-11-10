@@ -252,6 +252,43 @@ impl Shape {
     }
 }
 
+/// The points of drag a scrub takes to cross a parameter's soft range.
+pub const SCRUB_TRAVEL: f64 = 300.0;
+
+/// An integer moves by one at least every this many points of a scrub.
+pub const INTEGER_POINTS: f64 = 4.0;
+
+/// The scrub speed (value units per point) of an implicit control over
+/// `range`: the range crossed in 150 to [`SCRUB_TRAVEL`] points, rounded
+/// up to a clean step (1, 2, 2.5 or 5 times a power of ten). An integer
+/// moves by one at least every [`INTEGER_POINTS`] points. A range with no
+/// bounds keeps [`Feel::default`]'s speed. The fine mode (Ctrl) still
+/// divides it by the feel's `fine` factor.
+pub fn scrub_sensitivity(range: Option<(f64, f64)>, integer: bool) -> f64 {
+    let fallback = Feel::default().sensitivity;
+    let speed = match range {
+        Some((lo, hi))
+            if lo.is_finite() && hi.is_finite() && hi > lo && hi - lo < f64::MAX / 4.0 =>
+        {
+            let raw = (hi - lo) / SCRUB_TRAVEL;
+            let decade = 10f64.powf(raw.log10().floor());
+            [1.0, 2.0, 2.5, 5.0, 10.0]
+                .into_iter()
+                .map(|m| m * decade)
+                .find(|s| *s >= raw * (1.0 - 1e-9))
+                .unwrap_or(10.0 * decade)
+        }
+        _ => fallback,
+    };
+    if integer {
+        let s = speed.max(1.0 / INTEGER_POINTS);
+        // Past one unit per point, a whole number of units.
+        if s > 1.0 { s.round() } else { s }
+    } else {
+        speed
+    }
+}
+
 /// The implicit control of a parameter no control is patched to, from
 /// its descriptor and hints: the row the panel draws for it (a slider, a
 /// toggle, a list, a curve).
@@ -343,6 +380,9 @@ pub fn implicit(path: &str, d: &ParamDescriptor) -> Control {
         .intents(&[Intent::Nudge, Intent::Set, Intent::Reset])
         .variant(shape.variant())
         .feel(Feel {
+            sensitivity: d
+                .sensitivity
+                .unwrap_or_else(|| scrub_sensitivity(d.soft.or(d.hard), d.ty == ParamType::Int)),
             response: if d.logarithmic {
                 Response::Logarithmic
             } else {
@@ -352,4 +392,65 @@ pub fn implicit(path: &str, d: &ParamDescriptor) -> Control {
         });
     c.implicit = true;
     c
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The points a scrub takes to cross `range`.
+    fn travel(range: (f64, f64), integer: bool) -> f64 {
+        (range.1 - range.0) / scrub_sensitivity(Some(range), integer)
+    }
+
+    #[test]
+    fn a_scrub_crosses_the_soft_range_in_a_few_hundred_points() {
+        // Feather, 0 to 200 px: one pixel a point, 40 px in 40 points.
+        assert_eq!(scrub_sensitivity(Some((0.0, 200.0)), false), 1.0);
+        assert_eq!(travel((0.0, 200.0), false), 200.0);
+        // Exposure, -3 to +4 EV: a fortieth of a stop a point.
+        assert!((scrub_sensitivity(Some((-3.0, 4.0)), false) - 0.025).abs() < 1e-12);
+        assert!((travel((-3.0, 4.0), false) - 280.0).abs() < 1e-9);
+        for range in [
+            (0.0, 1.0),
+            (0.0, 100.0),
+            (-1.0, 1.0),
+            (0.0, 7.5),
+            (0.0, 1e6),
+        ] {
+            let t = travel(range, false);
+            assert!((150.0..=300.0 + 1e-6).contains(&t), "{range:?}: {t} pt");
+        }
+    }
+
+    #[test]
+    fn whole_numbers_move_by_one_every_few_points() {
+        // A small range: one unit every four points, not a hundred.
+        assert_eq!(scrub_sensitivity(Some((0.0, 10.0)), true), 0.25);
+        assert_eq!(scrub_sensitivity(Some((1.0, 64.0)), true), 0.25);
+        // A large one: a whole number of units a point.
+        assert_eq!(scrub_sensitivity(Some((0.0, 1000.0)), true), 5.0);
+        let s = scrub_sensitivity(Some((0.0, 750.0)), true);
+        assert_eq!(s, s.round());
+    }
+
+    #[test]
+    fn unbounded_ranges_keep_the_fallback_and_a_stated_speed_wins() {
+        let fallback = Feel::default().sensitivity;
+        assert_eq!(scrub_sensitivity(None, false), fallback);
+        assert_eq!(
+            scrub_sensitivity(Some((f64::MIN, f64::MAX)), false),
+            fallback
+        );
+        assert_eq!(scrub_sensitivity(Some((1.0, 1.0)), false), fallback);
+        assert_eq!(scrub_sensitivity(None, true), 1.0 / INTEGER_POINTS);
+        let mut d = ParamDescriptor::float("Feather", 0.0, 200.0, 0.0);
+        assert_eq!(implicit("n/feather", &d).feel.sensitivity, 1.0);
+        d.sensitivity = Some(0.5);
+        assert_eq!(implicit("n/feather", &d).feel.sensitivity, 0.5);
+        // The fine mode still divides it.
+        let c = implicit("n/feather", &ParamDescriptor::float("F", 0.0, 200.0, 0.0));
+        assert_eq!(c.scrubbed(0.0, 40.0, false, true), 40.0);
+        assert!((c.scrubbed(0.0, 40.0, true, true) - 4.0).abs() < 1e-9);
+    }
 }

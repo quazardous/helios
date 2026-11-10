@@ -68,6 +68,7 @@ pub fn descriptor(d: &Descriptor) -> ParamDescriptor {
         logarithmic: d.logarithmic,
         widget: d.widget.map(widget),
         module: d.module.clone(),
+        sensitivity: None,
     }
 }
 
