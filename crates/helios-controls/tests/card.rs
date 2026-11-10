@@ -154,7 +154,7 @@ fn bad_cards_are_refused() {
     let rack = Rack::new(Surface::Panel, COLUMN, COLUMN, ROW);
     let unknown = Card::new(vec![CardItem::control("x", "feather")]);
     assert!(card::layout(&r, &unknown, rack, None).is_err());
-    let bad_variant = Card::new(vec![CardItem::control("x", EXPOSURE).variant("knob")]);
+    let bad_variant = Card::new(vec![CardItem::control("x", EXPOSURE).variant("dial")]);
     assert!(card::layout(&r, &bad_variant, rack, None).is_err());
     let hud = Rack::new(Surface::Hud, COLUMN, COLUMN, ROW);
     assert!(

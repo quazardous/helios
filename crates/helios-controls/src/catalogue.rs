@@ -33,8 +33,9 @@ pub fn registry() -> egui_hudget::Registry {
 ///
 /// Its slider takes a row, grows across up to four units, steps down to
 /// a half-unit value field (compact) and a third-unit read-out
-/// (simplified), and turns vertical in a fader strip. Its scrub field
-/// takes half a unit, a third when simplified, horizontal only.
+/// (simplified), and turns vertical in a fader strip. Its knob and its
+/// scrub field take half a unit, a third when simplified, horizontal
+/// only (a knob's room is beside its dial).
 pub fn exposure() -> Control {
     Control::new(
         EXPOSURE,
@@ -76,6 +77,13 @@ pub fn exposure() -> Control {
             .slot(Representation::Compact, SizePolicy::fixed(Slot::HALF))
             .slot(Representation::Simplified, SizePolicy::fixed(THIRD))
             .orientations(&[Orientation::Horizontal, Orientation::Vertical])
+            .chip(),
+    )
+    .variant(
+        Variant::new("knob", "Knob")
+            .slot(Representation::Full, SizePolicy::fixed(Slot::HALF))
+            .slot(Representation::Simplified, SizePolicy::fixed(THIRD))
+            .orientations(&[Orientation::Horizontal])
             .chip(),
     )
     .variant(

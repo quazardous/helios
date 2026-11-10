@@ -772,12 +772,13 @@ pub fn resolve(
             }
         };
         match item {
-            CardItem::Chrome(_) => {
+            CardItem::Chrome(chrome) => {
                 let mut p = Placement {
                     key: s.map_or_else(|| format!("chrome#{i}"), |s| s.key.clone()),
                     kind: ItemKind::Chrome,
                     control: None,
-                    label: None,
+                    // A legend's or a help line's text.
+                    label: chrome.text.clone(),
                     variant: None,
                     tier: None,
                     mode,

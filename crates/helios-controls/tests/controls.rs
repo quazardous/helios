@@ -72,7 +72,7 @@ fn the_catalogue_lists_exposure_and_describes_it() {
     assert_eq!(ids, ["exposure"]);
     let d = r.describe(EXPOSURE).unwrap();
     assert_eq!(d["connector"], json!(["number<EV>"]));
-    assert_eq!(d["variants"], json!(["slider", "scrub"]));
+    assert_eq!(d["variants"], json!(["slider", "knob", "scrub"]));
     assert_eq!(
         d["surfaces"]["slider"],
         json!(["panel", "dock", "toolbar", "float", "hud"])
@@ -93,6 +93,9 @@ fn the_catalogue_lists_exposure_and_describes_it() {
     assert_eq!(scrub["slots"]["full"]["summary"], "fixed 1/2x1");
     assert!(scrub["slots"].get("compact").is_none());
     assert_eq!(scrub["orientations"], json!(["horizontal"]));
+    let knob = &d["layout"]["variants"]["knob"];
+    assert_eq!(knob["slots"]["full"]["summary"], "fixed 1/2x1");
+    assert_eq!(knob["orientations"], json!(["horizontal"]));
     assert_eq!(d["layout"]["warnings"], json!([]));
     assert_eq!(d["detents"][0]["value"], json!(0.0));
     assert!(
@@ -103,7 +106,7 @@ fn the_catalogue_lists_exposure_and_describes_it() {
     );
     assert_eq!(
         d["config_schema"]["properties"]["variant"]["enum"],
-        json!(["slider", "scrub"])
+        json!(["slider", "knob", "scrub"])
     );
     assert_eq!(d["patches"][0]["param"], json!("exposure"));
     assert!(r.describe("nope").is_none());
@@ -377,7 +380,7 @@ fn an_integrated_variant_without_fallback_is_flagged_not_refused() {
     // No fallback: registered, but counted.
     let mut lone = c.clone();
     lone.id = "lone".into();
-    lone.variants[2]
+    lone.variants[3]
         .integration
         .insert(Surface::Panel, Integration::Integrated { fallback: None });
     assert!(lone.check().is_ok());
@@ -401,13 +404,13 @@ fn an_integrated_variant_without_fallback_is_flagged_not_refused() {
     assert_eq!(r.catalogue()[1]["warnings"], 1);
     // A fallback that is not a managed variant is refused.
     let mut bad = c.clone();
-    bad.variants[2].integration.insert(
+    bad.variants[3].integration.insert(
         Surface::Panel,
         Integration::integrated(Fallback::Variant("nope".into())),
     );
     assert!(bad.check().is_err());
     let mut bad = c;
-    bad.variants[2]
+    bad.variants[3]
         .integration
         .insert(Surface::Panel, Integration::integrated(Fallback::Parts));
     assert!(bad.check().is_err(), "parts, but not a case");

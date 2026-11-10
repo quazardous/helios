@@ -304,7 +304,12 @@ pub fn implicit(path: &str, d: &ParamDescriptor) -> Control {
         ),
         ParamType::Floats => (
             ValueSpec::Other {
-                stored: ValueType::Points,
+                // A wheel's numbers are a colour (hue, chroma, luminance).
+                stored: if d.widget == Some(Widget::Wheel) {
+                    ValueType::Colour
+                } else {
+                    ValueType::Points
+                },
             },
             match d.widget {
                 Some(Widget::Curve) => Shape::Drawn(6),
