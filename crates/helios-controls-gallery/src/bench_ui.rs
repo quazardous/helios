@@ -5,9 +5,8 @@
 //!   small painted preview of its form (its preferred slot's width, its
 //!   value type's look). Drag an entry onto the bench to place it; click
 //!   it to put it at the end.
-//! - **The bench** is the composition's cards (its loose controls, each
-//!   case) resolved through `resolve` and drawn by `render::card`, as a
-//!   module's card is, stacked. While something
+//! - **The bench** is the composition's card resolved through `resolve`
+//!   and drawn by `render::card`, as a module's card is. While something
 //!   is dragged over it, the slot it would take in the dense grid is drawn
 //!   as a ghost. Its right edge is a handle that sets its width; the
 //!   placements follow (with the slot engine's hysteresis).
@@ -27,12 +26,12 @@ use egui_pop::egui::{
     self, Align2, Color32, DragAndDrop, Pos2, Rect, Role, Sense, Stroke, StrokeKind, Ui, UiBuilder,
     WidgetInfo, pos2, vec2,
 };
-use helios_controls::Control;
 use helios_controls::model::{Representation, ValueType};
 use helios_controls::render::{self, Drawn};
+use helios_controls::{CardPlacement, Control};
 
 use crate::EditorDrawings;
-use crate::bench::{Bench, Composition, Entry, Laid, Origin, Piece, ShelfEntry, Spot};
+use crate::bench::{Bench, Composition, Entry, Origin, Piece, ShelfEntry, Spot};
 
 /// What is dragged: a shelf entry by name, or a bench item by key.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -269,14 +268,17 @@ impl BenchPage {
     /// frames, the drop ghost, the layout mode's handles, and the width
     /// handle.
     pub fn bench_zone(&mut self, ui: &mut Ui) {
-        let laid = match self.bench.resolve() {
+        let (placement, origins) = match self.bench.resolve() {
             Ok(p) => p,
             Err(e) => {
                 ui.colored_label(ui.visuals().error_fg_color, e);
                 return;
             }
         };
-        let card_height = laid.height;
+        let card_height = placement
+            .layout
+            .as_ref()
+            .map_or(0.0, egui_hudget::card::CardLayout::height);
         let origin = ui.cursor().min;
         let zone = Rect::from_min_size(
             origin,
@@ -301,8 +303,9 @@ impl BenchPage {
         let at = |r: &helios_controls::card::Rect| {
             Rect::from_min_size(origin + vec2(r.x, r.y), vec2(r.w, r.h))
         };
-        self.case_frames(ui, &laid, &at);
+        self.case_frames(ui, &placement, &at);
 
+        // The card, as a module's card is drawn.
         let mut values: BTreeMap<String, egui_hudget::Value> = self
             .bench
             .composition
@@ -310,71 +313,55 @@ impl BenchPage {
             .into_iter()
             .filter_map(|k| Some((k.to_owned(), self.bench.value(k)?)))
             .collect();
-        // Each card, as a module's card is drawn.
-        self.drawn.clear();
-        let mut edits = Vec::new();
-        for (i, s) in laid.sections.iter().enumerate() {
-            let mut child = ui.new_child(
-                UiBuilder::new()
-                    .max_rect(Rect::from_min_max(
-                        origin + vec2(0.0, s.top),
-                        zone.right_bottom(),
-                    ))
-                    .id_salt(("bench-card", i))
-                    .layout(egui::Layout::top_down(egui::Align::Min)),
-            );
-            if self.arranging {
-                // The layout mode: the controls show, the handles take the
-                // input.
-                child.disable();
-            }
-            let out = render::card(
-                &mut child,
-                &self.bench.registry,
-                &s.placement,
-                &mut values,
-                &mut EditorDrawings,
-            );
-            self.drawn.extend(out.drawn);
-            edits.extend(out.edits);
+        let mut child = ui.new_child(
+            UiBuilder::new()
+                .max_rect(zone)
+                .id_salt("bench-card")
+                .layout(egui::Layout::top_down(egui::Align::Min)),
+        );
+        if self.arranging {
+            // The layout mode: the controls show, the handles take the input.
+            child.disable();
+        }
+        let out = render::card(
+            &mut child,
+            &self.bench.registry,
+            &placement,
+            &mut values,
+            &mut EditorDrawings,
+        );
+        self.drawn = out.drawn;
+        if !self.arranging {
+            self.bench.apply(out.edits);
         }
         if self.arranging {
-            self.handles(ui, &laid, &at);
-        } else {
-            self.bench.apply(edits);
+            self.handles(ui, &placement, &origins, &at);
         }
-        self.drop(ui, zone, &laid, &at);
+        self.drop(ui, zone, &placement, &origins, &at);
         ui.allocate_rect(zone, Sense::hover());
         self.width_handle(ui, zone);
     }
 
-    /// A frame around each case: its legend to its last item.
-    fn case_frames(&self, ui: &Ui, laid: &Laid, at: &dyn Fn(&helios_controls::card::Rect) -> Rect) {
-        let mut frames: BTreeMap<String, Rect> = BTreeMap::new();
-        for (p, o, r) in laid.items() {
-            let Some(r) = r.filter(|_| p.visibility.is_shown()) else {
-                continue;
-            };
-            let case = match o {
-                Origin::Chrome { case, .. } => Some(case.clone()),
-                Origin::Control { spot, .. } => spot.case.clone(),
-            };
-            if let Some(case) = case {
-                let r = at(&r);
-                frames
-                    .entry(case)
-                    .and_modify(|f| *f = f.union(r))
-                    .or_insert(r);
-            }
-        }
-        for (case, f) in frames {
-            let stroke = if self.selected.contains(&case) {
+    /// A frame around each case: the band the slot engine gave its group,
+    /// across the card, from its legend to its lowest part.
+    fn case_frames(
+        &self,
+        ui: &Ui,
+        placement: &CardPlacement,
+        at: &dyn Fn(&helios_controls::card::Rect) -> Rect,
+    ) {
+        let Some(layout) = &placement.layout else {
+            return;
+        };
+        for g in &layout.groups {
+            let Some(r) = &g.rect else { continue };
+            let stroke = if self.selected.contains(&g.key) {
                 Stroke::new(2.0, ui.visuals().selection.stroke.color)
             } else {
                 ui.visuals().widgets.noninteractive.bg_stroke
             };
             ui.painter()
-                .rect_stroke(f.expand(1.0), 4.0, stroke, StrokeKind::Outside);
+                .rect_stroke(at(r).expand(1.0), 4.0, stroke, StrokeKind::Outside);
         }
     }
 
@@ -383,11 +370,12 @@ impl BenchPage {
     fn handles(
         &mut self,
         ui: &mut Ui,
-        laid: &Laid,
+        placement: &CardPlacement,
+        origins: &[Origin],
         at: &dyn Fn(&helios_controls::card::Rect) -> Rect,
     ) {
-        for (p, o, r) in laid.items() {
-            let Some(r) = r.filter(|_| p.visibility.is_shown()) else {
+        for (p, o) in placement.items.iter().zip(origins) {
+            let Some(r) = p.rect.as_ref().filter(|_| p.visibility.is_shown()) else {
                 continue;
             };
             let key = match o {
@@ -398,7 +386,7 @@ impl BenchPage {
                 } => case.clone(),
                 Origin::Chrome { .. } => continue,
             };
-            let rect = at(&r).shrink(1.0);
+            let rect = at(r).shrink(1.0);
             let r = ui.interact(
                 rect,
                 ui.scope_id().with(("bench-handle", &key)),
@@ -459,7 +447,8 @@ impl BenchPage {
         &mut self,
         ui: &Ui,
         zone: Rect,
-        laid: &Laid,
+        placement: &CardPlacement,
+        origins: &[Origin],
         at: &dyn Fn(&helios_controls::card::Rect) -> Rect,
     ) {
         let Some(payload) = DragAndDrop::payload::<Payload>(ui.ctx()) else {
@@ -472,20 +461,22 @@ impl BenchPage {
         let Some(pos) = self.hover.filter(|p| zone.contains(*p)) else {
             return;
         };
-        let target = target_spot(&self.bench.composition, laid, at, pos);
+        let target = target_spot(&self.bench.composition, placement, origins, at, pos);
         let (trial, ghost) = self.trial(&payload, &target);
         if let Some(trial) = trial
             && let Ok(p) = self.bench.resolve_trial(&trial)
         {
             let rects: Vec<Rect> = p
-                .items()
-                .filter(|(_, o, _)| match o {
+                .items
+                .iter()
+                .zip(trial.card().1)
+                .filter(|(_, o)| match o {
                     Origin::Control { key, spot } => {
                         *key == ghost || spot.case.as_deref() == Some(ghost.as_str())
                     }
                     Origin::Chrome { case, .. } => *case == ghost,
                 })
-                .filter_map(|(_, _, r)| r.as_ref().map(at))
+                .filter_map(|(i, _)| i.rect.as_ref().map(at))
                 .collect();
             if let Some(first) = rects.first() {
                 let r = rects.iter().fold(*first, |a, b| a.union(*b));
@@ -681,15 +672,18 @@ impl BenchPage {
 /// which half the pointer is in; past the last row, the end.
 fn target_spot(
     composition: &Composition,
-    laid: &Laid,
+    placement: &CardPlacement,
+    origins: &[Origin],
     at: &dyn Fn(&helios_controls::card::Rect) -> Rect,
     pos: Pos2,
 ) -> Spot {
     let end = Spot::top(composition.entries.len());
-    let shown: Vec<(Rect, &Origin)> = laid
-        .items()
-        .filter(|(p, _, _)| p.visibility.is_shown())
-        .filter_map(|(_, o, r)| Some((at(r.as_ref()?), o)))
+    let shown: Vec<(Rect, &Origin)> = placement
+        .items
+        .iter()
+        .zip(origins)
+        .filter(|(p, _)| p.visibility.is_shown())
+        .filter_map(|(p, o)| Some((at(p.rect.as_ref()?), o)))
         .collect();
     let bottom = shown
         .iter()
