@@ -539,6 +539,8 @@ impl BenchPage {
             match e {
                 render::CardEvent::Reveal(key) => self.bench.reveal(&key),
                 render::CardEvent::RevealAll => self.bench.reveal_all(),
+                // No marks and no picker on the bench.
+                render::CardEvent::Reset(_) | render::CardEvent::Quad(_) => {}
             }
         }
         if self.arranging {
