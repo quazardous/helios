@@ -247,8 +247,17 @@ impl Shape {
                     SizePolicy::growable(FULL_MIN, Slot::ROW, Slot::wide(4), Grow::Width),
                 )
                 .orientations(&[Orientation::Horizontal]),
+            // Down to three quarters of a unit wide, as a slider.
             Shape::Drawn(rows) => v
-                .slot(Representation::Full, SizePolicy::fixed(Slot::block(rows)))
+                .slot(
+                    Representation::Full,
+                    SizePolicy::growable(
+                        Slot::new(Size::THREE_QUARTERS, Slot::block(rows).height),
+                        Slot::block(rows),
+                        Slot::block(rows),
+                        Grow::Width,
+                    ),
+                )
                 .slot(Representation::Compact, SizePolicy::fixed(Slot::ROW))
                 .integrated(Surface::Panel, Integration::integrated(Fallback::ValueType))
                 .integrated(Surface::Dock, Integration::integrated(Fallback::ValueType))

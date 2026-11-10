@@ -327,7 +327,7 @@ fn commands_set_nudge_and_reset_exposure() {
     let cx = helios_shell::when::Context::new();
     let mut run = |id: &str, args: serde_json::Value| cmds.run(id, args, agent.clone(), &cx);
     let cat = run("controls.catalogue", json!({})).unwrap();
-    assert_eq!(cat[0]["id"], "exposure");
+    assert_eq!(cat[1]["id"], "exposure");
     let d = run("controls.describe", json!({"id": "exposure"})).unwrap();
     assert_eq!(d["id"], "exposure");
     let out = run(
@@ -408,7 +408,8 @@ fn an_integrated_variant_without_fallback_is_flagged_not_refused() {
         json!(null)
     );
     assert_eq!(d["layout"]["warnings"].as_array().unwrap().len(), 1);
-    assert_eq!(r.catalogue()[1]["warnings"], 1);
+    // Sorted by id: black-level, exposure, lone.
+    assert_eq!(r.catalogue()[2]["warnings"], 1);
     // A fallback that is not a managed variant is refused.
     let mut bad = c.clone();
     bad.variants[3].integration.insert(
