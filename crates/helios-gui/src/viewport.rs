@@ -955,6 +955,18 @@ impl Viewport {
             NavCommand::ZoomOut => ZoomTo::Out,
             NavCommand::Zoom100 => ZoomTo::Actual,
             NavCommand::Hand => return,
+            NavCommand::ZoomTo(percent) => {
+                // A zoom control's step, around the view's centre.
+                let Some(m) = self.state.mapping() else {
+                    return;
+                };
+                let mut store = store.lock().unwrap_or_else(PoisonError::into_inner);
+                let mut view = view_of(&store);
+                let to = m.zoom_around(m.rect.center(), f64::from(percent) / 100.0);
+                self.state.propose(&mut view, to);
+                write_view(&mut store, &view, None);
+                return;
+            }
             NavCommand::Pan(dir) => {
                 let Some(m) = self.state.mapping() else {
                     return;
