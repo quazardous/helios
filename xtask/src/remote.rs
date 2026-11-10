@@ -58,8 +58,6 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
 
-use crate::test_times::target_dir;
-
 pub const USAGE: &str = "bench-remote failures [--all] | bench-remote why <id> <reason> | bench-remote <job> [key=value...] [--priority high|normal] [--push] | bench-remote --affected [base=REF] [key=value...] [--push] | bench-remote --chain egui-pop|helios [--release] [key=value...] [--priority high|normal] [--push] | bench-remote queue";
 
 /// The exit code of a job the box could not serve.
@@ -547,14 +545,33 @@ fn git(root: &Path, args: &[&str]) -> Option<String> {
         .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
-/// The branch to run on when none is given: the current one, else main
-/// when pushing (the checkout only needs a branch GitHub has).
-fn default_branch(root: &Path, push: bool) -> Option<String> {
-    let current = git(root, &["rev-parse", "--abbrev-ref", "HEAD"]).filter(|b| b != "HEAD");
-    if !push {
-        return current;
+/// The current branch, `None` on a detached HEAD.
+fn current_branch(root: &Path) -> Option<String> {
+    git(root, &["rev-parse", "--abbrev-ref", "HEAD"]).filter(|b| b != "HEAD")
+}
+
+/// The branch to run on when none is given: the current one, with or
+/// without `--push`. With `--push` the box still checks the branch out
+/// from GitHub (its Benchfile, its target cache) before building the
+/// pushed code, so it is never swapped for main: a branch only this
+/// checkout has would build main's tree in the check (a new crate missing).
+pub fn branch_for(current: Option<&str>, push: bool) -> Result<String, String> {
+    match current {
+        Some(b) if !b.is_empty() && b != "HEAD" => Ok(b.to_string()),
+        _ if push => Err(
+            "--push needs a named branch and this checkout is on a detached \
+                          HEAD: check one out (git switch -c <name>) or give branch=<branch>"
+                .into(),
+        ),
+        _ => Err("no current branch (detached HEAD): give branch=<branch>".into()),
     }
-    let on_github = |b: &String| {
+}
+
+/// With `--push`, the branch GitHub must have for the box to check it out:
+/// the current branch is pushed to origin when origin lacks it; another
+/// branch origin lacks is refused.
+fn ensure_on_origin(root: &Path, branch: &str) -> Result<(), String> {
+    let on_origin = |b: &str| {
         git(
             root,
             &[
@@ -566,14 +583,27 @@ fn default_branch(root: &Path, push: bool) -> Option<String> {
         )
         .is_some()
     };
-    Some(current.filter(on_github).unwrap_or_else(|| "main".into()))
+    if on_origin(branch) {
+        return Ok(());
+    }
+    if current_branch(root).as_deref() != Some(branch) {
+        return Err(format!(
+            "origin has no branch `{branch}`: push it first, or run from it"
+        ));
+    }
+    eprintln!(
+        "bench-remote: origin has no branch `{branch}`: pushing it (git push -u origin {branch})"
+    );
+    git(root, &["push", "--quiet", "-u", "origin", branch])
+        .map(drop)
+        .ok_or_else(|| format!("git push -u origin {branch} failed: push the branch first"))
 }
 
 /// Warns when the box will check out the current branch but not what is
 /// here: unpushed commits or uncommitted changes. Another branch, named
 /// on purpose, runs as GitHub has it without a word.
 fn warn_unpushed(root: &Path, branch: &str) {
-    if git(root, &["rev-parse", "--abbrev-ref", "HEAD"]).as_deref() != Some(branch) {
+    if current_branch(root).as_deref() != Some(branch) {
         return;
     }
     let local = git(root, &["rev-parse", "HEAD"]);
@@ -637,9 +667,25 @@ fn push(b: &Bench, root: &Path, empty: bool) -> Result<(), String> {
     }
 }
 
-/// Fetches a job's results into `target/bench-remote/<id>/`.
+/// Where a job's results go: `target/bench-remote/<id>/` of the checkout
+/// the command runs in (the git toplevel of the current directory, else
+/// `root`), whatever `CARGO_TARGET_DIR` says: a folder shared by several
+/// worktrees would mix their results, and the agent looks in its own.
+pub fn results_dir(toplevel: Option<&Path>, root: &Path, id: &str) -> PathBuf {
+    toplevel
+        .unwrap_or(root)
+        .join("target")
+        .join("bench-remote")
+        .join(id)
+}
+
+/// Fetches a job's results into `results_dir`.
 fn fetch(b: &Bench, root: &Path, id: &str) -> Result<PathBuf, String> {
-    let dir = target_dir(root).join("bench-remote").join(id);
+    let toplevel = std::env::current_dir()
+        .ok()
+        .and_then(|cwd| git(&cwd, &["rev-parse", "--show-toplevel"]))
+        .map(PathBuf::from);
+    let dir = results_dir(toplevel.as_deref(), root, id);
     std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let mut ssh = b
         .ssh(10, &["fetch", id])
@@ -732,16 +778,42 @@ fn conditions_warning(json: &str) -> Option<String> {
     ))
 }
 
+/// `help`, `--help` or `-h` anywhere in the arguments: the client's usage,
+/// never a job (the box would refuse one named `help`).
+pub fn wants_help(args: &[&str]) -> bool {
+    args.iter().any(|a| matches!(*a, "help" | "--help" | "-h"))
+}
+
+/// The jobs a Benchfile declares (`[jobs.<name>]`), in its order.
+pub fn benchfile_jobs(benchfile: &str) -> Vec<String> {
+    benchfile
+        .lines()
+        .filter_map(|l| l.trim().strip_prefix("[jobs.")?.strip_suffix(']'))
+        .map(str::to_string)
+        .collect()
+}
+
+/// Why a job is refused here before anything goes to the box: a name the
+/// Benchfile does not declare, with the list of the ones it does.
+pub fn unknown_job(job: &str, benchfile: &str) -> Option<String> {
+    let jobs = benchfile_jobs(benchfile);
+    (!jobs.is_empty() && !jobs.iter().any(|j| j == job)).then(|| {
+        format!(
+            "no job `{job}` in tools/bench/Benchfile; the jobs: {}",
+            jobs.join(", ")
+        )
+    })
+}
+
 pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
-    match args {
-        ["help" | "--help" | "-h"] => {
-            // `help` is the client's, never a job: the box would refuse it.
-            for form in USAGE.split(" | ") {
-                println!("{form}");
-            }
-            println!("Jobs and their parameters: tools/bench/Benchfile; the box: docs/bench.md.");
-            return Some(ExitCode::SUCCESS);
+    if wants_help(args) && !matches!(args, ["why", ..]) {
+        for form in USAGE.split(" | ") {
+            println!("{form}");
         }
+        println!("Jobs and their parameters: tools/bench/Benchfile; the box: docs/bench.md.");
+        return Some(ExitCode::SUCCESS);
+    }
+    match args {
         ["failures"] => return Some(ExitCode::from(failures(false))),
         ["failures", "--all"] => return Some(ExitCode::from(failures(true))),
         ["why", id, reason @ ..] if !reason.is_empty() => {
@@ -759,6 +831,13 @@ pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
         });
     }
     let mut req = parse_args(args)?;
+    if !req.job.is_empty()
+        && let Ok(benchfile) = std::fs::read_to_string(root.join("tools/bench/Benchfile"))
+        && let Some(why) = unknown_job(&req.job, &benchfile)
+    {
+        eprintln!("bench-remote: not queued: {why}");
+        return Some(ExitCode::from(EX_PREFLIGHT));
+    }
     let linked = root.join(".git").is_file();
     let shared = std::env::var_os("CARGO_TARGET_DIR").map(PathBuf::from);
     if let Some(w) = shared_target_warning(linked, shared.as_deref(), root) {
@@ -1069,12 +1148,15 @@ fn preflight(
     Ok(())
 }
 
-/// `branch=` when none is given: the current branch.
+/// `branch=` when none is given: the current branch. With `--push`, the
+/// branch is also put on origin when only this checkout has it.
 fn set_branch(root: &Path, req: &mut Request) -> Result<(), String> {
     if req.param("branch").is_none() {
-        let branch = default_branch(root, req.push)
-            .ok_or("no current branch (detached HEAD): give branch=<branch>")?;
+        let branch = branch_for(current_branch(root).as_deref(), req.push)?;
         req.params.insert(0, ("branch".into(), branch));
+    }
+    if req.push {
+        ensure_on_origin(root, req.param("branch").unwrap_or_default())?;
     }
     Ok(())
 }
@@ -1990,6 +2072,77 @@ mod tests {
         let e = parse_args(&["egui-pop-test", "egui_pop=f", "crate=y", "test=t"]).unwrap();
         assert_eq!(check_for(&e).unwrap().job, "egui-pop-check");
         assert!(check_for(&parse_args(&["check", "crate=x"]).unwrap()).is_none());
+    }
+
+    #[test]
+    fn a_push_from_a_new_branch_runs_that_branch_and_its_check_the_pushed_code() {
+        let mut req = parse_args(&["test-crate", "crate=new-crate", "--push"]).unwrap();
+        // what set_branch and prepare add: the current branch, then src=
+        let branch = branch_for(Some("feat/new-crate"), req.push).unwrap();
+        req.params.insert(0, ("branch".into(), branch));
+        req.params.push(("src".into(), "helios-local-1".into()));
+        assert_eq!(req.param("branch"), Some("feat/new-crate"));
+        let c = check_for(&req).unwrap();
+        assert_eq!(c.param("branch"), Some("feat/new-crate"), "never main");
+        assert_eq!(c.param("src"), Some("helios-local-1"));
+        assert!(
+            branch_for(None, true).unwrap_err().contains("detached"),
+            "a detached HEAD is refused"
+        );
+        assert!(branch_for(Some("HEAD"), true).is_err());
+        assert_eq!(branch_for(Some("main"), false).as_deref(), Ok("main"));
+    }
+
+    #[test]
+    fn the_box_s_own_check_builds_the_pushed_code() {
+        // the box passes a job's `first` only the parameters it lists:
+        // without `src` the check of a --push run builds the branch from
+        // GitHub instead of the code sent
+        let bf = include_str!("../../tools/bench/Benchfile");
+        let firsts: Vec<&str> = bf.lines().filter(|l| l.starts_with("first = ")).collect();
+        assert!(!firsts.is_empty());
+        for l in firsts {
+            assert!(l.contains("\"branch\"") && l.contains("\"src\""), "{l}");
+        }
+    }
+
+    #[test]
+    fn help_never_queues_and_an_unknown_job_is_refused_here() {
+        for args in [
+            &["help"][..],
+            &["--help"],
+            &["-h"],
+            &["help", "branch=x"],
+            &["test", "--help"],
+            &["--push", "-h"],
+        ] {
+            assert!(wants_help(args), "{args:?}");
+        }
+        assert!(!wants_help(&["test", "branch=help-me"]));
+        let bf = "[jobs.check]\ncommand = \"\"\n[jobs.test]\ncommand = \"\"\n";
+        assert_eq!(benchfile_jobs(bf), ["check", "test"]);
+        assert_eq!(unknown_job("test", bf), None);
+        let why = unknown_job("tests", bf).unwrap();
+        assert!(
+            why.contains("`tests`") && why.contains("check, test"),
+            "{why}"
+        );
+        let real = include_str!("../../tools/bench/Benchfile");
+        assert!(unknown_job("help", real).is_some());
+        assert_eq!(unknown_job("test-affected", real), None);
+    }
+
+    #[test]
+    fn results_go_to_the_current_checkout_not_cargo_target_dir() {
+        let root = Path::new("/w/helios");
+        assert_eq!(
+            results_dir(Some(Path::new("/w/helios-wt")), root, "j1"),
+            Path::new("/w/helios-wt/target/bench-remote/j1")
+        );
+        assert_eq!(
+            results_dir(None, root, "j1"),
+            Path::new("/w/helios/target/bench-remote/j1")
+        );
     }
 
     #[test]

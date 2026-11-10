@@ -110,7 +110,15 @@ cargo xtask bench-remote queue                   # the box's queue: what runs, w
 follows its log, then fetches the results to
 `target/bench-remote/<id>/` (`log`, `status`, `request`, and the job's
 `out/`) and prints a summary: the job, its id, its result and its
-duration. The exit code is the job's.
+duration. The exit code is the job's. The results folder is the
+`target/` of the checkout the command runs in (the git toplevel of the
+current directory), whatever `CARGO_TARGET_DIR` says, so each worktree
+finds its own jobs' results.
+
+`help`, `--help` or `-h` anywhere prints the client's usage and queues
+nothing. A job name the checkout's `tools/bench/Benchfile` does not
+declare is refused here, with the list of its jobs, before anything goes
+to the box.
 
 Without `--push`, the box checks the branch out from GitHub: push it first
 (`bench-remote` refuses to queue a branch origin does not have, or the
@@ -138,8 +146,13 @@ about it>"`. `cargo xtask bench-remote failures` lists the ones still
 unexplained (`--all` for every one). A run meant to fail (a reproduction
 before a fix) says so with `expect=fail` and is recorded as expected. With
 `--push`, the tracked and untracked files of the working tree (not the
-ignored ones) are sent to the box and the job runs on them; the target
-cache used is the current branch's when GitHub has it, else main's. Each
+ignored ones) are sent to the box and the job runs on them, with
+`branch=` the current branch (a detached HEAD is refused: give
+`branch=<branch>` or check a branch out). The box still checks that branch
+out from GitHub (its Benchfile, its target cache), so a branch origin
+lacks is pushed there first (`git push -u origin <branch>`). The box's own
+`check` before the job gets `src=` too (each `first` passes it), so it
+type-checks the code sent, not the branch as GitHub has it. Each
 checkout pushes under its own name (`helios-local-<id>`, a hash of its
 path), so worktrees can push at the same time; two `--push` runs from the
 same checkout still share it.
@@ -569,7 +582,8 @@ What happens on `next`:
   workspace, so worktrees of one repository sharing a folder overwrite each
   other's builds, and cargo then reads another branch's build as fresh:
   false "not found" errors until a source file is touched. `bench-remote`
-  warns when a linked worktree builds outside itself.
+  warns when a linked worktree builds outside itself; its job results go
+  to the worktree's own `target/bench-remote/` either way.
 - Local work is check-only (see "The work cycle"), so a worktree's
   `target/` stays small: about 0.6 GB for a clippy of all of egui-pop's
   targets from scratch, in about 80 s. Full builds and tests belong on the
