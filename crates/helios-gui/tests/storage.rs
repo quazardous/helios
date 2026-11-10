@@ -717,9 +717,12 @@ fn the_backup_wizard_sets_up_the_strategy() {
         h.query_by_role_and_label(A11y::Group, "Copy to: Any disk with the backup role")
             .is_some()
     });
-    h.get_by_label("Use this strategy");
-    let done = state(&mut h, "admin.wizard.finish", json!({})).unwrap();
-    assert_eq!(done["command"], "library.setUpBackups", "{done}");
+    // Finishing is the button's click, as a user does it: the toast the
+    // refused Next left in the corner keeps off the footer.
+    let app = h.state().app().handle().clone();
+    let toasts = app.service(&egui_pop::api::toasts::TOASTS).unwrap();
+    assert!(!toasts.shown().is_empty(), "the refused Next's toast");
+    h.get_by_label("Use this strategy").click();
     until(&mut h, "the strategy saved", |_| {
         strategy::load(&world.vault, &Scope::Library)
             .unwrap()
@@ -734,6 +737,26 @@ fn the_backup_wizard_sets_up_the_strategy() {
     assert!(s.triggers.contains(&Trigger::OnImport));
     assert!(!s.triggers.contains(&Trigger::OnConnect));
     // Opened from the Settings app: back on its page.
-    let app = h.state().app().handle().clone();
     assert!(egui_pop::api::admin::is_open(&app));
+    // An agent finishes the same wizard with its command.
+    state(
+        &mut h,
+        "admin.wizard.open",
+        json!({ "id": "backup.setup", "values": { "copies": 1, "destination": "archive" } }),
+    )
+    .unwrap();
+    let s = state(&mut h, "admin.wizard.go", json!({ "step": "summary" })).unwrap();
+    assert_eq!(s["canFinish"], true, "{s}");
+    let done = state(&mut h, "admin.wizard.finish", json!({})).unwrap();
+    assert_eq!(done["command"], "library.setUpBackups", "{done}");
+    until(&mut h, "the strategy set again", |_| {
+        strategy::load(&world.vault, &Scope::Library)
+            .unwrap()
+            .is_some_and(|s| s.copies == 1)
+    });
+    let s = strategy::load(&world.vault, &Scope::Library)
+        .unwrap()
+        .unwrap();
+    assert_eq!(s.destinations, [strategy::Destination::Role(Role::Archive)]);
+    assert!(!s.off_site_required);
 }
