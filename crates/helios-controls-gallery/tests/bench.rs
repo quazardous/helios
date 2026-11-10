@@ -302,7 +302,7 @@ fn snapshots_of_the_context_bar_and_the_reason_pane() {
         .with_size(vec2(760.0, 90.0))
         .build_ui_state(|ui, p: &mut BenchPage| p.context_bar(ui), explained_page());
     h.run();
-    assert!(h.query_by_label("Task").is_some());
+    assert!(h.query_by_role_and_label(Role::ComboBox, "Task").is_some());
     assert!(h.query_by_label_contains("Space: regular").is_some());
     snapshot_into(&mut h, "bench-context-bar", &mut results);
 

@@ -114,7 +114,8 @@ fn name_of<T: Serialize>(v: T) -> String {
 /// A drop-down of `all`, labelled `label`; answers the value picked.
 fn pick<T: Copy + PartialEq + Serialize>(ui: &mut Ui, label: &str, now: T, all: &[T]) -> Option<T> {
     let mut chosen = None;
-    egui::ComboBox::from_label(label)
+    ui.label(label);
+    let r = egui::ComboBox::from_id_salt(("bench-pick", label))
         .selected_text(name_of(now))
         .show_ui(ui, |ui| {
             for v in all {
@@ -122,7 +123,9 @@ fn pick<T: Copy + PartialEq + Serialize>(ui: &mut Ui, label: &str, now: T, all: 
                     chosen = Some(*v);
                 }
             }
-        });
+        })
+        .response;
+    r.widget_info(|| WidgetInfo::labeled(Role::ComboBox, true, label));
     chosen
 }
 
@@ -271,6 +274,7 @@ impl BenchPage {
         let mut args = serde_json::Map::new();
         ui.horizontal_wrapped(|ui| {
             ui.strong("Context");
+            ui.separator();
             if let Some(t) = pick(ui, "Task", k.task, &Task::ALL) {
                 args.insert("task".into(), json!(t));
             }
@@ -287,7 +291,8 @@ impl BenchPage {
                 args.insert("image".into(), json!(image));
             }
             let mut tool = None;
-            egui::ComboBox::from_label("Tool")
+            ui.label("Tool");
+            let r = egui::ComboBox::from_id_salt("bench-tool")
                 .selected_text(if k.tool.is_empty() { "none" } else { &k.tool })
                 .show_ui(ui, |ui| {
                     for t in TOOLS {
@@ -296,7 +301,9 @@ impl BenchPage {
                             tool = Some(t);
                         }
                     }
-                });
+                })
+                .response;
+            r.widget_info(|| WidgetInfo::labeled(Role::ComboBox, true, "Tool"));
             if let Some(t) = tool {
                 args.insert("tool".into(), json!(t));
             }
