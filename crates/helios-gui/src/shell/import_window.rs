@@ -163,6 +163,7 @@ impl ImportWindow {
         self.scans.clear();
         self.contents = Contents::new();
         self.published = None;
+        self.selection_synced = None;
         if let Some(t) = &self.thumbs {
             t.clear();
         }
@@ -202,16 +203,15 @@ impl ImportWindow {
             };
             self.scans.push((path.clone(), scan, false));
         }
+        let thumbs = self.thumbnails();
         for (_, scan, done) in &mut self.scans {
             for sent in scan.take() {
                 match sent {
                     Scanned::Found(found) => {
                         let key = found.key.clone();
                         let at = self.contents.add(found);
-                        if let (Some(key), Some(t), Some(main)) =
-                            (key, &self.thumbs, self.contents.cells[at].main())
-                        {
-                            t.key(main, key);
+                        if let (Some(key), Some(main)) = (key, self.contents.cells[at].main()) {
+                            thumbs.key(main, key);
                         }
                         let cell = &mut self.contents.cells[at];
                         let picked = &self.picked;
@@ -237,20 +237,26 @@ impl ImportWindow {
                         // No preview: the thumbnail says so (a pair's
                         // other file may still give one).
                         if none
-                            && let (Some(t), Some(main)) = (
-                                &self.thumbs,
-                                self.contents
-                                    .cell_of(&path)
-                                    .and_then(|i| self.contents.cells[i].main()),
-                            )
+                            && let Some(main) = self
+                                .contents
+                                .cell_of(&path)
+                                .and_then(|i| self.contents.cells[i].main())
                         {
-                            t.glanced(main, None);
+                            thumbs.glanced(main, None);
                         }
                     }
                     Scanned::Done => *done = true,
                 }
             }
         }
+    }
+
+    /// The thumbnails of the Contents, made the first time.
+    fn thumbnails(&mut self) -> Arc<ImportThumbnails> {
+        let cache = self.thumb_cache.clone();
+        self.thumbs
+            .get_or_insert_with(|| Arc::new(ImportThumbnails::new(cache)))
+            .clone()
     }
 
     pub(super) fn is_card(&self, path: &Path) -> bool {
@@ -1344,10 +1350,7 @@ impl ImportWindow {
     /// scans found since (entries, marks, previews), on the first source
     /// ticked, its selection the photos ticked.
     fn sync_browser(&mut self, ctx: &Egui, words: &GridWords) {
-        let thumbs = self
-            .thumbs
-            .get_or_insert_with(|| Arc::new(ImportThumbnails::new(self.thumb_cache.clone())))
-            .clone();
+        let thumbs = self.thumbnails();
         // The previews read go to the thumbnails, a few each frame.
         let mut made = 0;
         for cell in &mut self.contents.cells {
