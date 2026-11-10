@@ -115,7 +115,7 @@ pub const IMPLICIT_GROUP: &str = "Implicit, by value type";
 /// The purpose group of a business control on the shelf.
 fn group_of(control: &Control) -> &'static str {
     match control.id.as_str() {
-        helios_controls::catalogue::EXPOSURE => "Tone",
+        helios_controls::catalogue::EXPOSURE | helios_controls::catalogue::BLACK_LEVEL => "Tone",
         _ => "Other purposes",
     }
 }
@@ -1819,7 +1819,9 @@ mod tests {
         let b = Bench::default();
         let groups = b.shelf.groups("");
         assert_eq!(groups[0].0, "Tone");
-        assert_eq!(groups[0].1[0].name, "exposure");
+        let tone: Vec<&str> = groups[0].1.iter().map(|e| e.name.as_str()).collect();
+        assert!(tone.contains(&"exposure"), "{tone:?}");
+        assert!(tone.contains(&"black-level"), "{tone:?}");
         let implicit = &groups.last().unwrap().1;
         let names: Vec<&str> = implicit.iter().map(|e| e.name.as_str()).collect();
         assert_eq!(
