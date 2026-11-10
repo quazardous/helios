@@ -4,6 +4,6 @@ reach: from the bench's top left to each control's centre (AccessKit bounds)
 
 slider/full: steps 4 (exposure 2: drag 14 pt landed 0.17, or 53 key nudges; feather 2: drag 71 pt landed 0, or 40 key nudges); reach 374 pt [240pt/20pt D/W 12.0 ID 3.70; 134pt/20pt D/W 6.7 ID 2.95]; exposure 478x20 pt, feather 238x20 pt
 slider/compact: steps 4 (exposure 2: drag 3 pt landed 0.17, or 53 key nudges; feather 2: drag 35 pt landed 0, or 40 key nudges); reach 121 pt [61pt/20pt D/W 3.1 ID 2.02; 60pt/20pt D/W 3.0 ID 2.00]; exposure 118x20 pt, feather 118x20 pt
-slider/simplified: steps 2 (exposure 1: drag 140 pt landed 0.70, or 0 key nudges; feather 1: drag 2000 pt landed 40, or 0 key nudges); reach 102 pt [42pt/24pt D/W 1.8 ID 1.46; 60pt/24pt D/W 2.5 ID 1.81]; exposure 78x24 pt, feather 78x24 pt
+slider/simplified: steps 2 (exposure 1: drag 140 pt landed 0.70, or 0 key nudges; feather 1: drag 20 pt landed 40, or 0 key nudges); reach 102 pt [42pt/24pt D/W 1.8 ID 1.46; 60pt/24pt D/W 2.5 ID 1.81]; exposure 78x24 pt, feather 78x24 pt
 scrub/full: steps 3 (exposure 1: drag 140 pt landed 0.70, or 0 key nudges; feather 2: drag 71 pt landed 0, or 40 key nudges); reach 146 pt [61pt/24pt D/W 2.6 ID 1.83; 84pt/20pt D/W 4.2 ID 2.38]; exposure 118x24 pt, feather 238x20 pt
-scrub/simplified: steps 2 (exposure 1: drag 140 pt landed 0.70, or 0 key nudges; feather 1: drag 2000 pt landed 40, or 0 key nudges); reach 102 pt [42pt/24pt D/W 1.8 ID 1.46; 60pt/24pt D/W 2.5 ID 1.81]; exposure 78x24 pt, feather 78x24 pt
+scrub/simplified: steps 2 (exposure 1: drag 140 pt landed 0.70, or 0 key nudges; feather 1: drag 20 pt landed 40, or 0 key nudges); reach 102 pt [42pt/24pt D/W 1.8 ID 1.46; 60pt/24pt D/W 2.5 ID 1.81]; exposure 78x24 pt, feather 78x24 pt
