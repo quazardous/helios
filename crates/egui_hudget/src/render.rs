@@ -178,7 +178,16 @@ pub fn scrub(
     let (fine, free) = ui.input(|i| (i.modifiers.command, i.modifiers.alt));
     let start_id = id.with("scrub-start");
     if response.drag_started() {
-        ui.data_mut(|d| d.insert_temp(start_id, (*value, 0.0f64)));
+        // The travel before the drag threshold counts too (this frame's
+        // delta is added below), or a scrub lands short.
+        let before = ui.input(|i| {
+            i.pointer
+                .press_origin()
+                .zip(i.pointer.interact_pos())
+                .map_or(0.0, |(o, p)| p.x - o.x)
+        }) - response.drag_delta().x;
+        let scale = if fine { control.feel.fine } else { 1.0 };
+        ui.data_mut(|d| d.insert_temp(start_id, (*value, f64::from(before) * scale)));
     }
     if response.dragged()
         && let Some((start, acc)) = ui.data(|d| d.get_temp::<(f64, f64)>(start_id))
