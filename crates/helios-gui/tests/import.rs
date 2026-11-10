@@ -273,7 +273,7 @@ fn the_import_window_lists_a_card_first_ticks_it_and_imports_it() {
 fn the_import_grid_shows_a_card_by_day_greys_what_the_library_holds_and_pairs_raw_and_jpeg() {
     let dir = temp("grid");
     let (_, known) = fake_card(&dir);
-    let h = card_window(&dir, Some(known));
+    let mut h = card_window(&dir, Some(known));
     let cells = h.state().import_cells();
     assert_eq!(cells.len(), 3, "{cells:?}");
     let day = |d: u32| chrono::NaiveDate::from_ymd_opt(2026, 11, d);
@@ -286,8 +286,16 @@ fn the_import_grid_shows_a_card_by_day_greys_what_the_library_holds_and_pairs_ra
     // Each day with its count.
     assert_eq!(cell("IMG_0001.JPG").1, day(2));
     assert_eq!(cell("IMG_0003.CR2 + IMG_0003.JPG").1, day(3));
-    let _ = h.get_by_label("2026-11-02 · 2");
-    let _ = h.get_by_label("2026-11-03 · 1");
+    // The agenda of the file browser groups them by day.
+    assert!(
+        h.state_mut()
+            .import_browser_mut()
+            .unwrap()
+            .set_mode("agenda")
+    );
+    h.run_steps(3);
+    let _ = h.get_by_label("2026-11-02");
+    let _ = h.get_by_label("2026-11-03");
     // The one the Library holds is greyed, and left out.
     assert!(cell("IMG_0002.JPG").2);
     assert!(!cell("IMG_0001.JPG").2);
@@ -307,8 +315,9 @@ fn import_passes_exactly_the_photos_ticked() {
     let dir = temp("ticked");
     let (dcim, known) = fake_card(&dir);
     let mut h = card_window(&dir, Some(known));
-    // A click unticks a photo.
-    h.get_by_label("IMG_0001.JPG").click();
+    // Ctrl and a click take a photo out of the selection.
+    h.get_by_label("IMG_0001.JPG")
+        .click_modifiers(Modifiers::COMMAND);
     h.run_steps(3);
     assert_eq!(h.state().import_counts().selected, 1);
     h.get_by_label("Import 1").click();
@@ -1165,5 +1174,242 @@ fn without_vault_a_folder_imports_into_the_default_library() {
     // The next launch finds them in the same library.
     let again = Vault::new(helios_gui::platform::open_library(&file).unwrap());
     assert_eq!(again.images().unwrap().len(), 2);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The photos the import window's file browser lists, by name.
+fn listed(h: &Harness<'static, Shell>) -> Vec<String> {
+    h.state()
+        .import_browser()
+        .map(|b| b.entries().iter().map(|e| e.name.clone()).collect())
+        .unwrap_or_default()
+}
+
+/// The names of the photos selected in the import window's browser.
+fn selected(h: &Harness<'static, Shell>) -> Vec<String> {
+    let b = h.state().import_browser().unwrap();
+    b.entries()
+        .iter()
+        .filter(|e| b.selection().contains(&e.path))
+        .map(|e| e.name.clone())
+        .collect()
+}
+
+#[test]
+fn the_import_contents_are_a_file_browser_that_lists_selects_and_imports() {
+    let dir = temp("browser");
+    let (dcim, known) = fake_card(&dir);
+    let mut h = card_window(&dir, Some(known));
+    // A pair is one entry, by its raw; every photo selected, as ticked.
+    assert_eq!(
+        listed(&h),
+        [
+            "IMG_0001.JPG",
+            "IMG_0002.JPG",
+            "IMG_0003.CR2 + IMG_0003.JPG"
+        ]
+    );
+    assert_eq!(selected(&h).len(), 3);
+    let browser = h.state().import_browser().unwrap();
+    assert_eq!(browser.mode(), "thumbnails", "an import opens on them");
+    assert_eq!(
+        browser.modes(),
+        [
+            "details",
+            "thumbnails",
+            "filmstrip",
+            "columns",
+            "carousel",
+            "agenda"
+        ]
+    );
+    // A click selects that photo alone: one to import.
+    h.get_by_label("IMG_0001.JPG").click();
+    h.run_steps(3);
+    assert_eq!(selected(&h), ["IMG_0001.JPG"]);
+    assert_eq!(h.state().import_counts().selected, 1);
+    // Ctrl+A selects them all again; the one the Library holds stays out
+    // of the import while New only is on.
+    h.key_press_modifiers(Modifiers::COMMAND, Key::A);
+    h.run_steps(3);
+    assert_eq!(selected(&h).len(), 3);
+    assert_eq!(h.state().import_counts().selected, 2);
+    // Select: none, then the focused photo's day.
+    h.get_by_label("none").click();
+    h.run_steps(3);
+    assert!(selected(&h).is_empty());
+    h.get_by_label("IMG_0003.CR2 + IMG_0003.JPG · RAW+JPG")
+        .click();
+    h.run_steps(3);
+    h.get_by_label("day").click();
+    h.run_steps(3);
+    assert_eq!(selected(&h), ["IMG_0003.CR2 + IMG_0003.JPG"]);
+    h.get_by_label("Import 1").click();
+    h.run_steps(3);
+    assert_eq!(
+        h.state_mut().take_imports(),
+        [json!({
+            "paths": [dcim.join("IMG_0003.CR2"), dcim.join("IMG_0003.JPG")],
+            "copy": true,
+            "layout": "day",
+            "rename": "{stem}",
+            "duplicates": "skip"
+        })]
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn every_mode_of_the_import_browser_shows_the_photos_and_the_mode_is_kept_for_the_window() {
+    let dir = temp("modes");
+    let (_, known) = fake_card(&dir);
+    let mut h = card_window(&dir, Some(known));
+    // The keyboard goes to the entries with a click; Ctrl and a digit
+    // switch modes, in the switcher's order.
+    h.get_by_label("IMG_0001.JPG").click();
+    h.run_steps(3);
+    for (n, mode) in [
+        (Key::Num1, "details"),
+        (Key::Num2, "thumbnails"),
+        (Key::Num3, "filmstrip"),
+        (Key::Num4, "columns"),
+        (Key::Num5, "carousel"),
+        (Key::Num6, "agenda"),
+    ] {
+        h.key_press_modifiers(Modifiers::COMMAND, n);
+        h.run_steps(3);
+        assert_eq!(h.state().import_browser().unwrap().mode(), mode);
+        // The focused photo is there, said with its name, in every mode.
+        assert!(
+            h.query_all_by_label_contains("IMG_0001.JPG").count() > 0,
+            "{mode}"
+        );
+        // The selection holds across modes.
+        assert_eq!(selected(&h), ["IMG_0001.JPG"], "{mode}");
+    }
+    // The last mode is kept for the import window.
+    assert_eq!(
+        egui_pop::api::files::view_for(h.state().app().handle(), "helios.import").as_deref(),
+        Some("agenda")
+    );
+    h.get_by_label("Cancel").click();
+    h.run_steps(3);
+    h.key_press_modifiers(Modifiers::CTRL | Modifiers::SHIFT, Key::I);
+    h.run_steps(3);
+    assert_eq!(h.state().import_browser().unwrap().mode(), "agenda");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_folder_dropped_on_the_import_browser_opens_as_its_source() {
+    let dir = temp("drop-browser");
+    let (_, known) = fake_card(&dir);
+    let other = dir.join("Trip");
+    std::fs::create_dir_all(&other).unwrap();
+    put(&other.join("TRIP_1.JPG"), Ok(&jpeg("c")), 4);
+    let mut h = card_window(&dir, Some(known));
+    let card = dir.join("EOS_DIGITAL");
+    assert_eq!(h.state().import_ticked(), std::slice::from_ref(&card));
+    // Dragged over the photos: the browser says what a drop does.
+    let over = h.get_by_label("IMG_0001.JPG").rect().center();
+    h.hover_at(over);
+    h.input_mut().hovered_files.push(egui::HoveredFile {
+        path: Some(other.clone()),
+        ..Default::default()
+    });
+    h.run_steps(3);
+    let hover = h.state().import_browser().unwrap().drop_hover().cloned();
+    assert!(hover.as_ref().is_some_and(|(_, taken)| *taken), "{hover:?}");
+    assert!(h.query_by_label_contains("Drop into").is_some());
+    // Dropped: the folder is the import's source.
+    h.input_mut().hovered_files.clear();
+    h.input_mut()
+        .dropped_files
+        .push(Arc::new(Dropped(other.clone())));
+    h.run_steps(3);
+    assert_eq!(h.state().import_ticked(), std::slice::from_ref(&other));
+    read_through(&mut h);
+    assert_eq!(listed(&h), ["TRIP_1.JPG"]);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn the_import_browser_asks_helios_thumbnails_for_the_photos_in_view() {
+    let dir = temp("thumbs");
+    let (dcim, known) = fake_card(&dir);
+    let mut h = card_window(&dir, Some(known));
+    // The scan's previews (the JPEGs' own) answer the browser's requests.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !h.state().import_thumbnail_ready(&dcim.join("IMG_0001.JPG")) {
+        assert!(Instant::now() < deadline, "no thumbnail in 10 s");
+        std::thread::sleep(Duration::from_millis(20));
+        h.step();
+    }
+    let mut on_screen = h.state().import_thumbnails_on_screen();
+    on_screen.sort();
+    assert_eq!(
+        on_screen,
+        [
+            dcim.join("IMG_0001.JPG"),
+            dcim.join("IMG_0002.JPG"),
+            dcim.join("IMG_0003.CR2")
+        ],
+        "every photo in view is asked, as visible"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn an_offline_folder_lists_what_the_image_map_recorded_with_cached_thumbnails() {
+    let dir = temp("offline");
+    // A photo of the Library, seen on a disk now unplugged: its folder is
+    // gone, the image map and the thumbnail cache remember it.
+    let library = dir.join("library");
+    std::fs::create_dir_all(&library).unwrap();
+    std::fs::copy(jpeg("a"), library.join("a.jpg")).unwrap();
+    let vault = Arc::new(Vault::new(MemoryStore::default()));
+    let id = vault.import_file(&library.join("a.jpg"), 0).unwrap();
+    let gone = dir.join("Unplugged/DCIM");
+    let mut imported = helios_vault::Sighting::seen(gone.join("A.JPG"), 1_000, 50, 60, "import");
+    imported.image = Some(id);
+    let other = helios_vault::Sighting::seen(gone.join("B.JPG"), 2_000, 50, 60, "import");
+    vault.record_listed(&[imported, other]).unwrap();
+    let cache = Arc::new(helios_thumbs::ThumbCache::open(&dir.join("thumbs"), 1 << 30).unwrap());
+    let thumb = helios_thumbs::Rgb8 {
+        width: 64,
+        height: 48,
+        pixels: vec![120; 64 * 48 * 3],
+    };
+    cache
+        .put(
+            &helios_thumbs::Key::preview(id.hex()),
+            helios_thumbs::SMALL,
+            &thumb,
+        )
+        .unwrap();
+    let mut shell = Shell::new(helios_panels(), None);
+    shell.set_import_recorded(helios_gui::import_scan::recorded_of(vault));
+    shell.set_import_thumbnail_cache(cache);
+    let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+    h.run();
+    run(
+        &mut h,
+        "library.importWindow",
+        json!({ "source": gone.display().to_string() }),
+    );
+    read_through(&mut h);
+    assert_eq!(listed(&h), ["A.JPG", "B.JPG"]);
+    // Both offline, the one in the Library said so; neither imported.
+    let _ = h.get_by_label("A.JPG · offline · in your Library");
+    let _ = h.get_by_label("B.JPG · offline");
+    assert_eq!(h.state().import_counts().selected, 0);
+    // The Library's photo shows its cached thumbnail.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !h.state().import_thumbnail_ready(&gone.join("A.JPG")) {
+        assert!(Instant::now() < deadline, "no cached thumbnail in 10 s");
+        std::thread::sleep(Duration::from_millis(20));
+        h.step();
+    }
+    assert!(!h.state().import_thumbnail_ready(&gone.join("B.JPG")));
     let _ = std::fs::remove_dir_all(&dir);
 }

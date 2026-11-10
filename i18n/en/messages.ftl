@@ -497,8 +497,6 @@ gui-import-window-new-only = New only
 
 gui-import-window-no-cards = No card inserted
 
-gui-import-window-no-date = No date
-
 gui-import-window-no-favourites = None yet
 
 gui-import-window-no-sample = Tick a photo to see an example
@@ -506,6 +504,8 @@ gui-import-window-no-sample = Tick a photo to see an example
 gui-import-window-none-ticked = Tick the photos to import
 
 gui-import-window-nothing = Tick a card or a folder to import
+
+gui-import-window-offline = offline
 
 gui-import-window-open = Import photos…
 

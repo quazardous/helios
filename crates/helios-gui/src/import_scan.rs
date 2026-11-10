@@ -13,6 +13,9 @@
 //!   confirms it with the full hash.
 //! - [`Contents`]: the cells of the grid (a RAW+JPEG pair is one), their
 //!   days, ticks and counts, and the files a selection imports.
+//! - [`Recorded`]: what the image map recorded under a folder no volume
+//!   holds now (a card or a disk offline), listed by [`Scan::recorded`]
+//!   as the files were last seen, each said imported or not.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -146,6 +149,85 @@ pub struct Found {
     pub modified: Option<i64>,
     /// Probably in the Library already ([`Prefilter`]).
     pub known: bool,
+    /// Listed from the image map's record, its volume offline: shown,
+    /// never imported.
+    pub offline: bool,
+    /// Its thumbnail's entry in the library's thumbnail cache, when the
+    /// image map links it to one.
+    pub key: Option<helios_thumbs::Key>,
+}
+
+/// A file the image map recorded under a folder, as last seen.
+#[derive(Clone, Debug)]
+pub struct Seen {
+    pub path: PathBuf,
+    pub bytes: u64,
+    /// Its modification time when listed, in seconds since 1970.
+    pub modified: Option<i64>,
+    /// Its capture time (the camera's local time), once glanced.
+    pub taken: Option<NaiveDateTime>,
+    pub camera: Option<String>,
+    /// Its content is an image of the Library.
+    pub imported: bool,
+    pub key: Option<helios_thumbs::Key>,
+}
+
+/// What the image map recorded under a folder (`docs/design/image-map.md`):
+/// Helios's record of every image it saw on every known volume, read when
+/// the folder's volume is offline. Called on the scan's thread.
+pub type Recorded = Arc<dyn Fn(&Path) -> Vec<Seen> + Send + Sync>;
+
+/// The record of a vault: the sightings under `folder`, on the known
+/// volume last mounted above it, else on no volume.
+pub fn recorded_of<S: helios_vault::Store + 'static>(
+    vault: Arc<helios_vault::Vault<S>>,
+) -> Recorded {
+    Arc::new(move |folder: &Path| {
+        let volumes = helios_storage::registry::known(&vault).unwrap_or_default();
+        let on = volumes
+            .iter()
+            .filter_map(|v| {
+                let mount = v.last_seen.as_ref()?.mount.as_ref()?;
+                let rel = folder.strip_prefix(mount).ok()?;
+                Some((v, mount.clone(), rel.to_path_buf()))
+            })
+            .max_by_key(|(_, mount, _)| mount.components().count());
+        let (volume, mount, rel) = match on {
+            Some((v, mount, rel)) => (Some(v.id.clone()), Some(mount), rel),
+            None => (None, None, folder.to_path_buf()),
+        };
+        vault
+            .sightings_under(volume.as_ref(), &rel)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|s| {
+                s.path
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .is_some_and(|e| {
+                        helios_vault::IMAGE_EXTENSIONS.contains(&e.to_ascii_lowercase().as_str())
+                    })
+            })
+            .map(|s| {
+                let path = match (&mount, &s.rel_path) {
+                    (Some(m), Some(r)) => m.join(r),
+                    _ => s.path.clone(),
+                };
+                Seen {
+                    key: helios_library::thumb_check::key_of(&s),
+                    imported: s.image.is_some(),
+                    bytes: s.size,
+                    modified: i64::try_from(s.modified).ok(),
+                    taken: s
+                        .taken
+                        .and_then(|t| chrono::DateTime::from_timestamp(t, 0))
+                        .map(|t| t.naive_utc()),
+                    camera: s.camera,
+                    path,
+                }
+            })
+            .collect()
+    })
 }
 
 /// What a scan sends.
@@ -214,6 +296,8 @@ impl Scan {
                         bytes,
                         modified,
                         known,
+                        offline: false,
+                        key: None,
                     };
                     if sender.send(Scanned::Found(found)).is_err() {
                         return;
@@ -257,6 +341,48 @@ impl Scan {
                 }
                 if let Some(r) = recorder.take() {
                     r.finish();
+                }
+                let _ = sender.send(Scanned::Done);
+                wake();
+            });
+        if let Err(e) = spawned {
+            log::warn!("import scan: no thread: {e}");
+        }
+        Self { receiver, stop }
+    }
+
+    /// Lists what the image map recorded under `source`, a folder no
+    /// volume holds now: each file as last seen, offline, said imported
+    /// when its content is a Library image; nothing is read from it.
+    pub fn recorded(source: PathBuf, recorded: Recorded, wake: impl Fn() + Send + 'static) -> Self {
+        let (sender, receiver) = channel();
+        let stop = Arc::new(AtomicBool::new(false));
+        let stopped = stop.clone();
+        let spawned = std::thread::Builder::new()
+            .name("helios-import-recorded".into())
+            .spawn(move || {
+                for seen in recorded(&source) {
+                    if stopped.load(Ordering::Relaxed) {
+                        return;
+                    }
+                    let found = Found {
+                        source: source.clone(),
+                        path: seen.path.clone(),
+                        bytes: seen.bytes,
+                        modified: seen.modified,
+                        known: seen.imported,
+                        offline: true,
+                        key: seen.key,
+                    };
+                    let glance = Scanned::Glance {
+                        path: seen.path,
+                        taken: seen.taken,
+                        camera: seen.camera,
+                        thumb: None,
+                    };
+                    if sender.send(Scanned::Found(found)).is_err() || sender.send(glance).is_err() {
+                        return;
+                    }
                 }
                 let _ = sender.send(Scanned::Done);
                 wake();
@@ -316,10 +442,15 @@ pub struct Cell {
     /// The camera's model, when a glance found it.
     pub camera: Option<String>,
     known: [bool; 2],
+    /// Listed from the image map's record: its volume is offline.
+    pub offline: bool,
+    /// Its thumbnail's entry in the library's cache, when known.
+    pub key: Option<helios_thumbs::Key>,
     pub ticked: bool,
-    /// The preview read, until it becomes a texture.
+    /// The preview read, until it goes to the thumbnails.
     pub thumb: Option<Image>,
-    pub texture: Option<egui::TextureHandle>,
+    /// Its preview went to the thumbnails.
+    pub previewed: bool,
 }
 
 impl Cell {
@@ -332,8 +463,13 @@ impl Cell {
         (self.raw.is_none() || self.known[0]) && (self.picture.is_none() || self.known[1])
     }
 
+    /// The file it is shown by: the raw, else the picture.
+    pub fn main(&self) -> Option<&PathBuf> {
+        self.raw.as_ref().or(self.picture.as_ref())
+    }
+
     pub fn name(&self) -> String {
-        let main = self.raw.as_ref().or(self.picture.as_ref());
+        let main = self.main();
         let name = |p: &PathBuf| {
             p.file_name()
                 .map(|n| n.to_string_lossy().into_owned())
@@ -391,6 +527,8 @@ pub struct Contents {
     pub new_only: bool,
     /// The cells shown, by day, in time order; rebuilt when stale.
     order: Option<Vec<(Option<NaiveDate>, Vec<usize>)>>,
+    /// Bumped whenever a cell, its facts or the cells shown change.
+    revision: u64,
 }
 
 /// The counts the line above the grid says.
@@ -466,8 +604,20 @@ impl Contents {
             (Some(a), Some(b)) => Some(a.min(b)),
             (a, b) => a.or(b),
         };
+        if found.offline {
+            cell.offline = true;
+        }
+        if found.key.is_some() {
+            cell.key = found.key;
+        }
         self.by_path.insert(found.path, at);
         self.order = None;
+        self.revision += 1;
+    }
+
+    /// Changes whenever the cells, their facts or the type filter do.
+    pub fn revision(&self) -> u64 {
+        self.revision
     }
 
     /// A file's glance: its time, its camera and, the raw's first, its
@@ -482,6 +632,7 @@ impl Contents {
         let Some(&at) = self.by_path.get(path) else {
             return;
         };
+        self.revision += 1;
         let cell = &mut self.cells[at];
         let raw = is_raw(path);
         if camera.is_some() && (raw || cell.camera.is_none()) {
@@ -491,10 +642,15 @@ impl Contents {
             cell.taken = taken;
             self.order = None;
         }
-        if thumb.is_some() && (cell.thumb.is_none() && cell.texture.is_none() || raw) {
+        if thumb.is_some() && (cell.thumb.is_none() && !cell.previewed || raw) {
             cell.thumb = thumb;
-            cell.texture = None;
+            cell.previewed = false;
         }
+    }
+
+    /// The cell holding the file at `path`.
+    pub fn cell_of(&self, path: &Path) -> Option<usize> {
+        self.by_path.get(path).copied()
     }
 
     /// Removes the cells of the sources not in `sources`.
@@ -514,19 +670,21 @@ impl Contents {
             self.cells.push(cell);
         }
         self.order = None;
+        self.revision += 1;
     }
 
     pub fn set_types(&mut self, types: Types) {
         if self.types != types {
             self.types = types;
             self.order = None;
+            self.revision += 1;
         }
     }
 
     /// Whether an Import takes the cell `i` when it is ticked.
     pub fn importable(&self, i: usize) -> bool {
         let c = &self.cells[i];
-        c.passes(self.types) && !(self.new_only && c.known())
+        c.passes(self.types) && !c.offline && !(self.new_only && c.known())
     }
 
     /// The cells shown, by day (oldest first), each day in time order.
@@ -656,6 +814,8 @@ mod tests {
             bytes: 10,
             modified: Some(modified),
             known,
+            offline: false,
+            key: None,
         }
     }
 

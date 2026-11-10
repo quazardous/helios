@@ -47,23 +47,33 @@ or folders on Helios (the window opens with them as its source).
   When Helios starts, the window opens on the first card it finds, or
   else on the last source used.
 - **Contents** (middle):
-  - **The grid:**
+  - **The file browser** (egui-pop's `FileBrowser`, 2026-11-10; it was a
+    grid of its own before):
+    - its source (`crate::import_browser::ImportSource`) lists the photos
+      of the sources ticked as the scans find them; a source whose
+      volume is offline lists what the image map recorded there, marked
+      "offline", never imported;
+    - its modes: details, thumbnails (the default), filmstrip, columns,
+      carousel, agenda by capture day, month or year; Ctrl+1 to Ctrl+6;
+      the mode is kept for the window;
     - thumbnails read from embedded previews and EXIF thumbnails as they
-      are found, the first ones within a second;
-    - grouped by capture day, each day with a check box and its count;
-    - "New only" is on, and images already in the Library are greyed
+      are found, else from the library's thumbnail cache (an offline
+      photo), visible first, what scrolled away cancelled;
+    - "New only" is on, and images already in the Library are dimmed
       with "in your Library" (a size and partial-hash prefilter, then
       confirmed by the full hash during the job);
-    - a RAW+JPEG pair is one cell with a "RAW+JPG" mark.
-  - **Above the grid:**
+    - a RAW+JPEG pair is one entry with a "RAW+JPG" badge;
+    - folders or cards dropped on it from the system open as the
+      sources.
+  - **Above the browser:**
     - one line of counts;
     - a type filter (all, raw only, JPEG only);
-    - select all, none or by day.
-  - **Selecting:** a click toggles a cell, Shift extends, and Space
-    toggles the focused cell. Hovering a cell shows its name, time and
-    size.
+    - select all, none or the focused photo's day.
+  - **Selecting:** the browser's selection is what is imported, every
+    photo at first: a click selects one, Ctrl+click adds or removes,
+    Shift extends, Ctrl+A selects all, Space opens a quick look.
   - **Folders:** a folder source lists every image Helios reads
-    (`IMAGE_EXTENSIONS`), subfolders included, shown as day groups.
+    (`IMAGE_EXTENSIONS`), subfolders included.
 - **Choices** (right), top to bottom, each with a live example:
   - **Copy into the Library**, or **Add where they are** (references in
     place). Copy is forced for a card unless the person changes it, with

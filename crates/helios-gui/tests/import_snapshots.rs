@@ -1,5 +1,7 @@
 //! The import window's snapshots, pop-dark at 1x and 2x: empty (no
-//! source), a card ticked with its grid, and a folder added where it is
+//! source), a card ticked with its photos in the file browser's
+//! thumbnails, and a folder added where it is; at 1x, the card's Contents
+//! in the browser's other modes (details, filmstrip, agenda)
 //! (`tests/snapshots/`, thresholds in the workspace's `kittest.toml`).
 //! Regenerate with `UPDATE_SNAPSHOTS=1 cargo test -p helios-gui --test
 //! import_snapshots` (the box's `gui-snapshots` job).
@@ -117,6 +119,16 @@ fn the_import_window_snapshots() {
         assert_eq!(h.state().import_counts().selected, 3);
         assert!(h.state().import_copies());
         results.add(h.try_snapshot(name("card", scale)));
+        // The Contents in the browser's other modes.
+        if scale == 1.0 {
+            for mode in ["details", "filmstrip", "agenda"] {
+                assert!(h.state_mut().import_browser_mut().unwrap().set_mode(mode));
+                for _ in 0..4 {
+                    h.run();
+                }
+                results.add(h.try_snapshot(name(&format!("card-{mode}"), scale)));
+            }
+        }
         // A folder: added where it is.
         let mut h = window(Vec::new(), json!({ "paths": [folder] }), scale);
         assert!(!h.state().import_copies());

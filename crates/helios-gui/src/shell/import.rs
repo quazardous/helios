@@ -584,6 +584,10 @@ impl Shell {
     /// with them as its sources; while they are dragged over it, it says
     /// so.
     pub(super) fn take_dropped_files(&mut self, ctx: &Egui) {
+        // The import window open takes them itself, over its contents.
+        if self.import_window_open() {
+            return;
+        }
         let (hovered, dropped): (bool, Vec<PathBuf>) = ctx.input(|i| {
             (
                 !i.raw.hovered_files.is_empty(),

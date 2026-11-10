@@ -1841,7 +1841,13 @@ fn main() -> Result<(), String> {
             }
             // What the vault holds, for its "in your Library" prefilter.
             if let Some(vault) = known_vault.clone() {
-                shell.set_import_known(helios_gui::import_scan::known_of(vault));
+                shell.set_import_known(helios_gui::import_scan::known_of(vault.clone()));
+                // An offline folder's photos, as the image map recorded
+                // them, with the thumbnails the library's cache has.
+                shell.set_import_recorded(helios_gui::import_scan::recorded_of(vault));
+            }
+            if let Some(cache) = THUMB_CACHE.get().cloned().flatten() {
+                shell.set_import_thumbnail_cache(cache);
             }
             // The image map: what the import window's sources list is
             // recorded, Helios's own folders never.

@@ -22,6 +22,7 @@ pub mod history;
 pub mod host;
 pub mod i18n;
 pub mod image_map;
+pub mod import_browser;
 pub mod import_scan;
 pub mod importers;
 pub mod jobs;

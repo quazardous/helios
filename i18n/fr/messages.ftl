@@ -969,8 +969,6 @@ gui-import-window-new-only = Nouvelles seulement
 
 gui-import-window-no-cards = Aucune carte insérée
 
-gui-import-window-no-date = Sans date
-
 gui-import-window-no-favourites = Aucun pour l’instant
 
 gui-import-window-no-sample = Cochez une photo pour voir un exemple
@@ -978,6 +976,8 @@ gui-import-window-no-sample = Cochez une photo pour voir un exemple
 gui-import-window-none-ticked = Cochez les photos à importer
 
 gui-import-window-nothing = Cochez une carte ou un dossier à importer
+
+gui-import-window-offline = hors ligne
 
 gui-import-window-open = Importer des photos…
 

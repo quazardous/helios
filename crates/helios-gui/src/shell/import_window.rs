@@ -9,11 +9,15 @@
 //!   ticked. As it opens, the window ticks the first card, else the last
 //!   source used.
 //! - **Contents**, the middle column: what the sources ticked hold, read
-//!   off the interface thread ([`crate::import_scan`]) and shown as it
-//!   comes, by capture day; each photo ticked by default, those probably
-//!   in the Library already greyed while "New only" is on, a RAW+JPEG
-//!   pair one cell. Import takes the files ticked (`library.importFiles`
-//!   with `paths` and the choices).
+//!   off the interface thread ([`crate::import_scan`]), an offline
+//!   volume's as the image map recorded it, shown as it comes in egui-pop's
+//!   file browser ([`crate::import_browser`]): details, thumbnails,
+//!   filmstrip, columns, carousel or agenda (by capture day), the mode
+//!   kept for the window. Each photo is selected by default; those
+//!   probably in the Library already are dimmed and marked while "New
+//!   only" is on, a RAW+JPEG pair is one entry. Import takes the files
+//!   selected (`library.importFiles` with `paths` and the choices).
+//!   Folders or cards dropped on it from the system open as its sources.
 //! - **Choices**, the right column ([`super::import_choices`]): copy or
 //!   add where they are, where copies go and how they are named, with
 //!   examples from the first photo ticked; duplicates; darktable edits.
@@ -47,7 +51,11 @@ use serde_json::{Value, json};
 
 use super::Shell;
 use super::import_choices::{self, Asked, ChoiceWords, Choices};
-use crate::import_scan::{Contents, Counts, Known, MapRecorder, Scan, Scanned, Types};
+use crate::import_browser::{ImportSource, ImportThumbnails, NOWHERE};
+use crate::import_scan::{Contents, Counts, Known, MapRecorder, Recorded, Scan, Scanned, Types};
+use egui_pop::api::files::browser::{
+    DropOrigin, EntryKind, EntryMarks, FileBrowser, SourceEntry, ViewModes,
+};
 use helios_storage::{Card, Volumes, Watch};
 
 /// The command that opens the window (`source`: the card or folder to
@@ -108,9 +116,26 @@ pub(crate) struct ImportWindow {
     pub(super) copy: Option<bool>,
     /// The custom rename pattern is being edited.
     pub(super) custom: bool,
-    /// The cell a Shift+click extends from, and the one Space toggles.
-    anchor: Option<usize>,
-    focus: Option<usize>,
+    /// The Contents column: egui-pop's file browser over the photos.
+    browser: Option<FileBrowser>,
+    source: ImportSource,
+    thumbs: Option<Arc<ImportThumbnails>>,
+    /// The library's thumbnail cache, for the photos it has (an offline
+    /// volume's).
+    thumb_cache: Option<Arc<helios_thumbs::ThumbCache>>,
+    /// The image map's record, for a source whose volume is offline.
+    recorded: Option<Recorded>,
+    /// Each photo's marks (in your Library, RAW+JPG, offline), by path.
+    marks: Arc<Mutex<std::collections::HashMap<PathBuf, EntryMarks>>>,
+    /// What was last published to the browser: the contents' revision,
+    /// New only, the place, and whether every source is read through.
+    published: Option<(u64, bool, PathBuf, bool)>,
+    /// Bumped when the ticks change outside the browser (all, none, a
+    /// day).
+    tick_revision: u64,
+    /// The contents' revision, the entries listed and the ticks' revision
+    /// the browser's selection was last set from.
+    selection_synced: Option<(u64, usize, u64)>,
     /// The files dropped or pasted: in their folder, only they are ticked.
     picked: Vec<PathBuf>,
     /// The presets, by name, and where they are kept.
@@ -137,8 +162,10 @@ impl ImportWindow {
     fn clear_contents(&mut self) {
         self.scans.clear();
         self.contents = Contents::new();
-        self.anchor = None;
-        self.focus = None;
+        self.published = None;
+        if let Some(t) = &self.thumbs {
+            t.clear();
+        }
     }
 
     /// Reads the sources ticked (each on a thread of its own), forgets
@@ -149,8 +176,6 @@ impl ImportWindow {
         self.scans.retain(|(p, _, _)| ticked.contains(p));
         if self.scans.len() != before {
             self.contents.keep_sources(&ticked);
-            self.anchor = None;
-            self.focus = None;
         }
         for path in &ticked {
             if self.scans.iter().any(|(p, _, _)| p == path) {
@@ -163,18 +188,31 @@ impl ImportWindow {
                 "import"
             };
             let map = self.map.clone().map(|m| (m, seen_by));
-            let scan = Scan::start(path.clone(), self.known.clone(), map, move || {
+            let wake = move || {
                 if let Some(ctx) = ctx.lock().unwrap_or_else(PoisonError::into_inner).as_ref() {
                     ctx.request_repaint();
                 }
-            });
+            };
+            // A folder no volume holds now: as the image map recorded it.
+            let scan = match &self.recorded {
+                Some(recorded) if !path.exists() => {
+                    Scan::recorded(path.clone(), recorded.clone(), wake)
+                }
+                _ => Scan::start(path.clone(), self.known.clone(), map, wake),
+            };
             self.scans.push((path.clone(), scan, false));
         }
         for (_, scan, done) in &mut self.scans {
             for sent in scan.take() {
                 match sent {
                     Scanned::Found(found) => {
+                        let key = found.key.clone();
                         let at = self.contents.add(found);
+                        if let (Some(key), Some(t), Some(main)) =
+                            (key, &self.thumbs, self.contents.cells[at].main())
+                        {
+                            t.key(main, key);
+                        }
                         let cell = &mut self.contents.cells[at];
                         let picked = &self.picked;
                         if picked
@@ -194,7 +232,20 @@ impl ImportWindow {
                         camera,
                         thumb,
                     } => {
+                        let none = thumb.is_none();
                         self.contents.glance(&path, taken, camera, thumb);
+                        // No preview: the thumbnail says so (a pair's
+                        // other file may still give one).
+                        if none
+                            && let (Some(t), Some(main)) = (
+                                &self.thumbs,
+                                self.contents
+                                    .cell_of(&path)
+                                    .and_then(|i| self.contents.cells[i].main()),
+                            )
+                        {
+                            t.glanced(main, None);
+                        }
                     }
                     Scanned::Done => *done = true,
                 }
@@ -247,6 +298,8 @@ enum Event {
     Forget(PathBuf),
     /// "Storage…": the Storage page, to set up a backup.
     Storage,
+    /// Folders or cards dropped on the window: its new sources.
+    Dropped(Vec<PathBuf>),
 }
 
 /// The Contents column's words.
@@ -263,9 +316,9 @@ struct GridWords {
     all: String,
     none: String,
     day: String,
-    no_date: String,
     in_library: String,
     pair: String,
+    offline: String,
 }
 
 /// The window's words, in the shell's language.
@@ -372,6 +425,50 @@ impl Shell {
     /// source read, off the interface thread.
     pub fn set_import_map(&mut self, map: MapRecorder) {
         self.import_window.map = Some(map);
+    }
+
+    /// The image map's record of what Helios saw on every volume: the
+    /// import window lists an offline folder's photos from it.
+    pub fn set_import_recorded(&mut self, recorded: Recorded) {
+        self.import_window.recorded = Some(recorded);
+    }
+
+    /// The library's thumbnail cache: the import window shows the photos
+    /// it has thumbnails of (an offline volume's) from it.
+    pub fn set_import_thumbnail_cache(&mut self, cache: Arc<helios_thumbs::ThumbCache>) {
+        self.import_window.thumb_cache = Some(cache);
+        self.import_window.thumbs = None;
+        self.import_window.browser = None;
+    }
+
+    /// The import window's file browser, once drawn: its mode, entries,
+    /// selection and focus.
+    pub fn import_browser(&self) -> Option<&FileBrowser> {
+        self.import_window.browser.as_ref()
+    }
+
+    /// Whether the import window's thumbnail of the photo at `path` (a
+    /// pair's raw) is made.
+    pub fn import_thumbnail_ready(&self, path: &Path) -> bool {
+        self.import_window
+            .thumbs
+            .as_ref()
+            .is_some_and(|t| t.ready(path))
+    }
+
+    /// The photos the import window's browser last asked thumbnails of as
+    /// visible.
+    pub fn import_thumbnails_on_screen(&self) -> Vec<PathBuf> {
+        self.import_window
+            .thumbs
+            .as_ref()
+            .map(|t| t.on_screen())
+            .unwrap_or_default()
+    }
+
+    /// The import window's file browser, to drive it.
+    pub fn import_browser_mut(&mut self) -> Option<&mut FileBrowser> {
+        self.import_window.browser.as_mut()
     }
 
     /// The image map's job: the import window, the Library grid and
@@ -684,12 +781,12 @@ impl Shell {
             all: t(Message::new("gui-import-window-select-all", "all")),
             none: t(Message::new("gui-import-window-select-none", "none")),
             day: t(Message::new("gui-import-window-select-day", "day")),
-            no_date: t(Message::new("gui-import-window-no-date", "No date")),
             in_library: t(Message::new(
                 "gui-import-window-in-library",
                 "in your Library",
             )),
             pair: t(Message::new("gui-import-window-pair", "RAW+JPG")),
+            offline: t(Message::new("gui-import-window-offline", "offline")),
         }
     }
 
@@ -698,6 +795,7 @@ impl Shell {
         let words = self.import_words(sample.as_ref());
         let mut open = true;
         let mut event = None;
+        let app = self.app.handle().clone();
         let w = &mut self.import_window;
         let main = ctx.content_rect().size();
         let max = main - egui::vec2(32.0, 32.0);
@@ -760,7 +858,9 @@ impl Shell {
                     column(ui, middle, &mut |ui| {
                         ui.heading(&words.contents);
                         let reading = w.scans.iter().any(|(_, _, done)| !done);
-                        contents_ui(ui, w, &words.grid, reading);
+                        if let Some(paths) = contents_ui(ui, w, &words.grid, reading, &app) {
+                            event = Some(Event::Dropped(paths));
+                        }
                     });
                     column(ui, right, &mut |ui| {
                         if let Some(Asked::Into) = import_choices::choices_ui(ui, w, &words.choices)
@@ -815,6 +915,20 @@ impl Shell {
         if !open {
             event = Some(Event::Cancel);
         }
+        // Dropped anywhere else on the window: its sources too.
+        if event.is_none() {
+            let dropped: Vec<PathBuf> = ctx.input(|i| {
+                i.raw
+                    .dropped_files
+                    .iter()
+                    .map(|f| f.path().to_path_buf())
+                    .filter(|p| !p.as_os_str().is_empty())
+                    .collect()
+            });
+            if !dropped.is_empty() {
+                event = Some(Event::Dropped(dropped));
+            }
+        }
         match event {
             None => {}
             Some(Event::Cancel) => {
@@ -849,6 +963,7 @@ impl Shell {
                 }
             }
             Some(Event::Import) => self.import_ticked_sources(),
+            Some(Event::Dropped(paths)) => self.open_import_window(&json!({ "paths": paths })),
             Some(Event::Storage) => {
                 if let Err(e) = self.run(super::storage::COMMAND, Value::Null, Origin::User) {
                     self.warn(format!("storage: {e}"));
@@ -1115,12 +1230,15 @@ fn presets_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &Words) -> Option<
     event
 }
 
-/// The side of a cell of the grid, in points.
-const CELL: f32 = 88.0;
-
-/// The Contents column: the count line, the filters and selection, then
-/// the grid by day.
-fn contents_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &GridWords, reading: bool) {
+/// The Contents column: the count line, the filters and the selection,
+/// then the file browser. Gives the paths a drop on it offered.
+fn contents_ui(
+    ui: &mut egui::Ui,
+    w: &mut ImportWindow,
+    words: &GridWords,
+    reading: bool,
+    app: &egui_pop::api::app::AppHandle,
+) -> Option<Vec<PathBuf>> {
     let c = &mut w.contents;
     ui.horizontal(|ui| {
         ui.label(&words.counts);
@@ -1148,12 +1266,19 @@ fn contents_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &GridWords, readi
         ui.label(&words.select);
         if ui.small_button(&words.all).clicked() {
             c.tick_all(true);
+            w.tick_revision += 1;
         }
         if ui.small_button(&words.none).clicked() {
             c.tick_all(false);
+            w.tick_revision += 1;
         }
         // The focused photo's day, alone.
-        let day = w.focus.map(|i| c.cells[i].day());
+        let day = w
+            .browser
+            .as_ref()
+            .and_then(FileBrowser::focus)
+            .and_then(|f| c.cell_of(f))
+            .map(|i| c.cells[i].day());
         if ui
             .add_enabled(day.is_some(), egui::Button::new(&words.day).small())
             .clicked()
@@ -1163,198 +1288,186 @@ fn contents_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &GridWords, readi
             for cell in &mut c.cells {
                 cell.ticked = cell.day() == day || !cell.passes(types);
             }
+            w.tick_revision += 1;
         }
     });
     ui.separator();
-    // The previews read become textures, a few each frame.
-    let mut made = 0;
-    for (i, cell) in c.cells.iter_mut().enumerate() {
-        if made == 48 {
-            ui.ctx().request_repaint();
-            break;
-        }
-        if let Some(thumb) = cell.thumb.take() {
-            cell.texture = Some(ui.ctx().load_texture(
-                format!("helios.import.thumb.{i}"),
-                crate::library::thumbnail(&thumb),
-                egui::TextureOptions::LINEAR,
-            ));
-            made += 1;
-        }
-    }
-    if c.cells.is_empty() && !reading {
+    if w.contents.cells.is_empty() && !reading {
         ui.weak(&words.empty);
-        return;
     }
-    let shown = c.shown();
-    let days = c.days().to_vec();
-    let mut clicked = None;
-    let mut in_view = Vec::new();
-    egui::ScrollArea::vertical()
-        .id_salt("helios.import.grid")
-        .auto_shrink([false, false])
-        .show(ui, |ui| {
-            for (day, cells) in &days {
-                let day_text = day.map_or_else(|| words.no_date.clone(), |d| d.to_string());
-                let mut all = cells.iter().all(|&i| c.cells[i].ticked || !c.importable(i));
-                if ui
-                    .checkbox(&mut all, format!("{day_text} · {}", cells.len()))
-                    .changed()
-                {
-                    for &i in cells {
-                        c.cells[i].ticked = all;
-                    }
-                }
-                ui.horizontal_wrapped(|ui| {
-                    for &i in cells {
-                        if cell_ui(ui, c, i, w.focus == Some(i), words, &mut in_view) {
-                            clicked = Some(i);
-                        }
-                    }
-                });
-            }
-        });
-    if let Some(feed) = &w.map_feed
-        && in_view != w.on_screen
-    {
-        feed.on_screen(in_view.clone());
-        w.on_screen = in_view;
+    w.sync_browser(ui.ctx(), words);
+    let browser = w.browser.as_mut()?;
+    let out = browser.show_in(ui, app, "helios.import");
+    if out.selection_changed {
+        w.take_selection();
     }
-    let shift = ui.input(|i| i.modifiers.shift);
-    if let Some(i) = clicked {
-        // Shift extends the anchor's tick to every cell between.
-        if let Some(anchor) = w.anchor.filter(|_| shift) {
-            let on = c.cells[anchor].ticked;
-            let (a, b) = (
-                shown.iter().position(|&x| x == anchor),
-                shown.iter().position(|&x| x == i),
-            );
-            if let (Some(a), Some(b)) = (a, b) {
-                for &x in &shown[a.min(b)..=a.max(b)] {
-                    c.cells[x].ticked = on;
-                }
-            }
-        } else {
-            c.cells[i].ticked = !c.cells[i].ticked;
-            w.anchor = Some(i);
+    // The image map reads the photos in view first.
+    if let (Some(feed), Some(thumbs)) = (&w.map_feed, &w.thumbs) {
+        let c = &w.contents;
+        let in_view: Vec<PathBuf> = thumbs
+            .on_screen()
+            .iter()
+            .filter_map(|p| c.cell_of(p))
+            .flat_map(|i| c.cells[i].raw.iter().chain(&c.cells[i].picture).cloned())
+            .collect();
+        if in_view != w.on_screen {
+            feed.on_screen(in_view.clone());
+            w.on_screen = in_view;
         }
-        w.focus = Some(i);
     }
-    if let Some(i) = w.focus
-        && !ui.ctx().egui_wants_keyboard_input()
-        && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Space))
-    {
-        c.cells[i].ticked = !c.cells[i].ticked;
-        w.anchor = Some(i);
-    }
+    out.dropped.map(|d| d.paths).filter(|p| !p.is_empty())
 }
 
-/// A cell: its preview, its tick, greyed with "in your Library" when New
-/// only leaves it out, "RAW+JPG" on a pair; its name, time and size on
-/// hover. Whether it was clicked; its files go to `in_view` when it is
-/// in view.
-fn cell_ui(
-    ui: &mut egui::Ui,
-    c: &Contents,
-    i: usize,
-    focused: bool,
-    words: &GridWords,
-    in_view: &mut Vec<PathBuf>,
-) -> bool {
-    let cell = &c.cells[i];
-    let importable = c.importable(i);
-    let greyed = c.new_only && cell.known();
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(CELL, CELL), egui::Sense::click());
-    let mut label = cell.name();
-    if greyed {
-        label = format!("{label} · {}", words.in_library);
-    }
-    if cell.is_pair() {
-        label = format!("{label} · {}", words.pair);
-    }
-    let ticked = cell.ticked && importable;
-    response.widget_info(|| {
-        egui::WidgetInfo::selected(egui::Role::CheckBox, importable, ticked, &label)
-    });
-    if ui.is_rect_visible(rect) {
-        in_view.extend(cell.raw.iter().chain(&cell.picture).cloned());
-        if cell.raw.is_none() && cell.picture.is_none() {
-            in_view.push(cell.source.clone());
-        }
-        let visuals = ui.visuals();
-        let painter = ui.painter_at(rect);
-        painter.rect_filled(rect, 4.0, visuals.extreme_bg_color);
-        if let Some(texture) = &cell.texture {
-            let size = texture.size_vec2();
-            let inner = rect.shrink(4.0);
-            let scale = (inner.width() / size.x).min(inner.height() / size.y);
-            let image = egui::Rect::from_center_size(inner.center(), size * scale);
-            let tint = if greyed {
-                egui::Color32::from_gray(90)
-            } else {
-                egui::Color32::WHITE
-            };
-            painter.image(
-                texture.id(),
-                image,
-                egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                tint,
-            );
-        }
-        let small = egui::FontId::proportional(10.0);
-        if greyed {
-            painter.text(
-                rect.center(),
-                egui::Align2::CENTER_CENTER,
-                &words.in_library,
-                small.clone(),
-                visuals.strong_text_color(),
-            );
-        }
-        if cell.is_pair() {
-            let text =
-                painter.layout_no_wrap(words.pair.clone(), small, visuals.strong_text_color());
-            let at = rect.left_bottom() + egui::vec2(4.0, -4.0 - text.size().y);
-            painter.rect_filled(
-                egui::Rect::from_min_size(at, text.size()).expand(2.0),
-                2.0,
-                visuals.widgets.inactive.bg_fill,
-            );
-            painter.galley(at, text, visuals.strong_text_color());
-        }
-        if importable {
-            let tick =
-                egui::Rect::from_min_size(rect.min + egui::vec2(4.0, 4.0), egui::vec2(14.0, 14.0));
-            let fill = if ticked {
-                visuals.selection.bg_fill
-            } else {
-                visuals.widgets.inactive.bg_fill
-            };
-            painter.rect_filled(tick, 2.0, fill);
-            if ticked {
-                painter.text(
-                    tick.center(),
-                    egui::Align2::CENTER_CENTER,
-                    "✔",
-                    egui::FontId::proportional(11.0),
-                    visuals.selection.stroke.color,
-                );
+/// A photo as the browser lists it: by its raw (a pair's) or its picture,
+/// named after both, with its capture time.
+fn entry_of(cell: &crate::import_scan::Cell) -> Option<SourceEntry> {
+    let secs = |s: i64| {
+        u64::try_from(s)
+            .ok()
+            .map(|s| std::time::UNIX_EPOCH + std::time::Duration::from_secs(s))
+    };
+    Some(SourceEntry {
+        path: cell.main()?.clone(),
+        name: cell.name(),
+        kind: EntryKind::File,
+        size: Some(cell.bytes),
+        modified: cell.modified.and_then(secs),
+        // The camera's local time, kept as if it were UTC (as the image
+        // map keeps it): the agenda's days are the camera's.
+        taken: cell.taken.and_then(|t| secs(t.and_utc().timestamp())),
+        app_id: None,
+    })
+}
+
+impl ImportWindow {
+    /// The browser over the contents: made the first time, given what the
+    /// scans found since (entries, marks, previews), on the first source
+    /// ticked, its selection the photos ticked.
+    fn sync_browser(&mut self, ctx: &Egui, words: &GridWords) {
+        let thumbs = self
+            .thumbs
+            .get_or_insert_with(|| Arc::new(ImportThumbnails::new(self.thumb_cache.clone())))
+            .clone();
+        // The previews read go to the thumbnails, a few each frame.
+        let mut made = 0;
+        for cell in &mut self.contents.cells {
+            if made == 48 {
+                ctx.request_repaint();
+                break;
+            }
+            if let Some(thumb) = cell.thumb.take() {
+                cell.previewed = true;
+                if let Some(main) = cell.main() {
+                    thumbs.glanced(main, Some(crate::library::thumbnail(&thumb)));
+                }
+                made += 1;
             }
         }
-        let stroke = if focused {
-            visuals.selection.stroke
-        } else if response.hovered() {
-            visuals.widgets.hovered.bg_stroke
-        } else {
-            egui::Stroke::NONE
-        };
-        painter.rect_stroke(rect.shrink(0.5), 4.0, stroke, egui::StrokeKind::Inside);
+        let place = self
+            .ticked
+            .first()
+            .cloned()
+            .unwrap_or_else(|| PathBuf::from(NOWHERE));
+        let done = self.scans.len() == self.ticked.len() && self.scans.iter().all(|s| s.2);
+        let sig = (
+            self.contents.revision(),
+            self.contents.new_only,
+            place.clone(),
+            done,
+        );
+        if self.published.as_ref() != Some(&sig) {
+            let c = &mut self.contents;
+            let shown = c.shown();
+            let mut marks = std::collections::HashMap::with_capacity(shown.len());
+            let mut entries = Vec::with_capacity(shown.len());
+            for i in shown {
+                let cell = &c.cells[i];
+                let Some(entry) = entry_of(cell) else {
+                    continue;
+                };
+                let mut badges = Vec::new();
+                if cell.offline {
+                    badges.push(words.offline.clone());
+                }
+                if c.new_only && cell.known() {
+                    badges.push(words.in_library.clone());
+                }
+                if cell.is_pair() {
+                    badges.push(words.pair.clone());
+                }
+                marks.insert(
+                    entry.path.clone(),
+                    EntryMarks {
+                        badges,
+                        dimmed: !c.importable(i),
+                    },
+                );
+                entries.push(entry);
+            }
+            *self.marks.lock().unwrap_or_else(PoisonError::into_inner) = marks;
+            self.source.publish(&place, entries, done);
+            self.published = Some(sig);
+        }
+        let browser = self.browser.get_or_insert_with(|| {
+            let marks = self.marks.clone();
+            let mut b = FileBrowser::new(
+                "helios.import",
+                Arc::new(self.source.clone()),
+                place.clone(),
+            )
+            .with_modes(ViewModes::built_in())
+            // The photos alone: no folder above them in Finder's columns.
+            .with_root(NOWHERE)
+            .with_thumbnails(thumbs)
+            .with_marks(move |e| {
+                marks
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .get(&e.path)
+                    .cloned()
+                    .unwrap_or_default()
+            })
+            // Folders and cards from the system open as the sources.
+            .with_drops(|offer| offer.origin == DropOrigin::System);
+            // An import starts on its thumbnails, until another mode is
+            // kept for the window.
+            b.set_mode("thumbnails");
+            b
+        });
+        if browser.place() != place {
+            browser.open(place);
+        }
+        browser.pump();
+        // The selection is the photos ticked: the new ones come ticked.
+        let key = (
+            self.contents.revision(),
+            browser.entries().len(),
+            self.tick_revision,
+        );
+        if self.selection_synced != Some(key) {
+            let c = &self.contents;
+            let ticked = browser
+                .entries()
+                .iter()
+                .filter(|e| c.cell_of(&e.path).is_some_and(|i| c.cells[i].ticked))
+                .map(|e| e.path.clone())
+                .collect::<Vec<_>>();
+            browser.set_selection(ticked);
+            self.selection_synced = Some(key);
+        }
     }
-    let size = crate::library::size_text(ui.ctx(), cell.bytes);
-    let time = cell.time().map_or_else(
-        || words.no_date.clone(),
-        |t| t.format("%Y-%m-%d %H:%M:%S").to_string(),
-    );
-    let response = response.on_hover_text(format!("{}\n{time}\n{size}", cell.name()));
-    response.clicked() && importable
+
+    /// The photos the person selected in the browser are the ones ticked
+    /// (a photo the browser does not list keeps its tick).
+    fn take_selection(&mut self) {
+        let Some(browser) = &self.browser else { return };
+        let selected = &browser.selection().paths;
+        let listed: std::collections::HashSet<&Path> =
+            browser.entries().iter().map(|e| e.path.as_path()).collect();
+        for cell in &mut self.contents.cells {
+            if let Some(main) = cell.main().filter(|m| listed.contains(m.as_path())) {
+                cell.ticked = selected.contains(main);
+            }
+        }
+    }
 }
