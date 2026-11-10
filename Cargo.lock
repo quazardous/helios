@@ -2232,6 +2232,7 @@ version = "0.74.0"
 dependencies = [
  "eframe",
  "egui-pop",
+ "egui_hudget",
  "egui_kittest",
  "helios-controls",
  "helios-core",

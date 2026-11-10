@@ -9,10 +9,12 @@ publish = false
 
 [dependencies]
 helios-controls = { workspace = true, features = ["render"] }
+egui_hudget = { workspace = true, features = ["render"] }
 helios-core.workspace = true
 helios-shell.workspace = true
 helios-values.workspace = true
-egui-pop.workspace = true
+# The curve editor and the colour wheel: the implicit card's own drawings.
+egui-pop = { workspace = true, features = ["viewport"] }
 serde_json.workspace = true
 # MIT OR Apache-2.0 (eframe): the window, or the browser's canvas.
 eframe = { version = "0.37", default-features = false, features = ["default_fonts", "wgpu", "wayland", "x11", "accesskit"] }
