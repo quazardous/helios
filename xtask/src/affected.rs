@@ -26,6 +26,13 @@
 //! stderr. `--filter` prints the nextest filter alone, for a shell;
 //! `--critical` prints the critical set's filter alone.
 //!
+//! `--crates LIST` takes the selection as given instead of computing it:
+//! `all`, `none`, or crate names joined by `+` (what
+//! [`Selection::crates_param`] writes). A box job whose source came with
+//! `bench-remote --push` has no git history to diff, so the client
+//! computes the selection and passes it as `crates=`; `BASE` is then only
+//! a label.
+//!
 //! The full suite still runs on `main` after a merge: a selection is a
 //! shortcut for a branch, never the last word.
 
@@ -36,7 +43,7 @@ use std::process::{Command, ExitCode};
 
 use serde_json::{Value, json};
 
-pub const USAGE: &str = "affected [BASE] [--filter | --critical]";
+pub const USAGE: &str = "affected [BASE] [--crates all|none|A+B...] [--filter | --critical]";
 
 /// The base a selection is computed against when none is given.
 pub const DEFAULT_BASE: &str = "origin/main";
@@ -410,6 +417,48 @@ impl Selection {
         jobs
     }
 
+    /// The selection as one box parameter value (`[A-Za-z0-9._/@+-]`):
+    /// `all` for everything, `none` for the critical set alone, else the
+    /// affected crates joined by `+`.
+    pub fn crates_param(&self) -> String {
+        if self.everything {
+            "all".into()
+        } else if self.crates.is_empty() {
+            "none".into()
+        } else {
+            self.crates.iter().cloned().collect::<Vec<_>>().join("+")
+        }
+    }
+
+    /// The selection a `crates=` value names, as [`Self::crates_param`]
+    /// writes it; `None` for an empty name.
+    pub fn from_crates_param(value: &str) -> Option<Selection> {
+        let mut selection = Selection {
+            everything: false,
+            reasons: Vec::new(),
+            changed: BTreeSet::new(),
+            crates: BTreeSet::new(),
+            data_jobs: BTreeSet::new(),
+        };
+        match value {
+            "all" => {
+                selection.everything = true;
+                selection.reasons.push("crates=all".into());
+                selection.data_jobs.extend(DATA_JOBS.iter().map(|j| j.job));
+            }
+            "none" => {}
+            list => {
+                for name in list.split('+') {
+                    if name.is_empty() {
+                        return None;
+                    }
+                    selection.crates.insert(name.to_string());
+                }
+            }
+        }
+        Some(selection)
+    }
+
     pub fn to_json(&self, base: &str) -> Value {
         json!({
             "base": base,
@@ -516,16 +565,20 @@ pub fn compute(root: &Path, base: &str) -> Result<(Selection, usize), String> {
 }
 
 pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
-    let (mut base, mut filter, mut critical) = (None, false, false);
-    for a in args {
+    let (mut base, mut filter, mut critical, mut given) = (None, false, false, None);
+    let mut args = args.iter();
+    while let Some(a) = args.next() {
         match *a {
             "--filter" => filter = true,
             "--critical" => critical = true,
+            "--crates" if given.is_none() => {
+                given = Some(Selection::from_crates_param(args.next()?)?);
+            }
             a if a.starts_with('-') || base.is_some() => return None,
             a => base = Some(a),
         }
     }
-    if filter && critical {
+    if critical && (filter || given.is_some()) {
         return None;
     }
     if critical {
@@ -533,7 +586,11 @@ pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
         return Some(ExitCode::SUCCESS);
     }
     let base = base.unwrap_or(DEFAULT_BASE);
-    Some(match compute(root, base) {
+    let computed = match given {
+        Some(selection) => Ok((selection, 0)),
+        None => compute(root, base),
+    };
+    Some(match computed {
         Ok((selection, files)) => {
             if filter {
                 println!("{}", selection.nextest_filter());
@@ -818,5 +875,43 @@ mod tests {
         assert!(run(&root, &["--fast"]).is_none());
         assert!(run(&root, &["--filter", "--critical"]).is_none());
         assert!(run(&root, &["--critical"]).is_some());
+        assert!(run(&root, &["--crates"]).is_none(), "a list");
+        assert!(run(&root, &["--crates", ""]).is_none());
+        assert!(run(&root, &["--crates", "a++b"]).is_none());
+        assert!(run(&root, &["--crates", "a", "--crates", "b"]).is_none());
+        assert!(run(&root, &["--crates", "all", "--critical"]).is_none());
+    }
+
+    #[test]
+    fn a_selection_travels_as_a_crates_parameter() {
+        let g = graph();
+        for changed in [
+            paths(&["crates/helios-photo/src/lib.rs"]),
+            paths(&["docs/bench.md"]),
+            paths(&["Cargo.toml"]),
+        ] {
+            let selection = select(&g, &changed);
+            let value = selection.crates_param();
+            assert!(
+                value
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || "._/@+-".contains(c)),
+                "{value}"
+            );
+            let given = Selection::from_crates_param(&value).expect("parses");
+            assert_eq!(
+                given.nextest_filter(),
+                selection.nextest_filter(),
+                "{value}"
+            );
+            assert_eq!(given.everything, selection.everything);
+        }
+        assert_eq!(
+            Selection::from_crates_param("none")
+                .unwrap()
+                .nextest_filter(),
+            format!("({CRITICAL})")
+        );
+        assert!(Selection::from_crates_param("a+").is_none());
     }
 }

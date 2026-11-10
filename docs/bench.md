@@ -28,7 +28,7 @@ Jobs of the Benchfile:
 | `lint` | fast compile feedback: `cargo clippy --workspace --all-targets -- -D warnings`, `cargo xtask check`, then `cargo xtask i18n check` (its report in `out/i18n.txt`) | 8 cores, 6 GB |
 | `test` | `cargo nextest run --workspace --profile ci`, its JUnit report and a summary of the slowest tests in `out/` | 6 cores, 6 GB |
 | `test-crate` | a fix loop's run: `crate=` (required), `test=` (one test target) and `filter=` (a name filter), stopped at the first failure, in the branch's target | 4 cores, 4 GB |
-| `test-affected` | the tests a change touches since `base=` (`origin/main` by default) and the critical set: see "Running what a change touches"; the selection in `out/affected.json`, the JUnit report and the slowest tests in `out/` | 6 cores, 6 GB |
+| `test-affected` | the tests a change touches since `base=` (`origin/main` by default), or the `crates=` given (as `--push` does), and the critical set: see "Running what a change touches"; the selection in `out/affected.json`, the JUnit report and the slowest tests in `out/` | 6 cores, 6 GB |
 | `survival` | `cargo survival`: quit, `kill -9` and reopen | 4 cores, 4 GB |
 | `release` | `cargo xtask release` (survival first), Cargo.lock refreshed; the change as `out/release.patch` (see CONTRIBUTING.md) | 5 cores, 6 GB |
 | `i18n-extract` | the translation catalogues regenerated on a branch: `cargo xtask i18n extract`, then `i18n stamp fr`, then `i18n check` (its report in `out/i18n.txt`); the change as `out/i18n.patch`, applied on the branch with `git apply --index` and committed there | 5 cores, 6 GB |
@@ -157,7 +157,9 @@ checkout pushes under its own name (`helios-local-<id>`, a hash of its
 path), so worktrees can push at the same time; two `--push` runs from the
 same checkout still share it.
 `check-commits` needs the git history, so it runs on a branch, not on
-pushed code.
+pushed code. `test-affected` needs it too, to diff against its base: with
+`--push`, `bench-remote` computes the selection here, where git is, and
+passes it as `crates=` (see "Running what a change touches").
 
 Once the box has queued the job, `bench-remote` prints one line on the
 box (its capacity, what running jobs hold, what this job asks for) and,
@@ -250,7 +252,8 @@ cargo xtask bench-remote --chain helios                        # lint and test-a
 cargo xtask bench-remote --chain helios --release branch=wip/x # ... then the release, once both succeeded
 ```
 
-Every parameter goes to each step (`base=` to `test-affected` alone), and
+Every parameter goes to each step (`base=` and `crates=` to
+`test-affected` alone), and
 `--push` works as for a single job. Each step carries its usual name
 (`egui-pop-feat-dock-snapshots`, `helios-wip-x-release`...): running one
 step again alone, after a fix, replaces it in the chain, and the steps
@@ -343,6 +346,7 @@ change can break, and the box runs that.
 cargo xtask affected                    # since origin/main: JSON on stdout, a summary on stderr
 cargo xtask affected main --filter      # the nextest filter alone
 cargo xtask affected --critical         # the critical set's filter alone
+cargo xtask affected --crates helios-core+helios-gui --filter   # a selection given, no git needed
 cargo nextest run --workspace -E "$(cargo xtask affected --filter)"
 cargo xtask bench-remote test-affected base=origin/main
 cargo xtask bench-remote --affected     # every job the selection names, in turn
@@ -391,6 +395,17 @@ jobs. `bench-remote --affected` runs them one after the other on the
 current branch (or with `--push`), passes `base=` to `test-affected`, and
 prints a table of their results; it exits with the first failure, else
 75 when the box could not serve a job.
+
+A source pushed with `--push` reaches the box without its `.git`, so the
+box cannot diff it. `bench-remote` then computes the selection on the
+client (against `base=`, `origin/main` by default) and gives it to
+`test-affected` as `crates=`: `all` for everything, `none` for the
+critical set alone, else the crates joined by `+`
+(`crates=helios-core+helios-gui`). The job runs `cargo xtask affected
+--crates <list>`, which takes the list as given, and the base is only a
+label in its `affected.json`. This holds for `test-affected` alone,
+`--affected` and `--chain helios`; a `crates=` given by hand is kept, and
+works without `--push` too.
 
 The full suite still runs on `main` after every merge (CI's gate): a
 selection is a shortcut for a branch, not the last word.

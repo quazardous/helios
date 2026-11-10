@@ -856,8 +856,25 @@ pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
     })
 }
 
+/// Whether a parameter goes to `job`: `base=` and `crates=` belong to
+/// `test-affected` alone.
+fn param_for(job: &str, key: &str) -> bool {
+    !matches!(key, "base" | "crates") || job == "test-affected"
+}
+
+/// With `--push`, the box gets the working tree without its git history:
+/// `test-affected` (alone or in the Helios chain) cannot diff it there, so
+/// the client computes the selection and passes it as `crates=`, unless
+/// one was given.
+pub fn wants_client_selection(req: &Request) -> bool {
+    req.push
+        && req.param("crates").is_none()
+        && (req.job == "test-affected" || matches!(req.chain, Some(Chain::Helios { .. })))
+}
+
 /// The requests `--affected` makes of the jobs a selection names: the
-/// request's parameters for each, `base=` for `test-affected` alone.
+/// request's parameters for each, `base=` and `crates=` for
+/// `test-affected` alone.
 pub fn affected_requests(req: &Request, jobs: &[String]) -> Vec<Request> {
     jobs.iter()
         .map(|job| Request {
@@ -865,7 +882,7 @@ pub fn affected_requests(req: &Request, jobs: &[String]) -> Vec<Request> {
             params: req
                 .params
                 .iter()
-                .filter(|(k, _)| k != "base" || job == "test-affected")
+                .filter(|(k, _)| param_for(job, k))
                 .cloned()
                 .collect(),
             push: req.push,
@@ -895,6 +912,9 @@ fn affected(root: &Path, req: &Request) -> Result<u8, String> {
     let mut req = req.clone();
     if req.param("base").is_none() {
         req.params.push(("base".into(), base));
+    }
+    if req.push && req.param("crates").is_none() {
+        req.params.push(("crates".into(), selection.crates_param()));
     }
     let benchfile = std::fs::read_to_string(root.join("tools/bench/Benchfile")).unwrap_or_default();
     let mut results = Vec::new();
@@ -1175,6 +1195,22 @@ fn prepare(root: &Path, b: &Bench, req: &mut Request) -> Option<u8> {
         );
         return Some(EX_PREFLIGHT);
     }
+    if wants_client_selection(req) {
+        let base = req
+            .param("base")
+            .unwrap_or(crate::affected::DEFAULT_BASE)
+            .to_string();
+        match crate::affected::compute(root, &base) {
+            Ok((selection, files)) => {
+                eprint!("{}", selection.summary(&base, files));
+                req.params.push(("crates".into(), selection.crates_param()));
+            }
+            Err(e) => {
+                eprintln!("bench-remote: not queued: the affected crates: {e}");
+                return Some(EX_PREFLIGHT);
+            }
+        }
+    }
     if req.push {
         if let Err(e) = push(b, root, false) {
             return Some(unavailable(&e));
@@ -1378,7 +1414,7 @@ pub fn chain_steps(chain: Chain, req: &Request) -> Vec<Step> {
             let mut params: Vec<(String, String)> = req
                 .params
                 .iter()
-                .filter(|(k, _)| k != "priority" && (k != "base" || job == "test-affected"))
+                .filter(|(k, _)| k != "priority" && param_for(job, k))
                 .cloned()
                 .collect();
             if high && n == 0 {
@@ -2566,6 +2602,48 @@ mod tests {
                 req("raw-corpus", &[("branch", "x")], false),
             ]
         );
+    }
+
+    #[test]
+    fn a_pushed_test_affected_gets_its_crates_from_the_client() {
+        // the pushed source has no .git: the box cannot diff it
+        assert!(wants_client_selection(&req("test-affected", &[], true)));
+        assert!(wants_client_selection(&Request {
+            chain: Some(Chain::Helios { release: false }),
+            ..req("", &[], true)
+        }));
+        assert!(!wants_client_selection(&req("test-affected", &[], false)));
+        assert!(!wants_client_selection(&req("test", &[], true)));
+        assert!(!wants_client_selection(&Request {
+            chain: Some(Chain::EguiPop),
+            ..req("", &[], true)
+        }));
+        assert!(
+            !wants_client_selection(&req("test-affected", &[("crates", "all")], true)),
+            "given"
+        );
+        let r = parse_args(&["test-affected", "crates=helios-core+helios-gui", "--push"]);
+        assert_eq!(
+            r.and_then(|r| r.param("crates").map(str::to_string)),
+            Some("helios-core+helios-gui".into()),
+            "a valid box value"
+        );
+        // crates= goes to test-affected alone, in a series and in a chain
+        let jobs: Vec<String> = ["lint", "test-affected"]
+            .iter()
+            .map(|j| (*j).to_string())
+            .collect();
+        let pushed = req("", &[("branch", "x"), ("crates", "none")], true);
+        let reqs = affected_requests(&pushed, &jobs);
+        assert_eq!(reqs[0].param("crates"), None);
+        assert_eq!(reqs[1].param("crates"), Some("none"));
+        let chain = Request {
+            chain: Some(Chain::Helios { release: false }),
+            ..pushed
+        };
+        let steps = chain_steps(Chain::Helios { release: false }, &chain);
+        assert_eq!(steps[0].req.param("crates"), None);
+        assert_eq!(steps[1].req.param("crates"), Some("none"));
     }
 
     #[test]
