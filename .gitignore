@@ -8,3 +8,5 @@ CLAUDE.todo
 # the bench box (HELIOS_BENCH_HOST, HELIOS_BENCH_KEY): see docs/bench.md
 tools/bench/local.env
 __pycache__/
+# Trunk builds (`trunk build` in a crate folder)
+/crates/*/dist/

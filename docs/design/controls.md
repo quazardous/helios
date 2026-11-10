@@ -21,6 +21,12 @@ Status: **accepted** (2026-11-08), recommended answers to Q1 to Q10
 The context rules (`control-contexts.md`) are accepted too (2026-11-09,
 its choices C1 to C4).
 
+**Demo** (2026-11-10): [egui_hud's web demo](https://quazardous.github.io/helios/egui_hud/)
+(`crates/egui_hud_demo`) shows the framework with no application behind
+it: a mixer channel and a light declared as data, on the bench, which
+moved into `egui_hud` (feature `bench`) so the gallery and the demo share
+it.
+
 **Slice 1 built** (2026-11-09): the `helios-controls` crate (model,
 registry and `controls.describe` output, the value flow with the vetoable
 `controls.change` step, implicit controls from descriptors), the

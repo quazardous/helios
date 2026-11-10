@@ -22,7 +22,15 @@ The crate knows nothing of the application it serves. It asks for:
 
 The renderers on [egui-pop](https://github.com/quazardous/egui-pop) are
 behind the `render` feature; without it the crate has no egui
-dependency.
+dependency. The `bench` feature adds the bench: a shelf of a host's
+controls, composed onto a card and tried live (context bar, modes,
+presets, undo and redo, and why each control takes its form).
+
+## Demo
+
+**[Try it in a browser](https://quazardous.github.io/helios/egui_hud/)**:
+a mixer channel and a light, declared as data, on the bench
+([source](../egui_hud_demo)).
 
 ## Status
 
