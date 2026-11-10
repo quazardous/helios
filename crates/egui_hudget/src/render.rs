@@ -736,17 +736,19 @@ fn draw_marks(
 ) -> (Option<Rect>, Option<Rect>) {
     let y = part.center().y;
     let row = 18.0_f32.min(slot.height());
+    // The dot's place answers clicks whether shown or not, so a part's
+    // focus order and its first stop do not change with its value.
+    let dot = Rect::from_center_size(
+        pos2(slot.left() + MARK_BEFORE / 2.0, y),
+        vec2(MARK_BEFORE, row),
+    );
+    let r = ui.interact(
+        dot,
+        ui.make_persistent_id(("hudget-changed", key)),
+        Sense::click(),
+    );
     let mut changed = None;
     if marks.changed {
-        let dot = Rect::from_center_size(
-            pos2(slot.left() + MARK_BEFORE / 2.0, y),
-            vec2(MARK_BEFORE, row),
-        );
-        let r = ui.interact(
-            dot,
-            ui.make_persistent_id(("hudget-changed", key)),
-            Sense::click(),
-        );
         ui.painter()
             .circle_filled(dot.center(), 3.0, ui.visuals().selection.stroke.color);
         let r = r.on_hover_text("Changed from its default: click to reset");
