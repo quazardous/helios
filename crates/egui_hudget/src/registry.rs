@@ -22,11 +22,16 @@ use crate::slot::{Fallback, Grow, Integration, Orientation, Size, SizePolicy, Sl
 use crate::value::{ParamDescriptor, ParamType, Value, Widget};
 
 /// A slider's full form: a row, growing across up to four units (the
-/// rule for sliders, range sliders and drop-downs). Below a row it steps
-/// down to its compact form.
+/// rule for sliders, range sliders and drop-downs), shrinking to three
+/// quarters of a unit so a side panel a little narrower than a column
+/// keeps its labelled sliders. Below that it steps down to its compact
+/// form.
 pub fn slider_policy() -> SizePolicy {
-    SizePolicy::growable(Slot::ROW, Slot::ROW, Slot::wide(4), Grow::Width)
+    SizePolicy::growable(FULL_MIN, Slot::ROW, Slot::wide(4), Grow::Width)
 }
+
+/// The least width of a full slider or field: three quarters of a unit.
+const FULL_MIN: Slot = Slot::new(Size::THREE_QUARTERS, Size::ONE);
 
 /// A module's parameter plugged into a control's jack.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -239,7 +244,7 @@ impl Shape {
             Shape::Field => v
                 .slot(
                     Representation::Full,
-                    SizePolicy::growable(Slot::ROW, Slot::ROW, Slot::wide(4), Grow::Width),
+                    SizePolicy::growable(FULL_MIN, Slot::ROW, Slot::wide(4), Grow::Width),
                 )
                 .orientations(&[Orientation::Horizontal]),
             Shape::Drawn(rows) => v

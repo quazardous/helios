@@ -87,7 +87,7 @@ fn the_catalogue_lists_exposure_and_black_level_and_describes_them() {
     let slider = &d["layout"]["variants"]["slider"];
     assert_eq!(
         slider["slots"]["full"]["summary"],
-        "1x1 (from 1x1 to 4x1, grows across)"
+        "1x1 (from 3/4x1 to 4x1, grows across)"
     );
     assert_eq!(slider["slots"]["full"]["policy"]["max"], "4x1");
     assert_eq!(slider["slots"]["compact"]["summary"], "fixed 1/2x1");
