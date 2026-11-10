@@ -629,6 +629,8 @@ impl Gallery {
                     ("controls.reveal", json!({"node": IMPLICIT, "key": key}))
                 }
                 CardEvent::RevealAll => ("controls.reveal_all", json!({"node": IMPLICIT})),
+                // No marks and no picker on the gallery's card.
+                CardEvent::Reset(_) | CardEvent::Quad(_) => continue,
             };
             let _ = egui_hudget::commands::run(
                 name,

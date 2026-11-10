@@ -12,7 +12,7 @@
 //!   control patched to a store path, from a Helios descriptor.
 //!
 //! The framework's modules are re-exported as they are: [`model`],
-//! [`slot`], [`card`], [`context`], [`resolve`], [`registry`], and
+//! [`slot`], [`card`], [`context`], [`resolve`], [`registry`], [`value`], and
 //! `render` (feature `render`).
 
 pub mod catalogue;
@@ -22,7 +22,7 @@ pub mod values;
 
 #[cfg(feature = "render")]
 pub use egui_hudget::render;
-pub use egui_hudget::{card, context, model, registry, resolve, slot};
+pub use egui_hudget::{card, context, model, registry, resolve, slot, value};
 
 pub use context::{ContextKeys, Rule, Tier};
 pub use model::{Control, Kind, Mode, Representation, Surface, Variant};

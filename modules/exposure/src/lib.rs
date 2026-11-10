@@ -175,15 +175,24 @@ impl Module for DecideExposure {
 }
 
 /// The controls this module's parameters are patched to: `exposure` is
-/// edited by the exposure control (`docs/design/controls.md`); the others
-/// keep their implicit controls, built from their descriptors.
+/// edited by the exposure control, `black` by the black level control
+/// (`docs/design/controls.md`); `compensate_bias` keeps its implicit
+/// control, built from its descriptor.
 pub fn patches() -> Vec<helios_controls::Patch> {
-    vec![helios_controls::Patch::new(
-        "exposure",
-        "exposure",
-        helios_controls::catalogue::EXPOSURE,
-        "value",
-    )]
+    vec![
+        helios_controls::Patch::new(
+            "exposure",
+            "exposure",
+            helios_controls::catalogue::EXPOSURE,
+            "value",
+        ),
+        helios_controls::Patch::new(
+            "exposure",
+            "black",
+            helios_controls::catalogue::BLACK_LEVEL,
+            "value",
+        ),
+    ]
 }
 
 #[cfg(test)]

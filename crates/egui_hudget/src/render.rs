@@ -24,6 +24,11 @@
 //!   field.
 //! - [`configure`] and [`detent_hook`] give egui-pop's slider and knob a
 //!   control's steps, sign and detents.
+//! - A host dresses what the framework draws through [`Drawings`]: the
+//!   label shown (a translation), a choice's words, its own touches on a
+//!   slider (a picker button), a verdict on each slider change, the marks
+//!   beside a part ([`Marks`]: changed, held, moved) and, once a part is
+//!   drawn, its response ([`Dressing`]: names, menus, focus, hover).
 //! - [`chip`]: the HUD read-out (`Exposure +0.67 EV`).
 //! - [`show`]: a control in a representation and a variant, outside a
 //!   card.
@@ -38,7 +43,7 @@ use egui_pop::egui::{self, Key, Rect, Sense, Ui, UiBuilder, Vec2, pos2, vec2};
 
 use crate::card::ItemKind;
 use crate::flow::Cause;
-use crate::model::{Control, HIT_AREA, Mode, Representation, ValueSpec, ValueType};
+use crate::model::{Control, HIT_AREA, Mode, Representation, Response, ValueSpec, ValueType};
 use crate::registry::Registry;
 use crate::resolve::{CardPlacement, Placement};
 use crate::slot::{Fallback, Integration, Orientation};
@@ -159,6 +164,18 @@ pub fn scrub(
     ui: &mut Ui,
     control: &Control,
     label: Option<&str>,
+    value: &mut f64,
+    width: f32,
+) -> Output {
+    scrub_named(ui, control, label, &control.label, value, width)
+}
+
+/// [`scrub`], named `name` to assistive technology and in its tooltip.
+fn scrub_named(
+    ui: &mut Ui,
+    control: &Control,
+    label: Option<&str>,
+    name: &str,
     value: &mut f64,
     width: f32,
 ) -> Output {
@@ -306,10 +323,9 @@ pub fn scrub(
         ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
     }
     let v = *value;
-    let name = control.label.clone();
-    response.widget_info(|| egui::WidgetInfo::slider(true, v, &name));
+    response.widget_info(|| egui::WidgetInfo::slider(true, v, name));
     let response = if label.is_none() {
-        response.on_hover_text(&control.label)
+        response.on_hover_text(name)
     } else {
         response
     };
@@ -419,8 +435,46 @@ impl Edit {
     }
 }
 
+/// The marks beside a part, as the host knows them: drawn in a gutter on
+/// each side of the part's slot (the changed dot before it, the held and
+/// moved marks after it).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Marks {
+    /// Changed from its default: a dot that resets on a click.
+    pub changed: bool,
+    /// Held by someone else's gesture: who.
+    pub held: Option<String>,
+    /// Just moved by someone else: who.
+    pub moved: Option<String>,
+}
+
+/// The gutter before a part that has marks, in points (the changed dot).
+pub const MARK_BEFORE: f32 = 10.0;
+/// The gutter after a part that has marks, in points (held, moved).
+pub const MARK_AFTER: f32 = 12.0;
+
+/// A part just drawn, handed to [`Drawings::dress`].
+#[derive(Debug)]
+pub struct Dressing<'a> {
+    pub key: &'a str,
+    pub control: &'a Control,
+    /// The part's own rect (its slot less the marks' gutters).
+    pub rect: Rect,
+    /// The widget that answers for it, when one does (not for a host's
+    /// own drawing).
+    pub response: Option<&'a egui::Response>,
+    /// Its label's own widget, when drawn apart from it (a drop-down's).
+    pub label: Option<&'a egui::Response>,
+    /// Where its changed dot is, when shown.
+    pub changed: Option<Rect>,
+    /// Where its moved mark is, when shown.
+    pub moved: Option<Rect>,
+}
+
 /// The host's own drawings, for its integrated controls (a curve
-/// editor, colour wheels): the framework knows nothing of them.
+/// editor, colour wheels): the framework knows nothing of them. The
+/// other methods dress what the framework draws; each does nothing by
+/// default.
 pub trait Drawings {
     /// Draws part `key` (control `control`) in `rect` with the host's own
     /// drawing; `None` when the host has none for it, or it does not fit:
@@ -433,6 +487,51 @@ pub trait Drawings {
         rect: Rect,
         value: &mut Value,
     ) -> Option<Vec<Edit>>;
+
+    /// The label shown for part `key` (a translation); the control's
+    /// when `None`.
+    fn label(&mut self, _ctx: &egui::Context, _key: &str, _control: &Control) -> Option<String> {
+        None
+    }
+
+    /// The words shown for one choice of part `key`; the choice itself
+    /// when `None`.
+    fn choice(
+        &mut self,
+        _ctx: &egui::Context,
+        _key: &str,
+        _control: &Control,
+        _choice: &str,
+    ) -> Option<String> {
+        None
+    }
+
+    /// The host's touches on part `key`'s slider before it shows (a
+    /// picker button).
+    fn slider<'a>(
+        &mut self,
+        _ctx: &egui::Context,
+        _key: &str,
+        _control: &Control,
+        slider: Slider<'a>,
+    ) -> Slider<'a> {
+        slider
+    }
+
+    /// The host's verdict on a slider's or a knob's change of part `key`,
+    /// once the control's detents have held it: a veto or a redirect wins.
+    fn verdict(&mut self, _key: &str, _control: &Control, _change: &slider::Change) -> Verdict {
+        Verdict::Go
+    }
+
+    /// The marks beside part `key`; `None` keeps the part's whole slot.
+    fn marks(&mut self, _key: &str) -> Option<Marks> {
+        None
+    }
+
+    /// Called once a part is drawn: the host's own touches on its
+    /// response (names, menus, focus, hover text).
+    fn dress(&mut self, _ui: &mut Ui, _dressing: Dressing<'_>) {}
 }
 
 /// No drawings of the host's own: every integrated part falls back.
@@ -471,6 +570,12 @@ pub enum Drawn {
 pub struct PartOutput {
     pub edits: Vec<Edit>,
     pub drawn: Drawn,
+    /// The widget that answers for it, when one does.
+    pub response: Option<egui::Response>,
+    /// Its label's own widget, when drawn apart from it.
+    pub label: Option<egui::Response>,
+    /// Its quad button (a picker) was clicked.
+    pub quad: bool,
 }
 
 /// A card's request to its host.
@@ -480,6 +585,10 @@ pub enum CardEvent {
     Reveal(String),
     /// Show every part: `controls.reveal_all {node}`.
     RevealAll,
+    /// Put a part back to its default (its changed dot clicked).
+    Reset(String),
+    /// A part's quad button (a picker) was clicked.
+    Quad(String),
 }
 
 /// What a card did in a frame.
@@ -514,24 +623,32 @@ pub fn card(
     let (_, response) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
     let mut edits = Vec::new();
     let mut drawn = BTreeMap::new();
+    let mut events = Vec::new();
     for p in placement.items.iter().filter(|p| p.visibility.is_shown()) {
         let Some(r) = p.rect else { continue };
-        let rect = Rect::from_min_size(origin + vec2(r.x, r.y), vec2(r.w, r.h)).shrink(GAP / 2.0);
-        let mut child = ui.new_child(
-            UiBuilder::new()
-                .max_rect(rect)
-                .id_salt(("hudget-part", &p.key))
-                .layout(egui::Layout::left_to_right(egui::Align::Center)),
-        );
-        // A part never draws past its slot.
-        child.set_clip_rect(rect.expand(1.0).intersect(ui.clip_rect()));
+        let slot = Rect::from_min_size(origin + vec2(r.x, r.y), vec2(r.w, r.h)).shrink(GAP / 2.0);
         if p.kind == ItemKind::Chrome {
-            chrome(&mut child, p, rect);
+            let mut child = part_ui(ui, &p.key, slot);
+            chrome(&mut child, p, slot);
             continue;
         }
         let Some(control) = p.control.as_deref().and_then(|id| registry.get(id)) else {
             continue;
         };
+        let marks = drawings.marks(&p.key);
+        let rect = if marks.is_some() {
+            Rect::from_min_max(
+                slot.min + vec2(MARK_BEFORE, 0.0),
+                slot.max - vec2(MARK_AFTER, 0.0),
+            )
+        } else {
+            slot
+        };
+        let (changed, moved) = match &marks {
+            Some(m) => draw_marks(ui, &p.key, m, slot, rect, &mut events),
+            None => (None, None),
+        };
+        let mut child = part_ui(ui, &p.key, rect);
         let value = values
             .entry(p.key.clone())
             .or_insert_with(|| default_of(control));
@@ -545,10 +662,24 @@ pub fn card(
             value,
             drawings,
         );
+        if out.quad {
+            events.push(CardEvent::Quad(p.key.clone()));
+        }
+        drawings.dress(
+            &mut child,
+            Dressing {
+                key: &p.key,
+                control,
+                rect,
+                response: out.response.as_ref(),
+                label: out.label.as_ref(),
+                changed,
+                moved,
+            },
+        );
         edits.extend(out.edits);
         drawn.insert(p.key.clone(), out.drawn);
     }
-    let mut events = Vec::new();
     if let Some(m) = &placement.more
         && m.count + m.inapplicable.len() > 0
     {
@@ -556,7 +687,7 @@ pub fn card(
             .items
             .first()
             .is_some_and(|p| p.mode == Mode::Toolbar);
-        events = more(ui, placement, toolbar);
+        events.extend(more(ui, placement, toolbar));
     }
     CardOutput {
         response,
@@ -577,6 +708,100 @@ pub fn default_of(control: &Control) -> Value {
             _ => Value::Floats(Vec::new()),
         },
     }
+}
+
+/// A child ui for one part in `rect`: left to right, clipped to it.
+fn part_ui(ui: &mut Ui, key: &str, rect: Rect) -> Ui {
+    let mut child = ui.new_child(
+        UiBuilder::new()
+            .max_rect(rect)
+            .id_salt(("hudget-part", key))
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+    );
+    // A part never draws past its slot.
+    child.set_clip_rect(rect.expand(1.0).intersect(ui.clip_rect()));
+    child
+}
+
+/// A part's marks in its gutters: the changed dot before it (a click
+/// asks for a reset), then the held and moved marks after it. Returns
+/// where the changed dot and the moved mark went.
+fn draw_marks(
+    ui: &mut Ui,
+    key: &str,
+    marks: &Marks,
+    slot: Rect,
+    part: Rect,
+    events: &mut Vec<CardEvent>,
+) -> (Option<Rect>, Option<Rect>) {
+    let y = part.center().y;
+    let row = 18.0_f32.min(slot.height());
+    let mut changed = None;
+    if marks.changed {
+        let dot = Rect::from_center_size(
+            pos2(slot.left() + MARK_BEFORE / 2.0, y),
+            vec2(MARK_BEFORE, row),
+        );
+        let r = ui.interact(
+            dot,
+            ui.make_persistent_id(("hudget-changed", key)),
+            Sense::click(),
+        );
+        ui.painter()
+            .circle_filled(dot.center(), 3.0, ui.visuals().selection.stroke.color);
+        let r = r.on_hover_text("Changed from its default: click to reset");
+        if r.clicked() {
+            events.push(CardEvent::Reset(key.to_owned()));
+        }
+        changed = Some(dot);
+    }
+    let after = |dy: f32| {
+        Rect::from_center_size(
+            pos2(slot.right() - MARK_AFTER / 2.0, y + dy),
+            vec2(MARK_AFTER, row / 2.0),
+        )
+    };
+    // Both: the held mark above, the moved one below.
+    let both = marks.held.is_some() && marks.moved.is_some();
+    let shift = if both { row / 4.0 } else { 0.0 };
+    if let Some(by) = &marks.held {
+        let at = after(-shift);
+        let r = ui.interact(
+            at,
+            ui.make_persistent_id(("hudget-held", key)),
+            Sense::hover(),
+        );
+        ui.painter().circle_filled(
+            at.center(),
+            4.0_f32.min(at.height() / 2.0),
+            ui.visuals().warn_fg_color,
+        );
+        r.on_hover_text(format!("Held by {by}"));
+    }
+    let mut moved = None;
+    if let Some(by) = &marks.moved {
+        let at = after(shift);
+        let r = ui.interact(
+            at,
+            ui.make_persistent_id(("hudget-moved", key)),
+            Sense::hover(),
+        );
+        let c = at.center();
+        let d = 4.5_f32.min(at.height() / 2.0);
+        ui.painter().add(egui::Shape::convex_polygon(
+            vec![
+                c + vec2(0.0, -d),
+                c + vec2(d, 0.0),
+                c + vec2(0.0, d),
+                c + vec2(-d, 0.0),
+            ],
+            ui.visuals().selection.stroke.color,
+            egui::Stroke::NONE,
+        ));
+        r.on_hover_text(format!("Moved by {by}"));
+        moved = Some(at);
+    }
+    (changed, moved)
 }
 
 /// A piece of chrome in its rect: a legend, a separator, a help line, an
@@ -623,50 +848,64 @@ pub fn part(
     value: &mut Value,
     drawings: &mut dyn Drawings,
 ) -> PartOutput {
+    let only = |edits: Vec<Edit>, drawn: Drawn| PartOutput {
+        edits,
+        drawn,
+        response: None,
+        label: None,
+        quad: false,
+    };
+    let with = |m: Managed, drawn: Drawn| PartOutput {
+        edits: m.edits,
+        drawn,
+        response: m.response,
+        label: m.label,
+        quad: m.quad,
+    };
     if let Integration::Integrated { fallback } = &look.integration {
         // Its own drawing goes only where its full form was given.
         if look.representation == Representation::Full
             && let Some(edits) = drawings.draw(ui, key, control, rect, value)
         {
-            return PartOutput {
-                edits,
-                drawn: Drawn::Integrated,
-            };
+            return only(edits, Drawn::Integrated);
         }
         let Some(fallback) = fallback else {
             missing(ui, control, rect);
-            return PartOutput {
-                edits: Vec::new(),
-                drawn: Drawn::Missing,
-            };
+            return only(Vec::new(), Drawn::Missing);
         };
-        let edits = match fallback {
+        let drawn = Drawn::Fallback(fallback.clone());
+        return match fallback {
             Fallback::Variant(id) => {
                 let look = Look {
                     variant: Some(id.clone()),
                     integration: Integration::Managed,
                     ..look.clone()
                 };
-                managed(ui, key, control, &look, rect, value)
+                with(
+                    managed(ui, key, control, &look, rect, value, drawings),
+                    drawn,
+                )
             }
             Fallback::ValueType => {
                 let look = Look {
                     integration: Integration::Managed,
                     ..look.clone()
                 };
-                managed(ui, key, control, &look, rect, value)
+                with(
+                    managed(ui, key, control, &look, rect, value, drawings),
+                    drawn,
+                )
             }
-            Fallback::Parts => parts(ui, registry, key, control, rect, value, drawings),
-        };
-        return PartOutput {
-            edits,
-            drawn: Drawn::Fallback(fallback.clone()),
+            Fallback::Parts => only(
+                parts(ui, registry, key, control, rect, value, drawings),
+                drawn,
+            ),
         };
     }
-    PartOutput {
-        edits: managed(ui, key, control, look, rect, value),
-        drawn: Drawn::Managed,
-    }
+    with(
+        managed(ui, key, control, look, rect, value, drawings),
+        Drawn::Managed,
+    )
 }
 
 /// An integrated part with nothing to draw here.
@@ -747,7 +986,35 @@ fn card_at(
     card(ui, registry, placement, values, drawings).edits
 }
 
-/// A managed part by its value type.
+/// What a managed part drew.
+struct Managed {
+    edits: Vec<Edit>,
+    response: Option<egui::Response>,
+    label: Option<egui::Response>,
+    quad: bool,
+}
+
+impl Managed {
+    fn edits(edits: Vec<Edit>) -> Self {
+        Self {
+            edits,
+            response: None,
+            label: None,
+            quad: false,
+        }
+    }
+
+    fn of(edits: Vec<Edit>, response: egui::Response) -> Self {
+        Self {
+            edits,
+            response: Some(response),
+            label: None,
+            quad: false,
+        }
+    }
+}
+
+/// A managed part by its value type, dressed by the host.
 fn managed(
     ui: &mut Ui,
     key: &str,
@@ -755,24 +1022,41 @@ fn managed(
     look: &Look,
     rect: Rect,
     value: &mut Value,
-) -> Vec<Edit> {
-    let label = control.label.as_str();
+    drawings: &mut dyn Drawings,
+) -> Managed {
+    let ctx = ui.ctx().clone();
+    let label = drawings
+        .label(&ctx, key, control)
+        .unwrap_or_else(|| control.label.clone());
+    let label = label.as_str();
+    let set = |value: &Value, done: bool| {
+        vec![Edit::Set {
+            key: key.to_owned(),
+            to: value.clone(),
+            done,
+        }]
+    };
     match &control.value {
         ValueSpec::Number(n) => {
             let mut v = value.as_f64().unwrap_or(n.default);
-            let out = number_at(ui, control, look, rect, &mut v);
+            let (out, quad) = number_with(ui, key, control, label, look, rect, &mut v, drawings);
             *value = if n.integer {
                 Value::Int(v.round() as i64)
             } else {
                 Value::Float(v)
             };
-            out.changes
+            let edits = out
+                .changes
                 .into_iter()
                 .map(|change| Edit::Number {
                     key: key.to_owned(),
                     change,
                 })
-                .collect()
+                .collect();
+            Managed {
+                quad,
+                ..Managed::of(edits, out.response)
+            }
         }
         ValueSpec::Bool { default } => {
             let mut on = match value {
@@ -791,15 +1075,12 @@ fn managed(
             } else {
                 r
             };
+            let mut edits = Vec::new();
             if r.changed() {
                 *value = Value::Bool(on);
-                return vec![Edit::Set {
-                    key: key.to_owned(),
-                    to: value.clone(),
-                    done: true,
-                }];
+                edits = set(value, true);
             }
-            Vec::new()
+            Managed::of(edits, r)
         }
         ValueSpec::OneOf { choices, default } => {
             let mut chosen = match value {
@@ -808,38 +1089,46 @@ fn managed(
             };
             let before = chosen.clone();
             let full = look.representation == Representation::Full;
-            let label_id = full.then(|| ui.label(label).id);
+            let label_r = full.then(|| ui.label(label));
             let width = ui.available_width();
+            let words: Vec<String> = choices
+                .iter()
+                .map(|c| {
+                    drawings
+                        .choice(&ctx, key, control, c)
+                        .unwrap_or_else(|| c.clone())
+                })
+                .collect();
+            let shown = choices
+                .iter()
+                .position(|c| *c == chosen)
+                .map_or_else(|| chosen.clone(), |i| words[i].clone());
             let r = egui::ComboBox::from_id_salt(("hudget-choice", key))
-                .selected_text(chosen.clone())
+                .selected_text(shown)
                 .width(width)
                 .show_ui(ui, |ui| {
-                    for c in choices {
-                        ui.selectable_value(&mut chosen, c.clone(), c);
+                    for (c, w) in choices.iter().zip(&words) {
+                        ui.selectable_value(&mut chosen, c.clone(), w);
                     }
                 })
                 .response;
-            match label_id {
-                Some(id) => {
-                    let _ = r.labelled_by(id);
-                }
-                None => {
-                    let _ = r.on_hover_text(label);
-                }
-            }
+            let r = match &label_r {
+                Some(l) => r.labelled_by(l.id),
+                None => r.on_hover_text(label),
+            };
+            let mut edits = Vec::new();
             if chosen != before {
                 *value = Value::Choice(chosen);
-                return vec![Edit::Set {
-                    key: key.to_owned(),
-                    to: value.clone(),
-                    done: true,
-                }];
+                edits = set(value, true);
             }
-            Vec::new()
+            Managed {
+                label: label_r,
+                ..Managed::of(edits, r)
+            }
         }
         ValueSpec::Other { stored } => match stored {
-            ValueType::Points => points(ui, key, label, rect, value),
-            ValueType::Colour => colour(ui, key, label, rect, value),
+            ValueType::Points => Managed::edits(points(ui, key, label, rect, value)),
+            ValueType::Colour => Managed::edits(colour(ui, key, label, rect, value)),
             ValueType::Text => {
                 let mut text = match value {
                     Value::Text(t) => t.clone(),
@@ -847,19 +1136,19 @@ fn managed(
                 };
                 let r = ui.add(egui::TextEdit::singleline(&mut text).desired_width(rect.width()));
                 let r = r.on_hover_text(label);
+                let mut edits = Vec::new();
                 if r.changed() {
                     *value = Value::Text(text);
-                    return vec![Edit::Set {
-                        key: key.to_owned(),
-                        to: value.clone(),
-                        done: r.lost_focus(),
-                    }];
                 }
-                Vec::new()
+                // Typing is reported as it goes; leaving the field ends it.
+                if r.changed() || r.lost_focus() {
+                    edits = set(value, r.lost_focus());
+                }
+                Managed::of(edits, r)
             }
             _ => {
-                ui.label(format!("{label}: {}", value.to_json()));
-                Vec::new()
+                let r = ui.label(format!("{label}: {}", value.to_json()));
+                Managed::of(Vec::new(), r)
             }
         },
     }
@@ -993,6 +1282,62 @@ pub fn number_at(
     rect: Rect,
     value: &mut f64,
 ) -> Output {
+    let label = control.label.clone();
+    number_with(
+        ui,
+        &control.id,
+        control,
+        &label,
+        look,
+        rect,
+        value,
+        &mut NoDrawings,
+    )
+    .0
+}
+
+/// A slider or knob hook: the control's detents (unless `free`), then
+/// the host's verdict.
+fn hooked<'a>(
+    key: &'a str,
+    control: &'a Control,
+    free: bool,
+    drawings: &'a mut dyn Drawings,
+) -> impl FnMut(&slider::Change) -> Verdict + 'a {
+    move |c| {
+        let mut change = *c;
+        if c.cause == slider::Cause::Drag {
+            change.to = control.detented(c.to, free);
+        }
+        match drawings.verdict(key, control, &change) {
+            Verdict::Veto => return Verdict::Veto,
+            Verdict::Redirect(v) => change.to = v,
+            Verdict::Go => {}
+        }
+        if change.to == c.to {
+            Verdict::Go
+        } else {
+            Verdict::Redirect(change.to)
+        }
+    }
+}
+
+/// [`number_at`] for part `key`, labelled `label`, dressed by the host;
+/// also says whether its quad button was clicked.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "a part's key, control, label, look, rect and value, and its host"
+)]
+fn number_with(
+    ui: &mut Ui,
+    key: &str,
+    control: &Control,
+    label: &str,
+    look: &Look,
+    rect: Rect,
+    value: &mut f64,
+    drawings: &mut dyn Drawings,
+) -> (Output, bool) {
     let variant = control
         .variant_or_default(look.variant.as_deref())
         .map_or("slider", |v| v.id.as_str());
@@ -1017,19 +1362,20 @@ pub fn number_at(
     };
     let mut child = ui.new_child(UiBuilder::new().max_rect(bar(row.max(HIT_AREA))));
     let ui = &mut child;
+    let ctx = ui.ctx().clone();
     match (variant, look.representation) {
-        ("scrub", Representation::Full) => {
-            scrub(ui, control, Some(&control.label), value, rect.width())
-        }
-        (_, Representation::Simplified) | ("scrub", _) => {
-            let out = scrub(ui, control, None, value, rect.width());
-            let label = control.label.clone();
-            Output {
-                response: out.response.on_hover_text(label),
-                changes: out.changes,
-            }
-        }
-        ("knob", _) => knob_in(ui, control, rect, value),
+        ("scrub", Representation::Full) => (
+            scrub_named(ui, control, Some(label), label, value, rect.width()),
+            false,
+        ),
+        (_, Representation::Simplified) | ("scrub", _) => (
+            scrub_named(ui, control, None, label, value, rect.width()),
+            false,
+        ),
+        ("knob", _) => (
+            knob_in(ui, key, control, label, rect, value, drawings),
+            false,
+        ),
         (_, representation) => {
             let soft = control.value.number().map_or((0.0, 1.0), |n| n.soft);
             let free = detents_off(ui);
@@ -1038,26 +1384,37 @@ pub fn number_at(
             } else {
                 vec2(rect.width(), row.min(rect.height()))
             };
-            let mut s = configure(Slider::new(value, &control.label, soft.0..=soft.1), control)
-                .on_change(detent_hook(control, free))
-                .size(size);
+            let mut s = configure(Slider::new(value, label, soft.0..=soft.1), control).size(size);
+            if control.feel.response == Response::Logarithmic {
+                s = s.logarithmic();
+            }
             if vertical {
                 s = s.vertical();
             }
             if representation == Representation::Compact {
                 s = s.compact();
             }
-            let out = s.show(ui);
-            slider_output(out.response, &out.changes, *value)
+            let s = drawings.slider(&ctx, key, control, s);
+            let out = s.on_change(hooked(key, control, free, drawings)).show(ui);
+            let quad = out.quad_clicked();
+            (slider_output(out.response, &out.changes, *value), quad)
         }
     }
 }
 
 /// A knob in `rect`, with the control's steps and detents.
-fn knob_in(ui: &mut Ui, control: &Control, rect: Rect, value: &mut f64) -> Output {
+fn knob_in(
+    ui: &mut Ui,
+    key: &str,
+    control: &Control,
+    label: &str,
+    rect: Rect,
+    value: &mut f64,
+    drawings: &mut dyn Drawings,
+) -> Output {
     let soft = control.value.number().map_or((0.0, 1.0), |n| n.soft);
     let free = detents_off(ui);
-    let mut k = Knob::new(value, &control.label, soft.0..=soft.1).size(rect.size());
+    let mut k = Knob::new(value, label, soft.0..=soft.1).size(rect.size());
     if let Some(n) = control.value.number() {
         k = k
             .hard(n.hard.0..=n.hard.1)
@@ -1081,7 +1438,7 @@ fn knob_in(ui: &mut Ui, control: &Control, rect: Rect, value: &mut f64) -> Outpu
             k = k.travel((span / control.feel.sensitivity) as f32);
         }
     }
-    let out = k.on_change(detent_hook(control, free)).show(ui);
+    let out = k.on_change(hooked(key, control, free, drawings)).show(ui);
     slider_output(out.response, &out.changes, *value)
 }
 
@@ -1363,5 +1720,61 @@ mod tests {
                 orientation == Orientation::Vertical && representation == Representation::Full
             );
         }
+    }
+
+    /// A host that renames every part, marks it changed and moved, and
+    /// counts what it dressed.
+    #[derive(Default)]
+    struct Dressed {
+        dressed: Vec<(String, bool, bool, bool)>,
+    }
+
+    impl Drawings for Dressed {
+        fn draw(
+            &mut self,
+            _: &mut Ui,
+            _: &str,
+            _: &Control,
+            _: Rect,
+            _: &mut Value,
+        ) -> Option<Vec<Edit>> {
+            None
+        }
+
+        fn label(&mut self, _: &egui::Context, key: &str, _: &Control) -> Option<String> {
+            Some(format!("{key} renamed"))
+        }
+
+        fn marks(&mut self, _: &str) -> Option<Marks> {
+            Some(Marks {
+                changed: true,
+                held: None,
+                moved: Some("an agent".into()),
+            })
+        }
+
+        fn dress(&mut self, _: &mut Ui, d: Dressing<'_>) {
+            self.dressed.push((
+                d.key.to_owned(),
+                d.response.is_some(),
+                d.changed.is_some(),
+                d.moved.is_some(),
+            ));
+        }
+    }
+
+    #[test]
+    fn a_host_dresses_each_part_its_label_and_its_marks_in_gutters() {
+        let (r, c) = card_of_three();
+        let p = resolved(&r, &c, Layout::default());
+        let mut host = Dressed::default();
+        let (out, names) = draw(&r, &p, &mut host);
+        assert!(out.events.is_empty());
+        // The curve and the wheel fall back to their rows, renamed.
+        assert!(names.iter().any(|n| n == "curve renamed 2 y"), "{names:?}");
+        for (key, _, changed, moved) in &host.dressed {
+            assert!(*changed && *moved, "{key}: marks in the gutters");
+        }
+        assert_eq!(host.dressed.len(), 2, "the folded part is not drawn");
     }
 }

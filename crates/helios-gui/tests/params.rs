@@ -541,3 +541,42 @@ fn a_node_s_parameters_show_by_section_in_the_order_of_their_first() {
         ]
     );
 }
+
+/// The panel's cards resolve in the context the `controls.*` commands
+/// share: `controls.context` reads the box the panel set from its width,
+/// and the exposure module's `black` is edited by the black level
+/// control, placed on the node's card.
+#[test]
+fn the_panel_and_the_controls_commands_share_one_context() {
+    let mut h = harness();
+    let panel = h.state().target_rect("helios.params").unwrap();
+    let out = h
+        .state_mut()
+        .run("controls.context", json!({}), Origin::User)
+        .unwrap();
+    let width = out["keys"]["box"]["width"].as_u64().unwrap() as f32;
+    // In twelfths of a 240-point column, the panel's width at most.
+    assert!(width > 0.0, "{out}");
+    assert!(width * 20.0 <= panel.width() + 1.0, "{width} in {panel:?}");
+    assert_eq!(out["keys"]["density"], json!("comfortable"));
+    let black = h
+        .state_mut()
+        .run(
+            "controls.describe",
+            json!({ "id": "black-level", "node": "exposure" }),
+            Origin::User,
+        )
+        .unwrap();
+    assert_eq!(black["patches"][0]["param"], json!("black"), "{black}");
+    // A nudge through the control: its step, 0.05 %.
+    h.state_mut()
+        .run(
+            "controls.nudge",
+            json!({ "node": "exposure", "control": "black-level", "steps": 1 }),
+            Origin::User,
+        )
+        .unwrap();
+    h.run();
+    let read = h.get_by_role_and_label(egui::accesskit::Role::Slider, "black");
+    assert_eq!(read.value().as_deref(), Some("0.05 %"));
+}

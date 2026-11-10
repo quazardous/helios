@@ -42,7 +42,19 @@ person's layout, never folding a changed value, the slot engine, a
 placement per item with its reasons, the "More (n)" entry, anti-jump,
 the reachability invariant, and the `controls.context`, `controls.find`,
 `controls.reveal`, `controls.reveal_all` commands
-(`control-contexts.md`, section 6.5). Section 7 lists the slices left. Section 8 holds the questions, each with its
+(`control-contexts.md`, section 6.5). **Slice 9 built** (2026-11-10):
+the darkroom's Parameters panel draws each node as a card through
+`resolve` and `render::card`: each parameter gets its patched control
+(`exposure`, and `black-level` now bound to exposure's `black`) or its
+implicit one, the card resolved in the context the `controls.*`
+commands share (`register_with`: the panel sets the box from its width
+at the density, and the hand), its gestures, undo steps, marks, menus
+and accessible names as before. The renderers gained a host's
+dressing (`render::Drawings`: the label shown, a choice's words, a
+slider's touches, a verdict on each change, the marks in gutters
+beside a part, and the touches once drawn); Helios draws as integrated
+parts what the framework has no form for (curves, wheels, lists, text,
+a mask group's operator). Section 7 lists the slices left. Section 8 holds the questions, each with its
 recommendation.
 
 **The request.** Helios modules should not draw widgets. They declare
@@ -1063,7 +1075,7 @@ control.
 
 Sizes: S is a day or less of agent work, M two or three days, L a week.
 
-Slices 1 to 8 and 5b are done; slice 2 is this note's reconciliation with the
+Slices 1 to 9 and 5b are done; slice 2 is this note's reconciliation with the
 decisions of 2026-11-09. The slices after it were renumbered that day:
 the slot engine, contexts and the bench come first, then the masks and
 customisation slices of the 2026-11-08 plan.
@@ -1079,7 +1091,7 @@ customisation slices of the 2026-11-08 plan.
 | 6 | **Done** (2026-11-10). Renderers by representation and orientation, under the ergonomic contract. Built: `egui_hudget::render::card` draws a card from its resolution (each shown part at its rect, its chrome, the "More (n)" row as egui-pop's section band with its count, the reasons on hover, a part revealed through `controls.reveal`; in a toolbar, the More tools glyph); `render::part` by placement (numbers as egui-pop's slider, full, compact or vertical, its knob, or a scrub read-out; a toggle, a drop-down, `points` as numbered rows, a `colour` as a swatch and channels, text); an integrated part drawn by the host's `Drawings` where its full form fits, else its fallback (a variant, the value type's renderer, a case's parts), curve and wheels covered. egui-pop gained the vertical slider, the knob, sliders down to 24 points and a standalone section band. The controls gallery draws through this path, with snapshots per view | M | 4 |
 | 7 | **Done** (2026-11-10). Bench A: the gallery's shelf and bench, controls moved from the shelf to the bench (`controls.bench.*`) and packed live. Built: a bench page in the controls gallery; the shelf (the catalogue by purpose, an implicit control per value type, searchable, each with a painted preview of its form); the bench as one card of the composition (controls, and cases as a legend, help text, their parts and a separator) resolved through `resolve` and drawn by `render::card`; drops shown as a ghost of the slot they would take; a layout mode to move, select, group and remove; a width handle, the placements following with hysteresis; values in egui_hudget's `MemoryStore` through the value flow, which gained undo and redo; the commands `controls.bench.add`, `remove`, `move`, `case`, `list`, `clear` | M | 5, 6 |
 | 8 | **Done** (2026-11-10). Bench B: the context switches on the bench and the measures as agent scenarios. Built: a context bar over the bench setting every key (task, detail, image flags, tool, device, density) through the context the `controls.*` commands share, so `controls.context` and the bar agree, with the space the box's width gives; changes wait while the pointer is over the bench (anti-jump); a mode switch (panel, dock, toolbar, float with their slot grids; the HUD as chips, a control without one named, gizmos listed); a placement and reason pane (slot, orientation, representation, visibility, why, and the rule, layout or engine that decided); per control a tier and a variant, card rules (`controls.bench.part`, `rules`, `mode`); a bench saved and loaded as data with its context, mode, width and the person's layout as the `controls.layout.bench` setting (`controls.bench.save`, `load`); the scenarios' bench (`controls.bench.sample`); S1 to S6 as headless tests writing text reports (`tests/reports`). Open: a toolbar is not yet one line (the slot engine has no height limit), and S6 has no device abstraction, so its sweep is synthetic nudges | M | 7 |
-| 9 | The darkroom panels through the engine: `param_ui_with` replaced by the managed renderers, no visible change beyond the packing; snapshots updated knowingly | M | 5, 6 |
+| 9 | **Done** (2026-11-10). The darkroom panels through the engine: `param_ui_with` replaced by the managed renderers, no visible change beyond the packing; snapshots updated knowingly. Built: a card per node (per section of a macro's exposed parameters) resolved in the shared context and drawn by `render::card` with Helios as its host (`render::Drawings`: labels, choices, the picker, the `slider.change` and `controls.change` steps, marks, names, menus, focus); `black-level` bound to exposure's `black` | M | 5, 6 |
 | 10 | egui-pop: knob and scrub field; anchored HUD element | M | none (egui-pop issues) |
 | 11 | HUD and the exposure scrub on the image; the active control and its context keys | M | 9, 10 |
 | 12 | `feather`, `angle`, `gradient-mask` with derived parts: integrated on the image plus a managed fallback in the panel; its part of `drag_writes` removed; scenario with invariants | M | 11 |

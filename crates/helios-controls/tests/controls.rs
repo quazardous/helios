@@ -60,7 +60,7 @@ fn value(s: &Store, path: &str) -> f64 {
 }
 
 #[test]
-fn the_catalogue_lists_exposure_and_describes_it() {
+fn the_catalogue_lists_exposure_and_black_level_and_describes_them() {
     let r = registry();
     let cat = r.catalogue();
     let ids: Vec<&str> = cat
@@ -69,7 +69,14 @@ fn the_catalogue_lists_exposure_and_describes_it() {
         .iter()
         .map(|c| c["id"].as_str().unwrap())
         .collect();
-    assert_eq!(ids, ["exposure"]);
+    assert_eq!(ids, ["black-level", "exposure"]);
+    let b = r.describe(catalogue::BLACK_LEVEL).unwrap();
+    assert_eq!(b["connector"], json!(["number<relative>"]));
+    assert_eq!(b["variants"], json!(["slider", "knob"]));
+    let black = catalogue::black_level();
+    assert_eq!(black.value.number().unwrap().format(0.0012), "0.12 %");
+    assert_eq!(black.detented(0.001, false), 0.0, "held at 0");
+    assert_eq!(black.detented(0.001, true), 0.001, "Alt lets it go");
     let d = r.describe(EXPOSURE).unwrap();
     assert_eq!(d["connector"], json!(["number<EV>"]));
     assert_eq!(d["variants"], json!(["slider", "knob", "scrub"]));

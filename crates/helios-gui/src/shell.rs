@@ -345,6 +345,9 @@ struct Parts {
     subworkspaces: crate::contexts::Subworkspaces,
     /// Where the agents' collectors find the library and the viewport.
     agent_state: crate::agent_state::Late,
+    /// The controls' context: the Parameters panel sets its box and hand,
+    /// the `controls.*` commands read and set it.
+    controls: helios_controls::commands::SharedContexts,
 }
 
 /// A shell whose egui-pop application is still to build: in a test
@@ -702,6 +705,7 @@ impl Shell {
         // Undo walks back through the host.
         let values: Arc<Mutex<helios_values::Store>> = Arc::default();
         let agent_state = crate::agent_state::Late::default();
+        let controls = helios_controls::commands::SharedContexts::default();
         // The open image's history snapshots: taken through the history
         // owner, pinned and kept by the vault's link (`persist`).
         let snapshots = crate::edit_snapshots::Shared::default();
@@ -746,11 +750,12 @@ impl Shell {
         // The param commands first: the menus take their titles.
         helios_values::register(&mut lock(&registry), wiring.values.clone())
             .expect("param commands are declared once");
-        helios_controls::commands::register(
+        helios_controls::commands::register_with(
             &mut lock(&registry),
             wiring.values.clone(),
             crate::controls::registry().clone(),
             crate::controls::steps().clone(),
+            controls.clone(),
         )
         .expect("controls commands are declared once");
         Shell::declare_menus(&wiring);
@@ -892,6 +897,7 @@ impl Shell {
                 images,
                 subworkspaces,
                 agent_state,
+                controls,
             },
         }
     }
@@ -920,6 +926,7 @@ impl Shell {
             images: _,
             subworkspaces,
             agent_state,
+            controls,
         } = parts;
         if let Some(d) = app.handle().service(&DIALOGS) {
             let _ = dialogs.set((*d).clone());
@@ -999,7 +1006,7 @@ impl Shell {
             gpu: None,
             gpu_info: None,
             image_surface: crate::display::ImageSurfaceSwitch::default(),
-            params: Rc::default(),
+            params: Rc::new(RefCell::new(crate::params::Params::new(controls))),
             clip,
             system,
             copying: None,

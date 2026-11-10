@@ -144,7 +144,7 @@ pub type SharedContexts = Arc<Mutex<Contexts>>;
 
 impl Contexts {
     /// The moment of a node's card: its reveals and the hand.
-    fn moment(&self, node: &str) -> Moment {
+    pub fn moment(&self, node: &str) -> Moment {
         let mut m = self.moments.get(node).cloned().unwrap_or_default();
         m.gesture_open = self.hand.gesture_open;
         m.pointer_in_panel = self.hand.pointer_in_panel;
