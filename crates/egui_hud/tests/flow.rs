@@ -3,13 +3,13 @@
 
 use std::sync::{Arc, Mutex};
 
-use egui_hudget::commands::{self, COMMANDS, Shared};
-use egui_hudget::flow::{self, Cause, Outcome, Steps, Verdict};
-use egui_hudget::model::{
+use egui_hud::commands::{self, COMMANDS, Shared};
+use egui_hud::flow::{self, Cause, Outcome, Steps, Verdict};
+use egui_hud::model::{
     Control, Gesture, Intent, Jack, Kind, NumberSpec, Representation, ValueSpec, ValueType,
 };
-use egui_hudget::slot::{Grow, Size, SizePolicy, Slot};
-use egui_hudget::{
+use egui_hud::slot::{Grow, Size, SizePolicy, Slot};
+use egui_hud::{
     MemoryStore, ParamDescriptor, ParamType, Patch, Registry, Surface, Value, ValueSource, Variant,
     Widget, implicit,
 };

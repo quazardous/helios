@@ -1,4 +1,4 @@
-//! The `controls.*` commands (`egui_hudget::commands`) declared in the
+//! The `controls.*` commands (`egui_hud::commands`) declared in the
 //! shell's command registry, on `helios_values::Store`, and what the
 //! `controls` collector reads ([`instances`]).
 
@@ -8,8 +8,8 @@ use helios_shell::commands::{CommandSpec, Registry as Commands};
 use helios_values::Store;
 use serde_json::Value as Json;
 
-use egui_hudget::commands::{self as hc, Shared};
-pub use egui_hudget::commands::{COMMANDS, CommandInfo, Contexts, GROUP, SharedContexts};
+use egui_hud::commands::{self as hc, Shared};
+pub use egui_hud::commands::{COMMANDS, CommandInfo, Contexts, GROUP, SharedContexts};
 
 use crate::card::Card;
 use crate::flow::SharedSteps;

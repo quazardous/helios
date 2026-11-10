@@ -1,5 +1,5 @@
 [package]
-name = "egui_hudget"
+name = "egui_hud"
 description = "Controls as data for egui: a control's purpose, value, feel and representations, cards laid out on a slot engine, resolved in context, a value flow of gestures, and renderers on egui-pop"
 version.workspace = true
 edition.workspace = true

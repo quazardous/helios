@@ -1,9 +1,9 @@
-//! `helios_values::Store` seen through `egui_hudget`'s store traits:
+//! `helios_values::Store` seen through `egui_hud`'s store traits:
 //! [`StoreRef`] reads, [`StoreMut`] also writes inside gestures. Helios's
 //! values and descriptors map to the framework's ([`value`],
 //! [`descriptor`]), `ParamWidget` included.
 
-use egui_hudget::value::{self as hv, Param, ParamDescriptor, ParamType, ValueSource, ValueStore};
+use egui_hud::value::{self as hv, Param, ParamDescriptor, ParamType, ValueSource, ValueStore};
 use helios_core::{ParamWidget, Value};
 use helios_shell::commands::Origin;
 use helios_values::{Change, Descriptor, GestureId, Set, Store, Type};

@@ -1,4 +1,4 @@
-//! `egui_hudget`: controls as data, between an application's parameters
+//! `egui_hud`: controls as data, between an application's parameters
 //! and whatever the person touches. It knows nothing of the application:
 //! values come through [`value::ValueStore`], parameters are described by
 //! [`value::ParamDescriptor`], and the `controls.*` commands are plain

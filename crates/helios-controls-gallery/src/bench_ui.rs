@@ -32,8 +32,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use egui_hudget::context::{Density, Detail, Device, Task, Tier};
-use egui_hudget::slot::ChromeKind;
+use egui_hud::context::{Density, Detail, Device, Task, Tier};
+use egui_hud::slot::ChromeKind;
 use egui_pop::egui::{
     self, Align2, Color32, DragAndDrop, Pos2, Rect, Role, Sense, Stroke, StrokeKind, Ui, UiBuilder,
     WidgetInfo, pos2, vec2,
@@ -418,7 +418,7 @@ impl BenchPage {
                     p.tier = t;
                 }
                 let pinned = self.bench.layout.parts.get(one).and_then(|l| l.visibility);
-                let mut hidden = pinned == Some(egui_hudget::resolve::Pinned::Hidden);
+                let mut hidden = pinned == Some(egui_hud::resolve::Pinned::Hidden);
                 if ui.checkbox(&mut hidden, "Hidden in the layout").changed() {
                     let v = if hidden { json!("hidden") } else { Json::Null };
                     let _ = self.bench.part(one, &json!({"visibility": v}));
@@ -478,7 +478,7 @@ impl BenchPage {
         let card_height = placement
             .layout
             .as_ref()
-            .map_or(0.0, egui_hudget::card::CardLayout::height);
+            .map_or(0.0, egui_hud::card::CardLayout::height);
         let origin = ui.cursor().min;
         let zone = Rect::from_min_size(
             origin,
@@ -507,7 +507,7 @@ impl BenchPage {
         self.case_frames(ui, &placement, &at);
 
         // The card, as a module's card is drawn.
-        let mut values: BTreeMap<String, egui_hudget::Value> = self
+        let mut values: BTreeMap<String, egui_hud::Value> = self
             .bench
             .composition
             .keys()
@@ -971,7 +971,7 @@ impl BenchPage {
                     .map_or_else(String::new, |o| format!(" · {o}"));
                 let rep = e
                     .representation
-                    .map_or("", egui_hudget::model::representation_name);
+                    .map_or("", egui_hud::model::representation_name);
                 ui.weak(format!("{slot}{orientation} · {rep}"));
             }
             let mut marks = Vec::new();

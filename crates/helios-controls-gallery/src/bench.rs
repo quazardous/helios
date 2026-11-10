@@ -48,14 +48,14 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use std::sync::{MutexGuard, PoisonError};
 
-use egui_hudget::commands::{CommandInfo, Contexts, SharedContexts};
-use egui_hudget::context::{Rule, Tier};
-use egui_hudget::flow::{self, Cause, GestureOf, Outcome, Steps};
-use egui_hudget::model::{Control, Representation, ValueSpec, ValueType, representation_name};
-use egui_hudget::resolve::{Layout, Layouts, Placement, Source, Visibility};
-use egui_hudget::slot::{Chrome, ChromeKind, Orientation};
-use egui_hudget::value::{MemoryStore, ParamDescriptor, ParamType, Value, ValueSource, ValueStore};
-use egui_hudget::{CardPlacement, ContextKeys, Registry};
+use egui_hud::commands::{CommandInfo, Contexts, SharedContexts};
+use egui_hud::context::{Rule, Tier};
+use egui_hud::flow::{self, Cause, GestureOf, Outcome, Steps};
+use egui_hud::model::{Control, Representation, ValueSpec, ValueType, representation_name};
+use egui_hud::resolve::{Layout, Layouts, Placement, Source, Visibility};
+use egui_hud::slot::{Chrome, ChromeKind, Orientation};
+use egui_hud::value::{MemoryStore, ParamDescriptor, ParamType, Value, ValueSource, ValueStore};
+use egui_hud::{CardPlacement, ContextKeys, Registry};
 use helios_controls::card::{Card, CardGroup, CardItem};
 use helios_controls::context::CardBox;
 use helios_controls::render;
@@ -192,13 +192,13 @@ fn implicit_descriptors() -> Vec<(&'static str, &'static str, ParamDescriptor)> 
             list(
                 "Curve",
                 vec![0.0, 0.0, 0.25, 0.2, 0.75, 0.85, 1.0, 1.0],
-                egui_hudget::Widget::Curve,
+                egui_hud::Widget::Curve,
             ),
         ),
         (
             "colour",
             "a colour",
-            list("Lift", vec![0.08, 0.3, 0.1], egui_hudget::Widget::Wheel),
+            list("Lift", vec![0.08, 0.3, 0.1], egui_hud::Widget::Wheel),
         ),
         (
             "text",
@@ -270,7 +270,7 @@ impl Shelf {
             .collect();
         entries.sort_by(|a, b| a.group.cmp(&b.group).then(a.label.cmp(&b.label)));
         for (name, group, d) in sample_descriptors() {
-            let control = egui_hudget::implicit(&format!("shelf/{name}"), &d);
+            let control = egui_hud::implicit(&format!("shelf/{name}"), &d);
             entries.push(ShelfEntry {
                 name: name.to_owned(),
                 control: control.id.clone(),
@@ -282,7 +282,7 @@ impl Shelf {
             let _ = registry.register(control);
         }
         for (name, hint, d) in implicit_descriptors() {
-            let control = egui_hudget::implicit(&format!("shelf/{name}"), &d);
+            let control = egui_hud::implicit(&format!("shelf/{name}"), &d);
             entries.push(ShelfEntry {
                 name: name.to_owned(),
                 control: control.id.clone(),
@@ -878,7 +878,7 @@ fn source_name(source: Source) -> &'static str {
     }
 }
 
-fn reason_line(r: &egui_hudget::resolve::Reason) -> String {
+fn reason_line(r: &egui_hud::resolve::Reason) -> String {
     match &r.when {
         Some(when) => format!("{} (when `{when}`)", r.text),
         None => r.text.clone(),
@@ -1123,7 +1123,7 @@ impl Bench {
     /// `image`, `tool`, `device`, `density`…); a task change ends the
     /// reveals. The box stays the bench's.
     pub fn set_context(&self, args: &Json) -> Result<(), String> {
-        let r = egui_hudget::commands::set_context(&mut self.lock(), args);
+        let r = egui_hud::commands::set_context(&mut self.lock(), args);
         self.sync_box();
         r
     }
@@ -1500,7 +1500,7 @@ impl Bench {
             part.representation =
                 serde_json::from_value(r.clone()).map_err(|e| format!("`representation`: {e}"))?;
         }
-        if *part == egui_hudget::resolve::PartLayout::default() {
+        if *part == egui_hud::resolve::PartLayout::default() {
             self.layout.parts.remove(key);
         }
         Ok(())
@@ -1579,7 +1579,7 @@ impl Bench {
         };
         // Checked first: a bad context leaves the bench as it was.
         let mut trial = Contexts::default();
-        egui_hudget::commands::set_context(&mut trial, &saved.context)?;
+        egui_hud::commands::set_context(&mut trial, &saved.context)?;
         self.set_context(&saved.context)?;
         self.store = MemoryStore::new();
         for (key, d) in descriptors {
@@ -2069,10 +2069,10 @@ mod tests {
             explain(p.get("black").unwrap(), 2.0).visibility,
             "not applicable"
         );
-        egui_hudget::resolve::reachable(&p).unwrap();
+        egui_hud::resolve::reachable(&p).unwrap();
         // Every slow-key combination keeps every control reachable.
         let (card, _) = b.composition.card();
-        egui_hudget::resolve::reachable_everywhere(
+        egui_hud::resolve::reachable_everywhere(
             &b.registry,
             &card,
             Surface::Panel,
@@ -2121,8 +2121,8 @@ mod tests {
         assert_eq!(other.mode, BenchMode::Dock);
         assert!((other.width - 340.0).abs() < 0.5);
         let k = other.keys();
-        assert_eq!(k.task, egui_hudget::context::Task::Retouch);
-        assert_eq!(k.density, egui_hudget::context::Density::Compact);
+        assert_eq!(k.task, egui_hud::context::Task::Retouch);
+        assert_eq!(k.density, egui_hud::context::Density::Compact);
         assert_eq!(k.card_box.surface, Surface::Dock);
         let (p, _) = other.resolve().unwrap();
         assert!(matches!(
@@ -2174,7 +2174,7 @@ mod tests {
             b.set_mode(mode);
             let (p, _) = b.resolve().unwrap();
             assert_eq!(p.keys.card_box.surface, mode.surface());
-            egui_hudget::resolve::reachable(&p).unwrap();
+            egui_hud::resolve::reachable(&p).unwrap();
         }
         b.set_mode(BenchMode::Hud);
         assert!(b.resolve().is_err(), "the HUD has no slots");

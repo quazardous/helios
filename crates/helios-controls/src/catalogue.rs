@@ -2,13 +2,13 @@
 //! section 5). Curated: each control is decided in the note and its
 //! follow-ups.
 
-use egui_hudget::model::{
+use egui_hud::model::{
     Control, Feel, Gesture, Intent, Jack, NumberSpec, Representation, Response, ValueSpec,
     ValueType, Variant,
 };
-use egui_hudget::slot::{Orientation, Size, SizePolicy, Slot};
+use egui_hud::slot::{Orientation, Size, SizePolicy, Slot};
 
-pub use egui_hudget::registry::slider_policy;
+pub use egui_hud::registry::slider_policy;
 
 /// A third of a unit wide, one row high: a read-out.
 const THIRD: Slot = Slot::new(Size::THIRD, Size::ONE);
@@ -25,8 +25,8 @@ pub fn all() -> Vec<Control> {
 }
 
 /// A registry of the catalogue, with no patches.
-pub fn registry() -> egui_hudget::Registry {
-    egui_hudget::Registry::with(all()).expect("the standard catalogue is valid")
+pub fn registry() -> egui_hud::Registry {
+    egui_hud::Registry::with(all()).expect("the standard catalogue is valid")
 }
 
 /// Exposure, in stops: -18 to +18 EV, the bar spanning -3 to +4; steps of

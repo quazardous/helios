@@ -37,7 +37,7 @@ Read on 2026-11-10 on `next`.
 | Bricks in all but name | `modules/vkdt/src/guided.rs`, `modules/masks` | `vkdt_guided1..3`, `vkdt_blur`, `vkdt_blurs`, `vkdt_resample` wired by `guided_filter()` into `vkdt_contrast`; the masks crate's small modules (`mask_parametric`, `mask_combine`, `mask_feather`, `mask_blend`...) rebuild darktable's blending as a sub-network. |
 | Composite files | `helios-template`, `CompositeFile`, `Catalogue` | a network as versioned JSON (`nodes`, `connections`, `exits`, `exposed`, `workshop`), checked against the modules known by name. |
 | Registry and MCP | `helios_node::registry()`, `helios_describe` (entity `modules`) | a flat map of names to modules, readable by agents. |
-| Controls | `crates/egui_hudget`, `crates/helios-controls` | controls as data, `Patch { module, param, control, jack }`, implicit controls from descriptors, `controls.catalogue` and `controls.describe`. |
+| Controls | `crates/egui_hud`, `crates/helios-controls` | controls as data, `Patch { module, param, control, jack }`, implicit controls from descriptors, `controls.catalogue` and `controls.describe`. |
 | Test kit | `helios_testkit::assert_contract_of` | defaults, range ends, adversarial inputs, tiled equals untiled, half scale; on composites too. |
 | Plugins | `crates/helios-plugin`, [extensions.md](../extensions.md) | out of process, JSON-RPC over pipes, manifest first, capabilities brokered or disclosed; official ones in Rust under `plugins/<category>/<name>`. None contributes a module yet. |
 
@@ -211,7 +211,7 @@ with a description and the scale rule (a radius in full-resolution
 pixels). A brick's parameters are **not shown to people by default**:
 the module's parameters are, through its controls. But because each is
 described, the controls layer can still build an implicit control for
-it (`egui_hudget::registry::implicit`), which is what the graph
+it (`egui_hud::registry::implicit`), which is what the graph
 surface's "opened" view and an AI's draft use.
 
 ### 3.3 Determinism and purity
@@ -679,7 +679,7 @@ Read on 2026-11-10.
   [control-contexts.md](control-contexts.md), [macros.md](macros.md),
   [workshops.md](workshops.md); `crates/helios-core` (`module.rs`,
   `manifest.rs`, `network.rs`), `crates/helios-node`,
-  `crates/helios-template`, `crates/egui_hudget`,
+  `crates/helios-template`, `crates/egui_hud`,
   `crates/helios-controls`, `crates/helios-testkit`, `modules/*`.
 - darktable: `src/develop/blend.c`, `src/common/{gaussian,bilateral,guided_filter,eigf,box_filters,interpolation,iop_profile,curve_tools,histogram,colorspaces_inline_conversions}.*`,
   counts over `src/iop/*.c`.

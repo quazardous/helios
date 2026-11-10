@@ -1,4 +1,4 @@
-# egui_hudget
+# egui_hud
 
 Controls as data for [egui](https://github.com/emilk/egui) applications:
 what a control is (purpose, value, units, ranges, feel, detents,

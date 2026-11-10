@@ -1,11 +1,11 @@
-//! The value flow (`egui_hudget::flow`) on `helios_values::Store`: the
+//! The value flow (`egui_hud::flow`) on `helios_values::Store`: the
 //! same begin, preview, commit and cancel, with Helios's origins and the
 //! store's gestures (held against other origins, one undo step each).
 
 use helios_shell::commands::Origin;
 use helios_values::{GestureId, Store};
 
-pub use egui_hudget::flow::{
+pub use egui_hud::flow::{
     CHANGE_STEP, Cause, ChangeEvent, Outcome, SharedSteps, Steps, Verdict, node_of,
 };
 
@@ -13,11 +13,11 @@ use crate::model::Control;
 use crate::values::StoreMut;
 
 /// A one-shot change: the value asked, who asks and why.
-pub type OneShot<'a> = egui_hudget::flow::OneShot<'a, Origin>;
+pub type OneShot<'a> = egui_hud::flow::OneShot<'a, Origin>;
 
 /// An open gesture of one control on one path.
 #[derive(Debug)]
-pub struct Gesture(egui_hudget::flow::Gesture<GestureId, Origin>);
+pub struct Gesture(egui_hud::flow::Gesture<GestureId, Origin>);
 
 /// Begins a gesture of `control` on `path`, as `origin`.
 pub fn begin(
@@ -26,7 +26,7 @@ pub fn begin(
     path: &str,
     origin: Origin,
 ) -> Result<Gesture, String> {
-    egui_hudget::flow::begin(&mut StoreMut(store), control, path, origin).map(Gesture)
+    egui_hud::flow::begin(&mut StoreMut(store), control, path, origin).map(Gesture)
 }
 
 impl Gesture {
@@ -65,5 +65,5 @@ pub fn apply(
     path: &str,
     ask: OneShot<'_>,
 ) -> Result<Outcome, String> {
-    egui_hudget::flow::apply(&mut StoreMut(store), steps, control, path, ask)
+    egui_hud::flow::apply(&mut StoreMut(store), steps, control, path, ask)
 }

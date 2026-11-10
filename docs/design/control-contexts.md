@@ -556,7 +556,7 @@ Read on 2026-11-09; vendor docs for what the apps do, forums for what
 users say.
 
 - Helios: [controls.md](controls.md), [context-stack.md](context-stack.md),
-  [workshops.md](workshops.md); `crates/egui_hudget`, `crates/helios-controls`,
+  [workshops.md](workshops.md); `crates/egui_hud`, `crates/helios-controls`,
   `crates/helios-controls-gallery`, `crates/helios-gui/src/keys.rs`.
 - Lightroom Classic: [Workspace basics](https://helpx.adobe.com/lightroom-classic/desktop/workspace/workspace-basics.html);
   forum threads on solo mode: [several panels at once](https://community.adobe.com/t5/lightroom-classic-ideas/p-lightroom-classic-panel-scroll-bar-close-annoyance/idi-p/12248801/page/4),

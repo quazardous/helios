@@ -1427,7 +1427,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "egui_hudget"
+name = "egui_hud"
 version = "0.74.0"
 dependencies = [
  "egui-pop",
@@ -2219,7 +2219,7 @@ name = "helios-controls"
 version = "0.74.0"
 dependencies = [
  "egui_gridflow",
- "egui_hudget",
+ "egui_hud",
  "helios-core",
  "helios-shell",
  "helios-values",
@@ -2232,7 +2232,7 @@ version = "0.74.0"
 dependencies = [
  "eframe",
  "egui-pop",
- "egui_hudget",
+ "egui_hud",
  "egui_kittest",
  "helios-controls",
  "helios-core",

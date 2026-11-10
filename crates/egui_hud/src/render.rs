@@ -715,7 +715,7 @@ fn part_ui(ui: &mut Ui, key: &str, rect: Rect) -> Ui {
     let mut child = ui.new_child(
         UiBuilder::new()
             .max_rect(rect)
-            .id_salt(("hudget-part", key))
+            .id_salt(("hud-part", key))
             .layout(egui::Layout::left_to_right(egui::Align::Center)),
     );
     // A part never draws past its slot.
@@ -744,7 +744,7 @@ fn draw_marks(
     );
     let r = ui.interact(
         dot,
-        ui.make_persistent_id(("hudget-changed", key)),
+        ui.make_persistent_id(("hud-changed", key)),
         Sense::click(),
     );
     let mut changed = None;
@@ -768,11 +768,7 @@ fn draw_marks(
     let shift = if both { row / 4.0 } else { 0.0 };
     if let Some(by) = &marks.held {
         let at = after(-shift);
-        let r = ui.interact(
-            at,
-            ui.make_persistent_id(("hudget-held", key)),
-            Sense::hover(),
-        );
+        let r = ui.interact(at, ui.make_persistent_id(("hud-held", key)), Sense::hover());
         ui.painter().circle_filled(
             at.center(),
             4.0_f32.min(at.height() / 2.0),
@@ -785,7 +781,7 @@ fn draw_marks(
         let at = after(shift);
         let r = ui.interact(
             at,
-            ui.make_persistent_id(("hudget-moved", key)),
+            ui.make_persistent_id(("hud-moved", key)),
             Sense::hover(),
         );
         let c = at.center();
@@ -1105,7 +1101,7 @@ fn managed(
                 .iter()
                 .position(|c| *c == chosen)
                 .map_or_else(|| chosen.clone(), |i| words[i].clone());
-            let r = egui::ComboBox::from_id_salt(("hudget-choice", key))
+            let r = egui::ComboBox::from_id_salt(("hud-choice", key))
                 .selected_text(shown)
                 .width(width)
                 .show_ui(ui, |ui| {
@@ -1201,7 +1197,7 @@ fn points(ui: &mut Ui, key: &str, label: &str, rect: Rect, value: &mut Value) ->
     };
     if (list.len() / 2) as f32 * (row + 1.0) > rect.height() + 0.5 {
         egui::ScrollArea::vertical()
-            .id_salt(("hudget-points", key))
+            .id_salt(("hud-points", key))
             .max_height(rect.height())
             .auto_shrink([false, true])
             .show(ui, |ui| rows(ui, &mut list, &mut changed));
@@ -1475,7 +1471,7 @@ pub fn more(ui: &mut Ui, placement: &CardPlacement, toolbar: bool) -> Vec<CardEv
     let Some(m) = &placement.more else {
         return Vec::new();
     };
-    let id = ui.make_persistent_id("hudget-more");
+    let id = ui.make_persistent_id("hud-more");
     let mut open = ui.data(|d| d.get_temp::<bool>(id)).unwrap_or(false);
     let count = m.count as u64;
     let response = if toolbar {
@@ -1502,7 +1498,7 @@ pub fn more(ui: &mut Ui, placement: &CardPlacement, toolbar: bool) -> Vec<CardEv
         r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &title));
         r
     } else {
-        sections::band(ui, "hudget-more", "More", Some(count), open)
+        sections::band(ui, "hud-more", "More", Some(count), open)
     };
     let response = response.on_hover_ui(|ui| {
         for f in &m.folded {

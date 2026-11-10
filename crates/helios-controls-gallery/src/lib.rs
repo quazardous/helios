@@ -35,7 +35,7 @@ pub mod bench_ui;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-use egui_hudget::commands::{Shared, SharedContexts};
+use egui_hud::commands::{Shared, SharedContexts};
 use egui_pop::egui::{self, Rect, RichText, Ui};
 use egui_pop::viewport::curve::CurveEditor;
 use egui_pop::viewport::wheel::{ColorWheel, WheelValue};
@@ -301,7 +301,7 @@ impl Gallery {
         if name.starts_with("controls.bench.") {
             return self.bench.bench.run(name, args);
         }
-        egui_hudget::commands::run(
+        egui_hud::commands::run(
             name,
             args,
             &Origin::Agent("gallery".into()),
@@ -464,8 +464,7 @@ impl Gallery {
                 return;
             }
         };
-        let mut values =
-            BTreeMap::from([(id.to_owned(), egui_hudget::Value::Float(self.value(id)))]);
+        let mut values = BTreeMap::from([(id.to_owned(), egui_hud::Value::Float(self.value(id)))]);
         let out = ui
             .push_id(("view", view.name), |ui| {
                 render::card(
@@ -587,7 +586,7 @@ impl Gallery {
                 return BTreeMap::new();
             }
         };
-        let mut values: BTreeMap<String, egui_hudget::Value> = placement
+        let mut values: BTreeMap<String, egui_hud::Value> = placement
             .controls()
             .filter_map(|p| {
                 let v = self.implicit_value(&p.key)?;
@@ -632,7 +631,7 @@ impl Gallery {
                 // No marks and no picker on the gallery's card.
                 CardEvent::Reset(_) | CardEvent::Quad(_) => continue,
             };
-            let _ = egui_hudget::commands::run(
+            let _ = egui_hud::commands::run(
                 name,
                 &args,
                 &Origin::User,
@@ -677,12 +676,12 @@ impl Drawings for EditorDrawings {
         key: &str,
         control: &Control,
         rect: Rect,
-        value: &mut egui_hudget::Value,
+        value: &mut egui_hud::Value,
     ) -> Option<Vec<Edit>> {
         let ValueSpec::Other { stored } = &control.value else {
             return None;
         };
-        let egui_hudget::Value::Floats(list) = value else {
+        let egui_hud::Value::Floats(list) = value else {
             return None;
         };
         if rect.height() < 80.0 {
@@ -690,7 +689,7 @@ impl Drawings for EditorDrawings {
         }
         let set = |to: &[f64], done: bool| Edit::Set {
             key: key.to_owned(),
-            to: egui_hudget::Value::Floats(to.to_vec()),
+            to: egui_hud::Value::Floats(to.to_vec()),
             done,
         };
         match stored {

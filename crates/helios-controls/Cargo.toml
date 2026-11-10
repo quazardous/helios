@@ -1,6 +1,6 @@
 [package]
 name = "helios-controls"
-description = "Helios controls: the business controls (exposure…) on the egui_hudget framework, their patches to node parameters, and the adapters to the value store and the shell's commands"
+description = "Helios controls: the business controls (exposure…) on the egui_hud framework, their patches to node parameters, and the adapters to the value store and the shell's commands"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -10,14 +10,14 @@ repository.workspace = true
 ## The renderers (panel rows, HUD chips) on egui-pop. Off, the crate is the
 ## model, the registry and the value flow only, with no egui: what engine
 ## crates (modules declaring their patches) depend on.
-render = ["egui_hudget/render"]
+render = ["egui_hud/render"]
 
 [dependencies]
 helios-core.workspace = true
 helios-shell.workspace = true
 helios-values.workspace = true
 serde_json.workspace = true
-egui_hudget.workspace = true
+egui_hud.workspace = true
 
 [dev-dependencies]
 egui_gridflow.workspace = true

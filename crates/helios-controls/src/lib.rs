@@ -1,5 +1,5 @@
 //! Helios controls: Helios's side of the controls framework
-//! (`egui_hudget`, `docs/design/controls.md`).
+//! (`egui_hud`, `docs/design/controls.md`).
 //!
 //! - [`catalogue`]: Helios's business controls (exposure, for now).
 //! - [`values`]: `helios_values::Store` behind the framework's store
@@ -21,8 +21,8 @@ pub mod flow;
 pub mod values;
 
 #[cfg(feature = "render")]
-pub use egui_hudget::render;
-pub use egui_hudget::{card, context, model, registry, resolve, slot, value};
+pub use egui_hud::render;
+pub use egui_hud::{card, context, model, registry, resolve, slot, value};
 
 pub use context::{ContextKeys, Rule, Tier};
 pub use model::{Control, Kind, Mode, Representation, Surface, Variant};
@@ -33,9 +33,9 @@ pub use slot::{Integration, Orientation, SizePolicy, Slot};
 use helios_values::Descriptor;
 
 /// The implicit control of a parameter no control is patched to, from
-/// its Helios descriptor ([`egui_hudget::implicit`]).
+/// its Helios descriptor ([`egui_hud::implicit`]).
 pub fn implicit(path: &str, d: &Descriptor) -> Control {
-    egui_hudget::implicit(path, &values::descriptor(d))
+    egui_hud::implicit(path, &values::descriptor(d))
 }
 
 /// Helios's ways into the framework's registry.

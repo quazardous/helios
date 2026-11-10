@@ -11,9 +11,9 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::path::PathBuf;
 
-use egui_hudget::card::fits;
-use egui_hudget::flow::Cause;
-use egui_hudget::resolve::{self, Layouts, Values, Visibility};
+use egui_hud::card::fits;
+use egui_hud::flow::Cause;
+use egui_hud::resolve::{self, Layouts, Values, Visibility};
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT as _, Queryable as _};
 use egui_pop::egui::accesskit::Role;
@@ -366,7 +366,7 @@ fn s2_a_folded_part_is_one_action_away() {
 }
 
 /// Each shown control's rect, by key, in bench points.
-fn rects(p: &CardPlacement) -> BTreeMap<String, egui_hudget::card::Rect> {
+fn rects(p: &CardPlacement) -> BTreeMap<String, egui_hud::card::Rect> {
     p.controls()
         .filter(|c| c.visibility.is_shown())
         .filter_map(|c| Some((c.key.clone(), c.rect?)))
@@ -376,10 +376,10 @@ fn rects(p: &CardPlacement) -> BTreeMap<String, egui_hudget::card::Rect> {
 /// How far the controls shown before a change moved: the centres'
 /// displacement weighted by area, the largest, and how many left.
 fn shift(
-    before: &BTreeMap<String, egui_hudget::card::Rect>,
-    after: &BTreeMap<String, egui_hudget::card::Rect>,
+    before: &BTreeMap<String, egui_hud::card::Rect>,
+    after: &BTreeMap<String, egui_hud::card::Rect>,
 ) -> (f32, f32, usize) {
-    let centre = |r: &egui_hudget::card::Rect| Vec2::new(r.x + r.w / 2.0, r.y + r.h / 2.0);
+    let centre = |r: &egui_hud::card::Rect| Vec2::new(r.x + r.w / 2.0, r.y + r.h / 2.0);
     let (mut weighted, mut area, mut largest, mut gone) = (0.0, 0.0, 0.0_f32, 0);
     for (k, r) in before {
         let a = r.w * r.h;
@@ -530,7 +530,7 @@ fn s4_widths_and_densities() {
             let height = p
                 .layout
                 .as_ref()
-                .map_or(0.0, egui_hudget::card::CardLayout::height);
+                .map_or(0.0, egui_hud::card::CardLayout::height);
             let keys = b.keys();
             let _ = writeln!(
                 text,
