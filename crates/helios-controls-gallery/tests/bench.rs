@@ -250,6 +250,103 @@ fn a_composed_bench_at_two_widths() {
     }
 }
 
+#[test]
+fn controls_context_and_the_context_bar_share_the_keys() {
+    let mut g = helios_controls_gallery::Gallery::default();
+    g.run_command("controls.bench.sample", &json!({})).unwrap();
+    g.run_command(
+        "controls.context",
+        &json!({"task": "retouch", "detail": "expert"}),
+    )
+    .unwrap();
+    let list = g.run_command("controls.bench.list", &json!({})).unwrap();
+    assert_eq!(list["context"]["task"], "retouch");
+    let black = &list["controls"][1];
+    assert_eq!(black["key"], "black");
+    assert_eq!(black["explained"]["visibility"], "folded");
+    // The bench's box is what `controls.context` reports.
+    let cx = g.run_command("controls.context", &json!({})).unwrap();
+    assert_eq!(cx["keys"]["box"], list["context"]["box"]);
+
+    // The bar sets the shared keys too: a click on its density.
+    let mut h = harness(BenchPage::new(
+        helios_controls_gallery::bench::Bench::with_contexts(
+            helios_controls::HeliosRegistry::standard(),
+            g.bench.bench.contexts(),
+        ),
+    ));
+    h.run();
+    h.get_by_label("raw").click();
+    h.run();
+    assert!(!g.contexts().keys.image.raw, "unticked through the bar");
+}
+
+/// The scenarios' bench in a retouch context, its black level changed on
+/// a picture: shown (changed), contrast folded by a rule, the profile by
+/// its tier.
+fn explained_page() -> BenchPage {
+    let mut b = helios_controls_gallery::bench::Bench::default();
+    b.load_sample();
+    b.nudge("black", 20, "pointer").unwrap();
+    b.set_context(
+        &json!({"task": "retouch", "image": {"raw": false, "edited": true, "masked": false}}),
+    )
+    .unwrap();
+    BenchPage::new(b)
+}
+
+#[test]
+fn snapshots_of_the_context_bar_and_the_reason_pane() {
+    let mut results = egui_kittest::SnapshotResults::new();
+    let mut h = Harness::builder()
+        .with_size(vec2(760.0, 90.0))
+        .build_ui_state(|ui, p: &mut BenchPage| p.context_bar(ui), explained_page());
+    h.run();
+    assert!(h.query_by_label("Task").is_some());
+    assert!(h.query_by_label_contains("Space: regular").is_some());
+    snapshot_into(&mut h, "bench-context-bar", &mut results);
+
+    let mut h = Harness::builder()
+        .with_size(vec2(260.0, 720.0))
+        .build_ui_state(
+            |ui, p: &mut BenchPage| {
+                p.last = p.bench.resolve().ok().map(|r| r.0);
+                p.reasons(ui);
+            },
+            explained_page(),
+        );
+    h.run();
+    assert!(h.query_by_label("Contrast · folded").is_some());
+    assert!(h.query_by_label("Black level · shown").is_some());
+    snapshot_into(&mut h, "bench-reasons", &mut results);
+    results.unwrap();
+}
+
+#[test]
+fn the_mode_switch_shows_the_hud_as_chips() {
+    let mut page = BenchPage::default();
+    page.bench.load_sample();
+    let mut h = harness(page);
+    h.run();
+    h.get_by_label("HUD").click();
+    h.run();
+    assert!(h.query_by_label("HUD chip: Exposure 0.00 EV").is_some());
+    assert!(
+        h.query_by_role_and_label(Role::Slider, "Exposure")
+            .is_none()
+    );
+    h.get_by_label("Toolbar").click();
+    h.run();
+    assert_eq!(
+        h.state().bench.keys().card_box.surface,
+        helios_controls::Surface::Toolbar
+    );
+    assert!(
+        h.query_by_role_and_label(Role::Slider, "Exposure")
+            .is_some()
+    );
+}
+
 /// The harness's snapshot, compared with `tests/snapshots/<name>.png`;
 /// a new one is written to the bench box's results (as in `gallery.rs`).
 fn snapshot_into<S>(

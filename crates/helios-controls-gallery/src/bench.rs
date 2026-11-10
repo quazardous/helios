@@ -21,21 +21,44 @@
 //!   through the value flow: a gesture previews, commits one undo step or
 //!   cancels with no trace.
 //!
+//! Bench B (slice 8) adds the switches and the measures:
+//!
+//! - The bench resolves in the **shared context** of the `controls.*`
+//!   commands ([`SharedContexts`], the one `register_with` takes), so the
+//!   context bar and `controls.context` read and set the same keys; its
+//!   box follows its width, its [`BenchMode`] (the surface) and the
+//!   density.
+//! - A [`BenchMode`] shows the composition on a panel, a dock, a toolbar,
+//!   a float, or as HUD chips (the HUD has no slots: each control's chip
+//!   form, or a note that it has none).
+//! - [`explain`] says, per control, its slot, orientation,
+//!   representation and visibility, why, and which rule or layout decided
+//!   it: the placement and reason pane, and `controls.bench.list`.
+//! - A bench saves as data ([`Saved`]): the composition (tiers, variants,
+//!   the card's rules), its context, its mode and width, and the person's
+//!   layout under the setting key `controls.layout.bench`
+//!   (`docs/design/controls.md`, section 3.9).
+//! - [`Bench::sample`] is the scenarios' bench (`control-contexts.md`,
+//!   section 5): develop basics and a gradient mask case, with tiers and
+//!   rules.
+//!
 //! The drawing is in [`crate::bench_ui`].
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use egui_hudget::commands::CommandInfo;
+use std::sync::{MutexGuard, PoisonError};
+
+use egui_hudget::commands::{CommandInfo, Contexts, SharedContexts};
+use egui_hudget::context::{Rule, Tier};
 use egui_hudget::flow::{self, Cause, GestureOf, Outcome, Steps};
-use egui_hudget::model::{Control, ValueSpec, ValueType};
-use egui_hudget::resolve::Layouts;
-use egui_hudget::slot::{Chrome, ChromeKind};
+use egui_hudget::model::{Control, Representation, ValueSpec, ValueType, representation_name};
+use egui_hudget::resolve::{Layout, Layouts, Placement, Source, Visibility};
+use egui_hudget::slot::{Chrome, ChromeKind, Orientation};
 use egui_hudget::value::{MemoryStore, ParamDescriptor, ParamType, Value, ValueSource, ValueStore};
 use egui_hudget::{CardPlacement, ContextKeys, Registry};
 use helios_controls::card::{Card, CardGroup, CardItem};
-use helios_controls::context::{CardBox, Density};
+use helios_controls::context::CardBox;
 use helios_controls::render;
-use helios_controls::resolve::Moment;
 use helios_controls::{HeliosRegistry as _, Surface};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value as Json, json};
@@ -185,8 +208,45 @@ fn implicit_descriptors() -> Vec<(&'static str, &'static str, ParamDescriptor)> 
     ]
 }
 
+/// The sample parameters of the scenarios' bench (`control-contexts.md`,
+/// section 5): a develop card's black level and contrast, and a gradient
+/// mask's feather, angle and profile; each with its shelf group.
+fn sample_descriptors() -> Vec<(&'static str, &'static str, ParamDescriptor)> {
+    let mut black = ParamDescriptor::float("Black level", -0.1, 0.1, 0.0);
+    black.step = 0.001;
+    black.coarse = 0.01;
+    black.precision = 3;
+    let contrast = ParamDescriptor::float("Contrast", -1.0, 1.0, 0.0);
+    let mut feather = ParamDescriptor::float("Feather", 0.0, 200.0, 20.0);
+    feather.unit = Some("px".into());
+    feather.step = 1.0;
+    feather.coarse = 10.0;
+    feather.precision = 0;
+    let mut angle = ParamDescriptor::float("Angle", -180.0, 180.0, 0.0);
+    angle.unit = Some("°".into());
+    angle.step = 1.0;
+    angle.coarse = 15.0;
+    angle.precision = 0;
+    let mut profile =
+        ParamDescriptor::new(ParamType::Choice, "Profile", Value::Choice("Linear".into()));
+    profile.choices = vec!["Linear".into(), "Smooth".into(), "Sigmoid".into()];
+    vec![
+        ("black", SAMPLE_DEVELOP, black),
+        ("contrast", SAMPLE_DEVELOP, contrast),
+        ("feather", SAMPLE_MASK, feather),
+        ("angle", SAMPLE_MASK, angle),
+        ("profile", SAMPLE_MASK, profile),
+    ]
+}
+
+/// The shelf group of the develop card's sample parameters.
+pub const SAMPLE_DEVELOP: &str = "Sample: develop basics";
+/// The shelf group of the gradient mask's sample parameters.
+pub const SAMPLE_MASK: &str = "Sample: gradient mask";
+
 /// What can go on the bench, in shelf order: business controls grouped by
-/// purpose, then the implicit controls by value type.
+/// purpose, the scenarios' sample parameters, then the implicit controls
+/// by value type.
 #[derive(Clone, Debug)]
 pub struct Shelf {
     pub entries: Vec<ShelfEntry>,
@@ -209,6 +269,18 @@ impl Shelf {
             })
             .collect();
         entries.sort_by(|a, b| a.group.cmp(&b.group).then(a.label.cmp(&b.label)));
+        for (name, group, d) in sample_descriptors() {
+            let control = egui_hudget::implicit(&format!("shelf/{name}"), &d);
+            entries.push(ShelfEntry {
+                name: name.to_owned(),
+                control: control.id.clone(),
+                label: d.label.clone(),
+                group: group.to_owned(),
+                hint: "Sample parameter of the scenarios".to_owned(),
+                descriptor: d,
+            });
+            let _ = registry.register(control);
+        }
         for (name, hint, d) in implicit_descriptors() {
             let control = egui_hudget::implicit(&format!("shelf/{name}"), &d);
             entries.push(ShelfEntry {
@@ -247,11 +319,37 @@ impl Shelf {
     }
 }
 
-/// A control on the bench: its key there, and its control's id.
+/// A control on the bench: its key there, its control's id, the variant
+/// picked (the default when `None`) and how rare it is (its tier).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Piece {
     pub key: String,
     pub control: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub variant: Option<String>,
+    #[serde(default, skip_serializing_if = "Tier::is_standard")]
+    pub tier: Tier,
+}
+
+impl Piece {
+    /// A control in its default variant, at the standard tier.
+    pub fn new(key: &str, control: &str) -> Self {
+        Self {
+            key: key.into(),
+            control: control.into(),
+            variant: None,
+            tier: Tier::Standard,
+        }
+    }
+
+    /// Its card item.
+    fn item(&self) -> CardItem {
+        let item = CardItem::control(&self.key, &self.control).tier(self.tier);
+        match &self.variant {
+            Some(v) => item.variant(v),
+            None => item,
+        }
+    }
 }
 
 /// A case on the bench: parts under a legend, with optional help text and
@@ -314,10 +412,30 @@ pub enum Origin {
     Chrome { case: String, kind: ChromeKind },
 }
 
-/// What is on the bench, in logical order. Saved as data (slice 8).
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+/// What is on the bench, in logical order, and the card's rules over the
+/// context keys. Saved as data ([`Saved`]).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Composition {
     pub entries: Vec<Entry>,
+    /// The card's rules; a part a rule names that is not on the bench is
+    /// left out of it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rules: Vec<Rule>,
+}
+
+/// A rule with only the parts on the bench.
+fn prune(rule: &Rule, keys: &[&str]) -> Rule {
+    let mut r = rule.clone();
+    for list in [
+        &mut r.effect.fold,
+        &mut r.effect.show,
+        &mut r.effect.inapplicable,
+        &mut r.effect.emphasise,
+        &mut r.effect.hud,
+    ] {
+        list.retain(|k| keys.contains(&k.as_str()));
+    }
+    r
 }
 
 impl Composition {
@@ -333,7 +451,16 @@ impl Composition {
         out
     }
 
-    /// Every control, in logical order.
+    /// A control on the bench, to change its tier or variant.
+    pub fn piece_mut(&mut self, key: &str) -> Option<&mut Piece> {
+        self.entries.iter_mut().find_map(|e| match e {
+            Entry::Control(p) if p.key == key => Some(p),
+            Entry::Case(c) => c.parts.iter_mut().find(|p| p.key == key),
+            Entry::Control(_) => None,
+        })
+    }
+
+    /// Every control, in logical order, with its case.
     pub fn pieces(&self) -> Vec<(&Piece, Option<&BenchCase>)> {
         let mut out = Vec::new();
         for e in &self.entries {
@@ -529,7 +656,7 @@ impl Composition {
         for (i, e) in self.entries.iter().enumerate() {
             match e {
                 Entry::Control(p) => {
-                    items.push(CardItem::control(&p.key, &p.control));
+                    items.push(p.item());
                     origins.push(Origin::Control {
                         key: p.key.clone(),
                         spot: Spot::top(i),
@@ -553,7 +680,7 @@ impl Composition {
                         chrome(ChromeKind::Help, Some(help));
                     }
                     for (j, p) in c.parts.iter().enumerate() {
-                        items.push(CardItem::control(&p.key, &p.control));
+                        items.push(p.item());
                         origins.push(Origin::Control {
                             key: p.key.clone(),
                             spot: Spot::in_case(&c.key, j),
@@ -574,6 +701,8 @@ impl Composition {
         }
         let mut card = Card::new(items);
         card.groups = groups;
+        let keys: Vec<&str> = self.keys();
+        card.rules = self.rules.iter().map(|r| prune(r, &keys)).collect();
         (card, origins)
     }
 }
@@ -601,9 +730,39 @@ pub const COMMANDS: &[CommandInfo] = &[
         read_only: false,
     },
     CommandInfo {
+        name: "controls.bench.part",
+        help: "Changes a control on the bench: {key}, optional {tier} (essential, standard, expert) and {variant} (its declaration), {visibility} (shown, hidden, or null) and {representation} (full, compact, simplified, or null), pinned in the person's layout",
+        read_only: false,
+    },
+    CommandInfo {
+        name: "controls.bench.rules",
+        help: "Sets the bench card's rules over the context keys: {rules}, a list of {when, effect, reason, source}",
+        read_only: false,
+    },
+    CommandInfo {
+        name: "controls.bench.mode",
+        help: "Shows the bench as a {mode}: panel, dock, toolbar, hud or float; optional {width} in points. The box follows (set the other keys with `controls.context`)",
+        read_only: false,
+    },
+    CommandInfo {
         name: "controls.bench.list",
-        help: "What is on the bench: its width and box, each control (key, control, case, value, placement: slot, representation, orientation, rect) and each case",
+        help: "What is on the bench: its mode, width and context, each control (key, control, case, tier, value, placement: slot, representation, orientation, rect, visibility, why and what decided it) and each case",
         read_only: true,
+    },
+    CommandInfo {
+        name: "controls.bench.save",
+        help: "Saves the bench (composition, context, mode, width, and the person's layout as the `controls.layout.bench` setting); answers it as {bench}, and writes it to {path} when given",
+        read_only: true,
+    },
+    CommandInfo {
+        name: "controls.bench.load",
+        help: "Loads a saved bench, from {bench} (what `controls.bench.save` answers) or from the file at {path}; its values go back to their defaults",
+        read_only: false,
+    },
+    CommandInfo {
+        name: "controls.bench.sample",
+        help: "Loads the scenarios' bench: develop basics and a gradient mask case, with tiers and rules",
+        read_only: false,
     },
     CommandInfo {
         name: "controls.bench.clear",
@@ -611,6 +770,199 @@ pub const COMMANDS: &[CommandInfo] = &[
         read_only: false,
     },
 ];
+
+/// How the bench shows its composition: on a boxed surface (a panel, a
+/// dock, a toolbar, a float), or as HUD chips.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum BenchMode {
+    #[default]
+    Panel,
+    Dock,
+    Toolbar,
+    Hud,
+    Float,
+}
+
+impl BenchMode {
+    pub const ALL: [BenchMode; 5] = [
+        BenchMode::Panel,
+        BenchMode::Dock,
+        BenchMode::Toolbar,
+        BenchMode::Hud,
+        BenchMode::Float,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            BenchMode::Panel => "Panel",
+            BenchMode::Dock => "Dock",
+            BenchMode::Toolbar => "Toolbar",
+            BenchMode::Hud => "HUD",
+            BenchMode::Float => "Float",
+        }
+    }
+
+    /// The surface the composition is laid out on.
+    pub fn surface(self) -> Surface {
+        match self {
+            BenchMode::Panel => Surface::Panel,
+            BenchMode::Dock => Surface::Dock,
+            BenchMode::Toolbar => Surface::Toolbar,
+            BenchMode::Hud => Surface::Hud,
+            BenchMode::Float => Surface::Float,
+        }
+    }
+
+    /// Whether it lays controls out in slots (every mode but the HUD).
+    pub fn boxed(self) -> bool {
+        self.surface().is_boxed()
+    }
+}
+
+/// A control's HUD and image forms, as declared (the HUD and the image
+/// have no slots: a chip, a gizmo).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct HudForm {
+    pub key: String,
+    pub label: String,
+    /// Its variant declares a HUD chip.
+    pub chip: bool,
+    /// Its variant declares a gizmo on the image.
+    pub gizmo: bool,
+    /// What the chip reads.
+    pub readout: String,
+}
+
+/// One control's placement, explained: the placement and reason pane.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct Explained {
+    pub key: String,
+    pub label: String,
+    /// Its slot (`1x1`) and the columns it spans, when placed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub slot: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub orientation: Option<Orientation>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub representation: Option<Representation>,
+    /// `shown`, `folded` or `not applicable`.
+    pub visibility: &'static str,
+    /// Why it is there, or not.
+    pub why: String,
+    /// The rule, layout or engine that decided it.
+    pub decided_by: String,
+    /// The other reasons it carries (a fallback, a reveal, a wait).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<String>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub deferred: bool,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub emphasised: bool,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub changed: bool,
+}
+
+/// Who a reason's source is, as the pane reads it.
+fn source_name(source: Source) -> &'static str {
+    match source {
+        Source::Detail => "the detail level, against its tier",
+        Source::Group => "a rule of the card",
+        Source::Profile => "the profile",
+        Source::Layout => "the person's layout",
+        Source::Size => "the slot engine: no room in the box",
+        Source::Changed => "a changed value is never folded",
+        Source::Revealed => "revealed for the moment",
+        Source::Deferred => "anti-jump: waits for the pointer to leave",
+        Source::Fallback => "the physical limits: a fallback",
+    }
+}
+
+fn reason_line(r: &egui_hudget::resolve::Reason) -> String {
+    match &r.when {
+        Some(when) => format!("{} (when `{when}`)", r.text),
+        None => r.text.clone(),
+    }
+}
+
+/// One placement, explained: its slot and form, its visibility, why, and
+/// what decided it; `columns` is the box's width in slot columns.
+pub fn explain(p: &Placement, columns: f32) -> Explained {
+    let label = p.label.clone().unwrap_or_else(|| p.key.clone());
+    let notes: Vec<String> = p
+        .reasons
+        .iter()
+        .map(|r| format!("{}: {}", source_name(r.source), reason_line(r)))
+        .collect();
+    let rep = p.representation.map_or("none", representation_name);
+    let slot = p.slot.map(|s| {
+        format!(
+            "{} · {} column{}",
+            s.units,
+            s.span,
+            if s.span == 1 { "" } else { "s" }
+        )
+    });
+    let (visibility, why, decided_by) = match &p.visibility {
+        Visibility::Shown => {
+            let decided = match p.reasons.last() {
+                Some(r) => source_name(r.source).to_owned(),
+                None => "the declaration and the slot engine (size policy)".to_owned(),
+            };
+            let why = format!(
+                "{rep} in {} of a {columns:.1}-column box",
+                slot.as_deref().unwrap_or("no slot")
+            );
+            ("shown", why, decided)
+        }
+        Visibility::Folded { reason } => (
+            "folded",
+            reason_line(reason),
+            source_name(reason.source).to_owned(),
+        ),
+        Visibility::NotApplicable { reason } => (
+            "not applicable",
+            reason_line(reason),
+            source_name(reason.source).to_owned(),
+        ),
+    };
+    Explained {
+        key: p.key.clone(),
+        label,
+        slot,
+        orientation: p.orientation,
+        representation: p.representation,
+        visibility,
+        why,
+        decided_by,
+        notes,
+        deferred: p.deferred,
+        emphasised: p.emphasised,
+        changed: p.changed,
+    }
+}
+
+/// The setting key of the bench card's layout (`controls.layout.<card>`).
+pub const LAYOUT_KEY: &str = "controls.layout.bench";
+
+/// What a saved bench says it is.
+pub const FORMAT: &str = "helios-controls-bench/1";
+
+/// A bench as data: the composition, its context, its mode and width, and
+/// the person's settings for its card (its layout under [`LAYOUT_KEY`],
+/// in the Layout settings format of `controls.md`, section 3.9).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Saved {
+    pub format: String,
+    pub mode: BenchMode,
+    pub width: f32,
+    /// The keys a person sets: task, detail, image, tool, device, density
+    /// (`controls.context`'s names; the space follows the box).
+    pub context: Json,
+    pub composition: Composition,
+    #[serde(default)]
+    pub settings: BTreeMap<String, Json>,
+}
 
 /// The bench: its shelf, its composition, its values and its box.
 pub struct Bench {
@@ -629,7 +981,15 @@ pub struct Bench {
     pub last: BTreeMap<String, String>,
     /// The bench's width, in points.
     pub width: f32,
-    keys: ContextKeys,
+    /// The surface it shows the composition on.
+    pub mode: BenchMode,
+    /// The person's layout of the bench's card: pins per part.
+    pub layout: Layout,
+    /// The pointer is over the bench (the drawing says): context changes
+    /// wait until it leaves.
+    pub pointer_in: bool,
+    /// The context shared with the `controls.*` commands.
+    contexts: SharedContexts,
     /// The last resolution and the card it was of: hysteresis holds while
     /// the card is the same.
     previous: Option<(Card, CardPlacement)>,
@@ -643,17 +1003,16 @@ impl Default for Bench {
 }
 
 impl Bench {
-    /// An empty bench over a registry's controls.
+    /// An empty bench over a registry's controls, in a context of its own.
     pub fn new(registry: Registry) -> Self {
+        Self::with_contexts(registry, SharedContexts::default())
+    }
+
+    /// An empty bench resolved in a context it shares with the
+    /// `controls.*` commands (`controls.context` sets its keys).
+    pub fn with_contexts(registry: Registry, contexts: SharedContexts) -> Self {
         let (shelf, registry) = Shelf::of(registry);
-        let mut keys = ContextKeys::default();
-        keys.set_box(CardBox::from_points(
-            Surface::Panel,
-            DEFAULT_WIDTH,
-            2000.0,
-            Density::default(),
-        ));
-        Self {
+        let bench = Self {
             registry,
             shelf,
             composition: Composition::default(),
@@ -663,29 +1022,143 @@ impl Bench {
             set_gesture: None,
             last: BTreeMap::new(),
             width: DEFAULT_WIDTH,
-            keys,
+            mode: BenchMode::default(),
+            layout: Layout::default(),
+            pointer_in: false,
+            contexts,
             previous: None,
             next_case: 1,
+        };
+        bench.sync_box();
+        bench
+    }
+
+    /// The scenarios' bench (`control-contexts.md`, section 5): exposure,
+    /// black level and contrast, then a "Gradient mask" case of feather,
+    /// angle and profile. Exposure and feather are essential, the profile
+    /// expert; contrast and black level fold while retouching; the black
+    /// level does not apply to a picture (it is raw only); the gradient
+    /// tool emphasises the mask's parts.
+    pub fn sample(registry: Registry) -> Self {
+        let mut b = Self::new(registry);
+        b.load_sample();
+        b
+    }
+
+    /// Replaces what is on the bench with the scenarios' bench.
+    pub fn load_sample(&mut self) {
+        let piece = |key: &str, tier| Piece {
+            tier,
+            ..Piece::new(key, &format!("implicit:shelf/{key}"))
+        };
+        let composition = Composition {
+            entries: vec![
+                Entry::Control(Piece {
+                    tier: Tier::Essential,
+                    ..Piece::new("exposure", helios_controls::catalogue::EXPOSURE)
+                }),
+                Entry::Control(piece("black", Tier::Standard)),
+                Entry::Control(piece("contrast", Tier::Standard)),
+                Entry::Case(BenchCase {
+                    key: "gradient".into(),
+                    legend: "Gradient mask".into(),
+                    help: None,
+                    separator: true,
+                    parts: vec![
+                        piece("feather", Tier::Essential),
+                        piece("angle", Tier::Standard),
+                        piece("profile", Tier::Expert),
+                    ],
+                }),
+            ],
+            rules: vec![
+                Rule::new("ctl.task == 'retouch'")
+                    .because("Folded while retouching")
+                    .fold(&["black", "contrast"]),
+                Rule::new("!ctl.image.raw")
+                    .because("Raw only")
+                    .inapplicable(&["black"]),
+                Rule::new("ctl.tool == 'gradient'").emphasise(&["feather", "angle"]),
+            ],
+        };
+        let saved = Saved {
+            format: FORMAT.into(),
+            mode: self.mode,
+            width: self.width,
+            context: json!({}),
+            composition,
+            settings: BTreeMap::new(),
+        };
+        // The sample is built from the shelf: it always loads.
+        let _ = self.load(saved);
+    }
+
+    fn lock(&self) -> MutexGuard<'_, Contexts> {
+        self.contexts.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// The context it shares with the `controls.*` commands.
+    pub fn contexts(&self) -> SharedContexts {
+        self.contexts.clone()
+    }
+
+    /// The box from the width, the mode's surface and the density; the
+    /// space follows with its hysteresis.
+    fn sync_box(&self) {
+        let mut c = self.lock();
+        let b = CardBox::from_points(self.mode.surface(), self.width, 2000.0, c.keys.density);
+        if c.keys.card_box != b {
+            c.keys.set_box(b);
         }
     }
 
-    /// The context keys the bench is resolved in (the box from its
-    /// width).
-    pub fn keys(&self) -> &ContextKeys {
-        &self.keys
+    /// The context keys the bench is resolved in (the box from its width
+    /// and mode).
+    pub fn keys(&self) -> ContextKeys {
+        self.sync_box();
+        self.lock().keys.clone()
+    }
+
+    /// Sets context keys as `controls.context` does (`task`, `detail`,
+    /// `image`, `tool`, `device`, `density`…); a task change ends the
+    /// reveals. The box stays the bench's.
+    pub fn set_context(&self, args: &Json) -> Result<(), String> {
+        let r = egui_hudget::commands::set_context(&mut self.lock(), args);
+        self.sync_box();
+        r
     }
 
     /// Sets the bench's width, held to [`WIDTH_RANGE`]; the box follows,
     /// the space key with its hysteresis.
     pub fn set_width(&mut self, width: f32) {
         self.width = width.clamp(WIDTH_RANGE.0, WIDTH_RANGE.1);
-        let density = self.keys.density;
-        self.keys.set_box(CardBox::from_points(
-            Surface::Panel,
-            self.width,
-            2000.0,
-            density,
-        ));
+        self.sync_box();
+    }
+
+    /// Shows the composition in another mode; the box follows.
+    pub fn set_mode(&mut self, mode: BenchMode) {
+        self.mode = mode;
+        self.sync_box();
+    }
+
+    /// Shows a folded part for the moment (until the task changes), as
+    /// `controls.reveal` does.
+    pub fn reveal(&self, key: &str) {
+        self.lock()
+            .moments
+            .entry(NODE.to_owned())
+            .or_default()
+            .revealed
+            .insert(key.to_owned());
+    }
+
+    /// Shows every part for the moment, as `controls.reveal_all` does.
+    pub fn reveal_all(&self) {
+        self.lock()
+            .moments
+            .entry(NODE.to_owned())
+            .or_default()
+            .reveal_all = true;
     }
 
     /// A free key for a control named `name`: `name`, then `name-2`…
@@ -712,13 +1185,8 @@ impl Bench {
             .ok_or_else(|| format!("nothing named `{name}` on the shelf"))?;
         let key = self.free_key(&entry.name);
         let spot = at.unwrap_or_else(|| Spot::top(self.composition.entries.len()));
-        self.composition.insert(
-            Entry::Control(Piece {
-                key: key.clone(),
-                control: entry.control.clone(),
-            }),
-            &spot,
-        )?;
+        self.composition
+            .insert(Entry::Control(Piece::new(&key, &entry.control)), &spot)?;
         self.store.declare(&path_of(&key), entry.descriptor);
         Ok(key)
     }
@@ -744,9 +1212,10 @@ impl Bench {
         Ok(key)
     }
 
-    /// Takes everything off the bench.
+    /// Takes everything off the bench, its rules and layout too.
     pub fn clear(&mut self) {
         self.composition = Composition::default();
+        self.layout = Layout::default();
     }
 
     /// The value of a control on the bench.
@@ -759,13 +1228,10 @@ impl Bench {
         let Some(v) = self.value(key) else {
             return String::new();
         };
-        let control = self
-            .composition
-            .pieces()
-            .into_iter()
-            .find(|(p, _)| p.key == key)
-            .and_then(|(p, _)| self.registry.get(&p.control));
-        match (&v, control.and_then(|c| c.value.number())) {
+        match (
+            &v,
+            self.control_of(key).and_then(|c| c.value.number().cloned()),
+        ) {
             (Value::Float(_) | Value::Int(_), Some(n)) => n.format(v.as_f64().unwrap_or(0.0)),
             (Value::Bool(b), _) => if *b { "on" } else { "off" }.to_owned(),
             (Value::Choice(s) | Value::Text(s), _) => s.clone(),
@@ -775,8 +1241,9 @@ impl Bench {
     }
 
     /// The bench resolved in its box: the card of its composition through
-    /// `resolve`, with the previous resolution for hysteresis while the
-    /// card is unchanged; and where each item comes from.
+    /// `resolve`, with the previous resolution for hysteresis and
+    /// anti-jump while the card is unchanged; and where each item comes
+    /// from. Refused in the HUD, which has no slots ([`Bench::hud`]).
     pub fn resolve(&mut self) -> Result<(CardPlacement, Vec<Origin>), String> {
         let (card, origins) = self.composition.card();
         let p = self.resolve_card(&card, true)?;
@@ -792,13 +1259,25 @@ impl Bench {
     }
 
     fn resolve_card(&self, card: &Card, keep: bool) -> Result<CardPlacement, String> {
+        if !self.mode.boxed() {
+            return Err(format!(
+                "The {} has no slots: each control shows as its chip",
+                self.mode.label()
+            ));
+        }
+        self.sync_box();
         let values = card
             .keys()
             .filter_map(|k| Some((k.to_owned(), self.value(k)?.to_json())))
             .collect();
-        let moment = Moment {
-            gesture_open: !self.gestures.is_empty() || self.set_gesture.is_some(),
-            ..Moment::default()
+        let (keys, moment) = {
+            let c = self.lock();
+            let mut moment = c.moments.get(NODE).cloned().unwrap_or_default();
+            moment.gesture_open =
+                !self.gestures.is_empty() || self.set_gesture.is_some() || c.hand.gesture_open;
+            moment.pointer_in_panel = self.pointer_in || c.hand.pointer_in_panel;
+            moment.handled.clone_from(&c.hand.handled);
+            (c.keys.clone(), moment)
         };
         let previous = self
             .previous
@@ -808,12 +1287,41 @@ impl Bench {
         helios_controls::resolve::resolve(
             &self.registry,
             card,
-            &self.keys,
-            &Layouts::default(),
+            &keys,
+            &Layouts::person(self.layout.clone()),
             &values,
             &moment,
             previous,
         )
+    }
+
+    /// Each control's HUD and image forms: the HUD has no slots, a control
+    /// shows there as its chip when its variant declares one.
+    pub fn hud(&self) -> Vec<HudForm> {
+        self.composition
+            .pieces()
+            .into_iter()
+            .map(|(p, _)| {
+                let c = self.registry.get(&p.control);
+                let v = c.and_then(|c| match &p.variant {
+                    Some(id) => c.variants.iter().find(|v| &v.id == id),
+                    None => c.variants.first(),
+                });
+                HudForm {
+                    key: p.key.clone(),
+                    label: c.map_or_else(|| p.key.clone(), |c| c.label.clone()),
+                    chip: v.is_some_and(|v| v.chip),
+                    gizmo: v.is_some_and(|v| v.gizmo),
+                    readout: self.readout(&p.key),
+                }
+            })
+            .collect()
+    }
+
+    /// The last resolution's controls, explained (the reason pane).
+    pub fn explain(&self, placement: &CardPlacement) -> Vec<Explained> {
+        let columns = placement.keys.card_box.columns();
+        placement.controls().map(|p| explain(p, columns)).collect()
     }
 
     /// The control of a key on the bench.
@@ -836,6 +1344,36 @@ impl Bench {
                 render::Edit::Set { key, to, done } => self.set(&key, to, done),
             }
         }
+    }
+
+    /// Steps a number on the bench by `steps` of its step, through the
+    /// flow (one undo step), as a device's encoder or `controls.nudge`
+    /// would; answers how it ended.
+    pub fn nudge(&mut self, key: &str, steps: i64, device: &'static str) -> Result<String, String> {
+        let control = self
+            .control_of(key)
+            .ok_or_else(|| format!("nothing keyed `{key}` on the bench"))?;
+        let now = self
+            .value(key)
+            .and_then(|v| v.as_f64())
+            .ok_or_else(|| format!("`{key}` is not a number"))?;
+        let to = control.nudged(now, steps, false, false);
+        let result = flow::apply(
+            &mut self.store,
+            &self.steps,
+            &control,
+            &path_of(key),
+            flow::OneShot {
+                to,
+                force: false,
+                origin: device,
+                cause: Cause::Nudge,
+                device,
+            },
+        );
+        let text = outcome_text(result);
+        self.last.insert(key.to_owned(), text.clone());
+        Ok(text)
     }
 
     fn number(&mut self, key: &str, c: &render::Change) {
@@ -928,6 +1466,140 @@ impl Bench {
         self.store.redo().is_some()
     }
 
+    /// Changes a control on the bench: its tier and variant (its
+    /// declaration), and its visibility and representation pinned in the
+    /// person's layout (`null` unpins). Fields left out stay.
+    pub fn part(&mut self, key: &str, args: &Json) -> Result<(), String> {
+        let field = |k: &str| args.get(k);
+        let piece = self
+            .composition
+            .piece_mut(key)
+            .ok_or_else(|| format!("no control `{key}` on the bench"))?;
+        if let Some(t) = field("tier") {
+            piece.tier = serde_json::from_value(t.clone()).map_err(|e| format!("`tier`: {e}"))?;
+        }
+        if let Some(v) = field("variant") {
+            let id: Option<String> =
+                serde_json::from_value(v.clone()).map_err(|e| format!("`variant`: {e}"))?;
+            if let Some(id) = &id
+                && !self
+                    .registry
+                    .get(&piece.control)
+                    .is_some_and(|c| c.variants.iter().any(|v| &v.id == id))
+            {
+                return Err(format!("`{}` has no variant `{id}`", piece.control));
+            }
+            piece.variant = id;
+        }
+        let part = self.layout.parts.entry(key.to_owned()).or_default();
+        if let Some(v) = field("visibility") {
+            part.visibility =
+                serde_json::from_value(v.clone()).map_err(|e| format!("`visibility`: {e}"))?;
+        }
+        if let Some(r) = field("representation") {
+            part.representation =
+                serde_json::from_value(r.clone()).map_err(|e| format!("`representation`: {e}"))?;
+        }
+        if *part == egui_hudget::resolve::PartLayout::default() {
+            self.layout.parts.remove(key);
+        }
+        Ok(())
+    }
+
+    /// The bench as data: the composition, the context a person sets, the
+    /// mode and width, and the person's layout under [`LAYOUT_KEY`] (its
+    /// order the composition's).
+    pub fn save(&self) -> Saved {
+        let k = self.keys();
+        let mut layout = self.layout.clone();
+        layout.order = self
+            .composition
+            .keys()
+            .into_iter()
+            .map(str::to_owned)
+            .collect();
+        let mut settings = BTreeMap::new();
+        settings.insert(
+            LAYOUT_KEY.to_owned(),
+            serde_json::to_value(&layout).unwrap_or(Json::Null),
+        );
+        Saved {
+            format: FORMAT.into(),
+            mode: self.mode,
+            width: self.width,
+            context: json!({
+                "task": k.task,
+                "detail": k.detail,
+                "image": k.image,
+                "tool": k.tool,
+                "device": k.device,
+                "density": k.density,
+            }),
+            composition: self.composition.clone(),
+            settings,
+        }
+    }
+
+    /// Loads a saved bench: every control must be on the shelf (and its
+    /// variant declared); the values go back to their defaults. Refused,
+    /// it leaves the bench as it was.
+    pub fn load(&mut self, saved: Saved) -> Result<(), String> {
+        if saved.format != FORMAT {
+            return Err(format!(
+                "not a saved bench: format `{}`, not `{FORMAT}`",
+                saved.format
+            ));
+        }
+        let mut descriptors = Vec::new();
+        for (p, _) in saved.composition.pieces() {
+            let e = self
+                .shelf
+                .get(&p.control)
+                .ok_or_else(|| format!("`{}`: no control `{}` on the shelf", p.key, p.control))?;
+            if let Some(id) = &p.variant
+                && !self
+                    .registry
+                    .get(&p.control)
+                    .is_some_and(|c| c.variants.iter().any(|v| &v.id == id))
+            {
+                return Err(format!(
+                    "`{}`: `{}` has no variant `{id}`",
+                    p.key, p.control
+                ));
+            }
+            descriptors.push((p.key.clone(), e.descriptor.clone()));
+        }
+        let (card, _) = saved.composition.card();
+        card.check()?;
+        let layout: Layout = match saved.settings.get(LAYOUT_KEY) {
+            Some(l) => {
+                serde_json::from_value(l.clone()).map_err(|e| format!("{LAYOUT_KEY}: {e}"))?
+            }
+            None => Layout::default(),
+        };
+        // Checked first: a bad context leaves the bench as it was.
+        let mut trial = Contexts::default();
+        egui_hudget::commands::set_context(&mut trial, &saved.context)?;
+        self.set_context(&saved.context)?;
+        self.store = MemoryStore::new();
+        for (key, d) in descriptors {
+            self.store.declare(&path_of(&key), d);
+        }
+        self.gestures.clear();
+        self.set_gesture = None;
+        self.last.clear();
+        self.previous = None;
+        self.composition = saved.composition;
+        self.layout = layout;
+        self.lock().moments.remove(NODE);
+        while self.composition.holds(&format!("case-{}", self.next_case)) {
+            self.next_case += 1;
+        }
+        self.mode = saved.mode;
+        self.set_width(saved.width);
+        Ok(())
+    }
+
     /// Runs a `controls.bench.*` command.
     pub fn run(&mut self, name: &str, args: &Json) -> Result<Json, String> {
         let text = |k: &str| args.get(k).and_then(Json::as_str);
@@ -982,7 +1654,60 @@ impl Bench {
                 }
                 Ok(json!({ "key": case }))
             }
+            "controls.bench.part" => {
+                let key = key()?.to_owned();
+                self.part(&key, args)?;
+                Ok(json!({ "key": key, "layout": self.layout.parts.get(&key) }))
+            }
+            "controls.bench.rules" => {
+                let rules: Vec<Rule> = serde_json::from_value(
+                    args.get("rules").cloned().ok_or("`rules` is required")?,
+                )
+                .map_err(|e| format!("`rules`: {e}"))?;
+                let mut trial = self.composition.clone();
+                trial.rules = rules;
+                trial.card().0.check()?;
+                self.composition = trial;
+                Ok(json!({ "rules": self.composition.rules.len() }))
+            }
+            "controls.bench.mode" => {
+                let mode: BenchMode =
+                    serde_json::from_value(args.get("mode").cloned().ok_or("`mode` is required")?)
+                        .map_err(|e| format!("`mode`: {e}"))?;
+                self.set_mode(mode);
+                if let Some(w) = args.get("width").and_then(Json::as_f64) {
+                    self.set_width(w as f32);
+                }
+                Ok(json!({ "mode": self.mode, "width": self.width, "keys": self.keys().report() }))
+            }
             "controls.bench.list" => self.list(),
+            "controls.bench.save" => {
+                let saved = serde_json::to_value(self.save()).map_err(|e| e.to_string())?;
+                if let Some(path) = text("path") {
+                    let body = serde_json::to_string_pretty(&saved).map_err(|e| e.to_string())?;
+                    std::fs::write(path, body + "\n").map_err(|e| format!("{path}: {e}"))?;
+                }
+                Ok(json!({ "bench": saved, "path": text("path") }))
+            }
+            "controls.bench.load" => {
+                let saved = match (args.get("bench"), text("path")) {
+                    (Some(b), _) => b.clone(),
+                    (None, Some(path)) => {
+                        let body =
+                            std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
+                        serde_json::from_str(&body).map_err(|e| format!("{path}: {e}"))?
+                    }
+                    (None, None) => return Err("`bench` or `path` is required".into()),
+                };
+                let saved: Saved =
+                    serde_json::from_value(saved).map_err(|e| format!("not a saved bench: {e}"))?;
+                self.load(saved)?;
+                Ok(json!({ "order": self.composition.keys(), "mode": self.mode }))
+            }
+            "controls.bench.sample" => {
+                self.load_sample();
+                Ok(json!({ "order": self.composition.keys() }))
+            }
             "controls.bench.clear" => {
                 let n = self.composition.keys().len();
                 self.clear();
@@ -994,16 +1719,24 @@ impl Bench {
 
     /// What `controls.bench.list` answers.
     pub fn list(&mut self) -> Result<Json, String> {
-        let (placement, _) = self.resolve()?;
+        let placement = if self.mode.boxed() {
+            Some(self.resolve()?.0)
+        } else {
+            None
+        };
+        let hud = self.hud();
         let controls: Vec<Json> = self
             .composition
             .pieces()
             .into_iter()
             .map(|(p, case)| {
-                let placed = placement.get(&p.key);
+                let placed = placement.as_ref().and_then(|x| x.get(&p.key));
+                let explained = placed.map(|x| explain(x, self.keys().card_box.columns()));
                 json!({
                     "key": p.key,
                     "control": p.control,
+                    "variant": p.variant,
+                    "tier": p.tier,
                     "case": case.map(|c| c.key.clone()),
                     "value": self.value(&p.key).map(|v| v.to_json()),
                     "readout": self.readout(&p.key),
@@ -1013,6 +1746,8 @@ impl Bench {
                     "orientation": placed.and_then(|x| x.orientation),
                     "position": placed.and_then(|x| x.position),
                     "rect": placed.and_then(|x| x.rect),
+                    "explained": explained,
+                    "hud": hud.iter().find(|h| h.key == p.key),
                 })
             })
             .collect();
@@ -1031,13 +1766,18 @@ impl Bench {
                 Entry::Control(_) => None,
             })
             .collect();
+        let keys = self.keys();
         Ok(json!({
+            "mode": self.mode,
             "width": self.width,
-            "columns": self.keys.card_box.columns(),
-            "space": self.keys.space,
+            "columns": keys.card_box.columns(),
+            "space": keys.space,
+            "context": keys.report(),
             "order": self.composition.keys(),
             "controls": controls,
             "cases": cases,
+            "more": placement.as_ref().and_then(|p| p.more.clone()),
+            "pending": placement.as_ref().is_some_and(|p| p.pending),
             "undo_steps": self.store.undo_steps(),
         }))
     }
@@ -1285,5 +2025,200 @@ mod tests {
         assert!(rect(&wide, "exposure").w > rect(&narrow, "exposure").w);
         b.set_width(5000.0);
         assert_eq!(b.width, WIDTH_RANGE.1);
+    }
+
+    #[test]
+    fn the_sample_folds_by_tier_rule_and_relevance_and_says_why() {
+        let mut b = Bench::default();
+        b.load_sample();
+        assert_eq!(
+            b.composition.keys(),
+            [
+                "exposure", "black", "contrast", "feather", "angle", "profile"
+            ]
+        );
+        // At the standard detail, the expert profile folds.
+        let (p, _) = b.resolve().unwrap();
+        let why = b.explain(&p);
+        let profile = why.iter().find(|e| e.key == "profile").unwrap();
+        assert_eq!(profile.visibility, "folded");
+        assert_eq!(profile.decided_by, "the detail level, against its tier");
+        let exposure = why.iter().find(|e| e.key == "exposure").unwrap();
+        assert_eq!(exposure.visibility, "shown");
+        assert!(exposure.slot.is_some() && exposure.representation.is_some());
+        // Retouching folds contrast and black level by the card's rule.
+        b.set_context(&json!({"task": "retouch"})).unwrap();
+        let (p, _) = b.resolve().unwrap();
+        let contrast = explain(p.get("contrast").unwrap(), 2.0);
+        assert_eq!(contrast.visibility, "folded");
+        assert_eq!(contrast.decided_by, "a rule of the card");
+        assert!(
+            contrast.why.contains("ctl.task == 'retouch'"),
+            "{}",
+            contrast.why
+        );
+        // A picture: the black level does not apply.
+        b.set_context(
+            &json!({"task": "develop", "image": {"raw": false, "edited": false, "masked": false}}),
+        )
+        .unwrap();
+        let (p, _) = b.resolve().unwrap();
+        assert_eq!(
+            explain(p.get("black").unwrap(), 2.0).visibility,
+            "not applicable"
+        );
+        egui_hudget::resolve::reachable(&p).unwrap();
+        // Every slow-key combination keeps every control reachable.
+        let (card, _) = b.composition.card();
+        egui_hudget::resolve::reachable_everywhere(
+            &b.registry,
+            &card,
+            Surface::Panel,
+            &Layouts::person(b.layout.clone()),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn a_bench_saves_and_loads_with_its_context_and_layout() {
+        let mut b = Bench::default();
+        b.load_sample();
+        b.run(
+            "controls.bench.part",
+            &json!({"key": "exposure", "variant": "scrub", "representation": "compact"}),
+        )
+        .unwrap();
+        b.run(
+            "controls.bench.part",
+            &json!({"key": "angle", "visibility": "hidden"}),
+        )
+        .unwrap();
+        b.run(
+            "controls.bench.mode",
+            &json!({"mode": "dock", "width": 340}),
+        )
+        .unwrap();
+        b.set_context(&json!({"task": "retouch", "detail": "expert", "density": "compact"}))
+            .unwrap();
+        let saved = b.run("controls.bench.save", &json!({})).unwrap()["bench"].clone();
+        assert_eq!(saved["format"], FORMAT);
+        assert_eq!(
+            saved["settings"][LAYOUT_KEY]["parts"]["angle"]["visibility"],
+            "hidden"
+        );
+        assert_eq!(saved["settings"][LAYOUT_KEY]["order"][0], "exposure");
+        assert_eq!(saved["context"]["task"], "retouch");
+
+        let mut other = Bench::default();
+        other.add("toggle", None).unwrap();
+        other
+            .run("controls.bench.load", &json!({"bench": saved}))
+            .unwrap();
+        assert_eq!(other.composition, b.composition);
+        assert_eq!(other.mode, BenchMode::Dock);
+        assert!((other.width - 340.0).abs() < 0.5);
+        let k = other.keys();
+        assert_eq!(k.task, egui_hudget::context::Task::Retouch);
+        assert_eq!(k.density, egui_hudget::context::Density::Compact);
+        assert_eq!(k.card_box.surface, Surface::Dock);
+        let (p, _) = other.resolve().unwrap();
+        assert!(matches!(
+            p.get("angle").unwrap().visibility,
+            Visibility::Folded { .. }
+        ));
+        assert_eq!(other.value("feather"), Some(Value::Float(20.0)));
+        assert_eq!(other.save(), b.save());
+
+        // Refused: the bench stays as it was.
+        let mut bad = saved_of(&b);
+        bad["composition"]["entries"][0]["control"] = json!("nothing");
+        assert!(
+            other
+                .run("controls.bench.load", &json!({"bench": bad}))
+                .is_err()
+        );
+        let mut bad = saved_of(&b);
+        bad["format"] = json!("other");
+        assert!(
+            other
+                .run("controls.bench.load", &json!({"bench": bad}))
+                .is_err()
+        );
+        let mut bad = saved_of(&b);
+        bad["context"]["task"] = json!("sleep");
+        assert!(
+            other
+                .run("controls.bench.load", &json!({"bench": bad}))
+                .is_err()
+        );
+        assert_eq!(other.composition, b.composition);
+    }
+
+    fn saved_of(b: &Bench) -> Json {
+        serde_json::to_value(b.save()).unwrap()
+    }
+
+    #[test]
+    fn the_modes_lay_out_on_their_surface_and_the_hud_shows_chips() {
+        let mut b = Bench::default();
+        b.load_sample();
+        for mode in [
+            BenchMode::Panel,
+            BenchMode::Dock,
+            BenchMode::Toolbar,
+            BenchMode::Float,
+        ] {
+            b.set_mode(mode);
+            let (p, _) = b.resolve().unwrap();
+            assert_eq!(p.keys.card_box.surface, mode.surface());
+            egui_hudget::resolve::reachable(&p).unwrap();
+        }
+        b.set_mode(BenchMode::Hud);
+        assert!(b.resolve().is_err(), "the HUD has no slots");
+        let hud = b.hud();
+        assert!(hud.iter().find(|h| h.key == "exposure").unwrap().chip);
+        assert!(!hud.iter().find(|h| h.key == "feather").unwrap().chip);
+        let list = b.list().unwrap();
+        assert_eq!(list["mode"], "hud");
+        assert_eq!(list["controls"][0]["hud"]["chip"], true);
+    }
+
+    #[test]
+    fn rules_and_parts_are_checked() {
+        let mut b = Bench::default();
+        b.load_sample();
+        assert!(
+            b.run(
+                "controls.bench.rules",
+                &json!({"rules": [{"when": "ctl.tool == 'crop'", "effect": {"fold": ["feather"]}}]}),
+            )
+            .is_err(),
+            "a fast key never folds"
+        );
+        assert_eq!(b.composition.rules.len(), 3);
+        assert!(
+            b.run(
+                "controls.bench.part",
+                &json!({"key": "feather", "variant": "nope"})
+            )
+            .is_err()
+        );
+        // A rule naming a control taken off the bench still checks.
+        b.remove("black").unwrap();
+        assert!(b.resolve().is_ok());
+    }
+
+    #[test]
+    fn a_nudge_is_one_undo_step() {
+        let mut b = Bench::default();
+        b.load_sample();
+        assert_eq!(
+            b.nudge("feather", 3, "midi").unwrap(),
+            "committed: one undo step"
+        );
+        assert_eq!(b.readout("feather"), "23 px");
+        assert_eq!(b.store.undo_steps().len(), 1);
+        assert!(b.nudge("profile", 1, "midi").is_err(), "not a number");
     }
 }

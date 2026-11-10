@@ -16,11 +16,23 @@
 //! - **The values** column reads each control's value, the last outcome of
 //!   its change, and the undo steps, with undo and redo.
 //!
-//! Slice 8 adds the context bar above the bench and the placement and
-//! reason pane in the values column.
+//! - **The context bar** above the bench's tools sets every context key
+//!   (task, detail, image flags, tool, device, density) through the
+//!   context it shares with `controls.context`, and shows the space the
+//!   box's width gives. A change re-resolves the bench at once, unless the
+//!   pointer is over it: then it waits until the pointer leaves
+//!   (anti-jump).
+//! - **The mode switch** shows the composition on a panel, a dock, a
+//!   toolbar, a float (each with its slot grid), or as HUD chips.
+//! - **The placement and reason pane**, in the values column, says per
+//!   control its slot, orientation, representation, visibility, why, and
+//!   what decided it.
+//! - **Save** and **Load** keep a bench as a file (`controls.bench.save`,
+//!   `controls.bench.load`); **Sample** loads the scenarios' bench.
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use egui_hudget::context::{Density, Detail, Device, Task, Tier};
 use egui_hudget::slot::ChromeKind;
 use egui_pop::egui::{
     self, Align2, Color32, DragAndDrop, Pos2, Rect, Role, Sense, Stroke, StrokeKind, Ui, UiBuilder,
@@ -31,7 +43,9 @@ use helios_controls::render::{self, Drawn};
 use helios_controls::{CardPlacement, Control};
 
 use crate::EditorDrawings;
-use crate::bench::{Bench, Composition, Entry, Origin, Piece, ShelfEntry, Spot};
+use crate::bench::{Bench, BenchMode, Composition, Entry, Origin, Piece, ShelfEntry, Spot};
+use serde::Serialize;
+use serde_json::{Value as Json, json};
 
 /// What is dragged: a shelf entry by name, or a bench item by key.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -66,6 +80,50 @@ pub struct BenchPage {
     /// Where the pointer last was while something was dragged: the drop's
     /// place on the frame it is released.
     hover: Option<Pos2>,
+    /// The bench's zone in the last frame: the pointer over it holds a
+    /// context change (anti-jump).
+    zone: Option<Rect>,
+    /// The last resolution drawn: what the reason pane explains.
+    pub last: Option<CardPlacement>,
+    /// The file Save writes and Load reads.
+    pub file: String,
+    /// How the last save or load went.
+    pub message: Option<String>,
+}
+
+/// The tools the context bar offers (`ctl.tool`), none first.
+pub const TOOLS: [&str; 4] = ["", "gradient", "brush", "crop"];
+
+/// Every input device (`ctl.device`).
+pub const DEVICES: [Device; 5] = [
+    Device::Pointer,
+    Device::Pen,
+    Device::Touch,
+    Device::Keys,
+    Device::Midi,
+];
+
+/// A key's value as data (`develop`, `pointer`).
+fn name_of<T: Serialize>(v: T) -> String {
+    serde_json::to_value(v)
+        .ok()
+        .and_then(|v| v.as_str().map(str::to_owned))
+        .unwrap_or_default()
+}
+
+/// A drop-down of `all`, labelled `label`; answers the value picked.
+fn pick<T: Copy + PartialEq + Serialize>(ui: &mut Ui, label: &str, now: T, all: &[T]) -> Option<T> {
+    let mut chosen = None;
+    egui::ComboBox::from_label(label)
+        .selected_text(name_of(now))
+        .show_ui(ui, |ui| {
+            for v in all {
+                if ui.selectable_label(*v == now, name_of(*v)).clicked() && *v != now {
+                    chosen = Some(*v);
+                }
+            }
+        });
+    chosen
 }
 
 impl Default for BenchPage {
@@ -84,6 +142,10 @@ impl BenchPage {
             legend: "Case".into(),
             drawn: BTreeMap::new(),
             hover: None,
+            zone: None,
+            last: None,
+            file: "bench.controls.json".into(),
+            message: None,
         }
     }
 
@@ -106,6 +168,8 @@ impl BenchPage {
                 egui::Layout::top_down(egui::Align::Min),
                 |ui| {
                     ui.set_width(middle);
+                    self.context_bar(ui);
+                    ui.separator();
                     self.toolbar(ui);
                     ui.add_space(4.0);
                     self.bench_zone(ui);
@@ -200,24 +264,131 @@ impl BenchPage {
         r.clicked()
     }
 
-    /// The bench's tools: the layout mode, case tools, clear.
+    /// The context bar: every context key, set through the context the
+    /// bench shares with `controls.context`; the space the box gives.
+    pub fn context_bar(&mut self, ui: &mut Ui) {
+        let k = self.bench.keys();
+        let mut args = serde_json::Map::new();
+        ui.horizontal_wrapped(|ui| {
+            ui.strong("Context");
+            if let Some(t) = pick(ui, "Task", k.task, &Task::ALL) {
+                args.insert("task".into(), json!(t));
+            }
+            if let Some(d) = pick(ui, "Detail", k.detail, &Detail::ALL) {
+                args.insert("detail".into(), json!(d));
+            }
+            let mut image = k.image;
+            ui.label("Image");
+            let mut flags = false;
+            flags |= ui.checkbox(&mut image.raw, "raw").changed();
+            flags |= ui.checkbox(&mut image.edited, "edited").changed();
+            flags |= ui.checkbox(&mut image.masked, "masked").changed();
+            if flags {
+                args.insert("image".into(), json!(image));
+            }
+            let mut tool = None;
+            egui::ComboBox::from_label("Tool")
+                .selected_text(if k.tool.is_empty() { "none" } else { &k.tool })
+                .show_ui(ui, |ui| {
+                    for t in TOOLS {
+                        let name = if t.is_empty() { "none" } else { t };
+                        if ui.selectable_label(k.tool == t, name).clicked() && k.tool != t {
+                            tool = Some(t);
+                        }
+                    }
+                });
+            if let Some(t) = tool {
+                args.insert("tool".into(), json!(t));
+            }
+            if let Some(d) = pick(ui, "Device", k.device, &DEVICES) {
+                args.insert("device".into(), json!(d));
+            }
+            if let Some(d) = pick(ui, "Density", k.density, &Density::ALL) {
+                args.insert("density".into(), json!(d));
+            }
+            let space = format!(
+                "Space: {} ({:.1} columns)",
+                name_of(k.space),
+                k.card_box.columns()
+            );
+            ui.label(&space)
+                .on_hover_text("Derived from the bench's width in slot columns at the density, with half a unit of hysteresis");
+        });
+        if self.last.as_ref().is_some_and(|p| p.pending) {
+            ui.weak("A context change waits until the pointer leaves the bench.");
+        }
+        if !args.is_empty()
+            && let Err(e) = self.bench.set_context(&Json::Object(args))
+        {
+            self.message = Some(e);
+        }
+    }
+
+    /// The bench's tools: the mode, the layout mode, case tools, clear,
+    /// the sample, save and load.
     fn toolbar(&mut self, ui: &mut Ui) {
         ui.horizontal_wrapped(|ui| {
             ui.heading("Bench");
+            for m in BenchMode::ALL {
+                if ui
+                    .selectable_label(self.bench.mode == m, m.label())
+                    .on_hover_text(format!("Show the bench as a {}", m.label()))
+                    .clicked()
+                {
+                    self.bench.set_mode(m);
+                }
+            }
+            ui.separator();
             ui.toggle_value(&mut self.arranging, "Arrange")
                 .on_hover_text("Move, group and remove the controls; off, they are live");
             if ui.button("Clear").clicked() {
                 self.bench.clear();
                 self.selected.clear();
             }
+            if ui
+                .button("Sample")
+                .on_hover_text("The scenarios' bench: develop basics and a gradient mask")
+                .clicked()
+            {
+                self.bench.load_sample();
+                self.selected.clear();
+            }
             let k = self.bench.keys();
             ui.weak(format!(
-                "{:.0} pt · {} columns · {:?}",
+                "{:.0} pt · {} columns",
                 self.bench.width,
                 k.card_box.columns(),
-                k.space
             ));
         });
+        ui.horizontal(|ui| {
+            let r = ui.add(egui::TextEdit::singleline(&mut self.file).desired_width(180.0));
+            r.widget_info(|| WidgetInfo::labeled(Role::TextInput, true, "Bench file"));
+            if ui.button("Save").clicked() {
+                let out = self
+                    .bench
+                    .run("controls.bench.save", &json!({"path": self.file}));
+                self.message = Some(match out {
+                    Ok(_) => format!("Saved to {}", self.file),
+                    Err(e) => e,
+                });
+            }
+            if ui.button("Load").clicked() {
+                let out = self
+                    .bench
+                    .run("controls.bench.load", &json!({"path": self.file}));
+                self.selected.clear();
+                self.message = Some(match out {
+                    Ok(_) => format!("Loaded {}", self.file),
+                    Err(e) => e,
+                });
+            }
+            if let Some(m) = &self.message {
+                ui.weak(m);
+            }
+        });
+        if self.bench.mode == BenchMode::Toolbar {
+            ui.weak("A toolbar is one line of slots, the rest under More tools; the slot engine has no height limit yet, so this one grows down.");
+        }
         if !self.arranging {
             return;
         }
@@ -231,6 +402,20 @@ impl BenchPage {
         ui.horizontal_wrapped(|ui| {
             if self.selected.is_empty() {
                 ui.weak("Click controls to select them; drag them to move them.");
+            }
+            if let [one] = controls.as_slice()
+                && let Some(p) = self.bench.composition.piece_mut(one)
+            {
+                let tiers = [Tier::Essential, Tier::Standard, Tier::Expert];
+                if let Some(t) = pick(ui, "Tier", p.tier, &tiers) {
+                    p.tier = t;
+                }
+                let pinned = self.bench.layout.parts.get(one).and_then(|l| l.visibility);
+                let mut hidden = pinned == Some(egui_hudget::resolve::Pinned::Hidden);
+                if ui.checkbox(&mut hidden, "Hidden in the layout").changed() {
+                    let v = if hidden { json!("hidden") } else { Json::Null };
+                    let _ = self.bench.part(one, &json!({"visibility": v}));
+                }
             }
             if !controls.is_empty() {
                 let r = ui.add(egui::TextEdit::singleline(&mut self.legend).desired_width(120.0));
@@ -268,6 +453,14 @@ impl BenchPage {
     /// frames, the drop ghost, the layout mode's handles, and the width
     /// handle.
     pub fn bench_zone(&mut self, ui: &mut Ui) {
+        // The hand over the bench holds a context change (anti-jump).
+        let pointer = ui.input(|i| i.pointer.hover_pos());
+        self.bench.pointer_in = self.zone.zip(pointer).is_some_and(|(z, p)| z.contains(p));
+        if !self.bench.mode.boxed() {
+            self.last = None;
+            self.hud_zone(ui);
+            return;
+        }
         let (placement, origins) = match self.bench.resolve() {
             Ok(p) => p,
             Err(e) => {
@@ -303,6 +496,7 @@ impl BenchPage {
         let at = |r: &helios_controls::card::Rect| {
             Rect::from_min_size(origin + vec2(r.x, r.y), vec2(r.w, r.h))
         };
+        self.slot_grid(ui, zone, &placement);
         self.case_frames(ui, &placement, &at);
 
         // The card, as a module's card is drawn.
@@ -334,12 +528,113 @@ impl BenchPage {
         if !self.arranging {
             self.bench.apply(out.edits);
         }
+        for e in out.events {
+            match e {
+                render::CardEvent::Reveal(key) => self.bench.reveal(&key),
+                render::CardEvent::RevealAll => self.bench.reveal_all(),
+            }
+        }
         if self.arranging {
             self.handles(ui, &placement, &origins, &at);
         }
         self.drop(ui, zone, &placement, &origins, &at);
+        // The "More" row, below the card, is part of the bench's zone.
+        let zone = zone.union(child.min_rect());
         ui.allocate_rect(zone, Sense::hover());
         self.width_handle(ui, zone);
+        self.zone = Some(zone);
+        self.last = Some(placement);
+    }
+
+    /// The surface's slot grid behind the card: a line between slot
+    /// columns at the density; on a toolbar, its one line of slots.
+    fn slot_grid(&self, ui: &Ui, zone: Rect, placement: &CardPlacement) {
+        let keys = &placement.keys;
+        let column = keys.density.column();
+        let row = keys.density.row();
+        let v = ui.visuals();
+        let stroke = Stroke::new(
+            1.0,
+            v.widgets.noninteractive.bg_stroke.color.gamma_multiply(0.6),
+        );
+        let painter = ui.painter();
+        let columns = keys.card_box.columns().floor() as usize;
+        for c in 1..=columns {
+            let x = zone.left() + column * c as f32;
+            if x < zone.right() - 0.5 {
+                painter.vline(x, zone.y_range(), stroke);
+            }
+        }
+        if self.bench.mode == BenchMode::Toolbar {
+            let line = Rect::from_min_size(zone.min, vec2(zone.width(), row));
+            painter.rect_stroke(
+                line,
+                2.0,
+                Stroke::new(1.0, v.selection.stroke.color.gamma_multiply(0.6)),
+                StrokeKind::Inside,
+            );
+        }
+    }
+
+    /// The HUD: no slots, each control as its chip (a read-out) when its
+    /// variant declares one, else a note that it stays in the panel; and
+    /// the gizmos the controls declare on the image.
+    fn hud_zone(&mut self, ui: &mut Ui) {
+        let forms = self.bench.hud();
+        let origin = ui.cursor().min;
+        let width = self.bench.width;
+        let inner = ui
+            .allocate_ui_with_layout(
+                vec2(width, 0.0),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| {
+                    ui.set_width(width);
+                    ui.weak("The HUD has no slots: a control shows there as its chip.");
+                    ui.horizontal_wrapped(|ui| {
+                        for f in forms.iter().filter(|f| f.chip) {
+                            let text = format!("{} {}", f.label, f.readout);
+                            let name = format!("HUD chip: {text}");
+                            let r = egui::Frame::new()
+                                .fill(ui.visuals().widgets.inactive.weak_bg_fill)
+                                .stroke(ui.visuals().widgets.inactive.bg_stroke)
+                                .corner_radius(10.0)
+                                .inner_margin(egui::Margin::symmetric(8, 3))
+                                .show(ui, |ui| ui.label(&text))
+                                .response;
+                            r.widget_info(|| WidgetInfo::labeled(Role::Label, true, &name));
+                        }
+                    });
+                    for f in forms.iter().filter(|f| !f.chip) {
+                        ui.weak(format!(
+                            "{}: no HUD chip declared; it stays in the panel",
+                            f.label
+                        ));
+                    }
+                    let gizmos: Vec<&str> = forms
+                        .iter()
+                        .filter(|f| f.gizmo)
+                        .map(|f| f.label.as_str())
+                        .collect();
+                    if gizmos.is_empty() {
+                        ui.weak("No control here declares a gizmo on the image.");
+                    } else {
+                        ui.weak(format!(
+                            "Gizmos on the image, drawn by the host, not on the bench yet: {}",
+                            gizmos.join(", ")
+                        ));
+                    }
+                },
+            )
+            .response
+            .rect;
+        let zone = Rect::from_min_size(origin, vec2(width, inner.height().max(72.0)));
+        ui.painter().rect_stroke(
+            zone.expand(2.0),
+            4.0,
+            ui.visuals().widgets.noninteractive.bg_stroke,
+            StrokeKind::Outside,
+        );
+        self.zone = Some(zone);
     }
 
     /// A frame around each case: the band the slot engine gave its group,
@@ -527,10 +822,7 @@ impl BenchPage {
                 let Some(e) = self.bench.shelf.get(name) else {
                     return (None, String::new());
                 };
-                let piece = Entry::Control(Piece {
-                    key: GHOST.into(),
-                    control: e.control.clone(),
-                });
+                let piece = Entry::Control(Piece::new(GHOST, &e.control));
                 (
                     trial.insert(piece, target).ok().map(|()| trial),
                     GHOST.into(),
@@ -629,6 +921,72 @@ impl BenchPage {
                 self.bench.redo();
             }
         });
+        ui.add_space(8.0);
+        egui::ScrollArea::vertical()
+            .id_salt("bench-reasons")
+            .show(ui, |ui| self.reasons(ui));
+    }
+
+    /// The placement and reason pane: per control, its slot, orientation
+    /// and representation, its visibility, why, and what decided it.
+    pub fn reasons(&mut self, ui: &mut Ui) {
+        ui.heading("Placements");
+        let Some(placement) = &self.last else {
+            for f in self.bench.hud() {
+                ui.label(egui::RichText::new(&f.label).strong());
+                ui.weak(if f.chip {
+                    "HUD: its chip"
+                } else {
+                    "HUD: no chip; stays in the panel"
+                });
+            }
+            return;
+        };
+        if let Some(m) = &placement.more {
+            ui.weak(format!(
+                "{} · {} not applicable",
+                m.title(),
+                m.inapplicable.len()
+            ));
+        }
+        for e in self.bench.explain(placement) {
+            ui.add_space(4.0);
+            let mut head = egui::RichText::new(format!("{} · {}", e.label, e.visibility)).strong();
+            if e.visibility != "shown" {
+                head = head.color(ui.visuals().warn_fg_color);
+            }
+            ui.label(head).on_hover_text(&e.key);
+            if let Some(slot) = &e.slot {
+                let orientation = e
+                    .orientation
+                    .map_or_else(String::new, |o| format!(" · {o}"));
+                let rep = e
+                    .representation
+                    .map_or("", egui_hudget::model::representation_name);
+                ui.weak(format!("{slot}{orientation} · {rep}"));
+            }
+            let mut marks = Vec::new();
+            if e.changed {
+                marks.push("changed");
+            }
+            if e.emphasised {
+                marks.push("emphasised");
+            }
+            if e.deferred {
+                marks.push("deferred");
+            }
+            if !marks.is_empty() {
+                ui.weak(marks.join(" · "));
+            }
+            ui.add(egui::Label::new(egui::RichText::new(format!("Why: {}", e.why)).small()).wrap());
+            ui.add(
+                egui::Label::new(egui::RichText::new(format!("By: {}", e.decided_by)).small())
+                    .wrap(),
+            );
+            for n in &e.notes {
+                ui.add(egui::Label::new(egui::RichText::new(n).small().weak()).wrap());
+            }
+        }
     }
 
     /// While something is dragged, its name by the pointer.

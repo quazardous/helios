@@ -268,12 +268,17 @@ impl Gallery {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .layouts = Layouts::person(Layout::default().hide("notes"));
+        // The bench resolves in the same context: `controls.context` and
+        // its context bar read and set the same keys.
+        let bench = bench_ui::BenchPage::new(bench::Bench::with_contexts(
+            registry.clone(),
+            contexts.clone(),
+        ));
         let commands = Shared {
             registry: Arc::new(registry.clone()),
             steps: Arc::new(Mutex::new(Steps::new())),
             contexts,
         };
-        let bench = bench_ui::BenchPage::new(bench::Bench::new(registry.clone()));
         Self {
             registry,
             store,
