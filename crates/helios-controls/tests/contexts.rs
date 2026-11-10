@@ -5,7 +5,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use helios_controls::card::{Card, CardItem};
+use helios_controls::card::{Card, CardGroup, CardItem};
 use helios_controls::catalogue::EXPOSURE;
 use helios_controls::context::{
     CardBox, ContextKeys, Density, Detail, Device, ImageFlags, Rule, Space, Task, Tier,
@@ -283,6 +283,43 @@ fn the_person_s_order_leaves_chrome_in_place() {
     assert!(rank("exposure") < rank("black"));
     assert_eq!(p.items[0].kind, helios_controls::card::ItemKind::Chrome);
     assert_eq!(p.items[0].position.unwrap().y, 0, "the legend stays first");
+}
+
+#[test]
+fn the_person_s_order_applies_within_each_group() {
+    // Black and the curve are a group: the order moves the curve first
+    // within it, but never out of it, nor exposure into it.
+    let mut grouped = card();
+    grouped.groups.push(CardGroup {
+        key: "levels".into(),
+        items: 2..4,
+        header: false,
+    });
+    let layouts = Layouts::person(Layout::default().order(&["curve", "exposure", "black"]));
+    let p = resolve::resolve(
+        &registry(),
+        &grouped,
+        &keys(),
+        &layouts,
+        &Values::new(),
+        &Moment::default(),
+        None,
+    )
+    .unwrap();
+    let rank = |k: &str| p.get(k).unwrap().visual.unwrap();
+    assert!(rank("exposure") < rank("curve"), "{p:#?}");
+    assert!(rank("curve") < rank("black"));
+    let band = p
+        .layout
+        .as_ref()
+        .unwrap()
+        .group("levels")
+        .unwrap()
+        .grid
+        .unwrap();
+    let y = |k: &str| p.get(k).unwrap().position.unwrap().y;
+    assert!(y("exposure") < band.y);
+    assert!(y("curve") >= band.y && y("black") >= band.y);
 }
 
 #[test]

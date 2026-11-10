@@ -8,12 +8,18 @@
 //! [`Rack`], and maps the placements back: item → slot rectangle,
 //! orientation, representation and status.
 //!
+//! A card may group its items: a case's legend, help and parts are one
+//! group, packed densely inside but never mixed with what comes before or
+//! after it ([`CardGroup`]), so a later control never moves up above a
+//! case's legend. The layout gives each group's band, for its frame.
+//!
 //! The rack counts its width in **slot columns**: one unit across is a
 //! column, one unit down is a row, so a `1x1` slot is a panel row and a
 //! `1x6` block six rows high. Drawing on top of the placements comes with
 //! the renderers.
 
 use core::fmt::Write as _;
+use core::ops::Range;
 
 use egui_gridflow as gf;
 use serde::Serialize;
@@ -21,7 +27,7 @@ use serde::Serialize;
 use crate::context::{Rule, Tier};
 use crate::model::{Case, CaseItem, Kind, Representation, Surface, representation_name};
 use crate::registry::Registry;
-use crate::slot::{Chrome, Integration, Orientation, Size, SizePolicy, Slot};
+use crate::slot::{Chrome, ChromeKind, Integration, Orientation, Size, SizePolicy, Slot};
 
 /// One item of a card, in its logical order.
 #[derive(Clone, Debug, PartialEq)]
@@ -90,11 +96,46 @@ impl CardItem {
     }
 }
 
-/// What a card holds, in order, and the rules it declares over the
-/// context keys (`docs/design/control-contexts.md`, section 6.2).
+/// A run of a card's items laid out apart from the rest: a case's
+/// legend (its header, on a line of its own), help and parts. Dense
+/// packing stays within the group; nothing before or after it moves into
+/// its gaps. Groups nest when one lies within another's members.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CardGroup {
+    /// Its name (a case's key).
+    pub key: String,
+    /// Its items, as indices into the card's items.
+    pub items: Range<usize>,
+    /// Whether its first item is its header (a legend).
+    pub header: bool,
+}
+
+impl CardGroup {
+    /// The group of a case whose items start at `start` in the card: a
+    /// leading legend is its header, a trailing separator follows it,
+    /// outside.
+    pub fn of_case(key: &str, start: usize, items: &[CardItem]) -> Self {
+        let chrome =
+            |i: Option<&CardItem>, kind| matches!(i, Some(CardItem::Chrome(c)) if c.kind == kind);
+        let end = if chrome(items.last(), ChromeKind::Separator) {
+            items.len() - 1
+        } else {
+            items.len()
+        };
+        Self {
+            key: key.into(),
+            items: start..start + end,
+            header: chrome(items.first(), ChromeKind::Legend),
+        }
+    }
+}
+
+/// What a card holds, in order, its groups, and the rules it declares
+/// over the context keys (`docs/design/control-contexts.md`, section 6.2).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Card {
     pub items: Vec<CardItem>,
+    pub groups: Vec<CardGroup>,
     pub rules: Vec<Rule>,
 }
 
@@ -102,8 +143,15 @@ impl Card {
     pub fn new(items: Vec<CardItem>) -> Self {
         Self {
             items,
+            groups: Vec::new(),
             rules: Vec::new(),
         }
+    }
+
+    /// The same card with one more group.
+    pub fn group(mut self, group: CardGroup) -> Self {
+        self.groups.push(group);
+        self
     }
 
     /// The same card with one more rule.
@@ -113,17 +161,24 @@ impl Card {
     }
 
     /// A case's parts (each keyed by its name, at its tier), its chrome
-    /// and its rules.
+    /// and its rules; under a legend, the case is a group.
     pub fn from_case(case: &Case) -> Self {
+        let items: Vec<CardItem> = case
+            .items
+            .iter()
+            .map(|i| match i {
+                CaseItem::Part(p) => CardItem::control(&p.name, &p.control).tier(p.tier),
+                CaseItem::Chrome(c) => CardItem::Chrome(c.clone()),
+            })
+            .collect();
+        let group = CardGroup::of_case("case", 0, &items);
         Self {
-            items: case
-                .items
-                .iter()
-                .map(|i| match i {
-                    CaseItem::Part(p) => CardItem::control(&p.name, &p.control).tier(p.tier),
-                    CaseItem::Chrome(c) => CardItem::Chrome(c.clone()),
-                })
-                .collect(),
+            groups: if group.header {
+                vec![group]
+            } else {
+                Vec::new()
+            },
+            items,
             rules: case.rules.clone(),
         }
     }
@@ -245,6 +300,20 @@ pub struct SlotPlacement {
     pub visual: Option<usize>,
 }
 
+/// Where a group went.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct GroupPlacement {
+    /// The group's key.
+    pub key: String,
+    /// Its band, across the whole card, in twelfths of a unit, when any
+    /// of its items is placed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub grid: Option<gf::GridRect>,
+    /// Its band in points, for its frame.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rect: Option<Rect>,
+}
+
 /// A laid-out card.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CardLayout {
@@ -253,6 +322,8 @@ pub struct CardLayout {
     pub grid: gf::Layout,
     /// One per item, in logical order.
     pub slots: Vec<SlotPlacement>,
+    /// One per group of the card, in its order.
+    pub groups: Vec<GroupPlacement>,
 }
 
 impl CardLayout {
@@ -266,7 +337,13 @@ impl CardLayout {
         self.grid.rows as f32 * self.rack.row / gf::TWELFTHS_PER_UNIT as f32
     }
 
-    /// The slot engine's picture of the grid, then one line per item:
+    /// The placement of the group keyed `key`.
+    pub fn group(&self, key: &str) -> Option<&GroupPlacement> {
+        self.groups.iter().find(|g| g.key == key)
+    }
+
+    /// The slot engine's picture of the grid (its groups' bands in its
+    /// gutter, then one line per group), then one line per item:
     /// its letter, key, representation, orientation, slot and status.
     pub fn dump(&self) -> String {
         let grid = self.grid.dump();
@@ -357,16 +434,18 @@ pub fn layout(
     previous: Option<&CardLayout>,
 ) -> Result<CardLayout, String> {
     let items: Vec<(usize, &CardItem)> = card.items.iter().enumerate().collect();
-    layout_items(registry, &items, rack, previous)
+    layout_items(registry, &items, &card.groups, rack, previous)
 }
 
 /// Lays some of a card's items out, each with its index in the card: the
 /// index keys it for the engine (so hysteresis holds when other items are
-/// folded) and names its chrome. What `resolve` lays the shown items out
-/// with.
+/// folded) and names its chrome; `groups` are the card's, over those
+/// indices. The items of a group must come together, its header first.
+/// What `resolve` lays the shown items out with.
 pub fn layout_items(
     registry: &Registry,
     items: &[(usize, &CardItem)],
+    groups: &[CardGroup],
     rack: Rack,
     previous: Option<&CardLayout>,
 ) -> Result<CardLayout, String> {
@@ -481,8 +560,60 @@ pub fn layout_items(
     }
     // The engine counts in columns: one unit is one column across.
     let container = gf::Container::new(columns, 1.0);
-    let grid = gf::layout(&container, &elements, previous.map(|p| &p.grid));
+    let engine_groups: Vec<gf::Group> = groups
+        .iter()
+        .enumerate()
+        .map(|(g, group)| {
+            // The shown items of the group, by their place in `items`.
+            let inside: Vec<usize> = items
+                .iter()
+                .enumerate()
+                .filter(|(_, (i, _))| group.items.contains(i))
+                .map(|(at, _)| at)
+                .collect();
+            let range = if let (Some(&first), Some(&last)) = (inside.first(), inside.last()) {
+                first..last + 1
+            } else {
+                // Nothing shown: an empty group where it would be.
+                let at = items
+                    .iter()
+                    .position(|(i, _)| *i >= group.items.start)
+                    .unwrap_or(items.len());
+                at..at
+            };
+            let header = group.header
+                && inside
+                    .first()
+                    .is_some_and(|&at| items[at].0 == group.items.start);
+            gf::Group {
+                key: g as u64,
+                range,
+                header,
+            }
+        })
+        .collect();
+    let grid = gf::layout_grouped(
+        &container,
+        &elements,
+        &engine_groups,
+        previous.map(|p| &p.grid),
+    );
     let per = gf::TWELFTHS_PER_UNIT as f32;
+    let to_rect = |r: gf::GridRect| Rect {
+        x: r.x as f32 * rack.column / per,
+        y: r.y as f32 * rack.row / per,
+        w: r.w as f32 * rack.column / per,
+        h: r.h as f32 * rack.row / per,
+    };
+    let group_places = groups
+        .iter()
+        .zip(&grid.groups)
+        .map(|(g, p)| GroupPlacement {
+            key: g.key.clone(),
+            grid: p.rect,
+            rect: p.rect.map(to_rect),
+        })
+        .collect();
     let slots = grid
         .placements
         .iter()
@@ -496,16 +627,16 @@ pub fn layout_items(
             orientation: Orientation::from_gridflow(p.orientation),
             slot: p.rect.map(|r| format!("{}x{}", size_of(r.w), size_of(r.h))),
             grid: p.rect,
-            rect: p.rect.map(|r| Rect {
-                x: r.x as f32 * rack.column / per,
-                y: r.y as f32 * rack.row / per,
-                w: r.w as f32 * rack.column / per,
-                h: r.h as f32 * rack.row / per,
-            }),
+            rect: p.rect.map(to_rect),
             integration: s.integration,
             status: SlotStatus::from_gridflow(p.status),
             visual: p.visual,
         })
         .collect();
-    Ok(CardLayout { rack, grid, slots })
+    Ok(CardLayout {
+        rack,
+        grid,
+        slots,
+        groups: group_places,
+    })
 }

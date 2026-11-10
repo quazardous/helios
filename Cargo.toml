@@ -77,7 +77,7 @@ egui-pop-wayland = { git = "https://github.com/quazardous/egui-pop", rev = "8d84
 # MIT OR Apache-2.0: the slot layout engine (dense packing of controls in
 # standard slot sizes), with no egui dependency. Pinned to a commit until it
 # is published.
-egui_gridflow = { git = "https://github.com/quazardous/egui_gridflow", rev = "036a0104845f4670ce8fbfe3b1d3e5e04491685f", features = ["serde"] }
+egui_gridflow = { git = "https://github.com/quazardous/egui_gridflow", rev = "13f31d0855e6ec101b75e7247ef5d688b4203ce5", features = ["serde"] }
 blake3 = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

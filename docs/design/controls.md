@@ -489,6 +489,14 @@ The design keeps it predictable:
   into an earlier gap that it fits; nothing else changes the order.
   The same inputs (controls, policies, order, slot columns, density)
   always give the same placement.
+- **A case is a group (2026-11-10).** Packing stays dense within a
+  case, but never across its edges: a case starts on a new band of rows
+  below what comes before it, its legend alone on the case's first band,
+  and nothing after it moves up into its gaps, so a part never lands
+  above its legend and a loose control never inside a case. The slot
+  engine gives each case's band, for its frame; a person's order and
+  pinned positions apply within it (a pin counts from the top of the
+  case's parts).
 - **Rows that mix thirds with halves or quarters may leave a gap.** The
   engine fills it with the first later control that fits; failing that,
   it gives the gap to a growable neighbour whose policy allows the size;

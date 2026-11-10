@@ -1,7 +1,7 @@
 //! Cards laid out on the slot engine: a text dump at a few widths, the
 //! placements mapped back to controls and chrome.
 
-use helios_controls::card::{self, Card, CardItem, ItemKind, Rack, SlotStatus};
+use helios_controls::card::{self, Card, CardGroup, CardItem, ItemKind, Rack, SlotStatus};
 use helios_controls::catalogue::EXPOSURE;
 use helios_controls::model::{Case, Representation, Surface};
 use helios_controls::slot::{Chrome, ChromeKind, Orientation};
@@ -146,6 +146,36 @@ fn a_case_lays_out_its_parts_and_chrome() {
         [ItemKind::Chrome, ItemKind::Control, ItemKind::Chrome]
     );
     assert!(l.slots.iter().all(|s| s.status == SlotStatus::Placed));
+}
+
+#[test]
+fn a_case_as_a_group_keeps_later_controls_out_of_its_gaps() {
+    let rack = Rack::new(Surface::Panel, COLUMN, COLUMN, ROW);
+    let r = registry();
+    // Ungrouped, the scrub after the separator moves up beside the toggle.
+    let loose = card::layout(&r, &card(), rack, None).unwrap();
+    assert_eq!(loose.get("quick").unwrap().grid.unwrap().y, 30);
+    // The legend to the toggle as a group, the separator after it: the
+    // scrub stays below the separator.
+    let grouped = card().group(CardGroup::of_case("exposure", 0, &card().items[..5]));
+    assert_eq!(grouped.groups[0].items, 0..4);
+    assert!(grouped.groups[0].header);
+    let l = card::layout(&r, &grouped, rack, None).unwrap();
+    let separator = l.get("chrome:separator#4").unwrap().grid.unwrap();
+    let quick = l.get("quick").unwrap().grid.unwrap();
+    assert!(quick.y >= separator.y + separator.h, "{}", l.dump());
+    let band = l.group("exposure").unwrap();
+    let g = band.grid.unwrap();
+    assert_eq!((g.x, g.y, g.w, g.h), (0, 0, 12, 42));
+    assert_eq!(band.rect.unwrap().h, 42.0 * ROW / 12.0);
+    assert!(
+        l.dump().contains("group key=0 at 0,0 size 12x42"),
+        "{}",
+        l.dump()
+    );
+    // Hysteresis holds with the group.
+    let again = card::layout(&r, &grouped, rack, Some(&l)).unwrap();
+    assert_eq!(again.slots, l.slots);
 }
 
 #[test]

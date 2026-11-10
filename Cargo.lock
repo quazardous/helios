@@ -1421,7 +1421,7 @@ dependencies = [
 [[package]]
 name = "egui_gridflow"
 version = "0.1.0"
-source = "git+https://github.com/quazardous/egui_gridflow?rev=036a0104845f4670ce8fbfe3b1d3e5e04491685f#036a0104845f4670ce8fbfe3b1d3e5e04491685f"
+source = "git+https://github.com/quazardous/egui_gridflow?rev=13f31d0855e6ec101b75e7247ef5d688b4203ce5#13f31d0855e6ec101b75e7247ef5d688b4203ce5"
 dependencies = [
  "serde",
 ]

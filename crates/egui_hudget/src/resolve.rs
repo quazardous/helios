@@ -478,7 +478,8 @@ fn rule_reason(rule: &crate::context::Rule, fallback: &str) -> Reason {
 }
 
 /// The card's items in the order the layouts give its controls; chrome
-/// keeps its places.
+/// keeps its places, and controls their groups: the order applies within
+/// each group (and each run between groups).
 fn ordered<'a>(card: &'a Card, layouts: &[(Source, &Layout)]) -> Vec<(usize, &'a CardItem)> {
     let all: Vec<(usize, &CardItem)> = card.items.iter().enumerate().collect();
     let Some(order) = layouts
@@ -494,9 +495,22 @@ fn ordered<'a>(card: &'a Card, layouts: &[(Source, &Layout)]) -> Vec<(usize, &'a
         .copied()
         .filter(|(_, i)| i.key().is_some())
         .collect();
+    // An item's segment: how many group edges come before it. It changes
+    // at each group's start and end, so a group's controls, and a run of
+    // controls between groups, share one.
+    let segment = |i: usize| {
+        card.groups
+            .iter()
+            .map(|g| usize::from(g.items.start <= i) + usize::from(g.items.end <= i))
+            .sum::<usize>()
+    };
     controls.sort_by_key(|(i, item)| {
         let k = item.key().unwrap_or_default();
-        (order.iter().position(|o| o == k).unwrap_or(order.len()), *i)
+        (
+            segment(*i),
+            order.iter().position(|o| o == k).unwrap_or(order.len()),
+            *i,
+        )
     });
     let mut next = controls.into_iter();
     all.into_iter()
@@ -747,7 +761,7 @@ pub fn resolve(
     let prev_grid = previous
         .filter(|p| p.keys.card_box.surface == keys.card_box.surface)
         .and_then(|p| p.layout.as_ref());
-    let laid = card::layout_items(registry, &refs, rack, prev_grid)?;
+    let laid = card::layout_items(registry, &refs, &card.groups, rack, prev_grid)?;
     let slot_of: BTreeMap<usize, &card::SlotPlacement> =
         refs.iter().map(|(i, _)| *i).zip(&laid.slots).collect();
 
