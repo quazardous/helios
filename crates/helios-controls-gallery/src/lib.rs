@@ -23,6 +23,14 @@
 //! goes through the value flow (`helios_controls::flow`): a drag
 //! previews inside one gesture and commits as one undo step, Escape
 //! cancels with no trace.
+//!
+//! The gallery's second page is the **bench** ([`bench`], [`bench_ui`]):
+//! controls dragged from a shelf onto a card laid out by the slot engine,
+//! composed into cases, and tried live; the `controls.bench.*` commands
+//! build it for agents and tests ([`Gallery::run_command`]).
+
+pub mod bench;
+pub mod bench_ui;
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -168,9 +176,19 @@ pub enum Fit {
     Compact,
 }
 
+/// The gallery's pages.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Page {
+    /// A card per registered control, then the implicit card.
+    #[default]
+    Catalogue,
+    /// The shelf and the bench.
+    Bench,
+}
+
 /// The gallery's state: the registry, the store of live values, the
-/// gestures open, the last outcome of each control, and what the
-/// `controls.*` commands share.
+/// gestures open, the last outcome of each control, what the
+/// `controls.*` commands share, and the bench.
 pub struct Gallery {
     pub registry: Registry,
     pub store: Store,
@@ -178,6 +196,8 @@ pub struct Gallery {
     gestures: BTreeMap<String, flow::Gesture>,
     last: BTreeMap<String, String>,
     commands: Shared,
+    pub page: Page,
+    pub bench: bench_ui::BenchPage,
 }
 
 impl Default for Gallery {
@@ -253,6 +273,7 @@ impl Gallery {
             steps: Arc::new(Mutex::new(Steps::new())),
             contexts,
         };
+        let bench = bench_ui::BenchPage::new(bench::Bench::new(registry.clone()));
         Self {
             registry,
             store,
@@ -260,7 +281,28 @@ impl Gallery {
             gestures: BTreeMap::new(),
             last: BTreeMap::new(),
             commands,
+            page: Page::default(),
+            bench,
         }
+    }
+
+    /// Runs a command as an agent would: `controls.bench.*` on the bench,
+    /// the other `controls.*` on the gallery's store.
+    pub fn run_command(
+        &mut self,
+        name: &str,
+        args: &serde_json::Value,
+    ) -> Result<serde_json::Value, String> {
+        if name.starts_with("controls.bench.") {
+            return self.bench.bench.run(name, args);
+        }
+        egui_hudget::commands::run(
+            name,
+            args,
+            &Origin::Agent("gallery".into()),
+            &mut StoreMut(&mut self.store),
+            &self.commands,
+        )
     }
 
     /// A control's live value.
@@ -344,8 +386,21 @@ impl Gallery {
         }
     }
 
-    /// Every card, one per registered control, then the implicit card.
+    /// The page chosen: the catalogue or the bench.
     pub fn ui(&mut self, ui: &mut Ui) {
+        ui.horizontal(|ui| {
+            ui.selectable_value(&mut self.page, Page::Catalogue, "Catalogue");
+            ui.selectable_value(&mut self.page, Page::Bench, "Bench");
+        });
+        ui.separator();
+        match self.page {
+            Page::Catalogue => self.catalogue(ui),
+            Page::Bench => self.bench.ui(ui),
+        }
+    }
+
+    /// Every card, one per registered control, then the implicit card.
+    pub fn catalogue(&mut self, ui: &mut Ui) {
         ui.heading(TITLE);
         ui.label(format!(
             "{} controls registered. Drag, scrub (Ctrl: fine, Alt: no detents, Escape: cancel), double click to reset, arrows and the wheel to step.",
