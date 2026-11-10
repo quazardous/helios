@@ -1,0 +1,5 @@
+S3: task develop -> retouch -> develop, the pointer over the bench
+shift: the centres' displacement weighted by area (pt), the largest (pt), controls folded
+
+rules on: under the pointer 0.0 (pending true); once it leaves 8.0, largest 24.0, folded 2; back to develop 12.0, largest 24.0, folded 0; round trip 0.0
+rules off: under the pointer 0.0 (pending false); once it leaves 0.0, largest 0.0, folded 0; back to develop 0.0, largest 0.0, folded 0; round trip 0.0

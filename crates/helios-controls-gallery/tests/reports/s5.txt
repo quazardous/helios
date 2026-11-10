@@ -1,0 +1,4 @@
+S5: black level (raw only) on a picture
+untouched: not applicable (Raw only (when `!ctl.image.raw`); by a rule of the card)
+changed to 0.020 then a picture: shown (a changed value is never folded; notes: a rule of the card: Raw only (when `!ctl.image.raw`) | a changed value is never folded: Shown: its value is changed)
+raw again: shown (full in 1x1 · 1 column of a 2.0-column box)

@@ -1,0 +1,5 @@
+S2: profile to sigmoid at detail essential (folded: black, contrast, angle, profile)
+by More: 4 steps (open More, Show Profile, open the list, Sigmoid); reach 908 pt [254pt/28pt D/W 9.1 ID 3.33; 218pt/20pt D/W 10.9 ID 3.57; 363pt/20pt D/W 18.2 ID 4.26; 73pt/20pt D/W 3.7 ID 2.22]
+by search: 5 steps (open the search, type, choose, open the list, Sigmoid), counted on the model
+by a key: 3 steps (reveal all, open the list, Sigmoid), counted on the model
+invariant: reachable before and after; More names it (More (4)); changed, it stays shown after a task change

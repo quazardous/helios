@@ -1,0 +1,16 @@
+S4: the bench at 260, 340, 480 pt, each density (panel)
+width/density: columns, space, shown/folded, card height
+
+260/comfortable: 1.08 columns, Regular, 5 shown / 1 folded, 138 pt high
+260/compact: 1.25 columns, Regular, 5 shown / 1 folded, 115 pt high
+260/touch: 0.75 columns, Narrow, 5 shown / 1 folded, 184 pt high
+340/comfortable: 1.42 columns, Regular, 5 shown / 1 folded, 138 pt high
+340/compact: 1.67 columns, Regular, 5 shown / 1 folded, 115 pt high
+340/touch: 1.00 columns, Regular, 5 shown / 1 folded, 184 pt high
+480/comfortable: 2.00 columns, Regular, 5 shown / 1 folded, 90 pt high
+480/compact: 2.33 columns, Regular, 5 shown / 1 folded, 75 pt high
+480/touch: 1.50 columns, Regular, 5 shown / 1 folded, 184 pt high
+
+reachability: 864 combinations (task x space x detail x image x density) x 4 surfaces x 2 value sets: all reachable
+snapshots: s4-260, s4-340, s4-480 (comfortable)
+web build: not run headless here (the same code on a canvas)

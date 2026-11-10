@@ -1,0 +1,11 @@
+S6: eight encoders over the docked bench, task develop -> retouch
+no device abstraction yet (slice 19): no MIDI; a synthetic sweep of `nudge` intents through the value flow, device `midi`
+
+follows the card:
+  develop  1:exposure 2:black 3:contrast 4:feather 5:angle 6:- 7:- 8:-
+  retouch  1:exposure 2:feather 3:angle 4:- 5:- 6:- 7:- 8:-
+  encoders remapped 4, bound to a folded control 0, unfolded by the sweep 0, undo steps 3
+fixed:
+  develop  1:exposure 2:black 3:contrast 4:feather 5:angle 6:- 7:- 8:-
+  retouch  1:exposure 2:black 3:contrast 4:feather 5:angle 6:- 7:- 8:-
+  encoders remapped 0, bound to a folded control 2, unfolded by the sweep 2, undo steps 5
