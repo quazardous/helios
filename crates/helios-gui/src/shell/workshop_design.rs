@@ -359,15 +359,13 @@ impl Shell {
             })?;
             got
         };
-        if !dry {
-            if let Some(node) = step_answer["node"].as_str() {
-                self.select_node(node);
-                let mut panel = self.focus.workshops.borrow_mut();
-                if let Some(d) = panel.design.as_mut().filter(|d| Some(d.session) == session) {
-                    d.waiting = false;
-                    d.node = Some(node.into());
-                    d.applied = step_answer["designed"].as_str().map(String::from);
-                }
+        if !dry && let Some(node) = step_answer["node"].as_str() {
+            self.select_node(node);
+            let mut panel = self.focus.workshops.borrow_mut();
+            if let Some(d) = panel.design.as_mut().filter(|d| Some(d.session) == session) {
+                d.waiting = false;
+                d.node = Some(node.into());
+                d.applied = step_answer["designed"].as_str().map(String::from);
             }
         }
         let mut out = answer(!dry);
