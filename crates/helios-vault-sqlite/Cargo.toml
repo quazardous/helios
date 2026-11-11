@@ -13,7 +13,7 @@ serde.workspace = true
 serde_json.workspace = true
 # MIT; SQLite itself is public domain, built in. `backup` is SQLite's
 # online backup API, used for snapshots.
-rusqlite = { version = "0.41", features = ["bundled", "backup"] }
+rusqlite = { version = "0.41", features = ["bundled", "backup", "functions"] }
 
 [dev-dependencies]
 helios-journal.workspace = true

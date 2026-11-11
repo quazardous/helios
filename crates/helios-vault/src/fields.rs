@@ -1,10 +1,13 @@
 //! What the vault records about an image besides its files: declared
 //! fields, the commands that change them, their audit trail, and queries.
 
+use std::collections::BTreeMap;
+
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::ImageId;
+use crate::storage::VolumeId;
+use crate::{ImageId, Presence};
 
 /// What a field holds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -496,7 +499,162 @@ pub struct Query {
     pub captured_from: Option<i64>,
     /// Taken before this capture time.
     pub captured_before: Option<i64>,
+    /// Words each found, whatever their case, in the photo's name (its
+    /// first present copy's file name, else the start of its id, as the
+    /// Library names it) or in one of its tags.
+    pub words: Vec<String>,
+    /// Taken with one of these cameras (the `camera_model` field, exact).
+    pub cameras: Vec<String>,
+    /// Taken with one of these lenses (the `lens` field, exact).
+    pub lenses: Vec<String>,
+    /// Of one of these file types (the `file_type` field: `cr3`, `jpg`).
+    pub file_types: Vec<String>,
+    /// With a copy in this folder or below (an absolute path, present or
+    /// not).
+    pub folder: Option<String>,
+    /// Present, offline or missing as one of these ([`Presence::of`]).
+    pub presence: Vec<Presence>,
+    /// Backed up in one of these states against a strategy.
+    pub backup: Option<BackupFilter>,
     pub order: Order,
+}
+
+/// A photo's backups against the library's strategy, as the Library marks
+/// them (`helios_storage::strategy::status` decides from the same facts).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BackupState {
+    /// Its verified copies meet the strategy.
+    Met,
+    /// Some verified copies, fewer than asked (or none off site when one
+    /// must be).
+    Short,
+    /// Copies on backup volumes not verified by hash yet.
+    Unverified,
+    /// No backup copy at all.
+    None,
+}
+
+impl BackupState {
+    pub const ALL: [BackupState; 4] = [
+        BackupState::Met,
+        BackupState::Short,
+        BackupState::Unverified,
+        BackupState::None,
+    ];
+
+    /// Its name, as filters and facet counts write it.
+    pub fn name(self) -> &'static str {
+        match self {
+            BackupState::Met => "met",
+            BackupState::Short => "short",
+            BackupState::Unverified => "unverified",
+            BackupState::None => "none",
+        }
+    }
+
+    /// The state from what the copies give: `have` verified drives,
+    /// `unverified` drives with copies not verified (none of them among
+    /// the verified ones), and whether a verified copy is off site.
+    pub fn of(have: u64, unverified: u64, off_site: bool, rule: &Backups) -> BackupState {
+        if have == 0 && unverified == 0 {
+            BackupState::None
+        } else if have >= u64::from(rule.copies) && (off_site || !rule.off_site_required) {
+            BackupState::Met
+        } else if unverified > 0 {
+            BackupState::Unverified
+        } else {
+            BackupState::Short
+        }
+    }
+}
+
+/// A volume whose copies count as backups (a backup or archive role,
+/// strongly identified), with the drive it is on: two volumes of one
+/// drive are one copy.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct BackupVolume {
+    pub id: VolumeId,
+    pub drive: String,
+    pub off_site: bool,
+}
+
+/// What a backup state is measured against: the volumes that count and
+/// the strategy's demands (`helios_storage::strategy::rule` makes it). A
+/// copy counts when its location is not missing and is on one of
+/// `volumes`; it is verified when the image's document in
+/// [`crate::storage::VERIFIED`] holds `<volume>\t<path inside it>`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+pub struct Backups {
+    pub volumes: Vec<BackupVolume>,
+    /// Verified copies on distinct drives a photo needs (0: no strategy).
+    pub copies: u8,
+    pub off_site_required: bool,
+}
+
+/// A backup filter: the states taken (none: no photo), measured against
+/// `rule`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+pub struct BackupFilter {
+    pub rule: Backups,
+    pub states: Vec<BackupState>,
+}
+
+/// The facets a library counts (`docs/design/library.md`, L4), by name.
+pub const FACETS: [&str; 8] = [
+    "rating",
+    "label",
+    "flag",
+    "camera",
+    "lens",
+    "file_type",
+    "presence",
+    "backup",
+];
+
+/// How many photos of a query carry each value of each facet ([`FACETS`]):
+/// `rating` (0 to 5, unrated as 0), `label` (each colour; a photo with two
+/// counts in both), `flag` (`pick`, `reject`, `none`), `camera`, `lens`,
+/// `file_type` (photos without the value are not counted), `presence`
+/// (`present`, `offline`, `missing`) and `backup` (each [`BackupState`],
+/// only when a rule is given). A value no photo has is absent.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct Facets(pub BTreeMap<String, BTreeMap<String, u64>>);
+
+impl Facets {
+    /// The count of one value of a facet (0 when none).
+    pub fn count(&self, facet: &str, value: &str) -> u64 {
+        self.0
+            .get(facet)
+            .and_then(|v| v.get(value))
+            .copied()
+            .unwrap_or(0)
+    }
+
+    /// A facet's values and counts, by value.
+    pub fn of(&self, facet: &str) -> Vec<(&str, u64)> {
+        self.0
+            .get(facet)
+            .map(|v| v.iter().map(|(k, n)| (k.as_str(), *n)).collect())
+            .unwrap_or_default()
+    }
+
+    /// Adds one photo to a value.
+    pub fn add(&mut self, facet: &str, value: &str, n: u64) {
+        *self
+            .0
+            .entry(facet.to_string())
+            .or_default()
+            .entry(value.to_string())
+            .or_default() += n;
+    }
+}
+
+/// Folds a word or a name for the case-blind match of [`Query::words`]:
+/// lower case, as Rust's `to_lowercase` gives it (the SQLite driver calls
+/// the same function).
+pub fn fold_case(text: &str) -> String {
+    text.to_lowercase()
 }
 
 /// The flags a query takes.

@@ -259,6 +259,24 @@ impl<S: Store> Vault<S> {
         })
     }
 
+    /// How many photos of a query carry each value of each facet
+    /// ([`fields::Facets`]: rating, label, flag, camera, lens, file type,
+    /// presence, and the backup state when `backups` is given): one store
+    /// query for every facet together, however many photos and values.
+    pub fn facets(
+        &self,
+        query: &Query,
+        backups: Option<&fields::Backups>,
+    ) -> Result<fields::Facets, String> {
+        let facets = self
+            .store
+            .lock()
+            .expect("store lock")
+            .facets(query, backups)?;
+        self.count_query();
+        Ok(facets)
+    }
+
     /// The images of a cursor window, in its order: no store query.
     pub fn cursor_ids(
         &self,
