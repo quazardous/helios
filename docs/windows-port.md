@@ -42,17 +42,24 @@ Done:
 CI step runs them with `continue-on-error`, so the job stays green on the
 build; making the step required is the next task. What fails, by cause:
 
-- **The vault's snapshots (real bug).** `helios-vault-sqlite` (lib,
-  `integrity`, `migrations`): writing `vault.db.snapshots/*.db.partial`
-  then renaming it fails with "Access is denied" (os error 5), so a
-  migration refuses to run and scheduled snapshots fail. The partial file
-  is most likely still open (SQLite's backup handle) when it is renamed:
-  close it first, and retry the rename on sharing violations (§1.3).
-- **darktable library import (real bug).**
-  `helios-plugin-darktable-library` (lib, `scan`) and the GUI's
-  `darktable_library` test: the read-only SQLite URI is built as
-  `file:/D:/...`, which SQLite rejects ("invalid uri authority"); Windows
-  needs `file:///D:/...`.
+- **The vault's snapshots (fixed, 2026-11-11).** `helios-vault-sqlite`
+  (lib, `integrity`, `migrations`, `catalogue`) and the GUI's
+  `health` test: a snapshot's copy was flushed through a handle opened
+  read-only, and Windows refuses to flush one ("Access is denied", os
+  error 5), so migrations refused to run and scheduled snapshots failed.
+  The copy is now flushed through a handle opened for writing, and the
+  renames into place are retried for a second on a sharing violation
+  (a scanner holding a new file). Its `contract` test fails apart from
+  this: `sightings_under` finds nothing under `shoot` (not looked at yet).
+- **darktable library import (fixed, 2026-11-08 and 2026-11-11).** The
+  read-only SQLite URI was built as `file:/D:/...`, which SQLite rejects
+  ("invalid uri authority"); it is now `file:///D:/...`, percent-encoded.
+  What was left failed in the tests only: a URI test written for a path
+  without a drive, the GUI's `darktable_library` test matching paths
+  by `/`, and `scan`'s stale-lock case (a process cannot be probed on
+  Windows, so every darktable lock counts as held and the library is
+  read from a copy, by design). The imported paths still carry the
+  `\\?\` prefix (see verbatim paths below).
 - **Verbatim paths.** `\\?\C:\...` from `canonicalize` reaches the
   importer plugins' answers (`importer_plugins`), and the long and short
   (`RUNNER~1`) forms of the temp folder differ (`macros_desk`, `import`):
