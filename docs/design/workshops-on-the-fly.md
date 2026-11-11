@@ -1,8 +1,9 @@
 # Workshops made on the fly: designed by the AI, refined by hand, run within limits
 
 Status: **decided** (2026-11-11): the owner accepted every
-recommendation of section 9 (C1 to C8). A design note: nothing here is
-built yet but slice 1 (semantic sliders). It extends [workshops.md](workshops.md) (workshops v1,
+recommendation of section 9 (C1 to C8). A design note: slices 1 to 3
+are built (semantic sliders, zone measures, the draft and its check),
+the rest is not. It extends [workshops.md](workshops.md) (workshops v1,
 built, experimental) and uses decision nodes and AI junctions
 ([module-contract.md](../module-contract.md)), macros
 ([macros.md](macros.md)), the undo design ([undo.md](undo.md)), the
@@ -141,7 +142,7 @@ author it with `macro.interface`'s `exposed` list; no new verb.
 
 ### Helios checks the draft (deterministic, not the AI)
 
-`helios_template::workshop::check_draft` takes the draft and the open
+`helios_template::draft::check_draft` takes the draft and the open
 image's proxy:
 
 - **schema and catalogue**: every module exists, every parameter is in
@@ -158,6 +159,30 @@ image's proxy:
 
 The answer is the checked draft and its notes, so an agent can amend
 and re-post. Nothing is written yet.
+
+Built (slice 3). A draft is `{ "intent", "composite", "rationale" }`:
+`composite` is a composite file whose `format`, `id`, `version`, `inputs`
+and `outputs` may be left out (one RGBA image in and out) and whose
+block's intent defaults to the draft's; `rationale` holds a sentence per
+piece, under `workshop`, `nodes`, `exposed`, `zones` and `targets`, each
+by name. The check answers `{ ok, refused, sliders, zones, notes, draft }`:
+a slider's `verdict` is `kept`, `narrowed` (with the range kept),
+`dropped` or `untested` (not a number), with its `change` in stops, where
+it acts most (`most_in`: a zone or `image`) and the share clipped at each
+end; a zone's is `ok`, `empty` (under 0.5 %) or `whole` (over 99.5 %);
+`notes` are the same in sentences ("Haze: dropped: from 0 to 1 it changes
+the image by 0 stop at most, under 0.05"). An end is narrowed when it
+clips more than 1 % of the image beyond what the defaults clip, pulled in
+by bisection (10 renders at most). A dropped slider's value at its
+default is written into the inner parameters it set, so the workshop
+renders as before; its targets and rationale go with it. A rationale for
+a piece the draft lacks is said and dropped. Refused, each problem said:
+the schema, an unknown module, a value or curve point out of range, other
+than one input and one output, a target on an unknown zone or slider, an
+empty intent. `State::draft_applied` saves the cleaned composite as
+`user.<slug of its name>@1` and inserts it as `workshop.apply` does, one
+step; given a node a former design applied, it pins that node to the next
+version instead.
 
 ### Applying a draft
 
@@ -562,7 +587,7 @@ included.
    `zone`; aiming per zone. Test: a synthetic backlit image (a bright
    upper band, a dark lower band) aims "foreground median at -1.5 stops"
    within tolerance.
-3. **The draft and its check** (M). The draft format (a composite with a
+3. **The draft and its check** (M, built 2026-11-11). The draft format (a composite with a
    workshop block and rationales), `check_draft`: catalogue, ranges,
    extremes tested, useless sliders dropped, clipping narrowed, zones
    reported. Test: a hand-written backlit draft with one useless slider
