@@ -671,13 +671,84 @@ core. Its viewport comes from `focus::viewport_on(&core.engine)`
 so no photo is decoded or cached twice. Slice 4 turns `focus` into the
 list of foci, the root's first, and keys the frame's work by the window
 egui-pop's multi-window API passes; nothing here depends on that API
-yet (Helios stays on egui-pop 0.8 until it ships).
+yet (Helios was on egui-pop 0.8 until slice 4).
 
 **Left for later slices.** The value store, the snapshots and the jobs
 are the core's: a focus's own undo scope and its jobs as tags (T7) come
 with foci as first-class (slice 7). The Queue panel and the status line
 show every job. The host's per-image work in `main.rs` (the image shown,
 the images being made ready) still serves the one focus.
+
+### Built: slice 4 (2026-11-11)
+
+Helios is on egui-pop 0.9, and the Import window is the first focus
+window: an OS window of its own, opened through egui-pop's application
+windows (`AppHandle::open_window`, an egui deferred viewport).
+
+```text
+Shell
+├── core: Core                  one per process
+├── focus: Focus                the main window: the root viewport, the first focus
+└── import: ImportFocus         the import focus (kind intake), OS window `import`
+    └── state: Rc<RefCell<ImportWindow>>   shared with the window's content
+```
+
+- **One state, two passes.** The import window's state
+  (`shell/import_window.rs`, `ImportWindow`) is shared, behind an `Rc`, by
+  the shell and the window's content, the closure given to
+  `open_window`. egui-pop reaches it from the deferred callback through
+  its thread-local registry (T3). The content runs in the window's own
+  pass: it follows the cards and the scans, draws the three columns, the
+  footer and the status bar, and does there what needs only the window's
+  state: ticks, favourites, presets, the folder choosers (opened from the
+  window's pass, so the dialog is the window's). What needs the shell
+  (Import, "Forget this folder", Storage…, sources dropped) waits in the
+  state's events for the main window's next pass, which the content asks
+  for. The shell gives the content its translator and the two lines it
+  needs of the core (the backup strategy, no library open) at each of the
+  main window's passes while the focus is open.
+- **Opening and closing.** `library.importWindow` (File > Import…,
+  Ctrl+Shift+I, the empty Library's button, a card's toast, a drop, a
+  paste) opens the focus; the main window's pass then opens its OS
+  window, sized four fifths of the main window at first (egui-pop keeps
+  its size under `import` after that), or brings it to the front when it
+  is open. Cancel, Import and the window's close button close the focus,
+  and the window with it; a window closed by other means (`window.close`)
+  closes the focus too. The main window stays. Closing the main window
+  while the import window is open moves the import focus into it (T2,
+  egui-pop's rule).
+- **Its own shell.** egui-pop gives the window its own toasts, dialogs
+  and palette (ADR 0025): the folder chooser opened from it shows there
+  and blocks it alone, never the main window. Its keys run with
+  `appWindow == 'import'`, and agents name it (`window: "import"` in
+  `call` and `snapshot`; the `windows` collector lists it).
+- **Its status bar** says what the scans read, "Reading <path>", the
+  path shortened in its middle to the bar's width (`Scan::reading`),
+  with a spinner; the line above the cells is gone.
+- **Repaint.** A scan's progress repaints the window it is drawn in, not
+  the main window: the main window sleeps while a card is read.
+- **One core.** The thumbnails come from the library's one thumbnail
+  cache and the glance cache, shared with the main window: no photo is
+  read twice.
+- **Present mode.** `AppBuilder::multi_window(true)`: `AutoNoVsync` on
+  Wayland (`Mailbox`), as the spike found; `AutoVsync` elsewhere. The
+  root window stays the first focus (T2).
+- **Embedded.** Where the backend has no windows of its own (kittest,
+  the web), egui draws the same content in an `egui::Window` inside the
+  main window, so the import tests and snapshots run as before, the
+  window placed by egui rather than centred.
+- **Tests.** `tests/import.rs`,
+  `import_opens_in_its_own_window_reads_in_its_status_bar_and_closes_alone`,
+  runs the shell with real viewports (no embedding): the import window is
+  declared as a deferred viewport and drawn in a pass of its own, its
+  status bar names what is read, agents reach it as `import`, its close
+  button closes the focus and leaves the main window as it was.
+
+**Not done here.** The import focus is not a full `Focus` (a workspace,
+a library view, a viewport): it needs none yet. "Cull these photos"
+after an import (P2) is still the owner's choice; the window closes once
+Import is pressed, as before. The jobs are the core's, shown in the main
+window's status bar and Queue panel (focus tags come with slice 7).
 
 ## 6. Open questions
 

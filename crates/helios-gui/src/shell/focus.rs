@@ -6,15 +6,16 @@
 //! places and modes, its sub-workspaces), the views and tools the window
 //! shows (the library's grid and selection, the comparison of photos side
 //! by side, the open image's viewport, its parameters, masks, network,
-//! scopes and decisions, the Queue and Workshops panels), the import
-//! window drawn in it, and what pictures of the window need (its named
-//! rectangles, scale and screenshots).
+//! scopes and decisions, the Queue and Workshops panels), and what
+//! pictures of the window need (its named rectangles, scale and
+//! screenshots).
 //!
-//! Today the process has one focus, the main window, which is the root
-//! viewport: the root window is always the first focus. A second focus
-//! (the Import window, through egui-pop's multi-window API) is made with
-//! [`Focus::new`] on the same core: its viewport renders on the core's
-//! engine, so no photo is loaded twice.
+//! The main window is the root viewport: the root window is always the
+//! first focus. The import focus is the second, in an OS window of its own
+//! (`super::import_window::ImportFocus`, through egui-pop's application
+//! windows). Another focus of this kind (a library or an editing window)
+//! is made with [`Focus::new`] on the same core: its viewport renders on
+//! the core's engine, so no photo is loaded twice.
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, VecDeque};
@@ -26,7 +27,7 @@ use egui_pop::model::ids::PanelId;
 use egui_pop::model::layout::Layout;
 use helios_core::Engine;
 
-use super::{Shot, import_window, workshop_edit, workspace_edit};
+use super::{Shot, workshop_edit, workspace_edit};
 use crate::dialogs::MenuItem;
 use crate::host::Workspace;
 use crate::snapshot::Recorder;
@@ -76,9 +77,6 @@ pub(super) struct Focus {
     /// one brought, to select once the Library shows them.
     pub(super) imported_ids: Vec<String>,
     pub(super) select_imported: Vec<String>,
-    /// The import window, its sources and the cards watched. Drawn in this
-    /// window today; the Import focus window of its own takes it over.
-    pub(super) import_window: import_window::ImportWindow,
     /// A menu of commands asked for, open at a point.
     pub(super) menu: Option<(egui::Pos2, Vec<MenuItem>)>,
     pub(super) viewport: Rc<RefCell<crate::viewport::Viewport>>,
@@ -164,7 +162,6 @@ impl Focus {
             import_source: None,
             imported_ids: Vec::new(),
             select_imported: Vec::new(),
-            import_window: import_window::ImportWindow::default(),
             menu: None,
             viewport: seed.viewport,
             opening: None,

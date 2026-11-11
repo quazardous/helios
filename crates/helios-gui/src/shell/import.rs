@@ -605,8 +605,13 @@ impl Shell {
     /// with them as its sources; while they are dragged over it, it says
     /// so.
     pub(super) fn take_dropped_files(&mut self, ctx: &Egui) {
-        // The import window open takes them itself, over its contents.
-        if self.import_window_open() {
+        // The import window open takes them itself, over its contents,
+        // while it is drawn in the main window (embedded). In its own OS
+        // window, what is dropped on the main window becomes its sources.
+        let embedded = self
+            .import_window_viewport()
+            .is_none_or(|v| v == egui::ViewportId::ROOT);
+        if self.import_window_open() && embedded {
             return;
         }
         let (hovered, dropped): (bool, Vec<PathBuf>) = ctx.input(|i| {
