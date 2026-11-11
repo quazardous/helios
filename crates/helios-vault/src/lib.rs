@@ -34,6 +34,7 @@ use serde::Serialize;
 use serde_json::json;
 use storage::VolumeId;
 
+pub mod capture;
 pub mod catalog;
 pub mod changed;
 pub mod contract;
@@ -49,6 +50,7 @@ pub mod undo;
 pub mod versions;
 pub mod workflow;
 
+pub use capture::{Backfill, Capture};
 pub use catalog::{ApplyReport, CursorId, CursorInfo, Delta, LibraryRow, Row};
 pub use edit::{EditSaved, EditSession};
 pub use fields::{AuditEntry, Command, Order, Query};
@@ -730,6 +732,18 @@ impl Store for MemoryStore {
             .filter(|id| {
                 let flag = Query::flag_of(yes(id, fields::PICKED), yes(id, fields::REJECTED));
                 query.flags.is_empty() || query.flags.iter().any(|f| f == flag)
+            })
+            .filter(|id| {
+                if query.captured_from.is_none() && query.captured_before.is_none() {
+                    return true;
+                }
+                self.fields
+                    .get(&(**id, capture::CAPTURED.to_string()))
+                    .and_then(serde_json::Value::as_f64)
+                    .is_some_and(|t| {
+                        query.captured_from.is_none_or(|from| t >= from as f64)
+                            && query.captured_before.is_none_or(|before| t < before as f64)
+                    })
             })
             .copied()
             .collect();

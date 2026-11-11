@@ -543,10 +543,31 @@ only) takes the files the system clipboard holds beside it. Only the
 user copies to and pastes from other applications: an agent neither
 reads the system clipboard nor writes over it.
 
-**Search.** The search field's rating, labels, flags and tags become a
-vault query (several labels: any of them; several tags: all of them);
-its words (in the name or a tag) and dates (the file's day) are matched
-on what the library holds. A filter shows stacks flattened.
+**Search.** The search field's rating, labels, flags, tags and dates
+become one vault query (several labels: any of them; several tags: all
+of them); its words (in the name or a tag) are matched on what the
+library holds. A date is the **capture day** by the camera's clock
+(`date:2024-06-01..2024-06-30` takes both days whole), served by the
+vault's index; a photo whose capture is not read yet matches no date. A
+filter shows stacks flattened.
+
+**Capture metadata.** Each photo's capture time, camera maker and
+model, lens, focal length, aperture, shutter, ISO, width, height, EXIF
+orientation and file type are read-only vault fields (`captured`,
+`capture_offset`, `captured_from`, `camera_make`, `camera_model`,
+`lens`, `focal_length`, `aperture`, `shutter`, `iso`, `width`,
+`height`, `orientation`, `file_type`), read at import without decoding
+a pixel. The capture time is the camera's clock (EXIF
+`DateTimeOriginal`) read as UTC, in seconds, with the clock's offset in
+minutes when the file says it (`OffsetTimeOriginal`); a file with no
+EXIF time takes its modification time, in UTC (`captured_from: file`).
+Photos imported before these fields existed are filled by a background
+job of kind `capture` in the jobs centre, started with Helios: it reads
+each photo's first present copy, or, for one on an unplugged disk, what
+the import kept (its signals, its sightings); it keeps its progress in
+the vault, resumes where it stopped, and does nothing once the whole
+Library is done. No command changes these fields and they leave no
+audit row: the file is their record.
 
 ## Storage
 

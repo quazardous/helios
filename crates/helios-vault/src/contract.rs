@@ -47,6 +47,126 @@ pub fn check<S: Store>(make: impl Fn() -> S) {
     listings_record_and_keep_what_was_read(make());
     the_map_reads_by_kind_newest_first(make());
     forgetting_and_pruning_never_touch_the_library(make());
+    capture_fields_are_read_only_and_a_date_range_is_one_query(make());
+}
+
+/// Capture fields are written whole by `set_captures` (a value not read
+/// is cleared), refused to commands, read back as a [`Capture`], and a
+/// capture range selects in the one query a cursor opens with; the
+/// backfill's progress is kept in the same transaction, and images gone
+/// meanwhile are passed over.
+fn capture_fields_are_read_only_and_a_date_range_is_one_query<S: Store>(s: S) {
+    use crate::capture::{self, Backfill, Capture, day_start};
+    let v = Vault::new(with_images(s, 4));
+    let ids: Vec<ImageId> = (1..=4).map(|i| image(i).id).collect();
+    let june = |day: i64, hour: i64| {
+        (day_start("2024-06-01").unwrap() + (day - 1) * 86_400 + hour * 3600) as f64
+    };
+    let shot = |captured: f64| Capture {
+        captured: Some(captured),
+        offset: Some(120),
+        captured_from: Some("exif".into()),
+        make: Some("Nikon".into()),
+        model: Some("Z 8".into()),
+        lens: Some("NIKKOR Z 24-120mm f/4 S".into()),
+        focal_length: Some(35.0),
+        aperture: Some(5.6),
+        shutter: Some(1.0 / 250.0),
+        iso: Some(400),
+        width: Some(8256),
+        height: Some(5504),
+        orientation: Some(1),
+        file_type: Some("nef".into()),
+    };
+    let gone = ImageId(ContentHash([99; 32]));
+    let progress = Backfill {
+        after: Some(ids[2].hex()),
+        done: 3,
+        total: 4,
+        read: 2,
+        kept: 1,
+        finished: false,
+    };
+    let written = v
+        .set_captures(
+            &[
+                (ids[0], shot(june(1, 23) + 0.25)),
+                (ids[1], shot(june(2, 0))),
+                (ids[2], shot(june(3, 12))),
+                (gone, shot(june(1, 1))),
+            ],
+            Some(&progress),
+        )
+        .unwrap();
+    assert_eq!(written, 3, "an image gone meanwhile is passed over");
+    assert_eq!(v.backfill().unwrap(), Some(progress));
+    let back = v.captures_of(&ids).unwrap();
+    assert_eq!(back[0], Some(shot(june(1, 23) + 0.25)));
+    assert_eq!(back[3], None, "never captured");
+    assert_eq!(back[0].as_ref().unwrap().day(), Some((2024, 6, 1)));
+    // Read-only: no command changes them, and nothing is audited.
+    let refused = v
+        .apply(
+            &[Command::set(ids[0], capture::ISO, json!(800))],
+            "user",
+            None,
+            1,
+        )
+        .unwrap_err();
+    assert!(refused.contains("read from the file"), "{refused}");
+    assert!(v.audit(&ids[0]).unwrap().is_empty());
+    // Written again whole: what the file no longer says is cleared.
+    let lens_only = Capture {
+        lens: Some("manual lens".into()),
+        ..Capture::default()
+    };
+    v.set_captures(&[(ids[2], lens_only.clone())], None)
+        .unwrap();
+    assert_eq!(v.captures_of(&ids[2..3]).unwrap()[0], Some(lens_only));
+    v.set_captures(&[(ids[2], shot(june(3, 12)))], None)
+        .unwrap();
+    // The first of June, by the camera's clock: one query.
+    let q0 = v.reads().queries;
+    let first = v
+        .open_cursor(Query {
+            captured_from: day_start("2024-06-01"),
+            captured_before: day_start("2024-06-02"),
+            ..Query::default()
+        })
+        .unwrap();
+    assert_eq!(
+        v.reads().queries - q0,
+        1,
+        "a date range is the cursor's one query"
+    );
+    assert_eq!(v.cursor_ids(first.id, 0, 9).unwrap(), [ids[0]]);
+    // Open ends, and a range with other criteria.
+    let from_second = v
+        .open_cursor(Query {
+            captured_from: day_start("2024-06-02"),
+            ..Query::default()
+        })
+        .unwrap();
+    assert_eq!(
+        v.cursor_ids(from_second.id, 0, 9).unwrap(),
+        [ids[1], ids[2]]
+    );
+    v.apply(&[Command::set(ids[2], RATING, json!(4))], "user", None, 2)
+        .unwrap();
+    let rated_before_third = v
+        .open_cursor(Query {
+            captured_before: day_start("2024-06-04"),
+            min_rating: Some(3),
+            ..Query::default()
+        })
+        .unwrap();
+    assert_eq!(v.cursor_ids(rated_before_third.id, 0, 9).unwrap(), [ids[2]]);
+    // Captures move the catalog: a cursor's refresh lists them again.
+    let delta_before = v.refresh(first.id).unwrap();
+    assert!(delta_before.changed);
+    v.set_captures(&[(ids[3], shot(june(1, 8)))], None).unwrap();
+    let delta = v.refresh(first.id).unwrap();
+    assert_eq!(delta.inserted, [ids[3]]);
 }
 
 fn on(volume: &str, rel: &str, size: u64, seen: u64) -> crate::Sighting {

@@ -21,6 +21,8 @@ pub enum FieldKind {
     Text,
     /// True or false.
     Bool,
+    /// A finite number, a fraction allowed (an aperture, a shutter time).
+    Number,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -28,6 +30,9 @@ pub struct FieldSpec {
     pub name: &'static str,
     pub kind: FieldKind,
     pub about: &'static str,
+    /// Read from the file (its capture metadata, [`crate::capture`]): no
+    /// command changes it, only [`crate::Vault::set_captures`].
+    pub read_only: bool,
 }
 
 pub const RATING: &str = "rating";
@@ -44,6 +49,7 @@ pub const FIELDS: &[FieldSpec] = &[
         name: RATING,
         kind: FieldKind::Int { min: 0, max: 5 },
         about: "0 to 5 stars",
+        read_only: false,
     },
     // A field of its own, not a rating of -1 as in darktable: taking a
     // reject back must not erase the stars the image had.
@@ -51,31 +57,135 @@ pub const FIELDS: &[FieldSpec] = &[
         name: REJECTED,
         kind: FieldKind::Bool,
         about: "rejected; the stars are kept beside it",
+        read_only: false,
     },
     FieldSpec {
         name: LABELS,
         kind: FieldKind::Labels(&["red", "yellow", "green", "blue", "purple"]),
         about: "color labels",
+        read_only: false,
     },
     FieldSpec {
         name: PICKED,
         kind: FieldKind::Bool,
         about: "picked while culling",
+        read_only: false,
     },
     FieldSpec {
         name: TAGS,
         kind: FieldKind::Tags,
         about: "tags (keywords)",
+        read_only: false,
     },
     FieldSpec {
         name: "title",
         kind: FieldKind::Text,
         about: "title",
+        read_only: false,
     },
     FieldSpec {
         name: "description",
         kind: FieldKind::Text,
         about: "description",
+        read_only: false,
+    },
+    // What the file says of how it was taken (`docs/design/library.md`,
+    // L2): read-only, indexed like every field (`(name, number)`).
+    FieldSpec {
+        name: crate::capture::CAPTURED,
+        kind: FieldKind::Number,
+        about: "when it was taken: the camera's clock read as UTC, in seconds (the instant is this less `capture_offset`)",
+        read_only: true,
+    },
+    FieldSpec {
+        name: crate::capture::CAPTURE_OFFSET,
+        kind: FieldKind::Int {
+            min: -1440,
+            max: 1440,
+        },
+        about: "the camera clock's offset from UTC, in minutes, when the file says it",
+        read_only: true,
+    },
+    FieldSpec {
+        name: crate::capture::CAPTURED_FROM,
+        kind: FieldKind::Text,
+        about: "where the capture time came from: `exif`, or `file` (its modification time, in UTC)",
+        read_only: true,
+    },
+    FieldSpec {
+        name: crate::capture::CAMERA_MAKE,
+        kind: FieldKind::Text,
+        about: "the camera's maker",
+        read_only: true,
+    },
+    FieldSpec {
+        name: crate::capture::CAMERA_MODEL,
+        kind: FieldKind::Text,
+        about: "the camera's model",
+        read_only: true,
+    },
+    FieldSpec {
+        name: crate::capture::LENS,
+        kind: FieldKind::Text,
+        about: "the lens",
+        read_only: true,
+    },
+    FieldSpec {
+        name: crate::capture::FOCAL_LENGTH,
+        kind: FieldKind::Number,
+        about: "the focal length, in millimetres",
+        read_only: true,
+    },
+    FieldSpec {
+        name: crate::capture::APERTURE,
+        kind: FieldKind::Number,
+        about: "the aperture, as an f-number",
+        read_only: true,
+    },
+    FieldSpec {
+        name: crate::capture::SHUTTER,
+        kind: FieldKind::Number,
+        about: "the exposure time, in seconds",
+        read_only: true,
+    },
+    FieldSpec {
+        name: crate::capture::ISO,
+        kind: FieldKind::Int {
+            min: 0,
+            max: 100_000_000,
+        },
+        about: "the ISO speed",
+        read_only: true,
+    },
+    FieldSpec {
+        name: crate::capture::WIDTH,
+        kind: FieldKind::Int {
+            min: 1,
+            max: 1_000_000,
+        },
+        about: "the width in pixels, as stored (before the orientation turns it)",
+        read_only: true,
+    },
+    FieldSpec {
+        name: crate::capture::HEIGHT,
+        kind: FieldKind::Int {
+            min: 1,
+            max: 1_000_000,
+        },
+        about: "the height in pixels, as stored",
+        read_only: true,
+    },
+    FieldSpec {
+        name: crate::capture::ORIENTATION,
+        kind: FieldKind::Int { min: 1, max: 8 },
+        about: "the EXIF orientation, 1 to 8",
+        read_only: true,
+    },
+    FieldSpec {
+        name: crate::capture::FILE_TYPE,
+        kind: FieldKind::Text,
+        about: "the file's type, its extension in lower case (`cr3`, `jpg`)",
+        read_only: true,
     },
 ];
 
@@ -128,6 +238,10 @@ pub fn normalize(name: &str, value: &Value) -> Result<Value, String> {
         }
         (FieldKind::Text, Value::String(s)) => Ok(Value::from(s.clone())),
         (FieldKind::Bool, Value::Bool(b)) => Ok(Value::from(*b)),
+        (FieldKind::Number, Value::Number(n)) => match n.as_f64() {
+            Some(v) if v.is_finite() => Ok(Value::Number(n.clone())),
+            _ => Err(format!("`{name}`: {n} is not a finite number")),
+        },
         (_, other) => Err(format!("`{name}`: {other} has the wrong type")),
     }
 }
@@ -190,6 +304,12 @@ impl Command {
     /// canonical form.
     pub(crate) fn checked(&self) -> Result<Op, String> {
         let spec = spec(&self.field)?;
+        if spec.read_only {
+            return Err(format!(
+                "`{}` is read from the file: no command changes it",
+                self.field
+            ));
+        }
         match &self.op {
             Op::Set(None) => Ok(Op::Set(None)),
             Op::Set(Some(v)) => Ok(Op::Set(Some(normalize(&self.field, v)?))),
@@ -294,6 +414,12 @@ pub struct Query {
     pub flags: Vec<String>,
     /// Carrying every one of these tags.
     pub tags: Vec<String>,
+    /// Taken at or after this capture time (the `captured` field: the
+    /// camera's clock read as UTC, in seconds); an image without one
+    /// never matches a capture range.
+    pub captured_from: Option<i64>,
+    /// Taken before this capture time.
+    pub captured_before: Option<i64>,
     pub order: Order,
 }
 

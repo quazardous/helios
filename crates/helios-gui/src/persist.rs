@@ -39,6 +39,7 @@ use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex};
 
 use helios_core::{Bus, Envelope, Graph, Message, NodeId, Params};
+use helios_vault::capture::CAPTURED;
 use helios_vault::fields::{Command, LABELS, PICKED, Query, RATING, REJECTED, TAGS};
 use helios_vault::{
     CursorId, EditSession, ImageId, LibraryRow, Location, Presence, Store, Vault, Version, edit,
@@ -49,8 +50,9 @@ use crate::Shell;
 use crate::dialogs::Level;
 use crate::library::{Change, Entry};
 
-/// The fields the library shows.
-const SHOWN: [&str; 5] = [RATING, REJECTED, PICKED, LABELS, TAGS];
+/// The fields the library shows (the capture time gives the day the
+/// search field's dates match).
+const SHOWN: [&str; 6] = [RATING, REJECTED, PICKED, LABELS, TAGS, CAPTURED];
 
 /// Who the vault's audit trail names for what the desktop writes.
 pub const WHO: &str = "user";
@@ -210,7 +212,6 @@ fn entry_of(row: LibraryRow, changed: &HashMap<ImageId, u64>) -> (Entry, Option<
     if let Some(l) = &present {
         entry.bytes = Some(l.size);
         entry.modified = i64::try_from(l.modified).ok().filter(|&m| m > 0);
-        entry.day = entry.modified.and_then(crate::library::day_text);
     }
     for field in SHOWN {
         entry.show(field, row.fields.get(field));
@@ -649,6 +650,7 @@ impl<S: Store> Persist<S> {
                 decided = true;
             } else if event.kind == helios_vault::LOCATIONS_CHANGED
                 || event.kind == helios_vault::changed::CHANGED_OUTSIDE
+                || event.kind == helios_vault::capture::CAPTURES_SET
             {
                 self.locations_changed = true;
             } else if event.kind == "vault.field_changed" {

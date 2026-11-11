@@ -372,6 +372,23 @@ fn back_up<S: helios_vault::Store + 'static>(
     });
 }
 
+/// Fills, on a thread of its own, the capture fields (time, camera, lens,
+/// settings) of the photos imported before Helios kept them
+/// (`helios_library::capture::backfill`): a job in the jobs centre that
+/// resumes where the last one stopped, and does nothing once finished.
+fn backfill_captures<S: helios_vault::Store + 'static>(
+    vault: Arc<helios_vault::Vault<S>>,
+    jobs: helios_core::jobs::Jobs,
+) {
+    std::thread::spawn(move || {
+        if let Err(e) =
+            helios_library::capture::backfill(&vault, &jobs, &helios_library::capture::Files, None)
+        {
+            warn(&format!("capture backfill: {e}"));
+        }
+    });
+}
+
 fn seconds() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -1990,6 +2007,7 @@ fn main() -> Result<(), String> {
                         feed.clone(),
                     );
                 }
+                backfill_captures(vault.clone(), shell.jobs());
                 helios_gui::image_map::start_job(vault, shell.jobs(), settings, helios, feed);
             }
             // The health check (Help > Health check): Helios's checks

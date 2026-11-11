@@ -136,6 +136,17 @@ CREATE INDEX locations_volume ON locations (volume);
         name: "the image map",
         sql: V5,
     },
+    Migration {
+        version: 6,
+        name: "capture fields",
+        // Capture metadata (`docs/design/library.md`, L2) is kept as
+        // read-only fields: numbers (the capture time, the settings) are
+        // served by `fields_name_number`; text (camera, lens, file type)
+        // gets an index of its own, over the fields that hold no number.
+        // The values come from a backfill job, not from this step: they
+        // are read from the files.
+        sql: "CREATE INDEX fields_name_text ON fields (name, value) WHERE number IS NULL;",
+    },
 ];
 
 /// The image map (`docs/design/image-map.md`): an image is in the Library

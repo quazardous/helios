@@ -929,6 +929,7 @@ impl<S: Store> Run<'_, S> {
             self.vault
                 .import_known(path, id, self.now, Some(&self.by))?;
             self.seen.entry(id).or_insert_with(|| path.to_path_buf());
+            self.keep_capture(path, id, None, &mut line)?;
             self.keep_metadata(path, id, &mut line)?;
             self.keep_edits(path, id, &mut line)?;
             return Ok((line, Status::Unchanged));
@@ -1025,6 +1026,14 @@ impl<S: Store> Run<'_, S> {
             self.vault.set_signals(&id, Some(&doc))?;
             line["signals"] = doc;
         }
+        // The copy when there is one: the source is read once.
+        let placed = line["to"].as_str().map(PathBuf::from);
+        self.keep_capture(
+            placed.as_deref().unwrap_or(path),
+            id,
+            measured.as_ref(),
+            &mut line,
+        )?;
         // An importer's values first: a catalogue is its application's
         // truth, a sidecar may lag behind it.
         self.keep_metadata(path, id, &mut line)?;
@@ -1044,6 +1053,34 @@ impl<S: Store> Run<'_, S> {
             .map(|f| (f.clone(), self.hashes.get(f).copied()))
             .collect();
         card_safety(self.vault, root, &source.path, &source.label(), files)
+    }
+
+    /// Records how the file at `path` was taken as its image's capture
+    /// fields, unless the image has them already: its metadata read (no
+    /// pixel decoded), else what `signals` measured.
+    fn keep_capture(
+        &mut self,
+        path: &Path,
+        id: ImageId,
+        signals: Option<&Signals>,
+        line: &mut Value,
+    ) -> Result<(), String> {
+        if self.vault.captures_of(&[id])?[0].is_some() {
+            return Ok(());
+        }
+        let capture = match crate::capture::read(path) {
+            Ok(c) => Some(c),
+            Err(e) => {
+                line["capture_error"] = json!(e);
+                let doc = signals.map(|s| serde_json::to_value(s).expect("signals serialize"));
+                let seen = self.vault.sightings(&id)?;
+                crate::capture::of_kept(doc.as_ref(), &seen)
+            }
+        };
+        if let Some(c) = capture {
+            self.vault.set_captures(&[(id, c)], None)?;
+        }
+        Ok(())
     }
 
     /// Applies what an importer listed for the file at `path` to its image

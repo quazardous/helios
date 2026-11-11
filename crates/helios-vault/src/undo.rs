@@ -150,7 +150,10 @@ pub(crate) fn rows_of<S: Store + ?Sized>(
     let Some(image) = store.image(id)? else {
         return Ok(None);
     };
-    let names: BTreeSet<String> = store.audit(id)?.into_iter().map(|e| e.field).collect();
+    // The fields a command changed, and the capture fields (read from the
+    // file, never audited).
+    let mut names: BTreeSet<String> = store.audit(id)?.into_iter().map(|e| e.field).collect();
+    names.extend(crate::capture::NAMES.iter().map(|n| (*n).to_string()));
     let mut fields = BTreeMap::new();
     for name in names {
         if let Some(v) = store.field(id, &name)? {

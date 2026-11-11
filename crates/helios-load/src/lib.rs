@@ -20,6 +20,7 @@
 //!   frame number from its EXIF, read with its preview ([`look`]) for an
 //!   import's near-duplicate signals.
 
+pub mod capture;
 mod colour;
 
 pub use colour::{Colour, ColourTag};
