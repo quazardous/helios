@@ -234,6 +234,10 @@
           "description": "Culling moves to the next image after each mark.",
           "type": "boolean"
         },
+        "compare": {
+          "description": "The workspace opens in Compare: two or more photos side by side, the selection's until photos are chosen.",
+          "type": "boolean"
+        },
         "export": { "$ref": "#/$defs/export" }
       }
     },

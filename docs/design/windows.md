@@ -658,6 +658,10 @@ is the host's (`main.rs`), outside the shell, and one per process too.
   and Workshops panels, what each panel draws (`contents`), the status
   bar items, a menu open at a point, a tab's drag refusal;
 - the import window and the photos the imports brought, to select.
+- the comparison (2026-11-11): the photos the Compare place names, the
+  active one, the best, the zoom and pan and whether they are
+  synchronised (`crate::comparison::Comparison`), which the Compare panel
+  draws; a Compare window of its own takes it over with slice 4.
 
 **The seams slice 4 uses.** A focus is made by `Focus::new` from a
 `Seed` (its window, workspace, library view, viewport and the panels'

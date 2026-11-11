@@ -462,6 +462,39 @@ fn batch_export_opens_on_the_picks_with_the_export_ready() {
     }
 }
 
+fn compare() -> Bundle {
+    Bundle::load(&root().join("compare.helios-template")).unwrap()
+}
+
+#[test]
+fn compare_opens_in_compare_with_the_photos_central_and_the_filmstrip_under() {
+    let bundle = compare();
+    assert_eq!(bundle.template.id, "helios.compare");
+    assert_eq!(bundle.template.meta.name, "Compare");
+    let report = bundle.validate(&catalogue());
+    assert!(report.is_ok(), "{:?}", report.problems);
+    let json = serde_json::to_value(&bundle.template).unwrap();
+    assert_eq!(
+        schema::check(&schema::template(), &json),
+        Vec::<String>::new()
+    );
+    let built = bundle.build(&catalogue()).unwrap();
+    let area = |p: &str| built.layout.area_of(&PanelId::new(p).unwrap());
+    assert_eq!(area("helios.compare"), Some(Area::Center));
+    assert_eq!(area("helios.filmstrip"), Some(Area::Bottom));
+    // Each photo drawn from its edit: the workspace's network develops it.
+    assert_eq!(built.view.0, built.nodes["sigmoid"]);
+    assert!(bundle.template.library.as_ref().unwrap().compare);
+    for locale in ["en", "fr"] {
+        let text = bundle.texts.iter().find(|t| t.locale == locale).unwrap();
+        assert!(text.source.contains(&format!("{} = ", bundle.name_key())));
+        assert!(
+            text.source
+                .contains(&format!("{} = ", bundle.scenario_key()))
+        );
+    }
+}
+
 #[test]
 fn an_export_s_settings_are_checked() {
     let mut bundle = batch_export();

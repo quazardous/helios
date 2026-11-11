@@ -7,8 +7,9 @@
 //!   entered from the library or opened alone, the workspace's own
 //!   network ([`WORKSPACE`], its payload the workspace's key), and a
 //!   sub-workspace of it ([`SUBWORKSPACE`], its payload `{"id": id}`),
-//!   entered under its parent's place, its crumb its name. The root is
-//!   the workspace the window shows.
+//!   entered under its parent's place, its crumb its name, and the
+//!   comparison of photos side by side ([`COMPARISON`], its payload
+//!   `{"images": [id, …]}`). The root is the workspace the window shows.
 //! - **Modes**: culling (an orientation, set), mask editing (drawing a
 //!   path, pushed and never restored) and before-and-after compare
 //!   (pushed).
@@ -37,6 +38,10 @@ pub const WORKSPACE: FrameId = FrameId::from_static("helios.workspace");
 /// A sub-workspace, edited (`{"id": id}`): its nodes only.
 pub const SUBWORKSPACE: FrameId = FrameId::from_static("helios.sub-workspace");
 
+/// Photos side by side (`{"images": [id, …]}`; none: the selection),
+/// as Lightroom's Survey and Compare views and darktable's culling.
+pub const COMPARISON: FrameId = FrameId::from_static("helios.comparison");
+
 /// Culling: flag, rate and label from anywhere, the image first.
 pub const CULLING: FrameId = FrameId::from_static("helios.culling");
 /// Drawing a mask's path in the image.
@@ -60,6 +65,9 @@ pub const IMAGE_ARRANGEMENT: &str = "Image";
 /// The darkroom's arrangement: the workspace's default layout, the image
 /// in the centre.
 pub const DARKROOM_ARRANGEMENT: &str = "Darkroom";
+/// The comparison's arrangement: the photos side by side, the filmstrip
+/// under them.
+pub const COMPARISON_ARRANGEMENT: &str = "Compare";
 /// A sub-workspace's arrangement: the network's, its own once the user
 /// changes it.
 pub const SUBWORKSPACE_ARRANGEMENT: &str = "Sub-workspace";
@@ -86,6 +94,9 @@ pub fn frames() -> Vec<FrameSpec> {
         // Its crumb is its name ([`guard_subworkspace`]), else its id.
         FrameSpec::place(SUBWORKSPACE, "Sub-workspace")
             .arrangement(SUBWORKSPACE_ARRANGEMENT)
+            .label(|c| crumb(c.frame, c.title, c.payload)),
+        FrameSpec::place(COMPARISON, "Compare")
+            .arrangement(COMPARISON_ARRANGEMENT)
             .label(|c| crumb(c.frame, c.title, c.payload)),
         // The modes the user turns on show as chips in the status bar.
         FrameSpec::mode(CULLING, ORIENTATION, "Culling")
@@ -116,6 +127,14 @@ pub fn crumb(frame: &FrameId, title: &str, payload: &serde_json::Value) -> Optio
     }
     if *frame == SUBWORKSPACE {
         return Some(subworkspace_of(payload).unwrap_or(title).to_string());
+    }
+    if *frame == COMPARISON {
+        let n = images_of(payload).len();
+        return Some(if n == 0 {
+            title.to_string()
+        } else {
+            format!("{title} · {n}")
+        });
     }
     if *frame == DARKROOM {
         return Some(match Opened::of(payload) {
@@ -234,6 +253,22 @@ pub fn subworkspace_shown(state: &State) -> Option<&str> {
         .last()
         .filter(|e| e.frame == SUBWORKSPACE)
         .and_then(|e| subworkspace_of(&e.payload))
+}
+
+/// The comparison's payload: the photos compared, in order.
+pub fn images_payload(ids: &[String]) -> serde_json::Value {
+    serde_json::json!({ "images": ids })
+}
+
+/// The photos a comparison's payload names, in order (none: the
+/// selection is compared).
+pub fn images_of(payload: &serde_json::Value) -> Vec<String> {
+    payload["images"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|v| v.as_str().filter(|s| !s.is_empty()).map(String::from))
+        .collect()
 }
 
 /// The darkroom's payload for an image of the vault.
@@ -457,7 +492,7 @@ mod tests {
     #[test]
     fn the_frames_are_declared_once_with_their_groups() {
         let r = registry("k", &[]);
-        assert_eq!(r.len(), 7);
+        assert_eq!(r.len(), 8);
         let groups = r.groups();
         assert_eq!(groups.len(), 3);
         assert!(r.get(&MASK_EDITING).unwrap().transient);
@@ -472,6 +507,7 @@ mod tests {
             assert_eq!(spec.tone.as_deref(), Some(tone), "{mode}");
         }
         assert!(!r.get(&LIBRARY).unwrap().visible);
+        assert!(!r.get(&COMPARISON).unwrap().visible);
     }
 
     #[test]
@@ -498,6 +534,18 @@ mod tests {
             r.get(&LIBRARY).unwrap().label_of("Library", &json!(null)),
             None
         );
+        // The comparison says how many photos it shows.
+        let comparison = r.get(&COMPARISON).unwrap();
+        let three = images_payload(&["a".into(), "b".into(), "c".into()]);
+        assert_eq!(images_of(&three), ["a", "b", "c"]);
+        assert_eq!(
+            comparison.label_of("Compare", &three).as_deref(),
+            Some("Compare · 3")
+        );
+        assert_eq!(
+            comparison.label_of("Compare", &json!(null)).as_deref(),
+            Some("Compare")
+        );
     }
 
     #[test]
@@ -516,7 +564,7 @@ mod tests {
         };
         let read = tools::read(&config, &args(json!({}))).unwrap();
         assert_eq!(read["place"], "root");
-        assert_eq!(read["frames"].as_array().unwrap().len(), 7);
+        assert_eq!(read["frames"].as_array().unwrap().len(), 8);
         // A blank workspace has no sub-workspace to enter.
         assert_eq!(read["subworkspaces"], json!([]));
         let sub = tools::request(

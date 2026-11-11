@@ -39,7 +39,7 @@ use serde_json::Value as Json;
 
 use crate::host::Workspace;
 pub use helios_template::contexts::{
-    COMPARE, COMPARING, CULLING, DARKROOM, LIBRARY, MASK_EDITING, ORIENTATION, Opened,
+    COMPARE, COMPARING, COMPARISON, CULLING, DARKROOM, LIBRARY, MASK_EDITING, ORIENTATION, Opened,
     SUBWORKSPACE, TOOL, WORKSPACE,
 };
 use helios_template::format::SubWorkspace;
@@ -237,6 +237,22 @@ pub fn darkroom(app: &AppHandle) -> Option<Opened> {
         .rev()
         .find(|e| e.frame == DARKROOM)
         .and_then(|e| Opened::of(&e.payload))
+}
+
+/// The photos the Compare place names, when the user is in it (under the
+/// darkroom too): `Some` of none when it compares the selection.
+pub fn compared(app: &AppHandle) -> Option<Vec<String>> {
+    state(app)
+        .places
+        .iter()
+        .rev()
+        .find(|e| e.frame == COMPARISON)
+        .map(|e| helios_template::contexts::images_of(&e.payload))
+}
+
+/// Whether the stack was read and shows the workspace's root (no place).
+pub fn at_root(app: &AppHandle) -> bool {
+    contexts::state(app).is_some_and(|s| s.places.is_empty())
 }
 
 /// An image opened: the darkroom on it, under the place the user was in

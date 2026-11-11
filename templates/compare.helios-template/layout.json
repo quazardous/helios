@@ -1,0 +1,20 @@
+{
+  "kind": "layout",
+  "version": 2,
+  "areas": [
+    ["center", { "kind": "tabs", "panels": ["helios.compare", "helios.vault", "helios.viewport"], "active": 0 }],
+    ["bottom", { "kind": "tabs", "panels": ["helios.filmstrip", "egui_pop.jobs"], "active": 0 }]
+  ],
+  "auxiliary": [],
+  "hidden": [
+    "helios.graph",
+    "helios.modules",
+    "helios.masks",
+    "helios.params",
+    "helios.scopes",
+    "helios.queue",
+    "helios.log",
+    "helios.stacks",
+    "helios.duplicates"
+  ]
+}

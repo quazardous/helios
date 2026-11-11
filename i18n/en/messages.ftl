@@ -163,6 +163,12 @@ gui-catalogue-snapshot-now = Snapshot now
 
 gui-catalogue-today = today
 
+gui-compare-first = Compare shows { $count } photos at most: the first { $count } are compared
+
+gui-compare-rating = Active photo's rating
+
+gui-compare-too-few = Select two or more photos to compare them
+
 gui-confirmed-by-policy = { $verb }: confirmed by policy
 
 gui-copied = copied { $text }
@@ -613,7 +619,11 @@ gui-library-badge-offline = offline
 
 gui-library-cannot-open = The library cannot be opened: { $error }
 
+gui-library-compare = Compare
+
 gui-library-compare-hint = Select two to four images to compare them
+
+gui-library-compare-tip = The selected photos side by side (C)
 
 gui-library-count = { $shown } of { $total }
 
@@ -1368,6 +1378,8 @@ gui-workspace-import-title = Add from a workspace or a template
 gui-workspace-import-verb = Add
 
 gui-workspace-library-advance = culling advances after each mark
+
+gui-workspace-library-compare = opens in Compare, photos side by side
 
 gui-workspace-library-darktable = read darktable edits (.xmp sidecars) on import
 

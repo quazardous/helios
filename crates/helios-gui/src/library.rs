@@ -45,7 +45,9 @@ use egui::{Color32, ColorImage, TextureHandle, Ui};
 use egui_pop::api::AppHandle;
 
 use crate::thumb_textures::Resident;
-use egui_pop::views::library::compare::{CompareState, CompareView, Pane};
+use egui_pop::views::library::compare::{CompareView, Pane};
+
+use crate::comparison::Comparison;
 use egui_pop::views::library::filter::{Candidate, Filter, SearchField, SearchState};
 use egui_pop::views::library::marks::{ColorLabels, FlagToggle, RatingStars};
 use egui_pop::views::library::tags::{TagInput, TagInputState};
@@ -668,9 +670,6 @@ pub struct Library {
     tags: TagInputState,
     /// Every tag the library's images carry, for completion.
     known_tags: Vec<String>,
-    compare: Comparison,
-    /// The image marked best in the comparison.
-    best: Option<String>,
     app: Option<AppHandle>,
     changes: Vec<Change>,
     /// Stacks expanded or collapsed, for the vault: (stack, expanded).
@@ -747,11 +746,6 @@ impl Default for Library {
             query: None,
             tags: TagInputState::default(),
             known_tags: Vec::new(),
-            compare: Comparison {
-                state: CompareState::new(),
-                synced: true,
-            },
-            best: None,
             app: None,
             changes: Vec::new(),
             expansions: Vec::new(),
@@ -834,12 +828,6 @@ pub fn srgb(small: &Image) -> ColorImage {
         })
         .collect();
     ColorImage::new([w as usize, h as usize], pixels)
-}
-
-/// The comparison's zoom and pan, and whether they follow each other.
-struct Comparison {
-    state: CompareState,
-    synced: bool,
 }
 
 /// The badges' words for an image not at hand, translated.
@@ -2136,6 +2124,15 @@ impl Library {
         let import = self
             .import_offered
             .then(|| crate::i18n::text(&ctx, Message::new("gui-library-import", "Import…")));
+        let compare = crate::i18n::text(&ctx, Message::new("gui-library-compare", "Compare"));
+        let compare_hint = crate::i18n::text(
+            &ctx,
+            Message::new(
+                "gui-library-compare-tip",
+                "The selected photos side by side (C)",
+            ),
+        );
+        let can_compare = self.state.selection().len() >= 2;
         let mut asked = None;
         // Wrapped, the field no wider than what is left of the line: a
         // narrow panel takes the bar on several lines rather than widen
@@ -2154,6 +2151,20 @@ impl Library {
             }
             asked = field.show(ui, &mut self.search).changed;
             ui.checkbox(&mut self.auto_advance, advance);
+            if ui
+                .add_enabled(can_compare, egui::Button::new(compare))
+                .on_hover_text(compare_hint)
+                .clicked()
+            {
+                crate::dialogs::request(
+                    ui.ctx(),
+                    crate::dialogs::Request::Run(
+                        crate::comparison::COMMAND.into(),
+                        Value::Null,
+                        helios_shell::commands::Origin::User,
+                    ),
+                );
+            }
             ui.weak(count);
         });
         if let Some(filter) = asked {
@@ -2360,13 +2371,25 @@ impl Library {
         self.handle(out.signals);
     }
 
-    /// The Compare panel: the two to four images selected side by side,
-    /// zoom and pan synced, one marked best; keeping the best picks it
-    /// and rejects the others.
-    pub fn compare_ui(&mut self, ui: &mut Ui) {
+    /// The Compare panel: the comparison's photos side by side (the
+    /// selection's two to four when it has none chosen), each drawn from
+    /// its edit, zoom and pan synchronised (a toggle), one active and
+    /// outlined, its marks at hand, one marked best; keeping the best
+    /// picks it and rejects the others.
+    ///
+    /// The comparison is the focus's ([`Comparison`]); with photos chosen
+    /// (the Compare place), the selection is the active photo, so the
+    /// culling keys mark it and a click in the filmstrip on one of them
+    /// makes it active, as in Lightroom's Survey view.
+    pub fn compare_ui(&mut self, ui: &mut Ui, cmp: &mut Comparison) {
         self.receive(ui.ctx());
-        let keys = self.selection();
-        if !(2..=4).contains(&keys.len()) {
+        let selection = self.selection();
+        let keys: Vec<String> = cmp
+            .shown(&selection)
+            .into_iter()
+            .filter(|k| self.index.contains_key(k))
+            .collect();
+        if keys.len() < 2 {
             ui.weak(crate::i18n::text(
                 ui.ctx(),
                 Message::new(
@@ -2376,6 +2399,15 @@ impl Library {
             ));
             return;
         }
+        let chosen = !cmp.photos().is_empty();
+        // A photo of the comparison selected elsewhere becomes active.
+        if chosen
+            && let [one] = selection.as_slice()
+            && let Some(i) = keys.iter().position(|k| k == one)
+        {
+            cmp.set_active(i);
+        }
+        let before = cmp.active_index(keys.len());
         self.feed_in_view(keys.clone(), false);
         let ctx = ui.ctx().clone();
         let sync = crate::i18n::text(&ctx, Message::new("gui-library-sync", "Sync zoom and pan"));
@@ -2386,14 +2418,26 @@ impl Library {
                 "Keep the best: pick it, reject the others",
             ),
         );
-        let best = self.best.clone().filter(|b| keys.contains(b));
+        let best = cmp.best().map(String::from).filter(|b| keys.contains(b));
         let mut keep = false;
-        ui.horizontal(|ui| {
-            ui.checkbox(&mut self.compare.synced, sync);
+        ui.horizontal_wrapped(|ui| {
+            ui.checkbox(&mut cmp.synced, sync);
             keep = ui
                 .add_enabled(best.is_some(), egui::Button::new(keep_text))
                 .clicked();
+            ui.separator();
+            // The active photo, chosen by its name (or the arrow keys).
+            for (i, k) in keys.iter().enumerate() {
+                let name = self.at(k).map_or(k.as_str(), |i| &self.entries[i].name);
+                if ui
+                    .selectable_label(i == cmp.active_index(keys.len()), name)
+                    .clicked()
+                {
+                    cmp.set_active(i);
+                }
+            }
         });
+        self.active_marks(ui, cmp.active(&keys).cloned());
         let panes: Vec<Pane<String>> = keys
             .iter()
             .filter_map(|k| {
@@ -2419,17 +2463,100 @@ impl Library {
                 },
             };
             CompareView::new("helios.compare")
-                .synced(self.compare.synced)
+                .synced(cmp.synced)
                 .best(best.clone())
-                .show(ui, &mut self.compare.state, &panes, &thumbs)
+                .show(ui, &mut cmp.view, &panes, &thumbs)
         };
-        crate::name_rect(ui.ctx(), "helios.library.compare", out.response.rect);
+        let rect = out.response.rect;
+        crate::name_rect(ui.ctx(), "helios.library.compare", rect);
+        // The active photo outlined; a click in a pane makes it active.
+        let gap = egui_pop::core::theme::Tokens::of(ui.ctx()).space.s;
+        let areas = pane_rects(rect, panes.len(), gap);
+        let clicked = ui.input(|i| {
+            i.pointer
+                .primary_clicked()
+                .then(|| i.pointer.interact_pos())
+                .flatten()
+        });
+        if let Some(at) = clicked
+            && let Some(i) = areas.iter().position(|a| a.contains(at))
+        {
+            cmp.set_active(i);
+        }
+        let active = cmp.active_index(keys.len());
+        if let Some(area) = areas.get(active) {
+            let ring = egui_pop::core::theme::Tokens::of(ui.ctx()).focus_ring;
+            ui.painter().rect_stroke(
+                area.shrink(1.0),
+                0.0,
+                egui::Stroke::new(2.0, ring),
+                egui::StrokeKind::Inside,
+            );
+            crate::name_rect(ui.ctx(), "helios.library.compare.active", *area);
+        }
         self.after_pass(ui.ctx());
         if let Some(k) = out.best {
-            self.best = Some(k);
+            cmp.set_best(Some(k));
         }
         if keep && let Some(best) = best {
             self.keep_best(&best, &keys);
+        }
+        // The selection follows the active photo of a chosen comparison.
+        if chosen && active != before {
+            self.select_ids(std::slice::from_ref(&keys[active]));
+        }
+    }
+
+    /// The active photo's marks in the Compare panel: its name, stars,
+    /// colour labels and flag, each changed on it alone.
+    fn active_marks(&mut self, ui: &mut Ui, active: Option<String>) {
+        let Some(entry) = active
+            .and_then(|k| self.at(&k))
+            .map(|i| self.entries[i].clone())
+        else {
+            return;
+        };
+        let marks = entry.marks();
+        let keys = vec![entry.id.clone()];
+        let rating = crate::i18n::text(
+            ui.ctx(),
+            Message::new("gui-compare-rating", "Active photo's rating"),
+        );
+        let mut asked = Vec::new();
+        ui.horizontal_wrapped(|ui| {
+            ui.strong(&entry.name);
+            if let Some(rating) = RatingStars::new(marks.rating)
+                .label(rating)
+                .show(ui)
+                .changed
+            {
+                asked.push(Mark::Rate {
+                    keys: keys.clone(),
+                    rating,
+                });
+            }
+            if let Some(labels) = ColorLabels::new(marks.labels).show(ui).changed {
+                for label in ColorLabel::ALL {
+                    if labels.has(label) != marks.labels.has(label) {
+                        asked.push(Mark::Label {
+                            keys: keys.clone(),
+                            label,
+                            on: labels.has(label),
+                        });
+                    }
+                }
+            }
+            if let Some(flag) = FlagToggle::new(marks.flag).show(ui).changed {
+                asked.push(Mark::Flag {
+                    keys: keys.clone(),
+                    flag,
+                });
+            }
+        });
+        for m in asked {
+            if let Err(e) = self.mark(m) {
+                self.notes.push(e);
+            }
         }
     }
 
@@ -2453,16 +2580,6 @@ impl Library {
         }
     }
 
-    /// The image marked best in the comparison.
-    pub fn best(&self) -> Option<&str> {
-        self.best.as_deref()
-    }
-
-    /// Marks an image best in the comparison.
-    pub fn set_best(&mut self, id: Option<String>) {
-        self.best = id;
-    }
-
     /// Keeps the best of `among`: picks it and rejects the others.
     pub fn keep_best(&mut self, best: &str, among: &[String]) {
         let others: Vec<String> = among.iter().filter(|k| *k != best).cloned().collect();
@@ -2482,6 +2599,28 @@ impl Library {
             }
         }
     }
+}
+
+/// Where the Compare view puts `n` panes in `rect`, `gap` apart: side by
+/// side up to three, four in a square (egui-pop's `CompareView` layout).
+fn pane_rects(rect: egui::Rect, n: usize, gap: f32) -> Vec<egui::Rect> {
+    let (cols, rows) = match n {
+        0 | 1 => (1, 1),
+        2 => (2, 1),
+        3 => (3, 1),
+        _ => (2, 2),
+    };
+    let w = (rect.width() - gap * (cols as f32 - 1.0)) / cols as f32;
+    let h = (rect.height() - gap * (rows as f32 - 1.0)) / rows as f32;
+    (0..n.min(cols * rows))
+        .map(|i| {
+            let (c, r) = ((i % cols) as f32, (i / cols) as f32);
+            egui::Rect::from_min_size(
+                rect.min + egui::vec2(c * (w + gap), r * (h + gap)),
+                egui::vec2(w, h),
+            )
+        })
+        .collect()
 }
 
 #[cfg(test)]

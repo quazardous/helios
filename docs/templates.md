@@ -2,8 +2,8 @@
 
 Status: **design note, format in code** (2026-10-13). The format, its
 schema, validation, the headless build check and composite files live in
-`crates/helios-template`; five built-in templates ("Portrait retouch",
-"Import, cull, de-duplicate", "Develop one image", "Develop
+`crates/helios-template`; six built-in templates ("Portrait retouch",
+"Import, cull, de-duplicate", "Compare", "Develop one image", "Develop
 (preview)" and "Batch export") ship as data under
 `templates/`, and the desktop's "New workspace from template" creates a
 workspace from them or from the user's own. A workspace is then edited, saved back as a
@@ -255,6 +255,10 @@ What the workspace sets for the library (optional):
   a query with no criterion, a word it does not know, more than 5 stars
   and a tag with a space (the search field could not show it).
 - `auto_advance` starts culling with auto-advance on.
+- `compare` (2026-11-11) makes the workspace a Compare focus: it opens
+  in the Compare place (`helios.comparison`), two to four photos side by
+  side, the selection's until photos are chosen (`library.compare`, `C`).
+  The built-in "Compare" template sets it.
 - `export` (2026-11-07) is what the export dialog (`library.export`,
   File > Export…) starts from, written as `library.export` takes its
   arguments: `format` (`jpeg`, `png`, `tiff`), `quality` (JPEG, 1 to
