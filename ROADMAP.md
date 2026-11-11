@@ -487,6 +487,15 @@ driver, not a rewrite.
   applied or was substituted goes to the Log panel and a short toast.
   Later, not decided in detail: importer plugins under File > Import
   from →, and reading darktable's `library.db`.
+  (2026-11-11, not decided) **Import connectors**
+  ([docs/design/import-connectors.md](docs/design/import-connectors.md)):
+  a connector trait (paged listing, decorative path, metadata, claimed
+  hash checked after download), folders and cards in process, Google
+  Photos, phones and remote storage as source plugins; saved imports
+  with filter, tags and triggers, automatic runs confirmed once, and a
+  history with "Import again". Google Photos is reachable only through
+  its Picker API since 2025 (hand-picked, no automatic import). Nine
+  choices C1 to C9 await the owner.
   (2026-11-11, decided) **The Library focus** (docs/design/library.md):
   the owner accepted the nine recommendations: capture time as the
   default order; folders, albums, smart albums and a quick collection;
