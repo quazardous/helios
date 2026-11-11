@@ -32,6 +32,7 @@ use egui_pop::viewport::graph::{
     Edge, Edit, GraphEditor, GraphEvent, GraphModel, GraphState, Group, Kind, Level, Node, Param,
     Port, PortRef, PortType, Refusal, Request, WireStyle,
 };
+use egui_pop::viewport::navigation::Overview;
 use helios_core::{Engine, Graph, Message, ModuleKind, NodeState, Region};
 use helios_shell::commands::Origin;
 use helios_template::Catalogue;
@@ -1057,8 +1058,15 @@ impl GraphPanel {
             Message::new("gui-graph-label", "The workspace's network"),
         );
         let headers = self.headers.clone();
+        let under = covered(ui, ui.available_rect_before_wrap());
         let editor = GraphEditor::new(&model, &mut self.state)
             .label(label)
+            .hint(!under)
+            .overview(if under {
+                Overview::Never
+            } else {
+                Overview::default()
+            })
             .snap(Some(10.0))
             .wires(wires)
             .requests(requests)
@@ -1257,6 +1265,23 @@ impl GraphPanel {
         self.commands
             .push(("subworkspace.enter".into(), json!({ "id": id })));
     }
+}
+
+/// Whether a window or a dialog lies over `rect` of the main window: the
+/// import window overlapping it, or a modal dialog. egui-pop draws a
+/// canvas's hint and overview in the foreground order, above every
+/// window; while one covers the canvas they are not drawn, and the hint
+/// comes back once it is gone. A safety net until egui-pop's own fix
+/// ships (its next release draws them just above their canvas).
+pub(crate) fn covered(ui: &Ui, rect: egui::Rect) -> bool {
+    let import = egui::Id::unique(crate::shell::IMPORT_WINDOW);
+    ui.ctx().memory(|m| {
+        m.top_modal_layer().is_some()
+            || m.areas()
+                .visible_layer_ids()
+                .contains(&egui::LayerId::new(egui::Order::Middle, import))
+                && m.area_rect(import).is_some_and(|r| r.intersects(rect))
+    })
 }
 
 #[cfg(test)]

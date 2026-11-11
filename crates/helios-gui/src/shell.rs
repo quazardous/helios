@@ -291,6 +291,9 @@ pub fn wgpu_setup(gpu: &helios_gpu::Gpu) -> eframe::egui_wgpu::WgpuSetup {
     })
 }
 
+/// The import window's egui id source (`egui::Id::unique` of it).
+pub(crate) const IMPORT_WINDOW: &str = "helios.import.window";
+
 /// Names a widget's rectangle for this frame, so it can be pictured by
 /// that name (`gui.snapshot {target: name}`). The rectangle is in the
 /// points of the window it is drawn in, which is kept with it.

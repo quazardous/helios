@@ -546,3 +546,95 @@ fn the_wire_style_is_kept_between_sessions() {
     );
     std::fs::remove_dir_all(&root).unwrap();
 }
+
+/// The canvas's one-time navigation hint.
+const NAV_HINT: &str = "Middle-drag, Space+drag or H to pan · Ctrl+wheel to zoom · F to frame";
+
+/// The layer drawn on top at a point of the main window.
+fn top_at(h: &Harness<'static, Shell>, at: egui::Pos2) -> Option<egui::LayerId> {
+    h.ctx.layer_id_at(at)
+}
+
+#[test]
+fn the_canvas_hint_never_shows_over_a_window_or_a_dialog() {
+    let root = temp("hint-under");
+    let (mut h, _) = window(&root);
+    // The pointer over the graph brings up its one-time hint, in a layer
+    // of its own above the canvas.
+    let graph = h.state().target_rect(GRAPH).unwrap();
+    // An empty spot of the canvas, away from the nodes, the toolbar and
+    // the overview.
+    h.hover_at(graph.left_bottom() + vec2(24.0, -24.0));
+    frames(&mut h);
+    let hint = h
+        .query_by_label(NAV_HINT)
+        .unwrap_or_else(|| {
+            let layers = h.ctx.memory(|m| {
+                let modal = m.top_modal_layer();
+                let ls: Vec<_> = m
+                    .areas()
+                    .visible_layer_ids()
+                    .into_iter()
+                    .map(|l| (l, m.area_rect(l.id)))
+                    .collect();
+                format!("modal {modal:?}, layers {ls:?}")
+            });
+            panic!("the hint shows over the hovered graph {graph:?}: {layers}")
+        })
+        .rect()
+        .center();
+    let overlay = top_at(&h, hint).expect("a layer under the hint");
+    // The import window, its title bar dragged over the hint, the
+    // pointer left there: the window is on top, the hint stays under it.
+    run(&mut h, "library.importWindow", json!(null));
+    let title = "Import photos";
+    let mut shown = None;
+    for _ in 0..headless::WINDOW_APPEARS_WITHIN {
+        h.step();
+        shown = headless::window_rect(&h, title);
+        if shown.is_some() {
+            break;
+        }
+    }
+    let shown = shown.expect("the import window shows");
+    let grip = egui::pos2(shown.center().x, shown.top() + 10.0);
+    h.hover_at(grip);
+    h.run();
+    h.drag_at(grip);
+    h.step();
+    for k in 1..=8 {
+        h.hover_at(grip + (hint - grip) * (k as f32 / 8.0));
+        h.step();
+    }
+    h.drop_at(hint);
+    frames(&mut h);
+    let moved = headless::window_rect(&h, title).unwrap();
+    assert!(
+        moved.contains(hint),
+        "the window covers the hint's place: {moved:?}, {hint:?}"
+    );
+    let on_top = top_at(&h, hint);
+    assert_ne!(
+        on_top,
+        Some(overlay),
+        "the canvas hint is drawn over the import window"
+    );
+    assert_eq!(
+        on_top.map(|l| l.order),
+        Some(egui::Order::Middle),
+        "{on_top:?}"
+    );
+    // A dialog over the main window (a form asked for): the same.
+    run(&mut h, "library.importSource", json!(null));
+    frames(&mut h);
+    assert!(
+        h.state().target_rect("helios.dialog").is_ok(),
+        "a dialog shows"
+    );
+    assert_ne!(
+        top_at(&h, hint),
+        Some(overlay),
+        "the canvas hint is drawn over a dialog"
+    );
+    std::fs::remove_dir_all(&root).unwrap();
+}

@@ -806,7 +806,7 @@ impl Shell {
         let main = ctx.content_rect().size();
         let max = main - egui::vec2(32.0, 32.0);
         egui::Window::new(&words.title)
-            .id(egui::Id::unique("helios.import.window"))
+            .id(egui::Id::unique(crate::shell::IMPORT_WINDOW))
             .open(&mut open)
             .collapsible(false)
             .resizable(true)
