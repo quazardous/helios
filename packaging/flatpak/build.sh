@@ -88,6 +88,8 @@ fetch() {
   flatpak update --user -y --noninteractive
 
   echo "== sources"
+  # A build that failed leaves its folder: flatpak-builder refuses a full one.
+  rm -rf "$work/build"
   "${builder[@]}" --user --download-only --state-dir="$state" "$work/build" "$manifest"
 }
 
