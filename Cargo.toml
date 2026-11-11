@@ -51,9 +51,6 @@ helios-colour = { path = "crates/helios-colour" }
 helios-storage = { path = "crates/helios-storage" }
 helios-health = { path = "crates/helios-health" }
 helios-controls = { path = "crates/helios-controls" }
-# GPL for now (the workspace's licence): the controls framework, agnostic
-# of Helios, to move to its own repository once the API has settled.
-egui_hud = { path = "crates/egui_hud" }
 # MIT: the UI library and application framework Helios is built on.
 # Pinned to a commit while the two move together. Its eframe support (the window's place) runs on the same
 # eframe as Helios; its icon font stays off. Its bundled font pair (Inter
@@ -78,6 +75,10 @@ egui-pop-wayland = { git = "https://github.com/quazardous/egui-pop", rev = "8d84
 # standard slot sizes), with no egui dependency. Pinned to a commit until it
 # is published.
 egui_fit = { git = "https://github.com/quazardous/egui_fit", rev = "0fe36629a70c37e9ef3c7ee5b5d769713d5f08de", features = ["serde"] }
+# MIT OR Apache-2.0: the controls framework (controls as data, cards on the
+# slot engine, the value flow, renderers on egui-pop), agnostic of Helios.
+# Pinned to a commit until it is published.
+egui_hud = { git = "https://github.com/quazardous/egui_hud", rev = "89267a6fee2effcdcf0d473074355cf0da2695b1" }
 blake3 = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

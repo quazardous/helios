@@ -132,9 +132,8 @@ jobs:
           HEAD: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
         run: cargo xtask check-commits "${BASE:-0}..$HEAD"
 
-  # egui_hud's web demo builds for wasm32 with Trunk, as the Pages
-  # workflow (pages.yml) builds it from main: it cannot break silently.
-  demo-web:
+  # The controls gallery builds for wasm32: its pages stay web-ready.
+  gallery-web:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -145,16 +144,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: wasm
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: trunk
       # The toolchain rust-toolchain.toml pins is not the one the action
       # named: add the target to it.
       - run: rustup target add wasm32-unknown-unknown
-      - run: cargo clippy --locked --target wasm32-unknown-unknown -p egui_hud_demo -p helios-controls-gallery -- -D warnings
-      - name: Build the demo
-        working-directory: crates/egui_hud_demo
-        run: trunk build --release --public-url /helios/egui_hud/
+      - run: cargo clippy --locked --target wasm32-unknown-unknown -p helios-controls-gallery -- -D warnings
 
   # Every linter of `cargo xtask lint`, installed so none is skipped:
   # rustfmt, clippy, cargo-deny, cargo-machete, taplo, typos, shellcheck, ruff.

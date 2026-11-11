@@ -21,11 +21,15 @@ Status: **accepted** (2026-11-08), recommended answers to Q1 to Q10
 The context rules (`control-contexts.md`) are accepted too (2026-11-09,
 its choices C1 to C4).
 
-**Demo** (2026-11-10): [egui_hud's web demo](https://quazardous.github.io/helios/egui_hud/)
-(`crates/egui_hud_demo`) shows the framework with no application behind
+**Demo** (2026-11-10): [egui_hud's web demo](https://quazardous.github.io/egui_hud/)
+(`demo/` in egui_hud's repository) shows the framework with no application behind
 it: a mixer channel and a light declared as data, on the bench, which
 moved into `egui_hud` (feature `bench`) so the gallery and the demo share
 it.
+
+**Own repository** (2026-11-11): egui_hud and its demo moved out of the
+Helios workspace to <https://github.com/quazardous/egui_hud>, under MIT OR
+Apache-2.0; Helios depends on it by git, pinned to a commit.
 
 **Slice 1 built** (2026-11-09): the `helios-controls` crate (model,
 registry and `controls.describe` output, the value flow with the vetoable
@@ -919,7 +923,7 @@ and never reaches past it into egui.
 |---|---|---|
 | Slot layout | a standalone crate in its own repository, dual MIT OR Apache-2.0, depending on neither egui nor Helios (`egui_fit`, at https://github.com/quazardous/egui_fit; D2, decided 2026-11-09) | slot packing over plain boxes: the base unit and its fractions in twelfths, size policies, orientations picked from the slot's shape, smaller forms by index, dense deterministic grid packing with spans and pinned positions (D3), growth slot by slot, hysteresis. It knows nothing of controls, values or drawing. egui_hud is its first user. egui_stack's sections and toolbar overflow, and egui-pop's admin forms, may adopt it once the bench has proved it. It is not published before then. |
 | Visual | egui-pop (`egui-pop-core`, `egui-pop-viewport`, `egui-pop-api`) | widgets (slider, range, curve, wheels), the viewport, overlays and handles, the canvas and its commands, the history contract, keys and pointer profiles, the agent bridge. Unchanged in spirit: visual parts, no meaning. |
-| Framework | `egui_hud` (`crates/egui_hud`; renamed egui_hud, 2026-11-10), agnostic of Helios: no `helios-*` dependency, only `egui_fit`, `egui-pop-model`, serde, and egui-pop behind its `render` feature. In the Helios workspace and GPL-3.0-or-later for now; it moves to its own repository under MIT OR Apache-2.0 once the bench (slices 7 and 8) has settled its API (option B, decided 2026-11-09) | the modules `model`, `slot`, `card`, `context`, `resolve`, `registry` (controls, patches, implicit controls from a `ParamDescriptor`), `flow` (on the `ValueSource` and `ValueStore` traits, with `MemoryStore` for tests and benches), `commands` (the `controls.*` commands as plain functions a host declares) and `render`. The rows below name the modules it holds. |
+| Framework | `egui_hud` (https://github.com/quazardous/egui_hud, its own repository since 2026-11-11; renamed egui_hud, 2026-11-10), agnostic of Helios: no `helios-*` dependency, only `egui_fit`, `egui-pop-model`, serde, and egui-pop behind its `render` feature. Developed in the Helios workspace under GPL-3.0-or-later, then moved to its own repository under MIT OR Apache-2.0 (option B, decided 2026-11-09; moved 2026-11-11) | the modules `model`, `slot`, `card`, `context`, `resolve`, `registry` (controls, patches, implicit controls from a `ParamDescriptor`), `flow` (on the `ValueSource` and `ValueStore` traits, with `MemoryStore` for tests and benches), `commands` (the `controls.*` commands as plain functions a host declares) and `render`. The rows below name the modules it holds. |
 | Helios side | `helios-controls` | the business catalogue (exposure…), the mapping from `helios_values::Descriptor` and `ParamWidget` to the framework's descriptor, the adapters from `helios_values::Store` to the store traits and from the shell's command registry to the `controls.*` commands, and re-exports of the framework's modules for Helios's callers. |
 | Model | `egui_hud`, module `model` (no egui) | the catalogue of business controls, value types, size policies and the slots they ask for (module `slot`; they replaced `Footprint` in slice 4), orientations (preferred and supported), the integration level per surface (managed or integrated, with the managed fallback), indicators and a case's chrome, connectors, cases, declarations and their serialisable form, bindings, derive and apply, coordinate spaces and mappings, intents, customisation types, resolution and diagnostics. |
 | Renderers | `egui_hud`, module `render` (on egui-pop) | per control, variant, surface, orientation and representation, under the ergonomic contract: the standard managed renderers (egui-pop sliders, range sliders, check boxes, drop-downs, swatches, knobs, value-type fallbacks), HUD read-outs and mini-controls, integrated renderers (curve, wheels, handles from composites on egui-pop overlays); the fallback rule. |
