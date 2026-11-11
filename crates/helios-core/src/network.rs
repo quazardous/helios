@@ -21,6 +21,7 @@
 
 use std::sync::Arc;
 
+use crate::brick::{BrickSpec, Contract};
 use crate::error::Error;
 use crate::image::Region;
 use crate::manifest::{Manifest, ModuleKind, ParamHint, ParamSpec, PortSpec};
@@ -341,6 +342,20 @@ pub trait Composite: Send + Sync + 'static {
     /// fields, for a render at `at`.
     fn expand(&self, params: &Params, context: &Context, at: &Expansion)
     -> Result<Network, String>;
+
+    /// What it declares as a brick (see [`crate::Module::brick`]).
+    fn brick(&self) -> Option<BrickSpec> {
+        None
+    }
+
+    /// The ways it is used (see [`crate::Module::provides`]).
+    fn provides(&self) -> Vec<Contract> {
+        let mut provides = vec![Contract::Node, Contract::Process];
+        if self.brick().is_some() {
+            provides.insert(0, Contract::Brick);
+        }
+        provides
+    }
 }
 
 /// One parameter of a macro, written into inner nodes' parameters.

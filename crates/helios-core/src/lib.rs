@@ -9,6 +9,7 @@
 //! - [`params`] and [`manifest`]: named, typed parameters and what a module declares.
 //! - [`module`]: the contract a module implements.
 //! - [`graph`]: a network of nodes.
+//! - [`brick`]: the contracts a module offers, and what a brick declares.
 //! - [`network`]: a node standing for a network (macros, multi-kernel modules).
 //! - [`engine`]: evaluates a network, never computing the same content twice.
 //! - [`bus`]: typed events for orchestration, with a journal.
@@ -16,6 +17,7 @@
 //! - [`jobs`]: how background work goes, as `job.*` events people follow.
 //! - [`describe`]: every entity reports its state as structured data.
 
+pub mod brick;
 pub mod bus;
 pub mod describe;
 pub mod engine;
@@ -31,6 +33,9 @@ pub mod params;
 pub mod scheduler;
 pub mod status;
 
+pub use brick::{
+    BrickFamily, BrickPort, BrickSpec, Contract, Form, PortType, Shape, Space, Tolerance,
+};
 pub use bus::{Bus, Envelope, Event};
 pub use describe::Describe;
 pub use engine::{Counters, Engine, FaultKind};

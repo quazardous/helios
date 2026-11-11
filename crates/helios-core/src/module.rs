@@ -4,6 +4,7 @@ use std::any::Any;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use crate::brick::{BrickSpec, Contract, Form};
 use crate::error::Error;
 use crate::image::{Image, Region};
 use crate::manifest::{Manifest, ParamHint};
@@ -382,6 +383,23 @@ pub trait Module: Send + Sync + 'static {
     fn gpu_uniforms(&self, _plan: &Self::Plan) -> Vec<f32> {
         Vec::new()
     }
+
+    /// What it declares as a brick, when it can be one (see
+    /// [`crate::brick`]). None by default.
+    fn brick(&self) -> Option<BrickSpec> {
+        None
+    }
+
+    /// The ways it is used: a node and a process by default, a brick too
+    /// when it declares itself one. A brick meant only to be assembled
+    /// says `[Contract::Brick]`.
+    fn provides(&self) -> Vec<Contract> {
+        let mut provides = vec![Contract::Node, Contract::Process];
+        if self.brick().is_some() {
+            provides.insert(0, Contract::Brick);
+        }
+        provides
+    }
 }
 
 /// A module behind a uniform interface, as the graph holds it.
@@ -391,17 +409,50 @@ pub struct ModuleRef(Arc<dyn Erased>);
 impl ModuleRef {
     pub fn new<M: Module>(module: M) -> Self {
         let manifest = module.manifest();
-        Self(Arc::new(Adapter { module, manifest }))
+        let brick = module.brick();
+        let provides = module.provides();
+        Self(Arc::new(Adapter {
+            module,
+            manifest,
+            brick,
+            provides,
+        }))
     }
 
     /// A node that stands for a network (a macro, a multi-kernel module):
     /// the engine expands it into its inner nodes when it plans a render.
     pub fn composite<C: Composite>(composite: C) -> Self {
         let manifest = composite.manifest();
+        let brick = composite.brick();
+        let provides = composite.provides();
         Self(Arc::new(CompositeAdapter {
             composite,
             manifest,
+            brick,
+            provides,
         }))
+    }
+
+    /// What it declares as a brick (see [`Module::brick`]).
+    pub fn brick(&self) -> Option<&BrickSpec> {
+        self.0.brick()
+    }
+
+    /// The ways it is used (see [`Module::provides`]).
+    pub fn provides(&self) -> &[Contract] {
+        self.0.provides()
+    }
+
+    /// The forms it is available in: an assembly for a composite; Rust on
+    /// the CPU for a module, and a WGSL kernel when it has one.
+    pub fn forms(&self) -> Vec<Form> {
+        if self.is_composite() {
+            vec![Form::Assembly]
+        } else if self.gpu_kernel().is_some() {
+            vec![Form::Cpu, Form::Gpu]
+        } else {
+            vec![Form::Cpu]
+        }
     }
 
     /// Whether it stands for a network.
@@ -673,6 +724,8 @@ pub(crate) type Plan = Arc<dyn Any + Send + Sync>;
 
 trait Erased: Send + Sync {
     fn manifest(&self) -> &Manifest;
+    fn brick(&self) -> Option<&BrickSpec>;
+    fn provides(&self) -> &[Contract];
     fn param_hints(&self) -> Vec<ParamHint>;
     fn question(&self) -> Vec<String> {
         Vec::new()
@@ -698,11 +751,21 @@ trait Erased: Send + Sync {
 struct CompositeAdapter<C: Composite> {
     composite: C,
     manifest: Manifest,
+    brick: Option<BrickSpec>,
+    provides: Vec<Contract>,
 }
 
 impl<C: Composite> Erased for CompositeAdapter<C> {
     fn manifest(&self) -> &Manifest {
         &self.manifest
+    }
+
+    fn brick(&self) -> Option<&BrickSpec> {
+        self.brick.as_ref()
+    }
+
+    fn provides(&self) -> &[Contract] {
+        &self.provides
     }
 
     fn param_hints(&self) -> Vec<ParamHint> {
@@ -754,6 +817,8 @@ impl<C: Composite> Erased for CompositeAdapter<C> {
 struct Adapter<M: Module> {
     module: M,
     manifest: Manifest,
+    brick: Option<BrickSpec>,
+    provides: Vec<Contract>,
 }
 
 impl<M: Module> Adapter<M> {
@@ -766,6 +831,14 @@ impl<M: Module> Adapter<M> {
 impl<M: Module> Erased for Adapter<M> {
     fn manifest(&self) -> &Manifest {
         &self.manifest
+    }
+
+    fn brick(&self) -> Option<&BrickSpec> {
+        self.brick.as_ref()
+    }
+
+    fn provides(&self) -> &[Contract] {
+        &self.provides
     }
 
     fn param_hints(&self) -> Vec<ParamHint> {
