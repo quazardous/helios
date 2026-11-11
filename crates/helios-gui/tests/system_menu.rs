@@ -137,13 +137,13 @@ fn about_and_keyboard_shortcuts_open_dialogs() {
         .unwrap();
     assert_eq!(about["kind"], json!("custom"));
     assert_eq!(about["title"], json!("About Helios"));
-    // What agents read: Cargo's version, licence and repository.
+    // What agents read: the program's version (HELIOS_VERSION, crates/helios-gui/build.rs), licence and repository.
     let read = h
         .state_mut()
         .run("about.read", json!(null), Origin::User)
         .unwrap();
     assert_eq!(read["name"], json!("Helios"));
-    assert_eq!(read["version"], json!(env!("CARGO_PKG_VERSION")));
+    assert_eq!(read["version"], json!(env!("HELIOS_VERSION")));
     assert_eq!(read["licences"], json!(["GPL-3.0-or-later"]));
     assert_eq!(
         read["links"]["repository"],
