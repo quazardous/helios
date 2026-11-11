@@ -8,6 +8,7 @@ repository.workspace = true
 
 [dependencies]
 helios-load.workspace = true
+helios-cache.workspace = true
 blake3.workspace = true
 # LGPL-2.1, compatible with GPL-3.0-or-later: the fallback for raws whose
 # previews are not JPEG streams.

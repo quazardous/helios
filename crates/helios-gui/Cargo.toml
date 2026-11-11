@@ -40,6 +40,7 @@ helios-display.workspace = true
 helios-load.workspace = true
 # The thumbnail cache, its fast read and its pool.
 helios-thumbs.workspace = true
+helios-cache.workspace = true
 # Workspace templates: the built-in ones, a workspace created from one.
 helios-template.workspace = true
 helios-vault.workspace = true

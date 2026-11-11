@@ -1518,6 +1518,25 @@ pub const TOOLS: &[Tool] = &[
         }],
     },
     Tool {
+        name: "helios_cache_stats",
+        endpoint: Endpoint::Control,
+        cmd: "cache.stats",
+        description: "What the node's caches hold: each tier's budget and use; per scope, kind and tier the entries, bytes and statistics (hits, misses, evictions)",
+        params: &[],
+    },
+    Tool {
+        name: "helios_cache_clear",
+        endpoint: Endpoint::Control,
+        cmd: "cache.clear",
+        description: "Clears the node's caches (debug control): every kind, or `kind` alone (`render.step`); answers the bytes freed",
+        params: &[Param {
+            name: "kind",
+            schema: string,
+            description: "The kind to clear; every kind when left out",
+            default: Some(null),
+        }],
+    },
+    Tool {
         name: "helios_pause",
         endpoint: Endpoint::Control,
         cmd: "pause",

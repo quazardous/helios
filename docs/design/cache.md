@@ -1,7 +1,9 @@
 # One cache service
 
-Status: **proposed** (2026-11-11), not decided. Nothing here is built yet;
-the inventory describes the code on `next` as of that date.
+Status: slices 1 to 3 **accepted** (2026-11-11), with the defaults of
+the open questions; the later slices stay proposed. Slice 1 is built
+(`crates/helios-cache`). The inventory describes the code on `next` as of
+that date.
 
 ROADMAP 2026-10-11 decided that data access is a framework prerogative:
 "identical photo data is never loaded twice in RAM or VRAM: buffers are

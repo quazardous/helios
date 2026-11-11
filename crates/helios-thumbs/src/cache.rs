@@ -1,14 +1,21 @@
 //! The thumbnail cache on disk: JPEG files under one folder, named by
 //! their key, with a size limit kept by evicting what was used least
-//! recently.
+//! recently. Its entries are the cache service's kinds
+//! [`THUMB_SMALL`](helios_cache::THUMB_SMALL) and
+//! [`THUMB_LARGE`](helios_cache::THUMB_LARGE), in the library's scope (a
+//! silo: a library's thumbnails stay beside its catalogue); attached to
+//! the service ([`ThumbCache::attach`]), it is counted and cleared with
+//! the other caches.
 
-use std::collections::HashMap;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Condvar, Mutex, MutexGuard};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::SystemTime;
 
+use helios_cache::{
+    Counters, Kind, Lru, Scope, Service, Store, THUMB_LARGE, THUMB_SMALL, Tier, Usage,
+};
 use image::RgbImage;
 
 use crate::Rgb8;
@@ -104,11 +111,20 @@ impl Key {
     }
 }
 
-struct Entry {
-    bytes: u64,
-    /// The last use, as a tick of [`ThumbCache::clock`] (the file's
-    /// modification time when the cache was opened).
-    used: u64,
+/// What a cache folder holds to tell backup tools it is a cache
+/// (<https://bford.info/cachedir/>); the image map skips such folders too.
+pub const CACHEDIR_TAG: &str = "Signature: 8a477f597d28d172789f06886806bc55\n\
+# This file is a cache directory tag created by Helios (its thumbnails).\n\
+# For information about cache directory tags, see https://bford.info/cachedir/\n";
+
+/// The kind of an entry, by its file name (`<image>.<version>.<size>.jpg`).
+fn kind_of(rel: &Path) -> Kind {
+    let name = rel.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+    if name.ends_with(&format!(".{}.jpg", crate::LARGE)) {
+        THUMB_LARGE
+    } else {
+        THUMB_SMALL
+    }
 }
 
 /// Whether the folder has been listed into the index.
@@ -120,8 +136,10 @@ enum Listing {
 }
 
 struct Index {
-    entries: HashMap<PathBuf, Entry>,
-    total: u64,
+    /// The entries, by file relative to the folder, in eviction order:
+    /// each last used at a tick of [`ThumbCache::clock`] (the file's
+    /// modification time when the folder was listed).
+    entries: Lru<PathBuf>,
     listing: Listing,
 }
 
@@ -133,6 +151,9 @@ pub struct ThumbCache {
     /// Signalled once the folder is listed.
     listed: Condvar,
     clock: AtomicU64,
+    /// The scope's statistics, per kind (small, large).
+    counters: [Arc<Counters>; 2],
+    scope: Scope,
 }
 
 fn nanos(t: SystemTime) -> u64 {
@@ -162,17 +183,40 @@ impl ThumbCache {
     pub fn open_unlisted(dir: &Path, limit: u64) -> Result<ThumbCache, String> {
         std::fs::create_dir_all(dir)
             .map_err(|e| format!("cannot make the thumbnail cache {}: {e}", dir.display()))?;
+        let tag = dir.join("CACHEDIR.TAG");
+        if !tag.exists() {
+            // Best effort: a cache without its tag still works.
+            let _ = std::fs::write(&tag, CACHEDIR_TAG);
+        }
+        let scope = Scope::silo(format!("library:{}", dir.display()));
+        let service = Service::global();
         Ok(ThumbCache {
             dir: dir.to_path_buf(),
             limit,
             index: Mutex::new(Index {
-                entries: HashMap::new(),
-                total: 0,
+                entries: Lru::new(),
                 listing: Listing::NotYet,
             }),
             listed: Condvar::new(),
             clock: AtomicU64::new(nanos(SystemTime::now())),
+            counters: [
+                service.counters(&scope, &THUMB_SMALL),
+                service.counters(&scope, &THUMB_LARGE),
+            ],
+            scope,
         })
+    }
+
+    /// Attaches the cache to the process's cache service: counted on the
+    /// Caches page and by `cache.stats`, cleared by "Clear caches".
+    pub fn attach(self: &Arc<Self>) {
+        let weak: std::sync::Weak<dyn Store> = Arc::downgrade(self) as std::sync::Weak<dyn Store>;
+        Service::global().attach(weak);
+    }
+
+    /// The statistics of an entry's kind.
+    fn counters_of(&self, rel: &Path) -> &Counters {
+        &self.counters[usize::from(kind_of(rel).id == THUMB_LARGE.id)]
     }
 
     /// Whether the folder has been listed (never waits).
@@ -195,8 +239,7 @@ impl ThumbCache {
             }
         }
         let dir = &self.dir;
-        let mut entries = HashMap::new();
-        let mut total = 0;
+        let mut entries = Lru::new();
         let mut latest = 0;
         for shard in std::fs::read_dir(dir).into_iter().flatten().flatten() {
             let Ok(files) = std::fs::read_dir(shard.path()) else {
@@ -212,22 +255,14 @@ impl ThumbCache {
                 let Ok(meta) = file.metadata() else { continue };
                 let used = meta.modified().map_or(0, nanos);
                 latest = latest.max(used);
-                total += meta.len();
                 let rel = path.strip_prefix(dir).unwrap_or(&path).to_path_buf();
-                entries.insert(
-                    rel,
-                    Entry {
-                        bytes: meta.len(),
-                        used,
-                    },
-                );
+                entries.insert(rel, meta.len(), used, 0);
             }
         }
         self.clock.fetch_max(latest, Ordering::Relaxed);
         {
             let mut index = self.index.lock().expect("the cache's index");
             index.entries = entries;
-            index.total = total;
             index.listing = Listing::Done;
         }
         self.listed.notify_all();
@@ -257,7 +292,7 @@ impl ThumbCache {
     /// The bytes the entries take, and how many there are.
     pub fn usage(&self) -> (u64, usize) {
         let index = self.ready();
-        (index.total, index.entries.len())
+        (index.entries.bytes(), index.entries.len())
     }
 
     fn tick(&self) -> u64 {
@@ -267,7 +302,7 @@ impl ThumbCache {
     /// Whether an entry is there.
     pub fn contains(&self, key: &Key, size: u32) -> bool {
         let index = self.ready();
-        index.entries.contains_key(&key.file(size))
+        index.entries.contains(&key.file(size))
     }
 
     /// The thumbnail of `key` at `size` pixels on its long side, when the
@@ -284,10 +319,22 @@ impl ThumbCache {
         let tick = self.tick();
         {
             let mut index = self.ready();
-            index.entries.get_mut(&rel)?.used = tick;
+            if !index.entries.touch(&rel, tick) {
+                drop(index);
+                Counters::add(&self.counters_of(&rel).misses, 1);
+                return None;
+            }
         }
         let path = self.dir.join(&rel);
         let bytes = std::fs::read(&path).ok();
+        let counters = self.counters_of(&rel);
+        match &bytes {
+            Some(b) => {
+                Counters::add(&counters.hits, 1);
+                Counters::add(&counters.bytes_read, b.len() as u64);
+            }
+            None => Counters::add(&counters.misses, 1),
+        }
         let current = bytes.as_deref().is_some_and(marked);
         let decoded = bytes.and_then(|bytes| image::load_from_memory(&bytes).ok());
         let Some(img) = decoded else {
@@ -337,9 +384,7 @@ impl ThumbCache {
 
     fn forget(&self, rel: &Path) {
         let mut index = self.index.lock().expect("the cache's index");
-        if let Some(e) = index.entries.remove(rel) {
-            index.total -= e.bytes;
-        }
+        index.entries.remove(&rel.to_path_buf());
         let _ = std::fs::remove_file(self.dir.join(rel));
     }
 
@@ -385,15 +430,11 @@ impl ThumbCache {
         let tick = self.tick();
         {
             let mut index = self.index.lock().expect("the cache's index");
-            let bytes = jpeg.len() as u64;
-            if let Some(old) = index
+            index
                 .entries
-                .insert(rel.clone(), Entry { bytes, used: tick })
-            {
-                index.total -= old.bytes;
-            }
-            index.total += bytes;
+                .insert(rel.clone(), jpeg.len() as u64, tick, 0);
         }
+        Counters::add(&self.counters_of(&rel).bytes_written, jpeg.len() as u64);
         self.evict(Some(&rel));
         Ok(())
     }
@@ -407,11 +448,10 @@ impl ThumbCache {
         for size in [crate::SMALL, crate::LARGE] {
             let (old, new) = (from.file(size), to.file(size));
             let mut index = self.ready();
-            let Some(entry) = index.entries.remove(&old) else {
+            let Some(bytes) = index.entries.remove(&old) else {
                 continue;
             };
-            if index.entries.contains_key(&new) {
-                index.total -= entry.bytes;
+            if index.entries.contains(&new) {
                 drop(index);
                 let _ = std::fs::remove_file(self.dir.join(&old));
                 continue;
@@ -421,46 +461,74 @@ impl ThumbCache {
                 let _ = std::fs::create_dir_all(parent);
             }
             if std::fs::rename(self.dir.join(&old), &path).is_ok() {
-                index.entries.insert(new, entry);
+                // Its last use kept: a rename is not a use.
+                let tick = self.clock.load(Ordering::Relaxed);
+                index.entries.insert(new, bytes, tick, 0);
                 moved += 1;
-            } else {
-                index.total -= entry.bytes;
             }
         }
         moved
     }
 
     /// Removes the entries used least recently until the cache is under
-    /// its limit; `keep` stays (the entry just written).
+    /// its limit, down to a tenth below it so a full cache does not evict
+    /// at every write; `keep` stays (the entry just written). The index is
+    /// kept in eviction order: the cost is the victims', not the entries'.
     fn evict(&self, keep: Option<&Path>) {
         let gone = {
             let mut index = self.index.lock().expect("the cache's index");
-            if index.total <= self.limit {
+            if index.entries.bytes() <= self.limit {
                 return;
             }
-            let mut order: Vec<(u64, PathBuf, u64)> = index
+            let target = helios_cache::eviction_target(self.limit);
+            index
                 .entries
-                .iter()
-                .filter(|(rel, _)| Some(rel.as_path()) != keep)
-                .map(|(rel, e)| (e.used, rel.clone(), e.bytes))
-                .collect();
-            order.sort_unstable();
-            // A tenth below the limit, so a full cache does not evict at
-            // every write.
-            let target = self.limit - self.limit / 10;
-            let mut gone = Vec::new();
-            for (_, rel, bytes) in order {
-                if index.total <= target {
-                    break;
-                }
-                index.entries.remove(&rel);
-                index.total -= bytes;
-                gone.push(rel);
-            }
-            gone
+                .evict(target, |rel| Some(rel.as_path()) == keep)
         };
-        for rel in gone {
+        for (rel, _) in gone {
+            Counters::add(&self.counters_of(&rel).evictions, 1);
             let _ = std::fs::remove_file(self.dir.join(rel));
         }
+    }
+}
+
+impl Store for ThumbCache {
+    /// Never waits for the folder's listing: until it is done, what is
+    /// known so far.
+    fn usage(&self) -> Vec<Usage> {
+        let index = self.index.lock().expect("the cache's index");
+        let mut usage = [THUMB_SMALL, THUMB_LARGE].map(|kind| Usage {
+            scope: self.scope.clone(),
+            kind,
+            tier: Tier::Disk,
+            entries: 0,
+            bytes: 0,
+            pinned: 0,
+            budget: Some(self.limit),
+        });
+        for (rel, bytes) in index.entries.iter() {
+            let u = &mut usage[usize::from(kind_of(rel).id == THUMB_LARGE.id)];
+            u.entries += 1;
+            u.bytes += bytes;
+        }
+        usage.into()
+    }
+
+    /// Lists the folder first when it was not yet: what is on disk goes.
+    fn clear(&self, kind: Option<&str>) -> u64 {
+        self.list();
+        let gone = {
+            let mut index = self.index.lock().expect("the cache's index");
+            index
+                .entries
+                .clear(|rel| kind.is_some_and(|k| k != kind_of(rel).id))
+        };
+        let mut freed = 0;
+        for (rel, bytes) in gone {
+            Counters::add(&self.counters_of(&rel).cleared, 1);
+            let _ = std::fs::remove_file(self.dir.join(rel));
+            freed += bytes;
+        }
+        freed
     }
 }

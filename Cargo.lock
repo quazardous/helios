@@ -2191,6 +2191,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "helios-cache"
+version = "0.75.0"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
 name = "helios-colour"
 version = "0.75.0"
 dependencies = [
@@ -2350,6 +2357,7 @@ dependencies = [
  "egui-pop-test",
  "egui-pop-wayland",
  "egui_kittest",
+ "helios-cache",
  "helios-config",
  "helios-controls",
  "helios-core",
@@ -2590,6 +2598,7 @@ dependencies = [
  "blake3",
  "egui-pop-model",
  "helios-ai",
+ "helios-cache",
  "helios-config",
  "helios-core",
  "helios-decision",
@@ -2769,6 +2778,7 @@ name = "helios-thumbs"
 version = "0.75.0"
 dependencies = [
  "blake3",
+ "helios-cache",
  "helios-load",
  "image",
  "jpeg-decoder",

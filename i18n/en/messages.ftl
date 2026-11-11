@@ -109,6 +109,30 @@ gui-backup-wizard-step-when = When
 
 gui-backup-wizard-when-about = Back up now on the Backup page makes copies at any time.
 
+gui-caches-clear = Clear
+
+gui-caches-clear-all = Clear caches
+
+gui-caches-clear-all-ask = Thumbnails are read again from the files and images rendered again when shown: slower for a while. Photos, edits and the catalogue are not touched.
+
+gui-caches-clear-all-title = Clear every cache?
+
+gui-caches-none = No cache holds anything yet.
+
+gui-caches-size = { $size }, { $entries } entries
+
+gui-caches-size-of = { $size } of { $budget }, { $entries } entries
+
+gui-caches-tier-disk = on disk
+
+gui-caches-tier-ram = in memory
+
+gui-caches-tier-vram = in video memory
+
+gui-caches-total = Caches hold { $size }
+
+gui-caches-use = In use
+
 gui-caption-decisions = Decisions waiting
 
 gui-caption-decisions-count = { $count } stack suggestions waiting for an answer

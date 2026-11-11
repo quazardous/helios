@@ -923,6 +923,10 @@ mod control {
                 node.scheduler.pause();
                 Ok(json!({}))
             }
+            ControlRequest::CacheStats => Ok(helios_cache::Service::global().snapshot()),
+            ControlRequest::CacheClear { kind } => Ok(json!({
+                "freed": helios_cache::Service::global().clear(kind.as_deref()),
+            })),
             ControlRequest::Resume => {
                 node.scheduler.resume();
                 Ok(json!({}))

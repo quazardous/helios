@@ -70,6 +70,30 @@ gui-about-description = Un framework de traitement d’image client/serveur, pen
 
 gui-backup-card-safe = { $card } peut être formatée : chaque photo a ses sauvegardes
 
+gui-caches-clear = Vider
+
+gui-caches-clear-all = Vider les caches
+
+gui-caches-clear-all-ask = Les vignettes sont relues depuis les fichiers et les images recalculées à l'affichage : plus lent pendant un moment. Les photos, les retouches et le catalogue ne sont pas touchés.
+
+gui-caches-clear-all-title = Vider tous les caches ?
+
+gui-caches-none = Aucun cache ne contient encore rien.
+
+gui-caches-size = { $size }, { $entries } entrées
+
+gui-caches-size-of = { $size } sur { $budget }, { $entries } entrées
+
+gui-caches-tier-disk = sur disque
+
+gui-caches-tier-ram = en mémoire
+
+gui-caches-tier-vram = en mémoire vidéo
+
+gui-caches-total = Les caches occupent { $size }
+
+gui-caches-use = Utilisé
+
 gui-caption-decisions = Décisions en attente
 
 gui-caption-decisions-count = { $count ->

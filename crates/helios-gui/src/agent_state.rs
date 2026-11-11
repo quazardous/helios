@@ -13,6 +13,8 @@
 //! - `helios.jobs`: egui-pop's jobs centre counted by state (`running`,
 //!   `finished`, `failed`, `cancelled`, `total`, `idle`), and each job's
 //!   `id`, `kind`, `title` and `state` (`list`).
+//! - `helios.cache`: the cache service's tiers and kinds
+//!   (`crate::caches::collector`).
 //!
 //! The library and the viewport exist once the shell is assembled, after
 //! the collectors are declared: they are handed over through [`Late`].
@@ -108,6 +110,7 @@ impl Plugin for AgentState {
                 helios_controls::commands::instances(&store, crate::controls::registry())
             }),
         )?;
+        ctx.collector(crate::caches::collector())?;
         let app = ctx.app();
         ctx.collector(
             FnCollector::new(

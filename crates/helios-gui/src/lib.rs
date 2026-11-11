@@ -3,6 +3,7 @@
 //! framework's own pictures and recordings of it.
 
 pub mod agent_state;
+pub mod caches;
 pub mod caption;
 pub mod catalogue;
 pub mod clipboard;

@@ -2025,6 +2025,9 @@ fn main() -> Result<(), String> {
             {
                 shell.notes.push(format!("catalogue commands: {e}"));
             }
+            if let Err(e) = helios_gui::caches::register(&mut shell) {
+                shell.notes.push(format!("cache commands: {e}"));
+            }
             // Without a library (no `--vault`), nothing registers the
             // import the shell hands over: its imports say so instead.
             if let Some(e) = &no_library {

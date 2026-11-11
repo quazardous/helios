@@ -144,7 +144,11 @@ fn lru_eviction_keeps_the_cache_under_its_limit() {
     assert!(!cache.contains(&Key::preview("0001"), SMALL));
     assert!(cache.contains(&Key::preview("0039"), SMALL));
     // On disk too.
-    let on_disk: u64 = walk(&dir).iter().map(|p| p.metadata().unwrap().len()).sum();
+    let on_disk: u64 = walk(&dir)
+        .iter()
+        .filter(|p| p.extension().is_some_and(|e| e == "jpg"))
+        .map(|p| p.metadata().unwrap().len())
+        .sum();
     assert_eq!(on_disk, bytes);
     // Reopened under a smaller limit, it shrinks.
     let smaller = ThumbCache::open(&dir, limit / 4).unwrap();
@@ -498,5 +502,54 @@ fn an_old_sideways_entry_is_read_again_and_the_others_are_kept() {
     assert_eq!(size("raw", &raw), (256, 170));
     let (_, current) = cache.get_marked(&Key::preview("raw"), SMALL).unwrap();
     assert!(!current, "a raw's old entry is left as it was");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn the_cache_is_tagged_counted_by_kind_and_cleared_through_the_service() {
+    use helios_cache::{Service, Store, Tier};
+    let dir = scratch("service");
+    let cache = std::sync::Arc::new(ThumbCache::open(&dir, 1 << 30).unwrap());
+    // Backup tools and the image map skip it.
+    let tag = std::fs::read_to_string(dir.join("CACHEDIR.TAG")).unwrap();
+    assert!(tag.starts_with("Signature: 8a477f597d28d172789f06886806bc55"));
+    let (a, b) = (Key::preview("aaaa"), Key::preview("bbbb"));
+    cache.put(&a, SMALL, &noise(1)).unwrap();
+    cache.put(&b, SMALL, &noise(2)).unwrap();
+    cache.put(&a, LARGE, &noise(3)).unwrap();
+    assert!(cache.get(&a, SMALL).is_some());
+    assert!(cache.get(&Key::preview("cccc"), SMALL).is_none());
+    cache.attach();
+    let usage = Store::usage(&*cache);
+    let of = |id: &str| usage.iter().find(|u| u.kind.id == id).unwrap().clone();
+    assert_eq!(of("thumb.256").entries, 2);
+    assert_eq!(of("thumb.1024").entries, 1);
+    assert_eq!(of("thumb.256").tier, Tier::Disk);
+    assert_eq!(of("thumb.256").budget, Some(1 << 30));
+    // The service sees it, with its statistics.
+    let snapshot = Service::global().snapshot();
+    let scope = format!("silo:library:{}", dir.display());
+    let small = snapshot["kinds"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|k| k["kind"] == "thumb.256" && k["scope"] == scope.as_str())
+        .unwrap()
+        .clone();
+    assert_eq!(small["entries"], 2);
+    assert_eq!(small["stats"]["hits"], 1);
+    assert_eq!(small["stats"]["misses"], 1);
+    // Clearing one kind keeps the other, and the tag.
+    let large_bytes = of("thumb.1024").bytes;
+    assert_eq!(Store::clear(&*cache, Some("thumb.1024")), large_bytes);
+    assert!(!cache.contains(&a, LARGE));
+    assert!(cache.contains(&a, SMALL));
+    Store::clear(&*cache, None);
+    assert_eq!(cache.usage(), (0, 0));
+    assert!(dir.join("CACHEDIR.TAG").exists());
+    // Reopened, the tag is not taken for an interrupted write.
+    let again = ThumbCache::open(&dir, 1 << 30).unwrap();
+    assert_eq!(again.usage(), (0, 0));
+    assert!(dir.join("CACHEDIR.TAG").exists());
     let _ = std::fs::remove_dir_all(&dir);
 }

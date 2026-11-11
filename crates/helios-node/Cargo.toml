@@ -8,6 +8,7 @@ repository.workspace = true
 
 [dependencies]
 helios-core.workspace = true
+helios-cache.workspace = true
 helios-inspect.workspace = true
 helios-config.workspace = true
 helios-export.workspace = true

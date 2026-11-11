@@ -19,13 +19,17 @@ pub fn cache_limit(settings: &crate::config::Settings) -> u64 {
 
 /// Opens the cache of the library whose catalogue is `vault_file`
 /// (`.helios/thumbs` beside it), without listing its folder: the pool's
-/// threads list it, so the interface thread never waits for it.
+/// threads list it, so the interface thread never waits for it. It is
+/// attached to the process's cache service.
 ///
 /// # Errors
 /// Its folder cannot be made.
 pub fn open_cache(vault_file: &Path, limit: u64) -> Result<Arc<ThumbCache>, String> {
     let file = std::path::absolute(vault_file).unwrap_or_else(|_| vault_file.to_path_buf());
-    ThumbCache::open_unlisted(&helios_thumbs::cache_dir(&file), limit).map(Arc::new)
+    let cache = ThumbCache::open_unlisted(&helios_thumbs::cache_dir(&file), limit).map(Arc::new)?;
+    // Counted on the Caches page, cleared by "Clear caches".
+    cache.attach();
+    Ok(cache)
 }
 
 /// Starts filling the library's thumbnails: every image without one, the

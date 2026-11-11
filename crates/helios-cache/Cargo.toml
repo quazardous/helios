@@ -1,0 +1,13 @@
+[package]
+name = "helios-cache"
+description = "Helios's cache service: one per process, owning every cache's accounting, budgets per tier, eviction, pins, request merging and statistics"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true

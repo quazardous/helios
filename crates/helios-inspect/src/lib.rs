@@ -605,6 +605,18 @@ pub mod control {
         WorkflowResume {
             run: String,
         },
+        /// What the node's caches hold: the cache service's tiers (budget,
+        /// use) and, per scope, kind and tier, entries, bytes and
+        /// statistics.
+        #[serde(rename = "cache.stats")]
+        CacheStats,
+        /// Clears the node's caches, `kind` alone when given (never what a
+        /// render running pins): answers the bytes freed.
+        #[serde(rename = "cache.clear")]
+        CacheClear {
+            #[serde(default)]
+            kind: Option<String>,
+        },
     }
 
     /// Where `workflow.prioritize` moves items within their run.

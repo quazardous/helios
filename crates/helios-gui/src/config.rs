@@ -453,6 +453,9 @@ pub fn manifest(schema: &Schema, t: &dyn Fn(Message) -> String) -> Manifest {
                         .restart(),
                 );
             }
+            if *path == "storage/caches" {
+                caches_section(s, t);
+            }
         });
     }
     m.section("storage/catalogue", &tt("storage/catalogue"), |s| {
@@ -669,6 +672,48 @@ fn health_section(s: &mut SectionBuilder<'_>, t: &dyn Fn(Message) -> String) {
                 &t(Message::new(
                     "gui-health-not-yet",
                     "Not checked yet: the checks run in the background.",
+                )),
+                None,
+            ),
+    );
+}
+
+/// The Caches page's usage: what each cache holds (`cache.stats`), per
+/// kind, with its size against its budget and a "Clear" each, and "Clear
+/// caches" for all of them; both ask first.
+fn caches_section(s: &mut SectionBuilder<'_>, t: &dyn Fn(Message) -> String) {
+    use crate::caches::{CLEAR_COMMAND, STATS_COMMAND};
+    s.status(Status::command(
+        "cacheUse",
+        &t(Message::new("gui-caches-use", "In use")),
+        STATS_COMMAND,
+        "/summary",
+    ));
+    s.action(
+        Action::command(CLEAR_COMMAND)
+            .title(&t(Message::new("gui-caches-clear-all", "Clear caches")))
+            .confirmation(Confirmation::new(
+                &t(Message::new("gui-caches-clear-all-title", "Clear every cache?")),
+                &t(Message::new(
+                    "gui-caches-clear-all-ask",
+                    "Thumbnails are read again from the files and images rendered again when shown: slower for a while. Photos, edits and the catalogue are not touched.",
+                )),
+                &t(Message::new("gui-caches-clear", "Clear")),
+            )),
+    );
+    s.list(
+        Records::command("caches", "", STATS_COMMAND, "/kinds", "id")
+            .titles("title", Some("detail"))
+            .column("sizeText", "")
+            .row_action(
+                Action::command(CLEAR_COMMAND)
+                    .title(&t(Message::new("gui-caches-clear", "Clear")))
+                    .args(json!({ "kind": "${row.kind}" })),
+            )
+            .empty(
+                &t(Message::new(
+                    "gui-caches-none",
+                    "No cache holds anything yet.",
                 )),
                 None,
             ),
