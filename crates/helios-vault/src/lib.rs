@@ -53,7 +53,7 @@ pub mod workflow;
 pub use capture::{Backfill, Capture};
 pub use catalog::{ApplyReport, CursorId, CursorInfo, Delta, LibraryRow, Row};
 pub use edit::{EditSaved, EditSession};
-pub use fields::{AuditEntry, Command, Order, Query};
+pub use fields::{AuditEntry, Command, Order, Query, Sort};
 pub use sightings::{Folder, FolderState, LibraryFlag, Sighting, ToRead};
 pub use stacks::Stack;
 pub use undo::{Change, Changes, ImageRows, Replayed};
@@ -375,6 +375,98 @@ impl MemoryStore {
             .collect();
         all.sort_by(|a, b| a.1.path.cmp(&b.1.path));
         all
+    }
+}
+
+/// A photo's value for a sort, as the SQL driver compares it.
+#[derive(PartialEq, PartialOrd)]
+enum SortKey {
+    Number(f64),
+    Text(String),
+}
+
+impl MemoryStore {
+    /// The file name a photo sorts by: its first present copy's, by path,
+    /// else its first copy's (the last part of the path, as the SQL
+    /// driver cuts it).
+    fn sort_name(&self, id: &ImageId) -> Option<String> {
+        self.sightings
+            .iter()
+            .filter(|s| s.image.as_ref() == Some(id))
+            .map(|s| (s.presence != Presence::Present, s.path.to_string_lossy()))
+            .min()
+            .map(|(_, path)| {
+                path.rsplit(std::path::MAIN_SEPARATOR)
+                    .next()
+                    .unwrap_or_default()
+                    .to_string()
+            })
+    }
+
+    fn sort_key(&self, id: &ImageId, by: Sort) -> Option<SortKey> {
+        let number = |name: &str| {
+            self.fields
+                .get(&(*id, name.to_string()))
+                .and_then(serde_json::Value::as_f64)
+        };
+        match by {
+            Sort::Id => Some(SortKey::Text(id.hex())),
+            Sort::Captured => number(capture::CAPTURED).map(SortKey::Number),
+            Sort::Imported => self
+                .images
+                .get(id)
+                .and_then(|(_, f)| f.at)
+                .map(|at| SortKey::Number(at as f64)),
+            Sort::Name => self.sort_name(id).map(SortKey::Text),
+            Sort::Rating => Some(SortKey::Number(number(fields::RATING).unwrap_or(0.0))),
+            Sort::Edited => self
+                .versions
+                .values()
+                .filter(|v| v.image == *id)
+                .map(|v| v.at)
+                .max()
+                .map(|at| SortKey::Number(at as f64)),
+            Sort::Size => self
+                .images
+                .get(id)
+                .map(|(image, _)| SortKey::Number(image.size as f64)),
+        }
+    }
+
+    /// Sorts as [`Order`] says: the photos without a value last, ties by
+    /// file name for the capture time, then by id.
+    fn sort(&self, ids: &mut [ImageId], order: Order) {
+        use std::cmp::Ordering;
+        if order == Order::ID {
+            ids.sort();
+            return;
+        }
+        let last = |a: &Option<SortKey>, b: &Option<SortKey>, descending: bool| match (a, b) {
+            (None, None) => Ordering::Equal,
+            (None, Some(_)) => Ordering::Greater,
+            (Some(_), None) => Ordering::Less,
+            (Some(a), Some(b)) => {
+                let o = a.partial_cmp(b).unwrap_or(Ordering::Equal);
+                if descending { o.reverse() } else { o }
+            }
+        };
+        let mut keyed: Vec<(Option<SortKey>, Option<SortKey>, ImageId)> = ids
+            .iter()
+            .map(|id| {
+                let tie = (order.by == Sort::Captured)
+                    .then(|| self.sort_name(id).map(SortKey::Text))
+                    .flatten();
+                (self.sort_key(id, order.by), tie, *id)
+            })
+            .collect();
+        keyed.sort_by(|a, b| {
+            last(&a.0, &b.0, order.descending)
+                .then_with(|| last(&a.1, &b.1, false))
+                .then_with(|| a.2.cmp(&b.2))
+        });
+        for (slot, (_, _, id)) in ids.iter_mut().zip(keyed) {
+            *slot = id;
+        }
     }
 }
 
@@ -747,9 +839,7 @@ impl Store for MemoryStore {
             })
             .copied()
             .collect();
-        if query.order == Order::RatingDesc {
-            ids.sort_by_key(|id| (std::cmp::Reverse(rating(id)), *id));
-        }
+        self.sort(&mut ids, query.order);
         Ok(ids)
     }
 

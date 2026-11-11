@@ -391,13 +391,89 @@ pub struct AuditEntry {
     pub new: Option<Value>,
 }
 
-/// How a query orders its images.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum Order {
+/// What a query sorts its images by (`docs/design/library.md`, L3).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum Sort {
+    /// The image's id (its content hash): no meaning, but stable.
     #[default]
     Id,
-    /// Highest rating first, then by id.
-    RatingDesc,
+    /// When the photo was taken (the `captured` field); photos taken in
+    /// the same second by their file name.
+    Captured,
+    /// When the photo entered the Library (its flag's time).
+    Imported,
+    /// Its file's name: the first copy present, by path, else the first
+    /// copy known.
+    Name,
+    /// Its stars (an unrated photo counts as 0).
+    Rating,
+    /// When it was last edited (its newest version).
+    Edited,
+    /// Its file's size.
+    Size,
+}
+
+impl Sort {
+    /// Every sort, in the order a menu lists them.
+    pub const ALL: [Sort; 7] = [
+        Sort::Captured,
+        Sort::Imported,
+        Sort::Name,
+        Sort::Rating,
+        Sort::Edited,
+        Sort::Size,
+        Sort::Id,
+    ];
+
+    /// Its name, as commands and templates write it.
+    pub fn name(self) -> &'static str {
+        match self {
+            Sort::Id => "id",
+            Sort::Captured => "captured",
+            Sort::Imported => "imported",
+            Sort::Name => "name",
+            Sort::Rating => "rating",
+            Sort::Edited => "edited",
+            Sort::Size => "size",
+        }
+    }
+
+    /// The sort of that name.
+    pub fn parse(name: &str) -> Option<Sort> {
+        Sort::ALL.into_iter().find(|s| s.name() == name)
+    }
+}
+
+/// How a query orders its images: a sort and its direction. Whatever the
+/// direction, the photos that have no value for the sort (never taken by
+/// a camera, never edited, no file name) come last, and ties are broken
+/// the same way every time (by file name for the capture time, then by
+/// id, ascending), so the order is stable.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct Order {
+    pub by: Sort,
+    pub descending: bool,
+}
+
+impl Order {
+    /// By id: what a query sorts by when told nothing.
+    pub const ID: Order = Order::asc(Sort::Id);
+
+    /// Smallest, oldest or first in the alphabet first.
+    pub const fn asc(by: Sort) -> Order {
+        Order {
+            by,
+            descending: false,
+        }
+    }
+
+    /// Largest, newest or last in the alphabet first.
+    pub const fn desc(by: Sort) -> Order {
+        Order {
+            by,
+            descending: true,
+        }
+    }
 }
 
 /// Which images a cursor holds.
