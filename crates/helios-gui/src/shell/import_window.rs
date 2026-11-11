@@ -111,6 +111,9 @@ pub(crate) struct ImportWindow {
     /// The files the scans glance at first: the cells in view without a
     /// picture, then the next screen's.
     glance_first: crate::import_scan::Wanted,
+    /// The files whose glance came from the glance cache as they were
+    /// found: the scan's own glance of them is left out.
+    glanced_early: std::collections::HashSet<PathBuf>,
     pub(super) contents: Contents,
     /// The choices, the last used until changed, and where they are kept.
     pub(super) choices: Choices,
@@ -168,11 +171,18 @@ impl ImportWindow {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .clear();
+        self.glanced_early.clear();
         self.contents = Contents::new();
         self.published = None;
         self.selection_synced = None;
         if let Some(t) = &self.thumbs {
             t.clear();
+        }
+        // The browser lists anew: never the last import's photos, drawn
+        // without their thumbnails before the scans find them again.
+        self.source.clear();
+        if let Some(b) = &mut self.browser {
+            b.reload();
         }
     }
 
@@ -222,6 +232,18 @@ impl ImportWindow {
                 match sent {
                     Scanned::Found(found) => {
                         let key = found.key.clone();
+                        // A glance kept from before: the cell is drawn with
+                        // its thumbnail, not empty until the scan's turn.
+                        let early = (!found.offline)
+                            .then(|| {
+                                crate::import_scan::GlanceCache::global().cached(
+                                    &found.path,
+                                    found.bytes,
+                                    found.modified,
+                                )
+                            })
+                            .flatten();
+                        let path = found.path.clone();
                         let at = self.contents.add(found);
                         if let (Some(key), Some(main)) = (key, self.contents.cells[at].main()) {
                             thumbs.key(main, key);
@@ -238,6 +260,12 @@ impl ImportWindow {
                                 .chain(&cell.picture)
                                 .any(|f| picked.contains(f));
                         }
+                        if let Some(g) = early {
+                            let (taken, camera, thumb) =
+                                (g.taken, g.camera.clone(), g.thumb.clone());
+                            take_glance(&mut self.contents, &thumbs, &path, taken, camera, thumb);
+                            self.glanced_early.insert(path);
+                        }
                     }
                     Scanned::Glance {
                         path,
@@ -245,23 +273,23 @@ impl ImportWindow {
                         camera,
                         thumb,
                     } => {
-                        let none = thumb.is_none();
-                        self.contents.glance(&path, taken, camera, thumb);
-                        // No preview: the thumbnail says so (a pair's
-                        // other file may still give one).
-                        if none
-                            && let Some(main) = self
-                                .contents
-                                .cell_of(&path)
-                                .and_then(|i| self.contents.cells[i].main())
-                        {
-                            thumbs.glanced(main, None);
+                        if !self.glanced_early.remove(&path) {
+                            take_glance(&mut self.contents, &thumbs, &path, taken, camera, thumb);
                         }
                     }
                     Scanned::Done => *done = true,
                 }
             }
         }
+    }
+
+    /// What the scans read now, the first source not read through's:
+    /// the folder it lists, else the file it glances at.
+    fn reading(&self) -> Option<PathBuf> {
+        self.scans
+            .iter()
+            .find(|(_, _, done)| !done)
+            .map(|(_, scan, _)| scan.reading())
     }
 
     /// The thumbnails of the Contents, made the first time.
@@ -302,6 +330,56 @@ impl ImportWindow {
     }
 }
 
+/// A file's glance into the contents; a glance without a preview tells
+/// the thumbnails there is none (a pair's other file may still give one).
+fn take_glance(
+    contents: &mut Contents,
+    thumbs: &ImportThumbnails,
+    path: &Path,
+    taken: Option<chrono::NaiveDateTime>,
+    camera: Option<String>,
+    thumb: Option<egui::ColorImage>,
+) {
+    let none = thumb.is_none();
+    contents.glance(path, taken, camera, thumb);
+    if none
+        && let Some(main) = contents
+            .cell_of(path)
+            .and_then(|i| contents.cells[i].main())
+    {
+        thumbs.glanced(main, None);
+    }
+}
+
+/// `text` shortened in its middle (an ellipsis for what is left out,
+/// more of its end kept than of its start: a path's file name) to the
+/// longest that `fits`; whole when it fits.
+pub(crate) fn shorten_middle(text: &str, fits: impl Fn(&str) -> bool) -> String {
+    if fits(text) {
+        return text.to_owned();
+    }
+    let chars: Vec<char> = text.chars().collect();
+    let cut = |kept: usize| {
+        let head = kept / 3;
+        let tail = kept - head;
+        let mut s: String = chars[..head].iter().collect();
+        s.push('…');
+        s.extend(&chars[chars.len() - tail..]);
+        s
+    };
+    // The most characters kept that fit, by halves.
+    let (mut lo, mut hi) = (0, chars.len().saturating_sub(1));
+    while lo < hi {
+        let mid = (lo + hi).div_ceil(2);
+        if fits(&cut(mid)) {
+            lo = mid;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    cut(lo)
+}
+
 /// What the window's controls asked for this frame.
 enum Event {
     Cancel,
@@ -324,7 +402,9 @@ enum Event {
 /// The Contents column's words.
 struct GridWords {
     counts: String,
-    reading: String,
+    /// "Reading <path>": the words before and after the path, and the
+    /// path, while a source is read.
+    reading: Option<(String, String, String)>,
     empty: String,
     new_only: String,
     types: String,
@@ -810,7 +890,21 @@ impl Shell {
             .with("photos", counts.photos)
             .with("new", counts.new)
             .with("size", size)),
-            reading: t(Message::new("gui-import-window-reading", "Reading…")),
+            reading: self.focus.import_window.reading().map(|path| {
+                // Translated around a mark, so the path alone is shortened
+                // to the line's width.
+                const MARK: &str = "\u{E000}";
+                let text = t(
+                    Message::new("gui-import-window-reading", "Reading { $path }")
+                        .with("path", MARK),
+                );
+                let (before, after) = text.split_once(MARK).unwrap_or((text.as_str(), ""));
+                (
+                    before.to_owned(),
+                    after.to_owned(),
+                    path.display().to_string(),
+                )
+            }),
             empty: t(Message::new(
                 "gui-import-window-empty",
                 "No photos in the sources ticked",
@@ -1288,9 +1382,25 @@ fn contents_ui(
     let c = &mut w.contents;
     ui.horizontal(|ui| {
         ui.label(&words.counts);
-        if reading {
+        if reading && let Some((before, after, path)) = &words.reading {
             ui.spinner();
-            ui.weak(&words.reading);
+            // The path shortened in its middle to the line's width.
+            let width = ui.available_width();
+            let font = egui::TextStyle::Body.resolve(ui.style());
+            let color = ui.visuals().weak_text_color();
+            let fits = |p: &str| {
+                let text = format!("{before}{p}{after}");
+                ui.painter()
+                    .layout_no_wrap(text, font.clone(), color)
+                    .size()
+                    .x
+                    <= width
+            };
+            let path = shorten_middle(path, fits);
+            ui.add(
+                egui::Label::new(egui::RichText::new(format!("{before}{path}{after}")).weak())
+                    .truncate(),
+            );
         }
     });
     ui.horizontal_wrapped(|ui| {
@@ -1521,5 +1631,21 @@ impl ImportWindow {
                 cell.ticked = selected.contains(main);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::shorten_middle;
+
+    #[test]
+    fn a_long_path_is_shortened_in_its_middle_keeping_its_file_name() {
+        let path = "/media/someone/EOS_DIGITAL/DCIM/100CANON/IMG_0042.CR3";
+        assert_eq!(shorten_middle(path, |_| true), path);
+        let short = shorten_middle(path, |s| s.chars().count() <= 24);
+        assert_eq!(short.chars().count(), 24);
+        assert!(short.contains('…'));
+        assert!(short.starts_with("/media"));
+        assert!(short.ends_with("IMG_0042.CR3"));
     }
 }

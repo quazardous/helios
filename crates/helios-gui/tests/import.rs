@@ -1505,3 +1505,165 @@ fn a_cold_folder_fills_the_cells_in_view_on_several_threads_and_opened_again_rea
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Steps frames until the sources are read through, a few frames more,
+/// and asserts on each that every cell in view among `cached` already has
+/// its thumbnail: a cached thumbnail is drawn with its cell, on the frame
+/// that first draws it. Gives the cells checked in view.
+fn painted_with_their_cells(
+    h: &mut Harness<'static, Shell>,
+    cached: impl Fn(&Path) -> bool,
+) -> std::collections::HashSet<PathBuf> {
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let mut seen = std::collections::HashSet::new();
+    let mut after = 0;
+    while after < 5 {
+        assert!(Instant::now() < deadline, "the sources not read in 20 s");
+        h.step();
+        for p in h.state().import_thumbnails_on_screen() {
+            if cached(&p) {
+                assert!(
+                    h.state().import_thumbnail_ready(&p),
+                    "{} drawn without its cached thumbnail",
+                    p.display()
+                );
+                seen.insert(p);
+            }
+        }
+        if h.state().import_read() && !seen.is_empty() {
+            after += 1;
+        } else {
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    }
+    seen
+}
+
+#[test]
+fn cached_glances_paint_with_their_cells_when_opened_again_and_scrolled() {
+    const N: usize = 160;
+    let dir = temp("painted");
+    let folder = dir.join("Shoot");
+    photos(&folder, N, 320, 240);
+    let mut h = headless::harness(Shell::new(helios_panels(), None), vec2(1280.0, 800.0));
+    h.run();
+    let source = json!({ "source": folder.display().to_string() });
+    h.state_mut()
+        .run("library.importWindow", source.clone(), Origin::User)
+        .unwrap();
+    read_through(&mut h);
+    // Closed, then opened again: every glance is in the RAM cache.
+    h.get_by_label("Cancel").click();
+    h.step();
+    h.step();
+    assert!(!h.state().import_window_open());
+    h.state_mut()
+        .run("library.importWindow", source, Origin::User)
+        .unwrap();
+    let seen = painted_with_their_cells(&mut h, |_| true);
+    assert_eq!(h.state().import_glances().read, 0, "files read again");
+    // Scrolled down to cells not drawn yet: theirs show with them too.
+    h.get_by_label("IMG_0000.JPG").click();
+    h.step();
+    for _ in 0..6 {
+        h.key_press(Key::PageDown);
+        h.step();
+        for p in h.state().import_thumbnails_on_screen() {
+            assert!(
+                h.state().import_thumbnail_ready(&p),
+                "scrolled to, {} drawn without its cached thumbnail",
+                p.display()
+            );
+        }
+    }
+    let now: std::collections::HashSet<PathBuf> = h
+        .state()
+        .import_thumbnails_on_screen()
+        .into_iter()
+        .collect();
+    assert!(
+        !now.is_subset(&seen),
+        "the scroll did not reach new cells: {} of {N}",
+        seen.len()
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_disk_cached_thumbnail_paints_with_its_cell() {
+    let dir = temp("painted-disk");
+    let library = dir.join("library");
+    std::fs::create_dir_all(&library).unwrap();
+    std::fs::copy(jpeg("a"), library.join("a.jpg")).unwrap();
+    let vault = Arc::new(Vault::new(MemoryStore::default()));
+    let id = vault.import_file(&library.join("a.jpg"), 0).unwrap();
+    let gone = dir.join("Unplugged/DCIM");
+    let mut imported = helios_vault::Sighting::seen(gone.join("A.JPG"), 1_000, 50, 60, "import");
+    imported.image = Some(id);
+    vault.record_listed(&[imported]).unwrap();
+    let cache = Arc::new(helios_thumbs::ThumbCache::open(&dir.join("thumbs"), 1 << 30).unwrap());
+    let thumb = helios_thumbs::Rgb8 {
+        width: 64,
+        height: 48,
+        pixels: vec![120; 64 * 48 * 3],
+    };
+    cache
+        .put(
+            &helios_thumbs::Key::preview(id.hex()),
+            helios_thumbs::SMALL,
+            &thumb,
+        )
+        .unwrap();
+    let mut shell = Shell::new(helios_panels(), None);
+    shell.set_import_recorded(helios_gui::import_scan::recorded_of(vault));
+    shell.set_import_thumbnail_cache(cache);
+    let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+    h.run();
+    h.state_mut()
+        .run(
+            "library.importWindow",
+            json!({ "source": gone.display().to_string() }),
+            Origin::User,
+        )
+        .unwrap();
+    let seen = painted_with_their_cells(&mut h, |_| true);
+    assert!(seen.contains(&gone.join("A.JPG")));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn the_reading_line_names_what_is_read_above_the_cells() {
+    let dir = temp("reading");
+    let folder = dir.join("Shoot");
+    photos(&folder, 48, 1600, 1200);
+    let mut h = headless::harness(Shell::new(helios_panels(), None), vec2(1280.0, 800.0));
+    h.run();
+    h.state_mut()
+        .run(
+            "library.importWindow",
+            json!({ "source": folder.display().to_string() }),
+            Origin::User,
+        )
+        .unwrap();
+    // The command runs on the next frame: until then, nothing is read.
+    h.step();
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let mut named = Vec::new();
+    while !h.state().import_read() {
+        assert!(Instant::now() < deadline, "the sources not read in 20 s");
+        h.step();
+        if let Some(node) = h.query_by_label_contains("Reading") {
+            let n = node.accesskit_node();
+            let label = n.label().or_else(|| n.value()).unwrap_or_default();
+            named.push(label);
+        }
+    }
+    assert!(!named.is_empty(), "no reading line while reading");
+    for label in &named {
+        assert!(
+            label.starts_with("Reading ") && (label.contains("Shoot") || label.contains(".JPG")),
+            "the reading line does not name what it reads: {label:?}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -285,6 +285,9 @@ pub struct Scan {
     receiver: Receiver<Scanned>,
     stop: Arc<AtomicBool>,
     stats: Arc<Stats>,
+    /// What it reads now: the folder while it lists it, then the file
+    /// last glanced at.
+    reading: Arc<Mutex<PathBuf>>,
 }
 
 /// The files the window wants glanced first, in order: the cells in view,
@@ -455,6 +458,22 @@ impl GlanceCache {
         })
     }
 
+    /// The glance of the file at `path` of `bytes`, changed at `modified`,
+    /// when kept: what the window shows with the file's cell, on the frame
+    /// that draws it (a miss is not counted: the scan asks again).
+    pub fn cached(&self, path: &Path, bytes: u64, modified: Option<i64>) -> Option<Arc<Glanced>> {
+        let key = (path.to_path_buf(), bytes, modified);
+        let mut index = lock(&self.index);
+        index.clock += 1;
+        let now = index.clock;
+        let (glanced, used) = index.entries.get_mut(&key)?;
+        *used = now;
+        let hit = glanced.clone();
+        drop(index);
+        Counters::add(&self.counters.hits, 1);
+        Some(hit)
+    }
+
     fn get(&self, key: &GlanceKey) -> Option<Arc<Glanced>> {
         let mut index = lock(&self.index);
         index.clock += 1;
@@ -553,6 +572,8 @@ impl Scan {
         let stopped = stop.clone();
         let stats = Arc::new(Stats::default());
         let counted = stats.clone();
+        let reading = Arc::new(Mutex::new(source.clone()));
+        let now_reading = reading.clone();
         let spawned = std::thread::Builder::new()
             .name("helios-import-scan".into())
             .spawn(move || {
@@ -601,8 +622,15 @@ impl Scan {
                 // The glances, on a few threads, the files wanted first.
                 let picking = Mutex::new(Picking::new(&listed));
                 let recorder = Mutex::new(recorder);
-                let (listed, picking, recorder, wanted, wake, stopped, stats) = (
-                    &listed, &picking, &recorder, &wanted, &wake, &stopped, &counted,
+                let (listed, picking, recorder, wanted, wake, stopped, stats, now_reading) = (
+                    &listed,
+                    &picking,
+                    &recorder,
+                    &wanted,
+                    &wake,
+                    &stopped,
+                    &counted,
+                    &now_reading,
                 );
                 std::thread::scope(|threads| {
                     for _ in 0..glancers().min(listed.len()) {
@@ -618,6 +646,7 @@ impl Scan {
                                 };
                                 let Some(i) = next else { return };
                                 let (path, bytes, modified) = &listed[i];
+                                lock(now_reading).clone_from(path);
                                 let g = glance_one(path, *bytes, *modified, stats);
                                 if let Some(r) = lock(recorder).as_mut() {
                                     // The camera's local time, kept as if it
@@ -655,7 +684,14 @@ impl Scan {
             receiver,
             stop,
             stats,
+            reading,
         }
+    }
+
+    /// What it reads now: the folder while it lists it, then the file last
+    /// glanced at.
+    pub fn reading(&self) -> PathBuf {
+        lock(&self.reading).clone()
     }
 
     /// What the glances did so far: files read, from the cache, and the
@@ -672,6 +708,7 @@ impl Scan {
     /// volume holds now: each file as last seen, offline, said imported
     /// when its content is a Library image; nothing is read from it.
     pub fn recorded(source: PathBuf, recorded: Recorded, wake: impl Fn() + Send + 'static) -> Self {
+        let reading = Arc::new(Mutex::new(source.clone()));
         let (sender, receiver) = channel();
         let stop = Arc::new(AtomicBool::new(false));
         let stopped = stop.clone();
@@ -711,6 +748,7 @@ impl Scan {
             receiver,
             stop,
             stats: Arc::default(),
+            reading,
         }
     }
 
