@@ -307,6 +307,41 @@ original (option C3 below).
 - **Signing out** deletes the keyring entry and, where the service
   offers it, revokes the token. Sightings stay.
 
+### 2.4.1 Connecting: a declared process, not only OAuth
+
+Some connectors need a connection process before they can list
+anything, and OAuth is only one kind (owner, 2026-11-11). A connector
+declares its process in its manifest (`[[connect]]`), as ordered steps
+Helios drives itself, so every connector, built in or a plugin, gets
+the same screens, the same states and the same tests:
+
+| Step kind | What Helios shows and does | Examples |
+|---|---|---|
+| `oauth` | the system browser on the consent page, PKCE and loopback redirect (2.4) | Google Photos, Dropbox |
+| `form` | a form built from the step's schema (the declarative admin forms of the settings framework), secrets marked so they go to the keyring | NAS (SMB server, share, user, password), S3 (endpoint, bucket, keys), WebDAV |
+| `device` | an instruction to follow on the device and a wait for it, with a timeout and a "try again" | a phone's "Allow access to data" after unlocking, a camera's Wi-Fi pairing (PTP/IP) accepted on the camera |
+| `trust` | a fingerprint to confirm once, remembered per account | a self-signed WebDAV or NAS certificate, a PTP/IP camera's GUID |
+| `code` | a code shown on one side and typed on the other | a device-pairing flow, a second factor the service asks for |
+| `test` | a call the connector answers to prove the connection (`source.probe`), with its error in plain words | every connector, as the last step |
+
+- **States**, per account or device: *not connected*, *connecting*
+  (which step), *connected*, *needs attention* (a token expired, a
+  password changed, a device not trusted any more). A `sign-in needed`
+  or `not trusted` error from `list` or `fetch` moves the account to
+  *needs attention* and the import window offers "Reconnect", which
+  replays only the steps that failed.
+- **Where**: "Add a source…" in the import window runs the process for
+  a new account; Settings > Accounts lists every account with its state
+  and "Reconnect" / "Sign out". Folders and mounted cards declare no
+  process.
+- **Agents and plugins**: the process is data, so the node exposes it
+  (`import.connect` with the steps and their state); an agent may start
+  it and fill a `form` the user allows, never a secret on its own, and
+  never an `oauth` consent or a `device` step, which are the user's.
+- **Tests**: each step kind runs headless against fakes (a fake OAuth
+  server, a fake device that accepts after N polls, a fake certificate),
+  so a connector's process is tested like its listing.
+
 ### 2.5 Rate limits, cuts, offline
 
 - **Rate limits.** `RateLimited { retry_after }` pauses the source's
