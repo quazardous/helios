@@ -35,6 +35,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 use helios_core::ContentHash;
+use helios_vault::capture::CAPTURED;
 use helios_vault::fields::{AuditEntry, LABELS, Order, PICKED, Query, RATING, REJECTED, TAGS};
 use helios_vault::storage::VolumeId;
 use helios_vault::{
@@ -663,6 +664,97 @@ fn image_known(db: &Connection, id: &ImageId) -> Result<Option<String>, String> 
     .map_err(err)
 }
 
+/// The statement a query selects with, and its arguments.
+fn select_sql(query: &Query) -> Result<(String, Vec<rusqlite::types::Value>), String> {
+    use rusqlite::types::Value as Sql;
+    query.check()?;
+    let order = match query.order {
+        Order::Id => "i.id",
+        Order::RatingDesc => "COALESCE(r.number, 0) DESC, i.id",
+    };
+    let mut args: Vec<Sql> = vec![
+        query.min_rating.map_or(Sql::Null, Sql::Integer),
+        query.label.clone().map_or(Sql::Null, Sql::Text),
+    ];
+    let mut sql = format!(
+            "SELECT i.id FROM images i
+             LEFT JOIN fields r ON r.image = i.id AND r.name = '{RATING}'
+             LEFT JOIN fields l ON l.image = i.id AND l.name = '{LABELS}'
+             LEFT JOIN fields p ON p.image = i.id AND p.name = '{PICKED}'
+             LEFT JOIN fields x ON x.image = i.id AND x.name = '{REJECTED}'
+             LEFT JOIN fields t ON t.image = i.id AND t.name = '{TAGS}'
+             WHERE i.in_library = 1
+               AND (?1 IS NULL OR COALESCE(r.number, 0) >= ?1)
+               AND (?2 IS NULL OR EXISTS (SELECT 1 FROM json_each(l.value) WHERE json_each.value = ?2))"
+        );
+    if !query.labels.is_empty() {
+        let marks = vec!["?"; query.labels.len()].join(", ");
+        sql.push_str(" AND EXISTS (SELECT 1 FROM json_each(l.value) WHERE json_each.value IN (");
+        sql.push_str(&marks);
+        sql.push_str("))");
+        args.extend(query.labels.iter().cloned().map(Sql::Text));
+    }
+    for tag in &query.tags {
+        sql.push_str(" AND EXISTS (SELECT 1 FROM json_each(t.value) WHERE json_each.value = ?)");
+        args.push(Sql::Text(tag.clone()));
+    }
+    // A capture range: the `(name, number)` index finds the images
+    // taken in it, in the same statement.
+    if query.captured_from.is_some() || query.captured_before.is_some() {
+        sql.push_str(" AND i.id IN (SELECT image FROM fields WHERE name = '");
+        sql.push_str(CAPTURED);
+        sql.push('\'');
+        if let Some(from) = query.captured_from {
+            sql.push_str(" AND number >= ?");
+            args.push(Sql::Integer(from));
+        }
+        if let Some(before) = query.captured_before {
+            sql.push_str(" AND number < ?");
+            args.push(Sql::Integer(before));
+        }
+        sql.push(')');
+    }
+    if !query.flags.is_empty() {
+        let picked = "COALESCE(p.value, '') = 'true'";
+        let rejected = "COALESCE(x.value, '') = 'true'";
+        let ways: Vec<String> = query
+            .flags
+            .iter()
+            .map(|f| match f.as_str() {
+                "pick" => format!("({picked} AND NOT {rejected})"),
+                "reject" => rejected.to_string(),
+                _ => format!("(NOT {picked} AND NOT {rejected})"),
+            })
+            .collect();
+        sql.push_str(" AND (");
+        sql.push_str(&ways.join(" OR "));
+        sql.push(')');
+    }
+    sql.push_str(" ORDER BY ");
+    sql.push_str(order);
+    Ok((sql, args))
+}
+
+impl SqliteStore {
+    /// The plan SQLite chooses for a query's select, one step a line:
+    /// what a test reads to check an index serves it.
+    pub fn explain_select(&self, query: &Query) -> Result<String, String> {
+        let (sql, args) = select_sql(query)?;
+        let mut statement = self
+            .db
+            .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
+            .map_err(err)?;
+        let steps = statement
+            .query_map(rusqlite::params_from_iter(args.iter()), |r| {
+                r.get::<_, String>(3)
+            })
+            .map_err(err)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(err)?;
+        Ok(steps.join("\n"))
+    }
+}
+
 impl Store for SqliteStore {
     fn add_image(&mut self, image: &Image) -> Result<bool, String> {
         self.writable()?;
@@ -1058,26 +1150,26 @@ impl Store for SqliteStore {
     fn set_field(&mut self, id: &ImageId, name: &str, value: Option<&Value>) -> Result<(), String> {
         self.write(|db| {
             let known = db
-                .query_row(
-                    "SELECT 1 FROM images WHERE id = ?1",
-                    params![id.hex()],
-                    |_| Ok(()),
-                )
-                .optional()
+                .prepare_cached("SELECT 1 FROM images WHERE id = ?1")
+                .and_then(|mut st| st.query_row(params![id.hex()], |_| Ok(())).optional())
                 .map_err(err)?;
             if known.is_none() {
                 return Err(format!("no image {}", id.hex()));
             }
             match value {
-                Some(v) => db.execute(
-                    "INSERT INTO fields (image, name, value, number) VALUES (?1, ?2, ?3, ?4)
+                // Cached: a backfill sets every capture field of thousands
+                // of images.
+                Some(v) => db
+                    .prepare_cached(
+                        "INSERT INTO fields (image, name, value, number) VALUES (?1, ?2, ?3, ?4)
                      ON CONFLICT (image, name) DO UPDATE SET value = ?3, number = ?4",
-                    params![id.hex(), name, v.to_string(), v.as_f64()],
-                ),
-                None => db.execute(
-                    "DELETE FROM fields WHERE image = ?1 AND name = ?2",
-                    params![id.hex(), name],
-                ),
+                    )
+                    .and_then(|mut st| {
+                        st.execute(params![id.hex(), name, v.to_string(), v.as_f64()])
+                    }),
+                None => db
+                    .prepare_cached("DELETE FROM fields WHERE image = ?1 AND name = ?2")
+                    .and_then(|mut st| st.execute(params![id.hex(), name])),
             }
             .map_err(err)?;
             Ok(())
@@ -1205,60 +1297,7 @@ impl Store for SqliteStore {
     }
 
     fn select(&self, query: &Query) -> Result<Vec<ImageId>, String> {
-        use rusqlite::types::Value as Sql;
-        query.check()?;
-        let order = match query.order {
-            Order::Id => "i.id",
-            Order::RatingDesc => "COALESCE(r.number, 0) DESC, i.id",
-        };
-        let mut args: Vec<Sql> = vec![
-            query.min_rating.map_or(Sql::Null, Sql::Integer),
-            query.label.clone().map_or(Sql::Null, Sql::Text),
-        ];
-        let mut sql = format!(
-            "SELECT i.id FROM images i
-             LEFT JOIN fields r ON r.image = i.id AND r.name = '{RATING}'
-             LEFT JOIN fields l ON l.image = i.id AND l.name = '{LABELS}'
-             LEFT JOIN fields p ON p.image = i.id AND p.name = '{PICKED}'
-             LEFT JOIN fields x ON x.image = i.id AND x.name = '{REJECTED}'
-             LEFT JOIN fields t ON t.image = i.id AND t.name = '{TAGS}'
-             WHERE i.in_library = 1
-               AND (?1 IS NULL OR COALESCE(r.number, 0) >= ?1)
-               AND (?2 IS NULL OR EXISTS (SELECT 1 FROM json_each(l.value) WHERE json_each.value = ?2))"
-        );
-        if !query.labels.is_empty() {
-            let marks = vec!["?"; query.labels.len()].join(", ");
-            sql.push_str(
-                " AND EXISTS (SELECT 1 FROM json_each(l.value) WHERE json_each.value IN (",
-            );
-            sql.push_str(&marks);
-            sql.push_str("))");
-            args.extend(query.labels.iter().cloned().map(Sql::Text));
-        }
-        for tag in &query.tags {
-            sql.push_str(
-                " AND EXISTS (SELECT 1 FROM json_each(t.value) WHERE json_each.value = ?)",
-            );
-            args.push(Sql::Text(tag.clone()));
-        }
-        if !query.flags.is_empty() {
-            let picked = "COALESCE(p.value, '') = 'true'";
-            let rejected = "COALESCE(x.value, '') = 'true'";
-            let ways: Vec<String> = query
-                .flags
-                .iter()
-                .map(|f| match f.as_str() {
-                    "pick" => format!("({picked} AND NOT {rejected})"),
-                    "reject" => rejected.to_string(),
-                    _ => format!("(NOT {picked} AND NOT {rejected})"),
-                })
-                .collect();
-            sql.push_str(" AND (");
-            sql.push_str(&ways.join(" OR "));
-            sql.push(')');
-        }
-        sql.push_str(" ORDER BY ");
-        sql.push_str(order);
+        let (sql, args) = select_sql(query)?;
         let mut statement = self.db.prepare(&sql).map_err(err)?;
         let ids = statement
             .query_map(rusqlite::params_from_iter(args.iter()), |r| {

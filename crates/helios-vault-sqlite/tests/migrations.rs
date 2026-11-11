@@ -442,3 +442,63 @@ fn schema_4_moves_to_the_image_map_keeping_every_row() {
     drop((db, store));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Schema 6 indexes the text fields (capture's camera, lens, file type)
+/// beside the numbers; a vault at schema 5 keeps every row, and its
+/// capture fields wait for the backfill job (they are read from files).
+#[test]
+fn schema_5_gains_the_text_index_and_keeps_its_rows() {
+    let dir = scratch("capture");
+    let path = dir.join("vault.db");
+    let one = ImageId::from_hex(&"01".repeat(32)).unwrap();
+    {
+        let mut store = SqliteStore::open(&path).unwrap();
+        store
+            .add_to_library(&helios_vault::Image {
+                id: one,
+                size: 100,
+                partial: one.0,
+            })
+            .unwrap();
+        store
+            .set_field(&one, "rating", Some(&serde_json::json!(4)))
+            .unwrap();
+    }
+    // Back to schema 5 as an older Helios left it.
+    {
+        let db = Connection::open(&path).unwrap();
+        db.execute_batch("DROP INDEX fields_name_text; PRAGMA user_version = 5;")
+            .unwrap();
+    }
+    let mut store = SqliteStore::open(&path).unwrap();
+    let migrated = store.report().migrated.clone().unwrap();
+    assert_eq!((migrated.from, migrated.to), (5, SCHEMA_VERSION));
+    assert!(migrated.snapshot.is_some(), "a snapshot first");
+    assert_eq!(
+        store.field(&one, "rating").unwrap(),
+        Some(serde_json::json!(4))
+    );
+    assert_eq!(store.images().unwrap().len(), 1);
+    // Text fields are looked up through their index.
+    store
+        .set_field(&one, "camera_model", Some(&serde_json::json!("Z 8")))
+        .unwrap();
+    drop(store);
+    let db = Connection::open(&path).unwrap();
+    let plan: Vec<String> = db
+        .prepare(
+            "EXPLAIN QUERY PLAN SELECT image FROM fields \
+             WHERE name = 'camera_model' AND value = '\"Z 8\"' AND number IS NULL",
+        )
+        .unwrap()
+        .query_map([], |r| r.get(3))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert!(
+        plan.iter().any(|s| s.contains("fields_name_text")),
+        "{plan:?}"
+    );
+    drop(db);
+    let _ = std::fs::remove_dir_all(&dir);
+}
