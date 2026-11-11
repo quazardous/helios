@@ -230,7 +230,13 @@ impl Shell {
                     .map(|(id, s)| (id.clone(), crate::library::BackupMark::of(s)))
                     .collect();
                 let badges = self.core.storage.strategy.is_some();
-                self.focus.library.borrow_mut().set_backups(marks, badges);
+                let rule = strategy::rule(
+                    &self.core.storage.volumes,
+                    self.core.storage.strategy.as_ref(),
+                );
+                let mut library = self.focus.library.borrow_mut();
+                library.set_backup_rule(rule);
+                library.set_backups(marks, badges);
             }
             Err(e) => log::warn!("backups: {e}"),
         }

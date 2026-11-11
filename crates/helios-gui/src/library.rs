@@ -48,7 +48,7 @@ use crate::thumb_textures::Resident;
 use egui_pop::views::library::compare::{CompareView, Pane};
 
 use crate::comparison::Comparison;
-use egui_pop::views::library::filter::{Candidate, Filter, SearchField, SearchState};
+use egui_pop::views::library::filter::{Filter, SearchField, SearchState};
 use egui_pop::views::library::marks::{ColorLabels, FlagToggle, RatingStars};
 use egui_pop::views::library::tags::{TagInput, TagInputState};
 use egui_pop::views::library::{
@@ -531,12 +531,17 @@ impl Change {
     }
 }
 
-/// The vault query a search filter makes: its rating, labels, flags,
-/// tags and dates, a date being the capture day by the camera's clock
-/// (`date:2024-06-01..2024-06-30` takes both days whole); its words are
-/// matched on what the library holds.
+/// The vault query a search filter makes: all of it runs in the vault
+/// (`docs/design/library.md`, L4). Its rating, labels, flags, tags and
+/// dates (a date being the capture day by the camera's clock:
+/// `date:2024-06-01..2024-06-30` takes both days whole), and in its text
+/// Helios's own keys ([`helios_terms`]): `camera:`, `lens:`, `type:`,
+/// `folder:`, `presence:` and `backup:`; the other words are looked for
+/// in the photo's name and tags. A `backup:` term is measured against no
+/// volume until the library sets its rule ([`Library::set_backup_rule`]).
 pub fn query_of(filter: &Filter) -> Query {
     use helios_vault::capture::day_start;
+    let terms = helios_terms(&filter.text);
     Query {
         min_rating: filter.min_rating.map(i64::from),
         labels: filter.labels.iter().map(|l| l.name().to_string()).collect(),
@@ -544,8 +549,120 @@ pub fn query_of(filter: &Filter) -> Query {
         tags: filter.tags.clone(),
         captured_from: filter.from.as_deref().and_then(day_start),
         captured_before: filter.to.as_deref().and_then(day_start).map(|d| d + 86_400),
+        words: terms.words,
+        cameras: terms.cameras,
+        lenses: terms.lenses,
+        file_types: terms.file_types,
+        folder: terms.folder,
+        presence: terms.presence,
+        backup: terms.backup.map(|states| helios_vault::BackupFilter {
+            rule: helios_vault::Backups::default(),
+            states,
+        }),
         ..Query::default()
     }
+}
+
+/// The terms of a filter's text: Helios's own keys, and the words left.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Terms {
+    pub words: Vec<String>,
+    pub cameras: Vec<String>,
+    pub lenses: Vec<String>,
+    pub file_types: Vec<String>,
+    pub folder: Option<String>,
+    pub presence: Vec<helios_vault::Presence>,
+    /// The backup states every `backup:` term allows (`None`: no term).
+    pub backup: Option<Vec<helios_vault::BackupState>>,
+}
+
+/// The backup states a `backup:` word takes: `met` (or `ok`), `short`
+/// (short, unverified, or no copy at all), `unverified`, `none`.
+fn backup_states(word: &str) -> Option<Vec<helios_vault::BackupState>> {
+    use helios_vault::BackupState as B;
+    Some(match word {
+        "met" | "ok" => vec![B::Met],
+        "short" => vec![B::Short, B::Unverified, B::None],
+        "unverified" => vec![B::Unverified],
+        "none" => vec![B::None],
+        _ => return None,
+    })
+}
+
+/// A filter's text cut into words, a double-quoted value kept whole
+/// (`camera:"Z 8"`, `folder:"/photos/2024 trip"`).
+fn tokens(text: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut open = false;
+    for w in text.split_whitespace() {
+        if open && let Some(last) = out.last_mut() {
+            last.push(' ');
+            last.push_str(w);
+        } else {
+            out.push(w.to_string());
+        }
+        if w.matches('"').count() % 2 == 1 {
+            open = !open;
+        }
+    }
+    out
+}
+
+/// A term's value without its quotes.
+fn unquoted(value: &str) -> String {
+    value.trim_matches('"').to_string()
+}
+
+/// A value as a term writes it: quoted when it holds a space.
+pub fn quoted(value: &str) -> String {
+    if value.contains(char::is_whitespace) {
+        format!("\"{value}\"")
+    } else {
+        value.to_string()
+    }
+}
+
+/// Helios's own keys in a filter's text (the words egui-pop's grammar
+/// leaves): `camera:<model>`, `lens:<lens>`, `type:<cr3>` (each exact;
+/// several of one key take any of them), `folder:<path>` (a copy there
+/// or below), `presence:present|offline|missing` and `backup:<state>`
+/// (several: every one holds). A key with a value it does not know stays
+/// a word, as before.
+pub fn helios_terms(text: &str) -> Terms {
+    let mut t = Terms::default();
+    for token in tokens(text) {
+        let lower = token.to_lowercase();
+        let value = |key: &str| {
+            lower
+                .starts_with(key)
+                .then(|| unquoted(&token[key.len()..]))
+                .filter(|v| !v.is_empty())
+        };
+        if let Some(v) = value("camera:") {
+            t.cameras.push(v);
+        } else if let Some(v) = value("lens:") {
+            t.lenses.push(v);
+        } else if let Some(v) = value("type:") {
+            t.file_types.push(v.to_lowercase());
+        } else if let Some(v) = value("folder:") {
+            t.folder = Some(v);
+        } else if let Some(p) = value("presence:").and_then(|v| match v.to_lowercase().as_str() {
+            "present" => Some(helios_vault::Presence::Present),
+            "offline" => Some(helios_vault::Presence::Offline),
+            "missing" => Some(helios_vault::Presence::Missing),
+            _ => None,
+        }) {
+            t.presence.push(p);
+        } else if let Some(states) = lower.strip_prefix("backup:").and_then(backup_states) {
+            t.backup = Some(match t.backup.take() {
+                None => states,
+                Some(before) => before.into_iter().filter(|s| states.contains(s)).collect(),
+            });
+        } else {
+            t.words.push(token);
+        }
+    }
+    t
 }
 
 /// The search filter a workspace's library query makes (see
@@ -583,6 +700,15 @@ pub fn query_typed(text: &str) -> Result<Option<helios_template::QueryDesc>, Str
     Ok((!q.is_empty()).then_some(q))
 }
 
+/// The filter term taking a facet's value (`label:red`, `camera:"Z 8"`).
+pub fn facet_term(facet: &str, value: &str) -> String {
+    match facet {
+        "rating" => format!("rating>={value}"),
+        "file_type" => format!("type:{}", quoted(value)),
+        other => format!("{other}:{}", quoted(value)),
+    }
+}
+
 /// The longest side of a thumbnail, in pixels.
 pub const THUMB: u32 = 256;
 
@@ -613,45 +739,6 @@ impl BackupMark {
             Self::Short
         }
     }
-
-    /// Whether `backup:<word>` in the search field takes it: `met`,
-    /// `short` (short, unverified, or none while copies are asked),
-    /// `unverified` and `none`; `None` for a word it does not know.
-    fn wanted(word: &str, mark: Option<Self>) -> Option<bool> {
-        Some(match word {
-            "met" | "ok" => mark == Some(Self::Met),
-            "short" => matches!(mark, Some(Self::Short | Self::Unverified | Self::None)),
-            "unverified" => mark == Some(Self::Unverified),
-            "none" => matches!(mark, Some(Self::None) | None),
-            _ => return None,
-        })
-    }
-}
-
-/// The `backup:` words of a filter's text, apart: what is left of its
-/// text, and the words.
-fn backup_words(filter: &Filter) -> (Filter, Vec<String>) {
-    let mut rest = filter.clone();
-    let mut words = Vec::new();
-    let kept: Vec<&str> = filter
-        .text
-        .split_whitespace()
-        .filter(|w| {
-            match w
-                .to_lowercase()
-                .strip_prefix("backup:")
-                .filter(|b| BackupMark::wanted(b, None).is_some())
-            {
-                Some(b) => {
-                    words.push(b.to_string());
-                    false
-                }
-                None => true,
-            }
-        })
-        .collect();
-    rest.text = kept.join(" ");
-    (rest, words)
 }
 
 pub struct Library {
@@ -681,6 +768,12 @@ pub struct Library {
     matches: Option<HashSet<String>>,
     /// A query for the host to run.
     query: Option<Query>,
+    /// What a backup state is measured against (`backup:` terms, the
+    /// backup facet): the library's strategy and backup volumes.
+    backup_rule: helios_vault::Backups,
+    /// How many photos of the filter carry each value of each facet, as
+    /// the vault last counted them.
+    facets: Option<helios_vault::Facets>,
     tags: TagInputState,
     /// Every tag the library's images carry, for completion.
     known_tags: Vec<String>,
@@ -805,6 +898,8 @@ impl Default for Library {
             search: SearchState::new(),
             filter: Filter::default(),
             matches: None,
+            backup_rule: helios_vault::Backups::default(),
+            facets: None,
             query: None,
             tags: TagInputState::default(),
             known_tags: Vec::new(),
@@ -1128,7 +1223,53 @@ impl Library {
         }
         self.backups = backups;
         self.backup_badges = badges;
+        // Backups changed: a `backup:` term may take other photos.
+        if self.filter.text.to_lowercase().contains("backup:") {
+            self.ask_query();
+        }
         self.reorder();
+    }
+
+    /// What a backup state is measured against: the library's strategy
+    /// and backup volumes (`helios_storage::strategy::rule`).
+    pub fn set_backup_rule(&mut self, rule: helios_vault::Backups) {
+        if self.backup_rule != rule {
+            self.backup_rule = rule;
+            self.ask_query();
+        }
+    }
+
+    /// The backup rule the facets count against: only when the library
+    /// has a strategy (its badges show).
+    pub fn facet_rule(&self) -> Option<&helios_vault::Backups> {
+        (self.backup_badges == Shown::Yes).then_some(&self.backup_rule)
+    }
+
+    /// The facet counts of the filter, as the vault counted them.
+    pub fn set_facets(&mut self, facets: helios_vault::Facets) {
+        self.facets = Some(facets);
+    }
+
+    /// The facet counts shown, once counted.
+    pub fn facets(&self) -> Option<&helios_vault::Facets> {
+        self.facets.as_ref()
+    }
+
+    /// The vault query of the filter in force, its backup rule set.
+    fn query_for(&self, filter: &Filter) -> Query {
+        let mut query = query_of(filter);
+        if let Some(b) = &mut query.backup {
+            b.rule = self.backup_rule.clone();
+        }
+        query
+    }
+
+    /// Asks the host to run the filter's query again (the photos or what
+    /// it measures changed); nothing without a filter.
+    fn ask_query(&mut self) {
+        if !self.filter.is_empty() {
+            self.query = Some(self.query_for(&self.filter));
+        }
     }
 
     /// A photo's backups, as last read.
@@ -1263,6 +1404,8 @@ impl Library {
         self.entries = entries;
         self.reindex();
         self.selected = selected.and_then(|id| self.index.get(&id).copied());
+        // Photos came or went: the vault answers the filter again.
+        self.ask_query();
         self.reorder();
     }
 
@@ -1310,34 +1453,21 @@ impl Library {
         self.reorder();
     }
 
-    /// Whether an image passes the filter (`filter`: its criteria but
-    /// the `backup:` words, which `backup` holds).
-    fn passes(&self, e: &Entry, filter: &Filter, backup: &[String]) -> bool {
-        if self.filter.is_empty() {
-            return true;
-        }
-        let mark = self.backups.get(&e.id).copied();
-        self.matches.as_ref().is_none_or(|m| m.contains(&e.id))
-            && backup
-                .iter()
-                .all(|w| BackupMark::wanted(w, mark).unwrap_or(true))
-            && filter.matches(&Candidate {
-                name: &e.name,
-                marks: e.marks(),
-                tags: &e.tags,
-                date: e.day.as_deref(),
-            })
+    /// Whether an image passes the filter: the vault matched it (every
+    /// term runs in the vault's query). Until the vault answers a new
+    /// filter, the last answer stands.
+    fn passes(&self, e: &Entry) -> bool {
+        self.filter.is_empty() || self.matches.as_ref().is_none_or(|m| m.contains(&e.id))
     }
 
     /// What the views show, in order: a stack's top image first, its
     /// other members right after it.
     fn reorder(&mut self) {
         let stacks = self.filter.is_empty();
-        let (filter, backup) = backup_words(&self.filter);
         let mut order = Vec::new();
         let mut placed: HashSet<&str> = HashSet::new();
         for (i, e) in self.entries.iter().enumerate() {
-            if !self.passes(e, &filter, &backup) {
+            if !self.passes(e) {
                 continue;
             }
             match e.stack.as_ref().filter(|_| stacks) {
@@ -1403,9 +1533,12 @@ impl Library {
     }
 
     fn filtered(&mut self, filter: Filter) {
-        self.query = (!filter.is_empty()).then(|| query_of(&filter));
+        self.query = (!filter.is_empty()).then(|| self.query_for(&filter));
+        if filter.is_empty() {
+            self.matches = None;
+            self.facets = None;
+        }
         self.filter = filter;
-        self.matches = None;
         self.reorder();
     }
 
@@ -1980,7 +2113,7 @@ impl Library {
         }
         if marked && !self.filter.is_empty() {
             // The vault answers again; what no longer matches goes now.
-            self.query = Some(query_of(&self.filter));
+            self.query = Some(self.query_for(&self.filter));
             self.reorder();
         }
         marked
@@ -2268,6 +2401,56 @@ impl Library {
         }
     }
 
+    /// The facet counts of the filter in force (`docs/design/library.md`,
+    /// L4), a line per facet: each value with how many of the photos
+    /// shown carry it; a click adds it to the filter. Shown while a filter
+    /// is in force, once the vault counted.
+    fn facets_bar(&mut self, ui: &mut Ui) {
+        if self.filter.is_empty() {
+            return;
+        }
+        let Some(facets) = self.facets.clone() else {
+            return;
+        };
+        let ctx = ui.ctx().clone();
+        let mut add = None;
+        for (facet, title) in [
+            ("rating", Message::new("gui-library-facet-rating", "Rating")),
+            ("label", Message::new("gui-library-facet-label", "Label")),
+            ("flag", Message::new("gui-library-facet-flag", "Flag")),
+            ("camera", Message::new("gui-library-facet-camera", "Camera")),
+            ("lens", Message::new("gui-library-facet-lens", "Lens")),
+            ("file_type", Message::new("gui-library-facet-type", "Type")),
+            (
+                "presence",
+                Message::new("gui-library-facet-presence", "Presence"),
+            ),
+            ("backup", Message::new("gui-library-facet-backup", "Backup")),
+        ] {
+            let values = facets.of(facet);
+            if values.is_empty() {
+                continue;
+            }
+            ui.horizontal_wrapped(|ui| {
+                ui.weak(crate::i18n::text(&ctx, title));
+                for (value, n) in values {
+                    let shown = if facet == "rating" {
+                        format!("{}★", value)
+                    } else {
+                        value.to_string()
+                    };
+                    if ui.small_button(format!("{shown} {n}")).clicked() {
+                        add = Some(facet_term(facet, value));
+                    }
+                }
+            });
+        }
+        if let Some(term) = add {
+            let filter = self.filter.merged(&Filter::parse(&term));
+            self.set_filter(filter);
+        }
+    }
+
     /// The sort's menu and its direction: a change runs
     /// [`SORT_COMMAND`], which the workspace keeps.
     fn sort_menu(&mut self, ui: &mut Ui) {
@@ -2402,6 +2585,7 @@ impl Library {
         // The search field (with the import button) and the marks bar
         // stay in place while the library is empty.
         self.toolbar(ui);
+        self.facets_bar(ui);
         self.marks_bar(ui);
         if self.entries.is_empty() {
             let text = crate::i18n::text(
@@ -2789,10 +2973,35 @@ fn pane_rects(rect: egui::Rect, n: usize, gap: f32) -> Vec<egui::Rect> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use egui_pop::views::library::filter::Candidate;
 
     /// A date in the search field is a capture day: the vault query takes
     /// both ends whole, and an entry's day is its capture's by the
     /// camera's clock, not its file's.
+    /// Helios's own keys come out of the search text into the vault
+    /// query, quoted values whole, unknown values left as words; several
+    /// `backup:` terms keep the states every one allows.
+    #[test]
+    fn helios_keys_become_query_terms() {
+        use helios_vault::{BackupState as B, Presence};
+        let q = query_of(&Filter::parse(
+            "camera:\"Z 8\" lens:L1 TYPE:NEF folder:\"/a b/c\" presence:offline presence:soon sea backup:short backup:unverified",
+        ));
+        assert_eq!(q.cameras, ["Z 8"]);
+        assert_eq!(q.lenses, ["L1"]);
+        assert_eq!(q.file_types, ["nef"]);
+        assert_eq!(q.folder.as_deref(), Some("/a b/c"));
+        assert_eq!(q.presence, [Presence::Offline]);
+        assert_eq!(q.words, ["presence:soon", "sea"]);
+        assert_eq!(q.backup.unwrap().states, [B::Unverified]);
+        assert_eq!(facet_term("camera", "Z 8"), "camera:\"Z 8\"");
+        assert_eq!(facet_term("file_type", "nef"), "type:nef");
+        assert_eq!(
+            query_of(&Filter::parse(&facet_term("camera", "Z 8"))).cameras,
+            ["Z 8"]
+        );
+    }
+
     #[test]
     fn search_dates_are_capture_days_queried_in_the_vault() {
         use helios_vault::capture::day_start;

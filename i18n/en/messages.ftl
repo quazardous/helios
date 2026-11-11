@@ -626,6 +626,14 @@ gui-library-compare-hint = Select two to four images to compare them
 gui-library-compare-tip = The selected photos side by side (C)
 
 gui-library-count = { $shown } of { $total }
+gui-library-facet-rating = Rating
+gui-library-facet-label = Label
+gui-library-facet-flag = Flag
+gui-library-facet-camera = Camera
+gui-library-facet-lens = Lens
+gui-library-facet-type = Type
+gui-library-facet-presence = Presence
+gui-library-facet-backup = Backup
 
 gui-library-empty = No photos yet: import a card or a folder, or drop photos on the window
 

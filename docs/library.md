@@ -558,13 +558,35 @@ only) takes the files the system clipboard holds beside it. Only the
 user copies to and pastes from other applications: an agent neither
 reads the system clipboard nor writes over it.
 
-**Search.** The search field's rating, labels, flags, tags and dates
-become one vault query (several labels: any of them; several tags: all
-of them); its words (in the name or a tag) are matched on what the
-library holds. A date is the **capture day** by the camera's clock
-(`date:2024-06-01..2024-06-30` takes both days whole), served by the
-vault's index; a photo whose capture is not read yet matches no date. A
-filter shows stacks flattened.
+**Search.** The whole filter is one vault query, run in the statement
+that opens the library's cursor, the same on every vault driver: the
+search field's rating, labels (any of them), flags, tags (all of them)
+and dates, and in its text Helios's own keys:
+
+- `camera:<model>`, `lens:<lens>`, `type:<cr3>`: the capture fields,
+  exact, served by the vault's index on text fields; a value with a
+  space is quoted (`camera:"Z 8"`); several of one key take any;
+- `folder:<path>`: a photo with a copy in that folder or below, present
+  or not;
+- `presence:present`, `presence:offline`, `presence:missing`;
+- `backup:met` (or `ok`), `backup:short` (short, unverified or with no
+  backup), `backup:unverified`, `backup:none`, measured in the query
+  against the library's strategy and backup volumes.
+
+The other words are looked for, whatever their case (accents
+included), in the name the Library shows (the first present copy's file
+name, else the start of the photo's id) and in its tags. A date is the
+**capture day** by the camera's clock (`date:2024-06-01..2024-06-30`
+takes both days whole), served by the vault's index; a photo whose
+capture is not read yet matches no date. A filter shows stacks
+flattened.
+
+**Facet counts.** While a filter is in force, lines under the Library's
+toolbar count its photos per value of each facet: rating (exact stars),
+colour label, flag, camera, lens, file type, presence and, with a
+strategy, backup state. They come in one more vault query, whatever
+the size of the library; a click on a value adds it to the filter
+(`rating>=N` for stars).
 
 **Capture metadata.** Each photo's capture time, camera maker and
 model, lens, focal length, aperture, shutter, ISO, width, height, EXIF
@@ -744,7 +766,7 @@ yet) or "no backup". They are read once for the whole Library each time it
 is filled (`helios_storage::strategy::statuses`). The search field takes
 `backup:met`, `backup:short` (short, unverified or with no backup),
 `backup:unverified` and `backup:none` (no backup copy at all, strategy or
-not).
+not), run in the vault's query (see "Search").
 
 ### Catalogue snapshots
 

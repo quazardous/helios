@@ -16,7 +16,7 @@ use helios_gui::{Shell, helios_panels};
 use helios_vault::capture::CAPTURED;
 use helios_vault::fields::{LABELS, RATING, TAGS};
 use helios_vault::storage::VolumeId;
-use helios_vault::{Image, ImageId, Location, Order, Presence, Sort, Store, Vault};
+use helios_vault::{Image, ImageId, Location, Order, Presence, Query, Sort, Store, Vault};
 use helios_vault_sqlite::SqliteStore;
 use serde_json::json;
 
@@ -277,6 +277,70 @@ fn the_library_read_at_scale_is_a_query_per_window_and_no_stat() {
             cost.elapsed
         );
     }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The whole filter runs in the vault (`docs/design/library.md`, L4): a
+/// filtered read at scale is still one query to open the cursor and one
+/// per window, and the facet counts are one query more, whatever the
+/// library's size. Words, presence and rating together here.
+#[test]
+fn a_filtered_read_at_scale_is_a_query_per_window_and_facets_one_more() {
+    use helios_gui::library::query_of;
+    let n = 50_000;
+    let dir = scratch("filter");
+    let path = synthetic(&dir, n);
+    let vault = Vault::new(SqliteStore::open(&path).unwrap());
+    let filter =
+        egui_pop::views::library::filter::Filter::parse("img_01 presence:present rating>=4");
+    let query = Query {
+        order: helios_gui::library::DEFAULT_SORT,
+        ..query_of(&filter)
+    };
+    let want: Vec<u32> = sorted(n, helios_gui::library::DEFAULT_SORT)
+        .into_iter()
+        .filter(|&i| {
+            presence(i) == Presence::Present
+                && (10_000..20_000).contains(&i)
+                && i.is_multiple_of(2)
+                && i % 6 >= 4
+        })
+        .collect();
+    assert!(!want.is_empty());
+    let q0 = vault.reads().queries;
+    let start = Instant::now();
+    let cursor = vault.open_cursor(query.clone()).unwrap();
+    let mut got = Vec::new();
+    for offset in (0..cursor.count).step_by(helios_gui::persist::PAGE) {
+        for row in vault
+            .fetch_library(cursor.id, offset, helios_gui::persist::PAGE, &[RATING])
+            .unwrap()
+        {
+            got.push(row.id);
+        }
+    }
+    let windows = cursor.count.div_ceil(helios_gui::persist::PAGE) as u64;
+    assert_eq!(got, want.iter().map(|&i| id(i)).collect::<Vec<_>>());
+    assert!(
+        vault.reads().queries - q0 <= windows + 1,
+        "{} queries for {} photos",
+        vault.reads().queries - q0,
+        got.len()
+    );
+    let q1 = vault.reads().queries;
+    let facets = vault.facets(&query, None).unwrap();
+    assert_eq!(vault.reads().queries - q1, 1, "every facet in one query");
+    assert_eq!(facets.count("presence", "present"), want.len() as u64);
+    assert_eq!(
+        facets.count("rating", "4") + facets.count("rating", "5"),
+        want.len() as u64
+    );
+    let elapsed = start.elapsed();
+    println!(
+        "library-filter {}",
+        json!({ "images": n, "matched": want.len(), "ms": elapsed.as_millis() })
+    );
+    assert!(elapsed < Duration::from_secs(30), "filtered in {elapsed:?}");
     let _ = std::fs::remove_dir_all(&dir);
 }
 

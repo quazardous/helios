@@ -673,8 +673,19 @@ impl<S: Store> Persist<S> {
         }
         let query = shell.library_mut().take_query();
         if let Some(query) = query {
-            match self.select(query) {
-                Ok(ids) => shell.library_mut().set_matches(ids),
+            // The photos it takes, then how many carry each value of each
+            // facet: two store queries, whatever the library's size.
+            let rule = shell.library().facet_rule().cloned();
+            let answer = self
+                .vault
+                .facets(&query, rule.as_ref())
+                .and_then(|facets| self.select(query).map(|ids| (ids, facets)));
+            match answer {
+                Ok((ids, facets)) => {
+                    let mut library = shell.library_mut();
+                    library.set_facets(facets);
+                    library.set_matches(ids);
+                }
                 Err(e) => shell.notify(
                     Level::Error,
                     Message::new(

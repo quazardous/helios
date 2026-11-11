@@ -547,6 +547,14 @@ gui-library-compare-hint ef5d43662fafd120
 gui-library-compare-tip e7cd98d9aa0035f5
 gui-library-count e72204ddb791f955
 gui-library-empty d1a64591ca82b2f8
+gui-library-facet-backup 20d776af0fba6d57
+gui-library-facet-camera 2084bc593dd90bf4
+gui-library-facet-flag 5213c254531bca8f
+gui-library-facet-label 263df32e353e24bd
+gui-library-facet-lens 666f135f6076a31d
+gui-library-facet-presence beeefaec1ce58ef2
+gui-library-facet-rating 36690a4e79cfa166
+gui-library-facet-type f97f51ee1be110cd
 gui-library-file f5342066f92b83c2
 gui-library-images f081af80bddd910b
 gui-library-import 4f18fde2a41db156
