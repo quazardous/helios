@@ -2251,6 +2251,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "helios-connect"
+version = "0.76.0"
+dependencies = [
+ "helios-storage",
+ "helios-vault",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "helios-controls"
 version = "0.76.0"
 dependencies = [
@@ -2378,6 +2388,7 @@ dependencies = [
  "egui_kittest",
  "helios-cache",
  "helios-config",
+ "helios-connect",
  "helios-controls",
  "helios-core",
  "helios-decision",
@@ -2469,6 +2480,7 @@ version = "0.76.0"
 dependencies = [
  "blake3",
  "egui-pop-model",
+ "helios-connect",
  "helios-core",
  "helios-decision",
  "helios-export",

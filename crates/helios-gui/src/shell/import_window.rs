@@ -2,10 +2,12 @@
 //! (Ctrl+Shift+I), the empty Library's "Import photos…" and a card's
 //! toast open it (`library.importWindow`).
 //!
-//! - **Sources**, the left column: the cards and cameras mounted
-//!   ([`helios_storage`], polled off the interface thread), first; then
-//!   the recent folders, the favourites (added and removed here) and
-//!   "Choose a folder…" (egui-pop's folder chooser). Several can be
+//! - **Sources**, the left column: the sources of the import connectors
+//!   ([`helios_connect::registry`]): the cards and cameras mounted (the
+//!   card connector, given the cards [`helios_storage`] polls off the
+//!   interface thread), first; then the recent folders and the favourites
+//!   (the folder connector's, added and removed here) and "Choose a
+//!   folder…" (egui-pop's folder chooser). Several can be
 //!   ticked. As it opens, the window ticks the first card, else the last
 //!   source used.
 //! - **Contents**, the middle column: what the sources ticked hold, read
@@ -52,7 +54,9 @@ use serde_json::{Value, json};
 use super::Shell;
 use super::import_choices::{self, Asked, ChoiceWords, Choices};
 use crate::import_browser::{ImportSource, ImportThumbnails, NOWHERE};
-use crate::import_scan::{Contents, Counts, Known, MapRecorder, Recorded, Scan, Scanned, Types};
+use crate::import_scan::{
+    Connectors, Contents, Counts, Known, MapRecorder, Recorded, Scan, Scanned, Types,
+};
 use egui_pop::api::files::browser::{
     DropOrigin, EntryKind, EntryMarks, FileBrowser, SourceEntry, ViewModes,
 };
@@ -115,6 +119,9 @@ pub(crate) struct ImportWindow {
     /// found: the scan's own glance of them is left out.
     glanced_early: std::collections::HashSet<PathBuf>,
     pub(super) contents: Contents,
+    /// The import connectors (`helios_connect`): the Sources column lists
+    /// their sources, a scan lists a source through its connector.
+    connectors: Connectors,
     /// The choices, the last used until changed, and where they are kept.
     pub(super) choices: Choices,
     pub(super) choices_file: Option<PathBuf>,
@@ -216,13 +223,17 @@ impl ImportWindow {
                 Some(recorded) if !path.exists() => {
                     Scan::recorded(path.clone(), recorded.clone(), wake)
                 }
-                _ => Scan::start(
-                    path.clone(),
-                    self.known.clone(),
-                    map,
-                    self.glance_first.clone(),
-                    wake,
-                ),
+                _ => match self.connectors.for_path(path) {
+                    Some(listed) => Scan::start(
+                        listed,
+                        path.clone(),
+                        self.known.clone(),
+                        map,
+                        self.glance_first.clone(),
+                        wake,
+                    ),
+                    None => continue,
+                },
             };
             self.scans.push((path.clone(), scan, false));
         }
@@ -316,6 +327,7 @@ impl ImportWindow {
     fn follow_cards(&mut self) {
         let Some(watch) = &self.watch else { return };
         self.cards = watch.cards();
+        self.connectors.set_cards(&self.cards);
         let cards = &self.cards;
         if self.open
             && !self.touched
@@ -1187,26 +1199,39 @@ fn sources_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &Words, event: &mu
         .id_salt("helios.import.sources")
         .auto_shrink([false, false])
         .show(ui, |ui| {
+            // The registry's sources: those detected (cards) first, then
+            // the folders given, under Recent and Favourites.
+            let mut places = w.memory.recent.clone();
+            places.extend(w.memory.favourites.iter().cloned());
+            w.connectors.set_places(places);
+            let sources = w.connectors.sources();
+            let (detected, given): (Vec<_>, Vec<_>) = sources.into_iter().partition(|(_, d)| *d);
             ui.strong(&words.cards);
-            if w.cards.is_empty() {
+            if detected.is_empty() {
                 ui.weak(&words.no_cards);
             }
-            let cards = w.cards.clone();
-            for card in &cards {
-                let label = match card.capacity {
-                    Some(b) => format!("{} · {}", card.label, helios_storage::capacity_text(b)),
-                    None => card.label.clone(),
+            for (source, _) in &detected {
+                let Some(root) = &source.root else { continue };
+                let label = match source.capacity {
+                    Some(b) => format!("{} · {}", source.label, helios_storage::capacity_text(b)),
+                    None => source.label.clone(),
                 };
-                if let Some(e) = source_row(ui, w, words, &card.root, label, None) {
+                if let Some(e) = source_row(ui, w, words, root, label, None) {
                     *event = Some(e);
                 }
             }
+            let label_of = |path: &Path| {
+                given
+                    .iter()
+                    .find(|(s, _)| s.root.as_deref() == Some(path))
+                    .map_or_else(|| name_of(path), |(s, _)| s.label.clone())
+            };
             ui.separator();
             ui.strong(&words.recent);
             let favourites = w.memory.favourites.clone();
             for path in w.memory.recent.clone() {
                 let star = (!favourites.contains(&path)).then_some((&words.add_favourite, true));
-                if let Some(e) = source_row(ui, w, words, &path, name_of(&path), star) {
+                if let Some(e) = source_row(ui, w, words, &path, label_of(&path), star) {
                     *event = Some(e);
                 }
             }
@@ -1216,7 +1241,7 @@ fn sources_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &Words, event: &mu
             }
             for path in favourites {
                 let remove = Some((&words.remove_favourite, false));
-                if let Some(e) = source_row(ui, w, words, &path, name_of(&path), remove) {
+                if let Some(e) = source_row(ui, w, words, &path, label_of(&path), remove) {
                     *event = Some(e);
                 }
             }

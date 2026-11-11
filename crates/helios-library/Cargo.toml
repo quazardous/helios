@@ -8,6 +8,8 @@ repository.workspace = true
 
 [dependencies]
 helios-core.workspace = true
+# The folder and card connectors' walk: what a source holds.
+helios-connect.workspace = true
 helios-decision.workspace = true
 # Batch exports planned over library images.
 helios-export.workspace = true

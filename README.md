@@ -124,6 +124,10 @@ A Cargo workspace (Rust):
 - `crates/helios-storage`: the volumes files live on (disks, cards,
   shares): identity, kind, roles, Linux detection, and the registry of
   those the vault knows.
+- `crates/helios-connect`: import connectors: the trait every import
+  source implements (paged listing with a cursor, items, access, fetch),
+  their manifests and registry, the folder and card connectors, and the
+  contract suite they pass.
 - `crates/helios-load`: loaders, the framework reading files into sources:
   camera raws through rawler (sensor data and camera description), JPEG,
   PNG and TIFF pictures in the working space, embedded previews.

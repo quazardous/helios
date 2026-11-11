@@ -68,9 +68,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use helios_core::jobs::{Jobs, Progress, Start};
 use helios_storage::strategy::Scope;
 use helios_vault::fields::{self as vault_fields, Command, Op};
-use helios_vault::{
-    Change, Changes, IMAGE_EXTENSIONS, ImageId, ImageRows, LibraryFlag, Location, Store, Vault,
-};
+use helios_vault::{Change, Changes, ImageId, ImageRows, LibraryFlag, Location, Store, Vault};
 use helios_xmp::files::Matched;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -504,56 +502,10 @@ pub fn set_library_root<S: Store>(vault: &Vault<S>, root: &Path) -> Result<(), S
     vault.set_library_document(SETTINGS, ROOT, Some(&json!({ "path": root })))
 }
 
-/// What a source is: `card` (a folder holding `DCIM`, read from there),
-/// `folder` or `file`; and where to read.
-pub fn source_kind(source: &Path) -> (&'static str, PathBuf) {
-    if source.is_file() {
-        return ("file", source.to_path_buf());
-    }
-    let dcim = source.join("DCIM");
-    if dcim.is_dir() {
-        ("card", dcim)
-    } else {
-        ("folder", source.to_path_buf())
-    }
-}
-
-fn is_image(path: &Path) -> bool {
-    path.extension()
-        .and_then(|e| e.to_str())
-        .is_some_and(|e| IMAGE_EXTENSIONS.contains(&e.to_ascii_lowercase().as_str()))
-}
-
-/// The image files of a source, in a stable order.
-pub fn files_of(source: &Path) -> Result<Vec<PathBuf>, String> {
-    let (_, root) = source_kind(source);
-    if root.is_file() {
-        return if is_image(&root) {
-            Ok(vec![root])
-        } else {
-            Err(format!("{}: not an image file", root.display()))
-        };
-    }
-    let mut found = Vec::new();
-    let mut dirs = vec![root];
-    while let Some(dir) = dirs.pop() {
-        let entries = std::fs::read_dir(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-        for entry in entries {
-            let entry = entry.map_err(|e| format!("{}: {e}", dir.display()))?;
-            let path = entry.path();
-            let kind = entry
-                .file_type()
-                .map_err(|e| format!("{}: {e}", path.display()))?;
-            if kind.is_dir() {
-                dirs.push(path);
-            } else if kind.is_file() && is_image(&path) {
-                found.push(path);
-            }
-        }
-    }
-    found.sort();
-    Ok(found)
-}
+// What a source is and the image files it holds: the folder and card
+// connectors' walk (`helios_connect::local`), so the import reads what the
+// import window listed.
+pub use helios_connect::local::{files_of, source_kind};
 
 /// The BLAKE3 hash of a file, streamed.
 pub fn hash_file(path: &Path) -> Result<ImageId, String> {
