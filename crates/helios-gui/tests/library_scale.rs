@@ -67,8 +67,15 @@ fn presence(i: u32) -> Presence {
 /// small file, each with its size and date as the vault saw them; marks on
 /// some.
 fn synthetic(dir: &Path, n: u32) -> PathBuf {
-    let file = dir.join("photo.raw");
-    std::fs::write(&file, ON_DISK).unwrap();
+    // One source file per 20,000 links: a file system caps a file's
+    // hard links (ext4 at 65,000), and the measure goes to 100,000 photos.
+    let source = |i: u32| {
+        let file = dir.join(format!("photo-{}.raw", i / 20_000));
+        if !file.exists() {
+            std::fs::write(&file, ON_DISK).unwrap();
+        }
+        file
+    };
     let photos = dir.join("photos");
     std::fs::create_dir_all(&photos).unwrap();
     let path = dir.join("vault.db");
@@ -111,11 +118,11 @@ fn synthetic(dir: &Path, n: u32) -> PathBuf {
                         },
                     )
                     .unwrap();
-                std::fs::hard_link(&file, &at).unwrap();
+                std::fs::hard_link(source(i), &at).unwrap();
                 seen
             }
             _ => {
-                std::fs::hard_link(&file, &at).unwrap();
+                std::fs::hard_link(source(i), &at).unwrap();
                 seen
             }
         };
