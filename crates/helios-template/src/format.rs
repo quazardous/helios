@@ -633,6 +633,37 @@ pub struct Workshop {
     /// At most one per exposed number parameter, solved in this order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub targets: Vec<Target>,
+    /// Named parts of the image a target can be measured in (a sky, a
+    /// foreground), each a mask rendered once on what enters the
+    /// workshop.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub zones: Vec<Zone>,
+}
+
+/// A named part of the image: the mask a module draws from what enters
+/// the workshop (a `mask_parametric` on high luminance for a sky). A
+/// pixel is in the zone where the mask is at least one half.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Zone {
+    /// How targets name it: a lowercase letter, then lowercase letters,
+    /// digits and `_`.
+    pub name: String,
+    /// The module drawing the mask: an image input, a one-channel output.
+    pub module: String,
+    #[serde(default, skip_serializing_if = "is_empty")]
+    pub params: Params,
+    /// The output holding the mask; `mask` by default.
+    #[serde(default = "mask_port", skip_serializing_if = "is_mask_port")]
+    pub port: String,
+}
+
+fn mask_port() -> String {
+    "mask".into()
+}
+
+fn is_mask_port(port: &str) -> bool {
+    port == "mask"
 }
 
 /// What the image should measure, and which exposed parameter is moved
@@ -648,6 +679,12 @@ pub struct Target {
     pub value: f64,
     #[serde(default, skip_serializing_if = "At::is_output")]
     pub at: At,
+    /// The zone it is measured in; the whole image otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub zone: Option<String>,
+    /// For `zones.ratio`: the zone `zone` is compared with.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub against: Option<String>,
 }
 
 /// What a target measures, on the luminance of the working data (linear
@@ -663,11 +700,28 @@ pub enum Measure {
     /// The share of pixels above 1.0, in %.
     #[serde(rename = "clip.high")]
     ClipHigh,
+    /// The 95th minus the 5th percentile of luminance, in stops.
+    #[serde(rename = "zone.contrast")]
+    ZoneContrast,
+    /// One zone's median luminance minus another's (`against`), in
+    /// stops: a backlight's gap.
+    #[serde(rename = "zones.ratio")]
+    ZonesRatio,
 }
 
 impl Measure {
-    /// Every measure.
+    /// The measures of a whole image (workshops v1's), which the save form
+    /// offers.
     pub const ALL: [Measure; 3] = [Measure::LumaMedian, Measure::LumaHigh, Measure::ClipHigh];
+
+    /// Every measure, those of zones included.
+    pub const EVERY: [Measure; 5] = [
+        Measure::LumaMedian,
+        Measure::LumaHigh,
+        Measure::ClipHigh,
+        Measure::ZoneContrast,
+        Measure::ZonesRatio,
+    ];
 
     /// Its name in a file.
     pub fn name(self) -> &'static str {
@@ -675,13 +729,18 @@ impl Measure {
             Measure::LumaMedian => "luma.median",
             Measure::LumaHigh => "luma.high",
             Measure::ClipHigh => "clip.high",
+            Measure::ZoneContrast => "zone.contrast",
+            Measure::ZonesRatio => "zones.ratio",
         }
     }
 
     /// The unit of a target's value.
     pub fn unit(self) -> &'static str {
         match self {
-            Measure::LumaMedian | Measure::LumaHigh => "stops",
+            Measure::LumaMedian
+            | Measure::LumaHigh
+            | Measure::ZoneContrast
+            | Measure::ZonesRatio => "stops",
             Measure::ClipHigh => "%",
         }
     }

@@ -278,8 +278,15 @@ fn aimed_through_the_engine_then_applied_the_median_lands_on_the_target() {
         .render(&b.graph, b.nodes["tone"], "output", Region::sized(16, 12))
         .unwrap();
     let targets = &file.workshop.unwrap().targets;
-    let (answers, values) =
-        workshop::aim_rendered(&engine, &built, &input, &Params::new(), targets).unwrap();
+    let (answers, values) = workshop::aim_rendered(
+        &engine,
+        &built,
+        &input,
+        &std::collections::BTreeMap::new(),
+        &Params::new(),
+        targets,
+    )
+    .unwrap();
     assert!(answers[0].reached, "{answers:?}");
     let step = now.workshop_applied(&c, &lift(), None, &values).unwrap();
     let image: Values = step

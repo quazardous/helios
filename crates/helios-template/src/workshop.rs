@@ -26,14 +26,14 @@ use helios_core::{
     Composite, Engine, Graph, Image, Macro, ModuleRef, ParamHint, ParamKind, ParamSpec, Params,
     Region, Value,
 };
-use helios_scopes::Scale;
+use helios_scopes::{Counts, Scale};
 use serde_json::json;
 
 use crate::build::SOURCE_PORT;
 use crate::catalogue::Catalogue;
 use crate::format::{
     At, CompositeFile, CompositeRef, Connection, Endpoint, Measure, NetworkDesc, NodeDesc, Target,
-    Workshop,
+    Workshop, Zone,
 };
 use crate::macros::{Moves, Step, Values, next_ref, node_path, values_of};
 use crate::network::{PortInfo, fresh_name, ports_of, types_fit};
@@ -53,20 +53,110 @@ const BINS: usize = 2400;
 /// The 99th percentile `luma.high` reads.
 const HIGH: f64 = 0.99;
 
+/// The percentiles `zone.contrast` spans.
+const CONTRAST: (f64, f64) = (0.05, 0.95);
+
 /// What `image` measures, in the measure's unit ([`Measure::unit`]):
 /// stops around 1.0 for the luminance ones, a percentage for
-/// `clip.high`. None for an image without pixels.
+/// `clip.high`. None for an image without pixels, and for `zones.ratio`,
+/// which compares two zones ([`measure_in`]).
 pub fn measure(image: &Image, m: Measure) -> Option<f64> {
+    measure_in(image, m, None, None)
+}
+
+/// The luminance counted in `zone` (a mask over the same region: the
+/// pixels where it is at least one half), or over the whole image.
+fn counted(image: &Image, zone: Option<&Image>, bins: usize, scale: Scale) -> Option<Counts> {
+    match zone {
+        None => Some(helios_scopes::luminance(image, bins, scale)),
+        Some(mask) => helios_scopes::luminance_where(image, mask, bins, scale),
+    }
+}
+
+/// What `image` measures inside `zone` (a mask over the same region; the
+/// whole image without one), as [`measure`]. `zones.ratio` is `zone`'s
+/// median minus `against`'s, in stops. None for a zone without pixels, a
+/// mask of another size, or `zones.ratio` without both zones.
+pub fn measure_in(
+    image: &Image,
+    m: Measure,
+    zone: Option<&Image>,
+    against: Option<&Image>,
+) -> Option<f64> {
+    let q = |zone: Option<&Image>, q: f64| counted(image, zone, BINS, SCALE)?.quantile(SCALE, q);
     match m {
-        Measure::LumaMedian => helios_scopes::luminance(image, BINS, SCALE).quantile(SCALE, 0.5),
-        Measure::LumaHigh => helios_scopes::luminance(image, BINS, SCALE).quantile(SCALE, HIGH),
+        Measure::LumaMedian => q(zone, 0.5),
+        Measure::LumaHigh => q(zone, HIGH),
         Measure::ClipHigh => {
             // One bin up to 1.0: what is above it is clipped.
-            let counts = helios_scopes::luminance(image, 1, Scale::Linear { max: 1.0 });
+            let counts = counted(image, zone, 1, Scale::Linear { max: 1.0 })?;
             let total = counts.total();
             (total > 0).then(|| f64::from(counts.above) * 100.0 / total as f64)
         }
+        Measure::ZoneContrast => {
+            let counts = counted(image, zone, BINS, SCALE)?;
+            Some(counts.quantile(SCALE, CONTRAST.1)? - counts.quantile(SCALE, CONTRAST.0)?)
+        }
+        Measure::ZonesRatio => Some(q(Some(zone?), 0.5)? - q(Some(against?), 0.5)?),
     }
+}
+
+/// The share of `mask`'s pixels in its zone (at least one half), in %.
+#[allow(clippy::cast_precision_loss)]
+pub fn zone_share(mask: &Image) -> f64 {
+    let n = mask.channels() as usize;
+    let all = mask.data().len() / n.max(1);
+    if all == 0 {
+        return 0.0;
+    }
+    let inside = mask.data().chunks_exact(n).filter(|p| p[0] >= 0.5).count();
+    inside as f64 * 100.0 / all as f64
+}
+
+/// Each zone's mask, drawn by its module from `input` (what enters the
+/// workshop, the proxy the targets are aimed on) through `engine`.
+/// Refused for an unknown module, one without an image input, and an
+/// output that is not one channel.
+pub fn zone_masks(
+    engine: &Engine,
+    catalogue: &Catalogue,
+    zones: &[Zone],
+    input: &Image,
+) -> Result<BTreeMap<String, Image>, String> {
+    let r = input.region();
+    let region = Region::sized(r.width, r.height);
+    let input = Image::new(region, input.channels(), input.to_vec());
+    let mut masks = BTreeMap::new();
+    for z in zones {
+        let at = |e: String| format!("zone `{}`: {e}", z.name);
+        let module = catalogue.resolve(Some(&z.module), None, 0).map_err(at)?;
+        let manifest = module.manifest().clone();
+        let entry = manifest
+            .inputs
+            .first()
+            .ok_or_else(|| at(format!("`{}` has no input", z.module)))?;
+        let out = manifest
+            .outputs
+            .iter()
+            .find(|p| p.name == z.port)
+            .ok_or_else(|| at(format!("`{}` has no output `{}`", z.module, z.port)))?;
+        if out.channels() != Some(1) {
+            return Err(at(format!("`{}` is not a mask (one channel)", z.port)));
+        }
+        let mut graph = Graph::new();
+        let src = graph.add_source("input", input.clone());
+        let node = graph
+            .add_module(&z.name, module, &z.params)
+            .map_err(|e| at(e.to_string()))?;
+        graph
+            .connect(src, SOURCE_PORT, node, &entry.name)
+            .map_err(|e| at(e.to_string()))?;
+        let mask = engine
+            .render(&graph, node, &z.port, region)
+            .map_err(|e| at(e.to_string()))?;
+        masks.insert(z.name.clone(), mask);
+    }
+    Ok(masks)
 }
 
 /// The range a targeted parameter is searched over (its narrowed range,
@@ -197,8 +287,27 @@ pub struct Aimed {
 /// values. Returns each target's answer and the values after aiming
 /// (each solved value is the next targets' current one).
 pub fn aim<F>(
+    render: F,
+    input: &Image,
+    params: &Params,
+    targets: &[Target],
+    ranges: &BTreeMap<String, Range>,
+) -> Result<(Vec<Aimed>, Params), String>
+where
+    F: FnMut(&Params) -> Result<Image, String>,
+{
+    aim_in(render, input, &BTreeMap::new(), params, targets, ranges)
+}
+
+/// [`aim`] with the workshop's zones: `zones` holds each zone's mask over
+/// `input`'s region ([`zone_masks`]), drawn once from the input, and a
+/// target with a `zone` is measured inside it. A target naming a zone
+/// `zones` lacks is refused; one whose zone is empty on this image keeps
+/// its parameter's value, and says so.
+pub fn aim_in<F>(
     mut render: F,
     input: &Image,
+    zones: &BTreeMap<String, Image>,
     params: &Params,
     targets: &[Target],
     ranges: &BTreeMap<String, Range>,
@@ -218,18 +327,59 @@ where
                 t.param, range.min, range.max
             ));
         }
-        let goal = match t.at {
-            At::Output => t.value,
-            At::Input => {
-                measure(input, t.measure).ok_or("the workshop's input has no pixels")? + t.value
+        let mask = |name: &Option<String>| -> Result<Option<&Image>, String> {
+            match name {
+                None => Ok(None),
+                Some(z) => zones
+                    .get(z)
+                    .map(Some)
+                    .ok_or_else(|| format!("{}: no zone `{z}` drawn", t.param)),
             }
         };
+        let (zone, against) = (mask(&t.zone)?, mask(&t.against)?);
         let current = params
             .get(&t.param)
             .and_then(Value::as_f64)
             .unwrap_or(range.min)
             .clamp(range.min, range.max);
-        let answer = solve(&mut render, &params, t, goal, range, current)?;
+        // A zone with no pixel on this image: nothing to aim at.
+        let empty = [(&t.zone, zone), (&t.against, against)]
+            .into_iter()
+            .find_map(|(name, m)| m.filter(|m| zone_share(m) == 0.0).and(name.as_ref()));
+        if let Some(name) = empty {
+            answers.push(Aimed {
+                param: t.param.clone(),
+                measure: t.measure,
+                goal: t.value,
+                value: current,
+                measured: None,
+                probes: 0,
+                reached: false,
+                note: Some(format!(
+                    "{}: the zone `{name}` is empty on this image, kept at {}",
+                    t.param,
+                    range.show(current)
+                )),
+            });
+            continue;
+        }
+        let goal = match t.at {
+            At::Output => t.value,
+            At::Input => {
+                measure_in(input, t.measure, zone, against)
+                    .ok_or("the workshop's input has no pixels")?
+                    + t.value
+            }
+        };
+        let answer = solve(
+            &mut render,
+            &params,
+            t,
+            (zone, against),
+            goal,
+            range,
+            current,
+        )?;
         params.set(&t.param, range.value(answer.value));
         answers.push(answer);
     }
@@ -241,6 +391,7 @@ fn solve<F>(
     render: &mut F,
     params: &Params,
     t: &Target,
+    (zone, against): (Option<&Image>, Option<&Image>),
     goal: f64,
     range: &Range,
     current: f64,
@@ -254,7 +405,8 @@ where
         let mut p = params.clone();
         p.set(&t.param, range.value(v));
         let image = render(&p)?;
-        measure(&image, t.measure).ok_or_else(|| "the workshop's output has no pixels".into())
+        measure_in(&image, t.measure, zone, against)
+            .ok_or_else(|| "the workshop's output has no pixels in the zone measured".into())
     };
     let answer = |value: f64, measured: Option<f64>, note: Option<String>| Aimed {
         param: t.param.clone(),
@@ -344,6 +496,7 @@ pub fn aim_rendered(
     engine: &Engine,
     built: &Macro,
     input: &Image,
+    zones: &BTreeMap<String, Image>,
     current: &Params,
     targets: &[Target],
 ) -> Result<(Vec<Aimed>, Params), String> {
@@ -368,7 +521,7 @@ pub fn aim_rendered(
         .map_err(|e| e.to_string())?
         .unwrap_or_default();
     let exit = exit.name.clone();
-    aim(
+    aim_in(
         |p: &Params| {
             for (name, value) in p.iter() {
                 graph
@@ -380,6 +533,7 @@ pub fn aim_rendered(
                 .map_err(|e| e.to_string())
         },
         &input,
+        zones,
         &params,
         targets,
         &ranges(built),
@@ -743,6 +897,8 @@ mod tests {
             measure,
             value,
             at: At::Output,
+            zone: None,
+            against: None,
         }
     }
 

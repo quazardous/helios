@@ -789,7 +789,7 @@ fn the_schema_and_the_types_refuse_the_same_blocks() {
         json!([{ "param": "brightness", "measure": "luma.mean", "value": 0.0 }]),
         json!([{ "param": "brightness", "measure": "luma.median" }]),
         json!([{ "param": "brightness", "measure": "luma.median", "value": 0.0, "at": "mask" }]),
-        json!([{ "param": "brightness", "measure": "luma.median", "value": 0.0, "zone": "sky" }]),
+        json!([{ "param": "brightness", "measure": "luma.median", "value": 0.0, "zone": 3 }]),
     ];
     for targets in bad {
         let j = workshop(targets.clone());

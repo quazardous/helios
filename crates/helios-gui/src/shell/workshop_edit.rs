@@ -171,13 +171,19 @@ impl Shell {
         if let Some(hit) = self.focus.workshop_aims.get(&key) {
             return Ok(hit.clone());
         }
-        let built = state
-            .bundle
-            .catalogue(&self.workspace_catalogue())
-            .build_composite(r, 0)?;
+        let catalogue = state.bundle.catalogue(&self.workspace_catalogue());
+        let built = catalogue.build_composite(r, 0)?;
         let engine = self.focus.viewport.borrow().engine().clone();
-        let aimed =
-            helios_template::workshop::aim_rendered(&engine, &built, input, current, targets)?;
+        // The workshop's zones, drawn once on the input.
+        let zones = catalogue
+            .get_composite(r)
+            .and_then(|f| f.workshop.as_ref())
+            .map(|w| w.zones.clone())
+            .unwrap_or_default();
+        let masks = helios_template::workshop::zone_masks(&engine, &catalogue, &zones, input)?;
+        let aimed = helios_template::workshop::aim_rendered(
+            &engine, &built, input, &masks, current, targets,
+        )?;
         self.focus.workshop_aims.insert(key, aimed.clone());
         Ok(aimed)
     }
@@ -334,10 +340,22 @@ impl Shell {
             Value::Null => form_targets(args, &interface.exposed)?,
             v => serde_json::from_value(v.clone()).map_err(|e| format!("targets: {e}"))?,
         };
+        // Zones: those given, else the ones the macro's file has.
+        let zones: Vec<helios_template::format::Zone> = match &args["zones"] {
+            Value::Null => state
+                .bundle
+                .catalogue(&catalogue)
+                .get_composite(&interface.composite)
+                .and_then(|f| f.workshop.as_ref())
+                .map(|w| w.zones.clone())
+                .unwrap_or_default(),
+            v => serde_json::from_value(v.clone()).map_err(|e| format!("zones: {e}"))?,
+        };
         let workshop = Workshop {
             intent: intent.trim().to_string(),
             keywords,
             targets,
+            zones,
         };
         let label = format!("save {node} as a workshop");
         self.macro_step(&label, args, origin, |now, values| {
@@ -380,6 +398,7 @@ impl Shell {
             intent: file.description.clone(),
             keywords: Vec::new(),
             targets: Vec::new(),
+            zones: Vec::new(),
         });
         let port = file
             .outputs
@@ -599,6 +618,8 @@ fn form_targets(args: &Value, exposed: &[Exposed]) -> Result<Vec<Target>, String
             measure,
             value,
             at: At::Output,
+            zone: None,
+            against: None,
         });
     }
     Ok(targets)
