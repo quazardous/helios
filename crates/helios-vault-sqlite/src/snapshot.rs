@@ -100,7 +100,7 @@ pub(crate) fn take(
         let _ = std::fs::remove_file(&partial);
         return Err(format!("snapshot {}: {e}", target.display()));
     }
-    std::fs::rename(&partial, &target).map_err(|e| format!("{}: {e}", target.display()))?;
+    rename(&partial, &target).map_err(|e| format!("{}: {e}", target.display()))?;
     // The rename itself must reach the disk. A directory cannot be opened
     // everywhere (Windows): there, the rename is as durable as it gets.
     if let Ok(d) = std::fs::File::open(&dir) {
@@ -247,7 +247,7 @@ pub fn copy_verified(file: &Path, to: &Path, keep: usize) -> Result<PathBuf, Str
         let _ = std::fs::remove_file(&partial);
         return Err(e);
     }
-    std::fs::rename(&partial, &target).map_err(|e| at(&target, e))?;
+    rename(&partial, &target).map_err(|e| at(&target, e))?;
     if let Ok(d) = std::fs::File::open(to) {
         let _ = d.sync_all();
     }
@@ -341,7 +341,7 @@ pub fn restore(path: &Path, from: &Path, now: u64) -> Result<Restored, String> {
         }
         moved.push((src, dst));
     }
-    if let Err(e) = std::fs::rename(&incoming, path) {
+    if let Err(e) = rename(&incoming, path) {
         for (s, d) in moved.iter().rev() {
             let _ = std::fs::rename(d, s);
         }
@@ -409,6 +409,25 @@ fn copy(db: &Connection, to: &Path, options: &Options) -> Result<(), String> {
     }
     dest.close().map_err(|(_, e)| err(e))?;
     sync_file(to).map_err(|e| format!("{}: {e}", to.display()))
+}
+
+/// Renames `from` to `to`. On Windows a file just closed can stay held
+/// for a moment (an indexer or a virus scanner opens new files), and the
+/// rename fails with a sharing violation: it is tried again for up to a
+/// second.
+fn rename(from: &Path, to: &Path) -> std::io::Result<()> {
+    // ERROR_ACCESS_DENIED, ERROR_SHARING_VIOLATION, ERROR_LOCK_VIOLATION
+    let held = |e: &std::io::Error| cfg!(windows) && matches!(e.raw_os_error(), Some(5 | 32 | 33));
+    let mut tries = 0;
+    loop {
+        match std::fs::rename(from, to) {
+            Err(e) if held(&e) && tries < 20 => {
+                tries += 1;
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            done => return done,
+        }
+    }
 }
 
 /// Flushes the file at `path` to the disk. It is opened for writing:
