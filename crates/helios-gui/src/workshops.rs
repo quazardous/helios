@@ -180,6 +180,16 @@ pub struct Design {
     pub notes: Vec<String>,
 }
 
+/// The workshop session recorded (`shell::workshop_session`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Pilot {
+    pub record: helios_template::session::Session,
+    /// The value store's step on top of the undo stack when last
+    /// followed, and its history's revision.
+    pub top: Option<u64>,
+    pub rev: u64,
+}
+
 /// The Workshops panel: describe, find, the list, the applied workshop.
 pub struct Panel {
     find: String,
@@ -195,6 +205,12 @@ pub struct Panel {
     /// see a small proxy of the image. Off at start; only the user
     /// switches it.
     pub send_proxy: bool,
+    /// The workshop session recorded, if one goes on.
+    pub pilot: Option<Pilot>,
+    /// The session records to write to the vault, by id (`None`: drop).
+    pub session_writes: Vec<(String, Option<serde_json::Value>)>,
+    /// The vault image the edit is saved to, as the host said.
+    pub image: Option<String>,
 }
 
 impl Default for Panel {
@@ -208,6 +224,9 @@ impl Default for Panel {
             design: None,
             sessions: 0,
             send_proxy: false,
+            pilot: None,
+            session_writes: Vec::new(),
+            image: None,
         }
     }
 }
@@ -242,6 +261,18 @@ pub fn measure_words(m: Measure) -> (Message, Message) {
 }
 
 impl Panel {
+    /// Queues the session's record for the vault, replacing a write of
+    /// it not taken yet.
+    pub fn queue_write(&mut self) {
+        let Some(p) = &self.pilot else {
+            return;
+        };
+        let id = p.record.session.clone();
+        let doc = serde_json::to_value(&p.record).ok();
+        self.session_writes.retain(|(k, _)| *k != id);
+        self.session_writes.push((id, doc));
+    }
+
     /// The user's library, read again by the shell.
     pub fn set_library(&mut self, library: Vec<CompositeFile>) {
         self.library = library;
@@ -266,6 +297,7 @@ impl Panel {
         let mut run: Option<(&str, serde_json::Value)> = None;
         let mut select: Option<String> = None;
         self.describe_ui(ui, &mut run);
+        self.session_ui(ui, &mut run);
         ui.separator();
         let find = ui
             .horizontal(|ui| {
@@ -459,6 +491,37 @@ impl Panel {
         for note in &d.notes {
             ui.weak(note);
         }
+    }
+
+    /// The session recorded: its steps, and Keep (a session not kept is
+    /// dropped when it ends).
+    fn session_ui(&self, ui: &mut egui::Ui, run: &mut Option<(&str, serde_json::Value)>) {
+        let Some(p) = &self.pilot else {
+            return;
+        };
+        let ctx = ui.ctx().clone();
+        let text = |m: Message| crate::i18n::text(&ctx, m);
+        ui.horizontal(|ui| {
+            ui.weak(text(
+                Message::new(
+                    "gui-workshops-session",
+                    "Session recorded: { $steps } steps",
+                )
+                .with("steps", p.record.steps.len()),
+            ));
+            if p.record.kept {
+                ui.weak(text(Message::new("gui-workshops-session-kept", "Kept")));
+            } else if ui
+                .small_button(text(Message::new("gui-workshops-session-keep", "Keep")))
+                .on_hover_text(text(Message::new(
+                    "gui-workshops-session-keep-hint",
+                    "Keep this session's record: who set what, why, and what the image measured. Not kept, it is dropped when the session ends",
+                )))
+                .clicked()
+            {
+                *run = Some(("workshop.session", json!({ "action": "keep" })));
+            }
+        });
     }
 
     /// One workshop's row: its name and version, Apply (or, applied, its

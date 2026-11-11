@@ -314,6 +314,14 @@ const fn optional(name: &'static str, schema: fn() -> Value, description: &'stat
     }
 }
 
+fn session_action() -> Value {
+    json!({ "type": "string", "enum": ["read", "keep", "close"] })
+}
+
+fn read() -> Value {
+    json!("read")
+}
+
 fn move_to() -> Value {
     json!({ "type": "string", "enum": ["top", "bottom"] })
 }
@@ -841,6 +849,22 @@ pub const TOOLS: &[Tool] = &[
             ),
             GROUP,
             DRY_RUN,
+            CONFIG,
+        ],
+    },
+    Tool {
+        name: "helios_workshop_session",
+        endpoint: Endpoint::Workspace,
+        cmd: "workshop.session",
+        description: "Experimental (interface.experimental.workshops, refused with that key when off): the record of the workshop session going on. Recording is always on: designing or applying a workshop starts a session, and each value step on its node is a step of the record (`steps`: `seq`, `author` user or agent:<id>, `kind` design, apply, set, propose, accept, override, reject, undo, redo, the `aim` words, the `changes` param, old and new, and the zone `measures` before and after on the proxy); `net` is each parameter's value after the whole session. A session the user does not keep is dropped when it ends; only the user keeps it. Refused on the files: it needs the desktop holding the workspace",
+        params: &[
+            WORKSPACE,
+            Param {
+                name: "action",
+                schema: session_action,
+                description: "read (the record), keep (the user's alone) or close (ends it: dropped unless kept)",
+                default: Some(read),
+            },
             CONFIG,
         ],
     },
@@ -3431,6 +3455,7 @@ mod tests {
             ("helios_workshop_save", "workshop.save"),
             ("helios_workshop_context", "workshop.context"),
             ("helios_workshop_design", "workshop.design"),
+            ("helios_workshop_session", "workshop.session"),
         ] {
             let tool = TOOLS.iter().find(|t| t.name == verb).unwrap();
             assert_eq!(tool.cmd, cmd);

@@ -86,6 +86,7 @@ mod macro_edit;
 mod network_edit;
 mod workshop_design;
 mod workshop_edit;
+mod workshop_session;
 mod workspace_edit;
 mod workspace_live;
 
@@ -5047,6 +5048,8 @@ impl Shell {
         self.follow_comparison();
         // An undo or a redo of the workspace's state, put in place.
         self.sync_workspace();
+        // The workshop session's record follows the value steps.
+        self.follow_session(None);
         // The theme asked for is installed here, before anything is drawn.
         self.core.app.logic(&ctx);
         let spec = self.core.app.handle().theme().spec();

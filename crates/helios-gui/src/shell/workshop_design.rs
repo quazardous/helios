@@ -361,11 +361,25 @@ impl Shell {
         };
         if !dry && let Some(node) = step_answer["node"].as_str() {
             self.select_node(node);
-            let mut panel = self.focus.workshops.borrow_mut();
-            if let Some(d) = panel.design.as_mut().filter(|d| Some(d.session) == session) {
-                d.waiting = false;
-                d.node = Some(node.into());
-                d.applied = step_answer["designed"].as_str().map(String::from);
+            {
+                let mut panel = self.focus.workshops.borrow_mut();
+                if let Some(d) = panel.design.as_mut().filter(|d| Some(d.session) == session) {
+                    d.waiting = false;
+                    d.node = Some(node.into());
+                    d.applied = step_answer["designed"].as_str().map(String::from);
+                }
+            }
+            // Recording starts: the design is the session's first step.
+            if let Some(workshop) = step_answer["designed"].as_str() {
+                let (node, workshop) = (node.to_string(), workshop.to_string());
+                self.start_session(
+                    &node,
+                    &workshop,
+                    helios_template::session::Kind::Design,
+                    origin,
+                    Some(&intent),
+                );
+                step_answer["session"] = json!(self.session_id());
             }
         }
         let mut out = answer(!dry);

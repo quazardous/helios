@@ -27,7 +27,8 @@
 //!   of a workspace's network, delegated, deleted, checked and copied.
 //! - [`workshop`] (experimental): workshops' measures, zones and
 //!   aiming; [`draft`]: a workshop an AI proposes, checked on a proxy of
-//!   the image and applied as one step.
+//!   the image and applied as one step; [`session`]: the record of a
+//!   workshop piloted on a test photo.
 //! - [`contexts`]: Helios's places and modes on egui-pop's context
 //!   stack, shared by the desktop and the MCP server, and the tools
 //!   agents move a workspace's stack with.
@@ -42,6 +43,7 @@ pub mod library;
 pub mod macros;
 pub mod network;
 pub mod schema;
+pub mod session;
 pub mod shipped;
 pub mod subworkspace;
 pub mod workshop;

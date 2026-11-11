@@ -1707,6 +1707,10 @@ fn main() -> Result<(), String> {
         None => (None, None),
     };
     start::mark("vault opened (and migrated)");
+    // Workshop sessions a former run left unkept are dropped (C6).
+    if let Some(Err(e)) = persist.as_ref().map(Persist::drop_unkept_sessions) {
+        warn(&format!("the workshop sessions: {e}"));
+    }
     // Held here, the vault outlives the window: it closes once the
     // window is gone (see `helios_gui::quit`).
     let vault = persist.as_ref().map(|p| p.vault().clone());
