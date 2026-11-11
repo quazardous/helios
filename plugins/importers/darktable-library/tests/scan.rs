@@ -290,7 +290,11 @@ fn a_library_darktable_holds_open_is_read_from_a_copy_and_never_written() {
     let _ = std::fs::remove_dir_all(&dir);
 
     // A lock left by a darktable that is gone (a crash) is stale: the
-    // files are read in place.
+    // files are read in place. Where a process cannot be probed
+    // (Windows), every lock counts as held: a copy is harmless.
+    if !cfg!(unix) {
+        return;
+    }
     let mut child = Command::new(PROGRAM)
         .stdin(std::process::Stdio::null())
         .spawn()

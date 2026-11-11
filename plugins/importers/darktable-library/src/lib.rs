@@ -1100,9 +1100,16 @@ mod tests {
 
     #[test]
     fn a_read_only_uri_escapes_the_path() {
+        // Made absolute first: on Windows it gains the current drive.
+        let uri = read_only(Path::new("/a b/Été#%.db"));
+        assert!(uri.starts_with("file:///"), "{uri}");
+        assert!(
+            uri.ends_with("/a%20b/%C3%89t%C3%A9%23%25.db?mode=ro"),
+            "{uri}"
+        );
         assert_eq!(
-            read_only(Path::new("/a b/Été?#%.db")),
-            "file:///a%20b/%C3%89t%C3%A9%3F%23%25.db?mode=ro"
+            file_uri("/a b/Été?#%.db"),
+            "file:///a%20b/%C3%89t%C3%A9%3F%23%25.db"
         );
     }
 
@@ -1115,6 +1122,10 @@ mod tests {
         assert_eq!(
             file_uri(r"D:\Users\Ann Été\darktable\library.db"),
             "file:///D:/Users/Ann%20%C3%89t%C3%A9/darktable/library.db"
+        );
+        assert_eq!(
+            file_uri(r"D:\Photos #2\100% raw\library.db"),
+            "file:///D:/Photos%20%232/100%25%20raw/library.db"
         );
         assert_eq!(
             file_uri(r"\\?\D:\darktable\data.db"),

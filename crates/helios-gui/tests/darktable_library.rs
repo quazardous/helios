@@ -164,7 +164,7 @@ fn a_darktable_library_imports_with_its_marks() {
             .find(|l| {
                 l["path"]
                     .as_str()
-                    .is_some_and(|p| p.ends_with(&format!("/{name}")))
+                    .is_some_and(|p| std::path::Path::new(p).ends_with(name))
             })
             .unwrap_or_else(|| panic!("no {name}: {lines:?}"));
         ImageId::from_hex(line["id"].as_str().unwrap()).unwrap()
