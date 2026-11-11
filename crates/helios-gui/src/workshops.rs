@@ -193,6 +193,14 @@ pub fn measure_words(m: Measure) -> (Message, Message) {
             Message::new("gui-workshops-measure-clip", "clipping"),
             Message::new("gui-workshops-unit-percent", "%"),
         ),
+        Measure::ZoneContrast => (
+            Message::new("gui-workshops-measure-contrast", "contrast"),
+            Message::new("gui-workshops-unit-stops", "stops"),
+        ),
+        Measure::ZonesRatio => (
+            Message::new("gui-workshops-measure-ratio", "gap between zones"),
+            Message::new("gui-workshops-unit-stops", "stops"),
+        ),
     }
 }
 
@@ -446,12 +454,18 @@ fn applied_ui(
             let name = path.rsplit('/').next().unwrap_or_default();
             if let Some(t) = targets.iter().find(|t| t.param == name) {
                 let (what, unit) = measure_words(t.measure);
+                // In a zone: "sky midtones", "foreground against sky".
+                let what = match (&t.zone, &t.against) {
+                    (Some(z), Some(a)) => format!("{} ({z} − {a})", text(what)),
+                    (Some(z), None) => format!("{z} {}", text(what)),
+                    _ => text(what),
+                };
                 ui.weak(text(
                     Message::new(
                         "gui-workshops-aimed",
                         "aimed: { $measure } at { $value } { $unit }",
                     )
-                    .with("measure", text(what))
+                    .with("measure", what)
                     .with("value", format!("{:.2}", t.value))
                     .with("unit", text(unit)),
                 ));

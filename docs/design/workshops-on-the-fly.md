@@ -173,6 +173,38 @@ In the Workshops panel, the Find field gains a "Design a workshop for
 this" row under the matches: it sends the typed intent to the design
 step (section 8 says who answers).
 
+### Zones and their measures (built, slice 2)
+
+A workshop block names its **zones**: `{ "name": "sky", "module":
+"mask_parametric", "params": {…}, "port": "mask" }`, a module with an
+image input and a one-channel output, drawn once from what enters the
+workshop (the proxy the targets are aimed on), never from its sliders. A
+pixel is in a zone where the mask is at least one half. A target gains
+`zone` (measured inside it; the whole image otherwise) and, for
+`zones.ratio`, `against`:
+
+```json
+"zones": [
+  { "name": "sky", "module": "mask_parametric",
+    "params": { "luminance": { "list": [0.4, 4.0, 0.05, 0.0] } } }
+],
+"targets": [
+  { "param": "sky_exposure", "measure": "luma.median", "value": -1.0, "zone": "sky" },
+  { "param": "backlight_lift", "measure": "zones.ratio", "value": -2.1,
+    "zone": "foreground", "against": "sky" }
+]
+```
+
+`zone.contrast` is the 95th minus the 5th percentile of luminance, in
+stops; `zones.ratio` is the zone's median minus the median of the zone
+it is against. A target whose zone is empty on an image keeps its
+value and says so. Refused when the file is built: a zone that is not a
+name or is named twice, a module the catalogue lacks or that draws no
+one-channel output, a target naming no zone, `zones.ratio` without two
+distinct zones, `against` on another measure. The save form keeps the
+three whole-image measures; agents give zones and zone targets in
+`workshop.save`'s `zones` and `targets`.
+
 ## 2. Refine on a test case, and record
 
 ### Piloting
@@ -525,7 +557,7 @@ included.
    "Backlight lift" slider on a synthetic network moves three inner
    values as its curves say; the flat network renders with the same
    content keys.
-2. **Zone measures** (M). The measures per zone (a mask input of the
+2. **Zone measures** (M, built 2026-11-11). The measures per zone (a mask input of the
    proxy render), `zone.contrast` and `zones.ratio`; targets with a
    `zone`; aiming per zone. Test: a synthetic backlit image (a bright
    upper band, a dark lower band) aims "foreground median at -1.5 stops"

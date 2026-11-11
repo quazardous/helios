@@ -1237,6 +1237,10 @@ gui-workshops-library = Votre bibliothèque
 
 gui-workshops-measure-clip = écrêtage
 
+gui-workshops-measure-contrast = contraste
+
+gui-workshops-measure-ratio = écart entre zones
+
 gui-workshops-measure-high = hautes lumières
 
 gui-workshops-measure-median = tons moyens

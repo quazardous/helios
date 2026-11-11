@@ -1335,9 +1335,13 @@ gui-workshops-library = Your library
 
 gui-workshops-measure-clip = clipping
 
+gui-workshops-measure-contrast = contrast
+
 gui-workshops-measure-high = highlights
 
 gui-workshops-measure-median = midtones
+
+gui-workshops-measure-ratio = gap between zones
 
 gui-workshops-no-image = Open an image to tune it
 

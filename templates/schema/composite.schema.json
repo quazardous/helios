@@ -170,7 +170,27 @@
           "description": "At most one per exposed number parameter, solved in this order.",
           "type": "array",
           "items": { "$ref": "#/$defs/target" }
+        },
+        "zones": {
+          "description": "Named parts of the image a target can be measured in, each a mask drawn once from what enters the workshop.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/zone" }
         }
+      }
+    },
+    "zone": {
+      "description": "A named part of the image: the mask a module draws from the workshop's input (a mask_parametric on high luminance for a sky); a pixel is in the zone where the mask is at least one half.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "module"],
+      "properties": {
+        "name": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+        "module": { "description": "A module with an image input and a one-channel output.", "type": "string" },
+        "params": {
+          "description": "Parameter values by name, tagged by kind, as in template.json.",
+          "type": "object"
+        },
+        "port": { "description": "The output holding the mask: mask by default.", "type": "string" }
       }
     },
     "target": {
@@ -181,11 +201,13 @@
       "properties": {
         "param": { "description": "An exposed number parameter's name.", "type": "string" },
         "measure": {
-          "description": "luma.median and luma.high (the 99th percentile) in stops around 1.0, clip.high (the share of pixels above 1.0) in %.",
-          "enum": ["luma.median", "luma.high", "clip.high"]
+          "description": "luma.median and luma.high (the 99th percentile) in stops around 1.0, clip.high (the share of pixels above 1.0) in %, zone.contrast (the 95th minus the 5th percentile) in stops, zones.ratio (the zone's median minus the median of the zone it is against) in stops.",
+          "enum": ["luma.median", "luma.high", "clip.high", "zone.contrast", "zones.ratio"]
         },
         "value": { "description": "In the measure's unit; with at: input, an offset from what the input measures.", "type": "number" },
-        "at": { "description": "Where it is measured: the workshop's output (the default) or its input.", "enum": ["output", "input"] }
+        "at": { "description": "Where it is measured: the workshop's output (the default) or its input.", "enum": ["output", "input"] },
+        "zone": { "description": "The zone it is measured in; the whole image otherwise.", "type": "string" },
+        "against": { "description": "For zones.ratio: the zone the zone is compared with.", "type": "string" }
       }
     },
     "panel_hint": {

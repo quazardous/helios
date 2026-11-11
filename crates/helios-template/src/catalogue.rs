@@ -262,14 +262,52 @@ pub fn build(file: &CompositeFile, catalogue: &Catalogue, depth: usize) -> Resul
             .map_err(|e| at(e.to_string()))?;
     }
     if let Some(w) = &file.workshop {
-        check_workshop(w, &built).map_err(|e| format!("workshop: {e}"))?;
+        check_workshop(w, &built, catalogue, depth).map_err(|e| format!("workshop: {e}"))?;
     }
     Ok(built)
 }
 
-/// A workshop's targets: each on an exposed number parameter, one per
-/// parameter, at a value its measure can take.
-fn check_workshop(w: &Workshop, built: &Macro) -> Result<(), String> {
+/// A workshop's zones and targets. Each zone: a free name, a module of
+/// the catalogue with an image input and a one-channel output (`port`),
+/// its parameters fitting it. Each target: on an exposed number
+/// parameter, one per parameter, at a value its measure can take, its
+/// `zone` one of the zones, `against` given for `zones.ratio` only (a
+/// zone other than `zone`).
+fn check_workshop(
+    w: &Workshop,
+    built: &Macro,
+    catalogue: &Catalogue,
+    depth: usize,
+) -> Result<(), String> {
+    let mut zones = BTreeSet::new();
+    for (i, z) in w.zones.iter().enumerate() {
+        let at = |e: &str| format!("zones[{i}] ({}): {e}", z.name);
+        if !crate::format::valid_name(&z.name) {
+            return Err(at(
+                "not a name: a lowercase letter, then letters, digits and `_`",
+            ));
+        }
+        if !zones.insert(z.name.as_str()) {
+            return Err(at("a second zone of that name"));
+        }
+        let m = catalogue
+            .resolve(Some(&z.module), None, depth + 1)
+            .map_err(|e| at(&e))?;
+        let manifest = m.manifest();
+        if manifest.inputs.is_empty() {
+            return Err(at("the module has no input to draw the zone from"));
+        }
+        match manifest.outputs.iter().find(|p| p.name == z.port) {
+            None => return Err(at(&format!("the module has no output `{}`", z.port))),
+            Some(p) if p.channels() != Some(1) => {
+                return Err(at(&format!("`{}` is not a mask (one channel)", z.port)));
+            }
+            Some(_) => {}
+        }
+        manifest
+            .resolve(&z.params)
+            .map_err(|e| at(&e.to_string()))?;
+    }
     let params = Composite::manifest(built).params;
     let mut seen = BTreeSet::new();
     for (i, t) in w.targets.iter().enumerate() {
@@ -286,6 +324,24 @@ fn check_workshop(w: &Workshop, built: &Macro) -> Result<(), String> {
         }
         if !t.value.is_finite() {
             return Err(at("the value is not a number"));
+        }
+        for z in [&t.zone, &t.against].into_iter().flatten() {
+            if !zones.contains(z.as_str()) {
+                return Err(at(&format!("no zone `{z}`")));
+            }
+        }
+        match (t.measure, &t.zone, &t.against) {
+            (Measure::ZonesRatio, Some(a), Some(b)) if a == b => {
+                return Err(at("`zones.ratio` compares two zones, not one with itself"));
+            }
+            (Measure::ZonesRatio, Some(_), Some(_)) => {}
+            (Measure::ZonesRatio, _, _) => {
+                return Err(at(
+                    "`zones.ratio` needs a `zone` and the zone it is `against`",
+                ));
+            }
+            (_, _, Some(_)) => return Err(at("`against` is for `zones.ratio`")),
+            _ => {}
         }
         if t.measure == Measure::ClipHigh && t.at == At::Output && !(0.0..=100.0).contains(&t.value)
         {
