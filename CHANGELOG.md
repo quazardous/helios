@@ -24,6 +24,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.77.0] - 2026-11-11
+
+### Added
+
+- Compare is now a workspace of its own: File > New workspace offers "Compare", and C (or the Compare command) on two to four selected photos opens them side by side, each drawn from its edit. Zoom and pan stay synchronised unless you turn that off, the arrow keys move the active photo, and its rating, flag and colour label are at hand.
+- Builds made between releases carry their own version, a pre-release of the next patch counting the commits since the last release (`0.76.1-dev.18+be34c639`), shown in About, in crash reports and by `--version`; a release build shows its plain version.
+- Helios for Linux as a Flatpak: each release now carries `io.github.quazardous.Helios-X.Y.Z-x86_64.flatpak`, a sandboxed bundle that sees the Pictures folder and removable media (see docs/releases.md, "The Flatpak", for its permissions and how to grant another folder). The tarball now also carries Helios's AppStream metadata.
+- Semantic sliders for macros and workshops (experimental): one slider of a macro's interface can move several inner parameters at once, each along a curve of up to 8 points ("Backlight lift" raising the exposure while easing the contrast). The interface editor creates them with "New semantic slider" and draws each curve; agents give the same `drives` list to `macro.interface`. Moving one is a single undo step.
+- Workshops (experimental) can aim a target inside a zone: a workshop names zones such as a sky or a foreground, each a mask drawn from the photo, and a target such as "sky midtones at -1 stop" is measured on that zone's pixels only. Two new measures help with backlit photos: a zone's contrast, and the gap in stops between two zones.
+
+### Changed
+
+- The import window's reading line names the folder or the file being read, shortened in its middle when the line is too narrow.
+- The search field's dates now mean the day a photo was taken, by the camera's clock, instead of the day its file was last modified, and they are filtered in the catalogue in one query. Capture time (with its time zone offset when the camera wrote one), camera, lens, focal length, aperture, shutter, ISO, size, orientation and file type are kept for every photo at import; a background job fills them for photos imported earlier, and resumes where it stopped.
+
+### Fixed
+
+- Helios ended by the system (a plain `kill`, a logout or a shutdown, Ctrl+C in its terminal, its terminal or console closed, the Windows session ending) now closes as Ctrl+Q closes it, and the next start no longer says it closed unexpectedly.
+- The import window's thumbnails fill fast: the photos in view are read first, on a few threads at once, each preview scaled down before its colours are converted, instead of one file after another in the folder's order. A photo already in the Library shows its Library thumbnail, and the previews read stay in memory (within a budget), so opening the window again on the same folder shows them at once.
+- The import window draws a photo with its thumbnail at once when the thumbnail is already known (read earlier in the session, or in the Library's thumbnail cache): opened again, or scrolled, its cells no longer show empty first. Only photos never read fill in afterwards.
+- A Library of more than about 32,000 photos opens again: it could not be read at all past that size. The Library is now read 2,000 photos at a time, each batch in one query, and never touches the photo files while reading: offline and missing badges come from the last scan, sizes and dates from what the import saw. After an import, a scan or an undo, only the photos added and those whose copies moved are read again.
+- Cached thumbnails show at once: the cells in view are read from the thumbnail cache on the frame that draws them (on a few threads, within a frame's time), instead of waiting in the reading queue behind the rest of the library, so a library opened again no longer fills its grid one picture after another.
+
 ## [0.76.0] - 2026-11-11
 
 ### Added
