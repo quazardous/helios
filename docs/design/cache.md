@@ -1,7 +1,7 @@
 # One cache service
 
 Status: slices 1 to 3 **accepted** (2026-11-11), with the defaults of
-the open questions; the later slices stay proposed. Slices 1 and 2 are built
+the open questions; the later slices stay proposed. Slices 1 to 3 are built
 (`crates/helios-cache`). The inventory describes the code on `next` as of
 that date.
 

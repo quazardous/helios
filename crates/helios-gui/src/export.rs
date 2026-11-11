@@ -12,7 +12,10 @@
 //!    parent job and an export per image, which name the workspace's
 //!    view node, so its Queue panel lists them;
 //! 3. renders each image as the darkroom shows it: the file through the
-//!    workspace's network, the version's edit applied.
+//!    workspace's network, the version's edit applied, on the engine the
+//!    desktop renders with ([`Exporter::with_engine`]): one cache and one
+//!    budget for the process, so what the darkroom computed is not
+//!    computed again and an export cannot grow memory without bound.
 //!
 //! What the batch says (failures, its end) goes back to the shell
 //! ([`crate::Shell::export_sink`]), which logs it and toasts the end.
@@ -80,17 +83,20 @@ pub struct Exporter<S: Store> {
 impl<S: Store + Send + 'static> Exporter<S> {
     /// Exports from `vault`, reported to `jobs`, what they say sent to
     /// `lines` (the shell's `export_sink`), `wake` asking the window for a
-    /// frame after each.
+    /// frame after each; rendered on `engine`, the desktop's (the
+    /// viewport's: its cache and its budget).
     pub fn new(
         vault: Arc<Vault<S>>,
         jobs: Jobs,
         lines: Sender<Line>,
         wake: impl Fn() + Send + Sync + 'static,
+        engine: Arc<Engine>,
     ) -> Self {
-        Self::with_workers(vault, jobs, lines, wake, parallelism())
+        Self::with_engine(vault, jobs, lines, wake, parallelism(), engine)
     }
 
-    /// [`Exporter::new`] rendering `workers` images side by side.
+    /// An exporter rendering `workers` images side by side on an engine of
+    /// its own, within the cache service's RAM budget.
     pub fn with_workers(
         vault: Arc<Vault<S>>,
         jobs: Jobs,
@@ -98,18 +104,39 @@ impl<S: Store + Send + 'static> Exporter<S> {
         wake: impl Fn() + Send + Sync + 'static,
         workers: usize,
     ) -> Self {
-        // Its own bus: the scheduler's and the engine's events are no
-        // one's on the desktop; the jobs' go to the shell's.
+        let budget = helios_cache::Service::global()
+            .budget(helios_cache::Tier::Ram)
+            .map(|b| b as usize);
+        let engine = Arc::new(Engine::with_budget(Arc::new(Bus::new()), budget));
+        Self::with_engine(vault, jobs, lines, wake, workers, engine)
+    }
+
+    /// An exporter rendering `workers` images side by side on `engine`.
+    pub fn with_engine(
+        vault: Arc<Vault<S>>,
+        jobs: Jobs,
+        lines: Sender<Line>,
+        wake: impl Fn() + Send + Sync + 'static,
+        workers: usize,
+        engine: Arc<Engine>,
+    ) -> Self {
+        // Its own bus: the scheduler's events are no one's on the
+        // desktop; the jobs' go to the shell's.
         let own = Arc::new(Bus::new());
         Exporter {
             vault,
-            scheduler: Some(Scheduler::new(own.clone(), workers.max(1))),
-            engine: Arc::new(Engine::new(own)),
+            scheduler: Some(Scheduler::new(own, workers.max(1))),
+            engine,
             jobs,
             lines,
             wake: Arc::new(wake),
             batches: std::sync::Mutex::default(),
         }
+    }
+
+    /// The engine it renders with.
+    pub fn engine(&self) -> &Arc<Engine> {
+        &self.engine
     }
 
     /// Plans an export over the library: the request it runs.

@@ -15,7 +15,7 @@ use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable as _;
 use egui_pop::api::jobs::JOBS;
 use egui_pop::model::jobs::JobState;
-use helios_core::{Bus, Image, Region};
+use helios_core::{Bus, Describe as _, Image, Region};
 use helios_export::Format;
 use helios_gui::dialogs::Level;
 use helios_gui::export::Exporter;
@@ -96,12 +96,14 @@ fn desk(dir: &Path, names: &[&str], workers: usize) -> Desk {
     }
     let mut shell = Shell::new(helios_panels(), None);
     persist.fill_library(&mut shell).unwrap();
-    let exporter = Exporter::with_workers(
+    // On the viewport's engine, as the desktop does.
+    let exporter = Exporter::with_engine(
         persist.vault().clone(),
         shell.jobs(),
         shell.export_sink(),
         || {},
         workers,
+        shell.viewport().engine().clone(),
     );
     let mut h = headless::harness(shell, vec2(1280.0, 800.0));
     h.run();
@@ -393,4 +395,38 @@ fn the_batch_export_template_opens_on_the_picks_with_the_export_ready() {
     assert_eq!(asks.len(), 1);
     assert_eq!(asks[0].images, ["ab".repeat(32)]);
     let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn exporting_the_image_open_reads_no_source_again_and_stays_within_the_budget() {
+    let dir = temp("shared-engine");
+    let mut d = desk(&dir, &["a.png"], 1);
+    let engine = d.h.state().viewport().engine().clone();
+    assert!(Arc::ptr_eq(&engine, d.exporter.engine()), "one engine");
+    let bundle =
+        d.h.state()
+            .workspace_bundle()
+            .unwrap_or_else(helios_template::workspace::blank);
+    // The darkroom shows the image whole, on the desktop's engine.
+    let (graph, node) = templates::open_file(&dir.join("photos").join("a.png"), &bundle).unwrap();
+    let extent = graph.extent(node).unwrap().unwrap();
+    engine.render(&graph, node, "output", extent).unwrap();
+    let budget = 1 << 20;
+    engine.set_budget(Some(budget));
+    let before = engine.counters();
+    let out = dir.join("out");
+    run(
+        &mut d.h,
+        "library.export",
+        json!({ "scope": "shown", "format": "tiff", "folder": out }),
+    );
+    let ids = d.run_exports();
+    assert_eq!(ids.len(), 1);
+    d.finish();
+    assert_eq!(std::fs::read_dir(&out).unwrap().count(), 1, "exported");
+    let since = engine.counters().since(&before);
+    assert_eq!(since.source_reads, 0, "the source is read again: {since:?}");
+    assert_eq!(since.computed, 0, "computed again: {since:?}");
+    let held = engine.describe()["cache"]["bytes"].as_u64().unwrap();
+    assert!(held <= budget as u64, "{held} bytes over {budget}");
 }

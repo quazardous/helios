@@ -2047,11 +2047,15 @@ fn main() -> Result<(), String> {
             }
             let exporter = persist.as_ref().map(|p| {
                 let ctx = cc.egui_ctx.clone();
+                // On the viewport's engine: one render cache and one
+                // budget for the desktop, so exporting the image open does
+                // not compute again what the darkroom holds.
                 helios_gui::export::Exporter::new(
                     p.vault().clone(),
                     shell.jobs(),
                     shell.export_sink(),
                     move || ctx.request_repaint(),
+                    shell.viewport().engine().clone(),
                 )
             });
             let mut app = App {
