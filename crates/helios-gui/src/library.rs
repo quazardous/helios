@@ -732,9 +732,9 @@ pub struct Library {
     fed: (Vec<String>, Vec<String>),
     /// The order the vault reads the photos in: this focus's sort.
     sort: helios_vault::Order,
-    /// The sort changed since the entries were read: the host reads them
-    /// again in the new order ([`Library::take_resort`]).
-    resort: bool,
+    /// The sort the entries must be read again in, once it changed
+    /// ([`Library::take_resort`]).
+    resort: Option<helios_vault::Order>,
 }
 
 /// The library's sort when nothing chose one: by capture time, oldest
@@ -835,7 +835,7 @@ impl Default for Library {
             map_feed: None,
             fed: (Vec::new(), Vec::new()),
             sort: DEFAULT_SORT,
-            resort: false,
+            resort: None,
         }
     }
 }
@@ -1419,19 +1419,19 @@ impl Library {
     pub fn set_sort(&mut self, sort: helios_vault::Order) {
         if sort != self.sort {
             self.sort = sort;
-            self.resort = true;
+            self.resort = Some(sort);
         }
     }
 
     /// Asks the host to read the photos again in the sort (they were read
     /// in another).
     pub fn ask_resort(&mut self) {
-        self.resort = true;
+        self.resort = Some(self.sort);
     }
 
     /// Whether the photos must be read again in the sort, once.
     pub fn take_resort(&mut self) -> bool {
-        std::mem::take(&mut self.resort)
+        self.resort.take().is_some()
     }
 
     /// The vault query the filter needs run, once.
