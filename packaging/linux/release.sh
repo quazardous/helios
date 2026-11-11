@@ -58,6 +58,7 @@ for p in $programs; do
   strip "$tree/bin/$p"
 done
 install -Dm644 "$here/$id.desktop" "$tree/share/applications/$id.desktop"
+install -Dm644 "$here/$id.metainfo.xml" "$tree/share/metainfo/$id.metainfo.xml"
 install -Dm644 "$here/icons/$id.svg" "$tree/share/icons/hicolor/scalable/apps/$id.svg"
 for n in $sizes; do
   install -Dm644 "$here/icons/$id-$n.png" "$tree/share/icons/hicolor/${n}x${n}/apps/$id.png"

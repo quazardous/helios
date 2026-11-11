@@ -321,6 +321,27 @@ fn insert_section(changelog: &str, section: &str) -> String {
     }
 }
 
+/// Helios's `AppStream` metadata (packaging/flatpak, the tarball).
+const METAINFO: &str = "packaging/linux/io.github.quazardous.Helios.metainfo.xml";
+
+/// The metainfo with a `<release>` for `version` at the top of
+/// `<releases>`, unless it lists that version already.
+fn insert_metainfo_release(metainfo: &str, version: &str, date: &str) -> String {
+    if metainfo.contains(&format!("<release version=\"{version}\"")) {
+        return metainfo.to_string();
+    }
+    let entry = format!(
+        "    <release version=\"{version}\" date=\"{date}\">\n      <url type=\"details\">https://github.com/quazardous/helios/releases/tag/v{version}</url>\n    </release>\n"
+    );
+    match metainfo.find("<releases>\n") {
+        Some(i) => {
+            let at = i + "<releases>\n".len();
+            format!("{}{entry}{}", &metainfo[..at], &metainfo[at..])
+        }
+        None => metainfo.to_string(),
+    }
+}
+
 /// Today's date in UTC, from the system clock.
 fn today() -> String {
     let secs = std::time::SystemTime::now()
@@ -503,6 +524,12 @@ fn main() -> ExitCode {
                         }
                     }
                     let v = format!("{}.{}.{}", new.0, new.1, new.2);
+                    // the AppStream metadata lists the release, for the
+                    // software centres and Flathub
+                    let metainfo = root.join(METAINFO);
+                    let text = std::fs::read_to_string(&metainfo).expect("the metainfo");
+                    std::fs::write(&metainfo, insert_metainfo_release(&text, &v, &date))
+                        .expect("write the metainfo");
                     println!(
                         "Prepared {v}. Run `cargo check` to refresh Cargo.lock, review the diff, then commit \"Release {v}\" and tag v{v}."
                     );
@@ -659,6 +686,29 @@ mod tests {
             render_section((0, 1, 0), "2026-10-11", &fragments),
             "## [0.1.0] - 2026-10-11\n\n### Added\n\n- A feature,\n  on two lines.\n\n### Fixed\n\n- A fix.\n"
         );
+    }
+
+    #[test]
+    fn a_release_goes_at_the_top_of_the_metainfo() {
+        let xml =
+            "<releases>\n    <release version=\"0.1.0\" date=\"2026-01-01\"/>\n  </releases>\n";
+        let out = insert_metainfo_release(xml, "0.2.0", "2026-02-01");
+        assert!(
+            out.starts_with("<releases>\n    <release version=\"0.2.0\" date=\"2026-02-01\">\n")
+        );
+        assert!(
+            out.contains(
+                "releases/tag/v0.2.0</url>\n    </release>\n    <release version=\"0.1.0\""
+            )
+        );
+        assert_eq!(insert_metainfo_release(&out, "0.2.0", "2026-02-01"), out);
+        let shipped = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("..")
+                .join(METAINFO),
+        )
+        .expect("the shipped metainfo");
+        assert!(shipped.contains("<releases>\n"));
     }
 
     #[test]

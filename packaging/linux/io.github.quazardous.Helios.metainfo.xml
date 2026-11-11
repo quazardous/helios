@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- AppStream metadata of Helios: what software centres (GNOME Software,
+     KDE Discover, Flathub) show. Checked with
+     appstreamcli validate (no network) (packaging/flatpak/build.sh). Each
+     release adds its <release> entry at the top of <releases>. -->
+<component type="desktop-application">
+  <id>io.github.quazardous.Helios</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <name>Helios</name>
+  <summary>Edit raw photos with darktable's processing</summary>
+  <developer id="io.github.quazardous">
+    <name>quazardous</name>
+  </developer>
+  <description>
+    <p>
+      Helios is an image processing framework whose first application is
+      photo editing: the quality of darktable's processing without having
+      to learn darktable.
+    </p>
+    <p>
+      It keeps photos in a library (the vault), processes them through a
+      graph of modules on the GPU when there is one and on the CPU
+      otherwise, and exports them. It can import a darktable library.
+    </p>
+    <p>
+      Helios is in an early stage of development: expect missing features
+      and changes from one release to the next.
+    </p>
+  </description>
+  <launchable type="desktop-id">io.github.quazardous.Helios.desktop</launchable>
+  <provides>
+    <binary>helios-gui</binary>
+    <binary>helios</binary>
+  </provides>
+  <categories>
+    <category>Graphics</category>
+    <category>Photography</category>
+  </categories>
+  <keywords>
+    <keyword>raw</keyword>
+    <keyword>photo</keyword>
+    <keyword>darktable</keyword>
+  </keywords>
+  <url type="homepage">https://github.com/quazardous/helios</url>
+  <url type="bugtracker">https://github.com/quazardous/helios/issues</url>
+  <url type="vcs-browser">https://github.com/quazardous/helios</url>
+  <branding>
+    <color type="primary" scheme_preference="light">#f6d365</color>
+    <color type="primary" scheme_preference="dark">#5a3d0c</color>
+  </branding>
+  <requires>
+    <display_length compare="ge">768</display_length>
+  </requires>
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+  </supports>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.76.0" date="2026-11-11">
+      <url type="details">https://github.com/quazardous/helios/releases/tag/v0.76.0</url>
+    </release>
+  </releases>
+</component>
