@@ -573,6 +573,9 @@ command-helios-workshops-dock =
 command-helios-workshops-moveTo =
     .title = Déplacer Ateliers vers une zone (`area`)
 
+command-workshop-answer =
+    .title = Expérimental : répondre à une valeur proposée : l’accepter ou mettre la vôtre (une étape d’annulation chacune), ou la rejeter ; enregistré dans la session (`of` : l’étape de la proposition ; `param` ; `action` : accept, override ou reject ; `value` pour override) ; à vous seul
+
 command-workshop-apply =
     .title = Expérimental : appliquer un atelier après un nœud, réglé sur l’image ouverte (`workshop` : id@version ; `after` : le nœud d’où l’image est montrée par défaut ; `aim` : vrai par défaut ; `dry_run`)
 
@@ -587,6 +590,9 @@ command-workshop-describe =
 
 command-workshop-design =
     .title = Expérimental : vérifier un brouillon d’atelier sur l’image ouverte et l’appliquer en une étape d’annulation (`draft` ; `intent` : celui de la session par défaut ; `apply` : vrai par défaut ; `replace` ; `dry_run`)
+
+command-workshop-propose =
+    .title = Expérimental : proposer des valeurs pour l’atelier piloté, montrées comme valeurs fantômes que l’utilisateur accepte, remplace ou rejette (`values` : par nom de curseur ; `aim` : les mots auxquels elles répondent ; `session`)
 
 command-workshop-save =
     .title = Expérimental : enregistrer une macro comme atelier, sa version suivante avec une intention, des mots-clés et des cibles (`node` : le nœud sélectionné par défaut ; `intent`, `keywords`, `targets` ; `dry_run`) ; sans `intent`, un formulaire les demande

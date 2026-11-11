@@ -1365,6 +1365,14 @@ gui-workshops-find = Find
 
 gui-workshops-find-hint = what you want: brighter, less contrast…
 
+gui-workshops-ghost = { $param }: { $value } proposed by { $author }
+
+gui-workshops-ghost-accept = Accept
+
+gui-workshops-ghost-accept-hint = Set this value (one undo step); move the slider instead to override it
+
+gui-workshops-ghost-reject = Reject
+
 gui-workshops-library = Your library
 
 gui-workshops-measure-clip = clipping
