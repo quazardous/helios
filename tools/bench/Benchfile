@@ -1000,7 +1000,7 @@ cwd = "/work/${src:-helios}"
 command = """test -x /target/release/examples/thumb_bench || { echo "thumb_bench is not built: run thumb-bench-build branch=${branch:-main} first" >&2; exit 2; } && \
 /target/release/examples/thumb_bench --corpus /corpus --out /out --part decode --renders ${renders:-6} && \
 for n in $(echo ${sizes:-1000,10000,50000} | tr , ' '); do \
-  timeout 15m /target/release/examples/thumb_bench --corpus /corpus --out /out --part grid --n $n --frames ${frames:-240} || exit 1; \
+  timeout 15m /target/release/examples/thumb_bench --corpus /corpus --out /out --part grid --n $n --frames ${frames:-240} --start ${start:-cold} || exit 1; \
 done"""
 mounts = { "target/${branch:-main}" = "/target", raw-corpus = "/corpus" }
 timeout = "1h"

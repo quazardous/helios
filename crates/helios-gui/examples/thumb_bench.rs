@@ -227,6 +227,10 @@ fn grid_cache(files: &[PathBuf], n: usize, dir: &Path, warm: bool) -> Arc<ThumbC
                 let _ = cache.put_jpeg(&Key::preview(format!("{i:016x}")), SMALL, jpeg);
             }
         }
+        // Opened again as the desktop opens it at start: its folder
+        // listed by the pool's threads, not here.
+        drop(cache);
+        return Arc::new(ThumbCache::open_unlisted(dir, u64::MAX).expect("the thumbnail cache"));
     }
     cache
 }
@@ -273,10 +277,16 @@ fn grid(files: &[PathBuf], n: usize, frames: usize, cache_dir: &Path, start_kind
     let mut first_screen = None;
     let mut cells = 0;
     let mut ui_frames = Vec::new();
+    // The thumbnails taken in at each frame until the first screen.
+    let mut per_frame = Vec::new();
+    let mut had = 0;
     while start.elapsed() < FIRST_SCREEN_DEADLINE {
         let t = Instant::now();
         h.step();
         ui_frames.push(ms(t.elapsed()));
+        let now = shown(&h);
+        per_frame.push(now.saturating_sub(had) as f64);
+        had = now;
         let lib = h.state().library();
         let in_view = lib.in_view();
         if !in_view.is_empty() {
@@ -364,6 +374,7 @@ fn grid(files: &[PathBuf], n: usize, frames: usize, cache_dir: &Path, start_kind
         "previews_read_at_first_screen": read_at_first_screen,
         "frames_to_first_screen": ui_frames.len(),
         "first_frames_ui_ms": stats(ui_frames),
+        "first_frames_thumbnails_taken": stats(per_frame),
         "first_render_ms": rendered.then(|| ms(first_render)),
         "scroll": {
             "frames": frames,
