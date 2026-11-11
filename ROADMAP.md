@@ -4,7 +4,7 @@ Vision, settled concepts, phases and open questions for Helios. This is a
 living document: decisions are dated, and an idea stays "not decided" until
 it says otherwise.
 
-Last updated: 2026-10-27.
+Last updated: 2026-11-11.
 
 ---
 
@@ -798,27 +798,47 @@ Validated (2026-10-10): location `src/common/catalog/` with per-domain
 first, `ids` for small cases; `selection` and `query` targets to be rediscussed
 at step C); selection stays in the database during phase 0.
 
-- [ ] **Step A: no SQL outside `common/`**, one domain = one potential
-      upstream PR, checked by an equivalence bench (SQL dump + XMP, plus GUI
-      captures) and a SQL inventory whose counter must go down.
-  - [x] 1. ratings and color labels (c442a88a8, upstream PR darktable-org/darktable#22572)
-  - [x] 2. metadata (e14874d30, 2026-10-11)
-  - [x] 3. tags (5d5763e27, 2026-10-11)
-  - [ ] 4. film rolls and images
-  - [ ] 5. locations, overlays
-  - [ ] 6. styles
-  - [ ] 7. presets
-  - [ ] 8. history and masks (critical, reinforced tests)
-  - [ ] 9. selection and collection
-  - [ ] 10. the `darktable-mcp` bridge
-  - [ ] SQL inventory check added to CI once step A is done
-  - [ ] make the Lua bench deterministic (see the fork's
-        `doc/helios/PHASE0.md`, known limits)
-  - [ ] performance bench: open and scroll a collection of 100,000 images
-  - [ ] a GUI bench for each domain whose code path the Lua scenario misses
-  - [ ] report the "Lua as a library" race upstream
-  - [ ] contact upstream (GitHub Discussions / pixls.us) with the first PR,
-        disclosing AI assistance
+(2026-11-11, decided) Finish step A first, then start step B domain by
+domain. The work stays in the fork: no upstream pull request, issue or
+contact from now on. The domains already merged upstream stay there.
+
+- [ ] **Step A: no SQL outside `common/`**, one domain per commit, checked
+      by an equivalence bench (SQL dump + XMP, plus GUI captures) and a SQL
+      inventory whose counter must go down. Counter (fork's
+      `tools/helios/sql_inventory.py`): 235 sites on the upstream base of
+      2026-10-09, 0 on 2026-11-07, then 15 after the rebase of 2026-11-07
+      onto upstream master, which brought upstream's new flexi masks code
+      (`src/develop/masks/`, `src/develop/masks_gui_presets.c`).
+  - [x] 1. ratings and color labels (merged upstream, d846d4946)
+  - [x] 2. metadata (merged upstream, cd6a056aa; the image information
+        "various values" query in the fork, dd8f577b3)
+  - [x] 3. tags (merged upstream, d304a8b90)
+  - [x] 4. film rolls and images (merged upstream: 05868f989, a63c00c8b,
+        62c225f30, 544a893f8, fecc1b00e)
+  - [x] 5. locations, overlays (nothing to move: their SQL was already in
+        `common/` on the base)
+  - [x] 6. styles (merged upstream, 7f504191d)
+  - [x] 7. presets (fork, 13 commits, the last 32ba57e9d)
+  - [x] 8. history (fork: f55b1470a, 7fed4fa53, 5629e4ac6, 9e0912961)
+  - [x] 9. selection and collection (fork, 20 commits, the last a90a1e396)
+  - [ ] 10. the `darktable-mcp` bridge: its 9 sites are classed as an
+        interface layer (the bridge runs on an injected database in its
+        tests), so the counter leaves them out; moving them through
+        `common/` is not decided
+  - [ ] 11. upstream's flexi masks code, arrived with the rebase: 15 sites
+        in presets (3), images (1), and masks history and its scratch
+        images (11, critical, reinforced tests)
+  - [ ] SQL inventory check (`sql_inventory.py --check`) added to CI once
+        step A is done
+  - [x] make the Lua bench deterministic (2026-10-11: ten consecutive runs
+        byte-identical; see the fork's `doc/helios/PHASE0.md`)
+  - [ ] performance bench: catalog operations on a synthetic 100,000-image
+        library are timed (`perf.sh`, a bench box job); scrolling the
+        lighttable is not
+  - [ ] a GUI bench for each domain whose code path the Lua scenario
+        misses: labels, metadata, tags and presets have one
+  - dropped (2026-11-11 decision): reporting the "Lua as a library" race
+    upstream, and contacting upstream with a first PR
 - [ ] **Step B: SDK interface**: `common/` functions grouped behind
       `catalog_*.h`, SQL moved into the sqlite backend, transactions become
       `dt_catalog_batch_*`, the image cache fed through the SDK.
@@ -827,8 +847,8 @@ at step C); selection stays in the database during phase 0.
       replacing `memory.collected_images`; a typed query model replacing the
       dynamic SQL of collections, producing the same SQL as today.
 
-Upstream framing: phase 0 is only acceptable upstream as a cleanup (less SQL
-in the GUI), never as a step toward client/server.
+Upstream framing (until 2026-11-11): phase 0 was only acceptable upstream as
+a cleanup (less SQL in the GUI), never as a step toward client/server.
 
 ### Phase 1: exposed parity
 
