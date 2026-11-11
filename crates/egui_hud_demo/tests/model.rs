@@ -161,3 +161,48 @@ fn the_page_draws_headless_with_its_fader_meter_and_fallbacks() {
         Some(&Drawn::Fallback(Fallback::Variant("knob".into())))
     );
 }
+
+#[test]
+fn a_slot_too_small_for_the_default_face_takes_the_next_that_fits() {
+    use egui_hud::card::{Card, CardItem};
+    use egui_hud::context::CardBox;
+    use egui_hud::model::Surface;
+    use egui_hud::resolve::{Layout, Layouts, Moment, Values, resolve};
+    use egui_hud::slot::{Size, Slot};
+    use egui_hud::{ContextKeys, Representation};
+
+    let kit = kit().unwrap();
+    let third = Slot::new(Size::THIRD, Size::ONE);
+    let place = |card: &Card| {
+        resolve(
+            &kit.registry,
+            card,
+            &ContextKeys::new(CardBox::new(Surface::Panel, 24, 240)),
+            &Layouts::person(Layout::default().slot("gain", third)),
+            &Values::new(),
+            &Moment::default(),
+            None,
+        )
+        .unwrap()
+    };
+    // The fader takes half a unit at least: a third takes the knob.
+    let p = place(&Card::new(vec![CardItem::control("gain", GAIN)]));
+    let gain = p.get("gain").unwrap();
+    assert_eq!(gain.variant.as_deref(), Some("knob"), "{gain:#?}");
+    assert_eq!(gain.representation, Some(Representation::Simplified));
+    assert!(
+        gain.reasons
+            .iter()
+            .any(|r| r.text.contains("too small for the Fader")),
+        "{gain:#?}"
+    );
+    // A face the person picked stays.
+    let p = place(&Card::new(vec![
+        CardItem::control("gain", GAIN).variant("fader"),
+    ]));
+    assert_eq!(p.get("gain").unwrap().variant.as_deref(), Some("fader"));
+    // A number that wraps takes the endless knob by default.
+    let hue = kit.registry.get("hue").unwrap();
+    let faces: Vec<&str> = hue.faces.iter().map(|f| f.id.as_str()).collect();
+    assert_eq!(faces, ["endless-knob", "scrub"]);
+}
