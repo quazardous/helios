@@ -473,7 +473,9 @@ with no window driver.
 - **The first painted frame shows the root.** eframe creates the root
   hidden and calls `set_visible(true)` after its first paint. A hide sent
   in that pass is applied after that call, so on X11, Windows and macOS
-  the root may flash once. Not observed yet: X11 is blocked (below).
+  the root may flash once. On X11 (below) the root ran 26 passes before
+  the hide took effect; a flash was not captured, as the first
+  screenshot comes 1.5 s later.
 
 **Wayland, labwc (box job 20261111-122717-1c38): proven, except
 hiding the root and raising a window.**
@@ -489,22 +491,67 @@ hiding the root and raising a window.**
 | Raising another window (`ViewportCommand::Focus` on B from A) | **not honoured**: A stays activated. This is focus-stealing prevention, so it needs an xdg-activation token |
 | Geometry | **not readable as tried**: `ViewportInfo::inner_rect` and `outer_rect` stay `None` for deferred windows on Wayland, so nothing was saved. The restored builder size was passed but not measured. The size has to be read from the pass (`Context::content_rect`), and the position is never available on Wayland |
 
-**Wayland, headless mutter (box job 20261111-123120-7256): not proven.**
-Both windows open and focus events arrive, but neither window paints
-past its first frames: no frame counts, and no quit within 60 s in
-autopilot. The same happened without autopilot. Bare mutter lists no
-windows and focuses none, so wbox's checks were not available. The
-suspected cause is the headless compositor sending no frame callbacks
-to a second surface, so a present blocks the one UI thread. If that
-also happens on a real GNOME session, it is a blocker for option A,
-since one stalled surface freezes every window. It must be checked on a
-GNOME desktop session before slice 2's API is fixed.
+**Wayland, headless mutter: the stall is the FIFO present (box jobs
+20261111-130143-0109 and 20261111-131011-30b9).** The spike now takes
+variants from the environment: `SPIKE_PRESENT_MODE` (the wgpu present
+mode), `SPIKE_A_SIZE` and `SPIKE_ROOT_SIZE` (window sizes, which change
+what covers what, as Wayland lets no client place its windows). The
+scenario runs each variant in autopilot on mutter. With software
+rendering (lavapipe), the surfaces offer `[Mailbox, Fifo]`.
 
-**X11: blocked on the box.** The scenario runs the example under labwc's
-Xwayland with `WAYLAND_DISPLAY` unset, but the image lacks
-`libxkbcommon-x11`, so winit's X11 backend panics at start. The fix is
-to add `libxkbcommon-x11` to the Benchfile's image (Helios
-`tools/bench/Benchfile`) and run the same job again.
+| Variant | Result |
+|---------|--------|
+| default (`AutoVsync`, so `Fifo`) | **stalls**: A stops after 6 frames, no quit in 25 s |
+| A larger than B (B covers part of A), `Fifo` | **stalls** after 15 frames |
+| root larger (A, B and the root each partly visible), `Fifo` | **stalls** after 13 frames |
+| `AutoNoVsync` (here `Mailbox`) | **works**: A paints 300 frames in 5.1 s (~60 per second), B stays at 5, the root ran 7 passes; B's close and A's close then the quit as on labwc; 0 off-thread callbacks |
+| `Mailbox` | **works**, the same figures |
+| A larger, `AutoNoVsync` | **works**, the same figures |
+| `Immediate` | **refused**: wgpu panics in `Surface::configure`, the mode is not offered |
+
+So the stall is not occlusion: with the root larger, every window shows
+part of itself and the FIFO run still stalls; under the same
+compositor, the same windows and the same placement, `Mailbox` never
+stalls. A FIFO present waits on the compositor (a frame callback, or
+the `fifo-v1` barrier with recent Mesa and mutter) inside the one UI
+thread, and on headless mutter that wait does not end, which freezes
+every window. Why mutter does not release it was not found: Mesa's
+Wayland FIFO was rebuilt on `fifo-v1` and `commit-timing` (Mesa 24.3),
+and mutter's own FIFO work, with its occluded-surface rules, is still
+moving. A single-window FIFO control run was not made, so whether one
+window alone stalls on headless mutter is open. A real GNOME session
+was not tried.
+
+The fix is on the application side, and eframe already takes it for
+its other renderer: its glow backend never blocks in the swap on
+Wayland ("a compositor may never present a hidden window's buffer",
+egui issue 5136), because winit already paces `RedrawRequested` by the
+compositor's frame callbacks (`pre_present_notify`, which egui-wgpu
+calls too). A non-blocking present mode gives wgpu the same pacing:
+the measured rate stayed at ~60 frames per second, not unbounded. A
+glow variant was not run: eframe's `glow` feature changes
+`App::on_exit`'s signature, and egui-pop's `App` implementation does
+not build with it.
+
+**X11, labwc's Xwayland (box job 20261111-130143-f811): proven, hiding
+the root included.** The image now has winit's X11 libraries
+(`libxkbcommon-x11` and the X libraries it loads, Helios
+`tools/bench/Benchfile`). The same job's Wayland run gave the labwc
+results above again.
+
+| Check | Result |
+|-------|--------|
+| Hidden root | **works**: "Spike root" is not listed after `Visible(false)`. eframe's `ViewportInfo::visible` for the root still reads `true` on every frame, so the application cannot trust it |
+| Independent repaint | **proven**: over 3.25 s, A painted 330 frames, B 0 and the root 0. Not paced: about 400 frames per second at 263 % CPU even with the default `AutoVsync`, as lavapipe on Xwayland does not throttle `Fifo` |
+| Closing one window | **proven**: B goes, A keeps painting, the process stays |
+| Closing the last window | **proven**: closing A quits the process, the root ran 29 passes in the whole run |
+| The `Rc` shim | **proven**: 0 callbacks off the main thread |
+| Raising another window | **honoured**: `F` in A activates B |
+| Geometry | **readable and restored**: `inner_rect` and `outer_rect` are filled; a second start with B at 500 x 330, position 300, 200 opens B there. The sizes saved at close were 1280 x 800 at 0, 0: labwc made the Xwayland windows fill the output after they opened (the screenshots show B undecorated and full screen), a harness behaviour, not the application's |
+
+At the end of the second start, winit's X11 backend panicked in
+`inner_size` once the X server had gone (the compositor stopped first).
+This is teardown only.
 
 **Windows and macOS: not run.** A `workflow_dispatch` on a branch is
 not allowed, and egui-pop's CI runs on Ubuntu only. Proposed: a
@@ -548,9 +595,18 @@ one is available.
 - Each window's close goes to the application, which stops declaring the
   window, and the root's close moves a focus into it.
 - Geometry comes from each window's content rect.
-- Before the API is fixed, the mutter stall is investigated on a real
-  GNOME session, and X11 runs on the box once the image has
-  `libxkbcommon-x11`.
+- **Present mode: egui-pop's multi-window launcher sets wgpu's present
+  mode to `AutoNoVsync` on Wayland** (`Mailbox` where `Immediate` is not
+  offered), and keeps `AutoVsync` on X11, Windows and macOS, where the
+  present is not what stalls and an unpaced mode would spin. On Wayland
+  the pacing comes from winit's frame callbacks, as for eframe's glow.
+  The choice is made at start from the display winit will use
+  (`WAYLAND_DISPLAY` set), as eframe's surface configuration is one for
+  every window; the application can override it.
+- The root stays "the first focus" (T2) even though X11 can hide it:
+  Wayland cannot, and `ViewportInfo::visible` is not reliable on X11.
+- Still open: a single-window FIFO run on headless mutter, a real GNOME
+  session, and the Windows and macOS runs proposed above.
 
 ## 6. Open questions
 
