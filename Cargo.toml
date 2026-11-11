@@ -59,18 +59,18 @@ helios-controls = { path = "crates/helios-controls" }
 # Helios; its icon font stays off. Its bundled font pair (Inter
 # and JetBrains Mono NL, SIL Open Font License 1.1) is Helios's interface
 # font.
-egui-pop = { version = "0.8", default-features = false, features = ["eframe", "bundled-fonts"] }
+egui-pop = { version = "0.9", default-features = false, features = ["eframe", "bundled-fonts"] }
 # MIT: egui-pop's agent socket (the debug bridge served to agents out of
 # the process), off unless EGUI_POP_AGENT_SOCKET asks for it.
-egui-pop-agent = "0.2"
+egui-pop-agent = "0.3"
 # MIT: egui-pop's translation plugin, alone for the tools (xtask's
 # catalogue tasks) that do not build the window's stack.
-egui-pop-i18n = "0.8"
+egui-pop-i18n = "0.9"
 # MIT: egui-pop's logic without egui (layouts, panels), for what checks a
 # layout without building the window's stack (workspace templates).
-egui-pop-model = "0.6"
+egui-pop-model = "0.7"
 # MIT: egui-pop's test kit (keymap checks, the accessibility tree).
-egui-pop-test = "0.8"
+egui-pop-test = "0.9"
 # MIT: egui-pop's Wayland layer, for the compositor announcements the
 # image surface's tests fake.
 egui-pop-wayland = "0.2"
@@ -79,7 +79,7 @@ egui-pop-wayland = "0.2"
 egui_fit = { version = "0.1", features = ["serde"] }
 # MIT OR Apache-2.0: the controls framework (controls as data, cards on the
 # slot engine, the value flow, renderers on egui-pop), agnostic of Helios.
-egui_hud = "0.1"
+egui_hud = "0.2"
 blake3 = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
