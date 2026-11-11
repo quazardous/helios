@@ -9,9 +9,15 @@ Python that has the wbox library:
 It imports the raw corpus into a vault, then, for each run, starts a
 compositor with `helios-gui` inside (the vault, the corpus's first raw
 open), waits for its window, asks it to close, and times from that request
-to the window going away and to the process exiting. The runs alternate
-the two ways a user closes: Ctrl+Q (egui-pop's Quit) and the compositor's
-close (a window manager's close button, Alt+F4).
+to the window going away and to the process exiting. The runs go in turn
+through the ways Helios is closed: Ctrl+Q (egui-pop's Quit), the
+compositor's close (a window manager's close button, Alt+F4), SIGTERM (a
+plain `kill`, a logout, a shutdown) and SIGINT (Ctrl+C in a terminal).
+
+Each run has a state directory of its own: every one of these closes must
+leave no crash marker behind (`crashes/session-<pid>.json`, which the next
+start would report as "closed unexpectedly"). A last run, SIGKILL, checks
+the other way: a process killed outright leaves its marker.
 
 The desktop marks each step of its quit on standard error when
 `HELIOS_QUIT_TRACE` is set (`helios_gui::quit`): the marks are lined up
@@ -27,6 +33,7 @@ import argparse
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -69,9 +76,32 @@ def wait_window(comp, proc_alive, timeout: float) -> bool:
     return False
 
 
-def close(comp, how: str) -> None:
+SIGNALS = {"sigterm": signal.SIGTERM, "sigint": signal.SIGINT, "sigkill": signal.SIGKILL}
+
+
+def session_markers(state: Path) -> list[Path]:
+    return sorted((state / "helios" / "crashes").glob("session-*.json"))
+
+
+def helios_pid(state: Path) -> int | None:
+    """helios-gui's own process id, from its crash marker's name (the
+    process wbox started may be a wrapper)."""
+    for marker in session_markers(state):
+        try:
+            return int(marker.stem.removeprefix("session-"))
+        except ValueError:
+            continue
+    return None
+
+
+def close(comp, how: str, state: Path) -> None:
     if how == "ctrl+q":
         comp.key("ctrl+q")
+    elif how in SIGNALS:
+        pid = helios_pid(state)
+        if pid is None:
+            raise RuntimeError("no crash marker to read helios-gui's pid from")
+        os.kill(pid, SIGNALS[how])
     else:
         subprocess.run(
             ["wlrctl", "toplevel", "close", f"app_id:{APP_ID}"],
@@ -100,6 +130,8 @@ def marks(trace: Path) -> list[tuple[float, str]]:
 
 def run_once(args, index: int, how: str, raw: Path) -> dict:
     trace = args.out / f"run-{index}.stderr"
+    state = args.work / f"state-{index}"
+    shutil.rmtree(state, ignore_errors=True)
     comp = build_compositor(config(f"helios-quit-{index}"))
     log_dir = args.out / "wbox-log"
     if hasattr(comp, "set_log_dir"):
@@ -115,7 +147,11 @@ def run_once(args, index: int, how: str, raw: Path) -> dict:
         str(raw),
         str(args.work / "workspace"),
     ]
-    env = {"HELIOS_QUIT_TRACE": "1", "HELIOS_TRACE_FILE": str(trace)}
+    env = {
+        "HELIOS_QUIT_TRACE": "1",
+        "HELIOS_TRACE_FILE": str(trace),
+        "XDG_STATE_HOME": str(state),
+    }
     result: dict = {"run": index, "close": how}
     try:
         started = comp.launch(cmd, env)
@@ -135,7 +171,7 @@ def run_once(args, index: int, how: str, raw: Path) -> dict:
         helios_windows(comp)
         result["poll_ms"] = round((time.time() - t) * 1e3, 1)
         asked = time.time()
-        close(comp, how)
+        close(comp, how, state)
         gone = exited = None
         deadline = time.monotonic() + args.timeout
         while time.monotonic() < deadline and (gone is None or exited is None):
@@ -154,6 +190,14 @@ def run_once(args, index: int, how: str, raw: Path) -> dict:
         result["window_gone_ms"] = None if gone is None else round((gone - asked) * 1e3, 1)
         result["exit_ms"] = None if exited is None else round((exited - asked) * 1e3, 1)
         result["exit_code"] = proc.poll()
+        # Only a process killed outright leaves its crash marker.
+        left = [m.name for m in session_markers(state)]
+        result["markers_left"] = left
+        if exited is not None:
+            if how == "sigkill" and not left:
+                result["error"] = "SIGKILL left no crash marker"
+            elif how != "sigkill" and left:
+                result["error"] = f"closed by {how}, a crash marker is left: {', '.join(left)}"
         result["steps"] = [
             {"step": step, "ms": round((at - asked) * 1e3, 1)} for at, step in marks(trace)
         ]
@@ -179,6 +223,7 @@ def table(results: list[dict]) -> str:
     for key, label in (("window_gone_ms", "**window gone**"), ("exit_ms", "**process exited**")):
         rows.append([label] + ["" if r.get(key) is None else f"{r[key]:.1f}" for r in results])
     rows.append(["poll resolution"] + [str(r.get("poll_ms", "")) for r in results])
+    rows.append(["markers left"] + [" ".join(r.get("markers_left", [])) for r in results])
     rows.append(["error"] + [r.get("error", "") for r in results])
     lines = ["| " + " | ".join(row) + " |" for row in rows]
     return (
@@ -221,8 +266,9 @@ def main() -> int:
     )
     os.environ.setdefault("XDG_RUNTIME_DIR", "/tmp/xdg")
     results = []
-    for i in range(args.runs):
-        how = "ctrl+q" if i % 2 == 0 else "compositor"
+    ways = ["ctrl+q", "compositor", "sigterm", "sigint"]
+    plan = [ways[i % len(ways)] for i in range(args.runs)] + ["sigkill"]
+    for i, how in enumerate(plan):
         try:
             r = run_once(args, i + 1, how, raws[0])
         except Exception as exc:  # report and go on with the next run
@@ -240,7 +286,8 @@ def main() -> int:
         failed += [
             r
             for r in results
-            if r.get("window_gone_ms") is None or r["window_gone_ms"] > args.budget_ms
+            if r["close"] != "sigkill"
+            and (r.get("window_gone_ms") is None or r["window_gone_ms"] > args.budget_ms)
         ]
         print(f"budget: the window goes within {args.budget_ms:.0f} ms of the request")
     return 1 if failed else 0

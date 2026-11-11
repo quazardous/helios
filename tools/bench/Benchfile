@@ -238,7 +238,8 @@ timeout = "1h"
 
 # how long the desktop takes to quit: helios-gui in release, in a headless
 # labwc through wbox, the raw corpus as its library, closed `runs=` times
-# (Ctrl+Q and the compositor's close in turn); the steps it marks, when its
+# (Ctrl+Q, the compositor's close, SIGTERM and SIGINT in turn, then SIGKILL
+# once; a crash marker left fails a close, none left fails SIGKILL); the steps it marks, when its
 # window went and when it exited, in /out/quit-timing.md and .jsonl.
 # `budget=<ms>` fails the job when a window outlives its close request by
 # more (tools/bench/quit-timing.py)
