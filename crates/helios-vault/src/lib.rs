@@ -49,7 +49,7 @@ pub mod undo;
 pub mod versions;
 pub mod workflow;
 
-pub use catalog::{ApplyReport, CursorId, CursorInfo, Delta, Row};
+pub use catalog::{ApplyReport, CursorId, CursorInfo, Delta, LibraryRow, Row};
 pub use edit::{EditSaved, EditSession};
 pub use fields::{AuditEntry, Command, Order, Query};
 pub use sightings::{Folder, FolderState, LibraryFlag, Sighting, ToRead};
@@ -179,6 +179,9 @@ impl Location {
     }
 }
 
+/// An image's fields and locations, as [`Store::library_rows`] gives them.
+pub type LibraryRows = (BTreeMap<String, serde_json::Value>, Vec<Location>);
+
 /// Where rows are kept. A store only stores: every rule is the vault's.
 ///
 /// **The Library is the images flagged in it** ([`LibraryFlag`]): every
@@ -289,6 +292,17 @@ pub trait Store: Send {
         ids: &[ImageId],
         names: &[&str],
     ) -> Result<Vec<BTreeMap<String, serde_json::Value>>, String>;
+    /// The asked fields and the locations (by path, as
+    /// [`Store::locations`]) of many images, in the order of `ids`: what a
+    /// library view shows. A store backed by a database answers in one
+    /// statement; this default asks for each image's locations in turn.
+    fn library_rows(&self, ids: &[ImageId], names: &[&str]) -> Result<Vec<LibraryRows>, String> {
+        let fields = self.fields_of(ids, names)?;
+        ids.iter()
+            .zip(fields)
+            .map(|(id, fields)| Ok((fields, self.locations(id)?)))
+            .collect()
+    }
     /// The images a query selects, in its order.
     fn select(&self, query: &Query) -> Result<Vec<ImageId>, String>;
     /// Records a change; returns its sequence number.
@@ -839,7 +853,8 @@ pub struct Reads {
     /// Files partially hashed (beginning and end).
     pub partial_hashes: u64,
     pub bytes: u64,
-    /// Store queries for catalog reads (selections, field fetches).
+    /// Store queries for catalog reads (selections, field fetches, an
+    /// image's locations, library windows).
     pub queries: u64,
 }
 
@@ -953,8 +968,11 @@ impl<S: Store> Vault<S> {
         self.store.lock().expect("store lock").images()
     }
 
+    /// An image's locations: one store query, counted in [`Vault::reads`].
     pub fn locations(&self, id: &ImageId) -> Result<Vec<Location>, String> {
-        self.store.lock().expect("store lock").locations(id)
+        let locations = self.store.lock().expect("store lock").locations(id)?;
+        self.reads.lock().expect("reads lock").queries += 1;
+        Ok(locations)
     }
 
     fn full_hash(&self, path: &Path) -> Result<ContentHash, String> {
@@ -998,9 +1016,11 @@ impl<S: Store> Vault<S> {
                     let image = store.image(id)?.ok_or("no image")?;
                     store.add_to_library(&image)
                 })?;
+                if flagged || !location.present() {
+                    self.placed([*id]);
+                }
                 if flagged {
                     report.added += 1;
-                    self.catalog.lock().expect("catalog lock").version += 1;
                 } else {
                     report.unchanged += 1;
                 }
@@ -1015,9 +1035,10 @@ impl<S: Store> Vault<S> {
                 store.put_location(&id, &Location::seen(path, size, modified, now))?;
                 store.add_to_library(&Image { id, size, partial })
             })?;
+            // A new image, or a known one at a new path.
+            self.placed([id]);
             if new {
                 report.added += 1;
-                self.catalog.lock().expect("catalog lock").version += 1;
             } else {
                 report.located += 1;
             }
@@ -1042,20 +1063,19 @@ impl<S: Store> Vault<S> {
                 store.add_to_library(&image)
             })?;
             if flagged {
-                self.catalog.lock().expect("catalog lock").version += 1;
+                self.placed([id]);
             }
             return Ok(id);
         }
         let id = ImageId(self.full_hash(&path)?);
         let partial = self.partial_hash(&path, size)?;
-        let new = self.transaction(|store| {
+        self.transaction(|store| {
             store.add_image(&Image { id, size, partial })?;
             store.put_location(&id, &Location::seen(path, size, modified, now))?;
             store.add_to_library(&Image { id, size, partial })
         })?;
-        if new {
-            self.catalog.lock().expect("catalog lock").version += 1;
-        }
+        // Even a known image has a new location.
+        self.placed([id]);
         Ok(id)
     }
 
@@ -1107,9 +1127,7 @@ impl<S: Store> Vault<S> {
             }
             Ok(!on)
         })?;
-        if new {
-            self.catalog.lock().expect("catalog lock").version += 1;
-        }
+        self.placed([id]);
         Ok(new)
     }
 
@@ -1137,7 +1155,7 @@ impl<S: Store> Vault<S> {
             }
             Ok(())
         })?;
-        self.catalog.lock().expect("catalog lock").version += 1;
+        self.placed(updates.iter().map(|(id, _, _)| *id));
         if let Some(bus) = &self.bus {
             bus.publish_value(
                 "vault",
@@ -1156,6 +1174,8 @@ impl<S: Store> Vault<S> {
     /// for.
     pub fn repair(&self, roots: &[&Path], now: u64) -> Result<RepairReport, String> {
         let mut report = RepairReport::default();
+        // The images whose copies this pass changed.
+        let mut placed = Vec::new();
         let locations = self.store.lock().expect("store lock").all_locations()?;
         for (id, location) in &locations {
             if !location.present() {
@@ -1172,6 +1192,7 @@ impl<S: Store> Vault<S> {
                     .lock()
                     .expect("store lock")
                     .put_location(id, &lost)?;
+                placed.push(*id);
                 report.lost += 1;
             }
         }
@@ -1217,11 +1238,15 @@ impl<S: Store> Vault<S> {
                         .expect("store lock")
                         .put_location(&id, &location)?;
                     missing.remove(i);
+                    placed.push(id);
                     report.relinked += 1;
                 }
             }
         }
         report.missing = missing.len() as u64;
+        if !placed.is_empty() {
+            self.placed(placed);
+        }
         Ok(report)
     }
 }

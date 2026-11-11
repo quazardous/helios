@@ -30,6 +30,7 @@ pub fn check<S: Store>(make: impl Fn() -> S) {
     tags_are_a_free_set(make());
     commands_skip_unchanged_values_coalesce_and_audit(make());
     cursors_cost_one_query_and_report_deltas(make());
+    library_rows_come_with_their_locations_and_moves_show_in_deltas(make());
     versions_are_content_addressed_and_heads_follow_forks_and_merges(make());
     documents_round_trip_by_namespace(make());
     transactions_keep_all_or_nothing(make());
@@ -1554,4 +1555,71 @@ fn cursors_cost_one_query_and_report_deltas<S: Store>(s: S) {
     assert_eq!(v.rank_of(cursor.id, &ids[4]).unwrap(), Some(1));
     v.close_cursor(cursor.id);
     assert!(v.fetch(cursor.id, 0, 1, &[]).is_err());
+}
+
+/// A library window reads each image's fields and locations together, in
+/// one query whatever its size, as `fields_of` and `locations` give them;
+/// a refresh lists the images whose copies moved since.
+fn library_rows_come_with_their_locations_and_moves_show_in_deltas<S: Store>(s: S) {
+    let mut s = with_images(s, 3);
+    let (a, b, c) = (image(1).id, image(2).id, image(3).id);
+    let away = Location {
+        volume: Some(VolumeId("uuid:backup".into())),
+        rel_path: Some("shoot/b.nef".into()),
+        presence: Presence::Offline,
+        ..location("/media/backup/shoot/b.nef")
+    };
+    s.put_location(&a, &location("/z/a.nef")).unwrap();
+    s.put_location(&a, &location("/y/a2.nef")).unwrap();
+    s.put_location(&b, &away).unwrap();
+    s.set_field(&a, RATING, Some(&json!(4))).unwrap();
+    s.set_field(&b, TAGS, Some(&json!(["x"]))).unwrap();
+    let v = Vault::new(s);
+    let cursor = v.open_cursor(Query::default()).unwrap();
+    let q0 = v.reads().queries;
+    let rows = v
+        .fetch_library(cursor.id, 0, cursor.count, &[RATING, TAGS])
+        .unwrap();
+    assert_eq!(v.reads().queries - q0, 1, "a library window is one query");
+    assert_eq!(
+        rows.iter().map(|r| r.id).collect::<Vec<_>>(),
+        v.cursor_ids(cursor.id, 0, cursor.count).unwrap()
+    );
+    let ids = [a, b, c];
+    let fields = v.fields_of(&ids, &[RATING, TAGS]).unwrap();
+    for (id, fields) in ids.iter().zip(fields) {
+        let row = rows.iter().find(|r| r.id == *id).unwrap();
+        assert_eq!(row.fields, fields, "the fields of {}", id.hex());
+        assert_eq!(
+            row.locations,
+            v.locations(id).unwrap(),
+            "where {} is",
+            id.hex()
+        );
+    }
+    // In the order asked, no field asked, an image with no copy.
+    let some = v.library_rows(&[c, a], &[]).unwrap();
+    assert_eq!(some.iter().map(|r| r.id).collect::<Vec<_>>(), vec![c, a]);
+    assert!(some[0].locations.is_empty() && some[0].fields.is_empty());
+    assert_eq!(some[1].locations.len(), 2);
+    assert!(v.library_rows(&[], &[RATING]).unwrap().is_empty());
+
+    // A scan finds b's volume plugged in: b's row is read again, nothing
+    // else.
+    let back = Location {
+        presence: Presence::Present,
+        ..away.clone()
+    };
+    v.update_locations(&[(b, away.path.clone(), back)]).unwrap();
+    let delta = v.refresh(cursor.id).unwrap();
+    assert!(delta.changed);
+    assert_eq!(delta.replaced, vec![b]);
+    assert!(delta.inserted.is_empty() && delta.removed.is_empty());
+    // Read once: the next refresh has nothing new.
+    assert!(!v.refresh(cursor.id).unwrap().changed);
+    // A field changed: no copy moved.
+    v.apply(&[Command::set(c, RATING, json!(2))], "user", None, 9)
+        .unwrap();
+    assert!(v.refresh(cursor.id).unwrap().replaced.is_empty());
+    v.close_cursor(cursor.id);
 }
