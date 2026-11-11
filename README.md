@@ -48,12 +48,20 @@ Requirements: Linux x86_64 with glibc 2.35 or newer (Ubuntu 22.04, Debian
 with a Vulkan driver speeds the processing up; without one it runs on the
 CPU.
 
-For Windows on x86_64, `helios-<version>-windows-x86_64.zip` is a folder
-that runs where it is unpacked: `helios-gui.exe` (the window), `helios.exe`
-(the command line). It needs Windows 10 or 11 (64-bit); a GPU with a
-Vulkan or DirectX 12 driver speeds the processing up, without one it runs
-on the CPU. The programs are not signed yet, so SmartScreen may warn on
-first start, and there is no installer: see
+For Windows on x86_64:
+
+- `helios-<version>-windows-x86_64-setup.exe`: an installer, for the
+  current user only (no administrator needed). It installs into
+  `%LOCALAPPDATA%\Programs\Helios`, adds Helios to the Start menu, and
+  uninstalls from Settings, Apps.
+- `helios-<version>-windows-x86_64.zip`: the same programs as a folder that
+  runs where it is unpacked: `helios-gui.exe` (the window), `helios.exe`
+  (the command line).
+
+It needs Windows 10 or 11 (64-bit); a GPU with a Vulkan or DirectX 12
+driver speeds the processing up, without one it runs on the CPU. The
+installer and the programs are not signed yet, so SmartScreen warns on
+first start ("More info", then "Run anyway"): see
 [docs/windows-port.md](./docs/windows-port.md) for what Windows still
 lacks.
 

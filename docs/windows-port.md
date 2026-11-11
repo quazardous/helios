@@ -105,14 +105,17 @@ Left, in rough order:
   on Windows, where `HOME` is usually unset, they fall back to the
   current directory. The GUI's log and state folders already use
   `%LOCALAPPDATA%`, and the bundled plugins' cache too.
-- **The window's program** is a console program: a console opens beside
-  the window, and children may flash one (§1.4, §5). It needs
-  `windows_subsystem = "windows"` with a console attach for `--version`.
-- **An installer.** The zip runs in place, unsigned. Next: an MSI or
-  NSIS per-user install (`cargo-packager` or `cargo-wix`) with a Start
-  menu entry, the icon embedded in the `.exe` (a resource file),
-  `longPathAware` in the manifest, then code signing (§6.3) and a winget
-  manifest (§6.2).
+- **Children's consoles.** The window's program is a window program in
+  release (`windows_subsystem = "windows"`, attaching to the parent's
+  console when started from a terminal, so `--version` prints there), but
+  the programs it starts may still flash a console (§1.4, §5).
+- **Signing, winget, file associations.** The installer is done (an Inno
+  Setup per-user install beside the zip, see `docs/releases.md`), with the
+  icon, version information and a manifest (`longPathAware`,
+  PerMonitorV2) embedded in `helios-gui.exe`. Still missing: code signing
+  (§6.3), so SmartScreen warns on the installer and the programs; a winget
+  manifest (§6.2); file associations and the `helios://` link handler in
+  the installer; an AppUserModelID on the shortcut.
 - **Graceful stop and Ctrl-C.** The batch's node is ended, not asked to
   stop, and `helios batch` does not catch Ctrl-C on Windows (§1.1).
 
@@ -636,7 +639,7 @@ a remote backend (the Helios vault) behind it. On Windows:
 
 | Topic | State in Helios | What Windows needs |
 |---|---|---|
-| **Subsystem** | `crates/helios-gui/src/main.rs` has no `windows_subsystem` attribute, so launching from Explorer opens a console window behind the app | `#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]`. `helios-gui --snapshot` prints to stdout: in a windows-subsystem build, call `AttachConsole(ATTACH_PARENT_PROCESS)` when started from a terminal, or move headless snapshotting to the `helios` CLI. |
+| **Subsystem** | Done: `helios-gui` is a window program in release builds (`windows_subsystem = "windows"`); started from a terminal with its output not redirected, it calls `AttachConsole(ATTACH_PARENT_PROCESS)`, so `--version` and `--snapshot` print there (the prompt does not wait for it). Its icon, version information and manifest (PerMonitorV2, `longPathAware`) are embedded by `crates/helios-gui/build.rs` (`winresource`). | Debug builds stay console programs. |
 | **DPI** | `pixels_per_point` is read per window (`shell.rs:2060`), with a `hidpi` class at 1.5 | winit enables per-monitor DPI awareness *[verify v2 on winit 0.30.13]*. Also declare `PerMonitorV2` in the application manifest so the process starts DPI-aware before winit runs. Test dragging an auxiliary window between a 100 % and a 150 % monitor: the scale changes mid-drag, and egui layouts must not jump. "100 % = one image pixel per physical pixel" (`ui-platforms.md` §10) already handles the viewport. |
 | **Custom frame** | `with_decorations(false)` in `main.rs:268`; `frame.rs` draws the title bar, buttons and resize grips, and uses `ViewportCommand::StartDrag` / `BeginResize`; double-click maximises | **Aero Snap** (drag to an edge or top, Win+arrows) works with winit's drag, which posts `WM_NCLBUTTONDOWN(HTCAPTION)` *[verify]*. Three gaps: (1) the **Windows 11 Snap Layouts flyout** appears only when `WM_NCHITTEST` returns `HTMAXBUTTON` over the maximise button, and winit gives no hook for that; (2) the drop shadow and rounded corners of undecorated windows depend on `DwmExtendFrameIntoClientArea` (winit's `with_undecorated_shadow`); (3) right-clicking the title bar does not open the system menu, and **Alt+Space is both Windows' system-menu key and Helios's `system` menu** (`docs/gui.md` "Menus are declared"). Options, in order of cost: (a) on Windows, default `draw_frame(false)` (the shell already supports it: `shell.rs:594`) and accept the native title bar; (b) subclass the window procedure to answer `WM_NCHITTEST` (unsafe, through `raw-window-handle`), the way Tauri and Electron's "window controls overlay" do; (c) upstream a winit hit-test hook (track in `docs/upstream.md`, per the egui-pop upstream rule). |
 | **Taskbar identity** | `with_app_id("helios-gui")` (Wayland only) | Set an AppUserModelID (`SetCurrentProcessExplicitAppUserModelID`, or through the installer shortcut) so all workspace windows group under one icon and jump lists ("recent workspaces") work. Embed the icon and version through a `build.rs` resource (`winresource`). |
@@ -724,9 +727,10 @@ C compiler for the bundled SQLite. A real `windows-latest` job is simpler.
 
 | Format | Tool | Notes |
 |---|---|---|
+| **Installer** | Done: Inno Setup 6 (`packaging/windows/helios.iss`), a per-user `-setup.exe` built and smoke-tested by the release workflow (`docs/releases.md`) | Per-user under `%LOCALAPPDATA%\Programs\Helios`, Start menu entry, uninstaller. Chosen over WiX for one short script and no .NET toolchain. |
 | **MSI** | `cargo-wix` (WiX 3/4), or `cargo-packager` (MIT/Apache; WiX MSI and NSIS from one config, also `.deb`, AppImage and `.dmg`) | Per-user install under `%LOCALAPPDATA%\Programs\Helios` (no admin needed), or per-machine. Ships `helios-gui.exe`, `helios.exe`, `helios-node.exe`, `helios-mcp.exe`, catalogues and icons. |
 | **MSIX** | `makeappx` + `signtool`, or cargo-packager *[verify MSIX support]* | Needed for the Microsoft Store. Clean install and uninstall, but packaged apps get a **virtualised `%APPDATA%`** and restricted spawning of out-of-package executables (plugins). Test plugin launching under MSIX before choosing it. |
-| **Portable zip** | xtask | Cheapest first deliverable; good for testers. |
+| **Portable zip** | Done: `packaging/windows/release.ps1` | Cheapest first deliverable; good for testers. |
 | **winget** | a manifest PR to `microsoft/winget-pkgs` (`wingetcreate`, `komac`) pointing to a signed MSI or zip on GitHub Releases | Free. Automatable from the release workflow. |
 
 The cross-platform `cargo-packager` (one config for all three OSes) fits
@@ -788,7 +792,7 @@ certificate.
 | 6 | **Parameterise the node system tests over the transport** so the `#![cfg(unix)]` suites run over TCP everywhere. Keep only the mode checks Unix-only. Replace `sh -c` resolver fixtures with a tiny Rust test binary (`[[bin]]` under `helios-testkit`, or `CARGO_BIN_EXE_*`). | 1 day |
 | 7 | **Add a Windows CI job** (§6.1) with `continue-on-error`, in Helios and egui-pop; make it required once green. | 1–2 h, then fixes |
 | 8 | **egui-pop focus mode**: read `UserPreferencesMask` with `windows-registry` (safe API) instead of `reg query`, or at least `CREATE_NO_WINDOW`. Note it in egui-pop's changelog. | 1 h |
-| 9 | **`windows_subsystem` attribute** on `helios-gui` (release only), plus an application manifest (PerMonitorV2, `longPathAware`, `activeCodePage` UTF-8) and an icon through a `build.rs` (`winresource`). | 2 h |
+| 9 | (Done, without `activeCodePage`.) **`windows_subsystem` attribute** on `helios-gui` (release only), plus an application manifest (PerMonitorV2, `longPathAware`, `activeCodePage` UTF-8) and an icon through a `build.rs` (`winresource`). | 2 h |
 | 10 | **Plugin manifests** gain an optional per-OS command and a `platforms` list. Validation refuses `python3` alone on Windows with a hint (`py -3`). | 2 h |
 | 11 | **ROADMAP**: record the proposed decisions as "not decided": (a) Windows GPU backend chosen at runtime, Vulkan or DX12, with no Vulkan-only feature lacking a fallback; (b) darktable is reached over IPC or a subprocess on Windows, never linked; (c) MSVC toolchain on Windows; (d) device identity key with or without the backend. | 30 min |
 

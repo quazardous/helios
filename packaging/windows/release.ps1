@@ -7,8 +7,11 @@
 # receives helios-VERSION-windows-x86_64.zip, a folder that runs in place
 # (helios-gui.exe, helios.exe...) with COPYING (the GPLv3),
 # THIRD-PARTY-LICENSES.txt (the crates built in and their licenses, from
-# `cargo deny list`, which must be installed) and README.md, and
-# SHA256SUMS-windows, its checksum in `sha256sum` format.
+# `cargo deny list`, which must be installed) and README.md;
+# helios-VERSION-windows-x86_64-setup.exe, a per-user installer of the same
+# folder (packaging/windows/helios.iss, compiled with Inno Setup 6, which
+# must be installed); and SHA256SUMS-windows, their checksums in
+# `sha256sum` format.
 param(
   [Parameter(Mandatory)] [string] $Version,
   [Parameter(Mandatory)] [string] $Build,
@@ -52,8 +55,25 @@ try {
   $zip = Join-Path $Out "$name.zip"
   if (Test-Path $zip) { Remove-Item $zip }
   Compress-Archive -Path $tree -DestinationPath $zip
-  $hash = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLowerInvariant()
-  [IO.File]::WriteAllText((Join-Path $Out 'SHA256SUMS-windows'), "$hash  $name.zip`n")
+
+  # The installer: Inno Setup's compiler, on PATH or where its installer
+  # puts it.
+  $iscc = Get-Command ISCC.exe -ErrorAction SilentlyContinue | ForEach-Object Source
+  if (-not $iscc) {
+    $iscc = @("${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe", "$env:ProgramFiles\Inno Setup 6\ISCC.exe",
+      "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe") |
+      Where-Object { Test-Path $_ } | Select-Object -First 1
+  }
+  if (-not $iscc) { throw 'Inno Setup 6 (ISCC.exe) not found' }
+  $setup = "$name-setup.exe"
+  & $iscc /Q "/DVersion=$Version" "/DSource=$tree" "/DOutDir=$Out" (Join-Path $PSScriptRoot 'helios.iss')
+  if ($LASTEXITCODE -ne 0) { throw "ISCC failed (exit $LASTEXITCODE)" }
+
+  $sums = foreach ($f in "$name.zip", $setup) {
+    $hash = (Get-FileHash -Algorithm SHA256 (Join-Path $Out $f)).Hash.ToLowerInvariant()
+    "$hash  $f"
+  }
+  [IO.File]::WriteAllText((Join-Path $Out 'SHA256SUMS-windows'), (($sums -join "`n") + "`n"))
   Get-Content (Join-Path $Out 'SHA256SUMS-windows')
 } finally {
   Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue

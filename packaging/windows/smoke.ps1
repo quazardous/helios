@@ -2,8 +2,9 @@
 # Windows runner (no GPU):
 #
 #   pwsh packaging/windows/smoke.ps1 helios-VERSION-windows-x86_64.zip PICTURE.jpg
+#   pwsh packaging/windows/smoke.ps1 INSTALLED_FOLDER PICTURE.jpg
 #
-# Unpacks it, then runs the command line: its version, an import of the
+# Unpacks the zip (or takes the folder an installer filled), then runs the command line: its version, an import of the
 # picture into a new vault, and a batch that exports it as a JPEG through
 # a network with one module (the processing runs on the CPU). The window's
 # program says its version. Mirrors packaging/linux/smoke.sh.
@@ -21,8 +22,12 @@ function Check([string] $what) {
 $work = Join-Path ([IO.Path]::GetTempPath()) "helios-smoke-$PID"
 New-Item -ItemType Directory -Force -Path $work | Out-Null
 try {
-  Expand-Archive -Path $Zip -DestinationPath $work
-  $bin = (Get-ChildItem -Directory (Join-Path $work 'helios-*')).FullName
+  if (Test-Path -PathType Container $Zip) {
+    $bin = (Resolve-Path $Zip).Path
+  } else {
+    Expand-Archive -Path $Zip -DestinationPath $work
+    $bin = (Get-ChildItem -Directory (Join-Path $work 'helios-*')).FullName
+  }
   $helios = Join-Path $bin 'helios.exe'
 
   Write-Output '== files'

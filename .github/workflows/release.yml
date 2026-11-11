@@ -134,7 +134,8 @@ jobs:
           "$app" helios --version | tee cli.txt
           grep -q '^helios [0-9]' cli.txt
 
-  # The same programs for Windows x86_64 (MSVC), zipped with the licences.
+  # The same programs for Windows x86_64 (MSVC), zipped with the licences,
+  # and a per-user installer of the same folder (Inno Setup).
   build-windows:
     runs-on: windows-latest
     outputs:
@@ -162,6 +163,14 @@ jobs:
         run: |
           cargo build --release --locked \
             -p helios-node -p helios-gui -p helios-plugin-darktable-library
+      # Inno Setup 6, the installer's compiler, unless the image has it.
+      - name: Inno Setup
+        shell: pwsh
+        run: |
+          $found = (Get-Command ISCC.exe -ErrorAction SilentlyContinue) -or
+            (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")
+          if ($found) { Write-Output 'Inno Setup is installed' }
+          else { choco install innosetup --no-progress -y; if ($LASTEXITCODE -ne 0) { exit 1 } }
       - name: package
         shell: pwsh
         run: ./packaging/windows/release.ps1 "${{ steps.version.outputs.version }}" target/release dist
@@ -171,9 +180,10 @@ jobs:
           path: dist/
           if-no-files-found: error
 
-  # The zip as a user gets it, on a Windows runner (no GPU): the command
-  # line imports a picture and exports it on the CPU, both programs say
-  # their version.
+  # The zip and the installer as a user gets them, on a Windows runner (no
+  # GPU): the command line imports a picture and exports it on the CPU,
+  # both programs say their version; the installer installs per user,
+  # the same runs from the installed folder, and it uninstalls cleanly.
   smoke-windows:
     needs: build-windows
     runs-on: windows-latest
@@ -197,6 +207,11 @@ jobs:
         run: |
           ./packaging/windows/smoke.ps1 "dist/helios-$env:VERSION-windows-x86_64.zip" `
             crates/helios-plugin/tests/fixtures/rated-photos/a.jpg
+      - name: installer, install, command line, uninstall
+        shell: pwsh
+        run: |
+          ./packaging/windows/smoke-installer.ps1 "dist/helios-$env:VERSION-windows-x86_64-setup.exe" `
+            crates/helios-plugin/tests/fixtures/rated-photos/a.jpg
 
   publish:
     needs: [build-linux, smoke-linux, build-windows, smoke-windows]
@@ -219,6 +234,7 @@ jobs:
       - name: checksums
         run: |
           mv dist-windows/helios-"$VERSION"-windows-x86_64.zip dist/
+          mv dist-windows/helios-"$VERSION"-windows-x86_64-setup.exe dist/
           cat dist-windows/SHA256SUMS-windows >> dist/SHA256SUMS
           (cd dist && sha256sum -c SHA256SUMS)
       - name: GitHub Release
@@ -230,4 +246,5 @@ jobs:
             dist/helios-"$VERSION"-linux-x86_64.tar.gz \
             dist/Helios-"$VERSION"-x86_64.AppImage \
             dist/helios-"$VERSION"-windows-x86_64.zip \
+            dist/helios-"$VERSION"-windows-x86_64-setup.exe \
             dist/SHA256SUMS
