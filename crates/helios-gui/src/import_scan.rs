@@ -1,8 +1,13 @@
 //! What the import window's sources hold, read off the interface thread.
 //!
-//! - [`Scan`] walks one source (a card from its `DCIM`, a folder with its
-//!   subfolders) on a thread of its own, for the files Helios reads
-//!   (`IMAGE_EXTENSIONS`). It sends each file as it is listed, then each
+//! - [`Connectors`]: the import connectors of the registry
+//!   ([`helios_connect::registry`]), created once for the window: the card
+//!   connector given the cards as last polled, the folder connector the
+//!   folders the window keeps. The Sources column lists their sources.
+//! - [`Scan`] lists one source through its connector (a card from its
+//!   `DCIM`, a folder with its subfolders), page by page on a thread of
+//!   its own, for the files Helios reads (`IMAGE_EXTENSIONS`), each read
+//!   in place. It sends each file as it is listed, then each
 //!   one's glance (its smallest embedded preview at the cell's size and its
 //!   capture time, [`helios_load::glance_at`], never a raw decoded), read
 //!   on a few threads ([`glancers`]), the files the window wants first
@@ -30,7 +35,12 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 use chrono::{NaiveDate, NaiveDateTime, TimeZone};
 use egui::ColorImage;
 use helios_cache::{Counters, IMPORT_GLANCE, Scope, Service, Store, Tier, Usage};
+use helios_connect::{
+    Access, Cancel, Connector, ConnectorError, ConnectorServices, Cursor, Item, ItemRef, PAGE,
+    Settings, SourceRef,
+};
 use helios_core::ContentHash;
+use helios_storage::Card;
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
@@ -261,6 +271,113 @@ pub fn recorded_of<S: helios_vault::Store + 'static>(
             })
             .collect()
     })
+}
+
+/// Every item of a source, its pages listed one after the other.
+fn list_all(
+    connector: &dyn Connector,
+    source: &SourceRef,
+    cancel: &Cancel,
+) -> Result<Vec<Item>, ConnectorError> {
+    let mut items = Vec::new();
+    let mut from: Option<Cursor> = None;
+    loop {
+        let page = connector.list(source, from.as_ref(), PAGE, cancel)?;
+        items.extend(page.items);
+        match page.next {
+            Some(next) if !page.complete => from = Some(next),
+            _ => return Ok(items),
+        }
+    }
+}
+
+/// The import connectors of the registry, created once with what the
+/// window gives them: the cards as last polled (never a poll of its own
+/// on the interface thread) and the folders it keeps.
+pub struct Connectors {
+    /// By id, in the registry's order: cards, then folders.
+    by_id: Vec<(&'static str, Arc<dyn Connector>)>,
+    cards: Arc<Mutex<Vec<Card>>>,
+    places: Arc<Mutex<Vec<PathBuf>>>,
+}
+
+impl Default for Connectors {
+    fn default() -> Self {
+        let cards: Arc<Mutex<Vec<Card>>> = Arc::default();
+        let places: Arc<Mutex<Vec<PathBuf>>> = Arc::default();
+        let (c, p) = (cards.clone(), places.clone());
+        let services = ConnectorServices {
+            cards: Some(Arc::new(move || lock(&c).clone())),
+            places: Some(Arc::new(move || lock(&p).clone())),
+        };
+        let by_id = helios_connect::registry()
+            .into_iter()
+            .filter_map(
+                |(id, provider)| match provider.create(&Settings::Null, &services) {
+                    Ok(c) => Some((id, Arc::<dyn Connector>::from(c))),
+                    Err(e) => {
+                        log::warn!("import connector {id}: {e}");
+                        None
+                    }
+                },
+            )
+            .collect();
+        Self {
+            by_id,
+            cards,
+            places,
+        }
+    }
+}
+
+impl Connectors {
+    /// The cards mounted, as the window last polled them.
+    pub fn set_cards(&self, cards: &[Card]) {
+        *lock(&self.cards) = cards.to_vec();
+    }
+
+    /// The folders the window keeps (recent, favourites).
+    pub fn set_places(&self, places: Vec<PathBuf>) {
+        *lock(&self.places) = places;
+    }
+
+    /// Every connector's sources now, in the registry's order, each with
+    /// whether its connector detects them (cards) or was given them.
+    pub fn sources(&self) -> Vec<(SourceRef, bool)> {
+        self.by_id
+            .iter()
+            .flat_map(|(_, c)| {
+                let detect = c.describe().caps.detect;
+                c.sources(None)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(move |s| (s, detect))
+            })
+            .collect()
+    }
+
+    fn get(&self, id: &str) -> Option<Arc<dyn Connector>> {
+        self.by_id
+            .iter()
+            .find(|(i, _)| *i == id)
+            .map(|(_, c)| c.clone())
+    }
+
+    /// The connector that lists the source at `path` and the source it
+    /// is: a card's when a card is mounted there, else a folder's.
+    pub fn for_path(&self, path: &Path) -> Option<(Arc<dyn Connector>, SourceRef)> {
+        let card = lock(&self.cards).iter().find(|c| c.root == path).cloned();
+        match card {
+            Some(card) => Some((
+                self.get(helios_connect::card::ID)?,
+                helios_connect::card::CardConnector::source(&card),
+            )),
+            None => Some((
+                self.get(helios_connect::folder::ID)?,
+                helios_connect::folder::Folder::source(path),
+            )),
+        }
+    }
 }
 
 /// What a scan sends.
@@ -561,6 +678,7 @@ impl Scan {
     /// recorded in the image map as `seen_by` (no file is read for it).
     /// The files in `wanted` are glanced at first.
     pub fn start(
+        (connector, listed_source): (Arc<dyn Connector>, SourceRef),
         source: PathBuf,
         known: Option<Known>,
         map: Option<(MapRecorder, &'static str)>,
@@ -577,23 +695,32 @@ impl Scan {
         let spawned = std::thread::Builder::new()
             .name("helios-import-scan".into())
             .spawn(move || {
-                let files = helios_library::import::files_of(&source).unwrap_or_default();
+                let cancel = Cancel::from_flag(stopped.clone());
+                let items = match list_all(connector.as_ref(), &listed_source, &cancel) {
+                    Ok(items) => items,
+                    Err(ConnectorError::Cancelled) => return,
+                    Err(e) => {
+                        log::debug!("import scan: {}: {e}", source.display());
+                        Vec::new()
+                    }
+                };
                 let prefilter = known.map(|k| Prefilter::of(k())).unwrap_or_default();
                 let mut recorder = map.and_then(|(make, seen_by)| make(seen_by));
-                let mut listed = Vec::with_capacity(files.len());
-                for path in files {
+                let mut listed = Vec::with_capacity(items.len());
+                for item in items {
                     if stopped.load(Ordering::Relaxed) {
                         return;
                     }
-                    let Ok(meta) = std::fs::metadata(&path) else {
+                    let at = ItemRef {
+                        source: listed_source.clone(),
+                        id: item.id,
+                    };
+                    // Read in place; a source fetched comes with fetching.
+                    let Access::InPlace(path) = connector.access(&at) else {
                         continue;
                     };
-                    let bytes = meta.len();
-                    let modified = meta
-                        .modified()
-                        .ok()
-                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                        .and_then(|d| i64::try_from(d.as_secs()).ok());
+                    let bytes = item.size.unwrap_or(0);
+                    let modified = item.modified;
                     let at = modified.and_then(|m| u64::try_from(m).ok());
                     let (known, partial) = prefilter.read_at(&path, bytes, at);
                     if let Some(r) = recorder.as_mut() {
@@ -1215,6 +1342,37 @@ mod tests {
         assert!(!filter.read_at(&path, 1_000, Some(43)).0);
         assert!(!filter.read_at(&path, 999, Some(42)).0);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_window_lists_cards_then_folders_from_the_registry_each_through_its_connector() {
+        let connectors = Connectors::default();
+        let card = Card {
+            label: "EOS_DIGITAL".into(),
+            root: PathBuf::from("/media/EOS_DIGITAL"),
+            capacity: Some(32_000_000_000),
+        };
+        connectors.set_cards(std::slice::from_ref(&card));
+        connectors.set_places(vec![PathBuf::from("/photos/trip")]);
+        let sources: Vec<_> = connectors
+            .sources()
+            .into_iter()
+            .map(|(s, detected)| (s.connector, s.label, detected))
+            .collect();
+        assert_eq!(
+            sources,
+            [
+                ("card".to_owned(), "EOS_DIGITAL".to_owned(), true),
+                ("folder".to_owned(), "trip".to_owned(), false),
+            ]
+        );
+        let (by, source) = connectors.for_path(&card.root).unwrap();
+        assert_eq!(
+            (by.describe().id.as_str(), source.capacity),
+            ("card", card.capacity)
+        );
+        let (by, _) = connectors.for_path(Path::new("/photos/trip")).unwrap();
+        assert_eq!(by.describe().id, "folder");
     }
 
     fn found(path: &str, known: bool, modified: i64) -> Found {

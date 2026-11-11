@@ -44,6 +44,8 @@ helios-cache.workspace = true
 # Workspace templates: the built-in ones, a workspace created from one.
 helios-template.workspace = true
 helios-vault.workspace = true
+# The import connectors: what the import window lists.
+helios-connect.workspace = true
 # The machine's volumes: the import window's cards.
 helios-storage.workspace = true
 helios-health.workspace = true

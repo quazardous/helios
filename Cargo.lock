@@ -2388,6 +2388,7 @@ dependencies = [
  "egui_kittest",
  "helios-cache",
  "helios-config",
+ "helios-connect",
  "helios-controls",
  "helios-core",
  "helios-decision",
@@ -2479,6 +2480,7 @@ version = "0.76.0"
 dependencies = [
  "blake3",
  "egui-pop-model",
+ "helios-connect",
  "helios-core",
  "helios-decision",
  "helios-export",
