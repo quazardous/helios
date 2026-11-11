@@ -275,6 +275,43 @@ pub fn status(
     }
 }
 
+/// What [`status`] measures against, as a vault query takes it
+/// (`helios_vault::Backups`): the volumes whose copies count, each with
+/// its drive, and the strategy's demands (none without a strategy). A
+/// photo's [`helios_vault::BackupState`] in the vault is then the
+/// Library's mark of its [`status`].
+pub fn rule(volumes: &[Volume], strategy: Option<&Strategy>) -> helios_vault::Backups {
+    helios_vault::Backups {
+        volumes: volumes
+            .iter()
+            .filter(|v| counts_on(v))
+            .map(|v| helios_vault::BackupVolume {
+                id: v.id.clone(),
+                drive: drive_of(v),
+                off_site: v.off_site,
+            })
+            .collect(),
+        copies: strategy.map_or(0, |s| s.copies),
+        off_site_required: strategy.is_some_and(|s| s.off_site_required),
+    }
+}
+
+/// The vault's backup state of a [`status`]: `none` without any copy,
+/// else `met`, else `unverified` while a copy waits for its check, else
+/// `short`.
+pub fn state_of(status: &BackupStatus) -> helios_vault::BackupState {
+    use helios_vault::BackupState;
+    if status.have == 0 && status.unverified == 0 {
+        BackupState::None
+    } else if status.met() {
+        BackupState::Met
+    } else if status.unverified > 0 {
+        BackupState::Unverified
+    } else {
+        BackupState::Short
+    }
+}
+
 /// Every image's status against the library strategy, from the vault (one
 /// read of its locations and verified copies).
 pub fn statuses<S: Store>(
@@ -426,6 +463,119 @@ mod tests {
             .iter()
             .map(|(v, r)| (copy_key(&VolumeId((*v).into()), Path::new(r)), 5))
             .collect()
+    }
+
+    /// The vault's backup filter (`docs/design/library.md`, L4) takes the
+    /// photos whose [`status`] marks them so, for every state: what the
+    /// Library's `backup:` words matched in the window, now in the query.
+    #[test]
+    fn the_vault_filter_takes_what_each_status_marks() {
+        use helios_vault::{BackupFilter, BackupState, Image, Query, parse_hash};
+        let library = disk("uuid:lib", &[Role::Library]);
+        let a = disk("uuid:a", &[Role::Backup]);
+        let b1 = Volume {
+            drive: Some("sdb".into()),
+            ..disk("uuid:b1", &[Role::Backup])
+        };
+        let b2 = Volume {
+            drive: Some("sdb".into()),
+            ..disk("uuid:b2", &[Role::Archive])
+        };
+        let far = Volume {
+            off_site: true,
+            ..disk("uuid:far", &[Role::Backup])
+        };
+        let weak = Volume {
+            identified_by: Identity::Weak,
+            ..disk("weak:w", &[Role::Backup])
+        };
+        let volumes = [library, a, b1, b2, far, weak];
+        let mut store = MemoryStore::default();
+        let ids: Vec<ImageId> = (1..=6u8)
+            .map(|n| {
+                let hash = parse_hash(&format!("{n:02x}").repeat(32)).unwrap();
+                let image = Image {
+                    id: ImageId(hash),
+                    size: 10,
+                    partial: hash,
+                };
+                store.add_to_library(&image).unwrap();
+                image.id
+            })
+            .collect();
+        // (image, volume, verified, presence)
+        let copies = [
+            (0, "uuid:a", true, Presence::Present),
+            (1, "uuid:b1", true, Presence::Present),
+            (1, "uuid:b2", false, Presence::Present),
+            (2, "uuid:a", false, Presence::Offline),
+            (4, "uuid:a", true, Presence::Present),
+            (4, "uuid:far", true, Presence::Offline),
+            (5, "weak:w", true, Presence::Present),
+            (5, "uuid:a", true, Presence::Missing),
+        ];
+        for (n, id) in ids.iter().enumerate() {
+            let rel = format!("2024/{n}.raf");
+            store
+                .put_location(id, &at("uuid:lib", &rel, Presence::Present))
+                .unwrap();
+        }
+        for (n, volume, _, presence) in copies {
+            let rel = format!("Helios Backup/{volume}/{n}.raf");
+            store
+                .put_location(&ids[n], &at(volume, &rel, presence))
+                .unwrap();
+        }
+        let vault = Vault::new(store);
+        for (n, volume, checked, _) in copies {
+            let rel = format!("Helios Backup/{volume}/{n}.raf");
+            if checked {
+                record_verified(
+                    &vault,
+                    &ids[n],
+                    &VolumeId(volume.into()),
+                    Path::new(&rel),
+                    5,
+                )
+                .unwrap();
+            }
+        }
+        for strategy in [
+            None,
+            Some(Strategy::default()),
+            Some(Strategy {
+                copies: 2,
+                off_site_required: true,
+                ..Strategy::default()
+            }),
+        ] {
+            let marks: BTreeMap<ImageId, BackupState> =
+                statuses(&vault, &volumes, strategy.as_ref())
+                    .unwrap()
+                    .into_iter()
+                    .map(|(id, (s, _))| (id, state_of(&s)))
+                    .collect();
+            let rule = rule(&volumes, strategy.as_ref());
+            for state in BackupState::ALL {
+                let query = Query {
+                    backup: Some(BackupFilter {
+                        rule: rule.clone(),
+                        states: vec![state],
+                    }),
+                    ..Query::default()
+                };
+                let cursor = vault.open_cursor(query).unwrap();
+                let got = vault.cursor_ids(cursor.id, 0, 99).unwrap();
+                let want: Vec<ImageId> = marks
+                    .iter()
+                    .filter(|(_, s)| **s == state)
+                    .map(|(id, _)| *id)
+                    .collect();
+                assert_eq!(got, want, "{strategy:?}: {state:?}");
+                let facets = vault.facets(&Query::default(), Some(&rule)).unwrap();
+                assert_eq!(facets.count("backup", state.name()), want.len() as u64);
+            }
+        }
     }
 
     #[test]
