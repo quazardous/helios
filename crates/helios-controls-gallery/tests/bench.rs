@@ -78,16 +78,25 @@ fn a_drag_from_the_shelf_adds_the_control_where_it_is_dropped() {
     let to = bench_middle(&h);
     drag(&mut h, from, to);
     assert_eq!(order(&h), ["exposure"]);
-    // A toggle dropped at the left of the exposure goes before it.
-    let from = h.get_by_label("Shelf: Preserve colours").rect().center();
+    // A generic toggle dropped at the left of the exposure goes before it,
+    // drawn live under its plain name, its set-up open to name it.
+    let from = h.get_by_label("Shelf: Toggle").rect().center();
     let exposure = h.get_by_role_and_label(Role::Slider, "Exposure").rect();
     drag(&mut h, from, exposure.left_center() + vec2(4.0, 0.0));
     assert_eq!(order(&h), ["toggle", "exposure"]);
     assert!(
-        h.query_by_role_and_label(Role::CheckBox, "Preserve colours")
+        h.query_by_role_and_label(Role::CheckBox, "Toggle")
             .is_some(),
         "drawn live"
     );
+    assert_eq!(
+        h.state().setup.as_ref().map(|d| d.key.as_str()),
+        Some("toggle"),
+        "its set-up opens"
+    );
+    h.get_by_label("Done").click();
+    h.run();
+    assert!(h.state().setup.is_none(), "Done closes the set-up");
 }
 
 #[test]

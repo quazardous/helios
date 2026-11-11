@@ -29,7 +29,9 @@ it.
 
 **Own repository** (2026-11-11): egui_hud and its demo moved out of the
 Helios workspace to <https://github.com/quazardous/egui_hud>, under MIT OR
-Apache-2.0; Helios depends on it by git, pinned to a commit.
+Apache-2.0; Helios depends on it by git, pinned to a commit. Since
+2026-11-11 it is on crates.io (0.1.0), as egui_fit is, and Helios takes
+both from there.
 
 **Slice 1 built** (2026-11-09): the `helios-controls` crate (model,
 registry and `controls.describe` output, the value flow with the vetoable

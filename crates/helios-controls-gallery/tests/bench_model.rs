@@ -209,15 +209,15 @@ fn a_change_goes_through_the_flow_and_undoes() {
         },
         render::Edit::Set {
             key: "toggle".into(),
-            to: Value::Bool(false),
+            to: Value::Bool(true),
             done: true,
         },
     ]);
     assert_eq!(b.readout("exposure"), "+0.70 EV");
-    assert_eq!(b.readout("toggle"), "off");
+    assert_eq!(b.readout("toggle"), "on");
     assert_eq!(b.store.undo_steps().len(), 2);
     assert!(b.undo());
-    assert_eq!(b.readout("toggle"), "on");
+    assert_eq!(b.readout("toggle"), "off");
     assert!(b.undo());
     assert_eq!(b.readout("exposure"), "0.00 EV");
     assert!(b.redo());

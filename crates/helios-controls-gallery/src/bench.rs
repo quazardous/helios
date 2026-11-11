@@ -6,7 +6,6 @@ use std::collections::BTreeMap;
 
 pub use egui_hud::bench::*;
 use egui_hud::context::{Rule, Tier};
-use egui_hud::value::{ParamDescriptor, ParamType, Value};
 use helios_controls::HeliosRegistry as _;
 use helios_controls::catalogue::{BLACK_LEVEL, EXPOSURE};
 
@@ -20,41 +19,58 @@ pub const SAMPLE: &str = "Sample";
 /// The tools the context bar offers (`ctl.tool`), none first.
 pub const TOOLS: [&str; 4] = ["", "gradient", "brush", "crop"];
 
-/// The sample parameters of the scenarios' bench: a develop card's black
-/// level and contrast, and a gradient mask's feather, angle and profile;
-/// each with its shelf group.
-fn sample_parameters() -> Vec<ShelfParam> {
-    let mut black = ParamDescriptor::float("Black level", -0.1, 0.1, 0.0);
-    black.step = 0.001;
-    black.coarse = 0.01;
-    black.precision = 3;
-    let contrast = ParamDescriptor::float("Contrast", -1.0, 1.0, 0.0);
-    let mut feather = ParamDescriptor::float("Feather", 0.0, 200.0, 20.0);
-    feather.unit = Some("px".into());
-    feather.step = 1.0;
-    feather.coarse = 10.0;
-    feather.precision = 0;
-    let mut angle = ParamDescriptor::float("Angle", -180.0, 180.0, 0.0);
-    angle.unit = Some("°".into());
-    angle.step = 1.0;
-    angle.coarse = 15.0;
-    angle.precision = 0;
-    let mut profile =
-        ParamDescriptor::new(ParamType::Choice, "Profile", Value::Choice("Linear".into()));
+/// The sample parameters of the scenarios' bench, as configured controls:
+/// a develop card's black level and contrast, and a gradient mask's
+/// feather, angle and profile; each with its shelf group.
+fn sample_parameters() -> Vec<Configured> {
+    let number = |label: &str, range, default: f64, step, unit: Option<&str>, precision| Settings {
+        range: Some(range),
+        default: Some(default.into()),
+        step,
+        unit: unit.map(str::to_owned),
+        precision,
+        ..Settings::named(label)
+    };
+    let mut profile = Settings::named("Profile");
     profile.choices = vec!["Linear".into(), "Smooth".into(), "Sigmoid".into()];
     [
-        ("black", SAMPLE_DEVELOP, black),
-        ("contrast", SAMPLE_DEVELOP, contrast),
-        ("feather", SAMPLE_MASK, feather),
-        ("angle", SAMPLE_MASK, angle),
-        ("profile", SAMPLE_MASK, profile),
+        (
+            "black",
+            SAMPLE_DEVELOP,
+            Generic::Number,
+            number("Black level", (-0.1, 0.1), 0.0, Some(0.001), None, Some(3)),
+        ),
+        (
+            "contrast",
+            SAMPLE_DEVELOP,
+            Generic::Number,
+            number("Contrast", (-1.0, 1.0), 0.0, None, None, None),
+        ),
+        (
+            "feather",
+            SAMPLE_MASK,
+            Generic::Number,
+            number(
+                "Feather",
+                (0.0, 200.0),
+                20.0,
+                Some(1.0),
+                Some("px"),
+                Some(0),
+            ),
+        ),
+        (
+            "angle",
+            SAMPLE_MASK,
+            Generic::Number,
+            number("Angle", (-180.0, 180.0), 0.0, Some(1.0), Some("°"), Some(0)),
+        ),
+        ("profile", SAMPLE_MASK, Generic::Choice, profile),
     ]
     .into_iter()
-    .map(|(name, group, descriptor)| ShelfParam {
-        name: name.into(),
-        group: group.into(),
-        hint: "Sample parameter of the scenarios".into(),
-        descriptor,
+    .map(|(name, group, generic, mut settings)| {
+        settings.line = "Sample parameter of the scenarios".into();
+        Configured::new(name, group, generic, settings)
     })
     .collect()
 }
@@ -120,7 +136,7 @@ pub fn kit() -> Kit {
             .into_iter()
             .map(|id| (id.to_owned(), "Tone".to_owned()))
             .collect(),
-        parameters: sample_parameters(),
+        configured: sample_parameters(),
         implicit: true,
         presets: vec![sample()],
         tools: TOOLS.iter().map(|t| (*t).to_owned()).collect(),

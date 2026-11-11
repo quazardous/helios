@@ -65,13 +65,7 @@ multiple-versions = "warn"
 wildcards = "allow"
 
 [sources]
-# crates.io, and egui-pop, egui_fit and egui_hud from their repositories: Helios
-# pins a commit of each until it is published on crates.io.
+# crates.io only: egui-pop, egui_fit and egui_hud are published there.
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
-allow-git = [
-    "https://github.com/quazardous/egui-pop",
-    "https://github.com/quazardous/egui_fit",
-    "https://github.com/quazardous/egui_hud",
-]
