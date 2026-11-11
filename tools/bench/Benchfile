@@ -396,7 +396,9 @@ timeout = "1h"
 # first crate that fails): `crate=` one crate, else the workspace. Sent by
 # `bench-remote` before each job; it warms the branch's target the job uses
 [jobs.check]
-about = "clippy -D warnings (which checks too) on a crate or the workspace, with its tests: a compile error or a lint stops here, before any test job; clippy never runs on the developer's machine"
+# Clippy (which checks too) runs here, never on the developer's machine:
+# a compile error or a lint stops a branch before any of its test jobs.
+about = "clippy -D warnings on a crate or the workspace with its tests, before any test job"
 checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 4
 memory = "4g"
@@ -410,7 +412,7 @@ timeout = "20m"
 # the same for egui-pop's branch (`egui_pop=`), in the target its test
 # jobs use
 [jobs.egui-pop-check]
-about = "egui-pop: clippy -D warnings (which checks too) on a crate or the workspace, with its tests, before its test jobs"
+about = "egui-pop: clippy -D warnings on a crate or the workspace with its tests, before its test jobs"
 checkouts = ["egui-pop"]
 cores = 4
 memory = "4g"
