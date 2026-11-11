@@ -48,9 +48,13 @@ jobs:
           echo "VKDT_SRC=$PWD" >> "$GITHUB_ENV"
       # No GPU in CI: lavapipe, Mesa's software Vulkan, runs the GPU
       # backend's tests against the CPU reference. Ubuntu's archive first,
-      # a GitHub-hosted Mesa build when the archive is down.
+      # a GitHub-hosted Mesa build when the archive is down, or at once when
+      # the repository variable UBUNTU_ARCHIVE_DOWN is `true` (docs/bench.md,
+      # "When Ubuntu's archive is down").
       - name: software Vulkan
         uses: ./.github/actions/software-vulkan
+        with:
+          apt: ${{ vars.UBUNTU_ARCHIVE_DOWN != 'true' }}
       # One process per test, a JUnit report, slow tests named
       # (.config/nextest.toml); nextest does not run doctests.
       - run: cargo nextest run --workspace --profile ci
@@ -118,6 +122,8 @@ jobs:
       # software Vulkan as the test job, so they see the same machine.
       - name: software Vulkan
         uses: ./.github/actions/software-vulkan
+        with:
+          apt: ${{ vars.UBUNTU_ARCHIVE_DOWN != 'true' }}
       # The test job saves this cache; this job only reads it.
       - uses: Swatinem/rust-cache@v2
         with:

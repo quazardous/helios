@@ -476,6 +476,41 @@ What a run depends on, so two runs can be compared:
   seen failing once without a cause is a bug to file, not a retry to add:
   the `ci` profile retries nothing.
 
+## When Ubuntu's archive is down
+
+GitHub's Ubuntu runners install packages from Ubuntu's archive
+(`archive.ubuntu.com`, its Azure mirror, `security.ubuntu.com`). When
+Canonical has an outage, every `apt-get` step fails with "Temporary failure
+resolving" or "Unable to fetch some archives", through no fault of the
+code. One repository variable, `UBUNTU_ARCHIVE_DOWN`, tells the workflows:
+
+```bash
+gh variable set UBUNTU_ARCHIVE_DOWN --body true -R quazardous/helios   # on
+gh variable delete UBUNTU_ARCHIVE_DOWN -R quazardous/helios            # off
+```
+
+While it is `true`, what can only work with the archive is skipped, not
+failed, and each run says so with a warning and a line in its summary;
+what has a fallback without the archive uses it at once:
+
+| Workflow | Job or step | With the switch on |
+|----------|-------------|--------------------|
+| ci | `test`, `commits`: software Vulkan | no apt: lavapipe from the pinned Mesa build of gfx-rs/ci-build (checked by SHA-256) |
+| ci | `lint`: shellcheck | unchanged: the runner image's own shellcheck, apt only if it is missing |
+| release | `build-flatpak`, `smoke-flatpak` | skipped; the Release is published without the Flatpak bundle |
+| parity | `darktable` | skipped |
+
+Unset or `false`, the workflows behave as they always did. Skipped jobs
+count as passed in a run's result, so a green `ci` on `next` still
+promotes `main`.
+
+What the skipped jobs covered runs on the bench box meanwhile, which
+needs no Ubuntu archive: the `flatpak` job builds and smoke-tests the
+bundle (attach it to the Release with `gh release upload`), `mask-parity`
+and `raw-parity` compare with darktable, and if the fallback Mesa build
+ever fails too, `test-affected` (or `test`) runs the suite on lavapipe.
+Delete the variable once `apt-get update` works on the runners again.
+
 ## Rules for agents (a shared box)
 
 Several agents share one box, one queue and one disk quota. A job that hangs

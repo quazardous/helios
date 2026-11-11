@@ -9,7 +9,21 @@ on:
   workflow_dispatch:
 
 jobs:
+  # The repository variable UBUNTU_ARCHIVE_DOWN set to `true` (Ubuntu's
+  # archive unreachable from the runners, docs/bench.md, "When Ubuntu's
+  # archive is down") skips the darktable job, which needs apt; this job
+  # says so in the run.
+  ubuntu-archive-down:
+    if: vars.UBUNTU_ARCHIVE_DOWN == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          msg="UBUNTU_ARCHIVE_DOWN is set: the darktable parity job (apt) is skipped; run mask-parity or raw-parity on the bench box"
+          echo "::warning::$msg"
+          echo "$msg" >> "$GITHUB_STEP_SUMMARY"
+
   darktable:
+    if: vars.UBUNTU_ARCHIVE_DOWN != 'true'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
