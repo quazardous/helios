@@ -1287,6 +1287,14 @@ gui-workshops-design-waiting = En attente de votre agent : il lit helios_worksho
 
 gui-workshops-designed = Conçu : { $workshop }
 
+gui-workshops-session = Session enregistrée : { $steps } étapes
+
+gui-workshops-session-keep = Garder
+
+gui-workshops-session-keep-hint = Garder l’enregistrement de cette session : qui a réglé quoi, pourquoi, et ce que mesurait l’image. Non gardée, elle est abandonnée à sa fin
+
+gui-workshops-session-kept = Gardée
+
 gui-workshops-send-proxy = Laisser l’agent voir un petit aperçu de la photo (cette session seulement)
 
 gui-library-import-photos = Importer des photos…

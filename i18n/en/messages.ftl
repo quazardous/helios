@@ -1401,6 +1401,14 @@ gui-workshops-save-verb = Save as { $file }
 
 gui-workshops-send-proxy = Let the agent see a small preview of the photo (this session only)
 
+gui-workshops-session = Session recorded: { $steps } steps
+
+gui-workshops-session-keep = Keep
+
+gui-workshops-session-keep-hint = Keep this session's record: who set what, why, and what the image measured. Not kept, it is dropped when the session ends
+
+gui-workshops-session-kept = Kept
+
 gui-workshops-shipped = Shipped with Helios
 
 gui-workshops-unit-percent = %

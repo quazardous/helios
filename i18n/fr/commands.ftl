@@ -594,6 +594,9 @@ command-workshop-save =
 command-workshop-send-proxy =
     .title = Expérimental : laisser un agent voir un petit aperçu de l’image ouverte, pour cette session (`on`) ; seul l’utilisateur peut l’activer
 
+command-workshop-session =
+    .title = Expérimental : l’enregistrement de la session d’atelier : chaque étape du pilotage, son auteur, son but et les mesures des zones (`action` : read, keep (le vôtre seulement : une session non gardée est abandonnée à sa fin) ou close)
+
 command-workshop-suggest =
     .title = Expérimental : trouver des ateliers d’après ce que vous voulez, classés par nom, mots-clés puis intention (`intent`)
 
