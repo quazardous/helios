@@ -1,7 +1,9 @@
 # Replicas and sync: a laptop and a workstation that never lose anything
 
-Status: **proposed** (2026-11-11). Each decision below carries a default;
-the questions in section 9 are not decided until the owner settles them.
+Status: **decided** (2026-11-11). The owner took every default and every
+recommended answer of section 9 (Q1: the folder mailbox first, then the
+network link). Building is parked until sync is needed; the slices of
+section 8 are the plan when it is.
 The inventory describes the code on `next` as of that date.
 
 ROADMAP 2.3 took git's *model* for the library (2026-10-10): content

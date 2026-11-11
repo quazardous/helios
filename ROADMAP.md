@@ -494,8 +494,8 @@ integrity. Raws are large immutable blobs stored git-annex style (hash
 pointer, separate object store), never in the history. Edits are small text
 (named parameters) and fit a version DAG; ratings, labels and tags merge best
 per field (CRDT-like), which requires field-level writes (section 2.8,
-rule 1). Not decided.
-(2026-11-11, proposed) The design note
+rule 1). Decided 2026-11-11, see below.
+(2026-11-11, decided by the owner) The design note
 [docs/design/sync.md](docs/design/sync.md) turns this model into
 decisions, each with a default: a replica is a full vault plus partial
 objects (previews everywhere); replicas exchange a change log per
@@ -508,9 +508,12 @@ versions never merged); pins say which originals a machine keeps; backup
 becomes continuous with scrubbing; reclaim never removes a copy without
 live confirmation of the others. First target: a laptop and a
 workstation, both offline at times, reconcile without losing anything.
-Its open questions (transport, concurrent ratings, whether another
-computer's copy counts as a backup, the laptop's default placement,
-developing without the original, tombstone retention) are not decided.
+Its questions are settled with the recommended answers: the shared-folder
+transport first, then the network link; last writer wins for a single
+value, the other kept in the history; only backup and archive roles count
+as backups; the laptop keeps its imports until safe, its pins and the
+previews; no developing without the original in v1; 30 days before
+reclaim. Building is parked until sync is needed.
 
 (2026-10-11) **Photos are not code.** No semantic merge: two concurrent edits
 simply coexist as two versions, and the user keeps one or both.
