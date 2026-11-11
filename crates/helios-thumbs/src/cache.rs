@@ -311,6 +311,21 @@ impl ThumbCache {
         self.get_marked(key, size).map(|(rgb, _)| rgb)
     }
 
+    /// [`ThumbCache::get`] for the interface's frame: never waits (none
+    /// while the folder is being listed), and only an entry stored by this
+    /// reader ([`READER`]); an older one is left to the pool, which checks
+    /// its picture's orientation.
+    pub fn try_get(&self, key: &Key, size: u32) -> Option<Rgb8> {
+        {
+            let index = self.index.lock().expect("the cache's index");
+            if index.listing != Listing::Done || !index.entries.contains(&key.file(size)) {
+                return None;
+            }
+        }
+        let (rgb, current) = self.get_marked(key, size)?;
+        current.then_some(rgb)
+    }
+
     /// [`ThumbCache::get`], and whether the entry was stored by this
     /// reader ([`READER`]): one stored before was read unturned (a
     /// portrait picture's sideways).

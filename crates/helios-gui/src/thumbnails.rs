@@ -46,6 +46,7 @@ pub fn start(
     warn: impl Fn(&str) + Send + Sync + 'static,
 ) -> Loader {
     let sink = shell.library_thumbnails();
+    let cache_for_frames = cache.clone();
     let loader = Loader::start(
         cache,
         helios_thumbs::workers(),
@@ -60,6 +61,9 @@ pub fn start(
         },
     );
     let mut library = shell.library_mut();
+    // The cells drawn without a thumbnail are read from the cache on the
+    // frame that drew them; the pool reads the rest.
+    library.set_thumb_cache(cache_for_frames);
     let paths: std::collections::HashMap<&str, &PathBuf> =
         files.iter().map(|(id, p)| (id.as_str(), p)).collect();
     let jobs: Vec<Job> = library

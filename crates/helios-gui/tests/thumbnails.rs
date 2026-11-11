@@ -349,3 +349,109 @@ fn the_loupe_shows_the_large_entry_until_its_render_is_complete() {
     drop(loader);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A cache holding a 256 px entry for each of `n` images (ids `0000…`).
+fn warm_cache(dir: &Path, n: usize) -> (Arc<ThumbCache>, Vec<Entry>) {
+    let cache = Arc::new(ThumbCache::open(dir, 1 << 30).unwrap());
+    let entries = (0..n)
+        .map(|i| {
+            let shade = (i * 37 % 200) as u8 + 20;
+            let rgb = helios_thumbs::Rgb8 {
+                width: SMALL,
+                height: 170,
+                pixels: (0..SMALL * 170 * 3)
+                    .map(|p| shade.wrapping_add((p % 251) as u8 / 4))
+                    .collect(),
+            };
+            let id = format!("{i:016x}");
+            cache.put(&Key::preview(id.clone()), SMALL, &rgb).unwrap();
+            Entry {
+                id,
+                name: format!("IMG_{i:04}.CR2"),
+                ..Entry::default()
+            }
+        })
+        .collect();
+    (cache, entries)
+}
+
+/// Steps the window until every cell in view has its thumbnail: the frames
+/// it took after the one that first drew cells.
+fn frames_to_fill(h: &mut egui_kittest::Harness<'_, Shell>) -> (usize, usize) {
+    h.state_mut()
+        .run(
+            "helios.vault.focus",
+            serde_json::Value::Null,
+            helios_shell::commands::Origin::User,
+        )
+        .expect("the Library panel");
+    let mut first = None;
+    for frame in 0..200 {
+        h.step();
+        let s = h.state();
+        let lib = s.library();
+        let in_view = lib.in_view();
+        if in_view.is_empty() {
+            continue;
+        }
+        let first = *first.get_or_insert(frame);
+        if in_view.iter().all(|id| lib.has_thumbnail(id)) {
+            assert!(
+                in_view.iter().all(|id| !lib.has_placeholder(id)),
+                "cached pictures, not placeholders"
+            );
+            return (frame - first, in_view.len());
+        }
+    }
+    panic!("the cells in view never all had their thumbnail");
+}
+
+/// A warm cache shows the cells in view at once: read on the frame that
+/// drew them, not after the pool's queue (the owner saw each cell drawn
+/// with its name alone, its picture coming later, one after another).
+#[test]
+fn a_warm_cache_fills_the_cells_in_view_on_the_next_frame() {
+    let dir = scratch("warm-frame");
+    let (cache, entries) = warm_cache(&dir.join("thumbs"), 400);
+    let mut shell = Shell::new(helios_panels(), None);
+    shell.set_library(entries);
+    // No pool: only the frame's read can fill them. Budget wide enough for
+    // a screen on a loaded machine: this checks the path, not its speed.
+    shell.library_mut().set_thumb_cache(Some(cache));
+    shell.library_mut().set_warm_budget(Duration::from_secs(10));
+    let mut h = headless::harness(shell, vec2(1920.0, 1080.0));
+    let (frames, cells) = frames_to_fill(&mut h);
+    assert!(cells >= 20, "a screen of cells ({cells})");
+    assert!(
+        frames <= 1,
+        "{cells} cells filled {frames} frames after drawn"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The same through the desktop's path (`thumbnails::start`: the cache
+/// opened unlisted, listed by the pool, the pool running), with the
+/// frame's default budget: a screen within three frames of being drawn.
+#[test]
+fn a_warm_cache_fills_a_screen_within_three_frames_with_the_pool() {
+    let dir = scratch("warm-pool");
+    let (_, entries) = warm_cache(&dir.join("thumbs"), 2000);
+    let cache = Arc::new(ThumbCache::open_unlisted(&dir.join("thumbs"), 1 << 30).unwrap());
+    let mut shell = Shell::new(helios_panels(), None);
+    shell.set_library(entries);
+    let loader = helios_gui::thumbnails::start(&shell, Some(cache.clone()), &[], |_| {});
+    // The desktop lists the cache while its window opens.
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while !cache.listed() {
+        assert!(Instant::now() < deadline, "listed within 30 s");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let mut h = headless::harness(shell, vec2(1920.0, 1080.0));
+    let (frames, cells) = frames_to_fill(&mut h);
+    assert!(
+        frames <= 3,
+        "{cells} cells filled {frames} frames after drawn"
+    );
+    drop(loader);
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -81,6 +81,67 @@ fn grid_keys() -> CullKeymap {
 
 pub const LABELS: [&str; 5] = ["red", "yellow", "green", "blue", "purple"];
 
+/// How long a frame may spend reading the thumbnail cache for the cells
+/// it drew without a texture: about a frame at 60 Hz. A 256 px entry
+/// decodes in about a millisecond, so a screen of cells is read in one or
+/// two frames.
+pub const WARM_FRAME_BUDGET: std::time::Duration = std::time::Duration::from_millis(12);
+
+/// Reads `ids` from `cache` on a few threads (never waiting for its
+/// folder's listing), each taking the next id until `budget` is spent:
+/// the thumbnails found, the ids the cache has no current entry for (for
+/// the pool), and those not reached, in order.
+pub fn read_cached(
+    cache: &helios_thumbs::ThumbCache,
+    ids: Vec<String>,
+    budget: std::time::Duration,
+) -> (Vec<(String, helios_thumbs::Rgb8)>, Vec<String>, Vec<String>) {
+    use std::sync::atomic::AtomicUsize;
+    if !cache.listed() {
+        // Its listing still runs on the pool's threads: the pool reads them.
+        return (Vec::new(), ids, Vec::new());
+    }
+    let deadline = std::time::Instant::now() + budget;
+    let next = AtomicUsize::new(0);
+    let threads = helios_thumbs::workers().min(ids.len());
+    let mut results: Vec<Option<Option<helios_thumbs::Rgb8>>> = Vec::new();
+    std::thread::scope(|scope| {
+        let work = || {
+            let mut got = Vec::new();
+            loop {
+                if std::time::Instant::now() >= deadline {
+                    break;
+                }
+                let i = next.fetch_add(1, Ordering::Relaxed);
+                let Some(id) = ids.get(i) else { break };
+                got.push((
+                    i,
+                    cache.try_get(&helios_thumbs::key_of(id), helios_thumbs::SMALL),
+                ));
+            }
+            got
+        };
+        let helpers: Vec<_> = (1..threads).map(|_| scope.spawn(work)).collect();
+        let mut all = work();
+        for h in helpers {
+            all.extend(h.join().unwrap_or_default());
+        }
+        results = (0..ids.len()).map(|_| None).collect();
+        for (i, r) in all {
+            results[i] = Some(r);
+        }
+    });
+    let (mut found, mut missed, mut left) = (Vec::new(), Vec::new(), Vec::new());
+    for (id, r) in ids.into_iter().zip(results) {
+        match r {
+            Some(Some(rgb)) => found.push((id, rgb)),
+            Some(None) => missed.push(id),
+            None => left.push(id),
+        }
+    }
+    (found, missed, left)
+}
+
 /// Where thumbnails are sent, by image id, from any thread: the first one
 /// after a frame wakes the window, so previews read while it is idle show
 /// without waiting for an input, and a burst of them costs one repaint.
@@ -636,6 +697,11 @@ pub struct Library {
     /// Told the thumbnails wanted (the cells in view without one, then a
     /// margin around them): the thumbnail pool reads those first.
     on_view: Option<Box<OnView>>,
+    /// The thumbnail cache, read on the interface's frame for the cells
+    /// drawn without a texture (see [`Library::set_thumb_cache`]).
+    warm: Option<Arc<helios_thumbs::ThumbCache>>,
+    /// How long a frame may spend reading the cache for those cells.
+    warm_budget: std::time::Duration,
     heads: Heads,
     /// Where each image's file is, by id: what a copy of images names.
     files: HashMap<String, PathBuf>,
@@ -703,6 +769,8 @@ impl Default for Library {
             placeholders: HashMap::new(),
             in_view: RefCell::default(),
             on_view: None,
+            warm: None,
+            warm_budget: WARM_FRAME_BUDGET,
             heads: Heads::default(),
             files: HashMap::new(),
             volumes: HashMap::new(),
@@ -1309,6 +1377,21 @@ impl Library {
     /// without a texture (one never received, or freed beyond the
     /// textures' budget), then a margin of a screen around them. The
     /// thumbnail pool reads those first, from its cache.
+    /// The thumbnail cache the cells drawn without a texture are read from
+    /// at once, on the frame that drew them (decoded on a few threads,
+    /// within [`WARM_FRAME_BUDGET`]): a cached thumbnail shows the next
+    /// frame, never after the pool's queue. Misses go to the pool
+    /// ([`Library::set_on_view`]).
+    pub fn set_thumb_cache(&mut self, cache: Option<Arc<helios_thumbs::ThumbCache>>) {
+        self.warm = cache;
+    }
+
+    /// How long a frame may spend reading the cache for the cells drawn
+    /// without a texture ([`WARM_FRAME_BUDGET`] by default).
+    pub fn set_warm_budget(&mut self, budget: std::time::Duration) {
+        self.warm_budget = budget;
+    }
+
     pub fn set_on_view(&mut self, on_view: impl Fn(&[String]) + 'static) {
         self.on_view = Some(Box::new(on_view));
         // A new pool: what the last one was asked is asked again.
@@ -1397,6 +1480,9 @@ impl Library {
     /// frees what the budget cannot hold.
     fn after_pass(&mut self, ctx: &egui::Context) {
         let mut wanted = self.textures.take_missing();
+        if let Some(cache) = self.warm.clone() {
+            wanted = self.read_warm(ctx, &cache, wanted);
+        }
         if self.view_changed.replace(false) {
             let margin = self.margin();
             wanted.extend(self.textures.ask(margin));
@@ -1407,6 +1493,36 @@ impl Library {
             on_view(&wanted);
         }
         self.textures.evict(ctx.cumulative_pass_nr());
+    }
+
+    /// Reads the cells drawn without a texture from the cache, on a few
+    /// threads, until the frame's budget is spent: each found becomes its
+    /// texture now; those not reached are asked again on the next frame
+    /// (a repaint is requested). The misses are returned, for the pool.
+    fn read_warm(
+        &mut self,
+        ctx: &egui::Context,
+        cache: &helios_thumbs::ThumbCache,
+        ids: Vec<String>,
+    ) -> Vec<String> {
+        if ids.is_empty() {
+            return ids;
+        }
+        let (found, missed, left) = read_cached(cache, ids, self.warm_budget);
+        let pass = ctx.cumulative_pass_nr();
+        for (id, rgb) in found {
+            let texture = ctx.load_texture(
+                format!("helios.library.{id}"),
+                rgb_image(&rgb),
+                egui::TextureOptions::LINEAR,
+            );
+            self.textures.insert(id, texture, false, pass);
+        }
+        for id in &left {
+            self.textures.dropped(id);
+        }
+        ctx.request_repaint();
+        missed
     }
 
     /// The images around the grid's cells in view, a screen's worth on
@@ -1944,6 +2060,12 @@ impl Library {
             let picture = match arrival {
                 Arrival::Linear(image) => thumbnail(&image),
                 Arrival::Srgb(rgb) => {
+                    if self.textures.contains(&id) {
+                        // Read from the cache on the frame that drew it
+                        // already: the pool's copy is the same picture.
+                        self.textures.dropped(&id);
+                        continue;
+                    }
                     if !self.textures.accepts(&id, bytes(rgb.width, rgb.height)) {
                         // Out of view, beyond the budget: read again from
                         // the cache when its cell comes in view.
