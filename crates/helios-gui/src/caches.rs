@@ -105,3 +105,22 @@ pub fn collector() -> FnCollector {
     )
     .snapshot(|_| Service::global().snapshot())
 }
+
+/// The render cache's budget in bytes from the resolved settings:
+/// `system.cache.budget` (MiB) when set, else `system.cache.share` of
+/// physical memory; `None` for no limit. Machine settings: the machine's
+/// layer, or `--set`.
+pub fn render_budget(settings: &crate::config::Settings) -> Option<usize> {
+    settings
+        .config()
+        .cache_budget(helios_cache::physical_memory())
+}
+
+/// Applies the cache settings to the desktop: the RAM tier's budget
+/// (`system.cache.budget` / `share`) to the cache service and to the
+/// engine the viewport, previews and exports render with.
+pub fn apply_settings(shell: &Shell, settings: &crate::config::Settings) {
+    let budget = render_budget(settings);
+    Service::global().set_budget(helios_cache::Tier::Ram, budget.map(|b| b as u64));
+    shell.viewport().engine().set_budget(budget);
+}

@@ -300,10 +300,11 @@ struct StandIn {
 
 impl Default for Viewport {
     fn default() -> Self {
-        let budget = helios_core::engine::memory_share(
-            helios_core::engine::DEFAULT_CACHE_SHARE,
-            helios_core::engine::physical_memory(),
-        );
+        // The RAM tier's budget, its default until the desktop applies
+        // its settings ([`crate::caches::apply_settings`]).
+        let budget = helios_cache::Service::global()
+            .budget(helios_cache::Tier::Ram)
+            .map(|b| b as usize);
         let engine = Arc::new(Engine::with_budget(Arc::new(Bus::new()), budget));
         let mut state = ViewportState::new();
         state.set_display_transform(Arc::new(HeliosDisplay));

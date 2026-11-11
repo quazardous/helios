@@ -1803,6 +1803,8 @@ fn main() -> Result<(), String> {
         .run_native("helios-gui", options, move |mut shell, cc| {
             start::mark("window open, application built (plugins, fonts)");
             shell.library_mut().set_texture_budget(texture_budget);
+            // The render cache's budget (`system.cache.budget` / `share`).
+            helios_gui::caches::apply_settings(&shell, &settings);
             helios_gui::config::install(
                 shell.app().handle(),
                 settings.clone(),

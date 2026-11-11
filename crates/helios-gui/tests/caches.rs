@@ -112,3 +112,36 @@ fn the_caches_page_lists_the_caches_with_their_actions() {
         assert!(text.contains(needle), "the manifest lacks {needle}");
     }
 }
+
+#[test]
+fn the_render_cache_setting_reaches_the_desktop_engine() {
+    use helios_gui::config::{Settings, Sources};
+    let shell = Shell::new(helios_panels(), None);
+    // A size set on the machine wins over the share.
+    let settings = Settings::resolve(&Sources {
+        global: Some("[system.cache]\nbudget = 512\nshare = 50\n".into()),
+        ..Sources::default()
+    });
+    assert_eq!(caches::render_budget(&settings), Some(512 << 20));
+    caches::apply_settings(&shell, &settings);
+    assert_eq!(shell.viewport().engine().budget(), Some(512 << 20));
+    assert_eq!(
+        helios_cache::Service::global().budget(helios_cache::Tier::Ram),
+        Some(512 << 20)
+    );
+    // A share alone: that share of the machine's memory.
+    let settings = Settings::resolve(&Sources {
+        global: Some("[system.cache]\nshare = 10\n".into()),
+        ..Sources::default()
+    });
+    let tenth = helios_cache::memory_share(10.0, helios_cache::physical_memory());
+    caches::apply_settings(&shell, &settings);
+    assert_eq!(shell.viewport().engine().budget(), tenth);
+    // A share of 0: no limit.
+    let settings = Settings::resolve(&Sources {
+        global: Some("[system.cache]\nshare = 0\n".into()),
+        ..Sources::default()
+    });
+    caches::apply_settings(&shell, &settings);
+    assert_eq!(shell.viewport().engine().budget(), None);
+}

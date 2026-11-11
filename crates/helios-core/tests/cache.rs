@@ -225,3 +225,67 @@ fn the_default_budget_is_a_share_of_memory() {
     assert_eq!(memory_share(DEFAULT_CACHE_SHARE, None), Some(2 << 30));
     const { assert!(DEFAULT_CACHE_SHARE > 0.0 && DEFAULT_CACHE_SHARE < 100.0) };
 }
+
+/// The bytes of the render cache the cache service counts, every engine.
+fn service_render_bytes() -> u64 {
+    helios_cache::Service::global()
+        .usage()
+        .iter()
+        .filter(|u| u.kind.id == helios_cache::RENDER_STEP.id)
+        .map(|u| u.bytes)
+        .sum()
+}
+
+#[test]
+fn the_cache_is_the_services_render_kind_takes_a_new_budget_and_is_cleared() {
+    let (g, copy) = network(Copy { gate: None });
+    let e = Engine::with_budget(Arc::new(Bus::new()), None);
+    for i in 0..8 {
+        e.render(&g, copy, "output", tile(i)).unwrap();
+    }
+    let held = || e.describe()["cache"]["bytes"].as_u64().unwrap();
+    assert_eq!(held(), 16 * TILE_BYTES as u64);
+    // Counted by the service (other tests' engines may add theirs).
+    assert!(service_render_bytes() >= held());
+    // A budget set later applies from the next render.
+    e.set_budget(Some(4 * TILE_BYTES));
+    assert_eq!(e.budget(), Some(4 * TILE_BYTES));
+    e.render(&g, copy, "output", tile(7)).unwrap();
+    assert!(held() <= 4 * TILE_BYTES as u64, "{} bytes", held());
+    // Clearing through the service frees it, and what is asked again is
+    // computed again.
+    assert!(helios_cache::Service::global().clear(Some("render.step")) >= held());
+    assert_eq!(held(), 0);
+    let before = e.counters();
+    e.render(&g, copy, "output", tile(7)).unwrap();
+    // The source region and the copy: both were cleared.
+    assert_eq!(e.counters().since(&before).computed, 2);
+    // Another kind's clear leaves it.
+    helios_cache::Service::global().clear(Some("thumb.256"));
+    assert_eq!(held(), 2 * TILE_BYTES as u64);
+}
+
+#[test]
+fn evicting_many_entries_walks_the_victims_only() {
+    // 20,000 one-pixel regions, then a budget of a tenth: before, each
+    // victim scanned every entry (quadratic, minutes); now one ordered walk.
+    let mut g = Graph::new();
+    let src = g.add_source(
+        "src",
+        Image::from_fn(Region::sized(20_000, 1), 1, |x, _, _| x as f32),
+    );
+    let e = Engine::with_budget(Arc::new(Bus::new()), None);
+    for x in 0..10_000 {
+        e.render(&g, src, "image", Region::new(x, 0, 1, 1)).unwrap();
+    }
+    let started = std::time::Instant::now();
+    e.set_budget(Some(1_000 * 4));
+    e.render(&g, src, "image", Region::new(19_999, 0, 1, 1))
+        .unwrap();
+    assert!(e.describe()["cache"]["bytes"].as_u64().unwrap() <= 4_000);
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(20),
+        "{:?}",
+        started.elapsed()
+    );
+}

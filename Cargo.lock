@@ -2265,6 +2265,7 @@ name = "helios-core"
 version = "0.75.0"
 dependencies = [
  "blake3",
+ "helios-cache",
  "serde",
  "serde_json",
 ]

@@ -67,36 +67,19 @@ use crate::module::{Context, ModuleRef};
 use crate::network::{Expansion, Network, Wire};
 use crate::params::Params;
 use crate::status::{Load, NodeState, NodeStatus, NodeType};
+use helios_cache::Lru;
 
 /// The source name the engine publishes events under.
 const SOURCE: &str = "engine";
 
+/// [`Engine::budget`]'s value for no limit.
+const NO_BUDGET: u64 = u64::MAX;
+
 /// The share of physical memory the render cache may use by default, in
-/// percent.
-pub const DEFAULT_CACHE_SHARE: f64 = 25.0;
+/// percent: the cache service's RAM tier default.
+pub const DEFAULT_CACHE_SHARE: f64 = helios_cache::DEFAULT_RAM_SHARE;
 
-/// The cache budget where physical memory is not known: 2 GiB.
-const UNKNOWN_MEMORY_BUDGET: usize = 2 << 30;
-
-/// This machine's physical memory in bytes, where it is known (Linux:
-/// `MemTotal` of `/proc/meminfo`).
-pub fn physical_memory() -> Option<u64> {
-    let text = std::fs::read_to_string("/proc/meminfo").ok()?;
-    let line = text.lines().find(|l| l.starts_with("MemTotal:"))?;
-    let kib: u64 = line.split_whitespace().nth(1)?.parse().ok()?;
-    Some(kib * 1024)
-}
-
-/// A cache budget of `share` percent of `memory` bytes (2 GiB when memory
-/// is not known); `None`, no limit, for a share of 0.
-pub fn memory_share(share: f64, memory: Option<u64>) -> Option<usize> {
-    if share <= 0.0 {
-        return None;
-    }
-    Some(memory.map_or(UNKNOWN_MEMORY_BUDGET, |m| {
-        (m as f64 * share.min(100.0) / 100.0) as usize
-    }))
-}
+pub use helios_cache::{memory_share, physical_memory};
 
 type Outputs = Result<Arc<Content>, Error>;
 
@@ -502,19 +485,37 @@ enum Found {
     Wider(Arc<Content>),
 }
 
-/// Computed content, by key, within an optional memory budget.
-#[derive(Default)]
+/// Computed content, by key, within an optional memory budget: the cache
+/// service's kind [`helios_cache::RENDER_STEP`] in the RAM tier.
 struct Cache {
     entries: HashMap<ContentHash, Entry>,
     /// Keys of the entries of each lineage, to find a wider region.
     lineages: HashMap<ContentHash, Vec<ContentHash>>,
-    /// Bytes held by ready entries.
-    bytes: usize,
-    /// Bumped on every use, to find the least recently used entry.
+    /// The ready entries counted (their bytes), in eviction order: the
+    /// least recently used first, so evicting never scans every entry.
+    order: Lru<ContentHash>,
+    /// Bumped on every use: the order's clock.
     tick: u64,
     /// Keys the renders running still need, with how many renders pin each.
     pins: HashMap<ContentHash, usize>,
     evictions: u64,
+    /// The kind's statistics in the shared scope.
+    stats: Arc<helios_cache::Counters>,
+}
+
+impl Default for Cache {
+    fn default() -> Self {
+        Cache {
+            entries: HashMap::new(),
+            lineages: HashMap::new(),
+            order: Lru::new(),
+            tick: 0,
+            pins: HashMap::new(),
+            evictions: 0,
+            stats: helios_cache::Service::global()
+                .counters(&helios_cache::Scope::Shared, &helios_cache::RENDER_STEP),
+        }
+    }
 }
 
 struct Entry {
@@ -523,7 +524,6 @@ struct Entry {
     region: Region,
     /// Bytes of its outputs, counted once they are ready.
     size: usize,
-    last_used: u64,
 }
 
 impl Cache {
@@ -533,14 +533,17 @@ impl Cache {
     fn find(&mut self, step: &Step) -> Found {
         self.tick += 1;
         let tick = self.tick;
-        if let Some(entry) = self.entries.get_mut(&step.key) {
-            entry.last_used = tick;
+        if let Some(entry) = self.entries.get(&step.key) {
+            self.order.touch(&step.key, tick);
+            helios_cache::Counters::add(&self.stats.hits, 1);
             return Found::Cell(entry.cell.clone());
         }
         if let Some((key, content)) = self.wider(step) {
-            self.entries.get_mut(&key).expect("listed").last_used = tick;
+            self.order.touch(&key, tick);
+            helios_cache::Counters::add(&self.stats.hits, 1);
             return Found::Wider(content);
         }
+        helios_cache::Counters::add(&self.stats.misses, 1);
         let cell: Arc<OnceLock<Outputs>> = Arc::default();
         self.entries.insert(
             step.key,
@@ -549,7 +552,6 @@ impl Cache {
                 lineage: step.lineage,
                 region: step.region,
                 size: 0,
-                last_used: tick,
             },
         );
         self.lineages
@@ -588,8 +590,15 @@ impl Cache {
         }
     }
 
+    /// The bytes ready entries hold.
+    fn bytes(&self) -> usize {
+        self.order.bytes() as usize
+    }
+
+    /// Takes an entry out, its bytes uncounted.
     fn remove(&mut self, key: ContentHash) -> Option<Entry> {
         let entry = self.entries.remove(&key)?;
+        self.order.remove(&key);
         if let Some(keys) = self.lineages.get_mut(&entry.lineage) {
             keys.retain(|k| *k != key);
             if keys.is_empty() {
@@ -603,41 +612,85 @@ impl Cache {
     /// is read back), then evicts the least recently used ready entries
     /// (never `keep`, never content still being computed, never content a
     /// render pinned) until the cache fits its budget.
+    ///
+    /// The order holds only ready entries with bytes, least recently used
+    /// first: eviction walks it once, skipping pinned keys.
     fn settle(&mut self, keep: Option<ContentHash>, budget: Option<usize>) {
         if let Some(keep) = keep
             && let Some(entry) = self.entries.get_mut(&keep)
             && let Some(Ok(content)) = entry.cell.get()
         {
             let size = content.bytes();
-            self.bytes = self.bytes - entry.size + size;
             entry.size = size;
+            if size > 0 && !self.order.resize(&keep, size as u64) {
+                self.order.insert(keep, size as u64, self.tick, 0);
+            } else if size == 0 {
+                self.order.remove(&keep);
+            }
         }
         let Some(budget) = budget else { return };
-        while self.bytes > budget {
-            let victim = self
-                .entries
-                .iter()
-                .filter(|(k, e)| {
-                    Some(**k) != keep
-                        && e.size > 0
-                        && e.cell.get().is_some()
-                        && !self.pins.contains_key(*k)
-                })
-                .min_by_key(|(_, e)| e.last_used)
-                .map(|(k, _)| *k);
-            let Some(key) = victim else { break };
-            let entry = self.remove(key).expect("victim exists");
-            self.bytes -= entry.size;
+        let pins = &self.pins;
+        let gone = self
+            .order
+            .evict(budget as u64, |k| Some(*k) == keep || pins.contains_key(k));
+        for (key, _) in gone {
+            self.remove(key);
             self.evictions += 1;
+            helios_cache::Counters::add(&self.stats.evictions, 1);
         }
+    }
+
+    /// Drops every ready entry no render pins: the bytes freed.
+    fn clear(&mut self) -> u64 {
+        let pins = &self.pins;
+        let gone = self.order.clear(|k| pins.contains_key(k));
+        let mut freed = 0;
+        for (key, bytes) in gone {
+            self.remove(key);
+            freed += bytes;
+            helios_cache::Counters::add(&self.stats.cleared, 1);
+        }
+        freed
+    }
+}
+
+/// An engine's cache as the cache service sees it.
+struct RenderStore(std::sync::Weak<Mutex<Cache>>);
+
+impl helios_cache::Store for RenderStore {
+    fn usage(&self) -> Vec<helios_cache::Usage> {
+        let Some(cache) = self.0.upgrade() else {
+            return Vec::new();
+        };
+        let cache = cache.lock().expect("engine cache lock");
+        vec![helios_cache::Usage {
+            scope: helios_cache::Scope::Shared,
+            kind: helios_cache::RENDER_STEP,
+            tier: helios_cache::Tier::Ram,
+            entries: cache.order.len() as u64,
+            bytes: cache.order.bytes(),
+            pinned: cache.pins.len() as u64,
+            budget: None,
+        }]
+    }
+
+    fn clear(&self, kind: Option<&str>) -> u64 {
+        if kind.is_some_and(|k| k != helios_cache::RENDER_STEP.id) {
+            return 0;
+        }
+        self.0
+            .upgrade()
+            .map_or(0, |c| c.lock().expect("engine cache lock").clear())
     }
 }
 
 pub struct Engine {
     bus: Arc<Bus>,
-    cache: Mutex<Cache>,
-    /// Bytes the cache may hold; `None` for no limit.
-    budget: Option<usize>,
+    cache: Arc<Mutex<Cache>>,
+    /// Bytes the cache may hold; [`NO_BUDGET`] for no limit.
+    budget: AtomicU64,
+    /// Keeps the engine's cache attached to the cache service.
+    _store: Arc<RenderStore>,
     requests: AtomicU64,
     computed: AtomicU64,
     source_reads: AtomicU64,
@@ -702,11 +755,21 @@ impl Engine {
 
     /// An engine whose cache stays within `budget` bytes (`None`: no limit).
     /// Content evicted is computed again when asked for.
+    ///
+    /// Its cache is attached to the process's cache service (kind
+    /// [`helios_cache::RENDER_STEP`]): counted by `cache.stats` and the
+    /// Caches page, cleared by "Clear caches".
     pub fn with_budget(bus: Arc<Bus>, budget: Option<usize>) -> Self {
+        let cache = Arc::new(Mutex::new(Cache::default()));
+        let store = Arc::new(RenderStore(Arc::downgrade(&cache)));
+        let weak: std::sync::Weak<dyn helios_cache::Store> =
+            Arc::downgrade(&store) as std::sync::Weak<dyn helios_cache::Store>;
+        helios_cache::Service::global().attach(weak);
         Self {
             bus,
-            cache: Mutex::new(Cache::default()),
-            budget,
+            cache,
+            budget: AtomicU64::new(budget.map_or(NO_BUDGET, |b| b as u64)),
+            _store: store,
             requests: AtomicU64::new(0),
             computed: AtomicU64::new(0),
             source_reads: AtomicU64::new(0),
@@ -724,6 +787,22 @@ impl Engine {
             gpu_off: Mutex::new(None),
             last_fallback: Mutex::new(None),
         }
+    }
+
+    /// The bytes the cache may hold; `None` for no limit.
+    pub fn budget(&self) -> Option<usize> {
+        match self.budget.load(Ordering::Relaxed) {
+            NO_BUDGET => None,
+            b => Some(b as usize),
+        }
+    }
+
+    /// Sets the bytes the cache may hold (`None`: no limit): what the
+    /// desktop does with `system.cache.budget` / `share` once its settings
+    /// are read. The cache settles within it after the next render.
+    pub fn set_budget(&self, budget: Option<usize>) {
+        self.budget
+            .store(budget.map_or(NO_BUDGET, |b| b as u64), Ordering::Relaxed);
     }
 
     /// Computes the steps whose module has a GPU variant on `accelerator`;
@@ -1006,10 +1085,10 @@ impl Engine {
                 for key in pins.readers.lock().expect("pins lock").keys() {
                     cache.unpin(*key);
                 }
-                cache.settle(None, self.budget);
+                cache.settle(None, self.budget());
                 CacheSettled {
-                    bytes: cache.bytes,
-                    budget: self.budget,
+                    bytes: cache.bytes(),
+                    budget: self.budget(),
                     entries: cache.entries.len(),
                     evicted: cache.evictions - evictions,
                 }
@@ -1082,9 +1161,7 @@ impl Engine {
             .map(|(k, _)| *k)
             .collect();
         for key in device {
-            if let Some(entry) = cache.remove(key) {
-                cache.bytes -= entry.size;
-            }
+            cache.remove(key);
         }
     }
 
@@ -1093,17 +1170,16 @@ impl Engine {
     fn evict_device(&self) -> bool {
         let mut cache = self.cache.lock().expect("engine cache lock");
         let victim = cache
-            .entries
-            .iter()
-            .filter(|(k, e)| {
-                matches!(e.cell.get(), Some(Ok(c)) if matches!(**c, Content::Device { .. }))
-                    && !cache.pins.contains_key(*k)
+            .order
+            .by_priority()
+            .find(|k| {
+                !cache.pins.contains_key(*k)
+                    && matches!(cache.entries[*k].cell.get(),
+                        Some(Ok(c)) if matches!(**c, Content::Device { .. }))
             })
-            .min_by_key(|(_, e)| e.last_used)
-            .map(|(k, _)| *k);
+            .copied();
         let Some(key) = victim else { return false };
-        let entry = cache.remove(key).expect("victim exists");
-        cache.bytes -= entry.size;
+        cache.remove(key);
         cache.evictions += 1;
         true
     }
@@ -1151,7 +1227,7 @@ impl Engine {
             for key in unpinned {
                 cache.unpin(key);
             }
-            cache.settle(None, self.budget);
+            cache.settle(None, self.budget());
         }
     }
 
@@ -1177,7 +1253,7 @@ impl Engine {
         self.cache
             .lock()
             .expect("engine cache lock")
-            .settle(Some(step.key), self.budget);
+            .settle(Some(step.key), self.budget());
         Ok(copy)
     }
 
@@ -1859,7 +1935,7 @@ impl Engine {
             self.cache
                 .lock()
                 .expect("engine cache lock")
-                .settle(Some(step.key), self.budget);
+                .settle(Some(step.key), self.budget());
         }
         self.release(step, pins);
         if outputs.as_ref().is_err_and(Error::is_transient) {
@@ -2061,7 +2137,7 @@ impl Describe for Engine {
         serde_json::json!({
             "cache": {
                 "entries": cache.entries.len(), "ready": ready,
-                "bytes": cache.bytes, "budget": self.budget, "evictions": cache.evictions,
+                "bytes": cache.bytes(), "budget": self.budget(), "evictions": cache.evictions,
                 "pinned": cache.pins.len(),
             },
             "counters": counters,
