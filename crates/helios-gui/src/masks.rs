@@ -10,6 +10,12 @@
 //!   dashed. A path point's control lines are painted under the
 //!   overlays (the viewport's `under_overlays` hook), the path being
 //!   drawn above them (`after_paint`).
+//! - **The handles of a circle and a gradient** are their cases' image
+//!   surface in `helios_controls::gizmo`: each handle names the
+//!   parameters it writes, its Shift snap, its reset and its wheel, and
+//!   its drag, reset and wheel turn go through the `controls.change` step
+//!   with the controls the panel's rows have. An ellipse's and a path's
+//!   handles are still written here, until their cases move there too.
 //! - **A drag** is one gesture of the value store: its Begin opens it,
 //!   each Update writes the parameters the handle moves (from the values
 //!   at the gesture's start), End closes it (one undo step), Cancel
@@ -33,6 +39,7 @@ use egui_pop::viewport::hooks::HandleMove;
 use egui_pop::viewport::overlay::{self, HIT_RADIUS, Handle, HandleKind, Overlay, Shape};
 use egui_pop::viewport::tokens::ViewportTokens;
 use egui_pop::viewport::{Cause, Mapping, Phase, Signal, Verdict, ViewChange};
+use helios_controls::gizmo::{self, Shift};
 use helios_core::{Graph, Message, ModuleRef, NodeId, Params, Value};
 use helios_module_masks::shape::{Outline, PathPoint, path_points, path_values};
 use helios_module_masks::{MaskCircle, MaskEllipse, MaskGradient, MaskPath};
@@ -62,10 +69,7 @@ pub const KINDS: [(&str, &str); 4] = [
     ("path", "mask_path"),
 ];
 
-/// A rotation snaps to steps of this many degrees with Shift held.
-pub const ANGLE_STEP: f64 = 15.0;
-/// With Ctrl held a handle moves this share of the pointer.
-pub const FINE: f64 = 0.1;
+pub use helios_controls::gizmo::{ANGLE_STEP, FINE};
 /// A gradient's rotation and feather handles sit at least this far
 /// along its line from the anchor, in points.
 const LINE_HANDLE: f64 = 80.0;
@@ -387,6 +391,15 @@ pub fn drag_writes(
     to: [f64; 2],
 ) -> Result<Vec<(String, Value)>, String> {
     let f = |v: f64| Value::Float(v);
+    if let Some(g) = gizmo::of_module(module) {
+        let h = g
+            .handle(handle)
+            .ok_or_else(|| format!("no handle `{handle}` on `{module}`"))?;
+        return Ok((h.apply)(start, to)
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), f(v)))
+            .collect());
+    }
     let c = centre_of(start);
     let d = sub(to, c);
     let w = |pairs: &[(&str, f64)]| {
@@ -427,8 +440,6 @@ pub fn drag_writes(
             vec![("points".into(), path_values(&points))]
         }
         (_, "centre") => w(&[("x", to[0]), ("y", to[1])]),
-        ("mask_circle", "radius") => w(&[("radius", len(d))]),
-        ("mask_circle", "feather") => w(&[("feather", (len(d) - start.float("radius")).max(0.0))]),
         ("mask_ellipse", "radius_x") => w(&[("radius_x", len(d)), ("rotation", degrees(d))]),
         ("mask_ellipse", "radius_y") => {
             w(&[("radius_y", len(d)), ("rotation", wrap(degrees(d) - 90.0))])
@@ -443,20 +454,13 @@ pub fn drag_writes(
             };
             w(&[("feather", feather.max(0.0))])
         }
-        ("mask_gradient", "rotation") => w(&[("rotation", degrees([d[0], -d[1]]))]),
-        ("mask_gradient", "feather") => {
-            let r = start.float("rotation").to_radians();
-            let n = [-r.sin(), -r.cos()];
-            w(&[("feather", 2.0 * (d[0] * n[0] + d[1] * n[1]).abs())])
-        }
         (m, h) => return Err(format!("no handle `{h}` on `{m}`")),
     })
 }
 
 /// A shape's centre or anchor (`x`, `y`; a path has none: the origin).
 fn centre_of(params: &Params) -> [f64; 2] {
-    let n = |k: &str| params.get(k).and_then(Value::as_f64).unwrap_or(0.0);
-    [n("x"), n("y")]
+    gizmo::centre_of(params)
 }
 
 /// A point on a cubic Bézier segment.
@@ -564,15 +568,8 @@ pub fn distance_to(points: &[[f64; 2]], closed: bool, m: &Mapping, p: Pos2) -> f
         .fold(f32::INFINITY, f32::min)
 }
 
-/// How a handle is held to its line by Shift.
-#[derive(Clone, Copy, Debug, PartialEq)]
-enum Constraint {
-    /// Its angle around this point, to [`ANGLE_STEP`].
-    Angle([f64; 2]),
-    /// Its move from where it started, to the axes and diagonals.
-    Line,
-    None,
-}
+/// How a handle is held by Shift, and the point an angle turns around.
+type Constraint = (Option<Shift>, [f64; 2]);
 
 /// What the `before_handle` and `before_view` hooks know, set before
 /// each frame.
@@ -609,13 +606,7 @@ struct Double {
 }
 
 /// What Shift does to a handle's drag.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ShiftSnap {
-    /// Turns it around a point to [`ANGLE_STEP`] steps.
-    Angle,
-    /// Holds its move to the axes and diagonals.
-    Axes,
-}
+pub type ShiftSnap = Shift;
 
 /// The gestures a handle takes, said in the status line while it is
 /// hovered: Ctrl moves any handle finely; the rest depend on the handle.
@@ -674,18 +665,82 @@ impl Gestures {
 }
 
 /// A drag under way.
-struct Drag {
-    gesture: GestureId,
-    node: String,
-    module: String,
-    handle: String,
-    start: Params,
+enum Drag {
+    /// A handle of a case declared with the controls.
+    Control(gizmo::Drag),
+    /// A handle written here (an ellipse's, a path's).
+    Hand {
+        gesture: GestureId,
+        node: String,
+        module: String,
+        handle: String,
+        start: Params,
+    },
+}
+
+impl Drag {
+    fn node(&self) -> &str {
+        match self {
+            Drag::Control(d) => d.node(),
+            Drag::Hand { node, .. } => node,
+        }
+    }
+
+    /// Ends it: one undo step (unless a `controls.change` hook vetoes a
+    /// control's).
+    fn end(self, store: &mut Store) {
+        match self {
+            Drag::Control(d) => {
+                let steps = crate::controls::steps()
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                d.commit(store, crate::controls::registry(), &steps);
+            }
+            Drag::Hand { gesture, .. } => store.end(gesture),
+        }
+    }
+
+    fn cancel(self, store: &mut Store) {
+        match self {
+            Drag::Control(d) => d.cancel(store),
+            Drag::Hand { gesture, .. } => {
+                store.cancel(gesture);
+            }
+        }
+    }
 }
 
 /// The wheel over a handle: one group while it turns.
-struct Wheel {
-    gesture: GestureId,
-    last: f64,
+enum Wheel {
+    /// Over a handle of a case declared with the controls.
+    Control {
+        turn: gizmo::Turn,
+        node: String,
+        handle: String,
+    },
+    /// Over a handle written here.
+    Hand { gesture: GestureId, last: f64 },
+}
+
+impl Wheel {
+    fn last(&self) -> f64 {
+        match self {
+            Wheel::Control { turn, .. } => turn.last,
+            Wheel::Hand { last, .. } => *last,
+        }
+    }
+
+    fn end(self, store: &mut Store) {
+        match self {
+            Wheel::Control { turn, .. } => {
+                let steps = crate::controls::steps()
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                turn.end(store, crate::controls::registry(), &steps);
+            }
+            Wheel::Hand { gesture, .. } => store.end(gesture),
+        }
+    }
 }
 
 /// What the viewport's mask editing keeps between frames: never values.
@@ -832,28 +887,15 @@ impl Masks {
         hooks.before_handle = Some(Box::new(move |mv: &HandleMove, _m: &Mapping| {
             let s = snap.borrow();
             let key = (mv.overlay.clone(), mv.handle);
-            let start = mv.start;
-            let mut to = mv.to;
-            if mv.modifiers.command {
-                to = add(start, scale(sub(to, start), FINE));
-            }
-            if mv.modifiers.shift {
-                to = match s.constraints.get(&key).copied().unwrap_or(Constraint::None) {
-                    Constraint::Angle(pivot) => {
-                        let d = sub(to, pivot);
-                        let a = (degrees(d) / ANGLE_STEP).round() * ANGLE_STEP;
-                        let r = len(d);
-                        add(pivot, [r * a.to_radians().cos(), r * a.to_radians().sin()])
-                    }
-                    Constraint::Line => {
-                        let d = sub(to, start);
-                        let a = (degrees(d) / 45.0).round() * 45.0;
-                        let u = [a.to_radians().cos(), a.to_radians().sin()];
-                        add(start, scale(u, d[0] * u[0] + d[1] * u[1]))
-                    }
-                    Constraint::None => to,
-                };
-            }
+            let (rule, pivot) = s.constraints.get(&key).copied().unwrap_or((None, mv.start));
+            let to = gizmo::snapped(
+                rule,
+                pivot,
+                mv.start,
+                mv.to,
+                mv.modifiers.shift,
+                mv.modifiers.command,
+            );
             if to == mv.to {
                 Verdict::Allow
             } else {
@@ -950,15 +992,15 @@ impl Masks {
                 o.handles.clear();
             }
             let centre = centre_of(&member.params);
+            let case = gizmo::of_module(&member.module);
             for h in &o.handles {
                 let name = &member.outline.handles[h.index as usize].name;
-                let c = match (member.module.as_str(), name.as_str()) {
-                    (_, "centre") => Constraint::Line,
-                    (_, n) if n.starts_with("corner.") => Constraint::Line,
-                    ("mask_ellipse", "radius_x" | "radius_y") | ("mask_gradient", "rotation") => {
-                        Constraint::Angle(centre)
-                    }
-                    ("mask_path", n) => {
+                let c: Constraint = match (&case, member.module.as_str(), name.as_str()) {
+                    (Some(g), _, n) => (g.handle(n).and_then(|s| s.shift), centre),
+                    (None, _, "centre") => (Some(Shift::Axes), centre),
+                    (None, _, n) if n.starts_with("corner.") => (Some(Shift::Axes), centre),
+                    (None, "mask_ellipse", "radius_x" | "radius_y") => (Some(Shift::Angle), centre),
+                    (None, "mask_path", n) => {
                         // A Bézier handle turns around its corner.
                         let i: usize = n
                             .split_once('.')
@@ -968,9 +1010,9 @@ impl Masks {
                             .outline
                             .handles
                             .get(3 * i)
-                            .map_or(Constraint::None, |c| Constraint::Angle(c.at))
+                            .map_or((None, centre), |c| (Some(Shift::Angle), c.at))
                     }
-                    _ => Constraint::None,
+                    _ => (None, centre),
                 };
                 snap.constraints.insert((o.id.clone(), h.index), c);
                 if member.module == "mask_path" && name.starts_with(['b', 'a']) {
@@ -988,11 +1030,18 @@ impl Masks {
                 let o = &self.overlays[i];
                 let member = self.members.iter().find(|mb| mb.node == o.id)?;
                 let name = &member.outline.handles.get(h.index as usize)?.name;
-                let shift = match snap.constraints.get(&(o.id.clone(), h.index)) {
-                    Some(Constraint::Angle(_)) => Some(ShiftSnap::Angle),
-                    Some(Constraint::Line) => Some(ShiftSnap::Axes),
-                    _ => None,
-                };
+                if let Some(g) = gizmo::of_module(&member.module) {
+                    let spec = g.handle(name)?;
+                    return Some(Gestures {
+                        shift: spec.shift,
+                        reset: spec.reset.is_some(),
+                        wheel: spec.wheel.is_some(),
+                    });
+                }
+                let shift = snap
+                    .constraints
+                    .get(&(o.id.clone(), h.index))
+                    .and_then(|c| c.0);
                 Some(Gestures::of(name, shift))
             }),
             _ => None,
@@ -1050,11 +1099,10 @@ impl Masks {
                 _ => {}
             }
         }
-        if let Some(w) = &self.wheel
-            && now - w.last > 0.5
+        if self.wheel.as_ref().is_some_and(|w| now - w.last() > 0.5)
+            && let Some(w) = self.wheel.take()
         {
-            store.end(w.gesture);
-            self.wheel = None;
+            w.end(store);
         }
     }
 
@@ -1071,13 +1119,18 @@ impl Masks {
                     return;
                 };
                 if let Some(d) = self.drag.take() {
-                    store.end(d.gesture);
+                    d.end(store);
                 }
                 if let Some((_, n)) = handle.split_once('.') {
                     put(store, POINT, Value::Int(n.parse().unwrap_or(-1)));
                 }
+                if let Some(g) = gizmo::of_module(&module) {
+                    self.drag = gizmo::Drag::begin(store, &g, node, &handle, start, Origin::User)
+                        .map(Drag::Control);
+                    return;
+                }
                 let label = format!("drag {node} {}", handle.split('.').next().unwrap_or(""));
-                self.drag = Some(Drag {
+                self.drag = Some(Drag::Hand {
                     gesture: store.begin_gesture(Origin::User, &label),
                     node: node.into(),
                     module,
@@ -1087,19 +1140,19 @@ impl Masks {
             }
             Phase::Update | Phase::End => {
                 if let Some(d) = &self.drag
-                    && d.node == node
+                    && d.node() == node
                 {
                     write_drag(d, at, store);
                 }
                 if phase == Phase::End
                     && let Some(d) = self.drag.take()
                 {
-                    store.end(d.gesture);
+                    d.end(store);
                 }
             }
             Phase::Cancel => {
                 if let Some(d) = self.drag.take() {
-                    store.cancel(d.gesture);
+                    d.cancel(store);
                 }
             }
             Phase::Once => {}
@@ -1112,6 +1165,14 @@ impl Masks {
         let Some((module, handle, params)) = self.handle_name(node, index) else {
             return;
         };
+        if let Some(g) = gizmo::of_module(&module) {
+            let steps = crate::controls::steps()
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let registry = crate::controls::registry();
+            gizmo::reset(store, registry, &steps, &g, node, &handle, Origin::User);
+            return;
+        }
         let writes = match handle.split_once('.') {
             Some(("corner", n)) => {
                 let Ok(n) = n.parse() else { return };
@@ -1126,7 +1187,6 @@ impl Masks {
                 _ => return,
             },
         };
-        let _ = module;
         let g = store.begin_group(Origin::User, &format!("reset {node} {handle}"));
         for (param, value) in writes {
             let _ = store.set(
@@ -1139,10 +1199,36 @@ impl Masks {
     /// The wheel over a handle adjusts its quantity: a size or a feather
     /// by a ratio, a rotation by degrees; one undo step while it turns.
     fn on_wheel(&mut self, node: &str, index: u32, delta: f32, store: &mut Store, now: f64) {
-        let Some((_, handle, params)) = self.handle_name(node, index) else {
+        let Some((module, handle, params)) = self.handle_name(node, index) else {
             return;
         };
         let k = f64::from(delta);
+        if let Some(g) = gizmo::of_module(&module) {
+            let Some(spec) = g.handle(&handle).copied() else {
+                return;
+            };
+            // A turn over another handle is a step of its own.
+            let same = matches!(&self.wheel, Some(Wheel::Control { node: n, handle: h, .. })
+                if n == node && *h == handle);
+            if !same && let Some(w) = self.wheel.take() {
+                w.end(store);
+            }
+            if self.wheel.is_none() {
+                let Some(turn) = gizmo::Turn::begin(store, &g, node, &handle, Origin::User, now)
+                else {
+                    return;
+                };
+                self.wheel = Some(Wheel::Control {
+                    turn,
+                    node: node.into(),
+                    handle: handle.clone(),
+                });
+            }
+            if let Some(Wheel::Control { turn, .. }) = &mut self.wheel {
+                turn.add(store, &spec, node, &params, k, now);
+            }
+            return;
+        }
         let (param, value) = match handle.as_str() {
             "radius" | "radius_x" | "radius_y" | "feather" => {
                 let p = handle.as_str();
@@ -1151,12 +1237,17 @@ impl Masks {
             "rotation" => ("rotation", wrap(params.float("rotation") + k * 0.1)),
             _ => return,
         };
-        let gesture = if let Some(w) = &mut self.wheel {
-            w.last = now;
-            w.gesture
+        if matches!(self.wheel, Some(Wheel::Control { .. }))
+            && let Some(w) = self.wheel.take()
+        {
+            w.end(store);
+        }
+        let gesture = if let Some(Wheel::Hand { gesture, last }) = &mut self.wheel {
+            *last = now;
+            *gesture
         } else {
             let g = store.begin_group(Origin::User, &format!("adjust {node} {handle}"));
-            self.wheel = Some(Wheel {
+            self.wheel = Some(Wheel::Hand {
                 gesture: g,
                 last: now,
             });
@@ -1243,12 +1334,26 @@ impl Masks {
 }
 
 fn write_drag(d: &Drag, at: [f64; 2], store: &mut Store) {
-    match drag_writes(&d.module, &d.handle, &d.start, at) {
+    let Drag::Hand {
+        gesture,
+        node,
+        module,
+        handle,
+        start,
+    } = d
+    else {
+        if let Drag::Control(d) = d {
+            // Refused only while another origin holds a parameter.
+            let _ = d.update(store, at);
+        }
+        return;
+    };
+    match drag_writes(module, handle, start, at) {
         Ok(writes) => {
             for (param, value) in writes {
                 let _ = store.set(
-                    Set::new(&node_path(&d.node, &param), Change::To(value), Origin::User)
-                        .gesture(d.gesture),
+                    Set::new(&node_path(node, &param), Change::To(value), Origin::User)
+                        .gesture(*gesture),
                 );
             }
         }

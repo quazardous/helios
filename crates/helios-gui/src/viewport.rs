@@ -745,6 +745,27 @@ impl Viewport {
             Command::Move { shape, handle, to } => {
                 let m = self.shape(store, shape.as_deref())?;
                 unlocked(store, &m.node)?;
+                // A case's handle: the drag its pointer makes, at once.
+                if let Some(g) = helios_controls::gizmo::of_module(&m.module) {
+                    let d = helios_controls::gizmo::Drag::begin(
+                        store,
+                        &g,
+                        &m.node,
+                        &handle,
+                        m.params.clone(),
+                        origin.clone(),
+                    )
+                    .ok_or_else(|| format!("no handle `{handle}` on `{}`", m.module))?;
+                    if let Err(e) = d.update(store, to) {
+                        d.cancel(store);
+                        return Err(e);
+                    }
+                    let steps = crate::controls::steps()
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    let kept = d.commit(store, crate::controls::registry(), &steps);
+                    return Ok(json!({ "vetoed": !kept }));
+                }
                 let writes = masks::drag_writes(&m.module, &handle, &m.params, to)?;
                 let label = format!("drag {} {}", m.node, handle.split('.').next().unwrap_or(""));
                 Self::write_step(store, &label, &origin, &m.node, writes)?;
