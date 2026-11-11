@@ -1,8 +1,9 @@
 # Import connectors: sources beyond folders and cards
 
-Status: design study (2026-11-11), **not decided**. Documentation only;
-nothing here is built. Choices for the owner are in section 10, each
-with options A, B, C and a recommendation.
+Status: design study (2026-11-11), **decided** (2026-11-11): the owner
+accepted every recommendation, C1 to C19 (section 10). Slice S1 (the
+connector trait and registry, folders and cards behind it) is the first
+built.
 
 The request (2026-11-11):
 
@@ -293,7 +294,7 @@ original (option C3 below).
   only the account's public facts (connector, display name, the
   volume id) so a second machine sees the account and asks to sign in
   there.
-- **Who holds the refresh token** is an owner choice (C2). Recommended:
+- **Who holds the refresh token** is choice C2, decided (2026-11-11):
   Helios runs the flow from the plugin's manifest (`[[accounts]]`:
   authorisation and token endpoints, scopes, client id), keeps the
   refresh token, and hands the plugin a short-lived access token with
@@ -424,7 +425,7 @@ list ─► item (id, path, size?, claim?, metadata)
 ```
 
 - **A fetched item always becomes a local copy** in the library folder:
-  there is no "reference" for a fetched source (recommended in C3).
+  there is no "reference" for a fetched source (decided in C3).
   Placement in the Choices column shows "Copy into the Library", fixed,
   with a note on why.
 - **Deduplication before download**, cheapest first:
@@ -501,7 +502,8 @@ part-file writer, the backoff), used by both.
   source's items, in the Library's query language (`helios_vault`'s
   `Query`, the search filter's syntax) applied to item metadata before
   any fetch, plus the window's type filter and "New only". Whether the
-  owner meant this or the Library's view after import is option C8.
+  owner meant this or the Library's view after import was option C8,
+  decided (2026-11-11) for this reading.
 - **Tags** are added as importer values (add-only, under
   `import:<saved id>`), so undoing the import takes them back with it.
 - **Backup after import** is the strategy's `OnImport` trigger today;
@@ -1213,7 +1215,9 @@ window's layout.
 
 ## 10. Choices for the owner
 
-Not decided. Each has options in key order and a recommendation.
+Decided (2026-11-11): the owner accepted every recommendation, C1 to
+C19. Each keeps its options in key order; the decision is the line
+below them.
 
 **C1. Google Photos: which route.**
 - A. The Picker connector only: pick by hand, up to 2,000 per session,
@@ -1223,7 +1227,7 @@ Not decided. Each has options in key order and a recommendation.
 - C. Both: Takeout for moving a library in, the Picker for "get these
   few photos from my phone's backup".
 
-Recommended: **C**, Takeout first (it is what a migrating user needs and
+Decided (2026-11-11): **C**, Takeout first (it is what a migrating user needs and
 it keeps originals), the Picker after S7.
 
 **C2. Who holds an account's refresh token.**
@@ -1234,7 +1238,7 @@ it keeps originals), the Picker after S7.
   ambient `secrets` and `network` capabilities.
 - C. Nobody: sign in at each import.
 
-Recommended: **A**: the refresh token never leaves Helios, revoking a
+Decided (2026-11-11): **A**: the refresh token never leaves Helios, revoking a
 plugin revokes its access, and one Settings page lists every account.
 
 **C3. A fetched item: copy, or reference the remote.**
@@ -1245,7 +1249,7 @@ plugin revokes its access, and one Settings page lists every account.
 - C. As A, and a remote with exact originals (S3, a Helios server) may
   count as a backup copy.
 
-Recommended: **A** now; C for exact-original remotes once scrubbing can
+Decided (2026-11-11): **A** now; C for exact-original remotes once scrubbing can
 verify them (sync.md, section 7).
 
 **C4. Where saved imports and the history live.**
@@ -1255,7 +1259,7 @@ verify them (sync.md, section 7).
 - B. A per-machine settings file, as presets are today.
 - C. In the workspace or its template.
 
-Recommended: **A**; a template may still reference a saved import by id.
+Decided (2026-11-11): **A**; a template may still reference a saved import by id.
 
 **C5. Presets and saved imports.**
 - A. One notion, the saved import; a preset is a saved import without a
@@ -1263,7 +1267,7 @@ Recommended: **A**; a template may still reference a saved import by id.
 - B. Two notions: presets (choices) and saved imports (a source plus a
   preset).
 
-Recommended: **A**: one menu, one word, Lightroom users find their
+Decided (2026-11-11): **A**: one menu, one word, Lightroom users find their
 presets in it.
 
 **C6. Automatic runs.**
@@ -1272,13 +1276,13 @@ presets in it.
 - B. Always a toast asking "Import 312 new photos?".
 - C. Fully silent, the history only.
 
-Recommended: **A**.
+Decided (2026-11-11): **A**.
 
 **C7. What runs automatic imports.**
 - A. The desktop while it is open (v1), the headless node later.
 - B. The node from the start, as a background service.
 
-Recommended: **A**: the node's service mode is not built yet, and an
+Decided (2026-11-11): **A**: the node's service mode is not built yet, and an
 import the person cannot see is the surprise C6 avoids.
 
 **C8. What "filter profile" means.**
@@ -1288,7 +1292,7 @@ import the person cannot see is the surprise C6 avoids.
   afterwards.
 - C. Both, as two fields of the saved import.
 
-Recommended: **A**; "show the import in this view" is the after-import
+Decided (2026-11-11): **A**; "show the import in this view" is the after-import
 `select` field, extended later if wanted.
 
 **C9. Items without a hash (Google, MTP) already probably in the
@@ -1297,7 +1301,7 @@ Library.**
   is on; the person can tick them.
 - B. Fetched anyway, deduplicated by BLAKE3 after download.
 
-Recommended: **A** for rendered sources (fetching cannot prove anything
+Decided (2026-11-11): **A** for rendered sources (fetching cannot prove anything
 and costs quota), **B** for exact-original sources without a claim
 (MTP), where the BLAKE3 settles it.
 
@@ -1310,7 +1314,7 @@ and costs quota), **B** for exact-original sources without a claim
   belongs to the job (source, destination, filter) and wins when both
   set a field.
 
-Recommended: **C**: a body's profile and style apply however its photos
+Decided (2026-11-11): **C**: a body's profile and style apply however its photos
 arrive (card, cable, a folder), while a saved import stays a job.
 
 **C11. Two bodies of the same model.**
@@ -1321,7 +1325,7 @@ arrive (card, cable, a folder), while a saved import stays a job.
   without a serial, the model applies unless the person sets a `tell`
   rule (owner name, file prefix, device, card); never a guess.
 
-Recommended: **C**, as Lightroom's raw defaults (model, optionally
+Decided (2026-11-11): **C**, as Lightroom's raw defaults (model, optionally
 serial) and calibration's `@serial` already do.
 
 **C12. When a body's edit defaults (profile, lens, style) apply.**
@@ -1331,7 +1335,7 @@ serial) and calibration's `@serial` already do.
 - C. Live: the image follows the body record until the person touches
   the module.
 
-Recommended: **B**: an import stays fast, an edit renders the same after
+Decided (2026-11-11): **B**: an import stays fast, an edit renders the same after
 the record changes (as calibration's pick is written into the edit), and
 "Apply body defaults again" is a command on a selection.
 
@@ -1342,7 +1346,7 @@ the record changes (as calibration's pick is written into the edit), and
   libgphoto2 as a fallback.
 - C. Linux only for devices; elsewhere, cameras as mounted cards.
 
-Recommended: **B**, in that order (Linux first); until a platform's
+Decided (2026-11-11): **B**, in that order (Linux first); until a platform's
 back end exists it is C there, which is what most users do anyway.
 
 **C14. The vocabulary of `Item.metadata`.**
@@ -1351,7 +1355,7 @@ back end exists it is C there, which is what most users do anyway.
   `Iptc4xmpCore:`…), reconciled after the fetch by MWG's read rules, the
   connector last.
 
-Recommended: **B**: one vocabulary for connectors, importer values and
+Decided (2026-11-11): **B**: one vocabulary for connectors, importer values and
 the XMP writer, and a plugin author reads a standard, not our docs.
 
 **C15. Where a hook may block the import.**
@@ -1360,14 +1364,14 @@ the XMP writer, and a plugin author reads a standard, not our docs.
 - C. Participants at the stages listed in 7.2, delivered per batch, with
   deadlines; observers everywhere.
 
-Recommended: **C**.
+Decided (2026-11-11): **C**.
 
 **C16. A participant that fails or times out.**
 - A. Fail open always: the item goes on as if the hook passed; reported.
 - B. Fail closed always: the item is held as failed.
 - C. Fail open by default; a hook declared `required` fails closed.
 
-Recommended: **C**; `required` is shown on the hook in Settings, so a
+Decided (2026-11-11): **C**; `required` is shown on the hook in Settings, so a
 hook that can stop imports is never a surprise.
 
 **C17. How agents take part in an import.**
@@ -1376,7 +1380,7 @@ hook that can stop imports is never a surprise.
   pause after the decision stage.
 - C. Live participants over MCP at each stage.
 
-Recommended: **B**: an agent's latency stays out of the import loop,
+Decided (2026-11-11): **B**: an agent's latency stays out of the import loop,
 and what it decides is data the person can read.
 
 **C18. Who can contribute a connector.**
@@ -1384,7 +1388,7 @@ and what it decides is data the person can read.
 - B. As A, plus third-party dynamic libraries loaded in process.
 - C. Plugins only, folders and cards excepted.
 
-Recommended: **A**: in-tree modules give the core a test bed with no
+Decided (2026-11-11): **A**: in-tree modules give the core a test bed with no
 broker, plugins give anyone else isolation; B has no stable ABI and
 loses crash isolation.
 
@@ -1393,7 +1397,7 @@ loses crash isolation.
   `helios_node::registry()` is, with its own manifest type.
 - B. A new kind in the image module registry, with a source "family".
 
-Recommended: **A**: image modules are pure by contract and a connector
+Decided (2026-11-11): **A**: image modules are pure by contract and a connector
 does IO; sharing conventions (manifest first, static registry, collected
 texts) is enough.
 
