@@ -22,6 +22,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
+use std::time::Instant;
 
 use egui::{ColorImage, TextureHandle};
 use egui_pop::api::files::browser::{
@@ -114,6 +115,18 @@ impl ImportSource {
         feed.done = done;
     }
 
+    /// Forgets the photos (the window closed or opened again): the
+    /// listings under way start again, empty, and follow what is
+    /// published next.
+    pub fn clear(&self) {
+        let mut feed = lock(&self.feed);
+        feed.entries.clear();
+        feed.done = false;
+        for l in feed.listeners.drain(..) {
+            l.send(Page::Changed);
+        }
+    }
+
     /// The photos as last published.
     pub fn entries(&self) -> Vec<SourceEntry> {
         lock(&self.feed).entries.clone()
@@ -177,6 +190,11 @@ struct Inner {
     asking: Vec<(u8, usize, PathBuf)>,
     /// What the last frame asked with no picture yet, in priority order.
     waiting: Vec<PathBuf>,
+    /// Until when this frame may read the cache for the cells in view.
+    warm_until: Option<Instant>,
+    /// The files the frame read the cache for and found no current entry:
+    /// the reader threads read them (they may be older entries).
+    warm_missed: HashSet<PathBuf>,
 }
 
 /// The import window's thumbnails: the scans' previews, then the
@@ -184,6 +202,9 @@ struct Inner {
 /// cancelled.
 pub struct ImportThumbnails {
     inner: Mutex<Inner>,
+    /// The library's thumbnail cache, read on the frame for the cells in
+    /// view, on the reader threads for the rest.
+    cache: Option<Arc<ThumbCache>>,
     queue: Arc<(Mutex<Queue>, Condvar)>,
     answers: Mutex<Receiver<(PathBuf, Option<ColorImage>)>>,
     ctx: Arc<Mutex<Option<egui::Context>>>,
@@ -203,7 +224,9 @@ impl Drop for ImportThumbnails {
     }
 }
 
-/// How many textures a frame makes: the rest the next frames.
+/// How many textures a frame makes for the cells not in view: the rest
+/// the next frames. The cells in view get theirs on the frame that draws
+/// them.
 const TEXTURES_PER_FRAME: usize = 48;
 
 /// How many threads read the library's thumbnail cache.
@@ -216,7 +239,7 @@ impl ImportThumbnails {
         let queue = Arc::new((Mutex::new(Queue::default()), Condvar::new()));
         let (tx, rx) = channel();
         let ctx: Arc<Mutex<Option<egui::Context>>> = Arc::default();
-        if let Some(cache) = cache {
+        if let Some(cache) = &cache {
             for _ in 0..CACHE_READERS {
                 let (cache, queue, ctx, tx) =
                     (cache.clone(), queue.clone(), ctx.clone(), tx.clone());
@@ -230,6 +253,7 @@ impl ImportThumbnails {
         }
         Self {
             inner: Mutex::default(),
+            cache,
             queue,
             answers: Mutex::new(rx),
             ctx,
@@ -283,10 +307,40 @@ impl ImportThumbnails {
         lock(&self.inner).waiting.clone()
     }
 
+    /// A cell in view's thumbnail read from the cache on the frame that
+    /// draws it, while the frame's budget lasts: none when the cache has
+    /// no current entry (the reader threads read it then).
+    fn read_warm(
+        &self,
+        ctx: &egui::Context,
+        inner: &mut Inner,
+        path: &Path,
+    ) -> Option<TextureHandle> {
+        let cache = self.cache.as_ref()?;
+        let key = inner.keys.get(path)?;
+        if inner.warm_missed.contains(path) || inner.warm_until.is_none_or(|t| Instant::now() >= t)
+        {
+            return None;
+        }
+        let Some(rgb) = cache.try_get(key, SMALL) else {
+            inner.warm_missed.insert(path.to_path_buf());
+            return None;
+        };
+        let texture = ctx.load_texture(
+            format!("helios.import.thumb.{}", path.display()),
+            crate::library::rgb_image(&rgb),
+            egui::TextureOptions::LINEAR,
+        );
+        inner.textures.insert(path.to_path_buf(), texture.clone());
+        Some(texture)
+    }
+
     /// Takes in what the cache reader answered.
     fn receive(&self, inner: &mut Inner) {
         for (path, picture) in lock(&self.answers).try_iter() {
             match picture {
+                // Read on a frame already: the same picture.
+                Some(_) if inner.textures.contains_key(&path) => {}
                 Some(p) => {
                     inner.pictures.insert(path, p);
                 }
@@ -307,6 +361,7 @@ impl ThumbnailProvider for ImportThumbnails {
         inner.visible.clear();
         inner.asking.clear();
         inner.made = 0;
+        inner.warm_until = Some(Instant::now() + crate::library::WARM_FRAME_BUDGET);
     }
 
     fn request(&self, ctx: &egui::Context, request: &ThumbRequest<'_>) -> ThumbState {
@@ -318,8 +373,9 @@ impl ThumbnailProvider for ImportThumbnails {
         if let Some(t) = inner.textures.get(path) {
             return ThumbState::Ready(t.clone());
         }
+        let visible = request.priority == Priority::Visible;
         if inner.pictures.contains_key(path) {
-            if inner.made >= TEXTURES_PER_FRAME {
+            if !visible && inner.made >= TEXTURES_PER_FRAME {
                 ctx.request_repaint();
                 return ThumbState::Loading;
             }
@@ -342,6 +398,9 @@ impl ThumbnailProvider for ImportThumbnails {
             Priority::Background => 2,
         };
         let seq = inner.asking.len();
+        if visible && let Some(texture) = self.read_warm(ctx, &mut inner, path) {
+            return ThumbState::Ready(texture);
+        }
         if inner.keys.contains_key(path) {
             // Asked of the cache: renewed each frame it is wanted.
             inner.renewals.ask(request.entry, request.priority);

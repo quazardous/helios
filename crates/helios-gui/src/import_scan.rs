@@ -455,6 +455,22 @@ impl GlanceCache {
         })
     }
 
+    /// The glance of the file at `path` of `bytes`, changed at `modified`,
+    /// when kept: what the window shows with the file's cell, on the frame
+    /// that draws it (a miss is not counted: the scan asks again).
+    pub fn cached(&self, path: &Path, bytes: u64, modified: Option<i64>) -> Option<Arc<Glanced>> {
+        let key = (path.to_path_buf(), bytes, modified);
+        let mut index = lock(&self.index);
+        index.clock += 1;
+        let now = index.clock;
+        let (glanced, used) = index.entries.get_mut(&key)?;
+        *used = now;
+        let hit = glanced.clone();
+        drop(index);
+        Counters::add(&self.counters.hits, 1);
+        Some(hit)
+    }
+
     fn get(&self, key: &GlanceKey) -> Option<Arc<Glanced>> {
         let mut index = lock(&self.index);
         index.clock += 1;

@@ -111,6 +111,9 @@ pub(crate) struct ImportWindow {
     /// The files the scans glance at first: the cells in view without a
     /// picture, then the next screen's.
     glance_first: crate::import_scan::Wanted,
+    /// The files whose glance came from the glance cache as they were
+    /// found: the scan's own glance of them is left out.
+    glanced_early: std::collections::HashSet<PathBuf>,
     pub(super) contents: Contents,
     /// The choices, the last used until changed, and where they are kept.
     pub(super) choices: Choices,
@@ -168,11 +171,18 @@ impl ImportWindow {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .clear();
+        self.glanced_early.clear();
         self.contents = Contents::new();
         self.published = None;
         self.selection_synced = None;
         if let Some(t) = &self.thumbs {
             t.clear();
+        }
+        // The browser lists anew: never the last import's photos, drawn
+        // without their thumbnails before the scans find them again.
+        self.source.clear();
+        if let Some(b) = &mut self.browser {
+            b.reload();
         }
     }
 
@@ -222,6 +232,18 @@ impl ImportWindow {
                 match sent {
                     Scanned::Found(found) => {
                         let key = found.key.clone();
+                        // A glance kept from before: the cell is drawn with
+                        // its thumbnail, not empty until the scan's turn.
+                        let early = (!found.offline)
+                            .then(|| {
+                                crate::import_scan::GlanceCache::global().cached(
+                                    &found.path,
+                                    found.bytes,
+                                    found.modified,
+                                )
+                            })
+                            .flatten();
+                        let path = found.path.clone();
                         let at = self.contents.add(found);
                         if let (Some(key), Some(main)) = (key, self.contents.cells[at].main()) {
                             thumbs.key(main, key);
@@ -238,6 +260,12 @@ impl ImportWindow {
                                 .chain(&cell.picture)
                                 .any(|f| picked.contains(f));
                         }
+                        if let Some(g) = early {
+                            let (taken, camera, thumb) =
+                                (g.taken, g.camera.clone(), g.thumb.clone());
+                            take_glance(&mut self.contents, &thumbs, &path, taken, camera, thumb);
+                            self.glanced_early.insert(path);
+                        }
                     }
                     Scanned::Glance {
                         path,
@@ -245,17 +273,8 @@ impl ImportWindow {
                         camera,
                         thumb,
                     } => {
-                        let none = thumb.is_none();
-                        self.contents.glance(&path, taken, camera, thumb);
-                        // No preview: the thumbnail says so (a pair's
-                        // other file may still give one).
-                        if none
-                            && let Some(main) = self
-                                .contents
-                                .cell_of(&path)
-                                .and_then(|i| self.contents.cells[i].main())
-                        {
-                            thumbs.glanced(main, None);
+                        if !self.glanced_early.remove(&path) {
+                            take_glance(&mut self.contents, &thumbs, &path, taken, camera, thumb);
                         }
                     }
                     Scanned::Done => *done = true,
@@ -299,6 +318,27 @@ impl ImportWindow {
         {
             self.ticked = vec![first.root.clone()];
         }
+    }
+}
+
+/// A file's glance into the contents; a glance without a preview tells
+/// the thumbnails there is none (a pair's other file may still give one).
+fn take_glance(
+    contents: &mut Contents,
+    thumbs: &ImportThumbnails,
+    path: &Path,
+    taken: Option<chrono::NaiveDateTime>,
+    camera: Option<String>,
+    thumb: Option<egui::ColorImage>,
+) {
+    let none = thumb.is_none();
+    contents.glance(path, taken, camera, thumb);
+    if none
+        && let Some(main) = contents
+            .cell_of(path)
+            .and_then(|i| contents.cells[i].main())
+    {
+        thumbs.glanced(main, None);
     }
 }
 
