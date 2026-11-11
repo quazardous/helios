@@ -2625,6 +2625,8 @@ mod tests {
             "workflow.prioritize",
             "workflow.pause",
             "workflow.resume",
+            "cache.stats",
+            "cache.clear",
         ];
         for cmd in inspect.iter().chain(&control) {
             assert!(TOOLS.iter().any(|t| t.cmd == *cmd), "no tool for `{cmd}`");
