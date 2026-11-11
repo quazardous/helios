@@ -2511,6 +2511,7 @@ dependencies = [
 name = "helios-module-exposure"
 version = "0.75.0"
 dependencies = [
+ "helios-bricks",
  "helios-controls",
  "helios-core",
  "helios-photo",

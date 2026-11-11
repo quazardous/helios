@@ -1,0 +1,41 @@
+{
+  "format": 1,
+  "name": "exposure",
+  "version": 1,
+  "description": "Scale the light by a number of stops and set the black level",
+  "module": { "family": "tone", "role": "general", "context": ["photo.exposure_bias"] },
+  "params": [
+    { "type": "float", "name": "exposure", "description": "exposure adjustment, in EV",
+      "min": -18, "max": 18, "default": 0 },
+    { "type": "float", "name": "black", "description": "black level correction",
+      "min": -1, "max": 1, "default": 0 },
+    { "type": "bool", "name": "compensate_bias",
+      "description": "take back the camera's exposure bias", "default": false }
+  ],
+  "inputs": [ { "name": "input", "channels": 4 } ],
+  "outputs": [ { "name": "output", "channels": 4 } ],
+  "values": [
+    { "name": "bias", "brick": "core.value.within@1",
+      "in": { "x": "context:photo.exposure_bias", "min": -5, "max": 5, "fallback": 0 } },
+    { "name": "compensated", "brick": "core.value.sub@1",
+      "in": { "a": "exposure", "b": "bias" } },
+    { "name": "ev", "brick": "core.value.select@1",
+      "in": { "when": "compensate_bias", "then": "compensated", "else": "exposure" } },
+    { "name": "darkening", "brick": "core.value.neg@1", "in": { "x": "ev" } },
+    { "name": "white", "brick": "core.value.exp2@1", "in": { "x": "darkening" } },
+    { "name": "floor", "brick": "core.value.below@1",
+      "in": { "x": "black", "limit": "white", "margin": 0.01 } },
+    { "name": "scale", "brick": "core.value.affine-inv@1",
+      "in": { "white": "white", "black": "floor" } }
+  ],
+  "nodes": [
+    { "name": "apply", "brick": "core.affine@1",
+      "params": { "origin": "floor", "scale": "scale" } }
+  ],
+  "connections": [ { "from": "@", "port": "input", "to": "apply", "input": "input" } ],
+  "exits": [ { "from": "apply", "port": "output", "output": "output" } ],
+  "controls": [
+    { "control": "exposure", "jack": "value", "param": "exposure" },
+    { "control": "black-level", "jack": "value", "param": "black" }
+  ]
+}

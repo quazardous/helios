@@ -16,6 +16,13 @@
 //!
 //! One difference: darktable also scales the fourth channel, which its
 //! pixelpipe carries but does not use; here it is passed through untouched.
+//!
+//! Two forms: [`Exposure`], sealed (its own `process`, the reference), and
+//! [`from_bricks`], the same module assembled from registered bricks
+//! (`exposure.bricks.json`: a value graph deriving the black and the scale,
+//! then `core.affine`). The brick form is held equal to the sealed one, bit
+//! for bit, by the tests; the sealed form stays the one served until the
+//! brick form replaces it.
 
 use helios_core::{
     Context, Family, GpuKernel, Image, Manifest, Module, ModuleKind, Needs, ParamHint, ParamKind,
@@ -123,6 +130,22 @@ impl Module for Exposure {
         }
         Ok(vec![Image::new(output, 4, data)])
     }
+}
+
+/// The brick form, as data.
+pub const ASSEMBLY: &str = include_str!("exposure.bricks.json");
+
+/// Exposure assembled from bricks: the same manifest, card and patches as
+/// [`Exposure`], computed by the bricks of [`ASSEMBLY`]. A drop-in for the
+/// sealed module wherever a [`ModuleRef`] is taken.
+///
+/// [`ModuleRef`]: helios_core::ModuleRef
+pub fn from_bricks() -> helios_core::ModuleRef {
+    let assembled =
+        helios_bricks::Assembled::from_json(ASSEMBLY, &helios_bricks::BrickRegistry::core())
+            .unwrap_or_else(|problems| panic!("exposure's assembly: {problems:?}"))
+            .with_hints(Exposure.param_hints());
+    helios_core::ModuleRef::composite(assembled)
 }
 
 /// A decided exposure: a decision node whose answer is the exposure, in
@@ -297,5 +320,26 @@ mod tests {
     #[test]
     fn contract() {
         helios_testkit::assert_contract(Exposure);
+    }
+
+    #[test]
+    fn the_brick_form_has_the_sealed_surface_card_and_patches() {
+        let bricks = from_bricks();
+        assert_eq!(bricks.manifest(), &Exposure.manifest());
+        assert_eq!(bricks.param_hints(), Exposure.param_hints());
+        let assembled =
+            helios_bricks::Assembled::from_json(ASSEMBLY, &helios_bricks::BrickRegistry::core())
+                .unwrap();
+        let patched: Vec<helios_controls::Patch> = assembled
+            .controls()
+            .iter()
+            .map(|c| helios_controls::Patch::new("exposure", &c.param, &c.control, &c.jack))
+            .collect();
+        assert_eq!(patched, patches());
+    }
+
+    #[test]
+    fn the_brick_form_passes_the_contract() {
+        helios_testkit::assert_contract_of(&from_bricks(), &Context::new());
     }
 }

@@ -8,6 +8,8 @@ repository.workspace = true
 
 [dependencies]
 helios-core.workspace = true
+# The brick form: exposure assembled from registered bricks.
+helios-bricks.workspace = true
 helios-photo.workspace = true
 # The controls its parameters are patched to (the model only, no egui).
 helios-controls.workspace = true
