@@ -299,13 +299,28 @@ struct StandIn {
 }
 
 impl Default for Viewport {
+    /// A viewport on an engine of its own ([`engine`]).
     fn default() -> Self {
-        // The RAM tier's budget, its default until the desktop applies
-        // its settings ([`crate::caches::apply_settings`]).
-        let budget = helios_cache::Service::global()
-            .budget(helios_cache::Tier::Ram)
-            .map(|b| b as usize);
-        let engine = Arc::new(Engine::with_budget(Arc::new(Bus::new()), budget));
+        Viewport::on_engine(engine())
+    }
+}
+
+/// A viewport engine with the RAM tier's budget, its default until the
+/// desktop applies its settings ([`crate::caches::apply_settings`]). The
+/// shell makes one per process (its core) and hands it to each window's
+/// viewport ([`Viewport::on_engine`]), so windows share its render cache.
+pub fn engine() -> Arc<Engine> {
+    let budget = helios_cache::Service::global()
+        .budget(helios_cache::Tier::Ram)
+        .map(|b| b as usize);
+    Arc::new(Engine::with_budget(Arc::new(Bus::new()), budget))
+}
+
+impl Viewport {
+    /// A viewport rendering on `engine`, which other viewports may share:
+    /// one engine per process, one viewport per window (see the shell's
+    /// `Core` and `Focus`).
+    pub fn on_engine(engine: Arc<Engine>) -> Self {
         let mut state = ViewportState::new();
         state.set_display_transform(Arc::new(HeliosDisplay));
         let stats = Arc::<Stats>::default();
@@ -341,9 +356,6 @@ impl Default for Viewport {
             stats,
         }
     }
-}
-
-impl Viewport {
     /// Shows a node's output; the store mirrors its parameters
     /// (`helios_values::bind_node`) and [`Viewport::sync`] follows them.
     /// The output as it is now is the "before" of a comparison.
