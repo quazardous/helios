@@ -2,7 +2,7 @@
 
 Status: **decided** (2026-11-11): the owner accepted every
 recommendation of section 9 (C1 to C8). A design note: nothing here is
-built yet. It extends [workshops.md](workshops.md) (workshops v1,
+built yet but slice 1 (semantic sliders). It extends [workshops.md](workshops.md) (workshops v1,
 built, experimental) and uses decision nodes and AI junctions
 ([module-contract.md](../module-contract.md)), macros
 ([macros.md](macros.md)), the undo design ([undo.md](undo.md)), the
@@ -124,6 +124,20 @@ the curve's domain, usually -1 to +1 or 0 to 1.
     { "node": "shadhi", "param": "shadows", "curve": [[0, 0], [0.5, 10], [1, 30]] }
   ] }
 ```
+
+Built (slice 1): an exposed entry with `drives` gives neither `node`
+nor `param`. Its range is `min`/`max`, else the curves' domain; its
+default is `default`, else 0 within the range. A whole-number inner
+parameter gets the curve's value rounded. Refused, the entry named: a
+curve of fewer than 2 or more than 8 points, `x` not strictly
+increasing, a point outside the inner hard range, a parameter that is
+not a number, and one inner parameter set by two exposed names (a drive
+and a plain exposure, or two drives: the cycle case). Opening or
+dissolving a macro writes the curves' values onto the inner parameters;
+folding it back drops them, the slider keeping its value. The interface
+editor's "New semantic slider" adds one; its row edits the range and,
+per driven parameter, the curve's points, drawn beside them. Agents
+author it with `macro.interface`'s `exposed` list; no new verb.
 
 ### Helios checks the draft (deterministic, not the AI)
 
@@ -505,7 +519,7 @@ one commit or a few, builds and passes its tests, and is testable
 headless. Sizes: S under 300 lines, M 300 to 800, L over 800, tests
 included.
 
-1. **Semantic sliders** (M). `drives` in the composite format and schema,
+1. **Semantic sliders** (M, built 2026-11-11). `drives` in the composite format and schema,
    piecewise-linear curves, the interface editor's curve rows; refusals
    (a point out of the inner range, a cycle of drives). Test: a
    "Backlight lift" slider on a synthetic network moves three inner

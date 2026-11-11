@@ -238,10 +238,28 @@ pub fn build(file: &CompositeFile, catalogue: &Catalogue, depth: usize) -> Resul
     };
     let mut built = Macro::new(manifest, network).map_err(|e| e.to_string())?;
     for (i, x) in file.exposed.iter().enumerate() {
-        let inner = node(&x.node).map_err(|e| format!("exposed[{i}]: {e}"))?;
+        let at = |e: String| format!("exposed[{i}]: {e}");
+        if x.is_driven() {
+            if !x.node.is_empty() || !x.param.is_empty() {
+                return Err(at(
+                    "a semantic slider gives `drives`, not `node` and `param`".into(),
+                ));
+            }
+            let mut drives = Vec::with_capacity(x.drives.len());
+            for (k, d) in x.drives.iter().enumerate() {
+                let at = |e: String| at(format!("drives[{k}]: {e}"));
+                let inner = node(&d.node).map_err(at)?;
+                drives.push((inner, d.param.clone(), d.curve().map_err(at)?));
+            }
+            built = built
+                .drive(&x.name, drives, &x.exposure())
+                .map_err(|e| at(e.to_string()))?;
+            continue;
+        }
+        let inner = node(&x.node).map_err(at)?;
         built = built
             .expose_as(&x.name, inner, &x.param, &x.exposure())
-            .map_err(|e| format!("exposed[{i}]: {e}"))?;
+            .map_err(|e| at(e.to_string()))?;
     }
     if let Some(w) = &file.workshop {
         check_workshop(w, &built).map_err(|e| format!("workshop: {e}"))?;

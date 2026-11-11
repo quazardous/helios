@@ -94,10 +94,14 @@
       }
     },
     "exposed": {
-      "description": "An inner parameter made the composite's own, in the order shown; one name on several inner nodes links them, its interface given on the first entry. The fields after 'param' are optional: the inner parameter's own otherwise.",
+      "description": "An inner parameter made the composite's own, in the order shown; one name on several inner nodes links them, its interface given on the first entry. The fields after 'param' are optional: the inner parameter's own otherwise. A semantic slider gives 'drives' instead of 'node' and 'param': one number moving several inner numbers, each along its curve.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "node", "param"],
+      "required": ["name"],
+      "oneOf": [
+        { "required": ["node", "param"] },
+        { "required": ["drives"] }
+      ],
       "properties": {
         "name": { "type": "string" },
         "node": { "type": "string" },
@@ -122,8 +126,35 @@
           "items": { "type": "string" }
         },
         "default": {
-          "description": "The default, tagged by kind as a node's parameters ({ \"float\": 0.5 }); the inner node's value otherwise.",
+          "description": "The default, tagged by kind as a node's parameters ({ \"float\": 0.5 }); the inner node's value otherwise. A semantic slider's: 0 within its range otherwise.",
           "type": "object"
+        },
+        "drives": {
+          "description": "A semantic slider's inner numbers. Its range is min and max, else the curves' domain.",
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/drive" }
+        }
+      }
+    },
+    "drive": {
+      "description": "One inner number a semantic slider moves: the curve maps the slider's value (x) to the inner value (y), piecewise-linear, x strictly increasing, flat outside its first and last points; every y within the inner hard range.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["node", "param", "curve"],
+      "properties": {
+        "node": { "type": "string" },
+        "param": { "type": "string" },
+        "curve": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 8,
+          "items": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 2,
+            "items": { "type": "number" }
+          }
         }
       }
     },
