@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use egui::vec2;
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
+use egui_pop::model::ids::PanelId;
 use helios_core::{Graph, Image, ModuleRef, Params, Region};
 use helios_gui::{Shell, headless, helios_panels};
 use helios_shell::commands::Origin;
@@ -549,12 +550,197 @@ fn the_wire_style_is_kept_between_sessions() {
 
 /// The canvas's one-time navigation hint.
 const NAV_HINT: &str = "Middle-drag, Space+drag or H to pan · Ctrl+wheel to zoom · F to frame";
+/// The canvas's hand mode indicator.
+const NAV_HAND: &str = "Hand: drag to pan (H to leave)";
+/// The graph's overview, in a corner of the canvas.
+const OVERVIEW: &str = "Graph overview";
 
 /// The layer drawn on top at a point of the main window.
 fn top_at(h: &Harness<'static, Shell>, at: egui::Pos2) -> Option<egui::LayerId> {
     h.ctx.layer_id_at(at)
 }
 
+/// An overlay: its name, its centre and its layer, as found over the
+/// bare canvas, before any window opens.
+type Found = (&'static str, egui::Pos2, egui::LayerId);
+
+/// An overlay of the canvas, found by its accessible name: its rect, and
+/// the layer drawn on top at its centre, which is its own.
+fn overlay(h: &Harness<'static, Shell>, label: &str) -> (egui::Rect, egui::LayerId) {
+    let rect = h
+        .query_by_label(label)
+        .unwrap_or_else(|| {
+            let layers = h.ctx.memory(|m| {
+                let ls: Vec<_> = m
+                    .areas()
+                    .visible_layer_ids()
+                    .into_iter()
+                    .map(|l| (l, m.area_rect(l.id)))
+                    .collect();
+                format!("modal {:?}, layers {ls:?}", m.top_modal_layer())
+            });
+            panic!("`{label}` shows over the graph: {layers}")
+        })
+        .rect();
+    let layer = top_at(h, rect.center()).expect("a layer under the overlay");
+    (rect, layer)
+}
+
+/// Each overlay lies above the canvas (an empty spot of it, `empty`, is
+/// in another layer) and out of the foreground order, where it would lie
+/// over every window, popup and dialog.
+fn above_the_canvas(h: &Harness<'static, Shell>, labels: &[&str], empty: egui::Pos2) {
+    let canvas = top_at(h, empty).expect("the canvas's layer");
+    for label in labels {
+        let (_, layer) = overlay(h, label);
+        assert_ne!(layer, canvas, "`{label}` lies above the canvas");
+        assert!(
+            !matches!(layer.order, egui::Order::Foreground | egui::Order::Tooltip),
+            "`{label}` is drawn in {:?}, over any window",
+            layer.order
+        );
+    }
+}
+
+/// The floating Masks palette moved over each overlay: it lies over
+/// them. It goes back where it was after.
+fn under_the_palette(h: &mut Harness<'static, Shell>, labels: &[Found]) {
+    let masks = PanelId::new("helios.masks").unwrap();
+    let before = h.state().layout().floating_of(&masks).map(|f| f.pos);
+    for &(label, _, layer) in labels {
+        let (rect, _) = overlay(h, label);
+        let at = rect.center();
+        run(
+            h,
+            "helios.masks.float",
+            json!({ "pos": [at.x - 30.0, at.y - 30.0] }),
+        );
+        let on_top = top_at(h, at);
+        assert_ne!(
+            on_top,
+            Some(layer),
+            "`{label}` is drawn over the floating Masks palette"
+        );
+    }
+    match before {
+        Some(pos) => run(h, "helios.masks.float", json!({ "pos": pos })),
+        None => run(h, "helios.masks.dock", json!(null)),
+    };
+}
+
+/// A popup (the canvas's context menu) opened just above and left of
+/// each overlay, so that it hangs over it: it lies over the overlay.
+fn under_a_popup(h: &mut Harness<'static, Shell>, labels: &[Found]) {
+    for &(label, _, layer) in labels {
+        let (rect, _) = overlay(h, label);
+        let at = rect.left_top() - vec2(4.0, 4.0);
+        h.hover_at(at);
+        h.run();
+        for pressed in [true, false] {
+            h.event(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Secondary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+            h.step();
+        }
+        frames(h);
+        // The popups' layers that hang over the overlay.
+        let over: Vec<egui::Rect> = h.ctx.memory(|m| {
+            m.areas()
+                .visible_layer_ids()
+                .into_iter()
+                .filter(|l| l.order == egui::Order::Foreground && *l != layer)
+                .filter_map(|l| m.area_rect(l.id))
+                .map(|r| r.intersect(rect))
+                .filter(egui::Rect::is_positive)
+                .collect()
+        });
+        let shared = over
+            .first()
+            .unwrap_or_else(|| panic!("a context menu opened at {at:?} hangs over `{label}`"));
+        assert_ne!(
+            top_at(h, shared.center()),
+            Some(layer),
+            "`{label}` is drawn over a popup"
+        );
+        h.key_press(egui::Key::Escape);
+        frames(h);
+    }
+}
+
+/// The import window, an `egui::Window` drawn inside the main window,
+/// dragged by its title bar over each overlay: it lies over them. It
+/// stays open.
+fn under_the_import_window(h: &mut Harness<'static, Shell>, labels: &[Found]) {
+    let title = "Import photos";
+    run(h, "library.importWindow", json!(null));
+    let mut shown = None;
+    for _ in 0..headless::WINDOW_APPEARS_WITHIN {
+        h.step();
+        shown = headless::window_rect(h, title);
+        if shown.is_some() {
+            break;
+        }
+    }
+    shown.expect("the import window shows");
+    for &(label, _, layer) in labels {
+        let (rect, _) = overlay(h, label);
+        let to = rect.center();
+        let shown = headless::window_rect(h, title).unwrap();
+        let grip = egui::pos2(shown.center().x, shown.top() + 10.0);
+        h.hover_at(grip);
+        h.run();
+        h.drag_at(grip);
+        h.step();
+        for k in 1..=8 {
+            h.hover_at(grip + (to - grip) * (k as f32 / 8.0));
+            h.step();
+        }
+        h.drop_at(to);
+        frames(h);
+        let moved = headless::window_rect(h, title).unwrap();
+        assert!(
+            moved.contains(to),
+            "the window covers `{label}`: {moved:?}, {to:?}"
+        );
+        let on_top = top_at(h, to);
+        assert_ne!(
+            on_top,
+            Some(layer),
+            "`{label}` is drawn over the import window"
+        );
+        assert_eq!(
+            on_top.map(|l| l.order),
+            Some(egui::Order::Middle),
+            "{on_top:?}"
+        );
+    }
+}
+
+/// A dialog over the main window (a form asked for): it lies over every
+/// overlay.
+fn under_a_dialog(h: &mut Harness<'static, Shell>, labels: &[Found]) {
+    run(h, "library.importSource", json!(null));
+    frames(h);
+    assert!(
+        h.state().target_rect("helios.dialog").is_ok(),
+        "a dialog shows"
+    );
+    for (label, at, layer) in labels {
+        assert_ne!(
+            top_at(h, *at),
+            Some(*layer),
+            "`{label}` is drawn over a dialog"
+        );
+    }
+}
+
+/// Soft windows, drawn inside the main window (the import window, the
+/// floating Masks palette, a popup, a dialog), lie over the canvas's
+/// overlays, which lie above the canvas: here the hint and the hand mode
+/// indicator.
 #[test]
 fn the_canvas_hint_never_shows_over_a_window_or_a_dialog() {
     let root = temp("hint-under");
@@ -564,77 +750,52 @@ fn the_canvas_hint_never_shows_over_a_window_or_a_dialog() {
     let graph = h.state().target_rect(GRAPH).unwrap();
     // An empty spot of the canvas, away from the nodes, the toolbar and
     // the overview.
-    h.hover_at(graph.left_bottom() + vec2(24.0, -24.0));
+    let empty = graph.left_bottom() + vec2(24.0, -24.0);
+    h.hover_at(empty);
     frames(&mut h);
-    let hint = h
-        .query_by_label(NAV_HINT)
-        .unwrap_or_else(|| {
-            let layers = h.ctx.memory(|m| {
-                let modal = m.top_modal_layer();
-                let ls: Vec<_> = m
-                    .areas()
-                    .visible_layer_ids()
-                    .into_iter()
-                    .map(|l| (l, m.area_rect(l.id)))
-                    .collect();
-                format!("modal {modal:?}, layers {ls:?}")
-            });
-            panic!("the hint shows over the hovered graph {graph:?}: {layers}")
-        })
-        .rect()
-        .center();
-    let overlay = top_at(&h, hint).expect("a layer under the hint");
-    // The import window, its title bar dragged over the hint, the
-    // pointer left there: the window is on top, the hint stays under it.
-    run(&mut h, "library.importWindow", json!(null));
-    let title = "Import photos";
-    let mut shown = None;
-    for _ in 0..headless::WINDOW_APPEARS_WITHIN {
-        h.step();
-        shown = headless::window_rect(&h, title);
-        if shown.is_some() {
-            break;
-        }
-    }
-    let shown = shown.expect("the import window shows");
-    let grip = egui::pos2(shown.center().x, shown.top() + 10.0);
-    h.hover_at(grip);
+    // Hand mode: its indicator in the canvas's top-left corner.
+    h.key_press(egui::Key::H);
+    frames(&mut h);
+    let labels = [NAV_HINT, NAV_HAND];
+    above_the_canvas(&h, &labels, empty);
+    let found = labels.map(|l| {
+        let (r, layer) = overlay(&h, l);
+        (l, r.center(), layer)
+    });
+    under_the_palette(&mut h, &found);
+    under_a_popup(&mut h, &found);
+    under_the_import_window(&mut h, &found);
+    under_a_dialog(&mut h, &found);
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+/// The graph's overview, shown once the network is much larger than the
+/// view, lies above the canvas and under the soft windows too.
+#[test]
+fn the_graph_overview_lies_under_the_windows_over_the_canvas() {
+    let root = temp("overview-under");
+    let (mut h, _) = window(&root);
+    let graph = h.state().target_rect(GRAPH).unwrap();
+    let empty = graph.left_bottom() + vec2(24.0, -24.0);
+    // Zoomed in far enough that the network is much larger than the
+    // view: the overview shows.
+    h.hover_at(graph.center());
     h.run();
-    h.drag_at(grip);
-    h.step();
-    for k in 1..=8 {
-        h.hover_at(grip + (hint - grip) * (k as f32 / 8.0));
+    for _ in 0..6 {
+        h.event(egui::Event::Zoom(2.0));
         h.step();
     }
-    h.drop_at(hint);
+    h.hover_at(empty);
     frames(&mut h);
-    let moved = headless::window_rect(&h, title).unwrap();
-    assert!(
-        moved.contains(hint),
-        "the window covers the hint's place: {moved:?}, {hint:?}"
-    );
-    let on_top = top_at(&h, hint);
-    assert_ne!(
-        on_top,
-        Some(overlay),
-        "the canvas hint is drawn over the import window"
-    );
-    assert_eq!(
-        on_top.map(|l| l.order),
-        Some(egui::Order::Middle),
-        "{on_top:?}"
-    );
-    // A dialog over the main window (a form asked for): the same.
-    run(&mut h, "library.importSource", json!(null));
-    frames(&mut h);
-    assert!(
-        h.state().target_rect("helios.dialog").is_ok(),
-        "a dialog shows"
-    );
-    assert_ne!(
-        top_at(&h, hint),
-        Some(overlay),
-        "the canvas hint is drawn over a dialog"
-    );
+    let labels = [OVERVIEW];
+    above_the_canvas(&h, &labels, empty);
+    let found = labels.map(|l| {
+        let (r, layer) = overlay(&h, l);
+        (l, r.center(), layer)
+    });
+    under_the_palette(&mut h, &found);
+    under_a_popup(&mut h, &found);
+    under_the_import_window(&mut h, &found);
+    under_a_dialog(&mut h, &found);
     std::fs::remove_dir_all(&root).unwrap();
 }
