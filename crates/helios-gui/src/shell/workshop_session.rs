@@ -10,6 +10,10 @@
 //!
 //! - `workshop.session`: `read` the record, `keep` it (the user's), or
 //!   `close` the session.
+//! - `workshop.propose`: an AI's values for the workshop, shown as ghost
+//!   values; nothing is set.
+//! - `workshop.answer`: the user's answer to a ghost: `accept` (one undo
+//!   step), `override` (their own value), `reject`; each one recorded.
 
 use helios_core::Params;
 use helios_shell::commands::Origin;
@@ -350,6 +354,164 @@ impl Shell {
     /// session names its test images by it.
     pub fn set_edited_image(&mut self, image: Option<String>) {
         self.focus.workshops.borrow_mut().image = image;
+    }
+}
+
+impl Shell {
+    /// `workshop.propose`: an AI's `values` for the session's workshop
+    /// (by exposed name) with the words it answers (`aim`), recorded as a
+    /// `propose` step and shown as ghost values: nothing is set until the
+    /// user accepts one.
+    pub(super) fn propose_values(
+        &mut self,
+        args: &Value,
+        origin: &Origin,
+    ) -> Result<Value, String> {
+        self.follow_session(None);
+        let (node, session) = {
+            let panel = self.focus.workshops.borrow();
+            let p = panel.pilot.as_ref().ok_or(NO_SESSION)?;
+            (p.record.node.clone(), p.record.session.clone())
+        };
+        if let Some(asked) = args["session"].as_str().filter(|s| !s.is_empty())
+            && asked != session
+        {
+            return Err(format!(
+                "no session `{asked}`: the session going on is `{session}`"
+            ));
+        }
+        let values = args["values"]
+            .as_object()
+            .filter(|v| !v.is_empty())
+            .ok_or("`values`: an object, {exposed name: value}")?;
+        let mut proposal = std::collections::BTreeMap::new();
+        {
+            let store = lock(&self.core.values);
+            for (param, value) in values {
+                let path = format!("node/{node}/{param}");
+                let entry = store
+                    .get(&path)
+                    .ok_or_else(|| format!("`{param}`: the workshop has no such slider"))?;
+                let v = value
+                    .as_f64()
+                    .ok_or_else(|| format!("`{param}`: a number"))?;
+                let d = &entry.descriptor;
+                if let Some((lo, hi)) = d.soft.or(d.hard)
+                    && !(lo..=hi).contains(&v)
+                {
+                    return Err(format!("`{param}`: {v} is outside {lo} to {hi}"));
+                }
+                proposal.insert(param.clone(), json!(v));
+            }
+        }
+        let aim = args["aim"]
+            .as_str()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(String::from);
+        let mut panel = self.focus.workshops.borrow_mut();
+        let p = panel.pilot.as_mut().ok_or(NO_SESSION)?;
+        let seq = p.record.push(Record {
+            aim,
+            proposal: proposal.clone(),
+            ..Record::new(&who(origin), Kind::Propose)
+        });
+        panel.queue_write();
+        Ok(json!({ "session": session, "proposal": seq, "ghosts": proposal }))
+    }
+
+    /// `workshop.answer`: the user's answer to a proposed value (`of`, the
+    /// proposal's step; `param`): `accept` sets it, `override` sets the
+    /// user's `value` instead, each one undo step; `reject` sets nothing.
+    /// Each is a step of the record. The user's alone.
+    pub(super) fn answer_proposal(
+        &mut self,
+        args: &Value,
+        origin: &Origin,
+    ) -> Result<Value, String> {
+        if *origin != Origin::User {
+            return Err(
+                "only the user answers a proposal: it is shown to them as ghost values".into(),
+            );
+        }
+        self.follow_session(None);
+        let of = args["of"]
+            .as_u64()
+            .and_then(|n| u32::try_from(n).ok())
+            .ok_or("`of`: the proposal's step")?;
+        let param = args["param"]
+            .as_str()
+            .ok_or("`param`: the proposed slider")?
+            .to_string();
+        let action = args["action"].as_str().unwrap_or("accept");
+        let (node, proposed, aim) = {
+            let panel = self.focus.workshops.borrow();
+            let p = panel.pilot.as_ref().ok_or(NO_SESSION)?;
+            let (_, _, value) = p
+                .record
+                .open_proposals()
+                .into_iter()
+                .find(|(seq, name, _)| *seq == of && *name == param)
+                .ok_or_else(|| format!("no open proposal of `{param}` at step {of}"))?;
+            let aim = p.record.step(of).and_then(|r| r.aim.clone());
+            (p.record.node.clone(), value, aim)
+        };
+        let (kind, value) = match action {
+            "accept" => (Kind::Accept, proposed.as_f64().ok_or("not a number")?),
+            "override" => (
+                Kind::Override,
+                args["value"]
+                    .as_f64()
+                    .ok_or("`value`: the user's own number")?,
+            ),
+            "reject" => {
+                let mut panel = self.focus.workshops.borrow_mut();
+                let p = panel.pilot.as_mut().ok_or(NO_SESSION)?;
+                let seq = p.record.push(Record {
+                    aim,
+                    of: Some(of),
+                    proposal: std::collections::BTreeMap::from([(param.clone(), proposed)]),
+                    ..Record::new(&who(origin), Kind::Reject)
+                });
+                panel.queue_write();
+                return Ok(json!({ "step": seq, "kind": "reject", "param": param }));
+            }
+            other => {
+                return Err(format!(
+                    "`action`: accept, override or reject, not `{other}`"
+                ));
+            }
+        };
+        let path = format!("node/{node}/{param}");
+        {
+            let mut store = lock(&self.core.values);
+            let label = format!("{action} {param}");
+            let group = store.begin_group(origin.clone(), &label);
+            if let Some(aim) = &aim {
+                store.aim(group, aim);
+            }
+            let set = store
+                .set(
+                    helios_values::Set::new(
+                        &path,
+                        helios_values::Change::To(helios_core::Value::Float(value)),
+                        origin.clone(),
+                    )
+                    .gesture(group),
+                )
+                .map_err(|e| format!("{path}: {e}"));
+            store.end(group);
+            set?;
+        }
+        self.follow_session(Some((kind, of)));
+        let seq = self
+            .focus
+            .workshops
+            .borrow()
+            .pilot
+            .as_ref()
+            .and_then(|p| p.record.steps.last().map(|r| r.seq));
+        Ok(json!({ "step": seq, "kind": action, "param": param, "value": value }))
     }
 }
 
