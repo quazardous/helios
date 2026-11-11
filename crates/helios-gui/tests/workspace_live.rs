@@ -99,12 +99,12 @@ fn args(dir: &Path, config: &Path, extra: &Value) -> Value {
 }
 
 fn steps(h: &Harness<'static, Shell>) -> usize {
-    h.state().values.lock().unwrap().undo_steps().len()
+    h.state().values().lock().unwrap().undo_steps().len()
 }
 
 fn undo(h: &mut Harness<'static, Shell>) {
     h.state()
-        .values
+        .values()
         .lock()
         .unwrap()
         .undo(&Origin::User)
@@ -590,7 +590,7 @@ fn an_agent_reads_and_walks_the_desktop_s_history_each_step_with_its_place() {
 
 fn last_step(h: &Harness<'static, Shell>) -> helios_values::Step {
     h.state()
-        .values
+        .values()
         .lock()
         .unwrap()
         .undo_steps()
@@ -676,7 +676,7 @@ fn an_agent_undoes_only_its_own_steps_and_its_batch_alone() {
     let group = edit["group"].clone();
     // Then the user changes a value of their own.
     {
-        let mut s = h.state().values.lock().unwrap();
+        let mut s = h.state().values().lock().unwrap();
         s.declare("view/test", Descriptor::float("Test", 0.0, 1.0, 0.0));
         s.set(Set::new(
             "view/test",
@@ -715,7 +715,7 @@ fn an_agent_undoes_only_its_own_steps_and_its_batch_alone() {
     assert_eq!(description(&h), start);
     assert_eq!(
         h.state()
-            .values
+            .values()
             .lock()
             .unwrap()
             .get("view/test")

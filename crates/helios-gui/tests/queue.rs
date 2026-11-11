@@ -29,7 +29,7 @@ fn harness(when_empty: bool) -> Harness<'static, Shell> {
 /// Selects a node of the graph, as the graph editor does.
 fn select(h: &mut Harness<'_, Shell>, node: &str) {
     h.state()
-        .values
+        .values()
         .lock()
         .unwrap()
         .set(Set::new(

@@ -47,7 +47,8 @@ impl Shell {
     /// Whether workshops are on for this session (the switch read at
     /// start declared their panel).
     pub fn workshops_on(&self) -> bool {
-        self.panels
+        self.core
+            .panels
             .iter()
             .any(|p| p.id.as_str() == crate::workshops::PANEL)
     }
@@ -137,7 +138,7 @@ impl Shell {
         targets: &[helios_template::format::Target],
     ) -> Result<Option<(Vec<Aimed>, Params)>, String> {
         let input = {
-            let viewport = self.viewport.borrow();
+            let viewport = self.focus.viewport.borrow();
             let Some(graph) = viewport.graph() else {
                 return Ok(None);
             };
@@ -167,17 +168,17 @@ impl Shell {
             serde_json::to_string(current).map_err(|e| e.to_string())?,
             serde_json::to_string(targets).map_err(|e| e.to_string())?
         );
-        if let Some(hit) = self.workshop_aims.get(&key) {
+        if let Some(hit) = self.focus.workshop_aims.get(&key) {
             return Ok(hit.clone());
         }
         let built = state
             .bundle
             .catalogue(&self.workspace_catalogue())
             .build_composite(r, 0)?;
-        let engine = self.viewport.borrow().engine().clone();
+        let engine = self.focus.viewport.borrow().engine().clone();
         let aimed =
             helios_template::workshop::aim_rendered(&engine, &built, input, current, targets)?;
-        self.workshop_aims.insert(key, aimed.clone());
+        self.focus.workshop_aims.insert(key, aimed.clone());
         Ok(aimed)
     }
 
@@ -219,7 +220,7 @@ impl Shell {
     fn aim_workshop(&mut self, args: &Value, origin: &Origin) -> Result<Value, String> {
         let node = match args["node"].as_str().filter(|s| !s.is_empty()) {
             Some(n) => n.to_string(),
-            None => crate::modules::selected(&super::lock(&self.values))
+            None => crate::modules::selected(&super::lock(&self.core.values))
                 .ok_or("no workshop is selected")?,
         };
         let dry = args["dry_run"].as_bool().unwrap_or(false);
@@ -234,7 +235,7 @@ impl Shell {
             return Err(format!("`{node}` has no target to aim"));
         }
         let (input, current) = {
-            let viewport = self.viewport.borrow();
+            let viewport = self.focus.viewport.borrow();
             let graph = viewport
                 .graph()
                 .ok_or("no image is open: open one to aim on it")?;
@@ -257,7 +258,7 @@ impl Shell {
         let (aimed, values) = self.aim_cached(&state, &r, &input, &current, &targets)?;
         if !dry {
             let label = format!("aim {}", file.name);
-            let mut store = super::lock(&self.values);
+            let mut store = super::lock(&self.core.values);
             let group = store.begin_group(origin.clone(), &label);
             let mut set = Ok(());
             for (param, value) in values.iter() {
@@ -307,7 +308,7 @@ impl Shell {
     fn save_workshop(&mut self, args: &Value, origin: &Origin) -> Result<Value, String> {
         let node = match args["node"].as_str().filter(|s| !s.is_empty()) {
             Some(n) => n.to_string(),
-            None => crate::modules::selected(&super::lock(&self.values))
+            None => crate::modules::selected(&super::lock(&self.core.values))
                 .ok_or("no macro is selected")?,
         };
         // A node of an opened macro names it.
@@ -347,7 +348,7 @@ impl Shell {
     /// What the macro `node`'s output measures on the open image now, by
     /// measure; `None` without an image open.
     fn measures_now(&self, node: &str, port: &str) -> Option<Vec<(Measure, f64)>> {
-        let viewport = self.viewport.borrow();
+        let viewport = self.focus.viewport.borrow();
         let graph = viewport.graph()?;
         let id = graph.find(node)?;
         let image = proxy(&viewport, graph, id, port).ok()?;
@@ -501,6 +502,7 @@ impl Shell {
         let intent = args["intent"].as_str().unwrap_or_default();
         let state = self.workspace_state().ok_or("no workspace is open")?;
         let library = self
+            .focus
             .edit
             .as_ref()
             .map(|e| e.library.clone())

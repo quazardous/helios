@@ -1416,7 +1416,7 @@ impl eframe::App for App {
                 }
             }
             // While a gesture goes on, come back to save it in time.
-            if self.shell.values.lock().is_ok_and(|v| v.uncommitted()) {
+            if self.shell.values().lock().is_ok_and(|v| v.uncommitted()) {
                 ui.ctx()
                     .request_repaint_after(std::time::Duration::from_secs_f64(
                         helios_gui::persist::FLUSH_SECONDS,

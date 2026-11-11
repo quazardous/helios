@@ -218,12 +218,12 @@ fn set(shell: &Shell, ev: f64, gesture: Option<helios_values::GestureId>) {
     if let Some(g) = gesture {
         set = set.gesture(g);
     }
-    shell.values.lock().unwrap().set(set).unwrap();
+    shell.values().lock().unwrap().set(set).unwrap();
 }
 
 fn shown(shell: &Shell) -> f64 {
     shell
-        .values
+        .values()
         .lock()
         .unwrap()
         .get(EV)
@@ -265,7 +265,7 @@ fn each_edit_step_is_a_version_and_reopening_loads_the_head() {
     persist.frame(&mut shell, 10.0);
     // A drag: saved while it goes, every FLUSH_SECONDS, then at its end.
     let drag = shell
-        .values
+        .values()
         .lock()
         .unwrap()
         .begin_gesture(Origin::User, "drag exposure");
@@ -276,13 +276,13 @@ fn each_edit_step_is_a_version_and_reopening_loads_the_head() {
     assert_eq!(saved(persist.bus()).len(), 1, "not yet a second");
     persist.frame(&mut shell, 11.3);
     set(&shell, 1.6, Some(drag));
-    shell.values.lock().unwrap().end(drag);
+    shell.values().lock().unwrap().end(drag);
     persist.frame(&mut shell, 11.4);
     // Undo and redo are steps too.
-    shell.values.lock().unwrap().undo(&Origin::User).unwrap();
+    shell.values().lock().unwrap().undo(&Origin::User).unwrap();
     persist.frame(&mut shell, 12.0);
     assert!((shown(&shell) - 1.0).abs() < 1e-9);
-    shell.values.lock().unwrap().redo(&Origin::User).unwrap();
+    shell.values().lock().unwrap().redo(&Origin::User).unwrap();
     persist.frame(&mut shell, 13.0);
     // A frame with no step saves nothing.
     persist.frame(&mut shell, 14.0);
@@ -341,12 +341,12 @@ fn ctrl_z_undoes_a_drag_as_a_version_redo_replays_it_and_a_drag_going_on_stops_i
         .unwrap();
     let start = shown(&shell);
     let drag = shell
-        .values
+        .values()
         .lock()
         .unwrap()
         .begin_gesture(Origin::User, "drag exposure");
     set(&shell, start + 1.5, Some(drag));
-    shell.values.lock().unwrap().end(drag);
+    shell.values().lock().unwrap().end(drag);
     persist.frame(&mut shell, 10.0);
     let mut h = helios_gui::headless::harness(shell, egui::vec2(1280.0, 800.0));
     h.run();
@@ -382,7 +382,7 @@ fn ctrl_z_undoes_a_drag_as_a_version_redo_replays_it_and_a_drag_going_on_stops_i
     let before = h.state().app().handle().last_event();
     let drag = h
         .state()
-        .values
+        .values()
         .lock()
         .unwrap()
         .begin_gesture(Origin::User, "drag exposure");
@@ -399,7 +399,7 @@ fn ctrl_z_undoes_a_drag_as_a_version_redo_replays_it_and_a_drag_going_on_stops_i
         .find(|e| e.name == "edit.undo_failed")
         .expect("the veto is on the journal");
     assert_eq!(failed.data["reason"], "drag exposure is in progress");
-    h.state().values.lock().unwrap().end(drag);
+    h.state().values().lock().unwrap().end(drag);
     drop((h, persist));
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -449,7 +449,7 @@ fn mask_labels_and_locks_are_saved_with_the_edit() {
     // The spot named and locked: two steps, saved with the edit.
     {
         let v = shell.viewport();
-        let mut store = shell.values.lock().unwrap();
+        let mut store = shell.values().lock().unwrap();
         let net = mask_tree::network(v.graph().unwrap(), &store, None);
         mask_tree::rename(&mut store, &net, "spot", "Face", &Origin::User).unwrap();
         mask_tree::set_locked(&mut store, &net, "spot", Some(true), &Origin::User).unwrap();
@@ -470,7 +470,7 @@ fn mask_labels_and_locks_are_saved_with_the_edit() {
         .open_image(&mut shell, id(1), graph, blend, "output")
         .unwrap();
     {
-        let store = shell.values.lock().unwrap();
+        let store = shell.values().lock().unwrap();
         assert_eq!(mask_tree::label_of(&store, "spot").as_deref(), Some("Face"));
         assert!(mask_tree::is_locked(&store, "spot"));
         assert!(store.undo_steps().is_empty());
@@ -481,7 +481,7 @@ fn mask_labels_and_locks_are_saved_with_the_edit() {
         .open_image(&mut shell, id(2), graph, blend, "output")
         .unwrap();
     {
-        let store = shell.values.lock().unwrap();
+        let store = shell.values().lock().unwrap();
         assert_eq!(mask_tree::label_of(&store, "spot"), None);
         assert!(!mask_tree::is_locked(&store, "spot"));
     }
@@ -534,7 +534,7 @@ fn opening_another_image_leaves_the_undo_steps_of_the_first_behind() {
     open_exposure(&mut shell, &mut persist, 2);
     assert!((shown(&shell) - start).abs() < 1e-9);
     {
-        let mut store = shell.values.lock().unwrap();
+        let mut store = shell.values().lock().unwrap();
         assert!(store.undo_steps().is_empty(), "the first image's steps");
         assert_eq!(store.undo(&Origin::User).unwrap(), None, "nothing to undo");
     }
@@ -551,7 +551,7 @@ fn opening_another_image_leaves_the_undo_steps_of_the_first_behind() {
 
 fn set_by(shell: &Shell, ev: f64, origin: helios_shell::commands::Origin) {
     shell
-        .values
+        .values()
         .lock()
         .unwrap()
         .set(helios_values::Set::new(
@@ -574,18 +574,18 @@ fn each_version_names_who_made_its_step() {
     // An agent's write, then the user's undo of it.
     set_by(&shell, start + 1.0, Origin::Agent("retouch".into()));
     persist.frame(&mut shell, 10.0);
-    shell.values.lock().unwrap().undo(&Origin::User).unwrap();
+    shell.values().lock().unwrap().undo(&Origin::User).unwrap();
     persist.frame(&mut shell, 11.0);
     // A script's drag, saved while it goes and at its end.
     let drag = shell
-        .values
+        .values()
         .lock()
         .unwrap()
         .begin_gesture(Origin::Script("ramp".into()), "drag exposure");
     set(&shell, start + 0.5, Some(drag));
     persist.frame(&mut shell, 12.0);
     persist.frame(&mut shell, 13.5);
-    shell.values.lock().unwrap().end(drag);
+    shell.values().lock().unwrap().end(drag);
     persist.frame(&mut shell, 14.0);
     let vault = persist.vault().clone();
     let head = vault.heads(&id(1)).unwrap().remove(0);
@@ -633,7 +633,7 @@ fn a_long_drag_cancelled_saves_the_values_it_put_back() {
     persist.frame(&mut shell, 10.0);
     // A drag held for more than a second: saved in progress.
     let drag = shell
-        .values
+        .values()
         .lock()
         .unwrap()
         .begin_gesture(Origin::User, "drag exposure");
@@ -642,7 +642,7 @@ fn a_long_drag_cancelled_saves_the_values_it_put_back() {
     persist.frame(&mut shell, 11.5);
     assert_eq!(saved(persist.bus()).len(), 2, "the drag in progress");
     // Escape: the value goes back, and that is what the vault keeps.
-    shell.values.lock().unwrap().cancel(drag);
+    shell.values().lock().unwrap().cancel(drag);
     assert!((shown(&shell) - (start + 0.5)).abs() < 1e-9);
     persist.frame(&mut shell, 11.6);
     persist.frame(&mut shell, 12.0);
@@ -693,7 +693,7 @@ fn a_network_changed_in_place_is_saved_with_its_new_nodes_and_without_the_old() 
         .unwrap();
     next.connect(exp, "output", lift, "input").unwrap();
     {
-        let mut store = shell.values.lock().unwrap();
+        let mut store = shell.values().lock().unwrap();
         let before = shell.viewport().graph().unwrap().clone();
         let rebound = helios_values::rebind(
             &mut store,
@@ -735,7 +735,7 @@ fn a_network_changed_in_place_is_saved_with_its_new_nodes_and_without_the_old() 
     persist.frame(&mut shell, 12.0);
     assert!(
         shell
-            .values
+            .values()
             .lock()
             .unwrap()
             .get("node/lift/exposure")
@@ -792,7 +792,7 @@ fn a_drag_makes_compare_render_again_once_at_its_end() {
     // A drag of many frames, saved in progress every FLUSH_SECONDS.
     let start = shown(&shell);
     let drag = shell
-        .values
+        .values()
         .lock()
         .unwrap()
         .begin_gesture(Origin::User, "drag exposure");
@@ -808,7 +808,7 @@ fn a_drag_makes_compare_render_again_once_at_its_end() {
     );
     assert!(!shell.library().head_render(&key).unwrap().2);
     // The drag ends: one render, then none until the edit changes again.
-    shell.values.lock().unwrap().end(drag);
+    shell.values().lock().unwrap().end(drag);
     persist.frame(&mut shell, 20.0);
     assert!(shell.library().head_render(&key).unwrap().2, "stale");
     land(&shell, "v2");

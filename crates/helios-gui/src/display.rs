@@ -150,15 +150,12 @@ pub fn install_image_surface(
     )
 }
 
-/// Takes the image surface down: the main window's image goes back to
-/// the window's surface at once. The viewport wishes sRGB from then on,
-/// so egui-pop negotiates no surface and drops the subsurfaces it made.
-pub fn take_down_image_surface(ctx: &egui::Context) {
-    pop_display::set_image_surface(
-        ctx,
-        egui::ViewportId::ROOT,
-        pop_display::ImageSurface::default(),
-    );
+/// Takes the image surface of `window` down (the main window's is
+/// `ViewportId::ROOT`): its image goes back to the window's surface at
+/// once. The viewport wishes sRGB from then on, so egui-pop negotiates no
+/// surface and drops the subsurfaces it made.
+pub fn take_down_image_surface(ctx: &egui::Context, window: egui::ViewportId) {
+    pop_display::set_image_surface(ctx, window, pop_display::ImageSurface::default());
 }
 
 /// What the display offers, asked once per process (one connection to
@@ -441,7 +438,7 @@ mod tests {
             assert_eq!(snapshot(&ctx, true)["route"]["route"], name);
 
             // The setting goes off: the image is back on the window.
-            take_down_image_surface(&ctx);
+            take_down_image_surface(&ctx, ViewportId::ROOT);
             pop_display::want(&ctx, ViewportId::ROOT, wanted(false));
             assert!(is_srgb(&pop_display::target(&ctx)));
             assert_eq!(negotiated(&ctx, &offer), Route::Window);

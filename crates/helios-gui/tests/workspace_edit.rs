@@ -69,12 +69,12 @@ fn answer(h: &mut Harness<'static, Shell>, values: Value) {
 }
 
 fn steps(h: &Harness<'static, Shell>) -> usize {
-    h.state().values.lock().unwrap().undo_steps().len()
+    h.state().values().lock().unwrap().undo_steps().len()
 }
 
 fn undo(h: &mut Harness<'static, Shell>) {
     h.state()
-        .values
+        .values()
         .lock()
         .unwrap()
         .undo(&Origin::User)

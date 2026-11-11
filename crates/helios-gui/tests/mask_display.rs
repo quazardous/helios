@@ -106,7 +106,7 @@ fn run(h: &mut Harness<'_, Shell>, command: &str, args: serde_json::Value) -> se
 }
 
 fn mode(h: &Harness<'_, Shell>) -> Mode {
-    helios_gui::mask_display::mode(&h.state().values.lock().unwrap())
+    helios_gui::mask_display::mode(&h.state().values().lock().unwrap())
 }
 
 /// The row the viewport shows over the image, and its node's name.
@@ -119,7 +119,7 @@ fn shown(h: &Harness<'_, Shell>) -> Option<(String, String)> {
 
 fn put(h: &mut Harness<'_, Shell>, path: &str, value: Value) {
     h.state()
-        .values
+        .values()
         .lock()
         .unwrap()
         .set(Set::new(path, Change::To(value), Origin::User))
@@ -236,7 +236,7 @@ fn the_command_cycles_and_sets_and_is_never_an_undo_step() {
             .run(COMMAND, json!({ "mode": "loud" }), Origin::User)
             .is_err()
     );
-    let store = h.state().values.lock().unwrap();
+    let store = h.state().values().lock().unwrap();
     assert!(store.undo_steps().is_empty(), "{:?}", store.undo_steps());
     assert!(store.get(MODE).unwrap().descriptor.transient);
 }
@@ -315,7 +315,7 @@ fn it_stays_on_through_a_drag_a_parameter_change_and_undo() {
     assert!(on_screen(&mut h, 440.0, 600.0).iter().all(|&c| c <= 5));
     // Undo: the radius back, still shown.
     h.state()
-        .values
+        .values()
         .lock()
         .unwrap()
         .undo(&Origin::User)

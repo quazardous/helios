@@ -54,7 +54,7 @@ fn window(root: &Path) -> Harness<'static, Shell> {
             )
             .unwrap();
         g.connect(src, "image", exp, "input").unwrap();
-        let mut store = shell.values.lock().unwrap();
+        let mut store = shell.values().lock().unwrap();
         helios_values::bind_node(&mut store, &g, exp).unwrap();
         store.declare(OPACITY, Descriptor::float("opacity", 0.0, 1.0, 1.0));
     }
@@ -89,7 +89,7 @@ fn crumbs(h: &Harness<'_, Shell>) -> Vec<String> {
 }
 
 fn scope(h: &Harness<'_, Shell>) -> Option<Scope> {
-    h.state().values.lock().unwrap().scope().cloned()
+    h.state().values().lock().unwrap().scope().cloned()
 }
 
 fn toasted(h: &Harness<'_, Shell>, text: &str) -> bool {

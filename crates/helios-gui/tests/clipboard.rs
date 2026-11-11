@@ -28,7 +28,7 @@ fn harness() -> egui_kittest::Harness<'static, Shell> {
         .unwrap();
     g.connect(src, "image", exp, "input").unwrap();
     let shell = Shell::new(helios_panels(), None);
-    helios_values::bind_node(&mut shell.values.lock().unwrap(), &g, exp).unwrap();
+    helios_values::bind_node(&mut shell.values().lock().unwrap(), &g, exp).unwrap();
     let mut h = headless::harness(shell, vec2(1280.0, 800.0));
     h.run();
     h
@@ -36,7 +36,7 @@ fn harness() -> egui_kittest::Harness<'static, Shell> {
 
 fn value(h: &egui_kittest::Harness<'_, Shell>, path: &str) -> Value {
     h.state()
-        .values
+        .values()
         .lock()
         .unwrap()
         .get(path)
@@ -47,7 +47,7 @@ fn value(h: &egui_kittest::Harness<'_, Shell>, path: &str) -> Value {
 
 fn steps(h: &egui_kittest::Harness<'_, Shell>) -> Vec<String> {
     h.state()
-        .values
+        .values()
         .lock()
         .unwrap()
         .undo_steps()

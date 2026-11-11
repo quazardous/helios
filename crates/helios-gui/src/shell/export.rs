@@ -165,12 +165,12 @@ fn choice(key: &str, label: String, choices: &[&str], value: &str) -> Field {
 impl Shell {
     /// Where the host sends what the exports it runs say, from any thread.
     pub fn export_sink(&self) -> Sender<Line> {
-        self.export_lines.0.clone()
+        self.core.export_lines.0.clone()
     }
 
     /// The exports asked for since the last call, for the host to run.
     pub fn take_exports(&mut self) -> Vec<ExportAsk> {
-        std::mem::take(&mut self.exports)
+        std::mem::take(&mut self.core.exports)
     }
 
     /// The workspace's export settings, or the defaults.
@@ -192,7 +192,7 @@ impl Shell {
                 .map(String::from)
                 .collect();
         }
-        let library = self.library.borrow();
+        let library = self.focus.library.borrow();
         let selected = library.targets().unwrap_or_default();
         match args.get("scope").and_then(Value::as_str) {
             Some("shown") => library.shown(),
@@ -240,7 +240,7 @@ impl Shell {
             .view
             .node;
         self.select_exported_node(&node);
-        self.exports.push(ExportAsk {
+        self.core.exports.push(ExportAsk {
             images,
             settings,
             open_label: self.text(Message::new("gui-export-open-folder", "Open folder")),
@@ -260,8 +260,14 @@ impl Shell {
     /// shown), the format and its quality, the size, the colour space,
     /// the folder, the names and what a name taken does.
     fn export_form(&mut self, desc: &ExportDesc, args: &Value) -> Result<(), String> {
-        let selected = self.library.borrow().targets().unwrap_or_default().len();
-        let shown = self.library.borrow().shown().len();
+        let selected = self
+            .focus
+            .library
+            .borrow()
+            .targets()
+            .unwrap_or_default()
+            .len();
+        let shown = self.focus.library.borrow().shown().len();
         let mut fields = Vec::new();
         if args.get("images").is_none() {
             let scope = match args.get("scope").and_then(Value::as_str) {
@@ -372,7 +378,7 @@ impl Shell {
             &helios_template::format::CLASHES,
             &desc.clash,
         ));
-        if self.edit.is_some() {
+        if self.focus.edit.is_some() {
             let mut remember = Field {
                 key: "remember".into(),
                 descriptor: Descriptor::bool(
@@ -428,9 +434,9 @@ impl Shell {
     /// Takes in what the exports said: each failure to the Log panel,
     /// each end to a toast offering the folder.
     pub(super) fn receive_exports(&mut self) {
-        while let Ok(line) = self.export_lines.1.try_recv() {
+        while let Ok(line) = self.core.export_lines.1.try_recv() {
             match line {
-                Line::Failed { item, error, .. } => self.log.borrow_mut().push(
+                Line::Failed { item, error, .. } => self.core.log.borrow_mut().push(
                     Level::Error,
                     Message::new(
                         "gui-export-image-failed",
@@ -491,10 +497,10 @@ impl Shell {
         } else {
             message
         };
-        self.log.borrow_mut().push(level, message.clone());
+        self.core.log.borrow_mut().push(level, message.clone());
         let text = self.text(message.clone());
         let open = self.text(Message::new("gui-export-open-folder", "Open folder"));
-        if let Some(toasts) = self.app.handle().service(&TOASTS) {
+        if let Some(toasts) = self.core.app.handle().service(&TOASTS) {
             let toast = match level {
                 Level::Warning => Toast::warning(&text),
                 Level::Error => Toast::error(&text),
@@ -507,12 +513,12 @@ impl Shell {
             ));
         }
         self.notes.push(text.clone());
-        self.notices.push(Notice {
+        self.core.notices.push(Notice {
             level,
             text,
             key: message.key,
             action: Some((open, OPEN_FOLDER.to_string())),
-            at: self.now,
+            at: self.core.now,
         });
     }
 
@@ -520,7 +526,7 @@ impl Shell {
     /// nothing is.
     fn select_exported_node(&mut self, node: &str) {
         use helios_values::{Change, Set};
-        let mut values = lock(&self.values);
+        let mut values = lock(&self.core.values);
         let empty = values
             .get(crate::params::SELECTION)
             .is_none_or(|v| matches!(&v.value, helios_core::Value::Text(t) if t.is_empty()));

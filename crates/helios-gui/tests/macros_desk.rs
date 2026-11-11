@@ -91,7 +91,7 @@ fn run(h: &mut Harness<'static, Shell>, id: &str, args: Json) -> Json {
 
 fn set(h: &mut Harness<'static, Shell>, path: &str, v: f64) {
     h.state()
-        .values
+        .values()
         .lock()
         .unwrap()
         .set(helios_values::Set::new(
@@ -105,7 +105,7 @@ fn set(h: &mut Harness<'static, Shell>, path: &str, v: f64) {
 
 fn undo(h: &mut Harness<'static, Shell>) {
     h.state()
-        .values
+        .values()
         .lock()
         .unwrap()
         .undo(&Origin::User)
@@ -115,7 +115,7 @@ fn undo(h: &mut Harness<'static, Shell>) {
 }
 
 fn steps(h: &Harness<'static, Shell>) -> usize {
-    h.state().values.lock().unwrap().undo_steps().len()
+    h.state().values().lock().unwrap().undo_steps().len()
 }
 
 /// A parameter of a node of the graph shown; `None` without that node.
@@ -158,7 +158,7 @@ fn a_macro_made_opened_folded_and_dissolved_keeps_the_image_and_undoes_in_one_st
     // Selected: what one looks at now.
     assert_eq!(
         h.state()
-            .values
+            .values()
             .lock()
             .unwrap()
             .get(helios_gui::params::SELECTION)
@@ -231,7 +231,7 @@ fn the_selected_nodes_are_made_a_macro_by_default() {
     let root = temp("selected");
     let mut h = window(&root);
     {
-        let mut store = h.state().values.lock().unwrap();
+        let mut store = h.state().values().lock().unwrap();
         store
             .set(helios_values::Set::new(
                 helios_gui::shell::GRAPH_SELECTED,
@@ -291,7 +291,7 @@ fn a_macro_s_interface_edited_is_one_step_and_keeps_the_image() {
     // The Parameters panel's descriptor carries the group.
     let group = h
         .state()
-        .values
+        .values()
         .lock()
         .unwrap()
         .get("node/look/brightness")

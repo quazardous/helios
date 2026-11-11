@@ -608,6 +608,73 @@ one is available.
 - Still open: a single-window FIFO run on headless mutter, a real GNOME
   session, and the Windows and macOS runs proposed above.
 
+### Built: slice 3 (2026-11-11)
+
+Helios's `Shell` (`crates/helios-gui/src/shell.rs`) is now a process
+core and one focus, with nothing visible changed: the process still has
+one window, the main one, and the scenarios and snapshots are the same.
+
+```text
+Shell
+├── core: Core    (shell/core.rs)   one per process, shared by every window
+├── focus: Focus  (shell/focus.rs)  the main window: the root viewport, the first focus
+└── notes         what the shell has to say to its caller
+```
+
+**The core** holds what every window shares:
+
+- egui-pop's application (one per process with egui-pop 0.8), the
+  command registry, its declarations and the queue of the commands'
+  actions, the panels declared;
+- the theme and the settings (profiles, the machine, the resolved view);
+- the value store and its undo, the open image's history snapshots;
+- the viewport engine and its render cache (`Core::engine`), the GPU
+  render state and what installing it found (one device per process);
+- the clipboard (its endpoints, the system clipboard, a copy being
+  rendered);
+- the jobs: their reports, the library's undo steps, the status line, the
+  nodes followed, the jobs ended and forgotten;
+- the imports and exports handed to the host and their lines, the
+  duplicates and stack proposals they bring, the library's files on disk;
+- the notices and the log, the dialogs, the clock, the catalogues
+  (`i18n`), the launches and links to open (`opens`), the Settings app's
+  Storage and Health check pages.
+
+The catalogue itself (the vault, the cache service, the node connection)
+is the host's (`main.rs`), outside the shell, and one per process too.
+
+**A focus** holds what belongs to its window:
+
+- the window it is drawn in (`Focus::window`, `ViewportId::ROOT` for the
+  main window), which keys its display surface (the Wide-gamut image
+  surface is taken down for that window), its title bar's system menu and
+  its pictures (named rectangles, scale, screenshots, recording);
+- its workspace: the layout and its last save, the workspace's state as
+  edited, the sub-workspaces, the places and modes followed, the import
+  source, the title;
+- its views and tools: the library as the window shows it (grid, filter,
+  selection), the viewport on the open image and the image being opened,
+  the preview, parameters, masks, network, scopes and decisions, the Queue
+  and Workshops panels, what each panel draws (`contents`), the status
+  bar items, a menu open at a point, a tab's drag refusal;
+- the import window and the photos the imports brought, to select.
+
+**The seams slice 4 uses.** A focus is made by `Focus::new` from a
+`Seed` (its window, workspace, library view, viewport and the panels'
+contents), so the Import window becomes a second `Focus` on the same
+core. Its viewport comes from `focus::viewport_on(&core.engine)`
+(`Viewport::on_engine`): every window renders on the core's one engine,
+so no photo is decoded or cached twice. Slice 4 turns `focus` into the
+list of foci, the root's first, and keys the frame's work by the window
+egui-pop's multi-window API passes; nothing here depends on that API
+yet (Helios stays on egui-pop 0.8 until it ships).
+
+**Left for later slices.** The value store, the snapshots and the jobs
+are the core's: a focus's own undo scope and its jobs as tags (T7) come
+with foci as first-class (slice 7). The Queue panel and the status line
+show every job. The host's per-image work in `main.rs` (the image shown,
+the images being made ready) still serves the one focus.
+
 ## 6. Open questions
 
 ### Product choices (for the owner)

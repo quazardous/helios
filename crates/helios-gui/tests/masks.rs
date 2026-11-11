@@ -82,7 +82,7 @@ fn run(h: &mut Harness<'_, Shell>, command: &str, args: serde_json::Value) {
 
 fn f(h: &Harness<'_, Shell>, path: &str) -> f64 {
     h.state()
-        .values
+        .values()
         .lock()
         .unwrap()
         .get(path)
@@ -93,19 +93,19 @@ fn f(h: &Harness<'_, Shell>, path: &str) -> f64 {
 }
 
 fn text(h: &Harness<'_, Shell>, path: &str) -> String {
-    match &h.state().values.lock().unwrap().get(path).unwrap().value {
+    match &h.state().values().lock().unwrap().get(path).unwrap().value {
         Value::Text(t) | Value::Choice(t) => t.clone(),
         v => panic!("{path}: {v:?}"),
     }
 }
 
 fn steps(h: &Harness<'_, Shell>) -> Vec<String> {
-    let store = h.state().values.lock().unwrap();
+    let store = h.state().values().lock().unwrap();
     store.undo_steps().iter().map(|s| s.label.clone()).collect()
 }
 
 fn path_len(h: &Harness<'_, Shell>, node: &str) -> usize {
-    let store = h.state().values.lock().unwrap();
+    let store = h.state().values().lock().unwrap();
     let v = store.get(&format!("node/{node}/points")).unwrap();
     path_points(v.value.as_list().unwrap()).unwrap().len()
 }
@@ -215,7 +215,7 @@ fn each_shape_kind_is_created_in_the_mask_at_the_view_s_centre() {
     for c in corners {
         click(&mut h, m.image_to_screen(c));
     }
-    assert_eq!(masks::draft(&h.state().values.lock().unwrap()).len(), 3);
+    assert_eq!(masks::draft(&h.state().values().lock().unwrap()).len(), 3);
     click(&mut h, m.image_to_screen(corners[0]));
     assert_eq!(text(&h, TOOL), "none");
     assert_eq!(text(&h, SHAPE), "path");
@@ -328,7 +328,7 @@ fn escape_cancels_a_drag_and_leaves_no_undo_step() {
     release(&mut h, from + vec2(60.0, 30.0));
     assert_eq!((f(&h, "node/ellipse/x"), f(&h, "node/ellipse/y")), (x, y));
     assert!(steps(&h).is_empty(), "{:?}", steps(&h));
-    let store = h.state().values.lock().unwrap();
+    let store = h.state().values().lock().unwrap();
     assert!(store.open_gesture().is_none());
 }
 
@@ -508,7 +508,7 @@ fn a_corner_drag_moves_its_handles_and_a_smooth_point_shows_them() {
     let from = handle(&h, "after.1");
     drag_to(&mut h, from, from + vec2(0.0, 30.0), Modifiers::NONE);
     release(&mut h, from + vec2(0.0, 30.0));
-    let store = h.state().values.lock().unwrap();
+    let store = h.state().values().lock().unwrap();
     let p = path_points(
         store
             .get("node/path/points")

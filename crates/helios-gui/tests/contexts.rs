@@ -235,7 +235,7 @@ fn compare_and_mask_editing_follow_the_image_and_the_stack() {
     let mut h = window(&dir);
     let compare = |h: &Harness<'_, Shell>| {
         h.state()
-            .values
+            .values()
             .lock()
             .unwrap()
             .get(helios_gui::viewport::COMPARE)
@@ -264,7 +264,8 @@ fn compare_and_mask_editing_follow_the_image_and_the_stack() {
         .unwrap();
     h.run();
     h.run();
-    let tool = |h: &Harness<'_, Shell>| helios_gui::masks::tool(&h.state().values.lock().unwrap());
+    let tool =
+        |h: &Harness<'_, Shell>| helios_gui::masks::tool(&h.state().values().lock().unwrap());
     assert_eq!(tool(&h), "path");
     assert!(
         h.state()
@@ -313,7 +314,7 @@ fn the_workspace_comes_back_where_it_was_left_or_falls_back() {
     h.run();
     assert!(
         h.state()
-            .values
+            .values()
             .lock()
             .unwrap()
             .get(helios_gui::viewport::COMPARE)

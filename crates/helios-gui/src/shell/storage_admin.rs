@@ -462,7 +462,7 @@ impl Shell {
         if self.has_command(VOLUMES) {
             return;
         }
-        let (l, i18n) = (link.clone(), self.i18n.clone());
+        let (l, i18n) = (link.clone(), self.core.i18n.clone());
         let volumes = self.register(
             CommandSpec::new(
                 VOLUMES,
@@ -478,7 +478,7 @@ impl Shell {
                 Ok(volume_rows(&t, &volumes, &photos, strategy.as_ref()))
             },
         );
-        let (l, i18n) = (link.clone(), self.i18n.clone());
+        let (l, i18n) = (link.clone(), self.core.i18n.clone());
         let strategy = self.register(
             CommandSpec::new(
                 STRATEGY,

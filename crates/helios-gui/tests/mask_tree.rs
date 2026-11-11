@@ -92,7 +92,14 @@ fn run(h: &mut Harness<'_, Shell>, command: &str, args: serde_json::Value) {
 }
 
 fn text(h: &Harness<'_, Shell>, path: &str) -> String {
-    match h.state().values.lock().unwrap().get(path).map(|e| &e.value) {
+    match h
+        .state()
+        .values()
+        .lock()
+        .unwrap()
+        .get(path)
+        .map(|e| &e.value)
+    {
         Some(Value::Text(t) | Value::Choice(t)) => t.clone(),
         v => panic!("{path}: {v:?}"),
     }
@@ -135,12 +142,12 @@ fn wired(h: &Harness<'_, Shell>, group: &str) -> Vec<String> {
 }
 
 fn floats(h: &Harness<'_, Shell>, path: &str) -> Vec<f64> {
-    let store = h.state().values.lock().unwrap();
+    let store = h.state().values().lock().unwrap();
     store.get(path).unwrap().value.as_list().unwrap().to_vec()
 }
 
 fn steps(h: &Harness<'_, Shell>) -> Vec<String> {
-    let store = h.state().values.lock().unwrap();
+    let store = h.state().values().lock().unwrap();
     store.undo_steps().iter().map(|s| s.label.clone()).collect()
 }
 
@@ -214,7 +221,7 @@ fn an_ai_object_member_shows_with_its_icon_and_its_question() {
     run(&mut h, "helios.masks.focus", json!(null));
     assert_eq!(rows(&h).last().unwrap(), "  ✨ sky");
     // Its question is in the Parameters panel's values; its answer is not.
-    let store = h.state().values.lock().unwrap();
+    let store = h.state().values().lock().unwrap();
     for p in ["kind", "prompt", "resolver"] {
         assert!(store.get(&format!("node/sky/{p}")).is_some(), "{p}");
     }
@@ -270,7 +277,7 @@ fn group_operators_are_named_by_their_effect_with_a_preview() {
         ("exclusion", "exclude"),
     ] {
         h.state()
-            .values
+            .values()
             .lock()
             .unwrap()
             .set(helios_values::Set::new(
@@ -354,7 +361,7 @@ fn in_params(h: &Harness<'_, Shell>, label: &str) -> bool {
 
 fn set(h: &mut Harness<'_, Shell>, path: &str, value: Value) {
     h.state()
-        .values
+        .values()
         .lock()
         .unwrap()
         .set(helios_values::Set::new(
@@ -984,7 +991,7 @@ fn a_refinement_row_selected_shows_its_parameters() {
     );
     assert!(
         h.state()
-            .values
+            .values()
             .lock()
             .unwrap()
             .get("node/edge/radius")
@@ -1174,7 +1181,7 @@ fn taking_out_a_group_that_holds_members_is_asked_first() {
 
 fn float(h: &Harness<'_, Shell>, path: &str) -> f64 {
     h.state()
-        .values
+        .values()
         .lock()
         .unwrap()
         .get(path)

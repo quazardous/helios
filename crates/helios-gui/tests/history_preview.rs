@@ -74,7 +74,7 @@ fn open(dir: &Path) -> (Shell, Persist<SqliteStore>, helios_vault::ImageId) {
 
 fn set(shell: &Shell, ev: f64) {
     shell
-        .values
+        .values()
         .lock()
         .unwrap()
         .set(helios_values::Set::new(
@@ -88,7 +88,9 @@ fn set(shell: &Shell, ev: f64) {
 /// The exposure the image renders with, once the graph followed the
 /// store (as each frame does).
 fn rendered(shell: &Shell) -> f64 {
-    shell.viewport_mut().sync(&mut shell.values.lock().unwrap());
+    shell
+        .viewport_mut()
+        .sync(&mut shell.values().lock().unwrap());
     let viewport = shell.viewport();
     let g = viewport.graph().unwrap();
     let id = g.find("exposure").unwrap();
@@ -104,7 +106,7 @@ fn rendered(shell: &Shell) -> f64 {
 /// The exposure the store holds: what widgets, agents and the save read.
 fn live(shell: &Shell) -> f64 {
     shell
-        .values
+        .values()
         .lock()
         .unwrap()
         .get(EV)
@@ -116,7 +118,7 @@ fn live(shell: &Shell) -> f64 {
 
 /// What would show a write: the store's counters.
 fn counters(shell: &Shell) -> (u64, u64, u64, usize) {
-    let s = shell.values.lock().unwrap();
+    let s = shell.values().lock().unwrap();
     (
         s.seq(),
         s.history_rev(),
@@ -184,7 +186,7 @@ fn a_hovered_step_shows_its_values_and_leaving_restores_the_live_ones() {
     // The pointer leaves: the live value, bit for bit.
     history::end_preview(shell.app().handle());
     assert_eq!(rendered(&shell).to_bits(), now.to_bits());
-    assert!(shell.values.lock().unwrap().previewed().is_empty());
+    assert!(shell.values().lock().unwrap().previewed().is_empty());
 
     // A snapshot's row: the state it pinned.
     set(&shell, -1.0);
@@ -207,12 +209,12 @@ fn a_drag_gets_no_preview_and_keeps_its_values() {
     set(&shell, 2.0);
     persist.frame(&mut shell, 1.0);
     let g = shell
-        .values
+        .values()
         .lock()
         .unwrap()
         .begin_gesture(Origin::User, "drag exposure");
     shell
-        .values
+        .values()
         .lock()
         .unwrap()
         .set(
@@ -227,12 +229,12 @@ fn a_drag_gets_no_preview_and_keeps_its_values() {
     let before = counters(&shell);
     // The pointer on a row while the drag goes on: no preview.
     assert!(history::hover(shell.app().handle(), &EDIT, At::Step(1)).is_none());
-    assert!(shell.values.lock().unwrap().previewed().is_empty());
+    assert!(shell.values().lock().unwrap().previewed().is_empty());
     assert_eq!(rendered(&shell), 2.5);
     assert_eq!(counters(&shell), before);
     // The drag ends as it would have: one step at its value.
     history::end_preview(shell.app().handle());
-    shell.values.lock().unwrap().end(g);
+    shell.values().lock().unwrap().end(g);
     assert_eq!(live(&shell), 2.5);
     assert_eq!(rendered(&shell), 2.5);
     assert_eq!(counters(&shell).3, before.3 + 1);
