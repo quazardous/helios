@@ -20,6 +20,11 @@
 //! and `helios://` links to the running one and exits; `--new-instance`
 //! opens a window of its own (see `helios_gui::platform`).
 
+// A window program on Windows, in release: started from Explorer or the
+// Start menu, no console opens beside the window. Started from a terminal,
+// it writes to that terminal's console (`attach_parent_console`).
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -1491,7 +1496,31 @@ fn node_links(args: &[String]) -> Result<Vec<helios_gui::relay::NodeLink>, Strin
         .collect()
 }
 
+/// Windows: a window program has no console of its own. Started from a
+/// terminal with its output not redirected, it attaches to the terminal's
+/// console, so `--version`, `--snapshot` and errors print there; with its
+/// output redirected (a pipe, a file), it writes there as is.
+#[cfg(windows)]
+#[allow(unsafe_code)] // two Win32 calls that take and return plain values
+fn attach_parent_console() {
+    use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
+    use windows_sys::Win32::System::Console::{
+        ATTACH_PARENT_PROCESS, AttachConsole, GetStdHandle, STD_OUTPUT_HANDLE,
+    };
+    // SAFETY: neither call takes a pointer; GetStdHandle reads the
+    // process's standard handle, AttachConsole fails harmlessly when the
+    // parent has no console (started from Explorer).
+    unsafe {
+        let out = GetStdHandle(STD_OUTPUT_HANDLE);
+        if out.is_null() || out == INVALID_HANDLE_VALUE {
+            AttachConsole(ATTACH_PARENT_PROCESS);
+        }
+    }
+}
+
 fn main() -> Result<(), String> {
+    #[cfg(windows)]
+    attach_parent_console();
     let args: Vec<String> = std::env::args().skip(1).collect();
     if let [flag] = args.as_slice()
         && (flag == "--version" || flag == "-V")

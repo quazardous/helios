@@ -85,6 +85,16 @@ arboard = { version = "3.6", default-features = false, features = ["image-data"]
 # The rendered image copied as 8-bit sRGB, as an export writes it.
 helios-export.workspace = true
 
+# Windows: the console a window program attaches to when started from a
+# terminal (MIT OR Apache-2.0, already in the tree).
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Console"] }
+
+# MIT: the icon, version information and application manifest embedded in
+# helios-gui.exe (build.rs; does nothing on other targets).
+[build-dependencies]
+winresource = "0.1"
+
 [dev-dependencies]
 egui-pop-test.workspace = true
 # The import window's snapshots (tests/snapshots, thresholds in the
