@@ -25,6 +25,9 @@
 //!   (`<config>/composites/`), the macros published from a workspace.
 //! - [`subworkspace`]: sub-workspaces as data, named scopes over nodes
 //!   of a workspace's network, delegated, deleted, checked and copied.
+//! - [`workshop`] (experimental): workshops' measures, zones and
+//!   aiming; [`draft`]: a workshop an AI proposes, checked on a proxy of
+//!   the image and applied as one step.
 //! - [`contexts`]: Helios's places and modes on egui-pop's context
 //!   stack, shared by the desktop and the MCP server, and the tools
 //!   agents move a workspace's stack with.
@@ -33,6 +36,7 @@ pub mod build;
 pub mod bundle;
 pub mod catalogue;
 pub mod contexts;
+pub mod draft;
 pub mod format;
 pub mod library;
 pub mod macros;

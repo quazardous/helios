@@ -132,7 +132,7 @@ fn slug(name: &str) -> String {
 }
 
 /// `user.<slug of name>`, made unique among the catalogue's composites.
-fn free_id(catalogue: &Catalogue, name: &str) -> String {
+pub(crate) fn free_id(catalogue: &Catalogue, name: &str) -> String {
     let taken: BTreeSet<String> = catalogue.composite_files().map(|f| f.id.clone()).collect();
     let base = format!("{USER_PREFIX}{}", slug(name));
     if !taken.contains(&base) {
