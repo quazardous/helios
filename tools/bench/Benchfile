@@ -185,6 +185,7 @@ registry = { about = "the cargo registry, shared by every job", keep = true, max
 darktable-build = { about = "darktable-cli builds for the mask parity, one per pinned checkout", lock = true, media = "hdd", ttl = "30d", max = "10g" }
 darktable-asan = { about = "ASan darktable builds for GUI checks, one per dt_ref", lock = true, media = "hdd", until = "dt_ref", ttl = "14d", max = "30g" }
 cargo-git = { about = "the cargo git dependencies, shared by every job", keep = true, max = "5g" }
+egui-pop-perf = { about = "egui-pop's performance results, one directory per egui-pop branch (latest.jsonl, history.jsonl): a branch's run compares with next's latest", keep = true, tmp = false, max = "1g" }
 sccache = { about = "sccache's compile cache, shared by every job and branch: a branch reuses what another compiled (it caps itself at 12G)", keep = true, max = "14g" }
 
 # Every job builds from a copy at a fixed path (/tmp/w/<repo>): the target
@@ -674,6 +675,46 @@ THREADING_OUT=/out/threading.jsonl /target/release/examples/threading ${scenario
 env = { CARGO_NET_OFFLINE = "true" }
 mounts = { "egui-pop-target/${egui_pop:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
 timeout = "1h"
+
+# egui-pop's performance gate (its docs/testing.md, "Performance"): the
+# gallery's `perf` example, headless and deterministic (fixed frames, fixed
+# input), on its heavy pages; frame build and tessellation times, vertices,
+# allocations and the heap's peak, one JSON line per page. Built first by
+# egui-pop-perf-build, measured alone on the machine (a timing job). Each
+# run is kept per egui-pop branch in the egui-pop-perf storage, and compared
+# with the last run of next: a figure beyond its threshold is a `warning:`
+# line (out/regressions.txt), never a failure. `pages=` picks pages (a
+# partial run is not kept as the branch's latest)
+[jobs.egui-pop-perf-build]
+about = "builds egui-pop's perf example (release) for egui-pop-perf"
+checkouts = ["egui-pop"]
+cores = 5
+memory = "6g"
+cwd = "/work/${src:-egui-pop}"
+command = """mkdir -p /tmp/w/egui-pop && cp -r --preserve=mode . /tmp/w/egui-pop/ && cd /tmp/w/egui-pop && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/egui-pop ] || { rm -rf /target/* && echo /tmp/w/egui-pop > /target/.built-at; }; } && \
+cargo build --release --locked -p egui-pop-gallery --example perf"""
+env = { CARGO_NET_OFFLINE = "true" }
+mounts = { "egui-pop-target/${egui_pop:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
+timeout = "1h"
+
+[jobs.egui-pop-perf]
+about = "egui-pop's gallery pages measured headless (frame times, memory), compared with next's last run"
+first = [{ job = "egui-pop-perf-build", pass = ["branch", "egui_pop", "src"] }]
+checkouts = ["egui-pop"]
+cores = 4
+memory = "4g"
+timing = true
+cwd = "/work/${src:-egui-pop}"
+command = """test -x /target/release/examples/perf || { echo "perf is not built: run egui-pop-perf-build egui_pop=${egui_pop:-main} first" >&2; exit 2; }; \
+b=$(echo "${egui_pop:-main}" | tr / -); base=/perf/next/latest.jsonl; mkdir -p /perf/$b; \
+cp "$MCU_RESOURCES" /out/resources.json 2> /dev/null; \
+if [ -s $base ]; then cp $base /out/baseline.jsonl; set -- --baseline /out/baseline.jsonl; else echo "no run of next yet: nothing to compare with"; set --; fi; \
+PERF_COMMIT=$(git rev-parse --short HEAD 2> /dev/null) PERF_OUT=/out/perf.jsonl /target/release/examples/perf $(echo ${pages:-} | tr , " ") "$@" | tee /out/perf.txt; rc=${PIPESTATUS[0]}; \
+grep '^warning:' /out/perf.txt > /out/regressions.txt; [ -s /out/regressions.txt ] && echo "$(wc -l < /out/regressions.txt) regression warning(s): out/regressions.txt"; \
+if [ $rc -eq 0 ] && [ -z "${pages:-}" ]; then cp /out/perf.jsonl /perf/$b/latest.jsonl && cat /out/perf.jsonl >> /perf/$b/history.jsonl; fi; \
+exit $rc"""
+mounts = { "egui-pop-target/${egui_pop:-main}" = "/target", egui-pop-perf = "/perf" }
+timeout = "30m"
 
 # egui-pop's viewport tile intake on the NVIDIA GPU (its docs/threading.md):
 # the viewport crate's `gpu_tiles` example, each intake in its own process
