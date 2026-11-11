@@ -349,6 +349,10 @@ impl<S: Store> Persist<S> {
                 })
                 .collect();
             shell.set_library(entries);
+        } else {
+            // The backups are read again all the same (a strategy saved,
+            // a copy verified: no catalog change), as a whole read does.
+            shell.refresh_backups();
         }
         let files = shown
             .files
