@@ -430,7 +430,8 @@ The library panels are egui-pop's photo library widgets (its
 - **Library**: the search field, the marks of the image under the cursor
   (stars, colour labels, pick or reject, tags) and a virtualised thumbnail
   grid. Thumbnails are the raws' embedded previews (a picture itself),
-  read in the background and shown as they arrive.
+  read in the background, the cells in view first, and shown as they
+  arrive.
 - **Filmstrip**: the same images in one row, sharing the grid's
   selection.
 - **Compare** (closed by default): the two to four images selected side
@@ -600,6 +601,16 @@ of a bare "no copy present". When a scan changes where copies are (a disk
 plugged in or out), the Library reads its photos again, so the badges
 follow at once.
 
+Reading the Library never touches the files. It goes through a cursor on
+the vault, 2,000 photos at a time, each window one query that brings the
+photos' marks and their copies together: the presence and the volume to
+plug in are what the scans stored, the file's size and date those its
+copy was last seen with. Once shown, the Library is brought up to date
+by the cursor's changes: after an import, a scan or an undo it reads only
+the photos added and those whose copies moved, and nothing at all when
+the library did not change. At 100,000 photos the read is a few dozen
+queries, never one per photo (see [performance.md](performance.md)).
+
 ### The Storage page
 
 File > Storage… (`library.storage`) opens the Settings app at Storage ›
@@ -730,8 +741,7 @@ verified. They live next to the catalogue, in `<file>.snapshots/`, named
 - Phones over MTP as a source (mount them as folders).
 - An interactive answer to `--duplicates ask` on the command line (the
   files are listed; the desktop asks, in its Duplicates panel).
-- Thumbnails are read in the library's order, not the ones in view
-  first; the comparison draws them at their size (256 pixels).
+- The comparison draws thumbnails at their size (256 pixels).
 - Burst identifiers from maker notes; capture times of pictures (JPEG,
   TIFF) from their EXIF, which fall back to the file's date.
 - Cancelling an import halfway (the job runs to its end).

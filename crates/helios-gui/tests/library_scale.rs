@@ -5,12 +5,14 @@
 //! files stat-ed) as a JSON line, kept by nextest when the test passes.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-use helios_core::ContentHash;
+use helios_core::{Bus, ContentHash};
 use helios_gui::library::Entry;
-use helios_gui::persist::read_library;
+use helios_gui::persist::{Persist, read_library};
+use helios_gui::{Shell, helios_panels};
 use helios_vault::fields::{LABELS, RATING, TAGS};
 use helios_vault::storage::VolumeId;
 use helios_vault::{Image, ImageId, Location, Presence, Store, Vault};
@@ -211,4 +213,96 @@ fn the_library_read_at_scale_measured() {
         println!("library-read {line}");
         let _ = std::fs::remove_dir_all(&dir);
     }
+}
+
+/// A shell whose library is filled from the vault at `path`.
+fn open(path: &Path) -> (Shell, Persist<SqliteStore>) {
+    let mut shell = Shell::new(helios_panels(), None);
+    let persist = Persist::new(SqliteStore::open(path).unwrap(), Arc::new(Bus::new()));
+    persist.fill_library(&mut shell).unwrap();
+    (shell, persist)
+}
+
+/// The read's cost does not grow a query or a file system call per photo:
+/// one query opens the cursor, one reads each window of
+/// `helios_gui::persist::PAGE` photos, and the sizes and dates shown are the
+/// vault's, never a `stat`'s. A time deadline catches a read gone slow.
+#[test]
+fn the_library_read_at_scale_is_a_query_per_window_and_no_stat() {
+    let n = 50_000;
+    let dir = scratch("guard");
+    let path = synthetic(&dir, n);
+    let cost = read(&path, n).unwrap();
+    let windows = (n as usize).div_ceil(helios_gui::persist::PAGE) as u64;
+    assert!(
+        cost.queries <= windows + 1,
+        "{} queries for {n} photos: one per photo again?",
+        cost.queries
+    );
+    assert_eq!(cost.stats, 0, "the read stat-ed the photos' files");
+    assert!(
+        cost.elapsed < Duration::from_secs(30),
+        "read in {:?}",
+        cost.elapsed
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// After a scan or an import, the library shown reads only the photos added
+/// and those whose copies moved, and ends as a whole read would show it;
+/// with nothing changed it reads nothing.
+#[test]
+fn a_refresh_reads_only_what_changed_and_shows_what_a_whole_read_shows() {
+    let n = 1_000;
+    let dir = scratch("refresh");
+    let path = synthetic(&dir, n);
+    let (mut shell, persist) = open(&path);
+    let vault = persist.vault().clone();
+    assert_eq!(shell.library().entries.len(), n as usize);
+
+    let q0 = vault.reads().queries;
+    persist.fill_library(&mut shell).unwrap();
+    assert_eq!(vault.reads().queries, q0, "nothing changed: nothing read");
+
+    // A scan finds photo 7's volume plugged in, photo 8 is relinked.
+    let away = vault.locations(&id(7)).unwrap().remove(0);
+    let back = Location {
+        presence: Presence::Present,
+        ..away.clone()
+    };
+    let lost = vault.locations(&id(8)).unwrap().remove(0);
+    let found = Location {
+        presence: Presence::Present,
+        ..lost.clone()
+    };
+    vault
+        .update_locations(&[
+            (id(7), away.path.clone(), back),
+            (id(8), lost.path.clone(), found),
+        ])
+        .unwrap();
+    // An import adds a photo.
+    let new = dir.join("photos").join("NEW.nef");
+    std::fs::write(&new, b"a new photo").unwrap();
+    vault.import_file(&new, 5).unwrap();
+    let q0 = vault.reads().queries;
+    persist.fill_library(&mut shell).unwrap();
+    assert!(
+        vault.reads().queries - q0 <= 2,
+        "a refresh is the cursor's query and one window of what changed: {}",
+        vault.reads().queries - q0
+    );
+    let refreshed = shell.library().entries.clone();
+    assert_eq!(refreshed.len(), n as usize + 1);
+    let shown = |i: u32| refreshed.iter().find(|e| e.id == id(i).hex()).unwrap();
+    assert_eq!(shown(7).presence, Presence::Present);
+    assert_eq!(shown(7).offline_on, None);
+    assert_eq!(shown(8).presence, Presence::Present);
+    assert_eq!(shown(8).name, "IMG_000008.nef");
+
+    // As a library filled from scratch shows it.
+    let (whole, _) = open(&path);
+    assert_eq!(refreshed, whole.library().entries);
+    drop((shell, persist, whole));
+    let _ = std::fs::remove_dir_all(&dir);
 }

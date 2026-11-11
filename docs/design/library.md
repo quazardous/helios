@@ -62,9 +62,7 @@ proposes the next slices.
   thousand cells cost a screenful), shared selection, rubber band, `+`
   and `-` sizes, captions and overlays, Enter or a double click opens the
   image. Thumbnails come from the disk cache, else the raw's embedded
-  preview, the cells in view first (`Library::set_on_view`;
-  [../library.md](../library.md) "Not yet" still says otherwise and is
-  out of date there).
+  preview, the cells in view first (`Library::set_on_view`).
 - **Search field:** words (name or tag), `rating>=N`, `label:`, `flag:`,
   `tag:`/`#tag`, `date:a..b`, `backup:met|short|unverified|none`, chips.
   Rating, labels, flags and tags become a vault `Query`
