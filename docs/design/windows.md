@@ -443,6 +443,115 @@ Each slice builds, passes its tests, and leaves the application usable.
 8. **Between windows.** "Send to focus…" (selection, photos, an edit),
    the typed clipboard across windows, and drags where the OS allows.
 
+### Spike results (slice 1, 2026-11-11)
+
+The spike is egui-pop's `multi_window_spike` example
+(`crates/egui-pop-gallery/examples/multi_window_spike.rs`, plain eframe
+0.37) and its wbox scenario (`tools/wbox/multi_window.py`), run on the
+bench box with `cargo xtask bench-remote egui-pop-wbox
+egui_pop=<branch> script=multi_window.py [compositor=mutter]`. A root
+sends `ViewportCommand::Visible(false)` and declares two deferred
+windows: "A" repaints every frame, "B" only on input. Their state is
+`Rc<RefCell<…>>`, reached from the `Send + Sync` callbacks through a
+thread-local registry keyed by `ViewportId`. Each callback holds only
+its id and checks that it runs on the main thread. The example prints
+JSON lines (frames per window, focus, close, geometry, quit).
+`SPIKE_AUTOPILOT=1` makes it close B, then A, by itself, for runners
+with no window driver.
+
+**Read in eframe 0.37 and winit 0.30.13 first:**
+
+- **Wayland cannot hide a window.** winit's Wayland `set_visible` does
+  nothing, and `is_visible` returns `None`, which eframe reads as
+  visible. A hidden coordinator root is therefore impossible on Wayland
+  with winit 0.30.
+- **A hidden root still runs its pass while a child is visible.**
+  eframe 0.37 runs a hidden viewport's ui when it or any descendant is
+  visible (`is_viewport_or_descendant_visible`). Only with no window
+  visible does it fall back to `App::logic` alone, and then
+  `RequestPaintWhileHidden` buys one pass.
+- **The first painted frame shows the root.** eframe creates the root
+  hidden and calls `set_visible(true)` after its first paint. A hide sent
+  in that pass is applied after that call, so on X11, Windows and macOS
+  the root may flash once. Not observed yet: X11 is blocked (below).
+
+**Wayland, labwc (box job 20261111-122717-1c38): proven, except
+hiding the root and raising a window.**
+
+| Check | Result |
+|-------|--------|
+| Hidden root | **not possible**: "Spike root" stays listed and shown after `Visible(false)` |
+| Independent repaint | **proven**: over 2.9 s, A painted 180 frames, B 0 and the root 0. CPU was 16.5 % with software rendering |
+| Closing one window | **proven**: closed through the compositor (`wlrctl toplevel close`), B reports `close_requested`, the application stops declaring it, and it goes. A keeps painting and the process stays |
+| Closing the last window | **proven**: closing A quits the process. The root ran 7 passes in the whole run |
+| The `Rc` shim | **proven**: 0 callbacks off the main thread |
+| Focus | **proven**: each window's `focused` follows the compositor (B, then A once focused) |
+| Raising another window (`ViewportCommand::Focus` on B from A) | **not honoured**: A stays activated. This is focus-stealing prevention, so it needs an xdg-activation token |
+| Geometry | **not readable as tried**: `ViewportInfo::inner_rect` and `outer_rect` stay `None` for deferred windows on Wayland, so nothing was saved. The restored builder size was passed but not measured. The size has to be read from the pass (`Context::content_rect`), and the position is never available on Wayland |
+
+**Wayland, headless mutter (box job 20261111-123120-7256): not proven.**
+Both windows open and focus events arrive, but neither window paints
+past its first frames: no frame counts, and no quit within 60 s in
+autopilot. The same happened without autopilot. Bare mutter lists no
+windows and focuses none, so wbox's checks were not available. The
+suspected cause is the headless compositor sending no frame callbacks
+to a second surface, so a present blocks the one UI thread. If that
+also happens on a real GNOME session, it is a blocker for option A,
+since one stalled surface freezes every window. It must be checked on a
+GNOME desktop session before slice 2's API is fixed.
+
+**X11: blocked on the box.** The scenario runs the example under labwc's
+Xwayland with `WAYLAND_DISPLAY` unset, but the image lacks
+`libxkbcommon-x11`, so winit's X11 backend panics at start. The fix is
+to add `libxkbcommon-x11` to the Benchfile's image (Helios
+`tools/bench/Benchfile`) and run the same job again.
+
+**Windows and macOS: not run.** A `workflow_dispatch` on a branch is
+not allowed, and egui-pop's CI runs on Ubuntu only. Proposed: a
+non-blocking job in egui-pop's `ci.yml`, run on pushes to `next`, with
+`continue-on-error: true`. A matrix `windows-2022`, `macos-14` and
+`ubuntu-24.04` would build `cargo build --release -p egui-pop-gallery
+--example multi_window_spike` and run it with `SPIKE_AUTOPILOT=1`, under
+`xvfb-run` with a window manager on Ubuntu (X11). It would upload the
+JSON lines. The job passes when the `quit` line shows 0 off-thread
+callbacks, the `counts` lines show A advancing while B stays still,
+`root_visible` is `false` after the first frames, and the process exits
+0. The OS close path (the user's close button) and focus stealing need a
+window driver: wbox's `win32` backend on the Windows box, and a Mac when
+one is available.
+
+**What this decides:**
+
+- **T2, the root window: "the root is the first focus", not a hidden
+  coordinator.** The hidden root cannot work on Wayland, Helios's main
+  Linux target. Proposed instead: the root window is always a focus
+  window. When the user closes it while other foci are open, the
+  application cancels the close (`CancelClose`) and moves the most
+  recent other focus into the root, and that focus's deferred window
+  closes. This needs no hiding on any platform. On X11, Windows and
+  macOS a hidden root remains possible, but one code path for every
+  platform is simpler.
+- **T1 and T3 hold:** deferred windows repaint independently, and the
+  thread-local `Rc` shim works as designed.
+- **T6:** geometry is read from each window's pass, not from
+  `ViewportInfo`; position is restored only where the platform gives it.
+- **Raising a window** on Wayland goes through an activation token
+  (xdg-activation), which winit 0.30 does not expose for an existing
+  window. Until then, "raise the settings window" may only flash it.
+
+**For slice 2, the egui-pop API:**
+
+- `open_window` creates a deferred viewport declared from the root's
+  pass, and the root's own content is a focus like any other.
+- The registry and shim are egui-pop's (`WindowId` to the window
+  scope), with a debug assertion on the main thread.
+- Each window's close goes to the application, which stops declaring the
+  window, and the root's close moves a focus into it.
+- Geometry comes from each window's content rect.
+- Before the API is fixed, the mutter stall is investigated on a real
+  GNOME session, and X11 runs on the box once the image has
+  `libxkbcommon-x11`.
+
 ## 6. Open questions
 
 ### Product choices (for the owner)
@@ -466,7 +575,7 @@ Each slice builds, passes its tests, and leaves the application usable.
 | # | Question | Proposed default |
 |---|----------|------------------|
 | T1 | Deferred or immediate viewports | Deferred; immediate only embedded and in kittest. |
-| T2 | The root window | A hidden coordinator with `RequestPaintWhileHidden`, if the spike holds on every platform; otherwise the root is the first focus, and closing it while others are open hides it instead. |
+| T2 | The root window | The root is the first focus (the spike, 2026-11-11: Wayland cannot hide a window). Closing it while others are open moves the most recent other focus into it. |
 | T3 | `Rc` application state and `Send + Sync` callbacks | A thread-local registry keyed by window and a shim closure holding the id, asserting the main thread; no move to `Arc<Mutex>`. |
 | T4 | Modal scope | Window-modal by default; app-modal only for the quit, crash and "another instance" questions. |
 | T5 | Agent socket | One per process; commands and collectors take `window` (a focus id), defaulting to the front window. |
