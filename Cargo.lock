@@ -2251,6 +2251,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "helios-connect"
+version = "0.76.0"
+dependencies = [
+ "helios-storage",
+ "helios-vault",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "helios-controls"
 version = "0.76.0"
 dependencies = [

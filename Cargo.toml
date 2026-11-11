@@ -50,6 +50,7 @@ helios-display = { path = "crates/helios-display" }
 helios-template = { path = "crates/helios-template" }
 helios-colour = { path = "crates/helios-colour" }
 helios-storage = { path = "crates/helios-storage" }
+helios-connect = { path = "crates/helios-connect" }
 helios-health = { path = "crates/helios-health" }
 helios-cache = { path = "crates/helios-cache" }
 helios-controls = { path = "crates/helios-controls" }

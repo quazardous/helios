@@ -1,0 +1,16 @@
+[package]
+name = "helios-connect"
+description = "Import connectors: the trait every import source implements (paged listing with a cursor, items, access and fetch), their manifests and registry, and the first two connectors, local folders and mounted cards"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+helios-storage.workspace = true
+helios-vault.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true
