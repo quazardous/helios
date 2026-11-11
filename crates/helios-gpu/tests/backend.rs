@@ -44,6 +44,47 @@ fn exposure_on_the_gpu_matches_the_cpu() {
     }
 }
 
+/// Exposure's brick form (`core.affine` behind a value graph) on the GPU
+/// renders the bits of the sealed module on the GPU, and runs there.
+#[test]
+fn exposure_from_bricks_on_the_gpu_matches_the_sealed_one() {
+    use std::sync::Arc;
+    let _gpu = helios_testkit::gpu_lock();
+    let Some(gpu) = gpu() else { return };
+    let input = helios_testkit::noise(Region::sized(97, 61), 4, 7);
+    let render = |module: ModuleRef, params: &Params| {
+        let engine = helios_core::Engine::new(Arc::new(helios_core::Bus::new()))
+            .with_accelerator(gpu.clone());
+        let mut g = helios_core::Graph::new();
+        let src = g.add_source("src", input.clone());
+        let n = g.add_module("exposure", module, params).unwrap();
+        g.connect(src, helios_core::graph::SOURCE_PORT, n, "input")
+            .unwrap();
+        let out = engine.render(&g, n, "output", input.region()).unwrap();
+        assert_eq!(engine.counters().accelerated, 1);
+        out
+    };
+    for (exposure, black) in [
+        (0.0, 0.0),
+        (1.5, 0.01),
+        (-3.0, 0.2),
+        (18.0, -1.0),
+        (1.0, 0.8),
+    ] {
+        let params = Params::new()
+            .with("exposure", Value::Float(exposure))
+            .with("black", Value::Float(black));
+        let sealed = render(ModuleRef::new(Exposure), &params);
+        let bricks = render(helios_module_exposure::from_bricks(), &params);
+        let same = sealed
+            .data()
+            .iter()
+            .zip(bricks.data())
+            .all(|(a, b)| a.to_bits() == b.to_bits());
+        assert!(same, "exposure {exposure}, black {black}");
+    }
+}
+
 #[test]
 fn a_module_without_a_gpu_variant_says_so() {
     let _gpu = helios_testkit::gpu_lock();
