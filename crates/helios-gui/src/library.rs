@@ -24,9 +24,9 @@
 //! keeps the stars.
 //!
 //! The search field's filter becomes a vault query (rating, labels, flags,
-//! tags; [`query_of`]), run by the host ([`Library::take_query`],
-//! [`Library::set_matches`]); its words and dates are matched here, on the
-//! names, tags and days the library holds.
+//! tags, and dates as capture days; [`query_of`]), run by the host
+//! ([`Library::take_query`], [`Library::set_matches`]); its words are
+//! matched here, on the names and tags the library holds.
 //!
 //! Each photo's backups (`helios_storage::strategy::statuses`, read once
 //! per refresh: [`Library::set_backups`]) show as a badge when the library
@@ -58,6 +58,7 @@ use egui_pop::views::library::{
 use helios_core::{Image, Message, Region};
 
 use crate::head_render::HeadRender;
+use helios_vault::capture::CAPTURED;
 pub use helios_vault::fields::Op;
 use helios_vault::fields::{LABELS as LABELS_FIELD, PICKED, Query, RATING, REJECTED, TAGS};
 use serde_json::Value;
@@ -325,7 +326,11 @@ pub struct Entry {
     /// When the file was last modified, in seconds since 1970 (UTC); shown
     /// in the system's time zone.
     pub modified: Option<i64>,
-    /// Its day (`YYYY-MM-DD`), for the search field's dates.
+    /// When it was taken: the camera's clock read as UTC, in seconds (the
+    /// vault's `captured` field, from the file's EXIF, else its time).
+    pub captured: Option<f64>,
+    /// Its capture day (`YYYY-MM-DD`, by the camera's clock), for the
+    /// search field's dates; none until its capture is read.
     pub day: Option<String>,
     pub stack: Option<StackOf>,
     /// Whether a copy of its file is at hand: present, offline (on a
@@ -471,6 +476,10 @@ impl Entry {
                     .sort_by_key(|l| LABELS.iter().position(|k| k == l));
             }
             TAGS => self.tags = names(value),
+            CAPTURED => {
+                self.captured = value.and_then(Value::as_f64);
+                self.day = self.captured.map(helios_vault::capture::day_text);
+            }
             _ => {}
         }
     }
@@ -522,14 +531,19 @@ impl Change {
     }
 }
 
-/// The vault query a search filter makes: its rating, labels, flags and
-/// tags (its words and dates are matched on what the library holds).
+/// The vault query a search filter makes: its rating, labels, flags,
+/// tags and dates, a date being the capture day by the camera's clock
+/// (`date:2024-06-01..2024-06-30` takes both days whole); its words are
+/// matched on what the library holds.
 pub fn query_of(filter: &Filter) -> Query {
+    use helios_vault::capture::day_start;
     Query {
         min_rating: filter.min_rating.map(i64::from),
         labels: filter.labels.iter().map(|l| l.name().to_string()).collect(),
         flags: filter.flags.iter().map(|f| f.name().to_string()).collect(),
         tags: filter.tags.clone(),
+        captured_from: filter.from.as_deref().and_then(day_start),
+        captured_before: filter.to.as_deref().and_then(day_start).map(|d| d + 86_400),
         ..Query::default()
     }
 }
@@ -2626,6 +2640,36 @@ fn pane_rects(rect: egui::Rect, n: usize, gap: f32) -> Vec<egui::Rect> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A date in the search field is a capture day: the vault query takes
+    /// both ends whole, and an entry's day is its capture's by the
+    /// camera's clock, not its file's.
+    #[test]
+    fn search_dates_are_capture_days_queried_in_the_vault() {
+        use helios_vault::capture::day_start;
+        let q = query_of(&Filter::parse("date:2024-06-01..2024-06-02 rating>=2"));
+        assert_eq!(q.captured_from, day_start("2024-06-01"));
+        assert_eq!(q.captured_before, day_start("2024-06-03"));
+        assert_eq!(q.min_rating, Some(2));
+        let open = query_of(&Filter::parse("from:2024-06-01"));
+        assert_eq!(open.captured_before, None);
+        let mut e = Entry {
+            modified: Some(1_800_000_000),
+            ..Entry::default()
+        };
+        assert_eq!(e.day, None, "no capture read: no day");
+        let late = day_start("2024-06-01").unwrap() as f64 + 23.5 * 3600.0;
+        e.show(CAPTURED, Some(&serde_json::json!(late)));
+        assert_eq!(e.day.as_deref(), Some("2024-06-01"));
+        assert!(
+            Filter::parse("date:2024-06-01..2024-06-01").matches(&Candidate {
+                name: &e.name,
+                marks: e.marks(),
+                tags: &e.tags,
+                date: e.day.as_deref(),
+            })
+        );
+    }
 
     #[test]
     fn the_files_in_view_feed_the_map_once_per_change() {
