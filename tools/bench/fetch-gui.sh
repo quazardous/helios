@@ -33,14 +33,19 @@ echo "$dest"
 # The "Helios Dev" launcher (packaging/linux/install.sh --dev --box) shows
 # the version it starts, as the program computes it (crates/helios-gui/
 # build.rs): the release on a tag, else the next patch's dev build counting
-# the commits since the last tag. Read from git, never by running the program.
+# the commits since the last tag. Read from the fetched binary itself (the
+# commit the box built, which may be behind the branch's tip), never by
+# running it; from git when the binary has no dev version (a release).
 branch="${1:-main}"
 launcher="${XDG_DATA_HOME:-$HOME/.local/share}/applications/io.github.quazardous.Helios.Devel.desktop"
 if [ -f "$launcher" ]; then
-  git -C "$root" fetch -q --tags origin "$branch" 2>/dev/null || true
-  version="$(git -C "$root" describe --tags --long --match 'v[0-9]*' "origin/$branch" 2>/dev/null |
-    sed -E 's/^v([0-9]+)\.([0-9]+)\.([0-9]+)-([0-9]+)-g([0-9a-f]+)$/\1 \2 \3 \4 \5/' |
-    awk 'NF == 5 { if ($4 == 0) print $1"."$2"."$3; else print $1"."$2"."($3+1)"-dev."$4 }')"
+  version="$(grep -aoE '[0-9]+\.[0-9]+\.[0-9]+-dev\.[0-9]+\+[0-9a-f]{7,}' "$dest" | head -1 | sed 's/+.*//')"
+  if [ -z "$version" ]; then
+    git -C "$root" fetch -q --tags origin "$branch" 2>/dev/null || true
+    version="$(git -C "$root" describe --tags --long --match 'v[0-9]*' "origin/$branch" 2>/dev/null |
+      sed -E 's/^v([0-9]+)\.([0-9]+)\.([0-9]+)-([0-9]+)-g([0-9a-f]+)$/\1 \2 \3 \4 \5/' |
+      awk 'NF == 5 { if ($4 == 0) print $1"."$2"."$3; else print $1"."$2"."($3+1)"-dev."$4 }')"
+  fi
   if [ -n "$version" ]; then
     label="Helios Dev $version"
     [ "$branch" = main ] || label="$label ($branch)"
