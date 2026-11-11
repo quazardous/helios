@@ -112,6 +112,11 @@ impl LibraryRows {
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
+
+    /// The entries read, in the library's order.
+    pub fn entries(&self) -> &[Entry] {
+        &self.entries
+    }
 }
 
 /// Reads the library from the vault: a query, then each image's copies and

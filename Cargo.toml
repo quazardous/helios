@@ -148,6 +148,12 @@ opt-level = 3
 [profile.dev.package.helios-thumbs]
 opt-level = 2
 
+# SQLite (the vault's engine), compiled from C: unoptimized, the vault
+# tests at the scale of a real library (100,000 photos) spent their time in
+# it.
+[profile.dev.package.libsqlite3-sys]
+opt-level = 3
+
 # The engine samples, scales and caches every pixel a test renders, and the
 # test kit makes the noise the contract tests read: unoptimized, they took
 # most of the module-contract and viewport test time.
