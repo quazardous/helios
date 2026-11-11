@@ -1630,3 +1630,40 @@ fn a_disk_cached_thumbnail_paints_with_its_cell() {
     assert!(seen.contains(&gone.join("A.JPG")));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn the_reading_line_names_what_is_read_above_the_cells() {
+    let dir = temp("reading");
+    let folder = dir.join("Shoot");
+    photos(&folder, 48, 1600, 1200);
+    let mut h = headless::harness(Shell::new(helios_panels(), None), vec2(1280.0, 800.0));
+    h.run();
+    h.state_mut()
+        .run(
+            "library.importWindow",
+            json!({ "source": folder.display().to_string() }),
+            Origin::User,
+        )
+        .unwrap();
+    // The command runs on the next frame: until then, nothing is read.
+    h.step();
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let mut named = Vec::new();
+    while !h.state().import_read() {
+        assert!(Instant::now() < deadline, "the sources not read in 20 s");
+        h.step();
+        if let Some(node) = h.query_by_label_contains("Reading") {
+            let n = node.accesskit_node();
+            let label = n.label().or_else(|| n.value()).unwrap_or_default();
+            named.push(label);
+        }
+    }
+    assert!(!named.is_empty(), "no reading line while reading");
+    for label in &named {
+        assert!(
+            label.starts_with("Reading ") && (label.contains("Shoot") || label.contains(".JPG")),
+            "the reading line does not name what it reads: {label:?}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -547,7 +547,7 @@ gui-import-window-preset-save = Save
 
 gui-import-window-raw-only = Raw only
 
-gui-import-window-reading = Reading…
+gui-import-window-reading = Reading { $path }
 
 gui-import-window-recent = Recent
 

@@ -283,6 +283,15 @@ impl ImportWindow {
         }
     }
 
+    /// What the scans read now, the first source not read through's:
+    /// the folder it lists, else the file it glances at.
+    fn reading(&self) -> Option<PathBuf> {
+        self.scans
+            .iter()
+            .find(|(_, _, done)| !done)
+            .map(|(_, scan, _)| scan.reading())
+    }
+
     /// The thumbnails of the Contents, made the first time.
     fn thumbnails(&mut self) -> Arc<ImportThumbnails> {
         let cache = self.thumb_cache.clone();
@@ -342,6 +351,35 @@ fn take_glance(
     }
 }
 
+/// `text` shortened in its middle (an ellipsis for what is left out,
+/// more of its end kept than of its start: a path's file name) to the
+/// longest that `fits`; whole when it fits.
+pub(crate) fn shorten_middle(text: &str, fits: impl Fn(&str) -> bool) -> String {
+    if fits(text) {
+        return text.to_owned();
+    }
+    let chars: Vec<char> = text.chars().collect();
+    let cut = |kept: usize| {
+        let head = kept / 3;
+        let tail = kept - head;
+        let mut s: String = chars[..head].iter().collect();
+        s.push('…');
+        s.extend(&chars[chars.len() - tail..]);
+        s
+    };
+    // The most characters kept that fit, by halves.
+    let (mut lo, mut hi) = (0, chars.len().saturating_sub(1));
+    while lo < hi {
+        let mid = (lo + hi).div_ceil(2);
+        if fits(&cut(mid)) {
+            lo = mid;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    cut(lo)
+}
+
 /// What the window's controls asked for this frame.
 enum Event {
     Cancel,
@@ -364,7 +402,9 @@ enum Event {
 /// The Contents column's words.
 struct GridWords {
     counts: String,
-    reading: String,
+    /// "Reading <path>": the words before and after the path, and the
+    /// path, while a source is read.
+    reading: Option<(String, String, String)>,
     empty: String,
     new_only: String,
     types: String,
@@ -850,7 +890,21 @@ impl Shell {
             .with("photos", counts.photos)
             .with("new", counts.new)
             .with("size", size)),
-            reading: t(Message::new("gui-import-window-reading", "Reading…")),
+            reading: self.focus.import_window.reading().map(|path| {
+                // Translated around a mark, so the path alone is shortened
+                // to the line's width.
+                const MARK: &str = "\u{E000}";
+                let text = t(
+                    Message::new("gui-import-window-reading", "Reading { $path }")
+                        .with("path", MARK),
+                );
+                let (before, after) = text.split_once(MARK).unwrap_or((text.as_str(), ""));
+                (
+                    before.to_owned(),
+                    after.to_owned(),
+                    path.display().to_string(),
+                )
+            }),
             empty: t(Message::new(
                 "gui-import-window-empty",
                 "No photos in the sources ticked",
@@ -1328,9 +1382,25 @@ fn contents_ui(
     let c = &mut w.contents;
     ui.horizontal(|ui| {
         ui.label(&words.counts);
-        if reading {
+        if reading && let Some((before, after, path)) = &words.reading {
             ui.spinner();
-            ui.weak(&words.reading);
+            // The path shortened in its middle to the line's width.
+            let width = ui.available_width();
+            let font = egui::TextStyle::Body.resolve(ui.style());
+            let color = ui.visuals().weak_text_color();
+            let fits = |p: &str| {
+                let text = format!("{before}{p}{after}");
+                ui.painter()
+                    .layout_no_wrap(text, font.clone(), color)
+                    .size()
+                    .x
+                    <= width
+            };
+            let path = shorten_middle(path, fits);
+            ui.add(
+                egui::Label::new(egui::RichText::new(format!("{before}{path}{after}")).weak())
+                    .truncate(),
+            );
         }
     });
     ui.horizontal_wrapped(|ui| {
@@ -1561,5 +1631,21 @@ impl ImportWindow {
                 cell.ticked = selected.contains(main);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::shorten_middle;
+
+    #[test]
+    fn a_long_path_is_shortened_in_its_middle_keeping_its_file_name() {
+        let path = "/media/someone/EOS_DIGITAL/DCIM/100CANON/IMG_0042.CR3";
+        assert_eq!(shorten_middle(path, |_| true), path);
+        let short = shorten_middle(path, |s| s.chars().count() <= 24);
+        assert_eq!(short.chars().count(), 24);
+        assert!(short.contains('…'));
+        assert!(short.starts_with("/media"));
+        assert!(short.ends_with("IMG_0042.CR3"));
     }
 }

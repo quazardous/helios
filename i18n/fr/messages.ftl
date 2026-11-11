@@ -1009,7 +1009,7 @@ gui-import-window-pair = RAW+JPG
 
 gui-import-window-raw-only = Raw seulement
 
-gui-import-window-reading = Lecture…
+gui-import-window-reading = Lecture de { $path }
 
 gui-import-window-recent = Récents
 
