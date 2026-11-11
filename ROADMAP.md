@@ -708,6 +708,15 @@ hash) is part of Helios; deploying a NAS is not.
   [docs/design/workshops.md](docs/design/workshops.md). v1 built
   (2026-11-05): the switch, the format's block, aiming, Lift midtones,
   applying, the panel, saving a macro as a workshop.
+- (2026-11-11, not decided) **Workshops made on the fly**: the AI
+  creates the workshop from an intent (real modules pre-calibrated,
+  only the useful sliders, semantic sliders), the user refines it on a
+  test photo or two half by hand, the session is recorded and
+  generalised ("Make it automatic": targets where a measure explains a
+  value, deterministic rules where one fits, AI junctions only where
+  needed, counted), then it runs on a set within limits the user sets,
+  with a contact-sheet review. Design, slices and choices:
+  [docs/design/workshops-on-the-fly.md](docs/design/workshops-on-the-fly.md).
 
 ### 2.6 Collaboration
 
