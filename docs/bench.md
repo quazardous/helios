@@ -504,11 +504,10 @@ Unset or `false`, the workflows behave as they always did. Skipped jobs
 count as passed in a run's result, so a green `ci` on `next` still
 promotes `main`.
 
-What the skipped jobs covered runs on the bench box meanwhile, which
-needs no Ubuntu archive: the `flatpak` job builds and smoke-tests the
-bundle (attach it to the Release with `gh release upload`), `mask-parity`
-and `raw-parity` compare with darktable, and if the fallback Mesa build
-ever fails too, `test-affected` (or `test`) runs the suite on lavapipe.
+The Linux tests still run on GitHub (lavapipe from the fallback Mesa);
+no full gate is run on the bench box in their place. Only what is skipped
+waits: the Flatpak bundle (build it with the box's `flatpak` job and attach
+it with `gh release upload` if a release cannot wait) and darktable parity.
 Delete the variable once `apt-get update` works on the runners again.
 
 ## Rules for agents (a shared box)
