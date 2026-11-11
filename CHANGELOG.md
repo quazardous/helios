@@ -24,6 +24,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.76.0] - 2026-11-11
+
+### Added
+
+- Settings › Storage › Caches shows what each cache holds (thumbnails and large thumbnails, against their budget) and clears them: one kind with its "Clear", or all with "Clear caches"; photos, edits and the catalogue are never touched. The thumbnail folder is tagged as a cache (`CACHEDIR.TAG`), so backup tools skip it, and existing thumbnails stay valid. `helios-node` answers `cache.stats` and `cache.clear` too.
+- Windows has an installer beside the portable zip: `helios-<version>-windows-x86_64-setup.exe` installs Helios for the current user, without administrator rights, adds it to the Start menu and uninstalls from Settings. It is not signed yet, so SmartScreen warns on first start.
+
+### Changed
+
+- On Windows, Helios's window opens without a console window beside it, shows its icon in Explorer and the taskbar, and draws sharp on high-DPI screens; started from a terminal, `helios-gui --version` still prints there.
+
+### Fixed
+
+- The graph's navigation hint ("Middle-drag, Space+drag or H to pan…") and its overview no longer show on top of the import window or a dialog lying over the graph; the hint comes back once the window is closed.
+- Exports render on the desktop's own engine: they share the render cache and its budget, so exporting the image open in the darkroom does not compute again what it already holds, and a large export no longer grows memory without bound (the exporter's own cache had no limit).
+- The desktop applies Settings › Storage › Caches › Render cache (`system.cache.budget`, or `system.cache.share` of memory): only `helios-node` did, the desktop kept a quarter of memory whatever was set. The render cache is listed on the Caches page and cleared with the others, and evicting many entries at once no longer scans the whole cache for each one.
+
 ## [0.75.0] - 2026-11-11
 
 ### Added
