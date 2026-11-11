@@ -173,7 +173,25 @@ pub struct LibraryDesc {
     /// The export's settings, ready in the export dialog.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub export: Option<ExportDesc>,
+    /// The order the grid shows the photos in; by capture time, oldest
+    /// first, when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sort: Option<SortDesc>,
 }
+
+/// How the library orders its photos: what by ([`SORTS`]), and which way.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SortDesc {
+    pub by: String,
+    /// Newest, largest or last in the alphabet first.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub descending: bool,
+}
+
+/// What the library sorts by: the capture time, the import time, the
+/// file name, the stars, the last edit, the file size.
+pub const SORTS: [&str; 6] = ["captured", "imported", "name", "rating", "edited", "size"];
 
 /// How the workspace exports its images, written as `library.export`
 /// takes its arguments: what the export dialog starts from.

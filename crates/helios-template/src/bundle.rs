@@ -504,6 +504,15 @@ impl Bundle {
         if let Some(export) = t.library.as_ref().and_then(|l| l.export.as_ref()) {
             check_export(export, p);
         }
+        if let Some(sort) = t.library.as_ref().and_then(|l| l.sort.as_ref())
+            && !crate::format::SORTS.contains(&sort.by.as_str())
+        {
+            p.push(format!(
+                "library.sort.by: `{}` is not one of {}",
+                sort.by,
+                crate::format::SORTS.join(", ")
+            ));
+        }
         check_parameters(t, p);
         crate::subworkspace::problems(t, &catalogue, p);
         for (area, node) in &self.layout.areas {
