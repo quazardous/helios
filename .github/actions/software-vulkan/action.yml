@@ -13,6 +13,11 @@ inputs:
   sha256:
     description: SHA-256 of the fallback archive, so a moved release is refused.
     default: "334ebc6c9ca5c5659f36536e987fe64d741cef750b64a17080a27b4646257460"
+  apt:
+    description: >
+      "false" goes straight to the fallback, without trying Ubuntu's archive
+      (callers pass the repository variable UBUNTU_ARCHIVE_DOWN, docs/bench.md).
+    default: "true"
 runs:
   using: composite
   steps:
@@ -22,17 +27,23 @@ runs:
         MESA_VERSION: ${{ inputs.mesa-version }}
         CI_BUILD: ${{ inputs.ci-build }}
         MESA_SHA256: ${{ inputs.sha256 }}
+        USE_APT: ${{ inputs.apt }}
       run: |
         set -euo pipefail
         # Ubuntu's archive has gone unreachable from the runners for hours
         # (DNS outages): give it three minutes, few retries, then move on.
         apt_opts=(-o Acquire::Retries=1 -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15)
-        if timeout 180 sudo apt-get "${apt_opts[@]}" -o APT::Update::Error-Mode=any update -q &&
+        if [ "$USE_APT" != true ]; then
+          msg="UBUNTU_ARCHIVE_DOWN is set: apt skipped, lavapipe from gfx-rs/ci-build $CI_BUILD (Mesa $MESA_VERSION)"
+          echo "::warning::$msg"
+          echo "- $msg" >> "$GITHUB_STEP_SUMMARY"
+        elif timeout 180 sudo apt-get "${apt_opts[@]}" -o APT::Update::Error-Mode=any update -q &&
           timeout 180 sudo apt-get "${apt_opts[@]}" install -yq mesa-vulkan-drivers; then
           echo "lavapipe from Ubuntu's archive"
           exit 0
+        else
+          echo "::warning::Ubuntu's archive unreachable: lavapipe from gfx-rs/ci-build $CI_BUILD (Mesa $MESA_VERSION)"
         fi
-        echo "::warning::Ubuntu's archive unreachable: lavapipe from gfx-rs/ci-build $CI_BUILD (Mesa $MESA_VERSION)"
         dir="$RUNNER_TEMP/mesa"
         mkdir -p "$dir"
         curl -fL --retry 5 -o "$dir/mesa.tar.xz" \

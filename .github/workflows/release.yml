@@ -33,6 +33,20 @@ env:
   CARGO_TERM_COLOR: never
 
 jobs:
+  # The repository variable UBUNTU_ARCHIVE_DOWN set to `true` (Ubuntu's
+  # archive unreachable from the runners, docs/bench.md, "When Ubuntu's
+  # archive is down") skips the Flatpak jobs, which install flatpak-builder
+  # with apt: the Release is published without the Flatpak bundle, which
+  # the bench box's `flatpak` job builds instead. This job says so in the run.
+  ubuntu-archive-down:
+    if: vars.UBUNTU_ARCHIVE_DOWN == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          msg="UBUNTU_ARCHIVE_DOWN is set: build-flatpak and smoke-flatpak (apt) are skipped; the Release has no Flatpak bundle (build it with the bench box's flatpak job and attach it)"
+          echo "::warning::$msg"
+          echo "$msg" >> "$GITHUB_STEP_SUMMARY"
+
   # The binaries in release, on the oldest glibc GitHub offers (Ubuntu
   # 22.04, glibc 2.35), so they run on that and on anything newer.
   build-linux:
@@ -137,6 +151,7 @@ jobs:
   # The Flatpak, built from source with no network inside the build
   # (packaging/flatpak/build.sh), as a single-file bundle.
   build-flatpak:
+    if: vars.UBUNTU_ARCHIVE_DOWN != 'true'
     runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -171,6 +186,7 @@ jobs:
   # it, the window's program says its version.
   smoke-flatpak:
     needs: build-flatpak
+    if: vars.UBUNTU_ARCHIVE_DOWN != 'true'
     runs-on: ubuntu-24.04
     env:
       VERSION: ${{ needs.build-flatpak.outputs.version }}
@@ -276,12 +292,15 @@ jobs:
 
   publish:
     needs: [build-linux, smoke-linux, build-flatpak, smoke-flatpak, build-windows, smoke-windows]
-    if: ${{ (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || inputs.publish == true }}
+    # The Flatpak jobs skipped by UBUNTU_ARCHIVE_DOWN do not stop it (a
+    # skipped need otherwise skips this job); any job failed or cancelled does.
+    if: ${{ !cancelled() && !failure() && ((github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || inputs.publish == true) }}
     runs-on: ubuntu-22.04
     permissions:
       contents: write
     env:
       VERSION: ${{ needs.build-linux.outputs.version }}
+      FLATPAK: ${{ needs.smoke-flatpak.result == 'success' }}
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -292,6 +311,7 @@ jobs:
           name: helios-${{ needs.build-windows.outputs.version }}-windows-x86_64
           path: dist-windows
       - uses: actions/download-artifact@v4
+        if: env.FLATPAK == 'true'
         with:
           name: helios-${{ needs.build-flatpak.outputs.version }}-flatpak-x86_64
           path: dist-flatpak
@@ -300,18 +320,27 @@ jobs:
         run: |
           mv dist-windows/helios-"$VERSION"-windows-x86_64.zip dist/
           mv dist-windows/helios-"$VERSION"-windows-x86_64-setup.exe dist/
-          mv dist-flatpak/io.github.quazardous.Helios-"$VERSION"-x86_64.flatpak dist/
-          cat dist-windows/SHA256SUMS-windows dist-flatpak/SHA256SUMS-flatpak >> dist/SHA256SUMS
+          cat dist-windows/SHA256SUMS-windows >> dist/SHA256SUMS
+          if [ "$FLATPAK" = true ]; then
+            mv dist-flatpak/io.github.quazardous.Helios-"$VERSION"-x86_64.flatpak dist/
+            cat dist-flatpak/SHA256SUMS-flatpak >> dist/SHA256SUMS
+          else
+            echo "::warning::no Flatpak bundle: its jobs were skipped (UBUNTU_ARCHIVE_DOWN)"
+          fi
           (cd dist && sha256sum -c SHA256SUMS)
       - name: GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag \
-            --title "Helios $VERSION" --notes-file dist/release-notes.md \
-            dist/helios-"$VERSION"-linux-x86_64.tar.gz \
-            dist/Helios-"$VERSION"-x86_64.AppImage \
-            dist/io.github.quazardous.Helios-"$VERSION"-x86_64.flatpak \
-            dist/helios-"$VERSION"-windows-x86_64.zip \
-            dist/helios-"$VERSION"-windows-x86_64-setup.exe \
+          files=(
+            dist/helios-"$VERSION"-linux-x86_64.tar.gz
+            dist/Helios-"$VERSION"-x86_64.AppImage
+            dist/helios-"$VERSION"-windows-x86_64.zip
+            dist/helios-"$VERSION"-windows-x86_64-setup.exe
             dist/SHA256SUMS
+          )
+          if [ "$FLATPAK" = true ]; then
+            files+=(dist/io.github.quazardous.Helios-"$VERSION"-x86_64.flatpak)
+          fi
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag \
+            --title "Helios $VERSION" --notes-file dist/release-notes.md "${files[@]}"
