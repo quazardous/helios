@@ -487,6 +487,14 @@ driver, not a rewrite.
   applied or was substituted goes to the Log panel and a short toast.
   Later, not decided in detail: importer plugins under File > Import
   from →, and reading darktable's `library.db`.
+  (2026-11-11, decided) **The Library focus** (docs/design/library.md):
+  the owner accepted the nine recommendations: capture time as the
+  default order; folders, albums, smart albums and a quick collection;
+  metadata written to sidecars on command, never into raw files; remove
+  from Library and move to the system trash; one cell per image with
+  copies shown on request; RAW+JPEG pairs as stacks made at import; path
+  keywords first; file operations inside library and archive volumes;
+  browse state per window. Slice L1 (the library read at scale) first.
 
 **Sync model.** (2026-10-10) Take git's *model* rather than git itself:
 content-addressed objects, a DAG of versions, refs, offline replicas,

@@ -1,8 +1,8 @@
 # The Library focus: managing photos
 
-Status: **study, proposed** (2026-11-11). Nothing here is decided; the
-choices for the owner are in section 5, each with a recommendation. The
-inventory describes the code on `next` as of that date.
+Status: **decided** (2026-11-11): the owner accepted every
+recommendation of section 5 (L-C1 to L-C9) and asked to start slice L1.
+The inventory describes the code on `next` as of that date.
 
 The Library focus is how Helios manages its photos: browsing and finding
 them, acting on many at once, their metadata, stacks and versions, where
@@ -335,7 +335,8 @@ list of foci) finds nothing global to untangle.
 
 ## 5. Choices for the owner
 
-Each has options A, B, C, and a recommendation.
+Each has options A, B, C, and a recommendation. All nine were decided on
+2026-11-11, each with its recommended option.
 
 **L-C1. The grid's default order, and which time is "the date".**
 - A. Capture time (EXIF `DateTimeOriginal` with its offset when present,
@@ -345,6 +346,8 @@ Each has options A, B, C, and a recommendation.
 
 Recommended: **A**, as every application above; the sort menu offers
 the others, kept per focus.
+
+**Decided (2026-11-11): A.**
 
 **L-C2. How photos are gathered.**
 - A. Three kinds in one tree: **folders** (mirroring the disk, read from
@@ -358,6 +361,8 @@ the others, kept per focus.
 Recommended: **A**. Explicit sets are what people expect and what agents
 can fill; smart albums are the saved searches; folders answer "where is
 it". The filter grammar can grow darktable's properties over time.
+
+**Decided (2026-11-11): A.**
 
 **L-C3. Writing metadata back to files.**
 - A. Never: the catalogue only, with its snapshots; exports embed the
@@ -375,6 +380,8 @@ in a Helios sidecar `photo.ext.helios.xmp` or merge into an existing
 `.xmp` without touching darktable's `darktable:` history (to be decided
 in that slice; darktable must still read its own sidecar).
 
+**Decided (2026-11-11): B.**
+
 **L-C4. Deleting.**
 - A. Two verbs: "Remove from Library" (the flag, undoable, no file
   touched) and "Move to Trash" (the system trash, asked first, journaled),
@@ -386,6 +393,8 @@ in that slice; darktable must still read its own sidecar).
 
 Recommended: **A**; the system trash gives the undo users know, and the
 backups protect the rest.
+
+**Decided (2026-11-11): A.**
 
 **L-C5. Copies of one photo (virtual copies, darktable duplicates).**
 - A. Each head of an image is a cell of its own in the grid, grouped
@@ -401,6 +410,8 @@ grid, and darktable and Lightroom users get cells on request. If the
 owner wants per-copy ratings (Lightroom, Capture One), marks must move
 to versions: a larger change, to decide before slice L10.
 
+**Decided (2026-11-11): C, with B as the default.**
+
 **L-C6. RAW+JPEG pairs** (open since 2026-10-13).
 - A. One image with two files (Lightroom's "treat as one").
 - B. A stack made at import without asking (a pair is certain), the raw
@@ -410,6 +421,8 @@ to versions: a larger change, to decide before slice L10.
 Recommended: **B**: an image is the hash of one file, so A breaks the
 identity model; stacks already show collapsed and a filter flattens
 them.
+
+**Decided (2026-11-11): B.**
 
 **L-C7. Keyword hierarchy.**
 - A. Path tags (`places|France|Lyon`, as darktable and as imported
@@ -422,6 +435,8 @@ them.
 
 Recommended: **C**.
 
+**Decided (2026-11-11): C.**
+
 **L-C8. File operations on disk (rename, move).**
 - A. Helios renames and moves files and folders, sidecars along,
   journaled and undoable, inside volumes with the library or archive
@@ -432,12 +447,16 @@ Recommended: **C**.
 Recommended: **A**, with the same rules as the backup job (write only
 where the roles allow, never on a card).
 
+**Decided (2026-11-11): A.**
+
 **L-C9. Browse state per window.**
 - A. Each focus has its own folder, collection, filter and sort.
 - B. One browse state for the whole process.
 
 Recommended: **A**, as windows.md's model (the library view is the
 focus's).
+
+**Decided (2026-11-11): A.**
 
 ## 6. Slices
 
