@@ -404,6 +404,11 @@ its fake provider); aiming a series as a job; targets measured in a
 zone (a mask from a decision node); composite semantic sliders;
 recording an aim's provenance in the edit.
 
+A proposed path for the AI design step, refining on test photos,
+generalising and running on a set within limits is in
+[workshops-on-the-fly.md](workshops-on-the-fly.md) (2026-11-11, not
+decided).
+
 ## Open questions
 
 Each with the default proposed:
