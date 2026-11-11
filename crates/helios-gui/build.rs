@@ -38,10 +38,10 @@ fn main() {
 /// (a source tarball with no git).
 fn version() -> String {
     println!("cargo:rerun-if-env-changed=HELIOS_BUILD_VERSION");
-    if let Ok(v) = std::env::var("HELIOS_BUILD_VERSION") {
-        if !v.is_empty() {
-            return v;
-        }
+    if let Ok(v) = std::env::var("HELIOS_BUILD_VERSION")
+        && !v.is_empty()
+    {
+        return v;
     }
     let pkg = std::env::var("CARGO_PKG_VERSION").unwrap_or_default();
     let git = |args: &[&str]| {
