@@ -1325,6 +1325,20 @@ gui-workshops-apply = Apply
 
 gui-workshops-apply-hint = Insert { $name } after the node the image is shown from, aimed on the open image (one undo step)
 
+gui-workshops-describe = Describe what you want
+
+gui-workshops-describe-hint = backlit, the mountain and the sky too contrasted…
+
+gui-workshops-design = Design a workshop
+
+gui-workshops-design-cancel = Cancel
+
+gui-workshops-design-hint = Ask your own agent (over MCP) for a workshop made for these words; Helios checks it on the open image and applies it as one undo step
+
+gui-workshops-design-waiting = Waiting for your agent: it reads helios_workshop_context and posts a draft with helios_workshop_design
+
+gui-workshops-designed = Designed: { $workshop }
+
 gui-workshops-experimental = Experimental: may change; what it saves stays a macro
 
 gui-workshops-find = Find
@@ -1364,6 +1378,8 @@ gui-workshops-save-title = Save { $node } as a workshop
 gui-workshops-save-value = { $param }: value (stops, or % for clip.high)
 
 gui-workshops-save-verb = Save as { $file }
+
+gui-workshops-send-proxy = Let the agent see a small preview of the photo (this session only)
 
 gui-workshops-shipped = Shipped with Helios
 

@@ -579,8 +579,20 @@ command-workshop-apply =
 command-workshop-aim =
     .title = Expérimental : régler à nouveau les cibles d’un atelier appliqué sur l’image ouverte, une étape de valeurs (`node` : le nœud sélectionné par défaut ; `dry_run`)
 
+command-workshop-context =
+    .title = Expérimental : ce qu’un agent lit pour concevoir un atelier : les mots, les mesures de l’image, les modules, les briques ; un aperçu seulement si permis (`intent` : celui de la session par défaut ; `proxy` ; `modules`)
+
+command-workshop-describe =
+    .title = Expérimental : commencer à concevoir un atelier à partir de vos mots, auxquels répond votre propre agent par MCP (`intent` ; `cancel`)
+
+command-workshop-design =
+    .title = Expérimental : vérifier un brouillon d’atelier sur l’image ouverte et l’appliquer en une étape d’annulation (`draft` ; `intent` : celui de la session par défaut ; `apply` : vrai par défaut ; `replace` ; `dry_run`)
+
 command-workshop-save =
     .title = Expérimental : enregistrer une macro comme atelier, sa version suivante avec une intention, des mots-clés et des cibles (`node` : le nœud sélectionné par défaut ; `intent`, `keywords`, `targets` ; `dry_run`) ; sans `intent`, un formulaire les demande
+
+command-workshop-send-proxy =
+    .title = Expérimental : laisser un agent voir un petit aperçu de l’image ouverte, pour cette session (`on`) ; seul l’utilisateur peut l’activer
 
 command-workshop-suggest =
     .title = Expérimental : trouver des ateliers d’après ce que vous voulez, classés par nom, mots-clés puis intention (`intent`)

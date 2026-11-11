@@ -1273,6 +1273,22 @@ gui-workshops-unit-stops = IL
 
 gui-workshops-workspace = Cet espace de travail
 
+gui-workshops-describe = Décrivez ce que vous voulez
+
+gui-workshops-describe-hint = contre-jour, la montagne et le ciel trop contrastés…
+
+gui-workshops-design = Concevoir un atelier
+
+gui-workshops-design-cancel = Annuler
+
+gui-workshops-design-hint = Demander à votre propre agent (par MCP) un atelier fait pour ces mots ; Helios le vérifie sur l’image ouverte et l’applique en une étape d’annulation
+
+gui-workshops-design-waiting = En attente de votre agent : il lit helios_workshop_context et envoie un brouillon avec helios_workshop_design
+
+gui-workshops-designed = Conçu : { $workshop }
+
+gui-workshops-send-proxy = Laisser l’agent voir un petit aperçu de la photo (cette session seulement)
+
 gui-library-import-photos = Importer des photos…
 
 gui-import-dropped-title = { $count ->
