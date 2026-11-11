@@ -19,6 +19,7 @@
 
 pub mod brick;
 pub mod bus;
+pub mod curve;
 pub mod describe;
 pub mod engine;
 pub mod error;
@@ -37,6 +38,7 @@ pub use brick::{
     BrickFamily, BrickPort, BrickSpec, Contract, Form, PortType, Shape, Space, Tolerance,
 };
 pub use bus::{Bus, Envelope, Event};
+pub use curve::Curve;
 pub use describe::Describe;
 pub use engine::{Counters, Engine, FaultKind};
 pub use error::Error;

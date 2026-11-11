@@ -22,6 +22,7 @@
 use std::sync::Arc;
 
 use crate::brick::{BrickSpec, Contract};
+use crate::curve::Curve;
 use crate::error::Error;
 use crate::image::Region;
 use crate::manifest::{Manifest, ModuleKind, ParamHint, ParamSpec, PortSpec};
@@ -367,6 +368,19 @@ struct Exposed {
     hint: ParamHint,
     /// The inner nodes and parameters it sets.
     targets: Vec<(Inner, String)>,
+    /// A semantic slider's inner parameters, each moved along its curve
+    /// (empty for a plain exposed parameter, whose `targets` are set).
+    drives: Vec<Drive>,
+}
+
+/// One inner number moved by a semantic slider.
+#[derive(Clone, Debug, PartialEq)]
+struct Drive {
+    node: Inner,
+    param: String,
+    curve: Curve,
+    /// The inner parameter is a whole number: the curve's value rounded.
+    whole: bool,
 }
 
 /// How a macro shows one exposed parameter, beyond the inner parameter it
@@ -475,7 +489,21 @@ impl Macro {
         if let Some(value) = inner.params.get(param) {
             spec.kind = with_default(&spec.kind, value);
         }
+        if let Some(other) = self
+            .exposed
+            .iter()
+            .find(|e| e.drives.iter().any(|d| d.node == node && d.param == param))
+        {
+            let other = &other.spec.name;
+            return Err(refused(format!(
+                "`{}.{param}` is already set by `{other}`",
+                inner.name
+            )));
+        }
         if let Some(i) = self.exposed.iter().position(|e| e.spec.name == name) {
+            if !self.exposed[i].drives.is_empty() {
+                return Err(refused("already a semantic slider".into()));
+            }
             if *how != Exposure::default() {
                 return Err(refused(
                     "a linked parameter's interface is given on its first entry".into(),
@@ -543,13 +571,187 @@ impl Macro {
             spec,
             hint,
             targets: vec![(node, param.into())],
+            drives: Vec::new(),
         });
         Ok(self)
+    }
+
+    /// The exposed name that sets inner parameter `param` of `node`, if
+    /// any: a plain exposed parameter or a semantic slider.
+    fn driven_by(&self, node: Inner, param: &str) -> Option<&str> {
+        self.exposed
+            .iter()
+            .find(|e| {
+                e.targets.iter().any(|(n, p)| *n == node && p == param)
+                    || e.drives.iter().any(|d| d.node == node && d.param == param)
+            })
+            .map(|e| e.spec.name.as_str())
+    }
+
+    /// A **semantic slider** `name`: one number of the macro's own that
+    /// moves several inner number parameters, each along its piecewise-
+    /// linear curve (`drives`: the inner node, its parameter, the curve).
+    ///
+    /// The slider's range is `how`'s `min` and `max`, else the curves'
+    /// domain (the lowest first `x` to the highest last `x`); its default
+    /// is `how`'s, else 0 clamped into the range. `how` gives its label,
+    /// description, unit, group and soft range as for an exposed
+    /// parameter; `options` is refused. Refused also: no drive, an inner
+    /// parameter that is not a number (a float or a whole number), a
+    /// curve point outside the inner parameter's hard range, the same
+    /// inner parameter twice, an inner parameter another exposed name
+    /// already sets (one value would be written by two sliders), and a
+    /// name already exposed.
+    pub fn drive(
+        mut self,
+        name: &str,
+        drives: Vec<(Inner, String, Curve)>,
+        how: &Exposure,
+    ) -> Result<Self, Error> {
+        let refused = |reason: String| Error::Param {
+            module: self.manifest.name.clone(),
+            param: name.into(),
+            reason,
+        };
+        if self.exposed.iter().any(|e| e.spec.name == name) {
+            return Err(refused("already exposed".into()));
+        }
+        if drives.is_empty() {
+            return Err(refused(
+                "a semantic slider drives at least one parameter".into(),
+            ));
+        }
+        if how.options.is_some() {
+            return Err(refused("a semantic slider is a number: no options".into()));
+        }
+        let mut moved: Vec<Drive> = Vec::with_capacity(drives.len());
+        for (i, (node, param, curve)) in drives.into_iter().enumerate() {
+            let inner = self.network.node(node)?;
+            let at = |e: String| refused(format!("drives[{i}] ({}.{param}): {e}", inner.name));
+            let spec = inner
+                .module
+                .manifest()
+                .param(&param)
+                .cloned()
+                .ok_or_else(|| at("unknown parameter".into()))?;
+            let whole = match spec.kind {
+                crate::manifest::ParamKind::Float { .. } => false,
+                crate::manifest::ParamKind::Int { .. } => true,
+                _ => return Err(at("a semantic slider drives numbers only".into())),
+            };
+            let (min, max) = hard(&spec.kind).expect("a number");
+            for (x, y) in curve.points() {
+                if !(min..=max).contains(y) {
+                    return Err(at(format!(
+                        "the point ({x}, {y}) is outside the inner range [{min}, {max}]"
+                    )));
+                }
+            }
+            if moved.iter().any(|d| d.node == node && d.param == param) {
+                return Err(at("driven twice".into()));
+            }
+            if let Some(other) = self.driven_by(node, &param) {
+                return Err(at(format!("already set by `{other}`")));
+            }
+            moved.push(Drive {
+                node,
+                param,
+                curve,
+                whole,
+            });
+        }
+        let lo = moved
+            .iter()
+            .map(|d| d.curve.domain().0)
+            .fold(f64::INFINITY, f64::min);
+        let hi = moved
+            .iter()
+            .map(|d| d.curve.domain().1)
+            .fold(f64::NEG_INFINITY, f64::max);
+        let (min, max) = (how.min.unwrap_or(lo), how.max.unwrap_or(hi));
+        if !(min.is_finite() && max.is_finite() && min < max) {
+            return Err(refused(format!("range [{min}, {max}] is empty")));
+        }
+        let default = match &how.default {
+            None => 0.0_f64.clamp(min, max),
+            Some(Value::Float(v)) if (min..=max).contains(v) => *v,
+            Some(v) => {
+                return Err(refused(format!(
+                    "default: {v:?} is not a number within [{min}, {max}]"
+                )));
+            }
+        };
+        let soft = match how.soft {
+            Some((s0, s1))
+                if s0.is_finite() && s1.is_finite() && min <= s0 && s0 < s1 && s1 <= max =>
+            {
+                Some((s0, s1))
+            }
+            Some((s0, s1)) => {
+                return Err(refused(format!(
+                    "soft range [{s0}, {s1}] not within [{min}, {max}]"
+                )));
+            }
+            None => None,
+        };
+        let spec = ParamSpec {
+            name: name.into(),
+            description: how.description.clone().unwrap_or_default(),
+            kind: crate::manifest::ParamKind::Float { min, max, default },
+        };
+        let hint = ParamHint {
+            name: name.into(),
+            soft,
+            unit: how.unit.clone(),
+            label: how.label.clone(),
+            group: how.group.clone(),
+            ..ParamHint::default()
+        };
+        self.manifest.params.push(spec.clone());
+        self.exposed.push(Exposed {
+            spec,
+            hint,
+            targets: Vec::new(),
+            drives: moved,
+        });
+        Ok(self)
+    }
+
+    /// What the semantic slider `name` writes at `value`: each inner
+    /// node's name, its parameter and the curve's value there. Empty for
+    /// a name that is not a semantic slider.
+    pub fn driven(&self, name: &str, value: f64) -> Vec<(String, String, Value)> {
+        let Some(e) = self.exposed.iter().find(|e| e.spec.name == name) else {
+            return Vec::new();
+        };
+        e.drives
+            .iter()
+            .map(|d| {
+                (
+                    self.network.nodes[d.node.0].name.clone(),
+                    d.param.clone(),
+                    d.value(value),
+                )
+            })
+            .collect()
     }
 
     /// The network it packages, as saved.
     pub fn network(&self) -> &Network {
         &self.network
+    }
+}
+
+impl Drive {
+    /// The inner value at the slider's `x`, rounded for a whole number.
+    fn value(&self, x: f64) -> Value {
+        let y = self.curve.eval(x);
+        if self.whole {
+            #[allow(clippy::cast_possible_truncation)]
+            Value::Int(y.round() as i64)
+        } else {
+            Value::Float(y)
+        }
     }
 }
 
@@ -729,10 +931,21 @@ impl Composite for Macro {
             let Some(value) = params.get(&e.spec.name) else {
                 continue;
             };
-            for (inner, param) in &e.targets {
+            let x = match value {
+                Value::Float(v) => Some(*v),
+                #[allow(clippy::cast_precision_loss)]
+                Value::Int(v) => Some(*v as f64),
+                _ => None,
+            };
+            let driven = e
+                .drives
+                .iter()
+                .filter_map(|d| x.map(|x| (&d.node, &d.param, d.value(x))));
+            let plain = e.targets.iter().map(|(n, p)| (n, p, value.clone()));
+            for (inner, param, value) in plain.chain(driven) {
                 let node = &mut network.nodes[inner.0];
                 let mut changed = node.params.clone();
-                changed.set(param, value.clone());
+                changed.set(param, value);
                 node.params = node
                     .module
                     .manifest()
