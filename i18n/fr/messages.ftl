@@ -1157,6 +1157,18 @@ gui-macro-iface-soft = Une plage souple
 
 gui-macro-iface-soft-range = Plage souple
 
+gui-macro-iface-new-slider = Nouveau curseur sémantique
+
+gui-macro-iface-new-slider-hint = Un curseur qui déplace plusieurs nombres internes, chacun selon sa courbe
+
+gui-macro-iface-point = x : la valeur du curseur ; y : la valeur interne à cet endroit
+
+gui-macro-iface-point-add = Ajouter un point
+
+gui-macro-iface-drive-remove = Ne plus le piloter
+
+gui-macro-iface-drive-add = Piloter un autre paramètre
+
 gui-macro-iface-default-value = Valeur par défaut
 
 gui-macro-iface-options = Options gardées

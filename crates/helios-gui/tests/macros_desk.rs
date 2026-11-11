@@ -678,3 +678,62 @@ fn a_macro_published_with_the_user_s_answer_is_offered_to_every_workspace_and_ne
     );
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// A semantic slider (`drives`): authored through `macro.interface` as an
+/// agent or the editor would, moved as one undo step, and its curves'
+/// values written onto the inner parameters when the macro is opened.
+#[test]
+fn a_semantic_slider_moves_its_inner_values_along_its_curves_in_one_step() {
+    let root = temp("drives");
+    let mut h = window(&root);
+    run(
+        &mut h,
+        "macro.make",
+        json!({ "nodes": ["exposure"], "name": "Look" }),
+    );
+    let exposed = json!([{
+        "name": "backlight_lift", "label": "Backlight lift", "min": 0.0, "max": 1.0,
+        "drives": [
+            { "node": "exposure", "param": "exposure", "curve": [[0, 0], [1, 1.6]] },
+            { "node": "exposure", "param": "black", "curve": [[0, 0], [0.5, -0.01], [1, -0.03]] }
+        ],
+    }]);
+    let before = steps(&h);
+    run(
+        &mut h,
+        "macro.interface",
+        json!({ "node": "look", "exposed": exposed }),
+    );
+    assert_eq!(steps(&h), before + 1, "the interface is one step");
+    let label = h
+        .state()
+        .values()
+        .lock()
+        .unwrap()
+        .get("node/look/backlight_lift")
+        .map(|e| e.descriptor.label.clone());
+    assert_eq!(label.as_deref(), Some("Backlight lift"));
+    // Moved: one step.
+    let before = steps(&h);
+    set(&mut h, "node/look/backlight_lift", 0.5);
+    assert_eq!(steps(&h), before + 1, "the slider moved in one step");
+    assert_eq!(shown(&h, "look", "backlight_lift"), Some(0.5));
+    // Opened: the inner parameters hold the curves' values at 0.5.
+    run(&mut h, "macro.open", json!({ "node": "look" }));
+    let near = |v: Option<f64>, want: f64| {
+        let v = v.unwrap_or(f64::NAN);
+        assert!((v - want).abs() < 1e-9, "{v} against {want}");
+    };
+    near(shown(&h, "look.exposure", "exposure"), 0.8);
+    near(shown(&h, "look.exposure", "black"), -0.01);
+    // Folded back: the slider keeps its value; nothing asked about the
+    // driven inner values.
+    run(&mut h, "macro.fold", json!({ "node": "look" }));
+    assert_eq!(shown(&h, "look", "backlight_lift"), Some(0.5));
+    // Undone: fold, open, then the move.
+    undo(&mut h);
+    undo(&mut h);
+    undo(&mut h);
+    assert_ne!(shown(&h, "look", "backlight_lift"), Some(0.5));
+    let _ = std::fs::remove_dir_all(&root);
+}
