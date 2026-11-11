@@ -16,7 +16,7 @@ does with it.
 
 | Where | What |
 |-------|------|
-| Locally | `cargo xtask check`, `cargo xtask lint`, the tests of the crate you change |
+| Locally | `cargo fmt`, `cargo check --tests`, `cargo xtask check`; never clippy (the box lints first in every test job) |
 | CI (GitHub Actions) | the full gate on every push and pull request: lint, tests, doctests, survival, check-commits |
 | The bench box | the same jobs on demand, on a pushed branch or on uncommitted code, plus timings on an otherwise idle machine and the tests on a real GPU |
 
@@ -493,10 +493,16 @@ branch. `main` only ever moves by the promotion of a green `next`.
 
 How a change goes in:
 1. **Branch from `origin/next`**, in a worktree of its own. Never from main.
-2. **Code with local checks only:** `cargo fmt`, then `cargo check --tests`
-   and `cargo clippy --tests` on the crates touched (`CARGO_INCREMENTAL=0`),
-   `cargo update -w --offline` (commit Cargo.lock if it changed), and
-   changelog fragments of at most 600 characters. No local test runs.
+2. **Code with light local checks only:** `cargo fmt`, then `cargo check
+   --tests` on the crates touched (`CARGO_INCREMENTAL=0`), `cargo update -w
+   --offline` (commit Cargo.lock if it changed), and changelog fragments of
+   at most 600 characters. No local test runs and **no local clippy**: it
+   compiles almost as much as a build and loads the developer's machine.
+   Clippy runs on the box, as the first step of every test job (`check`,
+   `egui-pop-check`: `clippy -D warnings` on the crate and its tests), so
+   testing the part before the merge into `next` lints it too. A local hook
+   refuses clippy, release builds, nextest, workspace-wide tests and
+   packaging builds.
 3. **Test only the part being changed,** on the box: `test-crate crate=…
    test=… filter=…` for Helios, `egui-pop-test` for egui-pop. Never the whole
    suite before a merge. `bench-remote`'s pre-flight refuses an unpushed
