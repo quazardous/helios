@@ -293,6 +293,9 @@ pub struct EditSession {
     /// The head is a save made during a gesture.
     in_progress: bool,
     steps: u64,
+    /// The metadata each version saved carries (the workshop session the
+    /// step was made in), until changed.
+    meta: Option<Value>,
 }
 
 impl EditSession {
@@ -325,6 +328,7 @@ impl EditSession {
                 saved: head.as_ref().map(|v| v.edit.clone()),
                 in_progress: false,
                 steps: 0,
+                meta: None,
             },
             head,
         ))
@@ -342,6 +346,11 @@ impl EditSession {
     /// How many versions this session saved.
     pub fn steps(&self) -> u64 {
         self.steps
+    }
+
+    /// The metadata the versions saved from now on carry (none: none).
+    pub fn set_meta(&mut self, meta: Option<Value>) {
+        self.meta = meta;
     }
 
     /// Saves a committed step made by `origin` (`user`, `agent:<id>`,
@@ -413,7 +422,8 @@ impl EditSession {
             origin,
             now,
         )
-        .labelled(label);
+        .labelled(label)
+        .with_meta(self.meta.clone());
         vault.add_version(&version)?;
         self.head = Some(version.id);
         self.saved = Some(version.edit.clone());

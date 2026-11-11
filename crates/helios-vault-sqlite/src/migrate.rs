@@ -147,6 +147,13 @@ CREATE INDEX locations_volume ON locations (volume);
         // are read from the files.
         sql: "CREATE INDEX fields_name_text ON fields (name, value) WHERE number IS NULL;",
     },
+    Migration {
+        version: 7,
+        name: "version metadata",
+        // What a step carries besides its edit, not hashed into the
+        // version's id: the workshop session it was made in.
+        sql: "ALTER TABLE versions ADD COLUMN meta TEXT;",
+    },
 ];
 
 /// The image map (`docs/design/image-map.md`): an image is in the Library
