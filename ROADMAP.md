@@ -485,6 +485,20 @@ pointer, separate object store), never in the history. Edits are small text
 (named parameters) and fit a version DAG; ratings, labels and tags merge best
 per field (CRDT-like), which requires field-level writes (section 2.8,
 rule 1). Not decided.
+(2026-11-11, proposed) The design note
+[docs/design/sync.md](docs/design/sync.md) turns this model into
+decisions, each with a default: a replica is a full vault plus partial
+objects (previews everywhere); replicas exchange a change log per
+replica by frontiers (version vectors), objects fetched on demand and
+verified by hash, over SSH first; fields merge per kind (last writer by
+hybrid clock for single values, add-wins sets for labels and tags,
+versions never merged); pins say which originals a machine keeps; backup
+becomes continuous with scrubbing; reclaim never removes a copy without
+live confirmation of the others. First target: a laptop and a
+workstation, both offline at times, reconcile without losing anything.
+Its open questions (transport, concurrent ratings, whether another
+computer's copy counts as a backup, the laptop's default placement,
+developing without the original, tombstone retention) are not decided.
 
 (2026-10-11) **Photos are not code.** No semantic merge: two concurrent edits
 simply coexist as two versions, and the user keeps one or both.
