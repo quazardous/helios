@@ -118,6 +118,9 @@ impl Text {
 }
 
 /// What a connector can do.
+// A table of independent capability flags, read by name, as the manifest
+// declares them: not a state machine hiding in booleans.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Caps {

@@ -87,8 +87,7 @@ impl Connector for Folder {
         Ok(self
             .places
             .as_ref()
-            .map(|places| places())
-            .unwrap_or_default()
+            .map_or_else(Vec::new, |places| places())
             .iter()
             .map(|p| Self::source(p))
             .collect())
