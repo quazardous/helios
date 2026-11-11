@@ -532,6 +532,7 @@ fn a_refused_draft_applies_nothing_and_the_user_alone_lets_the_proxy_out() {
     h.state_mut()
         .run("workshop.send_proxy", json!({ "on": true }), Origin::User)
         .unwrap();
+    follow(&mut h);
     let ctx = answer(agent(
         &mut h,
         &root,
