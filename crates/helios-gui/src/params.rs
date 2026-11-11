@@ -388,6 +388,13 @@ impl Drawings for Host<'_> {
         slider.quad(Icon::Picker, &picker)
     }
 
+    /// A parameter with Helios's own context menu (its Reset, Copy,
+    /// Paste…) keeps egui-pop's value menu off, so a right click opens
+    /// that menu alone.
+    fn value_menu(&mut self, key: &str, _: &Control) -> bool {
+        !(self.rows.contains_key(key) && self.params.app.is_some())
+    }
+
     fn verdict(&mut self, key: &str, control: &Control, c: &SliderChange) -> Verdict {
         let Some(row) = self.rows.get(key) else {
             return Verdict::Go;
