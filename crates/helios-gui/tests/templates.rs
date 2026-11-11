@@ -470,6 +470,35 @@ fn each_template_keeps_its_arrangement_under_both_pointer_profiles() {
                 egui_pop::api::pointer::profile_id(h.state().app().handle()),
                 profile
             );
+            // A template that opens in Compare shows the Compare place's
+            // arrangement first; its own is the workspace's root, one
+            // level up.
+            if template
+                .template
+                .library
+                .as_ref()
+                .is_some_and(|l| l.compare)
+            {
+                let app = h.state().app().handle().clone();
+                assert_eq!(
+                    app.context().get("place").to_string(),
+                    "helios.comparison",
+                    "{id}, {profile}: not opened in Compare"
+                );
+                assert_eq!(
+                    h.state().layout().area_of(&panel("helios.compare")),
+                    Some(Area::Center),
+                    "{id}, {profile}: Compare"
+                );
+                h.state_mut()
+                    .run("nav.up", json!(null), Origin::User)
+                    .unwrap();
+                h.run();
+                assert!(
+                    helios_gui::contexts::at_root(&app),
+                    "{id}, {profile}: still in a place"
+                );
+            }
             let wanted = &created.built.layout;
             let shown = h.state().layout();
             for p in wanted.placed() {

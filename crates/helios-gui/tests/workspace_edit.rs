@@ -137,7 +137,8 @@ fn the_library_settings_are_edited_after_creation() {
             "suggest_stacks",
             "darktable",
             "query",
-            "auto_advance"
+            "auto_advance",
+            "compare"
         ]
     );
     answer(
@@ -156,6 +157,8 @@ fn the_library_settings_are_edited_after_creation() {
     assert!(h.state().library().auto_advance);
     let kept = files.load().unwrap().bundle.template.library.unwrap();
     assert!(kept.auto_advance);
+    // Not asked to open in Compare, it does not.
+    assert!(!kept.compare);
     // A renaming without a copy is refused, nothing changed.
     let refused = h.state_mut().edit_workspace(
         &json!({ "library": { "import": { "source": "card", "rename": "x" } } }),
