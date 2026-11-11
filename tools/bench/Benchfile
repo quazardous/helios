@@ -185,8 +185,9 @@ ref = "055ef31b09a4a67671aa51c4b2a5a5ea9d1317c7"
 run = ["for d in /work/helios /work/egui-pop /work/${src:-helios}; do [ -d $d ] || continue; (cd $d && CARGO_NET_OFFLINE=false cargo fetch --locked) || exit 1; done",
   # the flatpak job: the runtime, the SDK and every source of the manifest,
   # into its kept storage (packaging/flatpak/build.sh fetch), from a copy
-  # of the tree, where the crates' list is written
-  '[ -z "${HELIOS_FLATPAK:-}" ] || { rm -rf /tmp/w/flatpak && mkdir -p /tmp/w/flatpak "$HOME" && cp -r --preserve=mode /work/${src:-helios}/. /tmp/w/flatpak/ && /tmp/w/flatpak/packaging/flatpak/build.sh fetch /flatpak/work; }',
+  # of the tree, where the crates' list is written; with the system's
+  # python3 (the cargo generator's modules), not wbox's venv
+  '[ -z "${HELIOS_FLATPAK:-}" ] || { rm -rf /tmp/w/flatpak && mkdir -p /tmp/w/flatpak "$HOME" && cp -r --preserve=mode /work/${src:-helios}/. /tmp/w/flatpak/ && PATH=/usr/bin:$PATH /tmp/w/flatpak/packaging/flatpak/build.sh fetch /flatpak/work; }',
 ]
 
 # Helios's own directories on the box. Build trees are keyed by the branch
