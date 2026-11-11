@@ -352,6 +352,68 @@ pub(crate) fn exif_glance(block: &[u8]) -> (Option<String>, Option<String>, Opti
     (taken, camera, thumb)
 }
 
+/// What an Exif block says of how a picture was taken (see
+/// [`crate::capture::Capture`]): the camera, lens, settings, time, offset
+/// and orientation. A tag missing or malformed reads as nothing.
+pub(crate) fn exif_capture(block: &[u8]) -> crate::capture::Capture {
+    let mut c = crate::capture::Capture::default();
+    let Some(t) = Ifds::new(block) else {
+        return c;
+    };
+    let Some(ifd0) = t.u32(4).map(|v| v as usize) else {
+        return c;
+    };
+    let ascii = |ifd: usize, tag: u16| -> Option<String> {
+        let (kind, count, at) = t.entry(ifd, tag)?;
+        (kind == 2).then_some(())?;
+        // Four bytes or fewer sit in the value field itself.
+        let start = if count <= 4 { at } else { t.u32(at)? as usize };
+        let bytes = t.b.get(start..start + count as usize)?;
+        let text = String::from_utf8_lossy(bytes);
+        let text = text.trim_end_matches('\0').trim();
+        (!text.is_empty()).then(|| text.to_string())
+    };
+    // A RATIONAL (or SRATIONAL), a SHORT or a LONG, as a number.
+    let number = |ifd: usize, tag: u16| -> Option<f64> {
+        let (kind, _, at) = t.entry(ifd, tag)?;
+        match kind {
+            3 => t.u16(at).map(f64::from),
+            4 => t.u32(at).map(f64::from),
+            5 | 10 => {
+                let start = t.u32(at)? as usize;
+                let (n, d) = (t.u32(start)?, t.u32(start + 4)?);
+                (d != 0).then(|| {
+                    if kind == 10 {
+                        f64::from(n as i32) / f64::from(d as i32)
+                    } else {
+                        f64::from(n) / f64::from(d)
+                    }
+                })
+            }
+            _ => None,
+        }
+    };
+    c.make = ascii(ifd0, 0x010F);
+    c.model = ascii(ifd0, 0x0110);
+    c.orientation = number(ifd0, 0x0112)
+        .map(|o| o as u8)
+        .filter(|o| (1..=8).contains(o));
+    let exif = t.pointer(ifd0, 0x8769);
+    c.taken = exif
+        .and_then(|e| ascii(e, 0x9003))
+        .or_else(|| ascii(ifd0, 0x0132));
+    if let Some(e) = exif {
+        c.subsec = ascii(e, 0x9291);
+        c.offset = ascii(e, 0x9011);
+        c.exposure_time = number(e, 0x829A).filter(|v| *v > 0.0);
+        c.aperture = number(e, 0x829D).filter(|v| *v > 0.0);
+        c.iso = number(e, 0x8827).filter(|v| *v > 0.0);
+        c.focal_length = number(e, 0x920A).filter(|v| *v > 0.0);
+        c.lens = ascii(e, 0xA434);
+    }
+    c
+}
+
 /// The Exif `Orientation` tag (0x0112 of the first directory), 1 to 8;
 /// `None` when the block has none, or one out of range.
 pub(crate) fn exif_orientation(block: &[u8]) -> Option<u8> {
