@@ -47,7 +47,7 @@ jobs:
       # No GPU in CI: lavapipe, Mesa's software Vulkan, runs the GPU
       # backend's tests against the CPU reference.
       - name: software Vulkan
-        run: sudo apt-get update -q && sudo apt-get install -yq mesa-vulkan-drivers
+        run: sudo apt-get -o Acquire::Retries=5 update -q && sudo apt-get -o Acquire::Retries=5 install -yq mesa-vulkan-drivers
       # One process per test, a JUnit report, slow tests named
       # (.config/nextest.toml); nextest does not run doctests.
       - run: cargo nextest run --workspace --profile ci
@@ -114,7 +114,7 @@ jobs:
       # The critical set runs desktop tests (persist, survival): the same
       # software Vulkan as the test job, so they see the same machine.
       - name: software Vulkan
-        run: sudo apt-get update -q && sudo apt-get install -yq mesa-vulkan-drivers
+        run: sudo apt-get -o Acquire::Retries=5 update -q && sudo apt-get -o Acquire::Retries=5 install -yq mesa-vulkan-drivers
       # The test job saves this cache; this job only reads it.
       - uses: Swatinem/rust-cache@v2
         with:
@@ -163,6 +163,6 @@ jobs:
           tool: cargo-deny,cargo-machete,taplo,typos
       - name: shellcheck and ruff
         run: |
-          sudo apt-get update -q && sudo apt-get install -yq shellcheck
+          sudo apt-get -o Acquire::Retries=5 update -q && sudo apt-get -o Acquire::Retries=5 install -yq shellcheck
           pipx install ruff
       - run: cargo xtask lint --require-all
