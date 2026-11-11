@@ -1,7 +1,7 @@
 //! What a control asks of a boxed surface (`docs/design/controls.md`,
 //! section 3.2): standard slots, size policies per representation,
 //! orientations, and its integration level per surface. Declarations
-//! only; [`crate::card`] lays them out with `egui_gridflow`.
+//! only; [`crate::card`] lays them out with `egui_fit`.
 //!
 //! - A [`Slot`] is a width × height in allowed sizes: ¼, ⅓, ½, ⅔, ¾ of the
 //!   base unit, or whole units. Written `1/2x1`, `1x6`.
@@ -17,13 +17,13 @@
 use core::fmt;
 use core::str::FromStr;
 
-use egui_gridflow as gf;
+use egui_fit as fit;
 use serde::{Deserialize, Serialize};
 
 use crate::model::Representation;
 
 /// A slot size along one axis, in the slot engine's allowed sizes.
-pub use gf::Size;
+pub use fit::Size;
 
 /// A slot: a width and a height in allowed sizes of the base unit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -53,8 +53,8 @@ impl Slot {
         Slot::new(Size::ONE, Size::units(n))
     }
 
-    fn to_gridflow(self) -> gf::Size2 {
-        gf::Size2::new(self.width, self.height)
+    fn to_fit(self) -> fit::Size2 {
+        fit::Size2::new(self.width, self.height)
     }
 }
 
@@ -73,7 +73,7 @@ fn parse_size(s: &str) -> Result<Size, String> {
         "3/4" => 9,
         n => {
             let n: u32 = n.parse().map_err(|_| format!("`{s}` is not a slot size"))?;
-            n.saturating_mul(gf::TWELFTHS_PER_UNIT)
+            n.saturating_mul(fit::TWELFTHS_PER_UNIT)
         }
     };
     Size::from_twelfths(twelfths).ok_or_else(|| format!("`{s}` is not a slot size"))
@@ -196,16 +196,16 @@ impl SizePolicy {
     }
 
     /// The slot engine's policy.
-    pub fn to_gridflow(&self) -> gf::SizePolicy {
-        let mut p = gf::SizePolicy {
-            min_size: self.min.to_gridflow(),
-            size: self.size.to_gridflow(),
-            max_size: self.max.to_gridflow(),
+    pub fn to_fit(&self) -> fit::SizePolicy {
+        let mut p = fit::SizePolicy {
+            min_size: self.min.to_fit(),
+            size: self.size.to_fit(),
+            max_size: self.max.to_fit(),
             aspect_ratio: None,
             grow: match self.grow {
-                Grow::Fixed => gf::Grow::Fixed,
-                Grow::Width => gf::Grow::Along(gf::Axis::Width),
-                Grow::Height => gf::Grow::Along(gf::Axis::Height),
+                Grow::Fixed => fit::Grow::Fixed,
+                Grow::Width => fit::Grow::Along(fit::Axis::Width),
+                Grow::Height => fit::Grow::Along(fit::Axis::Height),
             },
         };
         if let Some(r) = self.aspect_ratio {
@@ -256,17 +256,17 @@ pub enum Orientation {
 }
 
 impl Orientation {
-    pub fn to_gridflow(self) -> gf::Orientation {
+    pub fn to_fit(self) -> fit::Orientation {
         match self {
-            Orientation::Horizontal => gf::Orientation::Horizontal,
-            Orientation::Vertical => gf::Orientation::Vertical,
+            Orientation::Horizontal => fit::Orientation::Horizontal,
+            Orientation::Vertical => fit::Orientation::Vertical,
         }
     }
 
-    pub fn from_gridflow(o: gf::Orientation) -> Self {
+    pub fn from_fit(o: fit::Orientation) -> Self {
         match o {
-            gf::Orientation::Horizontal => Orientation::Horizontal,
-            gf::Orientation::Vertical => Orientation::Vertical,
+            fit::Orientation::Horizontal => Orientation::Horizontal,
+            fit::Orientation::Vertical => Orientation::Vertical,
         }
     }
 }

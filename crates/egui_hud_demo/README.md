@@ -1,7 +1,7 @@
 # egui_hud demo
 
 A web demo of [egui_hud](../egui_hud), the controls framework, laid out by
-[egui_gridflow](https://github.com/quazardous/egui_gridflow) and drawn
+[egui_fit](https://github.com/quazardous/egui_fit) and drawn
 with [egui-pop](https://github.com/quazardous/egui-pop).
 
 **Live:** <https://quazardous.github.io/helios/egui_hud/>

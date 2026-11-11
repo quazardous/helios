@@ -155,7 +155,7 @@ fn reason<'a>(p: &'a CardPlacement, key: &str) -> &'a resolve::Reason {
 }
 
 /// Where every item went: what a fast key must not change.
-fn geometry(p: &CardPlacement) -> Vec<(String, bool, Option<egui_gridflow::GridRect>)> {
+fn geometry(p: &CardPlacement) -> Vec<(String, bool, Option<egui_fit::GridRect>)> {
     p.items
         .iter()
         .map(|i| (i.key.clone(), i.visibility.is_shown(), i.position))

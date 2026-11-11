@@ -1,6 +1,6 @@
 [package]
 name = "egui_hud_demo"
-description = "A web demo of egui_hud: a neutral catalogue of controls (a mixer channel, a light) declared as data, composed on the bench and laid out by egui_gridflow"
+description = "A web demo of egui_hud: a neutral catalogue of controls (a mixer channel, a light) declared as data, composed on the bench and laid out by egui_fit"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

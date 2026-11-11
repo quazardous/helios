@@ -1405,6 +1405,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "egui_fit"
+version = "0.1.0"
+source = "git+https://github.com/quazardous/egui_fit?rev=0fe36629a70c37e9ef3c7ee5b5d769713d5f08de#0fe36629a70c37e9ef3c7ee5b5d769713d5f08de"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "egui_glow"
 version = "0.37.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1419,20 +1427,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "egui_gridflow"
-version = "0.1.0"
-source = "git+https://github.com/quazardous/egui_gridflow?rev=13f31d0855e6ec101b75e7247ef5d688b4203ce5#13f31d0855e6ec101b75e7247ef5d688b4203ce5"
-dependencies = [
- "serde",
-]
-
-[[package]]
 name = "egui_hud"
 version = "0.74.0"
 dependencies = [
  "egui-pop",
  "egui-pop-model",
- "egui_gridflow",
+ "egui_fit",
  "serde",
  "serde_json",
 ]
@@ -2230,7 +2230,7 @@ dependencies = [
 name = "helios-controls"
 version = "0.74.0"
 dependencies = [
- "egui_gridflow",
+ "egui_fit",
  "egui_hud",
  "helios-core",
  "helios-shell",

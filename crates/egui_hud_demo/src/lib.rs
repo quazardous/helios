@@ -1,6 +1,6 @@
 //! The `egui_hud` demo: a neutral catalogue of controls, a mixer channel and
 //! a light, declared as data ([`KIT`]), put on `egui_hud`'s bench and laid
-//! out by its slot engine (`egui_gridflow`).
+//! out by its slot engine (`egui_fit`).
 //!
 //! - [`kit`] reads the catalogue: the controls that specialise their
 //!   value type (the gain in decibels, the meter, pan, the light's

@@ -150,7 +150,7 @@ pub struct Placement {
     pub representation: Option<Representation>,
     /// Its slot in twelfths of a unit, when placed.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub position: Option<egui_gridflow::GridRect>,
+    pub position: Option<egui_fit::GridRect>,
     /// Its slot in points at the density, when placed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rect: Option<Rect>,

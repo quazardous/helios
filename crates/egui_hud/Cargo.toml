@@ -22,7 +22,7 @@ bench = ["render", "egui-pop/viewport"]
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
-egui_gridflow.workspace = true
+egui_fit.workspace = true
 # `when` clauses over the context keys, without egui.
 egui-pop-model.workspace = true
 egui-pop = { workspace = true, optional = true }

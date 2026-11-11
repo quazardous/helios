@@ -16,7 +16,7 @@
 //! - [`slot`]: what a control asks of a boxed surface: slots, size
 //!   policies per representation, orientations, integration levels.
 //! - [`card`]: a card or a case laid out on the slot engine
-//!   (`egui_gridflow`), item by item.
+//!   (`egui_fit`), item by item.
 //! - [`context`]: the context keys (task, space, detail, image, tool,
 //!   device), the box and the density, each key's class, a part's tier,
 //!   and the rules a card or a case declares over the keys.

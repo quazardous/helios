@@ -1,4 +1,4 @@
-//! A card laid out on the slot engine, `egui_gridflow`
+//! A card laid out on the slot engine, `egui_fit`
 //! (`docs/design/controls.md`, sections 3.2 and 4).
 //!
 //! A [`Card`] is a module's card or a case: controls and chrome in their
@@ -21,7 +21,7 @@
 use core::fmt::Write as _;
 use core::ops::Range;
 
-use egui_gridflow as gf;
+use egui_fit as fit;
 use serde::Serialize;
 
 use crate::context::{Rule, Tier};
@@ -255,11 +255,11 @@ pub enum SlotStatus {
 }
 
 impl SlotStatus {
-    fn from_gridflow(s: gf::Status) -> Self {
+    fn from_fit(s: fit::Status) -> Self {
         match s {
-            gf::Status::Placed => SlotStatus::Placed,
-            gf::Status::Unpinned(r) => SlotStatus::Unpinned(r.to_string()),
-            gf::Status::Overflow(r) => SlotStatus::Overflow(r.to_string()),
+            fit::Status::Placed => SlotStatus::Placed,
+            fit::Status::Unpinned(r) => SlotStatus::Unpinned(r.to_string()),
+            fit::Status::Overflow(r) => SlotStatus::Overflow(r.to_string()),
         }
     }
 }
@@ -286,7 +286,7 @@ pub struct SlotPlacement {
     pub slot: Option<String>,
     /// The slot in twelfths of a unit, when placed.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub grid: Option<gf::GridRect>,
+    pub grid: Option<fit::GridRect>,
     /// The slot in points, when placed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rect: Option<Rect>,
@@ -308,7 +308,7 @@ pub struct GroupPlacement {
     /// Its band, across the whole card, in twelfths of a unit, when any
     /// of its items is placed.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub grid: Option<gf::GridRect>,
+    pub grid: Option<fit::GridRect>,
     /// Its band in points, for its frame.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rect: Option<Rect>,
@@ -319,7 +319,7 @@ pub struct GroupPlacement {
 pub struct CardLayout {
     pub rack: Rack,
     /// The slot engine's result, kept for hysteresis and its dump.
-    pub grid: gf::Layout,
+    pub grid: fit::Layout,
     /// One per item, in logical order.
     pub slots: Vec<SlotPlacement>,
     /// One per group of the card, in its order.
@@ -334,7 +334,7 @@ impl CardLayout {
 
     /// The height used, in points.
     pub fn height(&self) -> f32 {
-        self.grid.rows as f32 * self.rack.row / gf::TWELFTHS_PER_UNIT as f32
+        self.grid.rows as f32 * self.rack.row / fit::TWELFTHS_PER_UNIT as f32
     }
 
     /// The placement of the group keyed `key`.
@@ -404,9 +404,9 @@ fn size_of(twelfths: u32) -> String {
 /// The widest allowed size at most `columns` wide (a quarter at least).
 fn line_width(columns: f32) -> Size {
     // `as` saturates and maps NaN to 0.
-    let t = (columns * gf::TWELFTHS_PER_UNIT as f32).floor() as u32;
-    let t = if t >= gf::TWELFTHS_PER_UNIT {
-        t / gf::TWELFTHS_PER_UNIT * gf::TWELFTHS_PER_UNIT
+    let t = (columns * fit::TWELFTHS_PER_UNIT as f32).floor() as u32;
+    let t = if t >= fit::TWELFTHS_PER_UNIT {
+        t / fit::TWELFTHS_PER_UNIT * fit::TWELFTHS_PER_UNIT
     } else {
         [9, 8, 6, 4, 3].into_iter().find(|&f| f <= t).unwrap_or(3)
     };
@@ -513,17 +513,17 @@ pub fn layout_items(
                     },
                     _ => first.policy,
                 };
-                let mut e = gf::Element::new(key, first_policy.to_gridflow()).with_orientations(
+                let mut e = fit::Element::new(key, first_policy.to_fit()).with_orientations(
                     &v.orientation_order()
                         .into_iter()
-                        .map(Orientation::to_gridflow)
+                        .map(Orientation::to_fit)
                         .collect::<Vec<_>>(),
                 );
                 for f in forms {
-                    e = e.with_form(f.policy.to_gridflow());
+                    e = e.with_form(f.policy.to_fit());
                 }
                 if let Some(o) = orientation {
-                    e = e.with_pinned_orientation(o.to_gridflow());
+                    e = e.with_pinned_orientation(o.to_fit());
                 }
                 if let Some((col, row)) = pin {
                     e = e.with_pin(*col, *row);
@@ -542,7 +542,7 @@ pub fn layout_items(
                 });
             }
             CardItem::Chrome(chrome) => {
-                elements.push(gf::Element::new(key, chrome.policy(line).to_gridflow()));
+                elements.push(fit::Element::new(key, chrome.policy(line).to_fit()));
                 let kind = serde_json::to_value(chrome.kind)
                     .ok()
                     .and_then(|v| v.as_str().map(str::to_owned))
@@ -559,8 +559,8 @@ pub fn layout_items(
         }
     }
     // The engine counts in columns: one unit is one column across.
-    let container = gf::Container::new(columns, 1.0);
-    let engine_groups: Vec<gf::Group> = groups
+    let container = fit::Container::new(columns, 1.0);
+    let engine_groups: Vec<fit::Group> = groups
         .iter()
         .enumerate()
         .map(|(g, group)| {
@@ -585,21 +585,21 @@ pub fn layout_items(
                 && inside
                     .first()
                     .is_some_and(|&at| items[at].0 == group.items.start);
-            gf::Group {
+            fit::Group {
                 key: g as u64,
                 range,
                 header,
             }
         })
         .collect();
-    let grid = gf::layout_grouped(
+    let grid = fit::layout_grouped(
         &container,
         &elements,
         &engine_groups,
         previous.map(|p| &p.grid),
     );
-    let per = gf::TWELFTHS_PER_UNIT as f32;
-    let to_rect = |r: gf::GridRect| Rect {
+    let per = fit::TWELFTHS_PER_UNIT as f32;
+    let to_rect = |r: fit::GridRect| Rect {
         x: r.x as f32 * rack.column / per,
         y: r.y as f32 * rack.row / per,
         w: r.w as f32 * rack.column / per,
@@ -624,12 +624,12 @@ pub fn layout_items(
             control: s.control,
             variant: s.variant,
             representation: s.forms.get(p.form).copied(),
-            orientation: Orientation::from_gridflow(p.orientation),
+            orientation: Orientation::from_fit(p.orientation),
             slot: p.rect.map(|r| format!("{}x{}", size_of(r.w), size_of(r.h))),
             grid: p.rect,
             rect: p.rect.map(to_rect),
             integration: s.integration,
-            status: SlotStatus::from_gridflow(p.status),
+            status: SlotStatus::from_fit(p.status),
             visual: p.visual,
         })
         .collect();

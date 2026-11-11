@@ -4,7 +4,7 @@ Controls as data for [egui](https://github.com/emilk/egui) applications:
 what a control is (purpose, value, units, ranges, feel, detents,
 read-out), the faces that draw it and the representations they take on
 each surface (panel row, compact field, HUD chip), cards laid out on a slot engine
-([egui_gridflow](https://github.com/quazardous/egui_gridflow)) and
+([egui_fit](https://github.com/quazardous/egui_fit)) and
 resolved in context, and a value flow of gestures (begin, preview,
 commit as one undo step through a vetoable change step, or cancel with
 no trace).
