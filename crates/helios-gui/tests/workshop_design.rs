@@ -404,9 +404,10 @@ fn an_agent_designs_the_backlit_workshop_and_the_panel_shows_only_its_sliders() 
     };
     assert_eq!(verdict("haze"), json!("dropped"), "{check}");
     assert_eq!(verdict("backlight_lift"), json!("kept"), "{check}");
-    assert_eq!(verdict("mountain_detail"), json!("kept"), "{check}");
-    // Half a stop up, the sky's top clips: its range is pulled in.
+    // Half a stop up, the sky's top clips; so does it under strong local
+    // contrast: both ranges are pulled in.
     assert_eq!(verdict("sky"), json!("narrowed"), "{check}");
+    assert_eq!(verdict("mountain_detail"), json!("narrowed"), "{check}");
     assert!(
         check["notes"]
             .as_array()
