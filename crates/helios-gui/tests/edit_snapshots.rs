@@ -74,7 +74,7 @@ fn open(dir: &Path) -> (Shell, Persist<SqliteStore>, ImageId) {
 
 fn set(shell: &Shell, ev: f64) {
     shell
-        .values
+        .values()
         .lock()
         .unwrap()
         .set(helios_values::Set::new(
@@ -87,7 +87,7 @@ fn set(shell: &Shell, ev: f64) {
 
 fn shown(shell: &Shell) -> f64 {
     shell
-        .values
+        .values()
         .lock()
         .unwrap()
         .get(EV)
@@ -197,7 +197,7 @@ fn a_restore_is_one_step_an_undo_takes_back_after_reopening() {
     let (mut shell, mut persist, _) = open(&dir);
     assert_eq!(listed(&shell), ["Original", "Bright"]);
     assert!((shown(&shell) - 2.0).abs() < 1e-9);
-    let steps = |s: &Shell| s.values.lock().unwrap().undo_steps().len();
+    let steps = |s: &Shell| s.values().lock().unwrap().undo_steps().len();
     let before = steps(&shell);
     let outcome = history::restore(shell.app().handle(), &EDIT, bright.id, &PopOrigin::User);
     assert!(outcome.ok(), "{outcome:?}");
@@ -232,12 +232,12 @@ fn a_restore_waits_for_a_drag_and_a_dry_run_changes_nothing() {
     persist.frame(&mut shell, 1.0);
     set(&shell, 1.0);
     let g = shell
-        .values
+        .values()
         .lock()
         .unwrap()
         .begin_gesture(Origin::User, "drag exposure");
     shell
-        .values
+        .values()
         .lock()
         .unwrap()
         .set(
@@ -251,10 +251,10 @@ fn a_restore_waits_for_a_drag_and_a_dry_run_changes_nothing() {
         .unwrap();
     let outcome = history::restore(shell.app().handle(), &EDIT, snap.id, &PopOrigin::User);
     assert!(!outcome.ok(), "vetoed while the drag goes on");
-    shell.values.lock().unwrap().end(g);
+    shell.values().lock().unwrap().end(g);
     // A dry run, as an agent: the step it would make, nothing written.
-    let mut owner = helios_gui::history::HeliosHistory::new(shell.values.clone())
-        .with_snapshots(shell.snapshots.clone());
+    let mut owner = helios_gui::history::HeliosHistory::new(shell.values().clone())
+        .with_snapshots(shell.snapshots().clone());
     let answer = egui_pop::api::history::History::restore(
         &mut owner,
         &egui_pop::api::history::Request::new(EDIT).dry_run(),

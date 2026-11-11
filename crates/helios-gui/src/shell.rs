@@ -14,7 +14,7 @@
 //! palette, a menu, a script and an agent reach the same actions.
 
 use std::cell::RefCell;
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
@@ -63,7 +63,9 @@ pub use storage::{
 };
 pub use workspace_edit::STATE as WORKSPACE_STATE;
 
+mod core;
 mod export;
+mod focus;
 mod health;
 mod import;
 mod import_choices;
@@ -488,188 +490,21 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
+/// The desktop shell: the process's [`Core`](core::Core), what every
+/// window shares, and the [`Focus`](focus::Focus) of its one window.
+///
+/// The split follows Helios's windows (docs/design/windows.md): one OS
+/// window per focus, all of them in one process around one core. The
+/// process has one focus today, the main window (the root viewport, which
+/// is always the first focus); a second window is a second `Focus` on the
+/// same core.
 pub struct Shell {
-    app: App,
-    registry: Arc<Mutex<Registry>>,
-    lists: Rc<RefCell<ListSource>>,
-    /// Keys, menu entries and ticks of Helios's commands.
-    declarations: Rc<RefCell<Declarations>>,
-    /// The panels declared, and what each draws.
-    panels: Vec<PanelSpec>,
-    contents: Contents,
-    /// The journal read up to here, for the workbench's refusals.
-    seen: u64,
-    /// Why the tab dragged last frame may not go where it is, as the
-    /// workbench's drop hint said it: said when the tab is let go there.
-    drag_refusal: Option<String>,
-    queue: Queue,
-    rects: BTreeMap<String, Rect>,
-    /// The window of each named rectangle drawn outside the main one.
-    rect_windows: BTreeMap<String, egui::ViewportId>,
-    pixels_per_point: f32,
-    /// The screen's own scale, as of the last frame (none before it).
-    native_scale: Option<f32>,
-    shots: VecDeque<Shot>,
-    /// The screenshots asked for, as the window hands them back, oldest
-    /// first: each answers the oldest of `shots`.
-    screenshots: Arc<Mutex<VecDeque<Arc<egui::ColorImage>>>>,
-    recording: Option<(String, Recorder)>,
+    /// What every window of the process shares.
+    core: core::Core,
+    /// What belongs to the main window.
+    focus: focus::Focus,
     /// What the shell has to say: command results, layout repairs.
     pub notes: Vec<String>,
-    /// The workspace's name, which the window's title shows.
-    title: String,
-    themes: crate::theme::Themes,
-    theme: crate::theme::Tokens,
-    theme_name: String,
-    theme_overrides: BTreeMap<String, serde_json::Value>,
-    /// The theme egui-pop last installed, as seen by the shell.
-    installed: Option<crate::theme::ThemeSpec>,
-    /// Where profiles are kept (`<name>.helios-profile`).
-    profiles_dir: PathBuf,
-    profile_name: String,
-    /// A profile read and shown as a diff, waiting for `profile.import.apply`.
-    pending_import: Option<helios_profile::Profile>,
-    /// This machine, as profile variants select it.
-    machine: helios_profile::Machine,
-    /// The profile in use as read, with its variants, and as resolved for
-    /// this machine.
-    loaded: Option<(helios_profile::Profile, helios_profile::Resolved)>,
-    /// What `profile.resolved` answers.
-    resolved_view: Arc<Mutex<Value>>,
-    scopes: Rc<RefCell<crate::scopes::Scopes>>,
-    library: Rc<RefCell<crate::library::Library>>,
-    /// The Stacks panel's proposals.
-    stack_review: Rc<RefCell<crate::stack_review::Review>>,
-    /// The open image's decisions, and the Decisions panel's cards.
-    decisions: Rc<RefCell<crate::decisions::Decisions>>,
-    /// The duplicates imports found (the Duplicates panel).
-    duplicates: Rc<RefCell<crate::duplicates::Duplicates>>,
-    /// Where the workspace imports from, and how (its template's).
-    import_source: Option<helios_template::ImportDesc>,
-    /// Imports asked for (`library.import`'s arguments), for the host.
-    imports: Vec<Value>,
-    /// Why the host has no library to import into (no `library.import`
-    /// registered), else none: imports then say so instead of being
-    /// queued.
-    no_library: Option<Message>,
-    /// The photos the imports running brought so far, and those the last
-    /// one brought, to select once the Library shows them.
-    imported_ids: Vec<String>,
-    select_imported: Vec<String>,
-    /// The import window, its sources and the cards watched.
-    import_window: import_window::ImportWindow,
-    health: health::HealthPage,
-    storage: storage::StoragePage,
-    /// The lines of the imports the host runs (`import_sink`).
-    import_lines: (ImportLines, std::sync::mpsc::Receiver<(Value, Value)>),
-    /// Exports asked for, for the host.
-    exports: Vec<ExportAsk>,
-    /// What the exports the host runs say (`export_sink`).
-    export_lines: (
-        std::sync::mpsc::Sender<helios_export::batch::Line>,
-        std::sync::mpsc::Receiver<helios_export::batch::Line>,
-    ),
-    /// The Log panel's entries.
-    log: Rc<RefCell<crate::log_panel::Log>>,
-    /// The library's images on disk, by id, for quick open.
-    image_files: BTreeMap<String, PathBuf>,
-    /// egui-pop's dialogs, once the application is built (`dialog.current`).
-    dialogs: Arc<OnceLock<Dialogs>>,
-    /// Confirmations are answered yes by policy (a script's `--yes`).
-    assume_yes: bool,
-    /// A menu of commands asked for, open at a point.
-    menu: Option<(egui::Pos2, Vec<MenuItem>)>,
-    /// Every notice so far; the status bar shows the last, toasts the
-    /// warnings and errors.
-    notices: Vec<Notice>,
-    /// The GUI's clock, in seconds, as of this frame.
-    now: f64,
-    viewport: Rc<RefCell<crate::viewport::Viewport>>,
-    /// The library's image being opened in the viewport, while its large
-    /// thumbnail is awaited (the loupe's first frame).
-    opening: Option<String>,
-    /// A small render of what the viewport shows, for the scopes and the
-    /// navigator.
-    preview: Rc<crate::preview::Preview>,
-    /// The render state the viewport's GPU path waits to be installed on.
-    gpu: Option<eframe::egui_wgpu::RenderState>,
-    /// What installing it found.
-    gpu_info: Option<egui_pop::viewport::gpu::GpuInfo>,
-    /// The image's own surface (Wayland), following the Wide-gamut
-    /// preview setting.
-    image_surface: crate::display::ImageSurfaceSwitch,
-    params: Rc<RefCell<crate::params::Params>>,
-    /// The clipboard's endpoints (`crate::clipboard`).
-    clip: crate::clipboard::Endpoints,
-    /// The system clipboard beyond text: files and images
-    /// (`crate::clipboard::system`).
-    system: crate::clipboard::system::Shared,
-    /// The image being rendered for the system clipboard.
-    copying: Option<std::sync::mpsc::Receiver<Result<image::RgbaImage, String>>>,
-    /// The Masks panel: the selected module's mask network as a tree.
-    mask_tree: Rc<RefCell<crate::mask_tree::MaskTree>>,
-    /// The Graph panel: the workspace's network in egui-pop's editor.
-    graph: Rc<RefCell<crate::graph::GraphPanel>>,
-    /// Every value widgets and agents edit (`param.*` commands).
-    pub values: Arc<Mutex<helios_values::Store>>,
-    /// The open image's history snapshots (`crate::edit_snapshots`).
-    pub snapshots: crate::edit_snapshots::Shared,
-    /// Headless runs: no cursor blink, no animation and no repaint asked
-    /// by the workspace's watcher, so a frame settles and a test's `run`
-    /// ends.
-    still: bool,
-    /// The workspace open, whose layout egui-pop keeps.
-    workspace: Workspace,
-    /// The layout as last saved to the workspace's document: saved again
-    /// once it changes, so a kill keeps it.
-    layout_saved: Option<Layout>,
-    /// The workspace's state, as edited (`workspace_edit`).
-    edit: Option<workspace_edit::Edited>,
-    /// The catalogues the shell's text is shown through.
-    i18n: egui_pop::i18n::I18n,
-    /// What later launches and links asked to open (`platform`).
-    opens: crate::platform::Opens,
-    /// The viewport engine's events read up to here, and the modules whose
-    /// GPU fallback was already said.
-    engine_seen: u64,
-    fell_back: BTreeSet<String>,
-    /// The catalogues' generation About's description was last
-    /// translated for (`follow_language`).
-    about_generation: Option<u64>,
-    /// Where background work reports (`job.*` on the shell's bus).
-    jobs: helios_core::jobs::Jobs,
-    /// The library's undo steps (imports), shared with the history owner.
-    library_history: crate::library_history::LibraryHistory,
-    /// Helios's status line, drawn in egui-pop's status bar.
-    status: crate::jobs::Status,
-    /// The jobs' ends read up to here, for the desktop notification.
-    ended: crate::jobs::Ended,
-    /// The nodes followed, whose jobs show in the jobs centre.
-    relays: crate::jobs::Relays,
-    /// The lost nodes' jobs to take out of the jobs centre.
-    forgotten: crate::jobs::Forgotten,
-    /// The Queue panel: the selected node's queue.
-    queue_panel: Rc<RefCell<crate::queue::QueuePanel>>,
-    /// The image's compare and mask tool, kept with their modes.
-    follow: crate::contexts::Follow,
-    /// The workspace's sub-workspaces, for their place; whether they
-    /// were read, and at which of the state's sequence numbers (none: no
-    /// state).
-    subworkspaces: crate::contexts::Subworkspaces,
-    subworkspaces_seen: (bool, Option<u64>),
-    /// Helios's status bar items, published when what they say changes.
-    status_items: crate::status_items::Items,
-    /// The first run's "Coming from darktable?" is offered (the desktop
-    /// only, `offer_pointer_choice`).
-    pointer_choice: bool,
-    /// The palettes a new layout gathered at the workbench's end edge
-    /// (their group's first panel), moved off the end side bar once the
-    /// areas are drawn ([`Shell::place_palettes`]).
-    palettes_to_place: Option<PanelId>,
-    /// The workshops' aims this session (see `workshop_edit`).
-    workshop_aims: workshop_edit::Aims,
-    /// The Workshops panel (experimental).
-    workshops: Rc<RefCell<crate::workshops::Panel>>,
 }
 
 impl Shell {
@@ -934,7 +769,10 @@ impl Shell {
         if let Some(d) = app.handle().service(&DIALOGS) {
             let _ = dialogs.set((*d).clone());
         }
-        let viewport: Rc<RefCell<crate::viewport::Viewport>> = Rc::default();
+        // The viewport engine and its render cache: one per process, every
+        // window's viewport renders on it.
+        let engine = crate::viewport::engine();
+        let viewport = focus::viewport_on(&engine);
         let library: Rc<RefCell<crate::library::Library>> = Rc::default();
         agent_state.set(library.clone(), viewport.clone());
         let system: crate::clipboard::system::Shared = Rc::new(RefCell::new(Box::new(
@@ -947,28 +785,24 @@ impl Shell {
             library.clone(),
             system.clone(),
         );
-        let preview = Rc::new(crate::preview::Preview::new(
-            viewport.borrow().engine().clone(),
-        ));
-        let mut shell = Shell {
+        // The main window, the root viewport: always the first focus.
+        let focus = focus::Focus::new(focus::Seed {
+            window: egui::ViewportId::ROOT,
+            contents,
+            workspace,
+            subworkspaces,
+            library,
+            viewport,
+            controls,
+        });
+        let core = core::Core {
             app,
             registry,
             lists,
             declarations,
             panels,
-            contents,
-            seen: 0,
-            drag_refusal: None,
             queue,
-            rects: BTreeMap::new(),
-            rect_windows: BTreeMap::new(),
-            pixels_per_point: 1.0,
-            native_scale: None,
-            shots: VecDeque::new(),
-            screenshots: Arc::default(),
-            recording: None,
-            notes: Vec::new(),
-            title: String::new(),
+            seen: 0,
             theme: crate::theme::resolve(&themes, crate::theme::DEFAULT, &BTreeMap::new()),
             themes,
             theme_name: crate::theme::DEFAULT.into(),
@@ -980,17 +814,10 @@ impl Shell {
             machine: helios_profile::Machine::here(&config_dir().join("machine.toml")),
             loaded: None,
             resolved_view,
-            scopes: Rc::default(),
-            library,
             stack_review: Rc::default(),
-            decisions: Rc::default(),
             duplicates: Rc::default(),
-            import_source: None,
             imports: Vec::new(),
             no_library: None,
-            imported_ids: Vec::new(),
-            select_imported: Vec::new(),
-            import_window: import_window::ImportWindow::default(),
             health: health::HealthPage::default(),
             storage: storage::StoragePage::default(),
             import_lines: std::sync::mpsc::channel(),
@@ -1000,64 +827,52 @@ impl Shell {
             image_files: BTreeMap::new(),
             dialogs,
             assume_yes: false,
-            menu: None,
             notices: Vec::new(),
             now: 0.0,
-            viewport,
-            opening: None,
-            preview,
+            engine,
             gpu: None,
             gpu_info: None,
-            image_surface: crate::display::ImageSurfaceSwitch::default(),
-            params: Rc::new(RefCell::new(crate::params::Params::new(controls))),
             clip,
             system,
             copying: None,
-            mask_tree: Rc::default(),
-            graph: Rc::default(),
             values,
             snapshots,
-            workspace,
-            layout_saved: None,
-            edit: None,
             still: false,
             i18n,
+            opens,
             engine_seen: 0,
             fell_back: BTreeSet::new(),
             about_generation: None,
-            opens,
             jobs,
             library_history,
             status,
             ended: crate::jobs::Ended::default(),
             relays,
             forgotten: crate::jobs::Forgotten::default(),
-            queue_panel: Rc::default(),
-            follow: crate::contexts::Follow::default(),
-            subworkspaces,
-            subworkspaces_seen: (false, None),
-            status_items: crate::status_items::Items::default(),
             pointer_choice: false,
-            palettes_to_place: None,
-            workshop_aims: workshop_edit::Aims::new(),
-            workshops: Rc::default(),
         };
-        if let Err(e) = crate::pointer_choice::declare(shell.app.handle()) {
+        let mut shell = Shell {
+            core,
+            focus,
+            notes: Vec::new(),
+        };
+        if let Err(e) = crate::pointer_choice::declare(shell.core.app.handle()) {
             shell.notes.push(format!("pointer choice: {e}"));
         }
-        for d in shell.app.handle().diagnostics() {
+        for d in shell.core.app.handle().diagnostics() {
             shell.notes.push(format!("{}: {}", d.code, d.message));
         }
         // The built-in templates' text, each under its own keys, once
         // the translation plugin has loaded Helios's catalogues.
-        if let Err(e) = crate::templates::add_texts(&shell.i18n, &crate::templates::builtin()) {
+        if let Err(e) = crate::templates::add_texts(&shell.core.i18n, &crate::templates::builtin())
+        {
             shell.notes.push(e);
         }
-        shell.seen = shell.app.handle().last_event();
-        shell.ended = crate::jobs::Ended::after(shell.seen);
-        shell.forgotten = crate::jobs::Forgotten::after(shell.seen);
+        shell.core.seen = shell.core.app.handle().last_event();
+        shell.core.ended = crate::jobs::Ended::after(shell.core.seen);
+        shell.core.forgotten = crate::jobs::Forgotten::after(shell.core.seen);
         {
-            let mut store = lock(&shell.values);
+            let mut store = lock(&shell.core.values);
             crate::viewport::declare(&mut store);
             crate::mask_display::declare(&mut store);
             crate::masks::declare(&mut store);
@@ -1073,16 +888,18 @@ impl Shell {
                 helios_values::Descriptor::text("selected nodes", "[]").transient(),
             );
         }
-        let has = |shell: &Shell, panel: &str| shell.panels.iter().any(|p| p.id.as_str() == panel);
+        let has =
+            |shell: &Shell, panel: &str| shell.core.panels.iter().any(|p| p.id.as_str() == panel);
         if has(&shell, "helios.params") {
             shell
+                .focus
                 .params
                 .borrow_mut()
-                .set_app(shell.app.handle().clone());
+                .set_app(shell.core.app.handle().clone());
             let (params, viewport, values) = (
-                shell.params.clone(),
-                shell.viewport.clone(),
-                shell.values.clone(),
+                shell.focus.params.clone(),
+                shell.focus.viewport.clone(),
+                shell.core.values.clone(),
             );
             shell.set_content("helios.params", move |ui| {
                 let (selection, members) = {
@@ -1110,25 +927,28 @@ impl Shell {
         }
         if has(&shell, crate::workshops::PANEL) {
             let (panel, params, values) = (
-                shell.workshops.clone(),
-                shell.params.clone(),
-                shell.values.clone(),
+                shell.focus.workshops.clone(),
+                shell.focus.params.clone(),
+                shell.core.values.clone(),
             );
             shell.set_content(crate::workshops::PANEL, move |ui| {
                 panel.borrow_mut().ui(ui, &values, &mut params.borrow_mut());
             });
         }
         if has(&shell, crate::queue::PANEL) {
-            let (panel, app) = (shell.queue_panel.clone(), shell.app.handle().clone());
+            let (panel, app) = (
+                shell.focus.queue_panel.clone(),
+                shell.core.app.handle().clone(),
+            );
             shell.set_content(crate::queue::PANEL, move |ui| {
                 panel.borrow_mut().ui(ui, &app);
             });
         }
         if has(&shell, "helios.viewport") {
             let (viewport, values, app) = (
-                shell.viewport.clone(),
-                shell.values.clone(),
-                shell.app.handle().clone(),
+                shell.focus.viewport.clone(),
+                shell.core.values.clone(),
+                shell.core.app.handle().clone(),
             );
             shell.set_content("helios.viewport", move |ui| {
                 let area = ui.max_rect();
@@ -1150,18 +970,22 @@ impl Shell {
             });
         }
         if has(&shell, crate::graph::PANEL) {
-            shell.graph.borrow_mut().set_app(shell.app.handle().clone());
+            shell
+                .focus
+                .graph
+                .borrow_mut()
+                .set_app(shell.core.app.handle().clone());
             let (graph, viewport, values) = (
-                shell.graph.clone(),
-                shell.viewport.clone(),
-                shell.values.clone(),
+                shell.focus.graph.clone(),
+                shell.focus.viewport.clone(),
+                shell.core.values.clone(),
             );
             shell.set_content(crate::graph::PANEL, move |ui| {
                 graph.borrow_mut().ui(ui, &values, &viewport);
             });
         }
         if has(&shell, crate::modules::PANEL) {
-            let (viewport, values) = (shell.viewport.clone(), shell.values.clone());
+            let (viewport, values) = (shell.focus.viewport.clone(), shell.core.values.clone());
             let workshops = has(&shell, crate::workshops::PANEL);
             shell.set_content(crate::modules::PANEL, move |ui| {
                 crate::modules::ui(ui, &viewport, &values, workshops);
@@ -1169,14 +993,15 @@ impl Shell {
         }
         if has(&shell, crate::mask_tree::PANEL) {
             shell
+                .focus
                 .mask_tree
                 .borrow_mut()
-                .set_app(shell.app.handle().clone());
+                .set_app(shell.core.app.handle().clone());
             let (tree, viewport, values, app) = (
-                shell.mask_tree.clone(),
-                shell.viewport.clone(),
-                shell.values.clone(),
-                shell.app.handle().clone(),
+                shell.focus.mask_tree.clone(),
+                shell.focus.viewport.clone(),
+                shell.core.values.clone(),
+                shell.core.app.handle().clone(),
             );
             shell.set_content(crate::mask_tree::PANEL, move |ui| {
                 let area = ui.max_rect();
@@ -1191,10 +1016,10 @@ impl Shell {
         if has(&shell, crate::navigator::PANEL) {
             let mut panel = crate::navigator::NavigatorPanel::default();
             let (viewport, preview, values, app) = (
-                shell.viewport.clone(),
-                shell.preview.clone(),
-                shell.values.clone(),
-                shell.app.handle().clone(),
+                shell.focus.viewport.clone(),
+                shell.focus.preview.clone(),
+                shell.core.values.clone(),
+                shell.core.app.handle().clone(),
             );
             shell.set_content(crate::navigator::PANEL, move |ui| {
                 panel.ui(ui, &viewport, &preview, &values, &app);
@@ -1202,10 +1027,10 @@ impl Shell {
         }
         if has(&shell, "helios.scopes") {
             let (scopes, preview, values, app) = (
-                shell.scopes.clone(),
-                shell.preview.clone(),
-                shell.values.clone(),
-                shell.app.handle().clone(),
+                shell.focus.scopes.clone(),
+                shell.focus.preview.clone(),
+                shell.core.values.clone(),
+                shell.core.app.handle().clone(),
             );
             shell.set_content("helios.scopes", move |ui| {
                 let mut scopes = scopes.borrow_mut();
@@ -1214,23 +1039,24 @@ impl Shell {
             });
         }
         shell
+            .focus
             .library
             .borrow_mut()
-            .set_app(shell.app.handle().clone());
+            .set_app(shell.core.app.handle().clone());
         if has(&shell, crate::log_panel::PANEL) {
-            let log = shell.log.clone();
+            let log = shell.core.log.clone();
             shell.set_content(crate::log_panel::PANEL, move |ui| {
                 log.borrow_mut().ui(ui);
             });
         }
         if has(&shell, crate::duplicates::PANEL) {
-            let duplicates = shell.duplicates.clone();
+            let duplicates = shell.core.duplicates.clone();
             shell.set_content(crate::duplicates::PANEL, move |ui| {
                 duplicates.borrow_mut().ui(ui);
             });
         }
         if has(&shell, crate::stack_review::PANEL) {
-            let (review, library) = (shell.stack_review.clone(), shell.library.clone());
+            let (review, library) = (shell.core.stack_review.clone(), shell.focus.library.clone());
             shell.set_content(crate::stack_review::PANEL, move |ui| {
                 let show = review.borrow_mut().ui(ui, &library.borrow());
                 if let Some(ids) = show {
@@ -1239,7 +1065,7 @@ impl Shell {
             });
         }
         if has(&shell, crate::decisions::PANEL) {
-            let decisions = shell.decisions.clone();
+            let decisions = shell.focus.decisions.clone();
             shell.set_content(crate::decisions::PANEL, move |ui| {
                 decisions.borrow_mut().ui(ui);
             });
@@ -1250,7 +1076,7 @@ impl Shell {
             ("helios.compare", 2),
         ] {
             if has(&shell, panel) {
-                let library = shell.library.clone();
+                let library = shell.focus.library.clone();
                 shell.set_content(panel, move |ui| {
                     let mut library = library.borrow_mut();
                     match view {
@@ -1263,11 +1089,11 @@ impl Shell {
         }
         // A new layout's palettes open together at the end edge, not
         // cascaded over the image; a loaded layout keeps its own.
-        let mut layout = shell.app.handle().layout();
+        let mut layout = shell.core.app.handle().layout();
         if let Some(lead) = crate::workbench::gather_palettes(&mut layout) {
-            let notes = shell.app.handle().set_layout(layout);
+            let notes = shell.core.app.handle().set_layout(layout);
             shell.notes.extend(notes);
-            shell.palettes_to_place = Some(lead);
+            shell.focus.palettes_to_place = Some(lead);
         }
         shell
     }
@@ -1276,7 +1102,7 @@ impl Shell {
     /// window has the focus and the `notifications.jobs` setting is on
     /// (see `platform::job_finished`); whether it was.
     pub fn job_finished(&self, end: &crate::platform::JobEnd) -> bool {
-        let app = self.app.handle();
+        let app = self.core.app.handle();
         let focused = crate::platform::window_focused(&app.egui());
         crate::platform::job_finished(app, end, focused, |m| self.text(m))
     }
@@ -1284,28 +1110,28 @@ impl Shell {
     /// What later launches and `helios:` links asked to open since the
     /// last call (the window opens them).
     pub fn take_opens(&self) -> Vec<crate::platform::Open> {
-        self.opens.take()
+        self.core.opens.take()
     }
 
     /// The egui-pop application (its handle: services, menus, history).
     pub fn app(&self) -> &App {
-        &self.app
+        &self.core.app
     }
 
     /// The parameters' clipboard endpoint (a command or a test pins the
     /// parameter it copies or pastes onto).
     pub fn clip_param(&self) -> &crate::clipboard::param::Endpoint {
-        &self.clip.param
+        &self.core.clip.param
     }
 
     /// The graph's clipboard endpoint (a test pins the nodes it copies).
     pub fn clip_graph(&self) -> &crate::clipboard::nodes::Endpoint {
-        &self.clip.graph
+        &self.core.clip.graph
     }
 
     /// The masks' clipboard endpoint.
     pub fn clip_masks(&self) -> &crate::clipboard::mask::Endpoint {
-        &self.clip.masks
+        &self.core.clip.masks
     }
 
     /// Replaces the system clipboard's files and images (a test's
@@ -1314,13 +1140,13 @@ impl Shell {
         &mut self,
         backend: Box<dyn crate::clipboard::system::SystemClipboard>,
     ) {
-        *self.system.borrow_mut() = backend;
+        *self.core.system.borrow_mut() = backend;
     }
 
     /// Waits for the image "Copy the image" renders and puts it on the
     /// system clipboard (`None`: none was being rendered); a test's.
     pub fn finish_copying(&mut self, timeout: std::time::Duration) -> Option<Result<(), String>> {
-        let rx = self.copying.take()?;
+        let rx = self.core.copying.take()?;
         let got = rx.recv_timeout(timeout).map_err(|e| e.to_string());
         Some(
             got.and_then(|r| r)
@@ -1330,7 +1156,7 @@ impl Shell {
 
     /// The rendered image, once it came: put on the system clipboard.
     fn copied_image(&mut self) {
-        let Some(rx) = &self.copying else { return };
+        let Some(rx) = &self.core.copying else { return };
         let got = match rx.try_recv() {
             Ok(r) => r,
             Err(std::sync::mpsc::TryRecvError::Empty) => return,
@@ -1338,7 +1164,7 @@ impl Shell {
                 Err("the render stopped".to_string())
             }
         };
-        self.copying = None;
+        self.core.copying = None;
         if let Err(e) = got.and_then(|image| self.put_copied(&image)) {
             self.warn(
                 Message::new(
@@ -1351,7 +1177,7 @@ impl Shell {
     }
 
     fn put_copied(&mut self, image: &image::RgbaImage) -> Result<(), String> {
-        self.system.borrow_mut().set_image(image)?;
+        self.core.system.borrow_mut().set_image(image)?;
         self.note(
             Message::new(
                 "gui-copied-image",
@@ -1366,11 +1192,11 @@ impl Shell {
     /// Renders the image the viewport shows on a thread of its own, for
     /// the system clipboard: the frame that sees it done puts it there.
     fn copy_image(&mut self) -> Result<Value, String> {
-        if self.copying.is_some() {
+        if self.core.copying.is_some() {
             return Err("the image is being copied already".into());
         }
         let (engine, shown) = {
-            let v = self.viewport.borrow();
+            let v = self.focus.viewport.borrow();
             (v.engine().clone(), v.shown().ok_or("no image is open")?)
         };
         let size = [shown.extent.width, shown.extent.height];
@@ -1381,14 +1207,14 @@ impl Shell {
                 let _ = tx.send(crate::clipboard::rendered(&engine, &shown));
             })
             .map_err(|e| e.to_string())?;
-        self.copying = Some(rx);
+        self.core.copying = Some(rx);
         Ok(json!({ "rendering": size }))
     }
 
     /// Saves the interface's settings and the user's keys (when built
     /// with a place for them).
     pub fn save(&self) -> Result<(), String> {
-        self.app.save().map_err(|e| e.to_string())
+        self.core.app.save().map_err(|e| e.to_string())
     }
 
     /// The application closes (egui-pop's `App::exit`): the builder's
@@ -1398,7 +1224,7 @@ impl Shell {
         use egui_pop::api::steps::Outcome;
         // Agents write the workspace's files again from now on.
         self.release_workspace();
-        match self.app.exit() {
+        match self.core.app.exit() {
             Outcome::Done(r) => r.map(|_| ()),
             Outcome::Vetoed { by, reason } => Err(format!("exit stopped by `{by}`: {reason}")),
         }
@@ -1410,7 +1236,7 @@ impl Shell {
     /// The interface's texts, for a command's answer written on another
     /// thread.
     pub fn texts(&self) -> impl Fn(Message) -> String + Send + Sync + 'static {
-        let i18n = self.i18n.clone();
+        let i18n = self.core.i18n.clone();
         move |m| helios_i18n::message(&i18n, &m)
     }
 
@@ -1419,17 +1245,18 @@ impl Shell {
         spec: CommandSpec,
         handler: impl Fn(&Value, &Origin) -> Result<Value, String> + Send + Sync + 'static,
     ) -> Result<(), String> {
-        let declared =
-            plugins::declared(&spec, &self.declarations.borrow()).map_err(|e| e.to_string())?;
-        lock(&self.registry).register(spec, handler)?;
-        self.app
+        let declared = plugins::declared(&spec, &self.core.declarations.borrow())
+            .map_err(|e| e.to_string())?;
+        lock(&self.core.registry).register(spec, handler)?;
+        self.core
+            .app
             .declare(&OwnerId::from(&plugins::COMMANDS), declared)
             .map_err(|e| e.to_string())
     }
 
     /// Every command Helios declares, by id.
     pub fn specs(&self) -> Vec<CommandSpec> {
-        lock(&self.registry).specs().cloned().collect()
+        lock(&self.core.registry).specs().cloned().collect()
     }
 
     /// The commands egui-pop's workbench declares for Helios's panels
@@ -1438,8 +1265,9 @@ impl Shell {
     /// left out: they read texts egui-pop shares between every panel.
     pub fn panel_commands(&self) -> Vec<CommandSpec> {
         let owner = egui_pop::model::ids::OwnerId::from(&crate::workbench::PANELS);
-        let ctx = self.app.handle().egui();
-        self.app
+        let ctx = self.core.app.handle().egui();
+        self.core
+            .app
             .handle()
             .commands()
             .into_iter()
@@ -1452,14 +1280,14 @@ impl Shell {
 
     /// The panels declared.
     pub fn panels(&self) -> &[PanelSpec] {
-        &self.panels
+        &self.core.panels
     }
 
     /// The panels a workspace template may name: Helios's, and those
     /// egui-pop's plugins declare (the jobs centre, `egui_pop.jobs`).
     pub fn template_panels(&self) -> Vec<PanelSpec> {
-        let mut all = self.panels.clone();
-        for (spec, owner) in self.app.handle().declared_panels() {
+        let mut all = self.core.panels.clone();
+        for (spec, owner) in self.core.app.handle().declared_panels() {
             if owner != OwnerId::FRAMEWORK && !all.iter().any(|p| p.id == spec.id) {
                 all.push(spec);
             }
@@ -1469,7 +1297,8 @@ impl Shell {
 
     /// The last command runs, Helios's and the interface's, oldest first.
     pub fn history(&self) -> Vec<Run> {
-        self.app
+        self.core
+            .app
             .handle()
             .history()
             .into_iter()
@@ -1485,13 +1314,13 @@ impl Shell {
     /// The image the scopes measure (working data, before the display
     /// transform): set by the viewport once it exists.
     pub fn set_scope_image(&mut self, image: helios_core::Image) {
-        self.scopes.borrow_mut().set_image(image);
+        self.focus.scopes.borrow_mut().set_image(image);
     }
 
     /// The images the library shows (the vault's, in its order); the
     /// selection follows its image when it is still there.
     pub fn set_library(&mut self, entries: Vec<crate::library::Entry>) {
-        self.library.borrow_mut().set_entries(entries);
+        self.focus.library.borrow_mut().set_entries(entries);
         // Their backups, read once for the whole Library.
         self.refresh_backups();
     }
@@ -1499,27 +1328,31 @@ impl Shell {
     /// Where the library's images are on disk, by id: quick open opens
     /// them from there, and a copy of images names them.
     pub fn set_image_files(&mut self, files: impl IntoIterator<Item = (String, PathBuf)>) {
-        self.image_files = files.into_iter().collect();
-        self.library
-            .borrow_mut()
-            .set_files(self.image_files.iter().map(|(k, v)| (k.clone(), v.clone())));
+        self.core.image_files = files.into_iter().collect();
+        self.focus.library.borrow_mut().set_files(
+            self.core
+                .image_files
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone())),
+        );
     }
 
     /// Where thumbnails are sent, by image id, from any thread.
     pub fn library_thumbnails(&self) -> crate::library::ThumbnailSink {
-        self.library.borrow().thumbnails()
+        self.focus.library.borrow().thumbnails()
     }
 
     /// What the user changed in the library since the last call, for the
     /// host to apply to the vault.
     pub fn take_library_changes(&mut self) -> Vec<crate::library::Change> {
-        self.library.borrow_mut().take_changes()
+        self.focus.library.borrow_mut().take_changes()
     }
 
-    /// The viewport's engine and its cache, for renders made beside it
-    /// (the Compare panel's head versions).
+    /// The process's engine and its cache, which every window's viewport
+    /// renders on, for renders made beside them (the Compare panel's head
+    /// versions).
     pub fn render_engine(&self) -> Arc<helios_core::Engine> {
-        self.viewport.borrow().engine().clone()
+        self.core.engine.clone()
     }
 
     /// An image of the library is being opened in the viewport (`None`:
@@ -1527,62 +1360,67 @@ impl Shell {
     /// draws its large thumbnail (the cache's 1024 px entry), asked of
     /// the thumbnail pool now.
     pub fn open_from_library(&mut self, id: Option<&str>) {
-        self.viewport.borrow_mut().await_stand_in(id.is_some());
-        self.opening = id.map(str::to_string);
+        self.focus
+            .viewport
+            .borrow_mut()
+            .await_stand_in(id.is_some());
+        self.focus.opening = id.map(str::to_string);
         if let Some(id) = id {
-            self.library.borrow_mut().ask_large(id);
+            self.focus.library.borrow_mut().ask_large(id);
         }
     }
 
     /// Hands the viewport the large thumbnail of the image being opened,
     /// once it arrived.
     fn follow_opening(&mut self, ctx: &Egui) {
-        let Some(id) = &self.opening else { return };
-        let mut viewport = self.viewport.borrow_mut();
+        let Some(id) = &self.focus.opening else {
+            return;
+        };
+        let mut viewport = self.focus.viewport.borrow_mut();
         if !viewport.wants_stand_in() {
-            self.opening = None;
+            self.focus.opening = None;
             return;
         }
-        if let Some(texture) = self.library.borrow_mut().take_large(ctx, id) {
+        if let Some(texture) = self.focus.library.borrow_mut().take_large(ctx, id) {
             viewport.set_stand_in(texture);
-            self.opening = None;
+            self.focus.opening = None;
         }
     }
 
     /// The library's state, to read.
     pub fn library(&self) -> std::cell::Ref<'_, crate::library::Library> {
-        self.library.borrow()
+        self.focus.library.borrow()
     }
 
     /// The library's state, to show what it holds.
     pub fn library_mut(&self) -> std::cell::RefMut<'_, crate::library::Library> {
-        self.library.borrow_mut()
+        self.focus.library.borrow_mut()
     }
 
     /// Where an import's lines go, with its arguments (`library.import`'s),
     /// from any thread: its duplicates fill the Duplicates panel.
     pub fn duplicates_sink(&self) -> std::sync::mpsc::Sender<(Value, Value)> {
-        self.duplicates.borrow().sink()
+        self.core.duplicates.borrow().sink()
     }
 
     /// The duplicates imports found, to read.
     pub fn duplicates(&self) -> std::cell::Ref<'_, crate::duplicates::Duplicates> {
-        self.duplicates.borrow()
+        self.core.duplicates.borrow()
     }
 
     /// The duplicates imports found, to answer them.
     pub fn duplicates_mut(&self) -> std::cell::RefMut<'_, crate::duplicates::Duplicates> {
-        self.duplicates.borrow_mut()
+        self.core.duplicates.borrow_mut()
     }
 
     /// The Stacks panel's proposals, to read.
     pub fn stack_review(&self) -> std::cell::Ref<'_, crate::stack_review::Review> {
-        self.stack_review.borrow()
+        self.core.stack_review.borrow()
     }
 
     /// The Stacks panel's proposals, to show the vault's and answer them.
     pub fn stack_review_mut(&self) -> std::cell::RefMut<'_, crate::stack_review::Review> {
-        self.stack_review.borrow_mut()
+        self.core.stack_review.borrow_mut()
     }
 
     /// Shows a node's output in the viewport; the parameters of the
@@ -1595,22 +1433,22 @@ impl Shell {
         port: &str,
     ) -> Result<(), String> {
         {
-            let mut store = lock(&self.values);
+            let mut store = lock(&self.core.values);
             // Another image: its values take the paths of the one before,
             // so that one's steps must not be undone into them, nor its
             // snapshots restored into them.
             store.clear_history();
-            crate::edit_snapshots::lock(&self.snapshots).clear();
+            crate::edit_snapshots::lock(&self.core.snapshots).clear();
             for id in graph.ids() {
                 helios_values::bind_node(&mut store, &graph, id)?;
             }
             store.take_dirty();
         }
-        let mut viewport = self.viewport.borrow_mut();
+        let mut viewport = self.focus.viewport.borrow_mut();
         viewport.set_source(graph, node, port)?;
         // Another image: its own decisions, the decision nodes of its
         // network waiting for a person until an edit's book says more.
-        let mut decisions = self.decisions.borrow_mut();
+        let mut decisions = self.focus.decisions.borrow_mut();
         decisions.set_book(helios_decision::Book::new());
         if let Some(g) = viewport.graph() {
             decisions.adopt(g);
@@ -1621,21 +1459,21 @@ impl Shell {
 
     /// The open image's decisions and their cards, to read.
     pub fn decisions(&self) -> std::cell::Ref<'_, crate::decisions::Decisions> {
-        self.decisions.borrow()
+        self.focus.decisions.borrow()
     }
 
     /// The Decisions panel, to act as the user would (its requests are
     /// answered at the next frame).
     pub fn decisions_mut(&self) -> std::cell::RefMut<'_, crate::decisions::Decisions> {
-        self.decisions.borrow_mut()
+        self.focus.decisions.borrow_mut()
     }
 
     /// The open image's edit's decisions (a loaded edit's book): their
     /// answers are applied to the graph shown, which renders again; the
     /// decision nodes the book does not know wait for a person.
     pub fn set_decisions(&mut self, book: helios_decision::Book) -> Result<(), String> {
-        let mut viewport = self.viewport.borrow_mut();
-        let mut decisions = self.decisions.borrow_mut();
+        let mut viewport = self.focus.viewport.borrow_mut();
+        let mut decisions = self.focus.decisions.borrow_mut();
         decisions.set_book(book);
         if let Some(replayed) = viewport.edit_graph(|graph| {
             decisions.adopt(graph);
@@ -1665,10 +1503,10 @@ impl Shell {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_secs());
-        let mut viewport = self.viewport.borrow_mut();
+        let mut viewport = self.focus.viewport.borrow_mut();
         let region = viewport.shown().map(|s| s.extent);
         let engine = viewport.engine().clone();
-        let mut decisions = self.decisions.borrow_mut();
+        let mut decisions = self.focus.decisions.borrow_mut();
         decisions.refresh(viewport.graph());
         let above: Vec<String> = match &request {
             Request::AcceptAbove { confidence } => decisions
@@ -1714,14 +1552,14 @@ impl Shell {
     /// makes its cards again from the book (an agent's answer removes
     /// its card here).
     fn follow_decisions(&mut self) {
-        let requests = self.decisions.borrow_mut().take_requests();
+        let requests = self.focus.decisions.borrow_mut().take_requests();
         for r in requests {
             if let Err(e) = self.answer_decision(r, &Origin::User) {
                 self.warn(e);
             }
         }
-        let viewport = self.viewport.borrow();
-        self.decisions.borrow_mut().refresh(viewport.graph());
+        let viewport = self.focus.viewport.borrow();
+        self.focus.decisions.borrow_mut().refresh(viewport.graph());
     }
 
     /// Gives the viewport the GPU path it draws with, on the render state
@@ -1735,10 +1573,10 @@ impl Shell {
             helios_gpu::shared::owns(&rs.instance),
             "the window opened a wgpu instance of its own: hand it wgpu_setup()"
         );
-        self.gpu = Some(rs.clone());
+        self.core.gpu = Some(rs.clone());
         match helios_gpu::shared::opened() {
             Some((_, gpu)) if gpu.handles().device == rs.device => {
-                self.viewport.borrow().attach_gpu(gpu);
+                self.focus.viewport.borrow().attach_gpu(gpu);
             }
             _ => eprintln!(
                 "helios-gui: the window draws on another device than the process's GPU: \
@@ -1749,7 +1587,7 @@ impl Shell {
 
     /// The viewport's GPU path, once installed: `None` draws on the CPU.
     pub fn viewport_gpu(&self) -> Option<egui_pop::viewport::gpu::GpuInfo> {
-        self.gpu_info
+        self.core.gpu_info
     }
 
     /// Follows the Wide-gamut preview setting with the image's own surface
@@ -1767,63 +1605,79 @@ impl Shell {
          ),
     ) {
         use crate::display::SurfaceStep;
-        let on = crate::display::wide_gamut(self.app.handle());
-        match self.image_surface.step(on, self.gpu_info.is_some()) {
+        let on = crate::display::wide_gamut(self.core.app.handle());
+        match self
+            .focus
+            .image_surface
+            .step(on, self.core.gpu_info.is_some())
+        {
             SurfaceStep::Install => {
                 let offer = crate::display::install_image_surface(ctx, rs, window);
                 if let Some(why) = offer.unavailable {
                     log::info!(target: "helios", "no image surface, the image stays sRGB: {why}");
                 }
             }
-            SurfaceStep::Down => crate::display::take_down_image_surface(ctx),
+            SurfaceStep::Down => crate::display::take_down_image_surface(ctx, self.focus.window),
             SurfaceStep::Keep | SurfaceStep::Up => {}
         }
     }
 
     /// What the viewport's render threads did.
     pub fn viewport_stats(&self) -> Arc<crate::engine_source::Stats> {
-        self.viewport.borrow().stats.clone()
+        self.focus.viewport.borrow().stats.clone()
+    }
+
+    /// Every value widgets and agents edit (`param.*` commands): the
+    /// process's one store, shared by every window.
+    pub fn values(&self) -> &Arc<Mutex<helios_values::Store>> {
+        &self.core.values
+    }
+
+    /// The open image's history snapshots (`crate::edit_snapshots`).
+    pub fn snapshots(&self) -> &crate::edit_snapshots::Shared {
+        &self.core.snapshots
     }
 
     /// The viewport: its egui-pop state, its readout, its scene.
     pub fn viewport(&self) -> std::cell::Ref<'_, crate::viewport::Viewport> {
-        self.viewport.borrow()
+        self.focus.viewport.borrow()
     }
 
     /// The Masks panel: its tree's state, the network it shows.
     pub fn mask_tree(&self) -> std::cell::Ref<'_, crate::mask_tree::MaskTree> {
-        self.mask_tree.borrow()
+        self.focus.mask_tree.borrow()
     }
 
     /// The viewport, to set its hooks.
     pub fn viewport_mut(&self) -> std::cell::RefMut<'_, crate::viewport::Viewport> {
-        self.viewport.borrow_mut()
+        self.focus.viewport.borrow_mut()
     }
 
     /// The preview of what the viewport shows (the pipeline's output,
     /// small), which the scopes measure and the navigator draws.
     pub fn preview(&self) -> &crate::preview::Preview {
-        &self.preview
+        &self.focus.preview
     }
 
     /// The image the scopes measure now.
     pub fn scope_image(&self) -> Option<helios_core::Image> {
-        self.scopes.borrow().image.clone()
+        self.focus.scopes.borrow().image.clone()
     }
 
     /// The float data the viewport shows, before the display transform.
     pub fn viewport_scene(&self) -> Option<helios_core::Image> {
-        self.viewport.borrow().scene()
+        self.focus.viewport.borrow().scene()
     }
 
     /// The layout as it stands, to be saved with the workspace.
     pub fn layout(&self) -> Layout {
-        self.app.handle().layout()
+        self.core.app.handle().layout()
     }
 
     /// Gives a panel its content; panels without one show a placeholder.
     pub fn set_content(&mut self, panel: &str, content: impl FnMut(&mut Ui) + 'static) {
-        self.contents
+        self.focus
+            .contents
             .borrow_mut()
             .insert(panel.into(), Box::new(content));
     }
@@ -1831,11 +1685,11 @@ impl Shell {
     /// Switches to a theme, with the user's overrides; problems (an
     /// unknown base, a wrong token) fall back and are noted, never fatal.
     pub fn set_theme(&mut self, name: &str, overrides: BTreeMap<String, serde_json::Value>) {
-        self.theme_name = name.into();
-        self.theme_overrides = overrides;
+        self.core.theme_name = name.into();
+        self.core.theme_overrides = overrides;
         // An unknown theme falls back to Helios's default, not to the
         // egui-pop base egui-pop itself would pick.
-        let known = self.themes.get(name).is_some();
+        let known = self.core.themes.get(name).is_some();
         if !known {
             self.warn(
                 Message::new(
@@ -1847,12 +1701,13 @@ impl Shell {
             );
         }
         let resolved = if known { name } else { crate::theme::DEFAULT };
-        self.theme = crate::theme::resolve(&self.themes, resolved, &self.theme_overrides);
+        self.core.theme =
+            crate::theme::resolve(&self.core.themes, resolved, &self.core.theme_overrides);
         let mut spec = crate::theme::ThemeSpec::new(resolved);
-        spec.overrides.clone_from(&self.theme_overrides);
+        spec.overrides.clone_from(&self.core.theme_overrides);
         // What the user chose across themes stays: the text size, the
         // fonts (Settings › Appearance › Fonts) and the accent colour.
-        let service = self.app.handle().theme();
+        let service = self.core.app.handle().theme();
         let kept = service.spec();
         spec.text_size = kept.text_size;
         spec.font_ui = kept.font_ui;
@@ -1860,6 +1715,7 @@ impl Shell {
         spec.accent = kept.accent;
         service.set(spec);
         let problems: Vec<String> = self
+            .core
             .theme
             .resolved()
             .problems()
@@ -1878,9 +1734,15 @@ impl Shell {
     /// Measures what Helios's status bar items say, and publishes what
     /// changed.
     fn status_items(&mut self, ctx: &egui::Context) {
-        let (images, picked, rejected) = self.library.borrow().counts();
-        let zoom = self.viewport.borrow().state().mapping().map(|m| m.zoom);
-        let history = lock(&self.values).undo_steps().len();
+        let (images, picked, rejected) = self.focus.library.borrow().counts();
+        let zoom = self
+            .focus
+            .viewport
+            .borrow()
+            .state()
+            .mapping()
+            .map(|m| m.zoom);
+        let history = lock(&self.core.values).undo_steps().len();
         let measure = crate::status_items::Measure {
             images,
             picked,
@@ -1888,7 +1750,9 @@ impl Shell {
             zoom,
             history,
         };
-        self.status_items.frame(self.app.handle(), ctx, &measure);
+        self.focus
+            .status_items
+            .frame(self.core.app.handle(), ctx, &measure);
     }
 
     /// Takes a theme installed from elsewhere (the theme editor) as the
@@ -1896,35 +1760,36 @@ impl Shell {
     /// what `theme.exportMerged` writes. The theme the shell installed
     /// itself, or an unknown name it fell back from, changes nothing.
     fn follow_theme(&mut self, spec: &crate::theme::ThemeSpec) {
-        let ours = if self.themes.get(&self.theme_name).is_some() {
-            self.theme_name.as_str()
+        let ours = if self.core.themes.get(&self.core.theme_name).is_some() {
+            self.core.theme_name.as_str()
         } else {
             crate::theme::DEFAULT
         };
-        if spec.base == ours && spec.overrides == self.theme_overrides {
+        if spec.base == ours && spec.overrides == self.core.theme_overrides {
             return;
         }
-        self.theme_name.clone_from(&spec.base);
-        self.theme_overrides.clone_from(&spec.overrides);
-        self.theme = crate::theme::resolve(&self.themes, &spec.base, &self.theme_overrides);
+        self.core.theme_name.clone_from(&spec.base);
+        self.core.theme_overrides.clone_from(&spec.overrides);
+        self.core.theme =
+            crate::theme::resolve(&self.core.themes, &spec.base, &self.core.theme_overrides);
     }
 
     /// The name of the theme in use, as chosen.
     pub fn theme_name(&self) -> &str {
-        &self.theme_name
+        &self.core.theme_name
     }
 
     /// The theme in use.
     pub fn theme(&self) -> &crate::theme::Tokens {
-        &self.theme
+        &self.core.theme
     }
 
     /// Binds keys to a command in the user's keymap (what a profile
     /// carries), from the next frame.
     pub fn bind_user_keys(&mut self, keys: &str, command: &str) -> Result<(), String> {
         let id = CommandId::new(command).map_err(|e| e.to_string())?;
-        self.app.handle().rebind(id, Some(keys.to_string()));
-        self.app.process_requests();
+        self.core.app.handle().rebind(id, Some(keys.to_string()));
+        self.core.app.process_requests();
         Ok(())
     }
 
@@ -1935,6 +1800,7 @@ impl Shell {
     pub fn profile(&self) -> helios_profile::Profile {
         use helios_profile::{Binding, Profile, System, ThemeChoice, portable_keys};
         let keymap = self
+            .core
             .app
             .handle()
             .export_keymap(Layer::User)
@@ -1951,11 +1817,11 @@ impl Shell {
             })
             .collect();
         Profile {
-            name: self.profile_name.clone(),
+            name: self.core.profile_name.clone(),
             keymap: Some(keymap),
             theme: Some(ThemeChoice {
-                name: self.theme_name.clone(),
-                overrides: self.theme_overrides.clone(),
+                name: self.core.theme_name.clone(),
+                overrides: self.core.theme_overrides.clone(),
             }),
             layout: serde_json::from_str(&self.layout().to_json()).ok(),
             ..Profile::default()
@@ -1987,19 +1853,19 @@ impl Shell {
                 .with("variants", from.join(", ")),
             );
         }
-        *lock(&self.resolved_view) = json!({
+        *lock(&self.core.resolved_view) = json!({
             "profile": p.name,
             "machine": machine,
             "from": resolved.from,
         });
         self.apply_resolved(&resolved.profile);
-        self.loaded = Some((p.clone(), resolved));
+        self.core.loaded = Some((p.clone(), resolved));
     }
 
     /// This machine, its screen as of the last frame.
     fn machine_now(&self) -> helios_profile::Machine {
-        let mut m = self.machine.clone();
-        m.hidpi |= self.native_scale.unwrap_or(1.0) >= HIDPI;
+        let mut m = self.core.machine.clone();
+        m.hidpi |= self.focus.native_scale.unwrap_or(1.0) >= HIDPI;
         m
     }
 
@@ -2007,13 +1873,13 @@ impl Shell {
     /// from `machine.toml` in the config directory); applies at the next
     /// profile.
     pub fn set_machine(&mut self, machine: helios_profile::Machine) {
-        self.machine = machine;
+        self.core.machine = machine;
     }
 
     /// Applies a resolved profile's parts the shell holds.
     fn apply_resolved(&mut self, p: &helios_profile::Profile) {
         use helios_profile::{System, local_keys};
-        self.profile_name.clone_from(&p.name);
+        self.core.profile_name.clone_from(&p.name);
         if let Some(t) = &p.theme {
             self.set_theme(&t.name, t.overrides.clone());
         }
@@ -2031,7 +1897,7 @@ impl Shell {
                     })
                     .collect(),
             };
-            match self.app.load_keymap(&doc, Layer::User) {
+            match self.core.app.load_keymap(&doc, Layer::User) {
                 Ok(diff) => {
                     let changed = diff.added.len() + diff.removed.len() + diff.changed.len();
                     if changed > 0 {
@@ -2095,10 +1961,10 @@ impl Shell {
     /// leaves a sub-workspace shown that is gone, with a toast.
     fn follow_subworkspaces(&mut self) {
         let (seq, list) = {
-            let store = lock(&self.values);
+            let store = lock(&self.core.values);
             let entry = store.get(WORKSPACE_STATE);
             let seq = entry.map(|e| e.seq);
-            if self.subworkspaces_seen == (true, seq) {
+            if self.focus.subworkspaces_seen == (true, seq) {
                 (seq, None)
             } else {
                 let list = entry.and_then(|e| match &e.value {
@@ -2114,10 +1980,12 @@ impl Shell {
             }
         };
         if let Some(list) = list {
-            self.subworkspaces_seen = (true, seq);
-            self.subworkspaces.set(list);
+            self.focus.subworkspaces_seen = (true, seq);
+            self.focus.subworkspaces.set(list);
         }
-        if let Some(id) = crate::contexts::leave_gone(self.app.handle(), &self.subworkspaces) {
+        if let Some(id) =
+            crate::contexts::leave_gone(self.core.app.handle(), &self.focus.subworkspaces)
+        {
             self.warn(
                 Message::new(
                     "gui-subworkspace-gone",
@@ -2130,7 +1998,7 @@ impl Shell {
 
     /// The open workspace's key (see `host::workspace_key`), if any.
     pub fn workspace(&self) -> Option<String> {
-        self.workspace.get()
+        self.focus.workspace.get()
     }
 
     /// Switches to a workspace directory: the layout as it stands is
@@ -2138,15 +2006,15 @@ impl Shell {
     /// (egui-pop's `layout.save` and `layout.load` steps). A workspace
     /// with no layout saved yet keeps the layout as it is.
     pub fn switch_workspace(&mut self, dir: &Path) -> Result<(), String> {
-        step_result(self.app.save_layout())?;
-        self.workspace.set(Some(workspace_key(dir)));
+        step_result(self.core.app.save_layout())?;
+        self.focus.workspace.set(Some(workspace_key(dir)));
         self.load_layout()?;
         // Its sub-workspaces are read once its state is: until then a
         // restored one is kept, and left then if it is gone.
-        self.subworkspaces.set(None);
-        self.subworkspaces_seen = (false, None);
+        self.focus.subworkspaces.set(None);
+        self.focus.subworkspaces_seen = (false, None);
         // Its places and modes, kept beside its layout.
-        egui_pop::api::contexts::reload(self.app.handle());
+        egui_pop::api::contexts::reload(self.core.app.handle());
         Ok(())
     }
 
@@ -2154,7 +2022,7 @@ impl Shell {
     /// step), repaired to today's panels; the repairs are noted. With no
     /// layout saved yet the layout stays as it is.
     pub fn load_layout(&mut self) -> Result<(), String> {
-        let loaded = step_result(self.app.load_layout())?;
+        let loaded = step_result(self.core.app.load_layout())?;
         let repaired = loaded["repaired"].as_array().into_iter().flatten();
         self.notes
             .extend(repaired.filter_map(|n| n.as_str().map(String::from)));
@@ -2166,22 +2034,24 @@ impl Shell {
     /// Helios before egui-pop's workbench reads the same
     /// (`Layout::from_json` migrates its area names).
     pub fn set_layout(&mut self, layout: Layout) {
-        let notes = self.app.handle().set_layout(layout);
+        let notes = self.core.app.handle().set_layout(layout);
         self.notes.extend(notes);
     }
 
     /// Where profiles are read and written.
     pub fn set_profiles_dir(&mut self, dir: PathBuf) {
-        self.lists.borrow_mut().profiles_dir.clone_from(&dir);
-        self.profiles_dir = dir;
+        self.core.lists.borrow_mut().profiles_dir.clone_from(&dir);
+        self.core.profiles_dir = dir;
     }
 
     pub fn profile_name(&self) -> &str {
-        &self.profile_name
+        &self.core.profile_name
     }
 
     fn profile_file(&self, name: &str) -> PathBuf {
-        self.profiles_dir.join(format!("{name}.helios-profile"))
+        self.core
+            .profiles_dir
+            .join(format!("{name}.helios-profile"))
     }
 
     fn read_profile(path: &std::path::Path) -> Result<helios_profile::Profile, String> {
@@ -2207,21 +2077,21 @@ impl Shell {
     /// Adds a theme (a user's file, a plugin's) to those that can be
     /// chosen; it is offered from the next start.
     pub fn add_theme(&mut self, theme: egui_pop::tokens::TokenFile) {
-        self.themes.add(theme);
+        self.core.themes.add(theme);
     }
 
     /// The workspace's name, for the window's title.
     pub fn set_title(&mut self, title: &str) {
-        self.title = title.into();
+        self.focus.title = title.into();
     }
 
     /// The window's title: the workspace, then Helios. The frame's title
     /// bar shows it.
     pub fn window_title(&self) -> String {
-        if self.title.is_empty() {
+        if self.focus.title.is_empty() {
             "Helios".into()
         } else {
-            format!("{} — Helios", self.title)
+            format!("{} — Helios", self.focus.title)
         }
     }
 
@@ -2238,7 +2108,7 @@ impl Shell {
             egui_pop::model::commands::Origin::User,
         )
         .untracked();
-        let done = lock(&self.app.handle().store()).set(set).map(|_| ());
+        let done = lock(&self.core.app.handle().store()).set(set).map(|_| ());
         if let Err(e) = done {
             self.warn(
                 Message::new("gui-window-frame-error", "window frame: { $error }")
@@ -2249,36 +2119,43 @@ impl Shell {
 
     /// The panel that has the focus.
     pub fn focused(&self) -> Option<String> {
-        self.app.handle().focused_panel().map(|p| p.to_string())
+        self.core
+            .app
+            .handle()
+            .focused_panel()
+            .map(|p| p.to_string())
     }
 
     pub fn palette_open(&self) -> bool {
-        palette::is_open(self.app.handle())
+        palette::is_open(self.core.app.handle())
     }
 
     /// Where a target was drawn at the last frame: `window`, a panel id or
     /// a name given by [`name_rect`]; `helios.dialog`, `helios.toasts` and
     /// `helios.menu` for what egui-pop and the shell show over the rest.
     pub fn target_rect(&self, target: &str) -> Result<Rect, String> {
-        self.rects
+        self.focus
+            .rects
             .get(target)
             .copied()
             .ok_or_else(|| format!("nothing named `{target}` is shown"))
     }
 
     /// The window a target was drawn in at the last frame: the main one
-    /// (`ViewportId::ROOT`) unless its panel is detached.
+    /// (the focus's window, `ViewportId::ROOT`) unless its panel is
+    /// detached.
     pub fn target_window(&self, target: &str) -> egui::ViewportId {
-        self.rect_windows
+        self.focus
+            .rect_windows
             .get(target)
             .copied()
-            .unwrap_or(egui::ViewportId::ROOT)
+            .unwrap_or(self.focus.window)
     }
 
     /// The main window's physical pixels per point (a detached panel's
     /// window has its own: `ui.ctx().pixels_per_point()` where it draws).
     pub fn pixels_per_point(&self) -> f32 {
-        self.pixels_per_point
+        self.focus.pixels_per_point
     }
 
     /// Runs a command as `origin`, in the context of the last frame. A
@@ -2286,7 +2163,7 @@ impl Shell {
     /// `{"queued": true}`; its result goes to the history and the bus.
     pub fn run(&mut self, id: &str, args: Value, origin: Origin) -> Result<Value, String> {
         let result = match CommandId::new(id) {
-            Ok(c) => match self.app.run(&c, args, to_pop(&origin)) {
+            Ok(c) => match self.core.app.run(&c, args, to_pop(&origin)) {
                 Reply::Done(r) => r,
                 Reply::Later(_) => Ok(json!({ "queued": true })),
             },
@@ -3546,7 +3423,7 @@ impl Shell {
 
     /// A message in the shell's language, else its English.
     pub fn text(&self, m: impl Into<Message>) -> String {
-        helios_i18n::message(&self.i18n, &m.into())
+        helios_i18n::message(&self.core.i18n, &m.into())
     }
 
     /// Shows a notice, in the shell's language: the status bar always, a
@@ -3560,22 +3437,22 @@ impl Shell {
             Level::Warning => Some(Toast::warning(&text)),
             Level::Error => Some(Toast::error(&text)),
         };
-        if let (Some(t), Some(toasts)) = (toast, self.app.handle().service(&TOASTS)) {
+        if let (Some(t), Some(toasts)) = (toast, self.core.app.handle().service(&TOASTS)) {
             toasts.notify(t);
         }
-        self.notices.push(Notice {
+        self.core.notices.push(Notice {
             level,
             text,
             key: message.key,
             action: None,
-            at: self.now,
+            at: self.core.now,
         });
     }
 
     /// Says each snapshot restored since the last frame: in the status
     /// bar and as a toast offering Undo (the restore is one step).
     pub fn follow_snapshots(&mut self) {
-        let restored = crate::edit_snapshots::lock(&self.snapshots).take_restored();
+        let restored = crate::edit_snapshots::lock(&self.core.snapshots).take_restored();
         if restored.is_empty() {
             return;
         }
@@ -3584,7 +3461,7 @@ impl Shell {
             let message = Message::new("gui-history-snapshot-restored", "Restored “{ $name }”")
                 .with("name", name);
             let text = self.text(message.clone());
-            if let Some(toasts) = self.app.handle().service(&TOASTS) {
+            if let Some(toasts) = self.core.app.handle().service(&TOASTS) {
                 toasts.notify(Toast::success(&text).action(
                     &undo,
                     egui_pop::api::app::CMD_UNDO,
@@ -3592,12 +3469,12 @@ impl Shell {
                 ));
             }
             self.notes.push(text.clone());
-            self.notices.push(Notice {
+            self.core.notices.push(Notice {
                 level: Level::Info,
                 text,
                 key: message.key,
                 action: Some((undo.clone(), egui_pop::api::app::CMD_UNDO.to_string())),
-                at: self.now,
+                at: self.core.now,
             });
         }
     }
@@ -3613,14 +3490,14 @@ impl Shell {
     /// What the viewport's engine says a user should know: a step whose
     /// GPU version failed (once per module), a GPU lost. Shown as toasts.
     fn engine_notices(&mut self) {
-        let engine = self.viewport.borrow().engine().clone();
-        for e in engine.bus().since(self.engine_seen) {
-            self.engine_seen = e.seq;
+        let engine = self.core.engine.clone();
+        for e in engine.bus().since(self.core.engine_seen) {
+            self.core.engine_seen = e.seq;
             let message = || serde_json::from_value::<Message>(e.payload["message"].clone()).ok();
             match e.kind {
                 "engine.gpu_fell_back" => {
                     let module = e.payload["module"].as_str().unwrap_or_default().to_string();
-                    if self.fell_back.insert(module)
+                    if self.core.fell_back.insert(module)
                         && let Some(m) = message()
                     {
                         self.notify(Level::Warning, m);
@@ -3642,7 +3519,7 @@ impl Shell {
     }
 
     fn open_dialog(&mut self, dialog: impl Into<dialogs::Dialog>) {
-        match self.dialogs.get() {
+        match self.core.dialogs.get() {
             Some(d) => {
                 // A dialog, as egui-pop's spec with its defaults.
                 d.open(Into::<dialogs::Dialog>::into(dialog));
@@ -3654,7 +3531,7 @@ impl Shell {
     /// Asks before running a command. Under the yes policy it runs at once,
     /// and says so.
     pub fn confirm(&mut self, c: crate::dialogs::Confirm) {
-        if self.assume_yes {
+        if self.core.assume_yes {
             self.notify(
                 Level::Warning,
                 Message::new("gui-confirmed-by-policy", "{ $verb }: confirmed by policy")
@@ -3718,6 +3595,7 @@ impl Shell {
     /// recent workspaces in one filtered list (see `quick_open`).
     fn quick_open(&mut self) {
         let modules = self
+            .focus
             .viewport
             .borrow()
             .graph()
@@ -3732,6 +3610,7 @@ impl Shell {
             })
             .unwrap_or_default();
         let images = self
+            .focus
             .library
             .borrow()
             .entries
@@ -3776,6 +3655,7 @@ impl Shell {
         match item {
             Item::Module(node) => {
                 let known = self
+                    .focus
                     .viewport
                     .borrow()
                     .graph()
@@ -3783,22 +3663,27 @@ impl Shell {
                 if !known {
                     return Err(format!("no module `{node}` in the network shown"));
                 }
-                lock(&self.values)
+                lock(&self.core.values)
                     .set(helios_values::Set::new(
                         crate::params::SELECTION,
                         helios_values::Change::To(helios_core::Value::Text(node.clone())),
                         Origin::User,
                     ))
                     .map_err(|e| e.to_string())?;
-                if self.panels.iter().any(|p| p.id.as_str() == "helios.params") {
+                if self
+                    .core
+                    .panels
+                    .iter()
+                    .any(|p| p.id.as_str() == "helios.params")
+                {
                     self.run("helios.params.focus", Value::Null, Origin::User)?;
                 }
                 Ok(json!({ "module": node }))
             }
             Item::Subworkspace(id) => {
                 crate::contexts::enter_subworkspace(
-                    self.app.handle(),
-                    &self.subworkspaces,
+                    self.core.app.handle(),
+                    &self.focus.subworkspaces,
                     &id,
                     &egui_pop::model::commands::Origin::User,
                 )?;
@@ -3806,22 +3691,27 @@ impl Shell {
             }
             Item::Image(id) => {
                 let path = self
+                    .core
                     .image_files
                     .get(&id)
                     .cloned()
                     .ok_or_else(|| format!("image `{id}` has no file at hand"))?;
-                self.opens.push(crate::platform::Open::Image(path.clone()));
+                self.core
+                    .opens
+                    .push(crate::platform::Open::Image(path.clone()));
                 Ok(json!({ "image": id, "path": path }))
             }
             Item::File(path) => {
                 if !path.is_file() {
                     return Err(format!("no image file at {}", path.display()));
                 }
-                self.opens.push(crate::platform::Open::Image(path.clone()));
+                self.core
+                    .opens
+                    .push(crate::platform::Open::Image(path.clone()));
                 Ok(json!({ "path": path }))
             }
             Item::Workspace(dir) => {
-                let ctx = self.app.handle().egui();
+                let ctx = self.core.app.handle().egui();
                 self.apply(&ctx, Action::OpenWorkspace(Some(dir.clone())))?;
                 Ok(json!({ "workspace": dir }))
             }
@@ -3830,8 +3720,8 @@ impl Shell {
 
     /// Opens a menu of commands at a position.
     pub fn open_menu(&mut self, at: egui::Pos2, items: Vec<MenuItem>) {
-        egui_pop::api::menus::close_popup(self.app.handle());
-        self.menu = Some((at, items));
+        egui_pop::api::menus::close_popup(self.core.app.handle());
+        self.focus.menu = Some((at, items));
     }
 
     /// A declared menu as data, as it would open now: each entry's
@@ -3898,8 +3788,8 @@ impl Shell {
                     .collect(),
             )
         }
-        self.set_context(&self.app.handle().egui());
-        let h = self.app.handle().clone();
+        self.set_context(&self.core.app.handle().egui());
+        let h = self.core.app.handle().clone();
         let cx = h.when_context();
         match MenuId::new(menu) {
             Ok(id) => rows(&h, &id, &cx),
@@ -3909,12 +3799,12 @@ impl Shell {
 
     /// The notices so far, oldest first.
     pub fn notices(&self) -> &[Notice] {
-        &self.notices
+        &self.core.notices
     }
 
     /// Answers the dialog shown, as `origin` (applied at the next frame).
     fn answer(&mut self, answer: Answer, origin: &Origin) -> Result<(), String> {
-        let d = self.dialogs.get().ok_or("no dialogs")?.clone();
+        let d = self.core.dialogs.get().ok_or("no dialogs")?.clone();
         let (_, dialog) = d.current().ok_or("no dialog to answer")?;
         let answer = match (answer, &dialog) {
             (Answer::Cancel, _) => dialogs::Answer::Cancel,
@@ -3954,7 +3844,7 @@ impl Shell {
     /// window does; a shell in tests, pictures or tools shows them only
     /// when asked (`tips.show`).
     pub fn tips_by_themselves(&self, on: bool) {
-        if let Some(tips) = self.app.handle().service(&egui_pop::api::tips::TIPS) {
+        if let Some(tips) = self.core.app.handle().service(&egui_pop::api::tips::TIPS) {
             tips.set_auto(on);
         }
     }
@@ -3962,20 +3852,20 @@ impl Shell {
     /// Translates what Helios gives About again once the language
     /// changes.
     fn follow_language(&mut self) {
-        let generation = self.i18n.generation();
-        if self.about_generation == Some(generation) {
+        let generation = self.core.i18n.generation();
+        if self.core.about_generation == Some(generation) {
             return;
         }
-        self.about_generation = Some(generation);
+        self.core.about_generation = Some(generation);
         let description = self.text(about_description());
-        if let Some(about) = self.app.handle().service(&egui_pop::api::about::ABOUT) {
+        if let Some(about) = self.core.app.handle().service(&egui_pop::api::about::ABOUT) {
             about.update(|i| i.description = description);
         }
     }
 
     /// Sets the context keys commands and keys are tested against.
     fn set_context(&self, ctx: &Egui) {
-        let h = self.app.handle();
+        let h = self.core.app.handle();
         let flag = |on: bool| if on { "true" } else { "false" };
         h.set_context(
             "focusedPanel",
@@ -3988,17 +3878,17 @@ impl Shell {
         );
         {
             // What the mask keys need: the tool, a path point selected.
-            let store = lock(&self.values);
+            let store = lock(&self.core.values);
             h.set_context("maskTool", &crate::masks::tool(&store));
             h.set_context("maskPoint", flag(crate::masks::point(&store).is_some()));
             h.set_context("maskDisplay", crate::mask_display::mode(&store).name());
         }
-        h.set_context("heliosTheme", &self.theme_name);
+        h.set_context("heliosTheme", &self.core.theme_name);
         h.set_context("libraryOpen", flag(self.library_open()));
-        h.set_context("heliosProfile", &self.profile_name);
+        h.set_context("heliosProfile", &self.core.profile_name);
         h.set_context(
             crate::importers::CONTEXT,
-            flag(!self.lists.borrow().importers.is_empty()),
+            flag(!self.core.lists.borrow().importers.is_empty()),
         );
     }
 
@@ -4017,13 +3907,13 @@ impl Shell {
             )
         })?;
         let ours = package.bindings();
-        let mut doc = self.app.handle().export_keymap(Layer::User);
+        let mut doc = self.core.app.handle().export_keymap(Layer::User);
         doc.bindings
             .retain(|b| !ours.iter().any(|o| crate::keymaps::same(o, b)));
         if on {
             doc.bindings.splice(0..0, ours);
         }
-        let diff = self.app.load_keymap(&doc, Layer::User)?;
+        let diff = self.core.app.load_keymap(&doc, Layer::User)?;
         Ok(json!({
             "package": package.name,
             "on": on,
@@ -4050,7 +3940,7 @@ impl Shell {
                 })
                 .collect(),
         };
-        if let Err(e) = self.app.load_keymap(&doc, Layer::Workspace) {
+        if let Err(e) = self.core.app.load_keymap(&doc, Layer::Workspace) {
             self.warn(
                 Message::new(
                     "gui-template-keys-error",
@@ -4070,8 +3960,8 @@ impl Shell {
         let Some(l) = library else {
             return;
         };
-        self.import_source.clone_from(&l.import);
-        let mut lib = self.library.borrow_mut();
+        self.focus.import_source.clone_from(&l.import);
+        let mut lib = self.focus.library.borrow_mut();
         lib.auto_advance = l.auto_advance;
         lib.import_offered = l.import.is_some();
         if let Some(q) = &l.query {
@@ -4081,12 +3971,13 @@ impl Shell {
 
     /// The workspace's import source, as its template set it.
     pub fn import_source(&self) -> Option<&helios_template::ImportDesc> {
-        self.import_source.as_ref()
+        self.focus.import_source.as_ref()
     }
 
     /// Whether the workspace proposes stacks after each import.
     pub fn suggests_stacks(&self) -> bool {
-        self.import_source
+        self.focus
+            .import_source
             .as_ref()
             .is_some_and(|i| i.suggest_stacks)
     }
@@ -4094,7 +3985,7 @@ impl Shell {
     /// The imports asked for since the last call ([`IMPORT_COMMAND`]'s
     /// arguments), for the host to run.
     pub fn take_imports(&mut self) -> Vec<Value> {
-        std::mem::take(&mut self.imports)
+        std::mem::take(&mut self.core.imports)
     }
 
     /// Says whether the host has a library to import into: it runs the
@@ -4103,13 +3994,13 @@ impl Shell {
     /// button is off and every import says why. Open by default (an
     /// embedder or a test running the imports itself).
     pub fn set_library_open(&mut self, open: bool) {
-        self.no_library = (!open).then(import::no_library);
+        self.core.no_library = (!open).then(import::no_library);
     }
 
     /// No library to import into, for the reason `error` gives (it could
     /// not be opened), else for want of one (`None`).
     pub fn set_no_library(&mut self, error: Option<String>) {
-        self.no_library = Some(error.map_or_else(import::no_library, |e| {
+        self.core.no_library = Some(error.map_or_else(import::no_library, |e| {
             Message::new(
                 "gui-import-no-library-error",
                 "No library is open: { $error }",
@@ -4120,12 +4011,12 @@ impl Shell {
 
     /// Whether a library is open to import into ([`Shell::set_library_open`]).
     pub fn library_open(&self) -> bool {
-        self.no_library.is_none()
+        self.core.no_library.is_none()
     }
 
     /// Whether a command of that id is registered.
     pub fn has_command(&self, id: &str) -> bool {
-        lock(&self.registry).specs().any(|s| s.id == id)
+        lock(&self.core.registry).specs().any(|s| s.id == id)
     }
 
     /// A workspace from a template: the templates to pick from (the
@@ -4143,7 +4034,7 @@ impl Shell {
         // The user's templates speak through their own text too (added
         // once: a second time is refused, and nothing changes).
         let _ = crate::templates::add_texts(
-            &self.i18n,
+            &self.core.i18n,
             &templates[crate::templates::builtin().len()..],
         );
         let name = |s: &Self, b: &helios_template::Bundle| {
@@ -4301,23 +4192,23 @@ impl Shell {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!on));
             }
             // The frame's steps, which plugins may veto or replace.
-            Action::Minimize => frame::request(self.app.handle(), ctx, FrameRequest::Minimize),
+            Action::Minimize => frame::request(self.core.app.handle(), ctx, FrameRequest::Minimize),
             Action::Maximize => {
-                frame::request(self.app.handle(), ctx, FrameRequest::ToggleMaximize);
+                frame::request(self.core.app.handle(), ctx, FrameRequest::ToggleMaximize);
             }
-            Action::Close => frame::request(self.app.handle(), ctx, FrameRequest::Close),
+            Action::Close => frame::request(self.core.app.handle(), ctx, FrameRequest::Close),
             Action::SystemMenu => {
                 // Under the title bar's start, where its menu button is
                 // (the window's top left when the system draws the frame).
-                self.menu = None;
+                self.focus.menu = None;
                 let at = HitTable::of(ctx)
-                    .get(egui::ViewportId::ROOT)
+                    .get(self.focus.window)
                     .and_then(|r| r.caption)
                     .map_or(egui::pos2(0.0, 0.0), |c| {
                         let ppp = ctx.pixels_per_point();
                         egui::pos2(c.x as f32 / ppp, (c.y + c.h) as f32 / ppp)
                     });
-                frame::request(self.app.handle(), ctx, FrameRequest::SystemMenu(at));
+                frame::request(self.core.app.handle(), ctx, FrameRequest::SystemMenu(at));
             }
             Action::Run(id, args, origin) => return self.run(&id, args, origin),
             Action::KeymapPackage(name, on) => return self.keymap_package(&name, on),
@@ -4362,13 +4253,13 @@ impl Shell {
                 return self.workspace_command(&id, &args, &origin);
             }
             Action::Theme(name) => {
-                let overrides = self.theme_overrides.clone();
+                let overrides = self.core.theme_overrides.clone();
                 self.set_theme(&name, overrides);
             }
             Action::ThemeExport(path) => {
                 // The resolved theme as one file, under its name.
-                let mut tokens = self.theme.resolved().to_dtcg();
-                tokens["$name"] = json!(self.theme_name);
+                let mut tokens = self.core.theme.resolved().to_dtcg();
+                tokens["$name"] = json!(self.core.theme_name);
                 let text = serde_json::to_string_pretty(&tokens).expect("tokens serialize");
                 path.parent()
                     .map_or(Ok(()), std::fs::create_dir_all)
@@ -4387,7 +4278,7 @@ impl Shell {
                 };
                 // What the shell holds is this machine's view; the
                 // profile's variants travel unless asked otherwise.
-                let profile = match &self.loaded {
+                let profile = match &self.core.loaded {
                     Some((source, resolved)) if !this_machine => {
                         self.profile().rebase(source, &resolved.profile)
                     }
@@ -4427,10 +4318,11 @@ impl Shell {
                         self.note(format!("{:?} {c}", d.part));
                     }
                 }
-                self.pending_import = Some(incoming);
+                self.core.pending_import = Some(incoming);
             }
             Action::ProfileApply => {
                 let p = self
+                    .core
                     .pending_import
                     .take()
                     .ok_or("no profile read to apply: profile.import first")?;
@@ -4444,13 +4336,13 @@ impl Shell {
             Action::ProfileUse(name) => self
                 .use_profile(&name)
                 .map_err(|e| format!("profile {name}: {e}"))?,
-            Action::ScopeMode(mode) => self.scopes.borrow_mut().set_mode(mode),
-            Action::ScopeStops(on) => self.scopes.borrow_mut().set_stops(on),
+            Action::ScopeMode(mode) => self.focus.scopes.borrow_mut().set_mode(mode),
+            Action::ScopeStops(on) => self.focus.scopes.borrow_mut().set_stops(on),
             Action::Decision(request, origin) => return self.answer_decision(request, &origin),
             Action::DecisionDecide(node, values, origin) => {
                 let values = {
-                    let viewport = self.viewport.borrow();
-                    let mut decisions = self.decisions.borrow_mut();
+                    let viewport = self.focus.viewport.borrow();
+                    let mut decisions = self.focus.decisions.borrow_mut();
                     decisions.refresh(viewport.graph());
                     decisions.values_of(&node, &values)?
                 };
@@ -4458,34 +4350,38 @@ impl Shell {
                     .answer_decision(crate::decisions::Request::Decide { node, values }, &origin);
             }
             Action::DecisionList => {
-                let viewport = self.viewport.borrow();
-                let mut decisions = self.decisions.borrow_mut();
+                let viewport = self.focus.viewport.borrow();
+                let mut decisions = self.focus.decisions.borrow_mut();
                 decisions.refresh(viewport.graph());
                 return Ok(decisions.describe());
             }
             Action::Rate(n) => self
+                .focus
                 .library
                 .borrow_mut()
                 .rate(n)
                 .map_err(|e| format!("vault.rate: {e}"))?,
             Action::Reject => self
+                .focus
                 .library
                 .borrow_mut()
                 .toggle_reject()
                 .map_err(|e| format!("vault.reject: {e}"))?,
             Action::Label(l) => self
+                .focus
                 .library
                 .borrow_mut()
                 .toggle_label(&l)
                 .map_err(|e| format!("vault.label: {e}"))?,
-            Action::Step(n) => self.library.borrow_mut().step(n),
+            Action::Step(n) => self.focus.library.borrow_mut().step(n),
             Action::Flag(flag) => self
+                .focus
                 .library
                 .borrow_mut()
                 .flag(flag)
                 .map_err(|e| format!("vault.flag: {e}"))?,
             Action::AutoAdvance(on) => {
-                let mut library = self.library.borrow_mut();
+                let mut library = self.focus.library.borrow_mut();
                 library.auto_advance = on.unwrap_or(!library.auto_advance);
             }
             Action::Place(frame) => {
@@ -4495,7 +4391,7 @@ impl Shell {
                     Value::Null
                 };
                 return crate::contexts::go(
-                    self.app.handle(),
+                    self.core.app.handle(),
                     frame,
                     payload,
                     &egui_pop::model::commands::Origin::User,
@@ -4505,25 +4401,26 @@ impl Shell {
                 let id = if let Some(id) = id {
                     id
                 } else {
-                    let node = crate::modules::selected(&lock(&self.values))
+                    let node = crate::modules::selected(&lock(&self.core.values))
                         .ok_or("no node is selected: name the sub-workspace (`id`)")?;
-                    let shown = crate::contexts::subworkspace_shown(self.app.handle());
-                    self.subworkspaces
+                    let shown = crate::contexts::subworkspace_shown(self.core.app.handle());
+                    self.focus
+                        .subworkspaces
                         .child_holding(shown.as_deref(), &node)
                         .ok_or_else(|| {
                             format!("`{node}` is in no sub-workspace under the place shown")
                         })?
                 };
                 return crate::contexts::enter_subworkspace(
-                    self.app.handle(),
-                    &self.subworkspaces,
+                    self.core.app.handle(),
+                    &self.focus.subworkspaces,
                     &id,
                     &crate::host::to_pop(&origin),
                 );
             }
             Action::Culling(on) => {
                 return crate::contexts::culling(
-                    self.app.handle(),
+                    self.core.app.handle(),
                     on,
                     &egui_pop::model::commands::Origin::User,
                 );
@@ -4546,13 +4443,14 @@ impl Shell {
             Action::Export(args, origin) => return self.export(&args, &origin),
             Action::OpenFolder(args) => return Self::open_folder(&args),
             Action::ToggleStack => self
+                .focus
                 .library
                 .borrow_mut()
                 .toggle_stack()
                 .map_err(|e| format!("vault.stack.toggle: {e}"))?,
-            Action::Zoom(z) => self.viewport.borrow_mut().zoom(z, &self.values),
+            Action::Zoom(z) => self.focus.viewport.borrow_mut().zoom(z, &self.core.values),
             Action::Fold(area) => {
-                let h = self.app.handle();
+                let h = self.core.app.handle();
                 let folded = h.layout().folded.contains(&area);
                 h.fold_area(area, !folded);
             }
@@ -4567,8 +4465,8 @@ impl Shell {
                     && origin == Origin::User
                 {
                     let ask = {
-                        let store = lock(&self.values);
-                        let viewport = self.viewport.borrow();
+                        let store = lock(&self.core.values);
+                        let viewport = self.focus.viewport.borrow();
                         viewport.graph().and_then(|g| {
                             let net = crate::mask_tree::network(g, &store, member.as_deref());
                             let key = crate::mask_tree::member_or_selected(
@@ -4585,14 +4483,18 @@ impl Shell {
                         return Ok(json!({ "asked": true }));
                     }
                 }
-                let mut store = lock(&self.values);
-                return self.viewport.borrow_mut().mask(command, origin, &mut store);
+                let mut store = lock(&self.core.values);
+                return self
+                    .focus
+                    .viewport
+                    .borrow_mut()
+                    .mask(command, origin, &mut store);
             }
             Action::RenameInTree(member) => {
-                self.mask_tree.borrow_mut().start_rename(member)?;
+                self.focus.mask_tree.borrow_mut().start_rename(member)?;
             }
             Action::MaskDisplay(mode, origin) => {
-                let mut store = lock(&self.values);
+                let mut store = lock(&self.core.values);
                 let now = match mode {
                     Some(m) => crate::mask_display::set(&mut store, m, &origin)?,
                     None => crate::mask_display::cycle(&mut store, &origin)?,
@@ -4600,6 +4502,7 @@ impl Shell {
                 // What it shows: the node the selection gives, if the
                 // selected module has a mask.
                 let target = self
+                    .focus
                     .viewport
                     .borrow()
                     .graph()
@@ -4610,13 +4513,13 @@ impl Shell {
                 }));
             }
             Action::Bypass(node, on, origin) => {
-                let mut store = lock(&self.values);
+                let mut store = lock(&self.core.values);
                 let (node, on) = crate::modules::bypass(&mut store, node.as_deref(), on, &origin)?;
                 return Ok(json!({ "node": node, "bypassed": on }));
             }
             Action::Compare => {
                 use crate::viewport::COMPARE;
-                let mut store = lock(&self.values);
+                let mut store = lock(&self.core.values);
                 let on = store
                     .get(COMPARE)
                     .and_then(|e| e.value.as_bool())
@@ -4631,14 +4534,14 @@ impl Shell {
             }
             Action::CopyParam(path, text, origin) => {
                 let out = crate::clipboard::copy_param(
-                    self.app.handle(),
-                    &self.clip.param,
+                    self.core.app.handle(),
+                    &self.core.clip.param,
                     &path,
                     text,
                     &to_pop(&origin),
                 )?;
                 let shown = {
-                    let store = lock(&self.values);
+                    let store = lock(&self.core.values);
                     store.get(&path).map(|e| match text {
                         crate::clipboard::param::Text::Value => {
                             crate::clipboard::param::shown(&e.descriptor, &e.value)
@@ -4653,7 +4556,7 @@ impl Shell {
             }
             Action::CopyFiles(origin) => {
                 user_only(&origin)?;
-                let out = crate::clipboard::copy_files(&self.clip.images, &self.system)?;
+                let out = crate::clipboard::copy_files(&self.core.clip.images, &self.core.system)?;
                 let count = out["files"].as_array().map_or(0, Vec::len);
                 let missing = out["missing"].as_array().map_or(0, Vec::len);
                 if missing == 0 {
@@ -4675,8 +4578,8 @@ impl Shell {
             }
             Action::PasteFiles(dry_run, origin) => {
                 return crate::clipboard::paste_from_system(
-                    self.app.handle(),
-                    &self.system,
+                    self.core.app.handle(),
+                    &self.core.system,
                     dry_run,
                     &to_pop(&origin),
                 );
@@ -4687,8 +4590,8 @@ impl Shell {
             }
             Action::PasteParam(path, dry_run, origin) => {
                 return crate::clipboard::paste_param(
-                    self.app.handle(),
-                    &self.clip.param,
+                    self.core.app.handle(),
+                    &self.core.clip.param,
                     &path,
                     dry_run,
                     &to_pop(&origin),
@@ -4697,11 +4600,11 @@ impl Shell {
             // The workbench's steps: the panel's rules, then any plugin,
             // may refuse.
             Action::MoveTo(p, area) => {
-                return workbench_outcome(self.app.handle().move_panel(&panel_id(&p)?, area));
+                return workbench_outcome(self.core.app.handle().move_panel(&panel_id(&p)?, area));
             }
             Action::Answer(answer, origin) => self.answer(answer, &origin)?,
             Action::AssumeYes(on) => {
-                self.assume_yes = on;
+                self.core.assume_yes = on;
                 self.note(if on {
                     Message::new("gui-policy-yes", "confirmations are answered yes by policy")
                 } else {
@@ -4709,11 +4612,11 @@ impl Shell {
                 });
             }
             Action::Detach(p) => {
-                return workbench_outcome(self.app.handle().detach_panel(&panel_id(&p)?));
+                return workbench_outcome(self.core.app.handle().detach_panel(&panel_id(&p)?));
             }
             Action::Float(p, pos) => {
                 let id = panel_id(&p)?;
-                let h = self.app.handle();
+                let h = self.core.app.handle();
                 let pos = pos.unwrap_or_else(|| {
                     egui_pop::model::layout::FloatingGroup::cascade(h.layout().floating.len())
                 });
@@ -4723,7 +4626,7 @@ impl Shell {
             }
             Action::Dock(p) => {
                 let id = panel_id(&p)?;
-                let h = self.app.handle();
+                let h = self.core.app.handle();
                 let layout = h.layout();
                 if layout.auxiliary.iter().any(|a| a.panel == id) {
                     return workbench_outcome(h.attach_panel(&id));
@@ -4731,6 +4634,7 @@ impl Shell {
                 // A palette docks in its own area.
                 if layout.floating_of(&id).is_some() {
                     let area = self
+                        .core
                         .panels
                         .iter()
                         .find(|s| s.id == id)
@@ -4752,14 +4656,14 @@ impl Shell {
                 );
             }
             Action::Snapshot { target, path } => {
-                self.shots.push_back(Shot::Save { target, path });
+                self.focus.shots.push_back(Shot::Save { target, path });
                 self.request_screenshot(ctx);
             }
             Action::RecordStart { target, path, fps } => {
-                self.recording = Some((target, Recorder::new(path, fps)));
+                self.focus.recording = Some((target, Recorder::new(path, fps)));
             }
             Action::RecordStop => {
-                if let Some((_, rec)) = self.recording.take() {
+                if let Some((_, rec)) = self.focus.recording.take() {
                     let p = rec.finish().map_err(|e| format!("recording failed: {e}"))?;
                     self.note(
                         Message::new("gui-recording-saved", "recording saved to { $path }")
@@ -4776,7 +4680,7 @@ impl Shell {
     /// number of rounds.
     fn apply_queue(&mut self, ctx: &Egui) {
         for _ in 0..8 {
-            let actions = std::mem::take(&mut *lock(&self.queue));
+            let actions = std::mem::take(&mut *lock(&self.core.queue));
             if actions.is_empty() {
                 break;
             }
@@ -4796,7 +4700,7 @@ impl Shell {
     /// a detached panel's window is not in it (that window has a scale and
     /// pixels of its own).
     fn pictured_rect(&self, target: &str) -> Result<Rect, String> {
-        if self.target_window(target) != egui::ViewportId::ROOT {
+        if self.target_window(target) != self.focus.window {
             return Err(format!(
                 "`{target}` is in a detached window, which pictures do not reach yet"
             ));
@@ -4807,7 +4711,7 @@ impl Shell {
     /// Asks the window for a screenshot of its next frame; it comes back
     /// through `screenshots`, read at the start of a frame.
     fn request_screenshot(&self, ctx: &Egui) {
-        let screenshots = Arc::clone(&self.screenshots);
+        let screenshots = Arc::clone(&self.focus.screenshots);
         let repaint = ctx.clone();
         ctx.request_screenshot(move |image| {
             lock(&screenshots).push_back(image);
@@ -4817,14 +4721,14 @@ impl Shell {
 
     fn on_screenshot(&mut self, image: &egui::ColorImage) {
         let full = snapshot::from_color_image(image);
-        let Some(shot) = self.shots.pop_front() else {
+        let Some(shot) = self.focus.shots.pop_front() else {
             return;
         };
         match shot {
             Shot::Save { target, path } => {
                 let note = self
                     .pictured_rect(&target)
-                    .map(|r| snapshot::crop(&full, r, self.pixels_per_point))
+                    .map(|r| snapshot::crop(&full, r, self.focus.pixels_per_point))
                     .and_then(|img| snapshot::save(&img, &path))
                     .map_or_else(
                         |e| {
@@ -4840,20 +4744,20 @@ impl Shell {
                 self.note(note);
             }
             Shot::Frame => {
-                let target = self.recording.as_ref().map(|(t, _)| t.clone());
+                let target = self.focus.recording.as_ref().map(|(t, _)| t.clone());
                 if let Some(target) = target
                     && let rect = self.pictured_rect(&target)
-                    && let Some((_, rec)) = &mut self.recording
+                    && let Some((_, rec)) = &mut self.focus.recording
                 {
                     let pushed = rect
-                        .map(|r| snapshot::crop(&full, r, self.pixels_per_point))
+                        .map(|r| snapshot::crop(&full, r, self.focus.pixels_per_point))
                         .and_then(|img| rec.push(&img));
                     if let Err(e) = pushed {
                         self.warn(
                             Message::new("gui-recording-stopped", "recording stopped: { $error }")
                                 .with("error", e),
                         );
-                        self.recording = None;
+                        self.focus.recording = None;
                     }
                 }
             }
@@ -4868,13 +4772,13 @@ impl Shell {
     /// profile with a `hidpi` variant is applied again when the screen's
     /// class changes. The interface zoom changes the scale, not the class.
     fn follow_scale(&mut self, ctx: &Egui) {
-        self.pixels_per_point = ctx.pixels_per_point();
+        self.focus.pixels_per_point = ctx.pixels_per_point();
         let native = scale::Scale::of(ctx).native;
-        let changed = scale::changed(ctx).is_some() || self.native_scale.is_none();
-        let was = self.native_scale.replace(native).unwrap_or(1.0);
+        let changed = scale::changed(ctx).is_some() || self.focus.native_scale.is_none();
+        let was = self.focus.native_scale.replace(native).unwrap_or(1.0);
         if changed
             && (was >= HIDPI) != (native >= HIDPI)
-            && let Some((source, _)) = &self.loaded
+            && let Some((source, _)) = &self.core.loaded
             && source.on.contains_key(&helios_profile::Selector::Hidpi)
         {
             let source = source.clone();
@@ -4885,13 +4789,13 @@ impl Shell {
     /// Draws the shell for one frame.
     pub fn ui(&mut self, ui: &mut Ui) {
         let ctx = ui.ctx().clone();
-        if let Some(rs) = self.gpu.take() {
-            self.gpu_info = Some(egui_pop::viewport::gpu::install(&ctx, &rs));
+        if let Some(rs) = self.core.gpu.take() {
+            self.core.gpu_info = Some(egui_pop::viewport::gpu::install(&ctx, &rs));
             crate::start::mark_in_first_frame("viewport GPU path installed");
         }
         self.follow_scale(&ctx);
-        self.now = ctx.input(|i| i.time);
-        let screenshots = std::mem::take(&mut *lock(&self.screenshots));
+        self.core.now = ctx.input(|i| i.time);
+        let screenshots = std::mem::take(&mut *lock(&self.focus.screenshots));
         for image in screenshots {
             self.on_screenshot(&image);
         }
@@ -4910,17 +4814,17 @@ impl Shell {
             }
         }
         self.set_context(&ctx);
-        let wanted = crate::display::wanted(crate::display::wide_gamut(self.app.handle()));
-        self.viewport.borrow_mut().set_wanted(wanted);
-        self.app.logic(&ctx);
+        let wanted = crate::display::wanted(crate::display::wide_gamut(self.core.app.handle()));
+        self.focus.viewport.borrow_mut().set_wanted(wanted);
+        self.core.app.logic(&ctx);
         // The workspace's sub-workspaces; one shown that is gone is left.
         self.follow_subworkspaces();
         // New undo steps are made in the place the stack shows now, and
         // inside a sub-workspace only its nodes may be written.
         crate::contexts::follow_place(
-            self.app.handle(),
-            &mut lock(&self.values),
-            &self.subworkspaces,
+            self.core.app.handle(),
+            &mut lock(&self.core.values),
+            &self.focus.subworkspaces,
         );
         // The History panel's snapshots: a toast for each restore.
         self.follow_snapshots();
@@ -4929,35 +4833,39 @@ impl Shell {
         self.follow_workspace(&ctx);
         // Keys changed for the workspace in the shortcuts editor.
         self.follow_workspace_keys();
-        self.follow
-            .frame(self.app.handle(), &mut lock(&self.values));
+        self.focus
+            .follow
+            .frame(self.core.app.handle(), &mut lock(&self.core.values));
         // An undo or a redo of the workspace's state, put in place.
         self.sync_workspace();
         // The theme asked for is installed here, before anything is drawn.
-        self.app.logic(&ctx);
-        let spec = self.app.handle().theme().spec();
-        if self.installed.as_ref() != Some(&spec) {
-            if self.still {
+        self.core.app.logic(&ctx);
+        let spec = self.core.app.handle().theme().spec();
+        if self.core.installed.as_ref() != Some(&spec) {
+            if self.core.still {
                 ctx.all_styles_mut(|style| {
                     style.visuals.text_cursor.blink = false;
                     style.animation_time = 0.0;
                 });
             }
             self.follow_theme(&spec);
-            self.installed = Some(spec);
+            self.core.installed = Some(spec);
         }
         self.set_context(&ctx);
         self.follow_language();
         crate::start::mark_in_first_frame("commands run, theme installed");
 
-        self.rects.clear();
-        self.rect_windows.clear();
+        self.focus.rects.clear();
+        self.focus.rect_windows.clear();
         ctx.data_mut(|d| {
             d.remove::<BTreeMap<String, (Rect, egui::ViewportId)>>(Id::unique("helios.named"));
         });
-        self.rects.insert("window".into(), ctx.content_rect());
+        self.focus.rects.insert("window".into(), ctx.content_rect());
 
-        self.viewport.borrow_mut().sync(&mut lock(&self.values));
+        self.focus
+            .viewport
+            .borrow_mut()
+            .sync(&mut lock(&self.core.values));
         self.follow_opening(&ctx);
         self.follow_decisions();
         self.status_bar(&ctx);
@@ -4977,18 +4885,20 @@ impl Shell {
                 .with("count", asked),
             );
         }
-        self.preview.follow(self.viewport.borrow().shown(), &ctx);
-        self.app.show(ui);
+        self.focus
+            .preview
+            .follow(self.focus.viewport.borrow().shown(), &ctx);
+        self.core.app.show(ui);
         crate::start::mark_in_first_frame("panels drawn");
         crate::workbench::keep_focus_taken(&ctx);
         self.place_palettes();
         self.graph_edits();
-        if self.library.borrow_mut().take_import_asked() {
+        if self.focus.library.borrow_mut().take_import_asked() {
             let _ = self.run(import_window::COMMAND, Value::Null, Origin::User);
         }
         self.take_dropped_files(&ctx);
         self.import_window_frame(&ctx);
-        let refused = std::mem::take(&mut self.library.borrow_mut().notes);
+        let refused = std::mem::take(&mut self.focus.library.borrow_mut().notes);
         for n in refused {
             self.warn(n);
         }
@@ -5005,15 +4915,15 @@ impl Shell {
             d.get_temp::<BTreeMap<String, (Rect, egui::ViewportId)>>(Id::unique("helios.named"))
         });
         for (name, (rect, window)) in named.unwrap_or_default() {
-            if window != egui::ViewportId::ROOT {
-                self.rect_windows.insert(name.clone(), window);
+            if window != self.focus.window {
+                self.focus.rect_windows.insert(name.clone(), window);
             }
-            self.rects.insert(name, rect);
+            self.focus.rects.insert(name, rect);
         }
         self.overlay_rects();
 
-        if self.recording.is_some() {
-            self.shots.push_back(Shot::Frame);
+        if self.focus.recording.is_some() {
+            self.focus.shots.push_back(Shot::Frame);
             self.request_screenshot(&ctx);
             ctx.request_repaint();
         }
@@ -5023,14 +4933,14 @@ impl Shell {
     /// at the workbench's end edge to the image's end edge, beside the end
     /// side bar rather than over it (`workbench::beside_the_end_side`).
     fn place_palettes(&mut self) {
-        let Some(lead) = self.palettes_to_place.clone() else {
+        let Some(lead) = self.focus.palettes_to_place.clone() else {
             return;
         };
-        let h = self.app.handle();
+        let h = self.core.app.handle();
         let Some(centre) = h.area_rect(Area::Center) else {
             return;
         };
-        self.palettes_to_place = None;
+        self.focus.palettes_to_place = None;
         let end = [Area::StartSide, Area::EndSide, Area::Bottom]
             .into_iter()
             .filter_map(|a| h.area_rect(a))
@@ -5048,7 +4958,7 @@ impl Shell {
     /// say.
     fn graph_edits(&mut self) {
         let (commands, notes, reveal) = {
-            let mut g = self.graph.borrow_mut();
+            let mut g = self.focus.graph.borrow_mut();
             (
                 g.take_commands(),
                 std::mem::take(&mut g.notes),
@@ -5073,7 +4983,7 @@ impl Shell {
     /// tabs (it would hide the graph), nor when it is in front already.
     fn reveal_params(&mut self) {
         let params = PanelId::from_static(crate::params::PANEL);
-        if !self.panels.iter().any(|p| p.id == params) {
+        if !self.core.panels.iter().any(|p| p.id == params) {
             return;
         }
         let graph = PanelId::from_static(crate::graph::PANEL);
@@ -5088,6 +4998,7 @@ impl Shell {
             return;
         }
         let _ = self
+            .core
             .app
             .handle()
             .change_workbench(egui_pop::api::workbench::Change::Show(params));
@@ -5095,21 +5006,21 @@ impl Shell {
 
     /// The Graph panel's state (its view, selection and folds).
     pub fn graph_panel(&self) -> std::cell::Ref<'_, crate::graph::GraphPanel> {
-        self.graph.borrow()
+        self.focus.graph.borrow()
     }
 
     /// Saves the workspace's layout once it changed (egui-pop's
     /// `layout.save` step), when no button is held (a splitter dragged
     /// is saved where it is let go): a kill loses no arrangement.
     fn save_layout_on_change(&mut self, ctx: &Egui) {
-        if self.workspace.get().is_none() || ctx.input(|i| i.pointer.any_down()) {
+        if self.focus.workspace.get().is_none() || ctx.input(|i| i.pointer.any_down()) {
             return;
         }
         let layout = self.layout();
-        if self.layout_saved.as_ref() == Some(&layout) {
+        if self.focus.layout_saved.as_ref() == Some(&layout) {
             return;
         }
-        if let Err(e) = step_result(self.app.save_layout()) {
+        if let Err(e) = step_result(self.core.app.save_layout()) {
             self.warn(
                 Message::new(
                     "gui-layout-not-saved",
@@ -5118,7 +5029,7 @@ impl Shell {
                 .with("error", e),
             );
         }
-        self.layout_saved = Some(layout);
+        self.focus.layout_saved = Some(layout);
     }
 
     /// What the workbench refused this frame, said in the status bar:
@@ -5128,18 +5039,18 @@ impl Shell {
     /// is dragged and changes nothing on the drop, so it is the last drop
     /// hint's refusal once the hint is gone with the button up.
     fn workbench_refusals(&mut self, ctx: &Egui) {
-        let h = self.app.handle().clone();
+        let h = self.core.app.handle().clone();
         let refusal = h.drop_hint().and_then(|hint| hint.refusal);
         let held = ctx.input(|i| i.pointer.primary_down());
-        let was = std::mem::replace(&mut self.drag_refusal, refusal);
+        let was = std::mem::replace(&mut self.focus.drag_refusal, refusal);
         if let Some(why) = was
-            && self.drag_refusal.is_none()
+            && self.focus.drag_refusal.is_none()
             && !held
         {
             self.note(Message::plain(why));
         }
-        let events = h.events_since(self.seen);
-        self.seen = h.last_event();
+        let events = h.events_since(self.core.seen);
+        self.core.seen = h.last_event();
         for e in events {
             if e.name == "workbench.refused"
                 && let Some(why) = e.data["reason"].as_str()
@@ -5154,14 +5065,14 @@ impl Shell {
     /// Names where egui-pop drew the dialog and the toasts, as it reports
     /// them.
     fn overlay_rects(&mut self) {
-        for o in self.app.handle().overlay_rects() {
+        for o in self.core.app.handle().overlay_rects() {
             let name = match o.kind {
                 OverlayKind::Dialog => "helios.dialog",
                 OverlayKind::Toasts => "helios.toasts",
                 OverlayKind::Menu => "helios.menu",
                 _ => continue,
             };
-            self.rects.insert(name.into(), o.rect);
+            self.focus.rects.insert(name.into(), o.rect);
         }
     }
 
@@ -5169,8 +5080,8 @@ impl Shell {
     /// offered and wanted: an area at the bottom of the window over the
     /// panels, not a dialog, so it blocks neither keys nor clicks.
     fn pointer_choice_ui(&mut self, ctx: &Egui) {
-        let h = self.app.handle().clone();
-        if !self.pointer_choice || !crate::pointer_choice::wanted(&h) {
+        let h = self.core.app.handle().clone();
+        if !self.core.pointer_choice || !crate::pointer_choice::wanted(&h) {
             return;
         }
         let shown = egui::Area::new(Id::unique(crate::pointer_choice::RECT))
@@ -5181,16 +5092,17 @@ impl Shell {
                     crate::pointer_choice::body(ui, &h);
                 });
             });
-        self.rects
+        self.focus
+            .rects
             .insert(crate::pointer_choice::RECT.into(), shown.response.rect);
     }
 
     /// Menus of commands asked for, in egui's popups (the system menu is
     /// egui-pop's, `menus::popup_at`).
     fn menus_ui(&mut self, ctx: &Egui) {
-        let h = self.app.handle().clone();
+        let h = self.core.app.handle().clone();
         let layer = egui::LayerId::background();
-        if let Some((at, items)) = self.menu.take() {
+        if let Some((at, items)) = self.focus.menu.take() {
             let mut open = true;
             let mut chosen = None;
             let cx = h.when_context();
@@ -5206,12 +5118,14 @@ impl Shell {
                     });
                 });
             if let Some(r) = shown {
-                self.rects.insert("helios.menu".into(), r.response.rect);
+                self.focus
+                    .rects
+                    .insert("helios.menu".into(), r.response.rect);
             }
             if let Some((id, args)) = chosen {
                 let _ = self.run(&id, args, Origin::User);
             } else if open {
-                self.menu = Some((at, items));
+                self.focus.menu = Some((at, items));
             }
         }
     }
@@ -5221,29 +5135,29 @@ impl Shell {
     /// profile is saved and the question was never answered. The
     /// desktop asks for it; tests and tools do only when they test it.
     pub fn offer_pointer_choice(&mut self) {
-        self.pointer_choice = true;
+        self.core.pointer_choice = true;
     }
 
     /// Helios's status line, which its block draws in egui-pop's status
     /// bar (beside the jobs item).
     fn status_bar(&self, ctx: &egui::Context) {
-        let mut line = self.status.borrow_mut();
-        line.recording = self.recording.is_some();
+        let mut line = self.core.status.borrow_mut();
+        line.recording = self.focus.recording.is_some();
         line.note = self.notes.last().cloned();
-        line.hint = self.viewport.borrow().masks().hint(ctx);
-        line.decisions = self.stack_review.borrow().decisions().len();
+        line.hint = self.focus.viewport.borrow().masks().hint(ctx);
+        line.decisions = self.core.stack_review.borrow().decisions().len();
         {
-            let decisions = self.decisions.borrow();
+            let decisions = self.focus.decisions.borrow();
             line.pending_decisions = decisions.pending();
             line.decisions_for_a_person = decisions.for_a_person();
         }
-        line.profile.clone_from(&self.profile_name);
+        line.profile.clone_from(&self.core.profile_name);
     }
 
     /// What the status line says now: the hovered mask handle's
     /// gestures, else the last note.
     pub fn status_text(&self) -> Option<String> {
-        let line = self.status.borrow();
+        let line = self.core.status.borrow();
         line.hint.clone().or_else(|| line.note.clone())
     }
 
@@ -5252,41 +5166,42 @@ impl Shell {
     /// (see `crate::jobs`). An import, an export started from the
     /// desktop, a calibration: each starts its job here.
     pub fn jobs(&self) -> helios_core::jobs::Jobs {
-        self.jobs.clone()
+        self.core.jobs.clone()
     }
 
     /// The library's undo steps: an import records its step there, and
     /// undo and redo reach the vault through what it is given
     /// ([`crate::library_history::LibraryHistory::set_apply`]).
     pub fn library_history(&self) -> crate::library_history::LibraryHistory {
-        self.library_history.clone()
+        self.core.library_history.clone()
     }
 
     /// The exports and batches that ended since the last frame: said on
     /// the desktop when long and unseen (`job_finished`). The jobs of a
     /// node lost for too long leave the jobs centre.
     fn job_notices(&mut self) {
-        let ends = self.ended.take(self.app.handle());
+        let ends = self.core.ended.take(self.core.app.handle());
         for end in ends {
             self.job_finished(&end);
         }
-        if self.ended.take_backups() {
+        if self.core.ended.take_backups() {
             self.backup_ended();
         }
-        self.forgotten.take(self.app.handle());
+        self.core.forgotten.take(self.core.app.handle());
     }
 
     /// The Queue panel follows the selected node: its queue read again,
     /// the panel closed or opened again as its setting says when empty.
     fn follow_queue(&mut self, ctx: &Egui) {
         if !self
+            .core
             .panels
             .iter()
             .any(|p| p.id.as_str() == crate::queue::PANEL)
         {
             return;
         }
-        let node = lock(&self.values)
+        let node = lock(&self.core.values)
             .get(crate::params::SELECTION)
             .and_then(|e| match &e.value {
                 helios_core::Value::Text(t) if !t.is_empty() => Some(t.clone()),
@@ -5294,9 +5209,10 @@ impl Shell {
             });
         // The panels are drawn already: a change shows at the next frame.
         if self
+            .focus
             .queue_panel
             .borrow_mut()
-            .update(self.app.handle(), node.as_deref())
+            .update(self.core.app.handle(), node.as_deref())
         {
             ctx.request_repaint();
         }
@@ -5304,13 +5220,13 @@ impl Shell {
 
     /// The Queue panel (see `crate::queue`).
     pub fn queue_panel(&self) -> std::cell::RefMut<'_, crate::queue::QueuePanel> {
-        self.queue_panel.borrow_mut()
+        self.focus.queue_panel.borrow_mut()
     }
 
     /// Whether the Queue panel shows when the selected node has no queue
     /// (`interface.panels.queue_when_empty`, on by default).
     pub fn set_queue_when_empty(&mut self, on: bool) {
-        self.queue_panel.borrow_mut().set_when_empty(on);
+        self.focus.queue_panel.borrow_mut().set_when_empty(on);
     }
 
     /// Follows a node's jobs in the jobs centre (see `crate::relay`):
@@ -5327,8 +5243,8 @@ impl Shell {
         timing: crate::relay::Timing,
     ) -> Result<(), String> {
         let name = link.name.clone();
-        let relay = crate::relay::Relay::start(link, self.jobs.bus().clone(), timing)?;
-        self.relays.borrow_mut().insert(name, relay);
+        let relay = crate::relay::Relay::start(link, self.core.jobs.bus().clone(), timing)?;
+        self.core.relays.borrow_mut().insert(name, relay);
         Ok(())
     }
 
@@ -5336,7 +5252,7 @@ impl Shell {
     /// is followed again at the relay's next attempt. Whether the node is
     /// followed.
     pub fn drop_node_link(&self, name: &str) -> bool {
-        let relays = self.relays.borrow();
+        let relays = self.core.relays.borrow();
         let Some(relay) = relays.get(name) else {
             return false;
         };
@@ -5554,7 +5470,7 @@ pub mod headless {
     ) -> (Harness<'a, Shell>, RenderState) {
         let rs = render_state();
         shell.attach_gpu(&rs);
-        shell.still = true;
+        shell.core.still = true;
         let title = shell.window_title();
         let mut h = Harness::builder()
             .with_size(size)

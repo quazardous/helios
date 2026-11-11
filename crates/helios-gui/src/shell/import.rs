@@ -76,13 +76,13 @@ impl Shell {
     /// from any thread: a line per file as `helios_library::import` gives
     /// it, then `{ "ended": report }` or `{ "failed": error }`.
     pub fn import_sink(&self) -> Sender<(Value, Value)> {
-        self.import_lines.0.clone()
+        self.core.import_lines.0.clone()
     }
 
     /// Whether an import can be queued: not without a library open, the
     /// error then saying so (rather than the host's missing command).
     pub(super) fn can_import(&self) -> Result<(), String> {
-        match &self.no_library {
+        match &self.core.no_library {
             None => Ok(()),
             Some(why) => Err(self.text(why.clone())),
         }
@@ -90,7 +90,7 @@ impl Shell {
 
     /// The Log panel's entries, to read.
     pub fn log(&self) -> std::cell::Ref<'_, crate::log_panel::Log> {
-        self.log.borrow()
+        self.core.log.borrow()
     }
 
     /// `library.importSource`: a card or folder (`path`) imported as the
@@ -139,7 +139,7 @@ impl Shell {
             return Err("`paths` is missing".into());
         }
         let asks =
-            args["ask"] == true && self.import_source.is_none() && args.get("copy").is_none();
+            args["ask"] == true && self.focus.import_source.is_none() && args.get("copy").is_none();
         if asks {
             let title = self.text(
                 Message::new("gui-import-dropped-title", "Import { $count } items")
@@ -173,6 +173,7 @@ impl Shell {
             text("importer").ok_or("`importer` is missing")?,
         );
         let entry = self
+            .core
             .lists
             .borrow()
             .importers
@@ -232,7 +233,7 @@ impl Shell {
     /// only in a workspace); darktable edits always.
     fn import_fields(&self) -> Vec<Field> {
         let mut fields = Vec::new();
-        let asks = self.import_source.is_none();
+        let asks = self.focus.import_source.is_none();
         if asks {
             fields.push(boolean(
                 "copy",
@@ -257,9 +258,12 @@ impl Shell {
                 "gui-import-darktable-help",
                 "Each sidecar, duplicates included, becomes a version of its photo",
             )),
-            self.import_source.as_ref().is_none_or(|s| s.darktable),
+            self.focus
+                .import_source
+                .as_ref()
+                .is_none_or(|s| s.darktable),
         ));
-        if asks && self.edit.is_some() {
+        if asks && self.focus.edit.is_some() {
             fields.push(boolean(
                 "remember",
                 self.text(Message::new(
@@ -291,8 +295,13 @@ impl Shell {
         let darktable = args
             .get("darktable")
             .and_then(Value::as_bool)
-            .unwrap_or_else(|| self.import_source.as_ref().is_none_or(|s| s.darktable));
-        if args["remember"] == true && self.import_source.is_none() {
+            .unwrap_or_else(|| {
+                self.focus
+                    .import_source
+                    .as_ref()
+                    .is_none_or(|s| s.darktable)
+            });
+        if args["remember"] == true && self.focus.import_source.is_none() {
             self.remember_import(copy.unwrap_or(false), darktable, origin)?;
         }
         if !darktable {
@@ -336,7 +345,7 @@ impl Shell {
         copy: Option<bool>,
         choices: &Value,
     ) -> Value {
-        let source = self.import_source.as_ref();
+        let source = self.focus.import_source.as_ref();
         let given = |key: &str| {
             choices
                 .get(key)
@@ -361,7 +370,7 @@ impl Shell {
         {
             args["duplicates"] = duplicates;
         }
-        self.imports.push(args.clone());
+        self.core.imports.push(args.clone());
         json!({ "queued": args })
     }
 
@@ -369,14 +378,14 @@ impl Shell {
     /// darktable edits not kept whole to the Log panel, each import's end
     /// said. How many duplicates now wait for an answer among them.
     pub(super) fn receive_imports(&mut self) -> usize {
-        let mut asked = self.duplicates.borrow_mut().receive();
-        while let Ok((import, line)) = self.import_lines.1.try_recv() {
+        let mut asked = self.core.duplicates.borrow_mut().receive();
+        while let Ok((import, line)) = self.core.import_lines.1.try_recv() {
             if line.get("ended").is_some() || line.get("failed").is_some() {
                 // The photos it brought are selected once the Library
                 // shows them.
-                let ids = std::mem::take(&mut self.imported_ids);
+                let ids = std::mem::take(&mut self.focus.imported_ids);
                 if line.get("ended").is_some() && !ids.is_empty() {
-                    self.select_imported = ids;
+                    self.focus.select_imported = ids;
                 }
                 self.import_ended(&line);
                 continue;
@@ -386,15 +395,15 @@ impl Shell {
                     line["status"].as_str(),
                     Some("added" | "located" | "unchanged")
                 )
-                && !self.imported_ids.iter().any(|i| i == id)
+                && !self.focus.imported_ids.iter().any(|i| i == id)
             {
-                self.imported_ids.push(id.to_string());
+                self.focus.imported_ids.push(id.to_string());
             }
             if let Some(scan) = line.get("scanned") {
                 self.log_scan(scan);
                 continue;
             }
-            if self.duplicates.borrow_mut().add(&import, &line)
+            if self.core.duplicates.borrow_mut().add(&import, &line)
                 == Some(crate::duplicates::Fate::Asked)
             {
                 asked += 1;
@@ -407,13 +416,18 @@ impl Shell {
     /// The photos the last import brought, selected as soon as the
     /// Library holds them.
     pub(super) fn select_imported_photos(&mut self) {
-        if self.select_imported.is_empty() {
+        if self.focus.select_imported.is_empty() {
             return;
         }
-        let mut library = self.library.borrow_mut();
-        if self.select_imported.iter().any(|id| library.holds(id)) {
-            library.select_ids(&self.select_imported);
-            self.select_imported.clear();
+        let mut library = self.focus.library.borrow_mut();
+        if self
+            .focus
+            .select_imported
+            .iter()
+            .any(|id| library.holds(id))
+        {
+            library.select_ids(&self.focus.select_imported);
+            self.focus.select_imported.clear();
         }
     }
 
@@ -425,6 +439,7 @@ impl Shell {
             scan["importer"].as_str().unwrap_or_default(),
         );
         let label = self
+            .core
             .lists
             .borrow()
             .importers
@@ -434,7 +449,7 @@ impl Shell {
                 || Message::new("", importer),
                 crate::importers::Entry::message,
             );
-        let mut log = self.log.borrow_mut();
+        let mut log = self.core.log.borrow_mut();
         let found = scan["images"].as_array().map_or(0, Vec::len);
         let refused = scan["refused"].as_array().cloned().unwrap_or_default();
         log.push(
@@ -473,7 +488,7 @@ impl Shell {
     /// One file's darktable sidecars kept with reservations, or not kept:
     /// in the Log panel.
     fn log_edits(&mut self, line: &Value) {
-        let mut log = self.log.borrow_mut();
+        let mut log = self.core.log.borrow_mut();
         for edit in line["darktable"].as_array().into_iter().flatten() {
             let sidecar = edit["path"].as_str().unwrap_or_default().to_string();
             if let Some(e) = edit["error"].as_str() {
@@ -506,7 +521,10 @@ impl Shell {
         if let Some(e) = line["failed"].as_str() {
             let message =
                 Message::new("gui-import-failed", "The import failed: { $error }").with("error", e);
-            self.log.borrow_mut().push(Level::Error, message.clone());
+            self.core
+                .log
+                .borrow_mut()
+                .push(Level::Error, message.clone());
             self.notify(Level::Error, message);
             return;
         }
@@ -521,12 +539,15 @@ impl Shell {
                 "The import was cancelled: { $photos } photos imported",
             )
             .with("photos", photos);
-            self.log.borrow_mut().push(Level::Info, message.clone());
+            self.core
+                .log
+                .borrow_mut()
+                .push(Level::Info, message.clone());
             self.notify(Level::Info, message);
             return;
         }
         if count("metadata") > 0 {
-            self.log.borrow_mut().push(
+            self.core.log.borrow_mut().push(
                 Level::Info,
                 Message::new(
                     "gui-import-metadata",
@@ -560,23 +581,23 @@ impl Shell {
         } else {
             Level::Info
         };
-        self.log.borrow_mut().push(level, message.clone());
+        self.core.log.borrow_mut().push(level, message.clone());
         if level == Level::Warning {
             self.notify(level, message);
             return;
         }
         // Information alone has no toast: an import's end has a short one.
         let text = self.text(message.clone());
-        if let Some(toasts) = self.app.handle().service(&TOASTS) {
+        if let Some(toasts) = self.core.app.handle().service(&TOASTS) {
             toasts.notify(Toast::success(&text));
         }
         self.notes.push(text.clone());
-        self.notices.push(Notice {
+        self.core.notices.push(Notice {
             level: Level::Info,
             text,
             key: message.key,
             action: None,
-            at: self.now,
+            at: self.core.now,
         });
     }
 

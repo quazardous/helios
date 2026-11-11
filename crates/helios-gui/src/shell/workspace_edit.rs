@@ -143,7 +143,7 @@ impl Shell {
         let origin = files.origin().transpose()?;
         let disk = files.load_on_disk()?.to_json();
         let text = state.to_json().to_string();
-        lock(&self.values).declare_with(
+        lock(&self.core.values).declare_with(
             STATE,
             descriptor(),
             helios_core::Value::Text(text.clone()),
@@ -157,7 +157,7 @@ impl Shell {
                 "the workspace is not reachable by agents through this window: {e}"
             ));
         }
-        self.edit = Some(Edited {
+        self.focus.edit = Some(Edited {
             files,
             config: config.into(),
             applied: text,
@@ -174,7 +174,7 @@ impl Shell {
         self.keys_loaded();
         // The workspace's own values of the settings (the Settings app's
         // `workspace` value scope), beside its files.
-        crate::config::open_workspace(self.app.handle(), Some(settings_file));
+        crate::config::open_workspace(self.core.app.handle(), Some(settings_file));
         Ok(())
     }
 
@@ -183,9 +183,10 @@ impl Shell {
     /// template set, egui-pop's `workspace` and `user` for the others.
     fn offer_workspace_keys(&mut self) {
         use helios_profile::{System, local_keys};
-        let h = self.app.handle().clone();
+        let h = self.core.app.handle().clone();
         h.offer_workspace_keys(true);
         let from_template: BTreeSet<(String, String)> = self
+            .focus
             .edit
             .as_ref()
             .and_then(|e| e.origin.as_ref())
@@ -207,7 +208,8 @@ impl Shell {
 
     /// egui-pop's workspace layer, as compared: keys, command, clause.
     fn layer_keys(&self) -> Vec<(String, String, String)> {
-        self.app
+        self.core
+            .app
             .handle()
             .export_keymap(Layer::Workspace)
             .bindings
@@ -220,7 +222,7 @@ impl Shell {
     /// loaded it.
     fn keys_loaded(&mut self) {
         let keys = self.layer_keys();
-        if let Some(edit) = &mut self.edit {
+        if let Some(edit) = &mut self.focus.edit {
             edit.keys_loaded = keys;
         }
     }
@@ -230,7 +232,7 @@ impl Shell {
     /// files (`tools.keymap`, a removal written `-<command>`).
     pub(super) fn follow_workspace_keys(&mut self) {
         use helios_profile::{System, local_keys};
-        let Some(edit) = &self.edit else {
+        let Some(edit) = &self.focus.edit else {
             return;
         };
         let now = self.layer_keys();
@@ -270,8 +272,8 @@ impl Shell {
 
     /// The open workspace as it stands, the layout shown included.
     pub fn workspace_state(&self) -> Option<State> {
-        self.edit.as_ref()?;
-        let value = lock(&self.values).get(STATE)?.value.clone();
+        self.focus.edit.as_ref()?;
+        let value = lock(&self.core.values).get(STATE)?.value.clone();
         let helios_core::Value::Text(text) = value else {
             return None;
         };
@@ -288,7 +290,7 @@ impl Shell {
 
     /// A layout with Helios's panels only.
     pub(super) fn own_panels(&self, mut layout: Layout) -> Layout {
-        let known = |p: &PanelId| self.panels.iter().any(|s| s.id == *p);
+        let known = |p: &PanelId| self.core.panels.iter().any(|s| s.id == *p);
         let foreign: Vec<PanelId> = layout
             .placed()
             .into_iter()
@@ -310,7 +312,8 @@ impl Shell {
     /// Whether the workspace's network changed since the last call: the
     /// host opens the image shown again through it.
     pub fn take_network_changed(&mut self) -> bool {
-        self.edit
+        self.focus
+            .edit
             .as_mut()
             .is_some_and(|e| std::mem::take(&mut e.network_changed))
     }
@@ -327,6 +330,7 @@ impl Shell {
         use helios_photo::camera::fields;
         use helios_template::Source;
         let kept = self
+            .focus
             .edit
             .as_mut()
             .map(|e| std::mem::take(&mut e.kept))
@@ -334,7 +338,7 @@ impl Shell {
         let Some(bundle) = self.workspace_bundle() else {
             return Ok(false);
         };
-        let Some(before) = self.viewport.borrow().graph().cloned() else {
+        let Some(before) = self.focus.viewport.borrow().graph().cloned() else {
             return Ok(false);
         };
         let e = |e: helios_core::Error| e.to_string();
@@ -388,7 +392,7 @@ impl Shell {
         let mut graph = built.graph;
         let (node, port) = built.view;
         let rebound = {
-            let mut store = lock(&self.values);
+            let mut store = lock(&self.core.values);
             let keep = helios_values::Keep {
                 all: store.last_replayed(),
                 paths: kept,
@@ -399,11 +403,11 @@ impl Shell {
             self.notes
                 .push(format!("a value does not fit the new network: {refused}"));
         }
-        let mut viewport = self.viewport.borrow_mut();
+        let mut viewport = self.focus.viewport.borrow_mut();
         viewport.set_source(graph, node, &port)?;
         // Its decisions stay; the new network's decision nodes take the
         // book's answers.
-        let mut decisions = self.decisions.borrow_mut();
+        let mut decisions = self.focus.decisions.borrow_mut();
         if let Some(replayed) = viewport.edit_graph(|graph| {
             decisions.adopt(graph);
             decisions.book().replay(graph).map(|_| ())
@@ -418,7 +422,7 @@ impl Shell {
     /// ships, then the user's library, and the panels and commands.
     pub(super) fn workspace_catalogue(&self) -> helios_template::Catalogue {
         let c = crate::templates::catalogue(&self.template_panels(), self.specs());
-        match &self.edit {
+        match &self.focus.edit {
             Some(e) => helios_template::library::with_library(c, &e.library),
             None => c,
         }
@@ -427,7 +431,7 @@ impl Shell {
     /// Reads the user's library of composites again, for the catalogue
     /// and the graph's Add menu; a file that does not read is said once.
     pub(super) fn read_library(&mut self) {
-        let Some(edit) = &mut self.edit else {
+        let Some(edit) = &mut self.focus.edit else {
             return;
         };
         let mut library = Vec::new();
@@ -439,8 +443,11 @@ impl Shell {
             }
         }
         edit.library.clone_from(&library);
-        self.workshops.borrow_mut().set_library(library.clone());
-        self.graph.borrow_mut().set_library(library);
+        self.focus
+            .workshops
+            .borrow_mut()
+            .set_library(library.clone());
+        self.focus.graph.borrow_mut().set_library(library);
         for e in unread {
             self.notes
                 .push(format!("a macro of your library does not read: {e}"));
@@ -451,10 +458,10 @@ impl Shell {
     /// applied (an edit, an undo, a redo): written to the workspace's
     /// files at once, its tools, library, layout and name put in place.
     pub(super) fn sync_workspace(&mut self) {
-        let Some(edit) = &self.edit else {
+        let Some(edit) = &self.focus.edit else {
             return;
         };
-        let value = lock(&self.values).get(STATE).map(|e| e.value.clone());
+        let value = lock(&self.core.values).get(STATE).map(|e| e.value.clone());
         let Some(helios_core::Value::Text(text)) = value else {
             return;
         };
@@ -480,7 +487,7 @@ impl Shell {
         }
         let network = before.bundle.template.network != next.bundle.template.network
             || before.bundle.composites != next.bundle.composites;
-        if let Some(edit) = &mut self.edit {
+        if let Some(edit) = &mut self.focus.edit {
             edit.applied = text;
             edit.network_changed |= network;
         }
@@ -492,7 +499,7 @@ impl Shell {
     /// Writes a state to the workspace's files (its layout being
     /// egui-pop's to save), remembered as what the files hold.
     pub(super) fn write_workspace(&mut self, state: &State) {
-        let Some(edit) = &mut self.edit else {
+        let Some(edit) = &mut self.focus.edit else {
             return;
         };
         match edit.files.save(state, false) {
@@ -516,10 +523,10 @@ impl Shell {
             self.apply_template_tools(&next.meta.name, &t.tools);
         }
         if changed(&|b| b.bundle.template.library != t.library) {
-            self.import_source = t.library.as_ref().and_then(|l| l.import.clone());
-            let mut lib = self.library.borrow_mut();
+            self.focus.import_source = t.library.as_ref().and_then(|l| l.import.clone());
+            let mut lib = self.focus.library.borrow_mut();
             lib.auto_advance = t.library.as_ref().is_some_and(|l| l.auto_advance);
-            lib.import_offered = self.import_source.is_some();
+            lib.import_offered = self.focus.import_source.is_some();
             // The images shown change with the query only: a typed
             // search stays while the other settings change.
             let query = |s: &State| {
@@ -603,7 +610,7 @@ impl Shell {
         };
         let now_text = now.to_json().to_string();
         {
-            let mut store = lock(&self.values);
+            let mut store = lock(&self.core.values);
             for (path, (descriptor, value)) in descriptors {
                 if store.get(&path).is_none() {
                     store.declare_with(&path, descriptor, value);
@@ -645,7 +652,7 @@ impl Shell {
             state_set.map_err(|e| e.to_string())?;
             moved?;
         }
-        if let Some(edit) = &mut self.edit {
+        if let Some(edit) = &mut self.focus.edit {
             edit.applied = now_text;
             edit.kept.extend(set.into_iter().map(|(p, _)| p));
         }
@@ -699,6 +706,7 @@ impl Shell {
     /// only says whether it changes anything.
     pub fn reset_workspace(&mut self, dry_run: bool, origin: &Origin) -> Result<Value, String> {
         let origin_bundle = self
+            .focus
             .edit
             .as_ref()
             .ok_or_else(no_workspace)?
@@ -725,7 +733,7 @@ impl Shell {
     pub fn workspace_parts(&self, source: Option<&str>) -> Result<Value, String> {
         let bundle = match source.filter(|s| !s.is_empty()) {
             Some(s) => {
-                let config = &self.edit.as_ref().ok_or_else(no_workspace)?.config;
+                let config = &self.focus.edit.as_ref().ok_or_else(no_workspace)?.config;
                 workspace::source(config, s)?
             }
             None => self.workspace_bundle().ok_or_else(no_workspace)?,
@@ -744,7 +752,13 @@ impl Shell {
         let name = text(args, "source")
             .filter(|s| !s.is_empty())
             .ok_or("`source` is missing")?;
-        let config = self.edit.as_ref().ok_or_else(no_workspace)?.config.clone();
+        let config = self
+            .focus
+            .edit
+            .as_ref()
+            .ok_or_else(no_workspace)?
+            .config
+            .clone();
         let from = workspace::source(&config, name)?;
         let names: Vec<String> = serde_json::from_value(args["parts"].clone()).unwrap_or_default();
         let parts = Part::list(&names)?;
@@ -848,7 +862,13 @@ impl Shell {
     /// the review form's values): the review, and the bundle written
     /// among the user's templates unless it is a dry run.
     pub fn save_workspace_as_template(&mut self, args: &Value) -> Result<Value, String> {
-        let config = self.edit.as_ref().ok_or_else(no_workspace)?.config.clone();
+        let config = self
+            .focus
+            .edit
+            .as_ref()
+            .ok_or_else(no_workspace)?
+            .config
+            .clone();
         let state = self.workspace_state().ok_or_else(no_workspace)?;
         let x = extract_of(args)?;
         let review = workspace::review(&state, &x, &self.workspace_catalogue());
@@ -861,7 +881,7 @@ impl Shell {
         let overwrite = args["overwrite"].as_bool().unwrap_or(false);
         let dir = workspace::save_template(&review, &config, overwrite)?;
         if let Err(e) =
-            crate::templates::add_texts(&self.i18n, std::slice::from_ref(&review.bundle))
+            crate::templates::add_texts(&self.core.i18n, std::slice::from_ref(&review.bundle))
         {
             self.notes.push(e);
         }
@@ -1268,6 +1288,7 @@ impl Shell {
     /// recent workspaces.
     fn sources_picker(&mut self) {
         let config = self
+            .focus
             .edit
             .as_ref()
             .map_or_else(super::config_dir, |e| e.config.clone());
@@ -1279,7 +1300,7 @@ impl Shell {
                 detail: Some(self.text(Message::new(&b.scenario_key(), &b.template.meta.scenario))),
             })
             .collect();
-        let own = self.edit.as_ref().map(|e| e.files.own.clone());
+        let own = self.focus.edit.as_ref().map(|e| e.files.own.clone());
         for dir in super::recent_workspaces() {
             if Some(Files::new(&config, &dir).own) == own {
                 continue;

@@ -69,7 +69,7 @@ fn the_palette_runs_a_helios_command() {
     let last = history.last().unwrap();
     assert_eq!(last.id, "viewport.compare");
     assert_eq!(last.origin, Origin::User);
-    let store = h.state().values.lock().unwrap();
+    let store = h.state().values().lock().unwrap();
     let on = store.get(helios_gui::viewport::COMPARE).unwrap();
     assert_eq!(on.value, Value::Bool(true));
 }
@@ -161,7 +161,7 @@ fn quick_open_selects_a_module_and_agents_go_there_too() {
     h.run();
     h.run();
     {
-        let store = h.state().values.lock().unwrap();
+        let store = h.state().values().lock().unwrap();
         let selected = store.get(helios_gui::params::SELECTION).unwrap();
         assert_eq!(selected.value, Value::Text("exposure".into()));
     }

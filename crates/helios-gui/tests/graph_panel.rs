@@ -74,12 +74,12 @@ fn node<'a>(graph: &'a Value, id: &str) -> &'a Value {
 }
 
 fn steps(h: &Harness<'static, Shell>) -> usize {
-    h.state().values.lock().unwrap().undo_steps().len()
+    h.state().values().lock().unwrap().undo_steps().len()
 }
 
 fn undo(h: &mut Harness<'static, Shell>) {
     h.state()
-        .values
+        .values()
         .lock()
         .unwrap()
         .undo(&Origin::User)
@@ -88,7 +88,7 @@ fn undo(h: &mut Harness<'static, Shell>) {
 }
 
 fn selection(h: &Harness<'static, Shell>) -> Value {
-    let store = h.state().values.lock().unwrap();
+    let store = h.state().values().lock().unwrap();
     match &store.get(helios_gui::params::SELECTION).unwrap().value {
         helios_core::Value::Text(t) => json!(t),
         other => panic!("{other:?}"),
@@ -501,7 +501,7 @@ fn the_wire_style_is_kept_between_sessions() {
             .map(|e| e.value.clone())
     };
     let wires = |h: &Harness<'static, Shell>| {
-        let store = h.state().values.lock().unwrap();
+        let store = h.state().values().lock().unwrap();
         store.get(helios_gui::graph::WIRES).map(|e| e.value.clone())
     };
     let root = temp("wires");

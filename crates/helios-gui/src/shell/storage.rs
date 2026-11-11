@@ -189,30 +189,30 @@ impl Shell {
     /// names of offline photos' volumes in the Library.
     pub fn set_storage(&mut self, link: Arc<dyn StorageLink>) {
         self.register_storage_commands(&link);
-        self.storage.link = Some(link);
+        self.core.storage.link = Some(link);
         self.refresh_volumes();
     }
 
     /// Reads the volumes again: the page's list, and the volumes the
     /// Library names (a scan ran, a disk came or went).
     pub fn refresh_volumes(&mut self) {
-        let Some(link) = self.storage.link.clone() else {
+        let Some(link) = self.core.storage.link.clone() else {
             return;
         };
         match link.volumes() {
             Ok(volumes) => {
-                self.library.borrow_mut().set_volumes(&volumes);
-                self.storage.volumes = volumes;
-                self.storage.error = None;
+                self.focus.library.borrow_mut().set_volumes(&volumes);
+                self.core.storage.volumes = volumes;
+                self.core.storage.error = None;
             }
-            Err(e) => self.storage.error = Some(e),
+            Err(e) => self.core.storage.error = Some(e),
         }
         // The import window's strategy line reads it too.
         match link.strategy() {
-            Ok(s) => self.storage.strategy = s,
-            Err(e) => self.storage.error = Some(e),
+            Ok(s) => self.core.storage.strategy = s,
+            Err(e) => self.core.storage.error = Some(e),
         }
-        if let Some(e) = &self.storage.error {
+        if let Some(e) = &self.core.storage.error {
             log::warn!("storage: {e}");
         }
     }
@@ -220,7 +220,7 @@ impl Shell {
     /// Each photo's backups read again (one read for the Library), for
     /// its badges and its `backup:` filters.
     pub fn refresh_backups(&mut self) {
-        let Some(link) = self.storage.link.clone() else {
+        let Some(link) = self.core.storage.link.clone() else {
             return;
         };
         match link.statuses() {
@@ -229,8 +229,8 @@ impl Shell {
                     .iter()
                     .map(|(id, s)| (id.clone(), crate::library::BackupMark::of(s)))
                     .collect();
-                let badges = self.storage.strategy.is_some();
-                self.library.borrow_mut().set_backups(marks, badges);
+                let badges = self.core.storage.strategy.is_some();
+                self.focus.library.borrow_mut().set_backups(marks, badges);
             }
             Err(e) => log::warn!("backups: {e}"),
         }
@@ -249,8 +249,8 @@ impl Shell {
             let Some(card) = card_of(card) else {
                 continue;
             };
-            self.storage.waiting.retain(|c| c.path != card.path);
-            self.storage.waiting.push(card);
+            self.core.storage.waiting.retain(|c| c.path != card.path);
+            self.core.storage.waiting.push(card);
         }
         self.share_waiting();
     }
@@ -258,21 +258,23 @@ impl Shell {
     /// The cards waiting for their backups, as the health check's thread
     /// reads them (kept current by the shell).
     pub fn waiting_cards(&self) -> Arc<Mutex<Vec<Card>>> {
-        self.storage.shared_waiting.clone()
+        self.core.storage.shared_waiting.clone()
     }
 
     fn share_waiting(&self) {
         let mut shared = self
+            .core
             .storage
             .shared_waiting
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
-        shared.clone_from(&self.storage.waiting);
+        shared.clone_from(&self.core.storage.waiting);
     }
 
     /// The cards still waiting for their backups.
     pub fn cards_waiting_for_backups(&self) -> Vec<String> {
-        self.storage
+        self.core
+            .storage
             .waiting
             .iter()
             .map(|c| c.label.clone())
@@ -285,10 +287,10 @@ impl Shell {
     /// has its backups"). A card taken out is no longer followed.
     pub(super) fn backup_ended(&mut self) {
         self.refresh_backups();
-        let Some(link) = self.storage.link.clone() else {
+        let Some(link) = self.core.storage.link.clone() else {
             return;
         };
-        let waiting = std::mem::take(&mut self.storage.waiting);
+        let waiting = std::mem::take(&mut self.core.storage.waiting);
         for card in waiting {
             if !card.path.is_dir() {
                 continue;
@@ -301,18 +303,19 @@ impl Shell {
                     )
                     .with("card", now.label.clone());
                     let text = self.text(message.clone());
-                    if let Some(toasts) = self.app.handle().service(&TOASTS) {
+                    if let Some(toasts) = self.core.app.handle().service(&TOASTS) {
                         toasts.notify(Toast::success(&text));
                     }
-                    self.log
+                    self.core
+                        .log
                         .borrow_mut()
                         .push(crate::dialogs::Level::Info, message);
                     self.notes.push(text);
                 }
-                Ok(_) => self.storage.waiting.push(card),
+                Ok(_) => self.core.storage.waiting.push(card),
                 Err(e) => {
                     log::warn!("{}: {e}", card.label);
-                    self.storage.waiting.push(card);
+                    self.core.storage.waiting.push(card);
                 }
             }
         }
@@ -325,14 +328,14 @@ impl Shell {
     pub fn import_backup_line(&self) -> (String, bool) {
         backup_line(
             &|m| self.text(m),
-            self.storage.strategy.as_ref(),
-            &self.storage.volumes,
+            self.core.storage.strategy.as_ref(),
+            &self.core.storage.volumes,
         )
     }
 
     /// Whether the Settings app is open on its Storage or Backup scope.
     pub fn storage_page_open(&self) -> bool {
-        let app = self.app.handle();
+        let app = self.core.app.handle();
         app.service(&egui_pop::api::admin::ADMIN).is_some_and(|a| {
             a.is_open() && matches!(a.shown().0.as_deref(), Some("storage" | "backup"))
         })
@@ -340,12 +343,12 @@ impl Shell {
 
     /// The library's backup strategy, as last read.
     pub fn storage_strategy(&self) -> Option<&Strategy> {
-        self.storage.strategy.as_ref()
+        self.core.storage.strategy.as_ref()
     }
 
     /// The volumes known, online ones first.
     pub fn storage_volumes(&self) -> &[Volume] {
-        &self.storage.volumes
+        &self.core.storage.volumes
     }
 
     /// `library.storage`: opens the Settings app at Storage › Volumes,

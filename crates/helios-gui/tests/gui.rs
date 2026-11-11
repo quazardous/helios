@@ -640,7 +640,7 @@ fn the_shell_runs_the_value_commands_with_their_origin() {
     use helios_values::Descriptor;
     let mut shell = Shell::new(helios_panels(), None);
     shell
-        .values
+        .values()
         .lock()
         .unwrap()
         .declare("view/zoom", Descriptor::float("zoom", 0.1, 8.0, 1.0));

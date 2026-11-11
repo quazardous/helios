@@ -28,7 +28,7 @@ fn harness() -> egui_kittest::Harness<'static, Shell> {
     g.connect(src, "image", exp, "input").unwrap();
     let shell = Shell::new(helios_panels(), None);
     // The node's values only: no viewport rendering in the background.
-    helios_values::bind_node(&mut shell.values.lock().unwrap(), &g, exp).unwrap();
+    helios_values::bind_node(&mut shell.values().lock().unwrap(), &g, exp).unwrap();
     let mut h = headless::harness(shell, vec2(1280.0, 800.0));
     h.state_mut()
         .run("helios.params.focus", json!(null), Origin::User)
@@ -39,7 +39,7 @@ fn harness() -> egui_kittest::Harness<'static, Shell> {
 
 fn ev(h: &egui_kittest::Harness<'_, Shell>) -> f64 {
     h.state()
-        .values
+        .values()
         .lock()
         .unwrap()
         .get(EV)
@@ -154,7 +154,7 @@ fn a_drag_is_one_gesture_that_keeps_agents_off() {
     press(&h, from + vec2(50.0, 0.0), false);
     h.run();
     {
-        let store = h.state().values.lock().unwrap();
+        let store = h.state().values().lock().unwrap();
         let steps: Vec<&str> = store
             .undo_steps()
             .iter()
@@ -176,7 +176,7 @@ fn a_drag_is_one_gesture_that_keeps_agents_off() {
     assert_eq!(changes.len(), 1, "{changes:?}");
     // One undo puts the whole drag back.
     h.state()
-        .values
+        .values()
         .lock()
         .unwrap()
         .undo(&Origin::User)
@@ -204,7 +204,7 @@ fn escape_gives_a_drag_up_without_a_trace() {
     press(&h, from + vec2(30.0, 0.0), false);
     h.run();
     assert_eq!(ev(&h), 0.0);
-    assert!(h.state().values.lock().unwrap().undo_steps().is_empty());
+    assert!(h.state().values().lock().unwrap().undo_steps().is_empty());
 }
 
 /// On Helios's default pointer profile (Photoshop's), the wheel scrolls
@@ -287,7 +287,7 @@ fn a_typed_expression_sets_the_value() {
     assert!((ev(&h) - 2.5).abs() < 1e-9, "{}", ev(&h));
     // The typed value is an undo step of its own.
     h.state()
-        .values
+        .values()
         .lock()
         .unwrap()
         .undo(&Origin::User)
@@ -429,7 +429,7 @@ fn a_parameter_s_context_menu_runs_its_commands_on_its_path() {
     h.run();
     let default = h
         .state()
-        .values
+        .values()
         .lock()
         .unwrap()
         .get(EV)
@@ -455,7 +455,7 @@ fn a_path_s_points_fold_into_a_summary_that_opens() {
         )
         .unwrap();
     let shell = Shell::new(helios_panels(), None);
-    helios_values::bind_node(&mut shell.values.lock().unwrap(), &g, path).unwrap();
+    helios_values::bind_node(&mut shell.values().lock().unwrap(), &g, path).unwrap();
     let mut h = headless::harness(shell, vec2(1280.0, 800.0));
     h.state_mut()
         .run("helios.params.focus", json!(null), Origin::User)
@@ -497,7 +497,7 @@ fn a_choice_s_list_opens_and_picks() {
         )
         .unwrap();
     let shell = Shell::new(helios_panels(), None);
-    helios_values::bind_node(&mut shell.values.lock().unwrap(), &g, ramp).unwrap();
+    helios_values::bind_node(&mut shell.values().lock().unwrap(), &g, ramp).unwrap();
     let mut h = headless::harness(shell, vec2(1280.0, 800.0));
     h.state_mut()
         .run("helios.params.focus", json!(null), Origin::User)
@@ -514,7 +514,7 @@ fn a_choice_s_list_opens_and_picks() {
     h.run();
     let profile = h
         .state()
-        .values
+        .values()
         .lock()
         .unwrap()
         .get("node/ramp/profile")

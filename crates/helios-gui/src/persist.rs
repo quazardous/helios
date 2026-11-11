@@ -324,12 +324,12 @@ impl<S: Store> Persist<S> {
         shell.set_view_source(graph, node, port)?;
         let snapshots = self.read_snapshots(shell, image, &unedited);
         {
-            let mut book = crate::edit_snapshots::lock(&shell.snapshots);
+            let mut book = crate::edit_snapshots::lock(shell.snapshots());
             book.load(image, snapshots);
             book.set_saved(saved_params(&modules));
         }
         let committed = {
-            let mut store = shell.values.lock().expect("value store lock");
+            let mut store = shell.values().lock().expect("value store lock");
             // The labels and locks it was saved with; another image's go.
             let marks = head.as_ref().map_or(&Value::Null, |h| &h.edit["marks"]);
             crate::mask_tree::restore_marks(&mut store, marks);
@@ -409,13 +409,13 @@ impl<S: Store> Persist<S> {
         };
         let image = e.session.image();
         let (step, committed, settled) = {
-            let store = shell.values.lock().expect("value store lock");
+            let store = shell.values().lock().expect("value store lock");
             let settled =
                 !e.unsaved && store.open_gesture().is_none() && store.committed() == e.committed;
             (head_step(&store), store.committed(), settled)
         };
         let (pinned, write) = {
-            let mut book = crate::edit_snapshots::lock(&shell.snapshots);
+            let mut book = crate::edit_snapshots::lock(shell.snapshots());
             if book.image() != Some(image) {
                 return;
             }
@@ -446,7 +446,7 @@ impl<S: Store> Persist<S> {
         };
         if let Some(graph) = shell.viewport().graph() {
             e.modules = modules_of(graph);
-            crate::edit_snapshots::lock(&shell.snapshots).set_saved(saved_params(&e.modules));
+            crate::edit_snapshots::lock(shell.snapshots()).set_saved(saved_params(&e.modules));
             // Saved at the next frame, under the step that changed it (an
             // edit the same as the last one saved is not saved again).
             e.committed = u64::MAX;
@@ -532,7 +532,7 @@ impl<S: Store> Persist<S> {
         };
         let at = now.max(0.0) as u64;
         let (committed, label, origin, gesture, current) = {
-            let store = shell.values.lock().expect("value store lock");
+            let store = shell.values().lock().expect("value store lock");
             let mut modules: BTreeMap<String, (String, Params)> = BTreeMap::new();
             for (path, entry) in store.list("node/") {
                 let Some((node, param)) = path

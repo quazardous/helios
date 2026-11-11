@@ -155,15 +155,15 @@ impl Shell {
     /// tests their own.
     pub fn set_health(&mut self, mut runner: Runner) {
         runner.report_to(self.jobs());
-        let ctx = self.health.ctx.clone();
+        let ctx = self.core.health.ctx.clone();
         runner.on_done(move || {
             if let Some(ctx) = ctx.lock().unwrap_or_else(PoisonError::into_inner).as_ref() {
                 ctx.request_repaint();
             }
         });
-        self.health.runner = Some(runner);
+        self.core.health.runner = Some(runner);
         if !self.has_command(FINDINGS) {
-            let answer = self.health.answer.clone();
+            let answer = self.core.health.answer.clone();
             let registered = self.register(
                 helios_shell::commands::CommandSpec::new(
                     FINDINGS,
@@ -183,29 +183,30 @@ impl Shell {
     /// Makes `health.findings`'s answer again, and has the Settings app
     /// read it.
     fn health_answer(&mut self) {
-        let Some(runner) = self.health.runner.as_ref() else {
+        let Some(runner) = self.core.health.runner.as_ref() else {
             return;
         };
         let t = |m: Message| self.text(m);
         let answer = findings_answer(&t, &runner.findings(), runner.running());
         *self
+            .core
             .health
             .answer
             .lock()
             .unwrap_or_else(PoisonError::into_inner) = answer;
-        if let Some(admin) = self.app.handle().service(&egui_pop::api::admin::ADMIN) {
+        if let Some(admin) = self.core.app.handle().service(&egui_pop::api::admin::ADMIN) {
             admin.refresh();
         }
     }
 
     /// The health checks' runner, when set.
     pub fn health(&self) -> Option<&Runner> {
-        self.health.runner.as_ref()
+        self.core.health.runner.as_ref()
     }
 
     /// Whether the Settings app is open on its Health scope.
     pub fn health_page_open(&self) -> bool {
-        let app = self.app.handle();
+        let app = self.core.app.handle();
         app.service(&egui_pop::api::admin::ADMIN)
             .is_some_and(|a| a.is_open() && a.shown().0.as_deref() == Some("health"))
     }
@@ -221,14 +222,18 @@ impl Shell {
 
     /// `health.checkNow`: whether a run started (none while one runs).
     pub(super) fn health_check_now(&mut self) -> bool {
-        self.health.runner.as_mut().is_some_and(Runner::run_now)
+        self.core
+            .health
+            .runner
+            .as_mut()
+            .is_some_and(Runner::run_now)
     }
 
     /// `health.fix`: the finding's fix, then the checks again.
     pub(super) fn health_fix(&mut self, args: &Value) -> Result<Value, String> {
         let id = args["id"].as_str().ok_or("`id` is missing")?;
         let fix = {
-            let runner = self.health.runner.as_ref().ok_or("no health check")?;
+            let runner = self.core.health.runner.as_ref().ok_or("no health check")?;
             let findings = runner.findings();
             let f = findings
                 .shown()
@@ -240,9 +245,9 @@ impl Shell {
             f.fix.ok_or_else(|| format!("`{id}` has no fix"))?
         };
         let command = CommandId::new(&fix.command).map_err(|e| format!("{}: {e}", fix.command))?;
-        self.app.handle().run(command, fix.args.clone());
+        self.core.app.handle().run(command, fix.args.clone());
         if let Ok(again) = CommandId::new(CHECK_NOW) {
-            self.app.handle().run(again, Value::Null);
+            self.core.app.handle().run(again, Value::Null);
         }
         Ok(json!({ "id": id, "command": fix.command }))
     }
@@ -251,10 +256,10 @@ impl Shell {
     pub(super) fn health_ignore(&mut self, args: &Value) -> Result<Value, String> {
         let id = args["id"].as_str().ok_or("`id` is missing")?;
         let on = args["on"].as_bool().unwrap_or(true);
-        let runner = self.health.runner.as_ref().ok_or("no health check")?;
+        let runner = self.core.health.runner.as_ref().ok_or("no health check")?;
         runner.findings().ignored.set(id, on)?;
         let worst = runner.findings().worst();
-        self.status.borrow_mut().health = worst;
+        self.core.status.borrow_mut().health = worst;
         self.health_answer();
         Ok(json!({ "id": id, "ignored": on }))
     }
@@ -264,6 +269,7 @@ impl Shell {
     pub(super) fn health_tick(&mut self, ctx: &Egui) {
         {
             let mut held = self
+                .core
                 .health
                 .ctx
                 .lock()
@@ -272,27 +278,28 @@ impl Shell {
                 *held = Some(ctx.clone());
             }
         }
-        if !self.health.listening && self.watching_volumes() {
-            let (volumes, ctx) = (self.health.volumes.clone(), ctx.clone());
+        if !self.core.health.listening && self.watching_volumes() {
+            let (volumes, ctx) = (self.core.health.volumes.clone(), ctx.clone());
             self.on_volumes_changed(move || {
                 volumes.fetch_add(1, Ordering::SeqCst);
                 ctx.request_repaint();
             });
-            self.health.listening = true;
+            self.core.health.listening = true;
         }
         let generation = self
+            .core
             .health
             .listening
-            .then(|| self.health.volumes.load(Ordering::SeqCst));
-        let Some(runner) = self.health.runner.as_mut() else {
+            .then(|| self.core.health.volumes.load(Ordering::SeqCst));
+        let Some(runner) = self.core.health.runner.as_mut() else {
             return;
         };
         runner.tick(Instant::now(), generation);
         let worst = runner.findings().worst();
         let seen = (runner.runs(), runner.running());
-        self.status.borrow_mut().health = worst;
-        if seen != self.health.seen {
-            self.health.seen = seen;
+        self.core.status.borrow_mut().health = worst;
+        if seen != self.core.health.seen {
+            self.core.health.seen = seen;
             self.health_answer();
         }
     }

@@ -70,12 +70,12 @@ impl Shell {
     /// None without an image open.
     pub(super) fn image_values(&self, state: &State) -> Result<Values, String> {
         let mut values = Values::new();
-        if self.viewport.borrow().graph().is_none() {
+        if self.focus.viewport.borrow().graph().is_none() {
             return Ok(values);
         }
         let built = state.bundle.build(&self.workspace_catalogue())?;
         let graph = &built.graph;
-        let store = lock(&self.values);
+        let store = lock(&self.core.values);
         for (path, entry) in store.list("node/") {
             let Some((node, param)) = path
                 .strip_prefix("node/")
@@ -113,7 +113,8 @@ impl Shell {
         if let Some(n) = args["node"].as_str().filter(|s| !s.is_empty()) {
             return Ok(n.to_string());
         }
-        crate::modules::selected(&lock(&self.values)).ok_or_else(|| "no macro is selected".into())
+        crate::modules::selected(&lock(&self.core.values))
+            .ok_or_else(|| "no macro is selected".into())
     }
 
     /// Runs one of [`COMMANDS`].
@@ -132,7 +133,7 @@ impl Shell {
                 };
                 if nodes.is_empty() {
                     // The nodes selected in the graph, else the one.
-                    let store = lock(&self.values);
+                    let store = lock(&self.core.values);
                     nodes = selected_nodes(&store);
                     if nodes.is_empty() {
                         nodes.extend(crate::modules::selected(&store));
@@ -270,6 +271,7 @@ impl Shell {
     fn publish_macro(&mut self, args: &Value, origin: &Origin) -> Result<Value, String> {
         let state = self.workspace_state().ok_or("no workspace is open")?;
         let config = self
+            .focus
             .edit
             .as_ref()
             .map(|e| e.config.clone())
@@ -450,7 +452,7 @@ impl Shell {
 
     /// Selects one node (`view/graph/selection` and [`SELECTED`]).
     pub(super) fn select_node(&self, node: &str) {
-        let mut store = lock(&self.values);
+        let mut store = lock(&self.core.values);
         for (path, value) in [
             (crate::params::SELECTION, node.to_string()),
             (SELECTED, json!([node]).to_string()),
@@ -519,8 +521,12 @@ impl Shell {
             .share(0.8);
         let mut editor =
             crate::macro_interface::Editor::new(interface.inner, interface.exposed, check);
-        let dialogs = self.dialogs.get().ok_or("no dialogs to show this in")?;
-        dialogs.open_custom(self.app.handle(), spec, move |ui, _, pass| {
+        let dialogs = self
+            .core
+            .dialogs
+            .get()
+            .ok_or("no dialogs to show this in")?;
+        dialogs.open_custom(self.core.app.handle(), spec, move |ui, _, pass| {
             editor.ui(ui, pass);
         })?;
         Ok(())

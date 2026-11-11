@@ -390,8 +390,8 @@ impl Shell {
     /// and its toasts (the desktop gives `helios_storage::system()`; tests a list
     /// of their own).
     pub fn watch_cards(&mut self, volumes: Arc<dyn Volumes>) {
-        let ctx = self.import_window.ctx.clone();
-        self.import_window.watch = Some(Watch::start(volumes, move || {
+        let ctx = self.focus.import_window.ctx.clone();
+        self.focus.import_window.watch = Some(Watch::start(volumes, move || {
             if let Some(ctx) = ctx.lock().unwrap_or_else(PoisonError::into_inner).as_ref() {
                 ctx.request_repaint();
             }
@@ -402,74 +402,75 @@ impl Shell {
     /// once [`Shell::watch_cards`] watches them: the background volume
     /// scan's cue.
     pub fn on_volumes_changed(&self, f: impl Fn() + Send + 'static) {
-        if let Some(watch) = &self.import_window.watch {
+        if let Some(watch) = &self.focus.import_window.watch {
             watch.on_volumes(f);
         }
     }
 
     /// Whether the volumes are watched ([`Shell::watch_cards`]).
     pub(super) fn watching_volumes(&self) -> bool {
-        self.import_window.watch.is_some()
+        self.focus.import_window.watch.is_some()
     }
 
     /// Keeps the import window's recent folders, favourites and last
     /// source in `file` (JSON), read now.
     pub fn remember_import_sources_in(&mut self, file: PathBuf) {
-        self.import_window.memory = std::fs::read_to_string(&file)
+        self.focus.import_window.memory = std::fs::read_to_string(&file)
             .ok()
             .and_then(|t| serde_json::from_str(&t).ok())
             .unwrap_or_default();
-        self.import_window.file = Some(file);
+        self.focus.import_window.file = Some(file);
     }
 
     /// Whether the import window is open.
     pub fn import_window_open(&self) -> bool {
-        self.import_window.open
+        self.focus.import_window.open
     }
 
     /// The import window's cards, as last polled.
     pub fn import_cards(&self) -> Vec<Card> {
-        self.import_window.cards.clone()
+        self.focus.import_window.cards.clone()
     }
 
     /// What the vault holds (size, partial hash), for the import window's
     /// "in your Library" prefilter; called once per source read, off the
     /// interface thread.
     pub fn set_import_known(&mut self, known: Known) {
-        self.import_window.known = Some(known);
+        self.focus.import_window.known = Some(known);
     }
 
     /// The image map's recorder for what the import window's sources
     /// list (`docs/design/image-map.md`, section 4); called once per
     /// source read, off the interface thread.
     pub fn set_import_map(&mut self, map: MapRecorder) {
-        self.import_window.map = Some(map);
+        self.focus.import_window.map = Some(map);
     }
 
     /// The image map's record of what Helios saw on every volume: the
     /// import window lists an offline folder's photos from it.
     pub fn set_import_recorded(&mut self, recorded: Recorded) {
-        self.import_window.recorded = Some(recorded);
+        self.focus.import_window.recorded = Some(recorded);
     }
 
     /// The library's thumbnail cache: the import window shows the photos
     /// it has thumbnails of (an offline volume's) from it.
     pub fn set_import_thumbnail_cache(&mut self, cache: Arc<helios_thumbs::ThumbCache>) {
-        self.import_window.thumb_cache = Some(cache);
-        self.import_window.thumbs = None;
-        self.import_window.browser = None;
+        self.focus.import_window.thumb_cache = Some(cache);
+        self.focus.import_window.thumbs = None;
+        self.focus.import_window.browser = None;
     }
 
     /// The import window's file browser, once drawn: its mode, entries,
     /// selection and focus.
     pub fn import_browser(&self) -> Option<&FileBrowser> {
-        self.import_window.browser.as_ref()
+        self.focus.import_window.browser.as_ref()
     }
 
     /// Whether the import window's thumbnail of the photo at `path` (a
     /// pair's raw) is made.
     pub fn import_thumbnail_ready(&self, path: &Path) -> bool {
-        self.import_window
+        self.focus
+            .import_window
             .thumbs
             .as_ref()
             .is_some_and(|t| t.ready(path))
@@ -478,7 +479,8 @@ impl Shell {
     /// What the import window's scans' glances did so far: files read,
     /// answered from the glance cache, and the most read at once.
     pub fn import_glances(&self) -> crate::import_scan::Glances {
-        self.import_window
+        self.focus
+            .import_window
             .scans
             .iter()
             .map(|(_, scan, _)| scan.glances())
@@ -488,7 +490,8 @@ impl Shell {
     /// The photos the import window's browser last asked thumbnails of as
     /// visible.
     pub fn import_thumbnails_on_screen(&self) -> Vec<PathBuf> {
-        self.import_window
+        self.focus
+            .import_window
             .thumbs
             .as_ref()
             .map(|t| t.on_screen())
@@ -497,32 +500,33 @@ impl Shell {
 
     /// The import window's file browser, to drive it.
     pub fn import_browser_mut(&mut self) -> Option<&mut FileBrowser> {
-        self.import_window.browser.as_mut()
+        self.focus.import_window.browser.as_mut()
     }
 
     /// The image map's job: the import window, the Library grid and
     /// Compare tell it the files in view.
     pub fn set_map_feed(&mut self, feed: helios_library::map_job::Feed) {
-        self.library.borrow_mut().set_map_feed(feed.clone());
-        self.import_window.map_feed = Some(feed);
+        self.focus.library.borrow_mut().set_map_feed(feed.clone());
+        self.focus.import_window.map_feed = Some(feed);
     }
 
     /// The import window's counts: photos shown, new, their size, and the
     /// ones an Import takes.
     pub fn import_counts(&self) -> Counts {
-        self.import_window.contents.counts()
+        self.focus.import_window.contents.counts()
     }
 
     /// Whether every source ticked in the import window is read through.
     pub fn import_read(&self) -> bool {
-        let w = &self.import_window;
+        let w = &self.focus.import_window;
         w.scans.len() == w.ticked.len() && w.scans.iter().all(|(_, _, done)| *done)
     }
 
     /// The import window's cells: name, day, probably in the Library, a
     /// RAW+JPEG pair, ticked.
     pub fn import_cells(&self) -> Vec<(String, Option<chrono::NaiveDate>, bool, bool, bool)> {
-        self.import_window
+        self.focus
+            .import_window
             .contents
             .cells
             .iter()
@@ -532,7 +536,7 @@ impl Shell {
 
     /// The sources ticked in the import window.
     pub fn import_ticked(&self) -> Vec<PathBuf> {
-        self.import_window.ticked.clone()
+        self.focus.import_window.ticked.clone()
     }
 
     /// `library.importWindow`: opens the import window, on `source` when
@@ -542,7 +546,7 @@ impl Shell {
     pub(super) fn open_import_window(&mut self, args: &Value) {
         // The strategy line reads the strategy and its disks as they are.
         self.refresh_volumes();
-        let w = &mut self.import_window;
+        let w = &mut self.focus.import_window;
         w.follow_cards();
         w.clear_contents();
         w.open = true;
@@ -617,6 +621,7 @@ impl Shell {
     pub(super) fn import_window_frame(&mut self, ctx: &Egui) {
         {
             let mut held = self
+                .focus
                 .import_window
                 .ctx
                 .lock()
@@ -625,21 +630,22 @@ impl Shell {
                 *held = Some(ctx.clone());
             }
         }
-        self.import_window.follow_cards();
+        self.focus.import_window.follow_cards();
         let inserted = self
+            .focus
             .import_window
             .watch
             .as_ref()
             .map(Watch::take_inserted)
             .unwrap_or_default();
-        if !self.import_window.open {
+        if !self.focus.import_window.open {
             for card in inserted {
                 self.card_toast(&card);
             }
         }
         self.receive_chosen_folder();
-        if self.import_window.open {
-            self.import_window.follow_scans();
+        if self.focus.import_window.open {
+            self.focus.import_window.follow_scans();
             self.import_window_ui(ctx);
         }
     }
@@ -651,7 +657,7 @@ impl Shell {
                 .with("card", card.label.clone()),
         );
         let action = self.text(Message::new("gui-import-window-open", "Import photos…"));
-        if let Some(toasts) = self.app.handle().service(&TOASTS) {
+        if let Some(toasts) = self.core.app.handle().service(&TOASTS) {
             toasts.notify(Toast::info(&text).action(
                 &action,
                 CommandId::from_static(COMMAND),
@@ -664,24 +670,31 @@ impl Shell {
     /// The folder the chooser gave: a recent source, ticked.
     fn receive_chosen_folder(&mut self) {
         if let Some(result) = self
+            .focus
             .import_window
             .choosing_into
             .as_ref()
             .and_then(Pending::take)
         {
-            self.import_window.choosing_into = None;
+            self.focus.import_window.choosing_into = None;
             if let Ok(files::Chosen::Paths(paths)) = files::chosen(&result)
                 && let Some(p) = paths.into_iter().next()
             {
-                self.import_window.choices.into = Some(p);
+                self.focus.import_window.choices.into = Some(p);
             }
         }
-        let Some(result) = self.import_window.choosing.as_ref().and_then(Pending::take) else {
+        let Some(result) = self
+            .focus
+            .import_window
+            .choosing
+            .as_ref()
+            .and_then(Pending::take)
+        else {
             return;
         };
-        self.import_window.choosing = None;
+        self.focus.import_window.choosing = None;
         if let Ok(files::Chosen::Paths(paths)) = files::chosen(&result) {
-            let w = &mut self.import_window;
+            let w = &mut self.focus.import_window;
             for p in paths {
                 w.memory.recent.retain(|r| r != &p);
                 w.memory.recent.insert(0, p.clone());
@@ -730,10 +743,10 @@ impl Shell {
             cancel: t(Message::new("gui-import-window-cancel", "Cancel")),
             import_count: t(
                 Message::new("gui-import-window-import", "Import { $count }")
-                    .with("count", self.import_window.contents.counts().selected),
+                    .with("count", self.focus.import_window.contents.counts().selected),
             ),
             totals: {
-                let counts = self.import_window.contents.counts();
+                let counts = self.focus.import_window.contents.counts();
                 t(
                     Message::new("gui-import-window-totals", "{ $photos } photos, { $size }")
                         .with("photos", counts.selected)
@@ -764,7 +777,7 @@ impl Shell {
                 "gui-import-window-none-ticked",
                 "Tick the photos to import",
             )),
-            no_library: self.no_library.clone().map(t),
+            no_library: self.core.no_library.clone().map(t),
             backup: backup.0,
             no_backup: backup.1,
             storage: t(Message::new("gui-import-backup-storage", "Storage…")),
@@ -773,7 +786,8 @@ impl Shell {
 
     /// A size, as the Library says it.
     fn import_size_text(&self, bytes: u64) -> String {
-        self.import_window
+        self.focus
+            .import_window
             .ctx
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -786,7 +800,7 @@ impl Shell {
 
     fn grid_words(&self) -> GridWords {
         let t = |m: Message| self.text(m);
-        let counts = self.import_window.contents.counts();
+        let counts = self.focus.import_window.contents.counts();
         let size = self.import_size_text(counts.bytes);
         GridWords {
             counts: t(Message::new(
@@ -820,12 +834,12 @@ impl Shell {
     }
 
     fn import_window_ui(&mut self, ctx: &Egui) {
-        let sample = self.import_window.sample();
+        let sample = self.focus.import_window.sample();
         let words = self.import_words(sample.as_ref());
         let mut open = true;
         let mut event = None;
-        let app = self.app.handle().clone();
-        let w = &mut self.import_window;
+        let app = self.core.app.handle().clone();
+        let w = &mut self.focus.import_window;
         let main = ctx.content_rect().size();
         let max = main - egui::vec2(32.0, 32.0);
         egui::Window::new(&words.title)
@@ -961,24 +975,26 @@ impl Shell {
         match event {
             None => {}
             Some(Event::Cancel) => {
-                self.import_window.open = false;
-                self.import_window.clear_contents();
+                self.focus.import_window.open = false;
+                self.focus.import_window.clear_contents();
             }
             Some(Event::Choose) => {
-                if let Some(f) = self.app.handle().service(&FILES) {
+                if let Some(f) = self.core.app.handle().service(&FILES) {
                     let request = FileRequest::folder(&words.choose).purpose("helios.import");
-                    self.import_window.choosing = Some(f.choose(self.app.handle(), request));
+                    self.focus.import_window.choosing =
+                        Some(f.choose(self.core.app.handle(), request));
                 }
             }
             Some(Event::ChooseInto) => {
-                if let Some(f) = self.app.handle().service(&FILES) {
+                if let Some(f) = self.core.app.handle().service(&FILES) {
                     let request =
                         FileRequest::folder(&words.choices.change).purpose("helios.import.into");
-                    self.import_window.choosing_into = Some(f.choose(self.app.handle(), request));
+                    self.focus.import_window.choosing_into =
+                        Some(f.choose(self.core.app.handle(), request));
                 }
             }
             Some(Event::Favourite(path, on)) => {
-                let w = &mut self.import_window;
+                let w = &mut self.focus.import_window;
                 w.memory.favourites.retain(|p| p != &path);
                 if on {
                     w.memory.favourites.push(path);
@@ -1016,29 +1032,30 @@ impl Shell {
             self.warn(e);
             return;
         }
-        let copy = self.import_window.copies();
+        let copy = self.focus.import_window.copies();
         let any_card = self
+            .focus
             .import_window
             .ticked
             .iter()
-            .any(|p| self.import_window.is_card(p));
+            .any(|p| self.focus.import_window.is_card(p));
         if !any_card {
-            self.import_window.choices.copy_folders = copy;
+            self.focus.import_window.choices.copy_folders = copy;
         }
-        self.import_window.save_choices();
-        let choices = self.import_window.choices.clone();
-        let ticked = std::mem::take(&mut self.import_window.ticked);
+        self.focus.import_window.save_choices();
+        let choices = self.focus.import_window.choices.clone();
+        let ticked = std::mem::take(&mut self.focus.import_window.ticked);
         for path in &ticked {
-            let files = self.import_window.contents.selected_files(path);
+            let files = self.focus.import_window.contents.selected_files(path);
             if files.is_empty() {
                 continue;
             }
-            let card = self.import_window.is_card(path);
+            let card = self.focus.import_window.is_card(path);
             let args = choices.args(&files, copy);
             if let Err(e) = self.import_files(&args, &Origin::User) {
                 self.warn(e);
             }
-            let w = &mut self.import_window;
+            let w = &mut self.focus.import_window;
             if !card {
                 w.memory.recent.retain(|r| r != path);
                 w.memory.recent.insert(0, path.clone());
@@ -1046,9 +1063,9 @@ impl Shell {
             }
             w.memory.last = Some(path.clone());
         }
-        self.import_window.save();
-        self.import_window.open = false;
-        self.import_window.clear_contents();
+        self.focus.import_window.save();
+        self.focus.import_window.open = false;
+        self.focus.import_window.clear_contents();
     }
 }
 

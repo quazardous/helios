@@ -60,7 +60,7 @@ fn until(h: &mut Harness<'_, Shell>, done: impl Fn(&Shell) -> bool) {
 }
 
 fn bypassed(s: &Shell) -> bool {
-    s.values.lock().unwrap().get(BYPASS).unwrap().value == Value::Bool(true)
+    s.values().lock().unwrap().get(BYPASS).unwrap().value == Value::Bool(true)
 }
 
 fn graph_bypassed(s: &Shell) -> bool {
@@ -78,7 +78,7 @@ fn centre(s: &Shell) -> f32 {
 
 fn select(h: &mut Harness<'_, Shell>, node: &str) {
     h.state()
-        .values
+        .values()
         .lock()
         .unwrap()
         .set(helios_values::Set::new(
@@ -114,7 +114,7 @@ fn node_bypass_toggles_the_selected_module_as_one_undo_step() {
     // Its parameters stay.
     let ev = h
         .state()
-        .values
+        .values()
         .lock()
         .unwrap()
         .get("node/exp/exposure")
@@ -125,7 +125,7 @@ fn node_bypass_toggles_the_selected_module_as_one_undo_step() {
     // One undo step, which brings it back.
     let label = h
         .state()
-        .values
+        .values()
         .lock()
         .unwrap()
         .undo_steps()
@@ -133,7 +133,7 @@ fn node_bypass_toggles_the_selected_module_as_one_undo_step() {
         .map(|s| s.label.clone());
     assert_eq!(label.as_deref(), Some("bypass exp"));
     h.state()
-        .values
+        .values()
         .lock()
         .unwrap()
         .undo(&Origin::User)
@@ -161,7 +161,7 @@ fn node_bypass_toggles_the_selected_module_as_one_undo_step() {
     until(&mut h, |s| !graph_bypassed(s));
     let last = h
         .state()
-        .values
+        .values()
         .lock()
         .unwrap()
         .undo_steps()
@@ -220,7 +220,7 @@ fn the_modules_panel_lists_the_modules_and_toggles_a_bypass() {
     let rows = {
         let s = h.state();
         let v = s.viewport();
-        modules::rows(v.graph().unwrap(), &s.values.lock().unwrap())
+        modules::rows(v.graph().unwrap(), &s.values().lock().unwrap())
     };
     assert_eq!(rows.len(), 1, "{rows:?}");
     assert_eq!(rows[0].node, "exp");
@@ -232,7 +232,7 @@ fn the_modules_panel_lists_the_modules_and_toggles_a_bypass() {
     h.run();
     assert_eq!(
         h.state()
-            .values
+            .values()
             .lock()
             .unwrap()
             .get(SELECTION)

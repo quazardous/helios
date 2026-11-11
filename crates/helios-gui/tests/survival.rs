@@ -61,12 +61,12 @@ fn set(shell: &Shell, ev: f64, gesture: Option<helios_values::GestureId>) {
     if let Some(g) = gesture {
         set = set.gesture(g);
     }
-    shell.values.lock().unwrap().set(set).unwrap();
+    shell.values().lock().unwrap().set(set).unwrap();
 }
 
 fn shown(shell: &Shell) -> f64 {
     shell
-        .values
+        .values()
         .lock()
         .unwrap()
         .get(EV)
@@ -205,7 +205,7 @@ fn survival_child() {
     set(&shell, 1.0, None);
     frame(&mut shell, &mut persist, 101.0);
     let drag = shell
-        .values
+        .values()
         .lock()
         .unwrap()
         .begin_gesture(Origin::User, "drag exposure");
@@ -225,9 +225,9 @@ fn survival_child() {
         return;
     }
     set(&shell, 1.9, Some(drag));
-    shell.values.lock().unwrap().end(drag);
+    shell.values().lock().unwrap().end(drag);
     frame(&mut shell, &mut persist, 104.0);
-    shell.values.lock().unwrap().undo(&Origin::User).unwrap();
+    shell.values().lock().unwrap().undo(&Origin::User).unwrap();
     frame(&mut shell, &mut persist, 105.0);
     shell.library_mut().toggle_reject().unwrap();
     frame(&mut shell, &mut persist, 106.0);

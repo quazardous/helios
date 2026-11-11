@@ -76,7 +76,7 @@ fn with(kind: &str) -> Harness<'static, Shell> {
 
 fn f(h: &Harness<'_, Shell>, path: &str) -> f64 {
     h.state()
-        .values
+        .values()
         .lock()
         .unwrap()
         .get(path)
@@ -87,7 +87,7 @@ fn f(h: &Harness<'_, Shell>, path: &str) -> f64 {
 }
 
 fn steps(h: &Harness<'_, Shell>) -> Vec<String> {
-    let store = h.state().values.lock().unwrap();
+    let store = h.state().values().lock().unwrap();
     store.undo_steps().iter().map(|s| s.label.clone()).collect()
 }
 
@@ -174,14 +174,14 @@ fn wheel(h: &mut Harness<'_, Shell>, at: Pos2, notches: f32) {
     });
     for _ in 0..120 {
         h.step();
-        if steps(h).len() > before && h.state().values.lock().unwrap().open_gesture().is_none() {
+        if steps(h).len() > before && h.state().values().lock().unwrap().open_gesture().is_none() {
             break;
         }
     }
 }
 
 fn no_gesture_left(h: &Harness<'_, Shell>) {
-    assert!(h.state().values.lock().unwrap().open_gesture().is_none());
+    assert!(h.state().values().lock().unwrap().open_gesture().is_none());
 }
 
 /// Moves the pointer off the shapes, so the next hover starts clean.

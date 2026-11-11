@@ -85,7 +85,7 @@ fn run(h: &mut Harness<'_, Shell>, command: &str, args: serde_json::Value) {
 }
 
 fn value(s: &Shell, path: &str) -> f64 {
-    let store = s.values.lock().unwrap();
+    let store = s.values().lock().unwrap();
     let v = &store.get(path).unwrap().value;
     v.as_f64().or_else(|| v.as_bool().map(f64::from)).unwrap()
 }
@@ -236,7 +236,7 @@ fn the_zoom_commands_walk_the_ladder_from_100_percent() {
     h.step();
     assert_eq!(value(h.state(), FIT), 1.0);
     // Where one looks is not an edit.
-    assert!(h.state().values.lock().unwrap().undo_steps().is_empty());
+    assert!(h.state().values().lock().unwrap().undo_steps().is_empty());
 }
 
 /// The image is a canvas of egui-pop's navigation model: with the
@@ -296,7 +296,7 @@ fn a_drag_pans_as_one_gesture_holding_the_view_and_is_no_undo_step() {
     run(&mut h, "viewport.zoom.100", json!(null));
     settled(&mut h);
     let x0 = value(h.state(), CENTER_X);
-    let committed = h.state().values.lock().unwrap().committed();
+    let committed = h.state().values().lock().unwrap().committed();
     let c = h.state().target_rect("viewport.display").unwrap().center();
     h.hover_at(c);
     press(&mut h, c, true);
@@ -319,7 +319,7 @@ fn a_drag_pans_as_one_gesture_holding_the_view_and_is_no_undo_step() {
     // at 100 % on a 1x window.
     let ppp = f64::from(h.state().pixels_per_point());
     assert_eq!(value(h.state(), CENTER_X), x0 - 40.0 * ppp);
-    let store = h.state().values.lock().unwrap();
+    let store = h.state().values().lock().unwrap();
     assert!(store.undo_steps().is_empty());
     assert_eq!(store.committed(), committed);
     assert!(store.open_gesture().is_none());

@@ -67,13 +67,13 @@ fn harness_with(shell: Shell, panel: &str) -> Harness<'static, Shell> {
 }
 
 fn f(h: &Harness<'_, Shell>, path: &str) -> f64 {
-    let store = h.state().values.lock().unwrap();
+    let store = h.state().values().lock().unwrap();
     let v = &store.get(path).unwrap().value;
     v.as_f64().or_else(|| v.as_bool().map(f64::from)).unwrap()
 }
 
 fn steps(h: &Harness<'_, Shell>) -> usize {
-    h.state().values.lock().unwrap().undo_steps().len()
+    h.state().values().lock().unwrap().undo_steps().len()
 }
 
 fn rect(h: &Harness<'_, Shell>, target: &str) -> egui::Rect {
@@ -125,7 +125,7 @@ fn the_histogram_reads_the_pipeline_s_output() {
     assert!(before.region().width <= helios_gui::preview::SIDE);
     // Two stops brighter: the scopes follow the edit.
     h.state()
-        .values
+        .values()
         .lock()
         .unwrap()
         .set(Set::new(EV, Change::To(Value::Float(2.0)), Origin::User))
@@ -200,7 +200,7 @@ fn tools_harness() -> Harness<'static, Shell> {
     use helios_values::Descriptor;
     let shell = shell();
     {
-        let mut store = shell.values.lock().unwrap();
+        let mut store = shell.values().lock().unwrap();
         let curve = ParamSpec {
             name: "curve".into(),
             description: "the tone curve".into(),
@@ -240,7 +240,7 @@ const CURVE: &str = "node/grade/curve";
 const LIFT: &str = "node/grade/lift";
 
 fn list(h: &Harness<'_, Shell>, path: &str) -> Vec<f64> {
-    match &h.state().values.lock().unwrap().get(path).unwrap().value {
+    match &h.state().values().lock().unwrap().get(path).unwrap().value {
         Value::List(l) => l.clone(),
         v => panic!("{path}: {v:?}"),
     }

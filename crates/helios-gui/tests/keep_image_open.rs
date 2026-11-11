@@ -75,7 +75,7 @@ fn run(h: &mut Harness<'static, Shell>, id: &str, args: Json) -> Json {
 
 fn set(h: &mut Harness<'static, Shell>, path: &str, v: f64) {
     h.state()
-        .values
+        .values()
         .lock()
         .unwrap()
         .set(helios_values::Set::new(
@@ -89,7 +89,7 @@ fn set(h: &mut Harness<'static, Shell>, path: &str, v: f64) {
 
 fn undo(h: &mut Harness<'static, Shell>) {
     h.state()
-        .values
+        .values()
         .lock()
         .unwrap()
         .undo(&Origin::User)
@@ -99,7 +99,7 @@ fn undo(h: &mut Harness<'static, Shell>) {
 }
 
 fn steps(h: &Harness<'static, Shell>) -> usize {
-    h.state().values.lock().unwrap().undo_steps().len()
+    h.state().values().lock().unwrap().undo_steps().len()
 }
 
 /// A parameter of a node of the graph shown; `None` without that node.
@@ -112,7 +112,7 @@ fn shown(h: &Harness<'static, Shell>, node: &str, param: &str) -> Option<f64> {
 
 fn stored(h: &Harness<'static, Shell>, path: &str) -> Option<f64> {
     h.state()
-        .values
+        .values()
         .lock()
         .unwrap()
         .get(path)
@@ -227,7 +227,7 @@ fn a_step_moving_values_is_one_undo_with_its_network() {
     assert_eq!(shown(&h, "lift", "exposure"), None);
     // Redone: the moved value comes back with its node.
     h.state()
-        .values
+        .values()
         .lock()
         .unwrap()
         .redo(&Origin::User)

@@ -101,20 +101,20 @@ fn settle(h: &mut Harness<'_, Shell>) {
 }
 
 fn f(h: &Harness<'_, Shell>, path: &str) -> f64 {
-    let store = h.state().values.lock().unwrap();
+    let store = h.state().values().lock().unwrap();
     let v = &store.get(path).unwrap().value;
     v.as_f64().or_else(|| v.as_bool().map(f64::from)).unwrap()
 }
 
 fn text(h: &Harness<'_, Shell>, path: &str) -> String {
-    match &h.state().values.lock().unwrap().get(path).unwrap().value {
+    match &h.state().values().lock().unwrap().get(path).unwrap().value {
         Value::Text(t) | Value::Choice(t) => t.clone(),
         v => panic!("{path}: {v:?}"),
     }
 }
 
 fn steps(h: &Harness<'_, Shell>) -> Vec<String> {
-    let store = h.state().values.lock().unwrap();
+    let store = h.state().values().lock().unwrap();
     store.undo_steps().iter().map(|s| s.label.clone()).collect()
 }
 
@@ -552,7 +552,7 @@ fn a_held_key_runs_its_command_once() {
     click(&mut h, corner);
     hold(&mut h, Key::C, 10);
     settle(&mut h);
-    let store = h.state().values.lock().unwrap();
+    let store = h.state().values().lock().unwrap();
     let circles = store
         .list("node/")
         .into_iter()
@@ -605,7 +605,7 @@ fn typing_in_a_field_fires_no_shortcut_and_an_agent_does_not_take_the_focus() {
     assert_eq!(f(&h, EV), 0.0, "nothing committed by typing");
     // An agent writes another parameter meanwhile.
     let other = {
-        let store = h.state().values.lock().unwrap();
+        let store = h.state().values().lock().unwrap();
         store
             .list("node/")
             .into_iter()

@@ -275,7 +275,7 @@ impl Shell {
     /// Where agents reach this desktop for its workspace, while it holds
     /// one open.
     pub fn workspace_holder(&self) -> Option<Holder> {
-        self.edit.as_ref()?.live.as_ref()?.holder().cloned()
+        self.focus.edit.as_ref()?.live.as_ref()?.holder().cloned()
     }
 
     /// Waits until an agent's request waits for the next frame, at most
@@ -292,7 +292,7 @@ impl Shell {
     }
 
     fn wait_live(&self, timeout: Duration, files: bool) -> bool {
-        let Some(live) = self.edit.as_ref().and_then(|e| e.live.as_ref()) else {
+        let Some(live) = self.focus.edit.as_ref().and_then(|e| e.live.as_ref()) else {
             return false;
         };
         let deadline = Instant::now() + timeout;
@@ -321,7 +321,7 @@ impl Shell {
 
     /// Lets the workspace go: agents write its files again.
     pub(super) fn release_workspace(&mut self) {
-        if let Some(live) = self.edit.as_mut().and_then(|e| e.live.as_mut()) {
+        if let Some(live) = self.focus.edit.as_mut().and_then(|e| e.live.as_mut()) {
             live.close();
         }
     }
@@ -329,7 +329,7 @@ impl Shell {
     /// Once per frame: the files looked at again when the watcher saw
     /// them change, then the agents' requests answered.
     pub(super) fn follow_workspace(&mut self, ctx: &egui::Context) {
-        let Some(live) = self.edit.as_ref().and_then(|e| e.live.as_ref()) else {
+        let Some(live) = self.focus.edit.as_ref().and_then(|e| e.live.as_ref()) else {
             return;
         };
         let shared = live.shared.clone();
@@ -337,7 +337,7 @@ impl Shell {
         // the endpoint: what they bring is taken at the next frame the
         // test draws, so the files settling after the window is set up
         // ask no frames of their own and a test's `run` ends.
-        if !self.still {
+        if !self.core.still {
             let mut waker = lock(&shared.waker);
             if waker.is_none() {
                 *waker = Some(ctx.clone());
@@ -359,7 +359,7 @@ impl Shell {
     /// What the workspace's files hold now, when it is not what the
     /// desktop last wrote or read there.
     pub(super) fn changed_outside(&self) -> Option<State> {
-        let edit = self.edit.as_ref()?;
+        let edit = self.focus.edit.as_ref()?;
         let theirs = edit.files.load_on_disk().ok()?;
         (theirs.to_json() != edit.disk).then_some(theirs)
     }
@@ -376,7 +376,7 @@ impl Shell {
     /// Merges `theirs` (the files) into what the desktop shows.
     pub(super) fn reload_workspace(&mut self, theirs: State) -> (Vec<String>, Vec<String>) {
         let names = |v: &[&str]| v.iter().map(ToString::to_string).collect::<Vec<_>>();
-        let Some(edit) = self.edit.as_ref() else {
+        let Some(edit) = self.focus.edit.as_ref() else {
             return Default::default();
         };
         let base = edit.disk_state();
@@ -386,7 +386,12 @@ impl Shell {
         // The layout is egui-pop's to save, as it changes: the desktop
         // changed it when it differs from what egui-pop last saved, and
         // the files compare with that too.
-        let saved = self.own_panels(self.layout_saved.clone().unwrap_or_else(|| self.layout()));
+        let saved = self.own_panels(
+            self.focus
+                .layout_saved
+                .clone()
+                .unwrap_or_else(|| self.layout()),
+        );
         let base = base.map(|mut b| {
             b.bundle.layout = saved;
             b
@@ -406,7 +411,7 @@ impl Shell {
                 return Default::default();
             }
         };
-        if let Some(edit) = &mut self.edit {
+        if let Some(edit) = &mut self.focus.edit {
             // The files as they are now: what the step below writes over.
             edit.disk = theirs.to_json();
         }
@@ -450,7 +455,7 @@ impl Shell {
     /// `{ok, answer}` or `{ok: false, error}`; `gone` when this desktop
     /// does not hold the workspace named.
     pub fn workspace_request(&mut self, request: &Value) -> Value {
-        let held = self.edit.as_ref().map(|e| e.files.own.clone());
+        let held = self.focus.edit.as_ref().map(|e| e.files.own.clone());
         let named = request["workspace"]
             .as_str()
             .map(|w| Files::new(&self.edit_config(), std::path::Path::new(w)).own);
@@ -461,9 +466,9 @@ impl Shell {
         // changes through it is one step, the agent's, labelled with the
         // name it gave, if any.
         let name = request["group"].as_str().filter(|g| !g.trim().is_empty());
-        lock(&self.values).begin_request(Origin::Agent(AGENT.into()), name);
+        lock(&self.core.values).begin_request(Origin::Agent(AGENT.into()), name);
         let answer = self.agent_workspace(request);
-        let group = lock(&self.values).end_request();
+        let group = lock(&self.core.values).end_request();
         match answer {
             Ok(mut answer) => {
                 if let Some(o) = answer.as_object_mut() {
@@ -479,7 +484,8 @@ impl Shell {
     }
 
     fn edit_config(&self) -> PathBuf {
-        self.edit
+        self.focus
+            .edit
             .as_ref()
             .map(|e| e.config.clone())
             .unwrap_or_default()
@@ -527,9 +533,12 @@ impl Shell {
                 self.network_command(cmd, request, &origin)
             }
             "workspace.undo" => self.agent_undo(&origin),
-            cmd if cmd.starts_with("context.") => {
-                crate::contexts::agent_tool(self.app.handle(), &self.subworkspaces, request, AGENT)
-            }
+            cmd if cmd.starts_with("context.") => crate::contexts::agent_tool(
+                self.core.app.handle(),
+                &self.focus.subworkspaces,
+                request,
+                AGENT,
+            ),
             cmd if cmd.starts_with("clipboard.") => self.agent_clipboard(cmd, request, &origin),
             cmd if cmd.starts_with("history.") => self.agent_history(cmd, request),
             other => Err(format!("no workspace tool `{other}`")),
@@ -634,7 +643,7 @@ impl Shell {
                 o.remove(k);
             }
         }
-        match self.app.run(&id, args, origin) {
+        match self.core.app.run(&id, args, origin) {
             egui_pop::api::host::Reply::Done(r) => r,
             egui_pop::api::host::Reply::Later(_) => Ok(json!({ "queued": true })),
         }
@@ -663,7 +672,7 @@ impl Shell {
         if request["dry_run"] == true {
             ask = ask.dry_run();
         }
-        let walked = crate::history::HeliosHistory::new(self.values.clone())
+        let walked = crate::history::HeliosHistory::new(self.core.values.clone())
             .undo_group(&ask, group, origin)
             .map_err(|r| r.reason)?;
         if !walked.dry_run {
@@ -675,7 +684,7 @@ impl Shell {
     /// An agent's undo on the desktop: the last step, when it is a
     /// workspace step an agent made; never the user's.
     fn agent_undo(&mut self, origin: &Origin) -> Result<Value, String> {
-        let mut store = lock(&self.values);
+        let mut store = lock(&self.core.values);
         let last = store
             .undo_steps()
             .last()
