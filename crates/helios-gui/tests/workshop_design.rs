@@ -609,8 +609,9 @@ fn a_piloted_session_records_who_set_what_why_and_what_the_zones_measured() {
         Origin::User,
         Some("the climber's face is too dark"),
     );
-    set_value(&mut h, &detail, 0.3, Origin::User, None);
-    set_value(&mut h, &detail, 0.6, Origin::Agent("mcp".into()), None);
+    // (The check narrowed the detail's range to about 0 to 0.26.)
+    set_value(&mut h, &detail, 0.1, Origin::User, None);
+    set_value(&mut h, &detail, 0.2, Origin::Agent("mcp".into()), None);
     h.state()
         .values()
         .lock()
@@ -643,7 +644,7 @@ fn a_piloted_session_records_who_set_what_why_and_what_the_zones_measured() {
     // The undo puts the agent's value back.
     assert_eq!(
         steps[4]["changes"][0],
-        json!({ "param": "mountain_detail", "old": 0.6, "new": 0.3 })
+        json!({ "param": "mountain_detail", "old": 0.2, "new": 0.1 })
     );
     let seqs: Vec<u64> = steps.iter().map(|s| s["seq"].as_u64().unwrap()).collect();
     assert_eq!(seqs, [1, 2, 3, 4, 5]);
@@ -669,7 +670,7 @@ fn a_piloted_session_records_who_set_what_why_and_what_the_zones_measured() {
     // The net outcome: the lift as the user set it, the detail as the
     // undo left it.
     assert_eq!(out["net"]["backlight_lift"]["value"], json!(0.9));
-    assert_eq!(out["net"]["mountain_detail"]["value"], json!(0.3));
+    assert_eq!(out["net"]["mountain_detail"]["value"], json!(0.1));
     // The value store's steps carry the words too.
     let store = h.state().values().lock().unwrap();
     assert!(
@@ -745,6 +746,12 @@ fn a_session_not_kept_leaves_nothing_and_a_kept_one_survives_a_reopen() {
     // A new design: a new session, kept by the user.
     let (_, kept) = designed(&mut h, &root);
     assert_ne!(kept, dropped);
+    h.state_mut()
+        .run("helios.workshops.focus", json!(null), Origin::User)
+        .unwrap();
+    for _ in 0..3 {
+        h.run();
+    }
     h.get_by_label("Keep").click();
     follow(&mut h);
     persist.frame(h.state_mut(), 3.0);
