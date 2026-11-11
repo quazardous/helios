@@ -108,6 +108,9 @@ pub(crate) struct ImportWindow {
     dropped: Vec<PathBuf>,
     /// Each source ticked being read, and whether it is read through.
     scans: Vec<(PathBuf, Scan, bool)>,
+    /// The files the scans glance at first: the cells in view without a
+    /// picture, then the next screen's.
+    glance_first: crate::import_scan::Wanted,
     pub(super) contents: Contents,
     /// The choices, the last used until changed, and where they are kept.
     pub(super) choices: Choices,
@@ -161,6 +164,10 @@ impl ImportWindow {
     /// Stops reading and forgets what was read.
     fn clear_contents(&mut self) {
         self.scans.clear();
+        self.glance_first
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clear();
         self.contents = Contents::new();
         self.published = None;
         self.selection_synced = None;
@@ -199,7 +206,13 @@ impl ImportWindow {
                 Some(recorded) if !path.exists() => {
                     Scan::recorded(path.clone(), recorded.clone(), wake)
                 }
-                _ => Scan::start(path.clone(), self.known.clone(), map, wake),
+                _ => Scan::start(
+                    path.clone(),
+                    self.known.clone(),
+                    map,
+                    self.glance_first.clone(),
+                    wake,
+                ),
             };
             self.scans.push((path.clone(), scan, false));
         }
@@ -460,6 +473,16 @@ impl Shell {
             .thumbs
             .as_ref()
             .is_some_and(|t| t.ready(path))
+    }
+
+    /// What the import window's scans' glances did so far: files read,
+    /// answered from the glance cache, and the most read at once.
+    pub fn import_glances(&self) -> crate::import_scan::Glances {
+        self.import_window
+            .scans
+            .iter()
+            .map(|(_, scan, _)| scan.glances())
+            .fold(crate::import_scan::Glances::default(), |a, b| a + b)
     }
 
     /// The photos the import window's browser last asked thumbnails of as
@@ -1301,11 +1324,25 @@ fn contents_ui(
     if w.contents.cells.is_empty() && !reading {
         ui.weak(&words.empty);
     }
-    w.sync_browser(ui.ctx(), words);
+    w.sync_browser(words);
     let browser = w.browser.as_mut()?;
     let out = browser.show_in(ui, app, "helios.import");
     if out.selection_changed {
         w.take_selection();
+    }
+    // The scans glance at the cells waiting for a picture first, a pair's
+    // files both.
+    if let Some(thumbs) = &w.thumbs {
+        let c = &w.contents;
+        let first: Vec<PathBuf> = thumbs
+            .waiting()
+            .iter()
+            .filter_map(|p| c.cell_of(p))
+            .flat_map(|i| c.cells[i].raw.iter().chain(&c.cells[i].picture).cloned())
+            .collect();
+        *w.glance_first
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = first;
     }
     // The image map reads the photos in view first.
     if let (Some(feed), Some(thumbs)) = (&w.map_feed, &w.thumbs) {
@@ -1349,21 +1386,16 @@ impl ImportWindow {
     /// The browser over the contents: made the first time, given what the
     /// scans found since (entries, marks, previews), on the first source
     /// ticked, its selection the photos ticked.
-    fn sync_browser(&mut self, ctx: &Egui, words: &GridWords) {
+    fn sync_browser(&mut self, words: &GridWords) {
         let thumbs = self.thumbnails();
-        // The previews read go to the thumbnails, a few each frame.
-        let mut made = 0;
+        // The previews read (sRGB pictures at the cell's size already) go
+        // to the thumbnails, which make a few textures a frame.
         for cell in &mut self.contents.cells {
-            if made == 48 {
-                ctx.request_repaint();
-                break;
-            }
             if let Some(thumb) = cell.thumb.take() {
                 cell.previewed = true;
                 if let Some(main) = cell.main() {
-                    thumbs.glanced(main, Some(crate::library::thumbnail(&thumb)));
+                    thumbs.glanced(main, Some(thumb));
                 }
-                made += 1;
             }
         }
         let place = self

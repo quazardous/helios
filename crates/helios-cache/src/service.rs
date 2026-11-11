@@ -154,6 +154,23 @@ pub const RENDER_STEP: Kind = Kind {
     reason: "",
 };
 
+/// The import window's glances of files not yet in the Library: each
+/// file's small preview, capture time and camera, kept in RAM by path,
+/// size and modification time (no content hash is read before an import),
+/// so the window opened again or scrolled back reads nothing.
+pub const IMPORT_GLANCE: Kind = Kind {
+    id: "import.glance",
+    title: "Import previews",
+    tiers: &[Tier::Ram],
+    identity: Identity::Path,
+    cost: Cost::Decode,
+    share: Share::Default,
+    persist: false,
+    version: 1,
+    scope: ScopeRule::Shared,
+    reason: "",
+};
+
 /// Where entries live: the shared pool, or a silo.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Scope {

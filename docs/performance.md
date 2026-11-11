@@ -228,8 +228,26 @@ crate, used by the library (`helios_gui::thumbnails`):
   entry before any render, then its render in its place. Timing stays
   with `thumb-bench`.
 
-Still open: the import window's grid does not share this code (its cells
-are glanced, not hashed, so they have no cache key); the pool still reads
+- **The import window (2026-11-11):** a source's files are glanced at on
+  a few threads (`import_scan::glancers`: half the cores, two to four),
+  the files whose cells wait for a picture first (in view, then the next
+  screen, as the browser asks them), then the rest in the folder's order;
+  each preview is scaled to 256 px in 8 bits before its conversion to
+  the working space (`helios_load::glance_at`), and made an sRGB picture
+  on the glancing thread, so the interface thread only uploads (48
+  textures a frame at most). The glances stay in RAM
+  (`import.glance`, 192 MiB, by path, size and modification time): the
+  window opened again reads no file. A file the image map saw in the
+  Library unchanged shows its `thumb.256` entry, read on two threads.
+  `import`'s `a_cold_folder_fills_*` test holds it and prints its times.
+  On the box (`test-crate`, a debug build, the box throttled: indicative
+  only), 96 JPEGs of 1600×1200 without Exif thumbnails, 12 cells in
+  view: the cells in view filled in 6.1 s (318 frames) before, 0.46 s
+  (14 frames, 12 files read, two at once) after; the window opened again
+  on the folder, 5.7 s before, 35 ms (one frame, nothing read) after.
+
+Still open: the import window's grid does not share the library's code
+(its new files are glanced, not hashed, so they have no content key); the pool still reads
 every image at startup, decoding cache hits that are then not uploaded;
 thumbnails are still the embedded previews, not renders of the edit
 (step 4, the render queue, which replaces cache entries by renders under

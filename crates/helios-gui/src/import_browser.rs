@@ -12,9 +12,11 @@
 //!   unticked, a type filter). A RAW+JPEG pair is one entry, by its raw.
 //! - [`ImportThumbnails`] answers from the preview a scan glanced at (the
 //!   raw's embedded one first), else from the library's thumbnail cache
-//!   (an offline photo, a photo of the Library), read on a thread of its
-//!   own: the requests of each frame in priority order (visible, near,
-//!   background), those not renewed in a frame cancelled.
+//!   (an offline photo, a photo of the Library), read on two threads: the
+//!   requests of each frame in priority order (visible, near,
+//!   background), those not renewed in a frame cancelled. The files still
+//!   waiting for a picture, in that order, are what the scans glance at
+//!   first ([`ImportThumbnails::waiting`]).
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
@@ -171,6 +173,10 @@ struct Inner {
     on_screen: Vec<PathBuf>,
     /// Textures made this frame: a few per frame.
     made: usize,
+    /// The files asked this frame with no picture yet: priority, order.
+    asking: Vec<(u8, usize, PathBuf)>,
+    /// What the last frame asked with no picture yet, in priority order.
+    waiting: Vec<PathBuf>,
 }
 
 /// The import window's thumbnails: the scans' previews, then the
@@ -200,6 +206,9 @@ impl Drop for ImportThumbnails {
 /// How many textures a frame makes: the rest the next frames.
 const TEXTURES_PER_FRAME: usize = 48;
 
+/// How many threads read the library's thumbnail cache.
+const CACHE_READERS: usize = 2;
+
 impl ImportThumbnails {
     /// A provider reading `cache` (the library's) for the files the image
     /// map links to an entry; none without a library.
@@ -208,12 +217,15 @@ impl ImportThumbnails {
         let (tx, rx) = channel();
         let ctx: Arc<Mutex<Option<egui::Context>>> = Arc::default();
         if let Some(cache) = cache {
-            let (queue, ctx) = (queue.clone(), ctx.clone());
-            let spawned = std::thread::Builder::new()
-                .name("helios-import-thumbs".into())
-                .spawn(move || read_cache(&cache, &queue, &tx, &ctx));
-            if let Err(e) = spawned {
-                log::warn!("import thumbnails: no thread: {e}");
+            for _ in 0..CACHE_READERS {
+                let (cache, queue, ctx, tx) =
+                    (cache.clone(), queue.clone(), ctx.clone(), tx.clone());
+                let spawned = std::thread::Builder::new()
+                    .name("helios-import-thumbs".into())
+                    .spawn(move || read_cache(&cache, &queue, &tx, &ctx));
+                if let Err(e) = spawned {
+                    log::warn!("import thumbnails: no thread: {e}");
+                }
             }
         }
         Self {
@@ -265,6 +277,12 @@ impl ImportThumbnails {
         lock(&self.inner).on_screen.clone()
     }
 
+    /// The files the last frame asked that have no picture yet: visible,
+    /// then near, then the rest, each in the order asked.
+    pub fn waiting(&self) -> Vec<PathBuf> {
+        lock(&self.inner).waiting.clone()
+    }
+
     /// Takes in what the cache reader answered.
     fn receive(&self, inner: &mut Inner) {
         for (path, picture) in lock(&self.answers).try_iter() {
@@ -287,6 +305,7 @@ impl ThumbnailProvider for ImportThumbnails {
         self.receive(&mut inner);
         inner.renewals.begin();
         inner.visible.clear();
+        inner.asking.clear();
         inner.made = 0;
     }
 
@@ -317,15 +336,25 @@ impl ThumbnailProvider for ImportThumbnails {
         if inner.none.contains(path) {
             return ThumbState::None;
         }
+        let rank = match request.priority {
+            Priority::Visible => 0,
+            Priority::Near => 1,
+            Priority::Background => 2,
+        };
+        let seq = inner.asking.len();
         if inner.keys.contains_key(path) {
             // Asked of the cache: renewed each frame it is wanted.
             inner.renewals.ask(request.entry, request.priority);
+            if !inner.glanced.contains(path) {
+                inner.asking.push((rank, seq, path.clone()));
+            }
             return ThumbState::Loading;
         }
         if inner.glanced.contains(path) {
             ThumbState::None
         } else {
-            // The scan has not glanced at it yet.
+            // The scan has not glanced at it yet: it is told to.
+            inner.asking.push((rank, seq, path.clone()));
             ThumbState::Loading
         }
     }
@@ -340,6 +369,9 @@ impl ThumbnailProvider for ImportThumbnails {
             .collect();
         // What is not wanted any more leaves the queue: cancelled.
         inner.on_screen = std::mem::take(&mut inner.visible);
+        let mut asking = std::mem::take(&mut inner.asking);
+        asking.sort_unstable_by_key(|(rank, seq, _)| (*rank, *seq));
+        inner.waiting = asking.into_iter().map(|(_, _, p)| p).collect();
         drop(inner);
         let (queue, ready) = &*self.queue;
         lock(queue).wanted = wanted;

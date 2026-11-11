@@ -186,6 +186,22 @@ pub struct Glance {
 /// # Errors
 /// The file cannot be read, or a raw's format is unknown.
 pub fn glance(path: &Path) -> Result<Glance, String> {
+    glance_at(path, None)
+}
+
+/// [`glance`], its preview no larger than `max` pixels on its long side:
+/// an embedded preview is scaled down in 8 bits before it is taken to the
+/// working space, so a thumbnail never converts a full-size preview in
+/// floating point; a picture without an Exif thumbnail likewise, once
+/// decoded.
+///
+/// # Errors
+/// The file cannot be read, or a raw's format is unknown.
+pub fn glance_at(path: &Path, max: Option<u32>) -> Result<Glance, String> {
+    let fit = |img: DynamicImage| match max {
+        Some(m) if img.width().max(img.height()) > m => img.thumbnail(m, m),
+        _ => img,
+    };
     // Not hashed: a glance identifies nothing.
     let bytes =
         Arc::new(std::fs::read(path).map_err(|e| format!("cannot read {}: {e}", path.display()))?);
@@ -200,7 +216,7 @@ pub fn glance(path: &Path) -> Result<Glance, String> {
         ]
         .into_iter()
         .find_map(|r| r.ok().flatten())
-        .map(|img| working(&img));
+        .map(|img| working(&fit(img)));
         let metadata = decoder.raw_metadata(&source, &params).ok();
         let tag = metadata
             .as_ref()
@@ -237,8 +253,8 @@ pub fn glance(path: &Path) -> Result<Glance, String> {
         (None, None, None)
     };
     let preview = match thumb.and_then(|t| image::load_from_memory(&t).ok()) {
-        Some(img) => working(&img),
-        None => load(path)?.image,
+        Some(img) => working(&fit(img)),
+        None => picture_at(&bytes, max).map_err(named)?.0,
     };
     Ok(Glance {
         preview: Some(upright(preview, tag)),
@@ -359,6 +375,12 @@ fn working(img: &DynamicImage) -> Image {
 /// A picture in the working space, its colours and its EXIF orientation
 /// tag (1 when it has none).
 fn picture(bytes: &[u8]) -> Result<(Image, Colour, u8), String> {
+    picture_at(bytes, None)
+}
+
+/// [`picture`], scaled down in 8 bits to `max` pixels on its long side
+/// before its colours are converted.
+fn picture_at(bytes: &[u8], max: Option<u32>) -> Result<(Image, Colour, u8), String> {
     let reader = image::ImageReader::new(Cursor::new(bytes))
         .with_guessed_format()
         .map_err(|e| e.to_string())?;
@@ -367,6 +389,10 @@ fn picture(bytes: &[u8]) -> Result<(Image, Colour, u8), String> {
     let tags = colour::tags(bytes, format, &mut decoder);
     let orientation = tags.orientation();
     let img = DynamicImage::from_decoder(decoder).map_err(|e| e.to_string())?;
+    let img = match max {
+        Some(m) if img.width().max(img.height()) > m => img.thumbnail(m, m),
+        _ => img,
+    };
     let (space, mut colour) = colour::choose(&tags, !img.color().has_color());
     match convert(&img, &space) {
         Ok(image) => Ok((image, colour, orientation)),

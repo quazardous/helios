@@ -41,7 +41,7 @@ limit and its default. "None" means nothing bounds it.
 | 10 | Large thumbnails (`Library::large_textures`) | VRAM | image id | **none** (freed when a render lands) | explicit | none | pool `Loader::large` / Compare | render lands | none | `thumbnails.rs` |
 | 11 | Loupe stand-in (`Viewport::stand_in`) | VRAM | the image opened | one texture | replaced when the render is complete | none | `Shell::open_from_library` / viewport | render complete | none | `thumbnails.rs` |
 | 12 | Head renders (`Library::Heads`) | VRAM (texture) + the render's `Image` in RAM via the render cache | image id + version + size | **none** | stale entries replaced; never evicted | none | `head_render::spawn` on the viewport's engine / Compare | generation per image (edit or network change) | none | `compare_heads.rs` |
-| 13 | Import window pictures and textures (`import_browser`) | RAM (`ColorImage`) then VRAM | file path | **none** (a frame's upload count is capped) | removed when a path leaves the listing | none | scan glance (embedded preview), the library thumbnail cache / import grid | rescan | none | `import.rs`, `import_snapshots.rs` |
+| 13 | Import window glances (`import_scan::GlanceCache`, kind `import.glance`), then its textures (`import_browser`) | RAM (`ColorImage` at 256 px) then VRAM | path + size + mtime (a Library file seen unchanged: its image's `thumb.256` entry) | 192 MiB for the glances (LRU, down to 90 %); a frame's upload count is capped for the textures | LRU; textures removed when a path leaves the listing | none | scan glance (embedded preview, scaled in 8 bits first), the library thumbnail cache / import grid | a changed file has another key | `usage()` (bytes, count), hits and misses | `import.rs`, `import_snapshots.rs` |
 | 14 | Import scan memo (`import_scan`: `seen`, `by_size`) | RAM | path → (size, mtime); size → hashes | none, one scan | dropped with the scan | none | the scan | per scan | none | `import.rs` |
 | 15 | Image map (sightings) | disk (the vault file) | path + size + mtime → content hash | `system.map.limit` | forgetting rules (`system.map.keepMissing`) | `system.map.*` | import scans, `thumb_check` / import window, thumbnail keys | re-check | rows | `helios-library` unit tests |
 | 16 | Resolver memo (`helios_resolve::Cached`) | RAM, in `helios-node` | `Request::key` (pixels + brief) | **none** | never | none | AI and HTTP resolvers / decision nodes | none (same question, same answer) | none | `helios-resolve` tests |
@@ -443,7 +443,11 @@ measured where speed is at stake (`thumb-bench`, the engine's
    the image map's content identity when known, sharing `thumb.256`
    with the library; the glance becomes `import.glance` (path identity,
    shown as debt) until hashed. Risk: cells not hashed yet (keep the
-   glance path).
+   glance path). Begun (2026-11-11): a file the image map saw in the
+   Library unchanged (path, size, modification time) shows its image's
+   `thumb.256` entry; the other files' glances are `import.glance` in
+   RAM. Not done yet: a file hashed later (by content alone) meeting its
+   entry, and glances written to the disk cache under a provisional key.
 7. **The small stores.** `resolve.answer` (16, bounded), `kit.compiled`
    (17), `plugin.bundle` (18), `ai.download` (19) registered in the user
    cache scope, so the page lists and clears them; the plugin protocol's
