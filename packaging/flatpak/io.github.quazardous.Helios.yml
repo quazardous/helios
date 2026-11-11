@@ -1,0 +1,72 @@
+# The Flatpak of Helios, built from this source tree with no network: the
+# crates come from cargo-sources.json, generated from Cargo.lock by
+# flatpak-builder-tools' cargo generator (packaging/flatpak/build.sh does
+# both). Flathub's copy of this manifest takes the sources from a release
+# tag instead of the tree (docs/flathub.md).
+app-id: io.github.quazardous.Helios
+runtime: org.freedesktop.Platform
+runtime-version: '26.08'
+sdk: org.freedesktop.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+command: helios-gui
+finish-args:
+  # The window: Wayland, or X11 where there is no Wayland (ipc for X11's
+  # shared memory).
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --share=ipc
+  # The GPU, for the window and for Vulkan processing.
+  - --device=dri
+  # The model providers (Ollama on this machine or the network, online
+  # APIs); Helios works without them.
+  - --share=network
+  # The photos: the Pictures folder and removable media (cards, disks).
+  # Helios's own folder picker shows these; other folders are granted with
+  # `flatpak override --user --filesystem=PATH io.github.quazardous.Helios`.
+  - --filesystem=xdg-pictures
+  - --filesystem=/run/media
+  - --filesystem=/media
+  # A darktable library to import, read only: darktable's own settings,
+  # or those of darktable's Flatpak.
+  - --filesystem=xdg-config/darktable:ro
+  - --filesystem=~/.var/app/org.darktable.Darktable/config/darktable:ro
+  # The desktop's notifications (a long job finished, an error).
+  - --talk-name=org.freedesktop.Notifications
+build-options:
+  append-path: /usr/lib/sdk/rust-stable/bin
+  env:
+    CARGO_HOME: /run/build/helios/cargo
+    CARGO_NET_OFFLINE: 'true'
+    CARGO_TERM_COLOR: never
+modules:
+  - name: helios
+    buildsystem: simple
+    build-commands:
+      # helios (the command line), helios-node and helios-mcp (which helios
+      # starts), helios-gui (the window) and the programs of the plugins
+      # Helios ships, as the release workflow builds them.
+      - cargo build --release --locked --offline -p helios-node -p helios-gui -p helios-plugin-darktable-library
+      - |
+        for p in helios helios-node helios-mcp helios-gui helios-darktable-library; do
+          install -Dm755 "target/release/$p" "$FLATPAK_DEST/bin/$p"
+        done
+      - install -Dm644 packaging/linux/io.github.quazardous.Helios.desktop -t "$FLATPAK_DEST/share/applications"
+      - install -Dm644 packaging/linux/io.github.quazardous.Helios.metainfo.xml -t "$FLATPAK_DEST/share/metainfo"
+      - install -Dm644 packaging/linux/icons/io.github.quazardous.Helios.svg -t "$FLATPAK_DEST/share/icons/hicolor/scalable/apps"
+      - |
+        for n in 16 24 32 48 64 128 256 512; do
+          install -Dm644 "packaging/linux/icons/io.github.quazardous.Helios-$n.png" \
+            "$FLATPAK_DEST/share/icons/hicolor/${n}x${n}/apps/io.github.quazardous.Helios.png"
+        done
+      - install -Dm644 LICENSE "$FLATPAK_DEST/share/licenses/io.github.quazardous.Helios/COPYING"
+    sources:
+      - type: dir
+        path: ../..
+        skip:
+          - target
+          - .flatpak-builder
+          - flatpak-build
+          - flatpak-repo
+          - dist
+      - cargo-sources.json

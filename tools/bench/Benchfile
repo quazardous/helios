@@ -100,6 +100,11 @@ run = [
   """dnf -y install --setopt=install_weak_deps=False libxkbcommon-x11 libX11 libX11-xcb libXcursor \
       libXrandr libXi mesa-libEGL mesa-libGL \
  && dnf clean all""",
+  # the flatpak job: flatpak and flatpak-builder, the metadata checkers,
+  # and what flatpak-builder-tools' cargo generator imports
+  """dnf -y install --setopt=install_weak_deps=False flatpak flatpak-builder appstream \
+      desktop-file-utils python3-aiohttp python3-tomlkit python3-pyyaml \
+ && dnf clean all""",
 ]
 # CARGO_HOME is the registry cache; the toolchain lives in /opt. Line
 # tables only and no incremental state keep the per-branch target small.
@@ -177,7 +182,12 @@ ref = "055ef31b09a4a67671aa51c4b2a5a5ea9d1317c7"
 # the job's env applies here too: CARGO_NET_OFFLINE is lifted for the fetch
 [fetch]
 # a job fetches only its own checkouts: skip the ones it does not have
-run = ["for d in /work/helios /work/egui-pop /work/${src:-helios}; do [ -d $d ] || continue; (cd $d && CARGO_NET_OFFLINE=false cargo fetch --locked) || exit 1; done"]
+run = ["for d in /work/helios /work/egui-pop /work/${src:-helios}; do [ -d $d ] || continue; (cd $d && CARGO_NET_OFFLINE=false cargo fetch --locked) || exit 1; done",
+  # the flatpak job: the runtime, the SDK and every source of the manifest,
+  # into its kept storage (packaging/flatpak/build.sh fetch), from a copy
+  # of the tree, where the crates' list is written
+  '[ -z "${HELIOS_FLATPAK:-}" ] || { rm -rf /tmp/w/flatpak && mkdir -p /tmp/w/flatpak "$HOME" && cp -r --preserve=mode /work/${src:-helios}/. /tmp/w/flatpak/ && /tmp/w/flatpak/packaging/flatpak/build.sh fetch /flatpak/work; }',
+]
 
 # Helios's own directories on the box. Build trees are keyed by the branch
 # they build (Helios's `branch`, egui-pop's `egui_pop`), so neither needs the
@@ -193,6 +203,7 @@ darktable-asan = { about = "ASan darktable builds for GUI checks, one per dt_ref
 cargo-git = { about = "the cargo git dependencies, shared by every job", keep = true, max = "5g" }
 egui-pop-perf = { about = "egui-pop's performance results, one directory per egui-pop branch (latest.jsonl, history.jsonl): a branch's run compares with next's latest", keep = true, tmp = false, max = "1g" }
 sccache = { about = "sccache's compile cache, shared by every job and branch: a branch reuses what another compiled (it caps itself at 12G)", keep = true, max = "14g" }
+flatpak = { about = "the flatpak job's Flatpak installation (the freedesktop runtime, SDK and Rust extension) and flatpak-builder's downloads (the crates), kept between runs", keep = true, lock = true, media = "hdd", max = "15g" }
 
 # Every job builds from a copy at a fixed path (/tmp/w/<repo>): the target
 # cache is shared by branch runs (/work/helios) and pushed code
@@ -482,6 +493,26 @@ git add -A && git diff --cached --binary > /out/release.patch && grep -m1 '^vers
 env = { CARGO_NET_OFFLINE = "true", HELIOS_SHARED_MACHINE = "1" }
 mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
 timeout = "1h"
+
+# the Flatpak (packaging/flatpak) as the release workflow builds it, from
+# source and offline, with flatpak-builder: [fetch] installs the runtime
+# and downloads the sources into the kept `flatpak` storage, then the job
+# builds the bundle into /out and smoke-tests it (installed for the user,
+# the command line in the sandbox imports and exports a picture, the
+# window's program says its version, uninstalled)
+[jobs.flatpak]
+about = "the Flatpak bundle built from source with flatpak-builder, installed and smoke-tested"
+checkouts = ["helios"]
+cores = 5
+memory = "8g"
+cwd = "/work/${src:-helios}"
+command = '''mkdir -p /tmp/w/flatpak "$HOME" "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR" && cp -r --preserve=mode . /tmp/w/flatpak/ && cd /tmp/w/flatpak && \
+v="$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n1)" && \
+packaging/flatpak/build.sh build "$v" /out /flatpak/work && \
+packaging/flatpak/smoke.sh "/out/io.github.quazardous.Helios-$v-x86_64.flatpak" crates/helios-plugin/tests/fixtures/rated-photos/a.jpg'''
+env = { HELIOS_FLATPAK = "1", FLATPAK_USER_DIR = "/flatpak/user" }
+mounts = { flatpak = "/flatpak", registry = "/cargo/registry" }
+timeout = "90m"
 
 # the translation catalogues regenerated on a branch: `i18n extract`
 # (helios-declarations, a headless desktop) then `i18n stamp fr`; the

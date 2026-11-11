@@ -10,3 +10,5 @@ tools/bench/local.env
 __pycache__/
 # Trunk builds (`trunk build` in a crate folder)
 /crates/*/dist/
+# Generated from Cargo.lock by packaging/flatpak/build.sh
+/packaging/flatpak/cargo-sources.json

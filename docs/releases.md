@@ -40,7 +40,14 @@ workflow (`.github/workflows/release.yml`) on GitHub Actions, which:
    temporary folder, the same tests from the installed folder, a silent
    uninstall, and a check that the files, the Start menu entry and the
    entry in Settings are gone;
-6. creates the GitHub Release, titled "Helios X.Y.Z", with that version's
+6. builds the Flatpak (`packaging/flatpak/build.sh`, on Ubuntu 24.04)
+   from the same source, as a single-file bundle
+   `io.github.quazardous.Helios-X.Y.Z-x86_64.flatpak`, and tests it
+   (`packaging/flatpak/smoke.sh`): installed for the user, the command line
+   in the sandbox says its version, imports a picture and exports it on
+   the CPU, the window's program says its version (see "The Flatpak"
+   below);
+7. creates the GitHub Release, titled "Helios X.Y.Z", with that version's
    CHANGELOG.md section as its notes, and attaches the files, with one
    `SHA256SUMS` for all of them.
 
@@ -92,6 +99,64 @@ Its icon, version information and manifest (per-monitor DPI awareness,
 paths longer than 260 characters) are embedded at build time
 (`crates/helios-gui/build.rs`). Neither the installer nor the programs
 are signed yet, so SmartScreen warns on first start.
+
+## The Flatpak
+
+`io.github.quazardous.Helios-X.Y.Z-x86_64.flatpak` is built by
+`packaging/flatpak/build.sh` from the manifest
+`packaging/flatpak/io.github.quazardous.Helios.yml`:
+
+- on the freedesktop runtime 26.08, with the SDK's Rust extension
+  (`rust-stable`, a Rust at least as new as `rust-toolchain.toml`'s);
+- from source, with no network during the build, as Flathub requires: the
+  crates are listed with their checksums in `cargo-sources.json`, which
+  the script generates from `Cargo.lock` with flatpak-builder-tools' cargo
+  generator (pinned by commit and SHA-256) and does not commit, so it
+  never drifts from the lock file. Repackaging the release tarball's
+  programs would be quicker to build, but Flathub accepts prebuilt
+  binaries only for programs whose source is not available, so the
+  bundle is built the way Flathub will build it;
+- with the desktop entry, the icons and the AppStream metadata
+  (`packaging/linux/io.github.quazardous.Helios.metainfo.xml`, also in the
+  tarball; `cargo xtask release` adds each release to it).
+
+Install and run it:
+
+```bash
+flatpak install --user io.github.quazardous.Helios-X.Y.Z-x86_64.flatpak
+flatpak run io.github.quazardous.Helios                     # the window
+flatpak run --command=helios io.github.quazardous.Helios --help   # the command line
+```
+
+The runtime comes from Flathub (the bundle points to it); add Flathub
+first if it is not there:
+`flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo`.
+
+What the sandbox lets Helios do, and why:
+
+| Permission | Why |
+|---|---|
+| `--socket=wayland`, `--socket=fallback-x11`, `--share=ipc` | the window, on Wayland or, without it, X11 |
+| `--device=dri` | the GPU, for the window and Vulkan processing |
+| `--share=network` | the AI model providers: Ollama on this machine or the network, online APIs. Helios works without them |
+| `--filesystem=xdg-pictures`, `/run/media`, `/media` | the photos: the Pictures folder and removable media (cards, disks), read and written (imports, exports, backups) |
+| `--filesystem=xdg-config/darktable:ro` and darktable's Flatpak settings, read only | importing a darktable library |
+| `--talk-name=org.freedesktop.Notifications` | the desktop's notifications |
+
+Helios picks folders with its own picker, not the desktop's file chooser
+portal, so a folder outside these is not seen until it is granted:
+
+```bash
+flatpak override --user --filesystem=/path/to/photos io.github.quazardous.Helios
+```
+
+Known gaps of the sandbox: the darktable import cannot tell whether a
+darktable outside the sandbox still runs (its process is not visible), so
+close darktable before importing; a local program set as an AI provider
+(segmentation) and the Ollama setup run inside the sandbox, where the
+host's programs are not; a library or vault outside the folders above
+needs an override. Helios is not on Flathub yet: see
+[flathub.md](./flathub.md) for what submitting it takes.
 
 ## Checking a download
 

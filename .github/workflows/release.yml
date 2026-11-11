@@ -134,6 +134,67 @@ jobs:
           "$app" helios --version | tee cli.txt
           grep -q '^helios [0-9]' cli.txt
 
+  # The Flatpak, built from source with no network inside the build
+  # (packaging/flatpak/build.sh), as a single-file bundle.
+  build-flatpak:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.PUBLISH == 'true' && env.TAG || '' }}
+      - name: version
+        id: version
+        run: echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+      # flatpak-builder sandboxes each step with bubblewrap, which Ubuntu
+      # 24.04's AppArmor keeps from creating user namespaces.
+      - name: flatpak-builder
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -yq flatpak flatpak-builder appstream desktop-file-utils
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: build
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          packaging/flatpak/build.sh all "$VERSION" dist "$RUNNER_TEMP/flatpak"
+          (cd dist && sha256sum ./*.flatpak | sed 's| \./| |' >SHA256SUMS-flatpak && cat SHA256SUMS-flatpak)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: helios-${{ steps.version.outputs.version }}-flatpak-x86_64
+          path: dist/
+          if-no-files-found: error
+
+  # The bundle as a user installs it, on a runner with no GPU and no
+  # display: the command line in the sandbox imports a picture and exports
+  # it, the window's program says its version.
+  smoke-flatpak:
+    needs: build-flatpak
+    runs-on: ubuntu-24.04
+    env:
+      VERSION: ${{ needs.build-flatpak.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.PUBLISH == 'true' && env.TAG || '' }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: helios-${{ needs.build-flatpak.outputs.version }}-flatpak-x86_64
+          path: dist
+      - name: checksums
+        working-directory: dist
+        run: sha256sum -c SHA256SUMS-flatpak
+      - name: flatpak
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -yq flatpak
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: install, command line, uninstall
+        run: |
+          packaging/flatpak/smoke.sh "dist/io.github.quazardous.Helios-$VERSION-x86_64.flatpak" \
+            crates/helios-plugin/tests/fixtures/rated-photos/a.jpg
+
   # The same programs for Windows x86_64 (MSVC), zipped with the licences,
   # and a per-user installer of the same folder (Inno Setup).
   build-windows:
@@ -214,7 +275,7 @@ jobs:
             crates/helios-plugin/tests/fixtures/rated-photos/a.jpg
 
   publish:
-    needs: [build-linux, smoke-linux, build-windows, smoke-windows]
+    needs: [build-linux, smoke-linux, build-flatpak, smoke-flatpak, build-windows, smoke-windows]
     if: ${{ (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || inputs.publish == true }}
     runs-on: ubuntu-22.04
     permissions:
@@ -230,12 +291,17 @@ jobs:
         with:
           name: helios-${{ needs.build-windows.outputs.version }}-windows-x86_64
           path: dist-windows
+      - uses: actions/download-artifact@v4
+        with:
+          name: helios-${{ needs.build-flatpak.outputs.version }}-flatpak-x86_64
+          path: dist-flatpak
       # One SHA256SUMS for every file attached.
       - name: checksums
         run: |
           mv dist-windows/helios-"$VERSION"-windows-x86_64.zip dist/
           mv dist-windows/helios-"$VERSION"-windows-x86_64-setup.exe dist/
-          cat dist-windows/SHA256SUMS-windows >> dist/SHA256SUMS
+          mv dist-flatpak/io.github.quazardous.Helios-"$VERSION"-x86_64.flatpak dist/
+          cat dist-windows/SHA256SUMS-windows dist-flatpak/SHA256SUMS-flatpak >> dist/SHA256SUMS
           (cd dist && sha256sum -c SHA256SUMS)
       - name: GitHub Release
         env:
@@ -245,6 +311,7 @@ jobs:
             --title "Helios $VERSION" --notes-file dist/release-notes.md \
             dist/helios-"$VERSION"-linux-x86_64.tar.gz \
             dist/Helios-"$VERSION"-x86_64.AppImage \
+            dist/io.github.quazardous.Helios-"$VERSION"-x86_64.flatpak \
             dist/helios-"$VERSION"-windows-x86_64.zip \
             dist/helios-"$VERSION"-windows-x86_64-setup.exe \
             dist/SHA256SUMS

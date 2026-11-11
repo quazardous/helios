@@ -41,6 +41,11 @@ its changelog. For Linux on x86_64:
 - `helios-<version>-linux-x86_64.tar.gz`: a folder that runs where it is
   unpacked: `bin/helios-gui` (the window), `bin/helios` (the command line),
   with a desktop entry and icons under `share/`.
+- `io.github.quazardous.Helios-<version>-x86_64.flatpak`: a Flatpak
+  bundle, sandboxed: `flatpak install --user` it, then
+  `flatpak run io.github.quazardous.Helios`. It sees the Pictures folder
+  and removable media; see [docs/releases.md](./docs/releases.md#the-flatpak)
+  for its permissions and how to grant another folder.
 - `SHA256SUMS`: the checksums of every file (see [docs/releases.md](./docs/releases.md)).
 
 Requirements: Linux x86_64 with glibc 2.35 or newer (Ubuntu 22.04, Debian
