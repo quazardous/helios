@@ -601,8 +601,20 @@ command-workshop-aim =
 command-workshop-apply =
     .title = Experimental: apply a workshop after a node, aimed on the open image (`workshop`: id@version; `after`: the node the image is shown from by default; `aim`: true by default; `dry_run`)
 
+command-workshop-context =
+    .title = Experimental: what an agent reads to design a workshop: the words, the image's measures, the modules, the bricks; a proxy only when allowed (`intent`, the session's by default; `proxy`; `modules`)
+
+command-workshop-describe =
+    .title = Experimental: start designing a workshop from your words, answered by your own agent over MCP (`intent`; `cancel`)
+
+command-workshop-design =
+    .title = Experimental: check a workshop draft on the open image and apply it as one undo step (`draft`; `intent`, the session's by default; `apply`: true by default; `replace`; `dry_run`)
+
 command-workshop-save =
     .title = Experimental: save a macro as a workshop, its next version with an intent, keywords and targets (`node`, the selected one by default; `intent`, `keywords`, `targets`; `dry_run`); without `intent`, a form asks
+
+command-workshop-send-proxy =
+    .title = Experimental: let an agent see a small proxy of the open image, for this session (`on`); the user's switch only
 
 command-workshop-suggest =
     .title = Experimental: find workshops by what you want, ranked by name, keywords, then intent (`intent`)

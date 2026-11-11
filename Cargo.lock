@@ -2378,6 +2378,7 @@ name = "helios-gui"
 version = "0.76.0"
 dependencies = [
  "arboard",
+ "base64 0.22.1",
  "chrono",
  "eframe",
  "egui",
@@ -2386,6 +2387,7 @@ dependencies = [
  "egui-pop-test",
  "egui-pop-wayland",
  "egui_kittest",
+ "helios-bricks",
  "helios-cache",
  "helios-config",
  "helios-connect",

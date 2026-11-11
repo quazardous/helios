@@ -37,6 +37,22 @@ pub(super) const COMMANDS: &[(&str, &str)] = &[
         "workshop.suggest",
         "Experimental: find workshops by what you want, ranked by name, keywords, then intent (`intent`)",
     ),
+    (
+        "workshop.describe",
+        "Experimental: start designing a workshop from your words, answered by your own agent over MCP (`intent`; `cancel`)",
+    ),
+    (
+        "workshop.context",
+        "Experimental: what an agent reads to design a workshop: the words, the image's measures, the modules, the bricks; a proxy only when allowed (`intent`, the session's by default; `proxy`; `modules`)",
+    ),
+    (
+        "workshop.design",
+        "Experimental: check a workshop draft on the open image and apply it as one undo step (`draft`; `intent`, the session's by default; `apply`: true by default; `replace`; `dry_run`)",
+    ),
+    (
+        "workshop.send_proxy",
+        "Experimental: let an agent see a small proxy of the open image, for this session (`on`); the user's switch only",
+    ),
 ];
 
 /// The aims of this session, by input content, workshop and targets: the
@@ -70,6 +86,10 @@ impl Shell {
             "workshop.aim" => self.aim_workshop(args, origin),
             "workshop.suggest" => self.suggest_workshops(args),
             "workshop.save" => self.save_workshop(args, origin),
+            "workshop.describe" => self.describe_workshop(args),
+            "workshop.context" => self.workshop_context(args),
+            "workshop.design" => self.design_workshop(args, origin),
+            "workshop.send_proxy" => self.switch_send_proxy(args, origin),
             other => Err(format!("no workshop command `{other}`")),
         }
     }
@@ -572,7 +592,7 @@ impl Shell {
 
 /// What `node`'s `port` gives the open image, rendered at the preview's
 /// proxy size (256 px on the long side).
-fn proxy(
+pub(super) fn proxy(
     viewport: &crate::viewport::Viewport,
     graph: &helios_core::Graph,
     node: helios_core::NodeId,
