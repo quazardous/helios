@@ -80,7 +80,9 @@ fn read_library(
     let spawned = std::thread::Builder::new()
         .name("helios-library-read".into())
         .spawn(move || {
-            let rows = helios_gui::persist::read_library(&vault);
+            // In the default sort: a workspace sorted otherwise reads it
+            // again once shown.
+            let rows = helios_gui::persist::read_library(&vault, helios_gui::library::DEFAULT_SORT);
             if let Ok(rows) = &rows {
                 start::mark(&format!("library read ({} images, its thread)", rows.len()));
             }
@@ -95,7 +97,7 @@ fn read_library(
 /// Fills the library from the vault, and reads the thumbnails behind it:
 /// from the thumbnail cache, else from the first copy still present.
 fn fill_library(shell: &mut Shell, persist: &Persist) -> Result<(), String> {
-    let rows = helios_gui::persist::read_library(persist.vault())?;
+    let rows = helios_gui::persist::read_library(persist.vault(), shell.library().sort())?;
     show_library(shell, persist, rows)
 }
 

@@ -13,9 +13,10 @@ use helios_core::{Bus, ContentHash};
 use helios_gui::library::Entry;
 use helios_gui::persist::{Persist, read_library};
 use helios_gui::{Shell, helios_panels};
+use helios_vault::capture::CAPTURED;
 use helios_vault::fields::{LABELS, RATING, TAGS};
 use helios_vault::storage::VolumeId;
-use helios_vault::{Image, ImageId, Location, Presence, Store, Vault};
+use helios_vault::{Image, ImageId, Location, Order, Presence, Sort, Store, Vault};
 use helios_vault_sqlite::SqliteStore;
 use serde_json::json;
 
@@ -44,6 +45,25 @@ fn stored_size(i: u32) -> u64 {
 /// When the vault saw photo `i` last modified.
 fn stored_modified(i: u32) -> u64 {
     1_700_000_000 + u64::from(i) * 60
+}
+
+/// When photo `i` was taken: the later photos earlier, a third never by
+/// a camera.
+fn captured(i: u32) -> Option<u64> {
+    (!i.is_multiple_of(3)).then(|| 1_600_000_000 - u64::from(i) * 60)
+}
+
+/// The photos in the order a sort shows them: by id, or by capture time
+/// (the photos never taken last, by their file name, `IMG_{i}` for every
+/// photo).
+fn sorted(n: u32, order: Order) -> Vec<u32> {
+    let mut ids: Vec<u32> = (0..n).collect();
+    match order.by {
+        Sort::Id => ids.sort_by_key(|&i| id(i)),
+        Sort::Captured => ids.sort_by_key(|&i| (captured(i).is_none(), captured(i), i)),
+        other => panic!("no expected order for {other:?}"),
+    }
+    ids
 }
 
 fn id(i: u32) -> ImageId {
@@ -136,6 +156,9 @@ fn synthetic(dir: &Path, n: u32) -> PathBuf {
         if i.is_multiple_of(11) {
             store.set_field(&id, TAGS, Some(&json!(["x"]))).unwrap();
         }
+        if let Some(t) = captured(i) {
+            store.set_field(&id, CAPTURED, Some(&json!(t))).unwrap();
+        }
     }
     store.commit().unwrap();
     path
@@ -178,11 +201,11 @@ struct Cost {
     stats: usize,
 }
 
-fn read(path: &Path, n: u32) -> Result<Cost, String> {
+fn read(path: &Path, n: u32, order: Order) -> Result<Cost, String> {
     let vault = Vault::new(SqliteStore::open(path).unwrap());
     let q0 = vault.reads().queries;
     let start = Instant::now();
-    let rows = read_library(&vault)?;
+    let rows = read_library(&vault, order)?;
     let elapsed = start.elapsed();
     let cost = Cost {
         images: rows.len(),
@@ -195,9 +218,7 @@ fn read(path: &Path, n: u32) -> Result<Cost, String> {
             .count(),
     };
     assert_eq!(rows.len(), n as usize);
-    let mut ids: Vec<u32> = (0..n).collect();
-    ids.sort_by_key(|&i| id(i));
-    for (i, e) in ids.into_iter().zip(rows.entries()) {
+    for (i, e) in sorted(n, order).into_iter().zip(rows.entries()) {
         check(i, e);
     }
     Ok(cost)
@@ -208,7 +229,7 @@ fn the_library_read_at_scale_measured() {
     for n in [30_000, 100_000] {
         let dir = scratch("read");
         let path = synthetic(&dir, n);
-        let line = match read(&path, n) {
+        let line = match read(&path, n, helios_gui::library::DEFAULT_SORT) {
             Ok(c) => json!({
                 "images": c.images,
                 "ms": c.elapsed.as_millis(),
@@ -234,24 +255,28 @@ fn open(path: &Path) -> (Shell, Persist<SqliteStore>) {
 /// one query opens the cursor, one reads each window of
 /// `helios_gui::persist::PAGE` photos, and the sizes and dates shown are the
 /// vault's, never a `stat`'s. A time deadline catches a read gone slow.
+/// Sorted by capture time (the library's default) the photos come in its
+/// order from the same query.
 #[test]
 fn the_library_read_at_scale_is_a_query_per_window_and_no_stat() {
     let n = 50_000;
     let dir = scratch("guard");
     let path = synthetic(&dir, n);
-    let cost = read(&path, n).unwrap();
-    let windows = (n as usize).div_ceil(helios_gui::persist::PAGE) as u64;
-    assert!(
-        cost.queries <= windows + 1,
-        "{} queries for {n} photos: one per photo again?",
-        cost.queries
-    );
-    assert_eq!(cost.stats, 0, "the read stat-ed the photos' files");
-    assert!(
-        cost.elapsed < Duration::from_secs(30),
-        "read in {:?}",
-        cost.elapsed
-    );
+    for order in [Order::ID, helios_gui::library::DEFAULT_SORT] {
+        let cost = read(&path, n, order).unwrap();
+        let windows = (n as usize).div_ceil(helios_gui::persist::PAGE) as u64;
+        assert!(
+            cost.queries <= windows + 1,
+            "{order:?}: {} queries for {n} photos: one per photo again?",
+            cost.queries
+        );
+        assert_eq!(cost.stats, 0, "the read stat-ed the photos' files");
+        assert!(
+            cost.elapsed < Duration::from_secs(30),
+            "{order:?}: read in {:?}",
+            cost.elapsed
+        );
+    }
     let _ = std::fs::remove_dir_all(&dir);
 }
 

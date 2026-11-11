@@ -42,7 +42,8 @@ use helios_core::{Bus, Envelope, Graph, Message, NodeId, Params};
 use helios_vault::capture::CAPTURED;
 use helios_vault::fields::{Command, LABELS, PICKED, Query, RATING, REJECTED, TAGS};
 use helios_vault::{
-    CursorId, EditSession, ImageId, LibraryRow, Location, Presence, Store, Vault, Version, edit,
+    CursorId, EditSession, ImageId, LibraryRow, Location, Order, Presence, Store, Vault, Version,
+    edit,
 };
 use serde_json::Value;
 
@@ -114,6 +115,8 @@ pub struct LibraryRows {
     /// The cursor it was read through, kept open so the library shown is
     /// refreshed by its delta ([`Persist::fill_library`]).
     cursor: Option<CursorId>,
+    /// The order it was read in.
+    order: Order,
 }
 
 impl LibraryRows {
@@ -140,8 +143,14 @@ impl LibraryRows {
 /// date are those of its location. Nothing of the window either: a thread
 /// of its own can read it while the window opens
 /// ([`Persist::show_library`] shows it).
-pub fn read_library<S: Store>(vault: &Vault<S>) -> Result<LibraryRows, String> {
-    let cursor = vault.open_cursor(Query::default())?;
+///
+/// The photos come in `order` (the library's sort), sorted by the vault in
+/// the query that opens the cursor.
+pub fn read_library<S: Store>(vault: &Vault<S>, order: Order) -> Result<LibraryRows, String> {
+    let cursor = vault.open_cursor(Query {
+        order,
+        ..Query::default()
+    })?;
     let read = read_cursor(vault, cursor.id, cursor.count);
     if read.is_err() {
         vault.close_cursor(cursor.id);
@@ -151,6 +160,7 @@ pub fn read_library<S: Store>(vault: &Vault<S>) -> Result<LibraryRows, String> {
         entries,
         files,
         cursor: Some(cursor.id),
+        order,
     })
 }
 
@@ -224,6 +234,8 @@ fn entry_of(row: LibraryRow, changed: &HashMap<ImageId, u64>) -> (Entry, Option<
 struct Shown {
     cursor: CursorId,
     files: BTreeMap<String, PathBuf>,
+    /// The order its cursor sorts by.
+    order: Order,
 }
 
 impl<S: Store> Persist<S> {
@@ -262,17 +274,25 @@ impl<S: Store> Persist<S> {
     /// read when the catalog did not change, else the images added and
     /// those whose copies moved (an import, a scan, an undo), in windows
     /// of [`PAGE`]; the others keep their entries as shown.
+    ///
+    /// A library sorted another way since is read whole again, in its
+    /// sort, through a new cursor.
     pub fn fill_library(&self, shell: &mut Shell) -> Result<Vec<(String, PathBuf)>, String> {
+        let order = shell.library().sort();
         let shown = self.shown.lock().expect("library lock").take();
         if let Some(shown) = shown {
             let cursor = shown.cursor;
-            match self.refresh_library(shell, shown) {
-                Ok(files) => return Ok(files),
-                // Read whole again, through a new cursor.
-                Err(_) => self.vault.close_cursor(cursor),
+            if shown.order == order {
+                match self.refresh_library(shell, shown) {
+                    Ok(files) => return Ok(files),
+                    // Read whole again, through a new cursor.
+                    Err(_) => self.vault.close_cursor(cursor),
+                }
+            } else {
+                self.vault.close_cursor(cursor);
             }
         }
-        let rows = read_library(&self.vault)?;
+        let rows = read_library(&self.vault, order)?;
         self.show_library(shell, rows)
     }
 
@@ -284,11 +304,17 @@ impl<S: Store> Persist<S> {
         shell: &mut Shell,
         rows: LibraryRows,
     ) -> Result<Vec<(String, PathBuf)>, String> {
+        // Read before the library's sort changed (on the thread reading it
+        // as the window opens): read again in the sort, next frame.
+        if rows.order != shell.library().sort() {
+            shell.library_mut().ask_resort();
+        }
         shell.set_library(rows.entries);
         let old = match rows.cursor {
             Some(cursor) => self.shown.lock().expect("library lock").replace(Shown {
                 cursor,
                 files: rows.files.iter().cloned().collect(),
+                order: rows.order,
             }),
             None => None,
         };
@@ -626,6 +652,19 @@ impl<S: Store> Persist<S> {
             if let Err(e) = self.vault.set_stack_expanded(&stack, expanded) {
                 shell.notify(Level::Warning, e);
             }
+        }
+        // The library sorted another way: read again in that order.
+        if shell.library_mut().take_resort()
+            && let Err(e) = self.fill_library(shell)
+        {
+            shell.notify(
+                Level::Error,
+                Message::new(
+                    "gui-vault-unreadable",
+                    "Cannot read the library: { $error }",
+                )
+                .with("error", e),
+            );
         }
         let query = shell.library_mut().take_query();
         if let Some(query) = query {

@@ -215,6 +215,9 @@ enum Action {
     /// Compares photos side by side, in the Compare place (`images`, else
     /// the selection: two or more).
     ComparePhotos(Value),
+    /// Sorts the library (`by`, `descending`), as whom; without `by`,
+    /// says how it is sorted.
+    Sort(Value, Origin),
     /// Moves the comparison's active photo by a step.
     CompareStep(i64),
     /// Zoom and pan synchronised across the compared photos, or not
@@ -2699,6 +2702,15 @@ impl Shell {
             ),
             Box::new(|a, _| Ok(Action::ComparePhotos(a.clone()))),
         );
+        add(
+            CommandSpec::new(
+                crate::library::SORT_COMMAND,
+                "Sort the library (`by`: captured, imported, name, rating, edited or size; \
+                 `descending`); kept with the workspace. Without `by`, says how it is sorted",
+                "Library",
+            ),
+            Box::new(|a, origin| Ok(Action::Sort(a.clone(), origin.clone()))),
+        );
         for (id, title, step) in [
             ("compare.next", "Compare: make the next photo active", 1),
             (
@@ -4010,9 +4022,53 @@ impl Shell {
         let mut lib = self.focus.library.borrow_mut();
         lib.auto_advance = l.auto_advance;
         lib.import_offered = l.import.is_some();
+        if let Some(sort) = crate::library::sort_of(l.sort.as_ref()) {
+            lib.set_sort(sort);
+        }
         if let Some(q) = &l.query {
             lib.set_filter(crate::library::filter_of(q));
         }
+    }
+
+    /// `library.sort`: sorts this window's library, and keeps the sort
+    /// with the workspace (one undo step) when one is open; answers the
+    /// sort in force.
+    fn sort_library(&mut self, args: &Value, origin: &Origin) -> Result<Value, String> {
+        let current = self.focus.library.borrow().sort();
+        if let Some(by) = args.get("by").filter(|v| !v.is_null()) {
+            let name = by.as_str().ok_or("`by`: not a sort's name")?;
+            let by = helios_vault::Sort::parse(name)
+                .filter(|s| helios_template::format::SORTS.contains(&s.name()))
+                .ok_or_else(|| {
+                    format!(
+                        "`by`: `{name}` is not one of {}",
+                        helios_template::format::SORTS.join(", ")
+                    )
+                })?;
+            let descending = match args.get("descending") {
+                None | Some(Value::Null) => current.descending,
+                Some(Value::Bool(b)) => *b,
+                Some(v) => return Err(format!("`descending`: {v} is not true or false")),
+            };
+            let sort = helios_vault::Order { by, descending };
+            if let Some(state) = self.workspace_state() {
+                let mut library = state.bundle.template.library.unwrap_or_default();
+                library.sort = crate::library::sort_desc(sort);
+                // An empty library section is none at all.
+                let library =
+                    (library != helios_template::LibraryDesc::default()).then_some(library);
+                if library
+                    != self
+                        .workspace_state()
+                        .and_then(|s| s.bundle.template.library)
+                {
+                    self.edit_workspace(&json!({ "library": library }), origin)?;
+                }
+            }
+            self.focus.library.borrow_mut().set_sort(sort);
+        }
+        let sort = self.focus.library.borrow().sort();
+        Ok(json!({ "by": sort.by.name(), "descending": sort.descending }))
     }
 
     /// Compares photos side by side: the Compare place on `images` (ids),
@@ -4528,6 +4584,7 @@ impl Shell {
                 );
             }
             Action::ComparePhotos(args) => return self.compare_photos(&args),
+            Action::Sort(args, origin) => return self.sort_library(&args, &origin),
             Action::CompareStep(step) => {
                 let selection = self.focus.library.borrow().selection();
                 let mut cmp = self.focus.comparison.borrow_mut();

@@ -620,3 +620,6 @@ command-compare-sync =
 
 command-library-compare =
     .title = Comparer des photos côte à côte (`images` : identifiants, sinon la sélection ; de deux à quatre)
+
+command-library-sort =
+    .title = Trier la bibliothèque (`by` : captured, imported, name, rating, edited ou size ; `descending`) ; gardé avec l’espace de travail. Sans `by`, dit comment elle est triée

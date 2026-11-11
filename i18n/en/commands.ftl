@@ -265,6 +265,9 @@ command-library-openFolder =
 command-library-pasteFiles =
     .title = Paste files or an image another application copied into the library, imported once confirmed (`dry_run`: only say what would be imported)
 
+command-library-sort =
+    .title = Sort the library (`by`: captured, imported, name, rating, edited or size; `descending`); kept with the workspace. Without `by`, says how it is sorted
+
 command-library-storage =
     .title = Storage… (the Settings app at Storage › Volumes; `volume`: the volume to mark and scroll to)
 
