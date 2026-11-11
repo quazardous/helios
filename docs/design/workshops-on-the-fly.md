@@ -1,13 +1,14 @@
 # Workshops made on the fly: designed by the AI, refined by hand, run within limits
 
-Status: **proposed, not decided** (2026-11-11). A design note: nothing
-here is built. It extends [workshops.md](workshops.md) (workshops v1,
+Status: **decided** (2026-11-11): the owner accepted every
+recommendation of section 9 (C1 to C8). A design note: nothing here is
+built yet but slice 1 (semantic sliders). It extends [workshops.md](workshops.md) (workshops v1,
 built, experimental) and uses decision nodes and AI junctions
 ([module-contract.md](../module-contract.md)), macros
 ([macros.md](macros.md)), the undo design ([undo.md](undo.md)), the
 workflow level ([workflow-level.md](../workflow-level.md)) and the import
 lifecycle ([import-connectors.md](import-connectors.md), section 7).
-Each choice has a default; the choices for the owner are at the end.
+The choices, now decided, are at the end.
 
 ## In short
 
@@ -123,6 +124,20 @@ the curve's domain, usually -1 to +1 or 0 to 1.
     { "node": "shadhi", "param": "shadows", "curve": [[0, 0], [0.5, 10], [1, 30]] }
   ] }
 ```
+
+Built (slice 1): an exposed entry with `drives` gives neither `node`
+nor `param`. Its range is `min`/`max`, else the curves' domain; its
+default is `default`, else 0 within the range. A whole-number inner
+parameter gets the curve's value rounded. Refused, the entry named: a
+curve of fewer than 2 or more than 8 points, `x` not strictly
+increasing, a point outside the inner hard range, a parameter that is
+not a number, and one inner parameter set by two exposed names (a drive
+and a plain exposure, or two drives: the cycle case). Opening or
+dissolving a macro writes the curves' values onto the inner parameters;
+folding it back drops them, the slider keeping its value. The interface
+editor's "New semantic slider" adds one; its row edits the range and,
+per driven parameter, the curve's points, drawn beside them. Agents
+author it with `macro.interface`'s `exposed` list; no new verb.
 
 ### Helios checks the draft (deterministic, not the AI)
 
@@ -504,7 +519,7 @@ one commit or a few, builds and passes its tests, and is testable
 headless. Sizes: S under 300 lines, M 300 to 800, L over 800, tests
 included.
 
-1. **Semantic sliders** (M). `drives` in the composite format and schema,
+1. **Semantic sliders** (M, built 2026-11-11). `drives` in the composite format and schema,
    piecewise-linear curves, the interface editor's curve rows; refusals
    (a point out of the inner range, a cycle of drives). Test: a
    "Backlight lift" slider on a synthetic network moves three inner
@@ -565,7 +580,9 @@ Slice 11 waits for import-connectors.md's lifecycle slice.
 
 ## 9. Choices for the owner
 
-Not decided. Each has options in key order and a recommendation.
+Decided on 2026-11-11: the owner accepted every recommendation (C1 C,
+C2 C, C3 C, C4 B, C5 B, C6 C, C7 A, C8 C). Each choice keeps its
+options in key order and says which was taken.
 
 **C1. Who answers the design and proposal steps.**
 - A. The user's own agent through the node's MCP only: no key in Helios,
@@ -573,7 +590,7 @@ Not decided. Each has options in key order and a recommendation.
 - B. `helios-ai` only (local by default, remote when added).
 - C. Both, with one draft format, one check and the same refusals.
 
-Recommended: **C**, the MCP path first (slice 4 tests both with fakes):
+Decided (2026-11-11): **C**, as recommended, the MCP path first (slice 4 tests both with fakes):
 it is the owner's own setup and it stores no key.
 
 **C2. How a run writes edits.**
@@ -582,7 +599,7 @@ it is the owner's own setup and it stores no key.
   review applies them.
 - C. Write the unflagged photos, stage the flagged ones until fixed.
 
-Recommended: **C**: the bulk lands at once, the doubtful ones wait, and
+Decided (2026-11-11): **C**, as recommended: the bulk lands at once, the doubtful ones wait, and
 the run is still one undo step.
 
 **C3. Series consistency default.**
@@ -592,21 +609,21 @@ the run is still one undo step.
   the value, a fixed value otherwise; "held together" offered for
   time-ordered series.
 
-Recommended: **C**.
+Decided (2026-11-11): **C**, as recommended.
 
 **C4. A junction with low confidence in a run.**
 - A. Hold the photo for review.
 - B. Use the fallback (the test case's answer) and flag it.
 - C. Skip the photo.
 
-Recommended: **B**: the run completes, the review shows each fallback.
+Decided (2026-11-11): **B**, as recommended: the run completes, the review shows each fallback.
 
 **C5. Pixels sent to the AI.**
 - A. Never: measures and descriptions only.
 - B. A proxy only when the user switches it on for the session.
 - C. A proxy always to a local model, by switch to a remote one.
 
-Recommended: **B** to start, as the owner asked ("only if the user
+Decided (2026-11-11): **B**, as recommended: to start, as the owner asked ("only if the user
 allows"); C once a local vision model is in the recommended setup.
 
 **C6. When a session is recorded.**
@@ -615,14 +632,14 @@ allows"); C once a local vision model is in the recommended setup.
 - C. Always, and dropped unless the workshop is generalised or the user
    keeps it.
 
-Recommended: **C**: no button to forget, nothing kept that is not used.
+Decided (2026-11-11): **C**, as recommended: no button to forget, nothing kept that is not used.
 
 **C7. Semantic sliders' form.**
 - A. Piecewise-linear curves in the composite file.
 - B. Expressions (a small formula language).
 - C. A brick graph behind the slider.
 
-Recommended: **A**: data an AI can write and a user can see as a curve;
+Decided (2026-11-11): **A**, as recommended: data an AI can write and a user can see as a curve;
 B and C can come later for what curves cannot say.
 
 **C8. Defaults for limits.**
@@ -630,7 +647,7 @@ B and C can come later for what curves cannot say.
 - B. Loose: the narrowed ranges only.
 - C. The table of section 3 (spread-based, at least 10 % of the range).
 
-Recommended: **C**, each limit shown and editable on its row.
+Decided (2026-11-11): **C**, as recommended, each limit shown and editable on its row.
 
 ## Sources
 

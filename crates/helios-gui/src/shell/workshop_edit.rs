@@ -422,14 +422,17 @@ impl Shell {
                 continue;
             }
             seen.push(&x.name);
-            let number = interface.inner.iter().any(|p| {
-                p.node == x.node
-                    && p.spec.name == x.param
-                    && matches!(
-                        p.spec.kind,
-                        helios_core::ParamKind::Float { .. } | helios_core::ParamKind::Int { .. }
-                    )
-            });
+            // A semantic slider is a number of its own.
+            let number = x.is_driven()
+                || interface.inner.iter().any(|p| {
+                    p.node == x.node
+                        && p.spec.name == x.param
+                        && matches!(
+                            p.spec.kind,
+                            helios_core::ParamKind::Float { .. }
+                                | helios_core::ParamKind::Int { .. }
+                        )
+                });
             if !number {
                 continue;
             }

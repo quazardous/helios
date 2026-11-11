@@ -758,11 +758,18 @@ pub struct Exit {
 /// every field after `param` is optional, the inner parameter's own
 /// otherwise. A name repeated on several inner nodes links them; the
 /// interface is given on its first entry.
+///
+/// A **semantic slider** gives `drives` instead of `node` and `param`:
+/// one number that moves several inner numbers, each along its curve.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Exposed {
     pub name: String,
+    /// The inner node; empty for a semantic slider.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub node: String,
+    /// The inner parameter; empty for a semantic slider.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub param: String,
     /// A short label, in English; the name otherwise.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -792,9 +799,49 @@ pub struct Exposed {
     /// node's value otherwise.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default: Option<helios_core::Value>,
+    /// A semantic slider's inner numbers, each moved along its curve; its
+    /// range is `min`/`max`, else the curves' domain.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub drives: Vec<Drive>,
+}
+
+/// One inner number a semantic slider moves: `curve` maps the slider's
+/// value (`x`) to the inner value (`y`), piecewise-linear, 2 to 8 points,
+/// `x` strictly increasing, flat outside its first and last points.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Drive {
+    pub node: String,
+    pub param: String,
+    pub curve: Vec<[f64; 2]>,
+}
+
+impl Drive {
+    /// Its curve, checked.
+    pub fn curve(&self) -> Result<helios_core::Curve, String> {
+        helios_core::Curve::new(self.curve.iter().map(|[x, y]| (*x, *y)).collect())
+    }
 }
 
 impl Exposed {
+    /// Whether it is a semantic slider.
+    pub fn is_driven(&self) -> bool {
+        !self.drives.is_empty()
+    }
+
+    /// The inner parameters it sets, `(node, param)`: its own, or its
+    /// drives'.
+    pub fn inner(&self) -> Vec<(&str, &str)> {
+        if self.is_driven() {
+            self.drives
+                .iter()
+                .map(|d| (d.node.as_str(), d.param.as_str()))
+                .collect()
+        } else {
+            vec![(self.node.as_str(), self.param.as_str())]
+        }
+    }
+
     /// How the macro shows it.
     pub fn exposure(&self) -> helios_core::Exposure {
         helios_core::Exposure {

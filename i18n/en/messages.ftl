@@ -695,6 +695,10 @@ gui-macro-iface-description = Description
 
 gui-macro-iface-down = Move down
 
+gui-macro-iface-drive-add = Drive another parameter
+
+gui-macro-iface-drive-remove = Stop driving it
+
 gui-macro-iface-filter = Filter
 
 gui-macro-iface-group = Group
@@ -709,11 +713,19 @@ gui-macro-iface-name = Name
 
 gui-macro-iface-name-hint = The same name on two rows links them: one value sets both
 
+gui-macro-iface-new-slider = New semantic slider
+
+gui-macro-iface-new-slider-hint = One slider that moves several inner numbers, each along its curve
+
 gui-macro-iface-none = Nothing shown: tick inner parameters on the left
 
 gui-macro-iface-options = Options kept
 
 gui-macro-iface-pick = Select a parameter shown to set its name, range and default
+
+gui-macro-iface-point = x: the slider's value; y: the inner value there
+
+gui-macro-iface-point-add = Add a point
 
 gui-macro-iface-range = Range
 

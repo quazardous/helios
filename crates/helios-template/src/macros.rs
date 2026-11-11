@@ -65,6 +65,37 @@ pub(crate) fn values_of<'a>(values: &'a Values, node: &str) -> Vec<(&'a str, &'a
 
 /// The paths of values held on the inner nodes of an opened macro
 /// `node` (`node/<node>.<inner>/<param>`).
+/// What exposed entry `x` writes into its inner parameters at `value`:
+/// `(inner node, param, value)`. A semantic slider's curves are evaluated
+/// by `built`, the file built as a macro; nothing for one when it is not
+/// given or the value is not a number.
+fn inner_values(
+    built: Option<&helios_core::Macro>,
+    x: &Exposed,
+    value: &Value,
+) -> Vec<(String, String, Value)> {
+    if !x.is_driven() {
+        return vec![(x.node.clone(), x.param.clone(), value.clone())];
+    }
+    #[allow(clippy::cast_precision_loss)]
+    let at = match value {
+        Value::Float(v) => *v,
+        Value::Int(v) => *v as f64,
+        _ => return Vec::new(),
+    };
+    built.map(|m| m.driven(&x.name, at)).unwrap_or_default()
+}
+
+/// The file built as a macro, when it has a semantic slider (its curves
+/// are evaluated by it); `None` otherwise or when it does not build.
+fn built_if_driven(file: &CompositeFile, cat: &Catalogue) -> Option<helios_core::Macro> {
+    if file.exposed.iter().any(Exposed::is_driven) {
+        crate::catalogue::build(file, cat, 0).ok()
+    } else {
+        None
+    }
+}
+
 fn inner_paths(values: &Values, node: &str) -> Vec<String> {
     let prefix = format!("node/{node}.");
     values
@@ -683,13 +714,14 @@ impl State {
             moves.insert(bypass_path(node), None);
         }
         // The image's exposed values onto the inner parameters they set,
-        // where the opened macro's nodes show them.
+        // where the opened macro's nodes show them (a semantic slider's
+        // through its curves).
+        let built = built_if_driven(&file, &self.bundle.catalogue(catalogue));
         for (name, v) in values_of(values, node) {
             for x in file.exposed.iter().filter(|x| x.name == name) {
-                moves.insert(
-                    node_path(&format!("{node}.{}", x.node), &x.param),
-                    Some(v.clone()),
-                );
+                for (inner, param, v) in inner_values(built.as_ref(), x, v) {
+                    moves.insert(node_path(&format!("{node}.{inner}"), &param), Some(v));
+                }
             }
         }
         Ok(Step {
@@ -778,7 +810,9 @@ impl State {
         for path in values.keys().filter(|k| k.starts_with(&inner_bypass)) {
             moves.insert(path.clone(), None);
         }
-        // Exposed values set on their inner nodes go back to the macro.
+        // Exposed values set on their inner nodes go back to the macro. A
+        // semantic slider's inner values are its curves': the slider kept
+        // its own value, so they are dropped.
         for path in inner_paths(values, node) {
             if changed.contains(&path) {
                 continue;
@@ -788,10 +822,34 @@ impl State {
                 .and_then(|(inner, param)| {
                     file.exposed
                         .iter()
-                        .find(|x| x.node == inner && x.param == param)
+                        .find(|x| x.inner().contains(&(inner, param)))
                 });
-            if let Some(x) = exposed {
-                moves.insert(node_path(node, &x.name), values.get(&path).cloned());
+            match exposed {
+                Some(x) if x.is_driven() => {
+                    moves.insert(path.clone(), None);
+                }
+                Some(x) => {
+                    moves.insert(node_path(node, &x.name), values.get(&path).cloned());
+                }
+                None => {}
+            }
+        }
+        // A semantic slider keeps its value: the image's if it still holds
+        // it, else read back through its first strictly monotonic curve
+        // from the inner value it wrote.
+        for x in file.exposed.iter().filter(|x| x.is_driven()) {
+            if let Some(v) = values.get(&node_path(node, &x.name)) {
+                moves.insert(node_path(node, &x.name), Some(v.clone()));
+                continue;
+            }
+            let back = x.drives.iter().find_map(|d| {
+                let y = values
+                    .get(&node_path(&format!("{node}.{}", d.node), &d.param))?
+                    .as_f64()?;
+                d.curve().ok()?.invert(y)
+            });
+            if let Some(at) = back {
+                moves.insert(node_path(node, &x.name), Some(Value::Float(at)));
             }
         }
         let mut next = self.clone();
@@ -934,17 +992,22 @@ impl State {
             let name = &renamed[inner];
             nodes.iter().position(|n| n.name == *name).expect("renamed")
         };
+        let built = built_if_driven(&file, &cat);
         for x in &file.exposed {
             if let Some(v) = desc.params.get(&x.name) {
-                let i = target(&nodes, &x.node);
-                nodes[i].params.set(&x.param, v.clone());
+                for (inner, param, v) in inner_values(built.as_ref(), x, v) {
+                    let i = target(&nodes, &inner);
+                    nodes[i].params.set(&param, v);
+                }
             }
         }
         let mut moves = Moves::new();
         for (name, v) in values_of(values, node) {
             moves.insert(node_path(node, name), None);
             for x in file.exposed.iter().filter(|x| x.name == name) {
-                moves.insert(node_path(&renamed[&x.node], &x.param), Some(v.clone()));
+                for (inner, param, v) in inner_values(built.as_ref(), x, v) {
+                    moves.insert(node_path(&renamed[&inner], &param), Some(v));
+                }
             }
         }
         for path in inner_paths(values, node) {
@@ -1055,10 +1118,12 @@ impl State {
             };
             for (name, v) in held.iter() {
                 for x in file.exposed.iter().filter(|x| x.name == name) {
-                    p.values
-                        .entry(renamed[&x.node].clone())
-                        .or_default()
-                        .set(&x.param, v.clone());
+                    for (inner, param, v) in inner_values(built.as_ref(), x, v) {
+                        p.values
+                            .entry(renamed[&inner].clone())
+                            .or_default()
+                            .set(&param, v);
+                    }
                 }
             }
         }
@@ -1429,6 +1494,13 @@ impl State {
             if follows.contains_key(old.name.as_str()) {
                 continue;
             }
+            // A semantic slider follows its name, kept a semantic slider.
+            if old.is_driven() {
+                if exposed.iter().any(|x| x.is_driven() && x.name == old.name) {
+                    follows.insert(old.name.as_str(), old.name.as_str());
+                }
+                continue;
+            }
             let entries: Vec<(&str, &str)> = file
                 .exposed
                 .iter()
@@ -1437,7 +1509,7 @@ impl State {
                 .collect();
             if let Some(new) = exposed
                 .iter()
-                .find(|x| entries.contains(&(x.node.as_str(), x.param.as_str())))
+                .find(|x| !x.is_driven() && entries.contains(&(x.node.as_str(), x.param.as_str())))
             {
                 follows.insert(old.name.as_str(), new.name.as_str());
             }
@@ -1446,7 +1518,9 @@ impl State {
         next_file.id.clone_from(&to.id);
         next_file.version = to.version;
         next_file.exposed = exposed.to_vec();
-        // What is no longer exposed keeps the value it renders with.
+        // What is no longer exposed keeps the value it renders with (a
+        // semantic slider's inner values, its curves').
+        let built = built_if_driven(file, &cat);
         for old in &file.exposed {
             if follows.contains_key(old.name.as_str()) {
                 continue;
@@ -1454,10 +1528,11 @@ impl State {
             let held = values
                 .get(&node_path(node, &old.name))
                 .or_else(|| desc.params.get(&old.name));
-            if let Some(v) = held
-                && let Some(n) = next_file.nodes.iter_mut().find(|n| n.name == old.node)
-            {
-                n.params.set(&old.param, v.clone());
+            let Some(v) = held else { continue };
+            for (inner, param, v) in inner_values(built.as_ref(), old, v) {
+                if let Some(n) = next_file.nodes.iter_mut().find(|n| n.name == inner) {
+                    n.params.set(&param, v);
+                }
             }
         }
         let built = crate::catalogue::build(&next_file, &cat, 0)?;
@@ -1620,7 +1695,7 @@ fn changed_inside(file: &CompositeFile, node: &str, values: &Values) -> Vec<Stri
                     !file
                         .exposed
                         .iter()
-                        .any(|x| x.node == inner && x.param == param)
+                        .any(|x| x.inner().contains(&(inner, param)))
                 })
         })
         .collect();
