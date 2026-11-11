@@ -30,6 +30,7 @@ use std::time::Duration;
 use rusqlite::{Connection, OpenFlags, OptionalExtension, TransactionBehavior, params};
 
 use std::collections::{BTreeMap, HashMap};
+use std::fmt::Write as _;
 
 use serde::Serialize;
 use serde_json::Value;
@@ -801,7 +802,7 @@ fn backup_cte(name: &str, rule: &Backups, args: &mut Vec<Sql>) -> String {
 /// joined), as [`BackupState::of`] decides it.
 fn backup_state(name: &str, rule: &Backups) -> String {
     let copies = rule.copies;
-    let required = if rule.off_site_required { 0 } else { 1 };
+    let required = i32::from(!rule.off_site_required);
     format!(
         "CASE WHEN COALESCE({name}.have, 0) = 0 AND COALESCE({name}.unverified, 0) = 0 THEN 'none'
               WHEN COALESCE({name}.have, 0) >= {copies}
@@ -910,10 +911,11 @@ fn matched_sql(
     let name = shown_name();
     for word in &query.words {
         let word = helios_vault::fields::fold_case(word);
-        sql.push_str(&format!(
+        let _ = write!(
+            sql,
             " AND (instr({FOLD}({name}), ?) > 0
                    OR EXISTS (SELECT 1 FROM json_each(t.value) WHERE instr({FOLD}(json_each.value), ?) > 0))"
-        ));
+        );
         args.push(Sql::Text(word.clone()));
         args.push(Sql::Text(word));
     }
@@ -927,10 +929,11 @@ fn matched_sql(
         if values.is_empty() {
             continue;
         }
-        sql.push_str(&format!(
+        let _ = write!(
+            sql,
             " AND i.id IN (SELECT image FROM fields WHERE name = '{field}' AND number IS NULL AND value IN ({}))",
             marks(values.len())
-        ));
+        );
         args.extend(
             values
                 .iter()
@@ -950,21 +953,19 @@ fn matched_sql(
         args.push(Sql::Text(end));
     }
     if !query.presence.is_empty() {
-        sql.push_str(&format!(
-            " AND {PRESENCE} IN ({})",
-            marks(query.presence.len())
-        ));
+        let _ = write!(sql, " AND {PRESENCE} IN ({})", marks(query.presence.len()));
         args.extend(query.presence.iter().map(|p| Sql::Text(p.as_str().into())));
     }
     if let Some(b) = &query.backup {
         if b.states.is_empty() {
             sql.push_str(" AND 0");
         } else {
-            sql.push_str(&format!(
+            let _ = write!(
+                sql,
                 " AND ({}) IN ({})",
                 backup_state("bk", &b.rule),
                 marks(b.states.len())
-            ));
+            );
             args.extend(b.states.iter().map(|s| Sql::Text(s.name().into())));
         }
     }

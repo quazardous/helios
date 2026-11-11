@@ -2435,7 +2435,7 @@ impl Library {
                 ui.weak(crate::i18n::text(&ctx, title));
                 for (value, n) in values {
                     let shown = if facet == "rating" {
-                        format!("{}★", value)
+                        format!("{value}★")
                     } else {
                         value.to_string()
                     };
