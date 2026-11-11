@@ -424,7 +424,7 @@ fn the_import_windows_strategy_line_says_what_backups_the_photos_get() {
 /// strategy, and the `backup:` filters of the search field.
 #[test]
 fn photos_show_their_backups_and_the_search_filters_on_them() {
-    let (world, mut shell) = World::new("backups");
+    let (mut world, mut shell) = World::new("backups");
     // A second photo, on the studio disk only.
     let other_file = world.dir.join("studio/other.jpg");
     std::fs::write(&other_file, b"another photo, on the studio disk").unwrap();
@@ -470,16 +470,26 @@ fn photos_show_their_backups_and_the_search_filters_on_them() {
     refresh(&mut h, &world);
     assert_eq!(badges(&h, &photo), ["backed up"]);
 
-    // The filters.
-    let shown = |h: &mut Harness<'_, Shell>, typed: &str| {
+    // The filters, run in the vault's query on the host's turn.
+    let shown = |h: &mut Harness<'_, Shell>, world: &mut World, typed: &str| {
         h.state()
             .library_mut()
             .set_filter(egui_pop::views::library::filter::Filter::parse(typed));
+        world.persist.frame(h.state_mut(), 1.0);
         h.state().library().shown()
     };
-    assert_eq!(shown(&mut h, "backup:met"), std::slice::from_ref(&photo));
-    assert_eq!(shown(&mut h, "backup:none"), std::slice::from_ref(&other));
-    assert_eq!(shown(&mut h, "backup:short"), std::slice::from_ref(&other));
+    assert_eq!(
+        shown(&mut h, &mut world, "backup:met"),
+        std::slice::from_ref(&photo)
+    );
+    assert_eq!(
+        shown(&mut h, &mut world, "backup:none"),
+        std::slice::from_ref(&other)
+    );
+    assert_eq!(
+        shown(&mut h, &mut world, "backup:short"),
+        std::slice::from_ref(&other)
+    );
 
     // Two copies asked: one is short.
     let two = Strategy {
@@ -489,12 +499,12 @@ fn photos_show_their_backups_and_the_search_filters_on_them() {
     strategy::save(&world.vault, &Scope::Library, Some(&two)).unwrap();
     refresh(&mut h, &world);
     assert_eq!(badges(&h, &photo), ["backup short"]);
-    let mut short = shown(&mut h, "backup:short");
+    let mut short = shown(&mut h, &mut world, "backup:short");
     short.sort();
     let mut both = vec![photo.clone(), other.clone()];
     both.sort();
     assert_eq!(short, both);
-    assert!(shown(&mut h, "backup:met").is_empty());
+    assert!(shown(&mut h, &mut world, "backup:met").is_empty());
 }
 
 /// A card left in the reader short of its backups: once a backup job
