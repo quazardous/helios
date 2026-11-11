@@ -2476,6 +2476,7 @@ dependencies = [
  "helios-storage",
  "helios-thumbs",
  "helios-vault",
+ "helios-vault-sqlite",
  "helios-xmp",
  "image",
  "log",

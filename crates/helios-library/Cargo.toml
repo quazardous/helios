@@ -25,6 +25,7 @@ serde_json.workspace = true
 
 [dev-dependencies]
 egui-pop-model.workspace = true
+helios-vault-sqlite.workspace = true
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 
 [lints]
