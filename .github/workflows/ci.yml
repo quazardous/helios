@@ -19,7 +19,9 @@ concurrency:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # Pinned, not ubuntu-latest: the fallback Mesa build links this
+    # image's LLVM 22 (see .github/actions/software-vulkan).
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v4
         with:
@@ -45,9 +47,10 @@ jobs:
           git checkout -q FETCH_HEAD
           echo "VKDT_SRC=$PWD" >> "$GITHUB_ENV"
       # No GPU in CI: lavapipe, Mesa's software Vulkan, runs the GPU
-      # backend's tests against the CPU reference.
+      # backend's tests against the CPU reference. Ubuntu's archive first,
+      # a GitHub-hosted Mesa build when the archive is down.
       - name: software Vulkan
-        run: sudo apt-get -o Acquire::Retries=5 update -q && sudo apt-get -o Acquire::Retries=5 install -yq mesa-vulkan-drivers
+        uses: ./.github/actions/software-vulkan
       # One process per test, a JUnit report, slow tests named
       # (.config/nextest.toml); nextest does not run doctests.
       - run: cargo nextest run --workspace --profile ci
@@ -103,7 +106,7 @@ jobs:
   # `cargo xtask check-commits`, capped at 20 commits, stops at the first
   # broken one and names it in the job summary, with what each commit ran.
   commits:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v4
         with:
@@ -114,7 +117,7 @@ jobs:
       # The critical set runs desktop tests (persist, survival): the same
       # software Vulkan as the test job, so they see the same machine.
       - name: software Vulkan
-        run: sudo apt-get -o Acquire::Retries=5 update -q && sudo apt-get -o Acquire::Retries=5 install -yq mesa-vulkan-drivers
+        uses: ./.github/actions/software-vulkan
       # The test job saves this cache; this job only reads it.
       - uses: Swatinem/rust-cache@v2
         with:
@@ -163,6 +166,7 @@ jobs:
           tool: cargo-deny,cargo-machete,taplo,typos
       - name: shellcheck and ruff
         run: |
-          sudo apt-get -o Acquire::Retries=5 update -q && sudo apt-get -o Acquire::Retries=5 install -yq shellcheck
+          # The runner image ships shellcheck: apt only if it ever stops.
+          command -v shellcheck || { sudo apt-get -o Acquire::Retries=5 update -q && sudo apt-get -o Acquire::Retries=5 install -yq shellcheck; }
           pipx install ruff
       - run: cargo xtask lint --require-all
