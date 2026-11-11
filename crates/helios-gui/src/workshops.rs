@@ -12,6 +12,10 @@
 //! - Off, a composite with a workshop block still loads and renders: it
 //!   is the macro it is.
 //! - The panel says it is experimental in its header.
+//! - "Describe what you want" starts a design session
+//!   (`workshop.describe`), answered by the user's own agent over MCP
+//!   (`shell::workshop_design`); the session's notes and the switch letting
+//!   the agent see a proxy ([`SEND_PROXY`]) live here.
 
 use egui_pop::core::ui::UiPop as _;
 use std::collections::BTreeMap;
@@ -159,24 +163,57 @@ impl Seen {
     }
 }
 
-/// The Workshops panel: find, the list, the applied workshop.
+/// A design session (`workshop.describe`): the user's words, answered
+/// by their own agent over MCP with a draft (`workshop.design`).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Design {
+    /// This desktop's count of sessions.
+    pub session: u32,
+    pub intent: String,
+    /// No draft applied yet.
+    pub waiting: bool,
+    /// The node the last applied draft is: a new draft replaces it.
+    pub node: Option<String>,
+    /// The workshop applied, `id@version`.
+    pub applied: Option<String>,
+    /// The last check's notes.
+    pub notes: Vec<String>,
+}
+
+/// The Workshops panel: describe, find, the list, the applied workshop.
 pub struct Panel {
     find: String,
+    describe: String,
     library: Vec<CompositeFile>,
     shipped: Vec<CompositeFile>,
     seen: Seen,
+    /// The design session, if one was started.
+    pub design: Option<Design>,
+    /// How many sessions were started.
+    pub sessions: u32,
+    /// `workshops.ai.send_proxy` for this session: whether an agent may
+    /// see a small proxy of the image. Off at start; only the user
+    /// switches it.
+    pub send_proxy: bool,
 }
 
 impl Default for Panel {
     fn default() -> Self {
         Panel {
             find: String::new(),
+            describe: String::new(),
             library: Vec::new(),
             shipped: helios_template::shipped::composites(),
             seen: Seen::default(),
+            design: None,
+            sessions: 0,
+            send_proxy: false,
         }
     }
 }
+
+/// The per-session switch letting an agent see a proxy of the image.
+pub const SEND_PROXY: &str = "workshops.ai.send_proxy";
 
 /// The words a measure is shown with: what it measures and its unit.
 pub fn measure_words(m: Measure) -> (Message, Message) {
@@ -228,6 +265,8 @@ impl Panel {
         ui.separator();
         let mut run: Option<(&str, serde_json::Value)> = None;
         let mut select: Option<String> = None;
+        self.describe_ui(ui, &mut run);
+        ui.separator();
         let find = ui
             .horizontal(|ui| {
                 let l = ui.label(text(Message::new("gui-workshops-find", "Find")));
@@ -340,6 +379,85 @@ impl Panel {
                 Change::To(Value::Text(node)),
                 CommandOrigin::User,
             ));
+        }
+    }
+
+    /// "Describe what you want": the words, Design (which starts a
+    /// session your agent answers over MCP), the proxy switch, and the
+    /// session's state and last notes.
+    fn describe_ui(&mut self, ui: &mut egui::Ui, run: &mut Option<(&str, serde_json::Value)>) {
+        let ctx = ui.ctx().clone();
+        let text = |m: Message| crate::i18n::text(&ctx, m);
+        let l = ui.label(text(Message::new(
+            "gui-workshops-describe",
+            "Describe what you want",
+        )));
+        ui.add(
+            egui::TextEdit::multiline(&mut self.describe)
+                .hint_text(text(Message::new(
+                    "gui-workshops-describe-hint",
+                    "backlit, the mountain and the sky too contrasted…",
+                )))
+                .desired_rows(2)
+                .desired_width(f32::INFINITY),
+        )
+        .labelled_by(l.id);
+        ui.horizontal(|ui| {
+            let words = self.describe.trim();
+            if ui
+                .add_enabled(
+                    !words.is_empty(),
+                    egui::Button::new(text(Message::new(
+                        "gui-workshops-design",
+                        "Design a workshop",
+                    ))),
+                )
+                .on_hover_text(text(Message::new(
+                    "gui-workshops-design-hint",
+                    "Ask your own agent (over MCP) for a workshop made for these words; Helios checks it on the open image and applies it as one undo step",
+                )))
+                .clicked()
+            {
+                *run = Some(("workshop.describe", json!({ "intent": words })));
+            }
+            if self.design.as_ref().is_some_and(|d| d.waiting)
+                && ui
+                    .small_button(text(Message::new("gui-workshops-design-cancel", "Cancel")))
+                    .clicked()
+            {
+                *run = Some(("workshop.describe", json!({ "cancel": true })));
+            }
+        });
+        let mut proxy = self.send_proxy;
+        if ui
+            .checkbox(
+                &mut proxy,
+                text(Message::new(
+                    "gui-workshops-send-proxy",
+                    "Let the agent see a small preview of the photo (this session only)",
+                )),
+            )
+            .clicked()
+        {
+            *run = Some(("workshop.send_proxy", json!({ "on": proxy })));
+        }
+        let Some(d) = &self.design else {
+            return;
+        };
+        if d.waiting {
+            ui.weak(text(Message::new(
+                "gui-workshops-design-waiting",
+                "Waiting for your agent: it reads helios_workshop_context and posts a draft with helios_workshop_design",
+            )));
+        }
+        if let Some(applied) = &d.applied {
+            ui.label(text(
+                Message::new("gui-workshops-designed", "Designed: { $workshop }")
+                    .with("workshop", applied),
+            ));
+        }
+        for note in &d.notes {
+            ui.weak(note);
         }
     }
 

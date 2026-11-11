@@ -84,6 +84,7 @@ pub use storage_admin::{
 type ImportLines = std::sync::mpsc::Sender<(Value, Value)>;
 mod macro_edit;
 mod network_edit;
+mod workshop_design;
 mod workshop_edit;
 mod workspace_edit;
 mod workspace_live;

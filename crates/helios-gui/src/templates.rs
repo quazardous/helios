@@ -45,9 +45,24 @@ pub fn find(id: &str) -> Option<Bundle> {
     builtin().into_iter().find(|b| b.template.id == id)
 }
 
+/// Modules added for this process beside the linked ones, by name.
+static ADDED: std::sync::Mutex<Vec<ModuleRef>> = std::sync::Mutex::new(Vec::new());
+
+/// Adds a module to [`modules`] for the rest of this process: one Helios
+/// does not link (a test's stand-in for a module not ported yet). A module
+/// of the same name is replaced.
+pub fn add_module(module: ModuleRef) {
+    let mut added = ADDED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    added.retain(|m| m.manifest().name != module.manifest().name);
+    added.push(module);
+}
+
 /// The modules the desktop links and the composites Helios ships: the
 /// raw chain the node runs on a raw (levels, white balance, highlights,
-/// demosaicing, camera colours), the tools on a picture, the masks.
+/// demosaicing, camera colours), the tools on a picture, the masks; and
+/// those added ([`add_module`]).
 pub fn modules() -> Catalogue {
     use helios_module_masks as m;
     let mut c = Catalogue::new()
@@ -75,6 +90,13 @@ pub fn modules() -> Catalogue {
         .module(ModuleRef::new(m::MaskGradient))
         .module(ModuleRef::new(m::MaskPath))
         .module(ModuleRef::new(m::MaskBrush));
+    for module in ADDED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .iter()
+    {
+        c = c.module(module.clone());
+    }
     for file in helios_template::shipped::composites() {
         c.add_composite(file);
     }

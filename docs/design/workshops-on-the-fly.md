@@ -1,9 +1,10 @@
 # Workshops made on the fly: designed by the AI, refined by hand, run within limits
 
 Status: **decided** (2026-11-11): the owner accepted every
-recommendation of section 9 (C1 to C8). A design note: slices 1 to 3
-are built (semantic sliders, zone measures, the draft and its check),
-the rest is not. It extends [workshops.md](workshops.md) (workshops v1,
+recommendation of section 9 (C1 to C8). A design note: slices 1 to 4
+are built (semantic sliders, zone measures, the draft and its check,
+`workshop.design` through the user's own agent over MCP), the rest is
+not. It extends [workshops.md](workshops.md) (workshops v1,
 built, experimental) and uses decision nodes and AI junctions
 ([module-contract.md](../module-contract.md)), macros
 ([macros.md](macros.md)), the undo design ([undo.md](undo.md)), the
@@ -197,6 +198,25 @@ undo step.
 In the Workshops panel, the Find field gains a "Design a workshop for
 this" row under the matches: it sends the typed intent to the design
 step (section 8 says who answers).
+
+Built (slice 4, the MCP path of C1). The Workshops panel opens with
+"Describe what you want": the words and **Design a workshop** start a
+design session (`workshop.describe`), which waits for the user's own
+agent; a checkbox switches `workshops.ai.send_proxy` for the session (the
+user's alone: an agent asking `workshop.send_proxy` is refused). The
+agent calls `helios_workshop_context` (`intent` defaults to the
+session's words; the measures of the image on the proxy, whole and in
+two candidate zones, `bright` and `dark`, it may copy; the modules with
+their parameters; the bricks; the workshops the words find; how to write
+the draft; the proxy as a PNG only when allowed, else `proxy_refused`),
+then `helios_workshop_design` with its `draft` (`apply` true by default,
+`replace`, `after`, `dry_run`). The answer carries the `check`, and once
+applied the node, the workshop (`designed`) and the aimed targets; the
+panel shows the notes, "Designed: user.<slug>@1", and the applied
+workshop's sliders. A refused draft applies nothing; posting again in the
+session replaces the former design. Not built yet: the `helios-ai` path
+(`workshop.design@1`), and an event telling a waiting agent a session
+started (it reads the session from `helios_workshop_context`).
 
 ### Zones and their measures (built, slice 2)
 
@@ -593,7 +613,8 @@ included.
    reported. Test: a hand-written backlit draft with one useless slider
    and one clipping range is checked: the first dropped, the second
    narrowed, the notes say so.
-4. **`workshop.design`** (M). The verb and command, applying a checked
+4. **`workshop.design`** (M, built 2026-11-11 but the `helios-ai`
+   path). The verb and command, applying a checked
    draft as one undo step, the panel's "Design a workshop for this" row,
    `helios_workshop_context`; the `helios-ai` path with the
    `workshop.design@1` prompt. Test: the fake provider (and a scripted

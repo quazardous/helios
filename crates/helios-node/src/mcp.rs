@@ -775,6 +775,76 @@ pub const TOOLS: &[Tool] = &[
         ],
     },
     Tool {
+        name: "helios_workshop_context",
+        endpoint: Endpoint::Workspace,
+        cmd: "workshop.context",
+        description: "Experimental (interface.experimental.workshops, refused with that key when off): what an agent reads to design a workshop for the user's words (the design session the user started in the Workshops panel, else `intent`): the open image's measures on a 256 px proxy (median, highlights, clipping, contrast, whole and in two candidate zones it may reuse), the module catalogue with each parameter's range and description, the bricks' descriptions, the workshops the words already find, and how to write the draft. Pixels leave only when the user switched workshops.ai.send_proxy on for this session (asked with `proxy`); otherwise the answer says so. Helios stores no key and calls no model: you answer with helios_workshop_design. Refused on the files: it needs the desktop holding the workspace",
+        params: &[
+            WORKSPACE,
+            optional(
+                "intent",
+                optional_string,
+                "The user's words; the design session's when null",
+            ),
+            Param {
+                name: "proxy",
+                schema: boolean,
+                description: "Ask for the proxy as a PNG (base64); given only when the user allowed it",
+                default: Some(no),
+            },
+            optional(
+                "modules",
+                optional_strings,
+                "Only these modules of the catalogue (all when null)",
+            ),
+            optional(
+                "after",
+                optional_string,
+                "The node the workshop would read; the node the image is shown from when null",
+            ),
+            CONFIG,
+        ],
+    },
+    Tool {
+        name: "helios_workshop_design",
+        endpoint: Endpoint::Workspace,
+        cmd: "workshop.design",
+        description: "Experimental (interface.experimental.workshops, refused with that key when off): posts a workshop draft for the user's words, checked by Helios without any AI on a proxy of the open image, then applied as one undoable step. The check answers `check`: schema and catalogue (refused with each problem: an unknown module, a value out of range, a target on an unknown zone), each slider rendered at both ends (`dropped` when it changes nothing, `narrowed` when an end clips), each zone's share (`empty`, `whole`), and `notes` in sentences; a refused draft is not applied, post it again. Applied: the workshop saved as user.<slug of its name>@1, inserted after the node the image is shown from, its targets aimed, its node selected; a new draft of the same session replaces the former one. Refused on the files: it needs the desktop holding the workspace, with an image open",
+        params: &[
+            WORKSPACE,
+            Param {
+                name: "draft",
+                schema: object,
+                description: "{\"intent\": the words, \"composite\": a composite file with a workshop block (zones, targets; format, id, version, inputs and outputs may be left out), \"rationale\": {\"workshop\", \"nodes\", \"exposed\", \"zones\", \"targets\": a sentence per name}}",
+                default: None,
+            },
+            optional(
+                "intent",
+                optional_string,
+                "The user's words; the design session's when null",
+            ),
+            Param {
+                name: "apply",
+                schema: boolean,
+                description: "Apply it when the check passes; false only checks it",
+                default: Some(yes),
+            },
+            optional(
+                "replace",
+                optional_string,
+                "The node of a former design to replace; the session's when null",
+            ),
+            optional(
+                "after",
+                optional_string,
+                "The node it reads; the node the image is shown from when null",
+            ),
+            GROUP,
+            DRY_RUN,
+            CONFIG,
+        ],
+    },
+    Tool {
         name: "helios_network_connect",
         endpoint: Endpoint::Workspace,
         cmd: "network.connect",
@@ -3359,6 +3429,8 @@ mod tests {
             ("helios_workshop_aim", "workshop.aim"),
             ("helios_workshop_suggest", "workshop.suggest"),
             ("helios_workshop_save", "workshop.save"),
+            ("helios_workshop_context", "workshop.context"),
+            ("helios_workshop_design", "workshop.design"),
         ] {
             let tool = TOOLS.iter().find(|t| t.name == verb).unwrap();
             assert_eq!(tool.cmd, cmd);
@@ -3369,6 +3441,7 @@ mod tests {
                 "workspace": ws,
                 "intent": "brighter",
                 "workshop": "helios.lift-midtones@1",
+                "draft": {},
             }))
             .unwrap_err();
             assert!(e.contains("interface.experimental.workshops"), "{e}");
