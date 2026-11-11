@@ -23,8 +23,8 @@ mod service;
 pub use flight::{Flight, FlightError};
 pub use lru::{Lru, Pin, Pins};
 pub use service::{
-    Cost, Counters, Identity, Kind, RENDER_STEP, Scope, ScopeRule, Service, Share, Store,
-    THUMB_LARGE, THUMB_SMALL, Tier, Usage, memory_share, physical_memory, size_text,
+    Cost, Counters, IMPORT_GLANCE, Identity, Kind, RENDER_STEP, Scope, ScopeRule, Service, Share,
+    Store, THUMB_LARGE, THUMB_SMALL, Tier, Usage, memory_share, physical_memory, size_text,
 };
 
 /// The share of physical memory the RAM tier may use by default, in

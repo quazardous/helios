@@ -1413,3 +1413,95 @@ fn an_offline_folder_lists_what_the_image_map_recorded_with_cached_thumbnails() 
     assert!(!h.state().import_thumbnail_ready(&gone.join("B.JPG")));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Writes `n` JPEGs of `width`×`height` in `folder`, each its own
+/// content, without an Exif thumbnail: each glance decodes one whole.
+fn photos(folder: &Path, n: usize, width: u32, height: u32) {
+    std::fs::create_dir_all(folder).unwrap();
+    for i in 0..n {
+        let img = image::RgbImage::from_fn(width, height, |x, y| {
+            image::Rgb([(x as usize + i) as u8, (y * 3) as u8, (i * 4) as u8])
+        });
+        img.save(folder.join(format!("IMG_{i:04}.JPG"))).unwrap();
+    }
+}
+
+/// Steps frames (`pause` between them) until every cell in view has its
+/// thumbnail: the frames and the time it took.
+fn fill_in_view(
+    h: &mut Harness<'static, Shell>,
+    pause: Duration,
+    within: Duration,
+) -> (usize, Duration) {
+    let started = Instant::now();
+    let mut frames = 0;
+    loop {
+        let on_screen = h.state().import_thumbnails_on_screen();
+        if !on_screen.is_empty()
+            && on_screen
+                .iter()
+                .all(|p| h.state().import_thumbnail_ready(p))
+        {
+            return (frames, started.elapsed());
+        }
+        assert!(
+            started.elapsed() < within,
+            "the cells in view not filled in {within:?} ({frames} frames)"
+        );
+        std::thread::sleep(pause);
+        h.step();
+        frames += 1;
+    }
+}
+
+#[test]
+fn a_cold_folder_fills_the_cells_in_view_on_several_threads_and_opened_again_reads_nothing() {
+    const N: usize = 96;
+    let dir = temp("cold");
+    let folder = dir.join("Shoot");
+    photos(&folder, N, 1600, 1200);
+    let mut h = headless::harness(Shell::new(helios_panels(), None), vec2(1280.0, 800.0));
+    h.run();
+    let source = json!({ "source": folder.display().to_string() });
+    h.state_mut()
+        .run("library.importWindow", source.clone(), Origin::User)
+        .unwrap();
+    let (frames, took) = fill_in_view(&mut h, Duration::from_millis(5), Duration::from_mins(1));
+    let in_view = h.state().import_thumbnails_on_screen().len();
+    let glances = h.state().import_glances();
+    eprintln!(
+        "import thumbnails, cold: {in_view} cells in view of {N} filled in {frames} frames, {} ms; {glances:?}",
+        took.as_millis()
+    );
+    // Read on several threads at once, the cells in view before the rest
+    // of the folder.
+    assert!(glances.peak >= 2, "the glances were serial: {glances:?}");
+    assert!(
+        glances.read < N,
+        "the whole folder read before the cells in view: {glances:?}"
+    );
+    read_through(&mut h);
+    // Opened again: every glance from the cache, nothing read.
+    h.state_mut()
+        .run("library.importWindow", source, Origin::User)
+        .unwrap();
+    // The command runs on the next frame: the window cleared, then filled.
+    h.step();
+    let (frames, took) = fill_in_view(&mut h, Duration::from_millis(5), Duration::from_secs(5));
+    eprintln!(
+        "import thumbnails, opened again: filled in {frames} frames, {} ms",
+        took.as_millis()
+    );
+    read_through(&mut h);
+    let glances = h.state().import_glances();
+    assert_eq!(
+        glances.read, 0,
+        "opened again, files were read: {glances:?}"
+    );
+    assert_eq!(glances.cached, N);
+    assert!(
+        frames <= 20,
+        "opened again, {frames} frames to fill the cells in view"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

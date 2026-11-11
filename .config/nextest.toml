@@ -34,3 +34,8 @@ test-group = 'alone'
 [[profile.ci.overrides]]
 filter = 'test(/stays_fluid|frame_budget|frames_stay/)'
 test-group = 'alone'
+
+# Tests that print what they measured: their output kept when they pass.
+[[profile.default.overrides]]
+filter = 'test(/a_cold_folder_fills/)'
+success-output = "final"

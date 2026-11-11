@@ -3,9 +3,13 @@
 //! - [`Scan`] walks one source (a card from its `DCIM`, a folder with its
 //!   subfolders) on a thread of its own, for the files Helios reads
 //!   (`IMAGE_EXTENSIONS`). It sends each file as it is listed, then each
-//!   one's glance (its smallest embedded preview and its capture time,
-//!   [`helios_load::glance`], never a raw decoded), so the first
-//!   thumbnails show while the rest is read.
+//!   one's glance (its smallest embedded preview at the cell's size and its
+//!   capture time, [`helios_load::glance_at`], never a raw decoded), read
+//!   on a few threads ([`glancers`]), the files the window wants first
+//!   (the cells in view, then the next screen), then the rest in order.
+//! - [`GlanceCache`]: the glances kept in RAM by path, size and
+//!   modification time (the cache service's `import.glance`, with a
+//!   budget), so a window opened again or scrolled back reads nothing.
 //! - [`Prefilter`]: whether a file is probably in the Library already, a
 //!   lookup on the image map first (a Library image's file seen at that
 //!   path, unchanged since: known without a read), then by size, then by
@@ -19,12 +23,18 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, channel};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 
 use chrono::{NaiveDate, NaiveDateTime, TimeZone};
-use helios_core::{ContentHash, Image};
+use egui::ColorImage;
+use helios_cache::{Counters, IMPORT_GLANCE, Scope, Service, Store, Tier, Usage};
+use helios_core::ContentHash;
+
+fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(PoisonError::into_inner)
+}
 
 /// What the vault holds ([`Holdings`]): read once per scan, on its
 /// thread.
@@ -37,13 +47,15 @@ pub type Known = Arc<dyn Fn() -> Holdings + Send + Sync>;
 pub struct Holdings {
     pub partials: Vec<(u64, ContentHash)>,
     pub seen: Vec<(PathBuf, u64, u64)>,
+    /// The thumbnail cache entries of the files seen: their images'.
+    pub keys: HashMap<PathBuf, helios_thumbs::Key>,
 }
 
 impl From<Vec<(u64, ContentHash)>> for Holdings {
     fn from(partials: Vec<(u64, ContentHash)>) -> Self {
         Self {
             partials,
-            seen: Vec::new(),
+            ..Self::default()
         }
     }
 }
@@ -51,20 +63,25 @@ impl From<Vec<(u64, ContentHash)>> for Holdings {
 /// The prefilter's lookup on a vault: the images in the Library (their
 /// flag) and their sightings.
 pub fn known_of<S: helios_vault::Store + 'static>(vault: Arc<helios_vault::Vault<S>>) -> Known {
-    Arc::new(move || Holdings {
-        partials: vault
-            .images()
-            .map(|images| images.into_iter().map(|i| (i.size, i.partial)).collect())
-            .unwrap_or_default(),
-        seen: vault
+    Arc::new(move || {
+        let present: Vec<_> = vault
             .all_locations()
-            .map(|all| {
-                all.into_iter()
-                    .filter(|(_, l)| l.present())
-                    .map(|(_, l)| (l.path, l.size, l.modified))
-                    .collect()
-            })
-            .unwrap_or_default(),
+            .map(|all| all.into_iter().filter(|(_, l)| l.present()).collect())
+            .unwrap_or_default();
+        Holdings {
+            partials: vault
+                .images()
+                .map(|images| images.into_iter().map(|i| (i.size, i.partial)).collect())
+                .unwrap_or_default(),
+            keys: present
+                .iter()
+                .map(|(id, l)| (l.path.clone(), helios_thumbs::Key::preview(id.hex())))
+                .collect(),
+            seen: present
+                .into_iter()
+                .map(|(_, l)| (l.path, l.size, l.modified))
+                .collect(),
+        }
     })
 }
 
@@ -81,6 +98,7 @@ pub struct Prefilter {
     by_size: HashMap<u64, HashSet<ContentHash>>,
     /// Library files by path: (size, modification time).
     seen: HashMap<PathBuf, (u64, u64)>,
+    keys: HashMap<PathBuf, helios_thumbs::Key>,
 }
 
 impl Prefilter {
@@ -92,6 +110,7 @@ impl Prefilter {
         Self {
             by_size,
             seen: HashMap::new(),
+            keys: HashMap::new(),
         }
     }
 
@@ -103,7 +122,21 @@ impl Prefilter {
             .into_iter()
             .map(|(path, size, modified)| (path, (size, modified)))
             .collect();
+        filter.keys = holdings.keys;
         filter
+    }
+
+    /// The thumbnail cache entry of a Library file seen at `path` with
+    /// this size and modification time, unchanged since.
+    pub fn key_at(
+        &self,
+        path: &Path,
+        size: u64,
+        modified: Option<u64>,
+    ) -> Option<helios_thumbs::Key> {
+        modified
+            .filter(|m| self.seen.get(path) == Some(&(size, *m)))
+            .and_then(|_| self.keys.get(path).cloned())
     }
 
     /// [`Prefilter::read`], a file of the Library seen at `path` with this
@@ -239,7 +272,9 @@ pub enum Scanned {
         path: PathBuf,
         taken: Option<NaiveDateTime>,
         camera: Option<String>,
-        thumb: Option<Image>,
+        /// Its preview, an sRGB picture at most [`crate::library::THUMB`]
+        /// pixels on its long side.
+        thumb: Option<ColorImage>,
     },
     /// Every file listed and glanced at.
     Done,
@@ -249,21 +284,275 @@ pub enum Scanned {
 pub struct Scan {
     receiver: Receiver<Scanned>,
     stop: Arc<AtomicBool>,
+    stats: Arc<Stats>,
+}
+
+/// The files the window wants glanced first, in order: the cells in view,
+/// then the next screen. Shared by the window and its scans.
+pub type Wanted = Arc<Mutex<Vec<PathBuf>>>;
+
+/// How many threads glance at a source's files: half the cores, two to
+/// four (the library's pool reads on as many).
+pub fn glancers() -> usize {
+    std::thread::available_parallelism().map_or(2, |n| (n.get() / 2).clamp(2, 4))
+}
+
+/// What a scan's glances did.
+#[derive(Debug, Default)]
+struct Stats {
+    /// Files read (a preview decoded).
+    read: AtomicUsize,
+    /// Files answered from the [`GlanceCache`].
+    cached: AtomicUsize,
+    busy: AtomicUsize,
+    /// The most files read at once.
+    peak: AtomicUsize,
+}
+
+/// What a scan's glances did, so far.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Glances {
+    /// Files read (a preview decoded).
+    pub read: usize,
+    /// Files answered from the [`GlanceCache`], nothing read.
+    pub cached: usize,
+    /// The most files read at once.
+    pub peak: usize,
+}
+
+impl std::ops::Add for Glances {
+    type Output = Glances;
+    fn add(self, o: Glances) -> Glances {
+        Glances {
+            read: self.read + o.read,
+            cached: self.cached + o.cached,
+            peak: self.peak.max(o.peak),
+        }
+    }
+}
+
+/// The listing's files not yet glanced at: the next is the first the
+/// window wants, else the first in order.
+struct Picking {
+    index: HashMap<PathBuf, usize>,
+    taken: Vec<bool>,
+    next: usize,
+}
+
+impl Picking {
+    fn new(files: &[(PathBuf, u64, Option<i64>)]) -> Self {
+        Self {
+            index: files
+                .iter()
+                .enumerate()
+                .map(|(i, f)| (f.0.clone(), i))
+                .collect(),
+            taken: vec![false; files.len()],
+            next: 0,
+        }
+    }
+
+    fn pick(&mut self, wanted: &[PathBuf]) -> Option<usize> {
+        let first = wanted
+            .iter()
+            .filter_map(|p| self.index.get(p).copied())
+            .find(|&i| !self.taken[i]);
+        let at = first.or_else(|| {
+            while self.next < self.taken.len() && self.taken[self.next] {
+                self.next += 1;
+            }
+            (self.next < self.taken.len()).then_some(self.next)
+        })?;
+        self.taken[at] = true;
+        Some(at)
+    }
+}
+
+/// A file's glance, read or from the cache.
+fn glance_one(path: &Path, bytes: u64, modified: Option<i64>, stats: &Stats) -> Arc<Glanced> {
+    let cache = GlanceCache::global();
+    let key = (path.to_path_buf(), bytes, modified);
+    if let Some(hit) = cache.get(&key) {
+        stats.cached.fetch_add(1, Ordering::Relaxed);
+        return hit;
+    }
+    let busy = stats.busy.fetch_add(1, Ordering::SeqCst) + 1;
+    stats.peak.fetch_max(busy, Ordering::SeqCst);
+    let started = std::time::Instant::now();
+    let glanced = match helios_load::glance_at(path, Some(crate::library::THUMB)) {
+        Ok(g) => Glanced {
+            taken: g.taken.as_deref().and_then(exif_time),
+            camera: g.camera,
+            thumb: g.preview.as_ref().map(crate::library::thumbnail),
+        },
+        Err(e) => {
+            log::debug!("import scan: {e}");
+            Glanced::default()
+        }
+    };
+    stats.busy.fetch_sub(1, Ordering::SeqCst);
+    stats.read.fetch_add(1, Ordering::Relaxed);
+    let glanced = Arc::new(glanced);
+    cache.put(key, glanced.clone(), started.elapsed());
+    glanced
+}
+
+/// What a glance found: when a file was taken, by which camera, and its
+/// preview at the cell's size.
+#[derive(Clone, Debug, Default)]
+pub struct Glanced {
+    pub taken: Option<NaiveDateTime>,
+    pub camera: Option<String>,
+    pub thumb: Option<ColorImage>,
+}
+
+impl Glanced {
+    fn bytes(&self) -> u64 {
+        let pixels = self.thumb.as_ref().map_or(0, |t| t.pixels.len());
+        (pixels * 4 + 128) as u64
+    }
+}
+
+/// A glance's key: the file's path, size and modification time.
+type GlanceKey = (PathBuf, u64, Option<i64>);
+
+/// The RAM budget of the glances: 192 MiB, about a thousand previews.
+pub const GLANCE_BUDGET: u64 = 192 << 20;
+
+#[derive(Default)]
+struct GlanceIndex {
+    entries: HashMap<GlanceKey, (Arc<Glanced>, u64)>,
+    clock: u64,
+    bytes: u64,
+}
+
+/// The import window's glances, kept in RAM within a budget (the cache
+/// service's kind `import.glance`), least recently used first out. Keyed
+/// by path, size and modification time: a file changed is read again.
+pub struct GlanceCache {
+    index: Mutex<GlanceIndex>,
+    budget: u64,
+    counters: Arc<Counters>,
+}
+
+impl GlanceCache {
+    pub fn new(budget: u64) -> Self {
+        Self {
+            index: Mutex::default(),
+            budget,
+            counters: Service::global().counters(&Scope::Shared, &IMPORT_GLANCE),
+        }
+    }
+
+    /// The process's, attached to the cache service.
+    pub fn global() -> &'static Arc<GlanceCache> {
+        static GLOBAL: OnceLock<Arc<GlanceCache>> = OnceLock::new();
+        GLOBAL.get_or_init(|| {
+            let cache = Arc::new(GlanceCache::new(GLANCE_BUDGET));
+            let weak = Arc::downgrade(&cache) as std::sync::Weak<dyn Store>;
+            Service::global().attach(weak);
+            cache
+        })
+    }
+
+    fn get(&self, key: &GlanceKey) -> Option<Arc<Glanced>> {
+        let mut index = lock(&self.index);
+        index.clock += 1;
+        let now = index.clock;
+        let hit = index.entries.get_mut(key).map(|(g, used)| {
+            *used = now;
+            g.clone()
+        });
+        let counter = if hit.is_some() {
+            &self.counters.hits
+        } else {
+            &self.counters.misses
+        };
+        Counters::add(counter, 1);
+        hit
+    }
+
+    fn put(&self, key: GlanceKey, glanced: Arc<Glanced>, took: std::time::Duration) {
+        let bytes = glanced.bytes();
+        Counters::add(&self.counters.bytes_written, bytes);
+        Counters::add(
+            &self.counters.produce_ns,
+            u64::try_from(took.as_nanos()).unwrap_or(u64::MAX),
+        );
+        let mut index = lock(&self.index);
+        index.clock += 1;
+        let now = index.clock;
+        if let Some((old, _)) = index.entries.insert(key, (glanced, now)) {
+            index.bytes -= old.bytes();
+        }
+        index.bytes += bytes;
+        if index.bytes > self.budget {
+            // Down to 90 % at once, so a full cache does not evict at
+            // every write.
+            let target = helios_cache::eviction_target(self.budget);
+            let mut by_age: Vec<(u64, GlanceKey)> = index
+                .entries
+                .iter()
+                .map(|(k, (_, used))| (*used, k.clone()))
+                .collect();
+            by_age.sort_unstable_by_key(|(used, _)| *used);
+            for (_, k) in by_age {
+                if index.bytes <= target {
+                    break;
+                }
+                if let Some((g, _)) = index.entries.remove(&k) {
+                    index.bytes -= g.bytes();
+                    Counters::add(&self.counters.evictions, 1);
+                }
+            }
+        }
+    }
+}
+
+impl Store for GlanceCache {
+    fn usage(&self) -> Vec<Usage> {
+        let index = lock(&self.index);
+        vec![Usage {
+            scope: Scope::Shared,
+            kind: IMPORT_GLANCE,
+            tier: Tier::Ram,
+            entries: index.entries.len() as u64,
+            bytes: index.bytes,
+            pinned: 0,
+            budget: Some(self.budget),
+        }]
+    }
+
+    fn clear(&self, kind: Option<&str>) -> u64 {
+        if kind.is_some_and(|k| k != IMPORT_GLANCE.id) {
+            return 0;
+        }
+        let mut index = lock(&self.index);
+        let freed = index.bytes;
+        Counters::add(&self.counters.cleared, index.entries.len() as u64);
+        index.entries.clear();
+        index.bytes = 0;
+        freed
+    }
 }
 
 impl Scan {
-    /// Starts reading `source`; `wake` is called (from the thread) when
+    /// Starts reading `source`; `wake` is called (from the threads) when
     /// something was sent. With `map`, what is listed and glanced is
     /// recorded in the image map as `seen_by` (no file is read for it).
+    /// The files in `wanted` are glanced at first.
     pub fn start(
         source: PathBuf,
         known: Option<Known>,
         map: Option<(MapRecorder, &'static str)>,
-        wake: impl Fn() + Send + 'static,
+        wanted: Wanted,
+        wake: impl Fn() + Send + Sync + 'static,
     ) -> Self {
         let (sender, receiver) = channel();
         let stop = Arc::new(AtomicBool::new(false));
         let stopped = stop.clone();
+        let stats = Arc::new(Stats::default());
+        let counted = stats.clone();
         let spawned = std::thread::Builder::new()
             .name("helios-import-scan".into())
             .spawn(move || {
@@ -297,49 +586,63 @@ impl Scan {
                         modified,
                         known,
                         offline: false,
-                        key: None,
+                        // A Library file: its thumbnail is in the cache.
+                        key: prefilter.key_at(&path, bytes, at),
                     };
                     if sender.send(Scanned::Found(found)).is_err() {
                         return;
                     }
-                    listed.push(path);
+                    listed.push((path, bytes, modified));
                 }
                 wake();
                 if let Some(r) = recorder.as_mut() {
                     r.flush();
                 }
-                for path in listed {
-                    if stopped.load(Ordering::Relaxed) {
-                        return;
+                // The glances, on a few threads, the files wanted first.
+                let picking = Mutex::new(Picking::new(&listed));
+                let recorder = Mutex::new(recorder);
+                let (listed, picking, recorder, wanted, wake, stopped, stats) = (
+                    &listed, &picking, &recorder, &wanted, &wake, &stopped, &counted,
+                );
+                std::thread::scope(|threads| {
+                    for _ in 0..glancers().min(listed.len()) {
+                        let sender = sender.clone();
+                        threads.spawn(move || {
+                            loop {
+                                if stopped.load(Ordering::Relaxed) {
+                                    return;
+                                }
+                                let next = {
+                                    let wanted = lock(wanted);
+                                    lock(picking).pick(&wanted)
+                                };
+                                let Some(i) = next else { return };
+                                let (path, bytes, modified) = &listed[i];
+                                let g = glance_one(path, *bytes, *modified, stats);
+                                if let Some(r) = lock(recorder).as_mut() {
+                                    // The camera's local time, kept as if it
+                                    // were UTC.
+                                    let at = g.taken.map(|t| t.and_utc().timestamp());
+                                    r.glanced(path, at, g.camera.clone());
+                                }
+                                let glance = Scanned::Glance {
+                                    path: path.clone(),
+                                    taken: g.taken,
+                                    camera: g.camera.clone(),
+                                    thumb: g.thumb.clone(),
+                                };
+                                if sender.send(glance).is_err() {
+                                    return;
+                                }
+                                wake();
+                            }
+                        });
                     }
-                    let (taken, camera, thumb) = match helios_load::glance(&path) {
-                        Ok(g) => (
-                            g.taken.as_deref().and_then(exif_time),
-                            g.camera,
-                            g.preview.as_ref().map(crate::library::small),
-                        ),
-                        Err(e) => {
-                            log::debug!("import scan: {e}");
-                            (None, None, None)
-                        }
-                    };
-                    if let Some(r) = recorder.as_mut() {
-                        // The camera's local time, kept as if it were UTC.
-                        let at = taken.map(|t| t.and_utc().timestamp());
-                        r.glanced(&path, at, camera.clone());
-                    }
-                    let glance = Scanned::Glance {
-                        path,
-                        taken,
-                        camera,
-                        thumb,
-                    };
-                    if sender.send(glance).is_err() {
-                        return;
-                    }
-                    wake();
+                });
+                if stopped.load(Ordering::Relaxed) {
+                    return;
                 }
-                if let Some(r) = recorder.take() {
+                if let Some(r) = lock(recorder).take() {
                     r.finish();
                 }
                 let _ = sender.send(Scanned::Done);
@@ -348,7 +651,21 @@ impl Scan {
         if let Err(e) = spawned {
             log::warn!("import scan: no thread: {e}");
         }
-        Self { receiver, stop }
+        Self {
+            receiver,
+            stop,
+            stats,
+        }
+    }
+
+    /// What the glances did so far: files read, from the cache, and the
+    /// most read at once.
+    pub fn glances(&self) -> Glances {
+        Glances {
+            read: self.stats.read.load(Ordering::Relaxed),
+            cached: self.stats.cached.load(Ordering::Relaxed),
+            peak: self.stats.peak.load(Ordering::Relaxed),
+        }
     }
 
     /// Lists what the image map recorded under `source`, a folder no
@@ -390,7 +707,11 @@ impl Scan {
         if let Err(e) = spawned {
             log::warn!("import scan: no thread: {e}");
         }
-        Self { receiver, stop }
+        Self {
+            receiver,
+            stop,
+            stats: Arc::default(),
+        }
     }
 
     /// What was sent since the last call.
@@ -448,7 +769,7 @@ pub struct Cell {
     pub key: Option<helios_thumbs::Key>,
     pub ticked: bool,
     /// The preview read, until it goes to the thumbnails.
-    pub thumb: Option<Image>,
+    pub thumb: Option<ColorImage>,
     /// Its preview went to the thumbnails.
     pub previewed: bool,
 }
@@ -627,7 +948,7 @@ impl Contents {
         path: &Path,
         taken: Option<NaiveDateTime>,
         camera: Option<String>,
-        thumb: Option<Image>,
+        thumb: Option<ColorImage>,
     ) {
         let Some(&at) = self.by_path.get(path) else {
             return;
@@ -792,6 +1113,51 @@ mod tests {
     }
 
     #[test]
+    fn glances_take_the_files_wanted_first_then_the_rest_in_order_each_once() {
+        let files: Vec<(PathBuf, u64, Option<i64>)> = (0..6)
+            .map(|i| (PathBuf::from(format!("/f/{i}.jpg")), 1, None))
+            .collect();
+        let mut picking = Picking::new(&files);
+        let wanted = vec![PathBuf::from("/f/4.jpg"), PathBuf::from("/elsewhere.jpg")];
+        assert_eq!(picking.pick(&wanted), Some(4));
+        // Wanted and taken: the rest in order, 4 skipped.
+        assert_eq!(picking.pick(&wanted), Some(0));
+        let wanted = vec![PathBuf::from("/f/3.jpg")];
+        assert_eq!(picking.pick(&wanted), Some(3));
+        let picked: Vec<_> = std::iter::from_fn(|| picking.pick(&wanted)).collect();
+        assert_eq!(picked, [1, 2, 5]);
+    }
+
+    #[test]
+    fn the_glance_cache_keeps_to_its_budget_least_recently_used_out() {
+        let glanced = || {
+            Arc::new(Glanced {
+                thumb: Some(ColorImage::filled([16, 16], egui::Color32::GRAY)),
+                ..Glanced::default()
+            })
+        };
+        let each = glanced().bytes();
+        let cache = GlanceCache::new(each * 3);
+        let key = |i: u64| (PathBuf::from(format!("/g/{i}.jpg")), i, Some(1));
+        let took = std::time::Duration::ZERO;
+        for i in 0..3 {
+            cache.put(key(i), glanced(), took);
+        }
+        // 0 used again: 1 is the least recently used.
+        assert!(cache.get(&key(0)).is_some());
+        cache.put(key(3), glanced(), took);
+        assert!(cache.get(&key(1)).is_none(), "the oldest evicted");
+        assert!(cache.get(&key(0)).is_some() && cache.get(&key(3)).is_some());
+        // Another size or time: another file.
+        assert!(cache.get(&(key(0).0, 0, Some(2))).is_none());
+        let usage = cache.usage();
+        assert!(usage[0].bytes <= each * 3);
+        assert_eq!(usage[0].kind.id, "import.glance");
+        assert!(cache.clear(Some("import.glance")) > 0);
+        assert!(cache.get(&key(0)).is_none());
+    }
+
+    #[test]
     fn the_prefilter_knows_a_library_file_by_lookup_without_reading_it() {
         let dir = temp("prefilter-lookup");
         // Not on disk: a read would fail; the map knows it.
@@ -799,7 +1165,13 @@ mod tests {
         let filter = Prefilter::of(Holdings {
             partials: Vec::new(),
             seen: vec![(path.clone(), 1_000, 42)],
+            keys: HashMap::from([(path.clone(), helios_thumbs::Key::preview("x"))]),
         });
+        assert_eq!(
+            filter.key_at(&path, 1_000, Some(42)),
+            Some(helios_thumbs::Key::preview("x"))
+        );
+        assert_eq!(filter.key_at(&path, 1_000, Some(43)), None);
         assert_eq!(filter.read_at(&path, 1_000, Some(42)), (true, None));
         // Changed since (another time or size): not known by the lookup.
         assert!(!filter.read_at(&path, 1_000, Some(43)).0);
