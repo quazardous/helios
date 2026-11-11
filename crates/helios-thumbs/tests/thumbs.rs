@@ -553,3 +553,89 @@ fn the_cache_is_tagged_counted_by_kind_and_cleared_through_the_service() {
     assert!(dir.join("CACHEDIR.TAG").exists());
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A JPEG as 0.75 stored it: the reader's mark (`helios-thumbs reader 2`)
+/// as a comment right after its start marker.
+fn marked_jpeg_075(thumb: &Rgb8) -> Vec<u8> {
+    let plain = unmarked_jpeg(thumb);
+    let mark = b"helios-thumbs reader 2";
+    let mut out = plain[..2].to_vec();
+    out.extend_from_slice(&[0xFF, 0xFE]);
+    out.extend_from_slice(&u16::try_from(mark.len() + 2).unwrap().to_be_bytes());
+    out.extend_from_slice(mark);
+    out.extend_from_slice(&plain[2..]);
+    out
+}
+
+/// A cache folder as 0.75 wrote it (written here byte for byte, not through
+/// today's code: `<two first characters>/<image>.preview.<size>.jpg`, the
+/// reader's mark, no CACHEDIR.TAG) is read by today's cache as hits only,
+/// opened as the desktop opens it and listed by the pool: nothing is read
+/// again from a file, nothing evicted.
+#[test]
+fn a_cache_written_by_0_75_is_read_as_hits() {
+    use helios_cache::Service;
+    let root = scratch("compat-075");
+    // `.helios/thumbs` beside the catalogue, as 0.75 placed it.
+    let dir = helios_thumbs::cache_dir(&root.join("library.helios"));
+    assert_eq!(dir, root.join(".helios").join("thumbs"));
+    let ids: Vec<String> = (0..24u32)
+        .map(|i| blake3::hash(&i.to_le_bytes()).to_hex().to_string())
+        .collect();
+    for (i, id) in ids.iter().enumerate() {
+        let shard = dir.join(&id[..2]);
+        std::fs::create_dir_all(&shard).unwrap();
+        let jpeg = marked_jpeg_075(&noise(u32::try_from(i).unwrap()));
+        std::fs::write(shard.join(format!("{id}.preview.{SMALL}.jpg")), &jpeg).unwrap();
+        std::fs::write(shard.join(format!("{id}.preview.{LARGE}.jpg")), &jpeg).unwrap();
+    }
+    assert!(!dir.join("CACHEDIR.TAG").exists());
+    let cache = std::sync::Arc::new(ThumbCache::open_unlisted(&dir, 1 << 30).unwrap());
+    // Offline photos: a miss could only answer Unavailable.
+    let (tx, rx) = channel();
+    let tx = std::sync::Mutex::new(tx);
+    let loader = Loader::start(Some(cache.clone()), 4, move |id, outcome| {
+        tx.lock().unwrap().send((id.to_string(), outcome)).is_ok()
+    });
+    loader.load(ids.iter().map(|id| Job {
+        id: id.clone(),
+        path: None,
+    }));
+    for _ in &ids {
+        let (id, outcome) = rx
+            .recv_timeout(Duration::from_secs(30))
+            .expect("an outcome within 30 s");
+        assert!(
+            matches!(outcome, Outcome::Thumb(ref t) if t.width == SMALL),
+            "{id}: {outcome:?}"
+        );
+    }
+    drop(loader);
+    assert_eq!(
+        cache.usage().1,
+        ids.len() * 2,
+        "every entry listed, none evicted"
+    );
+    let snapshot = Service::global().snapshot();
+    let scope = format!("silo:library:{}", dir.display());
+    let small = snapshot["kinds"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|k| k["kind"] == "thumb.256" && k["scope"] == scope.as_str())
+        .unwrap()
+        .clone();
+    assert_eq!(small["stats"]["hits"], ids.len());
+    assert_eq!(small["stats"]["misses"], 0);
+    // The files kept their names (nothing rewritten, renamed or removed).
+    for id in &ids {
+        for size in [SMALL, LARGE] {
+            assert!(
+                dir.join(&id[..2])
+                    .join(format!("{id}.preview.{size}.jpg"))
+                    .exists()
+            );
+        }
+    }
+    let _ = std::fs::remove_dir_all(&root);
+}
