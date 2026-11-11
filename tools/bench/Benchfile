@@ -94,6 +94,12 @@ run = [
  && /opt/wbox/bin/pip install --quiet \
       "wbox-mcp[mutter] @ git+https://github.com/quazardous/wbox-mcp.git@aafe8058a87c08ecf1e6e207e4266606f4e686fd" \
  && /opt/wbox/bin/python3 -c "import wbox, jeepney; assert wbox.__version__ == '0.14.0', wbox.__version__\"""",
+  # winit's X11 backend (Xwayland in labwc, the multi-window spike's X11
+  # run): the libraries it loads at start, xkbcommon's X11 part above all;
+  # last, so the layers above stay cached
+  """dnf -y install --setopt=install_weak_deps=False libxkbcommon-x11 libX11 libX11-xcb libXcursor \
+      libXrandr libXi mesa-libEGL mesa-libGL \
+ && dnf clean all""",
 ]
 # CARGO_HOME is the registry cache; the toolchain lives in /opt. Line
 # tables only and no incremental state keep the per-branch target small.
