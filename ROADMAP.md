@@ -305,6 +305,16 @@ other; parallelism only exists inside a render (OpenMP, OpenCL). Database
 writes during export (tags, timestamps) are mixed with computation and must be
 separated, as the catalog SDK does.
 
+**Camera colour calibration from a chart** (2026-11-11, plan accepted).
+A ColorChecker 24 shot under the scene's light, its four corners placed
+with the masks' handle kit in a Calibration focus, the patches measured
+in linear camera RGB before `colorin`, a 3×3 matrix solved on Delta E
+2000 (an optional residual LUT off by default), a report per patch, and
+a profile per camera and illuminant kept in the vault and applied by a
+`chartprofile` module after `colorin`; agents run `calibrate.chart`
+with a dry run. Design, slices and open questions:
+[docs/design/calibration.md](docs/design/calibration.md).
+
 ### 2.2 Kernel and scheduler
 
 - Content-addressed work units, offloadable anywhere (client, GPU PC by
